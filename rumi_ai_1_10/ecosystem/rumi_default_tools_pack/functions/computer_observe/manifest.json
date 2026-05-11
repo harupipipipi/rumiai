@@ -1,0 +1,15 @@
+{
+  "function_id": "computer_observe",
+  "description": "Observe a desktop application – returns screenshot, AX tree, and capabilities via ComputerSeat.",
+  "calling_convention": "subprocess",
+  "host_execution": false,
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "app": {"type": "string", "description": "Application name"},
+      "pid": {"type": "integer", "description": "Process ID"},
+      "window_id": {"type": "integer", "description": "Window ID"},
+      "window_title": {"type": "string", "description": "Window title"}
+    }
+  }
+}

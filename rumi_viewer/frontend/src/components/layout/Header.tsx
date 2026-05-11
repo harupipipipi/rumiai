@@ -1,61 +1,44 @@
-import { useSearchParams, useLocation } from 'react-router-dom';
-import { Search, ChevronDown } from 'lucide-react';
+import { useLocation } from 'react-router-dom';
 import { useAppStore } from '@/src/store';
+import { useT } from '@/src/lib/i18n';
 import { panelRoutes } from '@/src/lib/routes';
 
 export function Header() {
+  const t = useT();
   const profile = useAppStore(state => state.profile);
   const location = useLocation();
-  const [searchParams, setSearchParams] = useSearchParams();
-  const isHome = location.pathname === panelRoutes.home;
   const isFlows = location.pathname === panelRoutes.flows;
-  const searchValue = searchParams.get('q') ?? '';
 
-  const updateSearchValue = (value: string) => {
-    const next = new URLSearchParams(searchParams);
-    if (value.trim()) {
-      next.set('q', value);
-    } else {
-      next.delete('q');
-    }
-    setSearchParams(next, { replace: true });
+  const getPageTitle = () => {
+    if (location.pathname === panelRoutes.home) return t('nav.home');
+    if (location.pathname === panelRoutes.packs || location.pathname.startsWith(panelRoutes.packs)) return t('nav.packs');
+    if (location.pathname === panelRoutes.flows) return t('nav.flows');
+    if (location.pathname === panelRoutes.nodes) return t('nav.nodes');
+    if (location.pathname === panelRoutes.graphEditor) return 'Graphs';
+    if (location.pathname === panelRoutes.settings) return t('nav.settings');
+    return '';
   };
 
   return (
-    <header className={`z-40 flex shrink-0 items-center justify-between border-b border-border bg-bg-header transition-colors duration-200 ${isFlows ? 'h-14 px-4' : 'h-[72px] px-6'}`}>
-      <div className={`flex items-center ${isFlows ? 'gap-2' : 'gap-3'}`}>
-        <img
-          src="https://picsum.photos/seed/rumi/64/64"
-          alt="Rumi Logo"
-          className={`${isFlows ? 'h-7 w-7 opacity-85' : 'h-8 w-8'} rounded-full object-cover`}
-          referrerPolicy="no-referrer"
-        />
-        {!isFlows && <span className="text-lg font-bold text-text-main tracking-tight">Rumi AI</span>}
+    <header className={`z-40 flex shrink-0 items-center justify-between border-b border-border bg-bg-header transition-colors duration-[var(--transition-base)] ${isFlows ? 'h-12 px-4' : 'h-14 px-6'}`}>
+      <div className="flex items-center gap-2">
+        <h1 className="text-sm font-medium text-text-main">{getPageTitle()}</h1>
       </div>
 
-      {isHome ? (
-        <label className="hidden min-w-[360px] max-w-[440px] flex-1 items-center gap-3 rounded-2xl border border-stone-800 bg-[#141414] px-4 py-3 text-stone-400 lg:flex">
-          <Search className="h-4 w-4" />
-          <input
-            value={searchValue}
-            onChange={(event) => updateSearchValue(event.target.value)}
-            placeholder="Search profiles..."
-            className="w-full bg-transparent text-sm text-stone-200 outline-none placeholder:text-stone-500"
+      <div className="flex items-center gap-3">
+        <span className="text-xs text-text-muted hidden sm:block">{profile.username}</span>
+        {profile.avatar ? (
+          <img
+            src={profile.avatar}
+            alt={`${profile.username} avatar`}
+            className="h-7 w-7 rounded-full object-cover border border-border"
+            referrerPolicy="no-referrer"
           />
-        </label>
-      ) : (
-        <div className="flex-1" />
-      )}
-
-      <div className={`flex items-center ${isFlows ? 'gap-2' : 'gap-3'}`}>
-        {!isFlows && <span className="text-sm font-medium text-text-muted">{profile.username}</span>}
-        {!isFlows && <ChevronDown className="h-4 w-4 text-text-muted" />}
-        <img
-          src={profile.avatar}
-          alt="User Avatar"
-          className={`${isFlows ? 'h-8 w-8' : 'h-9 w-9'} rounded-full object-cover`}
-          referrerPolicy="no-referrer"
-        />
+        ) : (
+          <div className="h-7 w-7 rounded-full bg-accent/20 flex items-center justify-center text-accent text-xs font-semibold">
+            {profile.username.charAt(0).toUpperCase()}
+          </div>
+        )}
       </div>
     </header>
   );

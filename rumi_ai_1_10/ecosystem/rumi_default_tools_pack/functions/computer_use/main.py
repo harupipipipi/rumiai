@@ -40,6 +40,12 @@ def run(context, args):
         "type": "computer.type",
         "key": "computer.key",
         "scroll": "computer.scroll",
+        "observe": "computer.observe",
+        "semantic_action": "computer.semantic_action",
+        "press": "computer.semantic_action",
+        "pid_event": "computer.pid_event",
+        "doctor": "computer.doctor",
+        "diagnose": "computer.doctor",
     }
     action = action_map.get(str(raw.get("action") or "").strip(), str(raw.get("action") or "").strip())
     for key in (

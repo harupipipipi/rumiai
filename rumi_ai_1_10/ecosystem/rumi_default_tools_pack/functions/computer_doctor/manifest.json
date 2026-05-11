@@ -1,0 +1,10 @@
+{
+  "function_id": "computer_doctor",
+  "description": "Diagnose ComputerSeat capabilities – checks platform permissions, driver availability, and API access.",
+  "calling_convention": "subprocess",
+  "host_execution": false,
+  "input_schema": {
+    "type": "object",
+    "properties": {}
+  }
+}

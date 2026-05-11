@@ -50,15 +50,10 @@ export function Settings() {
   }, [activeTab, loadUpdates, loadUpdateSettings]);
 
   useEffect(() => {
-    const refreshProfile = () => {
-      void loadProfile();
-    };
+    const refreshProfile = () => { void loadProfile(); };
     const refreshWhenVisible = () => {
-      if (document.visibilityState === 'visible') {
-        refreshProfile();
-      }
+      if (document.visibilityState === 'visible') refreshProfile();
     };
-
     window.addEventListener('focus', refreshProfile);
     document.addEventListener('visibilitychange', refreshWhenVisible);
     return () => {
@@ -80,10 +75,7 @@ export function Settings() {
     setIsConnecting(true);
     try {
       await connectAccount();
-      addToast(
-        t('settings.connect_started') || 'Browser opened. Finish signing in there, then return.',
-        'success',
-      );
+      addToast(t('settings.connect_started') || 'Browser opened. Finish signing in there, then return.', 'success');
     } catch {
       addToast(t('settings.connect_failed') || 'Failed to connect', 'error');
     } finally {
@@ -99,311 +91,338 @@ export function Settings() {
   };
 
   return (
-    <div className="flex-1 overflow-y-auto p-8 flex flex-col gap-8 animate-in fade-in slide-in-from-bottom-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold tracking-tight text-text-main">{t('settings.title')}</h1>
-      </div>
+    <div className="flex-1 overflow-y-auto page-enter">
+      <div className="mx-auto max-w-4xl px-6 py-8 flex flex-col gap-8">
+        {/* Page header */}
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight text-text-main">{t('settings.title')}</h1>
+          <p className="mt-1 text-sm text-text-muted">Manage your profile, appearance, and system updates.</p>
+        </div>
 
-      <div className="flex gap-4 border-b border-border pb-4">
-        <Button
-          variant={activeTab === 'profile' ? 'default' : 'ghost'}
-          onClick={() => setActiveTab('profile')}
-          className="gap-2"
-        >
-          <User className="h-4 w-4" /> {t('settings.profile')}
-        </Button>
-        <Button
-          variant={activeTab === 'version' ? 'default' : 'ghost'}
-          onClick={() => setActiveTab('version')}
-          className="gap-2"
-        >
-          <SettingsIcon className="h-4 w-4" /> {t('settings.version_tab')}
-        </Button>
-      </div>
+        {/* Tab navigation */}
+        <div className="flex gap-1 border-b border-border" role="tablist">
+          <button
+            role="tab"
+            aria-selected={activeTab === 'profile'}
+            onClick={() => setActiveTab('profile')}
+            className={cn(
+              "flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px",
+              activeTab === 'profile'
+                ? "border-accent text-accent"
+                : "border-transparent text-text-muted hover:text-text-main"
+            )}
+          >
+            <User className="h-4 w-4" /> {t('settings.profile')}
+          </button>
+          <button
+            role="tab"
+            aria-selected={activeTab === 'version'}
+            onClick={() => setActiveTab('version')}
+            className={cn(
+              "flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px",
+              activeTab === 'version'
+                ? "border-accent text-accent"
+                : "border-transparent text-text-muted hover:text-text-main"
+            )}
+          >
+            <SettingsIcon className="h-4 w-4" /> {t('settings.version_tab')}
+          </button>
+        </div>
 
-      {activeTab === 'profile' ? (
-        <div className="grid gap-6 md:grid-cols-2">
-          {/* Left column */}
-          <div className="flex flex-col gap-6">
-            {/* Rumi Account Card */}
-            <Card>
-              <CardHeader>
-                <CardTitle>{t('settings.rumi_account')}</CardTitle>
-                <CardDescription>{t('settings.rumi_account_desc')}</CardDescription>
-              </CardHeader>
-              <CardContent>
-                {profile.connected ? (
-                  <div className="flex items-center justify-between rounded-[var(--radius)] border border-border p-4">
-                    <div className="flex items-center gap-3">
-                      <CheckCircle2 className="h-5 w-5 text-green-500" />
-                      <div>
-                        <p className="text-sm font-medium text-text-main">{profile.username}</p>
-                        <p className="text-xs text-text-muted">{t('settings.connected')}</p>
-                      </div>
-                    </div>
-                    <Button variant="outline" size="sm" onClick={handleConnect}>{t('settings.reconnect')}</Button>
-                  </div>
-                ) : (
-                  <div className="flex flex-col items-center gap-4 py-6">
-                    <LogIn className="h-12 w-12 text-text-muted opacity-30" />
-                    <p className="text-sm text-text-muted text-center">{t('settings.login_required')}</p>
-                    <Button onClick={handleConnect} disabled={isConnecting}>
-                      {isConnecting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                      {isConnecting ? t('settings.connecting') : t('settings.connect')}
-                    </Button>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-
-            {/* Profile Card  connected only */}
-            {profile.connected && (
+        {/* Profile Tab */}
+        {activeTab === 'profile' && (
+          <div className="grid gap-6 lg:grid-cols-2">
+            {/* Left column */}
+            <div className="flex flex-col gap-6">
+              {/* Account connection */}
               <Card>
                 <CardHeader>
-                  <CardTitle>{t('settings.basic_info')}</CardTitle>
-                  <CardDescription>{t('settings.basic_info_desc')}</CardDescription>
+                  <CardTitle>{t('settings.rumi_account')}</CardTitle>
+                  <CardDescription>{t('settings.rumi_account_desc')}</CardDescription>
                 </CardHeader>
-                <CardContent className="space-y-4">
-                  {/* Avatar  button to expand picker */}
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium text-text-main">{t('settings.select_icon')}</label>
-                    <div className="flex items-center gap-4">
-                      <img
-                        src={formData.avatar}
-                        alt=""
-                        className="h-16 w-16 rounded-full object-cover border border-border"
-                        referrerPolicy="no-referrer"
-                      />
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setShowAvatarPicker(!showAvatarPicker)}
-                        className="gap-1"
-                      >
-                        {t('settings.change_icon')}
-                        <ChevronDown className={cn("h-3 w-3 transition-transform", showAvatarPicker && "rotate-180")} />
+                <CardContent>
+                  {profile.connected ? (
+                    <div className="flex items-center justify-between rounded-lg border border-border p-4">
+                      <div className="flex items-center gap-3">
+                        <div className="flex h-8 w-8 items-center justify-center rounded-full bg-emerald-50 dark:bg-emerald-950/30">
+                          <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+                        </div>
+                        <div>
+                          <p className="text-sm font-medium text-text-main">{profile.username}</p>
+                          <p className="text-xs text-text-muted">{t('settings.connected')}</p>
+                        </div>
+                      </div>
+                      <Button variant="outline" size="sm" onClick={handleConnect}>{t('settings.reconnect')}</Button>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col items-center gap-4 py-8">
+                      <div className="flex h-12 w-12 items-center justify-center rounded-full bg-bg-hover">
+                        <LogIn className="h-5 w-5 text-text-muted" />
+                      </div>
+                      <p className="text-sm text-text-muted text-center">{t('settings.login_required')}</p>
+                      <Button onClick={handleConnect} disabled={isConnecting} loading={isConnecting}>
+                        {isConnecting ? t('settings.connecting') : t('settings.connect')}
                       </Button>
                     </div>
-                    {showAvatarPicker && (
-                      <div className="flex gap-3 mt-2 p-3 border border-border rounded-lg bg-bg-main animate-in fade-in slide-in-from-top-2">
-                        {AVATAR_OPTIONS.map((av) => (
-                          <button
-                            key={av}
-                            onClick={() => {
-                              setFormData({ ...formData, avatar: av });
-                              setShowAvatarPicker(false);
-                            }}
-                            className={cn(
-                              "rounded-full border-2 p-0.5 transition-all",
-                              formData.avatar === av
-                                ? "border-accent scale-110 shadow-md"
-                                : "border-transparent opacity-60 hover:opacity-100"
-                            )}
-                          >
-                            <img
-                              src={av}
-                              alt=""
-                              className="h-12 w-12 rounded-full object-cover"
-                              referrerPolicy="no-referrer"
-                            />
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Username */}
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium text-text-main">{t('settings.username')}</label>
-                    <Input
-                      value={formData.username}
-                      onChange={(e) => setFormData({ ...formData, username: e.target.value })}
-                    />
-                  </div>
-
-                  {/* Language  10 languages */}
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium text-text-main flex items-center gap-2">
-                      <Globe className="h-4 w-4" /> {t('settings.language')}
-                    </label>
-                    <select
-                      className="flex h-10 w-full rounded-[var(--radius)] border border-border bg-bg-main px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                      value={formData.language}
-                      onChange={(e) => setFormData({ ...formData, language: e.target.value })}
-                    >
-                      <option value="en">English</option>
-                      <option value="ja">日本語</option>
-                      <option value="zh">中文</option>
-                      <option value="ko">한국어</option>
-                      <option value="es">Español</option>
-                      <option value="fr">Français</option>
-                      <option value="de">Deutsch</option>
-                      <option value="pt">Português</option>
-                      <option value="ru">Русский</option>
-                      <option value="ar">العربية</option>
-                    </select>
-                  </div>
-
-                  {/* Job */}
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium text-text-main flex items-center gap-2">
-                      <Briefcase className="h-4 w-4" /> {t('settings.job')}
-                    </label>
-                    <Input
-                      value={formData.job}
-                      onChange={(e) => setFormData({ ...formData, job: e.target.value })}
-                    />
-                  </div>
-
-                  <Button onClick={handleSave} className="w-full mt-4">{t('settings.save')}</Button>
+                  )}
                 </CardContent>
               </Card>
-            )}
-          </div>
 
-          {/* Right column */}
+              {/* Profile form (connected only) */}
+              {profile.connected && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle>{t('settings.basic_info')}</CardTitle>
+                    <CardDescription>{t('settings.basic_info_desc')}</CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-5">
+                    {/* Avatar */}
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium text-text-main">{t('settings.select_icon')}</label>
+                      <div className="flex items-center gap-4">
+                        <img
+                          src={formData.avatar}
+                          alt=""
+                          className="h-14 w-14 rounded-full object-cover border border-border"
+                          referrerPolicy="no-referrer"
+                        />
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setShowAvatarPicker(!showAvatarPicker)}
+                          aria-expanded={showAvatarPicker}
+                        >
+                          {t('settings.change_icon')}
+                          <ChevronDown className={cn("h-3 w-3 transition-transform", showAvatarPicker && "rotate-180")} />
+                        </Button>
+                      </div>
+                      {showAvatarPicker && (
+                        <div className="flex gap-2 flex-wrap mt-2 p-3 border border-border rounded-lg bg-bg-main">
+                          {AVATAR_OPTIONS.map((av) => (
+                            <button
+                              key={av}
+                              onClick={() => {
+                                setFormData({ ...formData, avatar: av });
+                                setShowAvatarPicker(false);
+                              }}
+                              className={cn(
+                                "rounded-full border-2 p-0.5 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring-color)]",
+                                formData.avatar === av
+                                  ? "border-accent scale-105"
+                                  : "border-transparent opacity-60 hover:opacity-100"
+                              )}
+                              aria-label="Select avatar"
+                            >
+                              <img src={av} alt="" className="h-10 w-10 rounded-full object-cover" referrerPolicy="no-referrer" />
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Username */}
+                    <div className="space-y-1.5">
+                      <label className="text-sm font-medium text-text-main">{t('settings.username')}</label>
+                      <Input
+                        value={formData.username}
+                        onChange={(e) => setFormData({ ...formData, username: e.target.value })}
+                      />
+                    </div>
+
+                    {/* Language */}
+                    <div className="space-y-1.5">
+                      <label className="text-sm font-medium text-text-main flex items-center gap-2">
+                        <Globe className="h-3.5 w-3.5 text-text-muted" /> {t('settings.language')}
+                      </label>
+                      <select
+                        className="flex h-10 w-full rounded-lg border border-border bg-bg-main px-3 py-2 text-sm text-text-main transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring-color)]"
+                        value={formData.language}
+                        onChange={(e) => setFormData({ ...formData, language: e.target.value })}
+                      >
+                        <option value="en">English</option>
+                        <option value="ja">日本語</option>
+                        <option value="zh">中文</option>
+                        <option value="ko">한국어</option>
+                        <option value="es">Español</option>
+                        <option value="fr">Français</option>
+                        <option value="de">Deutsch</option>
+                        <option value="pt">Português</option>
+                        <option value="ru">Русский</option>
+                        <option value="ar">العربية</option>
+                      </select>
+                    </div>
+
+                    {/* Job */}
+                    <div className="space-y-1.5">
+                      <label className="text-sm font-medium text-text-main flex items-center gap-2">
+                        <Briefcase className="h-3.5 w-3.5 text-text-muted" /> {t('settings.job')}
+                      </label>
+                      <Input
+                        value={formData.job}
+                        onChange={(e) => setFormData({ ...formData, job: e.target.value })}
+                      />
+                    </div>
+
+                    {/* Save - right aligned */}
+                    <div className="flex justify-end pt-2">
+                      <Button onClick={handleSave}>{t('settings.save')}</Button>
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+            </div>
+
+            {/* Right column: Appearance */}
+            <div className="flex flex-col gap-6">
+              <Card>
+                <CardHeader>
+                  <CardTitle>{t('settings.theme')}</CardTitle>
+                  <CardDescription>{t('settings.theme_desc')}</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-6">
+                  {/* Color mode */}
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-text-main">{t('settings.color_mode')}</label>
+                    <div className="grid grid-cols-2 gap-3">
+                      <button
+                        onClick={() => setColorMode('light')}
+                        className={cn(
+                          "flex items-center justify-center gap-2 rounded-lg border px-4 py-2.5 text-sm font-medium transition-all",
+                          colorMode === 'light'
+                            ? "border-accent bg-accent/5 text-accent"
+                            : "border-border text-text-muted hover:border-text-muted/30"
+                        )}
+                      >
+                        <Sun className="h-4 w-4" /> Light
+                      </button>
+                      <button
+                        onClick={() => setColorMode('dark')}
+                        className={cn(
+                          "flex items-center justify-center gap-2 rounded-lg border px-4 py-2.5 text-sm font-medium transition-all",
+                          colorMode === 'dark'
+                            ? "border-accent bg-accent/5 text-accent"
+                            : "border-border text-text-muted hover:border-text-muted/30"
+                        )}
+                      >
+                        <Moon className="h-4 w-4" /> Dark
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Style theme */}
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-text-main">{t('settings.style_theme')}</label>
+                    <div className="grid grid-cols-2 gap-3">
+                      {themes.map((th) => (
+                        <button
+                          key={th}
+                          onClick={() => setTheme(th)}
+                          className={cn(
+                            "flex items-center justify-center gap-2 rounded-lg border px-4 py-2.5 text-sm font-medium transition-all",
+                            theme === th
+                              ? "border-accent bg-accent/5 text-accent"
+                              : "border-border text-text-muted hover:border-text-muted/30"
+                          )}
+                        >
+                          <Palette className="h-4 w-4" /> {th}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          </div>
+        )}
+
+        {/* Version Tab */}
+        {activeTab === 'version' && (
           <div className="flex flex-col gap-6">
-            {/* Theme Card */}
+            {/* Version info */}
             <Card>
               <CardHeader>
-                <CardTitle>{t('settings.theme')}</CardTitle>
-                <CardDescription>{t('settings.theme_desc')}</CardDescription>
+                <CardTitle>{t('settings.version')}</CardTitle>
+                <CardDescription>{t('settings.version_desc')}</CardDescription>
               </CardHeader>
-              <CardContent className="space-y-6">
-                <div className="space-y-3">
-                  <label className="text-sm font-medium text-text-main">{t('settings.color_mode')}</label>
-                  <div className="grid grid-cols-2 gap-4">
-                    <Button
-                      variant={colorMode === 'light' ? 'default' : 'outline'}
-                      className="justify-start gap-2"
-                      onClick={() => {
-                        setColorMode('light');
-                      }}
-                    >
-                      <Sun className="h-4 w-4" /> Light
-                    </Button>
-                    <Button
-                      variant={colorMode === 'dark' ? 'default' : 'outline'}
-                      className="justify-start gap-2"
-                      onClick={() => {
-                        setColorMode('dark');
-                      }}
-                    >
-                      <Moon className="h-4 w-4" /> Dark
-                    </Button>
-                  </div>
-                </div>
-
-                <div className="space-y-3">
-                  <label className="text-sm font-medium text-text-main">{t('settings.style_theme')}</label>
-                  <div className="grid grid-cols-2 gap-4">
-                    {themes.map((th) => (
-                      <Button
-                        key={th}
-                        variant={theme === th ? 'default' : 'outline'}
-                        className="justify-start gap-2"
-                        onClick={() => {
-                          setTheme(th);
-                        }}
-                      >
-                        <Palette className="h-4 w-4" /> {th}
-                      </Button>
-                    ))}
+              <CardContent>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {[
+                    ['App Version', version.app],
+                    ['Kernel Version', version.kernel],
+                    ['Python Version', version.python],
+                    ['Launcher Version', version.launcher],
+                  ].map(([label, val]) => (
+                    <div key={label} className="flex items-center justify-between rounded-lg border border-border p-3">
+                      <span className="text-sm text-text-main">{label}</span>
+                      <Badge variant="secondary">{val}</Badge>
+                    </div>
+                  ))}
+                  <div className="flex items-center justify-between rounded-lg border border-border p-3">
+                    <div className="flex flex-col">
+                      <span className="text-sm text-text-main">Docker</span>
+                      <span className="text-xs text-text-muted">{version.docker.type}</span>
+                    </div>
+                    <Badge variant={version.docker.installed ? 'secondary' : 'destructive'}>
+                      {version.docker.installed ? version.docker.version : t('settings.not_installed')}
+                    </Badge>
                   </div>
                 </div>
               </CardContent>
             </Card>
-          </div>
-        </div>
-      ) : (
-        <div className="flex flex-col gap-6">
-          <Card>
-            <CardHeader>
-              <CardTitle>{t('settings.version')}</CardTitle>
-              <CardDescription>{t('settings.version_desc')}</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="grid gap-4 md:grid-cols-2">
-                {[
-                  ['App Version', version.app],
-                  ['Kernel Version', version.kernel],
-                  ['Python Version', version.python],
-                  ['Launcher Version', version.launcher],
-                ].map(([label, val]) => (
-                  <div key={label} className="flex items-center justify-between rounded-[var(--radius)] border border-border p-4">
-                    <span className="text-sm font-medium text-text-main">{label}</span>
-                    <Badge variant="secondary">{val}</Badge>
+
+            {/* Updates */}
+            <Card>
+              <CardHeader className="flex-row items-center justify-between space-y-0">
+                <div>
+                  <CardTitle>{t('settings.updates')}</CardTitle>
+                  <CardDescription>{t('settings.updates_desc')}</CardDescription>
+                </div>
+                <Button variant="outline" size="sm" onClick={() => loadUpdates()} disabled={updatesLoading} loading={updatesLoading}>
+                  <RefreshCw className="h-3.5 w-3.5" />
+                  {t('settings.check_updates')}
+                </Button>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {updates.map((update) => (
+                  <div key={update.target} className="flex flex-col gap-4 rounded-lg border border-border p-4 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="flex min-w-0 flex-col gap-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-sm font-medium text-text-main">{updateName(update.target)}</span>
+                        <Badge variant={update.updateAvailable ? 'default' : 'secondary'}>
+                          {update.updateAvailable ? t('settings.update_available') : t('settings.up_to_date')}
+                        </Badge>
+                      </div>
+                      <span className="text-xs text-text-muted">
+                        {update.currentVersion} → {update.latestVersion}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-4">
+                      <label className="flex items-center gap-2 text-xs text-text-muted cursor-pointer">
+                        <Switch
+                          checked={autoUpdate[update.target]}
+                          disabled={updateSettingsLoading}
+                          onCheckedChange={(checked) => setAutoUpdate(update.target, checked)}
+                        />
+                        {t('settings.auto_update')}
+                      </label>
+                      <Button
+                        variant={update.updateAvailable ? 'default' : 'outline'}
+                        size="sm"
+                        onClick={() => handleApplyUpdate(update.target)}
+                        disabled={!update.updateAvailable || updateApplyingTarget !== null || updatesLoading}
+                        loading={updateApplyingTarget === update.target}
+                      >
+                        <DownloadCloud className="h-3.5 w-3.5" />
+                        {t('settings.apply_update')}
+                      </Button>
+                    </div>
                   </div>
                 ))}
-                <div className="flex items-center justify-between rounded-[var(--radius)] border border-border p-4">
-                  <div className="flex flex-col">
-                    <span className="text-sm font-medium text-text-main">Docker</span>
-                    <span className="text-xs text-text-muted">{version.docker.type}</span>
-                  </div>
-                  <Badge variant={version.docker.installed ? 'secondary' : 'destructive'}>
-                    {version.docker.installed ? version.docker.version : t('settings.not_installed')}
-                  </Badge>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="flex-row items-center justify-between space-y-0">
-              <div>
-                <CardTitle>{t('settings.updates')}</CardTitle>
-                <CardDescription>{t('settings.updates_desc')}</CardDescription>
-              </div>
-              <Button variant="outline" size="sm" onClick={() => loadUpdates()} disabled={updatesLoading} className="gap-2">
-                {updatesLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-                {t('settings.check_updates')}
-              </Button>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {updates.map((update) => (
-                <div key={update.target} className="flex flex-col gap-3 rounded-[var(--radius)] border border-border p-4 md:flex-row md:items-center md:justify-between">
-                  <div className="flex min-w-0 flex-col gap-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="text-sm font-semibold text-text-main">{updateName(update.target)}</span>
-                      <Badge variant={update.updateAvailable ? 'default' : 'secondary'}>
-                        {update.updateAvailable ? t('settings.update_available') : t('settings.up_to_date')}
-                      </Badge>
-                    </div>
-                    <span className="text-xs text-text-muted">
-                      {update.currentVersion} → {update.latestVersion}
-                    </span>
-                    <span className="text-xs text-text-muted">{update.repo}</span>
-                  </div>
-                  <div className="flex flex-col gap-3 md:items-end">
-                    <label className="flex items-center gap-2 text-xs font-medium text-text-muted">
-                      <Switch
-                        checked={autoUpdate[update.target]}
-                        disabled={updateSettingsLoading}
-                        onCheckedChange={(checked) => setAutoUpdate(update.target, checked)}
-                      />
-                      {t('settings.auto_update')}
-                    </label>
-                    <Button
-                      variant={update.updateAvailable ? 'default' : 'outline'}
-                      size="sm"
-                      onClick={() => handleApplyUpdate(update.target)}
-                      disabled={!update.updateAvailable || updateApplyingTarget !== null || updatesLoading}
-                      className="gap-2 md:w-32"
-                    >
-                      {updateApplyingTarget === update.target ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <DownloadCloud className="h-4 w-4" />
-                      )}
-                      {t('settings.apply_update')}
-                    </Button>
-                  </div>
-                </div>
-              ))}
-            </CardContent>
-          </Card>
-        </div>
-      )}
+              </CardContent>
+            </Card>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

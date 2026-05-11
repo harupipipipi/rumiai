@@ -1,10 +1,11 @@
-import { useState, useEffect } from 'react';
+import { useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAppStore } from '@/src/store';
 import { useT } from '@/src/lib/i18n';
 import { Button } from '@/src/components/ui/Button';
 import { Badge } from '@/src/components/ui/Badge';
 import { Switch } from '@/src/components/ui/Switch';
+import { Card, CardHeader, CardTitle, CardContent } from '@/src/components/ui/Card';
 import { panelRoutes } from '@/src/lib/routes';
 import { ArrowLeft, Play, Loader2 } from 'lucide-react';
 
@@ -21,16 +22,14 @@ export function PackDetail() {
   const pack = packs.find(p => p.id === id);
 
   useEffect(() => {
-    if (packs.length === 0) {
-      loadPacks();
-    }
+    if (packs.length === 0) loadPacks();
   }, [packs.length, loadPacks]);
 
   if (isLoading && packs.length === 0) {
     return (
-      <div className="flex-1 flex items-center justify-center bg-bg-main">
+      <div className="flex-1 flex items-center justify-center">
         <div className="flex flex-col items-center gap-3">
-          <Loader2 className="w-8 h-8 animate-spin text-accent" />
+          <Loader2 className="w-6 h-6 animate-spin text-accent" />
           <span className="text-sm text-text-muted">{t('pack.loading')}</span>
         </div>
       </div>
@@ -38,7 +37,11 @@ export function PackDetail() {
   }
 
   if (!pack) {
-    return <div className="p-8 text-center text-text-muted">Pack not found</div>;
+    return (
+      <div className="flex-1 flex items-center justify-center">
+        <p className="text-sm text-text-muted">Pack not found</p>
+      </div>
+    );
   }
 
   const handleToggle = () => {
@@ -48,78 +51,90 @@ export function PackDetail() {
   };
 
   return (
-    <div className="flex-1 overflow-y-auto p-8 flex flex-col gap-8 animate-in fade-in slide-in-from-bottom-4">
-      <div className="flex items-center gap-4">
-        <Button variant="ghost" size="icon" onClick={() => navigate(panelRoutes.packs)}>
-          <ArrowLeft className="h-5 w-5" />
-        </Button>
-        <h1 className="text-3xl font-bold tracking-tight text-text-main">{pack.name}</h1>
-        <Badge variant="outline">{pack.version}</Badge>
-        <Badge variant={pack.type === 'core' ? 'default' : 'secondary'}>{pack.type}</Badge>
-        <div className="ml-auto flex items-center gap-3">
-          <span className="text-sm font-medium text-text-muted">{pack.enabled ? t('packs.enabled') : t('packs.disabled')}</span>
-          <Switch checked={pack.enabled} onCheckedChange={handleToggle} />
-        </div>
-      </div>
-
-      <div className="grid gap-8 md:grid-cols-2">
-        <div className="flex flex-col gap-6">
-          <div className="rounded-xl border border-border bg-bg-card p-6 shadow-sm">
-            <h3 className="mb-4 text-lg font-semibold text-text-main">{t('pack.basic_info')}</h3>
-            <p className="text-sm text-text-muted">{pack.description}</p>
-          </div>
-
-          <div className="rounded-xl border border-border bg-bg-card p-6 shadow-sm">
-            <h3 className="mb-4 text-lg font-semibold text-text-main">{t('pack.capabilities')}</h3>
-            {pack.capabilities.length === 0 ? (
-              <p className="text-sm text-text-muted">No data available</p>
-            ) : (
-              <ul className="space-y-3">
-                {pack.capabilities.map((cap, i) => (
-                  <li key={i} className="flex flex-col gap-1">
-                    <span className="text-sm font-medium text-text-main">{cap.name}</span>
-                    <span className="text-xs text-text-muted">{cap.description}</span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-        </div>
-
-        <div className="flex flex-col gap-6">
-          <div className="rounded-xl border border-border bg-bg-card p-6 shadow-sm">
-            <h3 className="mb-4 text-lg font-semibold text-text-main">{t('pack.flows')}</h3>
-            {pack.flows.length === 0 ? (
-              <p className="text-sm text-text-muted">No data available</p>
-            ) : (
-              <ul className="space-y-3">
-                {pack.flows.map((flow, i) => (
-                  <li key={i} className="flex items-center justify-between rounded-lg border border-border p-3">
-                    <span className="text-sm font-medium text-text-main">{flow}</span>
-                    <Button size="sm" variant="outline" onClick={() => {
-                      setTimeout(() => navigate(panelRoutes.flows), 1000);
-                    }}>
-                      <Play className="mr-2 h-4 w-4" />
-                      {t('pack.run')}
-                    </Button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-
-          <div className="rounded-xl border border-border bg-bg-card p-6 shadow-sm">
-            <h3 className="mb-4 text-lg font-semibold text-text-main">{t('pack.dependencies')}</h3>
-            {pack.dependencies.length === 0 ? (
-              <p className="text-sm text-text-muted">No data available</p>
-            ) : (
-              <div className="flex flex-wrap gap-2">
-                {pack.dependencies.map((dep, i) => (
-                  <Badge key={i} variant="secondary">{dep}</Badge>
-                ))}
+    <div className="flex-1 overflow-y-auto page-enter">
+      <div className="mx-auto max-w-4xl px-6 py-8 flex flex-col gap-6">
+        {/* Header */}
+        <div className="flex items-center justify-between gap-4">
+          <div className="flex items-center gap-3 min-w-0">
+            <Button variant="ghost" size="icon" onClick={() => navigate(panelRoutes.packs)} aria-label="Back to packs">
+              <ArrowLeft className="h-4 w-4" />
+            </Button>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <h1 className="text-xl font-semibold tracking-tight text-text-main">{pack.name}</h1>
+                <Badge variant="outline">{pack.version}</Badge>
+                <Badge variant={pack.type === 'core' ? 'default' : 'secondary'}>{pack.type}</Badge>
               </div>
-            )}
+              <p className="mt-0.5 text-sm text-text-muted">{pack.description}</p>
+            </div>
           </div>
+          <div className="flex items-center gap-3 shrink-0">
+            <span className="text-sm text-text-muted">{pack.enabled ? t('packs.enabled') : t('packs.disabled')}</span>
+            <Switch checked={pack.enabled} onCheckedChange={handleToggle} aria-label={`Toggle ${pack.name}`} />
+          </div>
+        </div>
+
+        {/* Content grid */}
+        <div className="grid gap-6 lg:grid-cols-2">
+          <Card>
+            <CardHeader>
+              <CardTitle>{t('pack.capabilities')}</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {pack.capabilities.length === 0 ? (
+                <p className="text-sm text-text-muted">No capabilities registered.</p>
+              ) : (
+                <ul className="space-y-3">
+                  {pack.capabilities.map((cap, i) => (
+                    <li key={i} className="flex flex-col gap-0.5">
+                      <span className="text-sm font-medium text-text-main">{cap.name}</span>
+                      <span className="text-xs text-text-muted">{cap.description}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>{t('pack.flows')}</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {pack.flows.length === 0 ? (
+                <p className="text-sm text-text-muted">No flows available.</p>
+              ) : (
+                <ul className="space-y-2">
+                  {pack.flows.map((flow, i) => (
+                    <li key={i} className="flex items-center justify-between rounded-lg border border-border p-3">
+                      <span className="text-sm font-medium text-text-main">{flow}</span>
+                      <Button size="sm" variant="outline" onClick={() => navigate(panelRoutes.flows)}>
+                        <Play className="h-3 w-3" />
+                        {t('pack.run')}
+                      </Button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>{t('pack.dependencies')}</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {pack.dependencies.length === 0 ? (
+                <p className="text-sm text-text-muted">No dependencies.</p>
+              ) : (
+                <div className="flex flex-wrap gap-2">
+                  {pack.dependencies.map((dep, i) => (
+                    <Badge key={i} variant="secondary">{dep}</Badge>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
         </div>
       </div>
     </div>

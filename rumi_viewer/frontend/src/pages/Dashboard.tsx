@@ -37,7 +37,6 @@ import {
   ArrowLeft,
   Box,
   CheckCircle2,
-  ChevronRight,
   Copy,
   Loader2,
   MoreHorizontal,
@@ -50,6 +49,8 @@ import {
   Trash2,
 } from 'lucide-react';
 import { Popover, PopoverTrigger, PopoverContent } from '@/src/components/ui/Popover';
+import { Button } from '@/src/components/ui/Button';
+import { Badge } from '@/src/components/ui/Badge';
 
 type ActionState = 'activate' | 'create' | 'delete' | 'duplicate' | 'launch' | 'restart' | 'save';
 
@@ -66,13 +67,6 @@ const INITIAL_PROFILE_LOAD_RETRY_DELAY_MS = 900;
 function formatTimestamp(timestamp: number): string {
   if (!timestamp) return '--';
   return new Date(timestamp * 1000).toLocaleString();
-}
-
-function cardBorderClass(hasDanger: boolean, hasWarning: boolean, isActive: boolean): string {
-  if (hasDanger) return 'border-rose-900/40';
-  if (hasWarning) return 'border-amber-900/40';
-  if (isActive) return 'border-accent/25';
-  return 'border-border';
 }
 
 function shouldRetryInitialProfileLoad(errorMessage: string): boolean {
@@ -157,9 +151,7 @@ export function Dashboard() {
         } catch (error) {
           lastErrorMessage = translateActionError(error, 'load startup profiles');
           const shouldRetry = attempt < maxAttempts && shouldRetryInitialProfileLoad(lastErrorMessage);
-          if (!shouldRetry) {
-            break;
-          }
+          if (!shouldRetry) break;
           await new Promise<void>((resolve) => {
             window.setTimeout(resolve, INITIAL_PROFILE_LOAD_RETRY_DELAY_MS * attempt);
           });
@@ -172,9 +164,7 @@ export function Dashboard() {
   };
 
   useEffect(() => {
-    if (!runtimeReady) {
-      return;
-    }
+    if (!runtimeReady) return;
     void refreshDashboard();
     void refreshProfiles();
   }, [runtimeReady]);
@@ -185,10 +175,7 @@ export function Dashboard() {
   );
 
   useEffect(() => {
-    if (!selectedProfile) {
-      setDraft(null);
-      return;
-    }
+    if (!selectedProfile) { setDraft(null); return; }
     setDraft(JSON.parse(JSON.stringify(selectedProfile)));
   }, [selectedProfile]);
 
@@ -217,16 +204,12 @@ export function Dashboard() {
   const isDirty = useMemo(() => {
     if (!selectedProfile || !draft) return false;
     return JSON.stringify({
-      name: selectedProfile.name,
-      base_pack: selectedProfile.base_pack,
-      graph_id: selectedProfile.graph_id,
-      packs: selectedProfile.packs,
+      name: selectedProfile.name, base_pack: selectedProfile.base_pack,
+      graph_id: selectedProfile.graph_id, packs: selectedProfile.packs,
       node_overrides: selectedProfile.node_overrides,
     }) !== JSON.stringify({
-      name: draft.name,
-      base_pack: draft.base_pack,
-      graph_id: draft.graph_id,
-      packs: draft.packs,
+      name: draft.name, base_pack: draft.base_pack,
+      graph_id: draft.graph_id, packs: draft.packs,
       node_overrides: draft.node_overrides,
     });
   }, [draft, selectedProfile]);
@@ -245,20 +228,13 @@ export function Dashboard() {
     setActionState({ type: 'create' });
     setFeedback(null);
     try {
-      if (!defaultCreatePack) {
-        throw new Error('No available base pack with a startup graph was found.');
-      }
-      const response = await createStartupProfile({
-        name: 'New custom profile',
-        base_pack: defaultCreatePack.pack_id,
-      });
+      if (!defaultCreatePack) throw new Error('No available base pack with a startup graph was found.');
+      const response = await createStartupProfile({ name: 'New custom profile', base_pack: defaultCreatePack.pack_id });
       await refreshProfiles(response.profile.profile_id);
-      setSuccessFeedback('Custom profile created. Finish the details and save when ready.');
+      setSuccessFeedback('Custom profile created.');
     } catch (error) {
       setErrorFeedback(translateActionError(error, 'create a custom profile'));
-    } finally {
-      setActionState(null);
-    }
+    } finally { setActionState(null); }
   };
 
   const handleSave = async () => {
@@ -267,19 +243,14 @@ export function Dashboard() {
     setFeedback(null);
     try {
       await updateStartupProfile(draft.profile_id, {
-        name: draft.name,
-        base_pack: draft.base_pack,
-        graph_id: draft.graph_id,
-        packs: draft.packs,
-        node_overrides: draft.node_overrides,
+        name: draft.name, base_pack: draft.base_pack, graph_id: draft.graph_id,
+        packs: draft.packs, node_overrides: draft.node_overrides,
       });
       await refreshProfiles(draft.profile_id);
       setSuccessFeedback('Profile changes saved.');
     } catch (error) {
       setErrorFeedback(translateActionError(error, 'save this profile'));
-    } finally {
-      setActionState(null);
-    }
+    } finally { setActionState(null); }
   };
 
   const handleAddPack = async (packId: string) => {
@@ -293,9 +264,7 @@ export function Dashboard() {
       setSuccessFeedback('Pack added to profile.');
     } catch (error) {
       setErrorFeedback(translateActionError(error, 'add this pack'));
-    } finally {
-      setActionState(null);
-    }
+    } finally { setActionState(null); }
   };
 
   const handleRemovePack = async (packId: string) => {
@@ -309,9 +278,7 @@ export function Dashboard() {
       setSuccessFeedback('Pack removed from profile.');
     } catch (error) {
       setErrorFeedback(translateActionError(error, 'remove this pack'));
-    } finally {
-      setActionState(null);
-    }
+    } finally { setActionState(null); }
   };
 
   const handleOverrideChange = async (portKey: string, nodeId: string) => {
@@ -327,9 +294,7 @@ export function Dashboard() {
       setSuccessFeedback(nodeId ? 'Node override saved.' : 'Node override cleared.');
     } catch (error) {
       setErrorFeedback(translateActionError(error, 'update this override'));
-    } finally {
-      setActionState(null);
-    }
+    } finally { setActionState(null); }
   };
 
   const handleDuplicate = async (profileId: string) => {
@@ -341,9 +306,7 @@ export function Dashboard() {
       setSuccessFeedback('Profile duplicated.');
     } catch (error) {
       setErrorFeedback(translateActionError(error, 'duplicate this profile'));
-    } finally {
-      setActionState(null);
-    }
+    } finally { setActionState(null); }
   };
 
   const handleActivate = async (profileId: string) => {
@@ -355,9 +318,7 @@ export function Dashboard() {
       setSuccessFeedback('Active profile updated for the next launch.');
     } catch (error) {
       setErrorFeedback(translateActionError(error, 'set this profile as active'));
-    } finally {
-      setActionState(null);
-    }
+    } finally { setActionState(null); }
   };
 
   const handleLaunch = async (profileId: string) => {
@@ -369,25 +330,18 @@ export function Dashboard() {
         await refreshProfiles(editProfileId);
         await refreshDashboard();
       }
-      setSuccessFeedback(
-        response.restart_requested
-          ? 'Profile launched. Kernel restart handoff was requested.'
-          : 'Profile launched.',
-      );
+      setSuccessFeedback(response.restart_requested ? 'Profile launched. Kernel restart handoff was requested.' : 'Profile launched.');
     } catch (error) {
       setErrorFeedback(translateActionError(error, 'launch this profile'));
-    } finally {
-      setActionState(null);
-    }
+    } finally { setActionState(null); }
   };
 
   const handleDelete = (profileId: string, name: string) => {
     showDialog({
       title: 'Delete this profile?',
-      message:
-        profileCount <= 1
-          ? 'At least one startup profile must remain.'
-          : `Delete '${name}' and switch back to another saved profile?`,
+      message: profileCount <= 1
+        ? 'At least one startup profile must remain.'
+        : `Delete '${name}' and switch back to another saved profile?`,
       confirmText: 'Delete',
       onConfirm: async () => {
         if (profileCount <= 1) return;
@@ -395,17 +349,12 @@ export function Dashboard() {
         setFeedback(null);
         try {
           const response = await deleteStartupProfile(profileId);
-          if (editProfileId === profileId) {
-            patchSearchParams({ edit: null });
-          }
+          if (editProfileId === profileId) patchSearchParams({ edit: null });
           await refreshProfiles(response.active_profile_id);
           setSuccessFeedback('Profile deleted.');
         } catch (error) {
           setErrorFeedback(translateActionError(error, 'delete this profile'));
-        } finally {
-          setActionState(null);
-          closeDialog();
-        }
+        } finally { setActionState(null); closeDialog(); }
       },
     });
   };
@@ -423,18 +372,16 @@ export function Dashboard() {
           setDashboard((current) => ({ ...current, kernelStatus: 'stopped' }));
           setSuccessFeedback('Kernel restart requested.');
           closeDialog();
-          window.setTimeout(() => {
-            void refreshDashboard();
-          }, 3000);
+          window.setTimeout(() => { void refreshDashboard(); }, 3000);
         } catch (error) {
           setErrorFeedback(translateActionError(error, 'restart the kernel'));
           closeDialog();
-        } finally {
-          setActionState(null);
-        }
+        } finally { setActionState(null); }
       },
     });
   };
+
+  // --- Loading / Error states ---
 
   if (!runtimeReady && runtimeStatus !== 'error') {
     return <DashboardSkeleton />;
@@ -442,245 +389,156 @@ export function Dashboard() {
 
   if (runtimeStatus === 'error' && !payload) {
     return (
-      <div className="flex flex-1 items-center justify-center bg-bg-main px-4 text-text-main">
-        <div className="flex max-w-lg flex-col gap-4 rounded-2xl border border-rose-900/40 bg-rose-950/20 p-8">
+      <div className="flex flex-1 items-center justify-center px-6">
+        <div className="flex max-w-md flex-col gap-4 rounded-xl border border-red-200 bg-red-50 p-6 dark:border-red-900/40 dark:bg-red-950/20">
           <div className="flex items-start gap-3">
-            <AlertCircle className="mt-0.5 h-5 w-5 text-rose-400" />
-            <div className="space-y-2">
-              <h1 className="text-2xl font-semibold text-text-main">Runtime could not finish starting</h1>
-              <p className="text-sm text-text-muted">
-                {runtimeError || 'The control panel opened, but the background runtime startup failed.'}
-              </p>
+            <AlertCircle className="mt-0.5 h-5 w-5 text-red-500 shrink-0" />
+            <div className="space-y-1">
+              <h2 className="text-base font-semibold text-text-main">Runtime could not finish starting</h2>
+              <p className="text-sm text-text-muted">{runtimeError || 'The control panel opened, but the background runtime startup failed.'}</p>
             </div>
           </div>
-          <button
-            onClick={() => window.location.reload()}
-            className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-accent px-4 py-3 text-sm font-semibold text-accent-fg transition hover:opacity-90 sm:w-fit"
-          >
-            <RefreshCw className="h-4 w-4" />
-            Reload
-          </button>
+          <div className="flex justify-end">
+            <Button onClick={() => window.location.reload()} size="sm"><RefreshCw className="h-3.5 w-3.5" /> Reload</Button>
+          </div>
         </div>
       </div>
     );
   }
 
-  if (profilesLoading && !payload) {
-    return <DashboardSkeleton />;
-  }
+  if (profilesLoading && !payload) return <DashboardSkeleton />;
 
   if (!payload) {
     return (
-      <div className="flex flex-1 items-center justify-center bg-bg-main px-4 text-text-main">
-        <div className="flex max-w-lg flex-col gap-4 rounded-2xl border border-border bg-bg-card p-8">
+      <div className="flex flex-1 items-center justify-center px-6">
+        <div className="flex max-w-md flex-col gap-4 rounded-xl border border-border bg-bg-card p-6">
           <div className="flex items-start gap-3">
-            <AlertCircle className="mt-0.5 h-5 w-5 text-rose-400" />
-            <div className="space-y-2">
-              <h1 className="text-2xl font-semibold text-text-main">Home could not load</h1>
+            <AlertCircle className="mt-0.5 h-5 w-5 text-red-500 shrink-0" />
+            <div className="space-y-1">
+              <h2 className="text-base font-semibold text-text-main">Home could not load</h2>
               <p className="text-sm text-text-muted">{profilesError || 'The launcher could not load your profiles yet.'}</p>
             </div>
           </div>
-          <button
-            onClick={() => void refreshProfiles()}
-            className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-accent px-4 py-3 text-sm font-semibold text-accent-fg transition hover:opacity-90 sm:w-fit"
-          >
-            <RefreshCw className="h-4 w-4" />
-            Retry
-          </button>
+          <div className="flex justify-end">
+            <Button onClick={() => void refreshProfiles()} size="sm"><RefreshCw className="h-3.5 w-3.5" /> Retry</Button>
+          </div>
         </div>
       </div>
     );
   }
 
+  // --- Main render ---
+
   return (
-    <div className="flex flex-1 overflow-hidden bg-bg-main text-text-main">
-      <div className="mx-auto flex w-full max-w-[1200px] flex-col gap-6 px-6 py-8 lg:px-10 scrollbar-hidden overflow-y-auto">
-        {/* Header */}
+    <div className="flex flex-1 overflow-hidden">
+      <div className="mx-auto flex w-full max-w-[1100px] flex-col gap-6 px-6 py-8 lg:px-10 scrollbar-hidden overflow-y-auto page-enter">
+        {/* Header section */}
         <section className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h1 className="text-3xl font-bold tracking-tight text-text-main">My Profiles</h1>
+            <h1 className="text-2xl font-semibold tracking-tight text-text-main">My Profiles</h1>
             <p className="mt-1 text-sm text-text-muted">Launch and manage your startup profiles.</p>
           </div>
           <div className="flex items-center gap-3">
-            <label className="flex items-center gap-2 rounded-xl border border-border bg-bg-card px-3 py-2 text-sm">
+            <label className="flex items-center gap-2 rounded-lg border border-border bg-bg-card px-3 py-2 text-sm">
               <Search className="h-4 w-4 text-text-muted" />
               <input
                 value={searchQuery}
                 onChange={(e) => patchSearchParams({ q: e.target.value || null })}
                 placeholder="Search profiles..."
-                className="w-40 bg-transparent text-sm text-text-main outline-none placeholder:text-text-muted sm:w-52"
+                className="w-36 bg-transparent text-sm text-text-main outline-none placeholder:text-text-muted sm:w-48"
+                aria-label="Search profiles"
               />
             </label>
-            <button
-              onClick={handleCreate}
-              disabled={actionState?.type === 'create'}
-              className="inline-flex items-center gap-2 rounded-xl bg-accent px-4 py-2.5 text-sm font-semibold text-accent-fg transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {actionState?.type === 'create' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-              Create Profile
-            </button>
+            <Button onClick={handleCreate} disabled={actionState?.type === 'create'} loading={actionState?.type === 'create'}>
+              <Plus className="h-4 w-4" /> Create
+            </Button>
           </div>
         </section>
 
-        {/* Feedback */}
-        {feedback ? (
-          <div
-            className={`flex flex-col gap-3 rounded-2xl border px-5 py-4 sm:flex-row sm:items-center sm:justify-between ${
-              feedback.tone === 'error'
-                ? 'border-rose-900/60 bg-rose-950/30 text-rose-100'
-                : 'border-emerald-900/60 bg-emerald-950/20 text-emerald-100'
-            }`}
-          >
-            <div className="flex items-start gap-3">
-              {feedback.tone === 'error' ? (
-                <AlertCircle className="mt-0.5 h-5 w-5 shrink-0" />
-              ) : (
-                <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0" />
-              )}
-              <p className="text-sm">{feedback.message}</p>
-            </div>
-            {feedback.tone === 'error' ? (
-              <button
-                onClick={() => void refreshProfiles(editProfileId)}
-                className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-black/20 px-4 py-2 text-sm font-medium transition hover:bg-black/35"
-              >
-                <RefreshCw className="h-4 w-4" />
-                Retry load
-              </button>
-            ) : null}
+        {/* Feedback banner */}
+        {feedback && (
+          <div className={`flex items-center gap-3 rounded-lg border px-4 py-3 text-sm ${
+            feedback.tone === 'error'
+              ? 'border-red-200 bg-red-50 text-red-700 dark:border-red-900/40 dark:bg-red-950/30 dark:text-red-300'
+              : 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/40 dark:bg-emerald-950/20 dark:text-emerald-300'
+          }`}>
+            {feedback.tone === 'error' ? <AlertCircle className="h-4 w-4 shrink-0" /> : <CheckCircle2 className="h-4 w-4 shrink-0" />}
+            <span className="flex-1">{feedback.message}</span>
+            {feedback.tone === 'error' && (
+              <Button variant="ghost" size="sm" onClick={() => void refreshProfiles(editProfileId)}>
+                <RefreshCw className="h-3.5 w-3.5" /> Retry
+              </Button>
+            )}
           </div>
-        ) : null}
-
-        {/* Partial Error */}
-        {profilesError ? (
-          <div className="flex flex-col gap-3 rounded-2xl border border-amber-900/40 bg-amber-950/20 px-5 py-4 text-amber-100 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex items-start gap-3">
-              <AlertCircle className="mt-0.5 h-5 w-5 shrink-0" />
-              <div className="space-y-1">
-                <p className="text-sm font-medium">Some profile data could not refresh.</p>
-                <p className="text-sm text-amber-200/80">{profilesError}</p>
-              </div>
-            </div>
-            <button
-              onClick={() => void refreshProfiles(editProfileId)}
-              className="inline-flex items-center gap-2 rounded-xl border border-amber-800/80 bg-black/20 px-4 py-2 text-sm font-medium transition hover:bg-black/35"
-            >
-              <RefreshCw className="h-4 w-4" />
-              Retry
-            </button>
-          </div>
-        ) : null}
+        )}
 
         {/* Profile Grid */}
         {visibleProfiles.length === 0 ? (
-          <section className="rounded-2xl border border-dashed border-border bg-bg-card/50 px-8 py-14 text-center">
-            <div className="mx-auto flex max-w-xl flex-col items-center gap-4">
-              <div className="flex h-16 w-16 items-center justify-center rounded-full border border-border bg-bg-hover text-text-muted">
-                {searchQuery ? <Search className="h-7 w-7" /> : <Plus className="h-7 w-7" />}
+          <section className="rounded-xl border border-dashed border-border bg-bg-card/50 px-8 py-16 text-center">
+            <div className="mx-auto flex max-w-sm flex-col items-center gap-4">
+              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-bg-hover">
+                {searchQuery ? <Search className="h-5 w-5 text-text-muted" /> : <Plus className="h-5 w-5 text-text-muted" />}
               </div>
-              <div className="space-y-2">
-                <h2 className="text-xl font-semibold text-text-main">
+              <div className="space-y-1">
+                <h2 className="text-base font-semibold text-text-main">
                   {searchQuery ? 'No profiles match that search' : 'Create your first profile'}
                 </h2>
-                <p className="text-sm leading-6 text-text-muted">
-                  {searchQuery
-                    ? 'Try a different profile, pack, node, or graph port search.'
-                    : 'Profiles keep your preferred base pack, graph ports, and node overrides ready for launch.'}
+                <p className="text-sm text-text-muted">
+                  {searchQuery ? 'Try a different search term.' : 'Profiles keep your preferred settings ready for launch.'}
                 </p>
               </div>
-              <div className="flex flex-col gap-3 sm:flex-row">
-                {searchQuery ? (
-                  <button
-                    onClick={() => patchSearchParams({ q: null })}
-                    className="rounded-xl border border-border bg-bg-hover px-4 py-2.5 text-sm font-medium text-text-main transition hover:bg-bg-hover/80"
-                  >
-                    Clear search
-                  </button>
-                ) : null}
-                <button
-                  onClick={handleCreate}
-                  disabled={actionState?.type === 'create'}
-                  className="rounded-xl bg-accent px-4 py-2.5 text-sm font-semibold text-accent-fg transition hover:opacity-90 disabled:opacity-60"
-                >
-                  Create Profile
-                </button>
-              </div>
+              {searchQuery ? (
+                <Button variant="outline" size="sm" onClick={() => patchSearchParams({ q: null })}>Clear search</Button>
+              ) : (
+                <Button size="sm" onClick={handleCreate} disabled={actionState?.type === 'create'}>Create Profile</Button>
+              )}
             </div>
           </section>
         ) : (
-          <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {visibleProfiles.map((profileView) => {
-              const { issues, profile, runtimeReady, basePack, lastLaunched } = profileView;
+              const { issues, profile, runtimeReady: profileReady, basePack, lastLaunched } = profileView;
               const hasDanger = issues.some((i) => i.severity === 'danger');
-              const hasWarning = issues.some((i) => i.severity === 'warning');
               const isActive = payload.active_profile_id === profile.profile_id;
               const busy = actionState?.profileId === profile.profile_id;
-              const borderClass = cardBorderClass(hasDanger, hasWarning, isActive);
 
               return (
                 <article
                   key={profile.profile_id}
-                  className={`group relative flex flex-col rounded-2xl border bg-bg-card p-5 transition hover:border-text-muted/30 ${borderClass}`}
+                  className={`group relative flex flex-col rounded-xl border bg-bg-card p-5 transition-all hover:shadow-[var(--shadow-md)] ${
+                    isActive ? 'border-accent/25' : 'border-border'
+                  }`}
                 >
-                  {/* Top row */}
+                  {/* Top: status + menu */}
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-1.5">
-                      {isActive ? (
+                      {isActive && (
                         <>
-                          <span className="h-2 w-2 rounded-full bg-accent shadow-[0_0_6px_rgba(99,102,241,0.5)]" />
+                          <span className="h-2 w-2 rounded-full bg-accent" />
                           <span className="text-[11px] font-medium text-accent">Active</span>
                         </>
-                      ) : lastLaunched ? (
-                        <span className="text-[11px] text-text-muted">Last used</span>
-                      ) : (
-                        <span className="text-[11px] text-transparent">.</span>
                       )}
+                      {!isActive && lastLaunched && <span className="text-[11px] text-text-muted">Last used</span>}
                     </div>
-
                     <Popover>
-                      <PopoverTrigger className="rounded-lg p-1.5 text-text-muted opacity-0 transition hover:bg-bg-hover group-hover:opacity-100">
+                      <PopoverTrigger className="rounded-md p-1.5 text-text-muted opacity-0 transition hover:bg-bg-hover group-hover:opacity-100 focus-visible:opacity-100">
                         <MoreHorizontal className="h-4 w-4" />
+                        <span className="sr-only">Actions</span>
                       </PopoverTrigger>
                       <PopoverContent className="w-40">
-                        <div className="flex flex-col">
-                          <button
-                            onClick={() => patchSearchParams({ edit: profile.profile_id })}
-                            className="flex items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-text-main transition hover:bg-bg-hover"
-                          >
+                        <div className="flex flex-col py-1">
+                          <button onClick={() => patchSearchParams({ edit: profile.profile_id })} className="flex items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-text-main transition hover:bg-bg-hover">
                             <Save className="h-3.5 w-3.5" /> Edit
                           </button>
-                          <button
-                            onClick={() => void handleActivate(profile.profile_id)}
-                            disabled={isActive || busy}
-                            className={`flex items-center gap-2 rounded-lg px-3 py-2 text-left text-sm transition hover:bg-bg-hover ${isActive ? 'cursor-not-allowed opacity-50' : 'text-text-main'}`}
-                          >
-                            <Star className={`h-3.5 w-3.5 ${isActive ? 'fill-accent text-accent' : ''}`} />
-                            {isActive ? 'Active' : 'Set Active'}
+                          <button onClick={() => void handleActivate(profile.profile_id)} disabled={isActive || busy} className="flex items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-text-main transition hover:bg-bg-hover disabled:opacity-50">
+                            <Star className={`h-3.5 w-3.5 ${isActive ? 'fill-accent text-accent' : ''}`} /> {isActive ? 'Active' : 'Set Active'}
                           </button>
-                          <button
-                            onClick={() => void handleDuplicate(profile.profile_id)}
-                            disabled={busy}
-                            className="flex items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-text-main transition hover:bg-bg-hover disabled:cursor-not-allowed disabled:opacity-50"
-                          >
-                            {actionState?.type === 'duplicate' && busy ? (
-                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                            ) : (
-                              <Copy className="h-3.5 w-3.5" />
-                            )}
-                            Duplicate
+                          <button onClick={() => void handleDuplicate(profile.profile_id)} disabled={busy} className="flex items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-text-main transition hover:bg-bg-hover disabled:opacity-50">
+                            <Copy className="h-3.5 w-3.5" /> Duplicate
                           </button>
                           <div className="my-1 border-t border-border" />
-                          <button
-                            onClick={() => handleDelete(profile.profile_id, profile.name)}
-                            disabled={profileCount <= 1 || busy}
-                            className="flex items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-rose-400 transition hover:bg-rose-500/10 disabled:cursor-not-allowed disabled:opacity-50"
-                          >
-                            {actionState?.type === 'delete' && busy ? (
-                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                            ) : (
-                              <Trash2 className="h-3.5 w-3.5" />
-                            )}
-                            Delete
+                          <button onClick={() => handleDelete(profile.profile_id, profile.name)} disabled={profileCount <= 1 || busy} className="flex items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-red-500 transition hover:bg-red-50 dark:hover:bg-red-950/20 disabled:opacity-50">
+                            <Trash2 className="h-3.5 w-3.5" /> Delete
                           </button>
                         </div>
                       </PopoverContent>
@@ -689,385 +547,349 @@ export function Dashboard() {
 
                   {/* Icon */}
                   <div className="mt-4 flex justify-center">
-                    <div className={`flex h-16 w-16 items-center justify-center rounded-2xl ${isActive ? 'bg-accent/10 text-accent' : 'bg-bg-hover text-text-muted'}`}>
-                      <Box className="h-7 w-7" strokeWidth={1.5} />
+                    <div className={`flex h-14 w-14 items-center justify-center rounded-xl ${isActive ? 'bg-accent/8 text-accent' : 'bg-bg-hover text-text-muted'}`}>
+                      <Box className="h-6 w-6" strokeWidth={1.5} />
                     </div>
                   </div>
 
                   {/* Name & Pack */}
-                  <div className="mt-4 text-center">
-                    <h3 className="font-semibold text-text-main">{profile.name}</h3>
-                    <p className="mt-0.5 text-xs text-text-muted">
-                      {packLabel(basePack, profile.base_pack)}
-                    </p>
+                  <div className="mt-3 text-center">
+                    <h3 className="text-sm font-semibold text-text-main">{profile.name}</h3>
+                    <p className="mt-0.5 text-xs text-text-muted">{packLabel(basePack, profile.base_pack)}</p>
                   </div>
 
                   {/* Status */}
-                  <div className="mt-2 min-h-[18px] text-center">
+                  <div className="mt-2 min-h-[16px] text-center">
                     {issues.length > 0 ? (
-                      <span className={`text-[11px] ${hasDanger ? 'text-rose-400' : 'text-amber-400'}`}>
-                        {issues[0].description}
-                      </span>
-                    ) : runtimeReady ? (
-                      <span className="text-[11px] text-emerald-400/90">Ready</span>
+                      <span className={`text-[11px] ${hasDanger ? 'text-red-500' : 'text-amber-500'}`}>{issues[0].description}</span>
+                    ) : profileReady ? (
+                      <Badge variant="success" className="text-[10px]">Ready</Badge>
                     ) : null}
                   </div>
 
-                  {/* Actions */}
-                  <div className="mt-auto pt-4 flex gap-2">
-                    <button
-                      onClick={() => void handleLaunch(profile.profile_id)}
-                      disabled={!runtimeReady || busy}
-                      className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-xl bg-accent px-3 py-2.5 text-sm font-semibold text-accent-fg transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
-                    >
-                      {actionState?.type === 'launch' && busy ? (
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      ) : (
-                        <Rocket className="h-3.5 w-3.5" />
-                      )}
-                      Launch
-                    </button>
-                    <button
-                      onClick={() => patchSearchParams({ edit: profile.profile_id })}
-                      className="inline-flex items-center justify-center rounded-xl border border-border bg-bg-hover px-3 py-2.5 text-sm font-medium text-text-main transition hover:bg-bg-hover/80"
-                    >
-                      Edit
-                    </button>
+                  {/* Actions - primary right */}
+                  <div className="mt-auto pt-4 flex gap-2 justify-end">
+                    <Button variant="outline" size="sm" onClick={() => patchSearchParams({ edit: profile.profile_id })}>Edit</Button>
+                    <Button size="sm" onClick={() => void handleLaunch(profile.profile_id)} disabled={!profileReady || busy} loading={actionState?.type === 'launch' && busy}>
+                      <Rocket className="h-3.5 w-3.5" /> Launch
+                    </Button>
                   </div>
                 </article>
               );
             })}
 
-            {/* Create new card */}
+            {/* Create card */}
             <button
               onClick={handleCreate}
               disabled={actionState?.type === 'create'}
-              className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-border bg-bg-card/50 p-5 text-center transition hover:border-accent/50 hover:bg-bg-card min-h-[260px]"
+              className="flex flex-col items-center justify-center rounded-xl border border-dashed border-border bg-bg-card/50 p-5 text-center transition hover:border-accent/40 hover:bg-bg-card min-h-[240px]"
             >
-              <div className="flex h-16 w-16 items-center justify-center rounded-2xl border border-border bg-bg-hover text-text-muted">
-                {actionState?.type === 'create' ? <Loader2 className="h-7 w-7 animate-spin text-accent" /> : <Plus className="h-7 w-7" />}
+              <div className="flex h-12 w-12 items-center justify-center rounded-xl border border-border bg-bg-hover text-text-muted">
+                {actionState?.type === 'create' ? <Loader2 className="h-5 w-5 animate-spin text-accent" /> : <Plus className="h-5 w-5" />}
               </div>
-              <h3 className="mt-4 font-semibold text-text-main">Create Profile</h3>
+              <h3 className="mt-3 text-sm font-semibold text-text-main">Create Profile</h3>
               <p className="mt-1 text-xs text-text-muted">Build a new startup profile</p>
             </button>
           </section>
         )}
 
         {/* Edit Panel */}
-        {draft && catalog ? (
-          <section className="rounded-2xl border border-border bg-bg-card p-6 lg:p-8">
-            <div className="flex flex-col gap-6 border-b border-border pb-6 lg:flex-row lg:items-end lg:justify-between">
-              <div className="space-y-2">
-                <button
-                  onClick={() => patchSearchParams({ edit: null })}
-                  className="inline-flex items-center gap-2 text-sm font-medium text-text-muted transition hover:text-text-main"
-                >
-                  <ArrowLeft className="h-4 w-4" />
-                  Back to profiles
-                </button>
-                <div>
-                  <h2 className="text-2xl font-semibold tracking-tight text-text-main">{draft.name}</h2>
-                  <p className="mt-1 text-sm text-text-muted">Edit profile settings, profile packs, and graph port overrides.</p>
-                </div>
-              </div>
-
-              <div className="flex flex-col gap-3 sm:flex-row">
-                <button
-                  onClick={() => void handleActivate(draft.profile_id)}
-                  disabled={actionState?.profileId === draft.profile_id}
-                  className="rounded-xl border border-border bg-bg-hover px-4 py-2.5 text-sm font-medium text-text-main transition hover:bg-bg-hover/80 disabled:opacity-60"
-                >
-                  Set Active
-                </button>
-                <button
-                  onClick={() => void handleDuplicate(draft.profile_id)}
-                  disabled={actionState?.profileId === draft.profile_id}
-                  className="inline-flex items-center justify-center gap-2 rounded-xl border border-border bg-bg-hover px-4 py-2.5 text-sm font-medium text-text-main transition hover:bg-bg-hover/80 disabled:opacity-60"
-                >
-                  <Copy className="h-4 w-4" />
-                  Duplicate
-                </button>
-                <button
-                  onClick={() => handleDelete(draft.profile_id, draft.name)}
-                  disabled={profileCount <= 1 || actionState?.profileId === draft.profile_id}
-                  className="inline-flex items-center justify-center gap-2 rounded-xl border border-rose-950 bg-rose-950/20 px-4 py-2.5 text-sm font-medium text-rose-300 transition hover:bg-rose-950/40 disabled:opacity-60"
-                >
-                  <Trash2 className="h-4 w-4" />
-                  Delete
-                </button>
-                <button
-                  onClick={handleSave}
-                  disabled={!isDirty || actionState?.type === 'save'}
-                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-accent px-5 py-2.5 text-sm font-semibold text-accent-fg transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {actionState?.type === 'save' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-                  Save Changes
-                </button>
-              </div>
-            </div>
-
-            <div className="mt-6 grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
-              <div className="space-y-6">
-                <section className="rounded-2xl border border-border bg-bg-main p-5">
-                  <h3 className="text-base font-semibold text-text-main">General settings</h3>
-                  <p className="mt-1 text-sm text-text-muted">Edit the profile name and choose which base pack anchors the setup.</p>
-
-                  <div className="mt-5 grid gap-5 md:grid-cols-2">
-                    <label className="space-y-2">
-                      <span className="text-xs font-semibold uppercase tracking-wider text-text-muted">Profile name</span>
-                      <input
-                        value={draft.name}
-                        onChange={(event) => setDraft({ ...draft, name: event.target.value })}
-                        className="w-full rounded-xl border border-border bg-bg-hover px-4 py-3 text-sm text-text-main outline-none transition focus:border-accent"
-                      />
-                    </label>
-
-                    <label className="space-y-2">
-                      <span className="text-xs font-semibold uppercase tracking-wider text-text-muted">Base pack</span>
-                      <select
-                        value={draft.base_pack}
-                        onChange={(event) => {
-                          const nextBasePack = event.target.value;
-                          const nextPack = catalogPacks.find((pack) => pack.pack_id === nextBasePack);
-                          setDraft({
-                            ...draft,
-                            base_pack: nextBasePack,
-                            graph_id: nextPack?.graphs[0]?.graph_id ?? draft.graph_id,
-                            packs: draft.packs.includes(nextBasePack) ? draft.packs : [nextBasePack, ...draft.packs],
-                          });
-                        }}
-                        className="w-full rounded-xl border border-border bg-bg-hover px-4 py-3 text-sm text-text-main outline-none transition focus:border-accent"
-                      >
-                        {catalogPacks.map((pack) => (
-                          <option key={pack.pack_id} value={pack.pack_id} disabled={!pack.available}>
-                            {packLabel(pack)} {pack.available ? '' : '(unavailable)'}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                  </div>
-
-                  {selectedBasePack && !selectedBasePack.available ? (
-                    <div className="mt-5 rounded-2xl border border-amber-900/40 bg-amber-950/20 p-4">
-                      <div className="flex items-center gap-2 font-medium text-amber-100">
-                        <AlertCircle className="h-4 w-4" />
-                        Base pack needs attention
-                      </div>
-                      <ul className="mt-3 space-y-2 text-sm text-amber-200/90">
-                        {selectedBasePack.approval_issues.map((issue) => (
-                          <li key={issue}>{describeStartupIssue(issue, packLabel(selectedBasePack)).description}</li>
-                        ))}
-                      </ul>
-                    </div>
-                  ) : null}
-                </section>
-
-                <section className="rounded-2xl border border-border bg-bg-main p-5">
-                  <h3 className="text-base font-semibold text-text-main">Profile packs</h3>
-                  <p className="mt-1 text-sm text-text-muted">Add packs before using their nodes as graph port overrides.</p>
-
-                  <div className="mt-5 grid gap-4">
-                    {draft.packs.map((packId) => {
-                      const pack = catalogPacks.find((item) => item.pack_id === packId) ?? null;
-                      const canRemove = packId !== draft.base_pack;
-                      return (
-                        <div key={packId} className="flex items-center justify-between gap-3 rounded-xl border border-border bg-bg-hover/50 p-4">
-                          <div className="min-w-0">
-                            <div className="truncate text-sm font-semibold text-text-main">{packLabel(pack, packId)}</div>
-                            <div className="mt-0.5 truncate text-xs text-text-muted">{packId}</div>
-                          </div>
-                          <button
-                            onClick={() => void handleRemovePack(packId)}
-                            disabled={!canRemove || actionState?.profileId === draft.profile_id}
-                            className="rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-text-muted transition hover:bg-bg-hover hover:text-text-main disabled:cursor-not-allowed disabled:opacity-50"
-                          >
-                            {packId === draft.base_pack ? 'Base' : 'Remove'}
-                          </button>
-                        </div>
-                      );
-                    })}
-                    <label className="space-y-2">
-                      <span className="text-xs font-semibold uppercase tracking-wider text-text-muted">Add pack</span>
-                      <select
-                        value=""
-                        onChange={(event) => void handleAddPack(event.target.value)}
-                        disabled={availablePacksToAdd.length === 0 || actionState?.profileId === draft.profile_id}
-                        className="w-full rounded-xl border border-border bg-bg-hover px-4 py-3 text-sm text-text-main outline-none transition focus:border-accent disabled:opacity-60"
-                      >
-                        <option value="">Select a pack</option>
-                        {availablePacksToAdd.map((pack) => (
-                          <option key={pack.pack_id} value={pack.pack_id}>
-                            {packLabel(pack)}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                  </div>
-                </section>
-
-                <section className="rounded-2xl border border-border bg-bg-main p-5">
-                  <h3 className="text-base font-semibold text-text-main">Graph port overrides</h3>
-                  <p className="mt-1 text-sm text-text-muted">Override a graph input only with nodes that provide its required standard.</p>
-
-                  <div className="mt-5 grid gap-4">
-                    {draft.graph_ports.map((graphPort) => {
-                      const compatibleNodes = compatibleNodesForPort(catalog, draft, graphPort);
-                      const currentOverride = draft.node_overrides[graphPort.port_key] ?? '';
-                      const defaultNode = graphPort.source_node_ref || graphPort.source_ref;
-                      return (
-                        <div key={graphPort.port_key} className="rounded-xl border border-border bg-bg-hover/50 p-4">
-                          <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-                            <div>
-                              <div className="text-sm font-semibold text-text-main">{titleCasePortKey(graphPort.port_key)}</div>
-                              <div className="mt-0.5 text-xs text-text-muted">
-                                Default: {defaultNode}
-                              </div>
-                            </div>
-                            <span className="rounded-full border border-border bg-bg-hover px-2.5 py-0.5 text-[11px] font-medium text-text-muted">
-                              {(graphPort.target_port?.standards ?? graphPort.target_port?.contracts ?? []).join(', ') || graphPort.port_key}
-                            </span>
-                          </div>
-
-                          <select
-                            value={currentOverride}
-                            onChange={(event) => void handleOverrideChange(graphPort.port_key, event.target.value)}
-                            disabled={actionState?.profileId === draft.profile_id}
-                            className="mt-3 w-full rounded-xl border border-border bg-bg-hover px-4 py-2.5 text-sm text-text-main outline-none transition focus:border-accent"
-                          >
-                            <option value="">Use graph default ({defaultNode})</option>
-                            {compatibleNodes.map((node) => (
-                              <option key={node.node_id} value={node.node_id}>
-                                {node.node_id}
-                              </option>
-                            ))}
-                          </select>
-
-                          {compatibleNodes.length === 0 ? (
-                            <div className="mt-3 space-y-2 rounded-xl border border-amber-900/30 bg-amber-950/15 p-3 text-sm text-amber-100">
-                              <div className="flex items-start gap-2">
-                                <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-                                <span>No compatible nodes are available from this profile's packs.</span>
-                              </div>
-                            </div>
-                          ) : null}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </section>
-              </div>
-
-              <aside className="space-y-4">
-                <section className="rounded-2xl border border-border bg-bg-main p-5">
-                  <div className="text-xs font-semibold uppercase tracking-wider text-text-muted">Quick launch</div>
-                  <div className="mt-4 space-y-3">
-                    <button
-                      onClick={() => void handleLaunch(draft.profile_id)}
-                      disabled={actionState?.profileId === draft.profile_id}
-                      className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-accent px-4 py-3 text-sm font-semibold text-accent-fg transition hover:opacity-90 disabled:opacity-50"
-                    >
-                      {actionState?.type === 'launch' && actionState?.profileId === draft.profile_id ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <Rocket className="h-4 w-4" />
-                      )}
-                      Launch Profile
-                    </button>
-                    <p className="text-sm leading-6 text-text-muted">
-                      Launch always uses the latest saved server state.
-                    </p>
-                  </div>
-                </section>
-
-                <section className="rounded-2xl border border-border bg-bg-main p-5">
-                  <div className="text-xs font-semibold uppercase tracking-wider text-text-muted">Profile metadata</div>
-                  <div className="mt-4 space-y-4 text-sm">
-                    <div>
-                      <div className="text-text-muted">Profile ID</div>
-                      <div className="mt-1 break-all rounded-xl border border-border bg-bg-hover px-3 py-2 font-mono text-xs text-text-main">
-                        {draft.profile_id}
-                      </div>
-                    </div>
-                    <div>
-                      <div className="text-text-muted">Created</div>
-                      <div className="mt-1 text-text-main">{formatTimestamp(draft.created_at)}</div>
-                    </div>
-                    <div>
-                      <div className="text-text-muted">Last updated</div>
-                      <div className="mt-1 text-text-main">{formatTimestamp(draft.updated_at)}</div>
-                    </div>
-                    <div>
-                      <div className="text-text-muted">Save status</div>
-                      <div className="mt-1 text-text-main">{isDirty ? 'Unsaved changes' : 'Saved'}</div>
-                    </div>
-                  </div>
-                </section>
-              </aside>
-            </div>
-          </section>
-        ) : null}
+        {draft && catalog && <EditPanel
+          draft={draft}
+          setDraft={setDraft}
+          catalog={catalog}
+          catalogPacks={catalogPacks}
+          selectedBasePack={selectedBasePack}
+          availablePacksToAdd={availablePacksToAdd}
+          isDirty={isDirty}
+          actionState={actionState}
+          profileCount={profileCount}
+          editProfileId={editProfileId}
+          patchSearchParams={patchSearchParams}
+          handleSave={handleSave}
+          handleActivate={handleActivate}
+          handleDuplicate={handleDuplicate}
+          handleDelete={handleDelete}
+          handleLaunch={handleLaunch}
+          handleAddPack={handleAddPack}
+          handleRemovePack={handleRemovePack}
+          handleOverrideChange={handleOverrideChange}
+        />}
       </div>
     </div>
   );
 }
 
-function SkeletonPulse({ className }: { className: string }) {
+// --- Edit Panel (extracted for readability) ---
+
+interface EditPanelProps {
+  draft: ApiStartupProfile;
+  setDraft: (d: ApiStartupProfile) => void;
+  catalog: any;
+  catalogPacks: any[];
+  selectedBasePack: any;
+  availablePacksToAdd: any[];
+  isDirty: boolean;
+  actionState: { profileId?: string; type: string } | null;
+  profileCount: number;
+  editProfileId: string | null;
+  patchSearchParams: (u: Record<string, string | null>) => void;
+  handleSave: () => Promise<void>;
+  handleActivate: (id: string) => Promise<void>;
+  handleDuplicate: (id: string) => Promise<void>;
+  handleDelete: (id: string, name: string) => void;
+  handleLaunch: (id: string) => Promise<void>;
+  handleAddPack: (packId: string) => Promise<void>;
+  handleRemovePack: (packId: string) => Promise<void>;
+  handleOverrideChange: (portKey: string, nodeId: string) => Promise<void>;
+}
+
+function EditPanel({
+  draft, setDraft, catalog, catalogPacks, selectedBasePack, availablePacksToAdd,
+  isDirty, actionState, profileCount, editProfileId, patchSearchParams,
+  handleSave, handleActivate, handleDuplicate, handleDelete, handleLaunch,
+  handleAddPack, handleRemovePack, handleOverrideChange,
+}: EditPanelProps) {
   return (
-    <div
-      className={`animate-pulse rounded-xl bg-bg-hover ${className}`}
-    />
+    <section className="rounded-xl border border-border bg-bg-card p-6">
+      {/* Edit header */}
+      <div className="flex flex-col gap-4 border-b border-border pb-5 lg:flex-row lg:items-end lg:justify-between">
+        <div className="space-y-2">
+          <button
+            onClick={() => patchSearchParams({ edit: null })}
+            className="inline-flex items-center gap-1.5 text-sm text-text-muted transition hover:text-text-main"
+          >
+            <ArrowLeft className="h-3.5 w-3.5" /> Back to profiles
+          </button>
+          <div>
+            <h2 className="text-xl font-semibold tracking-tight text-text-main">{draft.name}</h2>
+            <p className="mt-0.5 text-sm text-text-muted">Edit profile settings, packs, and graph port overrides.</p>
+          </div>
+        </div>
+
+        {/* Actions - destructive separated left, primary right */}
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" size="sm" onClick={() => void handleDuplicate(draft.profile_id)} disabled={actionState?.profileId === draft.profile_id}>
+            <Copy className="h-3.5 w-3.5" /> Duplicate
+          </Button>
+          <Button variant="destructive" size="sm" onClick={() => handleDelete(draft.profile_id, draft.name)} disabled={profileCount <= 1 || actionState?.profileId === draft.profile_id}>
+            <Trash2 className="h-3.5 w-3.5" /> Delete
+          </Button>
+          <div className="flex-1" />
+          <Button size="sm" onClick={() => void handleLaunch(draft.profile_id)} disabled={actionState?.profileId === draft.profile_id} loading={actionState?.type === 'launch' && actionState?.profileId === draft.profile_id}>
+            <Rocket className="h-3.5 w-3.5" /> Launch
+          </Button>
+          <Button size="sm" onClick={handleSave} disabled={!isDirty || actionState?.type === 'save'} loading={actionState?.type === 'save'}>
+            <Save className="h-3.5 w-3.5" /> Save
+          </Button>
+        </div>
+      </div>
+
+      {/* Edit body */}
+      <div className="mt-6 grid gap-6 xl:grid-cols-[1fr_280px]">
+        <div className="space-y-6">
+          {/* General settings */}
+          <div className="rounded-lg border border-border bg-bg-main p-5">
+            <h3 className="text-sm font-semibold text-text-main">General settings</h3>
+            <p className="mt-0.5 text-xs text-text-muted">Profile name and base pack.</p>
+            <div className="mt-4 grid gap-4 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium uppercase tracking-wider text-text-muted">Profile name</label>
+                <input
+                  value={draft.name}
+                  onChange={(e) => setDraft({ ...draft, name: e.target.value })}
+                  className="w-full rounded-lg border border-border bg-bg-hover px-3 py-2.5 text-sm text-text-main outline-none transition focus:border-accent focus:ring-2 focus:ring-[var(--ring-color)]"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium uppercase tracking-wider text-text-muted">Base pack</label>
+                <select
+                  value={draft.base_pack}
+                  onChange={(e) => {
+                    const nextBasePack = e.target.value;
+                    const nextPack = catalogPacks.find((pack: any) => pack.pack_id === nextBasePack);
+                    setDraft({
+                      ...draft,
+                      base_pack: nextBasePack,
+                      graph_id: nextPack?.graphs[0]?.graph_id ?? draft.graph_id,
+                      packs: draft.packs.includes(nextBasePack) ? draft.packs : [nextBasePack, ...draft.packs],
+                    });
+                  }}
+                  className="w-full rounded-lg border border-border bg-bg-hover px-3 py-2.5 text-sm text-text-main outline-none transition focus:border-accent focus:ring-2 focus:ring-[var(--ring-color)]"
+                >
+                  {catalogPacks.map((pack: any) => (
+                    <option key={pack.pack_id} value={pack.pack_id} disabled={!pack.available}>
+                      {packLabel(pack)} {pack.available ? '' : '(unavailable)'}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {selectedBasePack && !selectedBasePack.available && (
+              <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-900/30 dark:bg-amber-950/20">
+                <div className="flex items-center gap-2 text-sm font-medium text-amber-700 dark:text-amber-300">
+                  <AlertCircle className="h-4 w-4" /> Base pack needs attention
+                </div>
+                <ul className="mt-2 space-y-1 text-xs text-text-muted">
+                  {selectedBasePack.approval_issues.map((issue: string) => (
+                    <li key={issue}>{describeStartupIssue(issue, packLabel(selectedBasePack)).description}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+
+          {/* Profile packs */}
+          <div className="rounded-lg border border-border bg-bg-main p-5">
+            <h3 className="text-sm font-semibold text-text-main">Profile packs</h3>
+            <p className="mt-0.5 text-xs text-text-muted">Add packs before using their nodes as overrides.</p>
+            <div className="mt-4 space-y-3">
+              {draft.packs.map((packId: string) => {
+                const pack = catalogPacks.find((item: any) => item.pack_id === packId) ?? null;
+                const canRemove = packId !== draft.base_pack;
+                return (
+                  <div key={packId} className="flex items-center justify-between gap-3 rounded-lg border border-border bg-bg-hover/50 p-3">
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-medium text-text-main">{packLabel(pack, packId)}</div>
+                      <div className="truncate text-xs text-text-muted">{packId}</div>
+                    </div>
+                    <Button variant="outline" size="sm" onClick={() => void handleRemovePack(packId)} disabled={!canRemove || actionState?.profileId === draft.profile_id}>
+                      {packId === draft.base_pack ? 'Base' : 'Remove'}
+                    </Button>
+                  </div>
+                );
+              })}
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium uppercase tracking-wider text-text-muted">Add pack</label>
+                <select
+                  value=""
+                  onChange={(e) => void handleAddPack(e.target.value)}
+                  disabled={availablePacksToAdd.length === 0 || actionState?.profileId === draft.profile_id}
+                  className="w-full rounded-lg border border-border bg-bg-hover px-3 py-2.5 text-sm text-text-main outline-none transition focus:border-accent disabled:opacity-60"
+                >
+                  <option value="">Select a pack</option>
+                  {availablePacksToAdd.map((pack: any) => (
+                    <option key={pack.pack_id} value={pack.pack_id}>{packLabel(pack)}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          </div>
+
+          {/* Graph port overrides */}
+          <div className="rounded-lg border border-border bg-bg-main p-5">
+            <h3 className="text-sm font-semibold text-text-main">Graph port overrides</h3>
+            <p className="mt-0.5 text-xs text-text-muted">Override graph inputs with compatible nodes.</p>
+            <div className="mt-4 space-y-3">
+              {draft.graph_ports.map((graphPort: any) => {
+                const compatibleNodes = compatibleNodesForPort(catalog, draft, graphPort);
+                const currentOverride = draft.node_overrides[graphPort.port_key] ?? '';
+                const defaultNode = graphPort.source_node_ref || graphPort.source_ref;
+                return (
+                  <div key={graphPort.port_key} className="rounded-lg border border-border bg-bg-hover/50 p-3">
+                    <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                      <div>
+                        <div className="text-sm font-medium text-text-main">{titleCasePortKey(graphPort.port_key)}</div>
+                        <div className="text-xs text-text-muted">Default: {defaultNode}</div>
+                      </div>
+                      <Badge variant="outline" className="text-[10px] w-fit">
+                        {(graphPort.target_port?.standards ?? graphPort.target_port?.contracts ?? []).join(', ') || graphPort.port_key}
+                      </Badge>
+                    </div>
+                    <select
+                      value={currentOverride}
+                      onChange={(e) => void handleOverrideChange(graphPort.port_key, e.target.value)}
+                      disabled={actionState?.profileId === draft.profile_id}
+                      className="mt-2 w-full rounded-lg border border-border bg-bg-hover px-3 py-2 text-sm text-text-main outline-none transition focus:border-accent"
+                    >
+                      <option value="">Use graph default ({defaultNode})</option>
+                      {compatibleNodes.map((node: any) => (
+                        <option key={node.node_id} value={node.node_id}>{node.node_id}</option>
+                      ))}
+                    </select>
+                    {compatibleNodes.length === 0 && (
+                      <div className="mt-2 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs text-amber-700 dark:border-amber-900/30 dark:bg-amber-950/20 dark:text-amber-300">
+                        <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                        <span>No compatible nodes available from this profile's packs.</span>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+
+        {/* Sidebar metadata */}
+        <aside className="space-y-4">
+          <div className="rounded-lg border border-border bg-bg-main p-4">
+            <div className="text-xs font-medium uppercase tracking-wider text-text-muted">Metadata</div>
+            <div className="mt-3 space-y-3 text-sm">
+              <div>
+                <div className="text-text-muted text-xs">Profile ID</div>
+                <div className="mt-1 break-all rounded-md border border-border bg-bg-hover px-2.5 py-1.5 font-mono text-xs text-text-main">{draft.profile_id}</div>
+              </div>
+              <div>
+                <div className="text-text-muted text-xs">Created</div>
+                <div className="mt-0.5 text-text-main text-xs">{formatTimestamp(draft.created_at)}</div>
+              </div>
+              <div>
+                <div className="text-text-muted text-xs">Last updated</div>
+                <div className="mt-0.5 text-text-main text-xs">{formatTimestamp(draft.updated_at)}</div>
+              </div>
+              <div>
+                <div className="text-text-muted text-xs">Status</div>
+                <div className="mt-0.5 text-text-main text-xs">{isDirty ? 'Unsaved changes' : 'Saved'}</div>
+              </div>
+            </div>
+          </div>
+        </aside>
+      </div>
+    </section>
   );
+}
+
+// --- Skeleton ---
+
+function SkeletonPulse({ className }: { className: string }) {
+  return <div className={`animate-pulse rounded-lg bg-bg-hover ${className}`} />;
 }
 
 function DashboardSkeleton() {
   return (
-    <div className="flex flex-1 overflow-hidden bg-bg-main text-text-main">
-      <div className="mx-auto flex w-full max-w-[1200px] flex-col gap-6 px-6 py-8 lg:px-10 scrollbar-hidden overflow-y-auto">
-        {/* Header skeleton */}
+    <div className="flex flex-1 overflow-hidden">
+      <div className="mx-auto flex w-full max-w-[1100px] flex-col gap-6 px-6 py-8 lg:px-10 scrollbar-hidden overflow-y-auto">
         <section className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="space-y-2">
-            <SkeletonPulse className="h-8 w-48" />
-            <SkeletonPulse className="h-4 w-64" />
+            <SkeletonPulse className="h-7 w-44" />
+            <SkeletonPulse className="h-4 w-56" />
           </div>
           <div className="flex items-center gap-3">
             <SkeletonPulse className="h-10 w-40" />
-            <SkeletonPulse className="h-10 w-32" />
+            <SkeletonPulse className="h-10 w-28" />
           </div>
         </section>
-
-        {/* Profile cards skeleton */}
-        <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          {Array.from({ length: 4 }).map((_, i) => (
-            <article
-              key={i}
-              className="flex flex-col rounded-2xl border border-border bg-bg-card p-5"
-            >
+        <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <article key={i} className="flex flex-col rounded-xl border border-border bg-bg-card p-5">
               <div className="flex items-center justify-between">
                 <SkeletonPulse className="h-3 w-12" />
-                <SkeletonPulse className="h-6 w-6 rounded-lg" />
+                <SkeletonPulse className="h-6 w-6 rounded-md" />
               </div>
               <div className="mt-4 flex justify-center">
-                <SkeletonPulse className="h-16 w-16 rounded-2xl" />
+                <SkeletonPulse className="h-14 w-14 rounded-xl" />
               </div>
-              <div className="mt-4 flex flex-col items-center gap-2">
-                <SkeletonPulse className="h-5 w-32" />
-                <SkeletonPulse className="h-3 w-24" />
-              </div>
-              <div className="mt-2 flex justify-center">
+              <div className="mt-3 flex flex-col items-center gap-2">
+                <SkeletonPulse className="h-4 w-28" />
                 <SkeletonPulse className="h-3 w-20" />
               </div>
-              <div className="mt-auto pt-4 flex gap-2">
-                <SkeletonPulse className="h-10 flex-1" />
-                <SkeletonPulse className="h-10 w-16" />
+              <div className="mt-auto pt-4 flex gap-2 justify-end">
+                <SkeletonPulse className="h-8 w-14" />
+                <SkeletonPulse className="h-8 w-20" />
               </div>
             </article>
           ))}
-          {/* Create card skeleton */}
-          <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-border bg-bg-card/50 p-5 min-h-[260px]">
-            <SkeletonPulse className="h-16 w-16 rounded-2xl" />
-            <SkeletonPulse className="mt-4 h-5 w-28" />
-            <SkeletonPulse className="mt-1 h-3 w-36" />
-          </div>
         </section>
       </div>
     </div>

@@ -31,6 +31,15 @@ class BrowserComputerController:
         self._approval_path = pack_root / "user_data" / "shared" / "browser_computer_approvals.json"
         self._browser_root = pack_root / "user_data" / "shared" / "browser"
         self._profile_root = self._browser_root / "profiles"
+        # Lazy-initialized ComputerSeatService
+        self._computer_seat: Any = None
+
+    def _get_computer_seat(self):
+        """Lazy-create the ComputerSeatService to avoid import cycles."""
+        if self._computer_seat is None:
+            from ..computer.factory import create_default_computer_seat_service
+            self._computer_seat = create_default_computer_seat_service()
+        return self._computer_seat
 
     def run(self, action: str, payload: dict[str, Any] | None = None, *, yolo_mode: bool = False) -> dict[str, Any]:
         payload = payload or {}
@@ -73,6 +82,14 @@ class BrowserComputerController:
             return self._screenshot(payload=payload, dry_run=self._truthy(payload.get("dry_run")), yolo_mode=yolo_mode)
         if action in {"computer.move", "computer.click", "computer.drag", "computer.type", "computer.key", "computer.scroll"}:
             return self._desktop_action(action, payload, yolo_mode=yolo_mode)
+        if action == "computer.observe":
+            return self._computer_seat_observe(payload)
+        if action in {"computer.semantic_action", "computer.press"}:
+            return self._computer_seat_semantic_action(payload, yolo_mode=yolo_mode)
+        if action == "computer.pid_event":
+            return self._computer_seat_pid_event(payload, yolo_mode=yolo_mode)
+        if action in {"computer.doctor", "computer.diagnose"}:
+            return self._computer_seat_doctor()
         raise ValueError(f"Unsupported browser/computer action: {action}")
 
     def _open_url(self, url: str, *, payload: dict[str, Any], dry_run: bool, yolo_mode: bool) -> dict[str, Any]:
@@ -333,6 +350,16 @@ class BrowserComputerController:
             result["data_url"] = data_url
             result["model_image"] = data_url
             result["model_image_path"] = str(model_path)
+        # Additive ComputerSeat metadata
+        try:
+            svc = self._get_computer_seat()
+            doctor = svc.doctor()
+            result["computer_seat"] = {
+                "driver_chain_order": doctor.get("driver_chain_order", []),
+                "capabilities": [d.get("capabilities", {}) for d in doctor.get("available_drivers", [])],
+            }
+        except Exception:
+            pass
         return result
 
     def _screenshot_result(
@@ -472,6 +499,17 @@ class BrowserComputerController:
             result["windows"] = self._list_windows()
         if payload.get("include_installed_apps") is True:
             result["installed_apps"] = self._installed_apps(payload)
+        # Additive ComputerSeat metadata
+        try:
+            svc = self._get_computer_seat()
+            doctor = svc.doctor()
+            result["computer_seat"] = {
+                "driver_chain_order": doctor.get("driver_chain_order", []),
+                "capabilities": [d.get("capabilities", {}) for d in doctor.get("available_drivers", [])],
+                "recommended_next_actions": ["computer.screenshot", "computer.select_app", "computer.observe"],
+            }
+        except Exception:
+            pass
         return result
 
     def _apps(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -587,6 +625,7 @@ class BrowserComputerController:
             "platform": platform.system(),
             "target_app": selected,
             "open_apps": running_apps,
+            "computer_seat": self._computer_seat_metadata_for_target(selected),
         }
 
     def _show_app(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -1090,6 +1129,152 @@ class BrowserComputerController:
             }
         return None
 
+    # ------------------------------------------------------------------
+    # ComputerSeat delegation methods
+    # ------------------------------------------------------------------
+
+    def _computer_seat_target(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Build a ComputerTarget dict from payload."""
+        return {
+            "app": payload.get("app") or payload.get("application"),
+            "pid": payload.get("pid"),
+            "window_id": payload.get("window_id"),
+            "window_title": payload.get("title") or payload.get("window_title"),
+        }
+
+    def _computer_seat_metadata_for_target(self, target_record: dict[str, Any] | None) -> dict[str, Any]:
+        """Build additive ComputerSeat metadata for a selected target."""
+        meta: dict[str, Any] = {}
+        try:
+            svc = self._get_computer_seat()
+            doctor = svc.doctor()
+            meta["driver_chain_order"] = doctor.get("driver_chain_order", [])
+            meta["capabilities"] = [d.get("capabilities", {}) for d in doctor.get("available_drivers", [])]
+        except Exception:
+            pass
+        if target_record:
+            meta["target"] = {
+                "app": target_record.get("app") or target_record.get("name"),
+                "pid": target_record.get("pid"),
+                "window_id": target_record.get("window_id") or target_record.get("id"),
+                "window_title": target_record.get("title"),
+            }
+            meta["recommended_next_actions"] = ["computer.screenshot", "computer.click", "computer.observe"]
+        return meta
+
+    def _computer_seat_observe(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Delegate to ComputerSeatService.observe."""
+        try:
+            svc = self._get_computer_seat()
+            target = self._computer_seat_target(payload)
+            result = svc.observe(target)
+            result["action"] = "computer.observe"
+            return result
+        except Exception as e:
+            return {"action": "computer.observe", "error": str(e)}
+
+    def _computer_seat_semantic_action(self, payload: dict[str, Any], *, yolo_mode: bool) -> dict[str, Any]:
+        """Delegate to ComputerSeatService.semantic_action with approval."""
+        if not yolo_mode and not self._consume_approval(payload, "computer.semantic_action", self._safe_payload(payload)):
+            return self._approval_required("computer.semantic_action", self._safe_payload(payload))
+        try:
+            svc = self._get_computer_seat()
+            target = self._computer_seat_target(payload)
+            element_or_point = None
+            if payload.get("element_id"):
+                element_or_point = {"id": payload["element_id"]}
+            elif payload.get("point"):
+                element_or_point = tuple(payload["point"])
+            result = svc.semantic_action(target, intent=payload.get("intent", ""), element_or_point=element_or_point)
+            result["action"] = "computer.semantic_action"
+            return result
+        except Exception as e:
+            return {"action": "computer.semantic_action", "error": str(e)}
+
+    def _computer_seat_pid_event(self, payload: dict[str, Any], *, yolo_mode: bool) -> dict[str, Any]:
+        """Delegate to ComputerSeatService for pid-targeted events."""
+        if not yolo_mode and not self._consume_approval(payload, "computer.pid_event", self._safe_payload(payload)):
+            return self._approval_required("computer.pid_event", self._safe_payload(payload))
+        try:
+            svc = self._get_computer_seat()
+            target = {"app": None, "pid": payload.get("pid"), "window_id": None, "window_title": None}
+            action = payload.get("sub_action") or payload.get("action_type") or payload.get("action") or "click"
+            if action == "click":
+                result = svc.click(target, x=payload.get("x", 0), y=payload.get("y", 0), button=payload.get("button", "left"))
+            elif action == "type_text":
+                result = svc.type_text(target, text=payload.get("text", ""))
+            elif action == "key":
+                result = svc.key(target, key_combo=payload.get("key_combo", ""))
+            elif action == "scroll":
+                result = svc.scroll(target, x=payload.get("x", 0), y=payload.get("y", 0), direction=payload.get("direction", "down"), clicks=payload.get("clicks", 3))
+            else:
+                return {"action": "computer.pid_event", "error": f"Unknown sub-action: {action}"}
+            result["action"] = "computer.pid_event"
+            result["_experimental"] = True
+            return result
+        except Exception as e:
+            return {"action": "computer.pid_event", "error": str(e), "_experimental": True}
+
+    def _computer_seat_doctor(self) -> dict[str, Any]:
+        """Delegate to ComputerSeatService.doctor."""
+        try:
+            svc = self._get_computer_seat()
+            result = svc.doctor()
+            result["action"] = "computer.doctor"
+            return result
+        except Exception as e:
+            return {"action": "computer.doctor", "error": str(e)}
+
+    def _computer_seat_screenshot_compat(self, payload: dict[str, Any], *, dry_run: bool, yolo_mode: bool) -> dict[str, Any] | None:
+        """Try ComputerSeatService.observe for screenshot, return legacy schema or None on failure."""
+        try:
+            svc = self._get_computer_seat()
+            target = self._computer_seat_target(payload)
+            result = svc.observe(target)
+            # If observe returned a screenshot, we could use it – but for now
+            # we only add metadata. The legacy _screenshot path handles the
+            # actual capture with all its crop/model logic.
+            return None
+        except Exception:
+            return None
+
+    def _try_computer_seat_action(self, action: str, action_payload: dict[str, Any]) -> dict[str, Any] | None:
+        """Attempt to execute a mutation action via ComputerSeatService.
+
+        Returns the ActionResult dict if a non-foreground driver executed it,
+        or None to fall through to legacy platform code. Foreground fallback
+        results are ignored because the legacy code is the canonical foreground
+        implementation with full coordinate/marker support.
+        """
+        try:
+            svc = self._get_computer_seat()
+        except Exception:
+            return None
+
+        target = self._computer_seat_target(action_payload)
+        try:
+            if action == "computer.click":
+                result = svc.click(target, x=int(action_payload.get("x", 0)), y=int(action_payload.get("y", 0)), button=action_payload.get("button", "left"))
+            elif action == "computer.type":
+                result = svc.type_text(target, text=action_payload.get("text", ""))
+            elif action == "computer.key":
+                result = svc.key(target, key_combo=action_payload.get("key", "") or action_payload.get("key_combo", ""))
+            elif action == "computer.scroll":
+                direction = action_payload.get("direction", "down")
+                result = svc.scroll(target, x=int(action_payload.get("x", 0)), y=int(action_payload.get("y", 0)), direction=direction, clicks=int(action_payload.get("amount", 3)))
+            elif action == "computer.move":
+                result = svc.move(target, x=int(action_payload.get("x", 0)), y=int(action_payload.get("y", 0)))
+            elif action == "computer.drag":
+                result = svc.drag(target, x1=int(action_payload.get("x1", 0)), y1=int(action_payload.get("y1", 0)), x2=int(action_payload.get("x2", 0)), y2=int(action_payload.get("y2", 0)))
+            else:
+                return None
+            # Only accept if a non-foreground driver handled it
+            if result and result.get("executed") and not result.get("is_fallback"):
+                return result
+            return None
+        except Exception:
+            return None
+
     def _desktop_action(self, action: str, payload: dict[str, Any], *, yolo_mode: bool) -> dict[str, Any]:
         dry_run = self._truthy(payload.get("dry_run"))
         if dry_run:
@@ -1162,6 +1347,37 @@ class BrowserComputerController:
             self._focus_action_target(action_payload)
         if action == "computer.drag" and payload.get("physical") is True:
             self._focus_action_target(action_payload)
+        # --- Attempt ComputerSeatService delegation ---
+        seat_result = self._try_computer_seat_action(action, action_payload)
+        if seat_result is not None and seat_result.get("executed"):
+            result: dict[str, Any] = {"action": action, "executed": True, "platform": system}
+            result["driver"] = seat_result.get("driver", "computer_seat")
+            result["is_fallback"] = seat_result.get("is_fallback", False)
+            if action in {"computer.move", "computer.click"}:
+                result["target"] = {"x": int(action_payload.get("x", 0)), "y": int(action_payload.get("y", 0))}
+                if click_marker:
+                    result["marker"] = click_marker
+            if action == "computer.drag":
+                result["target"] = {
+                    "from": {"x": int(action_payload.get("x1", 0)), "y": int(action_payload.get("y1", 0))},
+                    "to": {"x": int(action_payload.get("x2", 0)), "y": int(action_payload.get("y2", 0))},
+                }
+                if click_marker:
+                    result["marker"] = click_marker
+                if drag_marker:
+                    result["drag_marker"] = drag_marker
+            if action == "computer.scroll":
+                result["amount"] = int(action_payload.get("amount", 1))
+            if self._should_capture_after_action(action, payload):
+                screenshot = self._capture_action_result_screenshot(
+                    action_payload,
+                    click_marker,
+                    action_name=action,
+                    drag_marker=drag_marker,
+                )
+                result.update(screenshot)
+            return result
+        # --- Legacy platform-specific fallback ---
         if system == "Darwin" and action == "computer.move":
             self._darwin_move_cursor(action_payload)
         elif system == "Darwin" and action == "computer.click":
@@ -2132,6 +2348,7 @@ class BrowserComputerController:
             "target_window": selected,
             "windows": windows,
             "coordinate_space": "screenshot_image",
+            "computer_seat": self._computer_seat_metadata_for_target(selected),
         }
 
     def _list_windows(self) -> list[dict[str, Any]]:
