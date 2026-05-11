@@ -17,12 +17,14 @@ _RISK_MAP: dict[str, Literal["low", "medium", "high"]] = {
     "ax_tree_read": "low",
     # Medium-risk: limited side effects
     "scroll": "medium",
+    "move": "medium",
     # High-risk: mutations / input injection
     "ax_press": "high",
     "ax_set_value": "high",
     "type_text": "high",
     "key": "high",
     "click": "high",
+    "drag": "high",
     "apple_events_mutation": "high",
     "post_to_pid": "high",
     "foreground_fallback": "high",

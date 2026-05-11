@@ -142,6 +142,54 @@ class ComputerDriver(ABC):
         """
         ...
 
+    def move(
+        self,
+        target: ComputerTarget,
+        x: int = 0,
+        y: int = 0,
+    ) -> ActionResult:
+        """Move cursor to coordinates. Optional – not all drivers support this.
+
+        Args:
+            target: The target application/window.
+            x: X coordinate.
+            y: Y coordinate.
+
+        Returns:
+            ActionResult describing what happened.
+        """
+        return ActionResult(
+            action="move", driver=self.name, executed=False,
+            confidence="not_supported",
+            notes=[f"{self.name} does not support move"],
+        )
+
+    def drag(
+        self,
+        target: ComputerTarget,
+        x1: int = 0,
+        y1: int = 0,
+        x2: int = 0,
+        y2: int = 0,
+    ) -> ActionResult:
+        """Drag from one point to another. Optional – not all drivers support this.
+
+        Args:
+            target: The target application/window.
+            x1: Start X coordinate.
+            y1: Start Y coordinate.
+            x2: End X coordinate.
+            y2: End Y coordinate.
+
+        Returns:
+            ActionResult describing what happened.
+        """
+        return ActionResult(
+            action="drag", driver=self.name, executed=False,
+            confidence="not_supported",
+            notes=[f"{self.name} does not support drag"],
+        )
+
     @abstractmethod
     def is_available(self) -> bool:
         """Check whether this driver is available on the current system.

@@ -4,13 +4,12 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from domain.computer import ComputerSeatService, DriverRegistry
+from domain.computer import create_default_computer_seat_service
 
 
 def run(context, args):
     try:
-        reg = DriverRegistry()
-        svc = ComputerSeatService(reg)
+        svc = create_default_computer_seat_service()
         base = svc.doctor()
 
         checks: list[dict] = []

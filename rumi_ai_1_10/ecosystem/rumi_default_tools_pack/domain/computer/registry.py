@@ -16,6 +16,7 @@ MAC_DRIVER_ORDER: list[str] = [
     "mac_accessibility",
     "mac_apple_events",
     "mac_cgevent_pid",
+    "mac_screen_capture",
     "mac_foreground",
 ]
 

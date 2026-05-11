@@ -159,6 +159,50 @@ class ComputerSeatService:
         payload = {"x": x, "y": y, "direction": direction, "clicks": clicks}
         return self._fallback_chain("scroll", target, payload)
 
+    def move(
+        self,
+        target: ComputerTarget | dict[str, Any],
+        x: int = 0,
+        y: int = 0,
+    ) -> dict[str, Any]:
+        """Move cursor to coordinates on the target.
+
+        Args:
+            target: The target application/window.
+            x: X coordinate.
+            y: Y coordinate.
+
+        Returns:
+            ActionResult as dict.
+        """
+        target = self._normalize_target(target)
+        payload = {"x": x, "y": y}
+        return self._fallback_chain("move", target, payload)
+
+    def drag(
+        self,
+        target: ComputerTarget | dict[str, Any],
+        x1: int = 0,
+        y1: int = 0,
+        x2: int = 0,
+        y2: int = 0,
+    ) -> dict[str, Any]:
+        """Drag from one point to another on the target.
+
+        Args:
+            target: The target application/window.
+            x1: Start X coordinate.
+            y1: Start Y coordinate.
+            x2: End X coordinate.
+            y2: End Y coordinate.
+
+        Returns:
+            ActionResult as dict.
+        """
+        target = self._normalize_target(target)
+        payload = {"x1": x1, "y1": y1, "x2": x2, "y2": y2}
+        return self._fallback_chain("drag", target, payload)
+
     def semantic_action(
         self,
         target: ComputerTarget | dict[str, Any],
@@ -319,6 +363,16 @@ class ComputerSeatService:
                 target,
                 intent=payload.get("intent", ""),
                 element_or_point=payload.get("element_or_point"),
+            )
+        elif method_name == "move":
+            return method(target, x=payload.get("x", 0), y=payload.get("y", 0))
+        elif method_name == "drag":
+            return method(
+                target,
+                x1=payload.get("x1", 0),
+                y1=payload.get("y1", 0),
+                x2=payload.get("x2", 0),
+                y2=payload.get("y2", 0),
             )
         else:
             # Generic fallback – pass target and payload

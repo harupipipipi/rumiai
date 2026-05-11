@@ -17,6 +17,7 @@ from .service import ComputerSeatService
 from .registry import DriverRegistry
 from .audit import AuditLogger
 from .permissions import requires_approval, risk_level
+from .factory import create_default_driver_registry, create_default_computer_seat_service
 
 __all__ = [
     "ActionResult",
@@ -29,4 +30,6 @@ __all__ = [
     "ObserveResult",
     "requires_approval",
     "risk_level",
+    "create_default_driver_registry",
+    "create_default_computer_seat_service",
 ]

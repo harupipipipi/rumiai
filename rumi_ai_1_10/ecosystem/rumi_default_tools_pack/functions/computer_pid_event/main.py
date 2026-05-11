@@ -4,7 +4,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from domain.computer import ComputerSeatService, DriverRegistry
+from domain.computer import ComputerSeatService, create_default_computer_seat_service
 from domain.computer.models import ComputerTarget
 
 _service: ComputerSeatService | None = None
@@ -13,12 +13,7 @@ _service: ComputerSeatService | None = None
 def _get_service() -> ComputerSeatService:
     global _service
     if _service is None:
-        reg = DriverRegistry()
-        # Register only the cgevent_pid driver for direct use
-        from domain.computer.drivers.mac_cgevent_pid import MacCGEventPidDriver
-
-        reg.register(MacCGEventPidDriver())
-        _service = ComputerSeatService(reg)
+        _service = create_default_computer_seat_service()
     return _service
 
 

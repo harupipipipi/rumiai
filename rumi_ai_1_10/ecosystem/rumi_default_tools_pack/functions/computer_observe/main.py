@@ -4,7 +4,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from domain.computer import ComputerSeatService, DriverRegistry
+from domain.computer import ComputerSeatService, create_default_computer_seat_service
 
 _service: ComputerSeatService | None = None
 
@@ -12,7 +12,7 @@ _service: ComputerSeatService | None = None
 def _get_service() -> ComputerSeatService:
     global _service
     if _service is None:
-        _service = ComputerSeatService(DriverRegistry())
+        _service = create_default_computer_seat_service()
     return _service
 
 
