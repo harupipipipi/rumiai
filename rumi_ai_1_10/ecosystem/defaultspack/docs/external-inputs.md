@@ -10,6 +10,7 @@ provider payload
   -> AudiencePolicy
   -> InputProfile
   -> submit_input
+  -> ResponsePromptPolicy
   -> ResponsePlanner
   -> ResponseAdapter
 ```
@@ -43,6 +44,12 @@ chat-compatible turn runner.
 `ResponsePlanner` converts the runtime result into a provider-neutral response
 plan. It decides whether to reply, acknowledge only, defer, split, truncate, or
 skip.
+
+`ResponsePromptPolicy` is an optional planning-only layer before the planner.
+It can choose actions such as `reply_text`, `store_only`, `run_browser_use`,
+`run_python`, or `ask_for_approval`, but it only returns a decision object.
+Tool execution still goes through the normal tool policy, approval, and turn
+runner paths.
 
 `ResponseAdapter` renders and delivers that plan through a provider-specific
 surface such as a Slack thread, LINE reply token, Discord interaction response,
@@ -98,11 +105,17 @@ must not be treated as long-lived configured tokens or displayed back to UI.
 4. Evaluate `AudiencePolicy`.
 5. Select `InputProfile`.
 6. Call `submit_input`.
-7. Run `ResponsePlanner`.
-8. Deliver through `ResponseAdapter`.
+7. Optionally run `ResponsePromptPolicy` to produce a safe action decision.
+8. Run `ResponsePlanner`.
+9. Deliver through `ResponseAdapter`.
 
 If any step rejects the event, the adapter should return the provider-expected
 acknowledgement without creating a chat message.
+
+Prompt-routed response actions are planning-only: a `response_prompt` may return
+a `ResponsePlan` decision, but external delivery still passes through the
+adapter path, where allowed actions, sensitivity, capabilities, and approval
+requirements are checked again.
 
 ## Local First Boundary
 

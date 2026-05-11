@@ -5,6 +5,7 @@ the outbound half of the external input framework.
 
 ```text
 runtime result
+  -> ResponsePromptPolicy
   -> ResponsePlanner
   -> ResponsePlan
   -> ResponseAdapter
@@ -19,16 +20,69 @@ result that a planner can adapt.
 
 `ResponsePlanner` decides what should happen with a runtime result:
 
-- `reply`: send text or blocks back to the source;
-- `ack`: acknowledge without visible reply;
-- `ignore`: do nothing;
-- `defer`: answer later through an async adapter path;
-- `split`: divide a long response into multiple provider messages;
-- `truncate`: send a bounded response with a marker;
-- `error`: send a safe failure message or suppress public output.
+- `reply_text`: send assistant text back to the source;
+- `store_only`: keep the chat result without an external reply;
+- `summarize_then_reply`: send a short bounded summary;
+- `run_browser_use`, `run_computer_use`, `run_python`, `run_tool`: create a
+  follow-up action plan, not a direct execution;
+- `send_file_if_allowed`: allow normal file planning after capability checks;
+- `ask_for_approval`: stop at an approval-required plan.
 
-The planner reads `InputProfile.response`, provider limits, event audience, and
-runtime output metadata.
+The planner reads the prompt decision, provider limits, event audience, and
+runtime output metadata. Provider length limits, file limits, and sensitivity
+checks still happen after the prompt decision.
+
+## Response Prompt Policy
+
+`response_prompt` is a prompt-routed planning policy. It may inspect the event,
+input text, and runtime result, then return a `plan_only` decision for
+`ResponsePlanner`, but it must not execute tools or call provider APIs directly.
+The executable steps are created later through the existing tool policy,
+approval, turn-runner, and response adapter paths.
+
+Policy fields are defined in `schemas/response_prompt_policy.schema.yaml`:
+
+- `allowed_actions`: the only `ResponsePlan.action` values the prompt may
+  return;
+- `tools`: tool visibility and approval requirements for planning context;
+- `output_schema`: the expected structured shape of the prompt decision;
+- `fallback`: the safe action to use when the prompt output is invalid or
+  denied;
+- `sensitivity`: visibility defaults and external delivery constraints.
+
+Any decision whose action is not listed in `allowed_actions` must be rejected
+and handled through `fallback`.
+
+Example:
+
+```yaml
+response_prompt:
+  enabled: true
+  model: inherit
+  mode: plan_only
+  allowed_actions:
+    - reply_text
+    - store_only
+    - run_browser_use
+    - run_python
+  tools:
+    browser_use:
+      enabled: true
+      requires_approval: false
+    python:
+      enabled: true
+      requires_approval: false
+      sandbox: true
+  system_prompt: |
+    Decide how Rumi should respond. Use browser_use only when current
+    external information is needed. Return strict JSON.
+  user_prompt: |
+    Provider: ${event.provider}
+    Scope: ${event.scope.type}:${event.scope.id}
+    Actor: ${event.actor.id}
+    User input: ${input.text}
+    Assistant result: ${response.text}
+```
 
 ## ResponsePlan
 
@@ -36,12 +90,7 @@ Example plan:
 
 ```json
 {
-  "action": "reply",
-  "adapter_id": "slack-thread",
-  "target": {
-    "channel_id": "C123",
-    "thread_id": "1700000000.000100"
-  },
+  "provider": "discord",
   "messages": [
     {
       "type": "text",
@@ -49,7 +98,14 @@ Example plan:
     }
   ],
   "metadata": {
-    "source_event_id": "evt_01"
+    "response_prompt_decision": {
+      "action": "reply_text",
+      "sensitivity": "public"
+    },
+    "response_action_plan": {
+      "type": "reply",
+      "external_reply": true
+    }
   }
 }
 ```
@@ -65,6 +121,8 @@ A `ResponseAdapter` is responsible for:
 - rendering provider-specific message shape;
 - enforcing provider length limits;
 - avoiding mass mentions unless policy allows them;
+- rejecting actions outside the active response prompt policy;
+- rechecking sensitivity and capabilities before external replies;
 - resolving secret references from the secret store;
 - calling provider APIs;
 - returning redacted delivery status;
@@ -95,8 +153,19 @@ Examples:
 
 | Condition | Recommended action |
 |---|---|
-| Missing outbound token | `ack` plus redacted delivery error |
-| Provider rate limit | `defer` or `error` based on profile |
-| Message too long | `split` or `truncate` |
-| Policy denied after planning | `ignore` |
+| Missing outbound token | redacted delivery error without raw secret |
+| Provider rate limit | `store_only` or provider-specific deferred handling |
+| Message too long | normal planner chunking |
+| Policy denied after planning | `store_only` |
 
+## Safety Rules
+
+Response prompt policies are deny-by-default at the action boundary:
+
+- `computer_use` requires explicit approval by default, even if it is visible in
+  the planning context.
+- Plans outside `allowed_actions` are refused before adapter delivery.
+- `browser_use` must respect the active network policy.
+- `python` follow-up plans must declare sandbox/local-only expectations.
+- Before any external reply, the adapter path rechecks `sensitivity` and current
+  capabilities so stale prompt output cannot leak local-only or secret content.

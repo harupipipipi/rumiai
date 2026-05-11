@@ -13,3 +13,5 @@ metadata:
     provider: generic
   webhook:
     payload: "$"
+response_prompt:
+  enabled: false

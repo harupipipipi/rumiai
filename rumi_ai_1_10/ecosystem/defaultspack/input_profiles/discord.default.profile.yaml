@@ -15,3 +15,5 @@ metadata:
     guild_id: "$.guild_id"
     channel_id: "$.channel_id"
     author: "$.author"
+response_prompt:
+  enabled: false

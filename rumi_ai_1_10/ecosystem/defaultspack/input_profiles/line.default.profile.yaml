@@ -20,3 +20,5 @@ metadata:
     reply_token: "$.replyToken"
     source: "$.source"
     message: "$.message"
+response_prompt:
+  enabled: false
