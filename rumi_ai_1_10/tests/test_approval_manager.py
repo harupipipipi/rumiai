@@ -167,6 +167,18 @@ class TestVerifyHash:
         mgr._hash_cache.clear()
         assert mgr.verify_hash("testpack") is False
 
+    def test_runtime_user_data_inside_pack_does_not_change_hash(self, tmp_path, monkeypatch):
+        mgr, pack_dir = _make_manager(tmp_path, monkeypatch=monkeypatch)
+        mgr.approve("testpack")
+        audit_dir = pack_dir / "functions" / "sample" / "user_data" / "audit"
+        audit_dir.mkdir(parents=True)
+        (audit_dir / "system_2026-05-11.jsonl").write_text(
+            '{"event":"runtime audit"}\n',
+            encoding="utf-8",
+        )
+        mgr._hash_cache.clear()
+        assert mgr.verify_hash("testpack") is True
+
     def test_hash_mismatch_after_file_removed(self, tmp_path, monkeypatch):
         mgr, pack_dir = _make_manager(tmp_path, monkeypatch=monkeypatch)
         mgr.approve("testpack")

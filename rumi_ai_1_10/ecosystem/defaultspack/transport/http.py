@@ -24,10 +24,17 @@ from domain.safety.local_guard import (
 from transport.registry import build_always_available_http_routes, build_fallback_http_routes
 
 
-_PACK_NOT_APPROVED_SAFE_GET_FALLBACK_BLOCKS = {
+_SAFE_GET_FALLBACK_BLOCKS = {
+    "blocks.ai.catalog",
+    "blocks.ai.models",
+    "blocks.ai.profiles",
+    "blocks.ai.providers",
+    "blocks.chat.get_conversation",
+    "blocks.chat.list_conversations",
+    "blocks.tool.list",
     "blocks.ui.catalog",
-    "blocks.ui.settings",
     "blocks.ui.commands",
+    "blocks.ui.settings",
 }
 
 
@@ -173,7 +180,12 @@ class DefaultsHttpServer:
                 error_info = result.get("error", {}) if isinstance(result, dict) else {}
                 error_code = str(error_info.get("code") or "")
                 if error_code == "PACK_NOT_APPROVED":
-                    if self._pack_not_approved_fallback_allowed(module_name, payload):
+                    if self._safe_get_fallback_allowed(module_name, payload):
+                        pass
+                    else:
+                        return result
+                elif error_code == "PERMISSION_DENIED":
+                    if self._function_call_permission_fallback_allowed(module_name, payload, error_info):
                         pass
                     else:
                         return result
@@ -188,9 +200,16 @@ class DefaultsHttpServer:
             pass
         return invoke_block(module_name, payload, context)
 
-    def _pack_not_approved_fallback_allowed(self, module_name, payload):
+    def _safe_get_fallback_allowed(self, module_name, payload):
         actual_method = str(payload.get("_actual_method") or "").upper()
-        return actual_method == "GET" and module_name in _PACK_NOT_APPROVED_SAFE_GET_FALLBACK_BLOCKS
+        return actual_method == "GET" and module_name in _SAFE_GET_FALLBACK_BLOCKS
+
+    def _function_call_permission_fallback_allowed(self, module_name, payload, error_info):
+        message = str((error_info or {}).get("message") or "")
+        return (
+            self._safe_get_fallback_allowed(module_name, payload)
+            and "function.call" in message
+        )
 
     # ---- Chat Handlers (fallback) ----
 
