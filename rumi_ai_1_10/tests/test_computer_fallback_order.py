@@ -77,9 +77,8 @@ def test_first_fails_second_succeeds():
     result = svc.click({"app": "Test"})
     assert result["executed"] is True
     assert result["driver"] == "d2"
-    # is_fallback is only True when a prior driver raised an exception
-    # d1 returned executed=False without raising, so is_fallback stays False
-    assert result["is_fallback"] is False
+    # is_fallback is True because d1 returned executed=False first
+    assert result["is_fallback"] is True
 
 
 def test_first_raises_second_succeeds():

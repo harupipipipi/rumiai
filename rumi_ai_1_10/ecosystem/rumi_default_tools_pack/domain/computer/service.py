@@ -44,6 +44,10 @@ class ComputerSeatService:
     def observe(self, target: ComputerTarget | dict[str, Any]) -> dict[str, Any]:
         """Observe the target – returns screenshot + AX tree + capabilities.
 
+        Aggregates results from multiple drivers: screenshot from the best
+        screenshot-capable driver, ax_tree from the best AX-capable driver,
+        and merged capabilities from all available drivers.
+
         Args:
             target: The target to observe.
 
@@ -57,21 +61,52 @@ class ComputerSeatService:
         if not chain:
             return asdict(ObserveResult(platform=self._platform))
 
-        # Use the first available driver for observation
+        merged = ObserveResult(platform=self._platform, fallback_available=len(chain) > 1)
+        merged_caps: dict[str, bool] = {}
+        drivers_used: list[str] = []
+
         for driver in chain:
             try:
                 result = driver.observe(target)
-                self._audit.record(
-                    action="observe",
-                    driver=driver.name,
-                    target_app=target.app or "",
-                    target_pid=target.pid,
-                )
-                return asdict(result)
             except Exception:
                 continue
 
-        return asdict(ObserveResult(platform=self._platform))
+            # Take screenshot from first driver that provides one
+            if not merged.screenshot and result.screenshot:
+                merged.screenshot = result.screenshot
+                drivers_used.append(driver.name)
+
+            # Take ax_tree from first driver that provides one
+            if not merged.ax_tree and result.ax_tree:
+                merged.ax_tree = result.ax_tree
+                if driver.name not in drivers_used:
+                    drivers_used.append(driver.name)
+
+            # Take target_window from first driver that provides one
+            if not merged.target_window and result.target_window:
+                merged.target_window = result.target_window
+
+            # Merge capabilities
+            caps = driver.capabilities()
+            for k, v in asdict(caps).items():
+                if v:
+                    merged_caps[k] = True
+
+        merged.capabilities = merged_caps
+        merged.recommended_next_actions = [
+            {"action": "computer.click", "description": "Click at coordinates"},
+            {"action": "computer.semantic_action", "description": "Press an AX element by intent"},
+        ]
+
+        for name in drivers_used:
+            self._audit.record(
+                action="observe",
+                driver=name,
+                target_app=target.app or "",
+                target_pid=target.pid,
+            )
+
+        return asdict(merged)
 
     def click(
         self,
@@ -296,6 +331,8 @@ class ComputerSeatService:
                         result=asdict(result),
                     )
                     return asdict(result)
+                # Driver returned executed=False – mark next attempt as fallback
+                is_fallback = True
 
             except Exception as e:
                 errors.append(f"{driver.name}: {e}")

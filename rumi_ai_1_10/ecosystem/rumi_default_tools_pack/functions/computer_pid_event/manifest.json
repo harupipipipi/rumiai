@@ -3,6 +3,9 @@
   "description": "Send input events directly to a PID via CGEventPostToPid (experimental). Requires macOS.",
   "calling_convention": "subprocess",
   "host_execution": false,
+  "requires_approval": true,
+  "risk_level": "high",
+  "capabilities": ["pid_event", "input_injection"],
   "input_schema": {
     "type": "object",
     "properties": {

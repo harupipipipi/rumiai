@@ -37,20 +37,8 @@ class BrowserComputerController:
     def _get_computer_seat(self):
         """Lazy-create the ComputerSeatService to avoid import cycles."""
         if self._computer_seat is None:
-            from pathlib import Path as _P
-            import importlib.util
-            factory_path = _P(__file__).resolve().parent.parent / "computer" / "factory.py"
-            if factory_path.exists():
-                spec = importlib.util.spec_from_file_location("_computer_factory", factory_path)
-                mod = importlib.util.module_from_spec(spec)
-                spec.loader.exec_module(mod)
-                self._computer_seat = mod.create_default_computer_seat_service()
-            else:
-                # Fallback: try package import
-                from rumi_ai_1_10.ecosystem.rumi_default_tools_pack.domain.computer.factory import (
-                    create_default_computer_seat_service,
-                )
-                self._computer_seat = create_default_computer_seat_service()
+            from ..computer.factory import create_default_computer_seat_service
+            self._computer_seat = create_default_computer_seat_service()
         return self._computer_seat
 
     def run(self, action: str, payload: dict[str, Any] | None = None, *, yolo_mode: bool = False) -> dict[str, Any]:
@@ -1210,7 +1198,7 @@ class BrowserComputerController:
         try:
             svc = self._get_computer_seat()
             target = {"app": None, "pid": payload.get("pid"), "window_id": None, "window_title": None}
-            action = payload.get("sub_action") or payload.get("action_type", "click")
+            action = payload.get("sub_action") or payload.get("action_type") or payload.get("action") or "click"
             if action == "click":
                 result = svc.click(target, x=payload.get("x", 0), y=payload.get("y", 0), button=payload.get("button", "left"))
             elif action == "type_text":
@@ -1253,8 +1241,10 @@ class BrowserComputerController:
     def _try_computer_seat_action(self, action: str, action_payload: dict[str, Any]) -> dict[str, Any] | None:
         """Attempt to execute a mutation action via ComputerSeatService.
 
-        Returns the ActionResult dict if the service executed it, or None
-        to fall through to legacy platform code.
+        Returns the ActionResult dict if a non-foreground driver executed it,
+        or None to fall through to legacy platform code. Foreground fallback
+        results are ignored because the legacy code is the canonical foreground
+        implementation with full coordinate/marker support.
         """
         try:
             svc = self._get_computer_seat()
@@ -1264,21 +1254,26 @@ class BrowserComputerController:
         target = self._computer_seat_target(action_payload)
         try:
             if action == "computer.click":
-                return svc.click(target, x=int(action_payload.get("x", 0)), y=int(action_payload.get("y", 0)), button=action_payload.get("button", "left"))
+                result = svc.click(target, x=int(action_payload.get("x", 0)), y=int(action_payload.get("y", 0)), button=action_payload.get("button", "left"))
             elif action == "computer.type":
-                return svc.type_text(target, text=action_payload.get("text", ""))
+                result = svc.type_text(target, text=action_payload.get("text", ""))
             elif action == "computer.key":
-                return svc.key(target, key_combo=action_payload.get("key", "") or action_payload.get("key_combo", ""))
+                result = svc.key(target, key_combo=action_payload.get("key", "") or action_payload.get("key_combo", ""))
             elif action == "computer.scroll":
                 direction = action_payload.get("direction", "down")
-                return svc.scroll(target, x=int(action_payload.get("x", 0)), y=int(action_payload.get("y", 0)), direction=direction, clicks=int(action_payload.get("amount", 3)))
+                result = svc.scroll(target, x=int(action_payload.get("x", 0)), y=int(action_payload.get("y", 0)), direction=direction, clicks=int(action_payload.get("amount", 3)))
             elif action == "computer.move":
-                return svc.move(target, x=int(action_payload.get("x", 0)), y=int(action_payload.get("y", 0)))
+                result = svc.move(target, x=int(action_payload.get("x", 0)), y=int(action_payload.get("y", 0)))
             elif action == "computer.drag":
-                return svc.drag(target, x1=int(action_payload.get("x1", 0)), y1=int(action_payload.get("y1", 0)), x2=int(action_payload.get("x2", 0)), y2=int(action_payload.get("y2", 0)))
+                result = svc.drag(target, x1=int(action_payload.get("x1", 0)), y1=int(action_payload.get("y1", 0)), x2=int(action_payload.get("x2", 0)), y2=int(action_payload.get("y2", 0)))
+            else:
+                return None
+            # Only accept if a non-foreground driver handled it
+            if result and result.get("executed") and not result.get("is_fallback"):
+                return result
+            return None
         except Exception:
             return None
-        return None
 
     def _desktop_action(self, action: str, payload: dict[str, Any], *, yolo_mode: bool) -> dict[str, Any]:
         dry_run = self._truthy(payload.get("dry_run"))

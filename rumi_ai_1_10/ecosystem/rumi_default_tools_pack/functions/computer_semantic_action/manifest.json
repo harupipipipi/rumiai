@@ -3,6 +3,9 @@
   "description": "Execute a semantic action on a desktop application via ComputerSeat (e.g. press a button, set a value).",
   "calling_convention": "subprocess",
   "host_execution": false,
+  "requires_approval": true,
+  "risk_level": "high",
+  "capabilities": ["accessibility", "input_injection"],
   "input_schema": {
     "type": "object",
     "properties": {
