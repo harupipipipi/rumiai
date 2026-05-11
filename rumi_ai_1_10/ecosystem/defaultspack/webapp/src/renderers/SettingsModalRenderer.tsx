@@ -100,6 +100,41 @@ function MaskedExternalTokenLabel({ token }: { token: Record<string, unknown> })
   );
 }
 
+function externalTokenKindOptions(providerId: string): Array<{ value: string; label: string }> {
+  const common: Record<string, Array<{ value: string; label: string }>> = {
+    line: [
+      { value: "channel_secret", label: "Channel Secret" },
+      { value: "channel_access_token", label: "Channel Access Token" },
+      { value: "reply_token", label: "Reply Token" },
+    ],
+    discord: [
+      { value: "bot_token", label: "Bot Token" },
+      { value: "channel_id", label: "Channel ID" },
+      { value: "webhook_url", label: "Webhook URL" },
+      { value: "application_id", label: "Application ID" },
+      { value: "public_key", label: "Public Key" },
+    ],
+    slack: [
+      { value: "bot_token", label: "Bot Token" },
+      { value: "signing_secret", label: "Signing Secret" },
+      { value: "app_token", label: "App Token" },
+      { value: "channel_id", label: "Channel ID" },
+    ],
+    generic: [
+      { value: "webhook_shared_secret", label: "Webhook Shared Secret" },
+      { value: "webhook_url", label: "Webhook URL" },
+      { value: "callback_url", label: "Callback URL" },
+    ],
+    web: [
+      { value: "callback_url", label: "Callback URL" },
+    ],
+  };
+  return common[providerId] ?? [
+    { value: "token", label: "Token" },
+    { value: "webhook_url", label: "Webhook URL" },
+  ];
+}
+
 function CustomSelect({
   value,
   options,
@@ -576,7 +611,11 @@ function SettingsField({
           <div className="grid gap-2 md:grid-cols-[150px_1fr_1fr_1.4fr_auto]">
             <CustomSelect
               value={tokenProvider}
-              onChange={setTokenProvider}
+              onChange={(nextProvider) => {
+                setTokenProvider(nextProvider);
+                setTokenKind(externalTokenKindOptions(nextProvider)[0]?.value ?? "token");
+                setTokenSaveState("idle");
+              }}
               options={uniqueProviderOptions.map((providerId) => ({ value: providerId, label: providerId }))}
             />
             <input
@@ -588,14 +627,13 @@ function SettingsField({
               placeholder="token name"
               className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-200 outline-none"
             />
-            <input
+            <CustomSelect
               value={tokenKind}
-              onChange={(event) => {
-                setTokenKind(event.target.value);
+              onChange={(nextKind) => {
+                setTokenKind(nextKind);
                 setTokenSaveState("idle");
               }}
-              placeholder="token kind"
-              className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-200 outline-none"
+              options={externalTokenKindOptions(tokenProvider)}
             />
             <input
               type="password"
@@ -717,7 +755,7 @@ function SettingsField({
       );
       break;
     case "readonly":
-      control = <div className="text-sm text-zinc-300">{formatReadonlyValue(value, field.default)}</div>;
+      control = <div className="whitespace-pre-wrap text-sm text-zinc-300 select-text">{formatReadonlyValue(value, field.default)}</div>;
       break;
     case "textarea":
       control = (

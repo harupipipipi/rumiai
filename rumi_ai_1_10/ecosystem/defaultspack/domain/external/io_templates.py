@@ -20,6 +20,7 @@ class ExternalIOTemplate:
 
     def as_dict(self) -> dict[str, Any]:
         payload = dict(self.spec)
+        is_custom = self.origin == "custom" or self.provider == "custom"
         payload.update(
             {
                 "id": self.id,
@@ -27,8 +28,11 @@ class ExternalIOTemplate:
                 "provider": self.provider,
                 "display_name": self.display_name,
                 "origin": self.origin,
+                "setup_mode": "custom" if is_custom else "copy_paste_select",
             }
         )
+        if not is_custom:
+            payload["copy_paste_setup"] = _copy_paste_setup(payload)
         if self.path:
             payload["path"] = self.path
         return payload
@@ -71,10 +75,14 @@ class ExternalIOTemplateRegistry:
         input_templates = [item for item in templates if item.get("direction") == "input"]
         output_templates = [item for item in templates if item.get("direction") == "output"]
         custom_templates = [item for item in templates if item.get("origin") == "custom" or item.get("provider") == "custom"]
+        builtin_input = [item for item in input_templates if item.get("provider") != "custom" and item.get("origin") != "custom"]
+        builtin_output = [item for item in output_templates if item.get("provider") != "custom" and item.get("origin") != "custom"]
         return {
             "templates": templates,
             "input": input_templates,
             "output": output_templates,
+            "builtin_input": builtin_input,
+            "builtin_output": builtin_output,
             "custom": custom_templates,
             "extension_paths": {
                 "templates": str(self.custom_templates_dir),
@@ -144,3 +152,43 @@ def external_io_template_catalog(pack_root: Path | None = None) -> dict[str, Any
 def _safe_filename(value: str) -> str:
     slug = re.sub(r"[^a-zA-Z0-9_.-]+", "-", str(value or "").strip()).strip(".-")
     return slug or "external-template"
+
+
+def _copy_paste_setup(spec: dict[str, Any]) -> dict[str, Any]:
+    endpoint = spec.get("endpoint") if isinstance(spec.get("endpoint"), dict) else {}
+    routes: list[str] = []
+    route = endpoint.get("route") if isinstance(endpoint, dict) else None
+    if route:
+        routes.append(str(route))
+    endpoint_routes = endpoint.get("routes") if isinstance(endpoint, dict) else None
+    if isinstance(endpoint_routes, list):
+        routes.extend(str(item) for item in endpoint_routes if str(item or "").strip())
+    fields = spec.get("fields") if isinstance(spec.get("fields"), list) else []
+    tokens = spec.get("tokens") if isinstance(spec.get("tokens"), list) else []
+    return {
+        "mode": "copy_paste_select",
+        "endpoint_id": str(endpoint.get("id") or "") if isinstance(endpoint, dict) else "",
+        "routes": routes,
+        "input_profile_id": str(spec.get("input_profile_id") or ""),
+        "output_profile_id": str(spec.get("output_profile_id") or ""),
+        "tokens": [
+            {
+                "provider": str(spec.get("provider") or ""),
+                "kind": str(token.get("kind") or ""),
+                "label": str(token.get("label") or token.get("kind") or ""),
+                "paste": True,
+            }
+            for token in tokens
+            if isinstance(token, dict)
+        ],
+        "fields": [
+            {
+                "id": str(field.get("id") or ""),
+                "label": str(field.get("label") or field.get("id") or ""),
+                "secret": bool(field.get("secret")),
+                "paste": True,
+            }
+            for field in fields
+            if isinstance(field, dict)
+        ],
+    }

@@ -26,9 +26,22 @@ def test_builtin_external_io_templates_split_input_and_output():
         "slack.output.default",
         "custom.output",
     } <= output_ids
+    assert {item["id"] for item in catalog["builtin_input"]} == {
+        "line.input.default",
+        "discord.input.default",
+        "slack.input.default",
+    }
     discord_webhook = next(item for item in catalog["output"] if item["id"] == "discord.output.webhook")
+    assert discord_webhook["setup_mode"] == "copy_paste_select"
     assert discord_webhook["fields"][0]["id"] == "webhook_url"
     assert discord_webhook["fields"][0]["secret"] is True
+    assert discord_webhook["copy_paste_setup"]["output_profile_id"] == "discord.webhook"
+    assert discord_webhook["copy_paste_setup"]["fields"][0]["paste"] is True
+    line_input = next(item for item in catalog["input"] if item["id"] == "line.input.default")
+    assert line_input["copy_paste_setup"]["routes"] == ["/api/integrations/line/webhook"]
+    assert line_input["copy_paste_setup"]["tokens"][0]["kind"] == "channel_secret"
+    custom_input = next(item for item in catalog["input"] if item["id"] == "custom.input")
+    assert custom_input["setup_mode"] == "custom"
 
 
 def test_output_profiles_are_provider_neutral_and_discord_has_two_outputs():

@@ -402,6 +402,8 @@ class ToolExecutor:
                 "is_error": True,
                 "widget": None,
             }
+        if isinstance(output, dict) and output.get("status") in {"ok", "error"}:
+            return ToolExecutor._tool_response_from_pack_function_output(output)
         if isinstance(output, dict):
             if "result" in output or "is_error" in output or "widget" in output:
                 return {

@@ -42,6 +42,9 @@ in and how should it enter chat?". Output profiles answer "where can a response
 go and through which transport?". Built-in input templates exist for LINE,
 Discord, Slack, and generic webhooks; custom templates can be registered through
 `/api/external/templates` or placed in `user_data/shared/external_io_templates`.
+Built-in templates expose `setup_mode: copy_paste_select`: the UI renders
+template/profile/provider choices plus copyable route paths and paste-only token
+or target fields. Free-form YAML/profile editing belongs in Custom.
 
 `submit_input` is the framework entrypoint after profile transformation. It
 accepts a `RumiInputEnvelope`, persists the user message, and invokes the

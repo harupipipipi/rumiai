@@ -36,6 +36,10 @@ Output profiles are the outbound counterpart to input profiles. Built-in
 profiles cover LINE reply/push, Discord bot channel messages, Discord webhook
 URLs, Slack channel/thread messages, generic webhook callbacks, and local web
 output. Custom profiles can be placed in `user_data/shared/output_profiles`.
+For built-in LINE/Discord/Slack outputs, setup is intentionally copy-paste plus
+selection: choose an output template/profile, paste non-secret target ids into
+the UI, and store bot tokens or webhook URLs as masked external tokens. Arbitrary
+senders and free-form prompt instructions live under Custom.
 
 ## Response Prompt Policy
 

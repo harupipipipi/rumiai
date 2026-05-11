@@ -31,7 +31,3 @@ examples:
   - id: line.to.web
     label: LINE to Web
     prompt: "LINEから来た内容をローカル/Web出力へ保存し、外部返信は必要な場合だけ短く返す。"
-  - id: line.biz.computer_use
-    label: LINE Official Account Manager via computer_use
-    prompt: |
-      Google Chromeをcomputer_useで操作して起動し、https://chat.line.biz/U938c119aee3803767d500905c221a1f4/chat/C7d9e77e21e38512175c081f235f0aec8 にアクセスして返答して。

@@ -9,6 +9,10 @@ properties:
     enum: [line, discord, slack, generic, web, custom]
   display_name:
     type: string
+  setup_mode:
+    enum: [copy_paste_select, custom]
+  copy_paste_setup:
+    type: object
   input_profile_id:
     type: string
   output_profile_id:
