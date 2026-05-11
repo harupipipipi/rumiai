@@ -2,7 +2,11 @@ id: discord.output.webhook
 direction: output
 provider: discord
 display_name: Discord Output (Webhook URL)
-summary: Send messages to a Discord webhook URL without a bot token.
+summary: "Channel webhook mode: paste a Discord channel Webhook URL and send without a bot token."
+setup_steps:
+  - Choose Discord Output (Webhook URL).
+  - "Paste the channel Webhook URL into External Tokens with provider=discord and kind=Webhook URL."
+  - "No Bot Token or local Discord gateway is required for this output mode."
 output_profile_id: discord.webhook
 required_setup:
   any_of:

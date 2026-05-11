@@ -363,10 +363,13 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         self.assertNotIn("external_inputs", sections)
         input_fields = {field["id"]: field for field in sections["external_input"]["fields"]}
         output_fields = {field["id"]: field for field in sections["external_output"]["fields"]}
+        self.assertEqual(input_fields["input_setup_guide"]["type"], "readonly")
         self.assertEqual(input_fields["input_provider"]["type"], "select")
         self.assertEqual(input_fields["input_template_id"]["type"], "select")
         self.assertEqual(input_fields["input_profile_id"]["type"], "select")
+        self.assertEqual(input_fields["public_url_launcher"]["type"], "public_url")
         self.assertEqual(input_fields["provider_route_copy"]["type"], "readonly")
+        self.assertEqual(output_fields["output_setup_guide"]["type"], "readonly")
         self.assertEqual(output_fields["output_provider"]["type"], "select")
         self.assertEqual(output_fields["output_template_id"]["type"], "select")
         self.assertEqual(output_fields["output_profile_id"]["type"], "select")
@@ -381,13 +384,29 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         self.assertEqual(values["external_input"]["default_response_mode"], "same_response")
         self.assertEqual(values["external_input"]["input_provider"], "line")
         self.assertEqual(values["external_input"]["input_template_id"], "line.input.default")
+        self.assertEqual(values["external_input"]["public_url_launcher"]["provider_id"], "cloudflare_quick_tunnel")
+        self.assertEqual(values["external_input"]["public_url_launcher"]["route_path"], "/api/integrations/line/webhook")
         self.assertIn("/api/integrations/line/webhook", values["external_input"]["provider_route_copy"])
         self.assertEqual(values["external_output"]["output_send_mode"], "same_source_reply")
         self.assertEqual(values["external_output"]["output_callback_token_id"], "main")
+        self.assertIn("Discord Bot + Channel", values["external_output"]["output_setup_guide"])
         self.assertIn("line", values["external_input"]["input_template_summary"])
         self.assertIn("discord", values["external_output"]["output_template_summary"])
         self.assertIn("slack", values["external_output"]["output_template_summary"])
         self.assertIn("external_io_templates", values["external_custom"]["custom_template_path"])
+
+        updated = FrontendRegistry(pack_root=DEFAULTSPACK_ROOT)._refresh_derived_settings(
+            {
+                **values,
+                "external_input": {**values["external_input"], "input_provider": "slack"},
+                "external_output": {**values["external_output"], "output_provider": "discord"},
+            }
+        )
+
+        self.assertEqual(updated["external_input"]["input_template_id"], "slack.input.default")
+        self.assertEqual(updated["external_input"]["public_url_launcher"]["route_path"], "/api/integrations/slack/events")
+        self.assertEqual(updated["external_output"]["output_template_id"], "discord.output.bot_channel")
+        self.assertEqual(updated["external_output"]["output_profile_id"], "discord.bot_channel")
 
     def test_update_settings_persists_sidebar_user_data(self):
         from domain.frontend.registry import FrontendRegistry

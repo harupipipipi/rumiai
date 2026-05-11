@@ -2,7 +2,13 @@ id: line.input.default
 direction: input
 provider: line
 display_name: LINE Input
-summary: Receive LINE Messaging API events and normalize them to Rumi input.
+summary: Issue a temporary public URL, paste it into LINE Messaging API Webhook URL, then receive LINE events.
+setup_steps:
+  - Select LINE Input.
+  - Generate a Cloudflare Quick Tunnel URL for /api/integrations/line/webhook.
+  - Paste the generated URL into LINE Messaging API Webhook URL.
+  - Save Channel Secret and Channel Access Token in External Tokens.
+  - Rumi replies with replyToken first, then can push when a target ID is available.
 input_profile_id: line.default
 endpoint:
   id: line-main

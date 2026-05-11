@@ -605,8 +605,20 @@ class FrontendRegistry:
             {
                 "id": "external_input",
                 "label": "External Input",
-                "description": "Built-in inbound setup uses selectable templates and copy-paste provider routes.",
+                "description": "Webhookで受ける入口。Built-inは選択とコピペだけで設定します。",
                 "fields": [
+                    {
+                        "id": "input_setup_guide",
+                        "label": "Setup Flow",
+                        "type": "readonly",
+                        "default": (
+                            "1. Providerを選ぶ\n"
+                            "2. Temporary Public URLでWebhook URLを発行する\n"
+                            "3. ProviderのWebhook URL欄へコピーする\n"
+                            "4. External Outputで必要なtokenを貼る\n"
+                            "5. 送信元を伝える / default応答を選ぶ"
+                        ),
+                    },
                     {
                         "id": "endpoint_summary",
                         "label": "Input Endpoints",
@@ -645,8 +657,19 @@ class FrontendRegistry:
                         "help": "provider ダッシュボードや endpoint 設定に貼る識別子です。例: line-main, discord-main, slack-main。",
                     },
                     {
+                        "id": "public_url_launcher",
+                        "label": "Temporary Public URL",
+                        "type": "public_url",
+                        "default": {
+                            "provider_id": "cloudflare_quick_tunnel",
+                            "local_url": "http://127.0.0.1:8766",
+                            "route_path": "/api/integrations/line/webhook",
+                        },
+                        "help": "LINE/Slack/DiscordのWebhook URL欄へ貼る一時公開URLを発行します。Cloudflareはprovider実装の1つです。",
+                    },
+                    {
                         "id": "provider_route_copy",
-                        "label": "Provider Routes",
+                        "label": "Route Paths",
                         "type": "readonly",
                         "default": (
                             "LINE: /api/integrations/line/webhook\n"
@@ -713,8 +736,20 @@ class FrontendRegistry:
             {
                 "id": "external_output",
                 "label": "External Output",
-                "description": "Built-in output setup uses token paste, target IDs, and selectable response profiles.",
+                "description": "返信・転送先。LINE/Discord/Slack/Webを選び、秘密値はExternal Tokensに貼ります。",
                 "fields": [
+                    {
+                        "id": "output_setup_guide",
+                        "label": "Send Modes",
+                        "type": "readonly",
+                        "default": (
+                            "LINE: Channel Access TokenでreplyTokenへ返信、またはUser/Group/Room IDへpush\n"
+                            "Discord Bot + Channel: Bot Tokenを保存し、Channel IDをTarget IDへ貼る\n"
+                            "Discord Webhook URL: Channel Webhook URLをExternal Tokensへ保存する\n"
+                            "Slack: Bot Tokenを保存し、Channel ID / Thread TSをTarget IDへ貼る\n"
+                            "Web/local: 外部投稿せず、chat historyやlocal保存に寄せる"
+                        ),
+                    },
                     {
                         "id": "external_tokens",
                         "label": "External Tokens",
@@ -764,14 +799,14 @@ class FrontendRegistry:
                     },
                     {
                         "id": "output_target_id",
-                        "label": "Target ID",
+                        "label": "Target / Channel ID",
                         "type": "text",
                         "default": "",
-                        "help": "Discord channel_id、Slack channel_id、LINE user/group/room ID など、秘密ではない送信先IDを貼ります。",
+                        "help": "Discord channel_id、Slack channel_id、LINE user/group/room ID など、秘密ではない送信先IDを貼ります。Webhook URLはExternal Tokensへ保存します。",
                     },
                     {
                         "id": "output_callback_token_id",
-                        "label": "Secret Token ID",
+                        "label": "Token ID To Use",
                         "type": "text",
                         "default": "main",
                         "help": "webhook URL や bot token は External Tokens に保存し、ここには token_id だけを書きます。",
@@ -1414,11 +1449,23 @@ class FrontendRegistry:
                 "model_api_routes": "",
             },
             "external_input": {
+                "input_setup_guide": (
+                    "1. Providerを選ぶ\n"
+                    "2. Temporary Public URLでWebhook URLを発行する\n"
+                    "3. ProviderのWebhook URL欄へコピーする\n"
+                    "4. External Outputで必要なtokenを貼る\n"
+                    "5. 送信元を伝える / default応答を選ぶ"
+                ),
                 "endpoint_summary": "",
                 "input_provider": "line",
                 "input_template_id": "line.input.default",
                 "input_profile_id": "line.default",
                 "input_endpoint_id": "line-main",
+                "public_url_launcher": {
+                    "provider_id": "cloudflare_quick_tunnel",
+                    "local_url": "http://127.0.0.1:8766",
+                    "route_path": "/api/integrations/line/webhook",
+                },
                 "provider_route_copy": (
                     "LINE: /api/integrations/line/webhook\n"
                     "Discord: /api/integrations/discord/interactions, /api/integrations/discord/events\n"
@@ -1432,6 +1479,13 @@ class FrontendRegistry:
                 "policy_summary": "Default allow/deny policies are evaluated server-side.",
             },
             "external_output": {
+                "output_setup_guide": (
+                    "LINE: Channel Access TokenでreplyTokenへ返信、またはUser/Group/Room IDへpush\n"
+                    "Discord Bot + Channel: Bot Tokenを保存し、Channel IDをTarget IDへ貼る\n"
+                    "Discord Webhook URL: Channel Webhook URLをExternal Tokensへ保存する\n"
+                    "Slack: Bot Tokenを保存し、Channel ID / Thread TSをTarget IDへ貼る\n"
+                    "Web/local: 外部投稿せず、chat historyやlocal保存に寄せる"
+                ),
                 "external_tokens": [],
                 "output_provider": "line",
                 "output_template_id": "line.output.default",
@@ -1691,11 +1745,36 @@ class FrontendRegistry:
         input_templates = template_catalog.get("input") if isinstance(template_catalog.get("input"), list) else []
         output_templates = template_catalog.get("output") if isinstance(template_catalog.get("output"), list) else []
         enabled_count = sum(1 for endpoint in endpoints if endpoint.get("enabled"))
+        self._sync_external_input_selection(external_input, input_templates)
+        self._sync_external_output_selection(external_output, output_templates)
+        external_input.setdefault(
+            "input_setup_guide",
+            (
+                "1. Providerを選ぶ\n"
+                "2. Temporary Public URLでWebhook URLを発行する\n"
+                "3. ProviderのWebhook URL欄へコピーする\n"
+                "4. External Outputで必要なtokenを貼る\n"
+                "5. 送信元を伝える / default応答を選ぶ"
+            ),
+        )
         external_input["endpoint_summary"] = f"{len(endpoints)} endpoints ({enabled_count} enabled)"
         external_input.setdefault("input_provider", "line")
         external_input.setdefault("input_template_id", "line.input.default")
         external_input.setdefault("input_profile_id", "line.default")
         external_input.setdefault("input_endpoint_id", f"{external_input.get('input_provider') or 'line'}-main")
+        external_input.setdefault(
+            "public_url_launcher",
+            {
+                "provider_id": "cloudflare_quick_tunnel",
+                "local_url": "http://127.0.0.1:8766",
+                "route_path": self._route_for_input_provider(str(external_input.get("input_provider") or "line")),
+            },
+        )
+        if isinstance(external_input.get("public_url_launcher"), dict):
+            public_url_launcher = external_input["public_url_launcher"]
+            public_url_launcher.setdefault("provider_id", "cloudflare_quick_tunnel")
+            public_url_launcher.setdefault("local_url", "http://127.0.0.1:8766")
+            public_url_launcher["route_path"] = self._route_for_input_provider(str(external_input.get("input_provider") or "line"))
         external_input["provider_route_copy"] = self._provider_route_copy()
         external_input["input_template_summary"] = self._template_summary(input_templates)
         external_input["input_profile_summary"] = ", ".join(profile.id for profile in input_profiles) or "No profiles"
@@ -1703,6 +1782,16 @@ class FrontendRegistry:
         external_input.setdefault("default_response_mode", "same_response")
         external_input.setdefault("input_response_preset", "same_source_reply")
         external_input.setdefault("policy_summary", "Default allow/deny policies are evaluated server-side.")
+        external_output.setdefault(
+            "output_setup_guide",
+            (
+                "LINE: Channel Access TokenでreplyTokenへ返信、またはUser/Group/Room IDへpush\n"
+                "Discord Bot + Channel: Bot Tokenを保存し、Channel IDをTarget IDへ貼る\n"
+                "Discord Webhook URL: Channel Webhook URLをExternal Tokensへ保存する\n"
+                "Slack: Bot Tokenを保存し、Channel ID / Thread TSをTarget IDへ貼る\n"
+                "Web/local: 外部投稿せず、chat historyやlocal保存に寄せる"
+            ),
+        )
         external_output["external_tokens"] = external_token_status(pack_root=self._pack_root)
         external_output.setdefault("output_provider", "line")
         external_output.setdefault("output_template_id", "line.output.default")
@@ -1816,6 +1905,75 @@ class FrontendRegistry:
             if provider and provider not in providers:
                 providers.append(provider)
         return ", ".join(providers) if providers else "No templates"
+
+    @staticmethod
+    def _template_map(templates: list[Any]) -> dict[str, dict[str, Any]]:
+        return {
+            str(item.get("id") or "").strip(): item
+            for item in templates
+            if isinstance(item, dict) and str(item.get("id") or "").strip()
+        }
+
+    @staticmethod
+    def _first_template_for_provider(templates: list[Any], provider: str) -> dict[str, Any] | None:
+        for item in templates:
+            if not isinstance(item, dict):
+                continue
+            if item.get("origin") == "custom" or item.get("provider") == "custom":
+                continue
+            if str(item.get("provider") or "").strip() == provider:
+                return item
+        return None
+
+    def _sync_external_input_selection(self, values: dict[str, Any], templates: list[Any]) -> None:
+        template_by_id = self._template_map(templates)
+        provider = str(values.get("input_provider") or "line").strip() or "line"
+        template = template_by_id.get(str(values.get("input_template_id") or "").strip())
+        if template is None or str(template.get("provider") or "").strip() != provider:
+            template = self._first_template_for_provider(templates, provider) or template or self._first_template_for_provider(templates, "line")
+        if not template:
+            return
+        values["input_provider"] = str(template.get("provider") or provider).strip()
+        values["input_template_id"] = str(template.get("id") or values.get("input_template_id") or "").strip()
+        if template.get("input_profile_id"):
+            values["input_profile_id"] = str(template.get("input_profile_id"))
+        endpoint = template.get("endpoint") if isinstance(template.get("endpoint"), dict) else {}
+        if endpoint.get("id"):
+            values["input_endpoint_id"] = str(endpoint.get("id"))
+
+    def _sync_external_output_selection(self, values: dict[str, Any], templates: list[Any]) -> None:
+        template_by_id = self._template_map(templates)
+        provider = str(values.get("output_provider") or "line").strip() or "line"
+        template = template_by_id.get(str(values.get("output_template_id") or "").strip())
+        if template is None or str(template.get("provider") or "").strip() != provider:
+            template = self._first_template_for_provider(templates, provider) or template or self._first_template_for_provider(templates, "line")
+        if not template:
+            return
+        template_id = str(template.get("id") or values.get("output_template_id") or "").strip()
+        values["output_provider"] = str(template.get("provider") or provider).strip()
+        values["output_template_id"] = template_id
+        if template.get("output_profile_id"):
+            values["output_profile_id"] = str(template.get("output_profile_id"))
+        mode_by_template = {
+            "line.output.default": "line_reply_or_push",
+            "discord.output.bot_channel": "discord_bot_channel",
+            "discord.output.webhook": "discord_webhook_url",
+            "slack.output.default": "slack_channel",
+            "generic.output.webhook": "generic_webhook",
+        }
+        if template_id in mode_by_template:
+            values.setdefault("output_send_mode", mode_by_template[template_id])
+
+    @staticmethod
+    def _route_for_input_provider(provider: str) -> str:
+        provider = provider.strip().lower()
+        if provider == "discord":
+            return "/api/integrations/discord/interactions"
+        if provider == "slack":
+            return "/api/integrations/slack/events"
+        if provider == "generic":
+            return "/api/webhooks/inbound/{webhook_id}"
+        return "/api/integrations/line/webhook"
 
     @staticmethod
     def _legacy_default_target(values: dict[str, Any]) -> str:

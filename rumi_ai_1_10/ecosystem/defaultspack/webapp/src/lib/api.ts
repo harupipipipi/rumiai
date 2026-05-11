@@ -220,7 +220,7 @@ export type SidebarFieldOption = {
 export type SidebarField = {
   id: string;
   label: string;
-  type: "text" | "textarea" | "number" | "toggle" | "select" | "readonly" | "secret" | "api_keys" | "external_tokens";
+  type: "text" | "textarea" | "number" | "toggle" | "select" | "readonly" | "secret" | "api_keys" | "external_tokens" | "public_url";
   default?: unknown;
   required?: boolean;
   help?: string;
@@ -815,6 +815,23 @@ export const api = {
         provider_id: providerId,
         token_id: tokenId,
       }),
+    });
+  },
+
+  listPublicUrlProviders() {
+    return request<{ providers: Array<Record<string, unknown>>; default_local_url?: string }>("/api/webhooks/public-urls");
+  },
+
+  createPublicUrl(payload: { provider_id?: string; provider?: string; local_url?: string; route_path?: string; ttl_seconds?: number }) {
+    return request<Record<string, unknown>>("/api/webhooks/public-urls", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  closePublicUrl(urlId: string) {
+    return request<Record<string, unknown>>(`/api/webhooks/public-urls/${encodeURIComponent(urlId)}`, {
+      method: "DELETE",
     });
   },
 

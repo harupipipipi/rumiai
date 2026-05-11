@@ -373,13 +373,15 @@ Current defaultspack HTTP routes include:
 | `PUT` | `/api/webhooks/endpoints/{webhook_id}` | update webhook endpoint config |
 | `DELETE` | `/api/webhooks/endpoints/{webhook_id}` | delete webhook endpoint config |
 | `POST` | `/api/webhooks/endpoints/{webhook_id}/test` | run a webhook test payload |
-| `GET` | `/api/webhooks/public-urls` | list public URL providers |
-| `POST` | `/api/webhooks/public-urls` | create a provider-backed public URL |
-| `DELETE` | `/api/webhooks/public-urls/{url_id}` | close a public URL |
+| `GET` | `/api/webhooks/public-urls` | list public URL providers and the local default URL |
+| `POST` | `/api/webhooks/public-urls` | create a provider-backed public URL; failures return redacted `ok: false` data |
+| `DELETE` | `/api/webhooks/public-urls/{url_id}` | close or clear a public URL |
 
 Cloudflare Quick Tunnel may supply a temporary public URL for development, but
-the API contract must not depend on it. Any tunnel or hosted ingress should feed
-the same local routes.
+the API contract must not depend on it. The External Input UI uses it only to
+generate a copyable provider webhook URL such as
+`https://...trycloudflare.com/api/integrations/line/webhook`. Any tunnel or
+hosted ingress should feed the same local routes.
 
 
 ## 6. stdio Transport

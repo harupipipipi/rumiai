@@ -2,7 +2,12 @@ id: discord.input.default
 direction: input
 provider: discord
 display_name: Discord Input
-summary: Receive Discord interactions or events and normalize them to Rumi input.
+summary: Receive Discord interactions/events through a public URL and normalize them to Rumi input.
+setup_steps:
+  - Select Discord Input.
+  - Use /api/integrations/discord/interactions for slash commands or /api/integrations/discord/events for message events.
+  - Save Discord Public Key for interaction signature verification.
+  - Save Bot Token only when the PC/Rumi bot-channel mode should post to a channel.
 input_profile_id: discord.default
 endpoint:
   id: discord-main

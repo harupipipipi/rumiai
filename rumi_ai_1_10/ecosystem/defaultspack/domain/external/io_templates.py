@@ -165,7 +165,7 @@ def _copy_paste_setup(spec: dict[str, Any]) -> dict[str, Any]:
         routes.extend(str(item) for item in endpoint_routes if str(item or "").strip())
     fields = spec.get("fields") if isinstance(spec.get("fields"), list) else []
     tokens = spec.get("tokens") if isinstance(spec.get("tokens"), list) else []
-    return {
+    setup = {
         "mode": "copy_paste_select",
         "endpoint_id": str(endpoint.get("id") or "") if isinstance(endpoint, dict) else "",
         "routes": routes,
@@ -192,3 +192,12 @@ def _copy_paste_setup(spec: dict[str, Any]) -> dict[str, Any]:
             if isinstance(field, dict)
         ],
     }
+    if spec.get("direction") == "input" and routes:
+        setup["public_url"] = {
+            "provider": "cloudflare_quick_tunnel",
+            "route_path": routes[0],
+            "copy_to_provider_webhook_url": True,
+        }
+    if spec.get("setup_steps"):
+        setup["setup_steps"] = spec.get("setup_steps")
+    return setup

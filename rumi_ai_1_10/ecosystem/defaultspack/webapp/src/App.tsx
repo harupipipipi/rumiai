@@ -1377,12 +1377,74 @@ export default function App() {
     setSettingsValues((current) => {
       const section = settingsSections.find((item) => item.id === sectionId);
       const field = section?.fields.find((item) => item.id === fieldId);
+      const sectionPatch = {
+        ...(current[sectionId] ?? {}),
+        [fieldId]: field?.type === "secret" || field?.type === "api_keys" || field?.type === "external_tokens" ? "" : value,
+      };
+      if (sectionId === "external_input" && fieldId === "input_provider") {
+        const provider = String(value ?? "line");
+        const templateByProvider: Record<string, { template: string; profile: string; endpoint: string; route: string }> = {
+          line: { template: "line.input.default", profile: "line.default", endpoint: "line-main", route: "/api/integrations/line/webhook" },
+          discord: { template: "discord.input.default", profile: "discord.default", endpoint: "discord-main", route: "/api/integrations/discord/interactions" },
+          slack: { template: "slack.input.default", profile: "slack.default", endpoint: "slack-main", route: "/api/integrations/slack/events" },
+          generic: { template: "generic.input.default", profile: "generic.webhook.default", endpoint: "generic-main", route: "/api/webhooks/inbound/{webhook_id}" },
+        };
+        const mapped = templateByProvider[provider] ?? templateByProvider.line;
+        sectionPatch.input_template_id = mapped.template;
+        sectionPatch.input_profile_id = mapped.profile;
+        sectionPatch.input_endpoint_id = mapped.endpoint;
+        sectionPatch.public_url_launcher = {
+          ...((current.external_input?.public_url_launcher as Record<string, unknown> | undefined) ?? {}),
+          route_path: mapped.route,
+        };
+      } else if (sectionId === "external_input" && fieldId === "input_template_id") {
+        const templateId = String(value ?? "");
+        const provider = templateId.split(".")[0] || "line";
+        const routeByProvider: Record<string, string> = {
+          line: "/api/integrations/line/webhook",
+          discord: "/api/integrations/discord/interactions",
+          slack: "/api/integrations/slack/events",
+          generic: "/api/webhooks/inbound/{webhook_id}",
+        };
+        sectionPatch.input_provider = provider;
+        sectionPatch.input_profile_id = provider === "discord" ? "discord.default" : provider === "slack" ? "slack.default" : provider === "generic" ? "generic.webhook.default" : "line.default";
+        sectionPatch.input_endpoint_id = `${provider}-main`;
+        sectionPatch.public_url_launcher = {
+          ...((current.external_input?.public_url_launcher as Record<string, unknown> | undefined) ?? {}),
+          route_path: routeByProvider[provider] ?? routeByProvider.line,
+        };
+      } else if (sectionId === "external_output" && fieldId === "output_provider") {
+        const provider = String(value ?? "line");
+        const templateByProvider: Record<string, { template: string; profile: string; mode: string }> = {
+          line: { template: "line.output.default", profile: "line.default", mode: "line_reply_or_push" },
+          discord: { template: "discord.output.bot_channel", profile: "discord.bot_channel", mode: "discord_bot_channel" },
+          slack: { template: "slack.output.default", profile: "slack.default", mode: "slack_channel" },
+          generic: { template: "generic.output.webhook", profile: "generic.webhook", mode: "generic_webhook" },
+          web: { template: "generic.output.webhook", profile: "generic.webhook", mode: "web_local" },
+        };
+        const mapped = templateByProvider[provider] ?? templateByProvider.line;
+        sectionPatch.output_template_id = mapped.template;
+        sectionPatch.output_profile_id = mapped.profile;
+        sectionPatch.output_send_mode = mapped.mode;
+      } else if (sectionId === "external_output" && fieldId === "output_template_id") {
+        const templateId = String(value ?? "");
+        const outputByTemplate: Record<string, { provider: string; profile: string; mode: string }> = {
+          "line.output.default": { provider: "line", profile: "line.default", mode: "line_reply_or_push" },
+          "discord.output.bot_channel": { provider: "discord", profile: "discord.bot_channel", mode: "discord_bot_channel" },
+          "discord.output.webhook": { provider: "discord", profile: "discord.webhook", mode: "discord_webhook_url" },
+          "slack.output.default": { provider: "slack", profile: "slack.default", mode: "slack_channel" },
+          "generic.output.webhook": { provider: "generic", profile: "generic.webhook", mode: "generic_webhook" },
+        };
+        const mapped = outputByTemplate[templateId];
+        if (mapped) {
+          sectionPatch.output_provider = mapped.provider;
+          sectionPatch.output_profile_id = mapped.profile;
+          sectionPatch.output_send_mode = mapped.mode;
+        }
+      }
       const next = {
         ...current,
-        [sectionId]: {
-          ...(current[sectionId] ?? {}),
-          [fieldId]: field?.type === "secret" || field?.type === "api_keys" || field?.type === "external_tokens" ? "" : value,
-        },
+        [sectionId]: sectionPatch,
       };
       if (field?.type === "api_keys") {
         const payload = value && typeof value === "object" ? value as Record<string, unknown> : {};

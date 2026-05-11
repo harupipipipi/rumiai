@@ -41,6 +41,17 @@ selection: choose an output template/profile, paste non-secret target ids into
 the UI, and store bot tokens or webhook URLs as masked external tokens. Arbitrary
 senders and free-form prompt instructions live under Custom.
 
+Discord exposes two built-in output templates because the operational model is
+different:
+
+- `discord.output.bot_channel`: the local Rumi runtime uses a Discord Bot Token
+  and a target `channel_id`.
+- `discord.output.webhook`: Rumi posts through a channel Webhook URL and does
+  not need a bot token for that output path.
+
+Both paths still pass through response planning and keep `allowed_mentions` safe
+by default.
+
 ## Response Prompt Policy
 
 `response_prompt` is a prompt-routed planning policy. It may inspect the event,

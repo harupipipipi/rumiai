@@ -2,7 +2,12 @@ id: discord.output.bot_channel
 direction: output
 provider: discord
 display_name: Discord Output (Bot + Channel)
-summary: Send messages through a Discord bot token to a channel_id.
+summary: "PC/Rumi server mode: use a Discord Bot Token plus Channel ID to post messages."
+setup_steps:
+  - Choose Discord Output (Bot + Channel).
+  - "Paste Bot Token into External Tokens with provider=discord and kind=Bot Token."
+  - "Paste Channel ID into Target / Channel ID."
+  - "Rumi sends with allowed_mentions.parse=[] for safety."
 output_profile_id: discord.bot_channel
 required_setup:
   any_of:

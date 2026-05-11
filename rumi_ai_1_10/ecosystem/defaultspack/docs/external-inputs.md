@@ -45,6 +45,11 @@ Discord, Slack, and generic webhooks; custom templates can be registered through
 Built-in templates expose `setup_mode: copy_paste_select`: the UI renders
 template/profile/provider choices plus copyable route paths and paste-only token
 or target fields. Free-form YAML/profile editing belongs in Custom.
+For webhook providers such as LINE, Slack, and Discord interactions, the
+External Input panel includes a Temporary Public URL launcher. The Cloudflare
+Quick Tunnel button creates a temporary public URL for the selected route path,
+for example `/api/integrations/line/webhook`, so the user can paste the full URL
+into the provider dashboard.
 
 `submit_input` is the framework entrypoint after profile transformation. It
 accepts a `RumiInputEnvelope`, persists the user message, and invokes the
@@ -138,6 +143,23 @@ allows otherwise. A public URL provider is just a replaceable edge component.
 Cloudflare Quick Tunnel can be used during development, but it is not part of
 the core architecture and must remain swappable with another tunnel, reverse
 proxy, or platform ingress.
+
+## Built-In Setup Shape
+
+The built-in UI is intentionally a guided setup, not a YAML editor:
+
+- `External Input`: choose provider/template/profile, generate or copy the
+  webhook URL, then choose the default response behavior.
+- `External Output`: choose the send mode and output template, paste masked
+  external tokens, and paste non-secret target ids such as Discord `channel_id`.
+- `External Custom`: register or drop custom templates/profiles, and keep
+  free-form response prompts such as computer-use browser workflows.
+
+LINE uses a provider-created webhook URL plus `Channel Secret` verification and
+`Channel Access Token` replies. Discord has two outbound modes: `Bot + Channel`
+uses a bot token and `channel_id`, while `Webhook URL` uses the channel webhook
+URL as a masked external token. Slack uses the Events Request URL, Signing
+Secret, Bot Token, and thread-aware `chat.postMessage`.
 
 ## Current Defaultspack Routes
 

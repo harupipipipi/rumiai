@@ -2,7 +2,11 @@ id: line.output.default
 direction: output
 provider: line
 display_name: LINE Output
-summary: Reply or push through LINE Messaging API.
+summary: Reply with LINE replyToken first, or push to User/Group/Room ID when needed.
+setup_steps:
+  - Paste Channel Access Token into External Tokens with provider=line.
+  - Use replyToken from incoming LINE events for immediate replies.
+  - Use User/Group/Room ID for push fallback.
 output_profile_id: line.default
 required_setup:
   any_of:
