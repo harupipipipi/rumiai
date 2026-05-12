@@ -54,7 +54,7 @@ class ExternalSourceStore:
         current = dict(sources.get(key) or {})
         created = not current
         first_seen = int(current.get("first_seen_at") or now)
-        enabled = bool(current.get("enabled", bool(verified)))
+        enabled = bool(current.get("enabled", False))
         item = {
             "provider": origin.provider,
             "source_type": origin.source_type,
@@ -74,6 +74,36 @@ class ExternalSourceStore:
         self._data["sources"] = sources
         self._save()
         return {"saved": True, "created": created, "key": key, "source": dict(item)}
+
+    def update_source(
+        self,
+        provider: str,
+        source_type: str,
+        source_id: str,
+        *,
+        enabled: bool | None = None,
+        allow_reply: bool | None = None,
+        allow_push: bool | None = None,
+        label: str | None = None,
+    ) -> dict[str, Any]:
+        key = external_source_key(provider, source_type, source_id)
+        sources = self._sources()
+        current = dict(sources.get(key) or {})
+        if not current:
+            return {"success": False, "error": "external source not found", "key": key}
+        if enabled is not None:
+            current["enabled"] = bool(enabled)
+        if allow_reply is not None:
+            current["allow_reply"] = bool(allow_reply)
+        if allow_push is not None:
+            current["allow_push"] = bool(allow_push)
+        if label is not None:
+            current["label"] = str(label)
+        current["updated_at"] = _now_ms()
+        sources[key] = current
+        self._data["sources"] = sources
+        self._save()
+        return {"success": True, "key": key, "source": dict(current)}
 
     def _sources(self) -> dict[str, dict[str, Any]]:
         raw = self._data.setdefault("sources", {})
