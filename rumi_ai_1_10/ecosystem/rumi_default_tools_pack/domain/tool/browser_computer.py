@@ -1510,7 +1510,10 @@ class BrowserComputerController:
         item_app = str(window.get("app") or "").lower()
         item_title = str(window.get("title") or "").lower()
         if app and app not in item_app:
-            return False
+            # Some Windows window enumerators omit the process/app label even though
+            # the browser name is still present in the window title.
+            if item_app or app not in item_title:
+                return False
         if title and title not in item_title:
             return False
         return True

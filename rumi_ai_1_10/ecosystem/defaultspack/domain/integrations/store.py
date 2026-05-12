@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import time
+import hashlib
 from pathlib import Path
 from typing import Any, Dict
 
@@ -41,6 +42,9 @@ class IntegrationConversationStore:
             data["processed_events"] = {}
         return data
 
+    def _reload(self) -> None:
+        self._data = self._load()
+
     def _save(self) -> None:
         self._path.parent.mkdir(parents=True, exist_ok=True)
         self._data["updated_at"] = _now_ms()
@@ -56,14 +60,96 @@ class IntegrationConversationStore:
     def event_key(provider: str, event_id: str) -> str:
         return "{}:{}".format(str(provider or "").strip(), str(event_id or "").strip())
 
+    @classmethod
+    def _event_locks_dir(cls) -> Path:
+        override = os.environ.get("RUMI_DEFAULTSPACK_INTEGRATIONS_LOCKS_DIR", "").strip()
+        if override:
+            return Path(override)
+        return cls._default_path().parent / "event_locks"
+
+    @staticmethod
+    def _event_lock_ttl_ms() -> int:
+        raw = str(os.environ.get("RUMI_DEFAULTSPACK_INTEGRATION_EVENT_LOCK_TTL_MS", "") or "").strip()
+        try:
+            value = int(raw)
+        except Exception:
+            value = 30 * 60 * 1000
+        return max(value, 1_000)
+
+    @classmethod
+    def _event_lock_path(cls, provider: str, event_id: str) -> Path:
+        event_key = cls.event_key(provider, event_id)
+        digest = hashlib.sha256(event_key.encode("utf-8")).hexdigest()
+        return cls._event_locks_dir() / f"{digest}.json"
+
+    @classmethod
+    def _prune_stale_event_lock(cls, provider: str, event_id: str) -> bool:
+        path = cls._event_lock_path(provider, event_id)
+        if not path.exists():
+            return False
+        try:
+            age_ms = _now_ms() - int(path.stat().st_mtime * 1000)
+        except OSError:
+            age_ms = 0
+        if age_ms < cls._event_lock_ttl_ms():
+            return False
+        try:
+            path.unlink()
+            return True
+        except FileNotFoundError:
+            return False
+        except OSError:
+            return False
+
     def is_event_processed(self, provider: str, event_id: str | None) -> bool:
         if not event_id:
             return False
+        self._reload()
         return self.event_key(provider, event_id) in self._data["processed_events"]
+
+    def is_event_in_progress(self, provider: str, event_id: str | None) -> bool:
+        if not event_id:
+            return False
+        self._prune_stale_event_lock(provider, event_id)
+        return self._event_lock_path(provider, event_id).exists()
+
+    def claim_event(self, provider: str, event_id: str | None, *, metadata: Dict[str, Any] | None = None) -> bool:
+        if not event_id:
+            return True
+        self._reload()
+        if self.event_key(provider, event_id) in self._data["processed_events"]:
+            return False
+        self._prune_stale_event_lock(provider, event_id)
+        path = self._event_lock_path(provider, event_id)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "provider": provider,
+            "event_id": event_id,
+            "claimed_at": _now_ms(),
+            **(metadata if isinstance(metadata, dict) else {}),
+        }
+        try:
+            fd = os.open(str(path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        except FileExistsError:
+            return False
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(json.dumps(payload, ensure_ascii=False, indent=2))
+        return True
+
+    def release_event_claim(self, provider: str, event_id: str | None) -> None:
+        if not event_id:
+            return
+        try:
+            self._event_lock_path(provider, event_id).unlink()
+        except FileNotFoundError:
+            return
+        except OSError:
+            return
 
     def mark_event_processed(self, provider: str, event_id: str | None, result: Dict[str, Any]) -> None:
         if not event_id:
             return
+        self._reload()
         self._data["processed_events"][self.event_key(provider, event_id)] = {
             "provider": provider,
             "event_id": event_id,
@@ -72,6 +158,7 @@ class IntegrationConversationStore:
             "processed_at": _now_ms(),
         }
         self._save()
+        self.release_event_claim(provider, event_id)
 
     def get_or_create_conversation(
         self,

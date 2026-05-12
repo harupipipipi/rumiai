@@ -48,3 +48,22 @@ def test_line_default_profile_fallbacks_non_text_message():
     envelope = InputProfileEngine(profile).to_envelope(event)
 
     assert envelope.input == "LINE image message received. messageId=m1"
+
+
+def test_line_computer_use_profile_attaches_browser_tools_and_prompt_policy():
+    event = normalize_line_event(
+        {
+            "type": "message",
+            "webhookEventId": "evt",
+            "source": {"type": "user", "userId": "U123"},
+            "message": {"id": "m1", "type": "text", "text": "open chrome"},
+            "replyToken": "reply",
+        },
+        verified=True,
+    )
+    profile = InputProfileRegistry(DEFAULTSPACK_ROOT).get("line.computer_use")
+    envelope = InputProfileEngine(profile).to_envelope(event)
+
+    assert envelope.input == "open chrome"
+    assert envelope.tools == ["computer_use", "browser_computer"]
+    assert profile.spec["response_prompt"]["enabled"] is True

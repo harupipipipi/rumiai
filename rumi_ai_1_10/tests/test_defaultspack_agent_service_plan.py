@@ -3565,6 +3565,43 @@ def test_browser_computer_screenshot_resolves_app_filter_without_prior_select(tm
     assert controller._computer_state()["target_window"]["window_id"] == 222
 
 
+def test_browser_computer_windows_screenshot_matches_title_when_app_label_is_missing(tmp_path, monkeypatch):
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+    import ecosystem.rumi_default_tools_pack.domain.tool.browser_computer as browser_computer
+
+    png_header = b"\x89PNG\r\n\x1a\n" + b"\x00\x00\x00\rIHDR"
+    png_body = png_header + b"\x00\x00\x02\x80\x00\x00\x01\x90"
+    captured = {}
+
+    def fake_windows_screenshot(self, path, target=None):
+        captured["target"] = target
+        Path(path).write_bytes(png_body)
+        return {"x": 80, "y": 120, "width": 1280, "height": 720}
+
+    monkeypatch.setattr(browser_computer.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(BrowserComputerController, "_windows_screenshot", fake_windows_screenshot)
+    monkeypatch.setattr(BrowserComputerController, "_model_screenshot_copy", lambda self, path: path)
+    monkeypatch.setattr(BrowserComputerController, "_cursor_position", staticmethod(lambda: None))
+
+    controller = BrowserComputerController(artifact_root=tmp_path)
+    controller._session_path = tmp_path / "shared" / "browser_sessions.json"
+    controller._list_windows = lambda: [
+        {"app": "Codex", "title": "RumiDP", "x": 0, "y": 0, "width": 1470, "height": 900, "active": True},
+        {"app": "", "title": "LINE Chat - Google Chrome", "x": 80, "y": 120, "width": 1280, "height": 720, "active": False, "window_id": 987},
+    ]
+    controller._active_window = lambda: {"app": "Codex", "title": "RumiDP", "x": 0, "y": 0, "width": 1470, "height": 900}
+    controller._chrome_tabs = lambda: []
+
+    result = controller.run("computer.screenshot", {"app": "Google Chrome", "title": "LINE"}, yolo_mode=True)
+
+    assert result["action"] == "computer.screenshot"
+    assert result["platform"] == "Windows"
+    assert captured["target"]["title"] == "LINE Chat - Google Chrome"
+    assert captured["target"]["window_id"] == 987
+    assert result["target_window"]["title"] == "LINE Chat - Google Chrome"
+    assert controller._computer_state()["target_window"]["window_id"] == 987
+
+
 def test_browser_computer_screenshot_title_contains_matches_non_chrome_window(tmp_path, monkeypatch):
     from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
     import ecosystem.rumi_default_tools_pack.domain.tool.browser_computer as browser_computer
