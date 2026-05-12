@@ -589,6 +589,7 @@ _SENSITIVE_CODING_PATHS = set(SENSITIVE_CODING_PATHS) | set(METHOD_SENSITIVE_COD
 _SENSITIVE_INTEGRATION_PATHS = {
     "/api/integrations/secrets",
     "/api/external/tokens",
+    "/api/external/sources",
 }
 _SENSITIVE_INTEGRATION_METHOD_PATHS = {
     "/api/external/templates": {"POST", "PUT", "DELETE"},

@@ -28,8 +28,14 @@ class ResponsePlanner:
         planned_response = self._response_for_decision(response, decision, max_chars)
         messages_enabled = text_caps.get("enabled", True) and self._should_send_text(decision)
         chunks = self._chunk_text(planned_response.text, max_chars) if messages_enabled else []
+        max_messages = int(text_caps.get("max_messages") or 0)
+        text_fallbacks = []
+        if max_messages and len(chunks) > max_messages:
+            text_fallbacks.append({"reason": "text message count limit exceeded", "dropped_messages": len(chunks) - max_messages})
+            chunks = chunks[:max_messages]
         artifacts = planned_response.artifacts if self._should_send_files(decision) else []
         file_plan, fallbacks = self._plan_artifacts(artifacts, caps)
+        fallbacks = [*text_fallbacks, *fallbacks]
         metadata = dict(planned_response.metadata)
         if decision is not None:
             metadata["response_prompt_decision"] = decision.as_dict()

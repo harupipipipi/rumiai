@@ -2,11 +2,11 @@ id: line.output.default
 direction: output
 provider: line
 display_name: LINE Output
-summary: Reply with LINE replyToken first, or push to User/Group/Room ID when needed.
+summary: Reply to the LINE source conversation with replyToken, or explicitly push to a saved/entered userId, groupId, or roomId.
 setup_steps:
-  - Paste Channel Access Token into External Tokens with provider=line.
-  - Use replyToken from incoming LINE events for immediate replies.
-  - Use User/Group/Room ID for push fallback.
+  - Paste the Messaging API Channel Access Token into External Tokens with provider=line.
+  - Use replyToken from incoming LINE events for immediate source-conversation replies.
+  - Keep push fallback off by default; enable push only for saved sources or explicit targets.
 output_profile_id: line.default
 required_setup:
   any_of:
@@ -15,21 +15,21 @@ required_setup:
         - reply_token
     - fields:
         - channel_access_token
-        - user_id
+        - target_id
 tokens:
   - kind: channel_access_token
-    label: Channel Access Token
+    label: Messaging API Channel Access Token
 fields:
   - id: reply_token
     label: Reply Token
     secret: false
-  - id: user_id
-    label: User/Group/Room ID
+  - id: target_id
+    label: Explicit userId / groupId / roomId
     secret: false
 capabilities_profile: line
 examples:
   - id: external_send.line.push
-    label: Tool send
+    label: Push to explicit target
     tool: external_send
     args:
       provider: line

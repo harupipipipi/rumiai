@@ -1416,7 +1416,7 @@ export default function App() {
       } else if (sectionId === "external_output" && fieldId === "output_provider") {
         const provider = String(value ?? "line");
         const templateByProvider: Record<string, { template: string; profile: string; mode: string }> = {
-          line: { template: "line.output.default", profile: "line.default", mode: "line_reply_or_push" },
+          line: { template: "line.output.default", profile: "line.default", mode: "reply_to_origin" },
           discord: { template: "discord.output.bot_channel", profile: "discord.bot_channel", mode: "discord_bot_channel" },
           slack: { template: "slack.output.default", profile: "slack.default", mode: "slack_channel" },
           generic: { template: "generic.output.webhook", profile: "generic.webhook", mode: "generic_webhook" },
@@ -1429,7 +1429,7 @@ export default function App() {
       } else if (sectionId === "external_output" && fieldId === "output_template_id") {
         const templateId = String(value ?? "");
         const outputByTemplate: Record<string, { provider: string; profile: string; mode: string }> = {
-          "line.output.default": { provider: "line", profile: "line.default", mode: "line_reply_or_push" },
+          "line.output.default": { provider: "line", profile: "line.default", mode: "reply_to_origin" },
           "discord.output.bot_channel": { provider: "discord", profile: "discord.bot_channel", mode: "discord_bot_channel" },
           "discord.output.webhook": { provider: "discord", profile: "discord.webhook", mode: "discord_webhook_url" },
           "slack.output.default": { provider: "slack", profile: "slack.default", mode: "slack_channel" },
