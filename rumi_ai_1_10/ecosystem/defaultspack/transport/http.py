@@ -31,7 +31,6 @@ _SAFE_GET_FALLBACK_BLOCKS = {
     "blocks.ai.providers",
     "blocks.chat.get_conversation",
     "blocks.chat.list_conversations",
-    "blocks.external.sources",
     "blocks.external.templates",
     "blocks.tool.list",
     "blocks.ui.catalog",
@@ -590,9 +589,9 @@ _SENSITIVE_CODING_PATHS = set(SENSITIVE_CODING_PATHS) | set(METHOD_SENSITIVE_COD
 _SENSITIVE_INTEGRATION_PATHS = {
     "/api/integrations/secrets",
     "/api/external/tokens",
+    "/api/external/sources",
 }
 _SENSITIVE_INTEGRATION_METHOD_PATHS = {
-    "/api/external/sources": {"POST", "PUT", "DELETE"},
     "/api/external/templates": {"POST", "PUT", "DELETE"},
 }
 _SENSITIVE_INTEGRATION_PREFIXES = (

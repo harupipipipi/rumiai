@@ -135,6 +135,36 @@ def test_fallback_http_permission_denied_does_not_fallback_for_other_permission(
     legacy.assert_not_called()
 
 
+def test_fallback_http_external_sources_get_does_not_use_legacy_fallback():
+    from transport.http import DefaultsHttpServer
+
+    server = DefaultsHttpServer.__new__(DefaultsHttpServer)
+    server._build_context = lambda: {"request_id": "req-1"}
+
+    denied = {
+        "status": "error",
+        "error": {
+            "code": "PERMISSION_DENIED",
+            "message": "Permission denied: function.call",
+        },
+    }
+    with patch("domain.function_runtime.registry.function_id_for_block_module", return_value="external_sources"), patch(
+        "domain.function_runtime.bridge.invoke_function",
+        return_value=denied,
+    ), patch(
+        "transport.http.invoke_block",
+        return_value={"status": "ok", "data": {"sources": []}},
+    ) as legacy:
+        result = server._invoke_fallback_block(
+            "blocks.external.sources",
+            {"_actual_method": "GET"},
+            {},
+        )
+
+    assert result == denied
+    legacy.assert_not_called()
+
+
 def test_fallback_http_dev_auto_approve_retries_pack_not_approved_post(monkeypatch):
     from transport.http import DefaultsHttpServer
 
@@ -219,6 +249,11 @@ def test_external_webhook_admin_routes_require_sensitive_http_auth():
     assert http._requires_sensitive_http_auth("GET", "/api/external/tokens")
     assert http._requires_sensitive_http_auth("POST", "/api/external/tokens")
 
+    assert http._requires_sensitive_http_auth("GET", "/api/external/sources")
+    assert http._requires_sensitive_http_auth("POST", "/api/external/sources")
+    assert http._requires_sensitive_http_auth("PUT", "/api/external/sources")
+    assert http._requires_sensitive_http_auth("DELETE", "/api/external/sources")
+
     assert not http._requires_sensitive_http_auth("GET", "/api/external/templates")
     assert http._requires_sensitive_http_auth("POST", "/api/external/templates")
 
@@ -242,6 +277,7 @@ def test_external_webhook_admin_routes_are_sensitive_for_cors():
     assert http._is_sensitive_http_path("/api/webhooks/endpoints/test-webhook")
     assert http._is_sensitive_http_path("/api/webhooks/public-urls")
     assert http._is_sensitive_http_path("/api/webhooks/public-urls/cfqt_123")
+    assert http._is_sensitive_http_path("/api/external/sources")
     assert http._is_sensitive_http_path("/api/external/templates")
 
     assert not http._is_sensitive_http_path("/api/webhooks/inbound/test-webhook")
