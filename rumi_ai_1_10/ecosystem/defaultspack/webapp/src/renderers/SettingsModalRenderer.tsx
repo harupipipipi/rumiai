@@ -122,8 +122,8 @@ function MaskedExternalTokenLabel({ token }: { token: Record<string, unknown> })
 function externalTokenKindOptions(providerId: string): Array<{ value: string; label: string }> {
   const common: Record<string, Array<{ value: string; label: string }>> = {
     line: [
-      { value: "channel_secret", label: "Channel Secret" },
-      { value: "channel_access_token", label: "Channel Access Token" },
+      { value: "channel_secret", label: "Messaging API Channel Secret" },
+      { value: "channel_access_token", label: "Messaging API Channel Access Token" },
       { value: "reply_token", label: "Reply Token" },
     ],
     discord: [
@@ -623,8 +623,8 @@ function SettingsField({
       const registeredTokens = registeredExternalTokenRows(providers);
       const requiredTokens = requiredExternalTokenRows(providers);
       const tokenHintByProvider: Record<string, string> = {
-        line: "LINE: Channel Secret / Channel Access Tokenを貼ります。返信先IDは外部入力から自動取得、push時だけTarget IDを使います。",
-        discord: "Discord Bot + Channel: Bot Tokenを貼り、Channel IDはTarget / Channel ID欄へ。Webhook mode: Webhook URLを貼ります。",
+        line: "LINE: Messaging API Channel Secret / Access Tokenを貼ります。返信は受信元 conversation へ返り、push時だけExplicit Target IDを使います。",
+        discord: "Discord Bot + Channel: Bot Tokenを貼り、Channel IDはExplicit Target ID欄へ。Webhook mode: Webhook URLを貼ります。",
         slack: "Slack: Signing Secret / Bot Tokenを貼り、Channel IDやThread TSはTarget欄へ。",
         generic: "Generic: shared secretやcallback URLを貼ります。",
       };

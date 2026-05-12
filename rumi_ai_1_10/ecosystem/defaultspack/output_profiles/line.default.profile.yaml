@@ -3,14 +3,26 @@ provider: line
 version: 1
 display_name: LINE Default Output
 transport: line_messaging_api
-mode: reply_or_push
+mode: reply_to_origin
 credentials:
   token_ref:
     provider_id: line
     kind: channel_access_token
 targets:
+  origin:
+    source_type: "$.payload.source.type"
+    source_id:
+      when:
+        - if: "$.payload.source.type == 'group'"
+          value: "$.payload.source.groupId"
+        - if: "$.payload.source.type == 'room'"
+          value: "$.payload.source.roomId"
+        - if: "$.payload.source.type == 'user'"
+          value: "$.payload.source.userId"
   reply_token: "$.metadata.reply_token"
-  push_target: "$.payload.source.userId"
+fallback:
+  missing_reply_token: store_only
+  push_to_origin: false
 capabilities_profile: line
 safety:
   recheck_sensitivity: true

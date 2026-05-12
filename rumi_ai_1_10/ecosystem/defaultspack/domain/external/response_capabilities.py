@@ -22,7 +22,7 @@ DEFAULT_RESPONSE_CAPABILITIES: dict[str, dict[str, Any]] = {
     "line": {
         "provider": "line",
         "capabilities": {
-            "text": {"enabled": True, "max_chars": 5000, "supports_markdown": False},
+            "text": {"enabled": True, "max_chars": 5000, "max_messages": 5, "supports_markdown": False},
             "files": {"enabled": False},
             "images": {"enabled": True, "max_bytes_per_image": 10485760, "allowed_mime": ["image/jpeg", "image/png"]},
             "reply": {"supports_reply_token": True, "supports_push": True},

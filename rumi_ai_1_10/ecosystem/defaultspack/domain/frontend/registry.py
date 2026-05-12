@@ -17,6 +17,7 @@ from domain.extensions.runtime import get_extension_registry
 from domain.external.input_profile_registry import InputProfileRegistry
 from domain.external.io_templates import external_io_template_catalog
 from domain.external.output_profile_registry import OutputProfileRegistry
+from domain.external.source_store import ExternalSourceStore, external_source_key
 from domain.external.token_store import external_token_status, set_external_token
 from domain.tool.registry import ToolRegistry
 from domain.webhook.endpoint_store import WebhookEndpointStore
@@ -605,7 +606,7 @@ class FrontendRegistry:
             {
                 "id": "external_input",
                 "label": "External Input",
-                "description": "Webhookで受ける入口。Built-inは選択とコピペだけで設定します。",
+                "description": "Webhookで受ける入口。LINE は Messaging API channel の webhook として受けます。",
                 "fields": [
                     {
                         "id": "input_setup_guide",
@@ -615,8 +616,8 @@ class FrontendRegistry:
                             "1. Providerを選ぶ\n"
                             "2. Temporary Public URLでWebhook URLを発行する\n"
                             "3. ProviderのWebhook URL欄へコピーする\n"
-                            "4. External Outputで必要なtokenを貼る\n"
-                            "5. 送信元を伝える / default応答を選ぶ"
+                            "4. LINE Messaging API Channel Secret / Access Tokenを貼る\n"
+                            "5. line-main endpointを有効化し、受信元ルールを確認する"
                         ),
                     },
                     {
@@ -654,7 +655,7 @@ class FrontendRegistry:
                         "label": "Endpoint ID",
                         "type": "text",
                         "default": "line-main",
-                        "help": "provider ダッシュボードや endpoint 設定に貼る識別子です。例: line-main, discord-main, slack-main。",
+                        "help": "Rumi 側の endpoint 識別子です。LINE の channel ID ではありません。",
                     },
                     {
                         "id": "public_url_launcher",
@@ -692,7 +693,7 @@ class FrontendRegistry:
                     },
                     {
                         "id": "include_source_context",
-                        "label": "Tell Source By Default",
+                        "label": "Include Source Context",
                         "type": "toggle",
                         "default": True,
                         "help": "外部入力をchatへ渡す時に、LINE/Discord/Slackなど送信元を既定で伝えます。",
@@ -703,11 +704,11 @@ class FrontendRegistry:
                         "type": "select",
                         "default": "same_response",
                         "options": [
-                            {"value": "same_response", "label": "Same response"},
+                            {"value": "same_response", "label": "Reply to source conversation"},
                             {"value": "custom_prompt", "label": "Custom prompt"},
                             {"value": "store_only", "label": "Store only"},
                         ],
-                        "help": "default は同じ応答。それ以外は response_prompt でカスタム指示できます。",
+                        "help": "LINE では replyToken を使って受信元の個人/グループ/複数人トークへ返信します。",
                     },
                     {
                         "id": "input_response_preset",
@@ -715,21 +716,29 @@ class FrontendRegistry:
                         "type": "select",
                         "default": "same_source_reply",
                         "options": [
-                            {"value": "same_source_reply", "label": "Default: same source reply"},
+                            {"value": "same_source_reply", "label": "Same source reply"},
                             {"value": "store_only", "label": "Store only"},
+                            {"value": "push_to_remembered_source", "label": "Push to remembered source"},
                             {"value": "line_to_discord", "label": "LINE -> Discord"},
                             {"value": "line_to_web", "label": "LINE -> Web/local"},
                             {"value": "browser_then_reply", "label": "Browser use -> reply"},
                             {"value": "python_then_reply", "label": "Python -> reply"},
                             {"value": "computer_use_line_biz", "label": "Computer use -> LINE Biz"},
                         ],
-                        "help": "ビルトインは選択式の応答プリセットだけにし、自由文プロンプトは External Custom に置きます。",
+                        "help": "Same source reply は送信先ID入力不要です。Push は保存済み source の許可がある時だけ使います。",
                     },
                     {
                         "id": "policy_summary",
                         "label": "Audience Policies",
                         "type": "readonly",
-                        "default": "Default allow/deny policies are evaluated server-side.",
+                        "default": "line.production: verified text only, saved source allowed, unknown source denied.",
+                    },
+                    {
+                        "id": "saved_sources_summary",
+                        "label": "Saved Sources",
+                        "type": "readonly",
+                        "default": "No saved sources",
+                        "help": "LINE の user/group/room source は webhook 受信時に自動保存されます。push は許可済み source のみ使います。",
                     },
                 ],
             },
@@ -743,7 +752,7 @@ class FrontendRegistry:
                         "label": "Send Modes",
                         "type": "readonly",
                         "default": (
-                            "LINE: Channel Access TokenでreplyTokenへ返信、またはUser/Group/Room IDへpush\n"
+                            "LINE: Messaging API Channel Access Tokenで受信元へreply。push fallbackは既定OFF\n"
                             "Discord Bot + Channel: Bot Tokenを保存し、Channel IDをTarget IDへ貼る\n"
                             "Discord Webhook URL: Channel Webhook URLをExternal Tokensへ保存する\n"
                             "Slack: Bot Tokenを保存し、Channel ID / Thread TSをTarget IDへ貼る\n"
@@ -763,7 +772,7 @@ class FrontendRegistry:
                         "type": "select",
                         "default": "line",
                         "options": self._provider_options(output_templates, fallback=["line", "discord", "slack", "generic", "web"]),
-                        "help": "返信・転送先 provider を選びます。tool 経由の LINE/Discord/Slack 送信にも使います。",
+                        "help": "返信・転送先 provider を選びます。LINE の送信先は channel ではなく source conversation です。",
                     },
                     {
                         "id": "output_template_id",
@@ -779,16 +788,17 @@ class FrontendRegistry:
                         "type": "select",
                         "default": "line.default",
                         "options": output_profile_options,
-                        "help": "送信能力、文字数上限、fallback を決める response profile です。",
+                        "help": "送信能力、文字数上限、reply/push mode を決める response profile です。",
                     },
                     {
                         "id": "output_send_mode",
                         "label": "Send Mode",
                         "type": "select",
-                        "default": "same_source_reply",
+                        "default": "reply_to_origin",
                         "options": [
-                            {"value": "same_source_reply", "label": "Default: same source reply"},
-                            {"value": "line_reply_or_push", "label": "LINE reply / push"},
+                            {"value": "reply_to_origin", "label": "Reply to source conversation"},
+                            {"value": "push_to_saved_origin", "label": "Push to remembered source"},
+                            {"value": "push_to_explicit_target", "label": "Push to explicit target"},
                             {"value": "discord_bot_channel", "label": "Discord bot + channel_id"},
                             {"value": "discord_webhook_url", "label": "Discord webhook URL"},
                             {"value": "slack_channel", "label": "Slack channel/thread"},
@@ -799,10 +809,10 @@ class FrontendRegistry:
                     },
                     {
                         "id": "output_target_id",
-                        "label": "Target / Channel ID",
+                        "label": "Explicit Target ID",
                         "type": "text",
                         "default": "",
-                        "help": "Discord channel_id、Slack channel_id、LINE user/group/room ID など、秘密ではない送信先IDを貼ります。Webhook URLはExternal Tokensへ保存します。",
+                        "help": "明示送信時だけ使います。LINE は userId / groupId / roomId、Discord/Slack は channel_id。Webhook URLはExternal Tokensへ保存します。",
                     },
                     {
                         "id": "output_callback_token_id",
@@ -815,7 +825,7 @@ class FrontendRegistry:
                         "id": "output_template_summary",
                         "label": "Output Templates",
                         "type": "readonly",
-                        "default": "Discord bot/channel or webhook URL, LINE reply/push, Slack channel, Generic webhook, Web/local.",
+                        "default": "Discord bot/channel or webhook URL, LINE source reply or explicit push, Slack channel, Generic webhook, Web/local.",
                     },
                     {
                         "id": "output_profile_summary",
@@ -835,7 +845,7 @@ class FrontendRegistry:
                         "type": "select",
                         "default": "same_source_reply",
                         "options": [
-                            {"value": "same_source_reply", "label": "Default: same source reply"},
+                            {"value": "same_source_reply", "label": "Same source reply"},
                             {"value": "summarize_then_reply", "label": "Summarize then reply"},
                             {"value": "run_browser_use", "label": "Browser use when current info is needed"},
                             {"value": "run_python", "label": "Python for calculation / file processing"},
@@ -1453,8 +1463,8 @@ class FrontendRegistry:
                     "1. Providerを選ぶ\n"
                     "2. Temporary Public URLでWebhook URLを発行する\n"
                     "3. ProviderのWebhook URL欄へコピーする\n"
-                    "4. External Outputで必要なtokenを貼る\n"
-                    "5. 送信元を伝える / default応答を選ぶ"
+                    "4. LINE Messaging API Channel Secret / Access Tokenを貼る\n"
+                    "5. line-main endpointを有効化し、受信元ルールを確認する"
                 ),
                 "endpoint_summary": "",
                 "input_provider": "line",
@@ -1476,11 +1486,12 @@ class FrontendRegistry:
                 "include_source_context": True,
                 "default_response_mode": "same_response",
                 "input_response_preset": "same_source_reply",
-                "policy_summary": "Default allow/deny policies are evaluated server-side.",
+                "policy_summary": "line.production: verified text only, saved source allowed, unknown source denied.",
+                "saved_sources_summary": "No saved sources",
             },
             "external_output": {
                 "output_setup_guide": (
-                    "LINE: Channel Access TokenでreplyTokenへ返信、またはUser/Group/Room IDへpush\n"
+                    "LINE: Messaging API Channel Access Tokenで受信元へreply。push fallbackは既定OFF\n"
                     "Discord Bot + Channel: Bot Tokenを保存し、Channel IDをTarget IDへ貼る\n"
                     "Discord Webhook URL: Channel Webhook URLをExternal Tokensへ保存する\n"
                     "Slack: Bot Tokenを保存し、Channel ID / Thread TSをTarget IDへ貼る\n"
@@ -1490,10 +1501,10 @@ class FrontendRegistry:
                 "output_provider": "line",
                 "output_template_id": "line.output.default",
                 "output_profile_id": "line.default",
-                "output_send_mode": "same_source_reply",
+                "output_send_mode": "reply_to_origin",
                 "output_target_id": "",
                 "output_callback_token_id": "main",
-                "output_template_summary": "Discord bot/channel or webhook URL, LINE reply/push, Slack channel, Generic webhook, Web/local.",
+                "output_template_summary": "Discord bot/channel or webhook URL, LINE source reply or explicit push, Slack channel, Generic webhook, Web/local.",
                 "output_profile_summary": "",
                 "response_summary": "Prompt decisions create action plans; tools/adapters execute after policy checks.",
                 "response_prompt_preset": "same_source_reply",
@@ -1781,11 +1792,12 @@ class FrontendRegistry:
         external_input.setdefault("include_source_context", True)
         external_input.setdefault("default_response_mode", "same_response")
         external_input.setdefault("input_response_preset", "same_source_reply")
-        external_input.setdefault("policy_summary", "Default allow/deny policies are evaluated server-side.")
+        external_input.setdefault("policy_summary", "line.production: verified text only, saved source allowed, unknown source denied.")
+        external_input["saved_sources_summary"] = self._external_sources_summary()
         external_output.setdefault(
             "output_setup_guide",
             (
-                "LINE: Channel Access TokenでreplyTokenへ返信、またはUser/Group/Room IDへpush\n"
+                "LINE: Messaging API Channel Access Tokenで受信元へreply。push fallbackは既定OFF\n"
                 "Discord Bot + Channel: Bot Tokenを保存し、Channel IDをTarget IDへ貼る\n"
                 "Discord Webhook URL: Channel Webhook URLをExternal Tokensへ保存する\n"
                 "Slack: Bot Tokenを保存し、Channel ID / Thread TSをTarget IDへ貼る\n"
@@ -1796,7 +1808,12 @@ class FrontendRegistry:
         external_output.setdefault("output_provider", "line")
         external_output.setdefault("output_template_id", "line.output.default")
         external_output.setdefault("output_profile_id", "line.default")
-        external_output.setdefault("output_send_mode", "same_source_reply")
+        external_output.setdefault("output_send_mode", "reply_to_origin")
+        if (
+            str(external_output.get("output_provider") or "line") == "line"
+            and str(external_output.get("output_send_mode") or "") in {"same_source_reply", "line_reply_or_push", "reply_or_push"}
+        ):
+            external_output["output_send_mode"] = "reply_to_origin"
         external_output.setdefault("output_target_id", "")
         external_output.setdefault("output_callback_token_id", "main")
         external_output["output_template_summary"] = self._template_summary(output_templates)
@@ -1955,7 +1972,7 @@ class FrontendRegistry:
         if template.get("output_profile_id"):
             values["output_profile_id"] = str(template.get("output_profile_id"))
         mode_by_template = {
-            "line.output.default": "line_reply_or_push",
+            "line.output.default": "reply_to_origin",
             "discord.output.bot_channel": "discord_bot_channel",
             "discord.output.webhook": "discord_webhook_url",
             "slack.output.default": "slack_channel",
@@ -1963,6 +1980,27 @@ class FrontendRegistry:
         }
         if template_id in mode_by_template:
             values.setdefault("output_send_mode", mode_by_template[template_id])
+
+    def _external_sources_summary(self) -> str:
+        try:
+            sources = ExternalSourceStore().list_sources()
+        except Exception:
+            sources = []
+        if not sources:
+            return "No saved sources"
+        lines = []
+        for source in sorted(sources, key=lambda item: (str(item.get("provider") or ""), str(item.get("source_type") or ""), str(item.get("source_id") or "")))[:20]:
+            key = external_source_key(
+                str(source.get("provider") or ""),
+                str(source.get("source_type") or ""),
+                str(source.get("source_id") or ""),
+            )
+            state = "push:on" if source.get("allow_push") else "push:off"
+            enabled = "enabled" if source.get("enabled") else "disabled"
+            lines.append(f"{key} ({enabled}, reply:on, {state})")
+        if len(sources) > 20:
+            lines.append(f"... and {len(sources) - 20} more")
+        return "\n".join(lines)
 
     @staticmethod
     def _route_for_input_provider(provider: str) -> str:

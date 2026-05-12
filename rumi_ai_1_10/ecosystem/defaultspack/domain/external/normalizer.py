@@ -20,11 +20,31 @@ def normalize_line_event(event: dict[str, Any], *, verified: bool, destination: 
     message = event.get("message") if isinstance(event.get("message"), dict) else {}
     source_type = _clean(source.get("type"), "unknown")
     scope_type = source_type if source_type in {"group", "room", "user"} else "unknown"
-    scope_id = _clean(source.get("groupId") or source.get("roomId") or source.get("userId"), "unknown")
+    if scope_type == "group":
+        scope_id = _clean(source.get("groupId"), "unknown")
+    elif scope_type == "room":
+        scope_id = _clean(source.get("roomId"), "unknown")
+    elif scope_type == "user":
+        scope_id = _clean(source.get("userId"), "unknown")
+    else:
+        scope_id = "unknown"
     actor_id = _clean(source.get("userId"), scope_id if scope_type == "user" else "unknown")
     conversation_id = _conversation_id("line", scope_type, scope_id)
     event_id = _clean(event.get("webhookEventId") or message.get("id"))
     message_id = _clean(message.get("id"))
+    message_type = _clean(message.get("type"), "unknown")
+    attachments = []
+    if message_type not in {"", "unknown", "text"} and message_id:
+        attachments.append(
+            {
+                "provider": "line",
+                "message_id": message_id,
+                "message_type": message_type,
+                "content_api": f"https://api-data.line.me/v2/bot/message/{message_id}/content",
+                "retrieval": "line_content_api",
+                "status": "unsupported_inline",
+            }
+        )
     return ExternalEvent(
         provider="line",
         workspace=ExternalPrincipal("line_destination", _clean(destination or event.get("destination"), "unknown")),
@@ -35,14 +55,16 @@ def normalize_line_event(event: dict[str, Any], *, verified: bool, destination: 
             "id": event_id,
             "message_id": message_id,
             "type": _clean(event.get("type"), "unknown"),
-            "message_type": _clean(message.get("type"), "unknown"),
+            "message_type": message_type,
         },
         payload=event,
         verified=verified,
         metadata={
             "reply_token": event.get("replyToken"),
+            "mode": _clean(event.get("mode"), "active"),
             "source": source,
             "message": message,
+            "attachments": attachments,
         },
     )
 

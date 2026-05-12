@@ -2,13 +2,14 @@ id: line.input.default
 direction: input
 provider: line
 display_name: LINE Input
-summary: Issue a temporary public URL, paste it into LINE Messaging API Webhook URL, then receive LINE events.
+summary: Configure a LINE Messaging API channel webhook and reply to the source conversation.
 setup_steps:
   - Select LINE Input.
   - Generate a Cloudflare Quick Tunnel URL for /api/integrations/line/webhook.
   - Paste the generated URL into LINE Messaging API Webhook URL.
-  - Save Channel Secret and Channel Access Token in External Tokens.
-  - Rumi replies with replyToken first, then can push when a target ID is available.
+  - Save the Messaging API Channel Secret and Channel Access Token in External Tokens.
+  - Enable the line-main endpoint after checking the source rules.
+  - Rumi replies with replyToken to the source user/group/room; no destination ID entry is needed for immediate replies.
 input_profile_id: line.default
 endpoint:
   id: line-main
@@ -18,9 +19,9 @@ endpoint:
     mode: provider_signature
 tokens:
   - kind: channel_secret
-    label: Channel Secret
+    label: Messaging API Channel Secret
   - kind: channel_access_token
-    label: Channel Access Token
+    label: Messaging API Channel Access Token
 default_response:
   mode: same_response
   include_source_context: true
@@ -29,8 +30,11 @@ response_prompt:
   enabled: false
 examples:
   - id: line.default.same_response
-    label: Default same response
-    prompt: "同じ会話へ短く返答する。送信元は既定で会話文脈に入れる。"
+    label: Same source reply
+    prompt: "replyToken を使い、受信した個人/グループ/複数人トークへ短く返答する。送信先ID入力は不要。"
+  - id: line.push.remembered_source
+    label: Push to remembered source
+    prompt: "以前受信して保存済みの LINE user/group/room source へ、許可されている場合だけ push する。"
   - id: line.to.discord
     label: LINE to Discord
     prompt: "LINEから来た内容を要約し、external_send toolでDiscordの指定channel_idへ送ってから、LINEには受付済みと返す。"
