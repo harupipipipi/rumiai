@@ -490,6 +490,28 @@
       "linux"
     ]
   },
+  "pre_auth_routes": [
+    {
+      "method": "POST",
+      "path": "/api/integrations/line/webhook"
+    },
+    {
+      "method": "POST",
+      "path": "/api/integrations/slack/events"
+    },
+    {
+      "method": "POST",
+      "path": "/api/integrations/discord/interactions"
+    },
+    {
+      "method": "POST",
+      "path": "/api/integrations/discord/events"
+    },
+    {
+      "method": "POST",
+      "path_prefix": "/api/webhooks/inbound"
+    }
+  ],
   "api_routes": [
     {
       "method": "GET",

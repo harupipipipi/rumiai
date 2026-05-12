@@ -25,10 +25,19 @@ def submit_input(envelope: RumiInputEnvelope | dict[str, Any], context: dict[str
     integration_store = IntegrationConversationStore()
     if integration_store.is_event_processed(provider, event_id):
         return {"status": "duplicate", "event_id": event_id, "assistant_text": ""}
+    if not integration_store.claim_event(
+        provider,
+        event_id,
+        metadata={"external_key": external_key},
+    ):
+        if integration_store.is_event_processed(provider, event_id):
+            return {"status": "duplicate", "event_id": event_id, "assistant_text": ""}
+        return {"status": "in_progress", "event_id": event_id, "assistant_text": ""}
 
     metadata = dict(envelope.metadata)
     metadata.setdefault("source", source)
     cleaned_text = apply_external_source_context(cleaned_text, envelope, source=source, metadata=metadata)
+    cleaned_text = apply_external_runtime_prompt(cleaned_text, context)
     resolver = ExternalConversationResolver(integration_store=integration_store)
     conversation = resolver.resolve(
         provider=provider,
@@ -59,26 +68,29 @@ def submit_input(envelope: RumiInputEnvelope | dict[str, Any], context: dict[str
         "tools": list(envelope.tools),
     }
 
-    result = send_run(request, context or {})
-    if not isinstance(result, dict) or result.get("status") != "ok":
-        return {
-            "status": "error",
-            "conversation_id": conversation["id"],
-            "error": result.get("error") if isinstance(result, dict) else str(result),
-            "assistant_text": "",
-        }
+    try:
+        result = send_run(request, context or {})
+        if not isinstance(result, dict) or result.get("status") != "ok":
+            return {
+                "status": "error",
+                "conversation_id": conversation["id"],
+                "error": result.get("error") if isinstance(result, dict) else str(result),
+                "assistant_text": "",
+            }
 
-    assistant = result.get("data") if isinstance(result.get("data"), dict) else {}
-    payload = {
-        "status": "ok",
-        "provider": provider,
-        "event_id": event_id,
-        "conversation_id": conversation["id"],
-        "assistant_message_id": assistant.get("id"),
-        "assistant_text": _extract_assistant_text(assistant),
-    }
-    integration_store.mark_event_processed(provider, event_id, payload)
-    return payload
+        assistant = result.get("data") if isinstance(result.get("data"), dict) else {}
+        payload = {
+            "status": "ok",
+            "provider": provider,
+            "event_id": event_id,
+            "conversation_id": conversation["id"],
+            "assistant_message_id": assistant.get("id"),
+            "assistant_text": _extract_assistant_text(assistant),
+        }
+        integration_store.mark_event_processed(provider, event_id, payload)
+        return payload
+    finally:
+        integration_store.release_event_claim(provider, event_id)
 
 
 def _extract_assistant_text(message: dict[str, Any]) -> str:
@@ -130,6 +142,28 @@ def apply_external_source_context(
         details.append(f"actor={actor_text}")
     detail_text = f" ({', '.join(details)})" if details else ""
     return f"[External source: {prefix}{detail_text}]\n{text}".strip()
+
+
+def apply_external_runtime_prompt(text: str, context: dict[str, Any] | None = None) -> str:
+    context = context if isinstance(context, dict) else {}
+    prefix = str(
+        context.get("external_prompt_prefix")
+        or context.get("external_instruction_prefix")
+        or context.get("prompt_prefix")
+        or ""
+    ).strip()
+    suffix = str(
+        context.get("external_prompt_suffix")
+        or context.get("external_instruction_suffix")
+        or context.get("prompt_suffix")
+        or ""
+    ).strip()
+    updated = str(text or "").strip()
+    if prefix:
+        updated = f"{prefix}\n\n{updated}".strip()
+    if suffix:
+        updated = f"{updated}\n\n{suffix}".strip()
+    return updated
 
 
 def _principal_label(value: dict[str, Any]) -> str:

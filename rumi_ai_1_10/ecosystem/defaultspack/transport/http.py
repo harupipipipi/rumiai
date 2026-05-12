@@ -38,6 +38,13 @@ _SAFE_GET_FALLBACK_BLOCKS = {
     "blocks.ui.settings",
 }
 
+_LONG_RUNNING_FALLBACK_BLOCKS = {
+    "blocks.chat.send",
+    "blocks.integrations.line",
+    "blocks.webhooks.inbound",
+}
+_LONG_RUNNING_FALLBACK_TIMEOUT_SECONDS = 300.0
+
 
 class DefaultsHttpServer:
     def __init__(self, facade):
@@ -173,11 +180,13 @@ class DefaultsHttpServer:
             if function_id:
                 context["_defaultspack_http_route_adapter"] = True
                 qualified_name = f"defaultspack:{function_id}"
+                timeout_seconds = self._fallback_function_timeout_seconds(module_name, payload)
                 result = invoke_function(
                     qualified_name,
                     payload,
                     context,
                     principal_id="defaultspack",
+                    timeout_seconds=timeout_seconds,
                 )
                 result = self._retry_after_dev_auto_approve(
                     qualified_name,
@@ -185,6 +194,7 @@ class DefaultsHttpServer:
                     context,
                     result,
                     invoke_function,
+                    timeout_seconds=timeout_seconds,
                 )
                 error_info = result.get("error", {}) if isinstance(result, dict) else {}
                 error_code = str(error_info.get("code") or "")
@@ -209,7 +219,16 @@ class DefaultsHttpServer:
             pass
         return invoke_block(module_name, payload, context)
 
-    def _retry_after_dev_auto_approve(self, qualified_name, payload, context, result, invoke_function):
+    def _retry_after_dev_auto_approve(
+        self,
+        qualified_name,
+        payload,
+        context,
+        result,
+        invoke_function,
+        *,
+        timeout_seconds=None,
+    ):
         error_info = result.get("error", {}) if isinstance(result, dict) else {}
         if str(error_info.get("code") or "") != "PACK_NOT_APPROVED":
             return result
@@ -221,7 +240,26 @@ class DefaultsHttpServer:
             payload,
             context,
             principal_id=pack_id,
+            timeout_seconds=timeout_seconds,
         )
+
+    @staticmethod
+    def _fallback_function_timeout_seconds(module_name, payload):
+        explicit = payload.get("timeout_seconds") if isinstance(payload, dict) else None
+        if explicit not in (None, ""):
+            try:
+                return max(1.0, float(explicit))
+            except (TypeError, ValueError):
+                pass
+        env_value = os.environ.get("RUMI_DEFAULTSPACK_HTTP_FALLBACK_TIMEOUT_SECONDS", "").strip()
+        if env_value:
+            try:
+                return max(1.0, float(env_value))
+            except ValueError:
+                pass
+        if module_name in _LONG_RUNNING_FALLBACK_BLOCKS:
+            return _LONG_RUNNING_FALLBACK_TIMEOUT_SECONDS
+        return None
 
     def _dev_auto_approve_pack(self, pack_id):
         rumi_env = os.environ.get("RUMI_ENVIRONMENT", "").lower()

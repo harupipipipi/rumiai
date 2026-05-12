@@ -58,6 +58,7 @@ def invoke_function(
     args: dict[str, Any] | None,
     context: dict[str, Any] | None = None,
     principal_id: str = "defaultspack",
+    timeout_seconds: float | None = None,
 ) -> dict[str, Any]:
     """Invoke a Rumi function through the shared CapabilityExecutor."""
     try:
@@ -72,6 +73,8 @@ def invoke_function(
         "args": dict(args or {}),
         "request_id": str((context or {}).get("request_id") or uuid.uuid4()),
     }
+    if timeout_seconds is not None:
+        request["timeout_seconds"] = timeout_seconds
     try:
         container = get_container()
         if qualified_name.startswith("defaultspack:") or qualified_name.startswith("defaults."):
@@ -98,6 +101,13 @@ def invoke_defaultspack_function(
     args: dict[str, Any] | None,
     context: dict[str, Any] | None = None,
     principal_id: str = "defaultspack",
+    timeout_seconds: float | None = None,
 ) -> dict[str, Any]:
     qualified_name = function_id if ":" in function_id else f"defaultspack:{function_id}"
-    return invoke_function(qualified_name, args, context, principal_id)
+    return invoke_function(
+        qualified_name,
+        args,
+        context,
+        principal_id,
+        timeout_seconds=timeout_seconds,
+    )

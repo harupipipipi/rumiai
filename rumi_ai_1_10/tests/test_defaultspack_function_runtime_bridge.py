@@ -77,6 +77,31 @@ def test_bridge_uses_explicit_principal_for_external_pack_callers():
     assert request["request_id"] == "req-2"
 
 
+def test_bridge_forwards_timeout_seconds_to_capability_executor():
+    from domain.function_runtime.bridge import invoke_function
+
+    executor = MagicMock()
+    executor.execute.return_value = SimpleNamespace(
+        success=True,
+        output={"status": "ok", "data": {}},
+        error=None,
+        error_type=None,
+    )
+
+    with patch("core_runtime.di_container.get_container", return_value=_FakeContainer(executor)):
+        result = invoke_function(
+            "defaultspack:chat_send",
+            {"conversation_id": "c1"},
+            {"request_id": "req-timeout"},
+            timeout_seconds=120,
+        )
+
+    assert result == {"status": "ok", "data": {}}
+    principal_id, request = executor.execute.call_args.args
+    assert principal_id == "defaultspack"
+    assert request["timeout_seconds"] == 120
+
+
 def test_high_risk_defaultspack_function_rejects_unapproved_external_caller():
     from core_runtime.capability_executor import CapabilityExecutor
     from core_runtime.function_registry import FunctionRegistry

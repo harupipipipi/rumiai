@@ -90,6 +90,7 @@ def _handle_event(
     runtime_context.setdefault("response_profile_id", endpoint.response_profile_id)
     runtime_context.setdefault("conversation", dict(endpoint.conversation))
     runtime_context.setdefault("source_record", source_record)
+    runtime_context = _apply_endpoint_response_context(runtime_context, endpoint)
     policy = AudiencePolicyRegistry().resolve(endpoint.audience_policy_id, event=external_event)
     decision = AudiencePolicy(policy).evaluate(external_event)
     if not decision.allowed:
@@ -187,3 +188,124 @@ def _verify_line(headers: Dict[str, str], raw_body: bytes) -> Dict[str, Any]:
 
 def _send_line_reply(reply_token: str, text: str) -> Dict[str, Any]:
     return LineResponseAdapter().send_text_reply(reply_token, text_limit(text, 5000))
+
+
+def _apply_endpoint_response_context(runtime_context: dict[str, Any], endpoint: WebhookEndpoint) -> dict[str, Any]:
+    updated = dict(runtime_context or {})
+    response = endpoint.response if isinstance(endpoint.response, dict) else {}
+    if not response:
+        return updated
+
+    mode = str(response.get("mode") or "").strip().lower()
+    prompt_prefix = str(
+        response.get("prompt_prefix")
+        or response.get("instruction_prefix")
+        or response.get("computer_use_prompt")
+        or _line_biz_prompt_prefix(response, mode=mode)
+        or ""
+    ).strip()
+    if prompt_prefix:
+        updated.setdefault("external_prompt_prefix", prompt_prefix)
+
+    prompt_suffix = str(
+        response.get("prompt_suffix")
+        or response.get("instruction_suffix")
+        or ""
+    ).strip()
+    if prompt_suffix:
+        updated.setdefault("external_prompt_suffix", prompt_suffix)
+
+    target_app = str(
+        response.get("target_app")
+        or response.get("computer_use_target_app")
+        or ("Google Chrome" if mode == "computer_use_line_biz" else "")
+        or ""
+    ).strip()
+    if target_app:
+        updated.setdefault("computer_use_target_app", target_app)
+
+    target_title = str(
+        response.get("target_title")
+        or response.get("computer_use_target_title")
+        or ("LINE" if mode == "computer_use_line_biz" else "")
+        or ""
+    ).strip()
+    if target_title:
+        updated.setdefault("computer_use_target_title", target_title)
+
+    tool_policy = dict(updated.get("profile_policy") if isinstance(updated.get("profile_policy"), dict) else {})
+    response_tool_policy = response.get("tool_policy") if isinstance(response.get("tool_policy"), dict) else {}
+    if response_tool_policy:
+        tool_policy.update(response_tool_policy)
+    if _truthy(
+        response.get("auto_approve")
+        or response.get("auto_approve_computer_use")
+        or response.get("yolo_mode")
+    ):
+        tool_policy["yolo_mode"] = True
+    if tool_policy:
+        updated["profile_policy"] = tool_policy
+
+    if _truthy(response.get("user_requested_computer_use")) or target_app or target_title or prompt_prefix:
+        updated.setdefault("user_requested_computer_use", True)
+
+    if _suppress_provider_reply(response):
+        updated.setdefault(
+            "response_prompt_decision",
+            {
+                "action": "store_only",
+                "reason": "provider reply suppressed by LINE endpoint response settings",
+                "sensitivity": "local_only",
+                "metadata": {
+                    "source": "line_endpoint_response",
+                    "mode": str(response.get("mode") or ""),
+                },
+            },
+        )
+
+    return updated
+
+
+def _line_biz_prompt_prefix(response: dict[str, Any], *, mode: str = "") -> str:
+    resolved_mode = (mode or str(response.get("mode") or "")).strip().lower()
+    if resolved_mode != "computer_use_line_biz":
+        return ""
+    chat_url = str(
+        response.get("line_biz_chat_url")
+        or response.get("chat_url")
+        or response.get("computer_use_target_url")
+        or ""
+    ).strip()
+    if not chat_url:
+        return ""
+    reply_language = str(
+        response.get("line_biz_reply_language")
+        or response.get("reply_language")
+        or "Japanese"
+    ).strip()
+    return (
+        "Use computer_use in Google Chrome to open "
+        f"{chat_url} and reply in {reply_language} inside LINE Official Account Manager. "
+        "Read the latest visible customer message in that chat, answer it clearly, "
+        "send the message in LINE Biz, and only after the send succeeds return a short local confirmation."
+    )
+
+
+def _suppress_provider_reply(response: dict[str, Any]) -> bool:
+    if _truthy(response.get("suppress_provider_reply")):
+        return True
+    mode = str(response.get("mode") or "").strip().lower()
+    return mode in {
+        "store_only",
+        "local_only",
+        "web_local",
+        "tool_only",
+        "computer_use_line_biz",
+        "computer_use_only",
+    }
+
+
+def _truthy(value: Any) -> bool:
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+    return bool(value)

@@ -509,8 +509,8 @@ class TestGetFunctionTimeout(unittest.TestCase):
         executor = CapabilityExecutor()
         entry = _make_entry(manifest={"grant_config": {"timeout": 9999}})
         t = executor._get_function_timeout(entry)
-        # MAX_TIMEOUT is 120
-        self.assertLessEqual(t, 120.0)
+        # MAX_TIMEOUT is 300
+        self.assertLessEqual(t, 300.0)
 
 
 if __name__ == "__main__":

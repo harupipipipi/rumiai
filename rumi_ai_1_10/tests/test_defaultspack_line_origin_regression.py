@@ -39,7 +39,7 @@ def _signed_line_payload(payload: dict[str, Any], *, raw_body: bytes | None = No
     }
 
 
-def _install_line_endpoint(monkeypatch, tmp_path, *, enabled: bool = True) -> None:
+def _install_line_endpoint(monkeypatch, tmp_path, *, enabled: bool = True, response: dict[str, Any] | None = None) -> None:
     endpoint_path = tmp_path / "endpoints.json"
     monkeypatch.setenv("RUMI_DEFAULTSPACK_WEBHOOK_ENDPOINTS_PATH", str(endpoint_path))
     monkeypatch.setenv("RUMI_DEFAULTSPACK_EXTERNAL_SOURCES_PATH", str(tmp_path / "external_sources.json"))
@@ -55,6 +55,7 @@ def _install_line_endpoint(monkeypatch, tmp_path, *, enabled: bool = True) -> No
             "response_profile_id": "line.default",
             "security": {"mode": "provider_signature"},
             "conversation": {"strategy": "external_key", "model": "stub/default"},
+            "response": dict(response or {}),
             "enabled": enabled,
         }
     )
@@ -141,6 +142,118 @@ def test_line_route_preserves_top_level_destination_and_endpoint_policy(monkeypa
     assert saved["enabled"] is True
     assert saved["actor_last_seen"] == "Uactor"
     assert saved["allow_push"] is False
+
+
+def test_line_route_applies_endpoint_response_context(monkeypatch, tmp_path):
+    from blocks.integrations import line as line_block  # noqa: E402
+
+    _install_line_endpoint(
+        monkeypatch,
+        tmp_path,
+        enabled=True,
+        response={
+            "mode": "computer_use_line_biz",
+            "prompt_prefix": "Use computer_use in Google Chrome and reply in LINE Biz.",
+            "target_app": "Google Chrome",
+            "target_title": "LINE",
+            "auto_approve_computer_use": True,
+        },
+    )
+    captured: dict[str, Any] = {}
+
+    def fake_dispatch(event, *, input_profile_id, audience_policy, context, send_response):
+        captured["input_profile_id"] = input_profile_id
+        captured["context"] = context
+        return {
+            "status": "ok",
+            "assistant_text": "done",
+            "response_plan": {
+                "provider": "line",
+                "messages": [],
+                "metadata": {"response_action_plan": {"type": "store_only", "external_reply": False}},
+            },
+        }
+
+    monkeypatch.setattr(line_block, "dispatch_external_event", fake_dispatch)
+    monkeypatch.setattr(LineResponseAdapter, "send", lambda self, plan, event=None, context=None: {"sent": True})
+    payload = {
+        "destination": "Udestination",
+        "events": [
+            {
+                "type": "message",
+                "mode": "active",
+                "webhookEventId": "evt-1",
+                "replyToken": "reply-1",
+                "source": {"type": "user", "userId": "Uactor"},
+                "message": {"id": "m1", "type": "text", "text": "hello"},
+            }
+        ],
+    }
+
+    result = line_block.run(_signed_line_payload(payload), {})
+
+    assert result["status"] == "ok"
+    assert captured["input_profile_id"] == "line.default"
+    assert captured["context"]["external_prompt_prefix"] == "Use computer_use in Google Chrome and reply in LINE Biz."
+    assert captured["context"]["computer_use_target_app"] == "Google Chrome"
+    assert captured["context"]["computer_use_target_title"] == "LINE"
+    assert captured["context"]["profile_policy"]["yolo_mode"] is True
+    assert captured["context"]["response_prompt_decision"]["action"] == "store_only"
+    assert captured["context"]["response_prompt_decision"]["sensitivity"] == "local_only"
+
+
+def test_line_route_builds_line_biz_prompt_from_chat_url(monkeypatch, tmp_path):
+    from blocks.integrations import line as line_block  # noqa: E402
+
+    chat_url = "https://chat.line.biz/U3615315e56cd0c7fd8dc296f60b6f149/chat/Ca3b2e13a28d5459f0b82057b6cd6033b"
+    _install_line_endpoint(
+        monkeypatch,
+        tmp_path,
+        enabled=True,
+        response={
+            "mode": "computer_use_line_biz",
+            "line_biz_chat_url": chat_url,
+        },
+    )
+    captured: dict[str, Any] = {}
+
+    def fake_dispatch(event, *, input_profile_id, audience_policy, context, send_response):
+        captured["context"] = context
+        return {
+            "status": "ok",
+            "assistant_text": "done",
+            "response_plan": {
+                "provider": "line",
+                "messages": [],
+                "metadata": {"response_action_plan": {"type": "store_only", "external_reply": False}},
+            },
+        }
+
+    monkeypatch.setattr(line_block, "dispatch_external_event", fake_dispatch)
+    monkeypatch.setattr(LineResponseAdapter, "send", lambda self, plan, event=None, context=None: {"sent": True})
+    payload = {
+        "destination": "Udestination",
+        "events": [
+            {
+                "type": "message",
+                "mode": "active",
+                "webhookEventId": "evt-1",
+                "replyToken": "reply-1",
+                "source": {"type": "user", "userId": "Uactor"},
+                "message": {"id": "m1", "type": "text", "text": "hello"},
+            }
+        ],
+    }
+
+    result = line_block.run(_signed_line_payload(payload), {})
+
+    assert result["status"] == "ok"
+    assert chat_url in captured["context"]["external_prompt_prefix"]
+    assert "LINE Official Account Manager" in captured["context"]["external_prompt_prefix"]
+    assert captured["context"]["computer_use_target_app"] == "Google Chrome"
+    assert captured["context"]["computer_use_target_title"] == "LINE"
+    assert captured["context"]["user_requested_computer_use"] is True
+    assert captured["context"]["response_prompt_decision"]["action"] == "store_only"
 
 
 def test_line_route_empty_events_ack_ok_without_dispatch(monkeypatch, tmp_path):
