@@ -1756,7 +1756,7 @@ class FrontendRegistry:
         input_templates = template_catalog.get("input") if isinstance(template_catalog.get("input"), list) else []
         output_templates = template_catalog.get("output") if isinstance(template_catalog.get("output"), list) else []
         enabled_count = sum(1 for endpoint in endpoints if endpoint.get("enabled"))
-        self._sync_external_input_selection(external_input, input_templates)
+        self._sync_external_input_selection(external_input, input_templates, endpoints=endpoints)
         self._sync_external_output_selection(external_output, output_templates)
         external_input.setdefault(
             "input_setup_guide",
@@ -1942,21 +1942,48 @@ class FrontendRegistry:
                 return item
         return None
 
-    def _sync_external_input_selection(self, values: dict[str, Any], templates: list[Any]) -> None:
+    def _sync_external_input_selection(
+        self,
+        values: dict[str, Any],
+        templates: list[Any],
+        *,
+        endpoints: list[dict[str, Any]] | None = None,
+    ) -> None:
         template_by_id = self._template_map(templates)
         provider = str(values.get("input_provider") or "line").strip() or "line"
+        endpoint_id = str(values.get("input_endpoint_id") or f"{provider}-main").strip()
+        endpoint = next(
+            (
+                item
+                for item in list(endpoints or [])
+                if isinstance(item, dict) and str(item.get("id") or "").strip() == endpoint_id
+            ),
+            None,
+        )
+        endpoint_template = self._input_template_for_endpoint(endpoint, templates) if endpoint else None
+        if endpoint is not None:
+            endpoint_provider = str(endpoint.get("kind") or provider).strip() or provider
+            values["input_provider"] = endpoint_provider
+            values["input_endpoint_id"] = str(endpoint.get("id") or endpoint_id).strip() or endpoint_id
+            endpoint_profile_id = str(endpoint.get("input_profile_id") or "").strip()
+            if endpoint_profile_id:
+                values["input_profile_id"] = endpoint_profile_id
+            if endpoint_template:
+                values["input_template_id"] = str(endpoint_template.get("id") or values.get("input_template_id") or "").strip()
+            provider = values["input_provider"]
         template = template_by_id.get(str(values.get("input_template_id") or "").strip())
         if template is None or str(template.get("provider") or "").strip() != provider:
-            template = self._first_template_for_provider(templates, provider) or template or self._first_template_for_provider(templates, "line")
+            template = endpoint_template or self._first_template_for_provider(templates, provider) or template or self._first_template_for_provider(templates, "line")
         if not template:
             return
         values["input_provider"] = str(template.get("provider") or provider).strip()
         values["input_template_id"] = str(template.get("id") or values.get("input_template_id") or "").strip()
-        if template.get("input_profile_id"):
+        if endpoint is None and template.get("input_profile_id"):
             values["input_profile_id"] = str(template.get("input_profile_id"))
-        endpoint = template.get("endpoint") if isinstance(template.get("endpoint"), dict) else {}
-        if endpoint.get("id"):
-            values["input_endpoint_id"] = str(endpoint.get("id"))
+        if endpoint is None:
+            template_endpoint = template.get("endpoint") if isinstance(template.get("endpoint"), dict) else {}
+            if template_endpoint.get("id"):
+                values["input_endpoint_id"] = str(template_endpoint.get("id"))
 
     def _sync_external_output_selection(self, values: dict[str, Any], templates: list[Any]) -> None:
         template_by_id = self._template_map(templates)
@@ -2001,6 +2028,34 @@ class FrontendRegistry:
         if len(sources) > 20:
             lines.append(f"... and {len(sources) - 20} more")
         return "\n".join(lines)
+
+    def _input_template_for_endpoint(self, endpoint: dict[str, Any] | None, templates: list[Any]) -> dict[str, Any] | None:
+        if not isinstance(endpoint, dict):
+            return None
+        provider = str(endpoint.get("kind") or "").strip()
+        input_profile_id = str(endpoint.get("input_profile_id") or "").strip()
+        response = endpoint.get("response") if isinstance(endpoint.get("response"), dict) else {}
+        response_mode = str(response.get("mode") or "").strip()
+        candidates = [
+            item
+            for item in templates
+            if isinstance(item, dict) and str(item.get("provider") or "").strip() == provider
+        ]
+        if not candidates:
+            return None
+        for item in candidates:
+            if (
+                input_profile_id
+                and str(item.get("input_profile_id") or "").strip() == input_profile_id
+                and str((item.get("response") or {}).get("mode") or "").strip() == response_mode
+            ):
+                return item
+        for item in candidates:
+            if input_profile_id and str(item.get("input_profile_id") or "").strip() == input_profile_id:
+                return item
+        if provider == "line" and response_mode == "computer_use_line_biz":
+            return next((item for item in candidates if str(item.get("id") or "").strip() == "line.input.computer_use"), None)
+        return None
 
     @staticmethod
     def _route_for_input_provider(provider: str) -> str:

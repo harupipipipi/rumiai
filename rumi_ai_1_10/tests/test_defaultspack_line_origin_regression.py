@@ -250,6 +250,9 @@ def test_line_route_builds_line_biz_prompt_from_chat_url(monkeypatch, tmp_path):
     assert result["status"] == "ok"
     assert chat_url in captured["context"]["external_prompt_prefix"]
     assert "LINE Official Account Manager" in captured["context"]["external_prompt_prefix"]
+    assert "computer.windows" in captured["context"]["external_prompt_prefix"]
+    assert "computer.select_window" in captured["context"]["external_prompt_prefix"]
+    assert "visible desktop Chrome window" in captured["context"]["external_prompt_prefix"]
     assert captured["context"]["computer_use_target_app"] == "Google Chrome"
     assert captured["context"]["computer_use_target_title"] == "LINE"
     assert captured["context"]["user_requested_computer_use"] is True
