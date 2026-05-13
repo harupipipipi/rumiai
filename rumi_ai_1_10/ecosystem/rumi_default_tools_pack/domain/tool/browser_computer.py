@@ -671,9 +671,51 @@ class BrowserComputerController:
             **({"reason": "No running or installed app matched the request."} if not shown else {}),
         }
 
-    @staticmethod
-    def _app_matches_filter(app: dict[str, Any], needle: str) -> bool:
-        value = needle.strip().lower()
+    @classmethod
+    def _app_alias_tokens(cls, value: Any) -> set[str]:
+        normalized = str(value or "").strip().lower()
+        if not normalized:
+            return set()
+
+        variants: set[str] = {normalized}
+        collapsed = re.sub(r"[^a-z0-9]+", "", normalized)
+        spaced = re.sub(r"[^a-z0-9]+", " ", normalized).strip()
+        if collapsed:
+            variants.add(collapsed)
+        if spaced:
+            variants.add(spaced)
+        if normalized.endswith(".exe"):
+            base = normalized[:-4].strip()
+            if base:
+                variants.add(base)
+                variants.add(re.sub(r"[^a-z0-9]+", "", base))
+                variants.add(re.sub(r"[^a-z0-9]+", " ", base).strip())
+
+        alias_groups = (
+            {"google chrome", "googlechrome", "chrome", "chrome.exe"},
+            {"microsoft edge", "microsoftedge", "ms edge", "edge", "msedge", "msedge.exe"},
+            {"mozilla firefox", "mozillafirefox", "firefox", "firefox.exe"},
+        )
+        for group in alias_groups:
+            if variants & group:
+                variants.update(group)
+        return {item for item in variants if item}
+
+    @classmethod
+    def _app_name_matches(cls, needle: str, haystack: str) -> bool:
+        need = cls._app_alias_tokens(needle)
+        if not need:
+            return True
+        hay = cls._app_alias_tokens(haystack)
+        if not hay:
+            return False
+        if need & hay:
+            return True
+        return any(left in right or right in left for left in need for right in hay)
+
+    @classmethod
+    def _app_matches_filter(cls, app: dict[str, Any], needle: str) -> bool:
+        value = needle.strip()
         if not value:
             return True
         haystacks = [
@@ -683,7 +725,7 @@ class BrowserComputerController:
             str(app.get("path") or ""),
             str(app.get("title") or ""),
         ]
-        return any(value in item.lower() for item in haystacks)
+        return any(cls._app_name_matches(value, item) for item in haystacks if item)
 
     @staticmethod
     def _normalize_app_record(value: Any) -> dict[str, Any]:
@@ -1505,14 +1547,14 @@ class BrowserComputerController:
             return True
         return False
 
-    @staticmethod
-    def _window_matches_filter(window: dict[str, Any], *, app: str = "", title: str = "") -> bool:
+    @classmethod
+    def _window_matches_filter(cls, window: dict[str, Any], *, app: str = "", title: str = "") -> bool:
         item_app = str(window.get("app") or "").lower()
         item_title = str(window.get("title") or "").lower()
-        if app and app not in item_app:
+        if app and not cls._app_name_matches(app, item_app):
             # Some Windows window enumerators omit the process/app label even though
             # the browser name is still present in the window title.
-            if item_app or app not in item_title:
+            if item_app or not cls._app_name_matches(app, item_title):
                 return False
         if title and title not in item_title:
             return False
@@ -2380,14 +2422,14 @@ class BrowserComputerController:
         if not app_name:
             return None
         active = self._active_window()
-        if active and app_name in str(active.get("app") or "").lower() and self._is_usable_target_window(active):
+        if active and self._app_name_matches(app_name, str(active.get("app") or "")) and self._is_usable_target_window(active):
             return self._normalize_window_record(active)
         for item in self._list_windows():
             window = self._normalize_window_record(item)
             if (
                 window
                 and self._is_usable_target_window(window)
-                and app_name in str(window.get("app") or "").lower()
+                and self._app_name_matches(app_name, str(window.get("app") or ""))
             ):
                 return window
         return None
@@ -3338,9 +3380,9 @@ $callback = [RumiWindowEnum+EnumWindowsProc]{
   $width = $rect.Right - $rect.Left
   $height = $rect.Bottom - $rect.Top
   if ($width -le 0 -or $height -le 0) { return $true }
-  [uint32]$pid = 0
-  [void][RumiWindowEnum]::GetWindowThreadProcessId($hWnd, [ref]$pid)
-  $proc = Get-Process -Id $pid -ErrorAction SilentlyContinue
+  [uint32]$procId = 0
+  [void][RumiWindowEnum]::GetWindowThreadProcessId($hWnd, [ref]$procId)
+  $proc = Get-Process -Id $procId -ErrorAction SilentlyContinue
   $items.Add([pscustomobject]@{
     app = if ($proc) { $proc.ProcessName } else { "" }
     title = $title
@@ -3381,6 +3423,7 @@ public class RumiWindow {
   [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
   [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT rect);
   [DllImport("user32.dll")] public static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int count);
+  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
   [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
 }
 '@
@@ -3389,12 +3432,13 @@ $r = New-Object RumiWindow+RECT
 [void][RumiWindow]::GetWindowRect($h, [ref]$r)
 $titleBuilder = New-Object System.Text.StringBuilder 512
 [void][RumiWindow]::GetWindowText($h, $titleBuilder, $titleBuilder.Capacity)
-ConvertTo-Json @{ app = ""; title = $titleBuilder.ToString(); x = $r.Left; y = $r.Top; width = ($r.Right - $r.Left); height = ($r.Bottom - $r.Top); active = $true } -Compress
+[uint32]$procId = 0
+[void][RumiWindow]::GetWindowThreadProcessId($h, [ref]$procId)
+$proc = Get-Process -Id $procId -ErrorAction SilentlyContinue
+        ConvertTo-Json @{ app = if ($proc) { $proc.ProcessName } else { "" }; title = $titleBuilder.ToString(); x = $r.Left; y = $r.Top; width = ($r.Right - $r.Left); height = ($r.Bottom - $r.Top); active = $true; window_id = $h.ToInt64() } -Compress
 '''
         try:
-            executable = "powershell" if shutil.which("powershell") else "pwsh"
-            completed = subprocess.run([executable, "-NoProfile", "-Command", script], check=True, capture_output=True, text=True)
-            value = json.loads(completed.stdout or "{}")
+            value = json.loads(self._run_powershell_capture(script) or "{}")
             return self._normalize_window_record(value)
         except Exception:
             return None
@@ -3421,6 +3465,12 @@ ConvertTo-Json @{ app = ""; title = $titleBuilder.ToString(); x = $r.Left; y = $
             "tab": "{TAB}",
             "backspace": "{BACKSPACE}",
             "delete": "{DELETE}",
+            "pageup": "{PGUP}",
+            "pgup": "{PGUP}",
+            "pagedown": "{PGDN}",
+            "pgdn": "{PGDN}",
+            "home": "{HOME}",
+            "end": "{END}",
             "up": "{UP}",
             "down": "{DOWN}",
             "left": "{LEFT}",
@@ -3490,11 +3540,14 @@ ConvertTo-Json @{ app = ""; title = $titleBuilder.ToString(); x = $r.Left; y = $
     @staticmethod
     def _run_powershell_capture(script: str) -> str:
         executable = "powershell" if shutil.which("powershell") else "pwsh"
+        wrapped_script = "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8\n" + script
         completed = subprocess.run(
-            [executable, "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script],
+            [executable, "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", wrapped_script],
             check=True,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
         )
         return completed.stdout or ""
 

@@ -195,6 +195,8 @@ def test_windows_sendkeys_escapes_literals_and_supports_modifiers():
     assert BrowserComputerController._windows_sendkeys_escape_text("a+b{c}\n") == "a{+}b{{}c{}}{ENTER}"
     assert BrowserComputerController._windows_send_key("p", ["ctrl", "shift"]) == "^+p"
     assert BrowserComputerController._windows_send_key("ctrl+escape") == "^{ESC}"
+    assert BrowserComputerController._windows_send_key("pagedown") == "{PGDN}"
+    assert BrowserComputerController._windows_send_key("pageup") == "{PGUP}"
 
 
 def test_windows_drag_steps_and_scrolls_at_point(tmp_path, monkeypatch):

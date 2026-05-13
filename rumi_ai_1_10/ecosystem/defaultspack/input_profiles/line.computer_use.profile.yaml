@@ -29,6 +29,8 @@ params:
 tools:
   - computer_use
   - browser_computer
+policy:
+  max_tool_calls: 30
 response_prompt:
   enabled: true
   mode: plan_only
