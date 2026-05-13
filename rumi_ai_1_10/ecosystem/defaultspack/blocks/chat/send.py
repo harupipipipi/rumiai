@@ -706,6 +706,19 @@ def _browser_screenshot_guidance(result):
     source = widget if (widget.get("coordinate_system") or widget.get("model_image_size")) else data
     model_image_size = source.get("model_image_size") if isinstance(source.get("model_image_size"), dict) else {}
     parts = ["Browser/computer screenshot attached for the vision model."]
+    active_window = _tool_window_details(result, "active_window")
+    selected_window = (
+        _tool_window_details(result, "selected_window")
+        or _tool_window_details(result, "target_window")
+    )
+    if active_window:
+        parts.append("Foreground window: {}.".format(active_window))
+    if selected_window:
+        parts.append("Selected target window: {}.".format(selected_window))
+        if active_window and selected_window != active_window:
+            parts.append(
+                "Foreground and selected target differ, so refocus the target window before typing, key presses, scrolling, or send actions."
+            )
     if model_image_size.get("width") and model_image_size.get("height"):
         parts.append(
             "The attached model image size (model_image_size) is width={} height={}.".format(
@@ -977,11 +990,53 @@ def _truncate_text(value, limit=480):
     return text
 
 
+def _tool_window_details(result, key):
+    if not isinstance(result, dict):
+        return ""
+    data = _tool_result_data(result)
+    widget = data.get("widget") if isinstance(data.get("widget"), dict) else {}
+    candidates = []
+    for container in (data, widget):
+        if not isinstance(container, dict):
+            continue
+        window = container.get(key)
+        if isinstance(window, dict):
+            candidates.append(window)
+    for window in candidates:
+        app = _truncate_text(window.get("app"), limit=80)
+        title = _truncate_text(window.get("title"), limit=140)
+        if app and title:
+            return "{} | {}".format(app, title)
+        if title:
+            return title
+        if app:
+            return app
+    return ""
+
+
 def _tool_result_summary(tool_name, result):
     reason = _tool_result_reason(result)
     if reason:
         return _truncate_text(reason)
     data = _tool_result_data(result)
+    if tool_name in {"browser_computer", "browser_use", "computer_use"}:
+        active_window = _tool_window_details(result, "active_window")
+        selected_window = (
+            _tool_window_details(result, "selected_window")
+            or _tool_window_details(result, "target_window")
+        )
+        if active_window and selected_window and active_window != selected_window:
+            return _truncate_text(
+                "{} completed. Foreground: {}. Selected target: {}.".format(
+                    tool_name,
+                    active_window,
+                    selected_window,
+                )
+            )
+        if active_window:
+            return _truncate_text("{} completed on {}.".format(tool_name, active_window))
+        if selected_window:
+            return _truncate_text("{} completed with target {}.".format(tool_name, selected_window))
     for key in ("results", "items", "files", "screenshots"):
         value = data.get(key)
         if isinstance(value, list):

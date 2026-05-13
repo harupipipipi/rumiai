@@ -2270,6 +2270,105 @@ def test_computer_context_tool_result_includes_widget_details_for_model():
     assert "open_apps" in messages[0]["content"]
 
 
+def test_browser_screenshot_guidance_mentions_foreground_and_selected_window():
+    import blocks.chat.send as send
+
+    guidance = send._browser_screenshot_guidance(
+        {
+            "status": "ok",
+            "data": {
+                "active_window": {"app": "Codex", "title": "Codex"},
+                "selected_window": {"app": "Google Chrome", "title": "LINE Chat - Google Chrome"},
+                "model_image_size": {"width": 1280, "height": 720},
+            },
+        }
+    )
+
+    assert "Foreground window: Codex | Codex." in guidance
+    assert "Selected target window: Google Chrome | LINE Chat - Google Chrome." in guidance
+    assert "Foreground and selected target differ" in guidance
+
+
+def test_tool_result_summary_mentions_foreground_window_mismatch():
+    import blocks.chat.send as send
+
+    summary = send._tool_result_summary(
+        "computer_use",
+        {
+            "status": "ok",
+            "data": {
+                "active_window": {"app": "Codex", "title": "Codex"},
+                "target_window": {"app": "Google Chrome", "title": "LINE Chat - Google Chrome"},
+            },
+        },
+    )
+
+    assert "Foreground: Codex | Codex" in summary
+    assert "Selected target: Google Chrome | LINE Chat - Google Chrome" in summary
+
+
+def test_browser_computer_windows_script_avoids_powershell_pid_variable(tmp_path, monkeypatch):
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+
+    recorded = {}
+
+    def fake_capture(self, script):
+        recorded["script"] = script
+        return "[]"
+
+    controller = BrowserComputerController(artifact_root=tmp_path)
+    monkeypatch.setattr(BrowserComputerController, "_run_powershell_capture", fake_capture)
+
+    controller._windows_windows()
+
+    assert "[uint32]$procId = 0" in recorded["script"]
+    assert "[ref]$procId" in recorded["script"]
+    assert "[ref]$pid" not in recorded["script"]
+
+
+def test_browser_computer_active_window_script_avoids_powershell_pid_variable(tmp_path, monkeypatch):
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+
+    recorded = {}
+
+    def fake_capture(self, script):
+        recorded["script"] = script
+        return "{}"
+
+    controller = BrowserComputerController(artifact_root=tmp_path)
+    monkeypatch.setattr(BrowserComputerController, "_run_powershell_capture", fake_capture)
+
+    controller._windows_active_window()
+
+    assert "[uint32]$procId = 0" in recorded["script"]
+    assert "[ref]$procId" in recorded["script"]
+    assert "[ref]$pid" not in recorded["script"]
+
+
+def test_browser_computer_run_powershell_capture_uses_utf8(tmp_path, monkeypatch):
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+    import ecosystem.rumi_default_tools_pack.domain.tool.browser_computer as browser_computer
+
+    recorded = {}
+
+    class Completed:
+        stdout = "[]"
+
+    def fake_run(args, **kwargs):
+        recorded["args"] = args
+        recorded["kwargs"] = kwargs
+        return Completed()
+
+    monkeypatch.setattr(browser_computer.shutil, "which", lambda _: "powershell")
+    monkeypatch.setattr(browser_computer.subprocess, "run", fake_run)
+
+    BrowserComputerController(artifact_root=tmp_path)._run_powershell_capture("Write-Output 'ok'")
+
+    assert recorded["kwargs"]["encoding"] == "utf-8"
+    assert recorded["kwargs"]["errors"] == "replace"
+    assert recorded["args"][-1].startswith("[Console]::OutputEncoding = [System.Text.Encoding]::UTF8")
+
+
 def test_browser_screenshot_tool_result_respects_provider_attachment_opt_out(monkeypatch):
     import blocks.chat.send as send
 
@@ -3600,6 +3699,42 @@ def test_browser_computer_windows_screenshot_matches_title_when_app_label_is_mis
     assert captured["target"]["window_id"] == 987
     assert result["target_window"]["title"] == "LINE Chat - Google Chrome"
     assert controller._computer_state()["target_window"]["window_id"] == 987
+
+
+def test_browser_computer_windows_screenshot_matches_browser_process_alias(tmp_path, monkeypatch):
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+    import ecosystem.rumi_default_tools_pack.domain.tool.browser_computer as browser_computer
+
+    png_header = b"\x89PNG\r\n\x1a\n" + b"\x00\x00\x00\rIHDR"
+    png_body = png_header + b"\x00\x00\x02\x80\x00\x00\x01\x90"
+    captured = {}
+
+    def fake_windows_screenshot(self, path, target=None):
+        captured["target"] = target
+        Path(path).write_bytes(png_body)
+        return {"x": 80, "y": 120, "width": 1280, "height": 720}
+
+    monkeypatch.setattr(browser_computer.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(BrowserComputerController, "_windows_screenshot", fake_windows_screenshot)
+    monkeypatch.setattr(BrowserComputerController, "_model_screenshot_copy", lambda self, path: path)
+    monkeypatch.setattr(BrowserComputerController, "_cursor_position", staticmethod(lambda: None))
+
+    controller = BrowserComputerController(artifact_root=tmp_path)
+    controller._session_path = tmp_path / "shared" / "browser_sessions.json"
+    controller._list_windows = lambda: [
+        {"app": "Codex", "title": "RumiDP", "x": 0, "y": 0, "width": 1470, "height": 900, "active": True},
+        {"app": "chrome", "title": "LINE Chat - Google Chrome", "x": 80, "y": 120, "width": 1280, "height": 720, "active": False, "window_id": 654},
+    ]
+    controller._active_window = lambda: {"app": "Codex", "title": "RumiDP", "x": 0, "y": 0, "width": 1470, "height": 900}
+    controller._chrome_tabs = lambda: []
+
+    result = controller.run("computer.screenshot", {"app": "Google Chrome", "title": "LINE"}, yolo_mode=True)
+
+    assert result["action"] == "computer.screenshot"
+    assert result["platform"] == "Windows"
+    assert captured["target"]["app"] == "chrome"
+    assert captured["target"]["title"] == "LINE Chat - Google Chrome"
+    assert result["target_window"]["window_id"] == 654
 
 
 def test_browser_computer_screenshot_title_contains_matches_non_chrome_window(tmp_path, monkeypatch):

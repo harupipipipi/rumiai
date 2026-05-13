@@ -252,7 +252,11 @@ def test_line_route_builds_line_biz_prompt_from_chat_url(monkeypatch, tmp_path):
     assert "LINE Official Account Manager" in captured["context"]["external_prompt_prefix"]
     assert "computer.windows" in captured["context"]["external_prompt_prefix"]
     assert "computer.select_window" in captured["context"]["external_prompt_prefix"]
+    assert "computer.context" in captured["context"]["external_prompt_prefix"]
+    assert "active_window" in captured["context"]["external_prompt_prefix"]
     assert "visible desktop Chrome window" in captured["context"]["external_prompt_prefix"]
+    assert "external source message below is already the customer message" in captured["context"]["external_prompt_prefix"]
+    assert "large red circular reply button" in captured["context"]["external_prompt_prefix"]
     assert captured["context"]["computer_use_target_app"] == "Google Chrome"
     assert captured["context"]["computer_use_target_title"] == "LINE"
     assert captured["context"]["user_requested_computer_use"] is True
