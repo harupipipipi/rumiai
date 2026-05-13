@@ -218,6 +218,10 @@ def _line_biz_prompt_prefix(response: dict[str, Any], *, mode: str = "") -> str:
     return (
         "Use computer_use in Google Chrome to open "
         f"{chat_url} and reply in {reply_language} inside LINE Official Account Manager. "
+        "Start by checking computer.windows, and if a visible Google Chrome LINE window exists, "
+        "target it with computer.select_window before screenshots or clicks. "
+        "This Windows workflow only works against a visible desktop Chrome window, so if Chrome is "
+        "not visible return a short local note asking for the LINE Biz window to be opened on screen. "
         "Read the latest visible customer message in that chat, answer it clearly, "
         "send the message in LINE Biz, and only after the send succeeds return a short local confirmation."
     )
