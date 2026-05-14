@@ -932,7 +932,7 @@ function pendingBrowserApproval(messages: ChatUiMessage[]): BrowserApproval | nu
     if (message.role === "user") return null;
     if (message.role !== "agent") continue;
     for (const log of [...(message.toolLogs ?? [])].reverse()) {
-      if (log.tool_name !== "browser_computer") continue;
+      if (log.tool_name !== "browser_computer" && log.tool_name !== "browser_companion") continue;
       const result = log.result as Record<string, unknown> | undefined;
       const data = (result?.data ?? result) as Record<string, unknown> | undefined;
       const widget = data?.widget as Record<string, unknown> | undefined;
@@ -1399,7 +1399,15 @@ export default function App() {
         };
       } else if (sectionId === "external_input" && fieldId === "input_template_id") {
         const templateId = String(value ?? "");
-        const provider = templateId.split(".")[0] || "line";
+        const inputByTemplate: Record<string, { provider: string; profile: string; endpoint: string; route: string }> = {
+          "line.input.default": { provider: "line", profile: "line.default", endpoint: "line-main", route: "/api/integrations/line/webhook" },
+          "line.input.computer_use": { provider: "line", profile: "line.computer_use", endpoint: "line-main", route: "/api/integrations/line/webhook" },
+          "discord.input.default": { provider: "discord", profile: "discord.default", endpoint: "discord-main", route: "/api/integrations/discord/interactions" },
+          "slack.input.default": { provider: "slack", profile: "slack.default", endpoint: "slack-main", route: "/api/integrations/slack/events" },
+          "generic.input.default": { provider: "generic", profile: "generic.webhook.default", endpoint: "generic-main", route: "/api/webhooks/inbound/{webhook_id}" },
+        };
+        const mapped = inputByTemplate[templateId];
+        const provider = mapped?.provider ?? (templateId.split(".")[0] || "line");
         const routeByProvider: Record<string, string> = {
           line: "/api/integrations/line/webhook",
           discord: "/api/integrations/discord/interactions",
@@ -1407,12 +1415,24 @@ export default function App() {
           generic: "/api/webhooks/inbound/{webhook_id}",
         };
         sectionPatch.input_provider = provider;
-        sectionPatch.input_profile_id = provider === "discord" ? "discord.default" : provider === "slack" ? "slack.default" : provider === "generic" ? "generic.webhook.default" : "line.default";
-        sectionPatch.input_endpoint_id = `${provider}-main`;
+        sectionPatch.input_profile_id = mapped?.profile ?? (provider === "discord" ? "discord.default" : provider === "slack" ? "slack.default" : provider === "generic" ? "generic.webhook.default" : "line.default");
+        sectionPatch.input_endpoint_id = mapped?.endpoint ?? `${provider}-main`;
         sectionPatch.public_url_launcher = {
           ...((current.external_input?.public_url_launcher as Record<string, unknown> | undefined) ?? {}),
-          route_path: routeByProvider[provider] ?? routeByProvider.line,
+          route_path: mapped?.route ?? routeByProvider[provider] ?? routeByProvider.line,
         };
+      } else if (sectionId === "external_input" && fieldId === "input_response_preset") {
+        const preset = String(value ?? "");
+        if (preset === "computer_use_line_biz") {
+          sectionPatch.input_provider = "line";
+          sectionPatch.input_template_id = "line.input.computer_use";
+          sectionPatch.input_profile_id = "line.computer_use";
+          sectionPatch.input_endpoint_id = "line-main";
+          sectionPatch.public_url_launcher = {
+            ...((current.external_input?.public_url_launcher as Record<string, unknown> | undefined) ?? {}),
+            route_path: "/api/integrations/line/webhook",
+          };
+        }
       } else if (sectionId === "external_output" && fieldId === "output_provider") {
         const provider = String(value ?? "line");
         const templateByProvider: Record<string, { template: string; profile: string; mode: string }> = {

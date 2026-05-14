@@ -79,6 +79,12 @@ def _handle_event(
     external_event = normalize_line_event(event, verified=verified, destination=destination)
     if model:
         external_event.metadata["model"] = model
+    mentioned = _line_message_mentions_bot(event, destination=destination)
+    require_group_mention = _require_line_group_mention(endpoint, external_event)
+    external_event.metadata["line_mention"] = {
+        "mentioned": mentioned,
+        "require_group_mention": require_group_mention,
+    }
     origin = origin_from_external_event(external_event)
     source_record = ExternalSourceStore().record_origin(origin, verified=verified)
     external_event.metadata["origin"] = origin.as_dict()
@@ -90,8 +96,12 @@ def _handle_event(
     runtime_context.setdefault("response_profile_id", endpoint.response_profile_id)
     runtime_context.setdefault("conversation", dict(endpoint.conversation))
     runtime_context.setdefault("source_record", source_record)
+    runtime_context = _apply_endpoint_response_context(runtime_context, endpoint)
     policy = AudiencePolicyRegistry().resolve(endpoint.audience_policy_id, event=external_event)
-    decision = AudiencePolicy(policy).evaluate(external_event)
+    if require_group_mention:
+        policy = _require_audience_mention(policy)
+        policy = _allow_current_scope(policy, external_event)
+    decision = AudiencePolicy(policy).evaluate(external_event, mentioned=mentioned)
     if not decision.allowed:
         return _policy_denied_result(external_event, decision)
     result = dispatch_external_event(
@@ -101,6 +111,7 @@ def _handle_event(
         audience_decision=decision,
         context=runtime_context,
         send_response=True,
+        mentioned=mentioned,
     )
     plan = result.get("response_plan") if isinstance(result.get("response_plan"), dict) else ResponsePlanner("line").plan(RumiResponse.from_result(result))
     reply = _send_response_plan(plan, external_event, context=runtime_context)
@@ -187,3 +198,203 @@ def _verify_line(headers: Dict[str, str], raw_body: bytes) -> Dict[str, Any]:
 
 def _send_line_reply(reply_token: str, text: str) -> Dict[str, Any]:
     return LineResponseAdapter().send_text_reply(reply_token, text_limit(text, 5000))
+
+
+def _apply_endpoint_response_context(runtime_context: dict[str, Any], endpoint: WebhookEndpoint) -> dict[str, Any]:
+    updated = dict(runtime_context or {})
+    response = endpoint.response if isinstance(endpoint.response, dict) else {}
+    if not response:
+        return updated
+
+    mode = str(response.get("mode") or "").strip().lower()
+    prompt_prefix = str(
+        response.get("prompt_prefix")
+        or response.get("instruction_prefix")
+        or response.get("computer_use_prompt")
+        or _line_biz_prompt_prefix(response, mode=mode)
+        or ""
+    ).strip()
+    if prompt_prefix:
+        updated.setdefault("external_prompt_prefix", prompt_prefix)
+
+    prompt_suffix = str(
+        response.get("prompt_suffix")
+        or response.get("instruction_suffix")
+        or ""
+    ).strip()
+    if prompt_suffix:
+        updated.setdefault("external_prompt_suffix", prompt_suffix)
+
+    target_app = str(
+        response.get("target_app")
+        or response.get("computer_use_target_app")
+        or ("Google Chrome" if mode == "computer_use_line_biz" else "")
+        or ""
+    ).strip()
+    if target_app:
+        updated.setdefault("computer_use_target_app", target_app)
+
+    target_title = str(
+        response.get("target_title")
+        or response.get("computer_use_target_title")
+        or ("LINE" if mode == "computer_use_line_biz" else "")
+        or ""
+    ).strip()
+    if target_title:
+        updated.setdefault("computer_use_target_title", target_title)
+
+    tool_policy = dict(updated.get("profile_policy") if isinstance(updated.get("profile_policy"), dict) else {})
+    response_tool_policy = response.get("tool_policy") if isinstance(response.get("tool_policy"), dict) else {}
+    if response_tool_policy:
+        tool_policy.update(response_tool_policy)
+    if _truthy(
+        response.get("auto_approve")
+        or response.get("auto_approve_computer_use")
+        or response.get("yolo_mode")
+    ):
+        tool_policy["yolo_mode"] = True
+    if tool_policy:
+        updated["profile_policy"] = tool_policy
+
+    if _truthy(response.get("user_requested_computer_use")) or target_app or target_title or prompt_prefix:
+        updated.setdefault("user_requested_computer_use", True)
+
+    if _suppress_provider_reply(response):
+        updated.setdefault(
+            "response_prompt_decision",
+            {
+                "action": "store_only",
+                "reason": "provider reply suppressed by LINE endpoint response settings",
+                "sensitivity": "local_only",
+                "metadata": {
+                    "source": "line_endpoint_response",
+                    "mode": str(response.get("mode") or ""),
+                },
+            },
+        )
+
+    return updated
+
+
+def _line_biz_prompt_prefix(response: dict[str, Any], *, mode: str = "") -> str:
+    resolved_mode = (mode or str(response.get("mode") or "")).strip().lower()
+    if resolved_mode != "computer_use_line_biz":
+        return ""
+    chat_url = str(
+        response.get("line_biz_chat_url")
+        or response.get("chat_url")
+        or response.get("computer_use_target_url")
+        or ""
+    ).strip()
+    if not chat_url:
+        return ""
+    reply_language = str(
+        response.get("line_biz_reply_language")
+        or response.get("reply_language")
+        or "Japanese"
+    ).strip()
+    return (
+        "Use computer_use in Google Chrome to open "
+        f"{chat_url} and reply in {reply_language} inside LINE Official Account Manager. "
+        "Start by checking computer.windows, and if a visible Google Chrome LINE window exists, "
+        "target it with computer.select_window before screenshots or clicks. "
+        "This Windows workflow only works against a visible desktop Chrome window, so if Chrome is "
+        "not visible return a short local note asking for the LINE Biz window to be opened on screen. "
+        "The external source message below is already the customer message you should answer, so do not spend tool calls rereading "
+        "the same message from the UI unless that is necessary to locate the composer. "
+        "Before typing, pressing Enter, or sending, call computer.context or inspect active_window in the latest "
+        "screenshot result to confirm the foreground window is the Chrome LINE chat; if Codex or another app is frontmost, "
+        "refocus the LINE window with computer.select_window before continuing. "
+        "After the target chat is visible, prefer one full screenshot and only a few focused follow-up screenshots near the bottom of the chat pane. "
+        "If the reply composer is hidden, scroll to the bottom of the chat and click the large red circular reply button near the lower edge to open it. "
+        "Then answer the external source message clearly, "
+        "send the message in LINE Biz, and only after the send succeeds return a short local confirmation."
+    )
+
+
+def _suppress_provider_reply(response: dict[str, Any]) -> bool:
+    if _truthy(response.get("suppress_provider_reply")):
+        return True
+    mode = str(response.get("mode") or "").strip().lower()
+    return mode in {
+        "store_only",
+        "local_only",
+        "web_local",
+        "tool_only",
+        "computer_use_line_biz",
+        "computer_use_only",
+    }
+
+
+def _truthy(value: Any) -> bool:
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+    return bool(value)
+
+
+def _line_message_mentions_bot(event: dict[str, Any], *, destination: str = "") -> bool:
+    message = event.get("message") if isinstance(event.get("message"), dict) else {}
+    mention = message.get("mention") if isinstance(message.get("mention"), dict) else {}
+    mentionees = mention.get("mentionees") if isinstance(mention.get("mentionees"), list) else []
+    destination_id = str(destination or "").strip()
+    for item in mentionees:
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("type") or "").strip() != "user":
+            continue
+        if bool(item.get("isSelf")):
+            return True
+        if destination_id and str(item.get("userId") or "").strip() == destination_id:
+            return True
+    return False
+
+
+def _require_line_group_mention(endpoint: WebhookEndpoint, external_event) -> bool:
+    if getattr(external_event, "scope", None) is None or external_event.scope.type not in {"group", "room"}:
+        return False
+    response = endpoint.response if isinstance(endpoint.response, dict) else {}
+    conversation = endpoint.conversation if isinstance(endpoint.conversation, dict) else {}
+    metadata = endpoint.metadata if isinstance(endpoint.metadata, dict) else {}
+    configured = None
+    for container in (metadata, response, conversation):
+        for key in ("require_group_mention", "group_mention_only", "mention_only_in_groups"):
+            if key in container:
+                configured = container.get(key)
+                break
+        if configured is not None:
+            break
+    if configured is None:
+        return endpoint.input_profile_id == "line.computer_use" or str(response.get("mode") or "").strip().lower() == "computer_use_line_biz"
+    return _truthy(configured)
+
+
+def _require_audience_mention(policy: dict[str, Any]) -> dict[str, Any]:
+    updated = dict(policy or {})
+    require = dict(updated.get("require") if isinstance(updated.get("require"), dict) else {})
+    require["mention"] = True
+    updated["require"] = require
+    return updated
+
+
+def _allow_current_scope(policy: dict[str, Any], external_event) -> dict[str, Any]:
+    scope = getattr(external_event, "scope", None)
+    if scope is None or scope.type not in {"group", "room"} or not scope.id:
+        return dict(policy or {})
+    updated = dict(policy or {})
+    allow = list(updated.get("allow")) if isinstance(updated.get("allow"), list) else []
+    scope_rule = {
+        "id": f"mentioned-scope:{scope.type}:{scope.id}",
+        "provider": external_event.provider,
+        "scope": {"type": scope.type, "id": scope.id},
+    }
+    if not any(
+        isinstance(rule, dict)
+        and rule.get("provider") == scope_rule["provider"]
+        and isinstance(rule.get("scope"), dict)
+        and str(rule["scope"].get("type") or "") == scope.type
+        and str(rule["scope"].get("id") or "") == scope.id
+        for rule in allow
+    ):
+        allow.append(scope_rule)
+    updated["allow"] = allow
+    return updated

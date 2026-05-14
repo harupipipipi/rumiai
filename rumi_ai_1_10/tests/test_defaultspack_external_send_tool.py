@@ -11,7 +11,7 @@ sys.path.insert(0, str(DEFAULTSPACK_ROOT))
 
 from domain.external.send_tool import external_send_tool  # noqa: E402
 from domain.input.envelope import RumiInputEnvelope  # noqa: E402
-from domain.input.submit import apply_external_source_context  # noqa: E402
+from domain.input.submit import apply_external_runtime_prompt, apply_external_source_context  # noqa: E402
 from domain.tool.registry import ToolRegistry  # noqa: E402
 
 
@@ -68,3 +68,17 @@ def test_source_context_prefix_is_defaultable_without_mutating_envelope_input():
     assert text.startswith("[External source: lineから来た入力です。")
     assert "scope=group:C1" in text
     assert text.endswith("hello")
+
+
+def test_runtime_prompt_prefix_and_suffix_wrap_external_text():
+    text = apply_external_runtime_prompt(
+        "hello",
+        {
+            "external_prompt_prefix": "Use computer_use in Google Chrome.",
+            "external_prompt_suffix": "Return only a short local confirmation.",
+        },
+    )
+
+    assert text.startswith("Use computer_use in Google Chrome.")
+    assert "\n\nhello\n\n" in text
+    assert text.endswith("Return only a short local confirmation.")

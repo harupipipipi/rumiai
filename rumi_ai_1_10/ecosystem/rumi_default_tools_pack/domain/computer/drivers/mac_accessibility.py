@@ -51,7 +51,12 @@ class MacAccessibilityDriver(ComputerDriver):
         from ..mac.ax import ax_get_tree
 
         try:
-            tree = ax_get_tree(pid=target.pid, app=target.app)
+            tree = ax_get_tree(
+                pid=target.pid,
+                app=target.app,
+                window_title=target.window_title,
+                window_id=target.window_id,
+            )
             return ObserveResult(
                 platform="darwin",
                 target_window={"app": target.app, "pid": target.pid},
@@ -91,8 +96,20 @@ class MacAccessibilityDriver(ComputerDriver):
         from ..mac.ax import ax_find_candidates, ax_press
 
         try:
+            if button != "left":
+                return ActionResult(
+                    action="click",
+                    driver=self.name,
+                    executed=False,
+                    notes=["AXPress only supports primary-button semantic clicks"],
+                )
+
             candidates = ax_find_candidates(
-                pid=target.pid, app=target.app, point=(x, y)
+                pid=target.pid,
+                app=target.app,
+                point=(x, y),
+                window_title=target.window_title,
+                window_id=target.window_id,
             )
             if not candidates:
                 return ActionResult(
@@ -226,9 +243,21 @@ class MacAccessibilityDriver(ComputerDriver):
                     data={"element": element_or_point, "intent": intent},
                 )
 
+            point = None
+            if (
+                isinstance(element_or_point, (tuple, list))
+                and len(element_or_point) >= 2
+            ):
+                point = (int(element_or_point[0]), int(element_or_point[1]))
+
             # Otherwise try to find candidates matching the intent
             candidates = ax_find_candidates(
-                pid=target.pid, app=target.app, intent=intent
+                pid=target.pid,
+                app=target.app,
+                intent=intent,
+                point=point,
+                window_title=target.window_title,
+                window_id=target.window_id,
             )
             if not candidates:
                 return ActionResult(

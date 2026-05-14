@@ -308,6 +308,65 @@ def test_pipeline_does_not_run_response_prompt_policy_when_send_response_false(m
     assert "response_plan" not in result
 
 
+def test_pipeline_merges_input_profile_policy_into_runtime_context(monkeypatch):
+    from domain.external import pipeline  # noqa: E402
+
+    profile = InputProfile.from_dict(
+        {
+            "id": "line.computer_use",
+            "provider": "line",
+            "version": 1,
+            "display_name": "LINE Computer Use",
+            "match": {"event_type": "message"},
+            "input": {"role": "user", "content": "$.message.text"},
+            "metadata": {"source": {"kind": "integration", "provider": "line"}},
+            "policy": {"max_tool_calls": 30},
+        }
+    )
+
+    class FakeRegistry:
+        def get(self, _profile_id):
+            return profile
+
+    captured = {}
+
+    def fake_submit_input(envelope, context):
+        captured["envelope"] = envelope
+        captured["context"] = context
+        return {"status": "ok", "assistant_text": "done"}
+
+    monkeypatch.setattr(pipeline, "InputProfileRegistry", FakeRegistry)
+    monkeypatch.setattr(pipeline, "submit_input", fake_submit_input)
+
+    result = pipeline.dispatch_external_event(
+        ExternalEvent.from_dict(
+            {
+                "provider": "line",
+                "workspace": {"type": "line_destination", "id": "Udest"},
+                "scope": {"type": "user", "id": "U123"},
+                "actor": {"type": "user", "id": "U123"},
+                "conversation": {"type": "external", "id": "line:user:U123"},
+                "event": {"id": "evt-1", "type": "message", "message_type": "text"},
+                "payload": {
+                    "type": "message",
+                    "message": {"id": "m1", "type": "text", "text": "open chrome"},
+                    "source": {"type": "user", "userId": "U123"},
+                    "replyToken": "reply-1",
+                },
+                "verified": True,
+                "metadata": {"model": "google/gemma-4-31b-it"},
+            }
+        ),
+        input_profile_id="line.computer_use",
+        context={"profile_policy": {"yolo_mode": True}},
+        send_response=False,
+    )
+
+    assert result["status"] == "ok"
+    assert captured["context"]["profile_policy"]["max_tool_calls"] == 30
+    assert captured["context"]["profile_policy"]["yolo_mode"] is True
+
+
 def test_adapters_recheck_suppressed_external_reply_before_sending():
     plan = {
         "messages": [{"type": "text", "text": "do not send"}],

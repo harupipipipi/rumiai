@@ -84,7 +84,7 @@ FUNCTION_RUNNER_PATH = Path(__file__).with_name("function_runner.py")
 
 # デフォルトタイムアウト
 DEFAULT_TIMEOUT = 30.0
-MAX_TIMEOUT = 120.0
+MAX_TIMEOUT = 300.0
 
 
 # W25.5: user function execution

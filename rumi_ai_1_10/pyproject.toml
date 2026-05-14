@@ -15,6 +15,13 @@ dev = [
   "ruff>=0.6.0",
   "mypy>=1.11.0",
 ]
+computer-windows = [
+  "Pillow>=10.0",
+  "pywinauto>=0.6.8",
+]
+browser-cdp = [
+  "websocket-client>=1.8.0",
+]
 
 [tool.setuptools]
 include-package-data = true

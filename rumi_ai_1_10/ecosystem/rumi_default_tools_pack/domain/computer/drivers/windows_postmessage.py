@@ -1,11 +1,4 @@
-"""WindowsPostMessageDriver – PostMessage/SendMessage skeleton.
-
-Skeleton driver for Windows PostMessage/SendMessage API. This will
-provide background input injection to specific window handles.
-
-⚠️ SKELETON: Not yet implemented. All methods raise NotImplementedError
-or return stub results.
-"""
+"""WindowsPostMessageDriver - best-effort Win32 message route."""
 
 from __future__ import annotations
 
@@ -13,14 +6,12 @@ import sys
 from typing import Any
 
 from ..models import ActionResult, ComputerCapabilities, ComputerTarget, ObserveResult
+from ..windows.hwnd import get_window_info, resolve_hwnd
 from .base import ComputerDriver
 
 
 class WindowsPostMessageDriver(ComputerDriver):
-    """Skeleton driver for Windows PostMessage/SendMessage.
-
-    ⚠️ SKELETON: Not yet implemented for Windows platform.
-    """
+    """Driver that posts Win32 messages to a target HWND."""
 
     @property
     def name(self) -> str:
@@ -34,25 +25,29 @@ class WindowsPostMessageDriver(ComputerDriver):
         return ComputerCapabilities(
             can_capture_background_window=False,
             can_semantic_action=False,
+            can_background_click=True,
+            can_background_type=True,
+            can_background_key=True,
+            can_background_scroll=True,
             can_pid_event=True,
             can_foreground_action=False,
             can_parallel_user_work=True,
         )
 
     def observe(self, target: ComputerTarget) -> ObserveResult:
-        """PostMessage driver does not support observation.
-
-        Args:
-            target: The target to observe.
-
-        Returns:
-            ObserveResult stub.
-
-        Raises:
-            NotImplementedError: Always (skeleton).
-        """
-        raise NotImplementedError(
-            "WindowsPostMessageDriver.observe is not yet implemented"
+        hwnd = self._resolve(target)
+        return ObserveResult(
+            platform="win32",
+            target_window=get_window_info(hwnd) if hwnd else {"app": target.app, "pid": target.pid, "hwnd": hwnd},
+            capabilities={
+                "can_pid_event": True,
+                "can_background_click": True,
+                "can_background_type": True,
+                "can_background_key": True,
+                "can_background_scroll": True,
+                "can_parallel_user_work": True,
+            },
+            fallback_available=True,
         )
 
     def click(
@@ -62,57 +57,31 @@ class WindowsPostMessageDriver(ComputerDriver):
         y: int = 0,
         button: str = "left",
     ) -> ActionResult:
-        """Click via PostMessage WM_LBUTTONDOWN/UP.
+        from ..windows.messages import post_click
 
-        Args:
-            target: The target application/window.
-            x: X coordinate.
-            y: Y coordinate.
-            button: Mouse button.
-
-        Returns:
-            ActionResult stub.
-
-        Raises:
-            NotImplementedError: Always (skeleton).
-        """
-        raise NotImplementedError(
-            "WindowsPostMessageDriver.click is not yet implemented"
-        )
+        hwnd = self._resolve(target)
+        if hwnd is None:
+            return self._failure("click", target, "No HWND matched the target.")
+        ok = post_click(hwnd, x, y, button)
+        return self._result("click", target, hwnd, ok)
 
     def type_text(self, target: ComputerTarget, text: str = "") -> ActionResult:
-        """Type text via PostMessage WM_CHAR.
+        from ..windows.messages import post_text
 
-        Args:
-            target: The target application/window.
-            text: The text to type.
-
-        Returns:
-            ActionResult stub.
-
-        Raises:
-            NotImplementedError: Always (skeleton).
-        """
-        raise NotImplementedError(
-            "WindowsPostMessageDriver.type_text is not yet implemented"
-        )
+        hwnd = self._resolve(target)
+        if hwnd is None:
+            return self._failure("type_text", target, "No HWND matched the target.")
+        ok = post_text(hwnd, text)
+        return self._result("type_text", target, hwnd, ok, data={"text_length": len(text)})
 
     def key(self, target: ComputerTarget, key_combo: str = "") -> ActionResult:
-        """Send key combo via PostMessage WM_KEYDOWN/UP.
+        from ..windows.messages import post_key
 
-        Args:
-            target: The target application/window.
-            key_combo: Key combination string.
-
-        Returns:
-            ActionResult stub.
-
-        Raises:
-            NotImplementedError: Always (skeleton).
-        """
-        raise NotImplementedError(
-            "WindowsPostMessageDriver.key is not yet implemented"
-        )
+        hwnd = self._resolve(target)
+        if hwnd is None:
+            return self._failure("key", target, "No HWND matched the target.")
+        ok = post_key(hwnd, key_combo)
+        return self._result("key", target, hwnd, ok, data={"key_combo": key_combo})
 
     def scroll(
         self,
@@ -122,24 +91,13 @@ class WindowsPostMessageDriver(ComputerDriver):
         direction: str = "down",
         clicks: int = 3,
     ) -> ActionResult:
-        """Scroll via PostMessage WM_MOUSEWHEEL.
+        from ..windows.messages import post_scroll
 
-        Args:
-            target: The target application/window.
-            x: X coordinate.
-            y: Y coordinate.
-            direction: Scroll direction.
-            clicks: Number of scroll clicks.
-
-        Returns:
-            ActionResult stub.
-
-        Raises:
-            NotImplementedError: Always (skeleton).
-        """
-        raise NotImplementedError(
-            "WindowsPostMessageDriver.scroll is not yet implemented"
-        )
+        hwnd = self._resolve(target)
+        if hwnd is None:
+            return self._failure("scroll", target, "No HWND matched the target.")
+        ok = post_scroll(hwnd, x, y, direction=direction, clicks=clicks)
+        return self._result("scroll", target, hwnd, ok, data={"direction": direction, "clicks": clicks})
 
     def semantic_action(
         self,
@@ -147,23 +105,61 @@ class WindowsPostMessageDriver(ComputerDriver):
         intent: str = "",
         element_or_point: Any = None,
     ) -> ActionResult:
-        """Not supported – PostMessage has no semantic capabilities.
-
-        Args:
-            target: The target application/window.
-            intent: Intent description.
-            element_or_point: Element or point.
-
-        Returns:
-            ActionResult with executed=False.
-
-        Raises:
-            NotImplementedError: Always (skeleton).
-        """
-        raise NotImplementedError(
-            "WindowsPostMessageDriver.semantic_action is not yet implemented"
+        return ActionResult(
+            action="semantic_action",
+            driver=self.name,
+            executed=False,
+            confidence="not_supported",
+            target_kind=target.kind,
+            notes=["PostMessage does not expose semantic UI elements."],
         )
 
     def is_available(self) -> bool:
-        """Available on Windows only (when implemented)."""
         return sys.platform == "win32"
+
+    @staticmethod
+    def _resolve(target: ComputerTarget) -> int | None:
+        return resolve_hwnd(
+            hwnd=target.hwnd,
+            window_id=target.window_id,
+            pid=target.pid,
+            title=target.window_title or target.app,
+        )
+
+    def _result(
+        self,
+        action: str,
+        target: ComputerTarget,
+        hwnd: int,
+        ok: bool,
+        *,
+        data: dict[str, Any] | None = None,
+    ) -> ActionResult:
+        return ActionResult(
+            action=action,
+            driver=self.name,
+            executed=ok,
+            confidence="best_effort" if ok else "failed",
+            target_kind=target.kind,
+            can_parallel_user_work=True,
+            requires_foreground=False,
+            uses_physical_input=False,
+            notes=[
+                "PostMessage was posted, but the target app may ignore synthetic messages.",
+                "Windows UIPI may block higher-integrity targets.",
+            ] if ok else ["PostMessage failed or was blocked."],
+            data={"hwnd": hwnd, **(data or {})},
+        )
+
+    def _failure(self, action: str, target: ComputerTarget, note: str) -> ActionResult:
+        return ActionResult(
+            action=action,
+            driver=self.name,
+            executed=False,
+            confidence="failed",
+            target_kind=target.kind,
+            can_parallel_user_work=True,
+            requires_foreground=False,
+            uses_physical_input=False,
+            notes=[note],
+        )

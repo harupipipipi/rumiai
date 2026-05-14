@@ -76,9 +76,13 @@ class ComputerSeatService:
                 merged.screenshot = result.screenshot
                 drivers_used.append(driver.name)
 
-            # Take ax_tree from first driver that provides one
+            # Take ax_tree/dom_tree from first drivers that provide them
             if not merged.ax_tree and result.ax_tree:
                 merged.ax_tree = result.ax_tree
+                if driver.name not in drivers_used:
+                    drivers_used.append(driver.name)
+            if not merged.dom_tree and result.dom_tree:
+                merged.dom_tree = result.dom_tree
                 if driver.name not in drivers_used:
                     drivers_used.append(driver.name)
 
@@ -93,10 +97,7 @@ class ComputerSeatService:
                     merged_caps[k] = True
 
         merged.capabilities = merged_caps
-        merged.recommended_next_actions = [
-            {"action": "computer.click", "description": "Click at coordinates"},
-            {"action": "computer.semantic_action", "description": "Press an AX element by intent"},
-        ]
+        merged.recommended_next_actions = self._recommended_next_actions(merged_caps)
 
         for name in drivers_used:
             self._audit.record(
@@ -430,8 +431,49 @@ class ComputerSeatService:
         if isinstance(target, ComputerTarget):
             return target
         return ComputerTarget(
+            kind=target.get("kind", "desktop"),
             app=target.get("app"),
             pid=target.get("pid"),
             window_id=target.get("window_id"),
-            window_title=target.get("window_title"),
+            window_title=target.get("window_title") or target.get("title"),
+            hwnd=target.get("hwnd"),
+            bundle_id=target.get("bundle_id"),
+            browser_client_id=target.get("browser_client_id") or target.get("client_id"),
+            browser_tab_id=target.get("browser_tab_id") or target.get("tab_id"),
+            url=target.get("url"),
+            coordinate_space=target.get("coordinate_space", "window"),
         )
+
+    @staticmethod
+    def _recommended_next_actions(capabilities: dict[str, bool]) -> list[dict[str, Any]]:
+        """Build model-facing hints from merged driver capabilities."""
+        actions: list[dict[str, Any]] = []
+        if capabilities.get("can_dom_action"):
+            actions.append({
+                "action": "browser_cdp.click",
+                "confidence": "high",
+                "reason": "Target exposes DOM actions.",
+            })
+        if capabilities.get("can_semantic_action"):
+            actions.append({
+                "action": "computer.semantic_action",
+                "confidence": "high",
+                "reason": "Target exposes accessibility elements.",
+            })
+        if capabilities.get("can_background_click"):
+            actions.append({
+                "action": "computer.click",
+                "confidence": "best_effort",
+                "reason": "Coordinate click may be converted to a background-safe semantic action.",
+            })
+        if capabilities.get("can_foreground_action"):
+            actions.append({
+                "action": "computer.click",
+                "confidence": "best_effort",
+                "requires_foreground": True,
+                "reason": "Foreground fallback is available if background-safe drivers fail.",
+            })
+        return actions or [
+            {"action": "computer.click", "description": "Click at coordinates"},
+            {"action": "computer.semantic_action", "description": "Press an AX element by intent"},
+        ]

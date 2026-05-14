@@ -143,7 +143,7 @@ class ToolExecutor:
         pack_id, _, function_id = qualified_name.partition(":")
         if isinstance(context, dict) and context.get("user_requested_computer_use"):
             local_tool = self._first_party_local_tool_for_function(pack_id, function_id)
-            if local_tool in {"browser_computer", "browser_use", "computer_use"}:
+            if local_tool in {"browser_computer", "browser_use", "computer_use", "browser_companion"}:
                 return self._execute_local(local_tool, arguments or {}, context)
         request = {
             "type": "function.call",
@@ -258,6 +258,7 @@ class ToolExecutor:
     def _first_party_local_tool_for_function(pack_id, function_id):
         if pack_id == "rumi_default_tools_pack":
             return {
+                "browser_companion": "browser_companion",
                 "browser_computer": "browser_computer",
                 "browser_use": "browser_use",
                 "computer_use": "computer_use",
@@ -658,6 +659,31 @@ class ToolExecutor:
             if isinstance(result.get("recovery"), dict):
                 output["recovery"] = result.get("recovery")
             return output
+        elif tool_name == "browser_companion":
+            from ecosystem.rumi_default_tools_pack.domain.tool.browser_companion import BrowserCompanionController
+
+            action = str(arguments.get("action") or "session")
+            payload = {key: value for key, value in (arguments or {}).items() if key != "action"}
+            result = BrowserCompanionController(artifact_root=_conversation_browser_companion_artifact_root(context)).run(
+                action,
+                payload,
+                context=context if isinstance(context, dict) else {},
+            )
+            is_error = bool(result.get("is_error"))
+            summary = "{} {} {}".format(
+                tool_name,
+                result.get("action", "action"),
+                "failed" if is_error else "completed",
+            )
+            if result.get("reason"):
+                summary += ": {}".format(result.get("reason"))
+            if result.get("path"):
+                summary += "; artifact: {}".format(result.get("path"))
+            return {
+                "result": summary,
+                "is_error": is_error,
+                "widget": {"type": tool_name, **result},
+            }
         elif tool_name == "todo":
             from ecosystem.rumi_default_tools_pack.domain.tool.todo import TodoController
 
@@ -1034,6 +1060,15 @@ def _conversation_tool_artifact_root(context):
     if not isinstance(workspace, str) or not workspace:
         return None
     return Path(workspace) / "tools" / "computer"
+
+
+def _conversation_browser_companion_artifact_root(context):
+    if not isinstance(context, dict):
+        return None
+    workspace = context.get("conversation_workspace_dir")
+    if not isinstance(workspace, str) or not workspace:
+        return None
+    return Path(workspace) / "tools" / "browser_companion"
 
 
 def _tool_value(tool_def, key):

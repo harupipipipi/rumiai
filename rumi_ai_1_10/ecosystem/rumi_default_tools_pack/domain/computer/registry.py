@@ -13,6 +13,8 @@ if TYPE_CHECKING:
 
 # Preferred driver order per platform (highest priority first)
 MAC_DRIVER_ORDER: list[str] = [
+    "browser_cdp",
+    "browser_companion",
     "mac_accessibility",
     "mac_apple_events",
     "mac_cgevent_pid",
@@ -21,8 +23,12 @@ MAC_DRIVER_ORDER: list[str] = [
 ]
 
 WINDOWS_DRIVER_ORDER: list[str] = [
+    "browser_cdp",
+    "browser_companion",
     "windows_uia",
     "windows_postmessage",
+    "windows_foreground",
+    "local_visible",
 ]
 
 

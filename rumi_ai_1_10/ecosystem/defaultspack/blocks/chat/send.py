@@ -398,6 +398,50 @@ def _available_tools(context, input_data):
     return filtered, adapt_tool_definitions(filtered), resolved_context
 
 
+def _prefocus_computer_use_target_window(available_tools, base_context, *, call_handler=None):
+    if not isinstance(base_context, dict) or not base_context.get("user_requested_computer_use"):
+        return None
+    target_app = str(base_context.get("computer_use_target_app") or "").strip()
+    target_title = str(base_context.get("computer_use_target_title") or "").strip()
+    if not (target_app or target_title):
+        return None
+    connected_names = connected_tool_names(
+        available_tools,
+        base_context.get("runtime_profile") if isinstance(base_context.get("runtime_profile"), dict) else None,
+        agent_id=base_context.get("agent_id"),
+    )
+    tool_name = next(
+        (candidate for candidate in ("browser_computer", "computer_use", "browser_use") if candidate in connected_names),
+        "",
+    )
+    if not tool_name:
+        return None
+
+    payload = {}
+    if target_app:
+        payload["app"] = target_app
+    if target_title:
+        payload["title"] = target_title
+    arguments = {"action": "computer.select_window", "payload": payload}
+    invoke_context = build_tool_execution_context(base_context, tool_name, connected_names)
+    if call_handler is not None:
+        result = call_handler(
+            "defaults.tool.invoke",
+            {
+                "tool_name": tool_name,
+                "arguments": arguments,
+                "context": invoke_context,
+            },
+        )
+        if isinstance(result, dict) and result.get("status") == "ok":
+            return result.get("data", {})
+        return result
+
+    from domain.tool.executor import ToolExecutor
+
+    return ToolExecutor().execute(tool_name, arguments, invoke_context)
+
+
 def _tool_use_blocks(response):
     blocks = response.get("content", []) if isinstance(response, dict) else []
     if not isinstance(blocks, list):
@@ -706,6 +750,19 @@ def _browser_screenshot_guidance(result):
     source = widget if (widget.get("coordinate_system") or widget.get("model_image_size")) else data
     model_image_size = source.get("model_image_size") if isinstance(source.get("model_image_size"), dict) else {}
     parts = ["Browser/computer screenshot attached for the vision model."]
+    active_window = _tool_window_details(result, "active_window")
+    selected_window = (
+        _tool_window_details(result, "selected_window")
+        or _tool_window_details(result, "target_window")
+    )
+    if active_window:
+        parts.append("Foreground window: {}.".format(active_window))
+    if selected_window:
+        parts.append("Selected target window: {}.".format(selected_window))
+        if active_window and selected_window != active_window:
+            parts.append(
+                "Foreground and selected target differ, so refocus the target window before typing, key presses, scrolling, or send actions."
+            )
     if model_image_size.get("width") and model_image_size.get("height"):
         parts.append(
             "The attached model image size (model_image_size) is width={} height={}.".format(
@@ -740,7 +797,7 @@ def _tool_result_message_text(tool_name, result):
     if isinstance(result, dict):
         data = result.get("data", result)
         if isinstance(data, dict):
-            if tool_name in {"browser_computer", "browser_use", "computer_use"}:
+            if tool_name in {"browser_companion", "browser_computer", "browser_use", "computer_use"}:
                 result_text = json.dumps(_compact_tool_log_value(data), ensure_ascii=False)
             else:
                 result_text = str(data.get("result", data.get("summary", json.dumps(data, ensure_ascii=False))))
@@ -765,7 +822,7 @@ def _append_tool_result_message(messages, tool_name, result, tool_call_id="", *,
         }
     )
     if (
-        tool_name in {"browser_computer", "browser_use", "computer_use"}
+        tool_name in {"browser_companion", "browser_computer", "browser_use", "computer_use"}
         and _model_supports_vision(model)
         and _model_supports_attachments(model)
     ):
@@ -977,11 +1034,53 @@ def _truncate_text(value, limit=480):
     return text
 
 
+def _tool_window_details(result, key):
+    if not isinstance(result, dict):
+        return ""
+    data = _tool_result_data(result)
+    widget = data.get("widget") if isinstance(data.get("widget"), dict) else {}
+    candidates = []
+    for container in (data, widget):
+        if not isinstance(container, dict):
+            continue
+        window = container.get(key)
+        if isinstance(window, dict):
+            candidates.append(window)
+    for window in candidates:
+        app = _truncate_text(window.get("app"), limit=80)
+        title = _truncate_text(window.get("title"), limit=140)
+        if app and title:
+            return "{} | {}".format(app, title)
+        if title:
+            return title
+        if app:
+            return app
+    return ""
+
+
 def _tool_result_summary(tool_name, result):
     reason = _tool_result_reason(result)
     if reason:
         return _truncate_text(reason)
     data = _tool_result_data(result)
+    if tool_name in {"browser_computer", "browser_use", "computer_use"}:
+        active_window = _tool_window_details(result, "active_window")
+        selected_window = (
+            _tool_window_details(result, "selected_window")
+            or _tool_window_details(result, "target_window")
+        )
+        if active_window and selected_window and active_window != selected_window:
+            return _truncate_text(
+                "{} completed. Foreground: {}. Selected target: {}.".format(
+                    tool_name,
+                    active_window,
+                    selected_window,
+                )
+            )
+        if active_window:
+            return _truncate_text("{} completed on {}.".format(tool_name, active_window))
+        if selected_window:
+            return _truncate_text("{} completed with target {}.".format(tool_name, selected_window))
     for key in ("results", "items", "files", "screenshots"):
         value = data.get(key)
         if isinstance(value, list):
@@ -1058,11 +1157,12 @@ def _tool_visibility_message(tools):
         return None
     guidance = ""
     tool_names = {tool_name_from_definition(tool) for tool in tools or []}
-    if tool_names.intersection({"browser_computer", "browser_use", "computer_use"}):
+    if tool_names.intersection({"browser_companion", "browser_computer", "browser_use", "computer_use"}):
         guidance = (
-            " Computer-use harness rules: inspect app state with context before screenshots; "
-            "computer_use is for all desktop apps, so use apps/windows plus select_app/select_window to target Vivaldi, VS Code, Finder, LINE, Chrome, or any other visible app/window; "
-            "only operate the currently visible screen; hidden tabs, background DOM, and Apple Events JavaScript control are unavailable; "
+            " Browser tool rules: browser_companion is the DOM-aware extension path and can inspect paired browser tabs with the user's live session; "
+            "browser_computer/computer_use are visible-window computer-use paths, so use apps/windows plus select_app/select_window to target Vivaldi, VS Code, Finder, LINE, Chrome, or any other visible app/window; "
+            "when you need background-tab DOM access, element ids, or the user's signed-in browser session, prefer browser_companion; "
+            "for visible-window actions, inspect app state with context before screenshots; "
             "for visual clicks, use a zoom ladder: first take a full or selected-window screenshot, then when the target is small or ambiguous call screenshot again with crop/zoom around the likely region; source=latest crops from that last full/selected-window screenshot, while source=current_crop is only for intentionally cropping the current crop again; click only using normalized_x/normalized_y relative to the attached image; "
             "after a zoomed/cropped inspection, take a fresh full or selected-window screenshot before unrelated actions so stale crop coordinates are not reused; "
             "prefer one type call for words like hello and key only for shortcuts/return; "
@@ -1105,7 +1205,7 @@ def _complete_with_tools(model, messages, tools, context, call_handler, params):
     if limit is None:
         limit = int(params.get("max_tool_calls", 4) or 4)
     connected_names = connected_tool_names(tools, context.get("runtime_profile") if isinstance(context, dict) else None)
-    if limit == 4 and connected_names.intersection({"browser_computer", "browser_use", "computer_use"}):
+    if limit == 4 and connected_names.intersection({"browser_companion", "browser_computer", "browser_use", "computer_use"}):
         limit = 12
 
     blocked_response = None
@@ -1579,6 +1679,10 @@ def run(input_data, context):
         )
     raw_tools, provider_tools, tool_context = _available_tools(request_context, input_data)
     tools_called = [tool_name_from_definition(tool) for tool in raw_tools if tool_name_from_definition(tool)]
+    try:
+        _prefocus_computer_use_target_window(raw_tools, tool_context, call_handler=call_handler)
+    except Exception:
+        pass
     try:
         response = _complete_with_tools(
             model,

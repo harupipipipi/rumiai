@@ -1,0 +1,135 @@
+{
+  "id": "browser_companion",
+  "category": "tool",
+  "version": "1",
+  "display_name": "Browser Companion",
+  "description": "Connect to the Rumi Browser Companion extension running inside the user's browser. Uses the user's live browser session and cookies, can list connected browsers, inspect tabs and DOM snapshots, capture the active tab, and act on elements by element_id or selector.",
+  "enabled": true,
+  "config": {
+    "name": "browser_companion",
+    "summary": "Extension-backed browser control with live user session cookies, multi-browser selection, DOM snapshots, tab capture, and element actions.",
+    "tags": ["browser", "extension", "dom", "cookies", "session"],
+    "schema": {
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "session",
+              "bridge.pairing",
+              "browser.clients",
+              "browser.select_client",
+              "browser.tabs",
+              "browser.select_tab",
+              "page.snapshot",
+              "page.capture",
+              "page.navigate",
+              "page.click",
+              "page.type",
+              "page.press",
+              "page.scroll",
+              "page.extract"
+            ],
+            "default": "session"
+          },
+          "client_id": {"type": "string"},
+          "browser": {"type": "string"},
+          "browser_name": {"type": "string"},
+          "label": {"type": "string"},
+          "tab_id": {"type": "integer"},
+          "window_id": {"type": "integer"},
+          "url": {"type": "string"},
+          "element_id": {"type": "string"},
+          "selector": {"type": "string"},
+          "text": {"type": "string"},
+          "key": {"type": "string"},
+          "code": {"type": "string"},
+          "modifiers": {
+            "type": "array",
+            "items": {"type": "string"}
+          },
+          "repeat": {"type": "boolean"},
+          "direction": {"type": "string"},
+          "amount": {"type": "integer"},
+          "top": {"type": "integer"},
+          "left": {"type": "integer"},
+          "delta_x": {"type": "integer"},
+          "delta_y": {"type": "integer"},
+          "behavior": {"type": "string"},
+          "limit": {"type": "integer"},
+          "include_hidden": {"type": "boolean"},
+          "include_html": {"type": "boolean"},
+          "include_capture": {"type": "boolean"},
+          "mode": {"type": "string"},
+          "attribute_names": {
+            "type": "array",
+            "items": {"type": "string"}
+          },
+          "timeout_ms": {"type": "integer"},
+          "format": {"type": "string"},
+          "quality": {"type": "integer"},
+          "rotate": {"type": "boolean"}
+        }
+      }
+    },
+    "execution": {
+      "type": "rumi_function",
+      "qualified_name": "rumi_default_tools_pack:browser_companion"
+    },
+    "requires_approval": true,
+    "ui": {
+      "group_id": "browser",
+      "group_label": "Browser",
+      "composer_label": "Browser Companion",
+      "composer_icon": "app-window",
+      "drop_capabilities": ["composer.toggle_chip"],
+      "widget_kind": "tool_toggle",
+      "settings_fields": [
+        {
+          "id": "preferred_browser",
+          "label": "Preferred Browser",
+          "type": "text",
+          "default": "",
+          "help": "Optional browser name hint used when more than one Browser Companion client is connected."
+        },
+        {
+          "id": "default_mode",
+          "label": "Default Mode",
+          "type": "select",
+          "default": "snapshot_first",
+          "options": [
+            {"value": "snapshot_first", "label": "Snapshot First"},
+            {"value": "tab_capture", "label": "Capture First"},
+            {"value": "direct", "label": "Direct Action"}
+          ],
+          "help": "Preferred operating mode before issuing browser extension actions."
+        },
+        {
+          "id": "safety",
+          "label": "Safety Default",
+          "type": "select",
+          "default": "approval_required",
+          "options": [
+            {"value": "approval_required", "label": "Require Approval"},
+            {"value": "read_only", "label": "Read Only"},
+            {"value": "manual_pairing", "label": "Manual Pairing"}
+          ],
+          "help": "Durable safety preference for extension-backed browser actions."
+        },
+        {
+          "id": "snapshot_detail",
+          "label": "Snapshot Detail",
+          "type": "select",
+          "default": "interactive",
+          "options": [
+            {"value": "interactive", "label": "Interactive Only"},
+            {"value": "balanced", "label": "Balanced"},
+            {"value": "verbose", "label": "Verbose"}
+          ],
+          "help": "Preferred DOM snapshot detail for the browser companion extension."
+        }
+      ]
+    }
+  }
+}

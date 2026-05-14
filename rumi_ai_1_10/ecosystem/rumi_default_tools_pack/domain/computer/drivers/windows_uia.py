@@ -1,11 +1,4 @@
-"""WindowsUIADriver – UI Automation skeleton.
-
-Skeleton driver for Windows UI Automation API. This will provide
-semantic interaction with Windows applications through the UIA tree.
-
-⚠️ SKELETON: Not yet implemented. All methods raise NotImplementedError
-or return stub results.
-"""
+"""WindowsUIADriver - semantic Windows UI Automation route."""
 
 from __future__ import annotations
 
@@ -13,14 +6,12 @@ import sys
 from typing import Any
 
 from ..models import ActionResult, ComputerCapabilities, ComputerTarget, ObserveResult
+from ..windows.hwnd import get_window_info, resolve_hwnd
 from .base import ComputerDriver
 
 
 class WindowsUIADriver(ComputerDriver):
-    """Skeleton driver for Windows UI Automation.
-
-    ⚠️ SKELETON: Not yet implemented for Windows platform.
-    """
+    """Driver using Windows UI Automation via optional native helpers."""
 
     @property
     def name(self) -> str:
@@ -34,24 +25,35 @@ class WindowsUIADriver(ComputerDriver):
         return ComputerCapabilities(
             can_capture_background_window=True,
             can_semantic_action=True,
+            can_background_click=True,
+            can_background_type=True,
+            can_background_scroll=True,
             can_pid_event=False,
             can_foreground_action=False,
             can_parallel_user_work=True,
         )
 
     def observe(self, target: ComputerTarget) -> ObserveResult:
-        """Observe via UIA tree.
+        from ..windows.printwindow import capture_window_via_printwindow
+        from ..windows.uia import uia_get_tree
 
-        Args:
-            target: The target to observe.
+        hwnd = self._resolve(target)
+        if hwnd is None:
+            return ObserveResult(
+                platform="win32",
+                target_window=self._target_window(target, None),
+                capabilities=self._caps(),
+                fallback_available=True,
+            )
 
-        Returns:
-            ObserveResult stub.
-
-        Raises:
-            NotImplementedError: Always (skeleton).
-        """
-        raise NotImplementedError("WindowsUIADriver.observe is not yet implemented")
+        return ObserveResult(
+            platform="win32",
+            target_window=self._target_window(target, hwnd),
+            screenshot=capture_window_via_printwindow(hwnd),
+            ax_tree=uia_get_tree(hwnd),
+            capabilities=self._caps(),
+            fallback_available=True,
+        )
 
     def click(
         self,
@@ -60,51 +62,64 @@ class WindowsUIADriver(ComputerDriver):
         y: int = 0,
         button: str = "left",
     ) -> ActionResult:
-        """Click via UIA InvokePattern.
+        from ..windows.uia import uia_find_candidates, uia_invoke
 
-        Args:
-            target: The target application/window.
-            x: X coordinate.
-            y: Y coordinate.
-            button: Mouse button.
-
-        Returns:
-            ActionResult stub.
-
-        Raises:
-            NotImplementedError: Always (skeleton).
-        """
-        raise NotImplementedError("WindowsUIADriver.click is not yet implemented")
+        hwnd = self._resolve(target)
+        if hwnd is None:
+            return self._failure("click", target, "No HWND matched the target.")
+        candidates = uia_find_candidates(hwnd, point=(x, y))
+        if not candidates:
+            return self._failure("click", target, f"No UIA element found at ({x}, {y}).")
+        element = candidates[0]
+        ok = uia_invoke(str(element.get("id") or ""))
+        return ActionResult(
+            action="click",
+            driver=self.name,
+            executed=ok,
+            confidence="high" if ok else "failed",
+            target_kind=target.kind,
+            can_parallel_user_work=True,
+            requires_foreground=False,
+            uses_physical_input=False,
+            data={"hwnd": hwnd, "element": element},
+            notes=[] if ok else ["UIA element did not support an invoke-like pattern."],
+        )
 
     def type_text(self, target: ComputerTarget, text: str = "") -> ActionResult:
-        """Type text via UIA ValuePattern.
+        from ..windows.uia import uia_find_candidates, uia_set_value
 
-        Args:
-            target: The target application/window.
-            text: The text to type.
-
-        Returns:
-            ActionResult stub.
-
-        Raises:
-            NotImplementedError: Always (skeleton).
-        """
-        raise NotImplementedError("WindowsUIADriver.type_text is not yet implemented")
+        hwnd = self._resolve(target)
+        if hwnd is None:
+            return self._failure("type_text", target, "No HWND matched the target.")
+        candidates = uia_find_candidates(hwnd, role="edit", intent="edit text input")
+        if not candidates:
+            candidates = uia_find_candidates(hwnd, intent="text edit")
+        if not candidates:
+            return self._failure("type_text", target, "No editable UIA element found.")
+        element = candidates[0]
+        ok = uia_set_value(str(element.get("id") or ""), text)
+        return ActionResult(
+            action="type_text",
+            driver=self.name,
+            executed=ok,
+            confidence="high" if ok else "failed",
+            target_kind=target.kind,
+            can_parallel_user_work=True,
+            requires_foreground=False,
+            uses_physical_input=False,
+            data={"hwnd": hwnd, "element": element, "text_length": len(text)},
+            notes=[] if ok else ["UIA element did not support ValuePattern-like text setting."],
+        )
 
     def key(self, target: ComputerTarget, key_combo: str = "") -> ActionResult:
-        """Send key combo via UIA.
-
-        Args:
-            target: The target application/window.
-            key_combo: Key combination string.
-
-        Returns:
-            ActionResult stub.
-
-        Raises:
-            NotImplementedError: Always (skeleton).
-        """
-        raise NotImplementedError("WindowsUIADriver.key is not yet implemented")
+        return ActionResult(
+            action="key",
+            driver=self.name,
+            executed=False,
+            confidence="not_supported",
+            target_kind=target.kind,
+            notes=["UIA driver does not synthesize arbitrary key combos; use PostMessage fallback."],
+        )
 
     def scroll(
         self,
@@ -114,22 +129,28 @@ class WindowsUIADriver(ComputerDriver):
         direction: str = "down",
         clicks: int = 3,
     ) -> ActionResult:
-        """Scroll via UIA ScrollPattern.
+        from ..windows.uia import uia_find_candidates, uia_scroll
 
-        Args:
-            target: The target application/window.
-            x: X coordinate.
-            y: Y coordinate.
-            direction: Scroll direction.
-            clicks: Number of scroll clicks.
-
-        Returns:
-            ActionResult stub.
-
-        Raises:
-            NotImplementedError: Always (skeleton).
-        """
-        raise NotImplementedError("WindowsUIADriver.scroll is not yet implemented")
+        hwnd = self._resolve(target)
+        if hwnd is None:
+            return self._failure("scroll", target, "No HWND matched the target.")
+        candidates = uia_find_candidates(hwnd, point=(x, y), intent="scroll")
+        if not candidates:
+            return self._failure("scroll", target, f"No scrollable UIA element found at ({x}, {y}).")
+        element = candidates[0]
+        ok = uia_scroll(str(element.get("id") or ""), direction=direction, amount=clicks)
+        return ActionResult(
+            action="scroll",
+            driver=self.name,
+            executed=ok,
+            confidence="high" if ok else "failed",
+            target_kind=target.kind,
+            can_parallel_user_work=True,
+            requires_foreground=False,
+            uses_physical_input=False,
+            data={"hwnd": hwnd, "element": element},
+            notes=[] if ok else ["UIA element did not support ScrollPattern-like scrolling."],
+        )
 
     def semantic_action(
         self,
@@ -137,23 +158,82 @@ class WindowsUIADriver(ComputerDriver):
         intent: str = "",
         element_or_point: Any = None,
     ) -> ActionResult:
-        """Execute semantic action via UIA patterns.
+        from ..windows.uia import uia_find_candidates, uia_invoke, uia_set_value
 
-        Args:
-            target: The target application/window.
-            intent: Natural language intent.
-            element_or_point: Element or point.
+        hwnd = self._resolve(target)
+        if hwnd is None:
+            return self._failure("semantic_action", target, "No HWND matched the target.")
+        if isinstance(element_or_point, dict) and element_or_point.get("id"):
+            candidates = [element_or_point]
+        elif isinstance(element_or_point, (tuple, list)) and len(element_or_point) >= 2:
+            candidates = uia_find_candidates(hwnd, point=(int(element_or_point[0]), int(element_or_point[1])), intent=intent)
+        else:
+            candidates = uia_find_candidates(hwnd, intent=intent)
+        if not candidates:
+            return self._failure("semantic_action", target, f"No UIA element matched intent: {intent}")
 
-        Returns:
-            ActionResult stub.
-
-        Raises:
-            NotImplementedError: Always (skeleton).
-        """
-        raise NotImplementedError(
-            "WindowsUIADriver.semantic_action is not yet implemented"
+        element = candidates[0]
+        element_id = str(element.get("id") or "")
+        if "set_value:" in intent:
+            value = intent.split("set_value:", 1)[1]
+            ok = uia_set_value(element_id, value)
+        else:
+            ok = uia_invoke(element_id)
+        return ActionResult(
+            action="semantic_action",
+            driver=self.name,
+            executed=ok,
+            confidence="high" if ok else "failed",
+            target_kind=target.kind,
+            can_parallel_user_work=True,
+            requires_foreground=False,
+            uses_physical_input=False,
+            data={"hwnd": hwnd, "element": element, "intent": intent},
         )
 
     def is_available(self) -> bool:
-        """Available on Windows only (when implemented)."""
         return sys.platform == "win32"
+
+    @staticmethod
+    def _caps() -> dict[str, bool]:
+        return {
+            "can_capture_background_window": True,
+            "can_semantic_action": True,
+            "can_background_click": True,
+            "can_background_type": True,
+            "can_background_scroll": True,
+            "can_parallel_user_work": True,
+        }
+
+    @staticmethod
+    def _resolve(target: ComputerTarget) -> int | None:
+        return resolve_hwnd(
+            hwnd=target.hwnd,
+            window_id=target.window_id,
+            pid=target.pid,
+            title=target.window_title or target.app,
+        )
+
+    @staticmethod
+    def _target_window(target: ComputerTarget, hwnd: int | None) -> dict[str, Any]:
+        info = get_window_info(hwnd) if hwnd else None
+        return info or {
+            "kind": target.kind,
+            "app": target.app,
+            "pid": target.pid,
+            "hwnd": hwnd,
+            "title": target.window_title,
+        }
+
+    def _failure(self, action: str, target: ComputerTarget, note: str) -> ActionResult:
+        return ActionResult(
+            action=action,
+            driver=self.name,
+            executed=False,
+            confidence="failed",
+            target_kind=target.kind,
+            can_parallel_user_work=True,
+            requires_foreground=False,
+            uses_physical_input=False,
+            notes=[note],
+        )

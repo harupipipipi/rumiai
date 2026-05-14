@@ -21,9 +21,10 @@ def dispatch_external_event(
     audience_decision: AudienceDecision | dict[str, Any] | None = None,
     context: dict[str, Any] | None = None,
     send_response: bool = False,
+    mentioned: bool = False,
 ) -> dict[str, Any]:
     policy = AudiencePolicy(audience_policy or {"default": "allow"})
-    decision = _coerce_audience_decision(audience_decision) or policy.evaluate(event)
+    decision = _coerce_audience_decision(audience_decision) or policy.evaluate(event, mentioned=mentioned)
     if not decision.allowed:
         return {
             "status": "denied",
@@ -41,7 +42,13 @@ def dispatch_external_event(
         return {"status": "ignored", "assistant_text": "", "reason": "input profile did not match", "input_profile_id": profile.id}
 
     envelope = engine.to_envelope(event)
-    runtime_context = context or {}
+    runtime_context = dict(context or {})
+    profile_policy = profile.spec.get("policy") if isinstance(getattr(profile, "spec", None), dict) else None
+    if isinstance(profile_policy, dict) and profile_policy:
+        runtime_context["profile_policy"] = {
+            **profile_policy,
+            **(runtime_context.get("profile_policy") if isinstance(runtime_context.get("profile_policy"), dict) else {}),
+        }
     result = submit_input(envelope, runtime_context)
     result["external_event"] = event.as_dict()
     result["policy"] = decision.as_dict()
