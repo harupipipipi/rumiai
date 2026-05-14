@@ -90,8 +90,74 @@ def test_browser_companion_controller_round_trip_uses_active_tab_and_saves_captu
     assert result["is_error"] is False
     assert result["client_id"] == "edge-1"
     assert result["snapshot"]["url"] == "https://example.com"
+    assert result["requires_foreground"] is True
+    assert result["can_parallel_user_work"] is False
     assert result["path"].endswith(".png")
     assert Path(result["path"]).exists()
+
+
+def test_browser_companion_controller_marks_dom_actions_parallel_safe(tmp_path):
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_companion import BrowserCompanionController
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_companion_bridge import BrowserCompanionBridgeStore
+
+    store = BrowserCompanionBridgeStore(root=tmp_path / "bridge")
+    store.upsert_client(
+        {
+            "client_id": "edge-1",
+            "browser_name": "Microsoft Edge",
+            "tabs": [{"id": 17, "active": True, "title": "Example", "url": "https://example.com"}],
+            "active_tab_id": 17,
+        }
+    )
+    controller = BrowserCompanionController(
+        artifact_root=tmp_path / "artifacts",
+        bridge_store=store,
+    )
+
+    def extension_worker():
+        claimed = None
+        deadline = time.time() + 3.0
+        while claimed is None and time.time() < deadline:
+            claimed = store.claim_next_command("edge-1")
+            if claimed is None:
+                time.sleep(0.05)
+        assert claimed is not None
+        assert claimed["request"]["action"] == "page.click"
+        store.complete_command(
+            "edge-1",
+            claimed["command_id"],
+            {"ok": True, "action": "click", "element_id": "rumi-el-1"},
+        )
+
+    worker = threading.Thread(target=extension_worker, daemon=True)
+    worker.start()
+    result = controller.run("page.click", {"element_id": "rumi-el-1"}, context={})
+    worker.join(timeout=1.0)
+
+    assert result["is_error"] is False
+    assert result["requires_foreground"] is False
+    assert result["can_parallel_user_work"] is True
+
+
+def test_browser_companion_extension_focus_semantics_are_explicit():
+    background = (ROOT.parent / "browser_extensions" / "rumi_browser_companion" / "background.js").read_text(encoding="utf-8")
+    send_element_body = background[
+        background.index("async function sendElementCommand") : background.index("async function sendToTab")
+    ]
+    send_to_tab_body = background[
+        background.index("async function sendToTab") : background.index("async function resolveTabId")
+    ]
+    capture_body = background[
+        background.index("async function captureVisibleTab") : background.index("async function captureDomSnapshot")
+    ]
+
+    assert "chrome.tabs.update(tabId, { url: payload.url })" in background
+    assert "return sendElementCommand(action, payload);" in background
+    assert "chrome.tabs.sendMessage(resolvedTabId, message)" in send_to_tab_body
+    assert "chrome.tabs.update" not in send_element_body
+    assert "chrome.windows.update" not in send_element_body
+    assert "requires_foreground: true" in capture_body
+    assert "can_parallel_user_work: false" in capture_body
 
 
 def test_browser_companion_bridge_routes_support_batch_results(tmp_path, monkeypatch):

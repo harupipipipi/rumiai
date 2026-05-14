@@ -277,24 +277,53 @@ async function executeBridgeCommand(command) {
   const action = String(command?.action || "");
   try {
     const result = await dispatchCommand(command);
+    const semantics = actionResultSemantics(action, result);
     return {
       command_id: command.command_id || null,
       action,
       ok: true,
       started_at: startedAt,
       finished_at: new Date().toISOString(),
+      ...semantics,
       result
     };
   } catch (error) {
+    const semantics = actionResultSemantics(action);
     return {
       command_id: command.command_id || null,
       action,
       ok: false,
       started_at: startedAt,
       finished_at: new Date().toISOString(),
+      ...semantics,
       error: String(error && error.message ? error.message : error)
     };
   }
+}
+
+function actionResultSemantics(action, result) {
+  if (action === "page.capture") {
+    return { requires_foreground: true, can_parallel_user_work: false };
+  }
+  if (action === "page.snapshot" && result && typeof result === "object" && result.capture) {
+    return { requires_foreground: true, can_parallel_user_work: false };
+  }
+  if (action === "browser.select_tab") {
+    return { requires_foreground: true, can_parallel_user_work: false };
+  }
+  if (
+    action === "browser.tabs" ||
+    action === "page.navigate" ||
+    action === "page.snapshot" ||
+    action === "page.click" ||
+    action === "page.type" ||
+    action === "page.press" ||
+    action === "page.scroll" ||
+    action === "page.extract"
+  ) {
+    return { requires_foreground: false, can_parallel_user_work: true };
+  }
+  return {};
 }
 
 async function dispatchCommand(command) {
@@ -327,7 +356,9 @@ async function listTabs() {
   const activeTab = tabs.find((tab) => tab.active) || null;
   return {
     tabs,
-    active_tab_id: activeTab ? activeTab.id : null
+    active_tab_id: activeTab ? activeTab.id : null,
+    requires_foreground: false,
+    can_parallel_user_work: true
   };
 }
 
@@ -339,7 +370,9 @@ async function selectTab(payload) {
   const selected = await chrome.tabs.get(tabId);
   return {
     tab: tabSummary(selected),
-    active_tab_id: selected.id
+    active_tab_id: selected.id,
+    requires_foreground: true,
+    can_parallel_user_work: false
   };
 }
 
@@ -348,11 +381,13 @@ async function navigateTab(payload) {
   if (!payload.url) {
     throw new Error("navigate requires url");
   }
-  const tab = await chrome.tabs.update(tabId, { url: payload.url, active: true });
+  const tab = await chrome.tabs.update(tabId, { url: payload.url });
   return {
     tab: tabSummary(tab),
     active_tab_id: tab.id,
-    url: tab.url || payload.url
+    url: tab.url || payload.url,
+    requires_foreground: false,
+    can_parallel_user_work: true
   };
 }
 
@@ -372,6 +407,8 @@ async function captureVisibleTab(payload) {
     active_tab_id: activeTab.id,
     data_url: dataUrl,
     image_size: imageSizeFromDataUrl(dataUrl),
+    requires_foreground: true,
+    can_parallel_user_work: false,
     target_window: {
       window_id: tab.windowId
     }
@@ -388,10 +425,14 @@ async function captureDomSnapshot(payload) {
   const result = {
     tab: tabSummary(tab),
     active_tab_id: tab.id,
-    snapshot
+    snapshot,
+    requires_foreground: false,
+    can_parallel_user_work: true
   };
   if (payload.include_capture) {
     result.capture = await captureVisibleTab({ ...payload, tab_id: tabId });
+    result.requires_foreground = true;
+    result.can_parallel_user_work = false;
   }
   return result;
 }
@@ -410,7 +451,9 @@ async function sendElementCommand(action, payload) {
     ...result,
     tab: tabSummary(tab),
     active_tab_id: tab.id,
-    url: tab.url || ""
+    url: tab.url || "",
+    requires_foreground: false,
+    can_parallel_user_work: true
   };
 }
 

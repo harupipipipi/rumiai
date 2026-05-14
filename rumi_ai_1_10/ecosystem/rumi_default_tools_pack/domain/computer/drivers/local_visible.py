@@ -84,6 +84,9 @@ class LocalVisibleDesktopDriver(ComputerDriver):
             driver=self.name,
             executed=False,
             confidence="best_effort",
+            target_kind=target.kind,
+            requires_foreground=True,
+            uses_physical_input=True,
             can_parallel_user_work=False,
             notes=["LocalVisibleDesktopDriver.click: not yet integrated"],
         )
@@ -104,6 +107,9 @@ class LocalVisibleDesktopDriver(ComputerDriver):
             driver=self.name,
             executed=False,
             confidence="best_effort",
+            target_kind=target.kind,
+            requires_foreground=True,
+            uses_physical_input=True,
             can_parallel_user_work=False,
             notes=["LocalVisibleDesktopDriver.type_text: not yet integrated"],
         )
@@ -124,6 +130,9 @@ class LocalVisibleDesktopDriver(ComputerDriver):
             driver=self.name,
             executed=False,
             confidence="best_effort",
+            target_kind=target.kind,
+            requires_foreground=True,
+            uses_physical_input=True,
             can_parallel_user_work=False,
             notes=["LocalVisibleDesktopDriver.key: not yet integrated"],
         )
@@ -154,6 +163,9 @@ class LocalVisibleDesktopDriver(ComputerDriver):
             driver=self.name,
             executed=False,
             confidence="best_effort",
+            target_kind=target.kind,
+            requires_foreground=True,
+            uses_physical_input=True,
             can_parallel_user_work=False,
             notes=["LocalVisibleDesktopDriver.scroll: not yet integrated"],
         )

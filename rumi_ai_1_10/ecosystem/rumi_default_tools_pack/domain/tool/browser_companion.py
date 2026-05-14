@@ -206,11 +206,13 @@ class BrowserCompanionController:
                 "command_id": command.get("command_id"),
             }
         result = completed.get("result") if isinstance(completed.get("result"), dict) else {}
+        semantics = self._action_semantics(remote_action, result)
         output = {
             "action": remote_action,
             "client": client,
             "client_id": client.get("client_id"),
             "command_id": command.get("command_id"),
+            **semantics,
             "result": result,
         }
         if bool(result.get("is_error")):
@@ -237,6 +239,42 @@ class BrowserCompanionController:
         if "elements" in result:
             output["elements"] = result.get("elements")
         return output
+
+    @staticmethod
+    def _action_semantics(remote_action: str, result: dict[str, Any]) -> dict[str, bool]:
+        requires_foreground = result.get("requires_foreground")
+        can_parallel = result.get("can_parallel_user_work")
+        if isinstance(requires_foreground, bool) and isinstance(can_parallel, bool):
+            return {
+                "requires_foreground": requires_foreground,
+                "can_parallel_user_work": can_parallel,
+            }
+        capture = result.get("capture") if isinstance(result.get("capture"), dict) else {}
+        if remote_action == "page.capture" or isinstance(capture.get("data_url"), str):
+            return {
+                "requires_foreground": True,
+                "can_parallel_user_work": False,
+            }
+        if remote_action == "browser.select_tab":
+            return {
+                "requires_foreground": True,
+                "can_parallel_user_work": False,
+            }
+        if remote_action in {
+            "browser.tabs",
+            "page.navigate",
+            "page.snapshot",
+            "page.click",
+            "page.type",
+            "page.press",
+            "page.scroll",
+            "page.extract",
+        }:
+            return {
+                "requires_foreground": False,
+                "can_parallel_user_work": True,
+            }
+        return {}
 
     @staticmethod
     def _remote_payload(payload: dict[str, Any]) -> dict[str, Any]:

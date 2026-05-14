@@ -171,9 +171,11 @@ def test_line_route_applies_endpoint_response_context(monkeypatch, tmp_path):
         },
     )
     captured: dict[str, Any] = {}
+    monkeypatch.setattr(line_block.AudiencePolicyRegistry, "resolve", lambda self, policy_id, event=None: {"default": "allow"})
 
-    def fake_dispatch(event, *, input_profile_id, audience_policy, context, send_response, mentioned=False):
+    def fake_dispatch(event, *, input_profile_id, audience_policy, audience_decision, context, send_response, mentioned=False):
         captured["input_profile_id"] = input_profile_id
+        captured["audience_decision"] = audience_decision
         captured["context"] = context
         captured["mentioned"] = mentioned
         return {
@@ -228,9 +230,11 @@ def test_line_route_builds_line_biz_prompt_from_chat_url(monkeypatch, tmp_path):
         },
     )
     captured: dict[str, Any] = {}
+    monkeypatch.setattr(line_block.AudiencePolicyRegistry, "resolve", lambda self, policy_id, event=None: {"default": "allow"})
 
-    def fake_dispatch(event, *, input_profile_id, audience_policy, context, send_response, mentioned=False):
+    def fake_dispatch(event, *, input_profile_id, audience_policy, audience_decision, context, send_response, mentioned=False):
         captured["context"] = context
+        captured["audience_decision"] = audience_decision
         captured["mentioned"] = mentioned
         return {
             "status": "ok",
@@ -324,9 +328,10 @@ def test_line_computer_use_group_message_dispatches_when_bot_is_mentioned(monkey
     )
     captured: dict[str, Any] = {}
 
-    def fake_dispatch(event, *, input_profile_id, audience_policy, context, send_response, mentioned=False):
+    def fake_dispatch(event, *, input_profile_id, audience_policy, audience_decision, context, send_response, mentioned=False):
         captured["event"] = event
         captured["audience_policy"] = audience_policy
+        captured["audience_decision"] = audience_decision
         captured["mentioned"] = mentioned
         return {
             "status": "ok",
@@ -476,7 +481,7 @@ def test_line_route_frontend_push_to_saved_origin_reaches_adapter(monkeypatch, t
     monkeypatch.setenv("RUMI_DEFAULTSPACK_FRONTEND_SETTINGS_PATH", str(settings_path))
     calls: list[dict[str, Any]] = []
 
-    def fake_dispatch(event, *, input_profile_id, audience_policy, audience_decision, context, send_response):
+    def fake_dispatch(event, *, input_profile_id, audience_policy, audience_decision, context, send_response, mentioned=False):
         assert audience_decision.allowed is True
         assert context["send_mode"] == "push_to_saved_origin"
         return {

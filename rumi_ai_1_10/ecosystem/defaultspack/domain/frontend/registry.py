@@ -1749,7 +1749,9 @@ class FrontendRegistry:
         if not isinstance(external_custom, dict):
             external_custom = {}
             refreshed["external_custom"] = external_custom
-        endpoints = WebhookEndpointStore().list_endpoints()
+        endpoints = WebhookEndpointStore(
+            self._pack_root / "user_data" / "shared" / "webhooks" / "endpoints.json"
+        ).list_endpoints()
         input_profiles = InputProfileRegistry(self._pack_root).list_profiles()
         output_profiles = OutputProfileRegistry(self._pack_root).list_profiles()
         template_catalog = external_io_template_catalog(self._pack_root)
