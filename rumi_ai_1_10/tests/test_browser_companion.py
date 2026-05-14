@@ -1,8 +1,16 @@
 from __future__ import annotations
 
+import sys
 import threading
 import time
 from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parent.parent
+DEFAULTSPACK_ROOT = ROOT / "ecosystem" / "defaultspack"
+
+sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(DEFAULTSPACK_ROOT))
 
 
 _PNG_DATA_URL = (
