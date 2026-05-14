@@ -163,6 +163,11 @@ class DefaultsHttpServer:
         for source_key, dest_key in (inject or {}).items():
             payload[dest_key] = path_params.get(source_key, "")
         context = self._build_context()
+        # Standalone live-server scripts start transport with no kernel facade.
+        # In that mode, capability bridge resolution can block while trying to
+        # discover runtime services that do not exist. Call the block directly.
+        if self.facade is None:
+            return invoke_block(module_name, payload, context)
         if module_name == "blocks.chat.stream":
             return invoke_block(module_name, payload, context)
         try:

@@ -9,6 +9,7 @@ import urllib.request
 from typing import Any, Dict, List
 
 from .openai_compatible_provider import OpenAICompatibleProvider
+from ..oauth_store import get_provider_access_token
 from .profile_catalog import merge_curated_and_profiles, profile_dir_for
 
 
@@ -167,6 +168,37 @@ class GoogleProvider(OpenAICompatibleProvider):
             known_models=self.curated_models,
         )
         self._base_url = self._normalize_google_base_url(self._base_url)
+        self.BASE_URL = self._base_url
+        self._runtime_bearer_token = ""
+
+    def _oauth_access_token(self) -> str:
+        return str(get_provider_access_token("google") or "").strip()
+
+    def _active_bearer_token(self) -> str:
+        runtime_token = str(getattr(self, "_runtime_bearer_token", "") or "").strip()
+        if runtime_token:
+            return runtime_token
+        return self._oauth_access_token() or str(self._api_key or "").strip()
+
+    def _headers(self, content_type="application/json"):
+        headers = dict(getattr(self, "_extra_headers", {}))
+        bearer_token = self._active_bearer_token()
+        if bearer_token:
+            headers["Authorization"] = "Bearer " + bearer_token
+        if content_type:
+            headers["Content-Type"] = content_type
+        return headers
+
+    def _ensure_runtime_config(self) -> None:
+        bearer_token = self._oauth_access_token() or str(self._api_key or "").strip()
+        self._runtime_bearer_token = bearer_token
+        if self._credential_required and not bearer_token:
+            missing = ", ".join(self._api_key_envs) or "api_key"
+            raise RuntimeError(
+                f"{self.provider_id}: missing API key env ({missing}) or browser OAuth connection"
+            )
+        if not self._base_url:
+            raise RuntimeError(f"{self.provider_id}: base URL is not configured")
         self.BASE_URL = self._base_url
 
     @staticmethod
@@ -430,10 +462,12 @@ class GoogleProvider(OpenAICompatibleProvider):
         if stream:
             url += "?alt=sse"
         data = json.dumps(body).encode("utf-8")
-        headers = {
-            "Content-Type": "application/json",
-            "x-goog-api-key": self._api_key,
-        }
+        headers = {"Content-Type": "application/json"}
+        bearer_token = self._active_bearer_token()
+        if bearer_token and bearer_token == str(self._api_key or "").strip():
+            headers["x-goog-api-key"] = bearer_token
+        elif bearer_token:
+            headers["Authorization"] = "Bearer " + bearer_token
         max_attempts = 4
         for attempt in range(max_attempts):
             req = urllib.request.Request(url, data=data, headers=headers, method="POST")

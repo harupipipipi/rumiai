@@ -413,3 +413,5 @@ def test_build_fallback_http_routes_contains_core_routes():
     route_methods = {(method, compiled.pattern) for method, compiled, _, _, _ in routes}
     assert ("POST", "^/v1/chat/completions$") in route_methods
     assert ("GET", "^/api/health$") in route_methods
+    assert ("GET", "^/api/tools/mcp$") in route_methods
+    assert ("POST", "^/api/tools/mcp/connect$") in route_methods

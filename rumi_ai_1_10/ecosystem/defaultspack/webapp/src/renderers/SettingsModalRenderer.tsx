@@ -50,6 +50,13 @@ function registeredApiRows(providers: Array<Record<string, unknown>>): Array<Rec
   return rows.filter((api) => Boolean(api.configured));
 }
 
+function oauthProviderRows(providers: Array<Record<string, unknown>>): Array<Record<string, unknown>> {
+  return providers.filter((provider) => {
+    const oauth = provider.oauth;
+    return Boolean(oauth) && typeof oauth === "object" && Boolean((oauth as Record<string, unknown>).supported);
+  });
+}
+
 function apiRowLabel(api: Record<string, unknown>): string {
   return String(api.label ?? `${api.provider_id}:${api.api_id}:***`);
 }
@@ -208,6 +215,252 @@ function publicUrlConfig(value: unknown, fallback: unknown): Record<string, unkn
   if (value && typeof value === "object" && !Array.isArray(value)) return value as Record<string, unknown>;
   if (fallback && typeof fallback === "object" && !Array.isArray(fallback)) return fallback as Record<string, unknown>;
   return {};
+}
+
+function ProviderOAuthPanel({
+  sectionId,
+  fieldId,
+  providers,
+  onRefresh,
+}: {
+  sectionId: string;
+  fieldId: string;
+  providers: Array<Record<string, unknown>>;
+  onRefresh: (sectionId: string, fieldId: string, value: unknown) => void;
+}) {
+  const [clientDrafts, setClientDrafts] = useState<Record<string, string>>({});
+  const [busyAction, setBusyAction] = useState("");
+  const [messages, setMessages] = useState<Record<string, { tone: "success" | "error"; text: string }>>({});
+  const oauthProviders = oauthProviderRows(providers);
+
+  if (!oauthProviders.length) {
+    return null;
+  }
+
+  const refresh = (providerId: string) => onRefresh(sectionId, fieldId, { action: "oauth_refresh", provider_id: providerId });
+
+  return (
+    <div className="space-y-3">
+      {oauthProviders.map((provider) => {
+        const providerId = String(provider.provider_id ?? "");
+        const oauth = provider.oauth as Record<string, unknown>;
+        const connected = Boolean(oauth.connected);
+        const clientConfigured = Boolean(oauth.client_configured);
+        const displayName = String(oauth.display_name ?? oauth.email ?? "");
+        const email = String(oauth.email ?? "");
+        const expiresAt = String(oauth.expires_at ?? "");
+        const hint = String(oauth.config_hint ?? "");
+        const scopes = Array.isArray(oauth.scopes) ? oauth.scopes.map((scope) => String(scope)).filter(Boolean) : [];
+        const draft = clientDrafts[providerId] ?? "";
+        const isBusy = busyAction.startsWith(`${providerId}:`);
+        const banner = messages[providerId];
+        const stateLabel = connected ? "Connected" : clientConfigured ? "Ready to connect" : "Client config needed";
+        const stateTone = connected
+          ? "border-emerald-800 bg-emerald-950/20 text-emerald-300"
+          : clientConfigured
+            ? "border-cyan-800 bg-cyan-950/20 text-cyan-300"
+            : "border-zinc-800 bg-zinc-950 text-zinc-400";
+
+        return (
+          <div key={providerId} className="rounded-lg border border-zinc-800 bg-zinc-950/70 p-4">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h4 className="text-sm font-medium text-zinc-100">{providerId} browser login</h4>
+                  <span className={cn("rounded-full border px-2 py-0.5 text-[11px]", stateTone)}>
+                    {stateLabel}
+                  </span>
+                </div>
+                <p className="mt-1 text-xs leading-5 text-zinc-500">
+                  {connected
+                    ? `Connected${displayName ? ` as ${displayName}` : ""}${email ? ` (${email})` : ""}.`
+                    : hint}
+                </p>
+                {expiresAt && (
+                  <p className="mt-1 text-[11px] text-zinc-600">Access token expires at: {expiresAt}</p>
+                )}
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  disabled={isBusy || !clientConfigured}
+                  onClick={async () => {
+                    let popup: Window | null = null;
+                    try {
+                      popup = window.open("", `rumi-oauth-${providerId}`, "popup=yes,width=560,height=760");
+                      setBusyAction(`${providerId}:start`);
+                      const result = await api.startProviderOAuth(providerId);
+                      if (popup) {
+                        popup.location.href = result.authorize_url;
+                        popup.focus();
+                      } else {
+                        window.location.href = result.authorize_url;
+                      }
+                      setMessages((current) => ({
+                        ...current,
+                        [providerId]: { tone: "success", text: "Browser login opened in a new window." },
+                      }));
+                    } catch (errorValue) {
+                      if (popup && !popup.closed) {
+                        popup.close();
+                      }
+                      setMessages((current) => ({
+                        ...current,
+                        [providerId]: {
+                          tone: "error",
+                          text: errorValue instanceof Error ? errorValue.message : "Failed to start browser login.",
+                        },
+                      }));
+                    } finally {
+                      setBusyAction("");
+                    }
+                  }}
+                  className={cn(
+                    "rounded-lg border px-3 py-2 text-xs transition-colors",
+                    isBusy || !clientConfigured
+                      ? "cursor-not-allowed border-zinc-800 bg-zinc-900 text-zinc-600"
+                      : "border-cyan-700 bg-cyan-950/30 text-cyan-100 hover:border-cyan-500 hover:bg-cyan-900/35",
+                  )}
+                >
+                  {isBusy && busyAction === `${providerId}:start` ? "Opening..." : connected ? "Reconnect in browser" : "Connect in browser"}
+                </button>
+                <button
+                  type="button"
+                  disabled={isBusy || !connected}
+                  onClick={async () => {
+                    try {
+                      setBusyAction(`${providerId}:disconnect`);
+                      await api.disconnectProviderOAuth(providerId);
+                      refresh(providerId);
+                      setMessages((current) => ({
+                        ...current,
+                        [providerId]: { tone: "success", text: "Browser login disconnected." },
+                      }));
+                    } catch (errorValue) {
+                      setMessages((current) => ({
+                        ...current,
+                        [providerId]: {
+                          tone: "error",
+                          text: errorValue instanceof Error ? errorValue.message : "Failed to disconnect browser login.",
+                        },
+                      }));
+                    } finally {
+                      setBusyAction("");
+                    }
+                  }}
+                  className={cn(
+                    "rounded-lg border px-3 py-2 text-xs transition-colors",
+                    isBusy || !connected
+                      ? "cursor-not-allowed border-zinc-800 bg-zinc-900 text-zinc-600"
+                      : "border-zinc-700 bg-zinc-900 text-zinc-200 hover:border-zinc-500",
+                  )}
+                >
+                  Disconnect
+                </button>
+                <button
+                  type="button"
+                  disabled={isBusy || !clientConfigured}
+                  onClick={async () => {
+                    try {
+                      setBusyAction(`${providerId}:clear`);
+                      await api.clearProviderOAuthClientConfig(providerId);
+                      setClientDrafts((current) => ({ ...current, [providerId]: "" }));
+                      refresh(providerId);
+                      setMessages((current) => ({
+                        ...current,
+                        [providerId]: { tone: "success", text: "Saved OAuth client config cleared." },
+                      }));
+                    } catch (errorValue) {
+                      setMessages((current) => ({
+                        ...current,
+                        [providerId]: {
+                          tone: "error",
+                          text: errorValue instanceof Error ? errorValue.message : "Failed to clear OAuth client config.",
+                        },
+                      }));
+                    } finally {
+                      setBusyAction("");
+                    }
+                  }}
+                  className={cn(
+                    "rounded-lg border px-3 py-2 text-xs transition-colors",
+                    isBusy || !clientConfigured
+                      ? "cursor-not-allowed border-zinc-800 bg-zinc-900 text-zinc-600"
+                      : "border-zinc-800 bg-zinc-950 text-zinc-400 hover:text-zinc-200",
+                  )}
+                >
+                  Clear client
+                </button>
+              </div>
+            </div>
+            <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1.4fr)_auto]">
+              <textarea
+                value={draft}
+                onChange={(event) => {
+                  const nextValue = event.target.value;
+                  setClientDrafts((current) => ({ ...current, [providerId]: nextValue }));
+                  setMessages((current) => {
+                    if (!(providerId in current)) return current;
+                    const next = { ...current };
+                    delete next[providerId];
+                    return next;
+                  });
+                }}
+                placeholder='Paste Google OAuth desktop client JSON or a client ID like "123....apps.googleusercontent.com"'
+                className="min-h-28 w-full rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 outline-none focus:border-cyan-500"
+              />
+              <div className="flex flex-col justify-between gap-3">
+                <button
+                  type="button"
+                  disabled={isBusy || !draft.trim()}
+                  onClick={async () => {
+                    try {
+                      setBusyAction(`${providerId}:save`);
+                      await api.saveProviderOAuthClientConfig(providerId, draft);
+                      setClientDrafts((current) => ({ ...current, [providerId]: "" }));
+                      refresh(providerId);
+                      setMessages((current) => ({
+                        ...current,
+                        [providerId]: { tone: "success", text: "OAuth client config saved." },
+                      }));
+                    } catch (errorValue) {
+                      setMessages((current) => ({
+                        ...current,
+                        [providerId]: {
+                          tone: "error",
+                          text: errorValue instanceof Error ? errorValue.message : "Failed to save OAuth client config.",
+                        },
+                      }));
+                    } finally {
+                      setBusyAction("");
+                    }
+                  }}
+                  className={cn(
+                    "rounded-lg border px-3 py-2 text-sm transition-colors",
+                    isBusy || !draft.trim()
+                      ? "cursor-not-allowed border-zinc-800 bg-zinc-900 text-zinc-600"
+                      : "border-zinc-100 bg-zinc-100 text-zinc-950",
+                  )}
+                >
+                  {isBusy && busyAction === `${providerId}:save` ? "Saving..." : "Save OAuth client"}
+                </button>
+                {scopes.length > 0 && (
+                  <div className="rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 text-[11px] text-zinc-500">
+                    Scopes: {scopes.join(", ")}
+                  </div>
+                )}
+              </div>
+            </div>
+            {banner && (
+              <p className={cn("mt-3 text-[11px]", banner.tone === "success" ? "text-emerald-400" : "text-rose-300")}>
+                {banner.text}
+              </p>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 function PublicUrlField({
@@ -408,6 +661,12 @@ function SettingsField({
       const registeredApis = registeredApiRows(providers);
       control = (
         <div className="space-y-4">
+          <ProviderOAuthPanel
+            sectionId={sectionId}
+            fieldId={field.id}
+            providers={providers}
+            onRefresh={onChange}
+          />
           <div className="overflow-hidden rounded-lg border border-zinc-800 bg-zinc-950/70">
             <div className="grid grid-cols-[36px_minmax(220px,1.4fr)_minmax(120px,0.8fr)_minmax(90px,0.6fr)_minmax(90px,0.6fr)_48px] items-center gap-3 border-b border-zinc-800 bg-zinc-900/70 px-3 py-2 text-[11px] font-medium text-zinc-500">
               <span className="h-4 w-4 rounded border border-indigo-500/70" />

@@ -5,6 +5,8 @@ JSON-RPC 2.0 準拠。stdio / SSE トランスポート対応。
 """
 import json
 import os
+import re
+import shlex
 import subprocess
 import threading
 import time
@@ -16,6 +18,43 @@ import urllib.error
 _PROTOCOL_VERSION = "2024-11-05"
 _CLIENT_INFO = {"name": "rumiai-defaults", "version": "0.1.0"}
 _DEFAULT_TIMEOUT = 30
+_PLACEHOLDER_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
+
+
+def _expand_placeholders(value):
+    if isinstance(value, str):
+        return _PLACEHOLDER_RE.sub(
+            lambda match: os.environ.get(match.group(1), ""),
+            value,
+        )
+    if isinstance(value, list):
+        return [_expand_placeholders(item) for item in value]
+    if isinstance(value, tuple):
+        return [_expand_placeholders(item) for item in value]
+    if isinstance(value, dict):
+        return {
+            str(key): _expand_placeholders(item)
+            for key, item in value.items()
+        }
+    return value
+
+
+def _normalize_stdio_command(command, args=None):
+    if isinstance(command, (list, tuple)):
+        parts = [str(part) for part in command if str(part)]
+    else:
+        command_text = str(command or "").strip()
+        if not command_text:
+            return []
+        if args is not None or os.path.exists(command_text):
+            parts = [command_text]
+        else:
+            parts = shlex.split(command_text, posix=os.name != "nt")
+    if isinstance(args, (list, tuple)):
+        parts.extend(str(arg) for arg in args)
+    elif args is not None:
+        parts.append(str(args))
+    return parts
 
 
 # ---------------------------------------------------------------------------
@@ -269,20 +308,22 @@ class _ServerConnection:
     def connect(self):
         transport_type = self.config.get("transport", "stdio")
         if transport_type == "stdio":
-            command = self.config.get("command")
-            if not command:
+            command = _expand_placeholders(self.config.get("command"))
+            command_args = _expand_placeholders(self.config.get("args"))
+            command_parts = _normalize_stdio_command(command, command_args)
+            if not command_parts:
                 raise ValueError("stdio transport requires 'command' in config")
             env = os.environ.copy()
-            config_env = self.config.get("env")
+            config_env = _expand_placeholders(self.config.get("env"))
             if isinstance(config_env, dict):
                 for key, value in config_env.items():
                     env[str(key)] = str(value)
-            self._transport = _StdioTransport(command, env=env)
+            self._transport = _StdioTransport(command_parts, env=env)
         elif transport_type == "sse":
-            url = self.config.get("url")
+            url = _expand_placeholders(self.config.get("url"))
             if not url:
                 raise ValueError("sse transport requires 'url' in config")
-            headers = self.config.get("headers")
+            headers = _expand_placeholders(self.config.get("headers"))
             self._transport = _SseTransport(url, headers=headers)
         else:
             raise ValueError("Unknown transport type: {}".format(transport_type))
