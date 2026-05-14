@@ -65,6 +65,7 @@ def test_line_computer_use_profile_attaches_browser_tools_and_prompt_policy():
     envelope = InputProfileEngine(profile).to_envelope(event)
 
     assert envelope.input == "open chrome"
+    assert envelope.params["thinking_level"] == "high"
     assert envelope.tools == ["computer_use", "browser_computer"]
     assert profile.spec["policy"]["max_tool_calls"] == 30
     assert profile.spec["response_prompt"]["enabled"] is True

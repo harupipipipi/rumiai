@@ -398,6 +398,50 @@ def _available_tools(context, input_data):
     return filtered, adapt_tool_definitions(filtered), resolved_context
 
 
+def _prefocus_computer_use_target_window(available_tools, base_context, *, call_handler=None):
+    if not isinstance(base_context, dict) or not base_context.get("user_requested_computer_use"):
+        return None
+    target_app = str(base_context.get("computer_use_target_app") or "").strip()
+    target_title = str(base_context.get("computer_use_target_title") or "").strip()
+    if not (target_app or target_title):
+        return None
+    connected_names = connected_tool_names(
+        available_tools,
+        base_context.get("runtime_profile") if isinstance(base_context.get("runtime_profile"), dict) else None,
+        agent_id=base_context.get("agent_id"),
+    )
+    tool_name = next(
+        (candidate for candidate in ("browser_computer", "computer_use", "browser_use") if candidate in connected_names),
+        "",
+    )
+    if not tool_name:
+        return None
+
+    payload = {}
+    if target_app:
+        payload["app"] = target_app
+    if target_title:
+        payload["title"] = target_title
+    arguments = {"action": "computer.select_window", "payload": payload}
+    invoke_context = build_tool_execution_context(base_context, tool_name, connected_names)
+    if call_handler is not None:
+        result = call_handler(
+            "defaults.tool.invoke",
+            {
+                "tool_name": tool_name,
+                "arguments": arguments,
+                "context": invoke_context,
+            },
+        )
+        if isinstance(result, dict) and result.get("status") == "ok":
+            return result.get("data", {})
+        return result
+
+    from domain.tool.executor import ToolExecutor
+
+    return ToolExecutor().execute(tool_name, arguments, invoke_context)
+
+
 def _tool_use_blocks(response):
     blocks = response.get("content", []) if isinstance(response, dict) else []
     if not isinstance(blocks, list):
@@ -1634,6 +1678,10 @@ def run(input_data, context):
         )
     raw_tools, provider_tools, tool_context = _available_tools(request_context, input_data)
     tools_called = [tool_name_from_definition(tool) for tool in raw_tools if tool_name_from_definition(tool)]
+    try:
+        _prefocus_computer_use_target_window(raw_tools, tool_context, call_handler=call_handler)
+    except Exception:
+        pass
     try:
         response = _complete_with_tools(
             model,

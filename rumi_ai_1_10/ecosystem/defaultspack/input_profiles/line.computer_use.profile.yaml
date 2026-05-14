@@ -21,6 +21,7 @@ metadata:
     source: "$.source"
     message: "$.message"
 params:
+  thinking_level: high
   external_input:
     default_response:
       mode: same_response

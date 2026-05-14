@@ -20,9 +20,10 @@ def dispatch_external_event(
     audience_policy: dict[str, Any] | None = None,
     context: dict[str, Any] | None = None,
     send_response: bool = False,
+    mentioned: bool = False,
 ) -> dict[str, Any]:
     policy = AudiencePolicy(audience_policy or {"default": "allow"})
-    decision = policy.evaluate(event)
+    decision = policy.evaluate(event, mentioned=mentioned)
     if not decision.allowed:
         return {
             "status": "denied",

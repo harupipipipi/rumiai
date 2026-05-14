@@ -71,6 +71,12 @@ def _handle_event(
     external_event = normalize_line_event(event, verified=verified, destination=destination)
     if model:
         external_event.metadata["model"] = model
+    mentioned = _line_message_mentions_bot(event, destination=destination)
+    require_group_mention = _require_line_group_mention(endpoint, external_event)
+    external_event.metadata["line_mention"] = {
+        "mentioned": mentioned,
+        "require_group_mention": require_group_mention,
+    }
     origin = origin_from_external_event(external_event)
     source_record = ExternalSourceStore().record_origin(origin, verified=verified)
     external_event.metadata["origin"] = origin.as_dict()
@@ -83,12 +89,15 @@ def _handle_event(
     runtime_context.setdefault("source_record", source_record)
     runtime_context = _apply_endpoint_response_context(runtime_context, endpoint)
     policy = AudiencePolicyRegistry().resolve(endpoint.audience_policy_id, event=external_event)
+    if require_group_mention:
+        policy = _require_audience_mention(policy)
     result = dispatch_external_event(
         external_event,
         input_profile_id=endpoint.input_profile_id,
         audience_policy=policy,
         context=runtime_context,
         send_response=True,
+        mentioned=mentioned,
     )
     plan = result.get("response_plan") if isinstance(result.get("response_plan"), dict) else ResponsePlanner("line").plan(RumiResponse.from_result(result))
     reply = _send_response_plan(plan, external_event, context=runtime_context)
@@ -252,3 +261,47 @@ def _truthy(value: Any) -> bool:
     if isinstance(value, str):
         return value.strip().lower() in {"1", "true", "yes", "y", "on"}
     return bool(value)
+
+
+def _line_message_mentions_bot(event: dict[str, Any], *, destination: str = "") -> bool:
+    message = event.get("message") if isinstance(event.get("message"), dict) else {}
+    mention = message.get("mention") if isinstance(message.get("mention"), dict) else {}
+    mentionees = mention.get("mentionees") if isinstance(mention.get("mentionees"), list) else []
+    destination_id = str(destination or "").strip()
+    for item in mentionees:
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("type") or "").strip() != "user":
+            continue
+        if bool(item.get("isSelf")):
+            return True
+        if destination_id and str(item.get("userId") or "").strip() == destination_id:
+            return True
+    return False
+
+
+def _require_line_group_mention(endpoint: WebhookEndpoint, external_event) -> bool:
+    if getattr(external_event, "scope", None) is None or external_event.scope.type not in {"group", "room"}:
+        return False
+    response = endpoint.response if isinstance(endpoint.response, dict) else {}
+    conversation = endpoint.conversation if isinstance(endpoint.conversation, dict) else {}
+    metadata = endpoint.metadata if isinstance(endpoint.metadata, dict) else {}
+    configured = None
+    for container in (metadata, response, conversation):
+        for key in ("require_group_mention", "group_mention_only", "mention_only_in_groups"):
+            if key in container:
+                configured = container.get(key)
+                break
+        if configured is not None:
+            break
+    if configured is None:
+        return endpoint.input_profile_id == "line.computer_use" or str(response.get("mode") or "").strip().lower() == "computer_use_line_biz"
+    return _truthy(configured)
+
+
+def _require_audience_mention(policy: dict[str, Any]) -> dict[str, Any]:
+    updated = dict(policy or {})
+    require = dict(updated.get("require") if isinstance(updated.get("require"), dict) else {})
+    require["mention"] = True
+    updated["require"] = require
+    return updated
