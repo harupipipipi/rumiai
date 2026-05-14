@@ -177,7 +177,22 @@ class IntegrationConversationStore:
             if conversation_id:
                 conversation = chat_store.get_conversation(str(conversation_id))
                 if conversation is not None:
+                    updates: Dict[str, Any] = {}
+                    requested_model = str(model or "").strip()
+                    if requested_model and str(conversation.get("model") or "").strip() != requested_model:
+                        updates["model"] = requested_model
+                    if isinstance(metadata, dict) and metadata:
+                        existing_metadata = (
+                            conversation.get("metadata") if isinstance(conversation.get("metadata"), dict) else {}
+                        )
+                        merged_metadata = {**existing_metadata, **metadata}
+                        if merged_metadata != existing_metadata:
+                            updates["metadata"] = merged_metadata
+                    if updates:
+                        conversation = chat_store.update_conversation(str(conversation_id), updates) or conversation
                     existing["updated_at"] = _now_ms()
+                    if isinstance(metadata, dict) and metadata:
+                        existing["metadata"] = {**(existing.get("metadata") if isinstance(existing.get("metadata"), dict) else {}), **metadata}
                     self._save()
                     return conversation
 

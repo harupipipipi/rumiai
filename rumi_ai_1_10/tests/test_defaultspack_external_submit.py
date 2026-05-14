@@ -115,3 +115,33 @@ def test_submit_input_releases_claim_after_send_error(monkeypatch, tmp_path):
     assert failed["status"] == "error"
     assert retried["status"] == "ok"
     assert retried["assistant_text"] == "retry ok"
+
+
+def test_existing_external_conversation_updates_model_and_metadata(monkeypatch, tmp_path):
+    _configure_external_submit_paths(monkeypatch, tmp_path)
+    chat_store = ChatStore()
+    integration_store = IntegrationConversationStore()
+
+    original = integration_store.get_or_create_conversation(
+        provider="line",
+        external_key="line:group:Cgroup",
+        title="line Cgroup",
+        metadata={"source": {"provider": "line"}, "input_profile_id": "line.default"},
+        chat_store=chat_store,
+        model="stub/default",
+    )
+
+    reused = integration_store.get_or_create_conversation(
+        provider="line",
+        external_key="line:group:Cgroup",
+        title="line Cgroup",
+        metadata={"input_profile_id": "line.computer_use", "line_mention": {"require_group_mention": True}},
+        chat_store=chat_store,
+        model="google/gemma-4-31b-it",
+    )
+
+    assert reused["id"] == original["id"]
+    assert reused["model"] == "google/gemma-4-31b-it"
+    assert reused["metadata"]["source"] == {"provider": "line"}
+    assert reused["metadata"]["input_profile_id"] == "line.computer_use"
+    assert reused["metadata"]["line_mention"] == {"require_group_mention": True}

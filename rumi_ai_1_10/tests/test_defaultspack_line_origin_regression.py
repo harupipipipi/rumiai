@@ -39,7 +39,16 @@ def _signed_line_payload(payload: dict[str, Any], *, raw_body: bytes | None = No
     }
 
 
-def _install_line_endpoint(monkeypatch, tmp_path, *, enabled: bool = True, response: dict[str, Any] | None = None) -> None:
+def _install_line_endpoint(
+    monkeypatch,
+    tmp_path,
+    *,
+    enabled: bool = True,
+    response: dict[str, Any] | None = None,
+    input_profile_id: str = "line.default",
+    conversation: dict[str, Any] | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> None:
     endpoint_path = tmp_path / "endpoints.json"
     monkeypatch.setenv("RUMI_DEFAULTSPACK_WEBHOOK_ENDPOINTS_PATH", str(endpoint_path))
     monkeypatch.setenv("RUMI_DEFAULTSPACK_EXTERNAL_SOURCES_PATH", str(tmp_path / "external_sources.json"))
@@ -50,12 +59,13 @@ def _install_line_endpoint(monkeypatch, tmp_path, *, enabled: bool = True, respo
         {
             "id": "line-main",
             "kind": "line",
-            "input_profile_id": "line.default",
+            "input_profile_id": input_profile_id,
             "audience_policy_id": "line.production",
             "response_profile_id": "line.default",
             "security": {"mode": "provider_signature"},
-            "conversation": {"strategy": "external_key", "model": "stub/default"},
+            "conversation": dict(conversation or {"strategy": "external_key", "model": "stub/default"}),
             "response": dict(response or {}),
+            "metadata": dict(metadata or {}),
             "enabled": enabled,
         }
     )
@@ -97,13 +107,14 @@ def test_line_route_preserves_top_level_destination_and_endpoint_policy(monkeypa
     _remember_line_group(monkeypatch, tmp_path)
     captured: dict[str, Any] = {}
 
-    def fake_dispatch(event, *, input_profile_id, audience_policy, audience_decision, context, send_response):
+    def fake_dispatch(event, *, input_profile_id, audience_policy, audience_decision=None, context, send_response, mentioned=False):
         captured["event"] = event
         captured["input_profile_id"] = input_profile_id
         captured["audience_policy"] = audience_policy
         captured["audience_decision"] = audience_decision
         captured["context"] = context
         captured["send_response"] = send_response
+        captured["mentioned"] = mentioned
         return {
             "status": "ok",
             "assistant_text": "done",
@@ -161,9 +172,10 @@ def test_line_route_applies_endpoint_response_context(monkeypatch, tmp_path):
     )
     captured: dict[str, Any] = {}
 
-    def fake_dispatch(event, *, input_profile_id, audience_policy, context, send_response):
+    def fake_dispatch(event, *, input_profile_id, audience_policy, context, send_response, mentioned=False):
         captured["input_profile_id"] = input_profile_id
         captured["context"] = context
+        captured["mentioned"] = mentioned
         return {
             "status": "ok",
             "assistant_text": "done",
@@ -217,8 +229,9 @@ def test_line_route_builds_line_biz_prompt_from_chat_url(monkeypatch, tmp_path):
     )
     captured: dict[str, Any] = {}
 
-    def fake_dispatch(event, *, input_profile_id, audience_policy, context, send_response):
+    def fake_dispatch(event, *, input_profile_id, audience_policy, context, send_response, mentioned=False):
         captured["context"] = context
+        captured["mentioned"] = mentioned
         return {
             "status": "ok",
             "assistant_text": "done",
@@ -261,6 +274,108 @@ def test_line_route_builds_line_biz_prompt_from_chat_url(monkeypatch, tmp_path):
     assert captured["context"]["computer_use_target_title"] == "LINE"
     assert captured["context"]["user_requested_computer_use"] is True
     assert captured["context"]["response_prompt_decision"]["action"] == "store_only"
+
+
+def test_line_computer_use_group_message_requires_bot_mention(monkeypatch, tmp_path):
+    from blocks.integrations import line as line_block  # noqa: E402
+
+    _install_line_endpoint(
+        monkeypatch,
+        tmp_path,
+        enabled=True,
+        input_profile_id="line.computer_use",
+        conversation={"strategy": "external_key", "model": "google/gemma-4-31b-it"},
+        response={"mode": "computer_use_line_biz"},
+    )
+    monkeypatch.setattr(LineResponseAdapter, "send", lambda self, plan, event=None, context=None: {"sent": False})
+    payload = {
+        "destination": "Udestination",
+        "events": [
+            {
+                "type": "message",
+                "mode": "active",
+                "webhookEventId": "evt-group-1",
+                "replyToken": "reply-1",
+                "source": {"type": "group", "groupId": "Cgroup", "userId": "Uactor"},
+                "message": {"id": "m1", "type": "text", "text": "hello"},
+            }
+        ],
+    }
+
+    result = line_block.run(_signed_line_payload(payload), {})
+
+    event_result = result["data"]["events"][0]
+    assert event_result["status"] == "denied"
+    assert event_result["policy"]["reason"] == "mention required"
+    assert event_result["event"]["metadata"]["line_mention"]["mentioned"] is False
+    assert event_result["event"]["metadata"]["line_mention"]["require_group_mention"] is True
+
+
+def test_line_computer_use_group_message_dispatches_when_bot_is_mentioned(monkeypatch, tmp_path):
+    from blocks.integrations import line as line_block  # noqa: E402
+
+    _install_line_endpoint(
+        monkeypatch,
+        tmp_path,
+        enabled=True,
+        input_profile_id="line.computer_use",
+        conversation={"strategy": "external_key", "model": "google/gemma-4-31b-it"},
+        response={"mode": "computer_use_line_biz"},
+    )
+    captured: dict[str, Any] = {}
+
+    def fake_dispatch(event, *, input_profile_id, audience_policy, context, send_response, mentioned=False):
+        captured["event"] = event
+        captured["audience_policy"] = audience_policy
+        captured["mentioned"] = mentioned
+        return {
+            "status": "ok",
+            "assistant_text": "done",
+            "response_plan": {
+                "provider": "line",
+                "messages": [],
+                "metadata": {"response_action_plan": {"type": "store_only", "external_reply": False}},
+            },
+        }
+
+    monkeypatch.setattr(line_block, "dispatch_external_event", fake_dispatch)
+    monkeypatch.setattr(LineResponseAdapter, "send", lambda self, plan, event=None, context=None: {"sent": False})
+    payload = {
+        "destination": "Udestination",
+        "events": [
+            {
+                "type": "message",
+                "mode": "active",
+                "webhookEventId": "evt-group-mention",
+                "replyToken": "reply-1",
+                "source": {"type": "group", "groupId": "Cgroup", "userId": "Uactor"},
+                "message": {
+                    "id": "m1",
+                    "type": "text",
+                    "text": "@bot hello",
+                    "mention": {
+                        "mentionees": [
+                            {
+                                "index": 0,
+                                "length": 4,
+                                "type": "user",
+                                "userId": "Udestination",
+                                "isSelf": True,
+                            }
+                        ]
+                    },
+                },
+            }
+        ],
+    }
+
+    result = line_block.run(_signed_line_payload(payload), {})
+
+    assert result["data"]["events"][0]["status"] == "ok"
+    assert captured["mentioned"] is True
+    assert captured["audience_policy"]["require"]["mention"] is True
+    assert captured["event"].metadata["line_mention"]["mentioned"] is True
+    assert captured["event"].metadata["line_mention"]["require_group_mention"] is True
 
 
 def test_line_route_empty_events_ack_ok_without_dispatch(monkeypatch, tmp_path):
