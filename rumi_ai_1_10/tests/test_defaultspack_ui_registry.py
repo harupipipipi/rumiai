@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import base64
 import os
+import shutil
 import sys
 import tempfile
 import unittest
@@ -397,9 +398,12 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
     def test_external_settings_are_split_into_input_output_and_custom_sections(self):
         from domain.frontend.registry import FrontendRegistry
 
-        with patch("domain.frontend.registry.AIClient") as mock_client:
-            mock_client.return_value.list_models.return_value = [{"id": "stub/default"}]
-            settings = FrontendRegistry(pack_root=DEFAULTSPACK_ROOT).get_settings()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            endpoint_path = Path(tmpdir) / "endpoints.json"
+            with patch.dict(os.environ, {"RUMI_DEFAULTSPACK_WEBHOOK_ENDPOINTS_PATH": str(endpoint_path)}, clear=False):
+                with patch("domain.frontend.registry.AIClient") as mock_client:
+                    mock_client.return_value.list_models.return_value = [{"id": "stub/default"}]
+                    settings = FrontendRegistry(pack_root=DEFAULTSPACK_ROOT).get_settings()
 
         sections = {section["id"]: section for section in settings["sections"]}
         values = settings["values"]
@@ -445,7 +449,7 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         updated = FrontendRegistry(pack_root=DEFAULTSPACK_ROOT)._refresh_derived_settings(
             {
                 **values,
-                "external_input": {**values["external_input"], "input_provider": "slack"},
+                "external_input": {**values["external_input"], "input_provider": "slack", "input_endpoint_id": "slack-main"},
                 "external_output": {**values["external_output"], "output_provider": "discord"},
             }
         )
@@ -478,6 +482,34 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         self.assertEqual(values["sidebar"]["starred_item_ids"], ["web_search"])
         self.assertEqual(values["sidebar"]["custom_tool_tags"], {"browser_use": ["coding"]})
         self.assertEqual(reloaded["sidebar"]["pinned_item_ids"], ["browser_use"])
+
+    def test_external_input_sync_prefers_line_computer_use_endpoint_template(self):
+        from domain.frontend.registry import FrontendRegistry
+        from domain.webhook.endpoint_store import WebhookEndpointStore
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pack_root = Path(tmpdir)
+            shutil.copytree(DEFAULTSPACK_ROOT / "external_io_templates", pack_root / "external_io_templates")
+            endpoint_store = WebhookEndpointStore(pack_root / "user_data" / "shared" / "webhooks" / "endpoints.json")
+            endpoint_store.upsert(
+                {
+                    "id": "line-main",
+                    "kind": "line",
+                    "input_profile_id": "line.computer_use",
+                    "response_profile_id": "line.default",
+                    "conversation": {"strategy": "external_key", "model": "google/gemma-4-31b-it"},
+                    "response": {"mode": "computer_use_line_biz"},
+                    "enabled": True,
+                }
+            )
+            with patch("domain.frontend.registry.AIClient") as mock_client:
+                mock_client.return_value.list_models.return_value = [{"id": "stub/default"}]
+                values = FrontendRegistry(pack_root=pack_root).get_settings()["values"]
+
+        self.assertEqual(values["external_input"]["input_provider"], "line")
+        self.assertEqual(values["external_input"]["input_template_id"], "line.input.computer_use")
+        self.assertEqual(values["external_input"]["input_profile_id"], "line.computer_use")
+        self.assertEqual(values["external_input"]["input_endpoint_id"], "line-main")
 
     def test_settings_migrates_default_target_without_losing_debug_values(self):
         from domain.frontend.registry import FrontendRegistry

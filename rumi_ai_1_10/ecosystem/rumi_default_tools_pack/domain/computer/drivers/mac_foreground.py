@@ -104,8 +104,11 @@ class MacForegroundFallbackDriver(ComputerDriver):
                 driver=self.name,
                 executed=True,
                 confidence="best_effort",
+                target_kind=target.kind,
                 is_fallback=True,
                 can_parallel_user_work=False,
+                requires_foreground=True,
+                uses_physical_input=True,
                 notes=["Foreground fallback: window was activated"],
             )
         except Exception as e:
@@ -140,8 +143,11 @@ class MacForegroundFallbackDriver(ComputerDriver):
                 driver=self.name,
                 executed=True,
                 confidence="best_effort",
+                target_kind=target.kind,
                 is_fallback=True,
                 can_parallel_user_work=False,
+                requires_foreground=True,
+                uses_physical_input=True,
                 notes=["Foreground fallback: window was activated"],
             )
         except Exception as e:
@@ -176,8 +182,11 @@ class MacForegroundFallbackDriver(ComputerDriver):
                 driver=self.name,
                 executed=True,
                 confidence="best_effort",
+                target_kind=target.kind,
                 is_fallback=True,
                 can_parallel_user_work=False,
+                requires_foreground=True,
+                uses_physical_input=True,
                 notes=["Foreground fallback: window was activated"],
             )
         except Exception as e:
@@ -222,8 +231,11 @@ class MacForegroundFallbackDriver(ComputerDriver):
                 driver=self.name,
                 executed=True,
                 confidence="best_effort",
+                target_kind=target.kind,
                 is_fallback=True,
                 can_parallel_user_work=False,
+                requires_foreground=True,
+                uses_physical_input=True,
                 notes=["Foreground fallback: window was activated"],
             )
         except Exception as e:

@@ -17,6 +17,10 @@ def create_default_driver_registry() -> DriverRegistry:
     """Create a DriverRegistry with all platform-appropriate drivers registered."""
     registry = DriverRegistry()
 
+    from .drivers.browser_cdp import BrowserCDPDriver
+
+    registry.register(BrowserCDPDriver())
+
     if sys.platform == "darwin":
         from .drivers.mac_accessibility import MacAccessibilityDriver
         from .drivers.mac_apple_events import MacAppleEventsDriver

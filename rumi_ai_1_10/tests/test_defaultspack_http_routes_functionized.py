@@ -27,6 +27,51 @@ def test_fallback_http_block_invocation_routes_through_function_bridge():
     assert result == {"status": "ok", "data": {"models": []}}
     mocked.assert_called_once()
     assert mocked.call_args.args[0] == "defaultspack:ai_models"
+    assert mocked.call_args.kwargs["timeout_seconds"] is None
+
+
+def test_fallback_http_chat_send_uses_long_running_timeout():
+    from transport.http import DefaultsHttpServer
+
+    server = DefaultsHttpServer.__new__(DefaultsHttpServer)
+    server._build_context = lambda: {"request_id": "req-1"}
+
+    with patch(
+        "domain.function_runtime.bridge.invoke_function",
+        return_value={"status": "ok", "data": {"id": "assistant-1"}},
+    ) as mocked:
+        result = server._invoke_fallback_block(
+            "blocks.chat.send",
+            {"conversation_id": "c1"},
+            {},
+            {},
+        )
+
+    assert result == {"status": "ok", "data": {"id": "assistant-1"}}
+    mocked.assert_called_once()
+    assert mocked.call_args.kwargs["timeout_seconds"] == 300.0
+
+
+def test_fallback_http_explicit_timeout_overrides_default():
+    from transport.http import DefaultsHttpServer
+
+    server = DefaultsHttpServer.__new__(DefaultsHttpServer)
+    server._build_context = lambda: {"request_id": "req-1"}
+
+    with patch(
+        "domain.function_runtime.bridge.invoke_function",
+        return_value={"status": "ok", "data": {"id": "assistant-1"}},
+    ) as mocked:
+        result = server._invoke_fallback_block(
+            "blocks.chat.send",
+            {"conversation_id": "c1", "timeout_seconds": 45},
+            {},
+            {},
+        )
+
+    assert result == {"status": "ok", "data": {"id": "assistant-1"}}
+    mocked.assert_called_once()
+    assert mocked.call_args.kwargs["timeout_seconds"] == 45.0
 
 
 def test_fallback_http_block_invocation_preserves_legacy_fallback_on_missing_registry():

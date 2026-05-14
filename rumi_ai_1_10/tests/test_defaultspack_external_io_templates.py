@@ -18,7 +18,7 @@ def test_builtin_external_io_templates_split_input_and_output():
     input_ids = {item["id"] for item in catalog["input"]}
     output_ids = {item["id"] for item in catalog["output"]}
 
-    assert {"line.input.default", "discord.input.default", "slack.input.default", "custom.input"} <= input_ids
+    assert {"line.input.default", "line.input.computer_use", "discord.input.default", "slack.input.default", "custom.input"} <= input_ids
     assert {
         "line.output.default",
         "discord.output.bot_channel",
@@ -28,6 +28,7 @@ def test_builtin_external_io_templates_split_input_and_output():
     } <= output_ids
     assert {item["id"] for item in catalog["builtin_input"]} == {
         "line.input.default",
+        "line.input.computer_use",
         "discord.input.default",
         "slack.input.default",
     }
@@ -42,6 +43,9 @@ def test_builtin_external_io_templates_split_input_and_output():
     assert line_input["copy_paste_setup"]["public_url"]["provider"] == "cloudflare_quick_tunnel"
     assert line_input["copy_paste_setup"]["public_url"]["route_path"] == "/api/integrations/line/webhook"
     assert line_input["copy_paste_setup"]["tokens"][0]["kind"] == "channel_secret"
+    line_computer_use = next(item for item in catalog["input"] if item["id"] == "line.input.computer_use")
+    assert line_computer_use["copy_paste_setup"]["input_profile_id"] == "line.computer_use"
+    assert line_computer_use["copy_paste_setup"]["fields"][0]["id"] == "line_biz_chat_url"
     custom_input = next(item for item in catalog["input"] if item["id"] == "custom.input")
     assert custom_input["setup_mode"] == "custom"
 

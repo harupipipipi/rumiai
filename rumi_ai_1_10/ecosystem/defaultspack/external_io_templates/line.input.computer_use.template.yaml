@@ -1,0 +1,43 @@
+id: line.input.computer_use
+direction: input
+provider: line
+display_name: LINE Computer Use
+summary: Configure a LINE webhook that routes text into Gemma 4 and replies through Google Chrome computer use in LINE Biz.
+setup_steps:
+  - Select LINE Computer Use.
+  - Generate a Cloudflare Quick Tunnel URL for /api/integrations/line/webhook.
+  - Paste the generated URL into the LINE Messaging API Webhook URL field.
+  - Save the Messaging API Channel Secret and Channel Access Token in External Tokens.
+  - Save a Google API key and choose google/gemma-4-31b-it.
+  - Set the LINE Biz chat URL and keep the target Google Chrome window visible on the desktop during replies.
+  - Enable the line-main endpoint after checking the source rules.
+input_profile_id: line.computer_use
+endpoint:
+  id: line-main
+  kind: line
+  route: /api/integrations/line/webhook
+  security:
+    mode: provider_signature
+conversation:
+  strategy: external_key
+  model: google/gemma-4-31b-it
+response:
+  mode: computer_use_line_biz
+  auto_approve_computer_use: true
+tokens:
+  - kind: channel_secret
+    label: Messaging API Channel Secret
+  - kind: channel_access_token
+    label: Messaging API Channel Access Token
+fields:
+  - id: line_biz_chat_url
+    label: LINE Biz Chat URL
+    secret: false
+  - id: google_api_key
+    label: Google API Key
+    secret: true
+default_response:
+  mode: store_only
+response_prompt:
+  enabled: true
+  preset: computer_use_line_biz

@@ -152,6 +152,7 @@ const ITEM_ICONS: Record<string, ReactElement> = {
   agent: <Sparkles size={18} />,
   artifacts: <Archive size={18} />,
   browser: <Monitor size={18} />,
+  browser_companion: <AppWindow size={18} />,
   browser_use: <AppWindow size={18} />,
   browser_computer: <MousePointerClick size={18} />,
   browser_open_url: <Globe size={18} />,

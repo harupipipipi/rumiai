@@ -375,6 +375,18 @@ class PackAPIHandler(
     def _is_pre_auth_route(self, method: str, path: str) -> bool:
         """method + path が pre_auth_table にマッチするか判定する。"""
         method_upper = method.upper()
+        # Provider webhooks must reach their own signature/shared-secret checks
+        # before panel or bearer auth can apply.
+        if method_upper == "POST":
+            if path in {
+                "/api/integrations/line/webhook",
+                "/api/integrations/slack/events",
+                "/api/integrations/discord/interactions",
+                "/api/integrations/discord/events",
+            }:
+                return True
+            if path.startswith("/api/webhooks/inbound/"):
+                return True
         for entry in self._pre_auth_table:
             if entry["method"] != method_upper:
                 continue

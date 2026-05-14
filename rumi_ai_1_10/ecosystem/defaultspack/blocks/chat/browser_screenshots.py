@@ -189,7 +189,7 @@ def run(input_data, context):
         if not isinstance(log, dict):
             continue
         tool_name = str(log.get("tool_name") or "")
-        if tool_name not in {"browser_computer", "browser_use", "computer_use"}:
+        if tool_name not in {"browser_companion", "browser_computer", "browser_use", "computer_use"}:
             continue
         for candidate in _candidate_image_records(log.get("result")):
             resolved = _is_allowed_image_path(candidate.get("path"), roots)
