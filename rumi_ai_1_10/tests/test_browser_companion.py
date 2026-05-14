@@ -1,0 +1,168 @@
+from __future__ import annotations
+
+import threading
+import time
+from pathlib import Path
+
+
+_PNG_DATA_URL = (
+    "data:image/png;base64,"
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/aKkAAAAASUVORK5CYII="
+)
+
+
+def test_browser_companion_store_accepts_tabs_summary_alias(tmp_path):
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_companion_bridge import BrowserCompanionBridgeStore
+
+    store = BrowserCompanionBridgeStore(root=tmp_path / "bridge")
+    record = store.upsert_client(
+        {
+            "client_id": "edge-1",
+            "browser_name": "Microsoft Edge",
+            "tabs_summary": [
+                {"id": 17, "active": True, "title": "Example", "url": "https://example.com"},
+            ],
+        }
+    )
+
+    assert record["tabs"][0]["id"] == 17
+    assert record["active_tab_id"] == 17
+
+
+def test_browser_companion_controller_round_trip_uses_active_tab_and_saves_capture(tmp_path):
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_companion import BrowserCompanionController
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_companion_bridge import BrowserCompanionBridgeStore
+
+    store = BrowserCompanionBridgeStore(root=tmp_path / "bridge")
+    store.upsert_client(
+        {
+            "client_id": "edge-1",
+            "browser_name": "Microsoft Edge",
+            "tabs": [{"id": 17, "active": True, "title": "Example", "url": "https://example.com"}],
+            "active_tab_id": 17,
+        }
+    )
+    controller = BrowserCompanionController(
+        artifact_root=tmp_path / "artifacts",
+        bridge_store=store,
+    )
+
+    def extension_worker():
+        claimed = None
+        deadline = time.time() + 3.0
+        while claimed is None and time.time() < deadline:
+            claimed = store.claim_next_command("edge-1")
+            if claimed is None:
+                time.sleep(0.05)
+        assert claimed is not None
+        request = claimed["request"]
+        assert request["action"] == "page.snapshot"
+        assert request["payload"]["tab_id"] == 17
+        store.complete_command(
+            "edge-1",
+            claimed["command_id"],
+            {
+                "snapshot": {
+                    "url": "https://example.com",
+                    "title": "Example",
+                    "nodes": [{"element_id": "rumi-el-1", "text": "Send"}],
+                },
+                "capture": {
+                    "data_url": _PNG_DATA_URL,
+                    "image_size": {"width": 1, "height": 1},
+                },
+            },
+        )
+
+    worker = threading.Thread(target=extension_worker, daemon=True)
+    worker.start()
+    result = controller.run("page.snapshot", {"include_capture": True}, context={})
+    worker.join(timeout=1.0)
+
+    assert result["is_error"] is False
+    assert result["client_id"] == "edge-1"
+    assert result["snapshot"]["url"] == "https://example.com"
+    assert result["path"].endswith(".png")
+    assert Path(result["path"]).exists()
+
+
+def test_browser_companion_bridge_routes_support_batch_results(tmp_path, monkeypatch):
+    from blocks.tool import browser_companion_bridge as route_module
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_companion_bridge import BrowserCompanionBridgeStore
+
+    store = BrowserCompanionBridgeStore(root=tmp_path / "bridge")
+    token = store.ensure_pairing(rotate=True)["pairing_token"]
+    store.create_command("edge-1", {"action": "browser.tabs", "payload": {}})
+
+    monkeypatch.setattr(route_module, "BrowserCompanionBridgeStore", lambda: store)
+
+    poll_response = route_module.run_poll(
+        {
+            "_headers": {"Authorization": f"Bearer {token}"},
+            "client": {"client_id": "edge-1", "browser_name": "Microsoft Edge"},
+        }
+    )
+
+    assert poll_response["status"] == "ok"
+    command = poll_response["data"]["command"]
+    assert command["action"] == "browser.tabs"
+    assert poll_response["data"]["commands"][0]["command_id"] == command["command_id"]
+
+    result_response = route_module.run_result(
+        {
+            "_headers": {"Authorization": f"Bearer {token}"},
+            "client_id": "edge-1",
+            "results": [
+                {
+                    "command_id": command["command_id"],
+                    "ok": True,
+                    "result": {"tabs": [{"id": 17, "title": "Example"}]},
+                }
+            ],
+        }
+    )
+
+    completed = store.wait_for_command(command["command_id"], timeout_seconds=0.2)
+
+    assert result_response["status"] == "ok"
+    assert completed["status"] == "completed"
+    assert completed["result"]["tabs"][0]["id"] == 17
+    assert completed["result"]["is_error"] is False
+
+
+def test_browser_companion_pack_not_approved_falls_back_to_local(monkeypatch):
+    from domain.tool.executor import ToolExecutor
+
+    captured = {}
+
+    def fake_execute_local(self, tool_name, arguments, context):
+        captured["tool_name"] = tool_name
+        captured["arguments"] = arguments
+        captured["context"] = context
+        return {
+            "result": "browser_companion page.snapshot completed",
+            "is_error": False,
+            "widget": {"type": "browser_companion", "action": "page.snapshot"},
+        }
+
+    class FakeResponse:
+        success = False
+        error_type = "pack_not_approved"
+
+    monkeypatch.setattr(ToolExecutor, "_execute_local", fake_execute_local)
+
+    result = ToolExecutor._fallback_function_call_if_first_party_unapproved(
+        {"name": "browser_companion"},
+        {
+            "type": "function.call",
+            "qualified_name": "rumi_default_tools_pack:browser_companion",
+            "args": {"action": "page.snapshot", "include_capture": True},
+        },
+        {"user_requested_computer_use": True},
+        FakeResponse(),
+    )
+
+    assert result["is_error"] is False
+    assert captured["tool_name"] == "browser_companion"
+    assert captured["arguments"]["action"] == "page.snapshot"
+    assert captured["arguments"]["include_capture"] is True

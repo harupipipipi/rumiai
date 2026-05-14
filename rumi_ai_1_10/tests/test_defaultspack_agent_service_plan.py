@@ -2767,7 +2767,7 @@ def test_browser_screenshots_endpoint_omits_model_preview_duplicates(tmp_path, m
             "content": [{"type": "text", "text": "done"}],
             "tool_logs": [
                 {
-                    "tool_name": "computer_use",
+                    "tool_name": "browser_companion",
                     "tool_call_id": "call_1",
                     "result": {
                         "data": {

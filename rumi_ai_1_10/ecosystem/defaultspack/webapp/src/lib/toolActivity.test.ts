@@ -199,6 +199,7 @@ test("attaches tool artifact files to the matching activity item", () => {
 });
 
 test("classifies common tool families", () => {
+  assert.equal(toolFolderFor("browser_companion").id, "browser");
   assert.equal(toolFolderFor("browser_computer").id, "browser");
   assert.equal(toolFolderFor("todo").id, "planning/todo");
   assert.equal(toolFolderFor("subagent").id, "agent/subagent");

@@ -740,7 +740,7 @@ def _tool_result_message_text(tool_name, result):
     if isinstance(result, dict):
         data = result.get("data", result)
         if isinstance(data, dict):
-            if tool_name in {"browser_computer", "browser_use", "computer_use"}:
+            if tool_name in {"browser_companion", "browser_computer", "browser_use", "computer_use"}:
                 result_text = json.dumps(_compact_tool_log_value(data), ensure_ascii=False)
             else:
                 result_text = str(data.get("result", data.get("summary", json.dumps(data, ensure_ascii=False))))
@@ -765,7 +765,7 @@ def _append_tool_result_message(messages, tool_name, result, tool_call_id="", *,
         }
     )
     if (
-        tool_name in {"browser_computer", "browser_use", "computer_use"}
+        tool_name in {"browser_companion", "browser_computer", "browser_use", "computer_use"}
         and _model_supports_vision(model)
         and _model_supports_attachments(model)
     ):
@@ -1058,11 +1058,12 @@ def _tool_visibility_message(tools):
         return None
     guidance = ""
     tool_names = {tool_name_from_definition(tool) for tool in tools or []}
-    if tool_names.intersection({"browser_computer", "browser_use", "computer_use"}):
+    if tool_names.intersection({"browser_companion", "browser_computer", "browser_use", "computer_use"}):
         guidance = (
-            " Computer-use harness rules: inspect app state with context before screenshots; "
-            "computer_use is for all desktop apps, so use apps/windows plus select_app/select_window to target Vivaldi, VS Code, Finder, LINE, Chrome, or any other visible app/window; "
-            "only operate the currently visible screen; hidden tabs, background DOM, and Apple Events JavaScript control are unavailable; "
+            " Browser tool rules: browser_companion is the DOM-aware extension path and can inspect paired browser tabs with the user's live session; "
+            "browser_computer/computer_use are visible-window computer-use paths, so use apps/windows plus select_app/select_window to target Vivaldi, VS Code, Finder, LINE, Chrome, or any other visible app/window; "
+            "when you need background-tab DOM access, element ids, or the user's signed-in browser session, prefer browser_companion; "
+            "for visible-window actions, inspect app state with context before screenshots; "
             "for visual clicks, use a zoom ladder: first take a full or selected-window screenshot, then when the target is small or ambiguous call screenshot again with crop/zoom around the likely region; source=latest crops from that last full/selected-window screenshot, while source=current_crop is only for intentionally cropping the current crop again; click only using normalized_x/normalized_y relative to the attached image; "
             "after a zoomed/cropped inspection, take a fresh full or selected-window screenshot before unrelated actions so stale crop coordinates are not reused; "
             "prefer one type call for words like hello and key only for shortcuts/return; "
@@ -1105,7 +1106,7 @@ def _complete_with_tools(model, messages, tools, context, call_handler, params):
     if limit is None:
         limit = int(params.get("max_tool_calls", 4) or 4)
     connected_names = connected_tool_names(tools, context.get("runtime_profile") if isinstance(context, dict) else None)
-    if limit == 4 and connected_names.intersection({"browser_computer", "browser_use", "computer_use"}):
+    if limit == 4 and connected_names.intersection({"browser_companion", "browser_computer", "browser_use", "computer_use"}):
         limit = 12
 
     blocked_response = None

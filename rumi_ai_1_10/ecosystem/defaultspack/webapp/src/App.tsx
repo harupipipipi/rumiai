@@ -932,7 +932,7 @@ function pendingBrowserApproval(messages: ChatUiMessage[]): BrowserApproval | nu
     if (message.role === "user") return null;
     if (message.role !== "agent") continue;
     for (const log of [...(message.toolLogs ?? [])].reverse()) {
-      if (log.tool_name !== "browser_computer") continue;
+      if (log.tool_name !== "browser_computer" && log.tool_name !== "browser_companion") continue;
       const result = log.result as Record<string, unknown> | undefined;
       const data = (result?.data ?? result) as Record<string, unknown> | undefined;
       const widget = data?.widget as Record<string, unknown> | undefined;

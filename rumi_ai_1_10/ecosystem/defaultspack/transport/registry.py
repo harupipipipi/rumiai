@@ -130,6 +130,8 @@ _FALLBACK_HTTP_ROUTE_SPECS = [
     HttpRouteSpec("GET", "/api/tools", block_module="blocks.tool.list"),
     HttpRouteSpec("POST", "/api/tools/invoke", block_module="blocks.tool.invoke"),
     HttpRouteSpec("POST", "/api/tools/browser-computer", block_module="blocks.tool.browser_computer"),
+    HttpRouteSpec("POST", "/api/tools/browser-companion/bridge/poll", block_module="blocks.tool.browser_companion_bridge_poll"),
+    HttpRouteSpec("POST", "/api/tools/browser-companion/bridge/result", block_module="blocks.tool.browser_companion_bridge_result"),
     HttpRouteSpec("POST", "/api/tools/create", block_module="blocks.tool.create"),
     HttpRouteSpec("PUT", "/api/tools/{name}", block_module="blocks.tool.update", path_inject={"name": "name"}),
     HttpRouteSpec("DELETE", "/api/tools/{name}", block_module="blocks.tool.delete", path_inject={"name": "name"}),
