@@ -53,7 +53,7 @@ test("streamed browser screenshots include nested tool result artifacts", () => 
     events: [
       {
         type: "tool_result",
-        tool_name: "browser_computer",
+        tool_name: "browser_companion",
         tool_call_id: "call_2",
         result: {
           data: {
@@ -69,6 +69,7 @@ test("streamed browser screenshots include nested tool result artifacts", () => 
 
   assert.equal(screenshots.length, 1);
   assert.equal(screenshots[0].tool_call_id, "call_2");
+  assert.equal(screenshots[0].tool_name, "browser_companion");
   assert.equal(screenshots[0].data_url, "data:image/png;base64,def");
   assert.deepEqual(screenshots[0].marker, { x: 10, y: 12 });
 });

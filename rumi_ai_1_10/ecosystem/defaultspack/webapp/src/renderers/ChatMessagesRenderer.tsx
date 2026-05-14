@@ -432,7 +432,7 @@ function BrowserScreenshotPreview({
 }
 
 function isBrowserToolName(toolName: unknown): boolean {
-  return toolName === "browser_computer" || toolName === "browser_use" || toolName === "computer_use";
+  return toolName === "browser_companion" || toolName === "browser_computer" || toolName === "browser_use" || toolName === "computer_use";
 }
 
 function isBrowserActivityEvent(event: NonNullable<ChatMessagesRendererProps["messages"][number]["events"]>[number]): boolean {
