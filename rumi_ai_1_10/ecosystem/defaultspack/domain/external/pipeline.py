@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from domain.external.audience_policy import AudiencePolicy
+from domain.external.audience_policy import AudienceDecision, AudiencePolicy
 from domain.external.event import ExternalEvent
 from domain.external.input_profile_engine import InputProfileEngine
 from domain.external.input_profile_registry import InputProfileRegistry
@@ -18,12 +18,13 @@ def dispatch_external_event(
     *,
     input_profile_id: str | None = None,
     audience_policy: dict[str, Any] | None = None,
+    audience_decision: AudienceDecision | dict[str, Any] | None = None,
     context: dict[str, Any] | None = None,
     send_response: bool = False,
     mentioned: bool = False,
 ) -> dict[str, Any]:
     policy = AudiencePolicy(audience_policy or {"default": "allow"})
-    decision = policy.evaluate(event, mentioned=mentioned)
+    decision = _coerce_audience_decision(audience_decision) or policy.evaluate(event, mentioned=mentioned)
     if not decision.allowed:
         return {
             "status": "denied",
@@ -52,13 +53,21 @@ def dispatch_external_event(
     result["external_event"] = event.as_dict()
     result["policy"] = decision.as_dict()
     result["input_profile_id"] = profile.id
-    response = RumiResponse.from_result(result)
     prompt_decision = None
     if send_response:
         output_profile = _resolve_output_profile(event.provider, runtime_context)
         output_provider = output_profile.provider if output_profile is not None else event.provider
         if output_profile is not None:
             result["output_profile_id"] = output_profile.id
+            metadata = _result_metadata(result)
+            output_metadata = metadata.get("output") if isinstance(metadata.get("output"), dict) else {}
+            metadata["output"] = output_metadata
+            output_metadata.setdefault("output_profile_id", output_profile.id)
+            output_metadata.setdefault("provider", output_profile.provider)
+            mode = str(output_profile.spec.get("mode") or "").strip()
+            if mode:
+                output_metadata.setdefault("send_mode", mode)
+        response = RumiResponse.from_result(result)
         prompt_decision = decide_response_prompt_policy(
             event=event,
             envelope=envelope,
@@ -68,10 +77,32 @@ def dispatch_external_event(
         )
         if prompt_decision is not None:
             result["response_prompt_decision"] = prompt_decision.as_dict()
-            result.setdefault("metadata", {})["response_prompt_decision"] = prompt_decision.as_dict()
+            _result_metadata(result)["response_prompt_decision"] = prompt_decision.as_dict()
             response.metadata["response_prompt_decision"] = prompt_decision.as_dict()
         result["response_plan"] = ResponsePlanner(output_provider).plan(response, prompt_decision=prompt_decision)
     return result
+
+
+def _coerce_audience_decision(value: AudienceDecision | dict[str, Any] | None) -> AudienceDecision | None:
+    if isinstance(value, AudienceDecision):
+        return value
+    if not isinstance(value, dict):
+        return None
+    if "allowed" not in value:
+        return None
+    return AudienceDecision(
+        allowed=bool(value.get("allowed")),
+        reason=str(value.get("reason") or ""),
+        matched_rule_id=str(value.get("matched_rule_id") or ""),
+    )
+
+
+def _result_metadata(result: dict[str, Any]) -> dict[str, Any]:
+    metadata = result.get("metadata")
+    if not isinstance(metadata, dict):
+        metadata = {}
+        result["metadata"] = metadata
+    return metadata
 
 
 def _resolve_output_profile(provider: str, context: dict[str, Any]) -> Any:
