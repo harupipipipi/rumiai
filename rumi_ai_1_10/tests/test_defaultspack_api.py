@@ -29,12 +29,22 @@ class TestDefaultspackApiRoutes(unittest.TestCase):
             packs = {"defaultspack": _PackInfo()}
 
         count = PackAPIHandler.load_api_routes(_Registry())
-        self.assertEqual(count, 14)
+        self.assertEqual(count, 16)
         self.assertIn(("GET", "/api/defaultspack/modules"), PackAPIHandler._api_route_exact)
         self.assertIn(("GET", "/api/defaultspack/pack-requests"), PackAPIHandler._api_route_exact)
+        self.assertIn(("GET", "/api/tools/mcp"), PackAPIHandler._api_route_exact)
+        self.assertIn(("POST", "/api/tools/mcp/connect"), PackAPIHandler._api_route_exact)
         self.assertEqual(
             PackAPIHandler._api_route_exact[("GET", "/api/defaultspack/modules")]["function_id"],
             "list_modules",
+        )
+        self.assertEqual(
+            PackAPIHandler._api_route_exact[("GET", "/api/tools/mcp")]["function_id"],
+            "tool_mcp_list",
+        )
+        self.assertEqual(
+            PackAPIHandler._api_route_exact[("POST", "/api/tools/mcp/connect")]["function_id"],
+            "tool_mcp_connect",
         )
         self.assertEqual(len(PackAPIHandler._api_route_patterns), 9)
 

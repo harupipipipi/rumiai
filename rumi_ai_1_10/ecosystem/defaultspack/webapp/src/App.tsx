@@ -1120,6 +1120,25 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    const handleOauthMessage = (event: MessageEvent) => {
+      if (event.origin !== window.location.origin) return;
+      const payload = event.data;
+      if (!payload || typeof payload !== "object") return;
+      if ((payload as Record<string, unknown>).type !== "rumi_provider_oauth") return;
+      const providerId = String((payload as Record<string, unknown>).provider_id ?? "").trim();
+      if (providerId) {
+        void refreshProviderOAuthStatus(providerId).catch(console.error);
+        return;
+      }
+      void refreshCatalog().catch(console.error);
+    };
+    window.addEventListener("message", handleOauthMessage);
+    return () => {
+      window.removeEventListener("message", handleOauthMessage);
+    };
+  }, []);
+
+  useEffect(() => {
     if (mode === "coding") {
       void loadCodingContext();
     }
@@ -1131,6 +1150,50 @@ export default function App() {
     } catch (healthError) {
       console.error(healthError);
     }
+  }
+
+  function mergeProviderOAuthStatus(providerId: string, oauthStatus: Record<string, unknown>) {
+    setSettingsValues((current) => {
+      const apiSection = current.apis;
+      const apiKeys = apiSection?.api_keys;
+      if (!Array.isArray(apiKeys)) return current;
+
+      let updated = false;
+      const nextApiKeys = apiKeys.map((entry) => {
+        if (!entry || typeof entry !== "object") return entry;
+        const provider = entry as Record<string, unknown>;
+        if (String(provider.provider_id ?? "").trim() !== providerId) return provider;
+
+        updated = true;
+        const existingOauth = provider.oauth && typeof provider.oauth === "object" && !Array.isArray(provider.oauth)
+          ? provider.oauth as Record<string, unknown>
+          : {};
+        return {
+          ...provider,
+          oauth: {
+            ...existingOauth,
+            ...oauthStatus,
+          },
+        };
+      });
+
+      if (!updated) return current;
+      return {
+        ...current,
+        apis: {
+          ...(apiSection ?? {}),
+          api_keys: nextApiKeys,
+        },
+      };
+    });
+  }
+
+  async function refreshProviderOAuthStatus(providerId: string) {
+    const result = await api.providerOAuthStatus(providerId);
+    if (result.provider && typeof result.provider === "object" && !Array.isArray(result.provider)) {
+      mergeProviderOAuthStatus(providerId, result.provider as Record<string, unknown>);
+    }
+    void refreshCatalog().catch(console.error);
   }
 
   async function refreshCatalog() {
@@ -1473,7 +1536,14 @@ export default function App() {
         const name = String(payload.name ?? apiId).trim();
         const secret = String(payload.value ?? "");
         const action = String(payload.action ?? "upsert").trim();
-        if (action === "delete" && providerId && apiId) {
+        if (action === "oauth_refresh") {
+          if (providerId) {
+            void refreshProviderOAuthStatus(providerId).catch(console.error);
+          } else {
+            void refreshCatalog().catch(console.error);
+          }
+          return current;
+        } else if (action === "delete" && providerId && apiId) {
           void api.deleteProviderApiKey(providerId, apiId)
             .then(() => refreshCatalog())
             .catch(console.error);

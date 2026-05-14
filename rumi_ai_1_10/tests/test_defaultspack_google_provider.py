@@ -42,6 +42,17 @@ class TestDefaultspackGoogleProvider(unittest.TestCase):
             "https://generativelanguage.googleapis.com/v1beta/openai",
         )
 
+    def test_google_provider_prefers_browser_oauth_bearer_when_available(self):
+        from domain.ai_client.providers.google_provider import GoogleProvider
+
+        with patch.dict(os.environ, {"GOOGLE_API_KEY": "google-key"}, clear=True):
+            with patch("domain.ai_client.providers.google_provider.get_provider_access_token", return_value="oauth-token"):
+                provider = GoogleProvider()
+                provider._ensure_runtime_config()
+                headers = provider._headers()
+
+        self.assertEqual(headers["Authorization"], "Bearer oauth-token")
+
     def test_google_provider_uses_openai_compatible_chat_endpoint(self):
         from domain.ai_client.providers.google_provider import GoogleProvider
 
@@ -146,6 +157,35 @@ class TestDefaultspackGoogleProvider(unittest.TestCase):
         self.assertEqual(response.read(), b'{"ok":true}')
         self.assertEqual(len(calls), 3)
         self.assertEqual([call.args[0] for call in sleep.call_args_list], [0.5, 1.0])
+
+    def test_google_native_request_uses_bearer_auth_for_browser_oauth(self):
+        from domain.ai_client.providers.google_provider import GoogleProvider
+
+        captured = {}
+
+        with patch.dict(os.environ, {}, clear=True):
+            with patch("domain.ai_client.providers.google_provider.get_provider_access_token", return_value="oauth-token"):
+                provider = GoogleProvider()
+
+        class FakeResponse(io.BytesIO):
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        def fake_urlopen(request, context=None, timeout=None):
+            captured["headers"] = dict(request.headers)
+            return FakeResponse(b'{"ok":true}')
+
+        with patch("domain.ai_client.providers.google_provider.urllib.request.urlopen", fake_urlopen), patch(
+            "domain.ai_client.providers.google_provider.get_provider_access_token",
+            return_value="oauth-token",
+        ):
+            provider._native_request_json("gemini-test", {"contents": []})
+
+        self.assertEqual(captured["headers"]["Authorization"], "Bearer oauth-token")
+        self.assertNotIn("x-goog-api-key", {key.lower(): value for key, value in captured["headers"].items()})
 
     def test_google_provider_streams_openai_compatible_tool_call_deltas(self):
         from domain.ai_client.providers.google_provider import GoogleProvider

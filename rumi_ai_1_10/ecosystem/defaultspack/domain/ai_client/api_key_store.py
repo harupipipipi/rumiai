@@ -6,6 +6,8 @@ import json
 from pathlib import Path
 from typing import Any, Dict, List
 
+from .oauth_store import provider_has_oauth_connection, provider_oauth_status
+
 
 PROVIDER_SECRET_KEYS: Dict[str, List[str]] = {
     "anthropic": ["ANTHROPIC_API_KEY"],
@@ -440,8 +442,12 @@ def provider_key_status(*, pack_root: Path | None = None) -> list[dict[str, Any]
             "provider_id": provider_id,
             "key": keys[0],
             "keys": list(keys),
-            "configured": provider_has_api_key(provider_id, pack_root=pack_root),
+            "configured": (
+                provider_has_api_key(provider_id, pack_root=pack_root)
+                or provider_has_oauth_connection(provider_id, pack_root=pack_root)
+            ),
             "apis": provider_named_api_keys(provider_id, pack_root=pack_root),
+            "oauth": provider_oauth_status(provider_id, pack_root=pack_root),
         }
         for provider_id, keys in sorted(PROVIDER_SECRET_KEYS.items())
         if keys

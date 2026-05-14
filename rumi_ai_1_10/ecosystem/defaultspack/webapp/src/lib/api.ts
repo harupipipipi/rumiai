@@ -712,6 +712,7 @@ export const api = {
   uiSettings() {
     return request<{ sections: SettingsSection[]; values: Record<string, Record<string, unknown>> }>(
       "/api/ui/settings",
+      { cache: "no-store" },
     );
   },
 
@@ -777,6 +778,52 @@ export const api = {
         action: "delete",
         provider_id: providerId,
         api_id: apiId,
+      }),
+    });
+  },
+
+  providerOAuthStatus(providerId?: string) {
+    const suffix = providerId ? `?provider_id=${encodeURIComponent(providerId)}` : "";
+    return request<{ provider?: Record<string, unknown>; providers?: Record<string, Record<string, unknown>> }>(`/api/ai/oauth${suffix}`, { cache: "no-store" });
+  },
+
+  saveProviderOAuthClientConfig(providerId: string, clientConfig: string) {
+    return request<{ provider_id: string; client_configured: boolean; client_label?: string }>("/api/ai/oauth", {
+      method: "POST",
+      body: JSON.stringify({
+        action: "save_client",
+        provider_id: providerId,
+        client_config: clientConfig,
+      }),
+    });
+  },
+
+  startProviderOAuth(providerId: string) {
+    return request<{ provider_id: string; authorize_url: string; redirect_uri: string; scopes: string[] }>("/api/ai/oauth", {
+      method: "POST",
+      body: JSON.stringify({
+        action: "start",
+        provider_id: providerId,
+      }),
+    });
+  },
+
+  disconnectProviderOAuth(providerId: string) {
+    return request<{ provider_id: string; connected: boolean }>("/api/ai/oauth", {
+      method: "POST",
+      body: JSON.stringify({
+        action: "disconnect",
+        provider_id: providerId,
+      }),
+    });
+  },
+
+  clearProviderOAuthClientConfig(providerId: string) {
+    return request<{ provider_id: string; client_configured: boolean; connected: boolean }>("/api/ai/oauth", {
+      method: "POST",
+      body: JSON.stringify({
+        action: "clear_client",
+        provider_id: providerId,
       }),
     });
   },

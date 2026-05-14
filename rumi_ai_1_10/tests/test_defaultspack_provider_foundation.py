@@ -99,6 +99,50 @@ class TestDefaultspackProviderCatalog(unittest.TestCase):
         self.assertTrue(google["configured"])
         self.assertTrue(profiles["google/gemini-2.5-flash"]["availability"]["configured"])
 
+    def test_provider_catalog_marks_google_configured_from_browser_oauth(self):
+        from ecosystem.defaultspack.backend.ai_client.provider_catalog import (
+            list_provider_catalog,
+        )
+        from ecosystem.defaultspack.domain.ai_client.oauth_store import (
+            save_provider_oauth_client_config,
+            save_provider_oauth_connection,
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pack_root = Path(tmpdir)
+            secrets_dir = pack_root / "user_data" / "secrets"
+            env = {"RUMI_DEFAULTSPACK_SECRETS_DIR": str(secrets_dir)}
+            with patch.dict(os.environ, env, clear=True):
+                save_provider_oauth_client_config(
+                    "google",
+                    """
+                    {
+                      "installed": {
+                        "client_id": "test-client.apps.googleusercontent.com",
+                        "client_secret": "test-secret"
+                      }
+                    }
+                    """,
+                    pack_root=pack_root,
+                )
+                save_provider_oauth_connection(
+                    "google",
+                    {
+                        "access_token": "oauth-access-token",
+                        "refresh_token": "oauth-refresh-token",
+                        "expires_in": 3600,
+                        "scope": "openid email profile https://www.googleapis.com/auth/generative-language",
+                    },
+                    userinfo={"email": "user@example.test", "name": "OAuth User"},
+                    pack_root=pack_root,
+                )
+                providers = {item["provider_id"]: item for item in list_provider_catalog()}
+
+        google = providers["google"]
+        self.assertEqual(google["configured_envs"], ["browser_oauth"])
+        self.assertTrue(google["configured"])
+        self.assertEqual(google["availability"]["configuration_source"], "browser_oauth")
+
 
 class TestDefaultspackToolPermissionPolicy(unittest.TestCase):
     def test_permission_policy_round_trip_and_checker_behavior(self):

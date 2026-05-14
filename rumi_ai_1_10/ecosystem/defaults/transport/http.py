@@ -103,6 +103,11 @@ class DefaultsHttpServer:
             # ---- Consent routes (Group 8) ----
             ("POST", "/api/consent/check", self._handle_consent_check),
             ("POST", "/api/consent/{id}/confirm", self._handle_consent_confirm),
+            # ---- Tool routes ----
+            ("GET", "/api/tools", self._handle_tool_list),
+            ("POST", "/api/tools/invoke", self._handle_tool_invoke),
+            ("POST", "/api/tools/mcp/connect", self._handle_tool_mcp_connect),
+            ("GET", "/api/tools/mcp", self._handle_tool_mcp_list),
             # ---- Knowledge routes (Group 9a) ----
             ("POST", "/api/packs/defaults/knowledge", self._handle_knowledge_create),
             ("GET", "/api/packs/defaults/knowledge", self._handle_knowledge_list),
@@ -366,6 +371,26 @@ class DefaultsHttpServer:
         return handler_run(request_data, context)
 
     # ---- Dynamic Tool Handlers (fallback) ----
+
+    def _handle_tool_list(self, request_data, path_params):
+        from blocks.tool.list import run as handler_run
+        context = self._build_context()
+        return handler_run(request_data, context)
+
+    def _handle_tool_invoke(self, request_data, path_params):
+        from blocks.tool.invoke import run as handler_run
+        context = self._build_context()
+        return handler_run(request_data, context)
+
+    def _handle_tool_mcp_connect(self, request_data, path_params):
+        from blocks.tool.mcp_connect import run as handler_run
+        context = self._build_context()
+        return handler_run(request_data, context)
+
+    def _handle_tool_mcp_list(self, request_data, path_params):
+        from blocks.tool.mcp_list import run as handler_run
+        context = self._build_context()
+        return handler_run(request_data, context)
 
     def _handle_tool_create(self, request_data, path_params):
         from blocks.tool.create import run as handler_run

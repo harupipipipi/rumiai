@@ -1,18 +1,107 @@
-import sys, os; sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..")); from _common import ok, error, gen_id, timestamp
+import json
+import os
+import sys
+from pathlib import Path
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from _common import error, ok  # noqa: E402
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
-from domain.tool.mcp_client import McpClient
-from domain.tool.registry import ToolRegistry
+from domain.tool.mcp_client import McpClient  # noqa: E402
+from domain.tool.registry import ToolRegistry  # noqa: E402
+
+
+def _mcp_config_path():
+    return (
+        Path(__file__).resolve().parents[2]
+        / "user_data"
+        / "shared"
+        / "tools"
+        / "mcp.json"
+    )
+
+
+def _load_saved_mcp_config(server_identifier):
+    config_path = _mcp_config_path()
+    if not config_path.is_file():
+        return None
+    try:
+        raw = json.loads(config_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+
+    if isinstance(raw, dict):
+        servers = raw.get("servers", [])
+    elif isinstance(raw, list):
+        servers = raw
+    else:
+        return None
+
+    if isinstance(servers, dict):
+        servers = list(servers.values())
+    if not isinstance(servers, list):
+        return None
+
+    for server in servers:
+        if not isinstance(server, dict):
+            continue
+        candidates = {
+            str(server.get("server_id", "") or "").strip(),
+            str(server.get("name", "") or "").strip(),
+        }
+        if server_identifier in candidates:
+            return dict(server)
+    return None
+
+
+def _resolve_server_name(input_data, config):
+    for candidate in (
+        input_data.get("server_id"),
+        config.get("server_id") if isinstance(config, dict) else None,
+        input_data.get("server_name"),
+        config.get("name") if isinstance(config, dict) else None,
+    ):
+        server_name = str(candidate or "").strip()
+        if server_name:
+            return server_name
+    return ""
+
+
+def _public_tool_name(tool_name, config):
+    prefix = ""
+    if isinstance(config, dict):
+        prefix = str(config.get("tool_prefix", "") or "").strip()
+    if prefix:
+        return "{}_{}".format(prefix, tool_name)
+    return tool_name
+
+
+def _tool_registry_id(server_name, tool_name, config):
+    public_name = _public_tool_name(tool_name, config)
+    if public_name != tool_name:
+        return public_name
+    return "mcp__{}__{}".format(server_name, tool_name)
 
 
 def run(input_data, context):
-    """defaults.tool.mcp_connect — MCP サーバーに接続する"""
-    server_name = input_data.get("server_name")
-    if not server_name:
-        return error("server_name is required", "MISSING_PARAM")
-
+    """defaults.tool.mcp_connect - connect to an MCP server."""
+    requested_server = str(
+        input_data.get("server_id")
+        or input_data.get("server_name")
+        or ""
+    ).strip()
     config = input_data.get("config")
+    if config is None and requested_server:
+        config = _load_saved_mcp_config(requested_server)
+
+    server_name = _resolve_server_name(input_data, config)
+    if not server_name:
+        return error("server_name or server_id is required", "MISSING_PARAM")
     if config is None:
-        return error("config is required", "MISSING_PARAM")
+        return error(
+            "config is required, or provide a server_id present in mcp.json",
+            "MISSING_PARAM",
+        )
 
     transport = config.get("transport", "stdio")
     if transport not in ("stdio", "sse"):
@@ -39,31 +128,35 @@ def run(input_data, context):
         tool_name = tool.get("name", "")
         if not tool_name:
             continue
-        tool_id = "mcp__{}__{}".format(server_name, tool_name)
+        public_name = _public_tool_name(tool_name, config)
+        tool_id = _tool_registry_id(server_name, tool_name, config)
         registered_tools.append(tool_id)
-        registry.register({
-            "tool_id": tool_id,
-            "name": tool_name,
-            "summary": tool.get("description", ""),
-            "tags": ["mcp", server_name],
-            "schema": {
-                "parameters": tool.get("inputSchema", {})
-            },
-            "execution": {
-                "type": "mcp",
-                "server_name": server_name,
-                "mcp_tool_name": tool_name,
-            },
-        })
+        registry.register(
+            {
+                "tool_id": tool_id,
+                "name": public_name,
+                "summary": tool.get("description", ""),
+                "tags": ["mcp", server_name],
+                "schema": {"parameters": tool.get("inputSchema", {})},
+                "execution": {
+                    "type": "mcp",
+                    "server_name": server_name,
+                    "mcp_tool_name": tool_name,
+                },
+            }
+        )
 
-    return ok({
-        "server_name": server_name,
-        "status": "connected",
-        "tools_added": tools_added,
-        "tools": registered_tools,
-        "server": {
-            "name": server_name,
-            "transport": transport,
-            "config": registry.list_mcp_servers().get(server_name, {}),
-        },
-    })
+    return ok(
+        {
+            "server_id": str(config.get("server_id", "") or server_name),
+            "server_name": server_name,
+            "status": "connected",
+            "tools_added": tools_added,
+            "tools": registered_tools,
+            "server": {
+                "name": server_name,
+                "transport": transport,
+                "config": registry.list_mcp_servers().get(server_name, {}),
+            },
+        }
+    )

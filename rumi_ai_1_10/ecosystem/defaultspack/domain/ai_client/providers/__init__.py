@@ -7,6 +7,7 @@ from typing import Any, Dict, Iterable, List, Optional
 from ...extensions.loading import import_entrypoint
 from ...extensions.runtime import get_extension_registry
 from ..api_key_store import load_provider_api_keys_into_env, provider_has_api_key
+from ..oauth_store import provider_has_oauth_connection, provider_oauth_status
 from .openai_compatible_provider import OpenAICompatibleProvider
 from .provider_catalog import OPENAI_COMPATIBLE_PROVIDER_CLASSES
 from . import google_provider as google_provider
@@ -542,6 +543,8 @@ def _merge_provider_entry(provider_id: str, manifest: Optional[Dict[str, Any]] =
 
 def _provider_is_configured(entry: Dict[str, Any]) -> tuple[bool, Optional[str]]:
     provider_id = str(entry.get("provider_id", "")).strip()
+    if provider_id and provider_has_oauth_connection(provider_id):
+        return True, "browser_oauth"
     if provider_id and provider_has_api_key(provider_id):
         return True, "defaultspack_secret"
     for env_name in entry.get("env_vars", []):
@@ -612,6 +615,7 @@ def get_provider_catalog(active_provider_ids=None):
                     "default_model_for": dict(entry.get("default_model_for", {})),
                     "adapter": entry.get("adapter", ""),
                     "entrypoint": entry.get("entrypoint", ""),
+                    "oauth": provider_oauth_status(entry["provider_id"]),
                 },
             }
         )
@@ -913,6 +917,8 @@ def _credentials_ready(manifest: Dict[str, Any], provider_id: str) -> bool:
         _CURATED_PROVIDER_METADATA.get(provider_id, {}).get("base_url_envs", []),
     )
     if any(_truthy_env(name) for name in api_envs + base_url_envs):
+        return True
+    if provider_has_oauth_connection(provider_id):
         return True
     if provider_has_api_key(provider_id):
         return True

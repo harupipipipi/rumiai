@@ -349,6 +349,52 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         self.assertTrue(reloaded["preview"]["auto_open"])
         self.assertEqual(reloaded["preview"]["max_items"], 5)
 
+    def test_settings_api_keys_expose_google_browser_oauth_status(self):
+        from domain.ai_client.oauth_store import (
+            save_provider_oauth_client_config,
+            save_provider_oauth_connection,
+        )
+        from domain.frontend.registry import FrontendRegistry
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pack_root = Path(tmpdir)
+            secrets_dir = pack_root / "user_data" / "secrets"
+            env = {"RUMI_DEFAULTSPACK_SECRETS_DIR": str(secrets_dir)}
+            with patch.dict(os.environ, env, clear=True):
+                save_provider_oauth_client_config(
+                    "google",
+                    """
+                    {
+                      "installed": {
+                        "client_id": "test-client.apps.googleusercontent.com",
+                        "client_secret": "test-secret"
+                      }
+                    }
+                    """,
+                    pack_root=pack_root,
+                )
+                save_provider_oauth_connection(
+                    "google",
+                    {
+                        "access_token": "oauth-access-token",
+                        "refresh_token": "oauth-refresh-token",
+                        "expires_in": 3600,
+                        "scope": "openid email profile https://www.googleapis.com/auth/generative-language",
+                    },
+                    userinfo={"email": "user@example.test", "name": "OAuth User"},
+                    pack_root=pack_root,
+                )
+                with patch("domain.frontend.registry.AIClient") as mock_client:
+                    mock_client.return_value.list_models.return_value = [{"id": "stub/default"}]
+                    settings = FrontendRegistry(pack_root=pack_root).get_settings()
+
+        api_rows = settings["values"]["apis"]["api_keys"]
+        google = next(item for item in api_rows if item["provider_id"] == "google")
+        self.assertIn("oauth", google)
+        self.assertTrue(google["oauth"]["supported"])
+        self.assertTrue(google["oauth"]["connected"])
+        self.assertEqual(google["oauth"]["email"], "user@example.test")
+
     def test_external_settings_are_split_into_input_output_and_custom_sections(self):
         from domain.frontend.registry import FrontendRegistry
 
@@ -654,7 +700,7 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
     def test_fallback_http_uses_block_when_function_bridge_rejects_unapproved_pack(self):
         from transport.http import DefaultsHttpServer
 
-        server = DefaultsHttpServer(facade=None)
+        server = DefaultsHttpServer(facade=object())
         with patch("domain.function_runtime.bridge.invoke_function") as invoke_function, patch("transport.http.invoke_block") as invoke_block:
             invoke_function.return_value = {
                 "status": "error",
@@ -670,7 +716,7 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
     def test_fallback_http_does_not_use_pack_not_approved_block_fallback_for_spoofed_post(self):
         from transport.http import DefaultsHttpServer
 
-        server = DefaultsHttpServer(facade=None)
+        server = DefaultsHttpServer(facade=object())
         with patch("domain.function_runtime.bridge.invoke_function") as invoke_function, patch("transport.http.invoke_block") as invoke_block:
             invoke_function.return_value = {
                 "status": "error",
@@ -681,6 +727,18 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         self.assertEqual(result["status"], "error")
         self.assertEqual(result["error"]["code"], "PACK_NOT_APPROVED")
         invoke_block.assert_not_called()
+
+    def test_fallback_http_invokes_blocks_directly_without_facade(self):
+        from transport.http import DefaultsHttpServer
+
+        server = DefaultsHttpServer(facade=None)
+        with patch("transport.http.invoke_block") as invoke_block, patch("domain.function_runtime.bridge.invoke_function") as invoke_function:
+            invoke_block.return_value = {"status": "ok", "data": {"settings": True}}
+            result = server._invoke_fallback_block("blocks.ui.settings", {"_method": "GET", "_actual_method": "GET"}, {})
+
+        self.assertEqual(result["status"], "ok")
+        invoke_block.assert_called_once()
+        invoke_function.assert_not_called()
 
     def test_default_conversation_model_uses_stub_when_unconfigured(self):
         from domain.chat import store as chat_store
