@@ -1,6 +1,6 @@
 const STORAGE_KEY = "rumiBrowserCompanionSettings";
 const DEFAULT_SETTINGS = {
-  serverUrl: "http://127.0.0.1:8765",
+  serverUrl: "http://127.0.0.1:8766",
   pairingToken: "",
   clientLabel: "",
   pollIntervalMinutes: 1

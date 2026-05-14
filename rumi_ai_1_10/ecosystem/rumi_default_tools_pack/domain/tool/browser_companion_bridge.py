@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 
-DEFAULT_PORT = 8765
+DEFAULT_PORT = 8766
 DEFAULT_STALE_SECONDS = 45
 
 

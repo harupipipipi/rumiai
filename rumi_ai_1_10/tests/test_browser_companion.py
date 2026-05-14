@@ -19,6 +19,15 @@ _PNG_DATA_URL = (
 )
 
 
+def test_browser_companion_candidate_urls_match_defaultspack_default_port():
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_companion_bridge import candidate_base_urls
+
+    urls = candidate_base_urls({})
+    assert "http://127.0.0.1:8766" in urls
+    assert "http://localhost:8766" in urls
+    assert "http://127.0.0.1:8765" not in urls
+
+
 def test_browser_companion_store_accepts_tabs_summary_alias(tmp_path):
     from ecosystem.rumi_default_tools_pack.domain.tool.browser_companion_bridge import BrowserCompanionBridgeStore
 
