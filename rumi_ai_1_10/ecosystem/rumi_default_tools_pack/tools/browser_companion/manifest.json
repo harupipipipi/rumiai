@@ -94,7 +94,7 @@
           "help": "Optional browser name hint used when more than one Browser Companion client is connected."
         },
         {
-          "id": "mode",
+          "id": "default_mode",
           "label": "Default Mode",
           "type": "select",
           "default": "snapshot_first",
