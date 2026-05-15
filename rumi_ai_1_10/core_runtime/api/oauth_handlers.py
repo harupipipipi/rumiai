@@ -35,13 +35,17 @@ from ._helpers import _log_internal_error
 from ..compat import safe_chmod
 
 _FERNET_AVAILABLE = False
+_Fernet: Any = None
+_InvalidToken: Any = None
 try:
-    from cryptography.fernet import Fernet as _Fernet
-    from cryptography.fernet import InvalidToken as _InvalidToken
+    from cryptography.fernet import Fernet
+    from cryptography.fernet import InvalidToken
+
+    _Fernet = Fernet
+    _InvalidToken = InvalidToken
     _FERNET_AVAILABLE = True
 except ImportError:
-    _Fernet = None
-    _InvalidToken = None
+    pass
 
 logger = logging.getLogger(__name__)
 
