@@ -1014,15 +1014,30 @@ class ChatRunEngine:
         canonical_type, payload_key = mapping[kind]
         payload = event.get(payload_key) if isinstance(event.get(payload_key), dict) else {}
         data = {payload_key: payload, **payload}
+        if event.get("timestamp") is not None and "timestamp" not in data:
+            data["timestamp"] = event.get("timestamp")
+        message_text = str(event.get("message") or payload.get("message") or canonical_type)
         extras = {
             key: value
             for key, value in event.items()
-            if key not in {"type", "event", payload_key}
+            if key
+            not in {
+                "type",
+                "event",
+                payload_key,
+                "timestamp",
+                "message",
+                "data",
+                "schema_version",
+                "run_id",
+                "conversation_id",
+                "seq",
+            }
         }
         normalized = self._emit(
             canonical_type,
             data=data,
-            message=str(payload.get("message") or canonical_type),
+            message=message_text,
             **extras,
         )
         return normalized
