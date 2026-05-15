@@ -126,6 +126,52 @@ test("uses streamed completion results and artifacts before final logs arrive", 
   assert.equal(item.artifacts?.some((artifact) => artifact.path.endsWith("screen.png")), true);
 });
 
+test("uses streamed display text and next step for realtime tool narration", () => {
+  const groups = buildToolActivityGroups([], [
+    {
+      type: "tool_call_completed",
+      phase: "tool_call_completed",
+      tool_call_id: "call_1",
+      tool_name: "browser_computer",
+      arguments: { action: "computer.click" },
+      display_text: "クリックしました。結果を確認しています。",
+      next_step: "画面の変化をもとに次へ進みます。",
+      status: "completed",
+    },
+  ]);
+
+  assert.equal(groups[0].items[0].detail, "クリックしました。結果を確認しています。");
+  assert.equal(groups[0].items[0].nextStep, "画面の変化をもとに次へ進みます。");
+});
+
+test("hides generic completion text for completed tool activity", () => {
+  const groups = buildToolActivityGroups([
+    {
+      tool_name: "computer_use",
+      arguments: { action: "context" },
+      result: { status: "ok", data: { result: "computer_use computer.context completed; artifact: /tmp/screenshot.png" } },
+    },
+  ]);
+
+  assert.equal(groups[0].items[0].status, "completed");
+  assert.equal(groups[0].items[0].detail, "");
+  assert.equal(groups[0].items[0].input, "context");
+});
+
+test("keeps raw json for unsupported tools", () => {
+  const groups = buildToolActivityGroups([
+    {
+      tool_name: "mystery_plugin",
+      arguments: { value: "abc" },
+      result: { status: "ok", data: { answer: 42 } },
+    },
+  ]);
+
+  const item = groups[0].items[0];
+  assert.equal(item.supported, false);
+  assert.match(item.rawJson ?? "", /mystery_plugin|answer|value/);
+});
+
 test("dedupes started events when a matching completed log exists", () => {
   const groups = buildToolActivityGroups(
     [

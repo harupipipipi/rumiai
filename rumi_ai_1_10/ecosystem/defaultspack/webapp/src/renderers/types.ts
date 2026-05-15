@@ -4,6 +4,7 @@ import type { ChatActivityEvent, ChatContentBlock, CodingContextEntry, CodingGit
 import type { ComposerCommandItem } from "../lib/api";
 import type { ChatItem } from "../components/HistoryBoard";
 import type { ToolPreviewItem, ToolPreviewMode } from "../components/ToolPreview";
+import type { LocaleSetting } from "../lib/i18n";
 
 export type { ComposerCommandItem } from "../lib/api";
 
@@ -85,6 +86,7 @@ export type ChatMessagesRendererProps = {
   showActivityInMessages: boolean;
   showWidgets: boolean;
   onSuggestionClick: (text: string) => void;
+  onOpenToolPreview?: (previewId: string) => void;
 };
 
 export type ComposerRendererProps = {
@@ -108,6 +110,7 @@ export type ComposerRendererProps = {
   attachedFiles?: AttachedFile[];
   droppedWidgets?: DroppedWidget[];
   selectedToolIds?: string[];
+  keyboardButtonNavigation?: boolean;
   onExtensionSelect?: (item: ComposerExtensionItem) => void;
   onCommandSelect?: (commandId: string, rawInput?: string) => void;
   onModelCommandCandidateSelect?: (candidate: ModelCommandCandidate) => void;
@@ -147,6 +150,7 @@ export type RightSidebarRendererProps = {
   settingsValues: Record<string, Record<string, unknown>>;
   settingsSections: SettingsSection[];
   selectedToolIds?: string[];
+  keyboardButtonNavigation?: boolean;
   onSettingChange: SettingChangeHandler;
   onOpenSettings: () => void;
   onToolToggle?: (item: SidebarItem) => void;
@@ -162,6 +166,7 @@ export type SettingsModalRendererProps = {
   previewsCount: number;
   settingsSections: SettingsSection[];
   settingsValues: Record<string, Record<string, unknown>>;
+  locale?: LocaleSetting;
   onClose: () => void;
   onSettingChange: SettingChangeHandler;
 };

@@ -210,17 +210,54 @@ export type Conversation = {
   messages: ChatMessage[];
 };
 
+export type ConversationSearchMatch = {
+  message_id?: string;
+  role?: string;
+  created_at?: number;
+  snippet: string;
+  exact?: boolean;
+  score?: number;
+};
+
+export type ConversationSearchResult = {
+  conversation_id: string;
+  title: string;
+  created_at?: number;
+  updated_at?: number;
+  is_starred?: boolean;
+  is_archived?: boolean;
+  score?: number;
+  exact_score?: number;
+  semantic_score?: number;
+  match_count?: number;
+  matches?: ConversationSearchMatch[];
+};
+
+export type ConversationSearchOptions = {
+  date_filter?: "all" | "today" | "7d" | "30d";
+  is_starred?: boolean;
+  is_archived?: boolean;
+  role?: "all" | "user" | "assistant";
+  limit?: number;
+  offset?: number;
+};
+
 export type SidebarCategory = "tool" | "widget" | "system" | "integration" | "capability";
 
 export type SidebarFieldOption = {
   value: string | number | boolean;
   label: string;
+  provider_id?: string;
+  model_id?: string;
+  qualified_model_id?: string;
+  configured?: boolean;
+  local?: boolean;
 };
 
 export type SidebarField = {
   id: string;
   label: string;
-  type: "text" | "textarea" | "number" | "toggle" | "select" | "readonly" | "secret" | "api_keys" | "external_tokens" | "public_url";
+  type: "text" | "textarea" | "number" | "toggle" | "select" | "readonly" | "secret" | "api_keys" | "external_tokens" | "public_url" | "model_api_routes";
   default?: unknown;
   required?: boolean;
   help?: string;
@@ -230,6 +267,7 @@ export type SidebarField = {
   provider_id?: string;
   configured_field?: string;
   advanced?: boolean;
+  api_keys?: Array<Record<string, unknown>>;
 };
 
 export type SidebarAction = {
@@ -623,6 +661,22 @@ export const api = {
     );
   },
 
+  searchConversations(query: string, options?: ConversationSearchOptions) {
+    return request<{ results: ConversationSearchResult[]; total: number; query: string }>("/api/chat/search", {
+      method: "POST",
+      body: JSON.stringify({
+        query,
+        mode: "conversations",
+        date_filter: options?.date_filter ?? "all",
+        is_starred: options?.is_starred,
+        is_archived: options?.is_archived,
+        role: options?.role ?? "all",
+        limit: options?.limit ?? 12,
+        offset: options?.offset ?? 0,
+      }),
+    });
+  },
+
   getConversation(id: string) {
     return request<Conversation>(`/api/chat/conversations/${id}`);
   },
@@ -933,6 +987,17 @@ export const api = {
     return request<Record<string, unknown>>("/api/tools/browser-computer", {
       method: "POST",
       body: JSON.stringify({ action, payload: payload ?? {} }),
+    });
+  },
+
+  invokeTool(toolName: string, argumentsPayload?: Record<string, unknown>, context?: Record<string, unknown>) {
+    return request<Record<string, unknown>>("/api/tools/invoke", {
+      method: "POST",
+      body: JSON.stringify({
+        tool_name: toolName,
+        arguments: argumentsPayload ?? {},
+        ...(context ? { context } : {}),
+      }),
     });
   },
 

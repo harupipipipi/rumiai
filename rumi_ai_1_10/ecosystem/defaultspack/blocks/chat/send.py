@@ -1697,7 +1697,9 @@ def run(input_data, context):
             "ai_retry_scheduled",
             "task_failed",
         }
-        for event in ChatRunEngine().stream(input_data, context, stream_mode=use_stream_adapter):
+        engine_context = dict(context or {}) if isinstance(context, dict) else {}
+        engine_context.setdefault("run_source", "blocks.chat.send")
+        for event in ChatRunEngine().stream(input_data, engine_context, stream_mode=use_stream_adapter):
             if not isinstance(event, dict):
                 continue
             event_type = str(event.get("type") or "").strip()

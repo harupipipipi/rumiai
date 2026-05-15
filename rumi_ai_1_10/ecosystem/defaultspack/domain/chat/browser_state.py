@@ -909,7 +909,7 @@ class BrowserStateNormalizer:
         return text[: max_length - 3].rstrip() + "..."
 
     def _clean_data_url(self, value: Any) -> str:
-        text = self._clean_string(value)
+        text = str(value or "").strip()
         if not text or not text.startswith("data:image/"):
             return ""
         return text

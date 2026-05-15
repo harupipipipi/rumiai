@@ -224,6 +224,7 @@ class ModelRuntimeSettingsService:
             "favorite_profiles": [DEFAULT_MODEL],
             "thinking_level_by_profile": {DEFAULT_MODEL: DEFAULT_THINKING_LEVEL},
             "thinking_level_by_conversation": {},
+            "model_api_routes": "",
             "google_api_key": "",
             "google_api_key_configured": provider_has_api_key("google", pack_root=self._pack_root),
             "openrouter_api_key": "",
@@ -243,6 +244,9 @@ class ModelRuntimeSettingsService:
             else:
                 sanitized[configured_field] = provider_has_api_key(provider_id, pack_root=self._pack_root)
             sanitized[field_id] = ""
+        sanitized["model_api_routes"] = self._normalize_model_api_routes(
+            sanitized.get("model_api_routes", "")
+        )
         return sanitized
 
     def refresh_models_settings(self, values: dict[str, Any]) -> dict[str, Any]:
@@ -286,7 +290,16 @@ class ModelRuntimeSettingsService:
                     values_by_scope = {}
             models[key] = values_by_scope if isinstance(values_by_scope, dict) else {}
         models["thinking_level"] = self._normalize_level(models.get("thinking_level"))
+        models["model_api_routes"] = self._normalize_model_api_routes(models.get("model_api_routes", ""))
         return models
+
+    @staticmethod
+    def _normalize_model_api_routes(value: Any) -> str:
+        if isinstance(value, list):
+            lines = [str(item).strip() for item in value if str(item).strip()]
+        else:
+            lines = [line.strip() for line in str(value or "").splitlines() if line.strip()]
+        return "\n".join(lines) + ("\n" if lines else "")
 
     def _read_all(self) -> dict[str, Any]:
         values: dict[str, Any] = {"models": self.default_model_settings()}

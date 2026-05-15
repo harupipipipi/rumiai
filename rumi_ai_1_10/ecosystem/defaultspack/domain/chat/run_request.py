@@ -17,6 +17,7 @@ from blocks.chat._context_helpers import enrich_messages, extract_user_text
 from domain.ai_client.model_runtime_settings import ModelRuntimeSettingsService
 from domain.chat.message_converter import convert_to_standard
 from domain.chat.store import ChatStore
+from domain.chat.tool_recommender import effective_tool_assist_mode, recommend_tool_ids, tool_assist_limit
 from domain.prompt.manager import get_manager
 from domain.tool.registry import ToolRegistry
 from domain.tool.schema_adapter import (
@@ -161,7 +162,7 @@ def prepare_chat_run(input_data: dict[str, Any], context: dict[str, Any] | None 
             **tool_policy,
         }
 
-    raw_tools, provider_tools, tool_context = _available_tools(request_context, prepared_input)
+    raw_tools, provider_tools, tool_context = _available_tools(request_context, prepared_input, user_text=user_text)
     connected_names = connected_tool_names(
         provider_tools,
         tool_context.get("runtime_profile") if isinstance(tool_context, dict) else None,
@@ -347,10 +348,33 @@ def _image_data_url_byte_length(data_url: Any) -> int | None:
         return None
 
 
-def _resolve_selected_tools(raw_tools: Any) -> tuple[list[dict[str, Any]], list[str]]:
+def _resolve_selected_tools(
+    raw_tools: Any,
+    *,
+    user_text: str = "",
+    context: dict[str, Any] | None = None,
+) -> tuple[list[dict[str, Any]], list[str]]:
     registry = ToolRegistry()
     if not isinstance(raw_tools, list):
-        return registry.list_tools(), []
+        tools = registry.list_tools()
+        mode = effective_tool_assist_mode(pack_root=Path(__file__).resolve().parents[2])
+        if mode == "off":
+            return [], []
+        if mode == "all":
+            return tools, []
+        recommended_ids = recommend_tool_ids(
+            user_text,
+            tools,
+            limit=tool_assist_limit(pack_root=Path(__file__).resolve().parents[2]),
+        )
+        resolved = [tool for tool in tools if str(tool.get("tool_id") or "") in set(recommended_ids)]
+        if isinstance(context, dict):
+            context["tool_assist"] = {
+                "mode": "auto",
+                "recommended_tools": recommended_ids,
+                "available_tool_count": len(tools),
+            }
+        return resolved, []
     resolved = []
     unknown = []
     for item in raw_tools:
@@ -417,10 +441,19 @@ def _apply_computer_use_context_preferences(context: dict[str, Any], user_text: 
     return updated
 
 
-def _available_tools(context: dict[str, Any], input_data: dict[str, Any]) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]]:
+def _available_tools(
+    context: dict[str, Any],
+    input_data: dict[str, Any],
+    *,
+    user_text: str = "",
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]]:
     raw_tools = input_data.get("tools")
+    params = input_data.get("params") if isinstance(input_data.get("params"), dict) else {}
+    tool_policy = params.get("tool_policy") if isinstance(params.get("tool_policy"), dict) else {}
+    if raw_tools is None and isinstance(tool_policy, dict) and "selected_tools" in tool_policy:
+        raw_tools = tool_policy.get("selected_tools")
     try:
-        tools, unknown_tools = _resolve_selected_tools(raw_tools)
+        tools, unknown_tools = _resolve_selected_tools(raw_tools, user_text=user_text, context=context)
     except Exception:
         tools, unknown_tools = [], []
     resolved_context = resolve_runtime_profile_context(context or {})

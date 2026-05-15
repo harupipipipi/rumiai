@@ -7,9 +7,12 @@ import re
 import base64
 import tempfile
 import threading
+from collections import Counter
 from pathlib import Path
 
 DEFAULT_CHAT_MODEL = "stub/default"
+_SEARCH_TOKEN_RE = re.compile(r"[A-Za-z0-9_./:-]+|[\u3040-\u30ff\u3400-\u9fff]+")
+_SEARCH_JA_RE = re.compile(r"[\u3040-\u30ff\u3400-\u9fff]")
 
 
 def _default_conversation_model(settings_path=None):
@@ -449,6 +452,91 @@ class ChatStore:
                     results.append(copy.deepcopy(msg))
         return results
 
+    def search_conversations(
+        self,
+        query,
+        *,
+        limit=20,
+        offset=0,
+        conversation_id=None,
+        date_filter=None,
+        is_starred=None,
+        is_archived=None,
+        role=None,
+    ):
+        text_query = str(query or "").strip()
+        if not text_query:
+            return [], 0
+        query_lower = text_query.lower()
+        query_vector = _search_vector(text_query)
+        role_filter = str(role or "all").strip().lower()
+        min_updated_at = _date_filter_floor_ms(str(date_filter or "all"), _now_ms())
+        targets = {}
+        if conversation_id is not None:
+            conv = self._conversations.get(conversation_id)
+            if conv is not None:
+                targets[conversation_id] = conv
+        else:
+            targets = self._conversations
+
+        results = []
+        for conv in targets.values():
+            if is_starred is not None and conv.get("is_starred") != is_starred:
+                continue
+            if is_archived is not None and conv.get("is_archived") != is_archived:
+                continue
+            if min_updated_at and int(conv.get("updated_at") or 0) < min_updated_at:
+                continue
+            title = str(conv.get("title") or "")
+            title_exact = 1.0 if query_lower in title.lower() else 0.0
+            title_semantic = _search_cosine(query_vector, _search_vector(title))
+            matches = []
+            for msg in conv.get("messages", []):
+                msg_role = str(msg.get("role") or "").lower()
+                if role_filter in {"user", "assistant"} and msg_role != role_filter:
+                    continue
+                raw = str(msg.get("raw_text") or self._extract_raw_text(msg.get("content", [])) or "")
+                if not raw:
+                    continue
+                exact_score = 1.0 if query_lower in raw.lower() else 0.0
+                semantic_score = _search_cosine(query_vector, _search_vector(raw))
+                message_score = max(exact_score, semantic_score)
+                if message_score < 0.08:
+                    continue
+                matches.append(
+                    {
+                        "message_id": msg.get("id"),
+                        "role": msg.get("role"),
+                        "created_at": msg.get("created_at"),
+                        "snippet": _search_snippet(raw, text_query),
+                        "exact": exact_score > 0,
+                        "score": round(message_score, 4),
+                    }
+                )
+            if not matches and title_exact <= 0 and title_semantic < 0.08:
+                continue
+            exact_score = max([title_exact, *(1.0 if item["exact"] else 0.0 for item in matches)], default=0.0)
+            semantic_score = max([title_semantic, *(float(item["score"]) for item in matches)], default=0.0)
+            score = (2.0 * exact_score) + semantic_score + min(len(matches), 4) * 0.05
+            results.append(
+                {
+                    "conversation_id": conv.get("id"),
+                    "title": title or "New Conversation",
+                    "created_at": conv.get("created_at"),
+                    "updated_at": conv.get("updated_at"),
+                    "is_starred": bool(conv.get("is_starred")),
+                    "is_archived": bool(conv.get("is_archived")),
+                    "score": round(score, 4),
+                    "exact_score": round(exact_score, 4),
+                    "semantic_score": round(semantic_score, 4),
+                    "match_count": len(matches),
+                    "matches": sorted(matches, key=lambda item: (-float(item["score"]), -(int(item.get("created_at") or 0))))[:3],
+                }
+            )
+        results.sort(key=lambda item: (-float(item["score"]), -(int(item.get("updated_at") or 0))))
+        total = len(results)
+        return copy.deepcopy(results[offset: offset + limit]), total
+
     # ----------------------------------------------------------
     # Branch
     # ----------------------------------------------------------
@@ -696,3 +784,67 @@ class ChatStore:
             for key in ("id", "name", "size", "type", "truncated", "source", "sourcePath")
             if isinstance(attachment, dict) and key in attachment
         }
+
+
+def _search_vector(text):
+    normalized = str(text or "").casefold()
+    vector = Counter()
+    for token in _SEARCH_TOKEN_RE.findall(normalized):
+        token = token.strip(" \t\r\n.,!?()[]{}")
+        if not token:
+            continue
+        vector[token] += 2
+        if "_" in token:
+            for part in token.split("_"):
+                if part:
+                    vector[part] += 1
+        if _SEARCH_JA_RE.search(token):
+            if len(token) <= 2:
+                vector[token] += 1
+            else:
+                for index in range(len(token) - 1):
+                    vector[token[index:index + 2]] += 1
+    return vector
+
+
+def _search_cosine(left, right):
+    if not left or not right:
+        return 0.0
+    overlap = set(left) & set(right)
+    numerator = sum(left[key] * right[key] for key in overlap)
+    if numerator <= 0:
+        return 0.0
+    left_norm = sum(value * value for value in left.values()) ** 0.5
+    right_norm = sum(value * value for value in right.values()) ** 0.5
+    if left_norm <= 0 or right_norm <= 0:
+        return 0.0
+    return numerator / (left_norm * right_norm)
+
+
+def _search_snippet(text, query, radius=72):
+    raw = str(text or "").replace("\n", " ").strip()
+    if len(raw) <= radius * 2:
+        return raw
+    q_lower = str(query or "").lower()
+    index = raw.lower().find(q_lower) if q_lower else -1
+    if index < 0:
+        return raw[: radius * 2].rstrip() + "..."
+    start = max(0, index - radius)
+    end = min(len(raw), index + len(q_lower) + radius)
+    prefix = "..." if start > 0 else ""
+    suffix = "..." if end < len(raw) else ""
+    return prefix + raw[start:end].strip() + suffix
+
+
+def _date_filter_floor_ms(date_filter, now_ms):
+    normalized = str(date_filter or "all").strip().lower()
+    if normalized in {"all", "", "any"}:
+        return 0
+    day_ms = 86_400_000
+    if normalized in {"today", "24h", "day"}:
+        return int(now_ms) - day_ms
+    if normalized in {"7d", "week", "recent"}:
+        return int(now_ms) - day_ms * 7
+    if normalized in {"30d", "month"}:
+        return int(now_ms) - day_ms * 30
+    return 0

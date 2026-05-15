@@ -34,6 +34,7 @@ from domain.chat.message_builder import build_assistant_message
 from domain.chat.run_request import PreparedChatRun, prepare_chat_run
 from domain.chat.tool_call_accumulator import ToolCallAccumulator
 from domain.chat.store import ChatStore
+from domain.dev.inspector import Inspector
 from domain.stream.events import run_event, to_legacy_chat_stream_event
 from domain.tool.executor import ToolExecutor
 from domain.tool.schema_adapter import build_tool_execution_context, max_tool_calls
@@ -44,6 +45,88 @@ class _ChatCancelled(Exception):
 
 
 _APPROVAL_WAITING_TEXT = "許可が必要なため、ユーザーが承認するまで待機します。承認後に続行します。"
+
+
+def _tool_display_group(tool_name: str) -> dict[str, str]:
+    lowered = str(tool_name or "").lower()
+    rules = [
+        (("calculator", "calc", "math"), "calculation", "計算"),
+        (("web", "search", "reddit"), "web/search", "Web検索"),
+        (("browser", "computer"), "browser", "ブラウザ"),
+        (("todo", "task"), "planning/todo", "Todo"),
+        (("subagent", "agent"), "agent/subagent", "Subagent"),
+        (("terminal", "shell", "exec"), "coding/terminal", "ターミナル"),
+        (("file", "read", "write", "list"), "coding/files", "ファイル"),
+        (("git", "branch", "commit", "diff"), "coding/git", "Git"),
+    ]
+    for keys, group_id, label in rules:
+        if any(key in lowered for key in keys):
+            return {"id": group_id, "label": label}
+    return {"id": "tools", "label": "Tools"}
+
+
+def _display_arg(arguments: dict[str, Any], keys: tuple[str, ...]) -> str:
+    for key in keys:
+        value = arguments.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+        if isinstance(value, (int, float, bool)):
+            return str(value)
+    return ""
+
+
+def _tool_display_action(tool_name: str, arguments: dict[str, Any]) -> str:
+    lowered = str(tool_name or "").lower()
+    if not isinstance(arguments, dict):
+        arguments = {}
+    if "calculator" in lowered or "calc" in lowered:
+        return _display_arg(arguments, ("expression", "expr", "input", "query"))
+    if "search" in lowered or "web" in lowered or "reddit" in lowered:
+        query = _display_arg(arguments, ("query", "q", "search_query", "text", "url"))
+        return "検索: {}".format(query) if query else "検索"
+    if "file" in lowered:
+        path = _display_arg(arguments, ("path", "filename", "directory", "glob"))
+        return "ファイル確認: {}".format(path) if path else "ファイル確認"
+    if "browser" in lowered or "computer" in lowered:
+        action = _display_arg(arguments, ("action",)) or "画面操作"
+        target = _display_arg(arguments, ("url", "app", "application", "browser", "name", "title"))
+        text = _display_arg(arguments, ("text", "key"))
+        return " ".join(part for part in (action, target, text) if part).strip()
+    if "terminal" in lowered or "shell" in lowered or "exec" in lowered:
+        command = _display_arg(arguments, ("command", "cmd"))
+        return "コマンド実行: {}".format(command) if command else "コマンド実行"
+    if "todo" in lowered:
+        return _display_arg(arguments, ("title", "task", "action", "todo_id")) or "Todo更新"
+    if "subagent" in lowered or "agent" in lowered:
+        return _display_arg(arguments, ("task", "title", "prompt")) or "Subagent実行"
+    return ""
+
+
+def _tool_display_payload(
+    tool_name: str,
+    arguments: dict[str, Any],
+    *,
+    status: str,
+    summary: str = "",
+) -> dict[str, Any]:
+    group = _tool_display_group(tool_name)
+    action = _tool_display_action(tool_name, arguments)
+    if status == "running":
+        display_text = "{}を進めています".format(action or tool_name or "tool")
+        next_step = "結果が届き次第、次の判断に使います。"
+    elif status == "failed":
+        display_text = summary or "{} が失敗しました".format(tool_name or "tool")
+        next_step = "失敗理由を確認して、必要なら止まります。"
+    else:
+        display_text = summary or "{} が完了しました".format(tool_name or "tool")
+        next_step = "結果をもとに次の応答へ進みます。"
+    return {
+        "display_text": display_text,
+        "status": status,
+        "group": group,
+        "action": action,
+        "next_step": next_step,
+    }
 
 
 def _approval_request_from_tool_result(
@@ -542,11 +625,13 @@ class ChatRunEngine:
                     events=list(self._activity_events),
                 )
 
+            finalized_response = self._final_response(prepared, response)
+            self._log_inspector(prepared, finalized_response)
             assistant_message = build_assistant_message(
                 conversation_id=prepared.conversation_id,
                 parent_id=prepared.user_message["id"],
                 sequence_number=assistant_seq,
-                response=self._final_response(prepared, response),
+                response=finalized_response,
                 model=prepared.model,
             )
             if draft is not None:
@@ -633,10 +718,11 @@ class ChatRunEngine:
                 arguments = self._tool_arguments(block)
                 if tool_call_id not in self._started_tool_call_ids:
                     self._started_tool_call_ids.add(tool_call_id)
+                    display_payload = _tool_display_payload(tool_name, arguments, status="running")
                     event = self._emit(
                         "tool_call_started",
-                        data={"tool_name": tool_name, "tool_call_id": tool_call_id, "arguments": arguments},
-                        message="{} を使用中".format(tool_name),
+                        data={"tool_name": tool_name, "tool_call_id": tool_call_id, "arguments": arguments, **display_payload},
+                        message=display_payload["display_text"],
                         phase="tool_call_started",
                         tool_name=tool_name,
                         tool_call_id=tool_call_id,
@@ -650,6 +736,8 @@ class ChatRunEngine:
                 self._raise_if_cancelled()
                 summary = _tool_result_summary(tool_name, result)
                 artifacts = _tool_result_artifacts(result)
+                status = "failed" if _tool_result_is_error(result) else "completed"
+                display_payload = _tool_display_payload(tool_name, arguments, status=status, summary=summary)
                 for event in self._after_tool_call(prepared, tool_name, tool_call_id, arguments, result):
                     yield event
                 completed_event = self._emit(
@@ -661,11 +749,12 @@ class ChatRunEngine:
                         "recovery_kind": _tool_result_recovery_kind(result),
                         "result_summary": summary,
                         "summary": summary,
+                        **display_payload,
                         "result": _bounded_compact_tool_result(result, summary, artifacts),
                         "artifacts": artifacts,
                         "artifact_paths": [artifact.get("path") for artifact in artifacts if artifact.get("path")],
                     },
-                    message=summary or "{} の結果を受け取りました".format(tool_name),
+                    message=display_payload["display_text"],
                     phase="tool_call_completed",
                     tool_name=tool_name,
                     tool_call_id=tool_call_id,
@@ -789,10 +878,11 @@ class ChatRunEngine:
                         tool_name = str(chunk.get("name") or chunk.get("tool_name") or "").strip()
                         if chunk_type == "tool_call_start" and call_id and call_id not in self._started_tool_call_ids:
                             self._started_tool_call_ids.add(call_id)
+                            display_payload = _tool_display_payload(tool_name or "tool", {}, status="running")
                             event = self._emit(
                                 "tool_call_started",
-                                data={"tool_name": tool_name, "tool_call_id": call_id},
-                                message="{} を使用中".format(tool_name or "tool"),
+                                data={"tool_name": tool_name, "tool_call_id": call_id, **display_payload},
+                                message=display_payload["display_text"],
                                 phase="tool_call_started",
                                 tool_name=tool_name,
                                 tool_call_id=call_id,
@@ -803,8 +893,14 @@ class ChatRunEngine:
                             arguments_chunk = str(chunk.get("arguments_chunk") or "")
                             event = self._emit(
                                 "tool_call_delta",
-                                data={"tool_name": tool_name, "tool_call_id": call_id, "arguments_chunk": arguments_chunk},
-                                message="tool call delta",
+                                data={
+                                    "tool_name": tool_name,
+                                    "tool_call_id": call_id,
+                                    "arguments_chunk": arguments_chunk,
+                                    "status": "running",
+                                    "display_text": "{} の入力を受け取っています".format(tool_name or "tool"),
+                                },
+                                message="{} の入力を受け取っています".format(tool_name or "tool"),
                                 phase="tool_call_delta",
                                 tool_name=tool_name,
                                 tool_call_id=call_id,
@@ -1045,12 +1141,60 @@ class ChatRunEngine:
             "cancelled",
         }
 
-    @staticmethod
-    def _provider_supports_stream_tool_calls(model: str) -> bool:
-        client = AIClient()
-        provider, _ = client.resolve_provider(model)
+    def _provider_supports_stream_tool_calls(self, model: str) -> bool:
+        try:
+            provider, _ = self._client.resolve_provider(model)
+        except Exception:
+            return False
         name = provider.__class__.__name__.lower()
         return name in {"openaiprovider", "googleprovider"}
+
+    def _log_inspector(self, prepared: PreparedChatRun, response: dict[str, Any]) -> None:
+        try:
+            source = "domain.chat.stream_engine"
+            if isinstance(prepared.request_context, dict):
+                source = str(
+                    prepared.request_context.get("run_source")
+                    or prepared.request_context.get("source")
+                    or source
+                )
+            enrich_info = prepared.enrich_info if isinstance(prepared.enrich_info, dict) else {}
+            executed_tool_names = [
+                str(log.get("tool_name") or "").strip()
+                for log in self._tool_logs
+                if isinstance(log, dict) and str(log.get("tool_name") or "").strip()
+            ]
+            unknown_selected_tools = []
+            if isinstance(prepared.tool_context, dict):
+                raw_unknown = prepared.tool_context.get("unknown_selected_tools")
+                if isinstance(raw_unknown, list):
+                    unknown_selected_tools = [str(item) for item in raw_unknown if str(item or "").strip()]
+            metadata = response.get("metadata") if isinstance(response.get("metadata"), dict) else {}
+            usage = response.get("usage") if isinstance(response.get("usage"), dict) else {}
+            Inspector().log_request(
+                request_id=prepared.request_id,
+                conversation_id=prepared.conversation_id,
+                model=prepared.model,
+                prompt_used=str(enrich_info.get("enriched_prompt") or prepared.system_prompt or ""),
+                tools_called=executed_tool_names or list(prepared.tools_called),
+                context_info={
+                    "source": source,
+                    "run_id": self._run_id,
+                    "stream_mode": self._stream_mode,
+                    "message_count": len(prepared.standard_messages),
+                    "params": dict(prepared.params or {}),
+                    "attached_tools": list(prepared.tools_called),
+                    "executed_tools": executed_tool_names,
+                    "unknown_selected_tools": unknown_selected_tools,
+                    "knowledge_results": enrich_info.get("knowledge_results", []),
+                    "memory_results": enrich_info.get("memory_results", []),
+                    "finish_reason": response.get("finish_reason"),
+                    "usage": usage,
+                    "metadata": metadata,
+                },
+            )
+        except Exception:
+            pass
 
     def _call_ai_complete_with_retry(
         self,

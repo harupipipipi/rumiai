@@ -1,4 +1,4 @@
-import { AlertTriangle, Check, ChevronDown, Clock, Copy, ExternalLink, Image as ImageIcon, Loader2, X } from "lucide-react";
+import { AlertTriangle, Check, Clock, Copy, ExternalLink, Image as ImageIcon, Loader2, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
 
@@ -142,6 +142,7 @@ function MessageBlock({
   }
 
   if (blockType === "image" || blockType === "image_url") {
+    if (!shouldRenderImageBlockInChat(block)) return null;
     const imageUrl = block.image_url;
     const url = String(
       block.url
@@ -182,6 +183,15 @@ function MessageBlock({
     <pre className="bg-zinc-900 border border-zinc-800 rounded-lg p-3 overflow-x-auto text-[11px] text-zinc-400 font-mono">
       {JSON.stringify(block, null, 2)}
     </pre>
+  );
+}
+
+export function shouldRenderImageBlockInChat(block: ChatContentBlock): boolean {
+  return (
+    block.show_in_chat === true
+    || block.display_in_chat === true
+    || block.presentation === "chat"
+    || block.intent === "show_to_user"
   );
 }
 
@@ -619,103 +629,80 @@ function BrowserScreenshotStrip({
 
 function ToolActivityTray({
   message,
-  onOpenImagePreview,
+  onOpenToolPreview,
 }: {
   message: ChatMessagesRendererProps["messages"][number];
-  onOpenImagePreview?: (image: ImagePreviewRequest) => void;
+  onOpenToolPreview?: (previewId: string) => void;
 }) {
-  const [screenshots, setScreenshots] = useState<BrowserScreenshot[]>([]);
-  const liveScreenshots = streamedBrowserScreenshots(message);
-  const canFetchStoredScreenshots = Boolean(message.conversationId) && hasBrowserToolLog(message) && !message.id.startsWith("optimistic-");
-
-  useEffect(() => {
-    let cancelled = false;
-    setScreenshots([]);
-    if (!message.conversationId || !canFetchStoredScreenshots) return () => {
-      cancelled = true;
-    };
-    void api.getBrowserScreenshots(message.conversationId, message.id)
-      .then((result) => {
-        if (!cancelled) setScreenshots(result.screenshots ?? []);
-      })
-      .catch(() => {
-        if (!cancelled) setScreenshots([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [message.conversationId, message.id, canFetchStoredScreenshots]);
-
   const groups = buildToolActivityGroups(message.toolLogs ?? [], message.events ?? [], { conversationId: message.conversationId });
   if (groups.length === 0) return null;
-  const items = groups.flatMap((group) => group.items);
-  const visibleScreenshots = canFetchStoredScreenshots ? screenshots : liveScreenshots;
-  const hasVisualToolContent = items.some((item) => (
-    visibleScreenshots.some((screenshot) => !item.toolCallId || screenshot.tool_call_id === item.toolCallId)
-    || (item.artifacts ?? []).some((artifact) => artifact.url)
-  ));
-  if (!hasVisualToolContent) return null;
-
+  const previewableCallIds = new Set(
+    (message.events ?? [])
+      .filter((event) => (
+        event.type === "browser_screenshot"
+        || event.type === "browser_state_snapshot"
+        || event.type === "browser_dom_snapshot"
+        || event.type === "tool_call_completed"
+      ))
+      .map((event) => String(event.tool_call_id ?? "").trim())
+      .filter(Boolean),
+  );
   return (
     <div className="rumi-tool-activity mb-4 grid w-full gap-3 text-zinc-300">
-      {items.map((item) => {
-        const itemScreenshots = visibleScreenshots.filter((screenshot) => !item.toolCallId || screenshot.tool_call_id === item.toolCallId);
-        const imageArtifacts = (item.artifacts ?? []).filter((artifact) => artifact.kind === "image" && artifact.url);
-        const fileArtifacts = (item.artifacts ?? []).filter((artifact) => artifact.kind !== "image" && artifact.url);
-        if (itemScreenshots.length === 0 && imageArtifacts.length === 0 && fileArtifacts.length === 0) return null;
-        return (
-          <div key={item.id} className="grid gap-3">
-            {visibleScreenshots
-              .filter((screenshot) => !item.toolCallId || screenshot.tool_call_id === item.toolCallId)
-              .map((screenshot) => (
-                <div key={screenshot.id} className="mt-3">
-                  <BrowserScreenshotPreview screenshot={screenshot} compact onOpenImagePreview={onOpenImagePreview} />
-                </div>
-              ))}
-            {itemScreenshots.length === 0 && imageArtifacts.map((artifact) => (
-              <div key={artifact.path}>
-                <figure className="max-w-full overflow-hidden rounded-lg border border-zinc-800 bg-black/30">
-                  <button
-                    type="button"
-                    className="block w-full cursor-zoom-in focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500"
-                    onClick={() => onOpenImagePreview?.({
-                      src: String(artifact.url ?? ""),
-                      href: String(artifact.url ?? ""),
-                      title: artifact.name,
-                      alt: artifact.name,
-                      subtitle: item.toolName,
-                      details: [
-                        { label: "tool", value: item.toolName },
-                        { label: "path", value: artifact.path },
-                      ],
-                    })}
-                  >
-                    <img src={artifact.url} alt={artifact.name} className="block h-auto w-full object-contain" style={{ maxHeight: "min(220px, 30vh)" }} />
-                  </button>
-                  <figcaption className="flex items-center gap-2 border-t border-zinc-800 px-3 py-2 text-[11px] text-zinc-500">
-                    <ImageIcon size={12} />
-                    <span className="truncate">{artifact.name}</span>
-                  </figcaption>
-                </figure>
-              </div>
-            ))}
-            {fileArtifacts.length > 0 && (
-              <div className="mt-2 flex flex-wrap gap-2">
-                {fileArtifacts.map((artifact) => (
-                  <a
-                    key={artifact.path}
-                    href={artifact.url}
-                    download={artifact.name}
-                    className="rounded-md border border-zinc-800 bg-zinc-950/70 px-2 py-1 font-mono text-[10px] text-zinc-500 hover:border-zinc-700 hover:text-zinc-200"
-                  >
-                    {artifact.name}
-                  </a>
-                ))}
-              </div>
-            )}
+      {groups.map((group) => (
+        <div key={group.id} className="grid gap-1.5">
+          <div className="flex items-center gap-2 text-[12px] font-medium text-zinc-400">
+            <span className="h-1.5 w-1.5 rounded-full bg-zinc-600" />
+            <span>{group.label}</span>
           </div>
-        );
-      })}
+          <div className="ml-1.5 grid gap-1.5 border-l border-zinc-800/70 pl-4">
+            {group.items.map((item) => {
+              const artifactPreviewId = item.artifacts?.find((artifact) => artifact.url)?.path;
+              const previewId = item.toolCallId && previewableCallIds.has(item.toolCallId) ? item.toolCallId : artifactPreviewId;
+              const hasPreview = Boolean(previewId);
+              const statusLabel = item.status === "failed" ? "エラー" : "";
+              const statusLine = [statusLabel, item.detail].filter(Boolean).join(" · ");
+              const body = (
+                <>
+                  <span className={cn("mt-1 h-1.5 w-1.5 rounded-full", item.status === "failed" ? "bg-red-400" : item.status === "running" ? "animate-pulse bg-blue-300" : "bg-zinc-700")} />
+                  <span className="min-w-0 max-w-full">
+                    <span className="block truncate text-[13px] leading-5 text-zinc-300">{item.input || item.detail || item.toolName}</span>
+                    {statusLine && (
+                      <span className={cn("block truncate text-[11px] leading-5", item.status === "failed" ? "text-red-300" : "text-zinc-500")}>
+                        {statusLine}
+                      </span>
+                    )}
+                    {item.nextStep && (
+                      <span className="block truncate text-[11px] leading-5 text-zinc-600">{item.nextStep}</span>
+                    )}
+                    {!item.supported && item.rawJson && (
+                      <code className="mt-1 block max-h-28 overflow-auto whitespace-pre-wrap rounded-md bg-zinc-950/70 px-2 py-1.5 font-mono text-[10px] leading-4 text-zinc-500">
+                        {item.rawJson}
+                      </code>
+                    )}
+                  </span>
+                </>
+              );
+              return hasPreview ? (
+                <button
+                  key={item.id}
+                  type="button"
+                  className="group/tool -ml-[5px] inline-flex max-w-full items-start gap-3 rounded-lg px-1 py-1.5 text-left transition-colors hover:bg-zinc-900/55 focus-visible:bg-zinc-900/55 focus-visible:outline-none"
+                  onClick={() => {
+                    if (previewId) onOpenToolPreview?.(previewId);
+                  }}
+                >
+                  {body}
+                </button>
+              ) : (
+                <div key={item.id} className="-ml-[5px] flex w-fit max-w-full items-start gap-3 px-1 py-1.5">
+                  {body}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
@@ -734,7 +721,7 @@ function PendingToolTray({ toolNames }: { toolNames: string[] }) {
   }
 
   return (
-    <div className="mt-2 ml-5 w-[min(820px,calc(100vw-64px))] rounded-xl border border-zinc-800 bg-zinc-950/70 px-4 py-3">
+    <div className="mt-2 ml-5 w-[min(820px,calc(100vw-64px))] px-1 py-2">
       <div className="mb-2 flex items-center gap-2 text-[11px] font-medium text-zinc-400">
         <Loader2 size={12} className="animate-spin text-blue-300" />
         <span>実行中の tool</span>
@@ -743,12 +730,12 @@ function PendingToolTray({ toolNames }: { toolNames: string[] }) {
         {[...groups.entries()].map(([id, group]) => (
           <div key={id} className="space-y-1.5">
             <div className="flex items-center gap-1.5 text-[11px] text-zinc-500">
-              <ChevronDown size={11} className="rotate-180" />
+              <span className="h-1.5 w-1.5 rounded-full bg-zinc-700" />
               <span>{group.label}</span>
             </div>
-            <div className="flex flex-wrap gap-1.5">
+            <div className="ml-1.5 flex flex-wrap gap-1.5 border-l border-zinc-800/70 pl-3">
               {group.names.map((name) => (
-                <span key={name} className="max-w-[220px] truncate rounded-md border border-zinc-800 bg-zinc-900/70 px-2 py-1 text-[11px] text-zinc-300">
+                <span key={name} className="max-w-[220px] truncate rounded-md bg-zinc-900/50 px-2 py-1 text-[11px] text-zinc-300">
                   {name}
                 </span>
               ))}
@@ -773,6 +760,7 @@ export function ChatMessagesRenderer({
   unknownBlockStrategy,
   showActivityInMessages,
   showWidgets,
+  onOpenToolPreview,
 }: ChatMessagesRendererProps) {
   const [imagePreview, setImagePreview] = useState<ImagePreviewRequest | null>(null);
 
@@ -787,11 +775,11 @@ export function ChatMessagesRenderer({
       ) : isNewConversation ? (
         <div className="flex-1" />
       ) : (
-        <div className="flex-1 overflow-y-auto px-6 py-3 md:px-9 lg:px-12">
-          <div className="w-full max-w-5xl mx-auto space-y-4">
+        <div className="flex-1 overflow-y-auto px-5 py-3 md:px-8 lg:px-10 xl:px-12">
+          <div className="w-full max-w-6xl mx-auto space-y-4">
             {messages.map((message) => (
-              <div key={message.id} className={cn("rumi-message-row group/message flex gap-3 select-text", message.role === "user" ? "flex-row-reverse" : "")}>
-                <div className={cn("flex flex-col min-w-0 pt-1", message.role === "user" ? "items-end max-w-[80%]" : "items-start flex-1")}>
+              <div key={message.id} className={cn("rumi-message-row group/message flex gap-3 select-text", message.role === "user" ? "flex-row-reverse lg:pr-6 xl:pr-8 2xl:pr-10" : "lg:pl-10 xl:pl-14 2xl:pl-20")}>
+                <div className={cn("flex flex-col min-w-0 pt-1", message.role === "user" ? "items-end max-w-[82%] lg:max-w-[70%] 2xl:max-w-[64%]" : "items-start flex-1")}>
                   {message.role === "agent" && (
                     <div className="flex items-center gap-2 mb-1.5">
                       <span className="text-xs font-semibold text-zinc-300 tracking-wide">Rumi</span>
@@ -815,8 +803,7 @@ export function ChatMessagesRenderer({
                           : "w-full text-zinc-200 bg-transparent",
                       )}
                     >
-                      {showActivityInMessages && message.role === "agent" && <ToolActivityTray message={message} onOpenImagePreview={setImagePreview} />}
-                      {message.role === "agent" && !showActivityInMessages && <BrowserScreenshotStrip message={message} onOpenImagePreview={setImagePreview} />}
+                      {showActivityInMessages && message.role === "agent" && <ToolActivityTray message={message} onOpenToolPreview={onOpenToolPreview} />}
 
                       {message.role === "agent" && message.metadata?.thinkingTranscript && (
                         <details className="mb-3 rounded-lg border border-zinc-800 bg-zinc-950/50 px-3 py-2 text-xs text-zinc-400">

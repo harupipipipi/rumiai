@@ -1,14 +1,16 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import { MessageSquare } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent } from "react";
 
+import { ConversationSpotlight } from "./components/ConversationSpotlight";
 import type { ChatItem } from "./components/HistoryBoard";
 import type { ToolPreviewItem, ToolPreviewMode } from "./components/ToolPreview";
 import { buildToolPreviewDisplayItems, hasCanvasItems } from "./components/ToolPreview";
-import { api, type ChatActivityEvent, type ChatContentBlock, type ChatMessage, type ChatStreamEvent, type ChatToolStreamEvent, type ComposerCommandExecuteResult, type ComposerCommandItem, type ComposerCommandMode, type ComposerWidgetAction, type Conversation, type ModelCommandCandidate, type ModelProfile, type OperationsCompanyStatus, type SettingsSection, type SidebarAction, type SidebarItem, type UICatalog } from "./lib/api";
+import { api, type ChatActivityEvent, type ChatContentBlock, type ChatMessage, type ChatStreamEvent, type ChatToolStreamEvent, type ComposerCommandExecuteResult, type ComposerCommandItem, type ComposerCommandMode, type ComposerWidgetAction, type Conversation, type ConversationSearchResult, type ModelCommandCandidate, type ModelProfile, type OperationsCompanyStatus, type SettingsSection, type SidebarAction, type SidebarItem, type UICatalog } from "./lib/api";
 import { reduceBrowserStateFromEvents } from "./lib/browserState";
-import { deriveConversationTitle, formatRelativeTime, messageToText } from "./lib/chat";
+import { deriveConversationTitle, formatRelativeTime, messageToText, orderConversationMessages } from "./lib/chat";
 import { cn } from "./lib/cn";
 import { canExecuteComposerEndpointAction, isSafeLocalEndpoint } from "./lib/composerWidgets";
+import { conversationMatchesSpotlightFilter, conversationToSearchResult, type SpotlightFilter } from "./lib/conversationSpotlight";
+import { normalizeLocale } from "./lib/i18n";
 import { PENDING_CHAT_REQUEST_TTL_MS, shouldClearPendingAfterConversationRefresh, type PendingChatRequest } from "./lib/pendingChat";
 import { isRecord, toolPreviewsFromMessages, upsertStreamActivityEvent } from "./lib/toolPreviews";
 import { hasShellRegion } from "./lib/uiShell";
@@ -748,6 +750,12 @@ export default function App() {
   const [activeConversation, setActiveConversation] = useState<Conversation | null>(null);
   const [input, setInput] = useLocalStorage("rumi-input", "");
   const [composerCandidateMenu, setComposerCandidateMenu] = useState<ComposerCandidateMenuState>(null);
+  const [isSpotlightOpen, setIsSpotlightOpen] = useState(false);
+  const [spotlightQuery, setSpotlightQuery] = useState("");
+  const [spotlightFilter, setSpotlightFilter] = useState<SpotlightFilter>("all");
+  const [spotlightResults, setSpotlightResults] = useState<ConversationSearchResult[]>([]);
+  const [spotlightSelectedIndex, setSpotlightSelectedIndex] = useState(0);
+  const [spotlightLoading, setSpotlightLoading] = useState(false);
   const [modelPickerRequestId, setModelPickerRequestId] = useState(0);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [requestedSettingsSectionId, setRequestedSettingsSectionId] = useState<string | null>(null);
@@ -782,12 +790,26 @@ export default function App() {
 
   const sidebarItems: SidebarItem[] = catalog?.sidebar.items ?? [];
   const chatItems = buildChatItems(conversations);
+  const recentSpotlightResults = useMemo(
+    () => conversations
+      .filter((conversation) => conversationMatchesSpotlightFilter(conversation, spotlightFilter))
+      .slice(0, 10)
+      .map(conversationToSearchResult),
+    [conversations, spotlightFilter],
+  );
+  const visibleSpotlightResults = spotlightQuery.trim() ? spotlightResults : recentSpotlightResults;
   const activeModelId = activeConversation?.model ?? String(settingsValues.models?.preferred_model ?? "stub/default").trim();
   const activeProfile = findProfile(modelProfiles, activeModelId);
-  const messages = activeConversation ? activeConversation.messages.map((message) => toUiMessage(message, activeProfile)) : [];
+  const orderedMessages = useMemo(
+    () => activeConversation ? orderConversationMessages(activeConversation.messages) : [],
+    [activeConversation?.messages],
+  );
+  const messages = orderedMessages.map((message) => toUiMessage(message, activeProfile));
   const activeChatTitle = activeConversation?.title ?? "New Conversation";
   const isNewConversation = activeConversation === null || activeConversation.messages.length === 0;
   const placeholder = String(settingsValues.general?.composer_placeholder ?? "メッセージを入力...");
+  const locale = normalizeLocale(settingsValues.general?.language);
+  const keyboardButtonNavigation = parseCommandBoolean(settingsValues.general?.keyboard_button_navigation, false);
   const preferredModel = activeModelId;
   const selectableModelProfiles = userFacingModelProfiles(modelProfiles, preferredModel);
   const favoriteProfiles = favoriteModelProfiles(settingsValues.models?.favorite_profiles, selectableModelProfiles, preferredModel);
@@ -1160,6 +1182,54 @@ export default function App() {
   }, [settingsValues.preview?.max_items, settingsValues.preview?.auto_open, activeConversationId]);
 
   useEffect(() => {
+    const handleGlobalKeyDown = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey && event.key.toLowerCase() === "k")) return;
+      event.preventDefault();
+      setIsSpotlightOpen(true);
+      setSpotlightSelectedIndex(0);
+    };
+    document.addEventListener("keydown", handleGlobalKeyDown);
+    return () => document.removeEventListener("keydown", handleGlobalKeyDown);
+  }, []);
+
+  useEffect(() => {
+    if (!isSpotlightOpen) return;
+    const query = spotlightQuery.trim();
+    if (!query) {
+      setSpotlightResults([]);
+      setSpotlightLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setSpotlightLoading(true);
+    const timeout = window.setTimeout(() => {
+      void api.searchConversations(query, {
+        date_filter: spotlightFilter === "starred" ? "all" : spotlightFilter,
+        is_starred: spotlightFilter === "starred" ? true : undefined,
+        role: "all",
+        limit: 12,
+      }).then((result) => {
+        if (cancelled) return;
+        setSpotlightResults(result.results);
+      }).catch((searchError) => {
+        if (cancelled) return;
+        console.error(searchError);
+        setSpotlightResults([]);
+      }).finally(() => {
+        if (!cancelled) setSpotlightLoading(false);
+      });
+    }, 120);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeout);
+    };
+  }, [isSpotlightOpen, spotlightFilter, spotlightQuery]);
+
+  useEffect(() => {
+    setSpotlightSelectedIndex(0);
+  }, [spotlightFilter, spotlightQuery, spotlightResults.length]);
+
+  useEffect(() => {
     if (!activeConversationId || !isConversationPending) return;
     if (streamingConversationIdRef.current === activeConversationId) return;
     setIsGenerating(true);
@@ -1229,6 +1299,42 @@ export default function App() {
   const handleHistoryClick = (conversationId: string) => {
     setError(null);
     void loadConversation(conversationId);
+  };
+
+  const closeSpotlight = () => {
+    setIsSpotlightOpen(false);
+    setSpotlightQuery("");
+    setSpotlightResults([]);
+    setSpotlightSelectedIndex(0);
+  };
+
+  const openSpotlightResult = (result: ConversationSearchResult | undefined) => {
+    if (!result?.conversation_id) return;
+    closeSpotlight();
+    setError(null);
+    void loadConversation(result.conversation_id);
+  };
+
+  const handleSpotlightKeyDown = (event: ReactKeyboardEvent<HTMLInputElement>) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeSpotlight();
+      return;
+    }
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setSpotlightSelectedIndex((index) => Math.min(index + 1, Math.max(visibleSpotlightResults.length - 1, 0)));
+      return;
+    }
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setSpotlightSelectedIndex((index) => Math.max(index - 1, 0));
+      return;
+    }
+    if (event.key === "Enter") {
+      event.preventDefault();
+      openSpotlightResult(visibleSpotlightResults[spotlightSelectedIndex] ?? visibleSpotlightResults[0]);
+    }
   };
 
   const handleSettingChange = (sectionId: string, fieldId: string, value: unknown) => {
@@ -1515,7 +1621,7 @@ export default function App() {
         }
         return;
       case "set_mode_coding":
-        setMode("coding");
+        setMode((current) => current === "coding" ? "chat" : "coding");
         return;
       case "set_mode_chat":
         setMode("chat");
@@ -1841,10 +1947,13 @@ export default function App() {
       toolNames: approvalToolIds,
     });
     try {
-      const result = await api.browserComputer(browserApproval.action, {
+      const approvedArguments = {
         ...browserApproval.payload,
         approval_token: browserApproval.token,
-      });
+      };
+      const result = browserApproval.toolName === "browser_computer"
+        ? await api.browserComputer(browserApproval.action, approvedArguments)
+        : await api.invokeTool(browserApproval.toolName, { ...approvedArguments, action: browserApproval.action });
       pushActionPreview(
         { id: "browser.approval", label: "Approved Browser Action", icon: "browser" },
         "browser-approval",
@@ -2187,12 +2296,13 @@ export default function App() {
       const replaceStreamingAssistant = (message: ChatMessage) => {
         setActiveConversation((current) => {
           if (!current || current.id !== conversation.id) return current;
-          const hasDraft = current.messages.some((candidate) => candidate.id === assistantDraft.id);
+          const withoutDraft = current.messages.filter((candidate) => candidate.id !== assistantDraft.id);
+          const hasFinalMessage = withoutDraft.some((candidate) => candidate.id === message.id);
           return {
             ...current,
-            messages: hasDraft
-              ? current.messages.map((candidate) => candidate.id === assistantDraft.id ? message : candidate)
-              : [...current.messages, message],
+            messages: hasFinalMessage
+              ? withoutDraft.map((candidate) => candidate.id === message.id ? message : candidate)
+              : [...withoutDraft, message],
           };
         });
       };
@@ -2313,6 +2423,7 @@ export default function App() {
       attachedFiles={attachedFiles}
       droppedWidgets={droppedWidgets}
       selectedToolIds={selectedToolIds}
+      keyboardButtonNavigation={keyboardButtonNavigation}
       onExtensionSelect={handleComposerExtensionSelect}
       onCommandSelect={handleComposerCommand}
       onModelCommandCandidateSelect={handleModelCommandCandidateSelect}
@@ -2410,6 +2521,10 @@ export default function App() {
                 showActivityInMessages={showActivityInMessages}
                 showWidgets={showWidgets}
                 onSuggestionClick={(text) => setInput(text)}
+                onOpenToolPreview={(previewId) => {
+                  setActivePreviewId(previewId);
+                  setShowPreview(true);
+                }}
               />
             )}
 
@@ -2473,6 +2588,7 @@ export default function App() {
             settingsValues={settingsValues}
             settingsSections={settingsSections}
             selectedToolIds={selectedToolIds}
+            keyboardButtonNavigation={keyboardButtonNavigation}
             onSettingChange={handleSettingChange}
             onOpenSettings={() => setIsSettingsOpen(true)}
             onToolToggle={(item) => toggleSelectedTool({
@@ -2489,6 +2605,21 @@ export default function App() {
         )}
       </div>
 
+      <ConversationSpotlight
+        isOpen={isSpotlightOpen}
+        query={spotlightQuery}
+        filter={spotlightFilter}
+        results={visibleSpotlightResults}
+        selectedIndex={spotlightSelectedIndex}
+        loading={spotlightLoading}
+        locale={locale}
+        onQueryChange={setSpotlightQuery}
+        onFilterChange={setSpotlightFilter}
+        onKeyDown={handleSpotlightKeyDown}
+        onClose={closeSpotlight}
+        onOpenResult={openSpotlightResult}
+      />
+
       {showRegion("settings_modal") && (
         <Renderers.settingsModal
           isOpen={isSettingsOpen}
@@ -2498,6 +2629,7 @@ export default function App() {
           previewsCount={canvasPreviews.length}
           settingsSections={settingsSections}
           settingsValues={settingsValues}
+          locale={locale}
           onClose={() => setIsSettingsOpen(false)}
           onSettingChange={handleSettingChange}
         />

@@ -33,6 +33,7 @@ def run(context):
         ("POST", "/api/chat/conversations", _lazy("blocks.chat.create_conversation"), {}),
         ("GET", "/api/chat/conversations", _lazy("blocks.chat.list_conversations"), {}),
         ("GET", "/api/chat/conversations/{id}", _lazy("blocks.chat.get_conversation"), {"id": "conversation_id"}),
+        ("POST", "/api/chat/search", _lazy("blocks.chat.search"), {}),
         ("PUT", "/api/chat/conversations/{id}", _lazy("blocks.chat.update_conversation"), {"id": "conversation_id"}),
         ("DELETE", "/api/chat/conversations/{id}", _lazy("blocks.chat.delete_conversation"), {"id": "conversation_id"}),
         ("POST", "/api/chat/conversations/{id}/messages", _lazy("blocks.chat.send"), {"id": "conversation_id"}),

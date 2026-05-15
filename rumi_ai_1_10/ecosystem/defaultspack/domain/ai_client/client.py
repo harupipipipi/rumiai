@@ -276,7 +276,9 @@ class AIClient:
             data = json.loads(self._settings_path().read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             return {}
-        raw_routes = ((data.get("apis") or {}).get("model_api_routes") or "")
+        models = data.get("models") if isinstance(data.get("models"), dict) else {}
+        apis = data.get("apis") if isinstance(data.get("apis"), dict) else {}
+        raw_routes = models.get("model_api_routes") or apis.get("model_api_routes") or ""
         if isinstance(raw_routes, list):
             raw_routes = "\n".join(str(item) for item in raw_routes)
         routes = {}

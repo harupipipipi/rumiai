@@ -1,10 +1,13 @@
 import { useEffect, useState, type ReactElement } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import { Check, ChevronDown, Copy, Loader2, MoreVertical, Pencil, Trash2, X } from "lucide-react";
+import { Check, ChevronDown, Copy, Loader2, MoreVertical, Pencil, Search, Trash2, X } from "lucide-react";
 
 import { cn } from "../lib/cn";
 import { api } from "../lib/api";
 import type { SettingsSection } from "../lib/api";
+import { t } from "../lib/i18n";
+import { selectedApisForModel, toggleModelApiRoute, updateModelApiRouteText } from "../lib/modelApiRoutes";
+import { settingsFieldSearchText, settingsSectionSearchText } from "../lib/settingsSearch";
 import type { SettingsModalRendererProps } from "./types";
 
 function formatReadonlyValue(value: unknown, fallback: unknown): string {
@@ -48,6 +51,32 @@ function registeredApiRows(providers: Array<Record<string, unknown>>): Array<Rec
     }))
   ));
   return rows.filter((api) => Boolean(api.configured));
+}
+
+function modelRouteOptions(field: SettingsSection["fields"][number]): Array<Record<string, unknown>> {
+  return Array.isArray(field.options)
+    ? field.options
+      .filter((item) => Boolean(item) && typeof item === "object")
+      .map((item) => item as unknown as Record<string, unknown>)
+    : [];
+}
+
+function fieldApiProviderRows(field: SettingsSection["fields"][number]): Array<Record<string, unknown>> {
+  return Array.isArray(field.api_keys)
+    ? field.api_keys.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object")
+    : [];
+}
+
+function routeProviderForOption(option: Record<string, unknown> | undefined, modelId: string): string {
+  const provider = String(option?.provider_id ?? "").trim();
+  if (provider) return provider;
+  return modelId.includes("/") ? modelId.split("/", 1)[0] ?? "" : "";
+}
+
+function apiRefForRoute(api: Record<string, unknown>, fallbackProvider: string): string {
+  const providerId = String(api.provider_id ?? fallbackProvider ?? "").trim();
+  const apiId = String(api.api_id ?? "").trim();
+  return providerId && apiId ? `${providerId}/${apiId}` : "";
 }
 
 function oauthProviderRows(providers: Array<Record<string, unknown>>): Array<Record<string, unknown>> {
@@ -623,11 +652,13 @@ function SettingsField({
   sectionId,
   field,
   value,
+  sectionValues,
   onChange,
 }: {
   sectionId: string;
   field: SettingsSection["fields"][number];
   value: unknown;
+  sectionValues?: Record<string, unknown>;
   onChange: (sectionId: string, fieldId: string, value: unknown) => void;
 }) {
   const [secretDraft, setSecretDraft] = useState("");
@@ -647,11 +678,129 @@ function SettingsField({
   const [openApiMenuKey, setOpenApiMenuKey] = useState("");
   const [selectedTokenKey, setSelectedTokenKey] = useState("");
   const [openTokenMenuKey, setOpenTokenMenuKey] = useState("");
+  const routeOptions = modelRouteOptions(field);
+  const routeOptionKey = routeOptions.map((option) => String(option.value ?? "")).join("|");
+  const preferredRouteModel = field.type === "model_api_routes" ? String(sectionValues?.preferred_model ?? "").trim() : "";
+  const [routeModel, setRouteModel] = useState(() => preferredRouteModel || String(routeOptions[0]?.value ?? ""));
+  const [routeModelTouched, setRouteModelTouched] = useState(false);
+  useEffect(() => {
+    if (field.type !== "model_api_routes") return;
+    if (!routeOptions.length) {
+      if (routeModel) setRouteModel("");
+      return;
+    }
+    const hasCurrent = routeOptions.some((option) => String(option.value ?? "") === routeModel);
+    const hasPreferred = routeOptions.some((option) => String(option.value ?? "") === preferredRouteModel);
+    if (!hasCurrent) {
+      setRouteModel(hasPreferred ? preferredRouteModel : String(routeOptions[0]?.value ?? ""));
+      setRouteModelTouched(false);
+      return;
+    }
+    if (!routeModelTouched && hasPreferred && routeModel !== preferredRouteModel) {
+      setRouteModel(preferredRouteModel);
+    }
+  }, [field.type, preferredRouteModel, routeModel, routeModelTouched, routeOptionKey, routeOptions]);
   const commonLabel = <span className="text-sm text-zinc-300">{field.label}</span>;
   const isSecretConfigured = Boolean(value);
 
   let control: ReactElement;
   switch (field.type) {
+    case "model_api_routes": {
+      const routeText = String(value ?? "");
+      const selectedModel = routeModel || String(routeOptions[0]?.value ?? "");
+      const selectedOption = routeOptions.find((option) => String(option.value ?? "") === selectedModel);
+      const selectedProvider = routeProviderForOption(selectedOption, selectedModel);
+      const isLocalModel = Boolean(selectedOption?.local) || selectedProvider === "stub";
+      const providerRows = fieldApiProviderRows(field);
+      const provider = providerRows.find((row) => String(row.provider_id ?? "") === selectedProvider);
+      const providerApis = provider ? registeredApiRows([provider]) : [];
+      const selectedApis = selectedApisForModel(routeText, selectedModel);
+      control = (
+        <div className="space-y-4">
+          <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(180px,0.42fr)]">
+            <label className="space-y-1.5">
+              <span className="text-[11px] uppercase tracking-[0.2em] text-zinc-600">Model</span>
+              <select
+                value={selectedModel}
+                onChange={(event) => {
+                  setRouteModelTouched(true);
+                  setRouteModel(event.target.value);
+                }}
+                className="w-full rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 outline-none transition-colors hover:border-zinc-700 focus:border-emerald-500/70"
+              >
+                {routeOptions.map((option) => (
+                  <option key={String(option.value ?? "")} value={String(option.value ?? "")}>
+                    {String(option.label ?? option.value ?? "")}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div className="rounded-lg border border-zinc-800 bg-zinc-950/70 px-3 py-2">
+              <p className="text-[11px] uppercase tracking-[0.2em] text-zinc-600">Provider</p>
+              <p className="mt-1 font-mono text-sm text-zinc-300">{selectedProvider || "unknown"}</p>
+            </div>
+          </div>
+
+          {isLocalModel ? (
+            <div className="rounded-lg border border-zinc-800 bg-zinc-950/70 px-3 py-3 text-sm text-zinc-400">
+              ローカル/StubモデルはAPIキーのルーティング不要です。
+            </div>
+          ) : providerApis.length > 0 ? (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[11px] uppercase tracking-[0.2em] text-zinc-600">Available API keys</span>
+                <span className="text-[11px] text-zinc-500">クリック順がfallback順になります</span>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {providerApis.map((apiRow) => {
+                  const routeRef = apiRefForRoute(apiRow, selectedProvider);
+                  const active = selectedApis.includes(routeRef);
+                  const order = selectedApis.indexOf(routeRef) + 1;
+                  return (
+                    <button
+                      key={routeRef}
+                      type="button"
+                      onClick={() => onChange(sectionId, field.id, toggleModelApiRoute(routeText, selectedModel, routeRef))}
+                      className={cn(
+                        "inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs transition-colors",
+                        active
+                          ? "border-emerald-500/60 bg-emerald-500/15 text-emerald-200"
+                          : "border-zinc-800 bg-zinc-950 text-zinc-400 hover:border-zinc-700 hover:text-zinc-200",
+                      )}
+                    >
+                      {active && <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-emerald-400 px-1 text-[10px] font-semibold text-zinc-950">{order}</span>}
+                      <MaskedApiLabel api={apiRow} />
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="rounded-lg border border-zinc-800 bg-zinc-950/70 px-3 py-2 text-xs text-zinc-500">
+                {selectedApis.length > 0 ? (
+                  <span>使用順: <span className="font-mono text-zinc-300">{selectedApis.join(" -> ")}</span></span>
+                ) : (
+                  <span>このモデルにはまだ使用APIが設定されていません。通常のprovider既定キーを使います。</span>
+                )}
+              </div>
+            </div>
+          ) : (
+            <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-3 text-sm text-amber-100">
+              {selectedProvider || "このprovider"} のAPI keyがありません。APIs の API Keys に追加してから、ここで選んでください。
+            </div>
+          )}
+
+          <details className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-3">
+            <summary className="cursor-pointer text-xs text-zinc-500">Advanced: route text</summary>
+            <textarea
+              value={routeText}
+              onChange={(event) => onChange(sectionId, field.id, updateModelApiRouteText(event.target.value, "", []))}
+              className="mt-3 min-h-28 w-full resize-y rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 font-mono text-xs text-zinc-300 outline-none focus:border-zinc-700"
+              placeholder="google/gemini-2.5-pro: google/main, google/backup"
+            />
+          </details>
+        </div>
+      );
+      break;
+    }
     case "api_keys": {
       const providers = apiProviderRows(value);
       const providerOptions = providers.length
@@ -1280,26 +1429,52 @@ export function SettingsModalRenderer({
   previewsCount,
   settingsSections,
   settingsValues,
+  locale = "ja",
   onClose,
   onSettingChange,
 }: SettingsModalRendererProps) {
   const [activeSectionId, setActiveSectionId] = useState(settingsSections[0]?.id ?? "system");
+  const [settingsSearch, setSettingsSearch] = useState("");
+  const normalizedSearch = settingsSearch.trim().toLowerCase();
+  const visibleSections = normalizedSearch
+    ? settingsSections.filter((section) => settingsSectionSearchText(section).includes(normalizedSearch))
+    : settingsSections;
   useEffect(() => {
     if (!requestedSectionId) return;
     if (settingsSections.some((section) => section.id === requestedSectionId)) {
       setActiveSectionId(requestedSectionId);
     }
   }, [requestedSectionId, settingsSections]);
-  const activeSection = settingsSections.find((section) => section.id === activeSectionId) ?? settingsSections[0];
+  useEffect(() => {
+    if (!normalizedSearch) return;
+    if (!visibleSections.some((section) => section.id === activeSectionId)) {
+      setActiveSectionId(visibleSections[0]?.id ?? settingsSections[0]?.id ?? "system");
+    }
+  }, [activeSectionId, normalizedSearch, settingsSections, visibleSections]);
+  const activeSection = visibleSections.find((section) => section.id === activeSectionId)
+    ?? visibleSections[0]
+    ?? settingsSections[0];
   const primaryFields = activeSection?.fields.filter((field) => !field.advanced) ?? [];
   const advancedFields = activeSection?.fields.filter((field) => field.advanced) ?? [];
+  const activeSectionOwnText = [
+    activeSection?.id ?? "",
+    activeSection?.label ?? "",
+    activeSection?.description ?? "",
+  ].join(" ").toLowerCase();
+  const fieldFilter = (field: SettingsSection["fields"][number]) => (
+    !normalizedSearch
+    || activeSectionOwnText.includes(normalizedSearch)
+    || settingsFieldSearchText(field).includes(normalizedSearch)
+  );
+  const visiblePrimaryFields = primaryFields.filter(fieldFilter);
+  const visibleAdvancedFields = advancedFields.filter(fieldFilter);
 
   const renderField = (field: SettingsSection["fields"][number]) => (
     <div
       key={`${activeSection?.id}.${field.id}`}
       className={cn(
         "rounded-lg border border-zinc-800 bg-zinc-950/50 p-4",
-        field.type === "textarea" || field.type === "secret" || field.type === "api_keys" || field.type === "external_tokens" || field.type === "public_url" || field.id.endsWith("_setup_guide") ? "lg:col-span-2" : "",
+        field.type === "textarea" || field.type === "secret" || field.type === "api_keys" || field.type === "external_tokens" || field.type === "public_url" || field.type === "model_api_routes" || field.id.endsWith("_setup_guide") ? "lg:col-span-2" : "",
       )}
     >
       <SettingsField
@@ -1310,6 +1485,7 @@ export function SettingsModalRenderer({
             ? settingsValues[activeSection?.id ?? ""]?.[field.configured_field]
             : settingsValues[activeSection?.id ?? ""]?.[field.id] ?? field.default
         }
+        sectionValues={settingsValues[activeSection?.id ?? ""] ?? {}}
         onChange={onSettingChange}
       />
     </div>
@@ -1333,10 +1509,14 @@ export function SettingsModalRenderer({
             className="relative h-[min(760px,calc(100vh-48px))] w-[min(1040px,calc(100vw-32px))] bg-[#09090b] border border-zinc-800 rounded-xl shadow-2xl overflow-hidden flex flex-col"
           >
             <div className="px-6 py-4 border-b border-zinc-800 flex justify-between items-center">
-              <div>
-                <h2 className="text-lg font-medium text-zinc-100">Settings</h2>
+              <div className="min-w-0">
+                <h2 className="text-lg font-medium text-zinc-100">{t(locale, "settings.title")}</h2>
                 <p className="text-xs text-zinc-500 mt-1">
-                  backend registry: {catalog?.extension_points.length ?? 0} extension points, {catalog?.parts?.length ?? 0} parts, {health?.pack ?? "defaultspack"}
+                  {t(locale, "settings.backendRegistry", {
+                    extensionPoints: catalog?.extension_points.length ?? 0,
+                    parts: catalog?.parts?.length ?? 0,
+                    pack: health?.pack ?? "defaultspack",
+                  })}
                 </p>
               </div>
               <button onClick={onClose} className="text-zinc-500 hover:text-zinc-300">
@@ -1345,8 +1525,27 @@ export function SettingsModalRenderer({
             </div>
             <div className="grid flex-1 min-h-0 md:grid-cols-[220px_1fr]">
               <nav className="border-b border-zinc-800 bg-zinc-950/50 p-3 md:border-b-0 md:border-r overflow-x-auto md:overflow-y-auto">
+                <label className="mb-3 flex h-9 items-center gap-2 rounded-lg border border-zinc-800 bg-black/30 px-3 text-xs text-zinc-500 focus-within:border-zinc-600 focus-within:text-zinc-300">
+                  <Search size={14} />
+                  <input
+                    value={settingsSearch}
+                    onChange={(event) => setSettingsSearch(event.target.value)}
+                    placeholder={t(locale, "settings.searchPlaceholder")}
+                    className="min-w-0 flex-1 bg-transparent text-zinc-200 outline-none placeholder:text-zinc-600"
+                  />
+                  {settingsSearch && (
+                    <button
+                      type="button"
+                      onClick={() => setSettingsSearch("")}
+                      className="rounded p-0.5 text-zinc-600 hover:bg-zinc-800 hover:text-zinc-300"
+                      aria-label={t(locale, "settings.clearSearch")}
+                    >
+                      <X size={13} />
+                    </button>
+                  )}
+                </label>
                 <div className="flex gap-2 md:flex-col">
-                  {settingsSections.map((section) => {
+                  {visibleSections.map((section) => {
                     const primaryFieldCount = section.fields.filter((field) => !field.advanced).length;
                     return (
                       <button
@@ -1361,10 +1560,15 @@ export function SettingsModalRenderer({
                         )}
                       >
                         <span className="block font-medium">{section.label}</span>
-                        <span className="mt-0.5 block text-[10px] text-zinc-600">{primaryFieldCount} controls</span>
+                        <span className="mt-0.5 block text-[10px] text-zinc-600">{t(locale, "settings.controls", { count: primaryFieldCount })}</span>
                       </button>
                     );
                   })}
+                  {visibleSections.length === 0 && (
+                    <div className="rounded-lg border border-zinc-800 bg-zinc-950/60 px-3 py-4 text-xs text-zinc-500">
+                      {t(locale, "settings.noSections")}
+                    </div>
+                  )}
                 </div>
               </nav>
 
@@ -1376,15 +1580,20 @@ export function SettingsModalRenderer({
                       {activeSection.description && <p className="text-xs text-zinc-500 mt-1">{activeSection.description}</p>}
                     </div>
                     <div className="grid gap-4 lg:grid-cols-2">
-                      {primaryFields.map(renderField)}
+                      {visiblePrimaryFields.map(renderField)}
                     </div>
-                    {advancedFields.length > 0 && (
+                    {normalizedSearch && visiblePrimaryFields.length === 0 && visibleAdvancedFields.length === 0 && (
+                      <div className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-4 text-sm text-zinc-500">
+                        {t(locale, "settings.noFields")}
+                      </div>
+                    )}
+                    {visibleAdvancedFields.length > 0 && (
                       <details className="rounded-lg border border-zinc-800 bg-zinc-950/40">
                         <summary className="cursor-pointer list-none px-4 py-3 text-xs font-medium text-zinc-400 transition-colors hover:text-zinc-200">
-                          Advanced settings
+                          {t(locale, "settings.advanced")}
                         </summary>
                         <div className="grid gap-4 border-t border-zinc-800 p-4 lg:grid-cols-2">
-                          {advancedFields.map(renderField)}
+                          {visibleAdvancedFields.map(renderField)}
                         </div>
                       </details>
                     )}
@@ -1393,7 +1602,7 @@ export function SettingsModalRenderer({
 
               <details className="rounded-lg border border-zinc-800 bg-zinc-950/30">
                 <summary className="cursor-pointer list-none px-4 py-3 text-xs font-medium text-zinc-500 transition-colors hover:text-zinc-300">
-                  Developer diagnostics
+                  {t(locale, "settings.developerDiagnostics")}
                 </summary>
                 <div className="space-y-6 border-t border-zinc-800 p-4">
                   <section className="space-y-3">

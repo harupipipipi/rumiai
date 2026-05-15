@@ -125,6 +125,18 @@ def test_browser_state_normalizer_unwraps_tool_executor_envelope_for_visual_feed
     assert screenshot["target_window"]["window_id"] == 42
 
 
+def test_browser_state_preserves_large_data_url_without_truncating():
+    data_url = "data:image/png;base64," + ("A" * 5000)
+    emission = emit_browser_state_events(
+        "browser_computer",
+        {"action": "computer.click", "executed": True, "data_url": data_url},
+    )
+
+    screenshot = emission.events[-1]["screenshot"]
+    assert screenshot["data_url"] == data_url
+    assert not screenshot["data_url"].endswith("...")
+
+
 def test_emit_browser_state_events_normalizes_snapshot_and_bounds_windows():
     result = {
         "action": "computer.context",

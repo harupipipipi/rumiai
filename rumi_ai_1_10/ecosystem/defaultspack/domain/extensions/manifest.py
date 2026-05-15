@@ -156,4 +156,24 @@ def validate_manifest(
         if "default_thinking_level" in manifest:
             normalized["default_thinking_level"] = str(manifest.get("default_thinking_level") or "")
 
+    if category == "skill":
+        triggers = manifest.get("triggers", manifest.get("keywords", []))
+        if isinstance(triggers, str):
+            triggers = [item.strip() for item in triggers.split(",") if item.strip()]
+        if triggers is None:
+            triggers = []
+        if not isinstance(triggers, list):
+            raise ManifestValidationError("manifest.triggers must be a string or array")
+        normalized["triggers"] = [str(item).strip() for item in triggers if str(item).strip()]
+        applies_to_tools = manifest.get("applies_to_tools", manifest.get("tool_ids", []))
+        if isinstance(applies_to_tools, str):
+            applies_to_tools = [item.strip() for item in applies_to_tools.split(",") if item.strip()]
+        if applies_to_tools is None:
+            applies_to_tools = []
+        if not isinstance(applies_to_tools, list):
+            raise ManifestValidationError("manifest.applies_to_tools must be a string or array")
+        normalized["applies_to_tools"] = [
+            str(item).strip() for item in applies_to_tools if str(item).strip()
+        ]
+
     return normalized

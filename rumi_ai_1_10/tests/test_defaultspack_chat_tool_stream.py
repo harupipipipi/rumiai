@@ -87,8 +87,87 @@ def test_chat_run_engine_streams_tool_call_events_and_final_message(tmp_path, mo
     assert "tool_call_delta" in event_types
     assert "tool_call_completed" in event_types
     assert len(streamed_run_ids) == 1
+    started = [event for event in events if event["type"] == "tool_call_started"][0]
+    completed = [event for event in events if event["type"] == "tool_call_completed"][0]
+    assert started["data"]["status"] == "running"
+    assert started["data"]["group"] == {"id": "calculation", "label": "計算"}
+    assert "display_text" in started["data"]
+    assert completed["data"]["status"] == "completed"
+    assert completed["data"]["next_step"] == "結果をもとに次の応答へ進みます。"
     final_message = [event["data"]["message"] for event in events if event["type"] == "done"][-1]
     assert final_message["raw_text"] == "4"
+    ChatStore._instance = None
+
+
+def test_chat_run_engine_provider_tool_stream_support_uses_injected_client(tmp_path, monkeypatch):
+    from domain.chat.store import ChatStore
+    from domain.chat.stream_engine import ChatRunEngine
+    from domain.tool.executor import ToolExecutor
+
+    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
+    ChatStore._instance = None
+
+    class GoogleProvider:
+        pass
+
+    class FakeClient:
+        def __init__(self):
+            self.calls = 0
+            self.resolve_provider_calls = 0
+
+        def resolve_provider(self, model):
+            self.resolve_provider_calls += 1
+            return GoogleProvider(), "gemini-test"
+
+        def supports_stream(self, model):
+            return True
+
+        def stream(self, model, messages, tools=None, params=None):
+            self.calls += 1
+            if self.calls == 1:
+                yield {"type": "tool_call_start", "id": "call_1", "name": "calculator"}
+                yield {"type": "tool_call_delta", "id": "call_1", "name": "calculator", "arguments_chunk": "{\"expression\":\"2+2\"}"}
+                yield {"type": "tool_call_end", "id": "call_1", "name": "calculator"}
+                yield {"type": "stream_end", "finish_reason": "tool_calls"}
+                return
+            yield {"type": "content_delta", "delta": {"type": "text", "text": "4"}}
+            yield {"type": "stream_end", "finish_reason": "stop"}
+
+        def complete(self, model, messages, tools=None, params=None):
+            raise AssertionError("complete fallback should not be used when injected client supports streamed tool calls")
+
+    def fake_execute(self, tool_name, arguments, context):
+        return {"result": "4", "is_error": False}
+
+    monkeypatch.setattr(ToolExecutor, "execute", fake_execute)
+
+    client = FakeClient()
+    store = ChatStore()
+    conversation = store.create_conversation(model="google/gemini-test")
+    events = list(
+        ChatRunEngine(client=client).stream(
+            {
+                "conversation_id": conversation["id"],
+                "message": {"role": "user", "content": "use a tool"},
+                "tools": [
+                    {
+                        "type": "function",
+                        "function": {
+                            "name": "calculator",
+                            "parameters": {"type": "object", "properties": {}, "required": []},
+                        },
+                    }
+                ],
+            },
+            {},
+            stream_mode=True,
+        )
+    )
+
+    assert client.resolve_provider_calls >= 1
+    assert "tool_call_started" in [event["type"] for event in events]
+    assert [event["data"]["message"]["raw_text"] for event in events if event["type"] == "done"][-1] == "4"
     ChatStore._instance = None
 
 

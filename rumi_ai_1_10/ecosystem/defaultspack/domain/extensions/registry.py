@@ -75,6 +75,9 @@ class ExtensionRegistry:
     def tools(self) -> "ToolExtensionRegistry":
         return ToolExtensionRegistry(self)
 
+    def skills(self) -> "SkillExtensionRegistry":
+        return SkillExtensionRegistry(self)
+
     def chat_modes(self) -> "ChatModeRegistry":
         return ChatModeRegistry(self)
 
@@ -264,6 +267,14 @@ class ToolExtensionRegistry:
 
     def list(self, *, enabled_only: bool = True) -> List[Dict[str, Any]]:
         return self._registry.list("tool", enabled_only=enabled_only)
+
+
+class SkillExtensionRegistry:
+    def __init__(self, registry: ExtensionRegistry) -> None:
+        self._registry = registry
+
+    def list(self, *, enabled_only: bool = True) -> List[Dict[str, Any]]:
+        return self._registry.list("skill", enabled_only=enabled_only)
 
 
 class ChatModeRegistry:

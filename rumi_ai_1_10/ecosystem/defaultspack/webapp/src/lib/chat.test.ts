@@ -5,6 +5,7 @@ import {
   deriveConversationTitle,
   formatRelativeTime,
   messageToText,
+  orderConversationMessages,
 } from "./chat";
 import type { ChatMessage } from "./api";
 
@@ -43,4 +44,35 @@ test("formatRelativeTime formats short durations", () => {
   const now = 10_000;
   assert.equal(formatRelativeTime(9_000, now), "just now");
   assert.equal(formatRelativeTime(0, 61_000), "1m ago");
+});
+
+test("orderConversationMessages restores chronological sequence and removes duplicate finals", () => {
+  const user = {
+    id: "user-1",
+    role: "user",
+    content: [{ type: "text", text: "weather" }],
+    raw_text: "weather",
+    created_at: 1000,
+    conversation_id: "c1",
+    sequence_number: 1,
+  } satisfies ChatMessage;
+  const assistant = {
+    id: "assistant-1",
+    role: "assistant",
+    content: [{ type: "text", text: "searched" }],
+    raw_text: "searched",
+    created_at: 1010,
+    conversation_id: "c1",
+    sequence_number: 2,
+    events: [{ type: "tool_call_completed", tool_name: "browser_use" }],
+  } satisfies ChatMessage;
+  const duplicateDone = {
+    ...assistant,
+    events: [{ type: "tool_call_completed", tool_name: "browser_use", message: "done" }],
+  } satisfies ChatMessage;
+
+  const ordered = orderConversationMessages([assistant, user, duplicateDone]);
+
+  assert.deepEqual(ordered.map((message) => message.id), ["user-1", "assistant-1"]);
+  assert.deepEqual(ordered[1].events, duplicateDone.events);
 });

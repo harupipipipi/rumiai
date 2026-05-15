@@ -64,6 +64,7 @@ class ToolRegistry:
         loaded = self._load_extension_tools()
         for pack_root in self._installed_pack_roots():
             loaded += self._load_tools_from_pack(pack_root)
+        self._apply_extension_skill_metadata()
         return loaded
 
     def _load_tools_from_pack(self, pack_root: Path) -> int:
@@ -132,6 +133,53 @@ class ToolRegistry:
             self.register(tool_def)
             loaded += 1
         return loaded
+
+    def _apply_extension_skill_metadata(self):
+        """skill manifests can annotate tools without becoming executable tools."""
+        try:
+            skills = get_extension_registry(force_reload=True).skills().list(
+                enabled_only=True
+            )
+        except Exception:
+            return 0
+
+        applied = 0
+        for skill in skills:
+            skill_id = str(skill.get("id", "")).strip()
+            if not skill_id:
+                continue
+            applies_to = skill.get("applies_to_tools", [])
+            if not isinstance(applies_to, list):
+                applies_to = []
+            triggers = skill.get("triggers", [])
+            if not isinstance(triggers, list):
+                triggers = []
+            for tool_id in applies_to:
+                tool_key = str(tool_id or "").strip()
+                if not tool_key:
+                    continue
+                with self._lock:
+                    tool_def = self._tools.get(tool_key)
+                    if tool_def is None:
+                        continue
+                    skills_list = list(tool_def.get("skills", []) or [])
+                    if skill_id not in skills_list:
+                        skills_list.append(skill_id)
+                    tool_def["skills"] = skills_list
+                    metadata = dict(tool_def.get("metadata", {}))
+                    metadata_skills = list(metadata.get("skills", []) or [])
+                    if skill_id not in metadata_skills:
+                        metadata_skills.append(skill_id)
+                    metadata["skills"] = metadata_skills
+                    if triggers:
+                        metadata["skill_triggers"] = [
+                            *list(metadata.get("skill_triggers", []) or []),
+                            *(str(trigger) for trigger in triggers if str(trigger).strip()),
+                        ]
+                    tool_def["metadata"] = metadata
+                    self._tools[tool_key] = tool_def
+                applied += 1
+        return applied
 
     @staticmethod
     def _tool_from_manifest(manifest):
