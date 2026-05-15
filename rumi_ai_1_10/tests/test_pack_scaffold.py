@@ -42,12 +42,21 @@ class TestMinimalTemplate:
         init = tmp_path / "my_pack" / "__init__.py"
         assert init.is_file()
 
-    def test_minimal_has_exactly_two_files(self, scaffold, tmp_path: Path):
+    def test_creates_contract_docs(self, scaffold, tmp_path: Path):
+        scaffold.generate("my_pack", tmp_path, template="minimal")
+        pack_dir = tmp_path / "my_pack"
+        assert (pack_dir / "README.md").is_file()
+        assert (pack_dir / "docs" / "README.md").is_file()
+        assert (pack_dir / "docs" / "architecture.md").is_file()
+        assert (pack_dir / "docs" / "interfaces.md").is_file()
+        assert (pack_dir / "docs" / "operations.md").is_file()
+
+    def test_minimal_has_exactly_seven_files(self, scaffold, tmp_path: Path):
         scaffold.generate("my_pack", tmp_path, template="minimal")
         pack_dir = tmp_path / "my_pack"
         files = list(pack_dir.rglob("*"))
         file_only = [f for f in files if f.is_file()]
-        assert len(file_only) == 2
+        assert len(file_only) == 7
 
     def test_ecosystem_json_is_valid_json(self, scaffold, tmp_path: Path):
         scaffold.generate("my_pack", tmp_path, template="minimal")
@@ -102,11 +111,11 @@ class TestCapabilityTemplate:
         scaffold.generate("cap_pack", tmp_path, template="capability")
         assert (tmp_path / "cap_pack" / "__init__.py").is_file()
 
-    def test_capability_has_exactly_three_files(self, scaffold, tmp_path: Path):
+    def test_capability_has_exactly_eight_files(self, scaffold, tmp_path: Path):
         scaffold.generate("cap_pack", tmp_path, template="capability")
         pack_dir = tmp_path / "cap_pack"
         file_only = [f for f in pack_dir.rglob("*") if f.is_file()]
-        assert len(file_only) == 3
+        assert len(file_only) == 8
 
     def test_capability_handler_contains_handle_function(self, scaffold, tmp_path: Path):
         scaffold.generate("cap_pack", tmp_path, template="capability")
@@ -148,6 +157,10 @@ class TestFlowTemplate:
         assert "sample_flow" in content
         assert "steps:" in content
 
+    def test_flow_template_creates_flows_doc(self, scaffold, tmp_path: Path):
+        scaffold.generate("flow_pack", tmp_path, template="flow")
+        assert (tmp_path / "flow_pack" / "docs" / "flows.md").is_file()
+
 
 # ======================================================================
 # テスト: full テンプレート
@@ -181,11 +194,11 @@ class TestFullTemplate:
         content = readme.read_text(encoding="utf-8")
         assert "full_pack" in content
 
-    def test_full_has_exactly_six_files(self, scaffold, tmp_path: Path):
+    def test_full_has_exactly_eleven_files(self, scaffold, tmp_path: Path):
         scaffold.generate("full_pack", tmp_path, template="full")
         pack_dir = tmp_path / "full_pack"
         file_only = [f for f in pack_dir.rglob("*") if f.is_file()]
-        assert len(file_only) == 6
+        assert len(file_only) == 11
 
 
 # ======================================================================
@@ -318,6 +331,12 @@ class TestCLI:
         exit_code = main(["invalid pack!", "-o", str(tmp_path)])
         assert exit_code == 1
 
+    def test_cli_default_template_is_minimal(self, tmp_path: Path):
+        main(["test_pack", "-o", str(tmp_path)])
+        pack_dir = tmp_path / "test_pack"
+        file_only = [f for f in pack_dir.rglob("*") if f.is_file()]
+        assert len(file_only) == 7
+
     def test_cli_force_flag(self, tmp_path: Path):
         main(["test_pack", "-o", str(tmp_path)])
         exit_code = main(["test_pack", "-o", str(tmp_path), "--force"])
@@ -327,9 +346,3 @@ class TestCLI:
         main(["test_pack", "-o", str(tmp_path), "-t", "full"])
         exit_code = main(["test_pack", "-o", str(tmp_path)])
         assert exit_code == 1
-
-    def test_cli_default_template_is_minimal(self, tmp_path: Path):
-        main(["test_pack", "-o", str(tmp_path)])
-        pack_dir = tmp_path / "test_pack"
-        file_only = [f for f in pack_dir.rglob("*") if f.is_file()]
-        assert len(file_only) == 2
