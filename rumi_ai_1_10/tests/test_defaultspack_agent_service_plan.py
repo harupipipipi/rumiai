@@ -782,8 +782,11 @@ def test_chat_stream_persists_terminal_ai_error_message(tmp_path, monkeypatch):
     ChatStore._instance = None
 
 
-def test_chat_stream_infers_computer_tools_before_stream_decision(tmp_path, monkeypatch):
+def test_chat_stream_infers_computer_tools_before_engine_stream(tmp_path, monkeypatch):
     from domain.chat.store import ChatStore
+    from domain.chat.stream_engine import ChatRunEngine
+    from domain.tool.schema_adapter import tool_name_from_definition
+    import domain.chat.run_request as run_request_module
     import blocks.chat.stream as stream_module
 
     storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
@@ -792,13 +795,26 @@ def test_chat_stream_infers_computer_tools_before_stream_decision(tmp_path, monk
 
     captured = {}
 
-    def fake_fallback_send(input_data, context):
-        captured["tools"] = input_data.get("tools")
-        captured["user_requested_computer_use"] = context.get("user_requested_computer_use")
-        yield {"type": "message", "message": {"role": "assistant", "raw_text": "ok"}}
-        yield {"type": "done", "message": {"role": "assistant", "raw_text": "ok"}}
+    def fail_fallback_send(*_args, **_kwargs):
+        raise AssertionError("legacy _fallback_send should not be used")
 
-    monkeypatch.setattr(stream_module, "_fallback_send", fake_fallback_send)
+    class FakeAIClient:
+        def supports_stream(self, model):
+            return True
+
+        def stream(self, model, messages, tools, params):
+            captured["tools"] = [tool_name_from_definition(tool) for tool in tools]
+            yield {"type": "content_delta", "delta": {"type": "text", "text": "ok"}}
+            yield {"type": "stream_end", "finish_reason": "stop", "usage": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}}
+
+    def fake_prefocus(prepared):
+        captured["user_requested_computer_use"] = prepared.request_context.get("user_requested_computer_use")
+        return None
+
+    monkeypatch.setattr(stream_module, "_fallback_send", fail_fallback_send)
+    monkeypatch.setattr(stream_module, "AIClient", FakeAIClient)
+    monkeypatch.setattr(run_request_module, "prefocus_computer_use_target_window", fake_prefocus)
+    monkeypatch.setattr(ChatRunEngine, "_provider_supports_stream_tool_calls", staticmethod(lambda _model: True))
 
     store = ChatStore()
     conversation = store.create_conversation(model="google/gemma-4-31b-it")
@@ -820,6 +836,8 @@ def test_chat_stream_infers_computer_tools_before_stream_decision(tmp_path, monk
 
 def test_chat_stream_infers_computer_tools_when_tools_are_omitted(tmp_path, monkeypatch):
     from domain.chat.store import ChatStore
+    from domain.chat.stream_engine import ChatRunEngine
+    from domain.tool.schema_adapter import tool_name_from_definition
     import blocks.chat.stream as stream_module
 
     storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
@@ -828,12 +846,21 @@ def test_chat_stream_infers_computer_tools_when_tools_are_omitted(tmp_path, monk
 
     captured = {}
 
-    def fake_fallback_send(input_data, context):
-        captured["tools"] = input_data.get("tools")
-        yield {"type": "message", "message": {"role": "assistant", "raw_text": "ok"}}
-        yield {"type": "done", "message": {"role": "assistant", "raw_text": "ok"}}
+    def fail_fallback_send(*_args, **_kwargs):
+        raise AssertionError("legacy _fallback_send should not be used")
 
-    monkeypatch.setattr(stream_module, "_fallback_send", fake_fallback_send)
+    class FakeAIClient:
+        def supports_stream(self, model):
+            return True
+
+        def stream(self, model, messages, tools, params):
+            captured["tools"] = [tool_name_from_definition(tool) for tool in tools]
+            yield {"type": "content_delta", "delta": {"type": "text", "text": "ok"}}
+            yield {"type": "stream_end", "finish_reason": "stop", "usage": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}}
+
+    monkeypatch.setattr(stream_module, "_fallback_send", fail_fallback_send)
+    monkeypatch.setattr(stream_module, "AIClient", FakeAIClient)
+    monkeypatch.setattr(ChatRunEngine, "_provider_supports_stream_tool_calls", staticmethod(lambda _model: True))
 
     store = ChatStore()
     conversation = store.create_conversation(model="google/gemma-4-31b-it")
@@ -852,30 +879,50 @@ def test_chat_stream_infers_computer_tools_when_tools_are_omitted(tmp_path, monk
 
 
 def test_chat_stream_fallback_yields_realtime_tool_progress(monkeypatch):
-    import blocks.chat.send as send_module
     import blocks.chat.stream as stream_module
 
-    def fake_send_run(input_data, context):
-        context["stream_event_callback"](
-            {
+    class FakeEngine:
+        def __init__(self, client=None):
+            self.client = client
+
+        def stream(self, input_data, context, *, stream_mode=True):
+            yield {
+                "schema_version": 1,
                 "type": "tool_call_started",
+                "run_id": "run-fallback",
+                "conversation_id": str(input_data.get("conversation_id") or ""),
+                "seq": 1,
+                "data": {"tool_name": "browser_computer", "tool_call_id": "call_1"},
                 "tool_name": "browser_computer",
                 "tool_call_id": "call_1",
                 "message": "browser_computer を使用中",
             }
-        )
-        assert context["is_cancelled"]() is False
-        return {
-            "status": "ok",
-            "data": {
+            message = {
                 "id": "m1",
                 "role": "assistant",
                 "content": [{"type": "text", "text": "done"}],
                 "raw_text": "done",
-            },
-        }
+            }
+            yield {
+                "schema_version": 1,
+                "type": "assistant_message_completed",
+                "run_id": "run-fallback",
+                "conversation_id": str(input_data.get("conversation_id") or ""),
+                "seq": 2,
+                "data": {"message": message},
+                "message": "assistant message completed",
+            }
+            yield {
+                "schema_version": 1,
+                "type": "done",
+                "run_id": "run-fallback",
+                "conversation_id": str(input_data.get("conversation_id") or ""),
+                "seq": 3,
+                "data": {"message": message},
+                "message": "done",
+            }
 
-    monkeypatch.setattr(send_module, "run", fake_send_run)
+    monkeypatch.setattr(stream_module, "ChatRunEngine", FakeEngine)
 
     events = list(stream_module._fallback_send({"conversation_id": "c1"}, {}))
 
@@ -995,19 +1042,41 @@ def test_chat_stream_fallback_persists_tool_events_to_assistant_draft(tmp_path, 
 
 def test_chat_stop_cancels_active_fallback_worker(monkeypatch):
     import time
-    import blocks.chat.send as send_module
     import blocks.chat.stream as stream_module
     from domain.chat.cancellation import get_chat_cancellation_registry
 
-    def fake_send_run(input_data, context):
-        context["stream_event_callback"]({"type": "status", "message": "started"})
-        deadline = time.time() + 2
-        while not context["is_cancelled"]() and time.time() < deadline:
-            time.sleep(0.01)
-        assert context["is_cancelled"]() is True
-        return {"status": "error", "error": {"code": "CANCELLED", "message": "cancelled"}}
+    class FakeEngine:
+        def __init__(self, client=None):
+            self.client = client
 
-    monkeypatch.setattr(send_module, "run", fake_send_run)
+        def stream(self, input_data, context, *, stream_mode=True):
+            conversation_id = str(input_data.get("conversation_id") or "")
+            yield {
+                "schema_version": 1,
+                "type": "status",
+                "run_id": "run-cancel",
+                "conversation_id": conversation_id,
+                "seq": 1,
+                "data": {"phase": "thinking"},
+                "message": "started",
+                "phase": "thinking",
+            }
+            registry = get_chat_cancellation_registry()
+            deadline = time.time() + 2
+            while not registry.is_cancelled(conversation_id) and time.time() < deadline:
+                time.sleep(0.01)
+            assert registry.is_cancelled(conversation_id) is True
+            yield {
+                "schema_version": 1,
+                "type": "cancelled",
+                "run_id": "run-cancel",
+                "conversation_id": conversation_id,
+                "seq": 2,
+                "data": {"reason": "cancelled"},
+                "message": "cancelled",
+            }
+
+    monkeypatch.setattr(stream_module, "ChatRunEngine", FakeEngine)
 
     events = stream_module._fallback_send({"conversation_id": "c-stop"}, {})
     assert next(events)["message"] == "started"
