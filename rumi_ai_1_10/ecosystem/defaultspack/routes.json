@@ -239,6 +239,300 @@
       "path": "/api/agent/org/roles",
       "flow_id": "transport_direct",
       "description": "List available company-style agent roles"
+    },
+    {
+      "method": "POST",
+      "path": "/api/chat/conversations/{id}/compact",
+      "flow_id": "simple_chat",
+      "description": "Compact a selected safe segment in a conversation"
+    },
+    {
+      "method": "POST",
+      "path": "/api/chat/conversations/{id}/auto-compact",
+      "flow_id": "simple_chat",
+      "description": "Suggest or apply automatic conversation compaction"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent/companies",
+      "flow_id": "company_workspace",
+      "description": "List company workspaces"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/companies",
+      "flow_id": "company_workspace",
+      "description": "Create a company workspace"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent/companies/{company_id}",
+      "flow_id": "company_workspace",
+      "description": "Get a company workspace"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/agent/companies/{company_id}",
+      "flow_id": "company_workspace",
+      "description": "Update a company workspace"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/agent/companies/{company_id}",
+      "flow_id": "company_workspace",
+      "description": "Delete a company workspace"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/companies/{company_id}/bootstrap",
+      "flow_id": "company_workspace",
+      "description": "Bootstrap a company workspace"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent/companies/{company_id}/status",
+      "flow_id": "company_workspace",
+      "description": "Read company workspace status"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent/companies/{company_id}/settings",
+      "flow_id": "company_workspace",
+      "description": "Read company workspace settings"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/agent/companies/{company_id}/settings",
+      "flow_id": "company_workspace",
+      "description": "Update company workspace settings"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent/companies/{company_id}/agents",
+      "flow_id": "company_workspace",
+      "description": "List company agents"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/companies/{company_id}/agents",
+      "flow_id": "company_workspace",
+      "description": "Create or upsert a company agent"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent/companies/{company_id}/agents/{agent_id}",
+      "flow_id": "company_workspace",
+      "description": "Get a company agent"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/agent/companies/{company_id}/agents/{agent_id}",
+      "flow_id": "company_workspace",
+      "description": "Update a company agent"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/agent/companies/{company_id}/agents/{agent_id}",
+      "flow_id": "company_workspace",
+      "description": "Delete a company agent"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent/companies/{company_id}/channels",
+      "flow_id": "company_workspace",
+      "description": "List company channels"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/companies/{company_id}/channels",
+      "flow_id": "company_workspace",
+      "description": "Create or upsert a company channel"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent/companies/{company_id}/channels/{channel_id}/messages",
+      "flow_id": "company_workspace",
+      "description": "List company channel messages"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/companies/{company_id}/channels/{channel_id}/messages",
+      "flow_id": "company_workspace",
+      "description": "Add a company channel message"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/companies/{company_id}/mention",
+      "flow_id": "company_workspace",
+      "description": "Resolve or queue company work from mentions"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/companies/{company_id}/dispatch",
+      "flow_id": "company_workspace",
+      "description": "Queue a company task dispatch"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent/companies/{company_id}/tasks",
+      "flow_id": "company_workspace",
+      "description": "List company tasks"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/companies/{company_id}/tasks",
+      "flow_id": "company_workspace",
+      "description": "Create a company task"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/agent/companies/{company_id}/tasks/{task_id}",
+      "flow_id": "company_workspace",
+      "description": "Update a company task"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent/companies/{company_id}/inbound-routes",
+      "flow_id": "company_workspace",
+      "description": "List company inbound routes"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/companies/{company_id}/inbound-routes",
+      "flow_id": "company_workspace",
+      "description": "Create or upsert a company inbound route"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/agent/companies/{company_id}/inbound-routes/{route_id}",
+      "flow_id": "company_workspace",
+      "description": "Update a company inbound route"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/agent/companies/{company_id}/inbound-routes/{route_id}",
+      "flow_id": "company_workspace",
+      "description": "Delete a company inbound route"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/companies/{company_id}/inbound-routes/{route_id}/ingest",
+      "flow_id": "company_workspace",
+      "description": "Ingest content through a company inbound route"
+    },
+    {
+      "method": "GET",
+      "path": "/api/p2p/status",
+      "flow_id": "p2p",
+      "description": "Read local P2P status"
+    },
+    {
+      "method": "GET",
+      "path": "/api/p2p/identity",
+      "flow_id": "p2p",
+      "description": "Read or initialize local P2P identity"
+    },
+    {
+      "method": "POST",
+      "path": "/api/p2p/identity/rotate",
+      "flow_id": "p2p",
+      "description": "Rotate local P2P identity"
+    },
+    {
+      "method": "GET",
+      "path": "/api/p2p/peers",
+      "flow_id": "p2p",
+      "description": "List P2P peers"
+    },
+    {
+      "method": "POST",
+      "path": "/api/p2p/peers",
+      "flow_id": "p2p",
+      "description": "Approve or upsert a P2P peer"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/p2p/peers/{peer_id}",
+      "flow_id": "p2p",
+      "description": "Update a P2P peer"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/p2p/peers/{peer_id}",
+      "flow_id": "p2p",
+      "description": "Block a P2P peer"
+    },
+    {
+      "method": "POST",
+      "path": "/api/p2p/pairing/start",
+      "flow_id": "p2p",
+      "description": "Start P2P pairing"
+    },
+    {
+      "method": "POST",
+      "path": "/api/p2p/pairing/accept",
+      "flow_id": "p2p",
+      "description": "Accept P2P pairing"
+    },
+    {
+      "method": "POST",
+      "path": "/api/p2p/pairing/reject",
+      "flow_id": "p2p",
+      "description": "Reject P2P pairing"
+    },
+    {
+      "method": "POST",
+      "path": "/api/p2p/messages/inbound",
+      "flow_id": "p2p",
+      "description": "Handle a signed inbound P2P message"
+    },
+    {
+      "method": "POST",
+      "path": "/api/p2p/messages/send",
+      "flow_id": "p2p",
+      "description": "Build a signed outbound P2P message"
+    },
+    {
+      "method": "POST",
+      "path": "/api/integrations/p2p/events",
+      "flow_id": "p2p",
+      "description": "Receive a signed P2P integration event"
+    },
+    {
+      "method": "GET",
+      "path": "/api/coding/workspaces",
+      "flow_id": "coding_workspace",
+      "description": "List coding workspaces"
+    },
+    {
+      "method": "POST",
+      "path": "/api/coding/workspaces",
+      "flow_id": "coding_workspace",
+      "description": "Create a coding workspace"
+    },
+    {
+      "method": "GET",
+      "path": "/api/coding/workspaces/{workspace_id}",
+      "flow_id": "coding_workspace",
+      "description": "Get a coding workspace"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/coding/workspaces/{workspace_id}",
+      "flow_id": "coding_workspace",
+      "description": "Update a coding workspace"
+    },
+    {
+      "method": "POST",
+      "path": "/api/coding/workspaces/{workspace_id}/select",
+      "flow_id": "coding_workspace",
+      "description": "Select a coding workspace"
+    },
+    {
+      "method": "POST",
+      "path": "/api/coding/workspaces/{workspace_id}/trust",
+      "flow_id": "coding_workspace",
+      "description": "Trust a coding workspace for mutations"
     }
   ]
 }
