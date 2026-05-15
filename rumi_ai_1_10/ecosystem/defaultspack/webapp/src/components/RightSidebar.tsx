@@ -1,7 +1,8 @@
-import { cloneElement, useEffect, useMemo, useRef, useState, type DragEvent, type MouseEvent, type ReactElement } from "react";
+import { cloneElement, useEffect, useMemo, useRef, useState, type DragEvent, type MouseEvent, type ReactElement, type ReactNode } from "react";
 import {
   Blocks,
   BrainCircuit,
+  Building2,
   ChevronDown,
   Cpu,
   Database,
@@ -727,6 +728,7 @@ export function RightSidebar({
   settingsValues,
   settingsSections,
   selectedToolIds = [],
+  companyPanel,
   keyboardButtonNavigation = false,
   onSettingChange,
   onOpenSettings,
@@ -739,6 +741,7 @@ export function RightSidebar({
   settingsValues: Record<string, Record<string, unknown>>;
   settingsSections: SettingsSection[];
   selectedToolIds?: string[];
+  companyPanel?: ReactNode;
   keyboardButtonNavigation?: boolean;
   onSettingChange: (sectionId: string, fieldId: string, value: unknown) => void;
   onOpenSettings: () => void;
@@ -785,10 +788,11 @@ export function RightSidebar({
   useEffect(() => {
     if (!activePanel) return;
     if (activePanel === "__tool_manager__") return;
+    if (activePanel === "__company_workspace__" && companyPanel) return;
     if (!items.some((item) => item.id === activePanel)) {
       setActivePanel(null);
     }
-  }, [activePanel, items]);
+  }, [activePanel, companyPanel, items]);
 
   useEffect(() => {
     if (!activePanel || categoryFilter === "all") return;
@@ -851,7 +855,7 @@ export function RightSidebar({
     [items, searchQuery, tagMap],
   );
   useEffect(() => {
-    if (!activePanel || activePanel === "__tool_manager__" || !searchQuery.trim()) return;
+    if (!activePanel || activePanel === "__tool_manager__" || activePanel === "__company_workspace__" || !searchQuery.trim()) return;
     if (!searchFilteredItems.some((item) => item.id === activePanel)) {
       setActivePanel(null);
     }
@@ -927,6 +931,7 @@ export function RightSidebar({
 
   const activeItem = items.find((item) => item.id === activePanel) ?? null;
   const isToolManagerActive = activePanel === "__tool_manager__";
+  const isCompanyPanelActive = activePanel === "__company_workspace__" && Boolean(companyPanel);
   const activeToolGroupId = activeItem?.category === "tool" ? toolGroupFor(activeItem).id : null;
 
   const handleDragStart = (event: DragEvent, item: SidebarItem) => {
@@ -1118,12 +1123,12 @@ export function RightSidebar({
 
   return (
     <aside className="flex-shrink-0 border-l border-zinc-800/60 bg-[#09090b] hidden md:flex h-full transition-[width,opacity] duration-200 ease-out">
-      {(activeItem || isToolManagerActive) && (
+      {(activeItem || isToolManagerActive || isCompanyPanelActive) && (
         <div className="w-[250px] xl:w-[270px] flex flex-col border-r border-zinc-800/40 bg-[#0a0a0c] animate-in slide-in-from-right-2 duration-200">
           <div className="h-10 flex items-center justify-between px-2.5 border-b border-zinc-800/60 flex-shrink-0">
             <div className="flex items-center gap-2 min-w-0 overflow-hidden">
-              <div className={cn("w-1.5 h-1.5 rounded-full flex-shrink-0", activeItem ? categoryColor(activeItem.category, "bg") : "bg-emerald-500")} />
-              <h3 className="text-[13px] font-medium text-zinc-100 truncate">{activeItem?.label ?? "Tool manager"}</h3>
+              <div className={cn("w-1.5 h-1.5 rounded-full flex-shrink-0", activeItem ? categoryColor(activeItem.category, "bg") : isCompanyPanelActive ? "bg-sky-400" : "bg-emerald-500")} />
+              <h3 className="text-[13px] font-medium text-zinc-100 truncate">{activeItem?.label ?? (isCompanyPanelActive ? "Company Workspace" : "Tool manager")}</h3>
               {activeItem?.badge && (
                 <span className="text-[8px] bg-emerald-500/20 text-emerald-400 px-1 py-0.5 rounded-full font-bold flex-shrink-0">
                   {activeItem.badge}
@@ -1218,8 +1223,10 @@ export function RightSidebar({
             </div>
           )}
 
-          <div className="flex-1 overflow-y-auto p-2.5">
-            {activeItem ? (
+          <div className={cn("flex-1 overflow-y-auto", isCompanyPanelActive ? "p-0" : "p-2.5")}>
+            {isCompanyPanelActive ? (
+              companyPanel
+            ) : activeItem ? (
               <SidebarPanel item={activeItem} settingsValues={settingsValues} onSettingChange={onSettingChange} onPanelAction={onPanelAction} />
                         ) : (
                           <div className="space-y-3">
@@ -1523,6 +1530,22 @@ export function RightSidebar({
               </span>
             )}
           </button>
+          {companyPanel && (
+            <button
+              type="button"
+              tabIndex={buttonTabIndex}
+              onClick={() => setActivePanel((current) => (current === "__company_workspace__" ? null : "__company_workspace__"))}
+              className={cn(
+                RAIL_BUTTON_CLASS,
+                activePanel === "__company_workspace__"
+                  ? "bg-sky-500/15 text-sky-200 ring-1 ring-sky-500/30"
+                  : "text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50",
+              )}
+              title="Company workspace"
+            >
+              <Building2 size={17} className="h-[17px] w-[17px] shrink-0" />
+            </button>
+          )}
           <div className="w-5 h-px bg-zinc-800 my-1" />
 
           {showToolGroups && (

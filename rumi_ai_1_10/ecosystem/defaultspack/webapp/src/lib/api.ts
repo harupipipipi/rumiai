@@ -74,6 +74,8 @@ export type CodingGitStatus = {
 export type CodingContextResponse = {
   branch: string | null;
   root_folder: string | null;
+  workspace_id?: string | null;
+  workspace_root?: string | null;
   directory?: string;
   files: string[];
   entries?: CodingContextEntry[];
@@ -88,6 +90,213 @@ export type CodingBranchResponse = {
   switched?: boolean;
   created?: boolean;
   output?: string;
+  workspace_id?: string | null;
+  workspace_root?: string | null;
+};
+
+export type CodingWorkspaceRecord = {
+  workspace_id: string;
+  label: string;
+  root_path: string;
+  trusted?: boolean;
+  trust_granted_at?: string | null;
+  last_used_at?: string | null;
+  metadata?: Record<string, unknown>;
+};
+
+export type CodingWorkspacesResponse = {
+  workspaces: CodingWorkspaceRecord[];
+  selected_workspace_id?: string | null;
+};
+
+export type CompanyAgent = {
+  id?: string;
+  agent_id: string;
+  role_key?: string;
+  agent_name?: string;
+  display_name?: string;
+  model?: string;
+  allowed_tools?: string[];
+  context_limit?: number;
+  aliases?: string[];
+  status?: string;
+  metadata?: Record<string, unknown>;
+  created_at?: string;
+  updated_at?: string;
+};
+
+export type CompanyChannel = {
+  id: string;
+  name?: string;
+  description?: string;
+  visibility?: string;
+  members?: string[];
+  mentions?: boolean;
+  append_only?: boolean;
+  message_count?: number;
+  last_message_at?: string | null;
+  metadata?: Record<string, unknown>;
+  created_at?: string;
+  updated_at?: string;
+};
+
+export type CompanyMessage = {
+  id: string;
+  company_id: string;
+  channel_id: string;
+  sender_id: string;
+  content: string;
+  mentions?: string[];
+  task_ids?: string[];
+  metadata?: Record<string, unknown>;
+  created_at?: string;
+  updated_at?: string;
+};
+
+export type CompanyTask = {
+  id: string;
+  company_id: string;
+  title: string;
+  description?: string;
+  target_agent_ids?: string[];
+  source?: string;
+  status?: string;
+  dispatches?: Array<Record<string, unknown>>;
+  metadata?: Record<string, unknown>;
+  created_at?: string;
+  updated_at?: string;
+};
+
+export type CompanyInboundRoute = {
+  id: string;
+  provider?: string;
+  source?: string;
+  channel_id?: string;
+  enabled?: boolean;
+  metadata?: Record<string, unknown>;
+  created_at?: string;
+  updated_at?: string;
+};
+
+export type CompanyRecord = {
+  id: string;
+  name: string;
+  description?: string;
+  status?: string;
+  conversation_group_id?: string;
+  settings?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
+  agents?: Record<string, CompanyAgent> | CompanyAgent[];
+  channels?: Record<string, CompanyChannel> | CompanyChannel[];
+  messages?: Record<string, CompanyMessage> | CompanyMessage[];
+  tasks?: Record<string, CompanyTask> | CompanyTask[];
+  inbound_routes?: Record<string, CompanyInboundRoute> | CompanyInboundRoute[];
+  agent_count?: number;
+  channel_count?: number;
+  message_count?: number;
+  task_count?: number;
+  created_at?: string;
+  updated_at?: string;
+};
+
+export type CompanyStatusResponse = {
+  bootstrapped: boolean;
+  company_id: string;
+  company?: CompanyRecord | null;
+  storage_file?: string;
+};
+
+export type P2PSettings = {
+  enabled?: boolean;
+  bind_host?: string;
+  bind_port?: number;
+  lan_discovery?: boolean;
+  internet_relay?: boolean;
+  store_path?: string;
+  envelope_ttl_seconds?: number;
+  replay_ttl_seconds?: number;
+  pairing_ttl_seconds?: number;
+  [key: string]: unknown;
+};
+
+export type P2PIdentity = {
+  node_id: string;
+  fingerprint?: string;
+  label?: string;
+  node_secret?: string;
+  created_at?: number;
+  updated_at?: number;
+  [key: string]: unknown;
+};
+
+export type P2PPeer = {
+  peer_id: string;
+  fingerprint?: string;
+  hmac_secret?: string;
+  status?: "pending" | "approved" | "blocked" | string;
+  capabilities?: string[];
+  allowed_company_ids?: string[];
+  label?: string;
+  metadata?: Record<string, unknown>;
+  created_at?: number;
+  updated_at?: number;
+};
+
+export type P2PPairing = {
+  pairing_id: string;
+  code: string;
+  status: "pending" | "accepted" | "rejected" | "expired" | string;
+  expires_at: number;
+  created_at: number;
+  peer_id?: string;
+  peer_fingerprint?: string;
+  peer_label?: string;
+  capabilities?: string[];
+  allowed_company_ids?: string[];
+  accepted_at?: number;
+  rejected_at?: number;
+  reason?: string;
+};
+
+export type P2PStatusResponse = {
+  p2p: P2PSettings;
+  peer_count: number;
+  approved_peer_count: number;
+};
+
+export type ConversationListOptions = {
+  tag?: string;
+  tags?: string[];
+  is_starred?: boolean;
+  is_pinned?: boolean;
+  is_archived?: boolean;
+  company_id?: string;
+  workspace_id?: string;
+  conversation_kind?: string;
+  limit?: number;
+  offset?: number;
+};
+
+export type CompactConversationOptions = {
+  protect_last_messages?: number;
+  start_message_id?: string;
+  end_message_id?: string;
+  reason?: string;
+  instruction?: string;
+  approved?: boolean;
+  approval_token?: string;
+};
+
+export type CompactConversationResult = {
+  conversation?: Conversation;
+  summary_message?: ChatMessage | null;
+  deleted_message_ids?: string[];
+  deleted_count?: number;
+  protect_last_messages?: number;
+  message?: string;
+  mode?: string;
+  compactable?: boolean;
+  trim_plan?: Record<string, unknown>;
 };
 
 export type OperationsCompanyRole = {
@@ -205,6 +414,9 @@ export type Conversation = {
   metadata?: Record<string, unknown> | null;
   tags: string[];
   is_starred: boolean;
+  is_pinned?: boolean;
+  pinned_at?: number | string | null;
+  pin_scope?: "global" | "group" | "company" | string;
   is_archived: boolean;
   current_node_id?: string | null;
   messages: ChatMessage[];
@@ -567,6 +779,32 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return payload.data;
 }
 
+function encodeQueryValue(value: unknown): string | null {
+  if (value === undefined || value === null || value === "") return null;
+  if (Array.isArray(value)) {
+    const items = value.map((item) => String(item).trim()).filter(Boolean);
+    return items.length ? items.join(",") : null;
+  }
+  return String(value);
+}
+
+function withQuery(path: string, params?: Record<string, unknown>): string {
+  if (!params) return path;
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    const encoded = encodeQueryValue(value);
+    if (encoded !== null) query.set(key, encoded);
+  }
+  const suffix = query.toString();
+  return suffix ? `${path}?${suffix}` : path;
+}
+
+export function arrayFromRecord<T>(value: Record<string, T> | T[] | undefined | null): T[] {
+  if (Array.isArray(value)) return value;
+  if (value && typeof value === "object") return Object.values(value);
+  return [];
+}
+
 function messageRequestBody(
   text: string,
   options?: SendMessageOptions,
@@ -655,9 +893,9 @@ async function readStreamEvents(
 }
 
 export const api = {
-  listConversations() {
+  listConversations(options?: ConversationListOptions) {
     return request<{ conversations: Conversation[]; total: number }>(
-      "/api/chat/conversations",
+      withQuery("/api/chat/conversations", options),
     );
   },
 
@@ -1026,6 +1264,176 @@ export const api = {
     });
   },
 
+  listCompanies(options?: { limit?: number; offset?: number }) {
+    return request<{ companies: CompanyRecord[]; total: number }>(
+      withQuery("/api/company", options),
+      { cache: "no-store" },
+    );
+  },
+
+  getCompany(companyId: string) {
+    return request<CompanyRecord>(`/api/company/${encodeURIComponent(companyId)}`, { cache: "no-store" });
+  },
+
+  createCompany(payload: {
+    id?: string;
+    company_id?: string;
+    name: string;
+    description?: string;
+    settings?: Record<string, unknown>;
+    metadata?: Record<string, unknown>;
+  }) {
+    return request<CompanyRecord>("/api/company", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  updateCompany(companyId: string, updates: Partial<CompanyRecord>) {
+    return request<CompanyRecord>(`/api/company/${encodeURIComponent(companyId)}`, {
+      method: "PUT",
+      body: JSON.stringify({ company_id: companyId, updates }),
+    });
+  },
+
+  deleteCompany(companyId: string) {
+    return request<{ deleted: boolean; company_id: string }>(`/api/company/${encodeURIComponent(companyId)}`, {
+      method: "DELETE",
+    });
+  },
+
+  getCompanyStatus(companyId?: string) {
+    return request<CompanyStatusResponse>(
+      withQuery("/api/company/status", { company_id: companyId }),
+      { cache: "no-store" },
+    );
+  },
+
+  bootstrapCompanyWorkspace(metadata?: Record<string, unknown>) {
+    return request<{ bootstrapped: boolean; company: CompanyRecord }>("/api/company/bootstrap", {
+      method: "POST",
+      body: JSON.stringify(metadata ? { metadata } : {}),
+    });
+  },
+
+  getCompanySettings(companyId: string) {
+    return request<{ settings: Record<string, unknown> }>(
+      withQuery(`/api/company/${encodeURIComponent(companyId)}/settings`, { company_id: companyId }),
+      { cache: "no-store" },
+    );
+  },
+
+  updateCompanySettings(companyId: string, settings: Record<string, unknown>, replace = false) {
+    return request<{ settings: Record<string, unknown> }>(`/api/company/${encodeURIComponent(companyId)}/settings`, {
+      method: "POST",
+      body: JSON.stringify({ company_id: companyId, action: "update", settings, replace }),
+    });
+  },
+
+  listCompanyAgents(companyId: string) {
+    return request<{ agents: CompanyAgent[]; total: number }>(
+      withQuery(`/api/company/${encodeURIComponent(companyId)}/agents`, { company_id: companyId }),
+      { cache: "no-store" },
+    );
+  },
+
+  upsertCompanyAgent(companyId: string, agent: Partial<CompanyAgent>) {
+    return request<CompanyAgent>(`/api/company/${encodeURIComponent(companyId)}/agents`, {
+      method: "POST",
+      body: JSON.stringify({ company_id: companyId, action: "upsert", agent }),
+    });
+  },
+
+  listCompanyChannels(companyId: string) {
+    return request<{ channels: CompanyChannel[]; total: number }>(
+      withQuery(`/api/company/${encodeURIComponent(companyId)}/channels`, { company_id: companyId }),
+      { cache: "no-store" },
+    );
+  },
+
+  upsertCompanyChannel(companyId: string, channel: Partial<CompanyChannel>) {
+    return request<CompanyChannel>(`/api/company/${encodeURIComponent(companyId)}/channels`, {
+      method: "POST",
+      body: JSON.stringify({ company_id: companyId, action: "upsert", channel }),
+    });
+  },
+
+  listCompanyMessages(companyId: string, options?: { channel_id?: string; limit?: number; offset?: number }) {
+    return request<{ messages: CompanyMessage[]; total: number }>(
+      withQuery(`/api/company/${encodeURIComponent(companyId)}/messages`, { company_id: companyId, ...options }),
+      { cache: "no-store" },
+    );
+  },
+
+  sendCompanyMessage(companyId: string, payload: {
+    content: string;
+    channel_id?: string;
+    sender_id?: string;
+    mentions?: string[];
+    task_ids?: string[];
+    metadata?: Record<string, unknown>;
+  }) {
+    return request<CompanyMessage>(`/api/company/${encodeURIComponent(companyId)}/messages`, {
+      method: "POST",
+      body: JSON.stringify({ company_id: companyId, action: "create", ...payload }),
+    });
+  },
+
+  listCompanyTasks(companyId: string, options?: { status?: string; target_agent_id?: string; limit?: number; offset?: number }) {
+    return request<{ tasks: CompanyTask[]; total: number }>(
+      withQuery(`/api/company/${encodeURIComponent(companyId)}/tasks`, { company_id: companyId, ...options }),
+      { cache: "no-store" },
+    );
+  },
+
+  createCompanyTask(companyId: string, payload: {
+    title: string;
+    description?: string;
+    target_agent_ids?: string[];
+    source?: string;
+    metadata?: Record<string, unknown>;
+  }) {
+    return request<CompanyTask>(`/api/company/${encodeURIComponent(companyId)}/tasks`, {
+      method: "POST",
+      body: JSON.stringify({ company_id: companyId, action: "create", ...payload }),
+    });
+  },
+
+  updateCompanyTask(companyId: string, taskId: string, updates: Partial<CompanyTask>) {
+    return request<CompanyTask>(`/api/company/${encodeURIComponent(companyId)}/tasks`, {
+      method: "POST",
+      body: JSON.stringify({ company_id: companyId, action: "update", task_id: taskId, updates }),
+    });
+  },
+
+  dispatchCompanyTask(companyId: string, taskId: string, policy?: Record<string, unknown>) {
+    return request<Record<string, unknown>>(`/api/company/${encodeURIComponent(companyId)}/dispatch`, {
+      method: "POST",
+      body: JSON.stringify({ company_id: companyId, task_id: taskId, policy }),
+    });
+  },
+
+  listCompanyInboundRoutes(companyId: string) {
+    return request<{ routes: CompanyInboundRoute[]; total: number }>(
+      withQuery(`/api/company/${encodeURIComponent(companyId)}/inbound-routes`, { company_id: companyId }),
+      { cache: "no-store" },
+    );
+  },
+
+  upsertCompanyInboundRoute(companyId: string, route: Partial<CompanyInboundRoute>) {
+    return request<CompanyInboundRoute>(`/api/company/${encodeURIComponent(companyId)}/inbound-routes`, {
+      method: "POST",
+      body: JSON.stringify({ company_id: companyId, action: "upsert", route }),
+    });
+  },
+
+  deleteCompanyInboundRoute(companyId: string, routeId: string) {
+    return request<{ deleted: boolean; route_id: string }>(`/api/company/${encodeURIComponent(companyId)}/inbound-routes`, {
+      method: "POST",
+      body: JSON.stringify({ company_id: companyId, action: "delete", route_id: routeId }),
+    });
+  },
+
   triggerSchedule(scheduleId: string) {
     return request<Record<string, unknown>>(`/api/agent/schedules/${scheduleId}/trigger`, {
       method: "POST",
@@ -1037,6 +1445,95 @@ export const api = {
     return request<Record<string, unknown>>("/api/chat/channels");
   },
 
+  getP2PStatus() {
+    return request<P2PStatusResponse>("/api/p2p/status", { cache: "no-store" });
+  },
+
+  getP2PIdentity(label?: string) {
+    return request<{ identity: P2PIdentity; p2p: P2PSettings }>(
+      withQuery("/api/p2p/identity", { label }),
+      { cache: "no-store" },
+    );
+  },
+
+  listP2PPeers() {
+    return request<{ peers: P2PPeer[] }>("/api/p2p/peers", { cache: "no-store" });
+  },
+
+  approveP2PPeer(payload: {
+    peer_id: string;
+    fingerprint?: string;
+    hmac_secret?: string;
+    shared_secret?: string;
+    capabilities?: string[];
+    allowed_company_ids?: string[];
+    label?: string;
+    metadata?: Record<string, unknown>;
+  }) {
+    return request<{ peer: P2PPeer }>("/api/p2p/peers", {
+      method: "POST",
+      body: JSON.stringify({ action: "approve", ...payload }),
+    });
+  },
+
+  blockP2PPeer(peerId: string, reason?: string) {
+    return request<{ peer: P2PPeer }>("/api/p2p/peers", {
+      method: "POST",
+      body: JSON.stringify({ action: "block", peer_id: peerId, reason }),
+    });
+  },
+
+  startP2PPairing(payload?: {
+    peer_id?: string;
+    peer_fingerprint?: string;
+    peer_label?: string;
+    ttl_seconds?: number;
+    capabilities?: string[];
+    allowed_company_ids?: string[];
+  }) {
+    return request<{ pairing: P2PPairing }>("/api/p2p/pairing/start", {
+      method: "POST",
+      body: JSON.stringify(payload ?? {}),
+    });
+  },
+
+  acceptP2PPairing(payload: {
+    code: string;
+    peer_id?: string;
+    peer_fingerprint?: string;
+    peer_label?: string;
+    hmac_secret?: string;
+    shared_secret?: string;
+    capabilities?: string[];
+    allowed_company_ids?: string[];
+  }) {
+    return request<{ ok: boolean; pairing: P2PPairing; peer?: P2PPeer; hmac_secret?: string }>("/api/p2p/pairing/accept", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  rejectP2PPairing(code: string, reason?: string) {
+    return request<{ ok: boolean; pairing: P2PPairing }>("/api/p2p/pairing/reject", {
+      method: "POST",
+      body: JSON.stringify({ code, reason }),
+    });
+  },
+
+  sendP2PMessage(peerId: string, payload: {
+    text?: string;
+    message?: string;
+    body?: Record<string, unknown>;
+    type?: string;
+    metadata?: Record<string, unknown>;
+    ttl_seconds?: number;
+  }) {
+    return request<{ envelope: Record<string, unknown>; peer: P2PPeer }>("/api/p2p/messages/send", {
+      method: "POST",
+      body: JSON.stringify({ peer_id: peerId, ...payload }),
+    });
+  },
+
   createShare(payload: Record<string, unknown>) {
     return request<Record<string, unknown>>("/api/share", {
       method: "POST",
@@ -1044,44 +1541,108 @@ export const api = {
     });
   },
 
-  getCodingContext(options?: { directory?: string }) {
-    const params = new URLSearchParams();
-    if (options?.directory) params.set("directory", options.directory);
+  compactConversation(conversationId: string, options?: CompactConversationOptions) {
+    return request<CompactConversationResult>(
+      `/api/chat/conversations/${encodeURIComponent(conversationId)}/compact`,
+      {
+        method: "POST",
+        body: JSON.stringify({ conversation_id: conversationId, ...(options ?? {}) }),
+      },
+    );
+  },
+
+  autoCompactConversation(conversationId: string, options?: CompactConversationOptions & { mode?: "suggest" | "apply" }) {
+    return request<CompactConversationResult>(
+      `/api/chat/conversations/${encodeURIComponent(conversationId)}/auto-compact`,
+      {
+        method: "POST",
+        body: JSON.stringify({ conversation_id: conversationId, mode: options?.mode ?? "suggest", ...(options ?? {}) }),
+      },
+    );
+  },
+
+  getCodingContext(options?: { directory?: string; workspace_id?: string | null }) {
     return request<CodingContextResponse>(
-      `/api/coding/context${params.size ? `?${params.toString()}` : ""}`,
+      withQuery("/api/coding/context", { directory: options?.directory, workspace_id: options?.workspace_id }),
     );
   },
 
-  listWorkspaceFiles(directory?: string) {
-    const params = new URLSearchParams();
-    if (directory) params.set("directory", directory);
+  listWorkspaceFiles(directory?: string, options?: { workspace_id?: string | null }) {
     return request<{ files: CodingContextEntry[] }>(
-      `/api/coding/files${params.size ? `?${params.toString()}` : ""}`,
+      withQuery("/api/coding/files", { directory, workspace_id: options?.workspace_id }),
     );
   },
 
-  readWorkspaceFile(path: string) {
+  readWorkspaceFile(path: string, options?: { workspace_id?: string | null }) {
     return request<{
       path: string;
       content: string;
       size?: number;
       encoding?: string;
+      workspace_id?: string | null;
+      workspace_root?: string | null;
     }>("/api/coding/files/read", {
       method: "POST",
-      body: JSON.stringify({ path }),
+      body: JSON.stringify({ path, workspace_id: options?.workspace_id }),
     });
   },
 
-  getGitBranch() {
+  getGitBranch(options?: { workspace_id?: string | null }) {
     return request<CodingBranchResponse>(
-      "/api/coding/git/branch",
+      withQuery("/api/coding/git/branch", { workspace_id: options?.workspace_id }),
     );
   },
 
-  switchGitBranch(branch: string, create = false) {
+  switchGitBranch(branch: string, create = false, options?: { workspace_id?: string | null }) {
     return request<CodingBranchResponse>("/api/coding/git/branch", {
       method: "POST",
-      body: JSON.stringify({ action: "switch", branch, create }),
+      body: JSON.stringify({ action: "switch", branch, create, workspace_id: options?.workspace_id }),
+    });
+  },
+
+  listCodingWorkspaces() {
+    return request<CodingWorkspacesResponse>("/api/coding/workspaces", { cache: "no-store" });
+  },
+
+  getCodingWorkspace(workspaceId: string) {
+    return request<{ workspace: CodingWorkspaceRecord }>(
+      withQuery("/api/coding/workspaces/get", { workspace_id: workspaceId }),
+      { cache: "no-store" },
+    );
+  },
+
+  createCodingWorkspace(payload: {
+    root_path?: string;
+    workspace_root?: string;
+    label?: string;
+    workspace_id?: string;
+    trusted?: boolean;
+    metadata?: Record<string, unknown>;
+  }) {
+    return request<{ workspace: CodingWorkspaceRecord }>("/api/coding/workspaces", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  updateCodingWorkspace(workspaceId: string, updates: Partial<CodingWorkspaceRecord> & { workspace_root?: string }) {
+    return request<{ workspace: CodingWorkspaceRecord }>("/api/coding/workspaces/update", {
+      method: "POST",
+      body: JSON.stringify({ workspace_id: workspaceId, ...updates }),
+    });
+  },
+
+  selectCodingWorkspace(workspaceId: string) {
+    return request<{ workspace: CodingWorkspaceRecord; selected_workspace_id: string }>("/api/coding/workspaces/select", {
+      method: "POST",
+      body: JSON.stringify({ workspace_id: workspaceId }),
+    });
+  },
+
+  trustCodingWorkspace(workspaceId: string) {
+    return request<{ workspace: CodingWorkspaceRecord }>("/api/coding/workspaces/trust", {
+      method: "POST",
+      body: JSON.stringify({ workspace_id: workspaceId }),
     });
   },
 };

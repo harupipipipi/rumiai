@@ -35,6 +35,9 @@ import type {
   ToolGroup,
 } from "./types";
 import type { ModelCommandCandidate, ModelProfile } from "../lib/api";
+import { CodingCommandPanel } from "../components/coding/CodingCommandPanel";
+import { CodingWorkspaceBadge } from "../components/coding/CodingWorkspaceBadge";
+import { CodingWorkspacePicker } from "../components/coding/CodingWorkspacePicker";
 import { fileToAttachment } from "../lib/attachments";
 import { resolveComposerWidgetDrop } from "../lib/composerWidgets";
 import { sortedToolGroups, toolGroupFor } from "../lib/toolUi";
@@ -719,6 +722,8 @@ export function ComposerRenderer({
   yoloMode = false,
   mode = "chat",
   codingContext = null,
+  codingWorkspaces = [],
+  selectedCodingWorkspaceId = null,
   attachedFiles = [],
   droppedWidgets = [],
   selectedToolIds = [],
@@ -742,6 +747,10 @@ export function ComposerRenderer({
   onWidgetToggle,
   onCodingBranchSwitch,
   onCodingDirectoryChange,
+  onCodingWorkspaceSelect,
+  onCodingWorkspaceTrust,
+  onCodingWorkspaceCreate,
+  onCodingWorkspacesRefresh,
   onCodingContextRefresh,
 }: ComposerRendererProps) {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -816,6 +825,7 @@ export function ComposerRenderer({
   const directoryEntries = (codingContext?.entries ?? []).filter((entry) => entry.is_dir);
   const branchOptions = codingContext?.branches?.length ? codingContext.branches : codingContext?.branch ? [codingContext.branch] : [];
   const currentDirectory = codingContext?.directory || ".";
+  const selectedCodingWorkspace = codingWorkspaces.find((workspace) => workspace.workspace_id === (selectedCodingWorkspaceId || codingContext?.workspaceId)) ?? codingWorkspaces[0] ?? null;
 
   const needsApiKey = useCallback(
     (profile: ModelProfile | null | undefined) => (
@@ -1646,6 +1656,21 @@ export function ComposerRenderer({
 
           {mode === "coding" && codingContext && (
             <div className="px-5 pb-2 pt-0 flex flex-wrap items-center gap-2 text-[11px] text-zinc-500 max-[640px]:px-3">
+              <CodingWorkspaceBadge workspace={selectedCodingWorkspace} compact />
+              <CodingWorkspacePicker
+                workspaces={codingWorkspaces}
+                selectedWorkspaceId={selectedCodingWorkspace?.workspace_id ?? selectedCodingWorkspaceId ?? codingContext.workspaceId ?? null}
+                disabled={isGenerating}
+                onSelect={onCodingWorkspaceSelect}
+                onTrust={onCodingWorkspaceTrust}
+                onCreate={onCodingWorkspaceCreate}
+                onRefresh={onCodingWorkspacesRefresh}
+              />
+              <CodingCommandPanel
+                commands={commands}
+                disabled={isGenerating}
+                onRunCommand={onCommandSelect}
+              />
               <span className="inline-flex min-w-0 items-center gap-1">
                 <GitBranch size={11} />
                 {branchOptions.length > 1 ? (

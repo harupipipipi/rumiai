@@ -1,6 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 
+import { CodingWorkspacePicker } from "../components/coding/CodingWorkspacePicker";
 import {
   filterAtMentionFiles,
   insertAtMentionText,
@@ -179,4 +182,21 @@ test("composer widget drop requires explicit kind capability contract", () => {
   assert.equal(resolveComposerWidgetDrop({ id: "model-selector", type: "selector", label: "Models", widgetKind: "selector" }, toolItems).type, "drop_widget");
   assert.equal(resolveComposerWidgetDrop({ id: "bad-panel", type: "panel", label: "Bad", widgetKind: "panel" }, toolItems).type, "ignore");
   assert.equal(resolveComposerWidgetDrop({ id: "unknown", type: "button", label: "Unknown" }, toolItems).type, "ignore");
+});
+
+test("coding workspace picker renders selected workspace and trust affordance", () => {
+  const html = renderToStaticMarkup(
+    createElement(CodingWorkspacePicker, {
+      workspaces: [
+        { workspace_id: "ws1", label: "Main Repo", root_path: "/repo", trusted: false },
+      ],
+      selectedWorkspaceId: "ws1",
+      onSelect: () => undefined,
+      onTrust: () => undefined,
+      onRefresh: () => undefined,
+    }),
+  );
+
+  assert.match(html, /Main Repo/);
+  assert.match(html, /Trust workspace/);
 });
