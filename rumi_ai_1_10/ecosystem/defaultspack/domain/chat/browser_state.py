@@ -203,7 +203,16 @@ class BrowserStateNormalizer:
             seen.add(marker)
             roots.append(value)
 
-        add(result)
+        if isinstance(result, dict) and isinstance(result.get("data"), dict):
+            data = result.get("data")
+            add(data)
+            if isinstance(data.get("widget"), dict):
+                add(data.get("widget"))
+            add(result)
+        else:
+            add(result)
+            if isinstance(result, dict) and isinstance(result.get("widget"), dict):
+                add(result.get("widget"))
         if isinstance(result, dict):
             for key in ("result", "output", "artifact", "capture"):
                 add(result.get(key))

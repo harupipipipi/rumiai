@@ -90,6 +90,41 @@ def test_browser_state_normalizer_emits_invalidated_and_screenshot_for_browser_c
     assert screenshot["target_window"]["window_id"] == 31
 
 
+def test_browser_state_normalizer_unwraps_tool_executor_envelope_for_visual_feedback():
+    browser_result = {
+        "action": "computer.click",
+        "executed": True,
+        "visual_feedback": {
+            "type": "post_click_screenshot",
+            "screenshot_path": "/tmp/post-click.png",
+            "model_image_path": "/tmp/post-click-model.png",
+            "data_url": _PNG_DATA_URL,
+        },
+        "target_window": _window("Chrome", "Docs", 0, 0, 1280, 720, window_id=42),
+    }
+    wrapped = {
+        "status": "ok",
+        "data": {
+            "result": "browser_computer computer.click completed",
+            "is_error": False,
+            "widget": {"type": "browser_computer", **browser_result},
+        },
+    }
+
+    emission = emit_browser_state_events(
+        "browser_computer",
+        wrapped,
+        tool_call_id="call_browser_1",
+        action="computer.click",
+    )
+
+    assert [event["event"] for event in emission.events] == ["invalidated", "screenshot"]
+    screenshot = emission.events[-1]["screenshot"]
+    assert screenshot["feedback_type"] == "post_click_screenshot"
+    assert screenshot["model_image_path"] == "/tmp/post-click-model.png"
+    assert screenshot["target_window"]["window_id"] == 42
+
+
 def test_emit_browser_state_events_normalizes_snapshot_and_bounds_windows():
     result = {
         "action": "computer.context",
