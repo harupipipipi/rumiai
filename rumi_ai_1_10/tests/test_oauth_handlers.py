@@ -31,7 +31,7 @@ from core_runtime.api.oauth_handlers import (  # noqa: E402
 )
 
 _OAUTH_MODULE = sys.modules[OAuthHandlersMixin.__module__]
-_TOKEN_STORAGE_MODULE = sys.modules[_save_tokens.__module__]
+_LOAD_TOKENS = _save_tokens.__globals__["_load_tokens"]
 
 
 class TestPKCEGeneration(unittest.TestCase):
@@ -231,9 +231,9 @@ class TestOAuthTokenStorage(unittest.TestCase):
     def setUp(self):
         self._tmpdir = tempfile.TemporaryDirectory()
         self.token_path = Path(self._tmpdir.name) / "oauth_tokens.json"
-        self.path_patch = patch(
-            f"{_TOKEN_STORAGE_MODULE.__name__}._get_token_path",
-            return_value=self.token_path,
+        self.path_patch = patch.dict(
+            _save_tokens.__globals__,
+            {"_get_token_path": lambda: self.token_path},
         )
         self.path_patch.start()
 
@@ -243,7 +243,7 @@ class TestOAuthTokenStorage(unittest.TestCase):
 
     @unittest.skipUnless(_FERNET_AVAILABLE and _Fernet is not None, "cryptography unavailable")
     def test_tokens_are_saved_encrypted(self):
-        _TOKEN_STORAGE_MODULE._save_tokens({"access_token": "access", "refresh_token": "refresh"})
+        _save_tokens({"access_token": "access", "refresh_token": "refresh"})
         raw_text = self.token_path.read_text(encoding="utf-8")
         raw = json.loads(raw_text)
 
@@ -259,14 +259,14 @@ class TestOAuthTokenStorage(unittest.TestCase):
     @unittest.skipUnless(_FERNET_AVAILABLE and _Fernet is not None, "cryptography unavailable")
     def test_load_tokens_decrypts_encrypted_payload(self):
         expected = {"access_token": "access", "refresh_token": "refresh"}
-        _TOKEN_STORAGE_MODULE._save_tokens(expected)
-        self.assertEqual(_TOKEN_STORAGE_MODULE._load_tokens(), expected)
+        _save_tokens(expected)
+        self.assertEqual(_LOAD_TOKENS(), expected)
 
     def test_load_tokens_keeps_legacy_plaintext_compatibility(self):
         legacy = {"access_token": "legacy", "refresh_token": "legacy-refresh"}
         self.token_path.parent.mkdir(parents=True, exist_ok=True)
         self.token_path.write_text(json.dumps(legacy), encoding="utf-8")
-        self.assertEqual(_TOKEN_STORAGE_MODULE._load_tokens(), legacy)
+        self.assertEqual(_LOAD_TOKENS(), legacy)
 
     @unittest.skipUnless(_FERNET_AVAILABLE and _Fernet is not None, "cryptography unavailable")
     def test_legacy_plaintext_migrates_to_encrypted_on_next_save(self):
@@ -274,8 +274,8 @@ class TestOAuthTokenStorage(unittest.TestCase):
         self.token_path.parent.mkdir(parents=True, exist_ok=True)
         self.token_path.write_text(json.dumps(legacy), encoding="utf-8")
 
-        self.assertEqual(_TOKEN_STORAGE_MODULE._load_tokens(), legacy)
-        _TOKEN_STORAGE_MODULE._save_tokens(legacy)
+        self.assertEqual(_LOAD_TOKENS(), legacy)
+        _save_tokens(legacy)
         raw_text = self.token_path.read_text(encoding="utf-8")
         raw = json.loads(raw_text)
 
@@ -283,7 +283,7 @@ class TestOAuthTokenStorage(unittest.TestCase):
         self.assertEqual(raw.get("encryption"), "fernet")
         self.assertIn("payload", raw)
         self.assertNotIn("legacy", raw_text)
-        self.assertEqual(_TOKEN_STORAGE_MODULE._load_tokens(), legacy)
+        self.assertEqual(_LOAD_TOKENS(), legacy)
 
     @unittest.skipUnless(_FERNET_AVAILABLE and _Fernet is not None, "cryptography unavailable")
     def test_empty_key_file_is_replaced_safely(self):
@@ -291,10 +291,10 @@ class TestOAuthTokenStorage(unittest.TestCase):
         key_path = self.token_path.with_name(".oauth_tokens.key")
         key_path.write_bytes(b"")
 
-        _TOKEN_STORAGE_MODULE._save_tokens({"access_token": "access"})
+        _save_tokens({"access_token": "access"})
 
         self.assertGreater(key_path.stat().st_size, 0)
-        self.assertEqual(_TOKEN_STORAGE_MODULE._load_tokens(), {"access_token": "access"})
+        self.assertEqual(_LOAD_TOKENS(), {"access_token": "access"})
 
     @unittest.skipUnless(_FERNET_AVAILABLE and _Fernet is not None, "cryptography unavailable")
     def test_corrupt_key_file_is_replaced_safely_for_new_save(self):
@@ -302,10 +302,10 @@ class TestOAuthTokenStorage(unittest.TestCase):
         key_path = self.token_path.with_name(".oauth_tokens.key")
         key_path.write_bytes(b"not-a-fernet-key")
 
-        _TOKEN_STORAGE_MODULE._save_tokens({"access_token": "access"})
+        _save_tokens({"access_token": "access"})
 
         self.assertNotEqual(key_path.read_bytes(), b"not-a-fernet-key")
-        self.assertEqual(_TOKEN_STORAGE_MODULE._load_tokens(), {"access_token": "access"})
+        self.assertEqual(_LOAD_TOKENS(), {"access_token": "access"})
 
 
 class TestOAuthSendRedirect(unittest.TestCase):
