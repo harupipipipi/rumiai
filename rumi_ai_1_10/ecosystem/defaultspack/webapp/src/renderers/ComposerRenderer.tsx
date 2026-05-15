@@ -763,6 +763,12 @@ export function ComposerRenderer({
   const toolItems = useMemo(() => [...inlineExtensions, ...belowExtensions], [inlineExtensions, belowExtensions]);
   const selectableProfiles = modelProfiles.length > 0 ? modelProfiles : favoriteProfiles;
   const selectedToolIdSet = useMemo(() => new Set(selectedToolIds), [selectedToolIds]);
+  const computerUseSelected = selectedToolIds.some((toolId) => (
+    toolId === "computer_use"
+    || toolId === "browser_computer"
+    || toolId === "browser_use"
+    || toolId === "browser_companion"
+  ));
   const toolGroups = useMemo(() => groupToolItems(toolItems), [toolItems]);
   const activeToolGroup = toolGroups.find((group) => group.id === openToolGroup) ?? toolGroups[0] ?? null;
   const showToolGroups = toolItems.length > 4;
@@ -1500,6 +1506,12 @@ export function ComposerRenderer({
               {yoloMode && (
                 <span className="rounded-full border border-orange-500/30 px-2 py-0.5 text-[11px] text-orange-300">
                   YOLO
+                </span>
+              )}
+              {computerUseSelected && (
+                <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[11px] font-medium text-emerald-300">
+                  <MousePointerClick size={12} />
+                  Computer ON
                 </span>
               )}
             </div>

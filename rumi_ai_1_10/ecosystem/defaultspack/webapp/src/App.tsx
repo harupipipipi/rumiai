@@ -21,6 +21,7 @@ type BrowserApproval = {
   action: string;
   payload: Record<string, unknown>;
   token: string;
+  toolName: string;
 };
 
 type ComposerCandidateMenuState = {
@@ -702,22 +703,35 @@ function modelCommandInputQuery(value: string): string | null {
 }
 
 function pendingBrowserApproval(messages: ChatUiMessage[]): BrowserApproval | null {
+  const approvalFromCandidate = (candidate: Record<string, unknown> | undefined, fallbackToolName = "browser_computer"): BrowserApproval | null => {
+    if (!candidate?.requires_approval && !candidate?.approval_required) return null;
+    if (!candidate.approval_token) return null;
+    const rawPayload = candidate.payload;
+    const toolName = String(candidate.tool_name ?? fallbackToolName);
+    return {
+      action: String(candidate.action ?? "browser.session"),
+      payload: rawPayload && typeof rawPayload === "object" ? rawPayload as Record<string, unknown> : {},
+      token: String(candidate.approval_token),
+      toolName,
+    };
+  };
+
   for (const message of [...messages].reverse()) {
     if (message.role === "user") return null;
     if (message.role !== "agent") continue;
+    for (const event of [...(message.events ?? [])].reverse()) {
+      if (event.type !== "approval_requested" && event.phase !== "approval_requested") continue;
+      const approval = approvalFromCandidate(event as Record<string, unknown>, String(event.tool_name ?? "browser_computer"));
+      if (approval) return approval;
+    }
     for (const log of [...(message.toolLogs ?? [])].reverse()) {
-      if (log.tool_name !== "browser_computer" && log.tool_name !== "browser_companion") continue;
+      if (!["browser_computer", "browser_companion", "browser_use", "computer_use"].includes(String(log.tool_name))) continue;
       const result = log.result as Record<string, unknown> | undefined;
       const data = (result?.data ?? result) as Record<string, unknown> | undefined;
       const widget = data?.widget as Record<string, unknown> | undefined;
-      const candidate = (widget?.requires_approval ? widget : data) as Record<string, unknown> | undefined;
-      if (!candidate?.requires_approval || !candidate.approval_token) continue;
-      const rawPayload = candidate.payload;
-      return {
-        action: String(candidate.action ?? "browser.session"),
-        payload: rawPayload && typeof rawPayload === "object" ? rawPayload as Record<string, unknown> : {},
-        token: String(candidate.approval_token),
-      };
+      const candidate = (widget?.requires_approval || widget?.approval_required ? widget : data) as Record<string, unknown> | undefined;
+      const approval = approvalFromCandidate(candidate, String(log.tool_name));
+      if (approval) return approval;
     }
   }
   return null;
@@ -1814,7 +1828,18 @@ export default function App() {
 
   const approveBrowserAction = async () => {
     if (!browserApproval) return;
+    if (!activeConversationId) return;
     setError(null);
+    setIsGenerating(true);
+    const approvalToolIds = selectedToolIds.length
+      ? selectedToolIds
+      : [browserApproval.toolName].filter(Boolean);
+    rememberPendingRequest({
+      conversationId: activeConversationId,
+      startedAt: Date.now(),
+      status: "ユーザー承認をAIへ伝えています",
+      toolNames: approvalToolIds,
+    });
     try {
       const result = await api.browserComputer(browserApproval.action, {
         ...browserApproval.payload,
@@ -1825,11 +1850,30 @@ export default function App() {
         "browser-approval",
         result,
       );
-      if (activeConversationId) {
-        await refreshPreview(activeConversationId);
-      }
+      await api.sendMessage(activeConversationId, "ユーザーが許可しました。承認済みの操作を踏まえて続行してください。", {
+        tool_policy: {
+          ...(yoloMode ? { yolo_mode: true, allow_shell: true, allow_file_write: true, write_actions_require_approval: false } : {}),
+          ...(approvalToolIds.length ? { selected_tools: approvalToolIds } : {}),
+        },
+        tools: approvalToolIds.length ? approvalToolIds : undefined,
+        metadata: {
+          mode: "chat",
+          approval_followup: {
+            action: browserApproval.action,
+            tool_name: browserApproval.toolName,
+          },
+          selected_tools: approvalToolIds,
+        },
+      });
+      forgetPendingRequest(activeConversationId);
+      replaceChatIdInUrl(activeConversationId, false);
+      await loadConversation(activeConversationId, false);
+      await refreshConversations(activeConversationId);
     } catch (approvalError) {
+      forgetPendingRequest(activeConversationId);
       setError(approvalError instanceof Error ? approvalError.message : "browser/computer の承認に失敗しました。");
+    } finally {
+      setIsGenerating(false);
     }
   };
 
@@ -2299,7 +2343,7 @@ export default function App() {
 
       <div className="flex flex-1 min-h-0">
         {showRegion("history") && !isHistoryMinimized && (
-          <div className="w-[360px] max-w-[36vw] min-w-[300px] flex-shrink-0 overflow-hidden border-r border-zinc-800/60 max-[900px]:w-[300px]">
+          <div className="w-[360px] max-w-[36vw] min-w-[300px] flex-shrink-0 overflow-hidden border-r border-zinc-800/60 animate-in slide-in-from-left-2 fade-in duration-200 ease-out max-[900px]:w-[300px]">
             <Renderers.historyBoard
               activeChatId={activeConversationId}
               chatItems={chatItems}
@@ -2313,7 +2357,7 @@ export default function App() {
         )}
 
         {showRegion("history") && isHistoryMinimized && (
-          <div className="rumi-history-rail w-14 flex-shrink-0 overflow-hidden border-r border-zinc-800/60">
+          <div className="rumi-history-rail w-14 flex-shrink-0 overflow-hidden border-r border-zinc-800/60 animate-in slide-in-from-left-1 fade-in duration-150 ease-out">
             <Renderers.historyBoard
               activeChatId={activeConversationId}
               chatItems={chatItems}

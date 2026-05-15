@@ -730,6 +730,7 @@ export function RightSidebar({
   const [activePanel, setActivePanel] = useState<string | null>(null);
   const [categoryFilter, setCategoryFilter] = useState<"all" | SidebarCategory>("all");
   const [searchQuery, setSearchQuery] = useState("");
+  const [toolManagerSearchQuery, setToolManagerSearchQuery] = useState("");
   const [openToolGroupMenu, setOpenToolGroupMenu] = useState<string | null>(null);
   const [toolGroupMenuPosition, setToolGroupMenuPosition] = useState<{ top: number; right: number } | null>(null);
   const sidebarSettings = settingsValues.sidebar ?? {};
@@ -843,15 +844,28 @@ export function RightSidebar({
     return next;
   }, [searchFilteredItems]);
   const allToolItems = useMemo(() => sortedToolUiItems(searchFilteredItems.filter((item) => item.category === "tool")), [searchFilteredItems]);
+  const toolManagerBaseItems = useMemo(
+    () => sortedToolUiItems(items.filter((item) => item.category === "tool")),
+    [items],
+  );
+  const toolManagerSearchItems = useMemo(
+    () => toolManagerBaseItems.filter((item) => sidebarItemMatchesSearch(item, tagMap.get(item.id) ?? [], toolManagerSearchQuery)),
+    [tagMap, toolManagerBaseItems, toolManagerSearchQuery],
+  );
+  const toolManagerItems = useMemo(() => sortedToolUiItems(toolManagerSearchItems.filter((item) => (
+    (!showStarredOnly || starredItemIdSet.has(item.id))
+    && (!activeTagFilter || tagMap.get(item.id)?.includes(activeTagFilter))
+  ))), [activeTagFilter, showStarredOnly, starredItemIdSet, tagMap, toolManagerSearchItems]);
+  const toolManagerCandidates = useMemo(() => toolManagerSearchItems.slice(0, 8), [toolManagerSearchItems]);
   const allToolTags = useMemo(() => {
     const counts = new Map<string, number>();
-    for (const item of allToolItems) {
+    for (const item of toolManagerSearchItems) {
       for (const tag of tagMap.get(item.id) ?? []) {
         counts.set(tag, (counts.get(tag) ?? 0) + 1);
       }
     }
     return [...counts.entries()].sort((left, right) => right[1] - left[1] || compareText(left[0], right[0]));
-  }, [allToolItems, tagMap]);
+  }, [tagMap, toolManagerSearchItems]);
   const toolItems = useMemo(() => sortedToolUiItems(allToolItems.filter((item) => (
     (!showStarredOnly || starredItemIdSet.has(item.id))
     && (!activeTagFilter || tagMap.get(item.id)?.includes(activeTagFilter))
@@ -1186,13 +1200,71 @@ export function RightSidebar({
           <div className="flex-1 overflow-y-auto p-2.5">
             {activeItem ? (
               <SidebarPanel item={activeItem} settingsValues={settingsValues} onSettingChange={onSettingChange} onPanelAction={onPanelAction} />
-            ) : (
-              <div className="space-y-3">
-                <div className="grid grid-cols-3 gap-2">
-                  <div className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-2">
-                    <p className="text-[9px] uppercase tracking-wider text-zinc-600">Tools</p>
-                    <p className="mt-1 text-lg font-semibold text-zinc-100">{toolItems.length}</p>
-                  </div>
+                        ) : (
+                          <div className="space-y-3">
+                            <div className="relative">
+                              <label className="relative block">
+                                <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-600" />
+                                <input
+                                  type="text"
+                                  value={toolManagerSearchQuery}
+                                  onChange={(event) => setToolManagerSearchQuery(event.target.value)}
+                                  placeholder="Tool managerで検索"
+                                  className="h-9 w-full rounded-lg border border-zinc-800 bg-zinc-950 pl-8 pr-8 text-[12px] text-zinc-200 outline-none placeholder:text-zinc-600 focus:border-zinc-600"
+                                />
+                                {toolManagerSearchQuery.trim() && (
+                                  <button
+                                    type="button"
+                                    onClick={() => setToolManagerSearchQuery("")}
+                                    className="absolute right-1.5 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200"
+                                    title="検索をクリア"
+                                  >
+                                    <X size={13} />
+                                  </button>
+                                )}
+                              </label>
+                              {toolManagerSearchQuery.trim() && (
+                                <div className="absolute left-0 right-0 top-[calc(100%+6px)] z-30 overflow-hidden rounded-xl border border-zinc-700/70 bg-zinc-950 py-1 shadow-2xl">
+                                  <div className="flex items-center justify-between border-b border-zinc-800 px-3 py-2 text-[10px] text-zinc-600">
+                                    <span>候補</span>
+                                    <span>{toolManagerSearchItems.length} / {toolManagerBaseItems.length}</span>
+                                  </div>
+                                  {toolManagerCandidates.length > 0 ? (
+                                    <div className="max-h-64 overflow-y-auto py-1">
+                                      {toolManagerCandidates.map((item) => (
+                                        <button
+                                          key={item.id}
+                                          type="button"
+                                          onClick={() => {
+                                            setActivePanel(item.id);
+                                            setToolManagerSearchQuery("");
+                                          }}
+                                          className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-zinc-300 transition-colors hover:bg-zinc-800/80 hover:text-zinc-100"
+                                        >
+                                          <span className="flex min-w-0 items-center gap-2">
+                                            <span className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md bg-zinc-900 text-zinc-500">
+                                              {iconForItem(item)}
+                                            </span>
+                                            <span className="min-w-0">
+                                              <span className="block truncate text-[12px]">{item.label}</span>
+                                              {item.description && <span className="block truncate text-[10px] text-zinc-500">{item.description}</span>}
+                                            </span>
+                                          </span>
+                                          <span className={cn("h-1.5 w-1.5 flex-shrink-0 rounded-full", selectedToolIdSet.has(item.id) ? "bg-emerald-400" : "bg-zinc-700")} />
+                                        </button>
+                                      ))}
+                                    </div>
+                                  ) : (
+                                    <p className="px-3 py-3 text-[11px] text-zinc-500">一致するtoolがありません。</p>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                            <div className="grid grid-cols-3 gap-2">
+                              <div className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-2">
+                                <p className="text-[9px] uppercase tracking-wider text-zinc-600">Tools</p>
+                                <p className="mt-1 text-lg font-semibold text-zinc-100">{toolManagerItems.length}</p>
+                              </div>
                   <div className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-2">
                     <p className="text-[9px] uppercase tracking-wider text-zinc-600">On</p>
                     <p className="mt-1 text-lg font-semibold text-emerald-300">{selectedToolIds.length}</p>
@@ -1203,17 +1275,17 @@ export function RightSidebar({
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-1.5">
-                  <button
-                    type="button"
-                    onClick={() => setToolsEnabled(toolItems.map((item) => item.id), true)}
+                              <button
+                                type="button"
+                                onClick={() => setToolsEnabled(toolManagerItems.map((item) => item.id), true)}
                     className="flex items-center justify-center gap-1 rounded-lg border border-emerald-500/20 bg-emerald-500/10 px-2 py-1.5 text-[11px] font-medium text-emerald-200 hover:bg-emerald-500/15"
                   >
                     <FolderCheck size={13} />
                     表示中をON
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => setToolsEnabled(toolItems.map((item) => item.id), false)}
+                              <button
+                                type="button"
+                                onClick={() => setToolsEnabled(toolManagerItems.map((item) => item.id), false)}
                     className="flex items-center justify-center gap-1 rounded-lg border border-zinc-800 bg-zinc-950/60 px-2 py-1.5 text-[11px] font-medium text-zinc-300 hover:bg-zinc-900"
                   >
                     <FolderX size={13} />
@@ -1279,7 +1351,7 @@ export function RightSidebar({
                   </div>
                 )}
                 <div className="space-y-1">
-                  {toolItems.map((item) => {
+                  {toolManagerItems.map((item) => {
                     const enabled = selectedToolIdSet.has(item.id);
                     const pinned = pinnedItemIdSet.has(item.id);
                     const starred = starredItemIdSet.has(item.id);
@@ -1306,30 +1378,30 @@ export function RightSidebar({
                             {item.description && <span className="block truncate text-[10px] text-zinc-500">{item.description}</span>}
                           </button>
                           <div className="flex flex-shrink-0 items-center gap-0.5">
-                            <button
-                              type="button"
-                              onClick={() => toggleStar(item.id)}
-                              className={cn("rounded-md p-1 transition-colors", starred ? "text-amber-300 hover:bg-amber-500/10" : "text-zinc-600 hover:bg-zinc-800 hover:text-zinc-300")}
-                              title={starred ? "スター解除" : "スター"}
-                            >
-                              <Star size={13} className={cn(starred && "fill-current")} />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => togglePin(item.id)}
-                              className={cn("rounded-md p-1 transition-colors", pinned ? "text-sky-300 hover:bg-sky-500/10" : "text-zinc-600 hover:bg-zinc-800 hover:text-zinc-300")}
-                              title={pinned ? "ピン留め解除" : "ピン留め"}
-                            >
-                              {pinned ? <PinOff size={13} /> : <Pin size={13} />}
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => onToolToggle?.(item)}
-                              className={cn("rounded-md p-1 transition-colors", enabled ? "text-emerald-300 hover:bg-emerald-500/10" : "text-zinc-600 hover:bg-zinc-800 hover:text-zinc-300")}
-                              title={enabled ? "無効にする" : "有効にする"}
-                            >
-                              <Power size={13} />
-                            </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => toggleStar(item.id)}
+                                          className={cn("flex h-7 w-7 items-center justify-center rounded-md transition-colors", starred ? "text-amber-300 hover:bg-amber-500/10" : "text-zinc-600 hover:bg-zinc-800 hover:text-zinc-300")}
+                                          title={starred ? "スター解除" : "スター"}
+                                        >
+                                          <Star size={16} strokeWidth={2.1} className={cn("h-4 w-4 flex-shrink-0", starred && "fill-current")} />
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => togglePin(item.id)}
+                                          className={cn("flex h-7 w-7 items-center justify-center rounded-md transition-colors", pinned ? "text-sky-300 hover:bg-sky-500/10" : "text-zinc-600 hover:bg-zinc-800 hover:text-zinc-300")}
+                                          title={pinned ? "ピン留め解除" : "ピン留め"}
+                                        >
+                                          {pinned ? <PinOff size={15} /> : <Pin size={15} />}
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => onToolToggle?.(item)}
+                                          className={cn("flex h-7 w-7 items-center justify-center rounded-md transition-colors", enabled ? "text-emerald-300 hover:bg-emerald-500/10" : "text-zinc-600 hover:bg-zinc-800 hover:text-zinc-300")}
+                                          title={enabled ? "無効にする" : "有効にする"}
+                                        >
+                                          <Power size={15} />
+                                        </button>
                           </div>
                         </div>
                         {itemTags.length > 0 && (
@@ -1398,9 +1470,13 @@ export function RightSidebar({
             )}
             title="Starred tools"
           >
-            <Star size={16} className={cn(starredItemIds.length > 0 && "fill-current")} />
+            <Star
+              size={18}
+              strokeWidth={2.15}
+              className={cn("h-[18px] w-[18px] flex-shrink-0", starredItemIds.length > 0 && "fill-current")}
+            />
             {starredItemIds.length > 0 && (
-              <span className="absolute -top-0.5 -right-0.5 rounded-full bg-zinc-700 px-0.5 text-[7px] leading-tight text-zinc-200">
+              <span className="absolute -top-0.5 -right-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-emerald-500 px-1 text-[7px] font-bold leading-none text-black">
                 {starredItemIds.length}
               </span>
             )}
@@ -1436,7 +1512,7 @@ export function RightSidebar({
                     type="button"
                     onClick={(event) => {
                       if (group.items.length === 1) {
-                        setActivePanel(group.items[0].id);
+                        setActivePanel((current) => (current === group.items[0].id ? null : group.items[0].id));
                         setOpenToolGroupMenu(null);
                         return;
                       }
@@ -1505,7 +1581,7 @@ export function RightSidebar({
                             onContextMenu={(event) => openItemContextMenu(event, item)}
                             onClick={(event) => {
                               event.stopPropagation();
-                              setActivePanel(item.id);
+                              setActivePanel((current) => (current === item.id ? null : item.id));
                               setOpenToolGroupMenu(null);
                             }}
                             className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-zinc-300 transition-colors hover:bg-zinc-800/80 hover:text-zinc-100"

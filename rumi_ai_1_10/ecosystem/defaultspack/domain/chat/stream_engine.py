@@ -43,6 +43,88 @@ class _ChatCancelled(Exception):
     pass
 
 
+_APPROVAL_WAITING_TEXT = "許可が必要なため、ユーザーが承認するまで待機します。承認後に続行します。"
+
+
+def _approval_request_from_tool_result(
+    tool_name: str,
+    tool_call_id: str,
+    arguments: dict[str, Any],
+    result: Any,
+) -> dict[str, Any] | None:
+    roots: list[dict[str, Any]] = []
+    seen: set[int] = set()
+
+    def add(value: Any) -> None:
+        if not isinstance(value, dict):
+            return
+        marker = id(value)
+        if marker in seen:
+            return
+        seen.add(marker)
+        roots.append(value)
+
+    add(result)
+    if isinstance(result, dict):
+        data = result.get("data")
+        add(data)
+        if isinstance(data, dict):
+            nested_data = data.get("data")
+            add(nested_data)
+            if isinstance(nested_data, dict):
+                add(nested_data.get("widget"))
+                add(nested_data.get("result"))
+            add(data.get("widget"))
+            add(data.get("result"))
+        add(result.get("widget"))
+        for key in ("result", "output", "artifact", "capture"):
+            add(result.get(key))
+
+    for root in roots:
+        requires_approval = bool(root.get("requires_approval") or root.get("approval_required"))
+        if not requires_approval:
+            continue
+        payload = root.get("payload")
+        if not isinstance(payload, dict):
+            payload = root.get("arguments") if isinstance(root.get("arguments"), dict) else arguments
+        action = str(root.get("action") or arguments.get("action") or tool_name).strip()
+        return {
+            "tool_name": tool_name,
+            "tool_call_id": tool_call_id,
+            "action": action,
+            "payload": dict(payload or {}),
+            "requires_approval": True,
+            "approval_required": True,
+            "approval_token": root.get("approval_token"),
+            "approval_request_id": root.get("approval_request_id") or root.get("request_id"),
+            "risk_level": root.get("risk_level"),
+            "expires_at": root.get("expires_at"),
+            "approval_expires_in_seconds": root.get("approval_expires_in_seconds"),
+            "display_summary": root.get("display_summary"),
+            "message": root.get("message") or root.get("approval_hint") or _APPROVAL_WAITING_TEXT,
+        }
+    return None
+
+
+def _approval_waiting_response(
+    model: str,
+    approval_request: dict[str, Any],
+    params: dict[str, Any],
+    events: list[dict[str, Any]],
+) -> dict[str, Any]:
+    return {
+        "content": [{"type": "text", "text": _APPROVAL_WAITING_TEXT}],
+        "finish_reason": "approval_required",
+        "usage": {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0},
+        "metadata": {
+            "model": model,
+            "pending_approval": approval_request,
+            "thinking_level": params.get("thinking_level"),
+        },
+        "events": list(events),
+    }
+
+
 class _InlineThoughtFilter:
     _open_tag = "<thought>"
     _close_tag = "</thought>"
@@ -591,6 +673,26 @@ class ChatRunEngine:
                 )
                 self._sync_draft(draft, force=True)
                 yield completed_event
+                approval_request = _approval_request_from_tool_result(tool_name, tool_call_id, arguments, result)
+                if approval_request is not None:
+                    approval_event = self._emit(
+                        "approval_requested",
+                        data=approval_request,
+                        message=_APPROVAL_WAITING_TEXT,
+                        phase="approval_requested",
+                        tool_name=tool_name,
+                        tool_call_id=tool_call_id,
+                        requires_approval=True,
+                    )
+                    self._sync_draft(draft, force=True)
+                    yield approval_event
+                    blocked_response = _approval_waiting_response(
+                        prepared.model,
+                        approval_request,
+                        prepared.params,
+                        events=list(self._activity_events),
+                    )
+                    break
                 _append_tool_result_message(working_messages, tool_name, result, tool_call_id, model=prepared.model)
 
                 recovery_kind = _tool_result_recovery_kind(result)

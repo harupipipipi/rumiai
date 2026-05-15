@@ -1,9 +1,9 @@
-import { AlertTriangle, Check, CheckCircle2, ChevronDown, Clock, Copy, ExternalLink, Image as ImageIcon, Loader2, X } from "lucide-react";
+import { AlertTriangle, Check, ChevronDown, Clock, Copy, ExternalLink, Image as ImageIcon, Loader2, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
 
 import { cn } from "../lib/cn";
-import { buildToolActivityGroups, toolFolderFor, type ToolActivityItem } from "../lib/toolActivity";
+import { buildToolActivityGroups, toolFolderFor } from "../lib/toolActivity";
 import { api, type BrowserScreenshot, type ChatContentBlock } from "../lib/api";
 import type { ChatMessagesRendererProps } from "./types";
 
@@ -617,43 +617,6 @@ function BrowserScreenshotStrip({
   );
 }
 
-function ToolStatusIcon({ item }: { item: ToolActivityItem }) {
-  if (item.status === "running") return <Loader2 size={12} className="shrink-0 animate-spin text-blue-300" />;
-  if (item.status === "failed") return <AlertTriangle size={12} className="shrink-0 text-red-300" />;
-  return <CheckCircle2 size={12} className="shrink-0 text-zinc-400" />;
-}
-
-function toolStatusLabel(item: ToolActivityItem): string {
-  if (item.status === "running") return "実行中";
-  if (item.status === "failed") return "失敗";
-  return "完了";
-}
-
-function isJsonLikeDetail(value: string): boolean {
-  const trimmed = value.trim();
-  return (
-    (trimmed.startsWith("{") && trimmed.endsWith("}"))
-    || (trimmed.startsWith("[") && trimmed.endsWith("]"))
-  );
-}
-
-function ToolResultDetail({ detail }: { detail: string }) {
-  if (isJsonLikeDetail(detail)) {
-    return (
-      <details className="min-w-0 flex-1 text-[12px] leading-relaxed">
-        <summary className="cursor-pointer select-none text-zinc-500 hover:text-zinc-300">
-          詳細データ
-        </summary>
-        <pre className="mt-2 max-h-36 overflow-auto whitespace-pre-wrap rounded-md border border-zinc-800 bg-black/30 p-2 font-mono text-[11px] text-zinc-500">
-          {detail}
-        </pre>
-      </details>
-    );
-  }
-
-  return <span className="min-w-0 break-words text-[12px] leading-relaxed">{detail}</span>;
-}
-
 function ToolActivityTray({
   message,
   onOpenImagePreview,
@@ -686,51 +649,22 @@ function ToolActivityTray({
   const groups = buildToolActivityGroups(message.toolLogs ?? [], message.events ?? [], { conversationId: message.conversationId });
   if (groups.length === 0) return null;
   const items = groups.flatMap((group) => group.items);
-  const total = items.length;
   const visibleScreenshots = canFetchStoredScreenshots ? screenshots : liveScreenshots;
+  const hasVisualToolContent = items.some((item) => (
+    visibleScreenshots.some((screenshot) => !item.toolCallId || screenshot.tool_call_id === item.toolCallId)
+    || (item.artifacts ?? []).some((artifact) => artifact.url)
+  ));
+  if (!hasVisualToolContent) return null;
 
   return (
-    <details className="rumi-tool-activity mb-4 w-full rounded-xl border border-zinc-800/90 bg-zinc-950/70 px-4 py-3 text-zinc-300 shadow-[0_16px_44px_rgba(0,0,0,0.22)]" open>
-      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-[13px] text-zinc-300">
-        <span className="flex min-w-0 items-center gap-2 font-medium">
-          <span className="truncate">使用した tool</span>
-          <span className="rounded-full border border-zinc-800 bg-zinc-900 px-1.5 py-0.5 text-[10px] text-zinc-500">{total}</span>
-        </span>
-        <ChevronDown size={16} className="rumi-tool-caret shrink-0 text-zinc-500" />
-      </summary>
-      <div className="mt-3 grid gap-2">
-        {items.map((item) => (
-          <div key={item.id} className="rumi-tool-card rounded-lg border border-zinc-800/80 bg-zinc-900/55 px-3.5 py-3">
-            <div className="flex min-w-0 items-start justify-between gap-3">
-              <div className="flex min-w-0 items-start gap-2.5">
-                <span className="mt-0.5">
-                  <ToolStatusIcon item={item} />
-                </span>
-                <div className="min-w-0">
-                  <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-                    <span className="rounded-md border border-zinc-800 bg-zinc-950/70 px-1.5 py-0.5 text-[10px] font-medium text-zinc-400">
-                      {item.folderLabel}
-                    </span>
-                    <span className="min-w-0 truncate font-mono text-[12px] text-zinc-200">{item.toolName}</span>
-                  </div>
-                  {item.input && (
-                    <div className="mt-1 flex min-w-0 items-center gap-1.5 text-[10px] leading-4 text-zinc-600">
-                      <span className="shrink-0 text-zinc-700">入力</span>
-                      <span className="min-w-0 truncate font-mono">{item.input}</span>
-                    </div>
-                  )}
-                </div>
-              </div>
-              <span className="shrink-0 rounded-full border border-zinc-800 bg-zinc-950/70 px-2 py-0.5 text-[10px] text-zinc-500">
-                {toolStatusLabel(item)}
-              </span>
-            </div>
-            {item.detail && (
-              <div className="mt-2 flex min-w-0 items-start gap-2 rounded-md border border-zinc-800/70 bg-black/20 px-3 py-2 text-zinc-300">
-                <span className="shrink-0 text-[10px] font-medium text-zinc-600">結果</span>
-                <ToolResultDetail detail={item.detail} />
-              </div>
-            )}
+    <div className="rumi-tool-activity mb-4 grid w-full gap-3 text-zinc-300">
+      {items.map((item) => {
+        const itemScreenshots = visibleScreenshots.filter((screenshot) => !item.toolCallId || screenshot.tool_call_id === item.toolCallId);
+        const imageArtifacts = (item.artifacts ?? []).filter((artifact) => artifact.kind === "image" && artifact.url);
+        const fileArtifacts = (item.artifacts ?? []).filter((artifact) => artifact.kind !== "image" && artifact.url);
+        if (itemScreenshots.length === 0 && imageArtifacts.length === 0 && fileArtifacts.length === 0) return null;
+        return (
+          <div key={item.id} className="grid gap-3">
             {visibleScreenshots
               .filter((screenshot) => !item.toolCallId || screenshot.tool_call_id === item.toolCallId)
               .map((screenshot) => (
@@ -738,8 +672,8 @@ function ToolActivityTray({
                   <BrowserScreenshotPreview screenshot={screenshot} compact onOpenImagePreview={onOpenImagePreview} />
                 </div>
               ))}
-            {!visibleScreenshots.some((screenshot) => !item.toolCallId || screenshot.tool_call_id === item.toolCallId) && item.artifacts?.filter((artifact) => artifact.kind === "image" && artifact.url).map((artifact) => (
-              <div key={artifact.path} className="mt-3">
+            {itemScreenshots.length === 0 && imageArtifacts.map((artifact) => (
+              <div key={artifact.path}>
                 <figure className="max-w-full overflow-hidden rounded-lg border border-zinc-800 bg-black/30">
                   <button
                     type="button"
@@ -765,9 +699,9 @@ function ToolActivityTray({
                 </figure>
               </div>
             ))}
-            {item.artifacts && item.artifacts.filter((artifact) => artifact.kind !== "image").length > 0 && (
+            {fileArtifacts.length > 0 && (
               <div className="mt-2 flex flex-wrap gap-2">
-                {item.artifacts.filter((artifact) => artifact.kind !== "image").map((artifact) => (
+                {fileArtifacts.map((artifact) => (
                   <a
                     key={artifact.path}
                     href={artifact.url}
@@ -780,9 +714,9 @@ function ToolActivityTray({
               </div>
             )}
           </div>
-        ))}
-      </div>
-    </details>
+        );
+      })}
+    </div>
   );
 }
 
@@ -853,7 +787,7 @@ export function ChatMessagesRenderer({
       ) : isNewConversation ? (
         <div className="flex-1" />
       ) : (
-        <div className="flex-1 overflow-y-auto px-4 py-3">
+        <div className="flex-1 overflow-y-auto px-6 py-3 md:px-9 lg:px-12">
           <div className="w-full max-w-5xl mx-auto space-y-4">
             {messages.map((message) => (
               <div key={message.id} className={cn("rumi-message-row group/message flex gap-3 select-text", message.role === "user" ? "flex-row-reverse" : "")}>
