@@ -1604,6 +1604,24 @@ class BrowserComputerController:
         if data_url:
             result["data_url"] = data_url
             result["model_image"] = data_url
+        feedback_type = ""
+        if action_name == "computer.move":
+            feedback_type = "post_move_screenshot"
+        elif action_name == "computer.click":
+            feedback_type = "post_click_screenshot"
+        if feedback_type:
+            visual_feedback = {
+                "type": feedback_type,
+                "screenshot_path": str(path),
+                "model_image_path": str(model_path),
+            }
+            if data_url:
+                visual_feedback["data_url"] = data_url
+            if marker:
+                visual_feedback["marker"] = marker
+            if drag_marker:
+                visual_feedback["drag_marker"] = drag_marker
+            result["visual_feedback"] = visual_feedback
         if marker:
             result["click_marker"] = marker
         if drag_marker:
