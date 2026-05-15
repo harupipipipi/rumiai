@@ -83,7 +83,9 @@ ROLE_DEFINITIONS = [
         "context_limit": 96000,
         "system_prompt": (
             "You own task decomposition, ownership, milestones, blocker routing, and final "
-            "handoff quality. Mention specialists in the internal channel when assigning work."
+            "handoff quality. Mention specialists in the internal channel when assigning work. "
+            "You delegate work; you do not write production code, execute terminal commands, "
+            "or perform deep research directly."
         ),
     },
     {
@@ -240,11 +242,14 @@ class OperationsCompanyRuntime:
         org = OrgManager().get_org(org_id) if org_id else None
         schedules = self._schedules_for_state(state)
         conversation_id = state.get("conversation_id")
+        company = self._sync_company_record(state)
         return {
             "profile_id": PROFILE_ID,
             "bootstrapped": bool(org),
             "org_id": org_id,
             "conversation_id": conversation_id,
+            "conversation_group_id": state.get("conversation_group_id"),
+            "company": company,
             "org": org,
             "schedules": schedules,
             "state": state,
@@ -272,9 +277,35 @@ class OperationsCompanyRuntime:
             )
         state["org_id"] = org_id
         state["conversation_id"] = conversation_id
+        state["conversation_group_id"] = self._conversation_group_id()
         state["last_bootstrapped_at"] = timestamp()
         self._save_state(state)
         return self.status()
+
+    def _conversation_group_id(self) -> str:
+        try:
+            from domain.company.models import DEFAULT_CONVERSATION_GROUP_ID
+
+            return DEFAULT_CONVERSATION_GROUP_ID
+        except Exception:
+            return "company:operations-company"
+
+    def _sync_company_record(self, state: dict[str, Any]) -> dict[str, Any] | None:
+        try:
+            from domain.company.migration import migrate_operations_company_state
+            from domain.company.service import CompanyService
+
+            if state:
+                state.setdefault("conversation_group_id", self._conversation_group_id())
+                return migrate_operations_company_state(state)
+            return CompanyService().bootstrap_default_company(
+                metadata={
+                    "profile_id": PROFILE_ID,
+                    "conversation_group_id": self._conversation_group_id(),
+                }
+            )
+        except Exception:
+            return None
 
     def _resolve_state_path(self) -> Path:
         override = os.environ.get("RUMI_DEFAULTSPACK_OPERATIONS_STATE_PATH", "").strip()
@@ -332,6 +363,22 @@ class OperationsCompanyRuntime:
         store = ChatStore()
         conversation_id = state.get("conversation_id")
         if conversation_id and store.get_conversation(conversation_id):
+            conversation = store.get_conversation(conversation_id)
+            metadata = conversation.get("metadata") if isinstance(conversation, dict) else {}
+            if not isinstance(metadata, dict):
+                metadata = {}
+            store.update_conversation(
+                conversation_id,
+                {
+                    "group_id": state.get("conversation_group_id") or self._conversation_group_id(),
+                    "metadata": {
+                        **metadata,
+                        "profile_id": PROFILE_ID,
+                        "client_manager_agent_id": "client_manager",
+                        "one_agent_one_conversation": True,
+                    },
+                },
+            )
             return str(conversation_id)
         conversation = store.create_conversation(
             model=model or DEFAULT_MODEL,
@@ -339,6 +386,7 @@ class OperationsCompanyRuntime:
             agent_id="client_manager",
             tags=["operations-company", "24-7", "company"],
             conversation_kind=CONVERSATION_KIND,
+            group_id=state.get("conversation_group_id") or self._conversation_group_id(),
             metadata={
                 "profile_id": PROFILE_ID,
                 "client_manager_agent_id": "client_manager",
