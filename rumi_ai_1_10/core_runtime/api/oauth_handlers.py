@@ -20,7 +20,9 @@ import hashlib
 import html
 import json
 import logging
+import os
 import secrets
+import tempfile
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -30,6 +32,20 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 from ._helpers import _log_internal_error
+from ..compat import safe_chmod
+
+_FERNET_AVAILABLE = False
+_Fernet: Any = None
+_InvalidToken: Any = None
+try:
+    from cryptography.fernet import Fernet
+    from cryptography.fernet import InvalidToken
+
+    _Fernet = Fernet
+    _InvalidToken = InvalidToken
+    _FERNET_AVAILABLE = True
+except ImportError:
+    pass
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +63,7 @@ _pkce_store: Dict[str, Dict[str, Any]] = {}
 
 # --- トークン保存ファイル名 ---
 _TOKEN_FILE_NAME = "oauth_tokens.json"
+_TOKEN_KEY_FILE_NAME = ".oauth_tokens.key"
 
 
 def _generate_code_verifier() -> str:
@@ -66,14 +83,98 @@ def _get_token_path() -> Path:
     return base_dir / "user_data" / "settings" / _TOKEN_FILE_NAME
 
 
+def _get_token_key_path() -> Path:
+    """OAuth トークン暗号化鍵のパスを返す"""
+    return _get_token_path().with_name(_TOKEN_KEY_FILE_NAME)
+
+
+def _write_token_key_atomic(key_path: Path, key_data: bytes) -> None:
+    """Fernet key を同一ディレクトリ内で atomic に保存する。"""
+    key_path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_path = tempfile.mkstemp(
+        dir=str(key_path.parent),
+        prefix=".oauth_tokens_key_tmp_",
+    )
+    try:
+        try:
+            safe_chmod(tmp_path, 0o600)
+        except (OSError, AttributeError):
+            pass
+        os.write(fd, key_data)
+        os.close(fd)
+        fd = -1
+        os.replace(tmp_path, str(key_path))
+        try:
+            safe_chmod(str(key_path), 0o600)
+        except (OSError, AttributeError):
+            pass
+    except Exception:
+        if fd >= 0:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
+
+
+def _get_or_create_token_cipher() -> Any:
+    """OAuth トークン保存用の Fernet cipher を返す。"""
+    if not _FERNET_AVAILABLE or _Fernet is None:
+        raise RuntimeError("cryptography is required for encrypted OAuth token storage")
+
+    key_path = _get_token_key_path()
+    if key_path.exists():
+        key_data = key_path.read_bytes().strip()
+        if key_data:
+            try:
+                return _Fernet(key_data)
+            except (TypeError, ValueError):
+                pass
+
+    key_data = _Fernet.generate_key()
+    _write_token_key_atomic(key_path, key_data)
+    return _Fernet(key_data)
+
+
 def _save_tokens(tokens: Dict[str, Any]) -> None:
     """トークンをファイルに保存する"""
     token_path = _get_token_path()
     token_path.parent.mkdir(parents=True, exist_ok=True)
-    token_path.write_text(
-        json.dumps(tokens, ensure_ascii=False, indent=2),
-        encoding="utf-8",
+    payload = json.dumps(tokens, ensure_ascii=False, indent=2)
+    cipher = _get_or_create_token_cipher()
+    wrapped = {
+        "version": "1.0",
+        "encryption": "fernet",
+        "payload": cipher.encrypt(payload.encode("utf-8")).decode("ascii"),
+    }
+    fd, tmp_path = tempfile.mkstemp(
+        dir=str(token_path.parent),
+        prefix=".oauth_tokens_tmp_",
+        suffix=".json",
     )
+    try:
+        os.write(
+            fd,
+            json.dumps(wrapped, ensure_ascii=False, indent=2).encode("utf-8"),
+        )
+        os.close(fd)
+        fd = -1
+        os.replace(tmp_path, str(token_path))
+    except Exception:
+        if fd >= 0:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
 
 
 def _load_tokens() -> Optional[Dict[str, Any]]:
@@ -82,9 +183,24 @@ def _load_tokens() -> Optional[Dict[str, Any]]:
     if not token_path.is_file():
         return None
     try:
-        return json.loads(token_path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
+        raw = json.loads(token_path.read_text(encoding="utf-8"))
+        if (
+            isinstance(raw, dict)
+            and raw.get("version") == "1.0"
+            and raw.get("encryption") == "fernet"
+            and isinstance(raw.get("payload"), str)
+        ):
+            cipher = _get_or_create_token_cipher()
+            decrypted = cipher.decrypt(raw["payload"].encode("ascii")).decode("utf-8")
+            loaded = json.loads(decrypted)
+            return loaded if isinstance(loaded, dict) else None
+        return raw if isinstance(raw, dict) else None
+    except (json.JSONDecodeError, OSError, RuntimeError, TypeError, ValueError):
         return None
+    except Exception as e:
+        if _InvalidToken is not None and isinstance(e, _InvalidToken):
+            return None
+        raise
 
 
 def _http_post_form(url: str, data: Dict[str, str], timeout: float = 30.0) -> Dict[str, Any]:

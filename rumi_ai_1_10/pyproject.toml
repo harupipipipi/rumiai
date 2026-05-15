@@ -7,6 +7,9 @@ name = "rumi-ai"
 version = "1.10.0"
 description = "Rumi AI runtime package"
 requires-python = ">=3.10"
+dependencies = [
+  "cryptography>=42.0.0",
+]
 
 [project.optional-dependencies]
 dev = [
