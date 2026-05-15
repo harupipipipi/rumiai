@@ -5,6 +5,7 @@ import type { ChatItem } from "./components/HistoryBoard";
 import type { ToolPreviewItem, ToolPreviewMode } from "./components/ToolPreview";
 import { buildToolPreviewDisplayItems, hasCanvasItems } from "./components/ToolPreview";
 import { api, conversationArtifactFileUrl, type ChatActivityEvent, type ChatContentBlock, type ChatMessage, type ChatStreamEvent, type ChatToolStreamEvent, type ComposerCommandExecuteResult, type ComposerCommandItem, type ComposerCommandMode, type ComposerWidgetAction, type Conversation, type ModelCommandCandidate, type ModelProfile, type OperationsCompanyStatus, type SettingsSection, type SidebarAction, type SidebarItem, type UICatalog } from "./lib/api";
+import { reduceBrowserStateFromEvents } from "./lib/browserState";
 import { deriveConversationTitle, formatRelativeTime, messageToText } from "./lib/chat";
 import { cn } from "./lib/cn";
 import { canExecuteComposerEndpointAction, isSafeLocalEndpoint } from "./lib/composerWidgets";
@@ -321,6 +322,24 @@ function collectInlineImageUrls(value: unknown, urls: string[] = [], seen = new 
 
 function streamActivityEventKey(event: ChatActivityEvent): string {
   const callId = typeof event.tool_call_id === "string" ? event.tool_call_id.trim() : "";
+  const runId = typeof event.run_id === "string" ? event.run_id.trim() : "";
+  const conversationId = typeof event.conversation_id === "string" ? event.conversation_id.trim() : "";
+  const stateRevision = Number(event.state_revision ?? -1);
+  if (
+    event.type === "browser_state_invalidated"
+    || event.type === "browser_state_snapshot"
+    || event.type === "browser_dom_snapshot"
+    || event.type === "browser_screenshot"
+  ) {
+    const revisionPart = Number.isFinite(stateRevision) && stateRevision >= 0 ? `:${stateRevision}` : "";
+    const payload = event.snapshot ?? event.dom_snapshot ?? event.screenshot ?? event.invalidated;
+    const identity = isRecord(payload)
+      ? stringValue(payload.path) || stringValue(payload.model_image_path) || stringValue(payload.url)
+      : "";
+    const scope = `${conversationId}:${runId}`;
+    if (callId) return `call:${scope}:${callId}:${event.type}${revisionPart}:${identity}`;
+    return `browser:${scope}:${event.type}${revisionPart}:${identity}`;
+  }
   if (callId) return `call:${callId}`;
   const toolName = typeof event.tool_name === "string" ? event.tool_name.trim() : "";
   const args = event.arguments && typeof event.arguments === "object" ? event.arguments : {};
@@ -329,6 +348,18 @@ function streamActivityEventKey(event: ChatActivityEvent): string {
 }
 
 function mergeStreamActivityEvent(base: ChatActivityEvent, update: ChatActivityEvent): ChatActivityEvent {
+  const baseRevision = Number(base.state_revision ?? -1);
+  const updateRevision = Number(update.state_revision ?? -1);
+  const baseScope = `${String(base.conversation_id ?? "")}:${String(base.run_id ?? "")}:${String(base.tool_call_id ?? base.tool_name ?? "")}`;
+  const updateScope = `${String(update.conversation_id ?? "")}:${String(update.run_id ?? "")}:${String(update.tool_call_id ?? update.tool_name ?? "")}`;
+  if (
+    baseScope === updateScope
+    && Number.isFinite(baseRevision)
+    && Number.isFinite(updateRevision)
+    && updateRevision < baseRevision
+  ) {
+    return base;
+  }
   const merged: ChatActivityEvent = { ...base, ...update };
   for (const key of ["arguments", "result", "artifact", "artifacts", "output", "message", "timestamp"]) {
     if (merged[key] === undefined && base[key] !== undefined) {
@@ -348,7 +379,16 @@ function upsertStreamActivityEvent(events: ChatActivityEvent[], nextEvent: ChatA
 }
 
 function resultValuesForToolEvent(event: ChatActivityEvent): unknown[] {
-  return [event.result, event.artifact, event.artifacts, event.output].filter((value) => value !== undefined);
+  return [
+    event.result,
+    event.artifact,
+    event.artifacts,
+    event.output,
+    event.invalidated,
+    event.snapshot,
+    event.dom_snapshot,
+    event.screenshot,
+  ].filter((value) => value !== undefined);
 }
 
 function toolPreviewsFromMessages(messages: ChatMessage[]): ToolPreviewItem[] {
@@ -569,8 +609,12 @@ function isActivityStreamEvent(event: ChatStreamEvent): event is ChatToolStreamE
     event.type === "status"
     || event.type === "tool_call"
     || event.type === "tool_call_started"
+    || event.type === "tool_call_delta"
     || event.type === "tool_call_completed"
     || event.type === "tool_result"
+    || event.type === "browser_state_invalidated"
+    || event.type === "browser_state_snapshot"
+    || event.type === "browser_dom_snapshot"
     || event.type === "browser_screenshot"
     || event.type === "approval_requested"
     || event.type === "ai_retry_scheduled"
@@ -1057,6 +1101,10 @@ export default function App() {
     () => toolPreviewsFromMessages(activeConversation?.messages ?? []),
     [activeConversation?.messages],
   );
+  const liveBrowserState = useMemo(
+    () => reduceBrowserStateFromEvents((activeConversation?.messages ?? []).flatMap((message) => message.events ?? [])),
+    [activeConversation?.messages],
+  );
   const canvasPreviews = useMemo(() => {
     const seen = new Set(previews.map((preview) => preview.id));
     return [
@@ -1064,7 +1112,7 @@ export default function App() {
       ...messageToolPreviews.filter((preview) => !seen.has(preview.id)),
     ].sort((a, b) => b.timestamp - a.timestamp);
   }, [messageToolPreviews, previews]);
-  const canShowCanvas = hasCanvasItems(canvasPreviews, canvasMemo);
+  const canShowCanvas = hasCanvasItems(canvasPreviews, canvasMemo) || liveBrowserState.state_revision >= 0;
   const effectiveShowPreview = showPreview && canShowCanvas;
   const composerCommands = useMemo(() => {
     const showAdvanced = settingsValues.commands?.show_advanced_commands === true;

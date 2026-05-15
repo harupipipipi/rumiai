@@ -398,6 +398,33 @@ test("streamMessage forwards explicit browser screenshot events", async () => {
   assert.deepEqual(activityEvents, ["browser_screenshot", "message"]);
 });
 
+test("streamMessage forwards browser state snapshot events", async () => {
+  const originalFetch = globalThis.fetch;
+  const activityEvents: string[] = [];
+  globalThis.fetch = (async () => {
+    const body = [
+      'data: {"type":"browser_state_snapshot","tool_name":"browser_computer","tool_call_id":"call_1","state_revision":7,"snapshot":{"active_window":{"title":"Example"}}}\n\n',
+      'data: {"type":"message","message":{"id":"m2","role":"assistant","content":[{"type":"text","text":"done"}],"created_at":1,"conversation_id":"c1"}}\n\n',
+    ].join("");
+    return new Response(body, {
+      status: 200,
+      headers: { "Content-Type": "text/event-stream; charset=utf-8" },
+    });
+  }) as typeof fetch;
+
+  try {
+    await api.streamMessage("c1", "hello", undefined, {
+      onEvent(event) {
+        activityEvents.push(event.type);
+      },
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.deepEqual(activityEvents, ["browser_state_snapshot", "message"]);
+});
+
 test("streamMessage surfaces structured stream errors", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (async () => {

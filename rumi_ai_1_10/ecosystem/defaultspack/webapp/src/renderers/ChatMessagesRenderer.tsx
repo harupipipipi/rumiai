@@ -436,7 +436,13 @@ function isBrowserToolName(toolName: unknown): boolean {
 }
 
 function isBrowserActivityEvent(event: NonNullable<ChatMessagesRendererProps["messages"][number]["events"]>[number]): boolean {
-  return isBrowserToolName(event.tool_name) || event.type === "browser_screenshot";
+  return (
+    isBrowserToolName(event.tool_name)
+    || event.type === "browser_screenshot"
+    || event.type === "browser_state_invalidated"
+    || event.type === "browser_state_snapshot"
+    || event.type === "browser_dom_snapshot"
+  );
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
