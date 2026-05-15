@@ -37,9 +37,11 @@ from ..compat import safe_chmod
 _FERNET_AVAILABLE = False
 try:
     from cryptography.fernet import Fernet as _Fernet
+    from cryptography.fernet import InvalidToken as _InvalidToken
     _FERNET_AVAILABLE = True
 except ImportError:
     _Fernet = None
+    _InvalidToken = None
 
 logger = logging.getLogger(__name__)
 
@@ -82,24 +84,18 @@ def _get_token_key_path() -> Path:
     return _get_token_path().with_name(_TOKEN_KEY_FILE_NAME)
 
 
-def _get_or_create_token_cipher() -> Any:
-    """OAuth トークン保存用の Fernet cipher を返す。"""
-    if not _FERNET_AVAILABLE or _Fernet is None:
-        raise RuntimeError("cryptography is required for encrypted OAuth token storage")
-
-    key_path = _get_token_key_path()
-    if key_path.exists():
-        key_data = key_path.read_bytes().strip()
-        if key_data:
-            return _Fernet(key_data)
-
-    key_data = _Fernet.generate_key()
+def _write_token_key_atomic(key_path: Path, key_data: bytes) -> None:
+    """Fernet key を同一ディレクトリ内で atomic に保存する。"""
     key_path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp_path = tempfile.mkstemp(
         dir=str(key_path.parent),
         prefix=".oauth_tokens_key_tmp_",
     )
     try:
+        try:
+            safe_chmod(tmp_path, 0o600)
+        except (OSError, AttributeError):
+            pass
         os.write(fd, key_data)
         os.close(fd)
         fd = -1
@@ -119,6 +115,24 @@ def _get_or_create_token_cipher() -> Any:
         except OSError:
             pass
         raise
+
+
+def _get_or_create_token_cipher() -> Any:
+    """OAuth トークン保存用の Fernet cipher を返す。"""
+    if not _FERNET_AVAILABLE or _Fernet is None:
+        raise RuntimeError("cryptography is required for encrypted OAuth token storage")
+
+    key_path = _get_token_key_path()
+    if key_path.exists():
+        key_data = key_path.read_bytes().strip()
+        if key_data:
+            try:
+                return _Fernet(key_data)
+            except (TypeError, ValueError):
+                pass
+
+    key_data = _Fernet.generate_key()
+    _write_token_key_atomic(key_path, key_data)
     return _Fernet(key_data)
 
 
@@ -177,8 +191,12 @@ def _load_tokens() -> Optional[Dict[str, Any]]:
             loaded = json.loads(decrypted)
             return loaded if isinstance(loaded, dict) else None
         return raw if isinstance(raw, dict) else None
-    except (json.JSONDecodeError, OSError, RuntimeError, ValueError):
+    except (json.JSONDecodeError, OSError, RuntimeError, TypeError, ValueError):
         return None
+    except Exception as e:
+        if _InvalidToken is not None and isinstance(e, _InvalidToken):
+            return None
+        raise
 
 
 def _http_post_form(url: str, data: Dict[str, str], timeout: float = 30.0) -> Dict[str, Any]:

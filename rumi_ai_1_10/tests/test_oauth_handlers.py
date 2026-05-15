@@ -17,7 +17,7 @@ from urllib.parse import urlparse, parse_qs
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_REPO_ROOT))
 
-from core_runtime.api.oauth_handlers import (
+from core_runtime.api.oauth_handlers import (  # noqa: E402
     OAuthHandlersMixin,
     _FERNET_AVAILABLE,
     _Fernet,
@@ -43,7 +43,6 @@ class TestPKCEGeneration(unittest.TestCase):
 
     def test_code_verifier_characters(self):
         """code_verifier は URL-safe base64 文字のみで構成される"""
-        import re
         verifier = _generate_code_verifier()
         self.assertRegex(verifier, r'^[A-Za-z0-9_\-]+$')
 
@@ -263,6 +262,45 @@ class TestOAuthTokenStorage(unittest.TestCase):
         self.token_path.parent.mkdir(parents=True, exist_ok=True)
         self.token_path.write_text(json.dumps(legacy), encoding="utf-8")
         self.assertEqual(_load_tokens(), legacy)
+
+    @unittest.skipUnless(_FERNET_AVAILABLE and _Fernet is not None, "cryptography unavailable")
+    def test_legacy_plaintext_migrates_to_encrypted_on_next_save(self):
+        legacy = {"access_token": "legacy", "refresh_token": "legacy-refresh"}
+        self.token_path.parent.mkdir(parents=True, exist_ok=True)
+        self.token_path.write_text(json.dumps(legacy), encoding="utf-8")
+
+        self.assertEqual(_load_tokens(), legacy)
+        _save_tokens(legacy)
+        raw_text = self.token_path.read_text(encoding="utf-8")
+        raw = json.loads(raw_text)
+
+        self.assertEqual(raw.get("version"), "1.0")
+        self.assertEqual(raw.get("encryption"), "fernet")
+        self.assertIn("payload", raw)
+        self.assertNotIn("legacy", raw_text)
+        self.assertEqual(_load_tokens(), legacy)
+
+    @unittest.skipUnless(_FERNET_AVAILABLE and _Fernet is not None, "cryptography unavailable")
+    def test_empty_key_file_is_replaced_safely(self):
+        self.token_path.parent.mkdir(parents=True, exist_ok=True)
+        key_path = self.token_path.with_name(".oauth_tokens.key")
+        key_path.write_bytes(b"")
+
+        _save_tokens({"access_token": "access"})
+
+        self.assertGreater(key_path.stat().st_size, 0)
+        self.assertEqual(_load_tokens(), {"access_token": "access"})
+
+    @unittest.skipUnless(_FERNET_AVAILABLE and _Fernet is not None, "cryptography unavailable")
+    def test_corrupt_key_file_is_replaced_safely_for_new_save(self):
+        self.token_path.parent.mkdir(parents=True, exist_ok=True)
+        key_path = self.token_path.with_name(".oauth_tokens.key")
+        key_path.write_bytes(b"not-a-fernet-key")
+
+        _save_tokens({"access_token": "access"})
+
+        self.assertNotEqual(key_path.read_bytes(), b"not-a-fernet-key")
+        self.assertEqual(_load_tokens(), {"access_token": "access"})
 
 
 class TestOAuthSendRedirect(unittest.TestCase):
