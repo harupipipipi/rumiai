@@ -1,0 +1,30 @@
+id: p2p.default
+provider: p2p
+version: 1
+display_name: P2P Default
+match:
+  event_type: message
+input:
+  role: user
+  content: "coalesce($.body.text, $.body.message, $.body.content, $.text, 'P2P message received')"
+chat:
+  external_key: "coalesce($.body.conversation_id, $.body.channel_id, $.body.company_id, $.sender_id)"
+  title: "P2P ${$.sender_id}"
+metadata:
+  source:
+    kind: integration
+    provider: p2p
+  p2p:
+    sender_id: "$.sender_id"
+    recipient_id: "$.recipient_id"
+    message_id: "$.message_id"
+    nonce: "$.nonce"
+    body: "$.body"
+params:
+  external_input:
+    default_response:
+      mode: same_response
+      include_source_context: true
+      source_context_format: "${provider} approved peer input"
+response_prompt:
+  enabled: false
