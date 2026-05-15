@@ -77,6 +77,42 @@ def test_chat_store_persists_conversations_to_user_data(tmp_path, monkeypatch):
     monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
     ChatStore._instance = None
 
+    store = ChatStore()
+    conversation = store.create_conversation(model="stub/default")
+
+    persisted = json.loads(storage_path.read_text(encoding="utf-8"))
+    assert conversation["id"] in persisted["conversations"]
+    assert persisted["conversations"][conversation["id"]]["model"] == "stub/default"
+    ChatStore._instance = None
+
+
+def test_chat_store_atomic_write_preserves_existing_json_on_replace_failure(tmp_path, monkeypatch):
+    import pytest
+    import domain.chat.store as chat_store_module
+    from domain.chat.store import ChatStore
+
+    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
+    ChatStore._instance = None
+    store = ChatStore()
+    target = tmp_path / "conversations.json"
+    target.write_text('{"ok": true}', encoding="utf-8")
+    original_replace = chat_store_module.Path.replace
+
+    def fail_replace(self, destination):
+        if destination == target and self.name.startswith(".conversations.json."):
+            raise OSError("replace failed")
+        return original_replace(self, destination)
+
+    monkeypatch.setattr(chat_store_module.Path, "replace", fail_replace)
+
+    with pytest.raises(OSError, match="replace failed"):
+        store._atomic_write_json(target, {"ok": False})
+
+    assert json.loads(target.read_text(encoding="utf-8")) == {"ok": True}
+    assert list(tmp_path.glob(".conversations.json.*.tmp")) == []
+    ChatStore._instance = None
+
 
 def test_model_profiles_expose_required_context_and_thinking_metadata():
     from ecosystem.defaultspack.backend.ai_client.provider_catalog import list_profile_catalog
