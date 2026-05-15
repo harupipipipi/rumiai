@@ -812,7 +812,13 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
                             {
                                 "tool_name": "calculator",
                                 "arguments": {"expression": "13829+12312"},
-                                "result": {"summary": "26141"},
+                                "result": {
+                                    "summary": "26141",
+                                    "visual_feedback": {
+                                        "data_url": "data:image/png;base64,iVBORw0KGgo=",
+                                        "model_image_path": "/tmp/result.png",
+                                    },
+                                },
                             }
                         ],
                     },
@@ -837,7 +843,12 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
 
         preview_ids = {item["id"] for item in preview["previews"]}
         self.assertTrue(any(item.startswith("tool-web_search") for item in preview_ids))
-        self.assertTrue(any(item.startswith("tool-log-") for item in preview_ids))
+        self.assertTrue(any(item.startswith("tool-log-artifact-") for item in preview_ids))
+        self.assertTrue(any(item.startswith("tool-log-inline-") for item in preview_ids))
+        self.assertFalse(any(
+            (item.get("data") or {}).get("filename", "").endswith(".tool")
+            for item in preview["previews"]
+        ))
         self.assertTrue(any(item.startswith("widget-") for item in preview_ids))
         self.assertTrue(any(item.startswith("code-") for item in preview_ids))
 

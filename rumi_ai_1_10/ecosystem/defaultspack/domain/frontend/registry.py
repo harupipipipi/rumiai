@@ -1115,30 +1115,8 @@ class FrontendRegistry:
     def _preview_from_tool_log(self, message: dict[str, Any], log: dict[str, Any], index: int) -> list[dict[str, Any]]:
         timestamp = int(message.get("created_at", 0)) - 200 - index
         tool_name = str(log.get("tool_name") or "tool")
-        arguments = log.get("arguments") if isinstance(log.get("arguments"), dict) else {}
         result = log.get("result")
-        input_text = self._preview_text(arguments, 180)
-        result_text = self._preview_text(result, 480)
-        status = "failed" if isinstance(result, dict) and result.get("status") == "error" else "completed"
-        lines = [
-            f"tool: {tool_name}",
-            f"status: {status}",
-        ]
-        if input_text:
-            lines.append(f"input: {input_text}")
-        if result_text:
-            lines.append(f"result: {result_text}")
-        previews = [{
-            "id": f"tool-log-{message.get('id')}-{index}",
-            "toolStepId": tool_name,
-            "timestamp": timestamp,
-            "data": {
-                "type": "file",
-                "filename": f"{tool_name}.tool",
-                "size": status,
-                "content": "\n".join(lines),
-            },
-        }]
+        previews: list[dict[str, Any]] = []
         conversation_id = str(message.get("conversation_id") or "")
         for artifact_index, path in enumerate(self._artifact_paths_from_value(result)):
             name = Path(path).name or "artifact"
@@ -1177,6 +1155,19 @@ class FrontendRegistry:
                         },
                     }
                 )
+        for image_index, url in enumerate(self._inline_image_urls_from_value(result)):
+            previews.append(
+                {
+                    "id": f"tool-log-inline-{message.get('id')}-{index}-{image_index}",
+                    "toolStepId": tool_name,
+                    "timestamp": timestamp + len(previews) + image_index + 0.1,
+                    "data": {
+                        "type": "image",
+                        "url": url,
+                        "alt": self._data_url_name(url),
+                    },
+                }
+            )
         return previews
 
     def _artifact_paths_from_value(self, value: Any, seen: set[str] | None = None) -> list[str]:
@@ -1201,9 +1192,37 @@ class FrontendRegistry:
                 paths.extend(self._artifact_paths_from_value(item, seen))
         return paths
 
+    def _inline_image_urls_from_value(self, value: Any, seen: set[str] | None = None) -> list[str]:
+        seen = seen or set()
+        urls: list[str] = []
+        if isinstance(value, dict):
+            for key in ("data_url", "dataUrl"):
+                item = value.get(key)
+                if isinstance(item, str) and self._is_image_data_url(item) and item not in seen:
+                    seen.add(item)
+                    urls.append(item)
+            for key, item in value.items():
+                if key in {"data_url", "dataUrl"}:
+                    continue
+                urls.extend(self._inline_image_urls_from_value(item, seen))
+        elif isinstance(value, list):
+            for item in value:
+                urls.extend(self._inline_image_urls_from_value(item, seen))
+        return urls
+
     @staticmethod
     def _is_image_path(path: str) -> bool:
         return Path(path).suffix.lower() in {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"}
+
+    @staticmethod
+    def _is_image_data_url(value: str) -> bool:
+        return value.lower().startswith("data:image/") and ";base64," in value[:80].lower()
+
+    @staticmethod
+    def _data_url_name(value: str) -> str:
+        prefix = value.split(";", 1)[0]
+        extension = prefix.rsplit("/", 1)[-1].replace("jpeg", "jpg").split("+")[0] or "png"
+        return f"screenshot.{extension}"
 
     def _preview_text(self, value: Any, limit: int) -> str:
         if value is None:

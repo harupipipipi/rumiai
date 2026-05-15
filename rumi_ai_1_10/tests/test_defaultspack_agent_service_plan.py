@@ -527,8 +527,56 @@ def test_chat_stream_direct_path_honors_conversation_cancel(tmp_path, monkeypatc
     assert events[-1]["error"] == "cancelled"
     persisted = json.loads(storage_path.read_text(encoding="utf-8"))
     messages = persisted["conversations"][conversation["id"]]["messages"]
-    assert [message["role"] for message in messages] == ["user"]
+    assert [message["role"] for message in messages] == ["user", "assistant"]
+    assert messages[-1]["finish_reason"] == "cancelled"
+    assert messages[-1]["metadata"]["thinking"]["state"] == "cancelled"
     assert get_chat_cancellation_registry().is_cancelled(conversation["id"]) is False
+    ChatStore._instance = None
+
+
+def test_chat_stop_marks_streaming_assistant_draft_cancelled(tmp_path, monkeypatch):
+    import blocks.chat.stop as stop_module
+    from domain.chat.store import ChatStore
+
+    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
+    ChatStore._instance = None
+
+    store = ChatStore()
+    conversation = store.create_conversation(model="stub/default")
+    user_message = store.add_message(
+        conversation["id"],
+        {
+            "role": "user",
+            "content": [{"type": "text", "text": "stop me"}],
+            "raw_text": "stop me",
+        },
+    )
+    assistant = store.add_message(
+        conversation["id"],
+        {
+            "role": "assistant",
+            "parent_id": user_message["id"],
+            "content": [],
+            "raw_text": "",
+            "finish_reason": "streaming",
+            "metadata": {"streaming": True, "draft": True, "thinking": {"state": "running"}},
+            "events": [],
+            "tool_logs": [],
+            "model": "stub/default",
+        },
+    )
+
+    result = stop_module.run({"conversation_id": conversation["id"]}, {})
+
+    assert result["status"] == "ok"
+    assert result["data"]["persisted_cancelled"] is True
+    stored = ChatStore().get_message(conversation["id"], assistant["id"])
+    assert stored["finish_reason"] == "cancelled"
+    assert stored["raw_text"] == "停止しました。"
+    assert stored["metadata"]["thinking"]["state"] == "cancelled"
+    assert "streaming" not in stored["metadata"]
+    assert "draft" not in stored["metadata"]
     ChatStore._instance = None
 
 

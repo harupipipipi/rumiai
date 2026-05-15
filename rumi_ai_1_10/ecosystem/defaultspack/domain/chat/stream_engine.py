@@ -230,6 +230,43 @@ class _AssistantDraft:
         updates["metadata"] = metadata
         return self._store.update_message(self._conversation_id, self.id, updates)
 
+    def cancel(
+        self,
+        *,
+        content_text: str,
+        thinking_transcript: str,
+        events: list[dict[str, Any]],
+        tool_logs: list[dict[str, Any]],
+    ) -> dict[str, Any] | None:
+        if not self.message:
+            return None
+        final_text = content_text if content_text.strip() else "停止しました。"
+        metadata = {
+            "model": self._model,
+            "thinking": {"state": "cancelled"},
+            "thinking_level": self._params.get("thinking_level"),
+            "cancelled": True,
+        }
+        if thinking_transcript:
+            metadata["thinking"]["transcript"] = thinking_transcript
+        updated = self._store.update_message(
+            self._conversation_id,
+            self.id,
+            {
+                "content": [{"type": "text", "text": final_text}],
+                "raw_text": final_text,
+                "finish_reason": "cancelled",
+                "usage": {},
+                "metadata": metadata,
+                "events": list(events),
+                "tool_logs": list(tool_logs),
+                "model": self._model,
+            },
+        )
+        if updated is not None:
+            self.message = updated
+        return updated
+
     def discard(self) -> None:
         if not self.message:
             return
@@ -374,14 +411,20 @@ class ChatRunEngine:
                     pass
                 response = yield from self._execute(prepared, draft)
             except _ChatCancelled:
-                if draft is not None:
-                    draft.discard()
-                yield self._emit(
+                cancelled_event = self._emit(
                     "cancelled",
                     data={"reason": "cancelled"},
                     message="cancelled",
                     reason="cancelled",
                 )
+                if draft is not None:
+                    draft.cancel(
+                        content_text="".join(self._text_parts),
+                        thinking_transcript="".join(self._thinking_transcript_parts),
+                        events=list(self._activity_events),
+                        tool_logs=list(self._tool_logs),
+                    )
+                yield cancelled_event
                 return
             except RuntimeError as exc:
                 task_failed_event = self._emit(
