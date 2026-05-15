@@ -6,5 +6,9 @@
   "model_id": "gemma-4-31b-it",
   "display_name": "Gemma 4 31B IT",
   "priority": 35,
-  "type": "chat"
+  "type": "chat",
+  "supports_thinking": true,
+  "thinking_levels": ["minimal", "high"],
+  "default_thinking_level": "high",
+  "capabilities": ["chat", "tool_calls", "vision"]
 }

@@ -68,7 +68,21 @@ function formatBoardDate(updatedAt: number): string {
   return formatRelativeTime(updatedAt);
 }
 
+function externalConversationSection(conversation: Conversation): { id: string; title: string } | null {
+  const metadata = conversation.metadata ?? {};
+  const provider = typeof metadata.external_provider === "string" ? metadata.external_provider.trim().toLowerCase() : "";
+  if (!provider) return null;
+  if (provider === "line") {
+    return { id: "integration-line", title: "LINE" };
+  }
+  return {
+    id: `integration-${provider}`,
+    title: provider.slice(0, 1).toUpperCase() + provider.slice(1),
+  };
+}
+
 function toChatItem(conversation: Conversation): ChatItem {
+  const section = externalConversationSection(conversation);
   return {
     id: conversation.id,
     title: conversation.title,
@@ -76,6 +90,8 @@ function toChatItem(conversation: Conversation): ChatItem {
     type: "chat",
     parentId: conversation.parent_conversation_id ?? null,
     conversationKind: conversation.conversation_kind ?? "chat",
+    sectionId: section?.id ?? null,
+    sectionTitle: section?.title ?? null,
   };
 }
 

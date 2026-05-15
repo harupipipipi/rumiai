@@ -357,6 +357,10 @@ class TestDefaultspackGoogleProvider(unittest.TestCase):
             GoogleProvider._translate_params({"thinking_level": "xhigh"}, "gemma-4-31b-it"),
             {"reasoning_effort": "high"},
         )
+        self.assertEqual(
+            GoogleProvider._translate_params({"thinking_level": "MINIMAL"}, "gemma-4-31b-it"),
+            {"reasoning_effort": "minimal"},
+        )
 
     def test_google_provider_uses_native_generative_api_for_gemma_4(self):
         from domain.ai_client.providers.google_provider import GoogleProvider
@@ -410,6 +414,55 @@ class TestDefaultspackGoogleProvider(unittest.TestCase):
         self.assertEqual(captured["body"]["tools"], [{"googleSearch": {}}])
         self.assertEqual(response["content"][0]["text"], "gemma answer")
         self.assertEqual(response["usage"]["total_tokens"], 5)
+
+    def test_google_provider_uses_native_generative_api_minimal_thinking_for_gemma_4(self):
+        from domain.ai_client.providers.google_provider import GoogleProvider
+
+        captured = {}
+
+        with patch.dict(os.environ, {"GEMINI_API_KEY": "gemini-key"}, clear=True):
+            provider = GoogleProvider()
+
+        class FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self):
+                return json.dumps(
+                    {
+                        "candidates": [
+                            {
+                                "content": {"parts": [{"text": "gemma answer"}]},
+                                "finishReason": "STOP",
+                            }
+                        ],
+                        "usageMetadata": {
+                            "promptTokenCount": 2,
+                            "candidatesTokenCount": 3,
+                            "totalTokenCount": 5,
+                        },
+                    }
+                ).encode("utf-8")
+
+        def fake_native_request_json(model, body, stream=False):
+            captured["model"] = model
+            captured["body"] = body
+            captured["stream"] = stream
+            return FakeResponse()
+
+        provider._native_request_json = fake_native_request_json
+        provider.complete(
+            "gemma-4-31b-it",
+            [{"role": "user", "content": "hello"}],
+            [],
+            {"thinking_level": "minimal"},
+        )
+
+        self.assertEqual(captured["model"], "gemma-4-31b-it")
+        self.assertEqual(captured["body"]["generationConfig"]["thinkingConfig"]["thinkingLevel"], "MINIMAL")
 
     def test_google_native_gemma_sends_function_declarations_and_parses_calls(self):
         from domain.ai_client.providers.google_provider import GoogleProvider
@@ -689,7 +742,8 @@ class TestDefaultspackGoogleProvider(unittest.TestCase):
 
         self.assertNotIn("xhigh", profiles["google/gemini-2.5-pro"]["thinking_levels"])
         self.assertEqual(profiles["google/gemini-3-pro-preview"]["thinking_levels"], ["low", "high"])
-        self.assertEqual(profiles["google/gemma-4-26b-a4b-it"]["thinking_levels"], ["none", "high"])
+        self.assertEqual(profiles["google/gemma-4-26b-a4b-it"]["thinking_levels"], ["minimal", "high"])
+        self.assertEqual(profiles["google/gemma-4-31b-it"]["thinking_levels"], ["minimal", "high"])
 
     def test_google_catalog_marks_gemma_4_as_tool_and_vision_capable(self):
         from domain.ai_client.providers.google_provider import GoogleProvider

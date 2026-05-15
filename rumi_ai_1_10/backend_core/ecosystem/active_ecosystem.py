@@ -64,8 +64,6 @@ class ActiveEcosystemManager:
     現在使用中のPack/Componentを管理する。
     """
     
-    SECRET_KEY_FILE = "user_data/permissions/.secret_key"
-
     def __init__(self, config_path: str = None, secret_key: str = None):
         """
         Args:
@@ -74,8 +72,6 @@ class ActiveEcosystemManager:
         """
         if config_path:
             self.config_path = Path(config_path)
-        elif os.environ.get("RUMI_USER_DATA"):
-            self.config_path = Path(os.environ["RUMI_USER_DATA"]) / "active_ecosystem.json"
         else:
             settings_dir = get_mount_path("data.settings", ensure_exists=True)
             self.config_path = settings_dir.parent / "active_ecosystem.json"
@@ -87,17 +83,16 @@ class ActiveEcosystemManager:
         if secret_key:
             self._secret_key: bytes = secret_key.encode("utf-8")
         else:
-            secret_key_file = (
-                Path(os.environ["RUMI_USER_DATA"]) / "permissions" / ".secret_key"
-                if os.environ.get("RUMI_USER_DATA")
-                else Path(self.SECRET_KEY_FILE)
-            )
             self._secret_key = generate_or_load_signing_key(
-                secret_key_file,
+                self._default_secret_key_path(),
             )
         
         # 設定を読み込み
         self._load_config()
+
+    def _default_secret_key_path(self) -> Path:
+        """Keep the signing key alongside active_ecosystem.json in the same user_data root."""
+        return self.config_path.parent / "permissions" / ".secret_key"
     
     def _load_config(self):
         """設定ファイルを読み込む（HMAC 検証付き）"""
