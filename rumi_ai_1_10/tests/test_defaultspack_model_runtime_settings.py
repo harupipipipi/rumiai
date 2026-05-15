@@ -45,6 +45,24 @@ def test_model_runtime_settings_preferred_model_and_thinking_level(tmp_path):
     assert service.get_thinking_level()["level"] == "high"
 
 
+def test_model_runtime_settings_normalizes_model_api_routes(tmp_path):
+    service = ModelRuntimeSettingsService(tmp_path)
+
+    settings = service.update_settings(
+        {
+            "model_api_routes": [
+                "google/gemini-2.5-pro: google/main, google/backup",
+                "google/gemma: google/work",
+            ]
+        }
+    )
+
+    assert settings["model_api_routes"] == (
+        "google/gemini-2.5-pro: google/main, google/backup\n"
+        "google/gemma: google/work\n"
+    )
+
+
 def test_effective_thinking_level_resolution_order(tmp_path):
     service = ModelRuntimeSettingsService(tmp_path)
     service.set_thinking_level("low", scope="global")

@@ -12,6 +12,9 @@ from .openai_compatible_provider import OpenAICompatibleProvider
 from ..oauth_store import get_provider_access_token
 from .profile_catalog import merge_curated_and_profiles, profile_dir_for
 
+_GOOGLE_FUNCTION_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_.:-]{0,127}$")
+_GOOGLE_FUNCTION_NAME_ALLOWED_RE = re.compile(r"[^A-Za-z0-9_.:-]+")
+
 
 class GoogleProvider(OpenAICompatibleProvider):
     """Google Gemini provider using Google's OpenAI-compatible Gemini endpoint."""
@@ -313,14 +316,74 @@ class GoogleProvider(OpenAICompatibleProvider):
                 return value
         return value
 
+    @staticmethod
+    def _remap_tool_name(name: str, name_map: Dict[str, str] | None = None) -> str:
+        text = str(name or "").strip()
+        if not text or not isinstance(name_map, dict):
+            return text
+        return str(name_map.get(text) or text)
+
+    @staticmethod
+    def _sanitize_google_function_name(name: str, used: set[str] | None = None) -> str:
+        original = str(name or "").strip()
+        if _GOOGLE_FUNCTION_NAME_RE.fullmatch(original):
+            candidate = original
+        else:
+            candidate = _GOOGLE_FUNCTION_NAME_ALLOWED_RE.sub("_", original).strip()
+            if not candidate:
+                candidate = "_tool"
+            if not re.match(r"^[A-Za-z_]", candidate):
+                candidate = "_" + candidate
+            candidate = candidate[:128] or "_tool"
+        registry = used if used is not None else set()
+        if candidate not in registry:
+            registry.add(candidate)
+            return candidate
+        base = candidate[:120] or "_tool"
+        suffix = 2
+        while True:
+            deduped = f"{base}_{suffix}"[:128]
+            if deduped not in registry:
+                registry.add(deduped)
+                return deduped
+            suffix += 1
+
     @classmethod
-    def _native_function_call_part(cls, tool_call: Any) -> Dict[str, Any] | None:
+    def _tool_name_maps(cls, tools: Any) -> tuple[Dict[str, str], Dict[str, str]]:
+        if not isinstance(tools, list):
+            return {}, {}
+        forward: Dict[str, str] = {}
+        reverse: Dict[str, str] = {}
+        used: set[str] = set()
+        for tool in tools:
+            function_def = tool.get("function") if isinstance(tool, dict) else None
+            name = str(
+                function_def.get("name")
+                if isinstance(function_def, dict)
+                else tool.get("name")
+                if isinstance(tool, dict)
+                else ""
+            ).strip()
+            if not name:
+                continue
+            alias = cls._sanitize_google_function_name(name, used)
+            forward[name] = alias
+            reverse[alias] = name
+        return forward, reverse
+
+    @classmethod
+    def _native_function_call_part(
+        cls,
+        tool_call: Any,
+        name_map: Dict[str, str] | None = None,
+    ) -> Dict[str, Any] | None:
         if not isinstance(tool_call, dict):
             return None
         function_def = tool_call.get("function") if isinstance(tool_call.get("function"), dict) else {}
         name = str(function_def.get("name") or tool_call.get("name") or "").strip()
         if not name:
             return None
+        name = cls._remap_tool_name(name, name_map)
         args = cls._json_value(function_def.get("arguments", tool_call.get("arguments", {})))
         function_call = {
             "name": name,
@@ -332,10 +395,15 @@ class GoogleProvider(OpenAICompatibleProvider):
         return {"functionCall": function_call}
 
     @classmethod
-    def _native_function_response_part(cls, message: Dict[str, Any]) -> Dict[str, Any] | None:
+    def _native_function_response_part(
+        cls,
+        message: Dict[str, Any],
+        name_map: Dict[str, str] | None = None,
+    ) -> Dict[str, Any] | None:
         name = str(message.get("name") or message.get("tool_name") or "").strip()
         if not name:
             return None
+        name = cls._remap_tool_name(name, name_map)
         content = cls._json_value(message.get("content", ""))
         response = content if isinstance(content, dict) else {"result": content}
         function_response = {"name": name, "response": response}
@@ -345,7 +413,11 @@ class GoogleProvider(OpenAICompatibleProvider):
         return {"functionResponse": function_response}
 
     @classmethod
-    def _native_build_contents(cls, messages: Any) -> tuple[List[Dict[str, Any]], Dict[str, Any] | None]:
+    def _native_build_contents(
+        cls,
+        messages: Any,
+        name_map: Dict[str, str] | None = None,
+    ) -> tuple[List[Dict[str, Any]], Dict[str, Any] | None]:
         contents: List[Dict[str, Any]] = []
         system_parts: List[Dict[str, Any]] = []
         for message in list(messages or []):
@@ -358,11 +430,14 @@ class GoogleProvider(OpenAICompatibleProvider):
             if role == "assistant":
                 parts.extend(
                     part
-                    for part in (cls._native_function_call_part(item) for item in message.get("tool_calls", []) or [])
+                    for part in (
+                        cls._native_function_call_part(item, name_map)
+                        for item in message.get("tool_calls", []) or []
+                    )
                     if part
                 )
             elif role == "tool":
-                response_part = cls._native_function_response_part(message)
+                response_part = cls._native_function_response_part(message, name_map)
                 if response_part:
                     parts.append(response_part)
             if not parts:
@@ -399,8 +474,12 @@ class GoogleProvider(OpenAICompatibleProvider):
             normalized.setdefault("required", [])
         return normalized
 
-    @staticmethod
-    def _native_tools(tools: Any) -> List[Dict[str, Any]]:
+    @classmethod
+    def _native_tools(
+        cls,
+        tools: Any,
+        name_map: Dict[str, str] | None = None,
+    ) -> List[Dict[str, Any]]:
         if not isinstance(tools, list):
             return []
         native_tools: List[Dict[str, Any]] = []
@@ -414,18 +493,25 @@ class GoogleProvider(OpenAICompatibleProvider):
                 continue
             if not isinstance(function_def, dict) or not name:
                 continue
-            declaration: Dict[str, Any] = {"name": name}
+            declaration: Dict[str, Any] = {"name": cls._remap_tool_name(name, name_map)}
             description = function_def.get("description")
             if isinstance(description, str) and description:
                 declaration["description"] = description
-            declaration["parameters"] = GoogleProvider._native_schema(function_def.get("parameters"))
+            declaration["parameters"] = cls._native_schema(function_def.get("parameters"))
             function_declarations.append(declaration)
         if function_declarations:
             native_tools.append({"functionDeclarations": function_declarations})
         return native_tools
 
-    def _native_body(self, model: str, messages: Any, tools: Any, params: Dict[str, Any]) -> Dict[str, Any]:
-        contents, system_instruction = self._native_build_contents(messages)
+    def _native_body(
+        self,
+        model: str,
+        messages: Any,
+        tools: Any,
+        params: Dict[str, Any],
+        name_map: Dict[str, str] | None = None,
+    ) -> Dict[str, Any]:
+        contents, system_instruction = self._native_build_contents(messages, name_map)
         body: Dict[str, Any] = {"contents": contents}
         if system_instruction:
             body["systemInstruction"] = system_instruction
@@ -438,7 +524,7 @@ class GoogleProvider(OpenAICompatibleProvider):
                 generation_config[target] = params[source]
         if generation_config:
             body["generationConfig"] = generation_config
-        native_tools = self._native_tools(tools)
+        native_tools = self._native_tools(tools, name_map)
         if native_tools:
             body["tools"] = native_tools
         extra_body = params.get("extra_body")
@@ -500,7 +586,11 @@ class GoogleProvider(OpenAICompatibleProvider):
         }
 
     @classmethod
-    def _native_extract_parts(cls, raw: Dict[str, Any]) -> tuple[str, str, str, List[Dict[str, Any]]]:
+    def _native_extract_parts(
+        cls,
+        raw: Dict[str, Any],
+        reverse_name_map: Dict[str, str] | None = None,
+    ) -> tuple[str, str, str, List[Dict[str, Any]]]:
         text_parts: List[str] = []
         thought_parts: List[str] = []
         tool_uses: List[Dict[str, Any]] = []
@@ -518,10 +608,11 @@ class GoogleProvider(OpenAICompatibleProvider):
                 function_call = part.get("functionCall") if isinstance(part.get("functionCall"), dict) else None
                 if function_call:
                     call_id = str(function_call.get("id") or function_call.get("name") or f"google_call_{len(tool_uses) + 1}").strip()
+                    name = cls._remap_tool_name(str(function_call.get("name") or ""), reverse_name_map)
                     tool_uses.append({
                         "type": "tool_use",
                         "id": call_id,
-                        "name": str(function_call.get("name") or ""),
+                        "name": name,
                         "input": json.dumps(function_call.get("args") or {}, ensure_ascii=False),
                     })
                     continue
@@ -536,10 +627,11 @@ class GoogleProvider(OpenAICompatibleProvider):
         return "".join(text_parts), "".join(thought_parts), finish_reason, tool_uses
 
     def _native_complete(self, model, messages, tools, params):
-        body = self._native_body(model, messages, tools, dict(params or {}))
+        name_map, reverse_name_map = self._tool_name_maps(tools)
+        body = self._native_body(model, messages, tools, dict(params or {}), name_map)
         with self._native_request_json(model, body) as resp:
             raw = json.loads(resp.read().decode("utf-8"))
-        text, thought, finish_reason, tool_uses = self._native_extract_parts(raw)
+        text, thought, finish_reason, tool_uses = self._native_extract_parts(raw, reverse_name_map)
         content = [{"type": "text", "text": text}]
         content.extend(tool_uses)
         response = {
@@ -558,7 +650,8 @@ class GoogleProvider(OpenAICompatibleProvider):
         return response
 
     def _native_stream(self, model, messages, tools, params):
-        body = self._native_body(model, messages, tools, dict(params or {}))
+        name_map, reverse_name_map = self._tool_name_maps(tools)
+        body = self._native_body(model, messages, tools, dict(params or {}), name_map)
         resp = self._native_request_json(model, body, stream=True)
         finish_reason = "stop"
         usage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
@@ -568,7 +661,7 @@ class GoogleProvider(OpenAICompatibleProvider):
                     obj = json.loads(payload)
                 except json.JSONDecodeError:
                     continue
-                text, thought, candidate_finish, tool_uses = self._native_extract_parts(obj)
+                text, thought, candidate_finish, tool_uses = self._native_extract_parts(obj, reverse_name_map)
                 if thought:
                     yield {"type": "thinking_delta", "delta": {"type": "text", "text": thought}}
                 if text:
@@ -643,8 +736,60 @@ class GoogleProvider(OpenAICompatibleProvider):
             parsed["metadata"] = metadata
         return parsed
 
-    @staticmethod
-    def _sanitize_tool(tool: Any) -> Dict[str, Any] | None:
+    def _build_request_with_tool_name_map(
+        self,
+        messages: Any,
+        name_map: Dict[str, str] | None = None,
+    ) -> List[Dict[str, Any]]:
+        request = super().build_request(messages)
+        if not isinstance(name_map, dict) or not name_map:
+            return request
+        remapped: List[Dict[str, Any]] = []
+        for message in request:
+            if not isinstance(message, dict):
+                remapped.append(message)
+                continue
+            current = dict(message)
+            if current.get("role") == "assistant" and isinstance(current.get("tool_calls"), list):
+                tool_calls = []
+                for tool_call in current.get("tool_calls") or []:
+                    if not isinstance(tool_call, dict):
+                        tool_calls.append(tool_call)
+                        continue
+                    mapped_call = dict(tool_call)
+                    function_def = mapped_call.get("function") if isinstance(mapped_call.get("function"), dict) else None
+                    if isinstance(function_def, dict):
+                        mapped_function = dict(function_def)
+                        mapped_function["name"] = self._remap_tool_name(mapped_function.get("name", ""), name_map)
+                        mapped_call["function"] = mapped_function
+                    elif mapped_call.get("name"):
+                        mapped_call["name"] = self._remap_tool_name(mapped_call.get("name", ""), name_map)
+                    tool_calls.append(mapped_call)
+                current["tool_calls"] = tool_calls
+            elif current.get("role") == "tool":
+                current["name"] = self._remap_tool_name(current.get("name", ""), name_map)
+            remapped.append(current)
+        return remapped
+
+    def _parse_response_with_tool_name_map(
+        self,
+        raw: Dict[str, Any],
+        reverse_name_map: Dict[str, str] | None = None,
+    ) -> Dict[str, Any]:
+        parsed = self.parse_response(raw)
+        if not isinstance(reverse_name_map, dict) or not reverse_name_map:
+            return parsed
+        for block in parsed.get("content", []):
+            if isinstance(block, dict) and block.get("type") == "tool_use":
+                block["name"] = self._remap_tool_name(block.get("name", ""), reverse_name_map)
+        return parsed
+
+    @classmethod
+    def _sanitize_tool(
+        cls,
+        tool: Any,
+        name_map: Dict[str, str] | None = None,
+    ) -> Dict[str, Any] | None:
         """Return the OpenAI-compatible function-tool shape Google accepts."""
         if not isinstance(tool, dict):
             return None
@@ -654,7 +799,7 @@ class GoogleProvider(OpenAICompatibleProvider):
         name = str(function_def.get("name") or "").strip()
         if not name:
             return None
-        sanitized_function: Dict[str, Any] = {"name": name}
+        sanitized_function: Dict[str, Any] = {"name": cls._remap_tool_name(name, name_map)}
         description = function_def.get("description")
         if isinstance(description, str) and description:
             sanitized_function["description"] = description
@@ -666,12 +811,16 @@ class GoogleProvider(OpenAICompatibleProvider):
         return {"type": "function", "function": sanitized_function}
 
     @classmethod
-    def _sanitize_tools(cls, tools: Any) -> List[Dict[str, Any]]:
+    def _sanitize_tools(
+        cls,
+        tools: Any,
+        name_map: Dict[str, str] | None = None,
+    ) -> List[Dict[str, Any]]:
         if not isinstance(tools, list):
             return []
         sanitized: List[Dict[str, Any]] = []
         for tool in tools:
-            item = cls._sanitize_tool(tool)
+            item = cls._sanitize_tool(tool, name_map)
             if item is not None:
                 sanitized.append(item)
         return sanitized
@@ -680,21 +829,23 @@ class GoogleProvider(OpenAICompatibleProvider):
         if self._use_native_generative_api(model):
             return self._native_complete(model, messages, tools, params)
         translated = self._translate_params(params, model)
-        body = {"model": model, "messages": self.build_request(messages)}
-        sanitized_tools = self._sanitize_tools(tools)
+        name_map, reverse_name_map = self._tool_name_maps(tools)
+        body = {"model": model, "messages": self._build_request_with_tool_name_map(messages, name_map)}
+        sanitized_tools = self._sanitize_tools(tools, name_map)
         if sanitized_tools:
             body["tools"] = sanitized_tools
         self._copy_chat_params(body, translated)
         raw = self._request_json("/chat/completions", body)
-        return self.parse_response(raw)
+        return self._parse_response_with_tool_name_map(raw, reverse_name_map)
 
     def stream(self, model, messages, tools, params):
         if self._use_native_generative_api(model):
             yield from self._native_stream(model, messages, tools, params)
             return
         translated = self._translate_params(params, model)
-        body = {"model": model, "messages": self.build_request(messages)}
-        sanitized_tools = self._sanitize_tools(tools)
+        name_map, reverse_name_map = self._tool_name_maps(tools)
+        body = {"model": model, "messages": self._build_request_with_tool_name_map(messages, name_map)}
+        sanitized_tools = self._sanitize_tools(tools, name_map)
         if sanitized_tools:
             body["tools"] = sanitized_tools
         self._copy_chat_params(body, translated)
@@ -714,7 +865,21 @@ class GoogleProvider(OpenAICompatibleProvider):
                 text = delta.get("content")
                 if text:
                     yield {"type": "content_delta", "delta": {"type": "text", "text": text}}
-                yield from self._stream_tool_call_events(delta, tool_call_state)
+                remapped_delta = dict(delta)
+                remapped_tool_calls = []
+                for tool_call in delta.get("tool_calls") or []:
+                    if not isinstance(tool_call, dict):
+                        remapped_tool_calls.append(tool_call)
+                        continue
+                    mapped_call = dict(tool_call)
+                    function_delta = mapped_call.get("function") if isinstance(mapped_call.get("function"), dict) else None
+                    if isinstance(function_delta, dict) and function_delta.get("name"):
+                        mapped_function = dict(function_delta)
+                        mapped_function["name"] = self._remap_tool_name(mapped_function.get("name", ""), reverse_name_map)
+                        mapped_call["function"] = mapped_function
+                    remapped_tool_calls.append(mapped_call)
+                remapped_delta["tool_calls"] = remapped_tool_calls
+                yield from self._stream_tool_call_events(remapped_delta, tool_call_state)
                 finish = choices[0].get("finish_reason")
                 if finish:
                     for current in tool_call_state.values():

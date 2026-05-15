@@ -27,6 +27,10 @@ DEFAULT_CATEGORY_SPECS: Dict[str, CategorySpec] = {
         category_id="tool",
         manifest_glob="tools/*/manifest.json",
     ),
+    "skill": CategorySpec(
+        category_id="skill",
+        manifest_glob="skills/*/manifest.json",
+    ),
     "chat_mode": CategorySpec(
         category_id="chat_mode",
         manifest_glob="chat_modes/*/manifest.json",
@@ -52,4 +56,3 @@ DEFAULT_CATEGORY_SPECS: Dict[str, CategorySpec] = {
         manifest_glob="policies/*/manifest.json",
     ),
 }
-

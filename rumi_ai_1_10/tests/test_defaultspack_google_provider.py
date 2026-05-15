@@ -552,6 +552,157 @@ class TestDefaultspackGoogleProvider(unittest.TestCase):
         self.assertEqual(response["content"][1]["id"], "call_browser_1")
         self.assertEqual(response["content"][1]["name"], "browser_use")
 
+    def test_google_native_gemma_sanitizes_invalid_tool_names_and_restores_original_name(self):
+        from domain.ai_client.providers.google_provider import GoogleProvider
+
+        captured = {}
+
+        with patch.dict(os.environ, {"GEMINI_API_KEY": "gemini-key"}, clear=True):
+            provider = GoogleProvider()
+
+        class FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self):
+                return json.dumps(
+                    {
+                        "candidates": [
+                            {
+                                "content": {
+                                    "parts": [
+                                        {
+                                            "functionCall": {
+                                                "id": "call_external_1",
+                                                "name": "External_Send",
+                                                "args": {"message": "hello"},
+                                            }
+                                        }
+                                    ]
+                                },
+                                "finishReason": "STOP",
+                            }
+                        ],
+                    }
+                ).encode("utf-8")
+
+        def fake_native_request_json(model, body, stream=False):
+            captured["body"] = body
+            return FakeResponse()
+
+        provider._native_request_json = fake_native_request_json
+        response = provider.complete(
+            "gemma-4-31b-it",
+            [
+                {"role": "user", "content": "send externally"},
+                {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [
+                        {
+                            "id": "previous_call",
+                            "type": "function",
+                            "function": {"name": "External Send", "arguments": "{\"message\":\"hello\"}"},
+                        }
+                    ],
+                },
+                {"role": "tool", "name": "External Send", "tool_call_id": "previous_call", "content": "{\"result\":\"ok\"}"},
+            ],
+            [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "External Send",
+                        "description": "Send to external destinations.",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {"message": {"type": "string"}},
+                            "required": ["message"],
+                        },
+                    },
+                }
+            ],
+            {"thinking_level": "high"},
+        )
+
+        declaration = captured["body"]["tools"][0]["functionDeclarations"][0]
+        self.assertEqual(declaration["name"], "External_Send")
+        self.assertEqual(captured["body"]["contents"][1]["parts"][0]["functionCall"]["name"], "External_Send")
+        self.assertEqual(captured["body"]["contents"][2]["parts"][0]["functionResponse"]["name"], "External_Send")
+        self.assertEqual(response["content"][1]["name"], "External Send")
+
+    def test_google_provider_openai_compatible_sanitizes_invalid_tool_names_and_restores_original_name(self):
+        from domain.ai_client.providers.google_provider import GoogleProvider
+
+        captured = {}
+
+        with patch.dict(os.environ, {"GEMINI_API_KEY": "gemini-key"}, clear=True):
+            provider = GoogleProvider()
+
+        def fake_request_json(path, body):
+            captured["body"] = body
+            return {
+                "choices": [
+                    {
+                        "message": {
+                            "content": "",
+                            "tool_calls": [
+                                {
+                                    "id": "call_external_1",
+                                    "type": "function",
+                                    "function": {"name": "External_Send", "arguments": "{\"message\":\"hello\"}"},
+                                }
+                            ],
+                        },
+                        "finish_reason": "tool_calls",
+                    }
+                ],
+                "usage": {},
+            }
+
+        provider._request_json = fake_request_json
+        response = provider.complete(
+            "gemini-2.5-flash",
+            [
+                {"role": "user", "content": "send externally"},
+                {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [
+                        {
+                            "id": "previous_call",
+                            "type": "function",
+                            "function": {"name": "External Send", "arguments": "{\"message\":\"hello\"}"},
+                        }
+                    ],
+                },
+                {"role": "tool", "name": "External Send", "tool_call_id": "previous_call", "content": "{\"result\":\"ok\"}"},
+            ],
+            [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "External Send",
+                        "description": "Send to external destinations.",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {"message": {"type": "string"}},
+                            "required": ["message"],
+                        },
+                    },
+                }
+            ],
+            {},
+        )
+
+        self.assertEqual(captured["body"]["tools"][0]["function"]["name"], "External_Send")
+        self.assertEqual(captured["body"]["messages"][1]["tool_calls"][0]["function"]["name"], "External_Send")
+        self.assertEqual(captured["body"]["messages"][2]["name"], "External_Send")
+        self.assertEqual(response["content"][1]["name"], "External Send")
+
     def test_openai_provider_translates_generic_thinking_level(self):
         from domain.ai_client.providers.openai_provider import OpenAIProvider
 

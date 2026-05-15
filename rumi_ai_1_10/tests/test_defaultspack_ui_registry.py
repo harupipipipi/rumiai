@@ -131,6 +131,26 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
             self.assertFalse(field_ids & runtime_args)
         self.assertIn("custom-widget", sidebar_ids)
         self.assertIn("custom", section_ids)
+        tools_section = next(section for section in catalog["settings"]["sections"] if section["id"] == "tools")
+        tools_field_ids = {field["id"] for field in tools_section["fields"]}
+        self.assertIn("tool_assist_mode", tools_field_ids)
+        self.assertEqual(catalog["settings"]["values"]["tools"]["tool_assist_mode"], "auto")
+        general_section = next(section for section in catalog["settings"]["sections"] if section["id"] == "general")
+        general_field_ids = {field["id"] for field in general_section["fields"]}
+        self.assertIn("language", general_field_ids)
+        self.assertEqual(catalog["settings"]["values"]["general"]["language"], "ja")
+        models_section = next(section for section in catalog["settings"]["sections"] if section["id"] == "models")
+        models_field_ids = {field["id"] for field in models_section["fields"]}
+        self.assertIn("model_api_routes", models_field_ids)
+        route_field = next(field for field in models_section["fields"] if field["id"] == "model_api_routes")
+        self.assertEqual(route_field["type"], "model_api_routes")
+        self.assertIsInstance(route_field.get("options"), list)
+        self.assertTrue(route_field["options"])
+        self.assertIn("api_keys", route_field)
+        apis_section = next(section for section in catalog["settings"]["sections"] if section["id"] == "apis")
+        apis_field_ids = {field["id"] for field in apis_section["fields"]}
+        self.assertIn("api_keys", apis_field_ids)
+        self.assertNotIn("model_api_routes", apis_field_ids)
         self.assertIn("operations_company", section_ids)
         self.assertNotIn("research", section_ids)
         self.assertNotIn("browser_computer", section_ids)
@@ -349,6 +369,25 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         self.assertTrue(reloaded["preview"]["auto_open"])
         self.assertEqual(reloaded["preview"]["max_items"], 5)
 
+    def test_keyboard_button_navigation_defaults_off(self):
+        from domain.frontend.registry import FrontendRegistry
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pack_root = Path(tmpdir)
+            with patch("domain.frontend.registry.AIClient") as mock_client:
+                mock_client.return_value.list_models.return_value = [{"id": "stub/default"}]
+                settings = FrontendRegistry(pack_root=pack_root).get_settings()
+
+        general = settings["values"]["general"]
+        field_ids = {
+            field["id"]
+            for section in settings["sections"]
+            if section["id"] == "general"
+            for field in section["fields"]
+        }
+        self.assertFalse(general["keyboard_button_navigation"])
+        self.assertIn("keyboard_button_navigation", field_ids)
+
     def test_settings_api_keys_expose_google_browser_oauth_status(self):
         from domain.ai_client.oauth_store import (
             save_provider_oauth_client_config,
@@ -539,6 +578,34 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         self.assertEqual(values["debug"]["custom_debug_flag"], "keep-me")
         self.assertEqual(values["tools"]["default_target"], "current_browser")
         self.assertFalse(values["tools"]["keep_selected_tools_after_send"])
+
+    def test_settings_migrates_model_api_routes_from_apis_to_models(self):
+        from domain.frontend.registry import FrontendRegistry
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pack_root = Path(tmpdir)
+            settings_path = pack_root / "user_data" / "shared" / "frontend_settings.json"
+            settings_path.parent.mkdir(parents=True, exist_ok=True)
+            settings_path.write_text(
+                json.dumps(
+                    {
+                        "apis": {
+                            "model_api_routes": "google/gemini-2.5-pro: google/main, google/backup"
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with patch("domain.frontend.registry.AIClient") as mock_client:
+                mock_client.return_value.list_models.return_value = [{"id": "stub/default"}]
+                values = FrontendRegistry(pack_root=pack_root).get_settings()["values"]
+
+        self.assertEqual(
+            values["models"]["model_api_routes"],
+            "google/gemini-2.5-pro: google/main, google/backup\n",
+        )
+        self.assertNotIn("model_api_routes", values["apis"])
 
     def test_update_settings_stores_openrouter_key_as_secret(self):
         from core_runtime.secrets_store import SecretsStore
@@ -812,7 +879,13 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
                             {
                                 "tool_name": "calculator",
                                 "arguments": {"expression": "13829+12312"},
-                                "result": {"summary": "26141"},
+                                "result": {
+                                    "summary": "26141",
+                                    "visual_feedback": {
+                                        "data_url": "data:image/png;base64,iVBORw0KGgo=",
+                                        "model_image_path": "/tmp/result.png",
+                                    },
+                                },
                             }
                         ],
                     },
@@ -837,7 +910,12 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
 
         preview_ids = {item["id"] for item in preview["previews"]}
         self.assertTrue(any(item.startswith("tool-web_search") for item in preview_ids))
-        self.assertTrue(any(item.startswith("tool-log-") for item in preview_ids))
+        self.assertTrue(any(item.startswith("tool-log-artifact-") for item in preview_ids))
+        self.assertTrue(any(item.startswith("tool-log-inline-") for item in preview_ids))
+        self.assertFalse(any(
+            (item.get("data") or {}).get("filename", "").endswith(".tool")
+            for item in preview["previews"]
+        ))
         self.assertTrue(any(item.startswith("widget-") for item in preview_ids))
         self.assertTrue(any(item.startswith("code-") for item in preview_ids))
 

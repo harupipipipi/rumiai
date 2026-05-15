@@ -8,6 +8,7 @@ import {
   nextModelCandidateIndex,
   profileNeedsApiKey,
   resolveComposerWidgetDrop,
+  shouldFocusComposerForSlashKey,
 } from "./ComposerRenderer";
 import { COMPOSER_BUTTON_DROP, COMPOSER_PANEL_DROP, COMPOSER_SELECTOR_DROP, COMPOSER_TOGGLE_DROP } from "../lib/toolUi";
 
@@ -67,6 +68,22 @@ test("model candidate menu keyboard helpers cycle and select", () => {
   assert.deepEqual(modelCandidateMenuKeyAction("Tab", false, 0, 0), { handled: false });
   assert.deepEqual(modelCandidateMenuKeyAction("Enter", false, 0, 0), { handled: false });
   assert.deepEqual(modelCandidateMenuKeyAction("Escape", false, 0, 0), { handled: false });
+});
+
+test("slash key focuses composer only for plain document shortcuts", () => {
+  const base = {
+    key: "/",
+    metaKey: false,
+    ctrlKey: false,
+    altKey: false,
+    defaultPrevented: false,
+    isComposing: false,
+  };
+
+  assert.equal(shouldFocusComposerForSlashKey(base, null), true);
+  assert.equal(shouldFocusComposerForSlashKey({ ...base, key: "a" }, null), false);
+  assert.equal(shouldFocusComposerForSlashKey({ ...base, metaKey: true }, null), false);
+  assert.equal(shouldFocusComposerForSlashKey({ ...base, defaultPrevented: true }, null), false);
 });
 
 test("composer model drop selects the model instead of creating a widget chip", () => {

@@ -1,13 +1,18 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import { MessageSquare } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent } from "react";
 
+import { ConversationSpotlight } from "./components/ConversationSpotlight";
 import type { ChatItem } from "./components/HistoryBoard";
 import type { ToolPreviewItem, ToolPreviewMode } from "./components/ToolPreview";
 import { buildToolPreviewDisplayItems, hasCanvasItems } from "./components/ToolPreview";
-import { api, conversationArtifactFileUrl, type ChatActivityEvent, type ChatContentBlock, type ChatMessage, type ChatStreamEvent, type ChatToolStreamEvent, type ComposerCommandExecuteResult, type ComposerCommandItem, type ComposerCommandMode, type ComposerWidgetAction, type Conversation, type ModelCommandCandidate, type ModelProfile, type OperationsCompanyStatus, type SettingsSection, type SidebarAction, type SidebarItem, type UICatalog } from "./lib/api";
-import { deriveConversationTitle, formatRelativeTime, messageToText } from "./lib/chat";
+import { api, type ChatActivityEvent, type ChatContentBlock, type ChatMessage, type ChatStreamEvent, type ChatToolStreamEvent, type ComposerCommandExecuteResult, type ComposerCommandItem, type ComposerCommandMode, type ComposerWidgetAction, type Conversation, type ConversationSearchResult, type ModelCommandCandidate, type ModelProfile, type OperationsCompanyStatus, type SettingsSection, type SidebarAction, type SidebarItem, type UICatalog } from "./lib/api";
+import { reduceBrowserStateFromEvents } from "./lib/browserState";
+import { deriveConversationTitle, formatRelativeTime, messageToText, orderConversationMessages } from "./lib/chat";
 import { cn } from "./lib/cn";
 import { canExecuteComposerEndpointAction, isSafeLocalEndpoint } from "./lib/composerWidgets";
+import { conversationMatchesSpotlightFilter, conversationToSearchResult, type SpotlightFilter } from "./lib/conversationSpotlight";
+import { normalizeLocale } from "./lib/i18n";
+import { PENDING_CHAT_REQUEST_TTL_MS, shouldClearPendingAfterConversationRefresh, type PendingChatRequest } from "./lib/pendingChat";
+import { isRecord, toolPreviewsFromMessages, upsertStreamActivityEvent } from "./lib/toolPreviews";
 import { hasShellRegion } from "./lib/uiShell";
 import { hasWorkspaceAttachment, workspaceFileToAttachment } from "./lib/workspaceAttachments";
 import { resolveDefaultspackRenderers } from "./renderers/defaultspackRenderers";
@@ -18,16 +23,8 @@ type BrowserApproval = {
   action: string;
   payload: Record<string, unknown>;
   token: string;
+  toolName: string;
 };
-
-type PendingChatRequest = {
-  conversationId: string;
-  startedAt: number;
-  status: string;
-  toolNames: string[];
-};
-
-const PENDING_CHAT_REQUEST_TTL_MS = 6 * 60 * 60_000;
 
 type ComposerCandidateMenuState = {
   mode: "model";
@@ -200,17 +197,6 @@ function optimisticAssistantMessage(conversationId: string, model: string): Chat
   };
 }
 
-function isAssistantMessageStillRunning(message: ChatMessage | undefined): boolean {
-  if (!message || message.role === "user") return false;
-  const metadata = message.metadata && typeof message.metadata === "object" ? message.metadata : {};
-  const thinking = metadata.thinking && typeof metadata.thinking === "object"
-    ? metadata.thinking as Record<string, unknown>
-    : {};
-  const state = String(thinking.state ?? "").toLowerCase();
-  const finishReason = String(message.finish_reason ?? "").toLowerCase();
-  return state === "streaming" || state === "running" || finishReason === "streaming";
-}
-
 function previewFromAction(action: SidebarAction, title: string, data: unknown): ToolPreviewItem {
   const content = typeof data === "string" ? data : JSON.stringify(data, null, 2);
   return {
@@ -233,256 +219,6 @@ function previewLabel(preview: ToolPreviewItem | undefined): string {
   if (data.type === "code") return data.filename || "Code preview";
   if (data.type === "file") return data.filename || "File preview";
   return data.alt || "Image preview";
-}
-
-function compactPreviewValue(value: unknown): string {
-  if (value === null || value === undefined) return "";
-  if (typeof value === "string") return value;
-  if (typeof value === "number" || typeof value === "boolean") return String(value);
-  if (Array.isArray(value)) {
-    return value.map(compactPreviewValue).filter(Boolean).join(", ");
-  }
-  if (typeof value === "object") {
-    return Object.entries(value as Record<string, unknown>)
-      .slice(0, 6)
-      .map(([key, entry]) => {
-        const text = compactPreviewValue(entry);
-        return text ? `${key}: ${text}` : key;
-      })
-      .join("\n");
-  }
-  return String(value);
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return !!value && typeof value === "object" && !Array.isArray(value);
-}
-
-function stringValue(value: unknown): string {
-  return typeof value === "string" ? value.trim() : "";
-}
-
-function basename(path: string): string {
-  const normalized = path.replace(/\\/g, "/");
-  return normalized.split("/").filter(Boolean).pop() || "artifact";
-}
-
-function isImagePath(path: string): boolean {
-  return /\.(png|jpe?g|gif|webp|svg)$/i.test(path);
-}
-
-function isImageDataUrl(value: string): boolean {
-  return /^data:image\/[a-z0-9.+-]+;base64,/i.test(value);
-}
-
-function dataUrlName(value: string): string {
-  const match = value.match(/^data:image\/([a-z0-9.+-]+);/i);
-  const extension = match?.[1]?.replace("jpeg", "jpg").split("+")[0] || "png";
-  return `screenshot.${extension}`;
-}
-
-function collectArtifactPaths(value: unknown, paths: string[] = [], seen = new Set<string>()): string[] {
-  if (Array.isArray(value)) {
-    value.forEach((item) => collectArtifactPaths(item, paths, seen));
-    return paths;
-  }
-  if (!isRecord(value)) return paths;
-
-  const preferredPath = stringValue(value.model_image_path) || stringValue(value.screenshot_path) || stringValue(value.path);
-  if (preferredPath && !seen.has(preferredPath)) {
-    seen.add(preferredPath);
-    paths.push(preferredPath);
-  }
-  Object.entries(value).forEach(([key, entry]) => {
-    if (key === "path" || key === "screenshot_path" || key === "model_image_path" || key === "data_url" || key === "dataUrl") return;
-    collectArtifactPaths(entry, paths, seen);
-  });
-  return paths;
-}
-
-function collectInlineImageUrls(value: unknown, urls: string[] = [], seen = new Set<string>()): string[] {
-  if (Array.isArray(value)) {
-    value.forEach((item) => collectInlineImageUrls(item, urls, seen));
-    return urls;
-  }
-  if (!isRecord(value)) return urls;
-
-  const dataUrl = stringValue(value.data_url) || stringValue(value.dataUrl);
-  if (dataUrl && isImageDataUrl(dataUrl) && !seen.has(dataUrl)) {
-    seen.add(dataUrl);
-    urls.push(dataUrl);
-  }
-  Object.entries(value).forEach(([key, entry]) => {
-    if (key === "data_url" || key === "dataUrl") return;
-    collectInlineImageUrls(entry, urls, seen);
-  });
-  return urls;
-}
-
-function streamActivityEventKey(event: ChatActivityEvent): string {
-  const callId = typeof event.tool_call_id === "string" ? event.tool_call_id.trim() : "";
-  if (callId) return `call:${callId}`;
-  const toolName = typeof event.tool_name === "string" ? event.tool_name.trim() : "";
-  const args = event.arguments && typeof event.arguments === "object" ? event.arguments : {};
-  if (toolName) return `tool:${toolName}:${JSON.stringify(args)}`;
-  return `event:${event.type}:${event.phase ?? ""}:${event.message ?? ""}`;
-}
-
-function mergeStreamActivityEvent(base: ChatActivityEvent, update: ChatActivityEvent): ChatActivityEvent {
-  const merged: ChatActivityEvent = { ...base, ...update };
-  for (const key of ["arguments", "result", "artifact", "artifacts", "output", "message", "timestamp"]) {
-    if (merged[key] === undefined && base[key] !== undefined) {
-      merged[key] = base[key];
-    }
-  }
-  return merged;
-}
-
-function upsertStreamActivityEvent(events: ChatActivityEvent[], nextEvent: ChatActivityEvent): ChatActivityEvent[] {
-  const key = streamActivityEventKey(nextEvent);
-  const index = events.findIndex((event) => streamActivityEventKey(event) === key);
-  if (index === -1) return [...events, nextEvent];
-  return events.map((event, eventIndex) => (
-    eventIndex === index ? mergeStreamActivityEvent(event, nextEvent) : event
-  ));
-}
-
-function resultValuesForToolEvent(event: ChatActivityEvent): unknown[] {
-  return [event.result, event.artifact, event.artifacts, event.output].filter((value) => value !== undefined);
-}
-
-function toolPreviewsFromMessages(messages: ChatMessage[]): ToolPreviewItem[] {
-  return messages.flatMap((message) => {
-    const logPreviews = (message.tool_logs ?? []).flatMap((log, index) => {
-    const toolName = String(log.tool_name ?? "tool");
-    const result = log.result as Record<string, unknown> | undefined;
-    const status = String(result?.status ?? "completed");
-    const args = compactPreviewValue(log.arguments);
-    const output = compactPreviewValue(result?.data ?? result ?? "");
-    const content = [
-      `tool: ${toolName}`,
-      `status: ${status}`,
-      args ? `input:\n${args}` : "",
-      output ? `result:\n${output}` : "",
-    ].filter(Boolean).join("\n\n");
-    const logPreview: ToolPreviewItem = {
-      id: `message-tool-${message.id}-${index}`,
-      toolStepId: toolName,
-      timestamp: typeof log.timestamp === "number" ? log.timestamp : message.created_at,
-      data: {
-        type: "file" as const,
-        filename: `${toolName}.tool`,
-        size: status,
-        content,
-      },
-    };
-    const artifactPreviews: ToolPreviewItem[] = collectArtifactPaths(log.result).map((path, artifactIndex) => {
-      const name = basename(path);
-      const url = conversationArtifactFileUrl(message.conversation_id, path);
-      return {
-        id: `message-tool-artifact-${message.id}-${index}-${artifactIndex}`,
-        toolStepId: toolName,
-        timestamp: (typeof log.timestamp === "number" ? log.timestamp : message.created_at) + artifactIndex + 0.1,
-        data: isImagePath(path)
-          ? {
-              type: "image" as const,
-              url,
-              alt: name,
-              path,
-            }
-          : {
-              type: "file" as const,
-              filename: name,
-              size: "tool artifact",
-              path,
-              url,
-              downloadName: name,
-              content: `artifact: ${path}`,
-            },
-      };
-    });
-    return [logPreview, ...artifactPreviews];
-    });
-
-    const logKeys = new Set((message.tool_logs ?? []).map((log) => {
-      const callId = typeof log.tool_call_id === "string" ? log.tool_call_id.trim() : "";
-      if (callId) return `call:${callId}`;
-      return `tool:${log.tool_name ?? "tool"}:${JSON.stringify(log.arguments ?? {})}`;
-    }));
-    const eventMap = new Map<string, ChatActivityEvent>();
-    for (const event of message.events ?? []) {
-      if (typeof event.tool_name !== "string" || !event.tool_name.trim()) continue;
-      const key = streamActivityEventKey(event);
-      if (logKeys.has(key)) continue;
-      const existing = eventMap.get(key);
-      eventMap.set(key, existing ? mergeStreamActivityEvent(existing, event) : event);
-    }
-    const eventPreviews = [...eventMap.values()].flatMap((event, index) => {
-      const values = resultValuesForToolEvent(event);
-      if (values.length === 0) return [];
-      const toolName = String(event.tool_name ?? "tool");
-      const timestamp = typeof event.timestamp === "number" ? event.timestamp : message.created_at + index + 0.01;
-      const status = event.is_error === true ? "failed" : event.type === "tool_call_completed" || event.type === "tool_result" ? "completed" : "running";
-      const args = compactPreviewValue(event.arguments);
-      const output = compactPreviewValue(event.result ?? event.output ?? event.artifact ?? event.artifacts ?? "");
-      const content = [
-        `tool: ${toolName}`,
-        `status: ${status}`,
-        args ? `input:\n${args}` : "",
-        output ? `result:\n${output}` : "",
-      ].filter(Boolean).join("\n\n");
-      const eventPreview: ToolPreviewItem = {
-        id: `message-tool-event-${message.id}-${streamActivityEventKey(event)}`,
-        toolStepId: String(event.tool_call_id ?? toolName),
-        timestamp,
-        data: {
-          type: "file" as const,
-          filename: `${toolName}.tool`,
-          size: status,
-          content,
-        },
-      };
-      const fileArtifacts = values.flatMap((value) => collectArtifactPaths(value));
-      const pathPreviews: ToolPreviewItem[] = fileArtifacts.map((path, artifactIndex) => {
-        const name = basename(path);
-        const url = conversationArtifactFileUrl(message.conversation_id, path);
-        return {
-          id: `message-tool-event-artifact-${message.id}-${streamActivityEventKey(event)}-${artifactIndex}`,
-          toolStepId: String(event.tool_call_id ?? toolName),
-          timestamp: timestamp + artifactIndex + 0.1,
-          data: isImagePath(path)
-            ? {
-                type: "image" as const,
-                url,
-                alt: name,
-                path,
-              }
-            : {
-                type: "file" as const,
-                filename: name,
-                size: "tool artifact",
-                path,
-                url,
-                downloadName: name,
-                content: `artifact: ${path}`,
-              },
-        };
-      });
-      const inlinePreviews: ToolPreviewItem[] = values.flatMap((value) => collectInlineImageUrls(value)).map((url, imageIndex) => ({
-        id: `message-tool-event-inline-${message.id}-${streamActivityEventKey(event)}-${imageIndex}`,
-        toolStepId: String(event.tool_call_id ?? toolName),
-        timestamp: timestamp + fileArtifacts.length + imageIndex + 0.1,
-        data: {
-          type: "image" as const,
-          url,
-          alt: dataUrlName(url),
-        },
-      }));
-      return [eventPreview, ...pathPreviews, ...inlinePreviews];
-    });
-
-    return [...logPreviews, ...eventPreviews];
-  }).sort((a, b) => b.timestamp - a.timestamp);
 }
 
 function CanvasPeek({
@@ -564,13 +300,23 @@ function isAbortError(errorValue: unknown): boolean {
   );
 }
 
+function isCancelledStreamError(errorValue: unknown): boolean {
+  if (isAbortError(errorValue)) return true;
+  const message = errorValue instanceof Error ? errorValue.message : String(errorValue ?? "");
+  return message.trim().toLowerCase() === "cancelled";
+}
+
 function isActivityStreamEvent(event: ChatStreamEvent): event is ChatToolStreamEvent {
   return (
     event.type === "status"
     || event.type === "tool_call"
     || event.type === "tool_call_started"
+    || event.type === "tool_call_delta"
     || event.type === "tool_call_completed"
     || event.type === "tool_result"
+    || event.type === "browser_state_invalidated"
+    || event.type === "browser_state_snapshot"
+    || event.type === "browser_dom_snapshot"
     || event.type === "browser_screenshot"
     || event.type === "approval_requested"
     || event.type === "ai_retry_scheduled"
@@ -959,22 +705,35 @@ function modelCommandInputQuery(value: string): string | null {
 }
 
 function pendingBrowserApproval(messages: ChatUiMessage[]): BrowserApproval | null {
+  const approvalFromCandidate = (candidate: Record<string, unknown> | undefined, fallbackToolName = "browser_computer"): BrowserApproval | null => {
+    if (!candidate?.requires_approval && !candidate?.approval_required) return null;
+    if (!candidate.approval_token) return null;
+    const rawPayload = candidate.payload;
+    const toolName = String(candidate.tool_name ?? fallbackToolName);
+    return {
+      action: String(candidate.action ?? "browser.session"),
+      payload: rawPayload && typeof rawPayload === "object" ? rawPayload as Record<string, unknown> : {},
+      token: String(candidate.approval_token),
+      toolName,
+    };
+  };
+
   for (const message of [...messages].reverse()) {
     if (message.role === "user") return null;
     if (message.role !== "agent") continue;
+    for (const event of [...(message.events ?? [])].reverse()) {
+      if (event.type !== "approval_requested" && event.phase !== "approval_requested") continue;
+      const approval = approvalFromCandidate(event as Record<string, unknown>, String(event.tool_name ?? "browser_computer"));
+      if (approval) return approval;
+    }
     for (const log of [...(message.toolLogs ?? [])].reverse()) {
-      if (log.tool_name !== "browser_computer" && log.tool_name !== "browser_companion") continue;
+      if (!["browser_computer", "browser_companion", "browser_use", "computer_use"].includes(String(log.tool_name))) continue;
       const result = log.result as Record<string, unknown> | undefined;
       const data = (result?.data ?? result) as Record<string, unknown> | undefined;
       const widget = data?.widget as Record<string, unknown> | undefined;
-      const candidate = (widget?.requires_approval ? widget : data) as Record<string, unknown> | undefined;
-      if (!candidate?.requires_approval || !candidate.approval_token) continue;
-      const rawPayload = candidate.payload;
-      return {
-        action: String(candidate.action ?? "browser.session"),
-        payload: rawPayload && typeof rawPayload === "object" ? rawPayload as Record<string, unknown> : {},
-        token: String(candidate.approval_token),
-      };
+      const candidate = (widget?.requires_approval || widget?.approval_required ? widget : data) as Record<string, unknown> | undefined;
+      const approval = approvalFromCandidate(candidate, String(log.tool_name));
+      if (approval) return approval;
     }
   }
   return null;
@@ -991,6 +750,12 @@ export default function App() {
   const [activeConversation, setActiveConversation] = useState<Conversation | null>(null);
   const [input, setInput] = useLocalStorage("rumi-input", "");
   const [composerCandidateMenu, setComposerCandidateMenu] = useState<ComposerCandidateMenuState>(null);
+  const [isSpotlightOpen, setIsSpotlightOpen] = useState(false);
+  const [spotlightQuery, setSpotlightQuery] = useState("");
+  const [spotlightFilter, setSpotlightFilter] = useState<SpotlightFilter>("all");
+  const [spotlightResults, setSpotlightResults] = useState<ConversationSearchResult[]>([]);
+  const [spotlightSelectedIndex, setSpotlightSelectedIndex] = useState(0);
+  const [spotlightLoading, setSpotlightLoading] = useState(false);
   const [modelPickerRequestId, setModelPickerRequestId] = useState(0);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [requestedSettingsSectionId, setRequestedSettingsSectionId] = useState<string | null>(null);
@@ -1025,12 +790,26 @@ export default function App() {
 
   const sidebarItems: SidebarItem[] = catalog?.sidebar.items ?? [];
   const chatItems = buildChatItems(conversations);
+  const recentSpotlightResults = useMemo(
+    () => conversations
+      .filter((conversation) => conversationMatchesSpotlightFilter(conversation, spotlightFilter))
+      .slice(0, 10)
+      .map(conversationToSearchResult),
+    [conversations, spotlightFilter],
+  );
+  const visibleSpotlightResults = spotlightQuery.trim() ? spotlightResults : recentSpotlightResults;
   const activeModelId = activeConversation?.model ?? String(settingsValues.models?.preferred_model ?? "stub/default").trim();
   const activeProfile = findProfile(modelProfiles, activeModelId);
-  const messages = activeConversation ? activeConversation.messages.map((message) => toUiMessage(message, activeProfile)) : [];
+  const orderedMessages = useMemo(
+    () => activeConversation ? orderConversationMessages(activeConversation.messages) : [],
+    [activeConversation?.messages],
+  );
+  const messages = orderedMessages.map((message) => toUiMessage(message, activeProfile));
   const activeChatTitle = activeConversation?.title ?? "New Conversation";
   const isNewConversation = activeConversation === null || activeConversation.messages.length === 0;
   const placeholder = String(settingsValues.general?.composer_placeholder ?? "メッセージを入力...");
+  const locale = normalizeLocale(settingsValues.general?.language);
+  const keyboardButtonNavigation = parseCommandBoolean(settingsValues.general?.keyboard_button_navigation, false);
   const preferredModel = activeModelId;
   const selectableModelProfiles = userFacingModelProfiles(modelProfiles, preferredModel);
   const favoriteProfiles = favoriteModelProfiles(settingsValues.models?.favorite_profiles, selectableModelProfiles, preferredModel);
@@ -1057,6 +836,10 @@ export default function App() {
     () => toolPreviewsFromMessages(activeConversation?.messages ?? []),
     [activeConversation?.messages],
   );
+  const liveBrowserState = useMemo(
+    () => reduceBrowserStateFromEvents((activeConversation?.messages ?? []).flatMap((message) => message.events ?? [])),
+    [activeConversation?.messages],
+  );
   const canvasPreviews = useMemo(() => {
     const seen = new Set(previews.map((preview) => preview.id));
     return [
@@ -1064,7 +847,7 @@ export default function App() {
       ...messageToolPreviews.filter((preview) => !seen.has(preview.id)),
     ].sort((a, b) => b.timestamp - a.timestamp);
   }, [messageToolPreviews, previews]);
-  const canShowCanvas = hasCanvasItems(canvasPreviews, canvasMemo);
+  const canShowCanvas = hasCanvasItems(canvasPreviews, canvasMemo) || liveBrowserState.state_revision >= 0;
   const effectiveShowPreview = showPreview && canShowCanvas;
   const composerCommands = useMemo(() => {
     const showAdvanced = settingsValues.commands?.show_advanced_commands === true;
@@ -1350,6 +1133,7 @@ export default function App() {
             startedAt: Date.now(),
             status: "Processing...",
             toolNames: [],
+            recoveredFromLocation: true,
           });
         }
         if (!cancelled) {
@@ -1398,6 +1182,54 @@ export default function App() {
   }, [settingsValues.preview?.max_items, settingsValues.preview?.auto_open, activeConversationId]);
 
   useEffect(() => {
+    const handleGlobalKeyDown = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey && event.key.toLowerCase() === "k")) return;
+      event.preventDefault();
+      setIsSpotlightOpen(true);
+      setSpotlightSelectedIndex(0);
+    };
+    document.addEventListener("keydown", handleGlobalKeyDown);
+    return () => document.removeEventListener("keydown", handleGlobalKeyDown);
+  }, []);
+
+  useEffect(() => {
+    if (!isSpotlightOpen) return;
+    const query = spotlightQuery.trim();
+    if (!query) {
+      setSpotlightResults([]);
+      setSpotlightLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setSpotlightLoading(true);
+    const timeout = window.setTimeout(() => {
+      void api.searchConversations(query, {
+        date_filter: spotlightFilter === "starred" ? "all" : spotlightFilter,
+        is_starred: spotlightFilter === "starred" ? true : undefined,
+        role: "all",
+        limit: 12,
+      }).then((result) => {
+        if (cancelled) return;
+        setSpotlightResults(result.results);
+      }).catch((searchError) => {
+        if (cancelled) return;
+        console.error(searchError);
+        setSpotlightResults([]);
+      }).finally(() => {
+        if (!cancelled) setSpotlightLoading(false);
+      });
+    }, 120);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeout);
+    };
+  }, [isSpotlightOpen, spotlightFilter, spotlightQuery]);
+
+  useEffect(() => {
+    setSpotlightSelectedIndex(0);
+  }, [spotlightFilter, spotlightQuery, spotlightResults.length]);
+
+  useEffect(() => {
     if (!activeConversationId || !isConversationPending) return;
     if (streamingConversationIdRef.current === activeConversationId) return;
     setIsGenerating(true);
@@ -1405,7 +1237,7 @@ export default function App() {
       void api.getConversation(activeConversationId).then((conversation) => {
         setActiveConversation(conversation);
         const latest = conversation.messages[conversation.messages.length - 1];
-        if (latest && latest.role !== "user" && !isAssistantMessageStillRunning(latest)) {
+        if (shouldClearPendingAfterConversationRefresh(latest, pendingRequest, Date.now())) {
           forgetPendingRequest(activeConversationId);
           replaceChatIdInUrl(activeConversationId, false);
           setIsGenerating(false);
@@ -1420,7 +1252,7 @@ export default function App() {
       });
     }, 1500);
     return () => window.clearInterval(interval);
-  }, [activeConversationId, isConversationPending]);
+  }, [activeConversationId, isConversationPending, pendingRequest]);
 
   useEffect(() => {
     const staleIds = Object.entries(pendingRequests)
@@ -1467,6 +1299,42 @@ export default function App() {
   const handleHistoryClick = (conversationId: string) => {
     setError(null);
     void loadConversation(conversationId);
+  };
+
+  const closeSpotlight = () => {
+    setIsSpotlightOpen(false);
+    setSpotlightQuery("");
+    setSpotlightResults([]);
+    setSpotlightSelectedIndex(0);
+  };
+
+  const openSpotlightResult = (result: ConversationSearchResult | undefined) => {
+    if (!result?.conversation_id) return;
+    closeSpotlight();
+    setError(null);
+    void loadConversation(result.conversation_id);
+  };
+
+  const handleSpotlightKeyDown = (event: ReactKeyboardEvent<HTMLInputElement>) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeSpotlight();
+      return;
+    }
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setSpotlightSelectedIndex((index) => Math.min(index + 1, Math.max(visibleSpotlightResults.length - 1, 0)));
+      return;
+    }
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setSpotlightSelectedIndex((index) => Math.max(index - 1, 0));
+      return;
+    }
+    if (event.key === "Enter") {
+      event.preventDefault();
+      openSpotlightResult(visibleSpotlightResults[spotlightSelectedIndex] ?? visibleSpotlightResults[0]);
+    }
   };
 
   const handleSettingChange = (sectionId: string, fieldId: string, value: unknown) => {
@@ -1753,7 +1621,7 @@ export default function App() {
         }
         return;
       case "set_mode_coding":
-        setMode("coding");
+        setMode((current) => current === "coding" ? "chat" : "coding");
         return;
       case "set_mode_chat":
         setMode("chat");
@@ -2066,22 +1934,55 @@ export default function App() {
 
   const approveBrowserAction = async () => {
     if (!browserApproval) return;
+    if (!activeConversationId) return;
     setError(null);
+    setIsGenerating(true);
+    const approvalToolIds = selectedToolIds.length
+      ? selectedToolIds
+      : [browserApproval.toolName].filter(Boolean);
+    rememberPendingRequest({
+      conversationId: activeConversationId,
+      startedAt: Date.now(),
+      status: "ユーザー承認をAIへ伝えています",
+      toolNames: approvalToolIds,
+    });
     try {
-      const result = await api.browserComputer(browserApproval.action, {
+      const approvedArguments = {
         ...browserApproval.payload,
         approval_token: browserApproval.token,
-      });
+      };
+      const result = browserApproval.toolName === "browser_computer"
+        ? await api.browserComputer(browserApproval.action, approvedArguments)
+        : await api.invokeTool(browserApproval.toolName, { ...approvedArguments, action: browserApproval.action });
       pushActionPreview(
         { id: "browser.approval", label: "Approved Browser Action", icon: "browser" },
         "browser-approval",
         result,
       );
-      if (activeConversationId) {
-        await refreshPreview(activeConversationId);
-      }
+      await api.sendMessage(activeConversationId, "ユーザーが許可しました。承認済みの操作を踏まえて続行してください。", {
+        tool_policy: {
+          ...(yoloMode ? { yolo_mode: true, allow_shell: true, allow_file_write: true, write_actions_require_approval: false } : {}),
+          ...(approvalToolIds.length ? { selected_tools: approvalToolIds } : {}),
+        },
+        tools: approvalToolIds.length ? approvalToolIds : undefined,
+        metadata: {
+          mode: "chat",
+          approval_followup: {
+            action: browserApproval.action,
+            tool_name: browserApproval.toolName,
+          },
+          selected_tools: approvalToolIds,
+        },
+      });
+      forgetPendingRequest(activeConversationId);
+      replaceChatIdInUrl(activeConversationId, false);
+      await loadConversation(activeConversationId, false);
+      await refreshConversations(activeConversationId);
     } catch (approvalError) {
+      forgetPendingRequest(activeConversationId);
       setError(approvalError instanceof Error ? approvalError.message : "browser/computer の承認に失敗しました。");
+    } finally {
+      setIsGenerating(false);
     }
   };
 
@@ -2395,12 +2296,13 @@ export default function App() {
       const replaceStreamingAssistant = (message: ChatMessage) => {
         setActiveConversation((current) => {
           if (!current || current.id !== conversation.id) return current;
-          const hasDraft = current.messages.some((candidate) => candidate.id === assistantDraft.id);
+          const withoutDraft = current.messages.filter((candidate) => candidate.id !== assistantDraft.id);
+          const hasFinalMessage = withoutDraft.some((candidate) => candidate.id === message.id);
           return {
             ...current,
-            messages: hasDraft
-              ? current.messages.map((candidate) => candidate.id === assistantDraft.id ? message : candidate)
-              : [...current.messages, message],
+            messages: hasFinalMessage
+              ? withoutDraft.map((candidate) => candidate.id === message.id ? message : candidate)
+              : [...withoutDraft, message],
           };
         });
       };
@@ -2468,7 +2370,7 @@ export default function App() {
       await refreshConversations(conversation.id);
     } catch (submitError) {
       console.error("Chat error:", submitError);
-      if (isAbortError(submitError)) {
+      if (isCancelledStreamError(submitError)) {
         if (submittedConversationId) {
           forgetPendingRequest(submittedConversationId);
           replaceChatIdInUrl(submittedConversationId, false);
@@ -2521,6 +2423,7 @@ export default function App() {
       attachedFiles={attachedFiles}
       droppedWidgets={droppedWidgets}
       selectedToolIds={selectedToolIds}
+      keyboardButtonNavigation={keyboardButtonNavigation}
       onExtensionSelect={handleComposerExtensionSelect}
       onCommandSelect={handleComposerCommand}
       onModelCommandCandidateSelect={handleModelCommandCandidateSelect}
@@ -2551,7 +2454,7 @@ export default function App() {
 
       <div className="flex flex-1 min-h-0">
         {showRegion("history") && !isHistoryMinimized && (
-          <div className="w-[360px] max-w-[36vw] min-w-[300px] flex-shrink-0 overflow-hidden border-r border-zinc-800/60 max-[900px]:w-[300px]">
+          <div className="w-[360px] max-w-[36vw] min-w-[300px] flex-shrink-0 overflow-hidden border-r border-zinc-800/60 animate-in slide-in-from-left-2 fade-in duration-200 ease-out max-[900px]:w-[300px]">
             <Renderers.historyBoard
               activeChatId={activeConversationId}
               chatItems={chatItems}
@@ -2565,7 +2468,7 @@ export default function App() {
         )}
 
         {showRegion("history") && isHistoryMinimized && (
-          <div className="rumi-history-rail w-14 flex-shrink-0 overflow-hidden border-r border-zinc-800/60">
+          <div className="rumi-history-rail w-14 flex-shrink-0 overflow-hidden border-r border-zinc-800/60 animate-in slide-in-from-left-1 fade-in duration-150 ease-out">
             <Renderers.historyBoard
               activeChatId={activeConversationId}
               chatItems={chatItems}
@@ -2618,6 +2521,10 @@ export default function App() {
                 showActivityInMessages={showActivityInMessages}
                 showWidgets={showWidgets}
                 onSuggestionClick={(text) => setInput(text)}
+                onOpenToolPreview={(previewId) => {
+                  setActivePreviewId(previewId);
+                  setShowPreview(true);
+                }}
               />
             )}
 
@@ -2681,6 +2588,7 @@ export default function App() {
             settingsValues={settingsValues}
             settingsSections={settingsSections}
             selectedToolIds={selectedToolIds}
+            keyboardButtonNavigation={keyboardButtonNavigation}
             onSettingChange={handleSettingChange}
             onOpenSettings={() => setIsSettingsOpen(true)}
             onToolToggle={(item) => toggleSelectedTool({
@@ -2697,6 +2605,21 @@ export default function App() {
         )}
       </div>
 
+      <ConversationSpotlight
+        isOpen={isSpotlightOpen}
+        query={spotlightQuery}
+        filter={spotlightFilter}
+        results={visibleSpotlightResults}
+        selectedIndex={spotlightSelectedIndex}
+        loading={spotlightLoading}
+        locale={locale}
+        onQueryChange={setSpotlightQuery}
+        onFilterChange={setSpotlightFilter}
+        onKeyDown={handleSpotlightKeyDown}
+        onClose={closeSpotlight}
+        onOpenResult={openSpotlightResult}
+      />
+
       {showRegion("settings_modal") && (
         <Renderers.settingsModal
           isOpen={isSettingsOpen}
@@ -2706,6 +2629,7 @@ export default function App() {
           previewsCount={canvasPreviews.length}
           settingsSections={settingsSections}
           settingsValues={settingsValues}
+          locale={locale}
           onClose={() => setIsSettingsOpen(false)}
           onSettingChange={handleSettingChange}
         />

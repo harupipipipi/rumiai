@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { messageCopyText, streamedBrowserScreenshots } from "./ChatMessagesRenderer";
+import { messageCopyText, shouldRenderImageBlockInChat, streamedBrowserScreenshots } from "./ChatMessagesRenderer";
 import type { ChatUiMessage } from "./types";
 
 function message(overrides: Partial<ChatUiMessage>): ChatUiMessage {
@@ -25,6 +25,12 @@ test("message copy text includes visible text and code blocks", () => {
 
 test("message copy text falls back to raw text", () => {
   assert.equal(messageCopyText(message({ rawText: "fallback text" })), "fallback text");
+});
+
+test("image blocks stay out of chat unless explicitly marked for display", () => {
+  assert.equal(shouldRenderImageBlockInChat({ type: "image_url", url: "data:image/png;base64,abc" }), false);
+  assert.equal(shouldRenderImageBlockInChat({ type: "image_url", url: "data:image/png;base64,abc", presentation: "chat" }), true);
+  assert.equal(shouldRenderImageBlockInChat({ type: "image", url: "data:image/png;base64,abc", intent: "show_to_user" }), true);
 });
 
 test("streamed browser screenshots include explicit screenshot events", () => {

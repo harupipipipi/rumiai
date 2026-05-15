@@ -108,6 +108,16 @@ def test_discovery_scans_manifest_categories(tmp_path: Path):
             "version": "1",
         },
     )
+    _write_json(
+        root / "skills/hatch_pet/manifest.json",
+        {
+            "id": "hatch-pet",
+            "category": "skill",
+            "version": "1",
+            "triggers": ["sprite", "pet"],
+            "applies_to_tools": ["image_gen"],
+        },
+    )
 
     result = discover_extensions(root)
     assert len(result.issues) == 0
@@ -115,7 +125,11 @@ def test_discovery_scans_manifest_categories(tmp_path: Path):
         ("llm_provider", "openai"),
         ("llm_model", "openai/gpt-5.4"),
         ("prompt", "base_assistant"),
+        ("skill", "hatch-pet"),
     }
+
+    registry = ExtensionRegistry(root)
+    assert registry.skills().list()[0]["triggers"] == ["sprite", "pet"]
 
 
 def test_extension_registry_llm_best_model(tmp_path: Path):

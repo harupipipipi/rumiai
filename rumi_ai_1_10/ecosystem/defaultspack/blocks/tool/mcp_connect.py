@@ -130,18 +130,37 @@ def run(input_data, context):
             continue
         public_name = _public_tool_name(tool_name, config)
         tool_id = _tool_registry_id(server_name, tool_name, config)
+        server_id = str(config.get("server_id", "") or server_name)
+        description = str(tool.get("description", "") or "")
         registered_tools.append(tool_id)
         registry.register(
             {
                 "tool_id": tool_id,
                 "name": public_name,
-                "summary": tool.get("description", ""),
+                "summary": description,
                 "tags": ["mcp", server_name],
                 "schema": {"parameters": tool.get("inputSchema", {})},
                 "execution": {
                     "type": "mcp",
                     "server_name": server_name,
                     "mcp_tool_name": tool_name,
+                },
+                "category": "tool",
+                "ui": {
+                    "group_id": "mcp",
+                    "group_label": "MCP",
+                    "group_icon": "terminal",
+                    "label": public_name,
+                    "description": description,
+                    "keywords": " ".join(["mcp", server_name, server_id, tool_name, public_name]),
+                },
+                "metadata": {
+                    "source": "mcp",
+                    "server_id": server_id,
+                    "server_name": server_name,
+                    "mcp_tool_name": tool_name,
+                    "transport": transport,
+                    "description": description,
                 },
             }
         )

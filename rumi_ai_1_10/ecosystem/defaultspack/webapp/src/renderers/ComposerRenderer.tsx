@@ -597,6 +597,18 @@ export function modelCandidateMenuKeyAction(
   return { handled: false };
 }
 
+export function shouldFocusComposerForSlashKey(
+  event: Pick<KeyboardEvent, "key" | "metaKey" | "ctrlKey" | "altKey" | "defaultPrevented" | "isComposing">,
+  target: EventTarget | null,
+): boolean {
+  if (event.defaultPrevented || event.isComposing) return false;
+  if (event.key !== "/" || event.metaKey || event.ctrlKey || event.altKey) return false;
+  if (typeof Element === "undefined") return true;
+  if (!(target instanceof Element)) return true;
+  const tagName = target.tagName.toLowerCase();
+  return tagName !== "input" && tagName !== "textarea" && tagName !== "select" && !target.closest("[contenteditable='true']");
+}
+
 function modelCandidateTitle(candidate: ModelCommandCandidate): string {
   return String(candidate.display_name ?? candidate.profile_id ?? "model");
 }
@@ -710,6 +722,7 @@ export function ComposerRenderer({
   attachedFiles = [],
   droppedWidgets = [],
   selectedToolIds = [],
+  keyboardButtonNavigation = false,
   onExtensionSelect,
   onCommandSelect,
   onModelCommandCandidateSelect,
@@ -748,6 +761,7 @@ export function ComposerRenderer({
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const lastModelPickerRequestIdRef = useRef(modelPickerRequestId);
+  const chromeButtonTabIndex = keyboardButtonNavigation ? undefined : -1;
   const profileName = profileDisplayName(selectedProfile);
   const selectedProviderLabel = profileProviderLabel(selectedProfile);
   const levels = selectedProfile?.supports_thinking
@@ -763,6 +777,12 @@ export function ComposerRenderer({
   const toolItems = useMemo(() => [...inlineExtensions, ...belowExtensions], [inlineExtensions, belowExtensions]);
   const selectableProfiles = modelProfiles.length > 0 ? modelProfiles : favoriteProfiles;
   const selectedToolIdSet = useMemo(() => new Set(selectedToolIds), [selectedToolIds]);
+  const computerUseSelected = selectedToolIds.some((toolId) => (
+    toolId === "computer_use"
+    || toolId === "browser_computer"
+    || toolId === "browser_use"
+    || toolId === "browser_companion"
+  ));
   const toolGroups = useMemo(() => groupToolItems(toolItems), [toolItems]);
   const activeToolGroup = toolGroups.find((group) => group.id === openToolGroup) ?? toolGroups[0] ?? null;
   const showToolGroups = toolItems.length > 4;
@@ -896,6 +916,27 @@ export function ComposerRenderer({
     return () => window.clearTimeout(focusTimer);
   }, []);
 
+  useEffect(() => {
+    const handleDocumentSlashFocus = (event: KeyboardEvent) => {
+      if (isGenerating || !shouldFocusComposerForSlashKey(event, event.target)) return;
+      event.preventDefault();
+      const textarea = textareaRef.current;
+      if (!textarea) return;
+      if (!input.trim()) {
+        onInputChange("/");
+        window.setTimeout(() => {
+          textarea.focus({ preventScroll: true });
+          textarea.setSelectionRange(1, 1);
+        }, 0);
+        return;
+      }
+      textarea.focus({ preventScroll: true });
+    };
+
+    document.addEventListener("keydown", handleDocumentSlashFocus);
+    return () => document.removeEventListener("keydown", handleDocumentSlashFocus);
+  }, [input, isGenerating, onInputChange]);
+
   const chooseCommand = (commandId: string, rawInput = input) => {
     const thinkingLevelMatch = commandId.match(/^think:(.+)$/);
     if (thinkingLevelMatch) {
@@ -907,6 +948,11 @@ export function ComposerRenderer({
     const command = commands.find((item) => item.id === commandId);
     const action = command?.execution.type === "frontend" ? command.execution.action : "";
     const rawHasArgs = rawInput.trim().includes(" ");
+    if (command?.id === "think") {
+      onInputChange("/think ");
+      window.setTimeout(() => textareaRef.current?.focus({ preventScroll: true }), 0);
+      return;
+    }
     if (action === "open_model_picker" && !rawHasArgs) {
       setModelDropdownOpen(true);
       setMenuOpen(false);
@@ -916,10 +962,6 @@ export function ComposerRenderer({
     } else if (action === "open_command_help") {
       setOpenFolder("commands");
       setMenuOpen(true);
-    } else if (command?.id === "think" && !thinkingCommandMatch(rawInput)) {
-      onInputChange("/think ");
-      window.setTimeout(() => textareaRef.current?.focus(), 0);
-      return;
     }
     onCommandSelect?.(commandId, rawInput);
     if (!(command?.id === "model" && rawHasArgs)) {
@@ -1082,6 +1124,11 @@ export function ComposerRenderer({
         }
       }
 
+      if (event.key === "Tab" && !keyboardButtonNavigation) {
+        event.preventDefault();
+        return;
+      }
+
       if (event.key === "Enter" && !event.shiftKey) {
         event.preventDefault();
         handleSubmitWithApiKeyGuard(event);
@@ -1093,6 +1140,7 @@ export function ComposerRenderer({
       matchedCommands,
       modelCommandCandidates,
       onModelCommandCandidatesClose,
+      keyboardButtonNavigation,
       selectedCommandIndex,
       selectedModelCandidateIndex,
     ],
@@ -1109,7 +1157,7 @@ export function ComposerRenderer({
           onSubmit={handleSubmitWithApiKeyGuard}
           className={`rumi-composer-frame ${
             isNewConversation
-              ? "rumi-composer-new min-h-[176px] rounded-3xl border-zinc-700/70 bg-[#242423]"
+              ? "rumi-composer-new min-h-[154px] rounded-3xl border-zinc-700/70 bg-[#242423]"
               : "rounded-xl border-zinc-700/30 bg-[#2b2b2d] max-[640px]:rounded-xl"
           } relative flex flex-col border overflow-visible shadow-2xl shadow-black/20 focus-within:border-zinc-500/60`}
         >
@@ -1135,12 +1183,13 @@ export function ComposerRenderer({
                 <span className="mr-1 text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Thinking</span>
                 {matchedCommands.map((command, index) => {
                   const level = command.id.replace(/^think:/, "");
-                  return (
-                    <button
-                      key={command.id}
-                      type="button"
-                      onMouseEnter={() => setSelectedCommandIndex(index)}
-                      onClick={() => chooseCommand(command.id)}
+                          return (
+                            <button
+                              key={command.id}
+                              type="button"
+                              tabIndex={chromeButtonTabIndex}
+                              onMouseEnter={() => setSelectedCommandIndex(index)}
+                              onClick={() => chooseCommand(command.id)}
                       className={`h-8 rounded-lg border px-3 text-xs font-medium transition-colors ${
                         index === selectedCommandIndex
                           ? "border-zinc-400 bg-zinc-100 text-zinc-950"
@@ -1158,12 +1207,13 @@ export function ComposerRenderer({
                   Commands
                 </div>
                 <div className="max-h-56 overflow-y-auto py-1">
-                  {matchedCommands.map((command, index) => (
-                    <button
-                      key={command.id}
-                      type="button"
-                      onMouseEnter={() => setSelectedCommandIndex(index)}
-                      onClick={() => chooseCommand(command.id)}
+                          {matchedCommands.map((command, index) => (
+                            <button
+                              key={command.id}
+                              type="button"
+                              tabIndex={chromeButtonTabIndex}
+                              onMouseEnter={() => setSelectedCommandIndex(index)}
+                              onClick={() => chooseCommand(command.id)}
                       className={`flex w-full items-center justify-between gap-3 px-3 py-2 text-left ${
                         index === selectedCommandIndex ? "bg-zinc-800 text-zinc-100" : "hover:bg-zinc-900"
                       }`}
@@ -1202,12 +1252,13 @@ export function ComposerRenderer({
 
           {menuOpen && (
             <>
-              <button
-                type="button"
-                aria-label="close composer menu"
-                className="fixed inset-0 z-20 cursor-default"
-                onClick={() => setMenuOpen(false)}
-              />
+                      <button
+                        type="button"
+                        aria-label="close composer menu"
+                        tabIndex={chromeButtonTabIndex}
+                        className="fixed inset-0 z-20 cursor-default"
+                        onClick={() => setMenuOpen(false)}
+                      />
               <div ref={menuRef} className="absolute bottom-[52px] left-4 z-30 grid w-[min(480px,calc(100vw-32px))] grid-cols-[120px_minmax(0,1fr)] overflow-hidden rounded-xl border border-zinc-700/70 bg-zinc-950 shadow-2xl max-[640px]:left-2 max-[640px]:grid-cols-1">
                 <div className="border-r border-zinc-800 bg-zinc-950/90 p-1.5 max-[640px]:flex max-[640px]:border-b max-[640px]:border-r-0">
                   {(
@@ -1217,10 +1268,11 @@ export function ComposerRenderer({
                       ["commands", "Commands", Folder],
                     ] as const
                   ).map(([id, label, Icon]) => (
-                    <button
-                      key={id}
-                      type="button"
-                      onClick={() => setOpenFolder(id)}
+                            <button
+                              key={id}
+                              type="button"
+                              tabIndex={chromeButtonTabIndex}
+                              onClick={() => setOpenFolder(id)}
                       className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs transition-colors ${
                         openFolder === id
                           ? "bg-zinc-800 text-zinc-100"
@@ -1246,10 +1298,11 @@ export function ComposerRenderer({
                     <div className="grid grid-cols-[130px_minmax(0,1fr)] gap-2 max-[640px]:grid-cols-1">
                       <div className="grid content-start gap-0.5">
                         {toolGroups.map((group) => (
-                          <button
-                            key={group.id}
-                            type="button"
-                            onClick={() => setOpenToolGroup(group.id)}
+                                  <button
+                                    key={group.id}
+                                    type="button"
+                                    tabIndex={chromeButtonTabIndex}
+                                    onClick={() => setOpenToolGroup(group.id)}
                             className={`rounded-lg px-2.5 py-1.5 text-left transition-colors ${
                               activeToolGroup?.id === group.id
                                 ? "bg-zinc-800 text-zinc-100"
@@ -1288,10 +1341,11 @@ export function ComposerRenderer({
                       {selectableProfiles.map((profile) => {
                         const needsKey = needsApiKey(profile);
                         return (
-                          <button
-                            key={profile.profile_id}
-                            type="button"
-                            draggable
+                                  <button
+                                    key={profile.profile_id}
+                                    type="button"
+                                    tabIndex={chromeButtonTabIndex}
+                                    draggable
                             onDragStart={(event) => {
                               event.dataTransfer.setData(
                                 "application/rumi-widget",
@@ -1326,13 +1380,14 @@ export function ComposerRenderer({
                   {openFolder === "commands" && (
                     <div className="grid gap-0.5">
                       {commands.map((command) => (
-                        <button
-                          key={command.id}
-                          type="button"
-                          onClick={() => {
-                            chooseCommand(command.id);
-                            setMenuOpen(false);
-                          }}
+                                <button
+                                  key={command.id}
+                                  type="button"
+                                  tabIndex={chromeButtonTabIndex}
+                                  onClick={() => {
+                                    chooseCommand(command.id);
+                                    setMenuOpen(false);
+                                  }}
                           className="flex items-center justify-between gap-3 rounded-lg px-3 py-1.5 text-left hover:bg-zinc-800/80 transition-colors"
                         >
                           <span className="min-w-0">
@@ -1379,7 +1434,7 @@ export function ComposerRenderer({
             disabled={isGenerating}
             className={`${
               isNewConversation
-                ? "rumi-composer-input-new min-h-[64px] px-6 pt-5 text-[18px] font-medium leading-[1.55] placeholder:text-zinc-500"
+                ? "rumi-composer-input-new min-h-[54px] px-6 pt-4 text-[18px] font-medium leading-[1.5] placeholder:text-zinc-500"
                 : "min-h-[34px] px-5 pt-3 text-[15px] max-[640px]:min-h-[32px] max-[640px]:px-3 max-[640px]:pt-2.5 max-[640px]:pb-0 max-[640px]:text-[13px]"
             } rumi-composer-textarea w-full select-text bg-transparent border-none outline-none text-zinc-100 pb-0 resize-none max-h-[130px] disabled:opacity-50`}
             onKeyDownCapture={(event) => {
@@ -1424,19 +1479,21 @@ export function ComposerRenderer({
             } flex items-center justify-between gap-2 pt-0 max-[640px]:gap-1.5`}
           >
             <div className="flex min-w-0 items-center gap-1 overflow-hidden">
-              <button
-                ref={menuButtonRef}
-                type="button"
-                disabled={isGenerating}
+                      <button
+                        ref={menuButtonRef}
+                        type="button"
+                        tabIndex={chromeButtonTabIndex}
+                        disabled={isGenerating}
                 title="追加"
                 onClick={() => setMenuOpen((value) => !value)}
                 className="h-8 w-8 flex flex-shrink-0 items-center justify-center text-zinc-400 hover:text-zinc-100 hover:bg-zinc-700/60 rounded-lg transition-colors disabled:opacity-50"
               >
                 <Plus size={18} />
               </button>
-              <button
-                type="button"
-                disabled={isGenerating}
+                      <button
+                        type="button"
+                        tabIndex={chromeButtonTabIndex}
+                        disabled={isGenerating}
                 title="ファイル添付（複数選択可）"
                 onClick={() => fileInputRef.current?.click()}
                 className={`${
@@ -1447,9 +1504,10 @@ export function ComposerRenderer({
               >
                 <Paperclip size={16} />
               </button>
-              <button
-                type="button"
-                disabled={isGenerating}
+                      <button
+                        type="button"
+                        tabIndex={chromeButtonTabIndex}
+                        disabled={isGenerating}
                 title="音声入力"
                 className="h-8 w-8 flex flex-shrink-0 items-center justify-center text-zinc-400 hover:text-zinc-100 hover:bg-zinc-700/60 rounded-lg transition-colors disabled:opacity-50 max-[640px]:hidden"
               >
@@ -1457,9 +1515,10 @@ export function ComposerRenderer({
               </button>
 
               <div className="group/mode relative flex">
-                <button
-                  type="button"
-                  disabled={isGenerating}
+                        <button
+                          type="button"
+                          tabIndex={chromeButtonTabIndex}
+                          disabled={isGenerating}
                   title={`モード: ${currentModeMeta.label}`}
                   onClick={() => setModeSelectorOpen((v) => !v)}
                   className={`h-8 flex flex-shrink-0 items-center gap-1.5 rounded-lg px-2.5 transition-colors disabled:opacity-50 ${
@@ -1474,9 +1533,10 @@ export function ComposerRenderer({
                   <span className="text-[11px] font-medium max-[640px]:hidden">{currentModeMeta.label}</span>
                 </button>
                 {mode !== "chat" && (
-                  <button
-                    type="button"
-                    aria-label="モードを閉じる"
+                          <button
+                            type="button"
+                            tabIndex={chromeButtonTabIndex}
+                            aria-label="モードを閉じる"
                     title="Chat に戻す"
                     onClick={(event) => {
                       event.stopPropagation();
@@ -1502,6 +1562,12 @@ export function ComposerRenderer({
                   YOLO
                 </span>
               )}
+              {computerUseSelected && (
+                <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[11px] font-medium text-emerald-300">
+                  <MousePointerClick size={12} />
+                  Computer ON
+                </span>
+              )}
             </div>
 
             <div className="rumi-composer-submit-area flex flex-shrink-0 items-center justify-end gap-2">
@@ -1516,9 +1582,10 @@ export function ComposerRenderer({
                   <div className="h-full w-full rounded-full bg-zinc-800" />
                 </div>
                 <div className="relative">
-                  <button
-                    type="button"
-                    disabled={isGenerating}
+                          <button
+                            type="button"
+                            tabIndex={chromeButtonTabIndex}
+                            disabled={isGenerating}
                     onClick={() => setModelDropdownOpen((v) => !v)}
                     className="flex items-center gap-1 text-[12px] font-medium text-zinc-300 hover:text-zinc-100 transition-colors disabled:opacity-50"
                   >
@@ -1544,8 +1611,9 @@ export function ComposerRenderer({
                     <select
                       value={thinkingLevel ?? levels[0]}
                       onChange={(event) => onThinkingLevelChange(event.target.value)}
-                      disabled={isGenerating}
-                      className="bg-transparent text-[11px] font-medium text-zinc-400 outline-none cursor-pointer hover:text-zinc-200 transition-colors disabled:opacity-50"
+                              disabled={isGenerating}
+                              tabIndex={chromeButtonTabIndex}
+                              className="bg-transparent text-[11px] font-medium text-zinc-400 outline-none cursor-pointer hover:text-zinc-200 transition-colors disabled:opacity-50"
                       title="Thinking level"
                     >
                       {levels.map((level) => (
@@ -1557,9 +1625,10 @@ export function ComposerRenderer({
                   </label>
                 )}
               </div>
-              <button
-                type={isGenerating ? "button" : "submit"}
-                disabled={!isGenerating && (!input.trim() && attachedFiles.length === 0)}
+                      <button
+                        type={isGenerating ? "button" : "submit"}
+                        tabIndex={chromeButtonTabIndex}
+                        disabled={!isGenerating && (!input.trim() && attachedFiles.length === 0)}
                 onClick={isGenerating ? onStopGenerating : undefined}
                 title={isGenerating ? "停止" : "送信"}
                 className={`rumi-send-button ${

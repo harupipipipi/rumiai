@@ -1284,6 +1284,8 @@ def _tool_visibility_message(tools):
     }
 
 
+# Compatibility helper retained for focused legacy tests and comparison only.
+# `send.run()` now routes through `ChatRunEngine` instead of this tool loop.
 def _complete_with_tools(model, messages, tools, context, call_handler, params):
     events = []
     _append_event(events, context, _event("status", "{} が考えています".format(model), phase="thinking", model=model))
@@ -1666,215 +1668,66 @@ def _sanitize_attachment_metadata(attachments):
 
 
 def run(input_data, context):
-    store = ChatStore()
-    conversation_id = input_data.get("conversation_id")
-    if not conversation_id:
-        return error("conversation_id is required", "INVALID_INPUT")
-    conv = store.get_conversation(conversation_id)
-    if conv is None:
-        return error("Conversation not found", "NOT_FOUND")
-    message = input_data.get("message")
-    if not message or not isinstance(message, dict):
-        return error("message dict is required", "INVALID_INPUT")
+    from domain.chat.run_request import validate_chat_run_input
+    from domain.chat.stream_engine import ChatRunEngine
+    from domain.stream.events import to_legacy_chat_stream_event
 
-    # --- 空メッセージ検証 ---
-    raw_content = message.get("content")
-    attachments = message.get("attachments")
-    has_attachments = isinstance(attachments, list) and len(attachments) > 0
-    if (raw_content is None or raw_content == "") and not has_attachments:
-        return error("message content must not be empty", "INVALID_INPUT")
-    if isinstance(raw_content, list) and len(raw_content) == 0 and not has_attachments:
-        return error("message content must not be empty", "INVALID_INPUT")
+    validation_error = validate_chat_run_input(input_data if isinstance(input_data, dict) else {})
+    if validation_error:
+        return error(validation_error, "INVALID_INPUT")
 
-    role = message.get("role", "user")
-    content = message.get("content", [])
-    if (content is None or content == "" or content == []) and has_attachments:
-        content = "添付ファイルを確認してください。"
-    if isinstance(content, str):
-        content = [{"type": "text", "text": content}]
-    if isinstance(content, list):
-        content = list(content)
-    metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
-    if isinstance(attachments, list):
-        metadata = dict(metadata)
-        persisted_attachments = store.persist_attachments(conversation_id, attachments)
-        metadata["attachments"] = _sanitize_attachment_metadata(attachments)
-        if persisted_attachments:
-            metadata["workspace_attachments"] = persisted_attachments
-        if isinstance(content, list):
-            content.extend(_attachment_text_blocks(attachments))
-            content.extend(_attachment_image_blocks(attachments))
-    user_msg_dict = {
-        "role": role,
-        "content": content,
-        "metadata": metadata or None,
-    }
-    user_msg = store.add_message(conversation_id, user_msg_dict)
-    if user_msg is None:
-        return error("Failed to add user message", "INTERNAL_ERROR")
-    chain = store.get_message_chain(conversation_id, user_msg["id"])
-    standard_messages = convert_to_standard(chain)
-    model = conv.get("model", "stub/default")
-
-    # P1-4: Inspector 用のリクエストID を生成
-    request_id = gen_id()
-    manager = get_manager()
-    system_prompt = _conversation_system_prompt(conv, manager)
-
-    # --- 9b: ナレッジ / メモリ自動検索 & コンテキスト変数実動化 ---
-    user_text = extract_user_text(content)
-    inferred_tool_ids = _infer_requested_tools_from_message(user_text)
-    input_data = _with_inferred_tools(input_data, inferred_tool_ids)
+    final_message = None
     try:
-        enrich_info = enrich_messages(
-            standard_messages, system_prompt, conversation_id, user_text, manager,
+        streaming_callback = (
+            context.get("stream_event_callback")
+            if isinstance(context, dict)
+            else None
         )
-    except Exception:
-        # 補強処理全体が失敗してもフローを止めない
-        enrich_info = {
-            "knowledge_text": "",
-            "memory_text": "",
-            "knowledge_results": [],
-            "memory_results": [],
-            "enriched_prompt": system_prompt,
+        use_stream_adapter = callable(streaming_callback) and callable((context or {}).get("is_cancelled"))
+        callback_passthrough_types = {
+            "status",
+            "tool_call_started",
+            "tool_call_delta",
+            "tool_call_completed",
+            "browser_state_invalidated",
+            "browser_state_snapshot",
+            "browser_dom_snapshot",
+            "browser_screenshot",
+            "approval_requested",
+            "ai_retry_scheduled",
+            "task_failed",
         }
-        # fallback: system prompt を standard_messages に挿入
-        if system_prompt:
-            standard_messages.insert(0, {"role": "system", "content": system_prompt})
-
-    # 防御ガード: enrich_messages が部分的に失敗し system メッセージ未挿入の場合を補完
-    if system_prompt and (
-        not standard_messages or standard_messages[0].get("role") != "system"
-    ):
-        standard_messages.insert(0, {"role": "system", "content": system_prompt})
-
-    call_handler = context.get("call_handler") if context else None
-    params = dict(input_data.get("params") or {})
-    if "thinking_level" not in params:
-        params["thinking_level"] = ModelRuntimeSettingsService().get_effective_thinking_level(
-            profile_id=model,
-            conversation_id=conversation_id,
-        )["level"]
-    request_context = dict(context or {})
-    if _ai_debug_enabled(input_data=input_data, params=params, context=request_context):
-        request_context["ai_debug_enabled"] = True
-    if inferred_tool_ids:
-        request_context["user_requested_computer_use"] = True
-        request_context = _apply_computer_use_context_preferences(request_context, user_text)
-    request_context["conversation_id"] = conversation_id
-    request_context["conversation_workspace_dir"] = str(store.conversation_workspace_dir(conversation_id))
-    request_context["model"] = model
-    request_context["chat_params"] = params
-    tool_policy = params.get("tool_policy")
-    if isinstance(tool_policy, dict):
-        request_context["profile_policy"] = {
-            **(request_context.get("profile_policy") if isinstance(request_context.get("profile_policy"), dict) else {}),
-            **tool_policy,
-        }
-    stream_assistant_draft = None
-    if _is_stream_fallback_context(request_context):
-        stream_assistant_draft = _create_stream_assistant_draft(
-            store,
-            conversation_id,
-            user_msg,
-            model,
-            params,
-        )
-        if stream_assistant_draft is None:
-            return error("Failed to add assistant draft", "INTERNAL_ERROR")
-        request_context["stream_event_persist_callback"] = _stream_draft_event_persister(
-            store,
-            conversation_id,
-            stream_assistant_draft["id"],
-            model,
-            params,
-        )
-    raw_tools, provider_tools, tool_context = _available_tools(request_context, input_data)
-    tools_called = [tool_name_from_definition(tool) for tool in raw_tools if tool_name_from_definition(tool)]
-    try:
-        _prefocus_computer_use_target_window(raw_tools, tool_context, call_handler=call_handler)
-    except Exception:
-        pass
-    try:
-        response = _complete_with_tools(
-            model,
-            standard_messages,
-            provider_tools,
-            tool_context,
-            call_handler,
-            params,
-        )
-    except _ChatCancelled:
-        return error("Chat request cancelled", "CANCELLED")
-    except RuntimeError as exc:
-        response = _ai_error_response(
-            model,
-            str(exc),
-            params,
-            events=[
-                _event(
-                    "task_failed",
-                    "APIエラーでタスクを終了しました",
-                    phase="task_failed",
-                    error=str(exc),
-                    terminal=True,
-                )
-            ],
-        )
+        engine_context = dict(context or {}) if isinstance(context, dict) else {}
+        engine_context.setdefault("run_source", "blocks.chat.send")
+        for event in ChatRunEngine().stream(input_data, engine_context, stream_mode=use_stream_adapter):
+            if not isinstance(event, dict):
+                continue
+            event_type = str(event.get("type") or "").strip()
+            if use_stream_adapter:
+                legacy = to_legacy_chat_stream_event(event)
+                if legacy is not None and legacy.get("type") in callback_passthrough_types:
+                    try:
+                        streaming_callback(legacy)
+                    except Exception:
+                        pass
+            if event_type in {"assistant_message_completed", "done"}:
+                data = event.get("data") if isinstance(event.get("data"), dict) else {}
+                message = data.get("message")
+                if isinstance(message, dict):
+                    final_message = message
+            elif event_type == "error":
+                data = event.get("data") if isinstance(event.get("data"), dict) else {}
+                err = data.get("error") if isinstance(data.get("error"), dict) else {}
+                if isinstance(err, dict):
+                    return error(str(err.get("message") or "AI request failed"), str(err.get("code") or "INTERNAL_ERROR"))
+                return error("AI request failed", "INTERNAL_ERROR")
+    except ValueError as exc:
+        message = str(exc)
+        code = "NOT_FOUND" if "not found" in message.lower() else "INVALID_INPUT"
+        return error(message, code)
     except Exception as exc:
-        ai_error = "AI request failed: " + str(exc)
-        response = _ai_error_response(
-            model,
-            ai_error,
-            params,
-            events=[
-                _event(
-                    "task_failed",
-                    "APIエラーでタスクを終了しました",
-                    phase="task_failed",
-                    error=ai_error,
-                    terminal=True,
-                )
-            ],
-        )
+        return error("AI request failed: " + str(exc), "INTERNAL_ERROR")
 
-    # P1-4: Inspector にリクエストログを記録
-    try:
-        inspector = Inspector()
-        inspector.log_request(
-            request_id=request_id,
-            conversation_id=conversation_id,
-            model=model,
-            prompt_used=enrich_info.get("enriched_prompt", system_prompt),
-            tools_called=tools_called,
-            context_info={
-                "message_count": len(standard_messages),
-                "messages": standard_messages,
-                "source": "blocks.chat.send",
-                "knowledge_results": enrich_info.get("knowledge_results", []),
-                "memory_results": enrich_info.get("memory_results", []),
-                "unknown_selected_tools": tool_context.get("unknown_selected_tools", []),
-            },
-        )
-    except Exception:
-        pass  # Inspector のエラーで本来の処理を止めない
-
-    seq = user_msg.get("sequence_number", 1) + 1
-    assistant_msg_dict = build_assistant_message(
-        conversation_id=conversation_id,
-        parent_id=user_msg["id"],
-        sequence_number=seq,
-        response=response,
-        model=model,
-    )
-    if stream_assistant_draft is not None:
-        assistant_msg = store.update_message(
-            conversation_id,
-            stream_assistant_draft["id"],
-            _final_assistant_updates(assistant_msg_dict),
-        )
-    else:
-        assistant_msg = store.add_message(conversation_id, assistant_msg_dict)
-    if assistant_msg is None:
-        return error("Failed to add assistant message", "INTERNAL_ERROR")
-    return ok(assistant_msg)
+    if final_message is not None:
+        return ok(final_message)
+    return error("Chat run ended without final message", "INTERNAL_ERROR")

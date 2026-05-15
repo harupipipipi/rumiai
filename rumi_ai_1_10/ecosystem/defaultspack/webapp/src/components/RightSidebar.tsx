@@ -71,6 +71,8 @@ function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+const RAIL_BUTTON_CLASS = "relative flex h-9 min-h-9 w-9 min-w-9 shrink-0 items-center justify-center overflow-visible rounded-md transition-colors";
+
 function readStoredStringArray(key: string): string[] {
   try {
     const raw = localStorage.getItem(key);
@@ -313,7 +315,11 @@ function iconForItem(item: SidebarItem) {
 }
 
 function railIcon(item: ReactElement, size = 18): ReactElement {
-  return cloneElement(item as ReactElement<Record<string, unknown>>, { size });
+  const props = item.props as Record<string, unknown>;
+  return cloneElement(item as ReactElement<Record<string, unknown>>, {
+    size,
+    className: cn("h-5 w-5 shrink-0", typeof props.className === "string" ? props.className : undefined),
+  });
 }
 
 function categoryColor(cat: SidebarCategory, variant: "bg" | "indicator" | "dot" | "badge") {
@@ -528,15 +534,18 @@ function CategorySwitcher({
   active,
   counts,
   onChange,
+  keyboardButtonNavigation = false,
 }: {
   active: "all" | SidebarCategory;
   counts: Record<string, number>;
   onChange: (id: "all" | SidebarCategory) => void;
+  keyboardButtonNavigation?: boolean;
 }) {
   const [isOpen, setIsOpen] = useState(false);
   const buttonRef = useRef<HTMLButtonElement | null>(null);
   const current = CATEGORY_META[active];
   const hasActiveFilter = active !== "all";
+  const buttonTabIndex = keyboardButtonNavigation ? undefined : -1;
   const rect = buttonRef.current?.getBoundingClientRect();
   const menuPosition = rect
     ? {
@@ -550,11 +559,12 @@ function CategorySwitcher({
       <button
         ref={buttonRef}
         type="button"
+        tabIndex={buttonTabIndex}
         onClick={() => setIsOpen((value) => !value)}
         aria-expanded={isOpen}
         aria-pressed={hasActiveFilter}
         className={cn(
-          "w-9 h-9 rounded-md flex items-center justify-center transition-colors relative",
+          RAIL_BUTTON_CLASS,
           hasActiveFilter
             ? "bg-zinc-800 text-zinc-100 ring-1 ring-zinc-600/70"
             : "text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800/50",
@@ -562,7 +572,7 @@ function CategorySwitcher({
         )}
         title={`Filter: ${current.label}`}
       >
-        {current.icon}
+        {railIcon(current.icon, 18)}
         {hasActiveFilter && (
           <span className="absolute left-0 top-1/2 h-4 w-[3px] -translate-y-1/2 rounded-r-full bg-sky-400" />
         )}
@@ -583,9 +593,11 @@ function CategorySwitcher({
                 const count = counts[filterId] ?? 0;
                 if (filterId !== "all" && count === 0) return null;
                 return (
-                  <button
-                    key={filterId}
-                    onClick={() => {
+                          <button
+                            key={filterId}
+                            type="button"
+                            tabIndex={buttonTabIndex}
+                            onClick={() => {
                       onChange(filterId);
                       setIsOpen(false);
                     }}
@@ -610,16 +622,19 @@ function SidebarSearchControl({
   resultCount,
   totalCount,
   onQueryChange,
+  keyboardButtonNavigation = false,
 }: {
   query: string;
   resultCount: number;
   totalCount: number;
   onQueryChange: (value: string) => void;
+  keyboardButtonNavigation?: boolean;
 }) {
   const [isOpen, setIsOpen] = useState(false);
   const buttonRef = useRef<HTMLButtonElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const hasQuery = query.trim().length > 0;
+  const buttonTabIndex = keyboardButtonNavigation ? undefined : -1;
   const rect = buttonRef.current?.getBoundingClientRect();
   const menuPosition = rect
     ? {
@@ -639,18 +654,19 @@ function SidebarSearchControl({
       <button
         ref={buttonRef}
         type="button"
+        tabIndex={buttonTabIndex}
         onClick={() => setIsOpen((value) => !value)}
         aria-expanded={isOpen}
         aria-pressed={hasQuery}
         className={cn(
-          "w-9 h-9 rounded-md flex items-center justify-center relative transition-colors",
+          RAIL_BUTTON_CLASS,
           hasQuery || isOpen
             ? "bg-zinc-800 text-zinc-100 ring-1 ring-zinc-600/70"
             : "text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50",
         )}
         title="名前検索"
       >
-        <Search size={16} />
+        <Search size={16} className="h-4 w-4 shrink-0" />
         {hasQuery && (
           <span className="absolute left-0 top-1/2 h-4 w-[3px] -translate-y-1/2 rounded-r-full bg-cyan-400" />
         )}
@@ -684,8 +700,9 @@ function SidebarSearchControl({
               />
               {hasQuery && (
                 <button
-                  type="button"
-                  onClick={() => onQueryChange("")}
+                          type="button"
+                          tabIndex={buttonTabIndex}
+                          onClick={() => onQueryChange("")}
                   className="absolute right-1.5 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200"
                   title="検索をクリア"
                 >
@@ -710,6 +727,7 @@ export function RightSidebar({
   settingsValues,
   settingsSections,
   selectedToolIds = [],
+  keyboardButtonNavigation = false,
   onSettingChange,
   onOpenSettings,
   onToolToggle,
@@ -721,6 +739,7 @@ export function RightSidebar({
   settingsValues: Record<string, Record<string, unknown>>;
   settingsSections: SettingsSection[];
   selectedToolIds?: string[];
+  keyboardButtonNavigation?: boolean;
   onSettingChange: (sectionId: string, fieldId: string, value: unknown) => void;
   onOpenSettings: () => void;
   onToolToggle?: (item: SidebarItem) => void;
@@ -730,6 +749,7 @@ export function RightSidebar({
   const [activePanel, setActivePanel] = useState<string | null>(null);
   const [categoryFilter, setCategoryFilter] = useState<"all" | SidebarCategory>("all");
   const [searchQuery, setSearchQuery] = useState("");
+  const [toolManagerSearchQuery, setToolManagerSearchQuery] = useState("");
   const [openToolGroupMenu, setOpenToolGroupMenu] = useState<string | null>(null);
   const [toolGroupMenuPosition, setToolGroupMenuPosition] = useState<{ top: number; right: number } | null>(null);
   const sidebarSettings = settingsValues.sidebar ?? {};
@@ -750,6 +770,7 @@ export function RightSidebar({
   const [tagDraftByItemId, setTagDraftByItemId] = useState<Record<string, string>>({});
   const [contextMenu, setContextMenu] = useState<{ itemId: string; x: number; y: number } | null>(null);
   const toolGroupMenuRef = useRef<HTMLDivElement | null>(null);
+  const buttonTabIndex = keyboardButtonNavigation ? undefined : -1;
   const selectedToolIdSet = useMemo(() => new Set(selectedToolIds), [selectedToolIds]);
   const pinnedItemIdSet = useMemo(() => new Set(pinnedItemIds), [pinnedItemIds]);
   const starredItemIdSet = useMemo(() => new Set(starredItemIds), [starredItemIds]);
@@ -843,15 +864,28 @@ export function RightSidebar({
     return next;
   }, [searchFilteredItems]);
   const allToolItems = useMemo(() => sortedToolUiItems(searchFilteredItems.filter((item) => item.category === "tool")), [searchFilteredItems]);
+  const toolManagerBaseItems = useMemo(
+    () => sortedToolUiItems(items.filter((item) => item.category === "tool")),
+    [items],
+  );
+  const toolManagerSearchItems = useMemo(
+    () => toolManagerBaseItems.filter((item) => sidebarItemMatchesSearch(item, tagMap.get(item.id) ?? [], toolManagerSearchQuery)),
+    [tagMap, toolManagerBaseItems, toolManagerSearchQuery],
+  );
+  const toolManagerItems = useMemo(() => sortedToolUiItems(toolManagerSearchItems.filter((item) => (
+    (!showStarredOnly || starredItemIdSet.has(item.id))
+    && (!activeTagFilter || tagMap.get(item.id)?.includes(activeTagFilter))
+  ))), [activeTagFilter, showStarredOnly, starredItemIdSet, tagMap, toolManagerSearchItems]);
+  const toolManagerCandidates = useMemo(() => toolManagerSearchItems.slice(0, 8), [toolManagerSearchItems]);
   const allToolTags = useMemo(() => {
     const counts = new Map<string, number>();
-    for (const item of allToolItems) {
+    for (const item of toolManagerSearchItems) {
       for (const tag of tagMap.get(item.id) ?? []) {
         counts.set(tag, (counts.get(tag) ?? 0) + 1);
       }
     }
     return [...counts.entries()].sort((left, right) => right[1] - left[1] || compareText(left[0], right[0]));
-  }, [allToolItems, tagMap]);
+  }, [tagMap, toolManagerSearchItems]);
   const toolItems = useMemo(() => sortedToolUiItems(allToolItems.filter((item) => (
     (!showStarredOnly || starredItemIdSet.has(item.id))
     && (!activeTagFilter || tagMap.get(item.id)?.includes(activeTagFilter))
@@ -1027,9 +1061,10 @@ export function RightSidebar({
       onDragStart={supportsComposerDrop(item) ? (e) => handleDragStart(e, item) : undefined}
       onContextMenu={(event) => openItemContextMenu(event, item)}
       onClick={() => setActivePanel((current) => (current === item.id ? null : item.id))}
+      tabIndex={buttonTabIndex}
       className={cn(
-        "rounded-md flex items-center justify-center relative transition-colors duration-150 ease-out group/btn flex-shrink-0",
-        "h-9 w-9",
+        RAIL_BUTTON_CLASS,
+        "duration-150 ease-out group/btn",
         activePanel === item.id
           ? "bg-zinc-800 text-zinc-100 ring-1 ring-zinc-600/70"
           : item.category === "tool" && !selectedToolIdSet.has(item.id)
@@ -1186,13 +1221,71 @@ export function RightSidebar({
           <div className="flex-1 overflow-y-auto p-2.5">
             {activeItem ? (
               <SidebarPanel item={activeItem} settingsValues={settingsValues} onSettingChange={onSettingChange} onPanelAction={onPanelAction} />
-            ) : (
-              <div className="space-y-3">
-                <div className="grid grid-cols-3 gap-2">
-                  <div className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-2">
-                    <p className="text-[9px] uppercase tracking-wider text-zinc-600">Tools</p>
-                    <p className="mt-1 text-lg font-semibold text-zinc-100">{toolItems.length}</p>
-                  </div>
+                        ) : (
+                          <div className="space-y-3">
+                            <div className="relative">
+                              <label className="relative block">
+                                <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-600" />
+                                <input
+                                  type="text"
+                                  value={toolManagerSearchQuery}
+                                  onChange={(event) => setToolManagerSearchQuery(event.target.value)}
+                                  placeholder="Tool managerで検索"
+                                  className="h-9 w-full rounded-lg border border-zinc-800 bg-zinc-950 pl-8 pr-8 text-[12px] text-zinc-200 outline-none placeholder:text-zinc-600 focus:border-zinc-600"
+                                />
+                                {toolManagerSearchQuery.trim() && (
+                                  <button
+                                    type="button"
+                                    onClick={() => setToolManagerSearchQuery("")}
+                                    className="absolute right-1.5 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200"
+                                    title="検索をクリア"
+                                  >
+                                    <X size={13} />
+                                  </button>
+                                )}
+                              </label>
+                              {toolManagerSearchQuery.trim() && (
+                                <div className="absolute left-0 right-0 top-[calc(100%+6px)] z-30 overflow-hidden rounded-xl border border-zinc-700/70 bg-zinc-950 py-1 shadow-2xl">
+                                  <div className="flex items-center justify-between border-b border-zinc-800 px-3 py-2 text-[10px] text-zinc-600">
+                                    <span>候補</span>
+                                    <span>{toolManagerSearchItems.length} / {toolManagerBaseItems.length}</span>
+                                  </div>
+                                  {toolManagerCandidates.length > 0 ? (
+                                    <div className="max-h-64 overflow-y-auto py-1">
+                                      {toolManagerCandidates.map((item) => (
+                                        <button
+                                          key={item.id}
+                                          type="button"
+                                          onClick={() => {
+                                            setActivePanel(item.id);
+                                            setToolManagerSearchQuery("");
+                                          }}
+                                          className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-zinc-300 transition-colors hover:bg-zinc-800/80 hover:text-zinc-100"
+                                        >
+                                          <span className="flex min-w-0 items-center gap-2">
+                                            <span className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md bg-zinc-900 text-zinc-500">
+                                              {iconForItem(item)}
+                                            </span>
+                                            <span className="min-w-0">
+                                              <span className="block truncate text-[12px]">{item.label}</span>
+                                              {item.description && <span className="block truncate text-[10px] text-zinc-500">{item.description}</span>}
+                                            </span>
+                                          </span>
+                                          <span className={cn("h-1.5 w-1.5 flex-shrink-0 rounded-full", selectedToolIdSet.has(item.id) ? "bg-emerald-400" : "bg-zinc-700")} />
+                                        </button>
+                                      ))}
+                                    </div>
+                                  ) : (
+                                    <p className="px-3 py-3 text-[11px] text-zinc-500">一致するtoolがありません。</p>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                            <div className="grid grid-cols-3 gap-2">
+                              <div className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-2">
+                                <p className="text-[9px] uppercase tracking-wider text-zinc-600">Tools</p>
+                                <p className="mt-1 text-lg font-semibold text-zinc-100">{toolManagerItems.length}</p>
+                              </div>
                   <div className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-2">
                     <p className="text-[9px] uppercase tracking-wider text-zinc-600">On</p>
                     <p className="mt-1 text-lg font-semibold text-emerald-300">{selectedToolIds.length}</p>
@@ -1203,17 +1296,17 @@ export function RightSidebar({
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-1.5">
-                  <button
-                    type="button"
-                    onClick={() => setToolsEnabled(toolItems.map((item) => item.id), true)}
+                              <button
+                                type="button"
+                                onClick={() => setToolsEnabled(toolManagerItems.map((item) => item.id), true)}
                     className="flex items-center justify-center gap-1 rounded-lg border border-emerald-500/20 bg-emerald-500/10 px-2 py-1.5 text-[11px] font-medium text-emerald-200 hover:bg-emerald-500/15"
                   >
                     <FolderCheck size={13} />
                     表示中をON
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => setToolsEnabled(toolItems.map((item) => item.id), false)}
+                              <button
+                                type="button"
+                                onClick={() => setToolsEnabled(toolManagerItems.map((item) => item.id), false)}
                     className="flex items-center justify-center gap-1 rounded-lg border border-zinc-800 bg-zinc-950/60 px-2 py-1.5 text-[11px] font-medium text-zinc-300 hover:bg-zinc-900"
                   >
                     <FolderX size={13} />
@@ -1279,7 +1372,7 @@ export function RightSidebar({
                   </div>
                 )}
                 <div className="space-y-1">
-                  {toolItems.map((item) => {
+                  {toolManagerItems.map((item) => {
                     const enabled = selectedToolIdSet.has(item.id);
                     const pinned = pinnedItemIdSet.has(item.id);
                     const starred = starredItemIdSet.has(item.id);
@@ -1306,30 +1399,30 @@ export function RightSidebar({
                             {item.description && <span className="block truncate text-[10px] text-zinc-500">{item.description}</span>}
                           </button>
                           <div className="flex flex-shrink-0 items-center gap-0.5">
-                            <button
-                              type="button"
-                              onClick={() => toggleStar(item.id)}
-                              className={cn("rounded-md p-1 transition-colors", starred ? "text-amber-300 hover:bg-amber-500/10" : "text-zinc-600 hover:bg-zinc-800 hover:text-zinc-300")}
-                              title={starred ? "スター解除" : "スター"}
-                            >
-                              <Star size={13} className={cn(starred && "fill-current")} />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => togglePin(item.id)}
-                              className={cn("rounded-md p-1 transition-colors", pinned ? "text-sky-300 hover:bg-sky-500/10" : "text-zinc-600 hover:bg-zinc-800 hover:text-zinc-300")}
-                              title={pinned ? "ピン留め解除" : "ピン留め"}
-                            >
-                              {pinned ? <PinOff size={13} /> : <Pin size={13} />}
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => onToolToggle?.(item)}
-                              className={cn("rounded-md p-1 transition-colors", enabled ? "text-emerald-300 hover:bg-emerald-500/10" : "text-zinc-600 hover:bg-zinc-800 hover:text-zinc-300")}
-                              title={enabled ? "無効にする" : "有効にする"}
-                            >
-                              <Power size={13} />
-                            </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => toggleStar(item.id)}
+                                          className={cn("flex h-7 w-7 items-center justify-center rounded-md transition-colors", starred ? "text-amber-300 hover:bg-amber-500/10" : "text-zinc-600 hover:bg-zinc-800 hover:text-zinc-300")}
+                                          title={starred ? "スター解除" : "スター"}
+                                        >
+                                          <Star size={16} strokeWidth={2.1} className={cn("h-4 w-4 flex-shrink-0", starred && "fill-current")} />
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => togglePin(item.id)}
+                                          className={cn("flex h-7 w-7 items-center justify-center rounded-md transition-colors", pinned ? "text-sky-300 hover:bg-sky-500/10" : "text-zinc-600 hover:bg-zinc-800 hover:text-zinc-300")}
+                                          title={pinned ? "ピン留め解除" : "ピン留め"}
+                                        >
+                                          {pinned ? <PinOff size={15} /> : <Pin size={15} />}
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => onToolToggle?.(item)}
+                                          className={cn("flex h-7 w-7 items-center justify-center rounded-md transition-colors", enabled ? "text-emerald-300 hover:bg-emerald-500/10" : "text-zinc-600 hover:bg-zinc-800 hover:text-zinc-300")}
+                                          title={enabled ? "無効にする" : "有効にする"}
+                                        >
+                                          <Power size={15} />
+                                        </button>
                           </div>
                         </div>
                         {itemTags.length > 0 && (
@@ -1359,64 +1452,71 @@ export function RightSidebar({
         </div>
       )}
 
-      <div className="w-11 flex flex-col flex-shrink-0 overflow-hidden">
-        <div
-          className="flex-1 flex flex-col items-center gap-1 overflow-y-auto w-full py-1.5 scrollbar-none"
-          onDragOver={(event) => {
-            if (event.dataTransfer.types.includes("application/rumi-sidebar-shortcut")) {
-              event.preventDefault();
-              event.dataTransfer.dropEffect = "copy";
-            }
-          }}
-          onDrop={handleShortcutDrop}
-        >
+              <div className="w-12 flex flex-col flex-shrink-0 overflow-visible">
+                <div
+                  className="flex-1 flex flex-col items-center gap-1 overflow-x-visible overflow-y-auto w-full py-1.5 scrollbar-none"
+                  onDragOver={(event) => {
+                    if (event.dataTransfer.types.includes("application/rumi-sidebar-shortcut")) {
+                      event.preventDefault();
+                      event.dataTransfer.dropEffect = "copy";
+                    }
+                  }}
+                  onDrop={handleShortcutDrop}
+                >
           {pinnedRailItems.length > 0 && (
             <div className="flex w-full flex-col items-center gap-1">
               {pinnedRailItems.map((item) => renderRailItemButton(item, true))}
               <div className="w-5 h-px bg-sky-500/20 my-0.5" />
             </div>
           )}
-          <CategorySwitcher active={categoryFilter} counts={counts} onChange={(id) => { setCategoryFilter(id); setOpenToolGroupMenu(null); }} />
-          <SidebarSearchControl
-            query={searchQuery}
-            resultCount={searchFilteredItems.length}
-            totalCount={items.length}
-            onQueryChange={(value) => {
-              setSearchQuery(value);
-              setOpenToolGroupMenu(null);
-            }}
-          />
-          <button
-            type="button"
-            onClick={() => setShowStarredOnly((value) => !value)}
-            aria-pressed={showStarredOnly}
-            className={cn(
-              "w-9 h-9 rounded-md flex items-center justify-center relative transition-colors",
-              showStarredOnly
-                ? "bg-amber-500/15 text-amber-300 ring-1 ring-amber-500/30"
-                : "text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50",
-            )}
-            title="Starred tools"
-          >
-            <Star size={16} className={cn(starredItemIds.length > 0 && "fill-current")} />
+                  <CategorySwitcher active={categoryFilter} counts={counts} keyboardButtonNavigation={keyboardButtonNavigation} onChange={(id) => { setCategoryFilter(id); setOpenToolGroupMenu(null); }} />
+                  <SidebarSearchControl
+                    query={searchQuery}
+                    resultCount={searchFilteredItems.length}
+                    totalCount={items.length}
+                    keyboardButtonNavigation={keyboardButtonNavigation}
+                    onQueryChange={(value) => {
+                      setSearchQuery(value);
+                      setOpenToolGroupMenu(null);
+                    }}
+                  />
+                  <button
+                    type="button"
+                    tabIndex={buttonTabIndex}
+                    onClick={() => setShowStarredOnly((value) => !value)}
+                    aria-pressed={showStarredOnly}
+                    className={cn(
+                      RAIL_BUTTON_CLASS,
+                      showStarredOnly
+                        ? "bg-amber-500/15 text-amber-300 ring-1 ring-amber-500/30"
+                        : "text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50",
+                    )}
+                    title="Starred tools"
+                  >
+            <Star
+              size={18}
+              strokeWidth={2.15}
+              className={cn("h-[18px] w-[18px] flex-shrink-0", starredItemIds.length > 0 && "fill-current")}
+            />
             {starredItemIds.length > 0 && (
-              <span className="absolute -top-0.5 -right-0.5 rounded-full bg-zinc-700 px-0.5 text-[7px] leading-tight text-zinc-200">
+              <span className="absolute -top-0.5 -right-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-emerald-500 px-1 text-[7px] font-bold leading-none text-black">
                 {starredItemIds.length}
               </span>
             )}
           </button>
-          <button
-            type="button"
-            onClick={() => setActivePanel((current) => (current === "__tool_manager__" ? null : "__tool_manager__"))}
-            className={cn(
-              "w-9 h-9 rounded-md flex items-center justify-center relative transition-colors",
-              activePanel === "__tool_manager__"
-                ? "bg-zinc-800 text-zinc-100 ring-1 ring-zinc-600/70"
-                : "text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50",
-            )}
-            title="Tool manager"
-          >
-            <SlidersHorizontal size={16} />
+                  <button
+                    type="button"
+                    tabIndex={buttonTabIndex}
+                    onClick={() => setActivePanel((current) => (current === "__tool_manager__" ? null : "__tool_manager__"))}
+                    className={cn(
+                      RAIL_BUTTON_CLASS,
+                      activePanel === "__tool_manager__"
+                        ? "bg-zinc-800 text-zinc-100 ring-1 ring-zinc-600/70"
+                        : "text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50",
+                    )}
+                    title="Tool manager"
+                  >
+            <SlidersHorizontal size={16} className="h-4 w-4 shrink-0" />
             {selectedToolIds.length > 0 && (
               <span className="absolute -top-0.5 -right-0.5 rounded-full bg-emerald-500 px-0.5 text-[7px] font-bold leading-tight text-black">
                 {selectedToolIds.length}
@@ -1430,28 +1530,30 @@ export function RightSidebar({
               {toolGroups.map((group) => {
                 const isGroupActive = activeToolGroupId === group.id;
                 const isGroupOpen = openToolGroupMenu === group.id;
-                return (
-                <div key={group.id} className="relative">
-                  <button
-                    type="button"
-                    onClick={(event) => {
-                      if (group.items.length === 1) {
-                        setActivePanel(group.items[0].id);
-                        setOpenToolGroupMenu(null);
-                        return;
-                      }
-                      if (openToolGroupMenu === group.id) {
-                        setOpenToolGroupMenu(null);
-                        return;
-                      }
-                      openToolGroup(group.id, event.currentTarget);
-                    }}
-                    className={cn(
-                      "group/group w-9 h-9 rounded-md flex items-center justify-center relative transition-colors flex-shrink-0",
-                      isGroupOpen || isGroupActive
-                        ? "bg-emerald-900/40 text-emerald-300 border border-emerald-500/30"
-                        : "text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50",
-                    )}
+                        return (
+                          <div key={group.id} className="relative">
+                            <button
+                              type="button"
+                              tabIndex={buttonTabIndex}
+                              onClick={(event) => {
+                                if (group.items.length === 1) {
+                                  setActivePanel((current) => (current === group.items[0].id ? null : group.items[0].id));
+                                  setOpenToolGroupMenu(null);
+                                  return;
+                                }
+                                if (openToolGroupMenu === group.id) {
+                                  setOpenToolGroupMenu(null);
+                                  return;
+                                }
+                                openToolGroup(group.id, event.currentTarget);
+                              }}
+                              className={cn(
+                                RAIL_BUTTON_CLASS,
+                                "group/group",
+                                isGroupOpen || isGroupActive
+                                  ? "bg-emerald-900/40 text-emerald-300 border border-emerald-500/30"
+                                  : "text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50",
+                              )}
                     title={`${group.path?.length ? group.path.join(" / ") : group.label || TOOL_GROUP_LABELS[group.id] || group.id} (${group.count})`}
                   >
                     {railIcon((group.icon && TOOL_GROUP_ICONS[group.icon]) || TOOL_GROUP_ICONS[group.id] || <Wrench size={20} />, 20)}
@@ -1477,35 +1579,38 @@ export function RightSidebar({
                         )}
                         <p className="text-[10px] text-zinc-500">{group.count} tools</p>
                       </div>
-                      <div className="grid grid-cols-2 gap-1 border-b border-zinc-800 p-2">
-                        <button
-                          type="button"
-                          onClick={() => setToolsEnabled(group.items.map((item) => item.id), true)}
-                          className="flex items-center justify-center gap-1 rounded-md bg-emerald-500/10 px-2 py-1 text-[10px] font-medium text-emerald-200 hover:bg-emerald-500/15"
-                        >
+                              <div className="grid grid-cols-2 gap-1 border-b border-zinc-800 p-2">
+                                <button
+                                  type="button"
+                                  tabIndex={buttonTabIndex}
+                                  onClick={() => setToolsEnabled(group.items.map((item) => item.id), true)}
+                                  className="flex items-center justify-center gap-1 rounded-md bg-emerald-500/10 px-2 py-1 text-[10px] font-medium text-emerald-200 hover:bg-emerald-500/15"
+                                >
                           <FolderCheck size={11} />
                           folder ON
                         </button>
-                        <button
-                          type="button"
-                          onClick={() => setToolsEnabled(group.items.map((item) => item.id), false)}
-                          className="flex items-center justify-center gap-1 rounded-md bg-zinc-900 px-2 py-1 text-[10px] font-medium text-zinc-300 hover:bg-zinc-800"
-                        >
+                                <button
+                                  type="button"
+                                  tabIndex={buttonTabIndex}
+                                  onClick={() => setToolsEnabled(group.items.map((item) => item.id), false)}
+                                  className="flex items-center justify-center gap-1 rounded-md bg-zinc-900 px-2 py-1 text-[10px] font-medium text-zinc-300 hover:bg-zinc-800"
+                                >
                           <FolderX size={11} />
                           folder OFF
                         </button>
                       </div>
                       <div className="max-h-64 overflow-y-auto py-1">
-                        {group.items.map((item) => (
-                          <button
-                            key={item.id}
-                            type="button"
-                            draggable={supportsComposerDrop(item)}
+                                {group.items.map((item) => (
+                                  <button
+                                    key={item.id}
+                                    type="button"
+                                    tabIndex={buttonTabIndex}
+                                    draggable={supportsComposerDrop(item)}
                             onDragStart={supportsComposerDrop(item) ? (event) => handleShortcutDragStart(event, item) : undefined}
                             onContextMenu={(event) => openItemContextMenu(event, item)}
                             onClick={(event) => {
                               event.stopPropagation();
-                              setActivePanel(item.id);
+                              setActivePanel((current) => (current === item.id ? null : item.id));
                               setOpenToolGroupMenu(null);
                             }}
                             className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-zinc-300 transition-colors hover:bg-zinc-800/80 hover:text-zinc-100"
@@ -1559,47 +1664,51 @@ export function RightSidebar({
                   <p className="truncate text-[11px] font-semibold text-zinc-200">{item.label}</p>
                   <p className="truncate text-[10px] text-zinc-500">{item.category}</p>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    togglePin(item.id);
-                    setContextMenu(null);
-                  }}
+                        <button
+                          type="button"
+                          tabIndex={buttonTabIndex}
+                          onClick={() => {
+                            togglePin(item.id);
+                            setContextMenu(null);
+                          }}
                   className="flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] text-zinc-300 hover:bg-zinc-800/80 hover:text-zinc-100"
                 >
                   {pinned ? <PinOff size={13} /> : <Pin size={13} />}
                   <span>{pinned ? "ピン留め解除" : "ピン留め"}</span>
                 </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    toggleStar(item.id);
-                    setContextMenu(null);
-                  }}
+                        <button
+                          type="button"
+                          tabIndex={buttonTabIndex}
+                          onClick={() => {
+                            toggleStar(item.id);
+                            setContextMenu(null);
+                          }}
                   className="flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] text-zinc-300 hover:bg-zinc-800/80 hover:text-zinc-100"
                 >
                   <Star size={13} className={cn(starred && "fill-current text-amber-300")} />
                   <span>{starred ? "スター解除" : "スター"}</span>
                 </button>
                 {item.category === "tool" && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      onToolToggle?.(item);
-                      setContextMenu(null);
-                    }}
+                          <button
+                            type="button"
+                            tabIndex={buttonTabIndex}
+                            onClick={() => {
+                              onToolToggle?.(item);
+                              setContextMenu(null);
+                            }}
                     className="flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] text-zinc-300 hover:bg-zinc-800/80 hover:text-zinc-100"
                   >
                     <Power size={13} className={enabled ? "text-emerald-300" : undefined} />
                     <span>{enabled ? "Tool を off" : "Tool を on"}</span>
                   </button>
                 )}
-                <button
-                  type="button"
-                  onClick={() => {
-                    setActivePanel(item.id);
-                    setContextMenu(null);
-                  }}
+                        <button
+                          type="button"
+                          tabIndex={buttonTabIndex}
+                          onClick={() => {
+                            setActivePanel(item.id);
+                            setContextMenu(null);
+                          }}
                   className="flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] text-zinc-300 hover:bg-zinc-800/80 hover:text-zinc-100"
                 >
                   <MoreVertical size={13} />
@@ -1611,12 +1720,14 @@ export function RightSidebar({
 
           <div className="mt-auto w-5 h-px bg-zinc-800 my-1" />
 
-          <button
-            onClick={onOpenSettings}
-            className="relative w-9 h-9 rounded-md flex items-center justify-center text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50 transition-colors group/btn flex-shrink-0"
-            title="Settings"
-          >
-            <Settings size={16} />
+                  <button
+                    type="button"
+                    tabIndex={buttonTabIndex}
+                    onClick={onOpenSettings}
+                    className={cn(RAIL_BUTTON_CLASS, "text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50 group/btn")}
+                    title="Settings"
+                  >
+            <Settings size={16} className="h-4 w-4 shrink-0" />
             <span className="absolute right-full mr-2 px-2 py-1 bg-zinc-800 text-zinc-200 text-[10px] rounded-md opacity-0 group-hover/btn:opacity-100 pointer-events-none transition-opacity whitespace-nowrap border border-zinc-700 shadow-lg z-50">
               Settings
             </span>

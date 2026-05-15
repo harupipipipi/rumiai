@@ -1,0 +1,136 @@
+import type { KeyboardEvent as ReactKeyboardEvent } from "react";
+import { CalendarDays, Clock, MessageSquare, Search, SlidersHorizontal, Star, X } from "lucide-react";
+
+import type { ConversationSearchResult } from "../lib/api";
+import { cn } from "../lib/cn";
+import { SPOTLIGHT_FILTERS, type SpotlightFilter } from "../lib/conversationSpotlight";
+import { formatRelativeTime } from "../lib/chat";
+import { t, type LocaleSetting } from "../lib/i18n";
+
+export function ConversationSpotlight({
+  isOpen,
+  query,
+  filter,
+  results,
+  selectedIndex,
+  loading,
+  locale,
+  onQueryChange,
+  onFilterChange,
+  onKeyDown,
+  onClose,
+  onOpenResult,
+}: {
+  isOpen: boolean;
+  query: string;
+  filter: SpotlightFilter;
+  results: ConversationSearchResult[];
+  selectedIndex: number;
+  loading: boolean;
+  locale: LocaleSetting;
+  onQueryChange: (value: string) => void;
+  onFilterChange: (value: SpotlightFilter) => void;
+  onKeyDown: (event: ReactKeyboardEvent<HTMLInputElement>) => void;
+  onClose: () => void;
+  onOpenResult: (result: ConversationSearchResult | undefined) => void;
+}) {
+  if (!isOpen) return null;
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/45 px-4 pt-[9vh] backdrop-blur-sm" onMouseDown={onClose}>
+      <div
+        className="w-full max-w-2xl overflow-hidden rounded-3xl border border-white/10 bg-zinc-950/95 shadow-[0_32px_120px_rgba(0,0,0,0.65)] ring-1 ring-white/5"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <div className="flex items-center gap-3 border-b border-zinc-800/80 px-4 py-3">
+          <Search size={20} className="text-emerald-300" />
+          <input
+            value={query}
+            autoFocus
+            onChange={(event) => onQueryChange(event.target.value)}
+            onKeyDown={onKeyDown}
+            placeholder={t(locale, "spotlight.placeholder")}
+            className="min-w-0 flex-1 bg-transparent text-lg text-zinc-100 outline-none placeholder:text-zinc-600"
+          />
+          <div className="hidden rounded-full border border-zinc-800 px-2 py-1 text-[10px] uppercase tracking-[0.18em] text-zinc-500 sm:block">
+            {t(locale, "spotlight.shortcut")}
+          </div>
+          <button type="button" onClick={onClose} className="rounded-full p-1.5 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200">
+            <X size={16} />
+          </button>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2 border-b border-zinc-900 px-4 py-3">
+          <span className="flex items-center gap-1 text-[11px] uppercase tracking-[0.18em] text-zinc-600">
+            <SlidersHorizontal size={13} /> {t(locale, "spotlight.filter")}
+          </span>
+          {SPOTLIGHT_FILTERS.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              onClick={() => onFilterChange(item.id)}
+              className={cn(
+                "rounded-full border px-3 py-1 text-xs transition-colors",
+                filter === item.id
+                  ? "border-emerald-500/50 bg-emerald-500/15 text-emerald-200"
+                  : "border-zinc-800 bg-zinc-900/50 text-zinc-500 hover:border-zinc-700 hover:text-zinc-300",
+              )}
+            >
+              {t(locale, item.labelKey)}
+            </button>
+          ))}
+          {loading && <span className="ml-auto text-xs text-zinc-500">{t(locale, "spotlight.loading")}</span>}
+        </div>
+
+        <div className="max-h-[min(62vh,560px)] overflow-y-auto p-2">
+          {results.length === 0 ? (
+            <div className="px-6 py-10 text-center text-sm text-zinc-500">
+              {query.trim() ? t(locale, "spotlight.emptyResults") : t(locale, "spotlight.emptyQuery")}
+            </div>
+          ) : (
+            <div className="space-y-1">
+              {results.map((result, index) => {
+                const selected = index === selectedIndex;
+                const firstMatch = result.matches?.[0];
+                return (
+                  <button
+                    key={result.conversation_id}
+                    type="button"
+                    onClick={() => onOpenResult(result)}
+                    className={cn(
+                      "group w-full rounded-2xl px-4 py-3 text-left transition-colors",
+                      selected ? "bg-zinc-800/85 text-zinc-100" : "text-zinc-300 hover:bg-zinc-900",
+                    )}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className={cn("flex h-10 w-10 items-center justify-center rounded-2xl border", selected ? "border-emerald-400/50 bg-emerald-400/10 text-emerald-200" : "border-zinc-800 bg-zinc-900 text-zinc-500")}>
+                        {result.is_starred ? <Star size={17} /> : <MessageSquare size={17} />}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <p className="truncate text-sm font-medium">{result.title}</p>
+                          {Number(result.exact_score ?? 0) > 0 && <span className="rounded-full bg-sky-500/15 px-2 py-0.5 text-[10px] text-sky-200">{t(locale, "spotlight.exact")}</span>}
+                          {Number(result.semantic_score ?? 0) > Number(result.exact_score ?? 0) && <span className="rounded-full bg-violet-500/15 px-2 py-0.5 text-[10px] text-violet-200">{t(locale, "spotlight.vector")}</span>}
+                        </div>
+                        <p className="mt-1 truncate text-xs text-zinc-500">{firstMatch?.snippet ?? t(locale, "spotlight.recent")}</p>
+                      </div>
+                      <div className="hidden shrink-0 items-center gap-2 text-[11px] text-zinc-600 sm:flex">
+                        <CalendarDays size={13} />
+                        <span>{result.updated_at ? formatRelativeTime(result.updated_at) : t(locale, "spotlight.recentDate")}</span>
+                      </div>
+                    </div>
+                    {result.matches && result.matches.length > 1 && (
+                      <div className="ml-[52px] mt-2 flex items-center gap-1 text-[11px] text-zinc-600">
+                        <Clock size={12} />
+                        {t(locale, "spotlight.matches", { count: result.matches.length })}
+                      </div>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}

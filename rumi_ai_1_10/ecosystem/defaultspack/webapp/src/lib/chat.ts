@@ -25,6 +25,59 @@ export function messageToText(message: ChatMessage): string {
   return contentBlocksToText(message.content).trim();
 }
 
+function numericValue(value: unknown): number | null {
+  const numberValue = Number(value);
+  return Number.isFinite(numberValue) ? numberValue : null;
+}
+
+function messageSortKey(message: ChatMessage, originalIndex: number): {
+  sequence: number | null;
+  createdAt: number;
+  originalIndex: number;
+} {
+  const sequence = numericValue(message.sequence_number);
+  return {
+    sequence: sequence && sequence > 0 ? sequence : null,
+    createdAt: numericValue(message.created_at) ?? 0,
+    originalIndex,
+  };
+}
+
+export function orderConversationMessages(messages: ChatMessage[]): ChatMessage[] {
+  const byId = new Map<string, { message: ChatMessage; originalIndex: number }>();
+  messages.forEach((message, index) => {
+    const id = String(message.id || "").trim();
+    if (!id) {
+      byId.set(`__message_${index}`, { message, originalIndex: index });
+      return;
+    }
+    const existing = byId.get(id);
+    byId.set(id, {
+      message: {
+        ...(existing?.message ?? {}),
+        ...message,
+        events: message.events ?? existing?.message.events ?? null,
+        tool_logs: message.tool_logs ?? existing?.message.tool_logs ?? null,
+      },
+      originalIndex: existing?.originalIndex ?? index,
+    });
+  });
+
+  return [...byId.values()]
+    .sort((left, right) => {
+      const leftKey = messageSortKey(left.message, left.originalIndex);
+      const rightKey = messageSortKey(right.message, right.originalIndex);
+      if (leftKey.sequence !== null && rightKey.sequence !== null && leftKey.sequence !== rightKey.sequence) {
+        return leftKey.sequence - rightKey.sequence;
+      }
+      if (leftKey.createdAt !== rightKey.createdAt) {
+        return leftKey.createdAt - rightKey.createdAt;
+      }
+      return leftKey.originalIndex - rightKey.originalIndex;
+    })
+    .map((entry) => entry.message);
+}
+
 export function deriveConversationTitle(seed: string): string {
   const title = seed.replace(/\s+/g, " ").trim();
   if (!title) {

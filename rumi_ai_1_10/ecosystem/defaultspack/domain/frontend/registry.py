@@ -476,6 +476,25 @@ class FrontendRegistry:
                         "default": True,
                         "help": "assistant メッセージ上部に activity 情報を表示する。",
                     },
+                    {
+                        "id": "keyboard_button_navigation",
+                        "label": "Keyboard Button Navigation",
+                        "type": "toggle",
+                        "default": False,
+                        "help": "Tab/Enterでcomposerや右サイドバーのボタンへ移動・実行できるようにします。Offでもslash候補のTab選択は使えます。",
+                    },
+                    {
+                        "id": "language",
+                        "label": "Language",
+                        "type": "select",
+                        "default": "ja",
+                        "options": [
+                            {"value": "ja", "label": "日本語"},
+                            {"value": "en", "label": "English"},
+                            {"value": "auto", "label": "Auto"},
+                        ],
+                        "help": "frontend の表示言語です。未翻訳の拡張項目は元の文言を表示します。",
+                    },
                 ],
             },
             {
@@ -537,6 +556,15 @@ class FrontendRegistry:
                         "help": "新しい会話と composer の既定モデルです。",
                     },
                     {
+                        "id": "model_api_routes",
+                        "label": "Model API Priority",
+                        "type": "model_api_routes",
+                        "default": "",
+                        "options": self._model_route_options(),
+                        "api_keys": provider_key_status(pack_root=self._pack_root),
+                        "help": "1行に model: provider/api-name を優先順で書きます。例: google/gemini-2.5-pro: google/main, google/backup。制限時は次の API へ切り替えます。",
+                    },
+                    {
                         "id": "thinking_level",
                         "label": "Thinking Level",
                         "type": "select",
@@ -571,7 +599,7 @@ class FrontendRegistry:
             {
                 "id": "apis",
                 "label": "APIs",
-                "description": "名前付き API key と、モデルごとの API 優先順位。",
+                "description": "名前付き API key を保存します。モデルごとの使用 API は Models で設定します。",
                 "fields": [
                     {
                         "id": "api_keys",
@@ -579,13 +607,6 @@ class FrontendRegistry:
                         "type": "api_keys",
                         "default": [],
                         "help": "provider と名前を付けて複数の API key を保存できます。値は再表示されません。",
-                    },
-                    {
-                        "id": "model_api_routes",
-                        "label": "Model API Priority",
-                        "type": "textarea",
-                        "default": "",
-                        "help": "1行に model: provider/api-name を優先順で書きます。例: google/gemini-2.5-pro: google/main, google/backup",
                     },
                 ],
             },
@@ -909,6 +930,28 @@ class FrontendRegistry:
                         "default": False,
                         "help": "Keep composer tool selections after a message is sent.",
                     },
+                    {
+                        "id": "tool_assist_mode",
+                        "label": "Tool Assist",
+                        "type": "select",
+                        "default": "auto",
+                        "options": [
+                            {"value": "auto", "label": "Auto: recommend relevant tools"},
+                            {"value": "all", "label": "All tools: expose every tool"},
+                            {"value": "off", "label": "Off: only manually selected tools"},
+                        ],
+                        "help": "Auto は入力文と tool の名前・説明・タグを照合し、関連度が高い tool だけを AI に推薦します。",
+                    },
+                    {
+                        "id": "tool_assist_limit",
+                        "label": "Tool Assist Limit",
+                        "type": "number",
+                        "default": 8,
+                        "min": 1,
+                        "max": 24,
+                        "help": "Auto が AI に推薦する tool 数の上限です。",
+                        "advanced": True,
+                    },
                 ],
             },
             {
@@ -1115,30 +1158,8 @@ class FrontendRegistry:
     def _preview_from_tool_log(self, message: dict[str, Any], log: dict[str, Any], index: int) -> list[dict[str, Any]]:
         timestamp = int(message.get("created_at", 0)) - 200 - index
         tool_name = str(log.get("tool_name") or "tool")
-        arguments = log.get("arguments") if isinstance(log.get("arguments"), dict) else {}
         result = log.get("result")
-        input_text = self._preview_text(arguments, 180)
-        result_text = self._preview_text(result, 480)
-        status = "failed" if isinstance(result, dict) and result.get("status") == "error" else "completed"
-        lines = [
-            f"tool: {tool_name}",
-            f"status: {status}",
-        ]
-        if input_text:
-            lines.append(f"input: {input_text}")
-        if result_text:
-            lines.append(f"result: {result_text}")
-        previews = [{
-            "id": f"tool-log-{message.get('id')}-{index}",
-            "toolStepId": tool_name,
-            "timestamp": timestamp,
-            "data": {
-                "type": "file",
-                "filename": f"{tool_name}.tool",
-                "size": status,
-                "content": "\n".join(lines),
-            },
-        }]
+        previews: list[dict[str, Any]] = []
         conversation_id = str(message.get("conversation_id") or "")
         for artifact_index, path in enumerate(self._artifact_paths_from_value(result)):
             name = Path(path).name or "artifact"
@@ -1177,6 +1198,19 @@ class FrontendRegistry:
                         },
                     }
                 )
+        for image_index, url in enumerate(self._inline_image_urls_from_value(result)):
+            previews.append(
+                {
+                    "id": f"tool-log-inline-{message.get('id')}-{index}-{image_index}",
+                    "toolStepId": tool_name,
+                    "timestamp": timestamp + len(previews) + image_index + 0.1,
+                    "data": {
+                        "type": "image",
+                        "url": url,
+                        "alt": self._data_url_name(url),
+                    },
+                }
+            )
         return previews
 
     def _artifact_paths_from_value(self, value: Any, seen: set[str] | None = None) -> list[str]:
@@ -1201,9 +1235,37 @@ class FrontendRegistry:
                 paths.extend(self._artifact_paths_from_value(item, seen))
         return paths
 
+    def _inline_image_urls_from_value(self, value: Any, seen: set[str] | None = None) -> list[str]:
+        seen = seen or set()
+        urls: list[str] = []
+        if isinstance(value, dict):
+            for key in ("data_url", "dataUrl"):
+                item = value.get(key)
+                if isinstance(item, str) and self._is_image_data_url(item) and item not in seen:
+                    seen.add(item)
+                    urls.append(item)
+            for key, item in value.items():
+                if key in {"data_url", "dataUrl"}:
+                    continue
+                urls.extend(self._inline_image_urls_from_value(item, seen))
+        elif isinstance(value, list):
+            for item in value:
+                urls.extend(self._inline_image_urls_from_value(item, seen))
+        return urls
+
     @staticmethod
     def _is_image_path(path: str) -> bool:
         return Path(path).suffix.lower() in {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"}
+
+    @staticmethod
+    def _is_image_data_url(value: str) -> bool:
+        return value.lower().startswith("data:image/") and ";base64," in value[:80].lower()
+
+    @staticmethod
+    def _data_url_name(value: str) -> str:
+        prefix = value.split(";", 1)[0]
+        extension = prefix.rsplit("/", 1)[-1].replace("jpeg", "jpg").split("+")[0] or "png"
+        return f"screenshot.{extension}"
 
     def _preview_text(self, value: Any, limit: int) -> str:
         if value is None:
@@ -1433,7 +1495,12 @@ class FrontendRegistry:
 
     def _default_settings(self) -> dict[str, Any]:
         return {
-            "general": {"composer_placeholder": "メッセージを入力...", "show_activity_in_messages": True},
+            "general": {
+                "composer_placeholder": "メッセージを入力...",
+                "show_activity_in_messages": True,
+                "keyboard_button_navigation": False,
+                "language": "ja",
+            },
             "preview": {"auto_open": False, "default_mode": "auto", "max_items": 12},
             "chat_rendering": {"show_widgets": True, "unknown_block_strategy": "hidden"},
             "models": {
@@ -1445,6 +1512,8 @@ class FrontendRegistry:
             "tools": {
                 "default_target": "",
                 "keep_selected_tools_after_send": False,
+                "tool_assist_mode": "auto",
+                "tool_assist_limit": 8,
             },
             "debug": {
                 "ai_request_logging": False,
@@ -1456,7 +1525,6 @@ class FrontendRegistry:
             },
             "apis": {
                 "api_keys": [],
-                "model_api_routes": "",
             },
             "external_input": {
                 "input_setup_guide": (
@@ -1530,6 +1598,46 @@ class FrontendRegistry:
             }
             for profile in profiles
         ] or [{"value": "stub/default", "label": "Stub Default"}]
+
+    def _model_route_options(self) -> list[dict[str, Any]]:
+        profiles = self._selectable_model_profiles()
+        options: list[dict[str, Any]] = []
+        for profile in profiles:
+            profile_id = str(
+                profile.get("profile_id")
+                or profile.get("qualified_model_id")
+                or profile.get("id")
+                or ""
+            ).strip()
+            if not profile_id:
+                continue
+            provider_id = str(profile.get("provider_id") or profile.get("provider") or "").strip()
+            model_id = str(profile.get("model_id") or profile.get("model") or "").strip()
+            if not provider_id and "/" in profile_id:
+                provider_id, inferred_model = profile_id.split("/", 1)
+                model_id = model_id or inferred_model
+            availability = profile.get("availability") if isinstance(profile.get("availability"), dict) else {}
+            options.append(
+                {
+                    "value": profile_id,
+                    "label": self._model_option_label(profile),
+                    "provider_id": provider_id,
+                    "model_id": model_id,
+                    "qualified_model_id": str(profile.get("qualified_model_id") or profile_id),
+                    "configured": bool(
+                        availability.get("configured")
+                        or availability.get("active")
+                        or str(availability.get("status", "")).lower() in {"configured", "active"}
+                    ),
+                    "local": bool(
+                        profile.get("local")
+                        or availability.get("local")
+                        or availability.get("offline")
+                        or provider_id in {"stub", "ollama", "lmstudio", "vllm"}
+                    ),
+                }
+            )
+        return options or [{"value": "stub/default", "label": "Stub Default", "provider_id": "stub", "model_id": "default", "local": True}]
 
     def _selectable_model_profiles(self) -> list[dict[str, Any]]:
         try:
@@ -1671,6 +1779,11 @@ class FrontendRegistry:
         sanitized = deepcopy(patch)
         apis = sanitized.get("apis")
         if isinstance(apis, dict):
+            legacy_model_routes = apis.pop("model_api_routes", None)
+            if legacy_model_routes:
+                models_patch = sanitized.setdefault("models", {})
+                if isinstance(models_patch, dict) and not models_patch.get("model_api_routes"):
+                    models_patch["model_api_routes"] = legacy_model_routes
             api_key_patch = apis.pop("api_keys", None)
             if isinstance(api_key_patch, dict) and api_key_patch.get("action") == "upsert":
                 provider_id = str(api_key_patch.get("provider_id") or "").strip()
@@ -1721,22 +1834,40 @@ class FrontendRegistry:
             refreshed["debug"] = debug
         debug.setdefault("ai_request_logging", False)
 
+        general = refreshed.setdefault("general", {})
+        if not isinstance(general, dict):
+            general = {}
+            refreshed["general"] = general
+        language = str(general.get("language") or "ja").strip().lower()
+        general["language"] = language if language in {"ja", "en", "auto"} else "ja"
+
         tools = refreshed.setdefault("tools", {})
         if not isinstance(tools, dict):
             tools = {}
             refreshed["tools"] = tools
         tools.setdefault("keep_selected_tools_after_send", False)
+        tool_assist_mode = str(tools.get("tool_assist_mode") or "auto").strip().lower()
+        tools["tool_assist_mode"] = tool_assist_mode if tool_assist_mode in {"auto", "all", "off"} else "auto"
+        try:
+            tools["tool_assist_limit"] = max(1, min(24, int(tools.get("tool_assist_limit", 8))))
+        except (TypeError, ValueError):
+            tools["tool_assist_limit"] = 8
         legacy_default_target = self._legacy_default_target(refreshed)
         if "default_target" not in tools or (not str(tools.get("default_target") or "").strip() and legacy_default_target):
             tools["default_target"] = legacy_default_target
 
+        models = refreshed.setdefault("models", {})
+        if not isinstance(models, dict):
+            models = {}
+            refreshed["models"] = models
+
         apis = refreshed.setdefault("apis", {})
         if isinstance(apis, dict):
             apis["api_keys"] = provider_key_status(pack_root=self._pack_root)
-            routes = apis.get("model_api_routes")
-            if isinstance(routes, list):
-                routes = "\n".join(str(item).strip() for item in routes if str(item).strip())
-            apis["model_api_routes"] = str(routes or "").strip() + ("\n" if str(routes or "").strip() else "")
+            legacy_routes = apis.pop("model_api_routes", None)
+            if legacy_routes and not models.get("model_api_routes"):
+                models["model_api_routes"] = legacy_routes
+        refreshed["models"] = ModelRuntimeSettingsService(self._pack_root).refresh_models_settings(models)
         external_input = refreshed.setdefault("external_input", {})
         if not isinstance(external_input, dict):
             external_input = {}

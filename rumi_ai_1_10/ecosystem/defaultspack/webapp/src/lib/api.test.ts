@@ -154,6 +154,42 @@ test("sendMessage preserves an empty selected tools filter", async () => {
   assert.deepEqual(requestBody?.message?.metadata, { selected_tools: [] });
 });
 
+test("searchConversations serializes spotlight search filters", async () => {
+  let requestUrl = "";
+  let requestBody: any = null;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    requestUrl = String(input);
+    requestBody = JSON.parse(String(init?.body ?? "{}"));
+    return new Response(JSON.stringify({
+      status: "ok",
+      data: { results: [], total: 0, query: "weather" },
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }) as typeof fetch;
+
+  try {
+    await api.searchConversations("weather", {
+      date_filter: "7d",
+      is_starred: true,
+      role: "user",
+      limit: 9,
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.equal(requestUrl, "/api/chat/search");
+  assert.deepEqual(requestBody, {
+    query: "weather",
+    mode: "conversations",
+    date_filter: "7d",
+    is_starred: true,
+    role: "user",
+    limit: 9,
+    offset: 0,
+  });
+});
+
 test("saveProviderApiKey serializes named API metadata", async () => {
   let requestBody: any = null;
   const originalFetch = globalThis.fetch;
@@ -398,6 +434,33 @@ test("streamMessage forwards explicit browser screenshot events", async () => {
   assert.deepEqual(activityEvents, ["browser_screenshot", "message"]);
 });
 
+test("streamMessage forwards browser state snapshot events", async () => {
+  const originalFetch = globalThis.fetch;
+  const activityEvents: string[] = [];
+  globalThis.fetch = (async () => {
+    const body = [
+      'data: {"type":"browser_state_snapshot","tool_name":"browser_computer","tool_call_id":"call_1","state_revision":7,"snapshot":{"active_window":{"title":"Example"}}}\n\n',
+      'data: {"type":"message","message":{"id":"m2","role":"assistant","content":[{"type":"text","text":"done"}],"created_at":1,"conversation_id":"c1"}}\n\n',
+    ].join("");
+    return new Response(body, {
+      status: 200,
+      headers: { "Content-Type": "text/event-stream; charset=utf-8" },
+    });
+  }) as typeof fetch;
+
+  try {
+    await api.streamMessage("c1", "hello", undefined, {
+      onEvent(event) {
+        activityEvents.push(event.type);
+      },
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.deepEqual(activityEvents, ["browser_state_snapshot", "message"]);
+});
+
 test("streamMessage surfaces structured stream errors", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (async () => {
@@ -505,6 +568,32 @@ test("browserComputer calls dedicated browser-computer endpoint", async () => {
     assert.deepEqual(requestBody, {
       action: "computer.screenshot",
       payload: { reason: "test" },
+    });
+    assert.deepEqual(result, { handled: true });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("invokeTool calls generic tool endpoint with tool name and arguments", async () => {
+  const originalFetch = globalThis.fetch;
+  let requestUrl = "";
+  let requestBody: any = null;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    requestUrl = String(input);
+    requestBody = JSON.parse(String(init?.body ?? "{}"));
+    return new Response(JSON.stringify({
+      status: "ok",
+      data: { handled: true },
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }) as typeof fetch;
+
+  try {
+    const result = await api.invokeTool("computer_use", { action: "computer.click", approval_token: "tok" });
+    assert.equal(requestUrl, "/api/tools/invoke");
+    assert.deepEqual(requestBody, {
+      tool_name: "computer_use",
+      arguments: { action: "computer.click", approval_token: "tok" },
     });
     assert.deepEqual(result, { handled: true });
   } finally {

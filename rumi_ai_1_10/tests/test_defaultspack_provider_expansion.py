@@ -125,6 +125,32 @@ class TestDefaultspackProviderExpansion(unittest.TestCase):
             finally:
                 AIClient._instance = None
 
+    def test_api_routes_read_models_before_legacy_apis(self):
+        from domain.ai_client.client import AIClient
+
+        AIClient._instance = None
+        with tempfile.TemporaryDirectory() as tmpdir:
+            settings_path = Path(tmpdir) / "frontend_settings.json"
+            settings_path.write_text(
+                json.dumps(
+                    {
+                        "models": {"model_api_routes": "google/gemini-test: google/models-main"},
+                        "apis": {"model_api_routes": "google/gemini-test: google/apis-legacy"},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with patch.dict(os.environ, {}, clear=True):
+                client = AIClient()
+
+            try:
+                with patch.object(client, "_settings_path", return_value=settings_path):
+                    routes = client._api_routes()
+            finally:
+                AIClient._instance = None
+
+        self.assertEqual(routes["google/gemini-test"], ["google/models-main"])
+
     def test_api_route_stream_keeps_named_key_until_generator_is_consumed(self):
         from domain.ai_client import client as client_module
         from domain.ai_client.client import AIClient

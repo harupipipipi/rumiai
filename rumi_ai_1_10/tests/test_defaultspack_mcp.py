@@ -165,6 +165,9 @@ def test_mcp_connect_accepts_server_id_and_saved_config(monkeypatch, tmp_path):
     assert result["data"]["tools"] == ["mcp_fs_read_file"]
     assert fake_registry.tools[0]["name"] == "mcp_fs_read_file"
     assert fake_registry.tools[0]["execution"]["mcp_tool_name"] == "read_file"
+    assert fake_registry.tools[0]["metadata"]["source"] == "mcp"
+    assert fake_registry.tools[0]["metadata"]["server_id"] == "filesystem"
+    assert fake_registry.tools[0]["ui"]["group_id"] == "mcp"
 
 
 def test_mcp_list_filters_by_server_id(monkeypatch):

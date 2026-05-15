@@ -11,9 +11,12 @@ export type ToolActivityItem = {
   input: string;
   title: string;
   detail: string;
+  nextStep?: string;
   status: ToolActivityStatus;
   timestamp?: number | string;
   artifacts?: ToolActivityArtifact[];
+  supported: boolean;
+  rawJson?: string;
 };
 
 export type ToolActivityGroup = {
@@ -47,6 +50,16 @@ function compact(value: unknown, maxLength = 96): string {
   return text.length > maxLength ? `${text.slice(0, maxLength - 1)}…` : text;
 }
 
+function jsonBlock(value: unknown, maxLength = 1600): string {
+  let text = "";
+  try {
+    text = JSON.stringify(value, null, 2);
+  } catch {
+    text = String(value ?? "");
+  }
+  return text.length > maxLength ? `${text.slice(0, maxLength - 1)}…` : text;
+}
+
 function pickString(record: Record<string, unknown>, keys: string[]): string {
   for (const key of keys) {
     const value = record[key];
@@ -61,6 +74,10 @@ export function toolFolderFor(toolName: string): { id: string; label: string } {
     if (pattern.test(toolName)) return { id, label };
   }
   return { id: "tools", label: "Tools" };
+}
+
+function isSupportedToolActivity(toolName: string, explicitSummary = ""): boolean {
+  return toolFolderFor(toolName).id !== "tools" || Boolean(explicitSummary.trim());
 }
 
 export function summarizeToolArguments(toolName: string, args?: Record<string, unknown>): string {
@@ -112,16 +129,34 @@ function formatCalculatorResult(summary: string): string {
   return summary;
 }
 
+function isGenericCompletionSummary(summary: string, toolName: string): boolean {
+  const normalized = summary.trim().toLowerCase();
+  if (!normalized) return true;
+  if (normalized === "completed" || normalized === "complete" || normalized === "done" || normalized === "完了") return true;
+  const lowerToolName = toolName.trim().toLowerCase();
+  return Boolean(lowerToolName && normalized.startsWith(lowerToolName) && /\b(completed|complete|done)\b/.test(normalized));
+}
+
 function summarizeToolResult(toolName: string, result: unknown): string {
-  if (!result || typeof result !== "object") return compact(result, 120);
+  if (!result || typeof result !== "object") {
+    const summary = compact(result, 120);
+    return isGenericCompletionSummary(summary, toolName) ? "" : summary;
+  }
   const record = result as Record<string, unknown>;
   const data = record.data && typeof record.data === "object" ? record.data as Record<string, unknown> : record;
   const direct = pickString(data, ["summary", "result", "message", "output", "title"]);
-  if (direct) return toolName.toLowerCase().includes("calc") ? formatCalculatorResult(direct) : direct;
+  if (direct) {
+    const formatted = toolName.toLowerCase().includes("calc") ? formatCalculatorResult(direct) : direct;
+    return isGenericCompletionSummary(formatted, toolName) ? "" : formatted;
+  }
   if (Array.isArray(data.results)) return `${data.results.length} 件の結果`;
   if (Array.isArray(data.items)) return `${data.items.length} 件の項目`;
   if (Array.isArray(data.files)) return `${data.files.length} 件のファイル`;
   return compact(data, 120);
+}
+
+function explicitToolText(value: Record<string, unknown>): string {
+  return pickString(value, ["display_text", "display_summary", "summary", "result_summary"]);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -290,6 +325,24 @@ export function buildToolActivityGroups(
   events: ChatActivityEvent[] = [],
   options: { conversationId?: string } = {},
 ): ToolActivityGroup[] {
+  const items = buildToolActivityItems(toolLogs, events, options);
+  const byFolder = new Map<string, ToolActivityGroup>();
+  for (const item of items) {
+    const existing = byFolder.get(item.folder);
+    if (existing) {
+      existing.items.push(item);
+    } else {
+      byFolder.set(item.folder, { id: item.folder, label: item.folderLabel, items: [item] });
+    }
+  }
+  return [...byFolder.values()];
+}
+
+export function buildToolActivityItems(
+  toolLogs: ToolLogEntry[] = [],
+  events: ChatActivityEvent[] = [],
+  options: { conversationId?: string } = {},
+): ToolActivityItem[] {
   const fromLogs = toolLogs
     .filter((log) => typeof log.tool_name === "string" && log.tool_name.trim())
     .map((log, index): ToolActivityItem => {
@@ -298,6 +351,8 @@ export function buildToolActivityGroups(
       const folder = toolFolderFor(toolName);
       const argumentSummary = summarizeToolArguments(toolName, args);
       const resultSummary = summarizeToolResult(toolName, log.result);
+      const explicitSummary = isRecord(log.result) ? explicitToolText(log.result) : "";
+      const supported = isSupportedToolActivity(toolName, explicitSummary);
       return {
         id: `log-${index}-${toolName}`,
         toolName,
@@ -307,9 +362,12 @@ export function buildToolActivityGroups(
         input: argumentSummary,
         title: argumentSummary ? `${folder.label} / ${toolName}: ${argumentSummary}` : `${folder.label} / ${toolName}`,
         detail: resultSummary,
+        nextStep: undefined,
         status: statusForLog(log),
         timestamp: log.timestamp,
         artifacts: collectArtifacts(log.result, options.conversationId),
+        supported,
+        rawJson: supported ? undefined : jsonBlock({ arguments: args, result: log.result }),
       };
     });
 
@@ -338,8 +396,14 @@ export function buildToolActivityGroups(
       const folder = toolFolderFor(toolName);
       const argumentSummary = summarizeToolArguments(toolName, args);
       const status = statusForEvent(event);
-      const defaultDetail = status === "running" ? "使用中" : status === "failed" ? "失敗" : "完了";
+      const defaultDetail = status === "running" ? "使用中" : status === "failed" ? "失敗" : "";
       const resultSummary = summarizeToolResult(toolName, resultValueForEvent(event));
+      const explicitSummary = explicitToolText(event);
+      const eventMessage = pickString(event, ["message"]);
+      const fallbackDetail = status === "completed" && isGenericCompletionSummary(eventMessage || defaultDetail, toolName)
+        ? ""
+        : eventMessage || defaultDetail;
+      const supported = isSupportedToolActivity(toolName, explicitSummary);
       return {
         id: `event-${index}-${toolName}`,
         toolName,
@@ -348,21 +412,22 @@ export function buildToolActivityGroups(
         folderLabel: folder.label,
         input: argumentSummary,
         title: argumentSummary ? `${folder.label} / ${toolName}: ${argumentSummary}` : `${folder.label} / ${toolName}`,
-        detail: resultSummary || String(event.message ?? defaultDetail),
+        detail: explicitSummary || resultSummary || fallbackDetail,
+        nextStep: pickString(event, ["next_step", "nextStep"]),
         status,
         timestamp: event.timestamp,
         artifacts: collectEventArtifacts(event, options.conversationId),
+        supported,
+        rawJson: supported ? undefined : jsonBlock({ arguments: args, event }),
       };
     });
 
-  const byFolder = new Map<string, ToolActivityGroup>();
-  for (const item of [...fromLogs, ...eventItems]) {
-    const existing = byFolder.get(item.folder);
-    if (existing) {
-      existing.items.push(item);
-    } else {
-      byFolder.set(item.folder, { id: item.folder, label: item.folderLabel, items: [item] });
+  return [...fromLogs, ...eventItems].sort((left, right) => {
+    const leftTime = Number(left.timestamp ?? 0);
+    const rightTime = Number(right.timestamp ?? 0);
+    if (Number.isFinite(leftTime) && Number.isFinite(rightTime) && leftTime !== rightTime) {
+      return leftTime - rightTime;
     }
-  }
-  return [...byFolder.values()];
+    return 0;
+  });
 }

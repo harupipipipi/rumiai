@@ -20,4 +20,5 @@ def test_defaultspack_uses_stub_default_without_cloud_key(tmp_path):
 
     assert service.get_preferred_model() == "stub/default"
     assert DEFAULT_CHAT_MODEL == "stub/default"
-    assert registry._default_settings()["apis"]["model_api_routes"] == ""
+    assert registry._default_settings()["models"]["model_api_routes"] == ""
+    assert "model_api_routes" not in registry._default_settings()["apis"]
