@@ -41,6 +41,11 @@ _TRANSIENT_AI_ERROR_RE = re.compile(
     r"\b(429|500|502|503|504)\b|temporary|temporarily|timeout|timed out|try again|rate limit|internal error",
     re.IGNORECASE,
 )
+_DEFAULT_AI_RETRY_DELAYS = (1.5, 4.0, 9.0)
+_NON_RETRYABLE_AI_ERROR_RE = re.compile(
+    r"(api key|not configured|unauthorized|forbidden|authentication|invalid api|invalid request|bad request|\b400\b|\b401\b|\b403\b)",
+    re.IGNORECASE,
+)
 _COMPUTER_USE_REQUEST_RE = re.compile(
     r"compute[\s_-]*use|compu?ter[\s_-]*use|computer\s+ツール|コンピューター操作|pc操作|"
     r"(google\s*chrome|chrome|chatgpt|vivaldi|vivladi|line|ブラウザ|browser).{0,80}(操作|送信|入力|クリック|開いて|開く)",
@@ -99,6 +104,41 @@ def _is_transient_ai_error(message):
     return bool(_TRANSIENT_AI_ERROR_RE.search(str(message or "")))
 
 
+def _ai_retry_attempts(params):
+    retry = params.get("retry") if isinstance(params, dict) else None
+    if isinstance(retry, dict):
+        if retry.get("enabled") is False:
+            return 1
+        raw = retry.get("max_attempts")
+    else:
+        raw = params.get("max_retry_attempts") if isinstance(params, dict) else None
+    try:
+        attempts = int(raw) if raw is not None else 3
+    except Exception:
+        attempts = 3
+    return max(1, min(attempts, 5))
+
+
+def _ai_retry_delay(params, retry_index):
+    retry = params.get("retry") if isinstance(params, dict) else None
+    if isinstance(retry, dict) and isinstance(retry.get("delays"), list) and retry["delays"]:
+        try:
+            value = float(retry["delays"][min(retry_index, len(retry["delays"]) - 1)])
+            return max(0.0, min(value, 30.0))
+        except Exception:
+            pass
+    return _DEFAULT_AI_RETRY_DELAYS[min(retry_index, len(_DEFAULT_AI_RETRY_DELAYS) - 1)]
+
+
+def _is_retryable_ai_error(message):
+    text = str(message or "")
+    if not text:
+        return True
+    if _NON_RETRYABLE_AI_ERROR_RE.search(text):
+        return False
+    return _is_transient_ai_error(text)
+
+
 def _ai_direct_complete(model, messages, tools=None, params=None):
     """AIClient を直接呼び出して complete を実行する。
     APIキー未設定等で実プロバイダーがない場合は明示的エラーを返す。
@@ -110,18 +150,84 @@ def _ai_direct_complete(model, messages, tools=None, params=None):
     client = AIClient()
     if not _has_real_provider(client, model):
         return None, "AI provider API key not configured"
-    last_error = ""
-    for attempt in range(3):
+    try:
+        response = client.complete(model, messages, tools or [], params or {})
+        return response, None
+    except RuntimeError as exc:
+        return None, "AI request failed: " + str(exc)
+
+
+def _call_ai_complete_with_retry(model, messages, tools, params, call_handler, events, context, *, allow_retry=True):
+    attempts = _ai_retry_attempts(params) if allow_retry else 1
+    last_error = "AI request failed"
+    for attempt_index in range(attempts):
         try:
-            response = client.complete(model, messages, tools or [], params or {})
-            return response, None
-        except RuntimeError as exc:
+            if call_handler is not None:
+                response = call_handler(
+                    "defaults.ai.complete",
+                    {
+                        "model": model,
+                        "messages": messages,
+                        "tools": tools,
+                        "params": params,
+                    },
+                )
+                if isinstance(response, dict) and response.get("status") == "error":
+                    err = response.get("error", {})
+                    raise RuntimeError(str(err.get("message") or "AI request failed"))
+                if isinstance(response, dict) and response.get("status") == "ok":
+                    return response.get("data", {})
+                return response
+            response, ai_error = _ai_direct_complete(model, messages, tools, params)
+            if ai_error is not None:
+                raise RuntimeError(ai_error)
+            return response
+        except _ChatCancelled:
+            raise
+        except Exception as exc:
             last_error = str(exc)
-            if attempt < 2 and _is_transient_ai_error(last_error):
-                time.sleep(0.6 * (attempt + 1))
-                continue
-            return None, "AI request failed: " + last_error
-    return None, "AI request failed: " + last_error
+            if attempt_index >= attempts - 1 or not _is_retryable_ai_error(last_error):
+                break
+            delay = _ai_retry_delay(params, attempt_index)
+            _append_event(
+                events,
+                context,
+                _event(
+                    "ai_retry_scheduled",
+                    "APIエラーのため少し待って再送信します",
+                    phase="ai_retry_scheduled",
+                    attempt=attempt_index + 1,
+                    max_attempts=attempts,
+                    delay_seconds=delay,
+                    error=last_error,
+                ),
+            )
+            if delay > 0:
+                time.sleep(delay)
+    raise RuntimeError(last_error)
+
+
+def _ai_error_response(model, message, params, events=None):
+    text = "APIエラーでこのタスクを終了しました。\n\n{}".format(str(message or "AI request failed"))
+    return {
+        "content": [{"type": "text", "text": text}],
+        "finish_reason": "error",
+        "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+        "events": list(events or []),
+        "tool_logs": [],
+        "metadata": {
+            "model": model,
+            "attached_tool_count": 0,
+            "attached_tools": [],
+            "thinking": {"state": "failed"},
+            "thinking_level": params.get("thinking_level") if isinstance(params, dict) else None,
+            "error": {
+                "type": "AI_ERROR",
+                "message": str(message or "AI request failed"),
+                "terminal": True,
+            },
+        },
+    }
 
 
 def _ai_error_after_tool_use_response(ai_error):
@@ -1238,26 +1344,32 @@ def _complete_with_tools(model, messages, tools, context, call_handler, params):
                     step_index=step_index + 1,
                 ),
             )
-        if call_handler is not None:
-            response = call_handler("defaults.ai.complete", ai_params)
-            if isinstance(response, dict) and response.get("status") == "error":
-                err = response.get("error", {})
-                ai_error = str(err.get("message") or "AI request failed")
-                _append_ai_debug_response(debug_request_path, {"status": "error", "error": err})
-                if tool_logs:
-                    response = _stop_after_tool_ai_error(events, context, ai_error)
-                    break
-                raise RuntimeError(ai_error)
-            if isinstance(response, dict) and response.get("status") == "ok":
-                response = response.get("data", {})
-        else:
-            response, ai_error = _ai_direct_complete(model, working_messages, tools, params)
-            if ai_error is not None:
-                _append_ai_debug_response(debug_request_path, {"status": "error", "error": ai_error})
-                if tool_logs:
-                    response = _stop_after_tool_ai_error(events, context, ai_error)
-                    break
-                raise RuntimeError(ai_error)
+        try:
+            response = _call_ai_complete_with_retry(
+                model,
+                working_messages,
+                tools,
+                params,
+                call_handler,
+                events,
+                context,
+                allow_retry=not tool_logs,
+            )
+        except RuntimeError as exc:
+            ai_error = str(exc)
+            _append_ai_debug_response(
+                debug_request_path,
+                {
+                    "status": "error",
+                    "error": {
+                        "message": ai_error,
+                    },
+                },
+            )
+            if tool_logs:
+                response = _stop_after_tool_ai_error(events, context, ai_error)
+                break
+            raise
         _append_ai_debug_response(debug_request_path, response)
         _raise_if_cancelled(context)
 
@@ -1695,9 +1807,36 @@ def run(input_data, context):
     except _ChatCancelled:
         return error("Chat request cancelled", "CANCELLED")
     except RuntimeError as exc:
-        return error(str(exc), "AI_ERROR")
+        response = _ai_error_response(
+            model,
+            str(exc),
+            params,
+            events=[
+                _event(
+                    "task_failed",
+                    "APIエラーでタスクを終了しました",
+                    phase="task_failed",
+                    error=str(exc),
+                    terminal=True,
+                )
+            ],
+        )
     except Exception as exc:
-        return error("AI request failed: " + str(exc), "AI_ERROR")
+        ai_error = "AI request failed: " + str(exc)
+        response = _ai_error_response(
+            model,
+            ai_error,
+            params,
+            events=[
+                _event(
+                    "task_failed",
+                    "APIエラーでタスクを終了しました",
+                    phase="task_failed",
+                    error=ai_error,
+                    terminal=True,
+                )
+            ],
+        )
 
     # P1-4: Inspector にリクエストログを記録
     try:
