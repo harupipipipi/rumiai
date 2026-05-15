@@ -8,6 +8,7 @@ import base64
 import tempfile
 import threading
 from collections import Counter
+from datetime import datetime, timezone
 from pathlib import Path
 
 DEFAULT_CHAT_MODEL = "stub/default"
@@ -156,6 +157,9 @@ class ChatStore:
             "agent_id": agent_id,
             "tags": tags if tags is not None else [],
             "is_starred": False,
+            "is_pinned": False,
+            "pinned_at": None,
+            "pin_scope": "global",
             "is_archived": False,
             "current_node_id": None,
             "parent_conversation_id": parent_id,
@@ -181,17 +185,51 @@ class ChatStore:
             return None
         return copy.deepcopy(conv)
 
-    def list_conversations(self, limit=50, offset=0, tag=None, is_starred=None, is_archived=None):
+    def list_conversations(
+        self,
+        limit=50,
+        offset=0,
+        tag=None,
+        tags=None,
+        is_starred=None,
+        is_pinned=None,
+        is_archived=None,
+        company_id=None,
+        workspace_id=None,
+        conversation_kind=None,
+        group_id=None,
+        query=None,
+        include_messages=False,
+    ):
+        filter_tags = self._normalize_filter_tags(tags)
+        query_text = str(query or "").strip().casefold()
         results = []
         for conv in self._conversations.values():
+            if not isinstance(conv, dict):
+                continue
+            self._normalize_conversation(str(conv.get("id") or ""), conv)
             if tag is not None and tag not in conv.get("tags", []):
+                continue
+            if filter_tags and not all(item in conv.get("tags", []) for item in filter_tags):
                 continue
             if is_starred is not None and conv.get("is_starred") != is_starred:
                 continue
+            if is_pinned is not None and conv.get("is_pinned") != is_pinned:
+                continue
             if is_archived is not None and conv.get("is_archived") != is_archived:
                 continue
+            if not self._conversation_field_matches(conv, "company_id", company_id):
+                continue
+            if not self._conversation_field_matches(conv, "workspace_id", workspace_id):
+                continue
+            if conversation_kind is not None and str(conv.get("conversation_kind") or "") != str(conversation_kind):
+                continue
+            if group_id is not None and str(conv.get("group_id") or "") != str(group_id):
+                continue
+            if query_text and not self._conversation_matches_query(conv, query_text, include_messages=include_messages):
+                continue
             results.append(conv)
-        results.sort(key=lambda c: c["updated_at"], reverse=True)
+        results.sort(key=self._conversation_list_sort_key, reverse=True)
         total = len(results)
         page = results[offset: offset + limit]
         return [copy.deepcopy(c) for c in page], total
@@ -652,6 +690,9 @@ class ChatStore:
         conversation.setdefault("agent_id", None)
         conversation.setdefault("tags", [])
         conversation.setdefault("is_starred", False)
+        conversation.setdefault("is_pinned", False)
+        conversation.setdefault("pinned_at", None)
+        conversation.setdefault("pin_scope", "global")
         conversation.setdefault("is_archived", False)
         conversation.setdefault("current_node_id", None)
         conversation.setdefault("parent_conversation_id", None)
@@ -660,10 +701,102 @@ class ChatStore:
         conversation.setdefault("group_id", None)
         conversation.setdefault("metadata", {})
         conversation.setdefault("messages", [])
+        conversation["is_starred"] = ChatStore._coerce_bool(conversation.get("is_starred"), False)
+        conversation["is_pinned"] = ChatStore._coerce_bool(conversation.get("is_pinned"), False)
+        conversation["is_archived"] = ChatStore._coerce_bool(conversation.get("is_archived"), False)
+        if conversation.get("pinned_at") in ("", 0):
+            conversation["pinned_at"] = None
+        pin_scope = str(conversation.get("pin_scope") or "global").strip().lower()
+        conversation["pin_scope"] = pin_scope if pin_scope in {"global", "group", "company"} else "global"
+        if not isinstance(conversation.get("tags"), list):
+            conversation["tags"] = []
         if not isinstance(conversation.get("child_conversation_ids"), list):
             conversation["child_conversation_ids"] = []
         if not isinstance(conversation.get("metadata"), dict):
             conversation["metadata"] = {}
+
+    @staticmethod
+    def _normalize_filter_tags(tags):
+        if tags is None:
+            return []
+        if isinstance(tags, str):
+            raw_items = tags.split(",")
+        elif isinstance(tags, (list, tuple, set)):
+            raw_items = tags
+        else:
+            raw_items = [tags]
+        normalized = []
+        for item in raw_items:
+            value = str(item or "").strip()
+            if value:
+                normalized.append(value)
+        return normalized
+
+    @staticmethod
+    def _coerce_bool(value, default=False):
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)) and value in {0, 1}:
+            return bool(value)
+        normalized = str(value).strip().lower()
+        if normalized in {"1", "true", "yes", "on", "enabled"}:
+            return True
+        if normalized in {"0", "false", "no", "off", "disabled"}:
+            return False
+        return default
+
+    @staticmethod
+    def _conversation_field_matches(conversation, field_name, expected):
+        if expected is None:
+            return True
+        expected_text = str(expected)
+        metadata = conversation.get("metadata") if isinstance(conversation.get("metadata"), dict) else {}
+        values = [conversation.get(field_name), metadata.get(field_name)]
+        return any(str(value) == expected_text for value in values if value is not None)
+
+    def _conversation_matches_query(self, conversation, query_text, include_messages=False):
+        metadata = conversation.get("metadata") if isinstance(conversation.get("metadata"), dict) else {}
+        fields = [
+            conversation.get("title"),
+            " ".join(str(tag) for tag in conversation.get("tags", [])),
+            metadata.get("workspace_label"),
+            metadata.get("company_id"),
+            metadata.get("workspace_id"),
+        ]
+        if include_messages:
+            fields.extend(msg.get("raw_text") for msg in conversation.get("messages", []) if isinstance(msg, dict))
+        return any(query_text in str(value or "").casefold() for value in fields)
+
+    @staticmethod
+    def _conversation_list_sort_key(conversation):
+        updated_at = ChatStore._sort_timestamp(conversation.get("updated_at"))
+        if conversation.get("is_pinned"):
+            pinned_at = ChatStore._sort_timestamp(conversation.get("pinned_at"))
+            if pinned_at <= 0:
+                pinned_at = updated_at
+            return (1, pinned_at, updated_at)
+        return (0, updated_at, updated_at)
+
+    @staticmethod
+    def _sort_timestamp(value):
+        if value is None:
+            return 0
+        if isinstance(value, (int, float)):
+            return int(value)
+        text = str(value or "").strip()
+        if not text:
+            return 0
+        try:
+            return int(float(text))
+        except (TypeError, ValueError):
+            pass
+        try:
+            parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            return int(parsed.timestamp() * 1000)
+        except (TypeError, ValueError):
+            return 0
 
     # ----------------------------------------------------------
     # Per-chat files / workspace artifacts
