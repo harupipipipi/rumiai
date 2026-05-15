@@ -31,6 +31,8 @@ from core_runtime.api.oauth_handlers import (  # noqa: E402
     _SCOPE,
 )
 
+_OAUTH_MODULE = sys.modules[OAuthHandlersMixin.__module__]
+
 
 class TestPKCEGeneration(unittest.TestCase):
     """PKCE code_verifier / code_challenge のテスト"""
@@ -187,29 +189,32 @@ class TestOAuthCallback(unittest.TestCase):
         self.assertIn("error", result)
         self.assertIn("expired", result["error"])
 
-    @patch("core_runtime.api.oauth_handlers._log_internal_error")
-    @patch("core_runtime.api.oauth_handlers._http_get_json")
-    @patch("core_runtime.api.oauth_handlers._http_post_form")
-    def test_callback_continues_when_cryptography_is_unavailable(
-        self,
-        mock_post_form,
-        mock_get_json,
-        mock_log_internal_error,
-    ):
+    def test_callback_continues_when_cryptography_is_unavailable(self):
         state = "available_state"
         _pkce_store[state] = {
             "code_verifier": "test_verifier",
             "created_at": time.time(),
         }
-        mock_post_form.return_value = {
-            "access_token": "token-access",
-            "refresh_token": "token-refresh",
-            "token_type": "bearer",
-        }
-        mock_get_json.return_value = None
 
-        with patch("core_runtime.api.oauth_handlers._FERNET_AVAILABLE", False), patch(
-            "core_runtime.api.oauth_handlers._Fernet",
+        with patch.object(_OAUTH_MODULE, "_log_internal_error") as mock_log_internal_error, patch.object(
+            _OAUTH_MODULE,
+            "_http_get_json",
+            return_value=None,
+        ), patch.object(
+            _OAUTH_MODULE,
+            "_http_post_form",
+            return_value={
+                "access_token": "token-access",
+                "refresh_token": "token-refresh",
+                "token_type": "bearer",
+            },
+        ), patch.object(
+            _OAUTH_MODULE,
+            "_FERNET_AVAILABLE",
+            False,
+        ), patch.object(
+            _OAUTH_MODULE,
+            "_Fernet",
             None,
         ):
             handler = _FakeHandler()
@@ -227,7 +232,7 @@ class TestOAuthTokenStorage(unittest.TestCase):
         self._tmpdir = tempfile.TemporaryDirectory()
         self.token_path = Path(self._tmpdir.name) / "oauth_tokens.json"
         self.path_patch = patch(
-            "core_runtime.api.oauth_handlers._get_token_path",
+            f"{_OAUTH_MODULE.__name__}._get_token_path",
             return_value=self.token_path,
         )
         self.path_patch.start()
