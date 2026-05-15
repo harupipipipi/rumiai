@@ -99,7 +99,7 @@ class GoogleProvider(OpenAICompatibleProvider):
             "type": "chat",
             "capabilities": ["chat", "tool_calls", "vision"],
             "supports_thinking": True,
-            "thinking_levels": ["none", "high"],
+            "thinking_levels": ["minimal", "high"],
             "default_thinking_level": "high",
         },
         {
@@ -112,7 +112,7 @@ class GoogleProvider(OpenAICompatibleProvider):
             "type": "chat",
             "capabilities": ["chat", "tool_calls", "vision"],
             "supports_thinking": True,
-            "thinking_levels": ["none", "high"],
+            "thinking_levels": ["minimal", "high"],
             "default_thinking_level": "high",
         },
         {
@@ -252,8 +252,8 @@ class GoogleProvider(OpenAICompatibleProvider):
             return None
 
         if model_id.startswith("gemma-4"):
-            if level == "low":
-                return "low"
+            if level in {"minimal", "low"}:
+                return "minimal"
             if level in {"medium", "high"}:
                 return "high"
             return None
@@ -278,6 +278,8 @@ class GoogleProvider(OpenAICompatibleProvider):
         level = str(params.get("thinking_level") or params.get("reasoning_effort") or "").strip().lower()
         if level == "xhigh":
             level = "high"
+        if level in {"minimal", "low"}:
+            return {"thinkingLevel": "MINIMAL"}
         if level == "high":
             return {"thinkingLevel": "HIGH"}
         return None

@@ -5,6 +5,8 @@ import json
 import os
 import re
 import base64
+import tempfile
+import threading
 from pathlib import Path
 
 DEFAULT_CHAT_MODEL = "stub/default"
@@ -52,6 +54,7 @@ class ChatStore:
         if cls._instance is None:
             cls._instance = super().__new__(cls)
             cls._instance._storage_path = storage_path
+            cls._instance._lock = threading.RLock()
             cls._instance._conversations = cls._instance._load_conversations()
             if cls._instance._conversations:
                 cls._instance._save_conversation_files()
@@ -70,38 +73,58 @@ class ChatStore:
         return Path(__file__).resolve().parents[2] / "user_data" / "shared" / "chat" / "conversations.json"
 
     def _load_conversations(self):
+        with self._lock:
+            try:
+                data = json.loads(self._storage_path.read_text(encoding="utf-8"))
+            except FileNotFoundError:
+                return {}
+            except Exception:
+                return {}
+            conversations = data.get("conversations") if isinstance(data, dict) else data
+            if not isinstance(conversations, dict):
+                return {}
+            loaded = {}
+            for conversation_id, conversation in conversations.items():
+                if not isinstance(conversation, dict):
+                    continue
+                self._normalize_conversation(str(conversation_id), conversation)
+                self._sanitize_inline_thought_messages(conversation)
+                loaded[str(conversation_id)] = conversation
+            return loaded
+
+    def _atomic_write_json(self, path, payload):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp_name = tempfile.mkstemp(
+            dir=str(path.parent),
+            prefix="." + path.name + ".",
+            suffix=".tmp",
+        )
         try:
-            data = json.loads(self._storage_path.read_text(encoding="utf-8"))
-        except FileNotFoundError:
-            return {}
-        except Exception:
-            return {}
-        conversations = data.get("conversations") if isinstance(data, dict) else data
-        if not isinstance(conversations, dict):
-            return {}
-        loaded = {}
-        for conversation_id, conversation in conversations.items():
-            if not isinstance(conversation, dict):
-                continue
-            self._normalize_conversation(str(conversation_id), conversation)
-            self._sanitize_inline_thought_messages(conversation)
-            loaded[str(conversation_id)] = conversation
-        return loaded
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                json.dump(payload, handle, ensure_ascii=False, indent=2)
+                handle.flush()
+                os.fsync(handle.fileno())
+            Path(tmp_name).replace(path)
+        except BaseException:
+            try:
+                os.unlink(tmp_name)
+            except OSError:
+                pass
+            raise
 
     def _save_conversations(self):
-        self._storage_path.parent.mkdir(parents=True, exist_ok=True)
-        for conversation in self._conversations.values():
-            if isinstance(conversation, dict):
-                self._sanitize_inline_thought_messages(conversation)
-        payload = {
-            "schema_version": 1,
-            "updated_at": _now_ms(),
-            "conversations": self._conversations,
-        }
-        tmp_path = self._storage_path.with_suffix(self._storage_path.suffix + ".tmp")
-        tmp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-        tmp_path.replace(self._storage_path)
-        self._save_conversation_files()
+        with self._lock:
+            self._storage_path.parent.mkdir(parents=True, exist_ok=True)
+            for conversation in self._conversations.values():
+                if isinstance(conversation, dict):
+                    self._sanitize_inline_thought_messages(conversation)
+            payload = {
+                "schema_version": 1,
+                "updated_at": _now_ms(),
+                "conversations": self._conversations,
+            }
+            self._atomic_write_json(self._storage_path, payload)
+            self._save_conversation_files()
 
     # ----------------------------------------------------------
     # Conversation CRUD
@@ -605,21 +628,21 @@ class ChatStore:
         return refs
 
     def _save_conversation_files(self):
-        for conversation_id, conversation in self._conversations.items():
-            self._save_conversation_file(str(conversation_id), conversation)
+        with self._lock:
+            for conversation_id, conversation in self._conversations.items():
+                self._save_conversation_file(str(conversation_id), conversation)
 
     def _save_conversation_file(self, conversation_id, conversation):
-        conversation_dir = self.conversation_dir(conversation_id)
-        (conversation_dir / "workspace" / "attachments").mkdir(parents=True, exist_ok=True)
-        (conversation_dir / "workspace" / "tools").mkdir(parents=True, exist_ok=True)
-        payload = {
-            "schema_version": 1,
-            "updated_at": _now_ms(),
-            "conversation": conversation,
-        }
-        tmp_path = conversation_dir / "history.json.tmp"
-        tmp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-        tmp_path.replace(conversation_dir / "history.json")
+        with self._lock:
+            conversation_dir = self.conversation_dir(conversation_id)
+            (conversation_dir / "workspace" / "attachments").mkdir(parents=True, exist_ok=True)
+            (conversation_dir / "workspace" / "tools").mkdir(parents=True, exist_ok=True)
+            payload = {
+                "schema_version": 1,
+                "updated_at": _now_ms(),
+                "conversation": conversation,
+            }
+            self._atomic_write_json(conversation_dir / "history.json", payload)
 
     def _persist_message_artifacts(self, conversation_id, msg):
         if not isinstance(msg, dict):

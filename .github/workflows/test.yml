@@ -207,15 +207,42 @@ jobs:
 
       - name: Bundle uv binary for offline startup
         run: |
+          set -euo pipefail
+
+          UV_VERSION="0.11.14"
           ARCH=$(uname -m)
-          if [ "$ARCH" = "arm64" ]; then
-            UV_TRIPLE="aarch64-apple-darwin"
-          else
-            UV_TRIPLE="x86_64-apple-darwin"
-          fi
-          UV_URL="https://github.com/astral-sh/uv/releases/latest/download/uv-${UV_TRIPLE}.tar.gz"
+          case "$ARCH" in
+            arm64)
+              UV_TRIPLE="aarch64-apple-darwin"
+              ;;
+            x86_64)
+              UV_TRIPLE="x86_64-apple-darwin"
+              ;;
+            *)
+              echo "Unsupported macOS architecture for uv bundle: ${ARCH}" >&2
+              exit 1
+              ;;
+          esac
+
+          UV_ASSET="uv-${UV_TRIPLE}.tar.gz"
+          UV_URL="https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/${UV_ASSET}"
+          UV_ARCHIVE="$(mktemp -t uv-bundle.XXXXXX.tar.gz)"
+          trap 'rm -f "$UV_ARCHIVE"' EXIT
+
           mkdir -p rumi_ai_1_10/bundled
-          curl -sL "$UV_URL" | tar -xz -C rumi_ai_1_10/bundled --strip-components=1 "uv-${UV_TRIPLE}/uv"
+          echo "Downloading uv ${UV_VERSION} for ${UV_TRIPLE}: ${UV_URL}"
+          if ! curl -fL --retry 5 --retry-delay 2 --connect-timeout 15 "$UV_URL" -o "$UV_ARCHIVE"; then
+            echo "Failed to download uv archive. Check UV_VERSION/asset URL: ${UV_URL}" >&2
+            exit 1
+          fi
+
+          file "$UV_ARCHIVE"
+          if ! tar -tzf "$UV_ARCHIVE" "uv-${UV_TRIPLE}/uv" >/dev/null; then
+            echo "Downloaded uv archive is invalid or missing uv-${UV_TRIPLE}/uv: ${UV_URL}" >&2
+            exit 1
+          fi
+
+          tar -xzf "$UV_ARCHIVE" -C rumi_ai_1_10/bundled --strip-components=1 "uv-${UV_TRIPLE}/uv"
           chmod +x rumi_ai_1_10/bundled/uv
           echo "Bundled uv at:"
           ls -la rumi_ai_1_10/bundled/

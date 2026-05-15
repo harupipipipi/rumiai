@@ -46,6 +46,8 @@ export type ChatItem = {
   type: 'research' | 'code' | 'chat';
   parentId?: string | null;
   conversationKind?: string;
+  sectionId?: string | null;
+  sectionTitle?: string | null;
   children?: ChatItem[];
 };
 
@@ -133,18 +135,36 @@ function saveCustomGroups(groups: CustomGroupInfo[]) {
   }
 }
 
-function buildGroupsFromChats(chatItems: ChatItem[], customGroups: CustomGroupInfo[] = []): ChatGroup[] {
+export function buildGroupsFromChats(chatItems: ChatItem[], customGroups: CustomGroupInfo[] = []): ChatGroup[] {
   const buckets: Record<'today' | 'recent' | 'older', ChatItem[]> = {
     today: [],
     recent: [],
     older: [],
   };
+  const integrationGroups = new Map<string, ChatGroup>();
 
   chatItems.forEach((chat) => {
     const normalized = {
       ...chat,
       type: classifyChatType(chat),
     };
+    const sectionId = typeof normalized.sectionId === "string" ? normalized.sectionId.trim() : "";
+    const sectionTitle = typeof normalized.sectionTitle === "string" ? normalized.sectionTitle.trim() : "";
+    if (sectionId && sectionTitle) {
+      const existing = integrationGroups.get(sectionId);
+      if (existing) {
+        existing.chats.push(normalized);
+      } else {
+        integrationGroups.set(sectionId, {
+          id: sectionId,
+          title: sectionTitle,
+          isCollapsed: false,
+          chats: [normalized],
+          subGroups: [],
+        });
+      }
+      return;
+    }
     buckets[groupDateLabel(chat.date)].push(normalized);
   });
 
@@ -181,7 +201,7 @@ function buildGroupsFromChats(chatItems: ChatItem[], customGroups: CustomGroupIn
     subGroups: [],
     custom: true,
   }));
-  return [...custom, ...visibleGroups];
+  return [...custom, ...integrationGroups.values(), ...visibleGroups];
 }
 
 // ============================================================
