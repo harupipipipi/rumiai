@@ -84,3 +84,40 @@ def test_doctor_delegates_to_seat(controller):
     result = controller.run("computer.doctor", {})
     assert result["action"] == "computer.doctor"
     svc.doctor.assert_called_once()
+
+
+def test_capture_action_result_screenshot_labels_move_and_click_feedback(controller, tmp_path, monkeypatch):
+    png_bytes = b"\x89PNG\r\n\x1a\n" + b"fake"
+    model_path = tmp_path / "model.png"
+    model_path.write_bytes(png_bytes)
+
+    def fake_capture(path, payload):
+        path.write_bytes(png_bytes)
+        return {"supported": True, "platform": "Darwin", "target_window": None}
+
+    monkeypatch.setattr(controller, "_capture_screenshot", fake_capture)
+    monkeypatch.setattr(controller, "_apply_screenshot_crop", lambda path, payload, capture: {})
+    monkeypatch.setattr(controller, "_model_screenshot_copy", lambda path: model_path)
+    monkeypatch.setattr(
+        controller,
+        "_screenshot_result",
+        lambda path, model_path, system, **kwargs: {"platform": system, "supported": True},
+    )
+    monkeypatch.setattr(controller, "_marker_preview_image", lambda model_path, result, marker=None, drag_marker=None: None)
+    monkeypatch.setattr(controller, "_image_data_url", lambda path: "data:image/png;base64,ZmFrZQ==")
+    monkeypatch.setattr(controller, "_remember_last_screenshot", lambda result: None)
+
+    move_result = controller._capture_action_result_screenshot({"x": 10, "y": 20}, None, action_name="computer.move")
+    click_result = controller._capture_action_result_screenshot({"x": 10, "y": 20}, {"x": 10, "y": 20}, action_name="computer.click")
+
+    assert move_result["visual_feedback"]["type"] == "post_move_screenshot"
+    assert move_result["visual_feedback"]["model_image_path"] == str(model_path)
+    assert click_result["visual_feedback"]["type"] == "post_click_screenshot"
+    assert click_result["visual_feedback"]["marker"] == {"x": 10, "y": 20}
+
+
+def test_move_dry_run_does_not_return_visual_feedback(controller):
+    result = controller.run("computer.move", {"x": 12, "y": 34, "dry_run": True, "include_screenshot": True}, yolo_mode=True)
+
+    assert result["dry_run"] is True
+    assert "visual_feedback" not in result
