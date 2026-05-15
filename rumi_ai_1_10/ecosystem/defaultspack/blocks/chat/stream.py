@@ -2,6 +2,7 @@ import sys
 import os
 import queue
 import threading
+import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
@@ -14,11 +15,16 @@ from domain.chat.message_builder import build_assistant_message
 from domain.prompt.manager import get_manager
 from blocks.chat._context_helpers import extract_user_text, enrich_messages
 from blocks.chat.send import (
+    _ai_error_response,
+    _ai_retry_attempts,
+    _ai_retry_delay,
     _attachment_image_blocks,
     _attachment_text_blocks,
     _apply_computer_use_context_preferences,
     _conversation_system_prompt,
+    _event,
     _infer_requested_tools_from_message,
+    _is_retryable_ai_error,
     _sanitize_attachment_metadata,
     _with_inferred_tools,
 )
@@ -269,14 +275,95 @@ def _stream_response(input_data, context):
     yield {"type": "user_message", "message": user_msg}
     cancellation_registry.register(conversation_id, request_cancel)
 
+    params = dict(input_data.get("params") or {})
+    model = (conv or {}).get("model", "stub/default")
+    seq = user_msg.get("sequence_number", 1) + 1
+    assistant_msg = store.add_message(
+        conversation_id,
+        build_assistant_message(
+            conversation_id=conversation_id,
+            parent_id=user_msg["id"],
+            sequence_number=seq,
+            response={
+                "content": [{"type": "text", "text": ""}],
+                "finish_reason": "streaming",
+                "usage": {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0},
+                "metadata": {
+                    "model": model,
+                    "attached_tool_count": 0,
+                    "attached_tools": [],
+                    "thinking": {"state": "running"},
+                    "thinking_level": params.get("thinking_level"),
+                },
+                "events": [],
+                "tool_logs": [],
+            },
+            model=model,
+        ),
+    )
+    if assistant_msg is None:
+        cancellation_registry.unregister(conversation_id, request_cancel)
+        yield {"type": "error", "error": "Failed to create assistant message"}
+        return
+
+    assistant_events = []
+
+    def current_transcript():
+        return "\n".join(
+            part
+            for part in ["".join(provider_thinking_parts).strip(), thought_filter.transcript()]
+            if part
+        ).strip()
+
+    def update_assistant_draft(*, finish="streaming", thinking_state="running", usage_data=None, extra_metadata=None):
+        current_text = "".join(text_parts)
+        thinking = {"state": thinking_state}
+        transcript = current_transcript()
+        if transcript:
+            thinking["transcript"] = transcript
+        metadata = {
+            "model": model,
+            "attached_tool_count": 0,
+            "attached_tools": [],
+            "thinking": thinking,
+            "thinking_level": params.get("thinking_level"),
+        }
+        if isinstance(extra_metadata, dict):
+            metadata.update(extra_metadata)
+        updated = store.update_message(
+            conversation_id,
+            assistant_msg["id"],
+            {
+                "content": [{"type": "text", "text": current_text}],
+                "raw_text": current_text,
+                "finish_reason": finish,
+                "usage": usage_data if usage_data is not None else {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0},
+                "metadata": metadata,
+                "events": list(assistant_events),
+                "tool_logs": [],
+                "model": model,
+            },
+        )
+        return updated if updated is not None else assistant_msg
+
+    def append_assistant_event(event):
+        assistant_events.append(event)
+        return update_assistant_draft()
+
+    def discard_assistant_draft():
+        try:
+            store.delete_message(conversation_id, assistant_msg["id"])
+        except Exception:
+            pass
+
     try:
         if is_cancelled():
+            discard_assistant_draft()
             yield from emit_cancelled()
             return
 
         chain = store.get_message_chain(conversation_id, user_msg["id"])
         standard_messages = convert_to_standard(chain)
-        model = (conv or {}).get("model", "stub/default")
 
         manager = get_manager()
         system_prompt = _conversation_system_prompt(conv, manager)
@@ -297,74 +384,134 @@ def _stream_response(input_data, context):
         ):
             standard_messages.insert(0, {"role": "system", "content": system_prompt})
 
-        params = dict(input_data.get("params") or {})
         client = AIClient()
         thought_filter = _InlineThoughtFilter()
         text_parts = []
         provider_thinking_parts = []
         finish_reason = "stop"
         usage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
-        try:
-            chunks = client.stream(model, standard_messages, tools=[], params=params)
-            if is_cancelled():
-                yield from emit_cancelled()
-                return
-            if isinstance(chunks, dict) and chunks.get("status") == "error":
-                err = chunks.get("error", {})
-                message_text = err.get("message") if isinstance(err, dict) else err
-                yield {"type": "error", "error": message_text or "AI request failed"}
-                return
-            for chunk in chunks:
+        attempts = _ai_retry_attempts(params)
+        for attempt_index in range(attempts):
+            try:
+                chunks = client.stream(model, standard_messages, tools=[], params=params)
                 if is_cancelled():
+                    discard_assistant_draft()
                     yield from emit_cancelled()
                     return
-                chunk_type = chunk.get("type", "") if isinstance(chunk, dict) else ""
-                if chunk_type == "content_delta":
-                    delta = chunk.get("delta", {})
-                    text = delta.get("text", "")
-                    if text:
-                        visible_text = thought_filter.push(text)
-                        thinking_text = thought_filter.pending_thinking_delta()
-                        if thinking_text:
-                            yield {"type": "thinking_delta", "delta": thinking_text}
-                        if visible_text:
-                            text_parts.append(visible_text)
-                            yield {"type": "delta", "delta": visible_text}
-                elif chunk_type in {"thinking_delta", "reasoning_delta"}:
-                    delta = chunk.get("delta", {}) if isinstance(chunk.get("delta"), dict) else {}
-                    text = delta.get("text") or chunk.get("text") or chunk.get("thinking") or chunk.get("reasoning") or ""
-                    if text:
-                        provider_thinking_parts.append(str(text))
-                        yield {"type": "thinking_delta", "delta": str(text)}
-                elif chunk_type == "stream_end":
-                    finish_reason = chunk.get("finish_reason", "stop")
-                    usage = chunk.get("usage", usage)
-        except Exception as exc:
-            if is_cancelled():
-                yield from emit_cancelled()
+                if isinstance(chunks, dict) and chunks.get("status") == "error":
+                    err = chunks.get("error", {})
+                    message_text = err.get("message") if isinstance(err, dict) else err
+                    raise RuntimeError(str(message_text or "AI request failed"))
+                for chunk in chunks:
+                    if is_cancelled():
+                        discard_assistant_draft()
+                        yield from emit_cancelled()
+                        return
+                    chunk_type = chunk.get("type", "") if isinstance(chunk, dict) else ""
+                    if chunk_type == "content_delta":
+                        delta = chunk.get("delta", {})
+                        text = delta.get("text", "")
+                        if text:
+                            visible_text = thought_filter.push(text)
+                            thinking_text = thought_filter.pending_thinking_delta()
+                            if thinking_text:
+                                update_assistant_draft(finish="streaming", thinking_state="streaming")
+                                yield {"type": "thinking_delta", "delta": thinking_text}
+                            if visible_text:
+                                text_parts.append(visible_text)
+                                update_assistant_draft(finish="streaming", thinking_state="streaming")
+                                yield {"type": "delta", "delta": visible_text}
+                    elif chunk_type in {"thinking_delta", "reasoning_delta"}:
+                        delta = chunk.get("delta", {}) if isinstance(chunk.get("delta"), dict) else {}
+                        text = delta.get("text") or chunk.get("text") or chunk.get("thinking") or chunk.get("reasoning") or ""
+                        if text:
+                            provider_thinking_parts.append(str(text))
+                            update_assistant_draft(finish="streaming", thinking_state="streaming")
+                            yield {"type": "thinking_delta", "delta": str(text)}
+                    elif chunk_type == "stream_end":
+                        finish_reason = chunk.get("finish_reason", "stop")
+                        usage = chunk.get("usage", usage)
+                break
+            except Exception as exc:
+                if is_cancelled():
+                    discard_assistant_draft()
+                    yield from emit_cancelled()
+                    return
+                message_text = "AI request failed: " + str(exc)
+                can_retry = (
+                    not "".join(text_parts).strip()
+                    and attempt_index < attempts - 1
+                    and _is_retryable_ai_error(message_text)
+                )
+                if can_retry:
+                    delay = _ai_retry_delay(params, attempt_index)
+                    retry_event = _event(
+                        "ai_retry_scheduled",
+                        "APIエラーのため少し待って再送信します",
+                        phase="ai_retry_scheduled",
+                        attempt=attempt_index + 1,
+                        max_attempts=attempts,
+                        delay_seconds=delay,
+                        error=message_text,
+                    )
+                    append_assistant_event(retry_event)
+                    yield retry_event
+                    if delay > 0:
+                        time.sleep(delay)
+                    continue
+
+                failed_response = _ai_error_response(
+                    model,
+                    message_text,
+                    params,
+                    events=assistant_events + [
+                        _event(
+                            "task_failed",
+                            "APIエラーでタスクを終了しました",
+                            phase="task_failed",
+                            error=message_text,
+                            terminal=True,
+                        )
+                    ],
+                )
+                failed_message = build_assistant_message(
+                    conversation_id=conversation_id,
+                    parent_id=user_msg["id"],
+                    sequence_number=seq,
+                    response=failed_response,
+                    model=model,
+                )
+                assistant_msg = store.update_message(conversation_id, assistant_msg["id"], failed_message) or assistant_msg
+                yield {
+                    "type": "task_failed",
+                    "message": "APIエラーでタスクを終了しました",
+                    "error": message_text,
+                    "terminal": True,
+                }
+                yield {"type": "message", "message": assistant_msg}
+                yield {"type": "done", "message": assistant_msg}
                 return
-            yield {"type": "error", "error": "AI request failed: " + str(exc)}
-            return
 
         if is_cancelled():
+            discard_assistant_draft()
             yield from emit_cancelled()
             return
 
         trailing_text = thought_filter.finish()
         thinking_text = thought_filter.pending_thinking_delta()
         if thinking_text:
+            update_assistant_draft(finish="streaming", thinking_state="streaming")
             yield {"type": "thinking_delta", "delta": thinking_text}
         if trailing_text:
             text_parts.append(trailing_text)
+            update_assistant_draft(finish="streaming", thinking_state="streaming")
             yield {"type": "delta", "delta": trailing_text}
 
-        transcript = "\n".join(
-            part for part in ["".join(provider_thinking_parts).strip(), thought_filter.transcript()]
-            if part
-        ).strip()
+        transcript = current_transcript()
         fallback_response = None
         if not "".join(text_parts).strip():
             if is_cancelled():
+                discard_assistant_draft()
                 yield from emit_cancelled()
                 return
             fallback_response = _fallback_complete_without_thinking(
@@ -408,14 +555,18 @@ def _stream_response(input_data, context):
                 "transcript": transcript,
                 "source": "inline_thought_stream",
             }
+        existing_events = response.get("events", [])
+        response["events"] = list(assistant_events) + (existing_events if isinstance(existing_events, list) else [])
+        response["tool_logs"] = response.get("tool_logs", [])
 
         if is_cancelled():
+            discard_assistant_draft()
             yield from emit_cancelled()
             return
 
-        seq = user_msg.get("sequence_number", 1) + 1
-        assistant_msg = store.add_message(
+        assistant_msg = store.update_message(
             conversation_id,
+            assistant_msg["id"],
             build_assistant_message(
                 conversation_id=conversation_id,
                 parent_id=user_msg["id"],

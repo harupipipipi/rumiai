@@ -140,6 +140,87 @@ def test_chat_send_attaches_tools_and_persists_activity_events(tmp_path, monkeyp
     ChatStore._instance = None
 
 
+def test_chat_send_retries_transient_ai_errors(tmp_path, monkeypatch):
+    from domain.chat.store import ChatStore
+    from blocks.chat.send import run
+
+    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
+    monkeypatch.setattr("blocks.chat.send.time.sleep", lambda _delay: None)
+    ChatStore._instance = None
+    calls = {"ai": 0}
+
+    def call_handler(name, payload):
+        if name == "defaults.ai.complete":
+            calls["ai"] += 1
+            if calls["ai"] == 1:
+                return {"status": "error", "error": {"message": "temporary upstream timeout"}}
+            return {
+                "status": "ok",
+                "data": {
+                    "content": [{"type": "text", "text": "retried"}],
+                    "finish_reason": "stop",
+                },
+            }
+        raise AssertionError(name)
+
+    store = ChatStore()
+    conversation = store.create_conversation(model="stub/default")
+    result = run(
+        {
+            "conversation_id": conversation["id"],
+            "message": {"role": "user", "content": "retry please"},
+            "tools": [],
+            "params": {"retry": {"max_attempts": 2, "delays": [0]}},
+        },
+        {"call_handler": call_handler},
+    )
+
+    assert result["status"] == "ok"
+    assert calls["ai"] == 2
+    assert result["data"]["raw_text"] == "retried"
+    assert any(event["type"] == "ai_retry_scheduled" for event in result["data"]["events"])
+    ChatStore._instance = None
+
+
+def test_chat_send_persists_terminal_ai_error_message(tmp_path, monkeypatch):
+    from domain.chat.store import ChatStore
+    from blocks.chat.send import run
+
+    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
+    ChatStore._instance = None
+
+    def call_handler(name, payload):
+        if name == "defaults.ai.complete":
+            return {"status": "error", "error": {"message": "invalid request 400"}}
+        raise AssertionError(name)
+
+    store = ChatStore()
+    conversation = store.create_conversation(model="stub/default")
+    result = run(
+        {
+            "conversation_id": conversation["id"],
+            "message": {"role": "user", "content": "fail visibly"},
+            "tools": [],
+            "params": {"retry": {"enabled": False}},
+        },
+        {"call_handler": call_handler},
+    )
+
+    assert result["status"] == "ok"
+    assistant = result["data"]
+    assert assistant["finish_reason"] == "error"
+    assert assistant["metadata"]["thinking"]["state"] == "failed"
+    assert assistant["metadata"]["error"]["terminal"] is True
+
+    persisted = json.loads(storage_path.read_text(encoding="utf-8"))
+    messages = persisted["conversations"][conversation["id"]]["messages"]
+    assert [message["role"] for message in messages] == ["user", "assistant"]
+    assert messages[-1]["finish_reason"] == "error"
+    ChatStore._instance = None
+
+
 def test_chat_store_links_subagent_conversations(tmp_path, monkeypatch):
     from domain.chat.store import ChatStore
 
@@ -569,6 +650,99 @@ def test_chat_stream_recovers_when_provider_returns_empty_text(tmp_path, monkeyp
     assert final["raw_text"] == "Recovered after empty stream."
     assert final["metadata"]["recovered_from_empty_stream"] is True
     assert captured["retry_params"] == {"temperature": 0.2}
+    ChatStore._instance = None
+
+
+def test_chat_stream_retries_transient_ai_errors_before_visible_output(tmp_path, monkeypatch):
+    from domain.chat.store import ChatStore
+    import blocks.chat.stream as stream_module
+
+    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
+    monkeypatch.setattr(stream_module.time, "sleep", lambda _delay: None)
+    ChatStore._instance = None
+    calls = {"stream": 0}
+
+    class FakeAIClient:
+        def supports_stream(self, model):
+            return True
+
+        def stream(self, model, messages, tools, params):
+            calls["stream"] += 1
+            if calls["stream"] == 1:
+                raise RuntimeError("temporary upstream timeout")
+            yield {"type": "content_delta", "delta": {"type": "text", "text": "retried stream"}}
+            yield {
+                "type": "stream_end",
+                "finish_reason": "stop",
+                "usage": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
+            }
+
+    monkeypatch.setattr(stream_module, "AIClient", FakeAIClient)
+
+    store = ChatStore()
+    conversation = store.create_conversation(model="google/gemma-4-31b-it")
+    result = stream_module.run(
+        {
+            "conversation_id": conversation["id"],
+            "message": {"role": "user", "content": "hello"},
+            "tools": [],
+            "params": {"retry": {"max_attempts": 2, "delays": [0]}},
+        },
+        {},
+    )
+
+    events = list(result["events"])
+    final = [event["message"] for event in events if event.get("type") == "message"][-1]
+
+    assert calls["stream"] == 2
+    assert any(event["type"] == "ai_retry_scheduled" for event in events)
+    assert final["raw_text"] == "retried stream"
+    assert any(event["type"] == "ai_retry_scheduled" for event in final["events"])
+    ChatStore._instance = None
+
+
+def test_chat_stream_persists_terminal_ai_error_message(tmp_path, monkeypatch):
+    from domain.chat.store import ChatStore
+    import blocks.chat.stream as stream_module
+
+    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
+    ChatStore._instance = None
+
+    class FakeAIClient:
+        def supports_stream(self, model):
+            return True
+
+        def stream(self, model, messages, tools, params):
+            raise RuntimeError("invalid request 400")
+
+    monkeypatch.setattr(stream_module, "AIClient", FakeAIClient)
+
+    store = ChatStore()
+    conversation = store.create_conversation(model="google/gemma-4-31b-it")
+    result = stream_module.run(
+        {
+            "conversation_id": conversation["id"],
+            "message": {"role": "user", "content": "hello"},
+            "tools": [],
+            "params": {"retry": {"max_attempts": 3, "delays": [0, 0]}},
+        },
+        {},
+    )
+
+    events = list(result["events"])
+    final = [event["message"] for event in events if event.get("type") == "message"][-1]
+
+    assert [event["type"] for event in events][-2:] == ["message", "done"]
+    assert final["finish_reason"] == "error"
+    assert final["metadata"]["thinking"]["state"] == "failed"
+    assert final["metadata"]["error"]["terminal"] is True
+
+    persisted = json.loads(storage_path.read_text(encoding="utf-8"))
+    messages = persisted["conversations"][conversation["id"]]["messages"]
+    assert [message["role"] for message in messages] == ["user", "assistant"]
+    assert messages[-1]["finish_reason"] == "error"
     ChatStore._instance = None
 
 

@@ -27,6 +27,8 @@ type PendingChatRequest = {
   toolNames: string[];
 };
 
+const PENDING_CHAT_REQUEST_TTL_MS = 6 * 60 * 60_000;
+
 type ComposerCandidateMenuState = {
   mode: "model";
   query: string;
@@ -180,6 +182,17 @@ function optimisticAssistantMessage(conversationId: string, model: string): Chat
     tool_logs: [],
     model,
   };
+}
+
+function isAssistantMessageStillRunning(message: ChatMessage | undefined): boolean {
+  if (!message || message.role === "user") return false;
+  const metadata = message.metadata && typeof message.metadata === "object" ? message.metadata : {};
+  const thinking = metadata.thinking && typeof metadata.thinking === "object"
+    ? metadata.thinking as Record<string, unknown>
+    : {};
+  const state = String(thinking.state ?? "").toLowerCase();
+  const finishReason = String(message.finish_reason ?? "").toLowerCase();
+  return state === "streaming" || state === "running" || finishReason === "streaming";
 }
 
 function previewFromAction(action: SidebarAction, title: string, data: unknown): ToolPreviewItem {
@@ -544,6 +557,8 @@ function isActivityStreamEvent(event: ChatStreamEvent): event is ChatToolStreamE
     || event.type === "tool_result"
     || event.type === "browser_screenshot"
     || event.type === "approval_requested"
+    || event.type === "ai_retry_scheduled"
+    || event.type === "task_failed"
   );
 }
 
@@ -990,6 +1005,7 @@ export default function App() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const isUnloadingRef = useRef(false);
   const currentAbortControllerRef = useRef<AbortController | null>(null);
+  const streamingConversationIdRef = useRef<string | null>(null);
 
   const sidebarItems: SidebarItem[] = catalog?.sidebar.items ?? [];
   const chatItems = buildChatItems(conversations);
@@ -1018,7 +1034,7 @@ export default function App() {
   const selectedToolIdSet = useMemo(() => new Set(selectedToolIds), [selectedToolIds]);
   const pendingRequest = activeConversationId ? pendingRequests[activeConversationId] : null;
   const isConversationPending = Boolean(
-    pendingRequest && Date.now() - pendingRequest.startedAt < 10 * 60_000,
+    pendingRequest && Date.now() - pendingRequest.startedAt < PENDING_CHAT_REQUEST_TTL_MS,
   );
   const browserApproval = pendingBrowserApproval(messages);
   const messageToolPreviews = useMemo(
@@ -1367,12 +1383,13 @@ export default function App() {
 
   useEffect(() => {
     if (!activeConversationId || !isConversationPending) return;
+    if (streamingConversationIdRef.current === activeConversationId) return;
     setIsGenerating(true);
     const interval = window.setInterval(() => {
       void api.getConversation(activeConversationId).then((conversation) => {
         setActiveConversation(conversation);
         const latest = conversation.messages[conversation.messages.length - 1];
-        if (latest && latest.role !== "user") {
+        if (latest && latest.role !== "user" && !isAssistantMessageStillRunning(latest)) {
           forgetPendingRequest(activeConversationId);
           replaceChatIdInUrl(activeConversationId, false);
           setIsGenerating(false);
@@ -1391,7 +1408,7 @@ export default function App() {
 
   useEffect(() => {
     const staleIds = Object.entries(pendingRequests)
-      .filter(([, request]) => Date.now() - request.startedAt >= 10 * 60_000)
+      .filter(([, request]) => Date.now() - request.startedAt >= PENDING_CHAT_REQUEST_TTL_MS)
       .map(([id]) => id);
     if (staleIds.length === 0) return;
     updatePendingRequests((current) => {
@@ -2257,6 +2274,7 @@ export default function App() {
       const assistantDraft = optimisticAssistantMessage(conversation.id, preferredModel || "stub/default");
       const abortController = new AbortController();
       currentAbortControllerRef.current = abortController;
+      streamingConversationIdRef.current = conversation.id;
       const updateStreamingAssistant = (delta: string) => {
         setActiveConversation((current) => {
           if (!current || current.id !== conversation.id) return current;
@@ -2457,6 +2475,7 @@ export default function App() {
       );
       setIsNewChatLaunching(false);
     } finally {
+      streamingConversationIdRef.current = null;
       currentAbortControllerRef.current = null;
       setIsGenerating(false);
       setIsNewChatLaunching(false);
