@@ -2,12 +2,14 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAppStore } from '@/src/store';
 import { useT } from '@/src/lib/i18n';
+import { launchDefaultspackDesktop } from '@/src/lib/api';
+import { Button } from '@/src/components/ui/Button';
 import { Input } from '@/src/components/ui/Input';
 import { Badge } from '@/src/components/ui/Badge';
 import { Switch } from '@/src/components/ui/Switch';
 import { Card } from '@/src/components/ui/Card';
 import { panelRoutes } from '@/src/lib/routes';
-import { Search, Package, Loader2 } from 'lucide-react';
+import { AppWindow, Search, Package, Loader2 } from 'lucide-react';
 
 export function Packs() {
   const t = useT();
@@ -16,7 +18,9 @@ export function Packs() {
   const isLoading = useAppStore(state => state.isLoading);
   const loadPacks = useAppStore(state => state.loadPacks);
   const togglePack = useAppStore(state => state.togglePack);
+  const addToast = useAppStore(state => state.addToast);
   const [search, setSearch] = useState('');
+  const [launchingDesktop, setLaunchingDesktop] = useState(false);
 
   useEffect(() => {
     loadPacks();
@@ -34,6 +38,19 @@ export function Packs() {
   }
 
   const filteredPacks = packs.filter(pack => pack.name.toLowerCase().includes(search.toLowerCase()));
+
+  const handleLaunchDefaultspack = async () => {
+    setLaunchingDesktop(true);
+    try {
+      const message = await launchDefaultspackDesktop();
+      addToast(message, 'success');
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Failed to launch Defaultspack';
+      addToast(msg, 'error');
+    } finally {
+      setLaunchingDesktop(false);
+    }
+  };
 
   return (
     <div className="flex-1 overflow-y-auto page-enter">
@@ -85,7 +102,18 @@ export function Packs() {
                     </div>
                     <p className="text-sm text-text-muted truncate">{pack.description}</p>
                   </div>
-                  <div className="ml-4 shrink-0" onClick={(e) => e.stopPropagation()}>
+                  <div className="ml-4 flex shrink-0 items-center gap-2" onClick={(e) => e.stopPropagation()}>
+                    {pack.id === 'defaultspack' && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => void handleLaunchDefaultspack()}
+                        loading={launchingDesktop}
+                      >
+                        <AppWindow className="h-3.5 w-3.5" />
+                        Open App
+                      </Button>
+                    )}
                     <Switch
                       checked={pack.enabled}
                       onCheckedChange={() => togglePack(pack.id)}

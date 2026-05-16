@@ -675,7 +675,9 @@ pub fn run() {
             reauthorize_panel_session,
             open_external_url,
             #[cfg(target_os = "macos")]
-            dock_registration::register_defaultspack_dock
+            dock_registration::register_defaultspack_dock,
+            #[cfg(target_os = "macos")]
+            dock_registration::launch_defaultspack_desktop
         ])
         .run(tauri::generate_context!())
         .unwrap_or_else(|error| error!("error while running tauri application: {error}"));

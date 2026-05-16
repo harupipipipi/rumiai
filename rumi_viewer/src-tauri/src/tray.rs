@@ -49,6 +49,14 @@ pub fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let open_i = MenuItem::with_id(app, "open", "Open", true, None::<&str>)?;
     let restart_i = MenuItem::with_id(app, "restart_kernel", "Restart Kernel", true, None::<&str>)?;
     #[cfg(target_os = "macos")]
+    let open_defaultspack_i = MenuItem::with_id(
+        app,
+        "open_defaultspack",
+        "Open Defaultspack",
+        true,
+        None::<&str>,
+    )?;
+    #[cfg(target_os = "macos")]
     let register_dock_i = MenuItem::with_id(
         app,
         "register_dock",
@@ -62,7 +70,7 @@ pub fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(target_os = "macos")]
     let menu = Menu::with_items(
         app,
-        &[&open_i, &restart_i, &register_dock_i, &update_i, &quit_i],
+        &[&open_i, &restart_i, &open_defaultspack_i, &register_dock_i, &update_i, &quit_i],
     )?;
     #[cfg(not(target_os = "macos"))]
     let menu = Menu::with_items(app, &[&open_i, &restart_i, &update_i, &quit_i])?;
@@ -106,6 +114,26 @@ pub fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
                 #[cfg(not(target_os = "macos"))]
                 {
                     error!("Dock registration is only supported on macOS");
+                }
+            }
+            "open_defaultspack" => {
+                #[cfg(target_os = "macos")]
+                {
+                    let config = app.state::<crate::config::AppConfig>().inner().clone();
+                    std::thread::spawn(move || {
+                        match crate::dock_registration::launch_defaultspack_desktop_impl(&config) {
+                            Ok(msg) => {
+                                info!("Defaultspack launch: {msg}");
+                            }
+                            Err(e) => {
+                                error!("Defaultspack launch failed: {e}");
+                            }
+                        }
+                    });
+                }
+                #[cfg(not(target_os = "macos"))]
+                {
+                    error!("Defaultspack desktop launch is only supported on macOS");
                 }
             }
             "check_update" => {

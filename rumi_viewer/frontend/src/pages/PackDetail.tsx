@@ -1,13 +1,14 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAppStore } from '@/src/store';
 import { useT } from '@/src/lib/i18n';
+import { launchDefaultspackDesktop } from '@/src/lib/api';
 import { Button } from '@/src/components/ui/Button';
 import { Badge } from '@/src/components/ui/Badge';
 import { Switch } from '@/src/components/ui/Switch';
 import { Card, CardHeader, CardTitle, CardContent } from '@/src/components/ui/Card';
 import { panelRoutes } from '@/src/lib/routes';
-import { ArrowLeft, Play, Loader2 } from 'lucide-react';
+import { AppWindow, ArrowLeft, Play, Loader2 } from 'lucide-react';
 
 export function PackDetail() {
   const t = useT();
@@ -18,6 +19,7 @@ export function PackDetail() {
   const loadPacks = useAppStore(state => state.loadPacks);
   const togglePack = useAppStore(state => state.togglePack);
   const addToast = useAppStore(state => state.addToast);
+  const [launchingDesktop, setLaunchingDesktop] = useState(false);
 
   const pack = packs.find(p => p.id === id);
 
@@ -50,6 +52,19 @@ export function PackDetail() {
     addToast(t(key, { name: pack.name }), 'success');
   };
 
+  const handleLaunchDefaultspack = async () => {
+    setLaunchingDesktop(true);
+    try {
+      const message = await launchDefaultspackDesktop();
+      addToast(message, 'success');
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Failed to launch Defaultspack';
+      addToast(msg, 'error');
+    } finally {
+      setLaunchingDesktop(false);
+    }
+  };
+
   return (
     <div className="flex-1 overflow-y-auto page-enter">
       <div className="mx-auto max-w-4xl px-6 py-8 flex flex-col gap-6">
@@ -69,6 +84,17 @@ export function PackDetail() {
             </div>
           </div>
           <div className="flex items-center gap-3 shrink-0">
+            {pack.id === 'defaultspack' && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => void handleLaunchDefaultspack()}
+                loading={launchingDesktop}
+              >
+                <AppWindow className="h-3.5 w-3.5" />
+                Open App
+              </Button>
+            )}
             <span className="text-sm text-text-muted">{pack.enabled ? t('packs.enabled') : t('packs.disabled')}</span>
             <Switch checked={pack.enabled} onCheckedChange={handleToggle} aria-label={`Toggle ${pack.name}`} />
           </div>

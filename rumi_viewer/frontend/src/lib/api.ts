@@ -127,6 +127,15 @@ export async function openExternalUrl(url: string): Promise<void> {
   window.location.href = url;
 }
 
+export async function launchDefaultspackDesktop(): Promise<string> {
+  const invoke = getTauriInvoke();
+  if (!invoke) {
+    throw new Error('Defaultspack desktop launch is only available in Rumi Viewer.');
+  }
+
+  return invoke<string>('launch_defaultspack_desktop');
+}
+
 async function requestDesktopPanelBootstrapCode(): Promise<string | null> {
   const invoke = getTauriInvoke();
   if (!invoke) {
