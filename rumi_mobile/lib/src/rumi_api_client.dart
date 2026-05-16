@@ -6,25 +6,30 @@ import 'package:http/http.dart' as http;
 import 'models.dart';
 
 enum ModuleAction {
-  enable('enable'),
-  disable('disable'),
-  reload('reload'),
-  rollback('rollback');
+  enable('enable', 'Enable', destructive: false),
+  disable('disable', 'Disable', destructive: true),
+  reload('reload', 'Reload', destructive: true),
+  rollback('rollback', 'Rollback', destructive: true);
 
-  const ModuleAction(this.pathSegment);
+  const ModuleAction(
+    this.pathSegment,
+    this.label, {
+    required this.destructive,
+  });
 
   final String pathSegment;
+  final String label;
+  final bool destructive;
 }
 
 class RumiApiClient {
   RumiApiClient({
     required String baseUrl,
     required String bearerToken,
-    Duration timeout = const Duration(seconds: 30),
+    this.timeout = const Duration(seconds: 30),
     http.Client? httpClient,
   })  : baseUri = normalizeBaseUri(baseUrl),
         bearerToken = bearerToken.trim(),
-        timeout = timeout,
         _http = httpClient ?? http.Client();
 
   final Uri baseUri;
@@ -87,7 +92,8 @@ class RumiApiClient {
 
   Future<List<PackRequest>> listPackRequests() async {
     final data = await _request('GET', '/api/defaultspack/pack-requests');
-    final items = _listPayload(data, keys: const ['requests', 'items', 'pack_requests']);
+    final items =
+        _listPayload(data, keys: const ['requests', 'items', 'pack_requests']);
     return items.map(PackRequest.fromJson).toList(growable: false);
   }
 
@@ -103,7 +109,8 @@ class RumiApiClient {
       throw const RumiApiException('Bearer token is required');
     }
     final request = http.Request(method, _uri(path));
-    request.headers.addAll(_headers(hasBody: body != null, requireAuth: requireAuth));
+    request.headers
+        .addAll(_headers(hasBody: body != null, requireAuth: requireAuth));
     if (body != null) {
       request.body = jsonEncode(body);
     }
@@ -168,7 +175,10 @@ Object? _unwrapEnvelope(Object? decoded) {
   return decoded;
 }
 
-String _errorMessage(Object? decoded, {String fallback = 'Rumi request failed'}) {
+String _errorMessage(
+  Object? decoded, {
+  String fallback = 'Rumi request failed',
+}) {
   if (decoded is Map<String, dynamic>) {
     final error = decoded['error'];
     if (error is String && error.trim().isNotEmpty) {

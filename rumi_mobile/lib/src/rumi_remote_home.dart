@@ -184,6 +184,13 @@ class _RumiRemoteHomeState extends State<RumiRemoteHome> {
   }
 
   Future<void> _moduleAction(RumiModule module, ModuleAction action) async {
+    if (action.destructive) {
+      final confirmed = await _confirmModuleAction(module, action);
+      if (!confirmed || !mounted) {
+        return;
+      }
+    }
+
     setState(() {
       _busy = true;
       _error = null;
@@ -210,6 +217,35 @@ class _RumiRemoteHomeState extends State<RumiRemoteHome> {
     }
   }
 
+  Future<bool> _confirmModuleAction(
+    RumiModule module,
+    ModuleAction action,
+  ) async {
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: Text('${action.label} module?'),
+          content: Text(
+            'Apply ${action.label.toLowerCase()} to '
+            '${module.displayName}? This may interrupt remote workflows.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: Text(action.label),
+            ),
+          ],
+        );
+      },
+    );
+    return result == true;
+  }
+
   void _setError(Object error) {
     if (!mounted) {
       return;
@@ -219,7 +255,13 @@ class _RumiRemoteHomeState extends State<RumiRemoteHome> {
 
   void _showSnack(String message) {
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message, maxLines: 2, overflow: TextOverflow.ellipsis)),
+      SnackBar(
+        content: Text(
+          message,
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+        ),
+      ),
     );
   }
 
@@ -349,7 +391,8 @@ class _RumiRemoteHomeState extends State<RumiRemoteHome> {
                     contentPadding: EdgeInsets.zero,
                     title: const Text('Auto refresh'),
                     value: autoRefresh,
-                    onChanged: (value) => setSheetState(() => autoRefresh = value),
+                    onChanged: (value) =>
+                        setSheetState(() => autoRefresh = value),
                   ),
                   const SizedBox(height: 12),
                   Row(
@@ -726,25 +769,25 @@ class _ModuleDetail extends StatelessWidget {
           children: [
             _ActionButton(
               icon: Icons.power_settings_new,
-              label: 'Enable',
+              label: ModuleAction.enable.label,
               busy: busy,
               onPressed: () => onAction(current, ModuleAction.enable),
             ),
             _ActionButton(
               icon: Icons.power_off_outlined,
-              label: 'Disable',
+              label: ModuleAction.disable.label,
               busy: busy,
               onPressed: () => onAction(current, ModuleAction.disable),
             ),
             _ActionButton(
               icon: Icons.restart_alt,
-              label: 'Reload',
+              label: ModuleAction.reload.label,
               busy: busy,
               onPressed: () => onAction(current, ModuleAction.reload),
             ),
             _ActionButton(
               icon: Icons.undo,
-              label: 'Rollback',
+              label: ModuleAction.rollback.label,
               busy: busy,
               onPressed: () => onAction(current, ModuleAction.rollback),
             ),

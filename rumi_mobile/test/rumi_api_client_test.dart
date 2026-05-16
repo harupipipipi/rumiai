@@ -123,6 +123,13 @@ void main() {
     expect(module.state, 'disabled');
   });
 
+  test('marks one-tap footgun module actions as destructive', () {
+    expect(ModuleAction.enable.destructive, isFalse);
+    expect(ModuleAction.disable.destructive, isTrue);
+    expect(ModuleAction.reload.destructive, isTrue);
+    expect(ModuleAction.rollback.destructive, isTrue);
+  });
+
   test('throws RumiApiException for API error envelopes', () async {
     final client = RumiApiClient(
       baseUrl: 'http://pc.local:8765',

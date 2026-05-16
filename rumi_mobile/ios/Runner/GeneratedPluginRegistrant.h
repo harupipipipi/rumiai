@@ -2,6 +2,11 @@
 //  Generated file. Do not edit.
 //
 
+// clang-format off
+
+#ifndef GeneratedPluginRegistrant_h
+#define GeneratedPluginRegistrant_h
+
 #import <Flutter/Flutter.h>
 
 NS_ASSUME_NONNULL_BEGIN
@@ -11,3 +16,4 @@ NS_ASSUME_NONNULL_BEGIN
 @end
 
 NS_ASSUME_NONNULL_END
+#endif /* GeneratedPluginRegistrant_h */

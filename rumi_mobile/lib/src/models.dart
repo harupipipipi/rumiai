@@ -128,7 +128,8 @@ class MigrationStatus {
     );
     final migrated = map['migrated'];
     final total = map['total'];
-    final suffix = migrated == null || total == null ? '' : ' ($migrated/$total)';
+    final suffix =
+        migrated == null || total == null ? '' : ' ($migrated/$total)';
     return MigrationStatus(summary: '$status$suffix', raw: map);
   }
 }

@@ -60,7 +60,10 @@ class SecureSettingsStore {
     await Future.wait([
       _storage.write(key: _baseUrlKey, value: settings.baseUrl.trim()),
       _storage.write(key: _tokenKey, value: settings.token.trim()),
-      _storage.write(key: _autoRefreshKey, value: settings.autoRefresh.toString()),
+      _storage.write(
+        key: _autoRefreshKey,
+        value: settings.autoRefresh.toString(),
+      ),
     ]);
   }
 }

@@ -27,6 +27,10 @@ In the app, set the server URL to `http://<pc-lan-ip>:8765` and paste the token.
 Keep the PC firewall limited to your private network. Do not expose this port
 directly to the public internet.
 
+Android debug/profile builds allow cleartext HTTP for trusted-LAN development.
+Android release builds do not globally allow cleartext traffic; use HTTPS or an
+explicit release network policy if distributing a LAN-only build.
+
 ## API Coverage
 
 | Purpose | Method | Path |
