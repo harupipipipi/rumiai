@@ -1,0 +1,45 @@
+{
+  "function_id": "coding_file_patch",
+  "description": "Patch a workspace file with old/new text.",
+  "tags": [
+    "coding"
+  ],
+  "risk": "high",
+  "requires": [
+    "coding.file.patch"
+  ],
+  "caller_requires": [
+    "user.approved.high_risk"
+  ],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.coding.file_patch",
+    "defaultspack.coding.file_patch",
+    "defaults.coding.file.patch",
+    "defaultspack.coding.file.patch"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.coding.file_patch",
+      "default_args": {}
+    }
+  }
+}

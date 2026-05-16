@@ -7,8 +7,19 @@ from domain.coding.file_ops import FileOps
 def run(input_data, context=None):
     try:
         paths = input_data.get("paths")
-        if paths is not None and not isinstance(paths, list):
-            return error("'paths' must be a list", code="INVALID_INPUT")
-        return ok(FileOps(input_data.get("workspace_root")).snapshot(paths=paths))
+        if isinstance(paths, str):
+            paths = [paths]
+        if paths is not None and not (
+            isinstance(paths, list) and all(isinstance(path, str) for path in paths)
+        ):
+            return error("'paths' must be a string or list of strings", code="INVALID_INPUT")
+        metadata = input_data.get("metadata") if isinstance(input_data.get("metadata"), dict) else {}
+        return ok(
+            FileOps(input_data.get("workspace_root")).snapshot(
+                paths=paths,
+                metadata=metadata,
+                include_missing=bool(input_data.get("include_missing", False)),
+            )
+        )
     except Exception as exc:
         return error(str(exc), code="SNAPSHOT_ERROR")

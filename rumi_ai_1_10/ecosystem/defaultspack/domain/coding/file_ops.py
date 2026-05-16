@@ -5,14 +5,19 @@
 
 import difflib
 import glob
+import json
 import os
+import re
 import shutil
 import tempfile
 import time
 import uuid
 
 MAX_TEXT_FILE_BYTES = 2 * 1024 * 1024
-PROTECTED_PATHS = {".git", ".rumi_snapshots"}
+SNAPSHOT_DIR = ".rumi_snapshots"
+SNAPSHOT_MANIFEST = "snapshot.json"
+SNAPSHOT_ID_PATTERN = re.compile(r"^\d{8}T\d{6}Z-[0-9a-fA-F]{8}$")
+PROTECTED_PATHS = {".git", SNAPSHOT_DIR}
 
 
 class FileOps:
@@ -106,6 +111,24 @@ class FileOps:
         """Write a text file using the same atomic path as write_file."""
         return self.write_file(path, content)
 
+    def checkpoint_before_mutation(self, operation, paths, metadata=None):
+        """Create a reversible checkpoint before a workspace mutation."""
+        clean_paths = []
+        for path in paths if isinstance(paths, list) else [paths]:
+            if path is not None:
+                clean_paths.append(str(path))
+        checkpoint_metadata = {
+            "operation": str(operation or "mutation"),
+            "kind": "pre_mutation",
+        }
+        if isinstance(metadata, dict):
+            checkpoint_metadata.update(metadata)
+        return self.snapshot(
+            clean_paths or ["."],
+            metadata=checkpoint_metadata,
+            include_missing=True,
+        )
+
     def preview_write(self, path, content):
         return {
             "path": path,
@@ -198,49 +221,123 @@ class FileOps:
             ),
         }
 
-    def snapshot(self, paths=None):
+    def _snapshot_manifest_path(self, snapshot_root):
+        return os.path.join(snapshot_root, SNAPSHOT_MANIFEST)
+
+    def _validate_snapshot_id(self, snapshot_id):
+        if not isinstance(snapshot_id, str) or not SNAPSHOT_ID_PATTERN.fullmatch(snapshot_id):
+            raise ValueError("Invalid snapshot id")
+
+    def _load_snapshot_manifest(self, snapshot_id):
+        self._validate_snapshot_id(snapshot_id)
+        snapshot_root = self._resolve(os.path.join(SNAPSHOT_DIR, snapshot_id))
+        manifest_path = self._snapshot_manifest_path(snapshot_root)
+        if not os.path.isfile(manifest_path):
+            return {}
+        with open(manifest_path, "r", encoding="utf-8") as handle:
+            loaded = json.load(handle)
+        return loaded if isinstance(loaded, dict) else {}
+
+    def snapshot(self, paths=None, metadata=None, include_missing=False):
         """対象ファイルを workspace 内の .rumi_snapshots にコピーする。"""
         snapshot_id = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime()) + "-" + str(uuid.uuid4())[:8]
-        snapshot_root = self._resolve(os.path.join(".rumi_snapshots", snapshot_id))
+        snapshot_root = self._resolve(os.path.join(SNAPSHOT_DIR, snapshot_id))
         os.makedirs(snapshot_root, exist_ok=True)
         selected = paths if paths else ["."]
         copied = []
+        entries = []
         for item in selected:
             resolved = self._resolve(item)
-            if not os.path.exists(resolved):
-                continue
             rel = self._relative(resolved)
-            if rel == ".rumi_snapshots" or rel.startswith(".rumi_snapshots/"):
+            entry = {
+                "path": rel,
+                "requested_path": str(item),
+                "existed": os.path.exists(resolved),
+                "is_dir": os.path.isdir(resolved),
+                "is_file": os.path.isfile(resolved),
+            }
+            if os.path.isfile(resolved):
+                entry["size"] = os.path.getsize(resolved)
+            entries.append(entry)
+            if not os.path.exists(resolved):
+                if include_missing:
+                    copied.append(rel)
+                continue
+            if rel == SNAPSHOT_DIR or rel.startswith(SNAPSHOT_DIR + "/"):
                 continue
             destination = os.path.join(snapshot_root, rel)
             parent = os.path.dirname(destination)
             if parent and not os.path.isdir(parent):
                 os.makedirs(parent, exist_ok=True)
             if os.path.isdir(resolved):
-                shutil.copytree(resolved, destination, dirs_exist_ok=True, ignore=shutil.ignore_patterns(".rumi_snapshots", ".git"))
+                shutil.copytree(
+                    resolved,
+                    destination,
+                    dirs_exist_ok=True,
+                    ignore=shutil.ignore_patterns(SNAPSHOT_DIR, ".git"),
+                )
             else:
                 shutil.copy2(resolved, destination)
             copied.append(rel)
+        manifest = {
+            "snapshot_id": snapshot_id,
+            "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "workspace_root": self._root,
+            "paths": entries,
+            "metadata": dict(metadata or {}) if isinstance(metadata, dict) else {},
+        }
+        with open(self._snapshot_manifest_path(snapshot_root), "w", encoding="utf-8") as handle:
+            json.dump(manifest, handle, ensure_ascii=False, indent=2, sort_keys=True)
+            handle.write("\n")
         return {
             "snapshot_id": snapshot_id,
             "path": self._relative(snapshot_root),
             "files": copied,
+            "metadata": manifest["metadata"],
         }
 
     def restore_snapshot(self, snapshot_id, paths=None):
         """snapshot_id から workspace に復元する。"""
-        snapshot_root = self._resolve(os.path.join(".rumi_snapshots", snapshot_id))
+        self._validate_snapshot_id(snapshot_id)
+        snapshot_root = self._resolve(os.path.join(SNAPSHOT_DIR, snapshot_id))
         if not os.path.isdir(snapshot_root):
             raise FileNotFoundError(f"Snapshot not found: {snapshot_id}")
+        manifest = self._load_snapshot_manifest(snapshot_id)
+        path_entries = {}
+        for entry in manifest.get("paths", []):
+            if not isinstance(entry, dict):
+                continue
+            if entry.get("requested_path"):
+                path_entries[str(entry["requested_path"])] = entry
+            if entry.get("path"):
+                path_entries[str(entry["path"])] = entry
         selected = paths if paths else ["."]
         restored = []
+        removed = []
         for item in selected:
             source = os.path.realpath(os.path.join(snapshot_root, item))
             if source != snapshot_root and not source.startswith(snapshot_root + os.sep):
                 raise ValueError("Snapshot path traversal detected: " + str(item))
+            entry = path_entries.get(str(item))
+            if entry is None:
+                try:
+                    entry = path_entries.get(self._relative(self._resolve(item)))
+                except Exception:
+                    entry = None
+            if entry and entry.get("existed") is False:
+                destination = self._resolve(item)
+                self._ensure_unprotected_mutation(destination)
+                if os.path.isdir(destination):
+                    shutil.rmtree(destination)
+                    removed.append(str(item))
+                elif os.path.exists(destination):
+                    os.remove(destination)
+                    removed.append(str(item))
+                continue
             if not os.path.exists(source):
                 continue
             destination = self._resolve(item)
+            self._ensure_unprotected_mutation(destination)
             parent = os.path.dirname(destination)
             if parent and not os.path.isdir(parent):
                 os.makedirs(parent, exist_ok=True)
@@ -252,7 +349,38 @@ class FileOps:
         return {
             "snapshot_id": snapshot_id,
             "restored": restored,
+            "removed": removed,
         }
+
+    def list_snapshots(self, limit=50):
+        """List workspace snapshots newest-first."""
+        root = self._resolve(SNAPSHOT_DIR)
+        if not os.path.isdir(root):
+            return []
+        entries = []
+        for name in sorted(os.listdir(root), reverse=True):
+            path = os.path.join(root, name)
+            if not os.path.isdir(path):
+                continue
+            manifest = {}
+            manifest_path = self._snapshot_manifest_path(path)
+            if os.path.isfile(manifest_path):
+                try:
+                    with open(manifest_path, "r", encoding="utf-8") as handle:
+                        loaded = json.load(handle)
+                    manifest = loaded if isinstance(loaded, dict) else {}
+                except (OSError, ValueError):
+                    manifest = {}
+            entries.append({
+                "snapshot_id": name,
+                "path": self._relative(path),
+                "created_at": manifest.get("created_at"),
+                "metadata": manifest.get("metadata", {}),
+                "paths": manifest.get("paths", []),
+            })
+            if len(entries) >= int(limit):
+                break
+        return entries
 
     def search_files(self, pattern, directory="."):
         """globパターンでファイルを検索し、マッチしたパスのリストを返す。"""

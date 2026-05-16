@@ -254,3 +254,55 @@ jobs:
       - name: Run rumi viewer tests
         working-directory: rumi_viewer/src-tauri
         run: cargo test --locked
+
+  windows-python-smoke:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        working-directory: rumi_ai_1_10
+        run: |
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+          pip install -e .
+
+      - name: Run Windows portability smoke tests
+        working-directory: rumi_ai_1_10
+        run: |
+          pytest tests/test_windows_driver_skeleton.py tests/test_rumi_capability.py tests/test_defaultspack_coding_hardening.py -v
+
+  rumi-viewer-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: rumi_viewer/frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: rumi_viewer/frontend
+        run: npm ci
+
+      - name: Run frontend tests
+        working-directory: rumi_viewer/frontend
+        run: npm test
+
+      - name: Typecheck frontend
+        working-directory: rumi_viewer/frontend
+        run: npm run lint
+
+      - name: Build panel frontend
+        working-directory: rumi_viewer/frontend
+        run: npm run build

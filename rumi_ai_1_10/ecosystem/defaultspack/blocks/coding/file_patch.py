@@ -22,7 +22,17 @@ def run(input_data, context=None):
             return invalid
         return ok(approval_required(operation, "medium", args=input_data, path=path))
     try:
-        result = FileOps(input_data.get("workspace_root")).apply_patch_text(path, old, new)
+        ops = FileOps(input_data.get("workspace_root"))
+        checkpoint = None
+        if input_data.get("checkpoint", True) is not False:
+            checkpoint = ops.checkpoint_before_mutation(
+                operation,
+                [path],
+                metadata={"path": path},
+            )
+        result = ops.apply_patch_text(path, old, new)
+        if checkpoint is not None:
+            result["checkpoint"] = checkpoint
         record_execution(operation, "medium", {"path": path})
         return ok(result)
     except ValueError as exc:

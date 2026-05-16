@@ -43,7 +43,7 @@ class FlowContext:
                 return callback(handler_name, params)
         if hasattr(self._parent_context, "call_handler") and callable(getattr(self._parent_context, "call_handler", None)):
             return self._parent_context.call_handler(handler_name, params)
-        return {"status": "ok", "data": None, "_stub": True}
+        return error(f"handler is not available in this flow context: {handler_name}", code="NOT_IMPLEMENTED")
 
     def emit_event(self, event_type, data):
         """イベントを発行する

@@ -33,13 +33,25 @@ def run(input_data, context=None):
 
     try:
         ops = FileOps(input_data.get("workspace_root"))
+        diff = ops.diff_text(path, content)
+        checkpoint = None
+        if input_data.get("checkpoint", True) is not False:
+            checkpoint = ops.checkpoint_before_mutation(
+                operation,
+                [path],
+                metadata={"path": path},
+            )
         size = ops.write_file(path, content)
         record_execution(operation, "medium", {"path": path, "size": size})
-        return ok({
+        data = {
             "path": path,
             "size": size,
             "written": True,
-        })
+            "diff": diff,
+        }
+        if checkpoint is not None:
+            data["checkpoint"] = checkpoint
+        return ok(data)
     except ValueError as e:
         return error(str(e), code="PATH_TRAVERSAL")
     except Exception as e:

@@ -32,6 +32,10 @@ def has_user32() -> bool:
 def current_process_id() -> int | None:
     if not _kernel32:
         return None
+    try:
+        return int(_kernel32.GetCurrentProcessId())
+    except Exception:
+        return None
 
 
 def get_process_integrity_level(pid: int | None) -> str:
@@ -81,11 +85,6 @@ def get_process_integrity_level(pid: int | None) -> str:
                     _kernel32.CloseHandle(handle)
                 except Exception:
                     pass
-    try:
-        return int(_kernel32.GetCurrentProcessId())
-    except Exception:
-        return None
-
 
 def can_post_to_hwnd(hwnd: int | None) -> bool:
     """Return whether basic user32 message APIs can target this HWND."""

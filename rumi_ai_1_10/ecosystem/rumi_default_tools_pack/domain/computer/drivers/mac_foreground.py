@@ -98,18 +98,17 @@ class MacForegroundFallbackDriver(ComputerDriver):
         previous_app = get_frontmost_app()
         try:
             activate_app(target.app or "", target.pid)
-            # TODO: Perform physical click at (x, y)
             return ActionResult(
                 action="click",
                 driver=self.name,
-                executed=True,
+                executed=False,
                 confidence="best_effort",
                 target_kind=target.kind,
                 is_fallback=True,
                 can_parallel_user_work=False,
                 requires_foreground=True,
                 uses_physical_input=True,
-                notes=["Foreground fallback: window was activated"],
+                notes=["Foreground fallback activated the window, but physical click is not integrated"],
             )
         except Exception as e:
             return ActionResult(
@@ -137,18 +136,17 @@ class MacForegroundFallbackDriver(ComputerDriver):
         previous_app = get_frontmost_app()
         try:
             activate_app(target.app or "", target.pid)
-            # TODO: Perform physical typing
             return ActionResult(
                 action="type_text",
                 driver=self.name,
-                executed=True,
+                executed=False,
                 confidence="best_effort",
                 target_kind=target.kind,
                 is_fallback=True,
                 can_parallel_user_work=False,
                 requires_foreground=True,
                 uses_physical_input=True,
-                notes=["Foreground fallback: window was activated"],
+                notes=["Foreground fallback activated the window, but physical typing is not integrated"],
             )
         except Exception as e:
             return ActionResult(
@@ -176,18 +174,17 @@ class MacForegroundFallbackDriver(ComputerDriver):
         previous_app = get_frontmost_app()
         try:
             activate_app(target.app or "", target.pid)
-            # TODO: Perform physical key combo
             return ActionResult(
                 action="key",
                 driver=self.name,
-                executed=True,
+                executed=False,
                 confidence="best_effort",
                 target_kind=target.kind,
                 is_fallback=True,
                 can_parallel_user_work=False,
                 requires_foreground=True,
                 uses_physical_input=True,
-                notes=["Foreground fallback: window was activated"],
+                notes=["Foreground fallback activated the window, but physical key events are not integrated"],
             )
         except Exception as e:
             return ActionResult(
@@ -225,18 +222,17 @@ class MacForegroundFallbackDriver(ComputerDriver):
         previous_app = get_frontmost_app()
         try:
             activate_app(target.app or "", target.pid)
-            # TODO: Perform physical scroll
             return ActionResult(
                 action="scroll",
                 driver=self.name,
-                executed=True,
+                executed=False,
                 confidence="best_effort",
                 target_kind=target.kind,
                 is_fallback=True,
                 can_parallel_user_work=False,
                 requires_foreground=True,
                 uses_physical_input=True,
-                notes=["Foreground fallback: window was activated"],
+                notes=["Foreground fallback activated the window, but physical scroll is not integrated"],
             )
         except Exception as e:
             return ActionResult(

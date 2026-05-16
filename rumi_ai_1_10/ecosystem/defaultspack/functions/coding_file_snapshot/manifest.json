@@ -1,0 +1,43 @@
+{
+  "function_id": "coding_file_snapshot",
+  "description": "Create a workspace file snapshot.",
+  "tags": [
+    "coding"
+  ],
+  "risk": "medium",
+  "requires": [
+    "coding.file.snapshot"
+  ],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.coding.file_snapshot",
+    "defaultspack.coding.file_snapshot",
+    "defaults.coding.file.snapshot",
+    "defaultspack.coding.file.snapshot"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.coding.file_snapshot",
+      "default_args": {}
+    }
+  }
+}

@@ -717,17 +717,46 @@ class ToolExecutor:
                 "widget": None
             }
         elif tool_name == "file_reader":
+            from blocks.coding.file_read import run as file_read_run
+
             path = arguments.get("path", "")
+            workspace_root = arguments.get("workspace_root")
+            if workspace_root is None and isinstance(context, dict):
+                workspace_root = context.get("workspace_root")
+            result = file_read_run(
+                {
+                    "path": path,
+                    "workspace_root": workspace_root,
+                },
+                context if isinstance(context, dict) else {},
+            )
+            if result.get("status") != "ok":
+                err = result.get("error", {})
+                message = (
+                    err.get("message", "file read failed")
+                    if isinstance(err, dict)
+                    else str(err)
+                )
+                return {
+                    "result": message,
+                    "is_error": True,
+                    "widget": {"type": "file_reader", "path": path, "error": err},
+                }
+            data = result.get("data", {})
             return {
-                "result": "File content from: {} (stub)".format(path),
+                "result": data.get("content", ""),
                 "is_error": False,
-                "widget": None
+                "widget": {"type": "file_reader", **data},
             }
         else:
             return {
-                "result": "Tool '{}' executed with args: {} (stub)".format(tool_name, arguments),
-                "is_error": False,
-                "widget": None
+                "result": "Tool '{}' is not implemented".format(tool_name),
+                "is_error": True,
+                "widget": {
+                    "type": tool_name,
+                    "error": "not_implemented",
+                    "arguments": arguments,
+                },
             }
 
 

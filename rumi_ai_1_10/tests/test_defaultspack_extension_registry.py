@@ -127,10 +127,27 @@ def test_discovery_scans_manifest_categories(tmp_path: Path):
         ("prompt", "base_assistant"),
         ("skill", "hatch-pet"),
     }
-
     registry = ExtensionRegistry(root)
     assert registry.skills().list()[0]["triggers"] == ["sprite", "pet"]
 
+
+def test_extension_registry_excludes_llm_models_without_provider(tmp_path: Path):
+    root = tmp_path / "extensions"
+    _write_json(
+        root / "llm/providers/missing-provider/models/orphan.json",
+        {
+            "id": "missing-provider/model",
+            "category": "llm_model",
+            "version": "1",
+            "provider_id": "missing-provider",
+            "model_id": "model",
+        },
+    )
+
+    registry = ExtensionRegistry(root)
+
+    assert registry.llm().models() == []
+    assert any("provider_id is not registered" in issue.message for issue in registry.issues)
 
 def test_extension_registry_llm_best_model(tmp_path: Path):
     root = tmp_path / "extensions"
