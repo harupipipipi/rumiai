@@ -51,11 +51,13 @@ npm run lint
 
 ```
 src/
+├── app/           App 起動処理・ルーティング
 ├── components/    UI コンポーネント
 ├── hooks/         カスタムフック
 ├── lib/           ユーティリティ・API クライアント・型定義
 ├── pages/         ページコンポーネント
-├── store.ts       Zustand ストア
+├── store/         Zustand ストアの型・初期値・変換
+├── store.ts       Zustand ストア本体
 └── main.tsx       エントリーポイント
 ```
 

@@ -27,208 +27,28 @@ import {
   transformProfile,
   transformVersion,
 } from './lib/transforms';
+import { AVATAR_OPTIONS, defaultDashboard, defaultProfile, defaultVersion } from './store/defaults';
+import type { AppState, ColorMode, Theme } from './store/types';
+import { transformUpdateInfo } from './store/updates';
 
-export type Theme = 'Rumi' | 'Minimal' | 'Standard' | 'Rounded';
-const VALID_THEMES: Theme[] = ['Rumi', 'Minimal', 'Standard', 'Rounded'];
-
-export type ColorMode = 'light' | 'dark';
-
-export const AVATAR_OPTIONS = [
-  'https://picsum.photos/seed/rumi-av1/128/128',
-  'https://picsum.photos/seed/rumi-av2/128/128',
-  'https://picsum.photos/seed/rumi-av3/128/128',
-  'https://picsum.photos/seed/rumi-av4/128/128',
-  'https://picsum.photos/seed/rumi-av5/128/128',
-];
-
-export interface Toast {
-  id: string;
-  message: string;
-  type: 'success' | 'error';
-}
-
-export interface DialogConfig {
-  title: string;
-  message: string;
-  onConfirm: () => void;
-  confirmText?: string;
-  cancelText?: string;
-}
-
-export interface Pack {
-  id: string;
-  name: string;
-  version: string;
-  type: 'core' | 'community';
-  enabled: boolean;
-  description: string;
-  capabilities: { name: string; description: string }[];
-  flows: string[];
-  dependencies: string[];
-}
-
-export interface Flow {
-  id: string;
-  name: string;
-  content: string;
-}
-
-export interface Activity {
-  id: number;
-  timestamp: string;
-  type: 'kernel_start' | 'pack_load' | 'flow_success' | 'flow_fail' | 'error';
-  message: string;
-}
-
-export interface DashboardData {
-  kernelStatus: 'running' | 'stopped' | 'error';
-  uptime: string;
-  activePacks: number;
-  registeredFlows: number;
-  activities: Activity[];
-}
-
-export interface Profile {
-  avatar: string;
-  username: string;
-  language: string;
-  job: string;
-  connected: boolean;
-}
-
-export interface VersionInfo {
-  app: string;
-  kernel: string;
-  python: string;
-  launcher: string;
-  docker: {
-    installed: boolean;
-    version: string;
-    type: string;
-  };
-}
-
-export type UpdateTarget = 'rumiai' | 'defaultspack';
-
-export interface UpdateInfo {
-  target: UpdateTarget;
-  currentVersion: string;
-  latestVersion: string;
-  updateAvailable: boolean;
-  releaseUrl: string;
-  repo: string;
-}
-
-export type RuntimeStatus = 'starting' | 'panel_ready' | 'runtime_ready' | 'error';
-
-interface AppState {
-  theme: Theme;
-  setTheme: (theme: Theme) => void;
-
-  colorMode: ColorMode;
-  setColorMode: (mode: ColorMode) => void;
-
-  isSetupDone: boolean;
-  setSetupDone: (done: boolean) => void;
-
-  isSidebarOpen: boolean;
-  setSidebarOpen: (open: boolean) => void;
-
-  toasts: Toast[];
-  addToast: (message: string, type: 'success' | 'error') => void;
-  removeToast: (id: string) => void;
-
-  dialog: DialogConfig | null;
-  showDialog: (config: DialogConfig) => void;
-  closeDialog: () => void;
-
-  isLoading: boolean;
-  apiError: string | null;
-
-  runtimeReady: boolean;
-  runtimeStatus: RuntimeStatus;
-  runtimeError: string | null;
-  setRuntimeHealth: (health: { status?: 'ok' | 'error'; panel_ready?: boolean; runtime_ready?: boolean; runtime_status?: RuntimeStatus; runtime_error?: string | null }) => void;
-  refreshRuntimeHealth: () => Promise<void>;
-
-  packs: Pack[];
-  loadPacks: () => Promise<void>;
-  togglePack: (id: string) => Promise<void>;
-
-  flows: Flow[];
-  loadFlows: () => Promise<void>;
-  addFlow: (flow: { id: string; name: string; content: string }) => Promise<void>;
-  updateFlow: (id: string, content: string) => Promise<void>;
-  deleteFlow: (id: string) => Promise<void>;
-
-  dashboard: DashboardData;
-  loadDashboard: () => Promise<void>;
-  setKernelStatus: (status: 'running' | 'stopped' | 'error') => void;
-  restartKernel: () => Promise<void>;
-
-  profile: Profile;
-  loadProfile: () => Promise<void>;
-  updateProfile: (profile: Partial<Profile>) => Promise<void>;
-  connectAccount: () => Promise<void>;
-
-  version: VersionInfo;
-  loadVersion: () => Promise<void>;
-  updates: UpdateInfo[];
-  autoUpdate: Record<UpdateTarget, boolean>;
-  updatesLoading: boolean;
-  updateSettingsLoading: boolean;
-  updateApplyingTarget: UpdateTarget | null;
-  loadUpdates: () => Promise<void>;
-  loadUpdateSettings: () => Promise<void>;
-  setAutoUpdate: (target: UpdateTarget, enabled: boolean) => Promise<void>;
-  applyUpdate: (target: UpdateTarget) => Promise<void>;
-}
-
-const defaultDashboard: DashboardData = {
-  kernelStatus: 'stopped',
-  uptime: '--',
-  activePacks: 0,
-  registeredFlows: 0,
-  activities: [],
-};
-
-const defaultProfile: Profile = {
-  avatar: AVATAR_OPTIONS[0],
-  username: 'User',
-  language: 'en',
-  job: '',
-  connected: false,
-};
-
-const defaultVersion: VersionInfo = {
-  app: 'v1.10.0',
-  kernel: '--',
-  python: '--',
-  launcher: '--',
-  docker: {
-    installed: false,
-    version: '',
-    type: '',
-  },
-};
-
-function transformUpdateInfo(update: {
-  target: UpdateTarget;
-  current_version: string;
-  latest_version: string;
-  update_available: boolean;
-  release_url: string;
-  repo: string;
-}): UpdateInfo {
-  return {
-    target: update.target,
-    currentVersion: update.current_version,
-    latestVersion: update.latest_version,
-    updateAvailable: update.update_available,
-    releaseUrl: update.release_url,
-    repo: update.repo,
-  };
-}
+export { AVATAR_OPTIONS, THEME_OPTIONS } from './store/defaults';
+export type {
+  Activity,
+  AppState,
+  ColorMode,
+  DashboardData,
+  DialogConfig,
+  Flow,
+  Pack,
+  Profile,
+  RuntimeHealthPatch,
+  RuntimeStatus,
+  Theme,
+  Toast,
+  UpdateInfo,
+  UpdateTarget,
+  VersionInfo,
+} from './store/types';
 
 export const useAppStore = create<AppState>((set, get) => ({
   theme: (localStorage.getItem('rumi-theme') as Theme) || 'Rumi',

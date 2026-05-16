@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useAppStore, Theme, ColorMode, AVATAR_OPTIONS, UpdateTarget } from '@/src/store';
+import { useAppStore, AVATAR_OPTIONS, THEME_OPTIONS, type UpdateTarget } from '@/src/store';
 import { fetchBackgroundControlStatus, isDesktopShellAvailable, sendToBackground } from '@/src/lib/api';
 import type { BackgroundControlStatus } from '@/src/lib/apiTypes';
 import { useT } from '@/src/lib/i18n';
@@ -117,7 +117,6 @@ export function Settings() {
     }
   };
 
-  const themes: Theme[] = ['Rumi', 'Minimal', 'Standard', 'Rounded'];
   const updateName = (target: UpdateTarget) => target === 'rumiai' ? 'Rumi AI' : 'defaultspack';
 
   const handleApplyUpdate = async (target: UpdateTarget) => {
@@ -347,7 +346,7 @@ export function Settings() {
                   <div className="space-y-2">
                     <label className="text-sm font-medium text-text-main">{t('settings.style_theme')}</label>
                     <div className="grid grid-cols-2 gap-3">
-                      {themes.map((th) => (
+                      {THEME_OPTIONS.map((th) => (
                         <button
                           key={th}
                           onClick={() => setTheme(th)}
