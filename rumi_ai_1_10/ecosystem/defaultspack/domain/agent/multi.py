@@ -11,6 +11,8 @@ from pathlib import Path
 from blocks._common import gen_id, timestamp
 from domain.agent.agent_def import AgentDefinition
 from domain.ai_client.client import AIClient
+from domain.coding.workspace_policy import require_registered_trusted_workspace
+from domain.coding.workspace_resolver import WorkspaceResolver
 
 
 # ---------------------------------------------------------------------------
@@ -95,6 +97,7 @@ class MultiAgentSession:
         max_turns,
         workspace_root=None,
         worktree_mode=None,
+        workspace_resolution=None,
     ):
         self.session_id = session_id
         self.task = task
@@ -113,6 +116,8 @@ class MultiAgentSession:
                 "base_workspace_root": str(Path(str(workspace_root)).expanduser().resolve())
                 if workspace_root
                 else None,
+                "workspace_id": workspace_resolution.workspace_id if workspace_resolution else None,
+                "trusted": bool(workspace_resolution.trusted) if workspace_resolution else False,
                 "worktree_mode": resolved_worktree_mode,
                 "merge_strategy": "manual_conflict_report",
             }
@@ -179,6 +184,21 @@ DONE_MARKER = "[DONE]"
 def _safe_workspace_segment(value):
     segment = re.sub(r"[^A-Za-z0-9_.-]+", "-", str(value or "").strip()).strip(".-")
     return (segment or "agent")[:80]
+
+
+def _resolve_agent_workspace(workspace_id=None, workspace_root=None, context=None):
+    if not workspace_id and not workspace_root:
+        return None
+    request = {}
+    if workspace_id:
+        request["workspace_id"] = workspace_id
+    elif workspace_root:
+        request["workspace_root"] = str(workspace_root)
+    resolution = WorkspaceResolver().resolve(request, context or {})
+    return require_registered_trusted_workspace(
+        resolution,
+        operation="agent.multi_execute",
+    )
 
 
 def _workspace_ignore(path):
@@ -598,7 +618,9 @@ class MultiAgentOrchestrator:
         orchestration="round_robin",
         max_turns=10,
         workspace_root=None,
+        workspace_id=None,
         worktree_mode=None,
+        context=None,
     ):
         """マルチエージェントタスクを開始し、完了まで実行する。
 
@@ -620,6 +642,22 @@ class MultiAgentOrchestrator:
         """
         session_id = "multi_" + gen_id()
 
+        workspace_resolution = None
+        try:
+            workspace_resolution = _resolve_agent_workspace(
+                workspace_id=workspace_id,
+                workspace_root=workspace_root,
+                context=context,
+            )
+        except Exception as exc:
+            return {
+                "session_id": session_id,
+                "status": "error",
+                "error": str(exc),
+            }
+        if workspace_resolution is not None:
+            workspace_root = workspace_resolution.root_path
+
         agents = []
         for ad in agent_dicts:
             agents.append(AgentDefinition.from_dict(ad))
@@ -639,6 +677,7 @@ class MultiAgentOrchestrator:
             max_turns=max_turns,
             workspace_root=workspace_root,
             worktree_mode=worktree_mode,
+            workspace_resolution=workspace_resolution,
         )
         session.status = "running"
 

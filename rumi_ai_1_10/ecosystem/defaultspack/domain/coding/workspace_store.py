@@ -108,6 +108,17 @@ class WorkspaceStore:
         record = data["workspaces"].get(str(workspace_id))
         return copy.deepcopy(record) if record else None
 
+    def find_by_root(self, root_path: str | os.PathLike[str]) -> dict[str, Any] | None:
+        normalized_root = normalize_workspace_root(root_path)
+        for record in self.list():
+            try:
+                candidate = normalize_workspace_root(record.get("root_path"))
+            except ValueError:
+                continue
+            if candidate == normalized_root:
+                return record
+        return None
+
     def create(
         self,
         root_path: str | os.PathLike[str],

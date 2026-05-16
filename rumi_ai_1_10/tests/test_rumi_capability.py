@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib
 import json
 import socket
 import struct
@@ -82,3 +83,31 @@ def test_rumi_capability_tcp_fallback_fails_closed_on_auth_rejection(monkeypatch
 
     assert result["success"] is False
     assert result["error_type"] == "auth_failed"
+
+
+def test_rumi_capability_tcp_fallback_reads_env_on_import(monkeypatch):
+    seen = {}
+
+    def handler(conn):
+        seen["auth"] = _read_json(conn)
+        _write_json(conn, {"auth_ok": True})
+        seen["request"] = _read_json(conn)
+        _write_json(conn, {"success": True, "output": "env route", "latency_ms": 1})
+
+    port, thread = _serve_once(handler)
+    monkeypatch.setenv("RUMI_CAPABILITY_HOST", "127.0.0.1")
+    monkeypatch.setenv("RUMI_CAPABILITY_PORT", str(port))
+    monkeypatch.setenv("RUMI_CAPABILITY_TOKEN", "env-secret")
+    module = importlib.reload(rumi_capability)
+    try:
+        result = module.call("fs.read", {"path": "env"}, timeout_seconds=1)
+        thread.join(timeout=5)
+    finally:
+        monkeypatch.delenv("RUMI_CAPABILITY_HOST", raising=False)
+        monkeypatch.delenv("RUMI_CAPABILITY_PORT", raising=False)
+        monkeypatch.delenv("RUMI_CAPABILITY_TOKEN", raising=False)
+        importlib.reload(rumi_capability)
+
+    assert result["success"] is True
+    assert seen["auth"] == {"auth_token": "env-secret"}
+    assert seen["request"]["permission_id"] == "fs.read"

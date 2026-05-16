@@ -1,6 +1,7 @@
 """ターミナル操作ドメインロジック."""
 
 import json
+import ntpath
 import os
 import shutil
 import shlex
@@ -68,8 +69,61 @@ class Terminal:
             raise ValueError("cwd is outside workspace root: " + str(cwd))
         return resolved
 
-    def classify(self, command):
-        normalized = " ".join(str(command).strip().split())
+    def _normalized_command(self, command):
+        if isinstance(command, (list, tuple)):
+            return " ".join(str(item).strip() for item in command if str(item).strip())
+        return " ".join(str(command).strip().split())
+
+    def _inspection_args(self, command):
+        if isinstance(command, (list, tuple)):
+            return [str(item) for item in command]
+        return shlex.split(str(command), posix=sys.platform != "win32")
+
+    def _low_risk_token(self, normalized):
+        for token in sorted(LOW_RISK_TOKENS, key=len, reverse=True):
+            if normalized == token or normalized.startswith(token + " "):
+                return token
+        return None
+
+    def _path_arg_may_escape_workspace(self, value):
+        text = str(value or "").strip()
+        if not text or text == "--" or text.startswith("-"):
+            return False
+        if text.isdigit():
+            return False
+        normalized = text.replace("\\", "/")
+        return (
+            os.path.isabs(os.path.expanduser(text))
+            or ntpath.isabs(text)
+            or normalized == ".."
+            or normalized.startswith("../")
+            or normalized.endswith("/..")
+            or "/../" in normalized
+        )
+
+    def _path_arg_inside_workspace(self, value, cwd):
+        text = str(value or "")
+        if ntpath.isabs(text) and not os.path.isabs(text):
+            return False
+        expanded = os.path.expanduser(text)
+        resolved = os.path.realpath(expanded if os.path.isabs(expanded) else os.path.join(cwd, expanded))
+        return resolved == self._root or resolved.startswith(self._root + os.sep)
+
+    def _outside_workspace_read_args(self, command, cwd, low_risk_token):
+        try:
+            args = self._inspection_args(command)
+        except ValueError:
+            return []
+        resolved_cwd = self._resolve_cwd(cwd)
+        remaining = args[len(low_risk_token.split()):]
+        outside = []
+        for arg in remaining:
+            if self._path_arg_may_escape_workspace(arg) and not self._path_arg_inside_workspace(arg, resolved_cwd):
+                outside.append(str(arg))
+        return outside
+
+    def classify(self, command, cwd=None):
+        normalized = self._normalized_command(command)
         if not normalized:
             return {"risk_level": "low", "approval_required": False, "reason": "empty"}
         if any(marker in normalized for marker in SHELL_METACHARS):
@@ -77,13 +131,23 @@ class Terminal:
         for token in HIGH_RISK_TOKENS:
             if normalized == token or normalized.startswith(token + " ") or ("; " + token) in normalized:
                 return {"risk_level": "high", "approval_required": True, "reason": "high_risk_command"}
-        for token in LOW_RISK_TOKENS:
-            if normalized == token or normalized.startswith(token + " "):
-                return {"risk_level": "low", "approval_required": False, "reason": "read_only_command"}
+        low_risk_token = self._low_risk_token(normalized)
+        if low_risk_token:
+            outside_paths = self._outside_workspace_read_args(command, cwd, low_risk_token)
+            if outside_paths:
+                return {
+                    "risk_level": "high",
+                    "approval_required": True,
+                    "reason": "outside_workspace_path",
+                    "paths": outside_paths,
+                }
+            return {"risk_level": "low", "approval_required": False, "reason": "read_only_command"}
         return {"risk_level": "medium", "approval_required": True, "reason": "command_execution"}
 
     def _uses_shell_syntax(self, command):
-        normalized = " ".join(str(command).strip().split())
+        if isinstance(command, (list, tuple)):
+            return False
+        normalized = self._normalized_command(command)
         return any(marker in normalized for marker in SHELL_METACHARS)
 
     def _command_args(self, command):
@@ -113,7 +177,7 @@ class Terminal:
 
     def execute(self, command, cwd=None, timeout=30, env=None, approved=False):
         """コマンドを実行する。medium/high risk は approved が必要。"""
-        risk = self.classify(command)
+        risk = self.classify(command, cwd=cwd)
         if risk["approval_required"] and not approved:
             self._record_command({
                 "type": "execute",
@@ -134,7 +198,7 @@ class Terminal:
                 "stderr": "",
             }
         resolved_cwd = self._resolve_cwd(cwd)
-        normalized_command = " ".join(str(command).strip().split())
+        normalized_command = self._normalized_command(command)
         if normalized_command == "pwd":
             result = {
                 "command": command,
@@ -195,7 +259,7 @@ class Terminal:
         現時点ではプロセスライフサイクル管理をHTTP越しに保持しないため、
         実行はせず approval/risk つきの stream_id を返す。
         """
-        risk = self.classify(command)
+        risk = self.classify(command, cwd=cwd)
         if risk["approval_required"] and not approved:
             self._record_command({
                 "type": "stream",
@@ -215,7 +279,7 @@ class Terminal:
             }
         stream_id = str(uuid.uuid4())
         resolved_cwd = self._resolve_cwd(cwd)
-        normalized_command = " ".join(str(command).strip().split())
+        normalized_command = self._normalized_command(command)
         if normalized_command == "pwd":
             result = {
                 "command": command,

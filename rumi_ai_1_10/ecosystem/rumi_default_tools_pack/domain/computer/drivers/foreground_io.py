@@ -42,7 +42,7 @@ def capture_api_available(platform_name: str | None = None) -> bool:
 
 def capture_visible_screen(platform_name: str | None = None) -> dict[str, Any]:
     platform_name = platform_name or sys.platform
-    output = Path(tempfile.mktemp(prefix="rumi-local-visible-", suffix=".png"))
+    output = _new_screenshot_path()
     if platform_name == "darwin":
         executable = shutil.which("screencapture")
         if not executable:
@@ -53,6 +53,11 @@ def capture_visible_screen(platform_name: str | None = None) -> dict[str, Any]:
         _windows_screenshot(output)
         return _screenshot_payload(output, method="powershell_copyfromscreen")
     raise ForegroundAutomationUnavailable("Visible-screen capture is supported only on macOS and Windows")
+
+
+def _new_screenshot_path() -> Path:
+    temp_dir = Path(tempfile.mkdtemp(prefix="rumi-local-visible-"))
+    return temp_dir / "screenshot.png"
 
 
 def move(x: int, y: int, platform_name: str | None = None) -> None:

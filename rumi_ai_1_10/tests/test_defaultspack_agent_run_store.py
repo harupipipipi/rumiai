@@ -131,6 +131,10 @@ def test_agent_run_store_redacts_tool_arguments_before_persisting(tmp_path, monk
 
 def test_multi_agent_session_records_isolated_workspace_contracts(tmp_path, monkeypatch):
     from domain.agent.multi import MultiAgentOrchestrator
+    from domain.coding.workspace_store import WorkspaceStore
+
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CODING_WORKSPACE_STORE_PATH", str(tmp_path / "workspaces.json"))
+    WorkspaceStore().create(tmp_path, workspace_id="multi", trusted=True)
 
     orchestrator = MultiAgentOrchestrator()
     monkeypatch.setattr(
@@ -146,7 +150,7 @@ def test_multi_agent_session_records_isolated_workspace_contracts(tmp_path, monk
             {"agent_id": "reviewer", "name": "reviewer", "role": "review", "model": "stub/default"},
         ],
         max_turns=1,
-        workspace_root=tmp_path,
+        workspace_id="multi",
         worktree_mode="metadata_only",
     )
 
@@ -160,10 +164,14 @@ def test_multi_agent_session_records_isolated_workspace_contracts(tmp_path, monk
     assert Path(coder_workspace["workspace_root"]).is_dir()
     assert Path(reviewer_workspace["workspace_root"]).is_dir()
     assert result["result"]["shared_context"]["workspace"]["base_workspace_root"] == str(tmp_path.resolve())
+    assert result["result"]["shared_context"]["workspace"]["workspace_id"] == "multi"
 
 
 def test_multi_agent_workspace_copy_skips_symlink_targets(tmp_path, monkeypatch):
     from domain.agent.multi import MultiAgentOrchestrator
+    from domain.coding.workspace_store import WorkspaceStore
+
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CODING_WORKSPACE_STORE_PATH", str(tmp_path / "workspaces.json"))
 
     outside = tmp_path.parent / "outside-secret.txt"
     outside.write_text("secret-data", encoding="utf-8")
@@ -173,6 +181,7 @@ def test_multi_agent_workspace_copy_skips_symlink_targets(tmp_path, monkeypatch)
     except (NotImplementedError, OSError) as exc:
         pytest.skip(f"symlink creation is unavailable on this platform: {exc}")
     (tmp_path / "real.txt").write_text("real-data", encoding="utf-8")
+    WorkspaceStore().create(tmp_path, workspace_id="multi", trusted=True)
 
     orchestrator = MultiAgentOrchestrator()
     monkeypatch.setattr(
@@ -185,7 +194,7 @@ def test_multi_agent_workspace_copy_skips_symlink_targets(tmp_path, monkeypatch)
         "coordinate",
         [{"agent_id": "coder", "name": "coder", "role": "code", "model": "stub/default"}],
         max_turns=1,
-        workspace_root=tmp_path,
+        workspace_id="multi",
         worktree_mode="copy",
     )
 
@@ -194,3 +203,21 @@ def test_multi_agent_workspace_copy_skips_symlink_targets(tmp_path, monkeypatch)
     assert (workspace_root / "real.txt").read_text(encoding="utf-8") == "real-data"
     assert not (workspace_root / "leak.txt").exists()
     assert "leak.txt" not in workspace["base_manifest"]
+
+
+def test_multi_agent_rejects_unregistered_workspace_root(tmp_path, monkeypatch):
+    from domain.agent.multi import MultiAgentOrchestrator
+
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CODING_WORKSPACE_STORE_PATH", str(tmp_path / "workspaces.json"))
+
+    result = MultiAgentOrchestrator().execute(
+        "coordinate",
+        [{"agent_id": "coder", "name": "coder", "role": "code", "model": "stub/default"}],
+        max_turns=1,
+        workspace_root=tmp_path,
+        worktree_mode="copy",
+    )
+
+    assert result["status"] == "error"
+    assert "registered trusted workspace required" in result["error"]
+    assert not (tmp_path / ".rumi" / "multi_agent").exists()

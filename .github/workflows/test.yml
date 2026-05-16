@@ -176,6 +176,21 @@ jobs:
         working-directory: ${{ matrix.app }}
         run: npm run audit
 
+      - name: Run defaultspack frontend tests
+        if: matrix.app == 'rumi_ai_1_10/ecosystem/defaultspack/webapp'
+        working-directory: ${{ matrix.app }}
+        run: npm test
+
+      - name: Typecheck defaultspack frontend
+        if: matrix.app == 'rumi_ai_1_10/ecosystem/defaultspack/webapp'
+        working-directory: ${{ matrix.app }}
+        run: npm run lint
+
+      - name: Build defaultspack frontend
+        if: matrix.app == 'rumi_ai_1_10/ecosystem/defaultspack/webapp'
+        working-directory: ${{ matrix.app }}
+        run: npm run build
+
   rumi-ai-static-checks:
     runs-on: ubuntu-latest
     steps:
@@ -336,6 +351,29 @@ jobs:
       - name: Run rumi viewer tests
         working-directory: rumi_viewer/src-tauri
         run: cargo test --locked
+
+  mac-computer-driver-smoke:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        working-directory: rumi_ai_1_10
+        run: |
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+          pip install -e .
+
+      - name: Run mac computer driver smoke tests
+        working-directory: rumi_ai_1_10
+        run: |
+          pytest tests/test_mac_foreground_driver.py tests/test_mac_cgevent_pid_driver.py tests/test_local_visible_driver.py tests/test_computer_foreground_io.py -v
 
   windows-python-smoke:
     runs-on: windows-latest

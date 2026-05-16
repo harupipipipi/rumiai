@@ -184,6 +184,8 @@ def test_snapshot_and_workspace_mutations_are_sensitive_routes():
     from domain.safety.local_guard import is_sensitive_coding_path
 
     assert is_sensitive_coding_path("/api/coding/files/snapshot", "POST") is True
+    assert is_sensitive_coding_path("/api/coding/checkpoints", "GET") is True
+    assert is_sensitive_coding_path("/api/coding/checkpoints", "POST") is True
     assert is_sensitive_coding_path("/api/coding/workspaces", "GET") is False
     assert is_sensitive_coding_path("/api/coding/workspaces", "POST") is True
     assert is_sensitive_coding_path("/api/coding/workspaces/trust", "POST") is True

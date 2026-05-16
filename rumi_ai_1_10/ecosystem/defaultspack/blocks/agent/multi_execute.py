@@ -1,4 +1,5 @@
-import sys, os
+import os
+import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from blocks._common import ok, error
@@ -49,6 +50,7 @@ def run(input_data, context):
         or context.get("workspace_root")
         or context.get("conversation_workspace_dir")
     )
+    workspace_id = input_data.get("workspace_id") or context.get("workspace_id")
     worktree_mode = input_data.get("worktree_mode") or context.get("worktree_mode")
 
     orchestrator = MultiAgentOrchestrator()
@@ -58,7 +60,9 @@ def run(input_data, context):
         orchestration=orchestration,
         max_turns=max_turns,
         workspace_root=workspace_root,
+        workspace_id=workspace_id,
         worktree_mode=worktree_mode,
+        context=context,
     )
 
     session_id = result.get("session_id", "")

@@ -208,24 +208,29 @@ def test_tool_executor_file_reader_delegates_and_unknown_tools_fail_closed(tmp_p
     assert "not implemented" in unknown["result"]
 
 
-def test_coding_checkpoint_functions_are_dispatchable(tmp_path):
+def test_coding_checkpoint_functions_are_dispatchable(tmp_path, monkeypatch):
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CODING_WORKSPACE_STORE_PATH", str(tmp_path / "workspaces.json"))
+
     from domain.function_runtime.dispatcher import run_defaultspack_function
+    from domain.coding.workspace_store import WorkspaceStore
+
+    WorkspaceStore().create(tmp_path, workspace_id="trusted", trusted=True)
 
     result = run_defaultspack_function(
         "coding_checkpoint_create",
-        {"workspace_root": str(tmp_path), "paths": ["missing.txt"]},
+        {"workspace_id": "trusted", "paths": ["missing.txt"]},
         {"_tool_server_approved": True},
     )
     listed = run_defaultspack_function(
         "coding_checkpoint_list",
-        {"workspace_root": str(tmp_path)},
+        {"workspace_id": "trusted"},
         {},
     )
     (tmp_path / "missing.txt").write_text("created after checkpoint", encoding="utf-8")
     restored = run_defaultspack_function(
         "coding_checkpoint_restore",
         {
-            "workspace_root": str(tmp_path),
+            "workspace_id": "trusted",
             "snapshot_id": result["data"]["checkpoint"]["snapshot_id"],
             "paths": ["missing.txt"],
         },
@@ -239,3 +244,87 @@ def test_coding_checkpoint_functions_are_dispatchable(tmp_path):
     assert restored["status"] == "ok"
     assert restored["data"]["removed"] == ["missing.txt"]
     assert not (tmp_path / "missing.txt").exists()
+
+
+def test_checkpoint_create_rejects_unregistered_workspace_root(tmp_path, monkeypatch):
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CODING_WORKSPACE_STORE_PATH", str(tmp_path / "workspaces.json"))
+
+    from blocks.coding.file_checkpoint import run as checkpoint_run
+
+    result = checkpoint_run({"workspace_root": str(tmp_path), "paths": ["."]}, {})
+
+    assert result["status"] == "error"
+    assert result["error"]["code"] == "WORKSPACE_UNTRUSTED"
+    assert not (tmp_path / ".rumi_snapshots").exists()
+
+
+def test_file_function_dispatch_covers_snapshot_diff_patch_restore(tmp_path, monkeypatch):
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CODING_WORKSPACE_STORE_PATH", str(tmp_path / "workspaces.json"))
+
+    from domain.function_runtime.dispatcher import run_defaultspack_function
+    from domain.coding.workspace_store import WorkspaceStore
+
+    WorkspaceStore().create(tmp_path, workspace_id="trusted", trusted=True)
+    (tmp_path / "doc.txt").write_text("before\n", encoding="utf-8")
+
+    snapshot = run_defaultspack_function(
+        "coding_file_snapshot",
+        {"workspace_id": "trusted", "paths": ["doc.txt"]},
+        {},
+    )
+    diff = run_defaultspack_function(
+        "coding_file_diff",
+        {"workspace_id": "trusted", "path": "doc.txt", "content": "after\n"},
+        {},
+    )
+    patch = run_defaultspack_function(
+        "coding_file_patch",
+        {"workspace_id": "trusted", "path": "doc.txt", "old": "before", "new": "after"},
+        {"_tool_server_approved": True},
+    )
+    patched_content = (tmp_path / "doc.txt").read_text(encoding="utf-8")
+    restored = run_defaultspack_function(
+        "coding_file_restore",
+        {
+            "workspace_id": "trusted",
+            "snapshot_id": snapshot["data"]["snapshot_id"],
+            "paths": ["doc.txt"],
+        },
+        {"_tool_server_approved": True},
+    )
+
+    assert snapshot["status"] == "ok"
+    assert snapshot["data"]["snapshot_id"]
+    assert diff["status"] == "ok"
+    assert diff["data"]["has_changes"] is True
+    assert patch["status"] == "ok"
+    assert patched_content == "after\n"
+    assert restored["status"] == "ok"
+    assert (tmp_path / "doc.txt").read_text(encoding="utf-8") == "before\n"
+
+
+def test_terminal_read_only_commands_require_approval_for_outside_workspace_paths(tmp_path):
+    from domain.coding.terminal import Terminal
+    from blocks.coding.terminal_exec import run as terminal_exec_run
+    from blocks.coding.terminal_stream import run as terminal_stream_run
+
+    outside = tmp_path.parent / "outside-secret.txt"
+    terminal = Terminal(tmp_path)
+
+    classification = terminal.classify(f"cat {outside}")
+    result = terminal.execute(f"cat {outside}", approved=False)
+    stream = terminal.stream(f"cat {outside}", approved=False)
+    exec_block = terminal_exec_run({"workspace_root": str(tmp_path), "command": f"cat {outside}"}, {})
+    stream_block = terminal_stream_run({"workspace_root": str(tmp_path), "command": f"cat {outside}"}, {})
+
+    assert classification["approval_required"] is True
+    assert classification["reason"] == "outside_workspace_path"
+    assert result["approval_required"] is True
+    assert result["exit_code"] is None
+    assert stream["approval_required"] is True
+    assert stream["started"] is False
+    assert exec_block["data"]["approval_required"] is True
+    assert exec_block["data"]["risk"]["reason"] == "outside_workspace_path"
+    assert stream_block["data"]["approval_required"] is True
+    assert stream_block["data"]["risk"]["reason"] == "outside_workspace_path"
+    assert terminal.classify("cat notes.txt")["risk_level"] == "low"
