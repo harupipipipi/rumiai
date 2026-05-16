@@ -634,3 +634,129 @@ test("coding context, branch, and workspace read helpers use existing API routes
     body: { path: "README.md" },
   });
 });
+
+test("listConversations serializes metadata filters", async () => {
+  let requestUrl = "";
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    requestUrl = String(input);
+    return new Response(JSON.stringify({
+      status: "ok",
+      data: { conversations: [], total: 0 },
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }) as typeof fetch;
+
+  try {
+    await api.listConversations({
+      tags: ["coding", "frontend"],
+      is_pinned: true,
+      company_id: "operations-company",
+      workspace_id: "ws1",
+      conversation_kind: "coding",
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.equal(
+    requestUrl,
+    "/api/chat/conversations?tags=coding%2Cfrontend&is_pinned=true&company_id=operations-company&workspace_id=ws1&conversation_kind=coding",
+  );
+});
+
+test("company and p2p helpers target frontend workspace routes", async () => {
+  const seen: Array<{ input: string; method: string; body?: unknown }> = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    seen.push({
+      input: String(input),
+      method: init?.method ?? "GET",
+      body: init?.body ? JSON.parse(String(init.body)) : undefined,
+    });
+    return new Response(JSON.stringify({
+      status: "ok",
+      data: String(input).includes("/p2p/status")
+        ? { p2p: { enabled: false }, peer_count: 0, approved_peer_count: 0 }
+        : String(input).includes("/p2p/messages/send")
+          ? { envelope: {}, peer: { peer_id: "peer-a" } }
+          : String(input).includes("/company/operations-company/tasks")
+            ? { id: "task-1", company_id: "operations-company", title: "Ship it" }
+            : { companies: [], total: 0 },
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }) as typeof fetch;
+
+  try {
+    await api.listCompanies({ limit: 10 });
+    await api.createCompanyTask("operations-company", { title: "Ship it", target_agent_ids: ["reviewer"] });
+    await api.getP2PStatus();
+    await api.sendP2PMessage("peer-a", { text: "hello" });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.equal(seen[0].input, "/api/company?limit=10");
+  assert.deepEqual(seen[1], {
+    input: "/api/company/operations-company/tasks",
+    method: "POST",
+    body: {
+      company_id: "operations-company",
+      action: "create",
+      title: "Ship it",
+      target_agent_ids: ["reviewer"],
+    },
+  });
+  assert.equal(seen[2].input, "/api/p2p/status");
+  assert.deepEqual(seen[3], {
+    input: "/api/p2p/messages/send",
+    method: "POST",
+    body: { peer_id: "peer-a", text: "hello" },
+  });
+});
+
+test("coding workspace and compact helpers serialize request bodies", async () => {
+  const seen: Array<{ input: string; method: string; body?: unknown }> = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    seen.push({
+      input: String(input),
+      method: init?.method ?? "GET",
+      body: init?.body ? JSON.parse(String(init.body)) : undefined,
+    });
+    return new Response(JSON.stringify({
+      status: "ok",
+      data: String(input).includes("/workspaces")
+        ? { workspace: { workspace_id: "ws1", label: "Repo", root_path: "/repo" }, selected_workspace_id: "ws1", workspaces: [] }
+        : { deleted_count: 2, summary_message: null },
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }) as typeof fetch;
+
+  try {
+    await api.selectCodingWorkspace("ws1");
+    await api.trustCodingWorkspace("ws1");
+    await api.compactConversation("c1", { protect_last_messages: 4 });
+    await api.autoCompactConversation("c1", { mode: "apply", approved: true });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.deepEqual(seen[0], {
+    input: "/api/coding/workspaces/select",
+    method: "POST",
+    body: { workspace_id: "ws1" },
+  });
+  assert.deepEqual(seen[1], {
+    input: "/api/coding/workspaces/trust",
+    method: "POST",
+    body: { workspace_id: "ws1" },
+  });
+  assert.deepEqual(seen[2], {
+    input: "/api/chat/conversations/c1/compact",
+    method: "POST",
+    body: { conversation_id: "c1", protect_last_messages: 4 },
+  });
+  assert.deepEqual(seen[3], {
+    input: "/api/chat/conversations/c1/auto-compact",
+    method: "POST",
+    body: { conversation_id: "c1", mode: "apply", approved: true },
+  });
+});

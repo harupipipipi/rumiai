@@ -1,6 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 
+import { CompanyAgentList } from "../components/company/CompanyAgentList";
 import { defaultspackRendererIds, defaultspackRenderers, resolveDefaultspackRenderers } from "./defaultspackRenderers";
 
 test("defaultspack renderer registry covers visible shell regions", () => {
@@ -52,4 +55,24 @@ test("defaultspack renderer resolver keeps builtin fallback for untrusted module
   });
 
   assert.equal(resolved.composer, defaultspackRenderers.composer);
+});
+
+test("company agent list renders operational role details", () => {
+  const html = renderToStaticMarkup(
+    createElement(CompanyAgentList, {
+      agents: [
+        {
+          agent_id: "reviewer",
+          display_name: "Reviewer",
+          role_key: "reviewer",
+          model: "stub/default",
+          allowed_tools: ["coding_git_diff"],
+          aliases: ["review"],
+        },
+      ],
+    }),
+  );
+
+  assert.match(html, /Reviewer/);
+  assert.match(html, /@review/);
 });

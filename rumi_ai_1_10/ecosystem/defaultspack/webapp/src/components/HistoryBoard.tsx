@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   DndContext,
   DragOverlay,
@@ -31,6 +31,10 @@ import {
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
+import { ConversationPinStarMenu } from './history/ConversationPinStarMenu';
+import { ConversationSearchBar } from './history/ConversationSearchBar';
+import { ConversationTagFilter } from './history/ConversationTagFilter';
+
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
@@ -48,6 +52,12 @@ export type ChatItem = {
   conversationKind?: string;
   sectionId?: string | null;
   sectionTitle?: string | null;
+  tags?: string[];
+  isStarred?: boolean;
+  isPinned?: boolean;
+  companyId?: string | null;
+  workspaceId?: string | null;
+  metadata?: Record<string, unknown> | null;
   children?: ChatItem[];
 };
 
@@ -113,6 +123,51 @@ function groupDateLabel(dateText: string): 'today' | 'recent' | 'older' {
   return 'older';
 }
 
+function cleanTag(value: string): string {
+  return value.trim().toLowerCase().replace(/\s+/g, "-").slice(0, 40);
+}
+
+function chatTags(chat: ChatItem): string[] {
+  return [...new Set((chat.tags ?? []).map((tag) => cleanTag(String(tag))).filter(Boolean))];
+}
+
+function chatCompanyId(chat: ChatItem): string {
+  const metadata = chat.metadata ?? {};
+  return String(chat.companyId ?? metadata.company_id ?? metadata.companyId ?? "").trim();
+}
+
+function chatWorkspaceId(chat: ChatItem): string {
+  const metadata = chat.metadata ?? {};
+  return String(chat.workspaceId ?? metadata.workspace_id ?? metadata.workspaceId ?? "").trim();
+}
+
+function isCompanyChat(chat: ChatItem): boolean {
+  const tags = chatTags(chat);
+  const groupId = String(chat.metadata?.group_id ?? "").trim();
+  return Boolean(
+    chatCompanyId(chat)
+    || groupId.startsWith("company:")
+    || chat.conversationKind === "operations_company"
+    || tags.includes("company")
+    || tags.includes("operations-company")
+  );
+}
+
+function isCodingChat(chat: ChatItem): boolean {
+  const tags = chatTags(chat);
+  const mode = String(chat.metadata?.mode ?? "").trim();
+  return Boolean(
+    chatWorkspaceId(chat)
+    || chat.conversationKind === "coding"
+    || mode === "coding"
+    || tags.includes("coding")
+  );
+}
+
+function hasWorkspaceGroupingMetadata(chat: ChatItem): boolean {
+  return Boolean(chat.isPinned || chat.isStarred || chatTags(chat).length || isCompanyChat(chat) || isCodingChat(chat));
+}
+
 const CUSTOM_GROUPS_STORAGE_KEY = 'rumi-history-custom-groups';
 
 function loadCustomGroups(): CustomGroupInfo[] {
@@ -136,12 +191,20 @@ function saveCustomGroups(groups: CustomGroupInfo[]) {
 }
 
 export function buildGroupsFromChats(chatItems: ChatItem[], customGroups: CustomGroupInfo[] = []): ChatGroup[] {
-  const buckets: Record<'today' | 'recent' | 'older', ChatItem[]> = {
+  const dateBuckets: Record<'today' | 'recent' | 'older', ChatItem[]> = {
     today: [],
     recent: [],
     older: [],
   };
+  const metadataBuckets: Record<'pinned' | 'company' | 'coding' | 'recent', ChatItem[]> = {
+    pinned: [],
+    company: [],
+    coding: [],
+    recent: [],
+  };
+  const tagBuckets = new Map<string, ChatItem[]>();
   const integrationGroups = new Map<string, ChatGroup>();
+  const useMetadataGrouping = chatItems.some(hasWorkspaceGroupingMetadata);
 
   chatItems.forEach((chat) => {
     const normalized = {
@@ -165,34 +228,104 @@ export function buildGroupsFromChats(chatItems: ChatItem[], customGroups: Custom
       }
       return;
     }
-    buckets[groupDateLabel(chat.date)].push(normalized);
+    if (!useMetadataGrouping) {
+      dateBuckets[groupDateLabel(chat.date)].push(normalized);
+      return;
+    }
+    if (normalized.isPinned) {
+      metadataBuckets.pinned.push(normalized);
+      return;
+    }
+    if (isCompanyChat(normalized)) {
+      metadataBuckets.company.push(normalized);
+      return;
+    }
+    if (isCodingChat(normalized)) {
+      metadataBuckets.coding.push(normalized);
+      return;
+    }
+    const tags = chatTags(normalized).filter((tag) => !["company", "operations-company", "coding"].includes(tag));
+    if (tags.length > 0) {
+      const primary = tags[0];
+      const bucket = tagBuckets.get(primary) ?? [];
+      bucket.push(normalized);
+      tagBuckets.set(primary, bucket);
+      return;
+    }
+    metadataBuckets.recent.push(normalized);
   });
 
-  const groups: ChatGroup[] = [
-    {
-      id: 'group-today',
-      title: 'Today',
-      isCollapsed: false,
-      chats: buckets.today,
-      subGroups: [],
-    },
-    {
-      id: 'group-recent',
-      title: 'Recent',
-      isCollapsed: false,
-      chats: buckets.recent,
-      subGroups: [],
-    },
-    {
-      id: 'group-older',
-      title: 'Older',
-      isCollapsed: false,
-      chats: buckets.older,
-      subGroups: [],
-    },
-  ];
+  const groups: ChatGroup[] = useMetadataGrouping
+    ? [
+        {
+          id: 'group-pinned',
+          title: 'Pinned',
+          isCollapsed: false,
+          chats: metadataBuckets.pinned,
+          subGroups: [],
+        },
+        {
+          id: 'group-company',
+          title: 'Company',
+          isCollapsed: false,
+          chats: metadataBuckets.company,
+          subGroups: [],
+        },
+        {
+          id: 'group-coding',
+          title: 'Coding',
+          isCollapsed: false,
+          chats: metadataBuckets.coding,
+          subGroups: [],
+        },
+        {
+          id: 'group-tags',
+          title: 'Tags',
+          isCollapsed: false,
+          chats: [],
+          subGroups: [...tagBuckets.entries()]
+            .sort(([left], [right]) => left.localeCompare(right))
+            .map(([tag, chats]) => ({
+              id: `group-tag-${tag}`,
+              title: `#${tag}`,
+              isCollapsed: false,
+              chats,
+              subGroups: [],
+            })),
+        },
+        {
+          id: 'group-recent',
+          title: 'Recent',
+          isCollapsed: false,
+          chats: metadataBuckets.recent,
+          subGroups: [],
+        },
+      ]
+    : [
+        {
+          id: 'group-today',
+          title: 'Today',
+          isCollapsed: false,
+          chats: dateBuckets.today,
+          subGroups: [],
+        },
+        {
+          id: 'group-recent',
+          title: 'Recent',
+          isCollapsed: false,
+          chats: dateBuckets.recent,
+          subGroups: [],
+        },
+        {
+          id: 'group-older',
+          title: 'Older',
+          isCollapsed: false,
+          chats: dateBuckets.older,
+          subGroups: [],
+        },
+      ];
 
-  const visibleGroups = groups.filter((group) => group.chats.length > 0);
+  const visibleGroups = groups.filter((group) => group.chats.length > 0 || group.subGroups.length > 0);
   const custom = customGroups.map((group) => ({
     id: group.id,
     title: group.title,
@@ -354,12 +487,14 @@ interface SortableChatItemProps {
   activeChatId: string | null;
   onChatSelect: (chatId: string) => void;
   onRename: (id: string, newTitle: string) => void;
+  onTogglePinned?: (chat: ChatItem) => void;
+  onToggleStarred?: (chat: ChatItem) => void;
   onToggleChildren: (chatId: string) => void;
   isChildrenExpanded: (chatId: string) => boolean;
   depth?: number;
 }
 
-function SortableChatItem({ chat, activeChatId, onChatSelect, onRename, onToggleChildren, isChildrenExpanded, depth = 0 }: SortableChatItemProps) {
+function SortableChatItem({ chat, activeChatId, onChatSelect, onRename, onTogglePinned, onToggleStarred, onToggleChildren, isChildrenExpanded, depth = 0 }: SortableChatItemProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [title, setTitle] = useState(chat.title);
   const children = chat.children ?? [];
@@ -441,6 +576,12 @@ function SortableChatItem({ chat, activeChatId, onChatSelect, onRename, onToggle
             isActive ? "text-zinc-100" : "text-zinc-300 group-hover/chat:text-zinc-100"
           )}>{chat.title}</span>
         )}
+        <ConversationPinStarMenu
+          isPinned={chat.isPinned}
+          isStarred={chat.isStarred}
+          onTogglePinned={onTogglePinned ? () => onTogglePinned(chat) : undefined}
+          onToggleStarred={onToggleStarred ? () => onToggleStarred(chat) : undefined}
+        />
       </div>
       {expanded && (
         <div className="space-y-0.5">
@@ -451,6 +592,8 @@ function SortableChatItem({ chat, activeChatId, onChatSelect, onRename, onToggle
               activeChatId={activeChatId}
               onChatSelect={onChatSelect}
               onRename={onRename}
+              onTogglePinned={onTogglePinned}
+              onToggleStarred={onToggleStarred}
               onToggleChildren={onToggleChildren}
               isChildrenExpanded={isChildrenExpanded}
               depth={depth + 1}
@@ -474,12 +617,14 @@ interface SubGroupProps {
   onToggleCollapse: (id: string) => void;
   onRenameGroup: (id: string, newTitle: string) => void;
   onUngroup: (groupId: string) => void;
+  onTogglePinned?: (chat: ChatItem) => void;
+  onToggleStarred?: (chat: ChatItem) => void;
   onToggleChatChildren: (chatId: string) => void;
   isChatChildrenExpanded: (chatId: string) => boolean;
   depth: number;
 }
 
-function SubGroup({ group, activeChatId, onChatSelect, onChatRename, onToggleCollapse, onRenameGroup, onUngroup, onToggleChatChildren, isChatChildrenExpanded, depth }: SubGroupProps) {
+function SubGroup({ group, activeChatId, onChatSelect, onChatRename, onToggleCollapse, onRenameGroup, onUngroup, onTogglePinned, onToggleStarred, onToggleChatChildren, isChatChildrenExpanded, depth }: SubGroupProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [title, setTitle] = useState(group.title);
 
@@ -589,6 +734,8 @@ function SubGroup({ group, activeChatId, onChatSelect, onChatRename, onToggleCol
                 activeChatId={activeChatId}
                 onChatSelect={onChatSelect}
                 onRename={onChatRename}
+                onTogglePinned={onTogglePinned}
+                onToggleStarred={onToggleStarred}
                 onToggleChildren={onToggleChatChildren}
                 isChildrenExpanded={isChatChildrenExpanded}
                 depth={depth + 1}
@@ -605,6 +752,8 @@ function SubGroup({ group, activeChatId, onChatSelect, onChatRename, onToggleCol
               onToggleCollapse={onToggleCollapse}
               onRenameGroup={onRenameGroup}
               onUngroup={onUngroup}
+              onTogglePinned={onTogglePinned}
+              onToggleStarred={onToggleStarred}
               onToggleChatChildren={onToggleChatChildren}
               isChatChildrenExpanded={isChatChildrenExpanded}
               depth={depth + 1}
@@ -630,6 +779,8 @@ interface DroppableColumnProps {
   onToggleCollapse: (id: string) => void;
   onChatRename: (chatId: string, newTitle: string) => void;
   onUngroup: (groupId: string) => void;
+  onTogglePinned?: (chat: ChatItem) => void;
+  onToggleStarred?: (chat: ChatItem) => void;
   onToggleChatChildren: (chatId: string) => void;
   isChatChildrenExpanded: (chatId: string) => boolean;
   isDraggedOver: boolean;
@@ -637,7 +788,7 @@ interface DroppableColumnProps {
   dragHandleProps?: React.HTMLAttributes<HTMLDivElement>;
 }
 
-function DroppableColumn({ group, activeChatId, onChatSelect, onNewTask, onSettingsClick, onRename, onToggleCollapse, onChatRename, onUngroup, onToggleChatChildren, isChatChildrenExpanded, isDraggedOver, isDragging, dragHandleProps }: DroppableColumnProps) {
+function DroppableColumn({ group, activeChatId, onChatSelect, onNewTask, onSettingsClick, onRename, onToggleCollapse, onChatRename, onUngroup, onTogglePinned, onToggleStarred, onToggleChatChildren, isChatChildrenExpanded, isDraggedOver, isDragging, dragHandleProps }: DroppableColumnProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [title, setTitle] = useState(group.title);
 
@@ -732,6 +883,8 @@ function DroppableColumn({ group, activeChatId, onChatSelect, onNewTask, onSetti
                 activeChatId={activeChatId}
                 onChatSelect={onChatSelect}
                 onRename={onChatRename}
+                onTogglePinned={onTogglePinned}
+                onToggleStarred={onToggleStarred}
                 onToggleChildren={onToggleChatChildren}
                 isChildrenExpanded={isChatChildrenExpanded}
                 depth={0}
@@ -748,6 +901,8 @@ function DroppableColumn({ group, activeChatId, onChatSelect, onNewTask, onSetti
               onToggleCollapse={onToggleCollapse}
               onRenameGroup={onRename}
               onUngroup={onUngroup}
+              onTogglePinned={onTogglePinned}
+              onToggleStarred={onToggleStarred}
               onToggleChatChildren={onToggleChatChildren}
               isChatChildrenExpanded={isChatChildrenExpanded}
               depth={0}
@@ -821,25 +976,57 @@ interface HistoryBoardProps {
   onChatSelect: (chatId: string) => void;
   onNewTask: () => void;
   onSettingsClick: () => void;
+  onChatMetadataChange?: (chatId: string, updates: { is_pinned?: boolean; is_starred?: boolean; tags?: string[] }) => void;
   onMinimize?: () => void;
   onRestore?: () => void;
   isCompact?: boolean;
 }
 
-export function HistoryBoard({ activeChatId, chatItems, account, onChatSelect, onNewTask, onSettingsClick, onMinimize, onRestore, isCompact = false }: HistoryBoardProps) {
+function visitChats(chats: ChatItem[], visitor: (chat: ChatItem) => void) {
+  for (const chat of chats) {
+    visitor(chat);
+    visitChats(chat.children ?? [], visitor);
+  }
+}
+
+function filterChatTree(chats: ChatItem[], query: string, activeTag: string | null): ChatItem[] {
+  const normalizedQuery = query.trim().toLowerCase();
+  const tag = activeTag ? cleanTag(activeTag) : null;
+  const matches = (chat: ChatItem): boolean => {
+    const haystack = [
+      chat.title,
+      chat.conversationKind ?? "",
+      chatCompanyId(chat),
+      chatWorkspaceId(chat),
+      ...chatTags(chat),
+    ].join(" ").toLowerCase();
+    return (!normalizedQuery || haystack.includes(normalizedQuery)) && (!tag || chatTags(chat).includes(tag));
+  };
+  const filterOne = (chat: ChatItem): ChatItem | null => {
+    const children = (chat.children ?? []).map(filterOne).filter((child): child is ChatItem => Boolean(child));
+    if (matches(chat) || children.length > 0) return { ...chat, children };
+    return null;
+  };
+  return chats.map(filterOne).filter((chat): chat is ChatItem => Boolean(chat));
+}
+
+export function HistoryBoard({ activeChatId, chatItems, account, onChatSelect, onNewTask, onSettingsClick, onChatMetadataChange, onMinimize, onRestore, isCompact = false }: HistoryBoardProps) {
+  const [searchQuery, setSearchQuery] = useState("");
+  const [activeTag, setActiveTag] = useState<string | null>(null);
+  const visibleChatItems = useMemo(() => filterChatTree(chatItems, searchQuery, activeTag), [activeTag, chatItems, searchQuery]);
   const [customGroups, setCustomGroups] = useState<CustomGroupInfo[]>(() => loadCustomGroups());
-  const [groups, setGroups] = useState<ChatGroup[]>(() => buildGroupsFromChats(chatItems, customGroups));
+  const [groups, setGroups] = useState<ChatGroup[]>(() => buildGroupsFromChats(visibleChatItems, customGroups));
   const [expandedChatIds, setExpandedChatIds] = useState<Set<string>>(() => new Set());
 
   useEffect(() => {
     setGroups((previousGroups) => {
       const collapsedById = new Map(previousGroups.map((group) => [group.id, group.isCollapsed]));
-      return buildGroupsFromChats(chatItems, customGroups).map((group) => ({
+      return buildGroupsFromChats(visibleChatItems, customGroups).map((group) => ({
         ...group,
         isCollapsed: collapsedById.get(group.id) ?? group.isCollapsed,
       }));
     });
-  }, [chatItems, customGroups]);
+  }, [visibleChatItems, customGroups]);
 
   const [activeColumnDrag, setActiveColumnDrag] = useState<ChatGroup | null>(null);
   const [activeChat, setActiveChat] = useState<ChatItem | null>(null);
@@ -1071,6 +1258,28 @@ export function HistoryBoard({ activeChatId, chatItems, account, onChatSelect, o
   };
 
   const isChatChildrenExpanded = (chatId: string) => expandedChatIds.has(chatId);
+  const allTags = useMemo(() => {
+    const counts = new Map<string, number>();
+    visitChats(chatItems, (chat) => {
+      for (const tag of chatTags(chat)) counts.set(tag, (counts.get(tag) ?? 0) + 1);
+    });
+    return [...counts.entries()].sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0])).map(([tag]) => tag);
+  }, [chatItems]);
+  const visibleChatCount = useMemo(() => {
+    let count = 0;
+    visitChats(visibleChatItems, () => {
+      count += 1;
+    });
+    return count;
+  }, [visibleChatItems]);
+
+  const handleTogglePinned = (chat: ChatItem) => {
+    onChatMetadataChange?.(chat.id, { is_pinned: !chat.isPinned });
+  };
+
+  const handleToggleStarred = (chat: ChatItem) => {
+    onChatMetadataChange?.(chat.id, { is_starred: !chat.isStarred });
+  };
 
   const allSortableIds = [
     ...getAllGroupDragIds(groups),
@@ -1196,6 +1405,8 @@ export function HistoryBoard({ activeChatId, chatItems, account, onChatSelect, o
             <FolderPlus size={14} />
             <span>New Group</span>
           </button>
+          <ConversationSearchBar value={searchQuery} resultCount={visibleChatCount} onChange={setSearchQuery} />
+          <ConversationTagFilter tags={allTags} activeTag={activeTag} onChange={setActiveTag} />
         </div>
 
         {/* Columns */}
@@ -1214,6 +1425,8 @@ export function HistoryBoard({ activeChatId, chatItems, account, onChatSelect, o
                     onToggleCollapse={handleToggleCollapse}
                     onChatRename={handleRenameChat}
                     onUngroup={handleUngroup}
+                    onTogglePinned={onChatMetadataChange ? handleTogglePinned : undefined}
+                    onToggleStarred={onChatMetadataChange ? handleToggleStarred : undefined}
                     onToggleChatChildren={handleToggleChatChildren}
                     isChatChildrenExpanded={isChatChildrenExpanded}
                     isDraggedOver={overColumnId === group.id}

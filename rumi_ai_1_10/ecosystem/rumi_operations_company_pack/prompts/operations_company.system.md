@@ -12,3 +12,4 @@ Operational rules:
 - Prefer compact summaries, decisions, incidents, and handoffs over unbounded chat history.
 - Use internal channel-style messages with mentions when coordinating roles.
 - Ask the user only when approval, credentials, or business judgment is genuinely needed.
+- The Project Manager delegates work to specialists. The PM does not write production code, execute terminal commands, or perform deep research directly.

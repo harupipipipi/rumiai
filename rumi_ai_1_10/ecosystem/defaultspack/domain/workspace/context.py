@@ -53,6 +53,15 @@ def resolve_workspace_root(
 ) -> str:
     input_data = input_data or {}
     context = context or {}
+    workspace_id = (
+        input_data.get("workspace_id")
+        or context.get("workspace_id")
+        or (context.get("inputs") or {}).get("workspace_id")
+    )
+    if workspace_id:
+        from domain.coding.workspace_resolver import WorkspaceResolver
+
+        return WorkspaceResolver().resolve(input_data, context, allow_cwd_fallback=True).root_path
     candidate = (
         input_data.get("workspace_root")
         or context.get("workspace_root")

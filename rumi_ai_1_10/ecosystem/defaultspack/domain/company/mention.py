@@ -1,0 +1,122 @@
+from __future__ import annotations
+
+import re
+from typing import Any
+
+from .models import DEFAULT_CHANNEL_ID
+from .store import CompanyStore
+
+
+MENTION_RE = re.compile(r"(?<![\w.])@([A-Za-z0-9_][A-Za-z0-9_-]*)")
+MENTION_ALIASES = {
+    "pm": "project_manager",
+    "project_manager": "project_manager",
+    "coding_engineer": "coding_engineer",
+    "reviewer": "reviewer",
+}
+
+
+def extract_mentions(text: str) -> list[str]:
+    mentions: list[str] = []
+    seen: set[str] = set()
+    for match in MENTION_RE.finditer(text or ""):
+        name = match.group(1).strip().lower()
+        if name and name not in seen:
+            seen.add(name)
+            mentions.append(name)
+    return mentions
+
+
+class CompanyMentionService:
+    def __init__(self, store: CompanyStore | None = None) -> None:
+        self.store = store or CompanyStore()
+
+    def resolve(self, company_id: str, text_or_mentions: str | list[str]) -> dict[str, Any] | None:
+        company = self.store.get_company(company_id)
+        if company is None:
+            return None
+        mentions = extract_mentions(text_or_mentions) if isinstance(text_or_mentions, str) else [
+            str(item).strip().lstrip("@").lower() for item in text_or_mentions if str(item).strip()
+        ]
+        agents = company.get("agents", {})
+        resolved: list[dict[str, Any]] = []
+        unresolved: list[str] = []
+        seen_agents: set[str] = set()
+        for mention in mentions:
+            if mention == "all":
+                for agent in agents.values():
+                    agent_id = agent.get("agent_id")
+                    if agent_id and agent_id not in seen_agents:
+                        seen_agents.add(agent_id)
+                        resolved.append(agent)
+                continue
+            target_key = MENTION_ALIASES.get(mention, mention)
+            agent = self._find_agent(agents, target_key)
+            if agent is None:
+                unresolved.append(mention)
+                continue
+            agent_id = agent.get("agent_id")
+            if agent_id not in seen_agents:
+                seen_agents.add(agent_id)
+                resolved.append(agent)
+        return {
+            "mentions": mentions,
+            "resolved_agents": resolved,
+            "resolved_agent_ids": [agent["agent_id"] for agent in resolved],
+            "unresolved": unresolved,
+        }
+
+    def create_message_task(
+        self,
+        company_id: str,
+        *,
+        content: str,
+        sender_id: str = "user",
+        channel_id: str = DEFAULT_CHANNEL_ID,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        resolution = self.resolve(company_id, content)
+        if resolution is None:
+            return None
+        task = None
+        if resolution["resolved_agent_ids"]:
+            task = self.store.create_task(
+                company_id,
+                title="Mention request from " + sender_id,
+                description=content,
+                target_agent_ids=resolution["resolved_agent_ids"],
+                source="mention",
+                metadata={
+                    "mentions": resolution["mentions"],
+                    "unresolved_mentions": resolution["unresolved"],
+                    "sender_id": sender_id,
+                    "channel_id": channel_id,
+                    **(metadata or {}),
+                },
+            )
+        message = self.store.add_message(
+            company_id,
+            channel_id=channel_id,
+            sender_id=sender_id,
+            content=content,
+            mentions=resolution["mentions"],
+            task_ids=[task["id"]] if task else [],
+            metadata=metadata or {},
+        )
+        return {
+            "message": message,
+            "task": task,
+            "resolution": resolution,
+        }
+
+    def _find_agent(self, agents: dict[str, dict[str, Any]], key: str) -> dict[str, Any] | None:
+        for agent in agents.values():
+            aliases = [str(alias).lower() for alias in agent.get("aliases", [])]
+            if key in {
+                str(agent.get("agent_id", "")).lower(),
+                str(agent.get("id", "")).lower(),
+                str(agent.get("role_key", "")).lower(),
+                *aliases,
+            }:
+                return agent
+        return None
