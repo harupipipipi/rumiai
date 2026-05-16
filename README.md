@@ -27,6 +27,7 @@ The repository keeps the runtime implementation under `rumi_ai_1_10/`, while `ru
 - `rumi_ai/`: version-stable Python entrypoint package
 - `pack-shell/`: desktop pack launcher
 - `rumi_viewer/`: desktop shell and control panel frontend source
+- `rumi_mobile/`: Flutter iOS/Android app for trusted-LAN defaultspack access
 
 ## Start
 
@@ -86,5 +87,6 @@ python -m rumi_ai migrate-hmac
 - `rumi_ai_1_10`: kernel, runtime, API, backend, and docs
 - `pack-shell`: launches desktop packs and brokers token/bootstrap flow
 - `rumi_viewer`: viewer-side application shell and canonical panel frontend source
+- `rumi_mobile`: mobile remote client for the bearer-auth Kernel Pack API
 
 For architecture and runtime details, see [rumi_ai_1_10/README.md](./rumi_ai_1_10/README.md).
