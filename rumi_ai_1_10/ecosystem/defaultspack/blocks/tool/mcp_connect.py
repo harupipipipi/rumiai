@@ -9,6 +9,16 @@ from _common import error, ok  # noqa: E402
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 from domain.tool.mcp_client import McpClient  # noqa: E402
 from domain.tool.registry import ToolRegistry  # noqa: E402
+from blocks.tool._safety import (  # noqa: E402
+    approved_or_request,
+    record_tool_attempt,
+    record_tool_execution,
+    record_tool_failure,
+)
+
+
+OPERATION = "tool.mcp_connect"
+RISK = "high"
 
 
 def _mcp_config_path():
@@ -111,10 +121,16 @@ def run(input_data, context):
     if transport == "sse" and not config.get("url"):
         return error("config.url is required for sse transport", "MISSING_PARAM")
 
+    record_tool_attempt(OPERATION, RISK, input_data)
+    approval = approved_or_request(input_data, context, OPERATION, RISK)
+    if approval is not None:
+        return approval
+
     mcp_client = McpClient()
     try:
         tools_added = mcp_client.connect(server_name, config)
     except Exception as exc:
+        record_tool_failure(OPERATION, RISK, input_data, str(exc), server_name=server_name)
         return error("MCP connect failed: {}".format(exc), "MCP_CONNECT_ERROR")
 
     registry = ToolRegistry()
@@ -165,6 +181,7 @@ def run(input_data, context):
             }
         )
 
+    record_tool_execution(OPERATION, RISK, input_data, server_name=server_name, tools_added=tools_added)
     return ok(
         {
             "server_id": str(config.get("server_id", "") or server_name),

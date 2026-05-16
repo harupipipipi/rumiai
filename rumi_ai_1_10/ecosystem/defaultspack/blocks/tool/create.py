@@ -2,6 +2,16 @@ import sys, os; sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..")
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 from domain.tool.registry import ToolRegistry
 from domain.tool.builder import generate_handler_code_with_ai
+from blocks.tool._safety import (
+    approved_or_request,
+    record_tool_attempt,
+    record_tool_execution,
+    record_tool_failure,
+)
+
+
+OPERATION = "tool.create"
+RISK = "high"
 
 
 def run(input_data, context):
@@ -26,6 +36,11 @@ def run(input_data, context):
     if existing is not None:
         return error("Tool '{}' already exists".format(name), "ALREADY_EXISTS")
 
+    record_tool_attempt(OPERATION, RISK, input_data)
+    approval = approved_or_request(input_data, context, OPERATION, RISK)
+    if approval is not None:
+        return approval
+
     # handler_code が null / 未指定の場合は AI で生成
     if handler_code is None:
         model = input_data.get("model")
@@ -48,8 +63,10 @@ def run(input_data, context):
     try:
         registered = registry.register_dynamic(tool_def, handler_code=handler_code)
     except Exception as exc:
+        record_tool_failure(OPERATION, RISK, input_data, str(exc), tool_name=name)
         return error("Failed to register tool: {}".format(exc), "REGISTER_ERROR")
 
+    record_tool_execution(OPERATION, RISK, input_data, tool_name=registered["tool_id"])
     return ok({
         "tool_id": registered["tool_id"],
         "name": registered["name"],

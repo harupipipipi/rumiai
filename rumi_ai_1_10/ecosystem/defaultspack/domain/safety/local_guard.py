@@ -31,6 +31,28 @@ METHOD_SENSITIVE_CODING_PATHS = {
     "/api/coding/workspaces": {"POST"},
 }
 
+SENSITIVE_LOCAL_PATHS = {
+    "/api/tools/browser-computer",
+    "/api/tools/create",
+    "/api/tools/mcp/connect",
+    "/api/container",
+    "/api/container/settings",
+}
+
+METHOD_SENSITIVE_LOCAL_PATHS = {
+    "/api/tools/permissions": {"PUT"},
+    "/api/consent/{id}/confirm": {"POST"},
+}
+
+SENSITIVE_LOCAL_PREFIXES = (
+    "/api/container/",
+)
+
+METHOD_SENSITIVE_LOCAL_PREFIXES = (
+    ("/api/tools/", {"PUT", "DELETE"}, ("/api/tools/browser-companion/bridge/",)),
+    ("/api/tools/", {"POST"}, ("/api/tools/browser-companion/bridge/", "/api/tools/invoke")),
+)
+
 
 def is_loopback_request(headers: dict[str, Any] | None = None, client_address: Any = None) -> bool:
     del headers
@@ -74,11 +96,42 @@ def is_sensitive_coding_path(path: str, method: str | None = None) -> bool:
     if normalized_path in SENSITIVE_CODING_PATHS:
         return True
     methods = METHOD_SENSITIVE_CODING_PATHS.get(normalized_path)
-    if not methods:
-        return False
-    if method is None:
+    if methods:
+        if method is None:
+            return True
+        return str(method or "").upper() in methods
+    return is_sensitive_local_path(normalized_path, method)
+
+
+def is_sensitive_local_path(path: str, method: str | None = None) -> bool:
+    normalized_path = str(path)
+    normalized_method = str(method or "").upper() if method is not None else None
+    if normalized_path in SENSITIVE_LOCAL_PATHS:
         return True
-    return str(method or "").upper() in methods
+    methods = METHOD_SENSITIVE_LOCAL_PATHS.get(normalized_path)
+    if methods:
+        if normalized_method is None:
+            return True
+        return normalized_method in methods
+    if _matches_confirm_consent_path(normalized_path):
+        if normalized_method is None:
+            return True
+        return normalized_method == "POST"
+    if any(normalized_path == prefix.rstrip("/") or normalized_path.startswith(prefix) for prefix in SENSITIVE_LOCAL_PREFIXES):
+        return True
+    for prefix, methods, exclusions in METHOD_SENSITIVE_LOCAL_PREFIXES:
+        if normalized_path.startswith(prefix) and not any(
+            normalized_path == excluded.rstrip("/") or normalized_path.startswith(excluded)
+            for excluded in exclusions
+        ):
+            if normalized_method is None:
+                return True
+            return normalized_method in methods
+    return False
+
+
+def _matches_confirm_consent_path(path: str) -> bool:
+    return path.startswith("/api/consent/") and path.endswith("/confirm")
 
 
 def require_local_guard(
@@ -91,10 +144,10 @@ def require_local_guard(
         return None
     headers = headers or {}
     if not is_loopback_request(headers, client_address):
-        return (403, "coding mutation requires a loopback client", "LOCAL_ONLY_REQUIRED")
+        return (403, "sensitive local route requires a loopback client", "LOCAL_ONLY_REQUIRED")
     origin = str(headers.get("Origin", "") or "")
     if not origin_allowed(origin):
-        return (403, "origin not allowed for sensitive coding route", "ORIGIN_DENIED")
+        return (403, "origin not allowed for sensitive local route", "ORIGIN_DENIED")
     if csrf_required(method, origin) and not str(headers.get("X-Rumi-CSRF", "") or "").strip():
-        return (403, "CSRF header required for sensitive coding mutation", "CSRF_REQUIRED")
+        return (403, "CSRF header required for sensitive local mutation", "CSRF_REQUIRED")
     return None

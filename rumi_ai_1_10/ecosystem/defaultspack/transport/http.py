@@ -674,7 +674,7 @@ def _requires_sensitive_http_auth(method, path):
 
 def _is_sensitive_http_path(path):
     return (
-        path in _SENSITIVE_CODING_PATHS
+        _is_sensitive_coding_path(path)
         or path in _SENSITIVE_INTEGRATION_PATHS
         or path in _SENSITIVE_INTEGRATION_METHOD_PATHS
         or _matches_sensitive_prefix(path)

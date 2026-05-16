@@ -326,3 +326,52 @@ def test_external_webhook_admin_routes_are_sensitive_for_cors():
     assert http._is_sensitive_http_path("/api/external/templates")
 
     assert not http._is_sensitive_http_path("/api/webhooks/inbound/test-webhook")
+
+
+def test_high_risk_defaultspack_local_routes_use_sensitive_cors():
+    from transport import http
+
+    for path in (
+        "/api/tools/browser-computer",
+        "/api/tools/invoke",
+        "/api/tools/create",
+        "/api/tools/mcp/connect",
+        "/api/tools/example",
+        "/api/tools/example/permissions",
+        "/api/container",
+        "/api/container/abc/exec",
+        "/api/container/abc/screenshot",
+        "/api/container/task/job-1/abort",
+    ):
+        assert http._is_sensitive_http_path(path)
+
+    assert not http._is_sensitive_http_path("/api/tools/browser-companion/bridge/poll")
+
+
+def test_high_risk_defaultspack_local_routes_require_loopback_origin_and_csrf():
+    from domain.safety.local_guard import require_local_guard
+
+    assert require_local_guard(
+        "/api/tools/browser-computer",
+        "POST",
+        {},
+        ("203.0.113.10", 4242),
+    ) == (403, "sensitive local route requires a loopback client", "LOCAL_ONLY_REQUIRED")
+    assert require_local_guard(
+        "/api/tools/create",
+        "POST",
+        {"Origin": "https://example.com", "X-Rumi-CSRF": "1"},
+        ("127.0.0.1", 4242),
+    ) == (403, "origin not allowed for sensitive local route", "ORIGIN_DENIED")
+    assert require_local_guard(
+        "/api/container/abc/exec",
+        "POST",
+        {"Origin": "http://localhost:8766"},
+        ("127.0.0.1", 4242),
+    ) == (403, "CSRF header required for sensitive local mutation", "CSRF_REQUIRED")
+    assert require_local_guard(
+        "/api/container/abc/exec",
+        "POST",
+        {"Origin": "http://localhost:8766", "X-Rumi-CSRF": "csrf"},
+        ("127.0.0.1", 4242),
+    ) is None

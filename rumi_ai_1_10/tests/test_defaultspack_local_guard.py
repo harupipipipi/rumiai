@@ -22,7 +22,7 @@ def test_sensitive_coding_http_path_uses_local_guard():
 
     assert handler._sensitive_request_error("POST", "/api/coding/files/write") == (
         403,
-        "origin not allowed for sensitive coding route",
+        "origin not allowed for sensitive local route",
         "ORIGIN_DENIED",
     )
 
@@ -36,7 +36,7 @@ def test_sensitive_coding_http_path_requires_csrf_for_local_origin():
 
     assert handler._sensitive_request_error("POST", "/api/coding/terminal/exec") == (
         403,
-        "CSRF header required for sensitive coding mutation",
+        "CSRF header required for sensitive local mutation",
         "CSRF_REQUIRED",
     )
 
@@ -56,7 +56,7 @@ def test_git_branch_post_is_guarded_but_get_remains_read_only():
     assert handler._sensitive_request_error("GET", "/api/coding/git/branch") is None
     assert handler._sensitive_request_error("POST", "/api/coding/git/branch") == (
         403,
-        "CSRF header required for sensitive coding mutation",
+        "CSRF header required for sensitive local mutation",
         "CSRF_REQUIRED",
     )
 
