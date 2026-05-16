@@ -6,15 +6,14 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 LEGACY_PACKAGES = {"prompt", "tool", "supporter"}
-ALLOWLIST = {
-    Path("tests/test_ecosystem_phase5.py"),
-    Path("ecosystem/defaultspack/blocks/prompt/prompt_loader.py"),
-    Path("ecosystem/defaultspack/blocks/tool/tool_loader.py"),
-}
-ALLOWLIST_DIRS = {
+REMOVED_LEGACY_PATHS = {
     Path("prompt"),
     Path("tool"),
     Path("supporter"),
+    Path("ecosystem/defaultspack/backend/prompt/prompt_loader.py"),
+    Path("ecosystem/defaultspack/backend/tool/tool_loader.py"),
+    Path("ecosystem/defaultspack/blocks/prompt/prompt_loader.py"),
+    Path("ecosystem/defaultspack/blocks/tool/tool_loader.py"),
 }
 SKIP_DIRS = {
     ".git",
@@ -26,8 +25,7 @@ SKIP_DIRS = {
 
 
 def _is_allowed(path: Path) -> bool:
-    rel = path.relative_to(REPO_ROOT)
-    return rel in ALLOWLIST or any(rel == allowed or allowed in rel.parents for allowed in ALLOWLIST_DIRS)
+    return False
 
 
 def _skip(path: Path) -> bool:
@@ -53,8 +51,13 @@ def _legacy_imports(path: Path) -> list[str]:
     return violations
 
 
+def test_removed_legacy_prompt_tool_supporter_shims_are_absent() -> None:
+    for path in REMOVED_LEGACY_PATHS:
+        assert not (REPO_ROOT / path).exists()
+
+
 def test_no_new_legacy_prompt_tool_supporter_imports() -> None:
-    """Top-level prompt/tool/supporter are deprecated import shims only."""
+    """Top-level prompt/tool/supporter packages have been removed."""
     violations: list[str] = []
     for path in REPO_ROOT.rglob("*.py"):
         if _skip(path) or _is_allowed(path):

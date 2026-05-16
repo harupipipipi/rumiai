@@ -8,6 +8,7 @@ __pycache__/
 *.bak.*
 chats/
 userdata/
+user_data/
 tenpu/
 debug.txt
 erroer_memo.txt

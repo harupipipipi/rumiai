@@ -43,21 +43,6 @@ def get_settings_dir() -> Path:
     return get_mount_path_safe("data.settings", "user_data/settings")
 
 
-def get_tools_dir() -> Path:
-    """Deprecated legacy shim. Prefer defaultspack tool registry."""
-    return get_legacy_component_dir("tool_pack")
-
-
-def get_prompts_dir() -> Path:
-    """Deprecated legacy shim. Prefer defaultspack prompt manager."""
-    return get_legacy_component_dir("prompt_pack")
-
-
-def get_supporters_dir() -> Path:
-    """Deprecated legacy shim. Prefer defaultspack functions/extensions."""
-    return get_legacy_component_dir("supporter_pack")
-
-
 def get_ai_clients_dir() -> Path:
     """Legacy AI client directory shim."""
     return get_legacy_component_dir("ai_client")
@@ -66,14 +51,10 @@ def get_ai_clients_dir() -> Path:
 def get_legacy_component_dir(component_type: str) -> Path:
     """Resolve deprecated legacy component directories.
 
-    This isolates older prompt/tool/supporter names from the generic ecosystem
-    compatibility surface. New runtime code should use defaultspack registries
-    and manifests rather than these directories.
+    New runtime code should use defaultspack registries and manifests rather
+    than these directories.
     """
     mapping = {
-        "tool_pack": Path("user_data/shared/tools"),
-        "prompt_pack": Path("user_data/shared/prompts"),
-        "supporter_pack": Path("supporter"),
         "ai_client": Path("ai_client"),
     }
     return mapping[component_type]
