@@ -1,0 +1,7 @@
+include: package:flutter_lints/flutter.yaml
+
+linter:
+  rules:
+    prefer_final_fields: true
+    prefer_final_locals: true
+    sort_child_properties_last: true
