@@ -1,0 +1,43 @@
+{
+  "function_id": "coding_github_issue_read",
+  "description": "Read GitHub issue metadata.",
+  "tags": [
+    "coding"
+  ],
+  "risk": "medium",
+  "requires": [
+    "coding.github.issue.read"
+  ],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.coding.github_issue_read",
+    "defaultspack.coding.github_issue_read",
+    "defaults.coding.github.issue.read",
+    "defaultspack.coding.github.issue.read"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.coding.github_issue_read",
+      "default_args": {}
+    }
+  }
+}

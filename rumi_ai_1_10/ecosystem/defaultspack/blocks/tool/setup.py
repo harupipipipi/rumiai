@@ -36,6 +36,32 @@ def run(context):
             return fn(request_data, context)
         return handler
 
+    def _guarded(handler, operation, risk="high"):
+        """Wrap high-risk local routes in the shared approval/audit path."""
+        def guarded_handler(request_data, context):
+            from blocks.tool._safety import (
+                approved_or_request,
+                record_tool_attempt,
+                record_tool_execution,
+                record_tool_failure,
+            )
+
+            payload = request_data if isinstance(request_data, dict) else {}
+            record_tool_attempt(operation, risk, payload)
+            approval = approved_or_request(payload, context, operation, risk)
+            if approval is not None:
+                return approval
+            result = handler(request_data, context)
+            if isinstance(result, dict) and result.get("status") == "error":
+                err = result.get("error", {})
+                message = err.get("message") if isinstance(err, dict) else err
+                record_tool_failure(operation, risk, payload, str(message or "route failed"))
+            else:
+                record_tool_execution(operation, risk, payload)
+            return result
+
+        return guarded_handler
+
     routes = [
         # ---- Tool read/invoke routes ----
         ("GET", "/api/tools", _lazy("blocks.tool.list"), {}),
@@ -63,21 +89,24 @@ def run(context):
         # ---- MCP routes ----
         ("POST", "/api/tools/mcp/connect", _lazy("blocks.tool.mcp_connect"), {}),
         ("GET", "/api/tools/mcp", _lazy("blocks.tool.mcp_list"), {}),
+        ("POST", "/api/tools/mcp", _lazy("blocks.tool.mcp_registry"), {}),
+        ("DELETE", "/api/tools/mcp", _lazy("blocks.tool.mcp_registry"), {}),
+        ("GET", "/api/browser/artifacts", _lazy("blocks.browser.artifacts"), {}),
         # ---- Container routes (T14) ----
-        ("POST", "/api/container", _lazy("blocks.tool.container.create"), {}),
-        ("POST", "/api/container/{id}/start", _lazy("blocks.tool.container.start"), {"id": "id"}),
-        ("POST", "/api/container/{id}/stop", _lazy("blocks.tool.container.stop"), {"id": "id"}),
-        ("DELETE", "/api/container/{id}", _lazy("blocks.tool.container.delete"), {"id": "id"}),
-        ("POST", "/api/container/{id}/exec", _lazy("blocks.tool.container.exec"), {"id": "id"}),
-        ("GET", "/api/container/{id}/screenshot", _lazy("blocks.tool.container.screenshot"), {"id": "id"}),
-        ("POST", "/api/container/{id}/input", _lazy("blocks.tool.container.input"), {"id": "id"}),
+        ("POST", "/api/container", _guarded(_lazy("blocks.tool.container.create"), "container.create"), {}),
+        ("POST", "/api/container/{id}/start", _guarded(_lazy("blocks.tool.container.start"), "container.start"), {"id": "id"}),
+        ("POST", "/api/container/{id}/stop", _guarded(_lazy("blocks.tool.container.stop"), "container.stop"), {"id": "id"}),
+        ("DELETE", "/api/container/{id}", _guarded(_lazy("blocks.tool.container.delete"), "container.delete"), {"id": "id"}),
+        ("POST", "/api/container/{id}/exec", _guarded(_lazy("blocks.tool.container.exec"), "container.exec"), {"id": "id"}),
+        ("GET", "/api/container/{id}/screenshot", _guarded(_lazy("blocks.tool.container.screenshot"), "container.screenshot"), {"id": "id"}),
+        ("POST", "/api/container/{id}/input", _guarded(_lazy("blocks.tool.container.input"), "container.input"), {"id": "id"}),
         # ---- Container task routes (T14) ----
-        ("POST", "/api/container/task", _lazy("blocks.tool.container.task_create"), {}),
+        ("POST", "/api/container/task", _guarded(_lazy("blocks.tool.container.task_create"), "container.task.create"), {}),
         ("GET", "/api/container/task/{id}", _lazy("blocks.tool.container.task_status"), {"id": "id"}),
         ("GET", "/api/container/task/{id}/result", _lazy("blocks.tool.container.task_result"), {"id": "id"}),
-        ("POST", "/api/container/task/{id}/abort", _lazy("blocks.tool.container.task_abort"), {"id": "id"}),
+        ("POST", "/api/container/task/{id}/abort", _guarded(_lazy("blocks.tool.container.task_abort"), "container.task.abort"), {"id": "id"}),
         # ---- Container settings routes (T14) ----
-        ("PUT", "/api/container/settings", _lazy("blocks.tool.container.settings"), {}),
+        ("PUT", "/api/container/settings", _guarded(_lazy("blocks.tool.container.settings"), "container.settings.update", risk="medium"), {}),
         ("GET", "/api/container/settings", _lazy("blocks.tool.container.settings"), {}),
     ]
 

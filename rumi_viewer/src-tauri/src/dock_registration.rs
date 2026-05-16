@@ -87,6 +87,36 @@ fn resolve_desktop_app_working_dir(desktop_app: &Value, pack_root: &Path) -> Pat
     }
 }
 
+fn is_valid_env_key(key: &str) -> bool {
+    let mut chars = key.chars();
+    match chars.next() {
+        Some(first) if first == '_' || first.is_ascii_alphabetic() => {}
+        _ => return false,
+    }
+    chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
+}
+
+fn read_desktop_app_env(desktop_app: &Value) -> AnyResult<Vec<(String, String)>> {
+    let Some(env) = desktop_app.get("env") else {
+        return Ok(Vec::new());
+    };
+    let env = env
+        .as_object()
+        .context("desktop_app.env must be an object")?;
+    let mut entries = Vec::with_capacity(env.len());
+    for (key, value) in env {
+        if !is_valid_env_key(key) {
+            bail!("desktop_app.env contains invalid shell variable name: {key}");
+        }
+        let value = value
+            .as_str()
+            .with_context(|| format!("desktop_app.env.{key} must be a string"))?;
+        entries.push((key.clone(), value.to_string()));
+    }
+    entries.sort_by(|left, right| left.0.cmp(&right.0));
+    Ok(entries)
+}
+
 fn shell_quote(value: &str) -> String {
     if value.is_empty() {
         return "''".to_string();
@@ -114,7 +144,19 @@ fn build_launch_script(
     venv_dir: &Path,
     app_working_dir: &Path,
     command: &str,
+    env_vars: &[(String, String)],
 ) -> String {
+    let env_exports = env_vars
+        .iter()
+        .map(|(key, value)| format!("export {key}={}", shell_quote(value)))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let env_exports = if env_exports.is_empty() {
+        String::new()
+    } else {
+        format!("\n# Environment declared by defaultspack's desktop_app metadata.\n{env_exports}\n")
+    };
+
     format!(
         r#"#!/bin/bash
 RUMI_HOME={rumi_home}
@@ -126,6 +168,7 @@ DESKTOP_COMMAND={command}
 
 export PATH="$VENV_DIR/bin:$PATH"
 export RUMI_HOME
+{env_exports}
 RUMI_API_TOKEN=$(cat "$TOKEN_FILE" 2>/dev/null | tr -d '\n')
 export RUMI_API_TOKEN
 
@@ -141,6 +184,7 @@ exec "$PACK_SHELL" run "defaultspack" \
         token_file = shell_quote_path(token_file),
         app_working_dir = shell_quote_path(app_working_dir),
         command = shell_quote(command),
+        env_exports = env_exports,
     )
 }
 
@@ -153,6 +197,7 @@ fn create_macos_app_bundle(
     venv_dir: &Path,
     app_working_dir: &Path,
     command: &str,
+    env_vars: &[(String, String)],
 ) -> AnyResult<PathBuf> {
     let safe_name = app_name.replace('/', "_").replace(' ', "_");
     let apps_base = dirs_home().join("Applications");
@@ -200,6 +245,7 @@ fn create_macos_app_bundle(
         venv_dir,
         app_working_dir,
         command,
+        env_vars,
     );
     fs::write(&launch_path, &launch_script)
         .with_context(|| format!("failed to write {}", launch_path.display()))?;
@@ -231,8 +277,37 @@ pub fn register_defaultspack_dock(config: tauri::State<'_, AppConfig>) -> Result
 }
 
 pub(crate) fn register_defaultspack_dock_impl(config: &AppConfig) -> AnyResult<String> {
+    let app_dir = ensure_defaultspack_app_bundle(config)?;
+
+    info!("Dock registration complete: {}", app_dir.display());
+    Ok(format!(
+        "Registered 'Rumi Defaultspack' to Dock at {}",
+        app_dir.display()
+    ))
+}
+
+#[tauri::command]
+pub fn launch_defaultspack_desktop(config: tauri::State<'_, AppConfig>) -> Result<String, String> {
+    launch_defaultspack_desktop_impl(&config).map_err(|e| {
+        error!("launch_defaultspack_desktop failed: {e:#}");
+        format!("{e:#}")
+    })
+}
+
+pub(crate) fn launch_defaultspack_desktop_impl(config: &AppConfig) -> AnyResult<String> {
+    let app_dir = ensure_defaultspack_app_bundle(config)?;
+    open::that_detached(&app_dir)
+        .with_context(|| format!("failed to launch {}", app_dir.display()))?;
+    info!("Launched defaultspack desktop app: {}", app_dir.display());
+    Ok(format!(
+        "Launched Rumi Defaultspack from {}",
+        app_dir.display()
+    ))
+}
+
+fn ensure_defaultspack_app_bundle(config: &AppConfig) -> AnyResult<PathBuf> {
     if !cfg!(target_os = "macos") {
-        bail!("Dock registration is only supported on macOS");
+        bail!("Defaultspack desktop launch is only supported on macOS");
     }
 
     // 1. Resolve pack-shell
@@ -253,6 +328,7 @@ pub(crate) fn register_defaultspack_dock_impl(config: &AppConfig) -> AnyResult<S
         .parent()
         .context("defaultspack ecosystem.json has no parent directory")?;
     let app_working_dir = resolve_desktop_app_working_dir(&desktop_app, pack_root);
+    let env_vars = read_desktop_app_env(&desktop_app)?;
 
     // 3. Read HMAC key and save as desktop API token
     let hmac_keys_path = config.rumi_home.join("user_data").join("hmac_keys.json");
@@ -287,14 +363,10 @@ pub(crate) fn register_defaultspack_dock_impl(config: &AppConfig) -> AnyResult<S
         &config.venv_dir,
         &app_working_dir,
         &command,
+        &env_vars,
     )?;
 
-    info!("Dock registration complete: {}", app_dir.display());
-    Ok(format!(
-        "Registered '{}' to Dock at {}",
-        app_name,
-        app_dir.display()
-    ))
+    Ok(app_dir)
 }
 
 #[cfg(test)]
@@ -356,12 +428,14 @@ mod tests {
             Path::new("/tmp/venv dir"),
             Path::new("/tmp/work $(bad)"),
             "python -c \"print('hello')\"",
+            &[("RUMI_DEFAULTSPACK_SURFACE".into(), "webview".into())],
         );
 
         assert!(script.contains("PACK_SHELL='/tmp/Rumi'\\''s bin/pack-shell'"));
         assert!(script.contains("TOKEN_FILE='/tmp/token file'"));
         assert!(script.contains("APP_WORKING_DIR='/tmp/work $(bad)'"));
         assert!(script.contains("DESKTOP_COMMAND='python -c \"print('\\''hello'\\'')\"'"));
+        assert!(script.contains("export RUMI_DEFAULTSPACK_SURFACE='webview'"));
         assert!(script.contains("--command \"$DESKTOP_COMMAND\""));
     }
 
@@ -386,6 +460,30 @@ mod tests {
         let (cmd, _) = read_desktop_app_command(&path).unwrap();
         assert_eq!(cmd, "python app.py");
         fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn read_desktop_app_env_sorts_and_validates_env_vars() {
+        let desktop_app: Value = serde_json::from_str(
+            r#"{"env":{"RUMI_DEFAULTSPACK_SURFACE":"webview","DEFAULTS_HTTP_PORT":"8766"}}"#,
+        )
+        .unwrap();
+
+        let env_vars = read_desktop_app_env(&desktop_app).unwrap();
+        assert_eq!(
+            env_vars,
+            vec![
+                ("DEFAULTS_HTTP_PORT".into(), "8766".into()),
+                ("RUMI_DEFAULTSPACK_SURFACE".into(), "webview".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn read_desktop_app_env_rejects_invalid_shell_names() {
+        let desktop_app: Value = serde_json::from_str(r#"{"env":{"BAD;NAME":"oops"}}"#).unwrap();
+        let err = read_desktop_app_env(&desktop_app).unwrap_err();
+        assert!(err.to_string().contains("invalid shell variable name"));
     }
 
     #[test]

@@ -1,6 +1,16 @@
 import sys, os; sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..")); from _common import ok, error, gen_id, timestamp
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 from domain.tool.registry import ToolRegistry
+from blocks.tool._safety import (
+    approved_or_request,
+    record_tool_attempt,
+    record_tool_execution,
+    record_tool_failure,
+)
+
+
+OPERATION = "tool.update"
+RISK = "high"
 
 
 def run(input_data, context):
@@ -30,13 +40,20 @@ def run(input_data, context):
     if exec_type != "dynamic":
         return error("Only dynamic tools can be updated", "NOT_DYNAMIC")
 
+    record_tool_attempt(OPERATION, RISK, input_data)
+    approval = approved_or_request(input_data, context, OPERATION, RISK)
+    if approval is not None:
+        return approval
+
     # updated_at を追加
     updates["updated_at"] = timestamp()
 
     updated = registry.update_dynamic(name, updates)
     if updated is None:
+        record_tool_failure(OPERATION, RISK, input_data, "update returned None", tool_name=name)
         return error("Failed to update tool '{}'".format(name), "UPDATE_ERROR")
 
+    record_tool_execution(OPERATION, RISK, input_data, tool_name=name)
     return ok({
         "tool_id": updated["tool_id"],
         "name": updated["name"],

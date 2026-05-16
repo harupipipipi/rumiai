@@ -27,8 +27,7 @@ struct GitHubRelease {
 }
 
 /// The GitHub API endpoint for the latest release.
-const RELEASES_API: &str =
-    "https://api.github.com/repos/harupipipipi/rumiai/releases/latest";
+const RELEASES_API: &str = "https://api.github.com/repos/harupipipipi/rumiai/releases/latest";
 
 /// HTTP request timeout in seconds.
 const TIMEOUT_SECS: u64 = 10;
@@ -41,11 +40,9 @@ const TIMEOUT_SECS: u64 = 10;
 /// Errors are **not** fatal — callers should log and continue.
 pub fn check_for_update() -> Result<Option<UpdateInfo>> {
     let current_str = env!("CARGO_PKG_VERSION");
-    let current = parse_version(current_str)
-        .context("failed to parse current version")?;
+    let current = parse_version(current_str).context("failed to parse current version")?;
 
-    let release = fetch_latest_release()
-        .context("failed to fetch latest release")?;
+    let release = fetch_latest_release().context("failed to fetch latest release")?;
 
     let latest = parse_version(&release.tag_name)
         .with_context(|| format!("failed to parse release tag: {}", release.tag_name))?;
@@ -63,8 +60,7 @@ pub fn check_for_update() -> Result<Option<UpdateInfo>> {
 
 /// Open the release page in the user's default browser.
 pub fn open_release_page(info: &UpdateInfo) -> Result<()> {
-    open::that_detached(&info.release_url)
-        .context("failed to open release page in browser")?;
+    open::that_detached(&info.release_url).context("failed to open release page in browser")?;
     Ok(())
 }
 
@@ -91,9 +87,7 @@ fn fetch_latest_release() -> Result<GitHubRelease> {
         bail!("GitHub API returned HTTP {}", resp.status());
     }
 
-    let release: GitHubRelease = resp
-        .json()
-        .context("failed to parse GitHub release JSON")?;
+    let release: GitHubRelease = resp.json().context("failed to parse GitHub release JSON")?;
 
     Ok(release)
 }
@@ -101,8 +95,7 @@ fn fetch_latest_release() -> Result<GitHubRelease> {
 /// Parse a version string, stripping an optional leading `v`.
 fn parse_version(tag: &str) -> Result<semver::Version> {
     let cleaned = tag.strip_prefix('v').unwrap_or(tag);
-    semver::Version::parse(cleaned)
-        .with_context(|| format!("invalid semver: {tag}"))
+    semver::Version::parse(cleaned).with_context(|| format!("invalid semver: {tag}"))
 }
 
 // ---------------------------------------------------------------------------

@@ -106,7 +106,9 @@ fn copy_runtime_tree(src: &Path, dst: &Path, runtime_root: &Path) -> io::Result<
         let source_path = entry.path();
         let file_type = entry.file_type()?;
         let target_path = dst.join(entry.file_name());
-        let relative = source_path.strip_prefix(runtime_root).unwrap_or(&source_path);
+        let relative = source_path
+            .strip_prefix(runtime_root)
+            .unwrap_or(&source_path);
 
         if should_skip(relative, file_type.is_dir()) {
             continue;
@@ -148,7 +150,9 @@ fn copy_dir_recursive_filtered(src: &Path, dst: &Path, runtime_root: &Path) -> i
         let source_path = entry.path();
         let target_path = dst.join(entry.file_name());
         let file_type = entry.file_type()?;
-        let relative = source_path.strip_prefix(runtime_root).unwrap_or(&source_path);
+        let relative = source_path
+            .strip_prefix(runtime_root)
+            .unwrap_or(&source_path);
 
         if should_skip(relative, file_type.is_dir()) {
             continue;

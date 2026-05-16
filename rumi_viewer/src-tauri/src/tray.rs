@@ -11,43 +11,25 @@ use tauri::{
 
 use crate::kernel_manager::KernelManager;
 use crate::updater;
-use crate::{refresh_panel_session_for_window, request_app_exit};
+use crate::{request_app_exit, show_primary_window};
 
 /// Helper: clone the Arc<Mutex<KernelManager>> out of Tauri State.
 fn get_km(app: &tauri::AppHandle) -> Arc<Mutex<KernelManager>> {
     Arc::clone(app.state::<Arc<Mutex<KernelManager>>>().inner())
 }
 
-fn primary_window_label(has_panel: bool, has_main: bool) -> Option<&'static str> {
-    if has_panel {
-        Some("panel")
-    } else if has_main {
-        Some("main")
-    } else {
-        None
-    }
-}
-
-fn show_primary_window(app: &tauri::AppHandle) {
-    let target = primary_window_label(
-        app.get_webview_window("panel").is_some(),
-        app.get_webview_window("main").is_some(),
-    );
-
-    if let Some(label) = target {
-        refresh_panel_session_for_window(app, label);
-        if let Some(win) = app.get_webview_window(label) {
-            let _ = win.unminimize();
-            let _ = win.show();
-            let _ = win.set_focus();
-        }
-    }
-}
-
 /// Build and register the system-tray icon with Open / Restart Kernel / Quit.
 pub fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let open_i = MenuItem::with_id(app, "open", "Open", true, None::<&str>)?;
     let restart_i = MenuItem::with_id(app, "restart_kernel", "Restart Kernel", true, None::<&str>)?;
+    #[cfg(target_os = "macos")]
+    let open_defaultspack_i = MenuItem::with_id(
+        app,
+        "open_defaultspack",
+        "Open Defaultspack",
+        true,
+        None::<&str>,
+    )?;
     #[cfg(target_os = "macos")]
     let register_dock_i = MenuItem::with_id(
         app,
@@ -62,7 +44,14 @@ pub fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(target_os = "macos")]
     let menu = Menu::with_items(
         app,
-        &[&open_i, &restart_i, &register_dock_i, &update_i, &quit_i],
+        &[
+            &open_i,
+            &restart_i,
+            &open_defaultspack_i,
+            &register_dock_i,
+            &update_i,
+            &quit_i,
+        ],
     )?;
     #[cfg(not(target_os = "macos"))]
     let menu = Menu::with_items(app, &[&open_i, &restart_i, &update_i, &quit_i])?;
@@ -73,7 +62,9 @@ pub fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id.as_ref() {
             "open" => {
-                show_primary_window(app);
+                if let Err(error) = show_primary_window(app) {
+                    error!("Failed to show Rumi window: {error}");
+                }
             }
             "restart_kernel" => {
                 let km = get_km(app);
@@ -108,6 +99,26 @@ pub fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
                     error!("Dock registration is only supported on macOS");
                 }
             }
+            "open_defaultspack" => {
+                #[cfg(target_os = "macos")]
+                {
+                    let config = app.state::<crate::config::AppConfig>().inner().clone();
+                    std::thread::spawn(move || {
+                        match crate::dock_registration::launch_defaultspack_desktop_impl(&config) {
+                            Ok(msg) => {
+                                info!("Defaultspack launch: {msg}");
+                            }
+                            Err(e) => {
+                                error!("Defaultspack launch failed: {e}");
+                            }
+                        }
+                    });
+                }
+                #[cfg(not(target_os = "macos"))]
+                {
+                    error!("Defaultspack desktop launch is only supported on macOS");
+                }
+            }
             "check_update" => {
                 std::thread::spawn(|| match updater::check_for_update() {
                     Ok(Some(info)) => {
@@ -140,7 +151,9 @@ pub fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
             } = event
             {
                 let app = tray.app_handle();
-                show_primary_window(&app);
+                if let Err(error) = show_primary_window(&app) {
+                    error!("Failed to show Rumi window: {error}");
+                }
             }
         });
 
@@ -153,24 +166,4 @@ pub fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let _ = tray_builder.build(app)?;
 
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::primary_window_label;
-
-    #[test]
-    fn prefers_panel_window_when_available() {
-        assert_eq!(primary_window_label(true, true), Some("panel"));
-    }
-
-    #[test]
-    fn falls_back_to_main_window_before_panel_exists() {
-        assert_eq!(primary_window_label(false, true), Some("main"));
-    }
-
-    #[test]
-    fn returns_none_when_no_window_exists() {
-        assert_eq!(primary_window_label(false, false), None);
-    }
 }

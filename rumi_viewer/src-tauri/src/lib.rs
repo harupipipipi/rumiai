@@ -18,18 +18,19 @@ use std::{fs, io};
 use anyhow::{anyhow, bail, Context, Result as AnyResult};
 use log::{error, info, warn};
 use rand::{distributions::Alphanumeric, Rng};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager};
 
 use config::AppConfig;
 use kernel_manager::KernelManager;
 
-#[cfg(target_os = "macos")]
 mod dock_registration;
 
 /// Wrapper around a shared progress string, managed as Tauri State.
 pub struct SetupProgress(pub Arc<Mutex<String>>);
 pub struct ShutdownState(pub Arc<AtomicBool>);
+
+const PRIMARY_WINDOW_LABELS: [&str; 2] = ["panel", "main"];
 
 #[derive(Debug, Deserialize)]
 struct PanelBootstrapPayload {
@@ -41,6 +42,24 @@ struct ApiEnvelope<T> {
     success: bool,
     data: Option<T>,
     error: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+struct WindowRuntimeSnapshot {
+    label: String,
+    visible: bool,
+    minimized: bool,
+    focused: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+struct BackgroundControlStatus {
+    enabled: bool,
+    app_visible: bool,
+    foreground_window: Option<String>,
+    kernel_running: bool,
+    shutdown_requested: bool,
+    windows: Vec<WindowRuntimeSnapshot>,
 }
 
 /// Returns the current setup progress message.
@@ -79,6 +98,34 @@ fn open_external_url(url: String) -> Result<(), String> {
     }
 
     open::that_detached(url).map_err(|error| format!("failed to open external url: {error}"))
+}
+
+#[tauri::command]
+fn send_to_background(app: AppHandle) -> Result<(), String> {
+    send_app_to_background(&app)
+}
+
+#[tauri::command]
+fn show_app_window(app: AppHandle) -> Result<(), String> {
+    show_primary_window(&app)
+}
+
+#[tauri::command]
+fn get_background_control_status(
+    app: AppHandle,
+    km: tauri::State<'_, Arc<Mutex<KernelManager>>>,
+    shutdown: tauri::State<'_, ShutdownState>,
+) -> Result<BackgroundControlStatus, String> {
+    let kernel_running = {
+        let mut kernel = km.lock().map_err(|error| format!("lock error: {error}"))?;
+        kernel.is_running()
+    };
+    let shutdown_requested = shutdown.0.load(Ordering::SeqCst);
+    Ok(summarize_background_control_status(
+        collect_primary_window_states(&app),
+        kernel_running,
+        shutdown_requested,
+    ))
 }
 
 fn generate_panel_bootstrap_secret() -> String {
@@ -284,6 +331,103 @@ pub(crate) fn refresh_panel_session_for_window(app: &AppHandle, window_label: &s
             }
         },
     );
+}
+
+pub(crate) fn primary_window_label(has_panel: bool, has_main: bool) -> Option<&'static str> {
+    if has_panel {
+        Some("panel")
+    } else if has_main {
+        Some("main")
+    } else {
+        None
+    }
+}
+
+pub(crate) fn show_primary_window(app: &AppHandle) -> Result<(), String> {
+    let target = primary_window_label(
+        app.get_webview_window("panel").is_some(),
+        app.get_webview_window("main").is_some(),
+    );
+
+    let Some(label) = target else {
+        return Err("no Rumi window is available".into());
+    };
+
+    refresh_panel_session_for_window(app, label);
+    if let Some(window) = app.get_webview_window(label) {
+        window
+            .unminimize()
+            .map_err(|error| format!("failed to unminimize window: {error}"))?;
+        window
+            .show()
+            .map_err(|error| format!("failed to show window: {error}"))?;
+        window
+            .set_focus()
+            .map_err(|error| format!("failed to focus window: {error}"))?;
+    }
+
+    Ok(())
+}
+
+pub(crate) fn send_app_to_background(app: &AppHandle) -> Result<(), String> {
+    let mut found_window = false;
+    for label in PRIMARY_WINDOW_LABELS {
+        if let Some(window) = app.get_webview_window(label) {
+            found_window = true;
+            window
+                .hide()
+                .map_err(|error| format!("failed to hide {label} window: {error}"))?;
+        }
+    }
+
+    if !found_window {
+        warn!("Background request ignored because no Rumi window is available");
+    }
+
+    Ok(())
+}
+
+fn collect_primary_window_states(app: &AppHandle) -> Vec<WindowRuntimeSnapshot> {
+    PRIMARY_WINDOW_LABELS
+        .iter()
+        .filter_map(|label| {
+            app.get_webview_window(label)
+                .map(|window| WindowRuntimeSnapshot {
+                    label: (*label).to_string(),
+                    visible: window.is_visible().unwrap_or(false),
+                    minimized: window.is_minimized().unwrap_or(false),
+                    focused: window.is_focused().unwrap_or(false),
+                })
+        })
+        .collect()
+}
+
+fn summarize_background_control_status(
+    windows: Vec<WindowRuntimeSnapshot>,
+    kernel_running: bool,
+    shutdown_requested: bool,
+) -> BackgroundControlStatus {
+    let app_visible = windows
+        .iter()
+        .any(|window| window.visible && !window.minimized);
+    let foreground_window = windows
+        .iter()
+        .find(|window| window.visible && window.focused)
+        .or_else(|| {
+            windows
+                .iter()
+                .find(|window| window.visible && !window.minimized)
+        })
+        .map(|window| window.label.clone());
+
+    BackgroundControlStatus {
+        enabled: !shutdown_requested,
+        app_visible,
+        foreground_window,
+        kernel_running,
+        shutdown_requested,
+        windows,
+    }
 }
 
 pub(crate) fn request_app_exit(app: &AppHandle) {
@@ -663,10 +807,11 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
-            #[cfg(target_os = "macos")]
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 api.prevent_close();
-                request_app_exit(&window.app_handle());
+                if let Err(error) = send_app_to_background(&window.app_handle()) {
+                    error!("Failed to send app to background: {error}");
+                }
             }
         })
         .invoke_handler(tauri::generate_handler![
@@ -674,10 +819,27 @@ pub fn run() {
             restart_kernel,
             reauthorize_panel_session,
             open_external_url,
-            #[cfg(target_os = "macos")]
-            dock_registration::register_defaultspack_dock
+            send_to_background,
+            show_app_window,
+            get_background_control_status,
+            dock_registration::register_defaultspack_dock,
+            dock_registration::launch_defaultspack_desktop
         ])
-        .run(tauri::generate_context!())
+        .build(tauri::generate_context!())
+        .map(|app| {
+            app.run(|app_handle, event| {
+                #[cfg(target_os = "macos")]
+                if let tauri::RunEvent::Reopen {
+                    has_visible_windows: false,
+                    ..
+                } = event
+                {
+                    if let Err(error) = show_primary_window(app_handle) {
+                        warn!("Failed to reopen primary window: {error}");
+                    }
+                }
+            });
+        })
         .unwrap_or_else(|error| error!("error while running tauri application: {error}"));
 }
 
@@ -699,6 +861,76 @@ mod tests {
             PathBuf::from("/tmp/test_appdata"),
         )
         .unwrap()
+    }
+
+    #[test]
+    fn prefers_panel_window_when_available() {
+        assert_eq!(primary_window_label(true, true), Some("panel"));
+    }
+
+    #[test]
+    fn falls_back_to_main_window_before_panel_exists() {
+        assert_eq!(primary_window_label(false, true), Some("main"));
+    }
+
+    #[test]
+    fn returns_none_when_no_window_exists() {
+        assert_eq!(primary_window_label(false, false), None);
+    }
+
+    #[test]
+    fn background_status_reports_visible_foreground_window() {
+        let status = summarize_background_control_status(
+            vec![
+                WindowRuntimeSnapshot {
+                    label: "panel".into(),
+                    visible: false,
+                    minimized: false,
+                    focused: false,
+                },
+                WindowRuntimeSnapshot {
+                    label: "main".into(),
+                    visible: true,
+                    minimized: false,
+                    focused: true,
+                },
+            ],
+            true,
+            false,
+        );
+
+        assert!(status.enabled);
+        assert!(status.app_visible);
+        assert!(status.kernel_running);
+        assert_eq!(status.foreground_window.as_deref(), Some("main"));
+    }
+
+    #[test]
+    fn background_status_stays_enabled_when_all_windows_are_hidden() {
+        let status = summarize_background_control_status(
+            vec![WindowRuntimeSnapshot {
+                label: "main".into(),
+                visible: false,
+                minimized: false,
+                focused: false,
+            }],
+            true,
+            false,
+        );
+
+        assert!(status.enabled);
+        assert!(!status.app_visible);
+        assert_eq!(status.foreground_window, None);
+        assert!(status.kernel_running);
+    }
+
+    #[test]
+    fn background_status_disables_during_shutdown() {
+        let status = summarize_background_control_status(Vec::new(), false, true);
+
+        assert!(!status.enabled);
+        assert!(status.shutdown_requested);
+        assert!(!status.kernel_running);
     }
 
     #[test]

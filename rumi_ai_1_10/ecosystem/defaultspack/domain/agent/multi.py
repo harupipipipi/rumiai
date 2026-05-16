@@ -735,6 +735,63 @@ class MultiAgentOrchestrator:
             "result": session.to_dict(),
         }
 
+    def create_session(
+        self,
+        task,
+        agent_dicts,
+        orchestration="round_robin",
+        max_turns=10,
+        workspace_root=None,
+        workspace_id=None,
+        worktree_mode=None,
+        context=None,
+    ):
+        """Create a visible multi-agent workspace session without running turns."""
+        session_id = "multi_" + gen_id()
+        workspace_resolution = None
+        try:
+            workspace_resolution = _resolve_agent_workspace(
+                workspace_id=workspace_id,
+                workspace_root=workspace_root,
+                context=context,
+            )
+        except Exception as exc:
+            return {
+                "session_id": session_id,
+                "status": "error",
+                "error": str(exc),
+            }
+        if workspace_resolution is not None:
+            workspace_root = workspace_resolution.root_path
+
+        agents = [AgentDefinition.from_dict(ad) for ad in agent_dicts]
+        if not agents:
+            return {"session_id": session_id, "status": "error", "error": "at least one agent is required"}
+
+        session = MultiAgentSession(
+            session_id=session_id,
+            task=task,
+            agents=agents,
+            orchestration=orchestration,
+            max_turns=max_turns,
+            workspace_root=workspace_root,
+            worktree_mode=worktree_mode,
+            workspace_resolution=workspace_resolution,
+        )
+        session.status = "created"
+        session.shared_context["workspace"]["merge_report"] = _workspace_merge_report(session)
+        session.updated_at = timestamp()
+        return {
+            "session_id": session_id,
+            "status": session.status,
+            "session": session,
+            "result": session.to_dict(),
+            "workspace": session.shared_context.get("workspace", {}),
+        }
+
+    def merge_report(self, session):
+        return _workspace_merge_report(session)
+
     # ------------------------------------------------------------------
     # 外部メッセージ投入
     # ------------------------------------------------------------------

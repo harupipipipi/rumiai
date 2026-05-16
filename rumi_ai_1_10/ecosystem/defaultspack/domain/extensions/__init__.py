@@ -1,6 +1,7 @@
 """Manifest-driven extension discovery and registry APIs."""
 
 from .entrypoints import import_entrypoint, import_module, normalize_module_name
+from .activation import selected_extension_pack_ids, setup_pack_selection_path
 from .registry import (
     AgentModeRegistry,
     ChatModeRegistry,
@@ -13,7 +14,7 @@ from .registry import (
     TransportRegistry,
     UISurfaceRegistry,
 )
-from .runtime import get_extension_registry, get_extensions_root
+from .runtime import get_extension_registry, get_extensions_root, get_extensions_roots
 
 __all__ = [
     "AgentModeRegistry",
@@ -31,4 +32,7 @@ __all__ = [
     "UISurfaceRegistry",
     "get_extension_registry",
     "get_extensions_root",
+    "get_extensions_roots",
+    "selected_extension_pack_ids",
+    "setup_pack_selection_path",
 ]

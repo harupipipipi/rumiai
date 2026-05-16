@@ -1,0 +1,41 @@
+{
+  "function_id": "coding_agent_session_merge_report",
+  "description": "Get a multi-agent coding workspace merge report.",
+  "tags": [
+    "coding"
+  ],
+  "risk": "low",
+  "requires": [],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.coding.agent_session_merge_report",
+    "defaultspack.coding.agent_session_merge_report",
+    "defaults.coding.agent.session.merge.report",
+    "defaultspack.coding.agent.session.merge.report"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.agent.coding_session_merge_report",
+      "default_args": {}
+    }
+  }
+}

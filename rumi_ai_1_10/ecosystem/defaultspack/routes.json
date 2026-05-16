@@ -205,6 +205,60 @@
       "description": "Switch or create a git branch"
     },
     {
+      "method": "GET",
+      "path": "/api/coding/approvals",
+      "flow_id": "transport_direct",
+      "description": "List coding approval requests"
+    },
+    {
+      "method": "POST",
+      "path": "/api/coding/approvals/approve",
+      "flow_id": "transport_direct",
+      "description": "Approve a coding operation"
+    },
+    {
+      "method": "POST",
+      "path": "/api/coding/approvals/deny",
+      "flow_id": "transport_direct",
+      "description": "Deny a coding operation"
+    },
+    {
+      "method": "POST",
+      "path": "/api/coding/github/pr",
+      "flow_id": "transport_direct",
+      "description": "Read GitHub pull request metadata"
+    },
+    {
+      "method": "POST",
+      "path": "/api/coding/github/issue",
+      "flow_id": "transport_direct",
+      "description": "Read GitHub issue metadata"
+    },
+    {
+      "method": "POST",
+      "path": "/api/coding/github/ci",
+      "flow_id": "transport_direct",
+      "description": "Read GitHub pull request CI status"
+    },
+    {
+      "method": "POST",
+      "path": "/api/coding/agent/sessions",
+      "flow_id": "transport_direct",
+      "description": "Create a multi-agent coding workspace session"
+    },
+    {
+      "method": "GET",
+      "path": "/api/coding/agent/sessions/status",
+      "flow_id": "transport_direct",
+      "description": "Read a multi-agent coding workspace session"
+    },
+    {
+      "method": "GET",
+      "path": "/api/coding/agent/sessions/merge-report",
+      "flow_id": "transport_direct",
+      "description": "Read a multi-agent coding workspace merge report"
+    },
+    {
       "method": "POST",
       "path": "/api/research/local-search",
       "flow_id": "transport_direct",
@@ -233,6 +287,36 @@
       "path": "/api/tools/browser-computer",
       "flow_id": "transport_direct",
       "description": "Run browser/computer capability actions with server approval"
+    },
+    {
+      "method": "GET",
+      "path": "/api/tools/mcp",
+      "flow_id": "transport_direct",
+      "description": "List MCP servers"
+    },
+    {
+      "method": "POST",
+      "path": "/api/tools/mcp",
+      "flow_id": "transport_direct",
+      "description": "Register an MCP server"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/tools/mcp",
+      "flow_id": "transport_direct",
+      "description": "Delete an MCP server"
+    },
+    {
+      "method": "POST",
+      "path": "/api/tools/mcp/connect",
+      "flow_id": "transport_direct",
+      "description": "Connect an MCP server"
+    },
+    {
+      "method": "GET",
+      "path": "/api/browser/artifacts",
+      "flow_id": "transport_direct",
+      "description": "List persistent browser artifacts"
     },
     {
       "method": "GET",

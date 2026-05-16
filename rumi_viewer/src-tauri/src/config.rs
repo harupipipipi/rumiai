@@ -130,9 +130,11 @@ impl AppConfig {
     /// Layout: `{workspace_root}/rumi_ai_1_10/bundled/uv` (Unix) or
     /// `{workspace_root}/rumi_ai_1_10/bundled/uv.exe` (Windows).
     pub fn dev_bundled_uv_path(&self) -> Option<PathBuf> {
-        self.dev_workspace_root
-            .as_ref()
-            .map(|root| root.join("rumi_ai_1_10").join("bundled").join(uv_binary_name()))
+        self.dev_workspace_root.as_ref().map(|root| {
+            root.join("rumi_ai_1_10")
+                .join("bundled")
+                .join(uv_binary_name())
+        })
     }
 
     /// Resolve the best available `uv` binary path.
@@ -242,22 +244,34 @@ fn pack_shell_binary_name() -> &'static str {
 /// and the `uv` release filenames.
 pub fn platform_triple() -> &'static str {
     #[cfg(all(target_arch = "x86_64", target_os = "linux"))]
-    { "x86_64-unknown-linux-gnu" }
+    {
+        "x86_64-unknown-linux-gnu"
+    }
 
     #[cfg(all(target_arch = "aarch64", target_os = "linux"))]
-    { "aarch64-unknown-linux-gnu" }
+    {
+        "aarch64-unknown-linux-gnu"
+    }
 
     #[cfg(all(target_arch = "x86_64", target_os = "macos"))]
-    { "x86_64-apple-darwin" }
+    {
+        "x86_64-apple-darwin"
+    }
 
     #[cfg(all(target_arch = "aarch64", target_os = "macos"))]
-    { "aarch64-apple-darwin" }
+    {
+        "aarch64-apple-darwin"
+    }
 
     #[cfg(all(target_arch = "x86_64", target_os = "windows"))]
-    { "x86_64-pc-windows-msvc" }
+    {
+        "x86_64-pc-windows-msvc"
+    }
 
     #[cfg(all(target_arch = "aarch64", target_os = "windows"))]
-    { "aarch64-pc-windows-msvc" }
+    {
+        "aarch64-pc-windows-msvc"
+    }
 
     #[cfg(not(any(
         all(target_arch = "x86_64", target_os = "linux"),
@@ -267,7 +281,9 @@ pub fn platform_triple() -> &'static str {
         all(target_arch = "x86_64", target_os = "windows"),
         all(target_arch = "aarch64", target_os = "windows"),
     )))]
-    { compile_error!("unsupported target platform") }
+    {
+        compile_error!("unsupported target platform")
+    }
 }
 
 #[cfg(test)]
@@ -323,7 +339,11 @@ mod tests {
             .unwrap()
             .as_nanos();
         let root = std::env::temp_dir().join(format!("rumi_viewer_config_{unique}"));
-        let resource = root.join("rumi_viewer").join("src-tauri").join("target").join("debug");
+        let resource = root
+            .join("rumi_viewer")
+            .join("src-tauri")
+            .join("target")
+            .join("debug");
         let appdata = root.join("appdata");
         let app_py = root.join("rumi_ai_1_10").join("app.py");
 
@@ -373,10 +393,17 @@ mod tests {
             .unwrap()
             .as_nanos();
         let root = std::env::temp_dir().join(format!("rumi_viewer_uv_dev_bundle_{unique}"));
-        let resource = root.join("rumi_viewer").join("src-tauri").join("target").join("debug");
+        let resource = root
+            .join("rumi_viewer")
+            .join("src-tauri")
+            .join("target")
+            .join("debug");
         let appdata = root.join("appdata");
         let app_py = root.join("rumi_ai_1_10").join("app.py");
-        let dev_bundled_uv = root.join("rumi_ai_1_10").join("bundled").join(uv_binary_name());
+        let dev_bundled_uv = root
+            .join("rumi_ai_1_10")
+            .join("bundled")
+            .join(uv_binary_name());
 
         fs::create_dir_all(&resource).unwrap();
         fs::create_dir_all(app_py.parent().unwrap()).unwrap();
@@ -385,7 +412,10 @@ mod tests {
         fs::write(&dev_bundled_uv, b"uv").unwrap();
 
         let config = AppConfig::detect_for_tauri(resource, appdata.clone()).unwrap();
-        assert_eq!(config.dev_bundled_uv_path().as_deref(), Some(dev_bundled_uv.as_path()));
+        assert_eq!(
+            config.dev_bundled_uv_path().as_deref(),
+            Some(dev_bundled_uv.as_path())
+        );
         assert_eq!(config.resolved_uv_path(), dev_bundled_uv);
         assert!(config.is_dev_workspace());
 

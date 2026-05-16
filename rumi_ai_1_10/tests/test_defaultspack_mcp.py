@@ -157,7 +157,7 @@ def test_mcp_connect_accepts_server_id_and_saved_config(monkeypatch, tmp_path):
     monkeypatch.setattr(mcp_connect_block, "McpClient", lambda: fake_client)
     monkeypatch.setattr(mcp_connect_block, "ToolRegistry", lambda: fake_registry)
 
-    result = mcp_connect_block.run({"server_id": "filesystem"}, {})
+    result = mcp_connect_block.run({"server_id": "filesystem"}, {"_tool_server_approved": True})
 
     assert result["status"] == "ok"
     assert fake_client.connected[0][0] == "filesystem"
@@ -168,6 +168,56 @@ def test_mcp_connect_accepts_server_id_and_saved_config(monkeypatch, tmp_path):
     assert fake_registry.tools[0]["metadata"]["source"] == "mcp"
     assert fake_registry.tools[0]["metadata"]["server_id"] == "filesystem"
     assert fake_registry.tools[0]["ui"]["group_id"] == "mcp"
+
+
+def test_mcp_connect_approval_binds_resolved_saved_config(monkeypatch, tmp_path):
+    from domain.safety.approval import approve, reset_approval_state_for_tests
+
+    class EmptyMcpRegistry:
+        def get_server(self, server_identifier):
+            return None
+
+        def add_server(self, payload):
+            raise AssertionError("approval should be checked before connecting")
+
+    def write_config(command: str) -> None:
+        config_path.write_text(
+            json.dumps(
+                {
+                    "servers": [
+                        {
+                            "server_id": "filesystem",
+                            "transport": "stdio",
+                            "command": command,
+                        }
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+
+    reset_approval_state_for_tests()
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_AUDIT_PATH", str(tmp_path / "audit.jsonl"))
+    config_path = tmp_path / "mcp.json"
+    write_config("python demo_server.py")
+    monkeypatch.setattr(mcp_connect_block, "_mcp_config_path", lambda: config_path)
+    monkeypatch.setattr(mcp_connect_block, "McpRegistry", lambda: EmptyMcpRegistry())
+
+    request = mcp_connect_block.run({"server_id": "filesystem"}, {})
+
+    assert request["status"] == "ok"
+    assert request["data"]["approval_required"] is True
+    assert request["data"]["config"]["command"] == "python demo_server.py"
+
+    decision = approve(request["data"]["approval_request_id"])
+    write_config("python changed_server.py")
+    tampered = mcp_connect_block.run(
+        {"server_id": "filesystem", "approval_token": decision["token"]},
+        {},
+    )
+
+    assert tampered["status"] == "error"
+    assert tampered["error"]["code"] == "APPROVAL_ARGUMENTS_CHANGED"
 
 
 def test_mcp_list_filters_by_server_id(monkeypatch):

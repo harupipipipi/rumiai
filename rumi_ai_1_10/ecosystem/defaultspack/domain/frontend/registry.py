@@ -13,6 +13,7 @@ from domain.ai_client.model_runtime_settings import ModelRuntimeSettingsService
 from domain.capability.catalog import CapabilityCatalog
 from domain.chat.store import ChatStore
 from domain.dev.inspector import Inspector
+from domain.extensions.activation import selected_extension_pack_ids
 from domain.extensions.runtime import get_extension_registry
 from domain.external.input_profile_registry import InputProfileRegistry
 from domain.external.io_templates import external_io_template_catalog
@@ -1319,9 +1320,12 @@ class FrontendRegistry:
     def _frontend_extension_dirs(self) -> list[Path]:
         dirs: list[Path] = []
         ecosystem_root = self._ecosystem_root()
+        selected_pack_ids = selected_extension_pack_ids(self._pack_root)
         if ecosystem_root.exists():
             for pack_root in sorted(ecosystem_root.iterdir()):
                 if not pack_root.is_dir() or not (pack_root / "ecosystem.json").exists():
+                    continue
+                if selected_pack_ids is not None and pack_root.name not in selected_pack_ids:
                     continue
                 dirs.append(pack_root / "frontend_extensions")
         dirs.append(self._extensions_dir)

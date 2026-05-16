@@ -1,5 +1,6 @@
 from .registry import ToolRegistry
 from .mcp_client import McpClient
+from .mcp_registry import McpRegistry
 from .schema_adapter import is_tool_rejected_by_policy, policy_from_context
 from domain.tool_policy.internal_context import internal_tool_decision_allows
 from pathlib import Path
@@ -109,6 +110,23 @@ class ToolExecutor:
         if exec_type == "mcp":
             server_name = execution.get("server_name", "")
             mcp_tool_name = execution.get("mcp_tool_name", tool_name)
+            if not McpRegistry().is_approved(server_name):
+                return {
+                    "result": "MCP server '{}' is not approved for tool execution".format(server_name),
+                    "is_error": True,
+                    "widget": None,
+                    "approval_required": True,
+                }
+            try:
+                from domain.safety.audit import record_execution
+
+                record_execution(
+                    "tool.mcp_call",
+                    "medium",
+                    {"server_name": server_name, "tool_name": mcp_tool_name},
+                )
+            except Exception:
+                pass
             return self._mcp_client.invoke(server_name, mcp_tool_name, arguments)
 
         if exec_type == "rumi_function":

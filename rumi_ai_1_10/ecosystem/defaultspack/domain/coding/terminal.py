@@ -1,7 +1,6 @@
 """ターミナル操作ドメインロジック."""
 
 import json
-import ntpath
 import os
 import shutil
 import shlex
@@ -10,21 +9,8 @@ import sys
 import time
 import uuid
 
+from domain.coding.terminal_policy import classify_command, normalized_command
 
-HIGH_RISK_TOKENS = {
-    "rm",
-    "sudo",
-    "chmod",
-    "chown",
-    "curl",
-    "wget",
-    "ssh",
-    "scp",
-    "git push",
-    "npm install",
-    "pip install",
-}
-LOW_RISK_TOKENS = {"pwd", "ls", "dir", "cat", "head", "tail", "git status", "git diff"}
 SHELL_METACHARS = {";", "&&", "||", "|", ">", "<", "`", "$(", "${"}
 MAX_OUTPUT_BYTES = 128 * 1024
 ENV_ALLOWLIST = {"PATH", "HOME", "USER", "USERNAME", "USERPROFILE", "TEMP", "TMP", "SYSTEMROOT"}
@@ -70,79 +56,10 @@ class Terminal:
         return resolved
 
     def _normalized_command(self, command):
-        if isinstance(command, (list, tuple)):
-            return " ".join(str(item).strip() for item in command if str(item).strip())
-        return " ".join(str(command).strip().split())
-
-    def _inspection_args(self, command):
-        if isinstance(command, (list, tuple)):
-            return [str(item) for item in command]
-        return shlex.split(str(command), posix=sys.platform != "win32")
-
-    def _low_risk_token(self, normalized):
-        for token in sorted(LOW_RISK_TOKENS, key=len, reverse=True):
-            if normalized == token or normalized.startswith(token + " "):
-                return token
-        return None
-
-    def _path_arg_may_escape_workspace(self, value):
-        text = str(value or "").strip()
-        if not text or text == "--" or text.startswith("-"):
-            return False
-        if text.isdigit():
-            return False
-        normalized = text.replace("\\", "/")
-        return (
-            os.path.isabs(os.path.expanduser(text))
-            or ntpath.isabs(text)
-            or normalized == ".."
-            or normalized.startswith("../")
-            or normalized.endswith("/..")
-            or "/../" in normalized
-        )
-
-    def _path_arg_inside_workspace(self, value, cwd):
-        text = str(value or "")
-        if ntpath.isabs(text) and not os.path.isabs(text):
-            return False
-        expanded = os.path.expanduser(text)
-        resolved = os.path.realpath(expanded if os.path.isabs(expanded) else os.path.join(cwd, expanded))
-        return resolved == self._root or resolved.startswith(self._root + os.sep)
-
-    def _outside_workspace_read_args(self, command, cwd, low_risk_token):
-        try:
-            args = self._inspection_args(command)
-        except ValueError:
-            return []
-        resolved_cwd = self._resolve_cwd(cwd)
-        remaining = args[len(low_risk_token.split()):]
-        outside = []
-        for arg in remaining:
-            if self._path_arg_may_escape_workspace(arg) and not self._path_arg_inside_workspace(arg, resolved_cwd):
-                outside.append(str(arg))
-        return outside
+        return normalized_command(command)
 
     def classify(self, command, cwd=None):
-        normalized = self._normalized_command(command)
-        if not normalized:
-            return {"risk_level": "low", "approval_required": False, "reason": "empty"}
-        if any(marker in normalized for marker in SHELL_METACHARS):
-            return {"risk_level": "high", "approval_required": True, "reason": "shell_syntax"}
-        for token in HIGH_RISK_TOKENS:
-            if normalized == token or normalized.startswith(token + " ") or ("; " + token) in normalized:
-                return {"risk_level": "high", "approval_required": True, "reason": "high_risk_command"}
-        low_risk_token = self._low_risk_token(normalized)
-        if low_risk_token:
-            outside_paths = self._outside_workspace_read_args(command, cwd, low_risk_token)
-            if outside_paths:
-                return {
-                    "risk_level": "high",
-                    "approval_required": True,
-                    "reason": "outside_workspace_path",
-                    "paths": outside_paths,
-                }
-            return {"risk_level": "low", "approval_required": False, "reason": "read_only_command"}
-        return {"risk_level": "medium", "approval_required": True, "reason": "command_execution"}
+        return classify_command(command, cwd=cwd, workspace_root=self._root)
 
     def _uses_shell_syntax(self, command):
         if isinstance(command, (list, tuple)):
@@ -178,7 +95,7 @@ class Terminal:
     def execute(self, command, cwd=None, timeout=30, env=None, approved=False):
         """コマンドを実行する。medium/high risk は approved が必要。"""
         risk = self.classify(command, cwd=cwd)
-        if risk["approval_required"] and not approved:
+        if risk["approval_required"] and (not approved or risk.get("classification") == "blocked"):
             self._record_command({
                 "type": "execute",
                 "command": command,
@@ -189,13 +106,17 @@ class Terminal:
                 "executed": False,
                 "exit_code": None,
             })
+            blocked = risk.get("classification") == "blocked"
             return {
                 "command": command,
                 "approval_required": True,
+                "classification": risk.get("classification", risk.get("risk_level")),
+                "risk_reasons": risk.get("risk_reasons", [risk.get("reason", "command_execution")]),
                 "risk": risk,
                 "exit_code": None,
                 "stdout": "",
-                "stderr": "",
+                "stderr": "blocked by terminal policy" if blocked else "",
+                **({"blocked": True} if blocked else {}),
             }
         resolved_cwd = self._resolve_cwd(cwd)
         normalized_command = self._normalized_command(command)
@@ -204,6 +125,9 @@ class Terminal:
                 "command": command,
                 "cwd": resolved_cwd,
                 "risk": risk,
+                "classification": risk.get("classification", risk.get("risk_level")),
+                "risk_reasons": risk.get("risk_reasons", [risk.get("reason", "read_only_command")]),
+                "approval_required": False,
                 "exit_code": 0,
                 "stdout": resolved_cwd + "\n",
                 "stderr": "",
@@ -241,6 +165,9 @@ class Terminal:
             "command": command,
             "cwd": resolved_cwd,
             "risk": risk,
+            "classification": risk.get("classification", risk.get("risk_level")),
+            "risk_reasons": risk.get("risk_reasons", [risk.get("reason", "command_execution")]),
+            "approval_required": False,
             "exit_code": completed.returncode,
             "stdout": self._truncate_output(completed.stdout),
             "stderr": self._truncate_output(completed.stderr),
@@ -260,7 +187,7 @@ class Terminal:
         実行はせず approval/risk つきの stream_id を返す。
         """
         risk = self.classify(command, cwd=cwd)
-        if risk["approval_required"] and not approved:
+        if risk["approval_required"] and (not approved or risk.get("classification") == "blocked"):
             self._record_command({
                 "type": "stream",
                 "command": command,
@@ -271,11 +198,15 @@ class Terminal:
                 "executed": False,
                 "started": False,
             })
+            blocked = risk.get("classification") == "blocked"
             return {
                 "command": command,
                 "approval_required": True,
+                "classification": risk.get("classification", risk.get("risk_level")),
+                "risk_reasons": risk.get("risk_reasons", [risk.get("reason", "command_execution")]),
                 "risk": risk,
                 "started": False,
+                **({"blocked": True} if blocked else {}),
             }
         stream_id = str(uuid.uuid4())
         resolved_cwd = self._resolve_cwd(cwd)
@@ -287,6 +218,8 @@ class Terminal:
                 "stream_id": stream_id,
                 "approval_required": False,
                 "risk": risk,
+                "classification": risk.get("classification", risk.get("risk_level")),
+                "risk_reasons": risk.get("risk_reasons", [risk.get("reason", "read_only_command")]),
                 "started": True,
                 "exit_code": 0,
                 "stdout": resolved_cwd + "\n",
@@ -339,6 +272,8 @@ class Terminal:
             "stream_id": stream_id,
             "approval_required": False,
             "risk": risk,
+            "classification": risk.get("classification", risk.get("risk_level")),
+            "risk_reasons": risk.get("risk_reasons", [risk.get("reason", "command_execution")]),
             "started": True,
             "exit_code": process.returncode,
             "stdout": self._truncate_output(stdout),

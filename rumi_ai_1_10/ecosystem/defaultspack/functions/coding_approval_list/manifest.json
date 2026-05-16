@@ -1,0 +1,41 @@
+{
+  "function_id": "coding_approval_list",
+  "description": "List pending coding approvals.",
+  "tags": [
+    "coding"
+  ],
+  "risk": "low",
+  "requires": [],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.coding.approval_list",
+    "defaultspack.coding.approval_list",
+    "defaults.coding.approval.list",
+    "defaultspack.coding.approval.list"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.coding.approval_list",
+      "default_args": {}
+    }
+  }
+}

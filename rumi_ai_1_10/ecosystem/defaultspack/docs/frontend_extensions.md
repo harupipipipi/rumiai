@@ -13,6 +13,23 @@
 
 ## 拡張ポイント
 
+### 読み込み順と有効化
+
+backend extension manifest は次の順で読み込まれる。
+
+1. `ecosystem/defaultspack/extensions/`
+2. 選択中の sibling pack の `extensions/`
+3. `ecosystem/defaultspack/user_data/shared/extensions/`
+4. `RUMI_DEFAULTSPACK_EXTENSION_ROOTS` で指定した追加 root
+
+frontend extension manifest は sibling pack の `frontend_extensions/` と
+`user_data/shared/frontend_extensions/` から読み込まれる。
+
+`user_data/settings/setup_pack_selection.json` がある場合、sibling pack は
+`target_pack_ids` / `active_target_pack_id` / legacy `target_pack_id` に含まれる
+pack だけが有効になる。`defaultspack` と user overlay は常に読み込まれる。
+selection file がない開発環境では、従来どおり全 sibling pack を読み込む。
+
 ### 0. Shell layout を差し替える
 
 `user_data/shared/frontend_shell.json` に `shell_layout` を置くと、既存 React を編集せずに表示 region を並べ替えたり無効化できる。

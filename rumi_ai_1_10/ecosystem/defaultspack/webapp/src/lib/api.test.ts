@@ -549,6 +549,78 @@ test("stopMessage calls backend stop endpoint", async () => {
   }
 });
 
+test("unsafe API requests include a local CSRF header", async () => {
+  const originalFetch = globalThis.fetch;
+  let requestHeaders: Headers | null = null;
+  globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+    requestHeaders = new Headers(init?.headers);
+    return new Response(JSON.stringify({
+      status: "ok",
+      data: { cancelled: true },
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }) as typeof fetch;
+
+  try {
+    await api.stopMessage("c1");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  const headers = requestHeaders as Headers | null;
+  assert.ok(headers);
+  assert.ok(headers.get("X-Rumi-CSRF"));
+});
+
+test("safe API requests do not include a local CSRF header", async () => {
+  const originalFetch = globalThis.fetch;
+  let requestHeaders: Headers | null = null;
+  globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+    requestHeaders = new Headers(init?.headers);
+    return new Response(JSON.stringify({
+      status: "ok",
+      data: { conversations: [], total: 0 },
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }) as typeof fetch;
+
+  try {
+    await api.listConversations();
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  const headers = requestHeaders as Headers | null;
+  assert.ok(headers);
+  assert.equal(headers.get("X-Rumi-CSRF"), null);
+});
+
+test("streamMessage includes a local CSRF header", async () => {
+  const originalFetch = globalThis.fetch;
+  let requestHeaders: Headers | null = null;
+  globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+    requestHeaders = new Headers(init?.headers);
+    return new Response(JSON.stringify({
+      status: "ok",
+      data: {
+        id: "m1",
+        role: "assistant",
+        content: "ok",
+        created_at: 1,
+        conversation_id: "c1",
+      },
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }) as typeof fetch;
+
+  try {
+    await api.streamMessage("c1", "hello");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  const headers = requestHeaders as Headers | null;
+  assert.ok(headers);
+  assert.ok(headers.get("X-Rumi-CSRF"));
+});
+
 test("browserComputer calls dedicated browser-computer endpoint", async () => {
   const originalFetch = globalThis.fetch;
   let requestUrl = "";

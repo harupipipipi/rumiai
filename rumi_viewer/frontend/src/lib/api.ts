@@ -21,6 +21,7 @@ import type {
   OAuthStartResponseData,
   SetupStatusResponseData,
   HealthResponseData,
+  BackgroundControlStatus,
   CapabilityGraphsResponseData,
   CapabilityGraphResponseData,
   CapabilityGraphCompileResponseData,
@@ -117,6 +118,10 @@ function getTauriInvoke(): TauriInvoke | null {
   return typeof invoke === 'function' ? invoke : null;
 }
 
+export function isDesktopShellAvailable(): boolean {
+  return getTauriInvoke() !== null;
+}
+
 export async function openExternalUrl(url: string): Promise<void> {
   const invoke = getTauriInvoke();
   if (invoke) {
@@ -125,6 +130,42 @@ export async function openExternalUrl(url: string): Promise<void> {
   }
 
   window.location.href = url;
+}
+
+export async function sendToBackground(): Promise<void> {
+  const invoke = getTauriInvoke();
+  if (!invoke) {
+    throw new Error('Background control is only available in Rumi Viewer.');
+  }
+
+  await invoke<void>('send_to_background');
+}
+
+export async function showAppWindow(): Promise<void> {
+  const invoke = getTauriInvoke();
+  if (!invoke) {
+    throw new Error('Window restore is only available in Rumi Viewer.');
+  }
+
+  await invoke<void>('show_app_window');
+}
+
+export async function fetchBackgroundControlStatus(): Promise<BackgroundControlStatus | null> {
+  const invoke = getTauriInvoke();
+  if (!invoke) {
+    return null;
+  }
+
+  return invoke<BackgroundControlStatus>('get_background_control_status');
+}
+
+export async function launchDefaultspackDesktop(): Promise<string> {
+  const invoke = getTauriInvoke();
+  if (!invoke) {
+    throw new Error('Defaultspack desktop launch is only available in Rumi Viewer.');
+  }
+
+  return invoke<string>('launch_defaultspack_desktop');
 }
 
 async function requestDesktopPanelBootstrapCode(): Promise<string | null> {

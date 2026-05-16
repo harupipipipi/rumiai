@@ -7,9 +7,13 @@ import {
   bootstrapPanelSession,
   clearStartupProfileNodeOverride,
   createStartupProfile,
+  fetchBackgroundControlStatus,
   hasPendingPanelBootstrapCode,
+  isDesktopShellAvailable,
   openExternalUrl,
+  sendToBackground,
   setStartupProfileNodeOverride,
+  showAppWindow,
 } from './api.ts';
 
 class MemoryStorage {
@@ -46,6 +50,8 @@ let lastReplacedUrl = '';
 let panelExchangeCount = 0;
 let tauriReauthorizeCount = 0;
 let tauriOpenExternalCount = 0;
+let tauriSendToBackgroundCount = 0;
+let tauriShowAppWindowCount = 0;
 let sessionStorageRef: MemoryStorage;
 let fetchHandler: ((input: string | URL | Request, init?: RequestInit) => Promise<Response>) | null = null;
 
@@ -62,6 +68,31 @@ function installBrowser(href: string): MemoryStorage {
           if (command === 'open_external_url') {
             tauriOpenExternalCount += 1;
             return undefined;
+          }
+          if (command === 'send_to_background') {
+            tauriSendToBackgroundCount += 1;
+            return undefined;
+          }
+          if (command === 'show_app_window') {
+            tauriShowAppWindowCount += 1;
+            return undefined;
+          }
+          if (command === 'get_background_control_status') {
+            return {
+              app_visible: false,
+              enabled: true,
+              foreground_window: null,
+              kernel_running: true,
+              shutdown_requested: false,
+              windows: [
+                {
+                  focused: false,
+                  label: 'main',
+                  minimized: false,
+                  visible: false,
+                },
+              ],
+            };
           }
           throw new Error(`Unknown command: ${command}`);
         },
@@ -148,6 +179,8 @@ beforeEach(() => {
   panelExchangeCount = 0;
   tauriReauthorizeCount = 0;
   tauriOpenExternalCount = 0;
+  tauriSendToBackgroundCount = 0;
+  tauriShowAppWindowCount = 0;
   installBrowser('http://127.0.0.1:8765/panel/');
   installFetchMock();
 });
@@ -342,6 +375,21 @@ test('openExternalUrl uses the desktop shell when Tauri is available', async () 
 
   assert.equal(tauriOpenExternalCount, 1);
   assert.equal(window.location.href, 'http://127.0.0.1:8765/panel/');
+});
+
+test('desktop shell helpers expose background control commands', async () => {
+  assert.equal(isDesktopShellAvailable(), true);
+
+  const status = await fetchBackgroundControlStatus();
+  await sendToBackground();
+  await showAppWindow();
+
+  assert.equal(status?.enabled, true);
+  assert.equal(status?.app_visible, false);
+  assert.equal(status?.kernel_running, true);
+  assert.equal(status?.windows[0]?.label, 'main');
+  assert.equal(tauriSendToBackgroundCount, 1);
+  assert.equal(tauriShowAppWindowCount, 1);
 });
 
 test('startup profile wrappers use v3 payloads and endpoints', async () => {
