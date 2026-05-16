@@ -1,0 +1,1 @@
+"""Company workspace blocks."""

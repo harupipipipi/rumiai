@@ -2,6 +2,7 @@
 
 from blocks._common import ok, error
 from blocks.coding._approval import approval_invalid_response, approval_required, is_server_approved
+from blocks.coding._workspace import resolve_workspace, with_workspace, workspace_error_response
 from domain.coding.file_ops import FileOps
 from domain.safety.audit import record_attempt, record_execution, record_failure
 
@@ -25,6 +26,13 @@ def run(input_data, context=None):
         return error("'content' is required", code="INVALID_INPUT")
     operation = "file.write"
     record_attempt(operation, "medium", {"path": path})
+    try:
+        workspace = resolve_workspace(input_data, context, mutation=True, operation=operation)
+    except Exception as e:
+        workspace_error = workspace_error_response(e, error)
+        if workspace_error:
+            return workspace_error
+        return error(str(e), code="WORKSPACE_ERROR")
     if not is_server_approved(context, operation, input_data):
         invalid = approval_invalid_response(operation, input_data, error)
         if invalid:
@@ -32,7 +40,7 @@ def run(input_data, context=None):
         return ok(approval_required(operation, "medium", args=input_data, path=path))
 
     try:
-        ops = FileOps(input_data.get("workspace_root"))
+        ops = FileOps(workspace.root_path)
         diff = ops.diff_text(path, content)
         checkpoint = None
         if input_data.get("checkpoint", True) is not False:
@@ -43,17 +51,20 @@ def run(input_data, context=None):
             )
         size = ops.write_file(path, content)
         record_execution(operation, "medium", {"path": path, "size": size})
-        data = {
+        data = with_workspace({
             "path": path,
             "size": size,
             "written": True,
             "diff": diff,
-        }
+        }, workspace)
         if checkpoint is not None:
             data["checkpoint"] = checkpoint
         return ok(data)
     except ValueError as e:
         return error(str(e), code="PATH_TRAVERSAL")
     except Exception as e:
+        workspace_error = workspace_error_response(e, error)
+        if workspace_error:
+            return workspace_error
         record_failure(operation, "medium", str(e), {"path": path})
         return error(str(e), code="WRITE_ERROR")

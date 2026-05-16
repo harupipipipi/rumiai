@@ -5,9 +5,6 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
-from domain.chat.store import ChatStore
-
-
 CATEGORIES = {"chat", "model", "mode", "coding", "tools", "settings", "debug"}
 VISIBILITIES = {"default", "advanced", "hidden"}
 MODES = {"chat", "coding", "agent"}
@@ -179,19 +176,22 @@ class SlashCommandRegistry:
             return ok({"command": self._public_command(command), "executed": False, "action": action, "args": args})
 
         conversation_id = str(payload.get("conversation_id") or "").strip()
-        if not conversation_id:
-            return error("conversation_id is required", "INVALID_INPUT")
-        conversation = ChatStore().get_conversation(conversation_id)
-        if conversation is None:
-            return error("Conversation not found", "NOT_FOUND")
+        if conversation_id:
+            from blocks.chat.compact import run as chat_compact_run
+
+            compact_input = dict(args)
+            compact_input["conversation_id"] = conversation_id
+            result = chat_compact_run(compact_input, context)
+            if isinstance(result, dict) and result.get("status") == "ok":
+                return ok({"command": self._public_command(command), "executed": True, "result": result.get("data")})
+            return result if isinstance(result, dict) else error("compact command failed", "EXECUTION_FAILED")
 
         from blocks.context.compact import run as compact_run
 
         result = compact_run(
             {
-                "conversation_id": conversation_id,
                 "goal": str(args.get("instruction") or "Compact current conversation"),
-                "messages": conversation.get("messages", []),
+                "messages": payload.get("messages", []),
                 "summary": args.get("instruction"),
             },
             context,

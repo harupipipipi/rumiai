@@ -14,6 +14,46 @@ class HttpRouteSpec:
     block_module: str = ""
     handler_name: str = ""
     path_inject: Dict[str, str] = field(default_factory=dict)
+    defaults: Dict[str, Any] = field(default_factory=dict)
+
+
+_ROUTE_PARAM_RE = re.compile(r"\{(\w+)\}")
+
+
+def http_route_sort_key(method: str, pattern: str, index: int = 0):
+    """Sort exact/static routes before parameterized catch-all siblings."""
+    segments = [segment for segment in str(pattern or "").split("/") if segment]
+    param_count = 0
+    catch_all_count = 0
+    static_segment_count = 0
+    for segment in segments:
+        match = _ROUTE_PARAM_RE.fullmatch(segment)
+        if match is None:
+            static_segment_count += 1
+            continue
+        param_count += 1
+        if match.group(1) == "path":
+            catch_all_count += 1
+    literal_chars = len(_ROUTE_PARAM_RE.sub("", str(pattern or "")))
+    return (
+        str(method or "").upper(),
+        catch_all_count,
+        param_count,
+        -static_segment_count,
+        -len(segments),
+        -literal_chars,
+        index,
+    )
+
+
+def compile_http_route_pattern(pattern: str):
+    regex_pattern = _ROUTE_PARAM_RE.sub(
+        lambda match: r"(?P<{}>.+)".format(match.group(1))
+        if match.group(1) == "path"
+        else r"(?P<{}>[^/]+)".format(match.group(1)),
+        pattern,
+    )
+    return re.compile("^" + regex_pattern + "$")
 
 
 _FALLBACK_HTTP_ROUTE_SPECS = [
@@ -38,6 +78,8 @@ _FALLBACK_HTTP_ROUTE_SPECS = [
     HttpRouteSpec("POST", "/api/chat/channels/{id}/messages/{msg_id}/reply", block_module="blocks.chat.channel.reply", path_inject={"id": "id", "msg_id": "msg_id"}),
     HttpRouteSpec("POST", "/api/chat/conversations/{id}/summarize", block_module="blocks.chat.summarize_and_trim", path_inject={"id": "conversation_id"}),
     HttpRouteSpec("POST", "/api/chat/conversations/{id}/auto-trim", block_module="blocks.chat.auto_trim", path_inject={"id": "conversation_id"}),
+    HttpRouteSpec("POST", "/api/chat/conversations/{id}/compact", block_module="blocks.chat.compact", path_inject={"id": "conversation_id"}),
+    HttpRouteSpec("POST", "/api/chat/conversations/{id}/auto-compact", block_module="blocks.chat.auto_compact", path_inject={"id": "conversation_id"}),
     HttpRouteSpec("GET", "/api/chat/conversations/{id}/run-results/{run_id}/browser-screenshots", block_module="blocks.chat.browser_screenshots", path_inject={"id": "conversation_id", "run_id": "run_id"}),
     HttpRouteSpec("GET", "/v1/conversations/{id}/run-results/{run_id}/browser-screenshots", block_module="blocks.chat.browser_screenshots", path_inject={"id": "conversation_id", "run_id": "run_id"}),
     HttpRouteSpec("GET", "/api/chat/conversations/{id}/artifact-file", block_module="blocks.chat.artifact_file", path_inject={"id": "conversation_id"}),
@@ -47,6 +89,7 @@ _FALLBACK_HTTP_ROUTE_SPECS = [
     HttpRouteSpec("POST", "/api/integrations/line/webhook", block_module="blocks.integrations.line"),
     HttpRouteSpec("POST", "/api/integrations/discord/interactions", block_module="blocks.integrations.discord"),
     HttpRouteSpec("POST", "/api/integrations/discord/events", block_module="blocks.integrations.discord"),
+    HttpRouteSpec("POST", "/api/integrations/p2p/events", block_module="blocks.integrations.p2p"),
     HttpRouteSpec("GET", "/api/external/tokens", block_module="blocks.external.tokens"),
     HttpRouteSpec("POST", "/api/external/tokens", block_module="blocks.external.tokens"),
     HttpRouteSpec("GET", "/api/external/sources", block_module="blocks.external.sources"),
@@ -62,6 +105,18 @@ _FALLBACK_HTTP_ROUTE_SPECS = [
     HttpRouteSpec("GET", "/api/webhooks/public-urls", block_module="blocks.webhooks.public_url"),
     HttpRouteSpec("POST", "/api/webhooks/public-urls", block_module="blocks.webhooks.public_url"),
     HttpRouteSpec("DELETE", "/api/webhooks/public-urls/{url_id}", block_module="blocks.webhooks.public_url", path_inject={"url_id": "url_id"}),
+    HttpRouteSpec("GET", "/api/p2p/status", block_module="blocks.p2p.status"),
+    HttpRouteSpec("GET", "/api/p2p/identity", block_module="blocks.p2p.identity"),
+    HttpRouteSpec("POST", "/api/p2p/identity/rotate", block_module="blocks.p2p.identity", defaults={"rotate": True}),
+    HttpRouteSpec("GET", "/api/p2p/peers", block_module="blocks.p2p.peers"),
+    HttpRouteSpec("POST", "/api/p2p/peers", block_module="blocks.p2p.peers"),
+    HttpRouteSpec("PUT", "/api/p2p/peers/{peer_id}", block_module="blocks.p2p.peers", path_inject={"peer_id": "peer_id"}),
+    HttpRouteSpec("DELETE", "/api/p2p/peers/{peer_id}", block_module="blocks.p2p.peers", path_inject={"peer_id": "peer_id"}),
+    HttpRouteSpec("POST", "/api/p2p/pairing/start", block_module="blocks.p2p.pairing_start"),
+    HttpRouteSpec("POST", "/api/p2p/pairing/accept", block_module="blocks.p2p.pairing_accept"),
+    HttpRouteSpec("POST", "/api/p2p/pairing/reject", block_module="blocks.p2p.pairing_reject"),
+    HttpRouteSpec("POST", "/api/p2p/messages/inbound", block_module="blocks.p2p.messages_inbound"),
+    HttpRouteSpec("POST", "/api/p2p/messages/send", block_module="blocks.p2p.messages_send"),
     HttpRouteSpec("POST", "/api/agent/execute", block_module="blocks.agent.execute"),
     HttpRouteSpec("POST", "/api/agent/{id}/approve", block_module="blocks.agent.approve", path_inject={"id": "execution_id"}),
     HttpRouteSpec("POST", "/api/agent/{id}/reject", block_module="blocks.agent.reject", path_inject={"id": "execution_id"}),
@@ -69,6 +124,54 @@ _FALLBACK_HTTP_ROUTE_SPECS = [
     HttpRouteSpec("GET", "/api/agent/company/manifest", block_module="ecosystem.rumi_operations_company_pack.blocks.agent.company.manifest"),
     HttpRouteSpec("GET", "/api/agent/company/status", block_module="ecosystem.rumi_operations_company_pack.blocks.agent.company.status"),
     HttpRouteSpec("POST", "/api/agent/company/bootstrap", block_module="ecosystem.rumi_operations_company_pack.blocks.agent.company.bootstrap"),
+    HttpRouteSpec("GET", "/api/company", block_module="blocks.company.list"),
+    HttpRouteSpec("POST", "/api/company", block_module="blocks.company.create"),
+    HttpRouteSpec("GET", "/api/company/status", block_module="blocks.company.status"),
+    HttpRouteSpec("POST", "/api/company/bootstrap", block_module="blocks.company.bootstrap"),
+    HttpRouteSpec("GET", "/api/company/{company_id}", block_module="blocks.company.get", path_inject={"company_id": "company_id"}),
+    HttpRouteSpec("PUT", "/api/company/{company_id}", block_module="blocks.company.update", path_inject={"company_id": "company_id"}),
+    HttpRouteSpec("DELETE", "/api/company/{company_id}", block_module="blocks.company.delete", path_inject={"company_id": "company_id"}),
+    HttpRouteSpec("GET", "/api/company/{company_id}/settings", block_module="blocks.company.settings", path_inject={"company_id": "company_id"}),
+    HttpRouteSpec("POST", "/api/company/{company_id}/settings", block_module="blocks.company.settings", path_inject={"company_id": "company_id"}),
+    HttpRouteSpec("GET", "/api/company/{company_id}/agents", block_module="blocks.company.agents", path_inject={"company_id": "company_id"}),
+    HttpRouteSpec("POST", "/api/company/{company_id}/agents", block_module="blocks.company.agents", path_inject={"company_id": "company_id"}),
+    HttpRouteSpec("GET", "/api/company/{company_id}/channels", block_module="blocks.company.channels", path_inject={"company_id": "company_id"}),
+    HttpRouteSpec("POST", "/api/company/{company_id}/channels", block_module="blocks.company.channels", path_inject={"company_id": "company_id"}),
+    HttpRouteSpec("GET", "/api/company/{company_id}/messages", block_module="blocks.company.messages", path_inject={"company_id": "company_id"}),
+    HttpRouteSpec("POST", "/api/company/{company_id}/messages", block_module="blocks.company.messages", path_inject={"company_id": "company_id"}),
+    HttpRouteSpec("GET", "/api/company/{company_id}/tasks", block_module="blocks.company.tasks", path_inject={"company_id": "company_id"}),
+    HttpRouteSpec("POST", "/api/company/{company_id}/tasks", block_module="blocks.company.tasks", path_inject={"company_id": "company_id"}),
+    HttpRouteSpec("POST", "/api/company/{company_id}/dispatch", block_module="blocks.company.dispatch", path_inject={"company_id": "company_id"}),
+    HttpRouteSpec("GET", "/api/company/{company_id}/inbound-routes", block_module="blocks.company.inbound_routes", path_inject={"company_id": "company_id"}),
+    HttpRouteSpec("POST", "/api/company/{company_id}/inbound-routes", block_module="blocks.company.inbound_routes", path_inject={"company_id": "company_id"}),
+    HttpRouteSpec("GET", "/api/agent/companies", block_module="blocks.company.list"),
+    HttpRouteSpec("POST", "/api/agent/companies", block_module="blocks.company.create"),
+    HttpRouteSpec("GET", "/api/agent/companies/{company_id}", block_module="blocks.company.get", path_inject={"company_id": "company_id"}),
+    HttpRouteSpec("PUT", "/api/agent/companies/{company_id}", block_module="blocks.company.update", path_inject={"company_id": "company_id"}),
+    HttpRouteSpec("DELETE", "/api/agent/companies/{company_id}", block_module="blocks.company.delete", path_inject={"company_id": "company_id"}),
+    HttpRouteSpec("POST", "/api/agent/companies/{company_id}/bootstrap", block_module="blocks.company.bootstrap", path_inject={"company_id": "company_id"}),
+    HttpRouteSpec("GET", "/api/agent/companies/{company_id}/status", block_module="blocks.company.status", path_inject={"company_id": "company_id"}),
+    HttpRouteSpec("GET", "/api/agent/companies/{company_id}/settings", block_module="blocks.company.settings", path_inject={"company_id": "company_id"}, defaults={"action": "get"}),
+    HttpRouteSpec("PUT", "/api/agent/companies/{company_id}/settings", block_module="blocks.company.settings", path_inject={"company_id": "company_id"}, defaults={"action": "update"}),
+    HttpRouteSpec("GET", "/api/agent/companies/{company_id}/agents", block_module="blocks.company.agents", path_inject={"company_id": "company_id"}, defaults={"action": "list"}),
+    HttpRouteSpec("POST", "/api/agent/companies/{company_id}/agents", block_module="blocks.company.agents", path_inject={"company_id": "company_id"}, defaults={"action": "create"}),
+    HttpRouteSpec("GET", "/api/agent/companies/{company_id}/agents/{agent_id}", block_module="blocks.company.agents", path_inject={"company_id": "company_id", "agent_id": "agent_id"}, defaults={"action": "get"}),
+    HttpRouteSpec("PUT", "/api/agent/companies/{company_id}/agents/{agent_id}", block_module="blocks.company.agents", path_inject={"company_id": "company_id", "agent_id": "agent_id"}, defaults={"action": "update"}),
+    HttpRouteSpec("DELETE", "/api/agent/companies/{company_id}/agents/{agent_id}", block_module="blocks.company.agents", path_inject={"company_id": "company_id", "agent_id": "agent_id"}, defaults={"action": "delete"}),
+    HttpRouteSpec("GET", "/api/agent/companies/{company_id}/channels", block_module="blocks.company.channels", path_inject={"company_id": "company_id"}, defaults={"action": "list"}),
+    HttpRouteSpec("POST", "/api/agent/companies/{company_id}/channels", block_module="blocks.company.channels", path_inject={"company_id": "company_id"}, defaults={"action": "create"}),
+    HttpRouteSpec("GET", "/api/agent/companies/{company_id}/channels/{channel_id}/messages", block_module="blocks.company.messages", path_inject={"company_id": "company_id", "channel_id": "channel_id"}, defaults={"action": "list"}),
+    HttpRouteSpec("POST", "/api/agent/companies/{company_id}/channels/{channel_id}/messages", block_module="blocks.company.messages", path_inject={"company_id": "company_id", "channel_id": "channel_id"}, defaults={"action": "create"}),
+    HttpRouteSpec("POST", "/api/agent/companies/{company_id}/mention", block_module="blocks.company.mention", path_inject={"company_id": "company_id"}),
+    HttpRouteSpec("POST", "/api/agent/companies/{company_id}/dispatch", block_module="blocks.company.dispatch", path_inject={"company_id": "company_id"}),
+    HttpRouteSpec("GET", "/api/agent/companies/{company_id}/tasks", block_module="blocks.company.tasks", path_inject={"company_id": "company_id"}, defaults={"action": "list"}),
+    HttpRouteSpec("POST", "/api/agent/companies/{company_id}/tasks", block_module="blocks.company.tasks", path_inject={"company_id": "company_id"}, defaults={"action": "create"}),
+    HttpRouteSpec("PUT", "/api/agent/companies/{company_id}/tasks/{task_id}", block_module="blocks.company.tasks", path_inject={"company_id": "company_id", "task_id": "task_id"}, defaults={"action": "update"}),
+    HttpRouteSpec("GET", "/api/agent/companies/{company_id}/inbound-routes", block_module="blocks.company.inbound_routes", path_inject={"company_id": "company_id"}, defaults={"action": "list"}),
+    HttpRouteSpec("POST", "/api/agent/companies/{company_id}/inbound-routes", block_module="blocks.company.inbound_routes", path_inject={"company_id": "company_id"}, defaults={"action": "create"}),
+    HttpRouteSpec("PUT", "/api/agent/companies/{company_id}/inbound-routes/{route_id}", block_module="blocks.company.inbound_routes", path_inject={"company_id": "company_id", "route_id": "route_id"}, defaults={"action": "update"}),
+    HttpRouteSpec("DELETE", "/api/agent/companies/{company_id}/inbound-routes/{route_id}", block_module="blocks.company.inbound_routes", path_inject={"company_id": "company_id", "route_id": "route_id"}, defaults={"action": "delete"}),
+    HttpRouteSpec("POST", "/api/agent/companies/{company_id}/inbound-routes/{route_id}/ingest", block_module="blocks.company.inbound_routes", path_inject={"company_id": "company_id", "route_id": "route_id"}, defaults={"action": "ingest"}),
     HttpRouteSpec("GET", "/api/agent/{id}/status", block_module="blocks.agent.status", path_inject={"id": "execution_id"}),
     HttpRouteSpec("POST", "/api/agent/multi/execute", block_module="blocks.agent.multi_execute"),
     HttpRouteSpec("GET", "/api/agent/multi/{id}/status", block_module="blocks.agent.multi_status", path_inject={"id": "session_id"}),
@@ -113,6 +216,16 @@ _FALLBACK_HTTP_ROUTE_SPECS = [
     HttpRouteSpec("POST", "/api/coding/git/commit", block_module="blocks.coding.git_commit"),
     HttpRouteSpec("POST", "/api/coding/approvals/approve", block_module="blocks.coding.approval_approve"),
     HttpRouteSpec("POST", "/api/coding/approvals/deny", block_module="blocks.coding.approval_deny"),
+    HttpRouteSpec("GET", "/api/coding/workspaces", block_module="blocks.coding.workspace.list"),
+    HttpRouteSpec("POST", "/api/coding/workspaces", block_module="blocks.coding.workspace.create"),
+    HttpRouteSpec("GET", "/api/coding/workspaces/get", block_module="blocks.coding.workspace.get"),
+    HttpRouteSpec("POST", "/api/coding/workspaces/update", block_module="blocks.coding.workspace.update"),
+    HttpRouteSpec("POST", "/api/coding/workspaces/select", block_module="blocks.coding.workspace.select"),
+    HttpRouteSpec("POST", "/api/coding/workspaces/trust", block_module="blocks.coding.workspace.trust"),
+    HttpRouteSpec("GET", "/api/coding/workspaces/{workspace_id}", block_module="blocks.coding.workspace.get", path_inject={"workspace_id": "workspace_id"}),
+    HttpRouteSpec("PUT", "/api/coding/workspaces/{workspace_id}", block_module="blocks.coding.workspace.update", path_inject={"workspace_id": "workspace_id"}),
+    HttpRouteSpec("POST", "/api/coding/workspaces/{workspace_id}/select", block_module="blocks.coding.workspace.select", path_inject={"workspace_id": "workspace_id"}),
+    HttpRouteSpec("POST", "/api/coding/workspaces/{workspace_id}/trust", block_module="blocks.coding.workspace.trust", path_inject={"workspace_id": "workspace_id"}),
     HttpRouteSpec("POST", "/api/research/local-search", block_module="blocks.research.local_search"),
     HttpRouteSpec("POST", "/api/research/web-search", block_module="blocks.research.web_search"),
     HttpRouteSpec("POST", "/api/research/reddit-search", block_module="blocks.research.reddit_search"),
@@ -201,15 +314,15 @@ class TransportRegistry:
 
 def build_http_routes_from_specs(server: Any, specs: List[HttpRouteSpec]):
     routes = []
-    for spec in specs:
-        regex_pattern = re.sub(
-            r"\{(\w+)\}",
-            lambda match: r"(?P<{}>.+)".format(match.group(1))
-            if match.group(1) == "path"
-            else r"(?P<{}>[^/]+)".format(match.group(1)),
-            spec.pattern,
+    ordered_specs = [
+        spec
+        for _, spec in sorted(
+            enumerate(specs),
+            key=lambda item: http_route_sort_key(item[1].method, item[1].pattern, item[0]),
         )
-        compiled = re.compile("^" + regex_pattern + "$")
+    ]
+    for spec in ordered_specs:
+        compiled = compile_http_route_pattern(spec.pattern)
         if spec.block_module:
             def _handler(
                 request_data,
@@ -217,10 +330,12 @@ def build_http_routes_from_specs(server: Any, specs: List[HttpRouteSpec]):
                 *,
                 block_module=spec.block_module,
                 path_inject=dict(spec.path_inject),
+                route_defaults=dict(spec.defaults),
                 route_method=spec.method,
             ):
                 payload = dict(request_data or {})
-                payload.setdefault("_method", route_method)
+                payload.update(route_defaults)
+                payload["_method"] = route_method
                 return server._invoke_fallback_block(
                     block_module,
                     payload,

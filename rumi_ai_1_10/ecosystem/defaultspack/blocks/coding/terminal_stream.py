@@ -2,6 +2,7 @@
 
 from blocks._common import error, ok
 from blocks.coding._approval import approval_invalid_response, approval_required, is_server_approved
+from blocks.coding._workspace import resolve_workspace, with_workspace, workspace_error_response
 from domain.coding.terminal import Terminal
 from domain.safety.audit import record_attempt, record_execution, record_failure
 
@@ -23,8 +24,9 @@ def run(input_data, context=None):
     cwd = input_data.get("cwd")
 
     try:
-        terminal = Terminal(input_data.get("workspace_root"))
         operation = "terminal.stream"
+        workspace = resolve_workspace(input_data, context, mutation=True, operation=operation)
+        terminal = Terminal(workspace.root_path)
         risk = terminal.classify(command)
         record_attempt(operation, risk["risk_level"], {"command": command, "cwd": cwd})
         approved = is_server_approved(context, operation, input_data)
@@ -45,7 +47,10 @@ def run(input_data, context=None):
             )
         result = terminal.stream(command, cwd=cwd, approved=approved)
         record_execution(operation, risk["risk_level"], {"command": command, "cwd": cwd})
-        return ok(result)
+        return ok(with_workspace(result, workspace))
     except Exception as e:
+        workspace_error = workspace_error_response(e, error)
+        if workspace_error:
+            return workspace_error
         record_failure("terminal.stream", "medium", str(e), {"command": command, "cwd": cwd})
         return error(str(e), code="STREAM_ERROR")

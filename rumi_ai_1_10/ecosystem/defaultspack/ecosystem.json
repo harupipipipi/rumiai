@@ -509,6 +509,10 @@
     },
     {
       "method": "POST",
+      "path": "/api/integrations/p2p/events"
+    },
+    {
+      "method": "POST",
       "path_prefix": "/api/webhooks/inbound"
     }
   ],

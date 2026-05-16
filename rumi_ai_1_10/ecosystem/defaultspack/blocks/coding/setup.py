@@ -45,6 +45,12 @@ def run(context):
         ("POST", "/api/coding/git/push", _lazy("blocks.coding.git_push"), {}),
         ("POST", "/api/coding/approvals/approve", _lazy("blocks.coding.approval_approve"), {}),
         ("POST", "/api/coding/approvals/deny", _lazy("blocks.coding.approval_deny"), {}),
+        ("GET", "/api/coding/workspaces", _lazy("blocks.coding.workspace.list"), {}),
+        ("POST", "/api/coding/workspaces", _lazy("blocks.coding.workspace.create"), {}),
+        ("GET", "/api/coding/workspaces/get", _lazy("blocks.coding.workspace.get"), {}),
+        ("POST", "/api/coding/workspaces/update", _lazy("blocks.coding.workspace.update"), {}),
+        ("POST", "/api/coding/workspaces/select", _lazy("blocks.coding.workspace.select"), {}),
+        ("POST", "/api/coding/workspaces/trust", _lazy("blocks.coding.workspace.trust"), {}),
     ]
 
     for method, pattern, handler, path_inject in routes:

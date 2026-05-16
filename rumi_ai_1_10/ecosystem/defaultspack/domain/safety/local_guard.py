@@ -12,6 +12,7 @@ SENSITIVE_CODING_PATHS = {
     "/api/coding/files/create",
     "/api/coding/files/delete",
     "/api/coding/files/patch",
+    "/api/coding/files/snapshot",
     "/api/coding/files/restore",
     "/api/coding/terminal/exec",
     "/api/coding/terminal/stream",
@@ -19,10 +20,14 @@ SENSITIVE_CODING_PATHS = {
     "/api/coding/git/push",
     "/api/coding/approvals/approve",
     "/api/coding/approvals/deny",
+    "/api/coding/workspaces/update",
+    "/api/coding/workspaces/select",
+    "/api/coding/workspaces/trust",
 }
 
 METHOD_SENSITIVE_CODING_PATHS = {
     "/api/coding/git/branch": {"POST"},
+    "/api/coding/workspaces": {"POST"},
 }
 
 

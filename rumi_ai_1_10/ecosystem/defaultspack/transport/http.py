@@ -21,7 +21,12 @@ from domain.safety.local_guard import (
     origin_allowed as _local_origin_allowed,
     require_local_guard,
 )
-from transport.registry import build_always_available_http_routes, build_fallback_http_routes
+from transport.registry import (
+    build_always_available_http_routes,
+    build_fallback_http_routes,
+    compile_http_route_pattern,
+    http_route_sort_key,
+)
 
 
 _SAFE_GET_FALLBACK_BLOCKS = {
@@ -87,7 +92,8 @@ class DefaultsHttpServer:
             try:
                 raw = self.facade.get_interface("io.http.route", strategy="all")
                 if raw and isinstance(raw, list):
-                    for entry in raw:
+                    route_entries = []
+                    for index, entry in enumerate(raw):
                         if not isinstance(entry, dict):
                             continue
                         method = entry.get("method")
@@ -95,18 +101,15 @@ class DefaultsHttpServer:
                         handler = entry.get("handler")
                         path_inject = entry.get("path_inject", {})
                         if method and pattern and callable(handler):
-                            regex_pattern = re.sub(
-                                r"\{(\w+)\}",
-                                lambda match: r"(?P<{}>.+)".format(match.group(1))
-                                if match.group(1) == "path"
-                                else r"(?P<{}>[^/]+)".format(match.group(1)),
-                                pattern,
-                            )
-                            regex_pattern = "^" + regex_pattern + "$"
-                            compiled = re.compile(regex_pattern)
-                            registry_routes.append(
-                                (method, compiled, handler, "registry", path_inject)
-                            )
+                            route_entries.append((method, pattern, handler, path_inject, index))
+                    for method, pattern, handler, path_inject, index in sorted(
+                        route_entries,
+                        key=lambda item: http_route_sort_key(item[0], item[1], item[4]),
+                    ):
+                        compiled = compile_http_route_pattern(pattern)
+                        registry_routes.append(
+                            (method, compiled, handler, "registry", path_inject)
+                        )
             except Exception as exc:
                 print(
                     "[defaults] WARNING: failed to collect io.http.route from "

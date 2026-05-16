@@ -1,6 +1,6 @@
-import type { FormEvent, MutableRefObject } from "react";
+import type { FormEvent, MutableRefObject, ReactNode } from "react";
 
-import type { ChatActivityEvent, ChatContentBlock, CodingContextEntry, CodingGitStatus, ComposerWidgetAction, ModelCommandCandidate, ModelProfile, SettingsSection, SidebarAction, SidebarItem, ToolLogEntry, UICatalog } from "../lib/api";
+import type { ChatActivityEvent, ChatContentBlock, CodingContextEntry, CodingGitStatus, CodingWorkspaceRecord, ComposerWidgetAction, ModelCommandCandidate, ModelProfile, SettingsSection, SidebarAction, SidebarItem, ToolLogEntry, UICatalog } from "../lib/api";
 import type { ComposerCommandItem } from "../lib/api";
 import type { ChatItem } from "../components/HistoryBoard";
 import type { ToolPreviewItem, ToolPreviewMode } from "../components/ToolPreview";
@@ -58,6 +58,7 @@ export type HistoryBoardRendererProps = {
   onChatSelect: (conversationId: string) => void;
   onNewTask: () => void;
   onSettingsClick: () => void;
+  onChatMetadataChange?: (chatId: string, updates: { is_pinned?: boolean; is_starred?: boolean; tags?: string[] }) => void;
   onMinimize?: () => void;
   onRestore?: () => void;
   isCompact?: boolean;
@@ -107,6 +108,8 @@ export type ComposerRendererProps = {
   yoloMode?: boolean;
   mode?: AppMode;
   codingContext?: CodingContext | null;
+  codingWorkspaces?: CodingWorkspaceRecord[];
+  selectedCodingWorkspaceId?: string | null;
   attachedFiles?: AttachedFile[];
   droppedWidgets?: DroppedWidget[];
   selectedToolIds?: string[];
@@ -130,6 +133,10 @@ export type ComposerRendererProps = {
   onWidgetToggle?: (widgetId: string) => void;
   onCodingBranchSwitch?: (branch: string, create?: boolean) => void;
   onCodingDirectoryChange?: (directory: string) => void;
+  onCodingWorkspaceSelect?: (workspaceId: string) => void;
+  onCodingWorkspaceTrust?: (workspaceId: string) => void;
+  onCodingWorkspaceCreate?: () => void;
+  onCodingWorkspacesRefresh?: () => void;
   onCodingContextRefresh?: () => void;
 };
 
@@ -150,6 +157,7 @@ export type RightSidebarRendererProps = {
   settingsValues: Record<string, Record<string, unknown>>;
   settingsSections: SettingsSection[];
   selectedToolIds?: string[];
+  companyPanel?: ReactNode;
   keyboardButtonNavigation?: boolean;
   onSettingChange: SettingChangeHandler;
   onOpenSettings: () => void;
@@ -185,6 +193,7 @@ export type AppMode = "chat" | "coding" | "agent";
 export type CodingContext = {
   branch: string | null;
   rootFolder: string | null;
+  workspaceId?: string | null;
   directory?: string;
   branches?: string[];
   files: string[];

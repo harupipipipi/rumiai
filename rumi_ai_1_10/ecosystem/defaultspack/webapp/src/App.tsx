@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent } from "react";
 
+import { CompanyWorkspacePanel } from "./components/company/CompanyWorkspacePanel";
 import { ConversationSpotlight } from "./components/ConversationSpotlight";
 import type { ChatItem } from "./components/HistoryBoard";
 import type { ToolPreviewItem, ToolPreviewMode } from "./components/ToolPreview";
 import { buildToolPreviewDisplayItems, hasCanvasItems } from "./components/ToolPreview";
-import { api, type ChatActivityEvent, type ChatContentBlock, type ChatMessage, type ChatStreamEvent, type ChatToolStreamEvent, type ComposerCommandExecuteResult, type ComposerCommandItem, type ComposerCommandMode, type ComposerWidgetAction, type Conversation, type ConversationSearchResult, type ModelCommandCandidate, type ModelProfile, type OperationsCompanyStatus, type SettingsSection, type SidebarAction, type SidebarItem, type UICatalog } from "./lib/api";
+import { api, type ChatActivityEvent, type ChatContentBlock, type ChatMessage, type ChatStreamEvent, type ChatToolStreamEvent, type CodingWorkspaceRecord, type ComposerCommandExecuteResult, type ComposerCommandItem, type ComposerCommandMode, type ComposerWidgetAction, type Conversation, type ConversationSearchResult, type ModelCommandCandidate, type ModelProfile, type OperationsCompanyStatus, type SettingsSection, type SidebarAction, type SidebarItem, type UICatalog } from "./lib/api";
 import { reduceBrowserStateFromEvents } from "./lib/browserState";
 import { deriveConversationTitle, formatRelativeTime, messageToText, orderConversationMessages } from "./lib/chat";
 import { cn } from "./lib/cn";
@@ -80,6 +81,7 @@ function externalConversationSection(conversation: Conversation): { id: string; 
 
 function toChatItem(conversation: Conversation): ChatItem {
   const section = externalConversationSection(conversation);
+  const metadata = conversation.metadata ?? {};
   return {
     id: conversation.id,
     title: conversation.title,
@@ -89,6 +91,12 @@ function toChatItem(conversation: Conversation): ChatItem {
     conversationKind: conversation.conversation_kind ?? "chat",
     sectionId: section?.id ?? null,
     sectionTitle: section?.title ?? null,
+    tags: conversation.tags ?? [],
+    isStarred: conversation.is_starred,
+    isPinned: Boolean(conversation.is_pinned),
+    companyId: typeof metadata.company_id === "string" ? metadata.company_id : null,
+    workspaceId: typeof metadata.workspace_id === "string" ? metadata.workspace_id : null,
+    metadata,
   };
 }
 
@@ -598,7 +606,7 @@ function isPendingInLocation(): boolean {
 
 function replaceChatIdInUrl(conversationId: string | null, pending?: boolean) {
   const url = new URL(window.location.href);
-  url.pathname = "/chat";
+  url.pathname = window.location.pathname === "/coding" ? "/coding" : "/chat";
   if (conversationId) {
     url.searchParams.set("chat", conversationId);
   } else {
@@ -777,6 +785,8 @@ export default function App() {
   const [yoloMode, setYoloMode] = useLocalStorage("rumi-yolo-mode", false);
   const [mode, setMode] = useLocalStorage<AppMode>("rumi-app-mode", "chat");
   const [codingContext, setCodingContext] = useState<CodingContext | null>(null);
+  const [codingWorkspaces, setCodingWorkspaces] = useState<CodingWorkspaceRecord[]>([]);
+  const [selectedCodingWorkspaceId, setSelectedCodingWorkspaceId] = useState<string | null>(null);
   const [codingDirectory, setCodingDirectory] = useState(".");
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
   const [droppedWidgets, setDroppedWidgets] = useState<DroppedWidget[]>([]);
@@ -898,15 +908,29 @@ export default function App() {
     });
   };
 
+  const loadCodingWorkspaces = useCallback(async () => {
+    try {
+      const result = await api.listCodingWorkspaces();
+      setCodingWorkspaces(result.workspaces);
+      setSelectedCodingWorkspaceId((current) => current ?? result.selected_workspace_id ?? result.workspaces[0]?.workspace_id ?? null);
+      return result;
+    } catch {
+      setCodingWorkspaces([]);
+      return { workspaces: [], selected_workspace_id: null };
+    }
+  }, []);
+
   const loadCodingContext = useCallback(async () => {
+    const workspaceId = selectedCodingWorkspaceId;
     try {
       const [result, branchInfo] = await Promise.all([
-        api.getCodingContext({ directory: codingDirectory }),
-        api.getGitBranch().catch(() => null),
+        api.getCodingContext({ directory: codingDirectory, workspace_id: workspaceId }),
+        api.getGitBranch({ workspace_id: workspaceId }).catch(() => null),
       ]);
       setCodingContext({
         branch: result.branch,
         rootFolder: result.root_folder,
+        workspaceId: result.workspace_id ?? workspaceId,
         directory: result.directory ?? codingDirectory,
         branches: branchInfo?.branches ?? [],
         files: result.files,
@@ -916,7 +940,7 @@ export default function App() {
     } catch {
       setCodingContext(null);
     }
-  }, [codingDirectory]);
+  }, [codingDirectory, selectedCodingWorkspaceId]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -955,9 +979,14 @@ export default function App() {
 
   useEffect(() => {
     if (mode === "coding") {
-      void loadCodingContext();
+      void loadCodingWorkspaces().then(() => loadCodingContext());
     }
-  }, [mode, loadCodingContext]);
+  }, [mode, loadCodingContext, loadCodingWorkspaces]);
+
+  useEffect(() => {
+    if (window.location.pathname !== "/coding") return;
+    setMode("coding");
+  }, [setMode]);
 
   async function refreshHealth() {
     try {
@@ -1301,6 +1330,16 @@ export default function App() {
     void loadConversation(conversationId);
   };
 
+  const handleHistoryMetadataChange = (conversationId: string, updates: { is_pinned?: boolean; is_starred?: boolean; tags?: string[] }) => {
+    setError(null);
+    void api.updateConversation(conversationId, updates as Partial<Conversation>)
+      .then((conversation) => {
+        setConversations((current) => current.map((item) => item.id === conversation.id ? { ...conversation, messages: [] } : item));
+        if (activeConversationId === conversation.id) setActiveConversation(conversation);
+      })
+      .catch((updateError) => setError(updateError instanceof Error ? updateError.message : "会話メタデータの更新に失敗しました。"));
+  };
+
   const closeSpotlight = () => {
     setIsSpotlightOpen(false);
     setSpotlightQuery("");
@@ -1621,13 +1660,13 @@ export default function App() {
         }
         return;
       case "set_mode_coding":
-        setMode((current) => current === "coding" ? "chat" : "coding");
+        handleModeChange("coding");
         return;
       case "set_mode_chat":
-        setMode("chat");
+        handleModeChange("chat");
         return;
       case "set_mode_agent":
-        setMode("agent");
+        handleModeChange("agent");
         return;
       case "toggle_yolo":
         setYoloMode((value) => parseCommandBoolean(args.enabled, !value));
@@ -1675,27 +1714,27 @@ export default function App() {
         setError(composerCommands.map((item) => `/${item.name}: ${item.description ?? item.label}`).join("\n"));
         return;
       case "open_diff_preview":
-        setMode("coding");
+        handleModeChange("coding");
         setInput("Preview the current git diff.");
         return;
       case "start_review":
-        setMode("coding");
+        handleModeChange("coding");
         setInput("Review the current diff and call out bugs, risks, and missing tests.");
         return;
       case "open_branch_picker":
-        setMode("coding");
+        handleModeChange("coding");
         if (args.name) setInput(`Create or switch to branch ${String(args.name)}.`);
         return;
       case "prepare_test_run":
-        setMode("coding");
+        handleModeChange("coding");
         setInput(args.target ? `Run tests for ${String(args.target)}.` : "Run the recommended tests.");
         return;
       case "prepare_lint_run":
-        setMode("coding");
+        handleModeChange("coding");
         setInput("Run lint and formatting checks.");
         return;
       case "open_file_search":
-        setMode("coding");
+        handleModeChange("coding");
         if (args.query) setInput(`Find workspace files matching ${String(args.query)}.`);
         return;
       default:
@@ -1800,10 +1839,22 @@ export default function App() {
 
   const handleModeChange = (newMode: AppMode) => {
     setMode(newMode);
+    if (newMode === "coding" && window.location.pathname !== "/coding") {
+      const url = new URL(window.location.href);
+      url.pathname = "/coding";
+      window.history.pushState({ mode: "coding", conversationId: activeConversationId }, "", `${url.pathname}${url.search}${url.hash}`);
+    } else if (newMode !== "coding" && window.location.pathname === "/coding") {
+      const url = new URL(window.location.href);
+      url.pathname = "/chat";
+      if (activeConversationId) url.searchParams.set("chat", activeConversationId);
+      else url.searchParams.delete("chat");
+      url.searchParams.delete("pending");
+      window.history.pushState({ mode: newMode, conversationId: activeConversationId }, "", `${url.pathname}${url.search}${url.hash}`);
+    }
   };
 
   const handleCodingBranchSwitch = (branch: string, create = false) => {
-    void api.switchGitBranch(branch, create)
+    void api.switchGitBranch(branch, create, { workspace_id: selectedCodingWorkspaceId })
       .then(() => loadCodingContext())
       .catch((branchError) => setError(branchError instanceof Error ? branchError.message : "ブランチ切り替えに失敗しました。"));
   };
@@ -1820,7 +1871,7 @@ export default function App() {
     if (mode !== "coding") return;
     if (hasWorkspaceAttachment(attachedFiles, path)) return;
 
-    void api.readWorkspaceFile(path)
+    void api.readWorkspaceFile(path, { workspace_id: selectedCodingWorkspaceId })
       .then((result) => {
         setAttachedFiles((prev) => {
           if (hasWorkspaceAttachment(prev, path)) return prev;
@@ -1830,6 +1881,38 @@ export default function App() {
       .catch((readError) => {
         setError(readError instanceof Error ? readError.message : "workspace file の添付に失敗しました。");
       });
+  };
+
+  const handleCodingWorkspaceSelect = (workspaceId: string) => {
+    handleModeChange("coding");
+    setSelectedCodingWorkspaceId(workspaceId);
+    void api.selectCodingWorkspace(workspaceId)
+      .then(() => loadCodingWorkspaces())
+      .then(() => loadCodingContext())
+      .catch((workspaceError) => setError(workspaceError instanceof Error ? workspaceError.message : "workspace selection failed."));
+  };
+
+  const handleCodingWorkspaceTrust = (workspaceId: string) => {
+    void api.trustCodingWorkspace(workspaceId)
+      .then(() => loadCodingWorkspaces())
+      .then(() => loadCodingContext())
+      .catch((workspaceError) => setError(workspaceError instanceof Error ? workspaceError.message : "workspace trust failed."));
+  };
+
+  const handleCodingWorkspaceCreate = () => {
+    const rootPath = codingContext?.rootFolder;
+    if (!rootPath) {
+      setError("Current coding context has no workspace root to add.");
+      return;
+    }
+    void api.createCodingWorkspace({ root_path: rootPath, trusted: false })
+      .then((result) => api.selectCodingWorkspace(result.workspace.workspace_id))
+      .then((result) => {
+        setSelectedCodingWorkspaceId(result.selected_workspace_id);
+        return loadCodingWorkspaces();
+      })
+      .then(() => loadCodingContext())
+      .catch((workspaceError) => setError(workspaceError instanceof Error ? workspaceError.message : "workspace creation failed."));
   };
 
   const handleFileRemove = (fileId: string) => {
@@ -2156,6 +2239,15 @@ export default function App() {
       if (!conversation) {
         conversation = await api.createConversation({
           model: preferredModel || "stub/default",
+          conversation_kind: mode === "coding" ? "coding" : null,
+          tags: mode === "coding" ? ["coding"] : undefined,
+          metadata: mode === "coding"
+            ? {
+                mode: "coding",
+                workspace_id: selectedCodingWorkspaceId,
+                workspace_label: codingWorkspaces.find((workspace) => workspace.workspace_id === selectedCodingWorkspaceId)?.label,
+              }
+            : undefined,
         });
         setActiveConversationId(conversation.id);
       }
@@ -2330,17 +2422,22 @@ export default function App() {
         tool_policy: {
           ...(yoloMode ? { yolo_mode: true, allow_shell: true, allow_file_write: true, write_actions_require_approval: false } : {}),
           ...operationsPolicy,
+          ...(mode === "coding" && selectedCodingWorkspaceId ? { workspace_id: selectedCodingWorkspaceId } : {}),
           ...(selectedToolIds.length ? { selected_tools: selectedToolIds } : {}),
         },
         attachments: submittedAttachments,
         tools: selectedToolIds.length ? selectedToolIds : undefined,
         metadata: {
-          mode: isOperationsMode ? "operations_company" : "chat",
+          mode: isOperationsMode ? "operations_company" : mode,
           ...(isOperationsMode ? {
             profile_id: "defaultspack.operations_company",
             agent_id: "client_manager",
             conversation_strategy: "one_agent_one_conversation",
             internal_channel: "ops-company",
+          } : {}),
+          ...(mode === "coding" ? {
+            workspace_id: selectedCodingWorkspaceId,
+            workspace_label: codingWorkspaces.find((workspace) => workspace.workspace_id === selectedCodingWorkspaceId)?.label,
           } : {}),
           attachments: submittedAttachments.map(({ name, size, type, truncated, source, sourcePath }) => ({ name, size, type, truncated, source, sourcePath })),
           selected_tools: selectedToolIds,
@@ -2420,6 +2517,8 @@ export default function App() {
       yoloMode={yoloMode}
       mode={mode}
       codingContext={codingContext}
+      codingWorkspaces={codingWorkspaces}
+      selectedCodingWorkspaceId={selectedCodingWorkspaceId}
       attachedFiles={attachedFiles}
       droppedWidgets={droppedWidgets}
       selectedToolIds={selectedToolIds}
@@ -2443,6 +2542,10 @@ export default function App() {
       onWidgetToggle={handleWidgetToggle}
       onCodingBranchSwitch={handleCodingBranchSwitch}
       onCodingDirectoryChange={handleCodingDirectoryChange}
+      onCodingWorkspaceSelect={handleCodingWorkspaceSelect}
+      onCodingWorkspaceTrust={handleCodingWorkspaceTrust}
+      onCodingWorkspaceCreate={handleCodingWorkspaceCreate}
+      onCodingWorkspacesRefresh={() => void loadCodingWorkspaces()}
       onCodingContextRefresh={loadCodingContext}
     />
   );
@@ -2462,6 +2565,7 @@ export default function App() {
               onChatSelect={handleHistoryClick}
               onNewTask={handleNewTask}
               onSettingsClick={() => setIsSettingsOpen(true)}
+              onChatMetadataChange={handleHistoryMetadataChange}
               onMinimize={() => setIsHistoryMinimized(true)}
             />
           </div>
@@ -2476,6 +2580,7 @@ export default function App() {
               onChatSelect={handleHistoryClick}
               onNewTask={handleNewTask}
               onSettingsClick={() => setIsSettingsOpen(true)}
+              onChatMetadataChange={handleHistoryMetadataChange}
               onRestore={() => setIsHistoryMinimized(false)}
               isCompact
             />
@@ -2588,6 +2693,7 @@ export default function App() {
             settingsValues={settingsValues}
             settingsSections={settingsSections}
             selectedToolIds={selectedToolIds}
+            companyPanel={<CompanyWorkspacePanel />}
             keyboardButtonNavigation={keyboardButtonNavigation}
             onSettingChange={handleSettingChange}
             onOpenSettings={() => setIsSettingsOpen(true)}
