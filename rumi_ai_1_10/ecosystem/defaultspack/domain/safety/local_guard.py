@@ -8,6 +8,7 @@ from typing import Any
 LOCAL_ORIGIN_HOSTS = {"127.0.0.1", "localhost", "::1"}
 
 SENSITIVE_CODING_PATHS = {
+    "/api/coding/approvals",
     "/api/coding/files/write",
     "/api/coding/files/create",
     "/api/coding/files/delete",
@@ -24,6 +25,9 @@ SENSITIVE_CODING_PATHS = {
     "/api/coding/workspaces/update",
     "/api/coding/workspaces/select",
     "/api/coding/workspaces/trust",
+    "/api/coding/agent/sessions",
+    "/api/coding/agent/sessions/status",
+    "/api/coding/agent/sessions/merge-report",
 }
 
 METHOD_SENSITIVE_CODING_PATHS = {
@@ -32,6 +36,7 @@ METHOD_SENSITIVE_CODING_PATHS = {
 }
 
 SENSITIVE_LOCAL_PATHS = {
+    "/api/browser/artifacts",
     "/api/tools/browser-computer",
     "/api/tools/create",
     "/api/tools/mcp/connect",
@@ -93,13 +98,16 @@ def csrf_required(method: str, origin: str | None) -> bool:
 
 def is_sensitive_coding_path(path: str, method: str | None = None) -> bool:
     normalized_path = str(path)
+    normalized_method = str(method or "").upper() if method is not None else None
     if normalized_path in SENSITIVE_CODING_PATHS:
         return True
     methods = METHOD_SENSITIVE_CODING_PATHS.get(normalized_path)
     if methods:
-        if method is None:
+        if normalized_method is None:
             return True
-        return str(method or "").upper() in methods
+        return normalized_method in methods
+    if _is_workspace_member_mutation_path(normalized_path, normalized_method):
+        return True
     return is_sensitive_local_path(normalized_path, method)
 
 
@@ -133,6 +141,21 @@ def is_sensitive_local_path(path: str, method: str | None = None) -> bool:
 
 def _matches_confirm_consent_path(path: str) -> bool:
     return path.startswith("/api/consent/") and path.endswith("/confirm")
+
+
+def _is_workspace_member_mutation_path(path: str, method: str | None) -> bool:
+    prefix = "/api/coding/workspaces/"
+    if not path.startswith(prefix):
+        return False
+    suffix = path[len(prefix):].strip("/")
+    if not suffix:
+        return False
+    parts = suffix.split("/")
+    if len(parts) == 1:
+        return method is None or method == "PUT"
+    if len(parts) == 2 and parts[1] in {"select", "trust"}:
+        return method is None or method == "POST"
+    return False
 
 
 def require_local_guard(

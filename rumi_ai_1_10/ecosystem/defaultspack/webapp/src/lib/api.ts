@@ -1,5 +1,7 @@
 import type { ToolPreviewItem } from "../components/ToolPreview";
 
+const DEFAULTSPACK_CSRF_STORAGE_KEY = "rumi-defaultspack-csrf";
+
 export type ChatContentBlock = {
   type?: string;
   text?: string;
@@ -121,6 +123,15 @@ export type CodingApprovalRequest = {
   display_summary?: string;
 };
 
+export type CodingApprovalDecision = {
+  request_id: string;
+  status: string;
+  approved: boolean;
+  token?: string;
+  expires_at?: number | null;
+  reason?: string;
+};
+
 export type CodingCheckpoint = {
   snapshot_id: string;
   path?: string;
@@ -143,6 +154,12 @@ export type CodingDiffResponse = {
 export type CodingTerminalResponse = {
   command: string;
   approval_required?: boolean;
+  approval_request_id?: string;
+  operation?: string;
+  risk_level?: string;
+  args_hash?: string;
+  expires_at?: number;
+  display_summary?: string;
   classification?: string;
   risk_reasons?: string[];
   risk?: Record<string, unknown>;
@@ -835,13 +852,61 @@ type ChatStreamHandlers = {
   signal?: AbortSignal;
 };
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(path, {
+function isUnsafeHttpMethod(method: string): boolean {
+  return !["GET", "HEAD", "OPTIONS"].includes(method.toUpperCase());
+}
+
+function sessionStorageOrNull(): Storage | null {
+  try {
+    return typeof sessionStorage === "undefined" ? null : sessionStorage;
+  } catch {
+    return null;
+  }
+}
+
+function generateCsrfToken(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `csrf-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function getDefaultspackCsrfToken(): string {
+  const storage = sessionStorageOrNull();
+  const stored = storage?.getItem(DEFAULTSPACK_CSRF_STORAGE_KEY);
+  if (stored) return stored;
+  const token = generateCsrfToken();
+  try {
+    storage?.setItem(DEFAULTSPACK_CSRF_STORAGE_KEY, token);
+  } catch {
+    // A nonempty per-request token still satisfies the local CSRF guard.
+  }
+  return token;
+}
+
+export function defaultspackApiHeaders(method: string, headers?: HeadersInit): Headers {
+  const nextHeaders = new Headers(headers);
+  if (!nextHeaders.has("Content-Type")) {
+    nextHeaders.set("Content-Type", "application/json");
+  }
+  if (isUnsafeHttpMethod(method) && !nextHeaders.has("X-Rumi-CSRF")) {
+    nextHeaders.set("X-Rumi-CSRF", getDefaultspackCsrfToken());
+  }
+  return nextHeaders;
+}
+
+export function defaultspackApiFetch(input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {
+  const method = (init.method ?? "GET").toUpperCase();
+  return fetch(input, {
     ...init,
-    headers: {
-      "Content-Type": "application/json",
-      ...(init?.headers ?? {}),
-    },
+    method,
+    headers: defaultspackApiHeaders(method, init.headers),
+  });
+}
+
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const response = await defaultspackApiFetch(path, {
+    ...init,
   });
 
   let payload: ApiEnvelope<T>;
@@ -1051,9 +1116,8 @@ export const api = {
     options?: SendMessageOptions,
     handlers?: ChatStreamHandlers,
   ) {
-    const response = await fetch(`/api/chat/conversations/${conversationId}/stream`, {
+    const response = await defaultspackApiFetch(`/api/chat/conversations/${conversationId}/stream`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(messageRequestBody(text, options)),
       signal: handlers?.signal,
     });
@@ -1767,7 +1831,7 @@ export const api = {
   },
 
   approveCodingApproval(requestId: string) {
-    return request<Record<string, unknown>>("/api/coding/approvals/approve", {
+    return request<CodingApprovalDecision>("/api/coding/approvals/approve", {
       method: "POST",
       body: JSON.stringify({ approval_request_id: requestId }),
     });

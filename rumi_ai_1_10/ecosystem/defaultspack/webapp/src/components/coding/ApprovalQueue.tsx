@@ -1,7 +1,7 @@
 import { Check, RefreshCw, ShieldAlert, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
-import { api, type CodingApprovalRequest } from "../../lib/api";
+import { api, type CodingApprovalDecision, type CodingApprovalRequest } from "../../lib/api";
 import { cn } from "../../lib/cn";
 
 function formatApprovalTime(value?: number): string {
@@ -20,9 +20,11 @@ function riskTone(riskLevel?: string): string {
 export function ApprovalQueue({
   initialApprovals,
   limit = 30,
+  onApproved,
 }: {
   initialApprovals?: CodingApprovalRequest[];
   limit?: number;
+  onApproved?: (decision: CodingApprovalDecision, request: CodingApprovalRequest) => void;
 }) {
   const [requests, setRequests] = useState<CodingApprovalRequest[]>(initialApprovals ?? []);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -44,11 +46,13 @@ export function ApprovalQueue({
   }, [load]);
 
   const decide = async (requestId: string, decision: "approve" | "deny") => {
+    const request = requests.find((item) => item.request_id === requestId);
     setBusyId(requestId);
     setError(null);
     try {
       if (decision === "approve") {
-        await api.approveCodingApproval(requestId);
+        const approved = await api.approveCodingApproval(requestId);
+        if (request) onApproved?.(approved, request);
       } else {
         await api.denyCodingApproval(requestId, "Denied from coding cockpit");
       }

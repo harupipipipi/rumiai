@@ -33,7 +33,7 @@ def run(input_data, context=None):
         max_turns=max_turns,
         workspace_root=workspace_root,
         workspace_id=workspace_id,
-        worktree_mode=input_data.get("worktree_mode") or "isolated",
+        worktree_mode=input_data.get("worktree_mode") or "metadata_only",
         context=context,
     )
     if result.get("status") == "error":

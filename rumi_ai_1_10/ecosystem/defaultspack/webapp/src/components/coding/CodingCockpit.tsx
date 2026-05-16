@@ -4,6 +4,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   api,
   type BrowserArtifact,
+  type CodingApprovalDecision,
+  type CodingApprovalRequest,
   type CodingAgentSession,
   type CodingWorkspaceRecord,
   type McpServerRecord,
@@ -11,7 +13,7 @@ import {
 import { ApprovalQueue } from "./ApprovalQueue";
 import { CheckpointPanel } from "./CheckpointPanel";
 import { DiffPanel } from "./DiffPanel";
-import { TerminalPanel } from "./TerminalPanel";
+import { TerminalPanel, type ApprovedTerminalDecision } from "./TerminalPanel";
 
 function workspaceLabel(workspace: CodingWorkspaceRecord): string {
   return workspace.label || workspace.workspace_id;
@@ -49,6 +51,7 @@ export function CodingCockpit({
   const [sessions, setSessions] = useState<CodingAgentSession[]>([]);
   const [sessionTask, setSessionTask] = useState("");
   const [status, setStatus] = useState<string | null>(null);
+  const [approvedTerminalDecision, setApprovedTerminalDecision] = useState<ApprovedTerminalDecision | null>(null);
 
   const loadSidecarState = useCallback(async () => {
     setStatus(null);
@@ -97,6 +100,16 @@ export function CodingCockpit({
     setSessions(refreshed);
   };
 
+  const handleApprovalApproved = (decision: CodingApprovalDecision, request: CodingApprovalRequest) => {
+    if (request.operation !== "terminal.exec") return;
+    setApprovedTerminalDecision({
+      request_id: decision.request_id,
+      approved: decision.approved,
+      token: decision.token,
+      nonce: Date.now(),
+    });
+  };
+
   return (
     <aside className="coding-cockpit flex w-[410px] max-w-[42vw] flex-shrink-0 flex-col overflow-hidden border-l border-zinc-800/60 bg-[#0b0b0f] max-[1180px]:hidden" aria-label="Coding cockpit">
       <div className="border-b border-zinc-800/60 p-3">
@@ -133,10 +146,10 @@ export function CodingCockpit({
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <ApprovalQueue />
+        <ApprovalQueue onApproved={handleApprovalApproved} />
         <DiffPanel workspaceId={activeWorkspaceId} />
         <CheckpointPanel workspaceId={activeWorkspaceId} />
-        <TerminalPanel workspaceId={activeWorkspaceId} />
+        <TerminalPanel workspaceId={activeWorkspaceId} approvedDecision={approvedTerminalDecision} />
 
         <section className="border-b border-zinc-800/60 p-3" aria-label="Browser artifacts">
           <div className="mb-2 flex items-center gap-2">

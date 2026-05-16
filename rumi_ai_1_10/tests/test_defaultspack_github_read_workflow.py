@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -82,3 +83,78 @@ def test_github_pr_read_returns_metadata_files_comments_and_checks(monkeypatch):
     assert result["data"]["files"][0]["filename"] == "app.py"
     assert result["data"]["review_comments"][0]["body"] == "review"
     assert result["data"]["checks"]["state"] == "success"
+
+
+def test_github_token_client_follows_link_pagination_for_lists(monkeypatch):
+    import domain.coding.github_client as github_client
+
+    class FakeResponse:
+        def __init__(self, payload, link=""):
+            self.payload = payload
+            self.headers = {"Link": link}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def read(self):
+            return json.dumps(self.payload).encode("utf-8")
+
+    seen_urls = []
+
+    def fake_urlopen(request, timeout):
+        del timeout
+        seen_urls.append(request.full_url)
+        if "page=2" in request.full_url:
+            return FakeResponse([{"filename": "second.py"}])
+        return FakeResponse(
+            [{"filename": "first.py"}],
+            '<https://api.github.com/repos/openai/codex/pulls/123/files?per_page=100&page=2>; rel="next"',
+        )
+
+    monkeypatch.setattr(github_client.urllib.request, "urlopen", fake_urlopen)
+
+    files = github_client.GitHubReadClient(token="tok")._api(
+        "repos/openai/codex/pulls/123/files?per_page=100"
+    )
+
+    assert [item["filename"] for item in files] == ["first.py", "second.py"]
+    assert seen_urls[1].endswith("page=2")
+
+
+def test_github_token_client_merges_paginated_check_runs(monkeypatch):
+    import domain.coding.github_client as github_client
+
+    class FakeResponse:
+        def __init__(self, payload, link=""):
+            self.payload = payload
+            self.headers = {"Link": link}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def read(self):
+            return json.dumps(self.payload).encode("utf-8")
+
+    def fake_urlopen(request, timeout):
+        del timeout
+        if "page=2" in request.full_url:
+            return FakeResponse({"total_count": 2, "check_runs": [{"name": "second"}]})
+        return FakeResponse(
+            {"total_count": 2, "check_runs": [{"name": "first"}]},
+            '<https://api.github.com/repos/openai/codex/commits/abc/check-runs?per_page=100&page=2>; rel="next"',
+        )
+
+    monkeypatch.setattr(github_client.urllib.request, "urlopen", fake_urlopen)
+
+    checks = github_client.GitHubReadClient(token="tok")._api(
+        "repos/openai/codex/commits/abc/check-runs?per_page=100"
+    )
+
+    assert checks["total_count"] == 2
+    assert [item["name"] for item in checks["check_runs"]] == ["first", "second"]

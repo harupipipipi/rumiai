@@ -1,11 +1,21 @@
 import { Play, Terminal as TerminalIcon } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { api, type CodingTerminalResponse } from "../../lib/api";
 import { cn } from "../../lib/cn";
 
 type TerminalLog = CodingTerminalResponse & {
   id: string;
+  cwd?: string | null;
+  timeout?: number;
+  replay_status?: "retrying" | "replayed";
+};
+
+export type ApprovedTerminalDecision = {
+  request_id: string;
+  approved?: boolean;
+  token?: string;
+  nonce: number;
 };
 
 function classificationTone(classification?: string): string {
@@ -17,38 +27,86 @@ function classificationTone(classification?: string): string {
 export function TerminalPanel({
   workspaceId,
   initialLogs = [],
+  approvedDecision,
 }: {
   workspaceId?: string | null;
   initialLogs?: TerminalLog[];
+  approvedDecision?: ApprovedTerminalDecision | null;
 }) {
   const [command, setCommand] = useState("git status");
   const [logs, setLogs] = useState<TerminalLog[]>(initialLogs);
   const [busy, setBusy] = useState(false);
+  const handledApprovalKeys = useRef<Set<string>>(new Set());
+
+  const pushLog = (log: TerminalLog) => {
+    setLogs((items) => [log, ...items].slice(0, 8));
+  };
 
   const run = async () => {
     const nextCommand = command.trim();
     if (!nextCommand) return;
+    const timeout = 30;
     setBusy(true);
     try {
-      const result = await api.runTerminalCommand(nextCommand, { workspace_id: workspaceId, timeout: 30 });
-      setLogs((items) => [{ ...result, id: `${Date.now()}:${nextCommand}` }, ...items].slice(0, 8));
+      const result = await api.runTerminalCommand(nextCommand, { workspace_id: workspaceId, timeout });
+      pushLog({ ...result, id: `${Date.now()}:${nextCommand}`, timeout, workspace_id: workspaceId ?? null });
     } catch (err) {
-      setLogs((items) => [
-        {
-          id: `${Date.now()}:error`,
-          command: nextCommand,
+      pushLog({
+        id: `${Date.now()}:error`,
+        command: nextCommand,
+        classification: "error",
+        risk_reasons: [err instanceof Error ? err.message : String(err)],
+        approval_required: false,
+        exit_code: null,
+        stderr: err instanceof Error ? err.message : String(err),
+      });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!approvedDecision?.approved || !approvedDecision.token) return;
+    const key = `${approvedDecision.nonce}:${approvedDecision.request_id}`;
+    if (handledApprovalKeys.current.has(key)) return;
+    const pending = logs.find((log) => log.approval_request_id === approvedDecision.request_id);
+    if (!pending) return;
+    handledApprovalKeys.current.add(key);
+    const approvalToken = approvedDecision.token;
+
+    const retry = async () => {
+      setBusy(true);
+      setLogs((items) => items.map((item) => (
+        item.id === pending.id ? { ...item, replay_status: "retrying" } : item
+      )));
+      try {
+        const result = await api.runTerminalCommand(pending.command, {
+          workspace_id: pending.workspace_id !== undefined ? pending.workspace_id : workspaceId,
+          cwd: pending.cwd ?? undefined,
+          timeout: pending.timeout ?? 30,
+          approval_token: approvalToken,
+        });
+        setLogs((items) => [
+          { ...result, id: `${Date.now()}:approved:${pending.command}`, replay_status: "replayed" as const },
+          ...items.map((item) => (item.id === pending.id ? { ...item, replay_status: "replayed" as const } : item)),
+        ].slice(0, 8));
+      } catch (err) {
+        pushLog({
+          id: `${Date.now()}:approval-error`,
+          command: pending.command,
           classification: "error",
           risk_reasons: [err instanceof Error ? err.message : String(err)],
           approval_required: false,
           exit_code: null,
           stderr: err instanceof Error ? err.message : String(err),
-        },
-        ...items,
-      ].slice(0, 8));
-    } finally {
-      setBusy(false);
-    }
-  };
+        });
+      } finally {
+        setBusy(false);
+      }
+    };
+
+    void retry();
+  }, [approvedDecision, logs, workspaceId]);
 
   return (
     <section className="border-b border-zinc-800/60 p-3" aria-label="Terminal">
@@ -90,7 +148,7 @@ export function TerminalPanel({
               <p className="mt-1 truncate text-[10px] text-zinc-600">{log.risk_reasons.join(", ")}</p>
             ) : null}
             <pre className="mt-1 max-h-24 overflow-auto whitespace-pre-wrap font-mono text-[10px] leading-relaxed text-zinc-500">
-              {log.stdout || log.stderr || (log.approval_required ? "Approval required" : "")}
+              {log.stdout || log.stderr || (log.replay_status === "retrying" ? "Retrying with approval" : log.approval_required ? "Approval required" : "")}
             </pre>
           </div>
         ))}
