@@ -14,6 +14,7 @@ SENSITIVE_CODING_PATHS = {
     "/api/coding/files/patch",
     "/api/coding/files/snapshot",
     "/api/coding/files/restore",
+    "/api/coding/checkpoints",
     "/api/coding/terminal/exec",
     "/api/coding/terminal/stream",
     "/api/coding/git/commit",

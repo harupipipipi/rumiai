@@ -665,52 +665,24 @@ class PythonFileExecutor:
 
         # 2. フォールバック: インラインで最小限のsyscallを生成
         fallback_content = '''
-"""rumi_syscall - Rumi AI OS System Call API (minimal fallback)"""
-import json, os, socket, struct
+"""rumi_syscall unavailable fail-closed shim."""
 from typing import Any, Dict, Optional
-
-SOCKET_PATH = os.environ.get("RUMI_EGRESS_SOCKET", "/run/rumi/egress.sock")
-MAX_RESPONSE_SIZE = 4 * 1024 * 1024
 
 class SyscallError(Exception):
     """システムコールエラー"""
     pass
 
+def _unavailable() -> Dict[str, Any]:
+    return {
+        "success": False,
+        "error": "rumi_syscall runtime module is unavailable",
+        "error_type": "runtime_unavailable",
+    }
+
 def http_request(method: str, url: str, headers: Optional[Dict[str, str]] = None,
                  body: Optional[str] = None, timeout_seconds: float = 30.0,
                  socket_path: Optional[str] = None) -> Dict[str, Any]:
-    sock_path = socket_path or SOCKET_PATH
-    timeout = min(float(timeout_seconds), 120.0)
-    request = {"method": method.upper(), "url": url, "headers": headers or {},
-               "body": body, "timeout_seconds": timeout}
-    sock = None
-    try:
-        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        sock.settimeout(timeout + 5)
-        sock.connect(sock_path)
-        payload = json.dumps(request, ensure_ascii=False).encode("utf-8")
-        sock.sendall(struct.pack(">I", len(payload)) + payload)
-        length_data = b""
-        while len(length_data) < 4:
-            chunk = sock.recv(4 - len(length_data))
-            if not chunk: raise SyscallError("Connection closed")
-            length_data += chunk
-        length = struct.unpack(">I", length_data)[0]
-        if length > MAX_RESPONSE_SIZE: raise SyscallError(f"Response too large: {length}")
-        data = b""
-        while len(data) < length:
-            chunk = sock.recv(min(length - len(data), 65536))
-            if not chunk: raise SyscallError("Connection closed")
-            data += chunk
-        return json.loads(data.decode("utf-8"))
-    except SyscallError:
-        raise
-    except Exception as e:
-        return {"success": False, "error": str(e), "error_type": type(e).__name__}
-    finally:
-        if sock:
-            try: sock.close()
-            except: pass
+    return _unavailable()
 
 def get(url: str, headers=None, timeout_seconds=30.0):
     return http_request("GET", url, headers=headers, timeout_seconds=timeout_seconds)
@@ -719,8 +691,9 @@ def post(url: str, body=None, headers=None, timeout_seconds=30.0):
     return http_request("POST", url, headers=headers, body=body, timeout_seconds=timeout_seconds)
 
 def post_json(url: str, data: Any, headers=None, timeout_seconds=30.0):
-    h = dict(headers or {}); h["Content-Type"] = "application/json"
-    return http_request("POST", url, headers=h, body=json.dumps(data, ensure_ascii=False), timeout_seconds=timeout_seconds)
+    h = dict(headers or {})
+    h["Content-Type"] = "application/json"
+    return http_request("POST", url, headers=h, body=data, timeout_seconds=timeout_seconds)
 
 def put(url: str, body=None, headers=None, timeout_seconds=30.0):
     return http_request("PUT", url, headers=headers, body=body, timeout_seconds=timeout_seconds)
@@ -839,13 +812,13 @@ request = http_request
                 pass
 
             # 一時ファイルに入力データを書き込み
-            with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False, encoding="utf-8") as f:
                 json.dump({"input_data": input_data, "context": exec_context}, f, ensure_ascii=False, default=str)
                 input_file = f.name
             os.chmod(input_file, 0o644)
 
             # rumi_syscall モジュールを一時ファイルに書き込み
-            with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False, encoding="utf-8") as f:
                 f.write(self._get_syscall_module_content())
                 syscall_file = f.name
             os.chmod(syscall_file, 0o644)
@@ -853,7 +826,7 @@ request = http_request
             # rumi_capability モジュールを一時ファイルに書き込み
             cap_content = self._get_capability_module_content()
             if cap_content:
-                with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+                with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False, encoding="utf-8") as f:
                     f.write(cap_content)
                     capability_file = f.name
                 os.chmod(capability_file, 0o644)
@@ -861,7 +834,7 @@ request = http_request
             # 実行スクリプトを生成
             executor_script = self._generate_executor_script(file_path.name)
 
-            with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False, encoding="utf-8") as f:
                 f.write(executor_script)
                 script_file = f.name
             os.chmod(script_file, 0o644)

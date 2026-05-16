@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
@@ -156,7 +157,19 @@ class ModuleStateManager:
         }
         tmp = self.state_file.with_suffix(".tmp")
         tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-        tmp.replace(self.state_file)
+        for attempt in range(5):
+            try:
+                tmp.replace(self.state_file)
+                break
+            except PermissionError:
+                if attempt == 4:
+                    self.state_file.write_text(tmp.read_text(encoding="utf-8"), encoding="utf-8")
+                    try:
+                        tmp.unlink()
+                    except OSError:
+                        pass
+                    break
+                time.sleep(0.05)
 
     def _load_catalog_modules(self) -> Dict[str, ModuleHealth]:
         specs = self._load_specs()

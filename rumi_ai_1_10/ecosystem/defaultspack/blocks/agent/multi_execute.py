@@ -1,4 +1,5 @@
-import sys, os
+import os
+import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from blocks._common import ok, error
@@ -18,6 +19,7 @@ def run(input_data, context):
     """
     if not isinstance(input_data, dict):
         return error("input_data must be a dict")
+    context = context or {}
 
     task = input_data.get("task")
     if not task:
@@ -43,12 +45,24 @@ def run(input_data, context):
     if not isinstance(max_turns, int) or max_turns < 1:
         return error("max_turns must be a positive integer")
 
+    workspace_root = (
+        input_data.get("workspace_root")
+        or context.get("workspace_root")
+        or context.get("conversation_workspace_dir")
+    )
+    workspace_id = input_data.get("workspace_id") or context.get("workspace_id")
+    worktree_mode = input_data.get("worktree_mode") or context.get("worktree_mode")
+
     orchestrator = MultiAgentOrchestrator()
     result = orchestrator.execute(
         task=task,
         agent_dicts=agents,
         orchestration=orchestration,
         max_turns=max_turns,
+        workspace_root=workspace_root,
+        workspace_id=workspace_id,
+        worktree_mode=worktree_mode,
+        context=context,
     )
 
     session_id = result.get("session_id", "")
@@ -61,6 +75,9 @@ def run(input_data, context):
         "status": result.get("status"),
         "turn_results": result.get("turn_results", []),
         "result": result.get("result"),
+        "workspace": result.get("result", {}).get("shared_context", {}).get("workspace", {})
+        if isinstance(result.get("result"), dict)
+        else {},
     }
 
     if result.get("status") == "error":

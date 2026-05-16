@@ -46,6 +46,46 @@ def test_click_delegates_to_seat(controller):
     svc.click.assert_called_once()
 
 
+def test_click_accepts_background_safe_fallback_driver(controller):
+    svc = _mock_service()
+    svc.click.return_value = asdict(ActionResult(
+        action="click",
+        driver="windows_postmessage",
+        executed=True,
+        is_fallback=True,
+        requires_foreground=False,
+        uses_physical_input=False,
+    ))
+    controller._computer_seat = svc
+
+    result = controller.run("computer.click", {"x": 100, "y": 200, "physical": True}, yolo_mode=True)
+
+    assert result["executed"] is True
+    assert result["driver"] == "windows_postmessage"
+    assert result["is_fallback"] is True
+
+
+def test_click_ignores_foreground_seat_driver_for_legacy_path(controller, monkeypatch):
+    svc = _mock_service()
+    svc.click.return_value = asdict(ActionResult(
+        action="click",
+        driver="local_visible",
+        executed=True,
+        requires_foreground=True,
+        uses_physical_input=True,
+    ))
+    controller._computer_seat = svc
+    monkeypatch.setattr(controller, "_capture_action_result_screenshot", lambda *args, **kwargs: {})
+    monkeypatch.setattr(controller, "_window_at_point", lambda x, y: None)
+    monkeypatch.setattr(controller, "_windows_desktop_action", lambda action, payload: None)
+    monkeypatch.setattr("rumi_ai_1_10.ecosystem.rumi_default_tools_pack.domain.tool.browser_computer.platform.system", lambda: "Windows")
+
+    result = controller.run("computer.click", {"x": 100, "y": 200, "physical": True}, yolo_mode=True)
+
+    assert result["executed"] is True
+    assert result.get("driver") != "local_visible"
+
+
 def test_type_delegates_to_seat(controller):
     svc = _mock_service()
     controller._computer_seat = svc

@@ -115,6 +115,10 @@ def _apply_function_defaults(function_id: str, payload: dict[str, Any]) -> dict[
         payload.setdefault("_method", "GET")
     elif function_id == "coding_git_branch_create":
         payload.setdefault("_method", "POST")
+    elif function_id == "coding_checkpoint_list":
+        payload.setdefault("_method", "GET")
+    elif function_id == "coding_checkpoint_create":
+        payload.setdefault("_method", "POST")
     return payload
 
 

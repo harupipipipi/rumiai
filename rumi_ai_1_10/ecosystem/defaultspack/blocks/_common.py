@@ -15,8 +15,8 @@ def error(message, code="ERROR"):
 
 
 def not_implemented(handler_name):
-    """Return stub response for unimplemented handlers"""
-    return {"status": "ok", "data": None, "_stub": True, "_handler": handler_name}
+    """Return a fail-closed response for unimplemented handlers."""
+    return error(f"{handler_name} is not implemented", code="NOT_IMPLEMENTED")
 
 
 def timestamp():

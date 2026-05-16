@@ -2,12 +2,17 @@ import sys
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
+import hashlib
 import re
+import shutil
 import threading
+from pathlib import Path
 
 from blocks._common import gen_id, timestamp
 from domain.agent.agent_def import AgentDefinition
 from domain.ai_client.client import AIClient
+from domain.coding.workspace_policy import require_registered_trusted_workspace
+from domain.coding.workspace_resolver import WorkspaceResolver
 
 
 # ---------------------------------------------------------------------------
@@ -83,7 +88,17 @@ class MessageBus:
 class MultiAgentSession:
     """マルチエージェントセッションの全状態を保持する。"""
 
-    def __init__(self, session_id, task, agents, orchestration, max_turns):
+    def __init__(
+        self,
+        session_id,
+        task,
+        agents,
+        orchestration,
+        max_turns,
+        workspace_root=None,
+        worktree_mode=None,
+        workspace_resolution=None,
+    ):
         self.session_id = session_id
         self.task = task
         self.agents = agents
@@ -92,8 +107,21 @@ class MultiAgentSession:
         self.status = "created"
         self.current_turn = 0
         self.message_bus = MessageBus()
+        resolved_worktree_mode = str(worktree_mode or ("copy" if workspace_root else "metadata_only"))
         self.agent_contexts = {}
-        self.shared_context = {}
+        self.shared_context = {
+            "workspace": {
+                "contract_version": "rumi.agent_workspace.v1",
+                "mode": "multi_agent",
+                "base_workspace_root": str(Path(str(workspace_root)).expanduser().resolve())
+                if workspace_root
+                else None,
+                "workspace_id": workspace_resolution.workspace_id if workspace_resolution else None,
+                "trusted": bool(workspace_resolution.trusted) if workspace_resolution else False,
+                "worktree_mode": resolved_worktree_mode,
+                "merge_strategy": "manual_conflict_report",
+            }
+        }
         self.result = None
         self.error = None
         self.created_at = timestamp()
@@ -101,11 +129,19 @@ class MultiAgentSession:
 
         for agent in self.agents:
             self.message_bus.register_agent(agent.name)
+            workspace = _agent_workspace_contract(
+                session_id,
+                agent,
+                workspace_root=workspace_root,
+                worktree_mode=resolved_worktree_mode,
+            )
+            agent.workspace = workspace
             self.agent_contexts[agent.name] = {
                 "messages": [],
                 "status": "idle",
                 "turns_taken": 0,
                 "done": False,
+                "workspace": workspace,
             }
 
     def to_dict(self):
@@ -124,6 +160,7 @@ class MultiAgentSession:
                     "turns_taken": ctx["turns_taken"],
                     "done": ctx["done"],
                     "message_count": len(ctx["messages"]),
+                    "workspace": ctx.get("workspace", {}),
                 }
                 for name, ctx in self.agent_contexts.items()
             },
@@ -142,6 +179,145 @@ class MultiAgentSession:
 _MENTION_RE = re.compile(r"@(\w+)\s*:")
 
 DONE_MARKER = "[DONE]"
+
+
+def _safe_workspace_segment(value):
+    segment = re.sub(r"[^A-Za-z0-9_.-]+", "-", str(value or "").strip()).strip(".-")
+    return (segment or "agent")[:80]
+
+
+def _resolve_agent_workspace(workspace_id=None, workspace_root=None, context=None):
+    if not workspace_id and not workspace_root:
+        return None
+    request = {}
+    if workspace_id:
+        request["workspace_id"] = workspace_id
+    elif workspace_root:
+        request["workspace_root"] = str(workspace_root)
+    resolution = WorkspaceResolver().resolve(request, context or {})
+    return require_registered_trusted_workspace(
+        resolution,
+        operation="agent.multi_execute",
+    )
+
+
+def _workspace_ignore(path):
+    parts = set(Path(path).parts)
+    return bool(parts & {".git", ".rumi", ".rumi_snapshots", ".rumi_agents", "__pycache__"})
+
+
+def _workspace_manifest(root):
+    manifest = {}
+    root_path = Path(root)
+    if not root_path.is_dir():
+        return manifest
+    for path in sorted(root_path.rglob("*")):
+        if path.is_symlink() or not path.is_file() or _workspace_ignore(path.relative_to(root_path)):
+            continue
+        rel = path.relative_to(root_path).as_posix()
+        digest = hashlib.sha256()
+        with open(path, "rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+        manifest[rel] = digest.hexdigest()
+    return manifest
+
+
+def _copy_workspace(base, destination):
+    base = Path(base)
+    destination = Path(destination)
+    for path in sorted(base.rglob("*")):
+        rel = path.relative_to(base)
+        if _workspace_ignore(rel):
+            continue
+        if path.is_symlink():
+            continue
+        target = destination / rel
+        if path.is_dir():
+            target.mkdir(parents=True, exist_ok=True)
+        elif path.is_file():
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(path, target)
+
+
+def _agent_workspace_contract(session_id, agent_def, workspace_root=None, worktree_mode=None):
+    resolved_mode = str(worktree_mode or ("copy" if workspace_root else "metadata_only"))
+    contract = {
+        "contract_version": "rumi.agent_workspace.v1",
+        "mode": "metadata_only",
+        "session_id": session_id,
+        "agent_id": agent_def.agent_id,
+        "agent_name": agent_def.name,
+        "write_scope": "agent_workspace_root",
+        "workspace_root": None,
+        "shared_workspace_root": None,
+        "base_workspace_root": None,
+        "worktree": {
+            "mode": resolved_mode,
+            "path": None,
+        },
+        "base_manifest": {},
+    }
+    if not workspace_root:
+        return contract
+
+    base = Path(str(workspace_root)).expanduser().resolve()
+    session_dir = base / ".rumi" / "multi_agent" / _safe_workspace_segment(session_id)
+    shared_dir = session_dir / "shared"
+    agent_dir = session_dir / "agents" / _safe_workspace_segment(agent_def.agent_id or agent_def.name)
+    shared_dir.mkdir(parents=True, exist_ok=True)
+    agent_dir.mkdir(parents=True, exist_ok=True)
+    if resolved_mode in {"copy", "isolated", "worktree"}:
+        _copy_workspace(base, agent_dir)
+    contract.update(
+        {
+            "mode": "isolated_workspace",
+            "workspace_root": str(agent_dir),
+            "shared_workspace_root": str(shared_dir),
+            "base_workspace_root": str(base),
+            "worktree": {
+                "mode": resolved_mode,
+                "path": str(agent_dir),
+            },
+            "base_manifest": _workspace_manifest(agent_dir),
+        }
+    )
+    return contract
+
+
+def _workspace_merge_report(session):
+    changed_by_agent = {}
+    owners_by_path = {}
+    for agent_name, ctx in session.agent_contexts.items():
+        workspace = ctx.get("workspace", {})
+        workspace_root = workspace.get("workspace_root")
+        base_manifest = workspace.get("base_manifest", {})
+        if not workspace_root:
+            continue
+        current = _workspace_manifest(workspace_root)
+        changed = sorted(path for path, digest in current.items() if base_manifest.get(path) != digest)
+        deleted = sorted(path for path in base_manifest if path not in current)
+        changed_by_agent[agent_name] = {
+            "changed_files": changed,
+            "deleted_files": deleted,
+            "workspace_root": workspace_root,
+        }
+        for path in changed + deleted:
+            owners_by_path.setdefault(path, []).append(agent_name)
+    conflicts = [
+        {"path": path, "agents": sorted(set(owners))}
+        for path, owners in sorted(owners_by_path.items())
+        if len(set(owners)) > 1
+    ]
+    return {
+        "merge_strategy": "manual_conflict_report",
+        "merge_required": bool(conflicts or any(
+            item["changed_files"] or item["deleted_files"]
+            for item in changed_by_agent.values()
+        )),
+        "conflicts": conflicts,
+        "agents": changed_by_agent,
+    }
 
 
 class MultiAgentOrchestrator:
@@ -226,6 +402,13 @@ class MultiAgentOrchestrator:
         parts.append(
             "The shared task is: " + session.task
         )
+        workspace = getattr(agent_def, "workspace", None) or session.agent_contexts.get(agent_def.name, {}).get("workspace", {})
+        if workspace.get("workspace_root"):
+            parts.append(
+                "Your isolated workspace path is: "
+                + workspace["workspace_root"]
+                + ". Keep edits inside it and report changed paths for merge review."
+            )
         parts.append(
             "When you believe the task is fully complete, include '"
             + DONE_MARKER
@@ -428,7 +611,17 @@ class MultiAgentOrchestrator:
     # オーケストレーション: メイン実行
     # ------------------------------------------------------------------
 
-    def execute(self, task, agent_dicts, orchestration="round_robin", max_turns=10):
+    def execute(
+        self,
+        task,
+        agent_dicts,
+        orchestration="round_robin",
+        max_turns=10,
+        workspace_root=None,
+        workspace_id=None,
+        worktree_mode=None,
+        context=None,
+    ):
         """マルチエージェントタスクを開始し、完了まで実行する。
 
         Parameters
@@ -449,6 +642,22 @@ class MultiAgentOrchestrator:
         """
         session_id = "multi_" + gen_id()
 
+        workspace_resolution = None
+        try:
+            workspace_resolution = _resolve_agent_workspace(
+                workspace_id=workspace_id,
+                workspace_root=workspace_root,
+                context=context,
+            )
+        except Exception as exc:
+            return {
+                "session_id": session_id,
+                "status": "error",
+                "error": str(exc),
+            }
+        if workspace_resolution is not None:
+            workspace_root = workspace_resolution.root_path
+
         agents = []
         for ad in agent_dicts:
             agents.append(AgentDefinition.from_dict(ad))
@@ -466,6 +675,9 @@ class MultiAgentOrchestrator:
             agents=agents,
             orchestration=orchestration,
             max_turns=max_turns,
+            workspace_root=workspace_root,
+            worktree_mode=worktree_mode,
+            workspace_resolution=workspace_resolution,
         )
         session.status = "running"
 
@@ -512,6 +724,7 @@ class MultiAgentOrchestrator:
         else:
             session.result = ""
 
+        session.shared_context["workspace"]["merge_report"] = _workspace_merge_report(session)
         session.updated_at = timestamp()
 
         return {

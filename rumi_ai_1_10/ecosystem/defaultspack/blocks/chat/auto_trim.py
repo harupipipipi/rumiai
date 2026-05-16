@@ -5,6 +5,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 from blocks._common import ok, error, gen_id, timestamp
 
 from domain.chat.store import ChatStore
+from blocks.chat.send import _ai_direct_complete
 
 
 def _build_text_from_content(content):
@@ -137,12 +138,12 @@ def _extract_text_from_response(response):
     return "\n".join(parts)
 
 
-def _stub_analysis_response():
-    """AI呼び出し失敗時のフォールバック。"""
+def _unavailable_analysis_response():
+    """Structured error used by legacy callers if AI analysis is unavailable."""
     return {
-        "content": [{"type": "text", "text": "[]"}],
-        "finish_reason": "stop",
-        "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+        "success": False,
+        "error": "AI analysis is unavailable",
+        "error_type": "not_implemented",
     }
 
 
@@ -193,10 +194,19 @@ def run(input_data, context):
             }
             response = call_handler("defaults.ai.complete", ai_params)
         except Exception as exc:
-            print("[auto_trim] AI call failed: " + str(exc))
-            response = _stub_analysis_response()
+            return error("AI request failed: " + str(exc), "AI_ERROR")
+        if isinstance(response, dict) and response.get("status") == "error":
+            err = response.get("error", {})
+            message = err.get("message") if isinstance(err, dict) else None
+            return error(str(message or "AI request failed"), "AI_ERROR")
+        if isinstance(response, dict) and response.get("status") == "ok":
+            response = response.get("data", {})
     else:
-        response = _stub_analysis_response()
+        response, ai_error = _ai_direct_complete(model, analysis_messages, [], {})
+        if ai_error is not None:
+            return error(ai_error, "AI_ERROR")
+    if not isinstance(response, dict):
+        return error("AI provider returned an invalid response", "AI_ERROR")
 
     response_text = _extract_text_from_response(response)
     segments = _parse_trim_plan(response_text)

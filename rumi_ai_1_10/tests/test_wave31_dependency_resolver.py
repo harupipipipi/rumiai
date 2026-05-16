@@ -13,6 +13,7 @@ from core_runtime.dependency_resolver import (
     DependencyError,
     MissingDependencyError,
     resolve_load_order,
+    validate_dependencies,
 )
 
 
@@ -230,3 +231,21 @@ class TestDictDependencyWithVersion:
             "pack_b": {},
         }
         assert resolve_load_order(packs_with_ver) == resolve_load_order(packs_without_ver)
+
+    def test_version_mismatch_is_reported_by_validation(self):
+        packs = {
+            "pack_a": {"depends_on": [{"pack_id": "pack_b", "version": ">=99.0"}]},
+            "pack_b": {"version": "1.2.3"},
+        }
+
+        issues = validate_dependencies(packs)
+
+        assert issues == [
+            {
+                "type": "version_mismatch",
+                "pack_id": "pack_a",
+                "depends_on": "pack_b",
+                "required": ">=99.0",
+                "actual": "1.2.3",
+            }
+        ]

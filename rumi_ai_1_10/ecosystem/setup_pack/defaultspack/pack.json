@@ -3,6 +3,21 @@
   "display_name": "Defaultspack v2",
   "description": "Recommended defaultspack v2 cloned from defaults, promoted to the main runtime pack, with canonical /api/defaultspack routes and migration support.",
   "target_pack_id": "defaultspack",
+  "version": "2.0.0",
+  "compatibility": {
+    "target_pack_version": ">=2.0.0",
+    "python": ">=3.10",
+    "platforms": ["windows", "linux", "macos"]
+  },
+  "marketplace": {
+    "registry": "bundled",
+    "publisher": "rumi-ai",
+    "status": "verified"
+  },
+  "signing": {
+    "mode": "repository_reviewed",
+    "verified": true
+  },
   "recommended": true,
   "risk_level": "low",
   "supports_all_ok": true

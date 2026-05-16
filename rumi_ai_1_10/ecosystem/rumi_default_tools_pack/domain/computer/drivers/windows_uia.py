@@ -7,6 +7,7 @@ from typing import Any
 
 from ..models import ActionResult, ComputerCapabilities, ComputerTarget, ObserveResult
 from ..windows.hwnd import get_window_info, resolve_hwnd
+from ..windows.uia import is_uia_available
 from .base import ComputerDriver
 
 
@@ -192,7 +193,9 @@ class WindowsUIADriver(ComputerDriver):
         )
 
     def is_available(self) -> bool:
-        return sys.platform == "win32"
+        if sys.platform != "win32":
+            return False
+        return is_uia_available()
 
     @staticmethod
     def _caps() -> dict[str, bool]:

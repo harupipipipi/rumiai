@@ -24,13 +24,23 @@ class AgentDefinition:
         使用可能なツール定義リスト。
     """
 
-    def __init__(self, name, role, model, system_prompt=None, tools=None, agent_id=None):
+    def __init__(
+        self,
+        name,
+        role,
+        model,
+        system_prompt=None,
+        tools=None,
+        agent_id=None,
+        workspace=None,
+    ):
         self.agent_id = agent_id if agent_id else ("agentdef_" + gen_id())
         self.name = name
         self.role = role
         self.model = model if model else "default"
         self.system_prompt = system_prompt if system_prompt else ""
         self.tools = tools if tools else []
+        self.workspace = workspace if isinstance(workspace, dict) else {}
         self.created_at = timestamp()
 
     def to_dict(self):
@@ -41,6 +51,7 @@ class AgentDefinition:
             "model": self.model,
             "system_prompt": self.system_prompt,
             "tools": self.tools,
+            "workspace": self.workspace,
             "created_at": self.created_at,
         }
 
@@ -54,4 +65,5 @@ class AgentDefinition:
             system_prompt=data.get("system_prompt", ""),
             tools=data.get("tools", []),
             agent_id=data.get("agent_id"),
+            workspace=data.get("workspace") if isinstance(data.get("workspace"), dict) else {},
         )

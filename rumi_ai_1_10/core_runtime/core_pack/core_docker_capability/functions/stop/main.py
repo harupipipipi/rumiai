@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-stop - Core function entry point (stub).
+stop - Core function registry entry point.
 
 This is a core function. It is executed in-process by the kernel.
 This file exists to satisfy pack_validator checks.
-The stdin/stdout JSON interface below is a placeholder for potential
-future migration to a user function execution model.
+The stdin/stdout JSON interface below returns an explicit failure for
+unsupported direct invocation.
 """
 
 import json
@@ -13,7 +13,7 @@ import sys
 
 
 def main():
-    """Stub entry point for core function 'stop'."""
+    """Direct entry point for core function 'stop'."""
     try:
         raw = sys.stdin.read()
         if raw.strip():
@@ -24,8 +24,15 @@ def main():
         request = {}
 
     response = {
+        "success": False,
         "status": "error",
+        "error_type": "invalid_dispatch",
         "message": (
+            "This is a core function. "
+            "It is executed in-process by the kernel. "
+            "Direct invocation via stdin/stdout is not supported."
+        ),
+        "error": (
             "This is a core function. "
             "It is executed in-process by the kernel. "
             "Direct invocation via stdin/stdout is not supported."

@@ -67,31 +67,49 @@ class TestSetupPackManager(unittest.TestCase):
         supports_all_ok: bool,
         *,
         recommended: bool = False,
+        version: str = "1.0.0",
+        compatibility: dict | None = None,
+        depends_on: list | None = None,
+        marketplace: dict | None = None,
+        signing: dict | None = None,
     ) -> None:
         pack_dir = root / pack_id
         pack_dir.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "pack_id": pack_id,
+            "display_name": pack_id,
+            "description": "desc",
+            "target_pack_id": target_pack_id,
+            "version": version,
+            "recommended": recommended,
+            "risk_level": "low",
+            "supports_all_ok": supports_all_ok,
+        }
+        if compatibility is not None:
+            payload["compatibility"] = compatibility
+        if depends_on is not None:
+            payload["depends_on"] = depends_on
+        if marketplace is not None:
+            payload["marketplace"] = marketplace
+        if signing is not None:
+            payload["signing"] = signing
         (pack_dir / "pack.json").write_text(
-            json.dumps(
-                {
-                    "pack_id": pack_id,
-                    "display_name": pack_id,
-                    "description": "desc",
-                    "target_pack_id": target_pack_id,
-                    "recommended": recommended,
-                    "risk_level": "low",
-                    "supports_all_ok": supports_all_ok,
-                },
-                ensure_ascii=False,
-                indent=2,
-            )
+            json.dumps(payload, ensure_ascii=False, indent=2)
             + "\n",
             encoding="utf-8",
         )
 
-    def _target(self, tmp: Path, pack_id: str, identity: str) -> SimpleNamespace:
+    def _target(
+        self,
+        tmp: Path,
+        pack_id: str,
+        identity: str,
+        *,
+        version: str = "1.0.0",
+    ) -> SimpleNamespace:
         target_json = tmp / f"{pack_id}.ecosystem.json"
         target_json.write_text(
-            json.dumps({"pack_identity": identity}) + "\n",
+            json.dumps({"pack_identity": identity, "version": version}) + "\n",
             encoding="utf-8",
         )
         return SimpleNamespace(pack_id=pack_id, ecosystem_json_path=target_json)
@@ -257,6 +275,83 @@ class TestSetupPackManager(unittest.TestCase):
             self.assertEqual(revoked["reason"], "unsupported_all_ok")
             self.assertEqual(fake.batch_calls, [])
             self.assertEqual(fake.revocations, [])
+
+    def test_install_rejects_missing_setup_pack_dependency_before_grants(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            root = base / "setup_pack"
+            self._write_pack(
+                root,
+                "addon",
+                "addon",
+                True,
+                depends_on=[{"pack_id": "defaultspack", "version": ">=2.0.0"}],
+            )
+            manager = SetupPackManager(root=root, selection_file=base / "selection.json")
+
+            ctx = self._install_context(
+                base,
+                [self._target(base, "addon", "rumi:ecosystem/addon")],
+            )
+            _, fake_grants, *patches = ctx
+            with patches[0], patches[1], patches[2], patches[3]:
+                result = manager.install("addon")
+
+            self.assertFalse(result["success"])
+            self.assertEqual(result["status_code"], 400)
+            self.assertEqual(result["errors"][0]["reason"], "dependency_missing")
+            self.assertEqual(fake_grants.batch_calls, [])
+
+    def test_install_rejects_target_version_mismatch_before_grants(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            root = base / "setup_pack"
+            self._write_pack(
+                root,
+                "defaultspack",
+                "defaultspack",
+                True,
+                compatibility={"target_pack_version": ">=2.0.0"},
+            )
+            manager = SetupPackManager(root=root, selection_file=base / "selection.json")
+
+            ctx = self._install_context(
+                base,
+                [self._target(base, "defaultspack", "rumi:ecosystem/defaultspack", version="1.9.0")],
+            )
+            _, fake_grants, *patches = ctx
+            with patches[0], patches[1], patches[2], patches[3]:
+                result = manager.install("defaultspack")
+
+            self.assertFalse(result["success"])
+            self.assertEqual(result["status_code"], 400)
+            self.assertEqual(result["errors"][0]["reason"], "target_version_mismatch")
+            self.assertEqual(fake_grants.batch_calls, [])
+
+    def test_install_rejects_blacklisted_marketplace_metadata(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            root = base / "setup_pack"
+            self._write_pack(
+                root,
+                "risky",
+                "risky",
+                True,
+                marketplace={"status": "blacklisted", "registry": "test"},
+            )
+            manager = SetupPackManager(root=root, selection_file=base / "selection.json")
+
+            ctx = self._install_context(
+                base,
+                [self._target(base, "risky", "rumi:ecosystem/risky")],
+            )
+            _, fake_grants, *patches = ctx
+            with patches[0], patches[1], patches[2], patches[3]:
+                result = manager.install("risky")
+
+            self.assertFalse(result["success"])
+            self.assertEqual(result["errors"][0]["reason"], "marketplace_blacklisted")
+            self.assertEqual(fake_grants.batch_calls, [])
 
     def test_audit_logging_uses_supported_signatures(self):
         with tempfile.TemporaryDirectory() as tmp:

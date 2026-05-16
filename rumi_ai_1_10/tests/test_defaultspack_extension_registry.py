@@ -76,6 +76,60 @@ def test_manifest_validation_requires_provider_adapter_or_entrypoint():
         )
 
 
+def test_manifest_validation_preserves_marketplace_and_signing_metadata():
+    manifest = validate_manifest(
+        {
+            "id": "x",
+            "category": "llm_provider",
+            "version": "1",
+            "adapter": "openai_compatible",
+            "marketplace": {
+                "registry": "bundled",
+                "publisher": "rumi-ai",
+                "status": "verified",
+            },
+            "signing": {
+                "mode": "repository_reviewed",
+                "verified": True,
+            },
+        },
+        expected_category="llm_provider",
+    )
+
+    assert manifest["marketplace"]["status"] == "verified"
+    assert manifest["marketplace"]["publisher"] == "rumi-ai"
+    assert manifest["signing"]["mode"] == "repository_reviewed"
+    assert manifest["signing"]["verified"] is True
+
+
+def test_manifest_validation_rejects_blacklisted_marketplace_status():
+    with pytest.raises(ManifestValidationError, match="blacklisted"):
+        validate_manifest(
+            {
+                "id": "x",
+                "category": "llm_provider",
+                "version": "1",
+                "adapter": "openai_compatible",
+                "marketplace": {"status": "blacklisted", "registry": "test"},
+            },
+            expected_category="llm_provider",
+        )
+
+
+def test_manifest_validation_rejects_required_signing_without_signature():
+    with pytest.raises(ManifestValidationError):
+        validate_manifest(
+            {
+                "id": "x",
+                "category": "llm_provider",
+                "version": "1",
+                "adapter": "openai_compatible",
+                "signing": {"mode": "ed25519", "required": True},
+            },
+            expected_category="llm_provider",
+        )
+
+
 def test_discovery_scans_manifest_categories(tmp_path: Path):
     root = tmp_path / "extensions"
     _write_json(
@@ -127,10 +181,27 @@ def test_discovery_scans_manifest_categories(tmp_path: Path):
         ("prompt", "base_assistant"),
         ("skill", "hatch-pet"),
     }
-
     registry = ExtensionRegistry(root)
     assert registry.skills().list()[0]["triggers"] == ["sprite", "pet"]
 
+
+def test_extension_registry_excludes_llm_models_without_provider(tmp_path: Path):
+    root = tmp_path / "extensions"
+    _write_json(
+        root / "llm/providers/missing-provider/models/orphan.json",
+        {
+            "id": "missing-provider/model",
+            "category": "llm_model",
+            "version": "1",
+            "provider_id": "missing-provider",
+            "model_id": "model",
+        },
+    )
+
+    registry = ExtensionRegistry(root)
+
+    assert registry.llm().models() == []
+    assert any("provider_id is not registered" in issue.message for issue in registry.issues)
 
 def test_extension_registry_llm_best_model(tmp_path: Path):
     root = tmp_path / "extensions"

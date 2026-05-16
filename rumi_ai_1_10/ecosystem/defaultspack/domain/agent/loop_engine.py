@@ -11,9 +11,44 @@ from domain.agent.context_builder import ContextBuilder
 class LoopEngine:
     """Executes the agent loop: build context, call LLM, check termination.
 
-    MVP: simulates LLM calls with stub responses and stops after 1 iteration.
-    Future: calls LLM via context capability_socket (defaults.ai.complete).
+    Calls the configured AI handler when one is available and fails closed
+    instead of fabricating a successful assistant response.
     """
+
+    def _call_ai(self, agent_def, session, context):
+        if not isinstance(context, dict):
+            return {
+                "status": "error",
+                "error": {
+                    "code": "AI_HANDLER_UNAVAILABLE",
+                    "message": "agent loop requires call_handler",
+                },
+            }
+        callback = context.get("call_handler")
+        if not callable(callback):
+            return {
+                "status": "error",
+                "error": {
+                    "code": "AI_HANDLER_UNAVAILABLE",
+                    "message": "agent loop requires call_handler",
+                },
+            }
+        messages = []
+        system_prompt = agent_def.get("system_prompt")
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.extend(
+            {"role": msg["role"], "content": msg["content"]}
+            for msg in session.messages
+        )
+        return callback(
+            "defaults.ai.complete",
+            {
+                "messages": messages,
+                "model": agent_def.get("model", "default"),
+                "tools": agent_def.get("tools", []),
+            },
+        )
 
     def run(self, agent_def, session, input_text, context):
         """Run the agent loop.
@@ -37,7 +72,32 @@ class LoopEngine:
         for _ in range(max_iterations):
             session.current_step += 1
             context_builder.build(agent_def, session, input_text)
-            response_text = "[stub] Agent response for step " + str(session.current_step)
+            ai_result = self._call_ai(agent_def, session, context)
+            if ai_result.get("status") != "ok":
+                session.status = "error"
+                error_data = ai_result.get("error")
+                message = (
+                    error_data.get("message")
+                    if isinstance(error_data, dict)
+                    else str(error_data)
+                )
+                return {
+                    "messages": session.messages,
+                    "final_text": "",
+                    "status": "error",
+                    "error": message or "AI handler failed",
+                    "metadata": {
+                        "total_tokens": session.total_tokens,
+                        "steps": session.current_step,
+                        "elapsed_ms": int((time.time() - start_time) * 1000),
+                    },
+                }
+            data = ai_result.get("data", {})
+            response_text = (
+                (data.get("content") or data.get("text") or "")
+                if isinstance(data, dict)
+                else str(data)
+            )
             session.add_message("assistant", response_text)
             session.total_tokens += len(response_text)
             break

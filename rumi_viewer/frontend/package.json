@@ -5,11 +5,12 @@
   "type": "module",
   "scripts": {
     "dev": "vite --port=3000 --host=0.0.0.0",
-    "build": "vite build && rm -rf ../../rumi_ai_1_10/core_runtime/core_pack/core_control_panel/web && mkdir -p ../../rumi_ai_1_10/core_runtime/core_pack/core_control_panel/web && cp -R dist/* ../../rumi_ai_1_10/core_runtime/core_pack/core_control_panel/web/",
+    "build": "vite build && node scripts/copy-panel-build.mjs",
     "preview": "vite preview",
-    "clean": "rm -rf dist",
+    "clean": "node scripts/clean.mjs",
     "lint": "tsc --noEmit",
-    "test": "node --import tsx --test src/lib/*.test.ts"
+    "audit": "npm audit --audit-level=high",
+    "test": "node --import tsx --test src/lib/*.test.ts scripts/*.test.mjs"
   },
   "dependencies": {
     "@codemirror/lang-yaml": "^6.1.2",

@@ -30,6 +30,7 @@ from domain.chat.history_editor import (
     identify_compactable_segments,
     _build_text_from_content,
 )
+from blocks.chat.send import _ai_direct_complete
 
 
 def _build_analysis_prompt(messages_with_ids, max_context_tokens=None):
@@ -148,8 +149,8 @@ def _extract_text(response):
     return "\n".join(parts)
 
 
-def _call_ai(call_handler, model, messages, fallback_text):
-    """Call AI via call_handler with fallback."""
+def _call_ai(call_handler, model, messages):
+    """Call AI and return (text, error_message)."""
     if call_handler is not None:
         try:
             ai_params = {
@@ -159,15 +160,30 @@ def _call_ai(call_handler, model, messages, fallback_text):
                 "params": {},
             }
             response = call_handler("defaults.ai.complete", ai_params)
-            return _extract_text(response)
         except Exception as exc:
-            print("[compact] AI call failed: " + str(exc))
-    return fallback_text
+            return None, "AI request failed: " + str(exc)
+        if isinstance(response, dict) and response.get("status") == "error":
+            err = response.get("error", {})
+            message = err.get("message") if isinstance(err, dict) else None
+            return None, str(message or "AI request failed")
+        if isinstance(response, dict) and response.get("status") == "ok":
+            response = response.get("data", {})
+    else:
+        response, ai_error = _ai_direct_complete(model, messages, [], {})
+        if ai_error is not None:
+            return None, ai_error
+    if not isinstance(response, dict):
+        return None, "AI provider returned an invalid response"
+    return _extract_text(response), None
 
 
-def _stub_analysis():
-    """Fallback when AI analysis is unavailable: return empty plan."""
-    return "[]"
+def _unavailable_analysis():
+    """Structured error used by legacy callers if AI analysis is unavailable."""
+    return {
+        "success": False,
+        "error": "AI analysis is unavailable",
+        "error_type": "not_implemented",
+    }
 
 
 def run(input_data, context):
@@ -212,9 +228,9 @@ def run(input_data, context):
         })
 
     analysis_prompt = _build_analysis_prompt(messages_with_ids, max_context_tokens)
-    analysis_text = _call_ai(
-        call_handler, model, analysis_prompt, _stub_analysis()
-    )
+    analysis_text, ai_error = _call_ai(call_handler, model, analysis_prompt)
+    if ai_error is not None:
+        return error(ai_error, "AI_ERROR")
     ai_segments = _parse_segments(analysis_text)
 
     # --- Step 3: merge AI segments with heuristic segments ---
@@ -284,8 +300,9 @@ def run(input_data, context):
             seg.get("reason", "compaction"),
             seg.get("summary_preview", ""),
         )
-        fallback = "[Summary of " + str(len(range_msgs)) + " messages]"
-        summary_text = _call_ai(call_handler, model, summary_prompt, fallback)
+        summary_text, ai_error = _call_ai(call_handler, model, summary_prompt)
+        if ai_error is not None:
+            return error(ai_error, "AI_ERROR")
 
         summary_msg_dict = {
             "role": "assistant",

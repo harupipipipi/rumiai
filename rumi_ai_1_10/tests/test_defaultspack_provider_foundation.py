@@ -22,6 +22,13 @@ class TestDefaultspackProviderCatalog(unittest.TestCase):
         self.assertIn("ollama", providers)
         self.assertTrue(providers["ollama"]["local"])
 
+    def test_provider_catalog_manifest_coverage_has_no_orphans(self):
+        from ecosystem.defaultspack.backend.ai_client.provider_catalog import (
+            validate_catalog_coverage,
+        )
+
+        self.assertEqual(validate_catalog_coverage(), [])
+
     def test_model_catalog_exposes_cross_provider_identity_metadata(self):
         from ecosystem.defaultspack.backend.ai_client.provider_catalog import (
             list_model_catalog,

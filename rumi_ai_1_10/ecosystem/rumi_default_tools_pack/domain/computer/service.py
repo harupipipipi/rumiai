@@ -259,6 +259,16 @@ class ComputerSeatService:
         payload = {"intent": intent, "element_or_point": element_or_point}
         return self._fallback_chain("semantic_action", target, payload)
 
+    def background_safe_action(
+        self,
+        action: str,
+        target: ComputerTarget | dict[str, Any],
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Run an action through only non-foreground, non-physical drivers."""
+        target = self._normalize_target(target)
+        return self._fallback_chain(action, target, payload, background_safe_only=True)
+
     def doctor(self) -> dict[str, Any]:
         """Check platform capabilities and driver availability.
 
@@ -295,6 +305,8 @@ class ComputerSeatService:
         action: str,
         target: ComputerTarget,
         payload: dict[str, Any],
+        *,
+        background_safe_only: bool = False,
     ) -> dict[str, Any]:
         """Try each driver in the chain until one succeeds.
 
@@ -313,6 +325,8 @@ class ComputerSeatService:
 
         for driver in chain:
             try:
+                if background_safe_only and not self._driver_can_run_background_safe(driver, action):
+                    continue
                 method = getattr(driver, action, None)
                 if method is None:
                     continue
@@ -321,6 +335,10 @@ class ComputerSeatService:
                 result: ActionResult = self._dispatch(method, target, payload)
 
                 if result.executed:
+                    if background_safe_only and (result.requires_foreground or result.uses_physical_input):
+                        errors.append(f"{driver.name}: foreground-only result was rejected")
+                        is_fallback = True
+                        continue
                     result.is_fallback = is_fallback
                     self._audit.record(
                         action=action,
@@ -333,6 +351,8 @@ class ComputerSeatService:
                     )
                     return asdict(result)
                 # Driver returned executed=False – mark next attempt as fallback
+                note = "; ".join(str(item) for item in result.notes if item)
+                errors.append(f"{driver.name}: {note or result.confidence or 'not executed'}")
                 is_fallback = True
 
             except Exception as e:
@@ -357,6 +377,24 @@ class ComputerSeatService:
             result=asdict(failure),
         )
         return asdict(failure)
+
+    @staticmethod
+    def _driver_can_run_background_safe(driver: Any, action: str) -> bool:
+        try:
+            caps = driver.capabilities()
+        except Exception:
+            return False
+        if action == "click":
+            return bool(caps.can_background_click or caps.can_dom_action or caps.can_semantic_action)
+        if action == "type_text":
+            return bool(caps.can_background_type or caps.can_dom_action)
+        if action == "key":
+            return bool(caps.can_background_key or caps.can_dom_action)
+        if action == "scroll":
+            return bool(caps.can_background_scroll or caps.can_dom_action)
+        if action == "semantic_action":
+            return bool(caps.can_semantic_action or caps.can_dom_action)
+        return False
 
     def _dispatch(
         self,

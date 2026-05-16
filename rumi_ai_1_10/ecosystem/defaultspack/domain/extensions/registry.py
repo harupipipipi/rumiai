@@ -5,6 +5,7 @@ from typing import Any, Dict, Iterable, List, Optional
 
 from .categories import DEFAULT_CATEGORY_SPECS
 from .discovery import DiscoveryIssue, discover_extensions
+from .manifest import ManifestValidationError
 
 
 class ExtensionRegistry:
@@ -46,7 +47,25 @@ class ExtensionRegistry:
             for item in result.extensions:
                 self._items[item.category][item.extension_id] = dict(item.manifest)
             self._issues.extend(result.issues)
+        self._validate_cross_references()
         return self
+
+    def _validate_cross_references(self) -> None:
+        provider_ids = set(self._items.get("llm_provider", {}).keys())
+        models = self._items.get("llm_model", {})
+        for model_id, model in list(models.items()):
+            provider_id = str(model.get("provider_id", "")).strip()
+            if provider_id and provider_id in provider_ids:
+                continue
+            issue = DiscoveryIssue(
+                path=str(model.get("source_path") or model_id),
+                category="llm_model",
+                message=f"llm_model provider_id is not registered: {provider_id or '<missing>'}",
+            )
+            if self._strict:
+                raise ManifestValidationError(issue.message)
+            self._issues.append(issue)
+            models.pop(model_id, None)
 
     def categories(self) -> List[str]:
         return list(DEFAULT_CATEGORY_SPECS.keys())

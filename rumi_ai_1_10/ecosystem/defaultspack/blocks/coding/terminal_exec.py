@@ -29,7 +29,7 @@ def run(input_data, context=None):
         operation = "terminal.exec"
         workspace = resolve_workspace(input_data, context, mutation=True, operation=operation)
         terminal = Terminal(workspace.root_path)
-        risk = terminal.classify(command)
+        risk = terminal.classify(command, cwd=cwd)
         record_attempt(operation, risk["risk_level"], {"command": command, "cwd": cwd})
         approved = is_server_approved(context, operation, input_data)
         if risk["approval_required"] and not approved:

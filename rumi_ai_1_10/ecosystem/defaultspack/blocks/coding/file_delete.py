@@ -36,12 +36,22 @@ def run(input_data, context=None):
 
     try:
         ops = FileOps(workspace.root_path)
+        checkpoint = None
+        if input_data.get("checkpoint", True) is not False:
+            checkpoint = ops.checkpoint_before_mutation(
+                operation,
+                [path],
+                metadata={"path": path},
+            )
         ops.delete_file(path)
         record_execution(operation, "high", {"path": path})
-        return ok(with_workspace({
+        data = with_workspace({
             "path": path,
             "deleted": True,
-        }, workspace))
+        }, workspace)
+        if checkpoint is not None:
+            data["checkpoint"] = checkpoint
+        return ok(data)
     except FileNotFoundError as e:
         return error(str(e), code="FILE_NOT_FOUND")
     except ValueError as e:

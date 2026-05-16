@@ -94,6 +94,103 @@ jobs:
           path: ${{ runner.temp }}/contract-pytest-${{ github.job }}-${{ github.run_id }}-${{ github.run_attempt }}.log
           if-no-files-found: ignore
 
+  task-d-cross-platform-smoke:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        working-directory: rumi_ai_1_10
+        run: |
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+          pip install -e .
+
+      - name: Run Task D smoke tests
+        working-directory: rumi_ai_1_10
+        run: |
+          pytest tests/test_defaultspack_setup_pack.py tests/test_setup_pack_basepack.py tests/test_defaultspack_extension_registry.py tests/test_defaultspack_provider_foundation.py tests/test_defaultspack_agent_run_store.py -v
+
+  rumi-ai-security-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        working-directory: rumi_ai_1_10
+        run: |
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+          pip install -e .
+          pip install pip-audit
+
+      - name: Audit Python dependencies
+        working-directory: rumi_ai_1_10
+        run: pip-audit -r requirements.txt
+
+      - name: Run security/audit regression tests
+        working-directory: rumi_ai_1_10
+        run: |
+          pytest tests/test_approval_security.py tests/test_security_guards.py tests/test_defaultspack_integrity_scan.py tests/test_capability_trust_store.py -v
+
+  frontend-security-audit:
+    strategy:
+      fail-fast: false
+      matrix:
+        app:
+          - rumi_viewer/frontend
+          - rumi_ai_1_10/ecosystem/defaultspack/webapp
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: ${{ matrix.app }}/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: ${{ matrix.app }}
+        run: npm ci
+
+      - name: Audit frontend dependencies
+        working-directory: ${{ matrix.app }}
+        run: npm run audit
+
+      - name: Run defaultspack frontend tests
+        if: matrix.app == 'rumi_ai_1_10/ecosystem/defaultspack/webapp'
+        working-directory: ${{ matrix.app }}
+        run: npm test
+
+      - name: Typecheck defaultspack frontend
+        if: matrix.app == 'rumi_ai_1_10/ecosystem/defaultspack/webapp'
+        working-directory: ${{ matrix.app }}
+        run: npm run lint
+
+      - name: Build defaultspack frontend
+        if: matrix.app == 'rumi_ai_1_10/ecosystem/defaultspack/webapp'
+        working-directory: ${{ matrix.app }}
+        run: npm run build
+
   rumi-ai-static-checks:
     runs-on: ubuntu-latest
     steps:
@@ -254,3 +351,78 @@ jobs:
       - name: Run rumi viewer tests
         working-directory: rumi_viewer/src-tauri
         run: cargo test --locked
+
+  mac-computer-driver-smoke:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        working-directory: rumi_ai_1_10
+        run: |
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+          pip install -e .
+
+      - name: Run mac computer driver smoke tests
+        working-directory: rumi_ai_1_10
+        run: |
+          pytest tests/test_mac_foreground_driver.py tests/test_mac_cgevent_pid_driver.py tests/test_local_visible_driver.py tests/test_computer_foreground_io.py -v
+
+  windows-python-smoke:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        working-directory: rumi_ai_1_10
+        run: |
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+          pip install -e .
+
+      - name: Run Windows portability smoke tests
+        working-directory: rumi_ai_1_10
+        run: |
+          pytest tests/test_windows_driver_skeleton.py tests/test_rumi_capability.py tests/test_defaultspack_coding_hardening.py -v
+
+  rumi-viewer-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: rumi_viewer/frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: rumi_viewer/frontend
+        run: npm ci
+
+      - name: Run frontend tests
+        working-directory: rumi_viewer/frontend
+        run: npm test
+
+      - name: Typecheck frontend
+        working-directory: rumi_viewer/frontend
+        run: npm run lint
+
+      - name: Build panel frontend
+        working-directory: rumi_viewer/frontend
+        run: npm run build

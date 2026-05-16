@@ -406,6 +406,100 @@ def _load_model_manifests(provider_id: str = "") -> List[Dict[str, Any]]:
         return []
 
 
+def _model_ref_matches(provider_id: str, model_ref: str, model: Dict[str, Any]) -> bool:
+    ref = str(model_ref or "").strip()
+    if not ref:
+        return False
+    model_id = str(model.get("model_id") or "").strip()
+    full_id = str(model.get("id") or "").strip()
+    qualified = "{}/{}".format(provider_id, ref)
+    return ref in {model_id, full_id} or qualified == full_id
+
+
+def validate_provider_catalog_coverage(registry: Any = None) -> List[Dict[str, Any]]:
+    """Validate provider/model manifest coverage for extension-backed catalogs."""
+    try:
+        active_registry = registry or get_extension_registry(force_reload=True)
+        llm_registry = active_registry.llm()
+        providers = llm_registry.providers(enabled_only=True)
+        models = llm_registry.models(enabled_only=True)
+    except Exception as exc:
+        return [{"type": "registry_unavailable", "error": str(exc)}]
+
+    provider_ids = {
+        str(provider.get("id") or provider.get("provider_id") or "").strip()
+        for provider in providers
+        if str(provider.get("id") or provider.get("provider_id") or "").strip()
+    }
+    models_by_provider: Dict[str, List[Dict[str, Any]]] = {provider_id: [] for provider_id in provider_ids}
+    issues: List[Dict[str, Any]] = []
+
+    for model in models:
+        provider_id = str(model.get("provider_id") or "").strip()
+        model_id = str(model.get("model_id") or "").strip()
+        full_id = str(model.get("id") or "").strip()
+        if not provider_id or provider_id not in provider_ids:
+            issues.append(
+                {
+                    "type": "model_provider_missing",
+                    "provider_id": provider_id,
+                    "model_id": model_id or full_id,
+                }
+            )
+            continue
+        if not model_id or not full_id:
+            issues.append(
+                {
+                    "type": "model_identity_missing",
+                    "provider_id": provider_id,
+                    "model_id": model_id,
+                    "id": full_id,
+                }
+            )
+            continue
+        models_by_provider.setdefault(provider_id, []).append(model)
+
+    for provider in providers:
+        provider_id = str(provider.get("id") or provider.get("provider_id") or "").strip()
+        if not provider_id:
+            issues.append({"type": "provider_identity_missing"})
+            continue
+        provider_models = models_by_provider.get(provider_id, [])
+        if not provider_models:
+            issues.append({"type": "provider_models_missing", "provider_id": provider_id})
+            continue
+
+        default_model = str(provider.get("default_model") or "").strip()
+        if default_model and not any(
+            _model_ref_matches(provider_id, default_model, model) for model in provider_models
+        ):
+            issues.append(
+                {
+                    "type": "provider_default_model_missing",
+                    "provider_id": provider_id,
+                    "model_id": default_model,
+                }
+            )
+
+        default_model_for = provider.get("default_model_for") or {}
+        if isinstance(default_model_for, dict):
+            for use_case, model_ref in default_model_for.items():
+                ref = str(model_ref or "").strip()
+                if ref and not any(
+                    _model_ref_matches(provider_id, ref, model) for model in provider_models
+                ):
+                    issues.append(
+                        {
+                            "type": "provider_default_model_for_missing",
+                            "provider_id": provider_id,
+                            "use_case": str(use_case),
+                            "model_id": ref,
+                        }
+                    )
+
+    return issues
+
+
 def _provider_manifest_map() -> Dict[str, Dict[str, Any]]:
     manifests: Dict[str, Dict[str, Any]] = {}
     for manifest in _list_provider_manifests():

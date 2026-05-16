@@ -60,9 +60,24 @@ jobs:
           cache: npm
           cache-dependency-path: rumi_viewer/frontend/package-lock.json
 
+      - name: Install frontend dependencies
+        working-directory: rumi_viewer/frontend
+        run: npm ci
+
+      - name: Run frontend release checks
+        working-directory: rumi_viewer/frontend
+        run: |
+          npm test
+          npm run lint
+          npm run audit
+
       - name: Build panel frontend
         working-directory: rumi_viewer/frontend
-        run: npm ci && npm run build
+        run: npm run build
+
+      - name: Run Rust release smoke tests
+        working-directory: rumi_viewer/src-tauri
+        run: cargo test --locked
 
       - name: Build with cargo tauri
         working-directory: rumi_viewer

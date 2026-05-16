@@ -39,12 +39,22 @@ def run(input_data, context=None):
 
     try:
         ops = FileOps(workspace.root_path)
+        checkpoint = None
+        if input_data.get("checkpoint", True) is not False:
+            checkpoint = ops.checkpoint_before_mutation(
+                operation,
+                [path],
+                metadata={"path": path},
+            )
         ops.create_file(path, content)
         record_execution(operation, "medium", {"path": path})
-        return ok(with_workspace({
+        data = with_workspace({
             "path": path,
             "created": True,
-        }, workspace))
+        }, workspace)
+        if checkpoint is not None:
+            data["checkpoint"] = checkpoint
+        return ok(data)
     except FileExistsError as e:
         return error(str(e), code="FILE_EXISTS")
     except ValueError as e:

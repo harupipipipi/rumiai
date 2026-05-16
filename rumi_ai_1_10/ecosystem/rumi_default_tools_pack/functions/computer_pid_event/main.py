@@ -40,7 +40,7 @@ def run(context, args):
             result["_experimental"] = True
             result.setdefault("notes", [])
             if isinstance(result["notes"], list):
-                result["notes"].append("⚠️ EXPERIMENTAL: CGEventPostToPid")
+                result["notes"].append("EXPERIMENTAL: CGEventPostToPid")
         return result
     except Exception as e:
         return {"action": "computer.pid_event", "error": str(e), "_experimental": True}

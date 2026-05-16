@@ -318,6 +318,10 @@ def test_subagent_tool_creates_child_conversation(tmp_path, monkeypatch):
     assert result["child_conversation_id"] in parent_after["child_conversation_ids"]
     assert child["title"] == "Subagent check"
     assert [message["role"] for message in child["messages"]] == ["user", "assistant"]
+    assert result["workspace"]["contract_version"] == "rumi.agent_workspace.v1"
+    assert result["workspace"]["mode"] == "child_conversation_workspace"
+    assert child["metadata"]["workspace"]["workspace_root"] == result["workspace"]["workspace_root"]
+    assert Path(result["workspace"]["workspace_root"]).is_dir()
     ChatStore._instance = None
 
 
@@ -478,10 +482,13 @@ def test_chat_stream_uses_provider_stream_and_persists_message(tmp_path, monkeyp
     assert result["_sse"] is True
     events = list(result["events"])
     deltas = [event["delta"] for event in events if event.get("type") == "delta"]
-    assert "".join(deltas) == "This is a stub stream response."
+    assert "".join(deltas) == ""
+    failed = [event for event in events if event.get("type") == "task_failed"]
+    assert failed
+    assert "provider is not configured" in failed[-1]["error"]
     final = [event["message"] for event in events if event.get("type") == "message"][-1]
     assert final["role"] == "assistant"
-    assert final["raw_text"] == "This is a stub stream response."
+    assert "provider is not configured" in final["raw_text"]
 
     persisted = json.loads(storage_path.read_text(encoding="utf-8"))
     messages = persisted["conversations"][conversation["id"]]["messages"]

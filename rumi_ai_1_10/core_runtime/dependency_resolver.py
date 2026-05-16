@@ -25,9 +25,13 @@ from __future__ import annotations
 
 import heapq
 import logging
+import re
 from typing import Any, Dict, List
 
 logger = logging.getLogger(__name__)
+
+_VERSION_PART_RE = re.compile(r"\d+")
+_VERSION_CONSTRAINT_RE = re.compile(r"^(>=|<=|==|>|<)?\s*([0-9][0-9A-Za-z.+-]*)$")
 
 
 # ---------------------------------------------------------------------------
@@ -53,6 +57,122 @@ class MissingDependencyError(DependencyError):
 # extract_dependencies — pack-level 3 source extraction
 # ---------------------------------------------------------------------------
 
+def _normalize_dependency_spec(dep: Any) -> Dict[str, str] | None:
+    if isinstance(dep, str):
+        return {"pack_id": dep}
+    if isinstance(dep, dict):
+        pack_id = dep.get("pack_id") or dep.get("id") or dep.get("name")
+        if not pack_id:
+            return None
+        spec = {"pack_id": str(pack_id)}
+        version = dep.get("version") or dep.get("constraint") or dep.get("version_constraint")
+        if version:
+            spec["version"] = str(version)
+        return spec
+    return None
+
+
+def extract_dependency_specs(pack_info: Dict[str, Any]) -> List[Dict[str, str]]:
+    """Return normalized dependency specs preserving optional version constraints."""
+    seen: set[str] = set()
+    result: List[Dict[str, str]] = []
+
+    def _add(dep: Any) -> None:
+        spec = _normalize_dependency_spec(dep)
+        if not spec:
+            return
+        pid = spec["pack_id"]
+        if pid and pid not in seen:
+            seen.add(pid)
+            result.append(spec)
+
+    raw_depends_on = pack_info.get("depends_on")
+    if isinstance(raw_depends_on, list):
+        for dep in raw_depends_on:
+            _add(dep)
+    elif isinstance(raw_depends_on, dict):
+        for pid, raw_spec in raw_depends_on.items():
+            if isinstance(raw_spec, dict):
+                spec = dict(raw_spec)
+                spec.setdefault("pack_id", pid)
+                _add(spec)
+            else:
+                _add(str(pid))
+
+    raw_dependencies = pack_info.get("dependencies")
+    if isinstance(raw_dependencies, dict):
+        for pid, raw_spec in raw_dependencies.items():
+            if isinstance(raw_spec, dict):
+                spec = dict(raw_spec)
+                spec.setdefault("pack_id", pid)
+                _add(spec)
+            else:
+                _add(str(pid))
+    elif isinstance(raw_dependencies, list):
+        for dep in raw_dependencies:
+            _add(dep)
+
+    raw_conn = pack_info.get("connectivity")
+    if isinstance(raw_conn, dict):
+        raw_requires = raw_conn.get("requires")
+        if isinstance(raw_requires, list):
+            for pid in raw_requires:
+                if isinstance(pid, str):
+                    _add(pid)
+
+    return result
+
+
+def _parse_version(value: Any) -> tuple[int, ...] | None:
+    parts = [int(part) for part in _VERSION_PART_RE.findall(str(value or ""))]
+    return tuple(parts) if parts else None
+
+
+def _compare_versions(left: tuple[int, ...], right: tuple[int, ...]) -> int:
+    max_len = max(len(left), len(right))
+    left_padded = left + (0,) * (max_len - len(left))
+    right_padded = right + (0,) * (max_len - len(right))
+    if left_padded < right_padded:
+        return -1
+    if left_padded > right_padded:
+        return 1
+    return 0
+
+
+def _version_satisfies(actual: Any, constraint: str) -> bool:
+    actual_version = _parse_version(actual)
+    if actual_version is None:
+        return False
+    for raw_part in str(constraint or "").split(","):
+        part = raw_part.strip()
+        if not part:
+            continue
+        match = _VERSION_CONSTRAINT_RE.match(part)
+        if not match:
+            return False
+        op = match.group(1) or "=="
+        required = _parse_version(match.group(2))
+        if required is None:
+            return False
+        cmp = _compare_versions(actual_version, required)
+        if op == "==" and cmp != 0:
+            return False
+        if op == ">=" and cmp < 0:
+            return False
+        if op == ">" and cmp <= 0:
+            return False
+        if op == "<=" and cmp > 0:
+            return False
+        if op == "<" and cmp >= 0:
+            return False
+    return True
+
+
+def version_satisfies(actual: Any, constraint: str) -> bool:
+    """Return whether ``actual`` satisfies a simple comma-separated version constraint."""
+    return _version_satisfies(actual, constraint)
+
+
 def extract_dependencies(pack_info: Dict[str, Any]) -> List[str]:
     """
     単一 pack の manifest / ecosystem dict から依存 pack_id を抽出する。
@@ -75,47 +195,7 @@ def extract_dependencies(pack_info: Dict[str, Any]) -> List[str]:
     Returns:
         依存 pack_id のユニークなリスト（出現順保持）
     """
-    seen: set = set()
-    result: List[str] = []
-
-    def _add(pid: str) -> None:
-        if pid and pid not in seen:
-            seen.add(pid)
-            result.append(pid)
-
-    # --- Source 1: depends_on ---
-    raw_depends_on = pack_info.get("depends_on")
-    if isinstance(raw_depends_on, list):
-        for dep in raw_depends_on:
-            if isinstance(dep, dict):
-                pid = dep.get("pack_id", "")
-                _add(str(pid) if pid else "")
-            elif isinstance(dep, str):
-                _add(dep)
-    elif isinstance(raw_depends_on, dict):
-        for pid in raw_depends_on:
-            _add(str(pid))
-
-    # --- Source 2: dependencies ---
-    raw_dependencies = pack_info.get("dependencies")
-    if isinstance(raw_dependencies, dict):
-        for pid in raw_dependencies:
-            _add(str(pid))
-    elif isinstance(raw_dependencies, list):
-        for pid in raw_dependencies:
-            if isinstance(pid, str):
-                _add(pid)
-
-    # --- Source 3: connectivity.requires ---
-    raw_conn = pack_info.get("connectivity")
-    if isinstance(raw_conn, dict):
-        raw_requires = raw_conn.get("requires")
-        if isinstance(raw_requires, list):
-            for pid in raw_requires:
-                if isinstance(pid, str):
-                    _add(pid)
-
-    return result
+    return [spec["pack_id"] for spec in extract_dependency_specs(pack_info)]
 
 
 # ---------------------------------------------------------------------------
@@ -318,7 +398,8 @@ def validate_dependencies(
     in_degree: Dict[str, int] = {pid: 0 for pid in all_pack_ids}
 
     for pid, manifest in packs.items():
-        deps: set = set(extract_dependencies(manifest))
+        dependency_specs = extract_dependency_specs(manifest)
+        deps: set = {spec["pack_id"] for spec in dependency_specs}
         comp_deps = _collect_component_requires(pid, manifest, type_to_packs)
         deps.update(comp_deps)
 
@@ -335,6 +416,18 @@ def validate_dependencies(
                     "depends_on": dep_id,
                 })
                 continue
+            for spec in dependency_specs:
+                if spec["pack_id"] != dep_id or not spec.get("version"):
+                    continue
+                actual_version = packs.get(dep_id, {}).get("version")
+                if not _version_satisfies(actual_version, spec["version"]):
+                    issues.append({
+                        "type": "version_mismatch",
+                        "pack_id": pid,
+                        "depends_on": dep_id,
+                        "required": spec["version"],
+                        "actual": actual_version,
+                    })
             graph[dep_id].append(pid)
             in_degree[pid] += 1
 

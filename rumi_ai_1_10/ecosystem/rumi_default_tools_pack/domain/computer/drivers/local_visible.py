@@ -13,6 +13,7 @@ from typing import Any
 
 from ..models import ActionResult, ComputerCapabilities, ComputerTarget, ObserveResult
 from .base import ComputerDriver
+from . import foreground_io
 
 
 class LocalVisibleDesktopDriver(ComputerDriver):
@@ -32,12 +33,16 @@ class LocalVisibleDesktopDriver(ComputerDriver):
         return sys.platform
 
     def capabilities(self) -> ComputerCapabilities:
+        action_available = foreground_io.action_api_available()
+        capture_available = foreground_io.capture_api_available()
         return ComputerCapabilities(
             can_capture_background_window=False,
             can_semantic_action=False,
             can_pid_event=False,
-            can_foreground_action=True,
+            can_foreground_action=action_available,
             can_parallel_user_work=False,
+            requires_foreground_for_capture=capture_available,
+            requires_user_permission=sys.platform == "darwin" and (action_available or capture_available),
         )
 
     def observe(self, target: ComputerTarget) -> ObserveResult:
@@ -49,13 +54,33 @@ class LocalVisibleDesktopDriver(ComputerDriver):
         Returns:
             ObserveResult with screenshot data.
         """
-        # TODO: Integrate with existing screenshot infrastructure
+        if not foreground_io.capture_api_available():
+            return ObserveResult(
+                platform=sys.platform,
+                target_window={"app": target.app, "pid": target.pid},
+                screenshot={
+                    "method": "unavailable",
+                    "error": "Visible-screen capture is supported only when the platform screenshot API is available.",
+                },
+                capabilities={
+                    "can_capture_background_window": False,
+                    "can_foreground_action": foreground_io.action_api_available(),
+                    "requires_foreground_for_capture": False,
+                },
+                fallback_available=False,
+            )
+        try:
+            screenshot = foreground_io.capture_visible_screen()
+        except Exception as exc:
+            screenshot = {"method": "unavailable", "error": str(exc)}
         return ObserveResult(
             platform=sys.platform,
             target_window={"app": target.app, "pid": target.pid},
+            screenshot=screenshot,
             capabilities={
                 "can_capture_background_window": False,
-                "can_foreground_action": True,
+                "can_foreground_action": foreground_io.action_api_available(),
+                "requires_foreground_for_capture": True,
             },
             fallback_available=False,
         )
@@ -78,17 +103,10 @@ class LocalVisibleDesktopDriver(ComputerDriver):
         Returns:
             ActionResult.
         """
-        # TODO: Integrate with existing click infrastructure
-        return ActionResult(
-            action="click",
-            driver=self.name,
-            executed=False,
-            confidence="best_effort",
-            target_kind=target.kind,
-            requires_foreground=True,
-            uses_physical_input=True,
-            can_parallel_user_work=False,
-            notes=["LocalVisibleDesktopDriver.click: not yet integrated"],
+        return self._run_foreground_action(
+            "click",
+            target,
+            lambda: foreground_io.click(int(x), int(y), button),
         )
 
     def type_text(self, target: ComputerTarget, text: str = "") -> ActionResult:
@@ -101,17 +119,10 @@ class LocalVisibleDesktopDriver(ComputerDriver):
         Returns:
             ActionResult.
         """
-        # TODO: Integrate with existing type infrastructure
-        return ActionResult(
-            action="type_text",
-            driver=self.name,
-            executed=False,
-            confidence="best_effort",
-            target_kind=target.kind,
-            requires_foreground=True,
-            uses_physical_input=True,
-            can_parallel_user_work=False,
-            notes=["LocalVisibleDesktopDriver.type_text: not yet integrated"],
+        return self._run_foreground_action(
+            "type_text",
+            target,
+            lambda: foreground_io.type_text(text),
         )
 
     def key(self, target: ComputerTarget, key_combo: str = "") -> ActionResult:
@@ -124,17 +135,10 @@ class LocalVisibleDesktopDriver(ComputerDriver):
         Returns:
             ActionResult.
         """
-        # TODO: Integrate with existing key infrastructure
-        return ActionResult(
-            action="key",
-            driver=self.name,
-            executed=False,
-            confidence="best_effort",
-            target_kind=target.kind,
-            requires_foreground=True,
-            uses_physical_input=True,
-            can_parallel_user_work=False,
-            notes=["LocalVisibleDesktopDriver.key: not yet integrated"],
+        return self._run_foreground_action(
+            "key",
+            target,
+            lambda: foreground_io.key(key_combo),
         )
 
     def scroll(
@@ -157,17 +161,10 @@ class LocalVisibleDesktopDriver(ComputerDriver):
         Returns:
             ActionResult.
         """
-        # TODO: Integrate with existing scroll infrastructure
-        return ActionResult(
-            action="scroll",
-            driver=self.name,
-            executed=False,
-            confidence="best_effort",
-            target_kind=target.kind,
-            requires_foreground=True,
-            uses_physical_input=True,
-            can_parallel_user_work=False,
-            notes=["LocalVisibleDesktopDriver.scroll: not yet integrated"],
+        return self._run_foreground_action(
+            "scroll",
+            target,
+            lambda: foreground_io.scroll(int(x), int(y), direction, int(clicks)),
         )
 
     def semantic_action(
@@ -194,6 +191,75 @@ class LocalVisibleDesktopDriver(ComputerDriver):
             notes=["LocalVisibleDesktopDriver does not support semantic actions"],
         )
 
+    def move(
+        self,
+        target: ComputerTarget,
+        x: int = 0,
+        y: int = 0,
+    ) -> ActionResult:
+        """Move the visible cursor using physical input."""
+        return self._run_foreground_action(
+            "move",
+            target,
+            lambda: foreground_io.move(int(x), int(y)),
+        )
+
     def is_available(self) -> bool:
-        """Always available as a last-resort driver."""
-        return True
+        """Available only when the host exposes a real visible-screen API."""
+        return foreground_io.action_api_available() or foreground_io.capture_api_available()
+
+    def _run_foreground_action(
+        self,
+        action: str,
+        target: ComputerTarget,
+        fn: Any,
+    ) -> ActionResult:
+        if not foreground_io.action_api_available():
+            return ActionResult(
+                action=action,
+                driver=self.name,
+                executed=False,
+                confidence="not_supported",
+                target_kind=target.kind,
+                requires_foreground=True,
+                uses_physical_input=True,
+                can_parallel_user_work=False,
+                notes=["No visible-screen automation API is available on this platform."],
+            )
+        try:
+            fn()
+            return ActionResult(
+                action=action,
+                driver=self.name,
+                executed=True,
+                confidence="high",
+                target_kind=target.kind,
+                requires_foreground=True,
+                uses_physical_input=True,
+                can_parallel_user_work=False,
+                visibility_state="visible_screen",
+            )
+        except foreground_io.ForegroundAutomationUnavailable as exc:
+            return ActionResult(
+                action=action,
+                driver=self.name,
+                executed=False,
+                confidence="not_supported",
+                target_kind=target.kind,
+                requires_foreground=True,
+                uses_physical_input=True,
+                can_parallel_user_work=False,
+                notes=[str(exc)],
+            )
+        except Exception as exc:
+            return ActionResult(
+                action=action,
+                driver=self.name,
+                executed=False,
+                confidence="failed",
+                target_kind=target.kind,
+                requires_foreground=True,
+                uses_physical_input=True,
+                can_parallel_user_work=False,
+                notes=[f"Visible-screen {action} failed: {exc}"],
+            )
