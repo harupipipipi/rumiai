@@ -317,7 +317,7 @@ project_root/
 The canonical frontend source for the control panel lives in `../rumi_viewer/frontend`.
 `core_runtime/core_pack/core_control_panel/web` contains the built static artifact served by the kernel at `/panel/`.
 
-Prompt behavior lives in `ecosystem/defaultspack/domain/prompt/` and `ecosystem/defaultspack/blocks/prompt/`. Tool behavior lives in `ecosystem/defaultspack/domain/tool/` and `ecosystem/defaultspack/blocks/tool/`. The top-level `prompt/`, `tool/`, and `supporter/` packages are deprecated legacy import shims only; new supporter-like behavior should be implemented as defaultspack functions, agents, prompts, memory, or extensions.
+Prompt behavior lives in `ecosystem/defaultspack/domain/prompt/` and `ecosystem/defaultspack/blocks/prompt/`. Tool behavior lives in `ecosystem/defaultspack/domain/tool/` and `ecosystem/defaultspack/blocks/tool/`. The old top-level `prompt/`, `tool/`, and `supporter/` import shims have been removed; new supporter-like behavior should be implemented as defaultspack functions, agents, prompts, memory, or extensions.
 
 `../rumi_viewer/frontend/src/pages/Flows.tsx` の graph editor は、Pack 特化の固定 UI ではなく、拡張用の graph metadata を持つ editor として扱います。
 

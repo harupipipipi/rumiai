@@ -107,15 +107,15 @@ ecosystem/defaultspack/extensions/
   - 受け入れ: extension 由来の prompt/tool が既存 API から見える
 - [ ] D6: transport route registration テスト
   - 受け入れ: fallback route 定義が registry module から構築される
-- [ ] D7: legacy shim テスト
-  - 受け入れ: `prompt.prompt_loader` / `tool.tool_loader` の互換 import が継続する
+- [ ] D7: legacy shim removal テスト
+  - 受け入れ: `prompt.prompt_loader` / `tool.tool_loader` の互換 import ができない
 
 ## 互換方針
 
 - API surface は維持する（`AIClient` 呼び出しシグネチャは変更しない）。
 - extension 未配置時は fail-soft で既存挙動にフォールバックする。
 - `transport/http.py` の fallback ルート表は互換用途として残すが、定義そのものは registry module 側へ寄せる。
-- top-level `prompt.*` / `tool.*` の legacy shim は削除しない。
+- top-level `prompt.*` / `tool.*` legacy shims have been removed; use defaultspack registries and functions.
 
 ## 前提と仮定
 

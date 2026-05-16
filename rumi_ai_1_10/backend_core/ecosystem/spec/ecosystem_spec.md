@@ -243,7 +243,7 @@ Historical example component types from the legacy default pack:
 | ui_panel_pack | UIパネル | 左ペイン、中央、設定 |
 | ui_button_pack | UIボタン | プロンプト切替、モデル切替 |
 
-Current defaultspack behavior is implemented through functions, manifests, nodes, and domain registries. Prompt behavior lives in `ecosystem/defaultspack/domain/prompt/` and `ecosystem/defaultspack/blocks/prompt/`; tool behavior lives in `ecosystem/defaultspack/domain/tool/` and `ecosystem/defaultspack/blocks/tool/`. Supporter is a legacy concept; new behavior should be modeled as defaultspack functions, agents, prompts, memory, or extensions.
+Current defaultspack behavior is implemented through functions, manifests, nodes, and domain registries. Prompt behavior lives in `ecosystem/defaultspack/domain/prompt/` and `ecosystem/defaultspack/blocks/prompt/`; tool behavior lives in `ecosystem/defaultspack/domain/tool/` and `ecosystem/defaultspack/blocks/tool/`. The old top-level prompt/tool/supporter import shims have been removed. Supporter is a legacy concept; new behavior should be modeled as defaultspack functions, agents, prompts, memory, or extensions.
 
 ---
 
@@ -497,9 +497,6 @@ chats_dir = get_chats_dir()
 | get_settings_dir() | 設定ディレクトリ |
 | get_cache_dir() | キャッシュディレクトリ |
 | get_shared_dir() | 共有ディレクトリ |
-| get_tools_dir() | ツールディレクトリ |
-| get_prompts_dir() | プロンプトディレクトリ |
-| get_supporters_dir() | サポーターディレクトリ |
 | get_ai_clients_dir() | AIクライアントディレクトリ |
 
 ---
