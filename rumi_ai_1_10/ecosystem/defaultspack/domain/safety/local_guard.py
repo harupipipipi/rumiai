@@ -126,7 +126,8 @@ def is_sensitive_local_path(path: str, method: str | None = None) -> bool:
         ):
             if normalized_method is None:
                 return True
-            return normalized_method in methods
+            if normalized_method in methods:
+                return True
     return False
 
 

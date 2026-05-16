@@ -89,6 +89,9 @@ def run(context):
         # ---- MCP routes ----
         ("POST", "/api/tools/mcp/connect", _lazy("blocks.tool.mcp_connect"), {}),
         ("GET", "/api/tools/mcp", _lazy("blocks.tool.mcp_list"), {}),
+        ("POST", "/api/tools/mcp", _lazy("blocks.tool.mcp_registry"), {}),
+        ("DELETE", "/api/tools/mcp", _lazy("blocks.tool.mcp_registry"), {}),
+        ("GET", "/api/browser/artifacts", _lazy("blocks.browser.artifacts"), {}),
         # ---- Container routes (T14) ----
         ("POST", "/api/container", _guarded(_lazy("blocks.tool.container.create"), "container.create"), {}),
         ("POST", "/api/container/{id}/start", _guarded(_lazy("blocks.tool.container.start"), "container.start"), {"id": "id"}),

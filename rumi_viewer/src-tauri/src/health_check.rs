@@ -68,9 +68,7 @@ pub fn check_health(port: u16) -> Result<bool> {
 ///
 /// Checks every 200 ms.
 pub fn wait_for_healthy(port: u16, timeout_secs: u64) -> Result<()> {
-    info!(
-        "Waiting for Kernel health-check on port {port} (timeout {timeout_secs}s) ..."
-    );
+    info!("Waiting for Kernel health-check on port {port} (timeout {timeout_secs}s) ...");
 
     let start = std::time::Instant::now();
     let timeout = Duration::from_secs(timeout_secs);

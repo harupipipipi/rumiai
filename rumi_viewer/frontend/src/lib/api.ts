@@ -159,6 +159,15 @@ export async function fetchBackgroundControlStatus(): Promise<BackgroundControlS
   return invoke<BackgroundControlStatus>('get_background_control_status');
 }
 
+export async function launchDefaultspackDesktop(): Promise<string> {
+  const invoke = getTauriInvoke();
+  if (!invoke) {
+    throw new Error('Defaultspack desktop launch is only available in Rumi Viewer.');
+  }
+
+  return invoke<string>('launch_defaultspack_desktop');
+}
+
 async function requestDesktopPanelBootstrapCode(): Promise<string | null> {
   const invoke = getTauriInvoke();
   if (!invoke) {

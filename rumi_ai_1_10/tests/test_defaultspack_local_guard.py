@@ -61,6 +61,23 @@ def test_git_branch_post_is_guarded_but_get_remains_read_only():
     )
 
 
+def test_dynamic_tool_post_routes_are_guarded():
+    from domain.safety.local_guard import require_local_guard
+    from transport.http import _is_sensitive_http_path
+
+    assert _is_sensitive_http_path("/api/tools/example") is True
+    assert require_local_guard(
+        "/api/tools/example",
+        "POST",
+        {"Origin": "http://localhost:8766"},
+        ("127.0.0.1", 54321),
+    ) == (
+        403,
+        "CSRF header required for sensitive local mutation",
+        "CSRF_REQUIRED",
+    )
+
+
 def test_audit_redacts_secrets(tmp_path, monkeypatch):
     from domain.safety.audit import audit_path, record_attempt
 

@@ -3,6 +3,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import pytest
+
 
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULTSPACK_ROOT = ROOT / "ecosystem" / "defaultspack"
@@ -10,8 +12,20 @@ DEFAULTSPACK_ROOT = ROOT / "ecosystem" / "defaultspack"
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(DEFAULTSPACK_ROOT))
 
+pytestmark = pytest.mark.contract
+
+
+def _prefer_defaultspack_modules() -> None:
+    sys.path[:] = [entry for entry in sys.path if entry != str(DEFAULTSPACK_ROOT)]
+    sys.path.insert(0, str(DEFAULTSPACK_ROOT))
+    for name in list(sys.modules):
+        if name == "domain" or name.startswith("domain.") or name == "blocks" or name.startswith("blocks."):
+            sys.modules.pop(name, None)
+
 
 def test_coding_cockpit_functions_are_registered_in_manifest_factory():
+    _prefer_defaultspack_modules()
+
     from domain.function_runtime.manifest_factory import FUNCTION_SPECS_BY_ID
 
     required = {
@@ -34,6 +48,8 @@ def test_coding_cockpit_functions_are_registered_in_manifest_factory():
 
 
 def test_coding_agent_session_create_status_and_merge_report_are_visible():
+    _prefer_defaultspack_modules()
+
     from blocks.agent.coding_session_create import run as create_session
     from blocks.agent.coding_session_merge_report import run as merge_report
     from blocks.agent.coding_session_status import run as session_status

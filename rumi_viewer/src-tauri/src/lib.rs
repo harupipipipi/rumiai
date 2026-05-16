@@ -24,7 +24,6 @@ use tauri::{AppHandle, Emitter, Manager};
 use config::AppConfig;
 use kernel_manager::KernelManager;
 
-#[cfg(target_os = "macos")]
 mod dock_registration;
 
 /// Wrapper around a shared progress string, managed as Tauri State.
@@ -823,8 +822,8 @@ pub fn run() {
             send_to_background,
             show_app_window,
             get_background_control_status,
-            #[cfg(target_os = "macos")]
-            dock_registration::register_defaultspack_dock
+            dock_registration::register_defaultspack_dock,
+            dock_registration::launch_defaultspack_desktop
         ])
         .build(tauri::generate_context!())
         .map(|app| {

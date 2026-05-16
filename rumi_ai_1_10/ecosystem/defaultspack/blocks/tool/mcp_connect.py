@@ -125,8 +125,13 @@ def run(input_data, context):
     if transport == "sse" and not config.get("url"):
         return error("config.url is required for sse transport", "MISSING_PARAM")
 
-    record_tool_attempt(OPERATION, RISK, input_data)
-    approval = approved_or_request(input_data, context, OPERATION, RISK)
+    approval_input = dict(input_data or {})
+    approval_input["server_id"] = server_name
+    approval_input["server_name"] = server_name
+    approval_input["config"] = config
+
+    record_tool_attempt(OPERATION, RISK, approval_input)
+    approval = approved_or_request(approval_input, context, OPERATION, RISK)
     if approval is not None:
         return approval
 
@@ -137,7 +142,7 @@ def run(input_data, context):
     try:
         tools_added = mcp_client.connect(server_name, config)
     except Exception as exc:
-        record_tool_failure(OPERATION, RISK, input_data, str(exc), server_name=server_name)
+        record_tool_failure(OPERATION, RISK, approval_input, str(exc), server_name=server_name)
         return error("MCP connect failed: {}".format(exc), "MCP_CONNECT_ERROR")
 
     registry = ToolRegistry()
@@ -188,7 +193,7 @@ def run(input_data, context):
             }
         )
 
-    record_tool_execution(OPERATION, RISK, input_data, server_name=server_name, tools_added=tools_added)
+    record_tool_execution(OPERATION, RISK, approval_input, server_name=server_name, tools_added=tools_added)
     mcp_registry.mark_connected(server_name, tools=registered_tools, approved=True)
     return ok(
         {

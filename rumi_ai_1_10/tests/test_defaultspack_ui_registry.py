@@ -173,6 +173,79 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         self.assertEqual(catalog["app"]["icon"], "/static/assets/icons/defaultspack-icon.png")
         self.assertEqual(catalog["diagnostics"], [])
 
+    def test_frontend_extensions_filter_to_selected_setup_targets(self):
+        from domain.frontend.registry import FrontendRegistry
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            rumi_root = Path(tmpdir) / "rumi_ai_1_10"
+            ecosystem_root = rumi_root / "ecosystem"
+
+            def make_pack(pack_id: str) -> Path:
+                pack_root = ecosystem_root / pack_id
+                pack_root.mkdir(parents=True, exist_ok=True)
+                (pack_root / "ecosystem.json").write_text(
+                    json.dumps({"pack_id": pack_id}),
+                    encoding="utf-8",
+                )
+                ext_dir = pack_root / "frontend_extensions"
+                ext_dir.mkdir(parents=True, exist_ok=True)
+                (ext_dir / f"{pack_id}.ui.json").write_text(
+                    json.dumps(
+                        {
+                            "sidebar_items": [
+                                {
+                                    "id": f"{pack_id}-item",
+                                    "label": pack_id,
+                                    "category": "widget",
+                                }
+                            ]
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+                return pack_root
+
+            pack_root = make_pack("defaultspack")
+            make_pack("pack_a")
+            make_pack("pack_b")
+            selection_path = rumi_root / "user_data" / "settings" / "setup_pack_selection.json"
+            selection_path.parent.mkdir(parents=True, exist_ok=True)
+            selection_path.write_text(
+                json.dumps(
+                    {
+                        "target_pack_ids": ["pack_a"],
+                        "active_target_pack_id": "pack_a",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            user_ext_dir = pack_root / "user_data" / "shared" / "frontend_extensions"
+            user_ext_dir.mkdir(parents=True, exist_ok=True)
+            (user_ext_dir / "overlay.ui.json").write_text(
+                json.dumps(
+                    {
+                        "sidebar_items": [
+                            {
+                                "id": "user-overlay-item",
+                                "label": "User Overlay",
+                                "category": "widget",
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with patch("domain.frontend.registry.AIClient") as mock_client:
+                mock_client.return_value.list_models.return_value = [{"id": "stub/default"}]
+                catalog = FrontendRegistry(pack_root=pack_root).build_catalog()
+
+        sidebar_ids = {item["id"] for item in catalog["sidebar"]["items"]}
+        self.assertIn("defaultspack-item", sidebar_ids)
+        self.assertIn("pack_a-item", sidebar_ids)
+        self.assertIn("user-overlay-item", sidebar_ids)
+        self.assertNotIn("pack_b-item", sidebar_ids)
+
     def test_chat_send_builds_multimodal_attachment_blocks(self):
         from blocks.chat.send import (
             _attachment_image_blocks,
