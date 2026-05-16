@@ -19,6 +19,7 @@ from ecosystem.defaultspack.domain.extensions.manifest import (
     validate_manifest,
 )
 from ecosystem.defaultspack.domain.extensions.registry import ExtensionRegistry
+from ecosystem.defaultspack.domain.extensions.runtime import build_extensions_roots
 from ecosystem.defaultspack.domain.prompt.manager import PromptManager
 from ecosystem.defaultspack.domain.tool.broker import ToolBroker
 from ecosystem.defaultspack.domain.tool.registry import ToolRegistry
@@ -62,6 +63,13 @@ class _FakeExtensionRegistry:
 def _write_json(path: Path, payload):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def _make_extension_pack(ecosystem_root: Path, pack_id: str) -> Path:
+    pack_root = ecosystem_root / pack_id
+    _write_json(pack_root / "ecosystem.json", {"pack_id": pack_id})
+    (pack_root / "extensions").mkdir(parents=True, exist_ok=True)
+    return pack_root
 
 
 def test_manifest_validation_requires_provider_adapter_or_entrypoint():
@@ -302,6 +310,44 @@ def test_extension_registry_lists_rumi_bundle_ui_surface():
     assert surfaces["rumi_bundle"]["config"]["module_id"] == "rumi_bundle"
     assert surfaces["rumi_bundle"]["config"]["launch_mode"] == "desktop_app"
     assert surfaces["rumi_bundle"]["config"]["port_source"]["default"] == 8766
+
+
+def test_build_extensions_roots_includes_all_packs_without_setup_selection(tmp_path: Path):
+    rumi_root = tmp_path / "rumi_ai_1_10"
+    ecosystem_root = rumi_root / "ecosystem"
+    defaultspack = _make_extension_pack(ecosystem_root, "defaultspack")
+    pack_a = _make_extension_pack(ecosystem_root, "pack_a")
+    pack_b = _make_extension_pack(ecosystem_root, "pack_b")
+
+    roots = {path.resolve() for path in build_extensions_roots(defaultspack)}
+
+    assert (defaultspack / "extensions").resolve() in roots
+    assert (pack_a / "extensions").resolve() in roots
+    assert (pack_b / "extensions").resolve() in roots
+
+
+def test_build_extensions_roots_filters_to_selected_setup_targets(tmp_path: Path):
+    rumi_root = tmp_path / "rumi_ai_1_10"
+    ecosystem_root = rumi_root / "ecosystem"
+    defaultspack = _make_extension_pack(ecosystem_root, "defaultspack")
+    pack_a = _make_extension_pack(ecosystem_root, "pack_a")
+    pack_b = _make_extension_pack(ecosystem_root, "pack_b")
+    extra_root = tmp_path / "loose_extensions"
+    _write_json(
+        rumi_root / "user_data" / "settings" / "setup_pack_selection.json",
+        {
+            "target_pack_ids": ["pack_a"],
+            "active_target_pack_id": "pack_a",
+        },
+    )
+
+    roots = {path.resolve() for path in build_extensions_roots(defaultspack, extra_roots=[extra_root])}
+
+    assert (defaultspack / "extensions").resolve() in roots
+    assert (pack_a / "extensions").resolve() in roots
+    assert (pack_b / "extensions").resolve() not in roots
+    assert (defaultspack / "user_data" / "shared" / "extensions").resolve() in roots
+    assert extra_root.resolve() in roots
 
 
 def test_openrouter_provider_lists_only_hy3_preview_free(monkeypatch):

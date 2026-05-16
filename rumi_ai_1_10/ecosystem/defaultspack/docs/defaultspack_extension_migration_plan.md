@@ -128,6 +128,9 @@ ecosystem/defaultspack/extensions/
 - discovery / registry / basic manifests は追加済み
 - provider migration は途中で、package import path の正規化と model metadata の寄せ先整理が必要
 - prompt / tool / transport は雛形追加済みだが、既存 manager / route table への接続が未完了
+- setup pack selection がある環境では、backend/frontend extension discovery は
+  `defaultspack` と選択済み target pack に絞られる。selection がない開発環境では
+  互換のため全 sibling pack を読み込む
 - Copilot 変更には互換 shim 削除が含まれていたため、このPRでは shim を戻して互換優先にする
 ## Local-first completion status
 
