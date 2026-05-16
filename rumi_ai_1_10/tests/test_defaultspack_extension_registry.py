@@ -365,6 +365,24 @@ def test_build_extensions_roots_fails_closed_on_invalid_setup_selection(tmp_path
     assert (pack_a / "extensions").resolve() not in roots
 
 
+def test_get_extension_registry_force_reload_preserves_registry_identity(monkeypatch, tmp_path: Path):
+    import ecosystem.defaultspack.domain.extensions.runtime as runtime
+
+    first_root = tmp_path / "first" / "extensions"
+    second_root = tmp_path / "second" / "extensions"
+    first_root.mkdir(parents=True)
+    second_root.mkdir(parents=True)
+    registry = ExtensionRegistry(first_root)
+
+    monkeypatch.setattr(runtime, "_REGISTRY", registry)
+    monkeypatch.setattr(runtime, "get_extensions_roots", lambda: [second_root])
+
+    reloaded = runtime.get_extension_registry(force_reload=True)
+
+    assert reloaded is registry
+    assert reloaded.root == second_root
+
+
 def test_openrouter_provider_lists_only_hy3_preview_free(monkeypatch):
     monkeypatch.setenv("OPENROUTER_API_KEY", "dummy-token")
 

@@ -88,8 +88,18 @@ def get_extension_registry(
     strict: bool = False,
 ) -> ExtensionRegistry:
     global _REGISTRY
-    if _REGISTRY is None or force_reload:
+    if _REGISTRY is None:
         with _LOCK:
-            if _REGISTRY is None or force_reload:
+            if _REGISTRY is None:
                 _REGISTRY = ExtensionRegistry(get_extensions_roots(), strict=strict)
+    elif force_reload:
+        with _LOCK:
+            if _REGISTRY is None:
+                _REGISTRY = ExtensionRegistry(get_extensions_roots(), strict=strict)
+            else:
+                roots = get_extensions_roots()
+                _REGISTRY._roots = [Path(root) for root in roots]
+                _REGISTRY._root = _REGISTRY._roots[0] if _REGISTRY._roots else Path(".")
+                _REGISTRY._strict = strict
+                _REGISTRY.reload()
     return _REGISTRY
