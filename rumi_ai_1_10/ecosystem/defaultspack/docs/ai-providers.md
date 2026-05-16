@@ -10,6 +10,7 @@ defaults の ai_client モジュールは以下のプロバイダーに対応す
 | `anthropic` | Anthropic API（Claude Opus 4, Sonnet 4, Haiku 3 等） |
 | `google` | Google Gemini API（Gemini 2.5 Pro, Gemini 2.5 Flash 等） |
 | `openrouter` | OpenRouter API（defaultspack では `tencent/hy3-preview:free` のみ） |
+| `gitlawb-opengateway` | Gitlawb OpenGateway（外部のno-key gateway。3モデルの固定allowlistのみ） |
 | `stub` | テスト用スタブ。固定レスポンスを返す |
 | `rumi` | rumi 独自のメタプロバイダー（パイプライン、ルーティング、評価） |
 
@@ -54,6 +55,27 @@ OPENROUTER_API_KEY=sk-or-...
 # オプション:
 OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
 ```
+
+### Gitlawb OpenGateway
+
+Gitlawb OpenGateway は OpenAI-compatible な外部 no-key gateway。API キーは不要だが、クラウド provider として扱うため、
+runtime で使うには明示的な opt-in が必要。
+
+```bash
+RUMI_DEFAULTSPACK_ENABLE_CLOUD_PROVIDERS=1
+# オプション:
+GITLAWB_OPENGATEWAY_BASE_URL=https://opengateway.gitlawb.com/v1
+```
+
+利用できるモデルは固定 allowlist のみ。
+
+| モデル名 | 特徴 |
+|---|---|
+| `gitlawb-opengateway/mimo-v2.5-pro` | reasoning 用の MiMo V2.5 Pro |
+| `gitlawb-opengateway/mimo-v2-flash` | 高速な MiMo V2 Flash |
+| `gitlawb-opengateway/google/gemini-3.1-flash-lite-preview` | 高速な Gemini 3.1 Flash Lite Preview |
+
+警告: この provider を選択すると、プロンプト、会話履歴、tool結果などのコンテキストが Gitlawb OpenGateway に送信される。
 
 ### stub
 

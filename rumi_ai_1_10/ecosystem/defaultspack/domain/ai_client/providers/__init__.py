@@ -157,6 +157,23 @@ _CURATED_PROVIDER_METADATA: Dict[str, Dict[str, Any]] = {
         "default_model": "tencent/hy3-preview:free",
         "capabilities": ["chat", "streaming"],
     },
+    "gitlawb-opengateway": {
+        "display_name": "Gitlawb OpenGateway",
+        "kind": "aggregator",
+        "description": "No-key Gitlawb OpenGateway allowlist for MiMo and Gemini Flash Lite.",
+        "env_vars": [],
+        "base_url_envs": ["GITLAWB_OPENGATEWAY_BASE_URL"],
+        "catalog_only": False,
+        "supports_invoke": True,
+        "default_base_url": "https://opengateway.gitlawb.com/v1",
+        "default_model": "mimo-v2.5-pro",
+        "default_model_for": {
+            "chat": "mimo-v2.5-pro",
+            "reasoning": "mimo-v2.5-pro",
+            "fast": "mimo-v2-flash",
+        },
+        "capabilities": ["chat", "streaming", "openai_compatible", "reasoning"],
+    },
     "deepseek": {
         "display_name": "DeepSeek",
         "kind": "cloud",
@@ -322,6 +339,15 @@ _CURATED_PROVIDER_MODELS: Dict[str, List[Dict[str, Any]]] = {
     "openrouter": [
         {"model_id": "tencent/hy3-preview:free", "name": "Tencent Hy3 preview (free)", "type": "chat"},
     ],
+    "gitlawb-opengateway": [
+        {"model_id": "mimo-v2.5-pro", "name": "MiMo V2.5 Pro via Gitlawb OpenGateway", "type": "reasoning"},
+        {"model_id": "mimo-v2-flash", "name": "MiMo V2 Flash via Gitlawb OpenGateway", "type": "chat"},
+        {
+            "model_id": "google/gemini-3.1-flash-lite-preview",
+            "name": "Gemini 3.1 Flash Lite Preview via Gitlawb OpenGateway",
+            "type": "chat",
+        },
+    ],
     "deepseek": [
         {"model_id": "deepseek-chat", "name": "DeepSeek Chat", "type": "chat"},
         {"model_id": "deepseek-r1", "name": "DeepSeek R1", "type": "reasoning"},
@@ -375,6 +401,7 @@ _BEST_MODEL_BY_PROVIDER = {
     "mistral": "mistral-large-latest",
     "xai": "grok-2-latest",
     "openrouter": "tencent/hy3-preview:free",
+    "gitlawb-opengateway": "mimo-v2.5-pro",
     "deepseek": "deepseek-chat",
     "perplexity": "sonar-pro",
     "together": "llama-3.1-70b-instruct-turbo",
@@ -1017,7 +1044,9 @@ def _credentials_ready(manifest: Dict[str, Any], provider_id: str) -> bool:
     if provider_has_api_key(provider_id):
         return True
     if not bool(manifest.get("credential_required", True)):
-        return not api_envs and not base_url_envs
+        return not api_envs and (
+            not base_url_envs or bool(str(manifest.get("default_base_url", "")).strip())
+        )
     return False
 
 

@@ -1,0 +1,109 @@
+from __future__ import annotations
+
+from typing import Any, Dict, List
+
+from .openai_compatible_provider import OpenAICompatibleProvider
+
+
+class GitlawbOpengatewayProvider(OpenAICompatibleProvider):
+    """Gitlawb OpenGateway provider limited to the Rumi-approved allowlist."""
+
+    MODEL_IDS = {
+        "mimo-v2.5-pro",
+        "mimo-v2-flash",
+        "google/gemini-3.1-flash-lite-preview",
+    }
+    KNOWN_MODELS = [
+        {
+            "id": "gitlawb-opengateway/mimo-v2.5-pro",
+            "model_id": "mimo-v2.5-pro",
+            "name": "MiMo V2.5 Pro via Gitlawb OpenGateway",
+            "display_name": "MiMo V2.5 Pro via Gitlawb OpenGateway",
+            "provider": "gitlawb-opengateway",
+            "provider_id": "gitlawb-opengateway",
+            "type": "chat",
+            "defaults": {"chat": True, "reasoning": True},
+            "capabilities": ["chat", "reasoning", "streaming"],
+            "supports_thinking": True,
+            "thinking_levels": ["low", "medium", "high", "xhigh"],
+            "default_thinking_level": "medium",
+            "metadata": {
+                "source": "gitlawb-opengateway",
+                "privacy": "external_no_key_gateway",
+            },
+        },
+        {
+            "id": "gitlawb-opengateway/mimo-v2-flash",
+            "model_id": "mimo-v2-flash",
+            "name": "MiMo V2 Flash via Gitlawb OpenGateway",
+            "display_name": "MiMo V2 Flash via Gitlawb OpenGateway",
+            "provider": "gitlawb-opengateway",
+            "provider_id": "gitlawb-opengateway",
+            "type": "chat",
+            "defaults": {"chat": True, "fast": True},
+            "capabilities": ["chat", "streaming"],
+            "metadata": {
+                "source": "gitlawb-opengateway",
+                "privacy": "external_no_key_gateway",
+            },
+        },
+        {
+            "id": "gitlawb-opengateway/google/gemini-3.1-flash-lite-preview",
+            "model_id": "google/gemini-3.1-flash-lite-preview",
+            "name": "Gemini 3.1 Flash Lite Preview via Gitlawb OpenGateway",
+            "display_name": "Gemini 3.1 Flash Lite Preview via Gitlawb OpenGateway",
+            "provider": "gitlawb-opengateway",
+            "provider_id": "gitlawb-opengateway",
+            "type": "chat",
+            "defaults": {"chat": True, "fast": True},
+            "capabilities": ["chat", "streaming"],
+            "metadata": {
+                "source": "gitlawb-opengateway",
+                "privacy": "external_no_key_gateway",
+            },
+        },
+    ]
+
+    def __init__(self) -> None:
+        super().__init__(
+            provider_id="gitlawb-opengateway",
+            display_name="Gitlawb OpenGateway",
+            api_key_env="",
+            base_url_env="GITLAWB_OPENGATEWAY_BASE_URL",
+            default_base_url="https://opengateway.gitlawb.com/v1",
+            credential_required=False,
+            known_models=self.KNOWN_MODELS,
+        )
+
+    @classmethod
+    def _assert_supported_model(cls, model: str) -> None:
+        if str(model or "").strip() not in cls.MODEL_IDS:
+            supported = ", ".join(sorted(cls.MODEL_IDS))
+            raise RuntimeError(
+                "gitlawb-opengateway: unsupported model. "
+                f"defaultspack supports only: {supported}"
+            )
+
+    @staticmethod
+    def _translate_params(params):
+        translated = OpenAICompatibleProvider._translate_params(params)
+        if "max_tokens" in translated and "max_completion_tokens" not in translated:
+            translated["max_completion_tokens"] = translated.pop("max_tokens")
+        return translated
+
+    @staticmethod
+    def _copy_chat_params(body, params):
+        OpenAICompatibleProvider._copy_chat_params(body, params)
+        if "max_completion_tokens" in params:
+            body["max_completion_tokens"] = params["max_completion_tokens"]
+
+    def list_models(self) -> List[Dict[str, Any]]:
+        return [dict(model) for model in self.KNOWN_MODELS]
+
+    def complete(self, model, messages, tools, params):
+        self._assert_supported_model(model)
+        return super().complete(model, messages, tools, params)
+
+    def stream(self, model, messages, tools, params):
+        self._assert_supported_model(model)
+        return super().stream(model, messages, tools, params)

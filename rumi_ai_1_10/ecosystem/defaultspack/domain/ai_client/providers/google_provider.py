@@ -573,6 +573,43 @@ class GoogleProvider(OpenAICompatibleProvider):
         raise RuntimeError("Google API request failed")
 
     @staticmethod
+    def _is_transient_google_api_error(exc: Exception) -> bool:
+        message = str(exc)
+        return (
+            "Google API error 500" in message
+            or "Google API error 503" in message
+            or "OpenAI API error 500" in message
+            or "OpenAI API error 503" in message
+            or "Internal error encountered" in message
+        )
+
+    def _request_json(self, path, body):
+        max_attempts = 4
+        last_error: Exception | None = None
+        for attempt in range(max_attempts):
+            try:
+                return super()._request_json(path, body)
+            except RuntimeError as exc:
+                last_error = exc
+                if attempt >= max_attempts - 1 or not self._is_transient_google_api_error(exc):
+                    break
+                time.sleep(0.5 * (attempt + 1))
+        raise last_error or RuntimeError("Google API request failed")
+
+    def _request_stream(self, path, body):
+        max_attempts = 4
+        last_error: Exception | None = None
+        for attempt in range(max_attempts):
+            try:
+                return super()._request_stream(path, body)
+            except RuntimeError as exc:
+                last_error = exc
+                if attempt >= max_attempts - 1 or not self._is_transient_google_api_error(exc):
+                    break
+                time.sleep(0.5 * (attempt + 1))
+        raise last_error or RuntimeError("Google API stream request failed")
+
+    @staticmethod
     def _native_usage(raw: Dict[str, Any]) -> Dict[str, int]:
         usage = raw.get("usageMetadata") if isinstance(raw, dict) else {}
         if not isinstance(usage, dict):
