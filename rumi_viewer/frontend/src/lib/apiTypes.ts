@@ -286,6 +286,22 @@ export interface HealthResponseData {
   runtime_error?: string | null;
 }
 
+export interface WindowRuntimeSnapshot {
+  label: string;
+  visible: boolean;
+  minimized: boolean;
+  focused: boolean;
+}
+
+export interface BackgroundControlStatus {
+  enabled: boolean;
+  app_visible: boolean;
+  foreground_window: string | null;
+  kernel_running: boolean;
+  shutdown_requested: boolean;
+  windows: WindowRuntimeSnapshot[];
+}
+
 export interface ApiCapabilityPort {
   id: string;
   label: string;

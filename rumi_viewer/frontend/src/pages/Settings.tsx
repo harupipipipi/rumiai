@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useAppStore, Theme, ColorMode, AVATAR_OPTIONS, UpdateTarget } from '@/src/store';
+import { fetchBackgroundControlStatus, isDesktopShellAvailable, sendToBackground } from '@/src/lib/api';
+import type { BackgroundControlStatus } from '@/src/lib/apiTypes';
 import { useT } from '@/src/lib/i18n';
 import { cn } from '@/src/lib/utils';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/src/components/ui/Card';
@@ -7,7 +9,7 @@ import { Button } from '@/src/components/ui/Button';
 import { Input } from '@/src/components/ui/Input';
 import { Badge } from '@/src/components/ui/Badge';
 import { Switch } from '@/src/components/ui/Switch';
-import { User, Settings as SettingsIcon, Globe, Briefcase, Palette, Moon, Sun, LogIn, Loader2, CheckCircle2, ChevronDown, RefreshCw, DownloadCloud } from 'lucide-react';
+import { User, Settings as SettingsIcon, Globe, Briefcase, Palette, Moon, Sun, LogIn, Loader2, CheckCircle2, ChevronDown, RefreshCw, DownloadCloud, MonitorOff } from 'lucide-react';
 
 export function Settings() {
   const t = useT();
@@ -36,6 +38,37 @@ export function Settings() {
   const [formData, setFormData] = useState(profile);
   const [isConnecting, setIsConnecting] = useState(false);
   const [showAvatarPicker, setShowAvatarPicker] = useState(false);
+  const [backgroundStatus, setBackgroundStatus] = useState<BackgroundControlStatus | null>(null);
+  const [backgroundBusy, setBackgroundBusy] = useState(false);
+  const desktopShellAvailable = isDesktopShellAvailable();
+
+  const loadBackgroundStatus = async () => {
+    if (!desktopShellAvailable) {
+      return;
+    }
+    setBackgroundBusy(true);
+    try {
+      setBackgroundStatus(await fetchBackgroundControlStatus());
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to read background status';
+      addToast(message, 'error');
+    } finally {
+      setBackgroundBusy(false);
+    }
+  };
+
+  const handleSendToBackground = async () => {
+    setBackgroundBusy(true);
+    try {
+      await sendToBackground();
+      setBackgroundStatus(await fetchBackgroundControlStatus());
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to send Rumi to background';
+      addToast(message, 'error');
+    } finally {
+      setBackgroundBusy(false);
+    }
+  };
 
   useEffect(() => {
     loadProfile();
@@ -46,6 +79,7 @@ export function Settings() {
     if (activeTab === 'version') {
       loadUpdates();
       loadUpdateSettings();
+      void loadBackgroundStatus();
     }
   }, [activeTab, loadUpdates, loadUpdateSettings]);
 
@@ -369,6 +403,52 @@ export function Settings() {
                 </div>
               </CardContent>
             </Card>
+
+            {desktopShellAvailable && (
+              <Card>
+                <CardHeader className="flex-row items-center justify-between space-y-0">
+                  <div>
+                    <CardTitle>Background Control</CardTitle>
+                    <CardDescription>Keep the local Kernel available while the window is hidden.</CardDescription>
+                  </div>
+                  <Button variant="outline" size="sm" onClick={loadBackgroundStatus} disabled={backgroundBusy} loading={backgroundBusy}>
+                    <RefreshCw className="h-3.5 w-3.5" />
+                    Refresh
+                  </Button>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    <div className="flex items-center justify-between rounded-lg border border-border p-3">
+                      <span className="text-sm text-text-main">Window</span>
+                      <Badge variant={backgroundStatus?.app_visible ? 'secondary' : 'default'}>
+                        {backgroundStatus ? (backgroundStatus.app_visible ? 'Visible' : 'Background') : 'Unknown'}
+                      </Badge>
+                    </div>
+                    <div className="flex items-center justify-between rounded-lg border border-border p-3">
+                      <span className="text-sm text-text-main">Kernel</span>
+                      <Badge variant={backgroundStatus?.kernel_running ? 'secondary' : 'destructive'}>
+                        {backgroundStatus ? (backgroundStatus.kernel_running ? 'Running' : 'Stopped') : 'Unknown'}
+                      </Badge>
+                    </div>
+                    <div className="flex items-center justify-between rounded-lg border border-border p-3">
+                      <span className="text-sm text-text-main">Control</span>
+                      <Badge variant={backgroundStatus?.enabled === false ? 'destructive' : 'secondary'}>
+                        {backgroundStatus ? (backgroundStatus.enabled === false ? 'Shutting down' : 'Ready') : 'Unknown'}
+                      </Badge>
+                    </div>
+                  </div>
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <span className="text-xs text-text-muted">
+                      Foreground: {backgroundStatus?.foreground_window ?? 'none'}
+                    </span>
+                    <Button onClick={handleSendToBackground} disabled={backgroundBusy || backgroundStatus?.enabled === false} loading={backgroundBusy}>
+                      <MonitorOff className="h-3.5 w-3.5" />
+                      Send to Background
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
 
             {/* Updates */}
             <Card>
