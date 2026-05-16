@@ -5,17 +5,18 @@ import hashlib
 import hmac
 import json
 import os
-import secrets
 import threading
 import time
 import uuid
 from dataclasses import asdict, dataclass
 from typing import Any
 
+from .approval_store import get_approval_store
+
 
 _TOKEN_VERSION = "v1"
 _DEFAULT_EXPIRES_IN_SECONDS = 300
-_RUNTIME_SECRET = os.environ.get("RUMI_DEFAULTSPACK_APPROVAL_SECRET") or secrets.token_urlsafe(32)
+_RUNTIME_SECRET = os.environ.get("RUMI_DEFAULTSPACK_APPROVAL_SECRET") or get_approval_store().get_or_create_runtime_secret()
 _LOCK = threading.RLock()
 _REQUESTS: dict[str, "ApprovalRequest"] = {}
 _USED_TOKEN_IDS: set[str] = set()
@@ -59,6 +60,22 @@ class TokenVerification:
     code: str = ""
     message: str = ""
     request_id: str = ""
+
+
+def _request_from_mapping(value: dict[str, Any] | None) -> ApprovalRequest | None:
+    if not value:
+        return None
+    return ApprovalRequest(
+        request_id=str(value.get("request_id") or ""),
+        operation=str(value.get("operation") or ""),
+        risk_level=str(value.get("risk_level") or "high"),
+        args_hash=str(value.get("args_hash") or ""),
+        details=dict(value.get("details") or {}),
+        created_at=int(value.get("created_at") or 0),
+        expires_at=int(value.get("expires_at") or 0),
+        status=str(value.get("status") or "pending"),
+        decision_at=value.get("decision_at"),
+    )
 
 
 def _now() -> int:
@@ -129,6 +146,7 @@ def create_approval_request(
     )
     with _LOCK:
         _REQUESTS[request.request_id] = request
+        get_approval_store().save_request(request)
     payload = asdict(request)
     payload["display_summary"] = display_summary(operation, args or details or {})
     return payload
@@ -136,32 +154,50 @@ def create_approval_request(
 
 def deny(request_id: str, reason: str = "") -> dict[str, Any]:
     with _LOCK:
-        request = _REQUESTS.get(str(request_id))
+        request = _REQUESTS.get(str(request_id)) or _request_from_mapping(
+            get_approval_store().get_request(str(request_id))
+        )
         if request is None:
             return asdict(
                 ApprovalDecision(str(request_id), "missing", False, reason="approval request not found")
             )
         request.status = "denied"
         request.decision_at = _now()
+        _REQUESTS[request.request_id] = request
+        get_approval_store().save_request(request)
         return asdict(ApprovalDecision(request.request_id, request.status, False, reason=reason))
 
 
 def approve(request_id: str) -> dict[str, Any]:
     with _LOCK:
-        request = _REQUESTS.get(str(request_id))
+        request = _REQUESTS.get(str(request_id)) or _request_from_mapping(
+            get_approval_store().get_request(str(request_id))
+        )
         now = _now()
         if request is None:
             return asdict(
                 ApprovalDecision(str(request_id), "missing", False, reason="approval request not found")
             )
+        if request.status == "consumed":
+            return asdict(
+                ApprovalDecision(request.request_id, request.status, False, reason="approval request already consumed")
+            )
+        if request.status == "denied":
+            return asdict(
+                ApprovalDecision(request.request_id, request.status, False, reason="approval request denied")
+            )
         if request.expires_at < now:
             request.status = "expired"
             request.decision_at = now
+            _REQUESTS[request.request_id] = request
+            get_approval_store().save_request(request)
             return asdict(
                 ApprovalDecision(request.request_id, request.status, False, reason="approval request expired")
             )
         request.status = "approved"
         request.decision_at = now
+        _REQUESTS[request.request_id] = request
+        get_approval_store().save_request(request)
         token = issue_execution_token(request.request_id, request.args_hash, expires_at=request.expires_at)
         return asdict(
             ApprovalDecision(
@@ -225,7 +261,14 @@ def verify_execution_token(
     request_id = str(payload.get("request_id") or "")
     jti = str(payload.get("jti") or "")
     with _LOCK:
-        request = _REQUESTS.get(request_id)
+        if jti in _USED_TOKEN_IDS or get_approval_store().is_token_used(jti):
+            return TokenVerification(
+                False,
+                "APPROVAL_TOKEN_USED",
+                "approval token has already been used",
+                request_id,
+            )
+        request = _REQUESTS.get(request_id) or _request_from_mapping(get_approval_store().get_request(request_id))
         if request is None:
             return TokenVerification(False, "APPROVAL_REQUEST_MISSING", "approval request is missing")
         if request.operation != operation:
@@ -235,6 +278,13 @@ def verify_execution_token(
                 "approval token operation mismatch",
                 request_id,
             )
+        if request.status == "consumed":
+            return TokenVerification(
+                False,
+                "APPROVAL_TOKEN_USED",
+                "approval token has already been used",
+                request_id,
+            )
         if request.status != "approved":
             return TokenVerification(
                 False,
@@ -242,19 +292,42 @@ def verify_execution_token(
                 "approval request is not approved",
                 request_id,
             )
-        if jti in _USED_TOKEN_IDS:
-            return TokenVerification(
-                False,
-                "APPROVAL_TOKEN_USED",
-                "approval token has already been used",
-                request_id,
-            )
         if consume:
+            inserted = get_approval_store().mark_token_used(jti, request_id, operation, args_hash)
+            if not inserted:
+                return TokenVerification(
+                    False,
+                    "APPROVAL_TOKEN_USED",
+                    "approval token has already been used",
+                    request_id,
+                )
             _USED_TOKEN_IDS.add(jti)
+            request.status = "consumed"
+            request.decision_at = _now()
+            _REQUESTS[request_id] = request
     return TokenVerification(True, request_id=request_id)
+
+
+def list_approval_requests(status: str | None = None, *, include_expired: bool = True, limit: int = 100) -> list[dict[str, Any]]:
+    requests = get_approval_store().list_requests(status=status, include_expired=include_expired, limit=limit)
+    result = []
+    now = _now()
+    for item in requests:
+        request = _request_from_mapping(item)
+        if request is None:
+            continue
+        if request.status == "pending" and request.expires_at < now:
+            request.status = "expired"
+            request.decision_at = now
+            get_approval_store().save_request(request)
+        payload = asdict(request)
+        payload["display_summary"] = display_summary(request.operation, request.details)
+        result.append(payload)
+    return result
 
 
 def reset_approval_state_for_tests() -> None:
     with _LOCK:
         _REQUESTS.clear()
         _USED_TOKEN_IDS.clear()
+        get_approval_store().clear()

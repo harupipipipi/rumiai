@@ -1,0 +1,43 @@
+{
+  "function_id": "coding_agent_session_create",
+  "description": "Create a multi-agent coding workspace session.",
+  "tags": [
+    "coding"
+  ],
+  "risk": "medium",
+  "requires": [
+    "coding.agent.session.create"
+  ],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.coding.agent_session_create",
+    "defaultspack.coding.agent_session_create",
+    "defaults.coding.agent.session.create",
+    "defaultspack.coding.agent.session.create"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.agent.coding_session_create",
+      "default_args": {}
+    }
+  }
+}

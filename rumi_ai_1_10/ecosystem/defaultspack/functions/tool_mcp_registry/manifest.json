@@ -1,0 +1,43 @@
+{
+  "function_id": "tool_mcp_registry",
+  "description": "Manage registered MCP servers.",
+  "tags": [
+    "tool"
+  ],
+  "risk": "medium",
+  "requires": [
+    "tool.mcp.registry"
+  ],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.tool.mcp_registry",
+    "defaultspack.tool.mcp_registry",
+    "defaults.tool.mcp.registry",
+    "defaultspack.tool.mcp.registry"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.tool.mcp_registry",
+      "default_args": {}
+    }
+  }
+}

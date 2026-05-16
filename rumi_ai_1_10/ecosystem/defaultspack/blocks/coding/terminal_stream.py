@@ -42,6 +42,8 @@ def run(input_data, context=None):
                     command=command,
                     cwd=cwd,
                     risk=risk,
+                    classification=risk.get("classification", risk.get("risk_level")),
+                    risk_reasons=risk.get("risk_reasons", [risk.get("reason", "command_execution")]),
                     started=False,
                 )
             )

@@ -99,6 +99,23 @@ def _run_tool_function(
     # The public function is the safety boundary; call the local implementation
     # directly here to avoid recursing through the AI tool facade.
     result = ToolExecutor()._execute_local(tool_name, arguments, context)
+    if function_id in {"browser_open_url", "browser_screenshot", "browser_session"} and isinstance(result, dict):
+        try:
+            from domain.browser.browser_artifacts import BrowserArtifactStore
+            from domain.safety.audit import record_execution
+
+            action = str(arguments.get("action") or result.get("action") or function_id)
+            artifact = BrowserArtifactStore().record(action, result)
+            result = {**result, "browser_artifact": artifact}
+            record_execution(
+                "browser.artifact",
+                "medium",
+                {"action": action, "url": result.get("url")},
+                artifact_id=artifact.get("artifact_id"),
+                session_id=artifact.get("session_id"),
+            )
+        except Exception:
+            pass
     return ok(result)
 
 

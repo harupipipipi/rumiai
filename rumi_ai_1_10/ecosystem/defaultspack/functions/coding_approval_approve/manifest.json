@@ -1,0 +1,43 @@
+{
+  "function_id": "coding_approval_approve",
+  "description": "Approve a pending coding operation.",
+  "tags": [
+    "coding"
+  ],
+  "risk": "medium",
+  "requires": [
+    "coding.approval.approve"
+  ],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.coding.approval_approve",
+    "defaultspack.coding.approval_approve",
+    "defaults.coding.approval.approve",
+    "defaultspack.coding.approval.approve"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.coding.approval_approve",
+      "default_args": {}
+    }
+  }
+}

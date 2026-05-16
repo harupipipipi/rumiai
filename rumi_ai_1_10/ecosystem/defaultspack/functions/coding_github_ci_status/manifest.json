@@ -1,0 +1,43 @@
+{
+  "function_id": "coding_github_ci_status",
+  "description": "Read GitHub pull request CI status.",
+  "tags": [
+    "coding"
+  ],
+  "risk": "medium",
+  "requires": [
+    "coding.github.ci.status"
+  ],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.coding.github_ci_status",
+    "defaultspack.coding.github_ci_status",
+    "defaults.coding.github.ci.status",
+    "defaultspack.coding.github.ci.status"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.coding.github_ci_status",
+      "default_args": {}
+    }
+  }
+}

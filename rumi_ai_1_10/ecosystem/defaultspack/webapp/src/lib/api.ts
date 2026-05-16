@@ -109,6 +109,89 @@ export type CodingWorkspacesResponse = {
   selected_workspace_id?: string | null;
 };
 
+export type CodingApprovalRequest = {
+  request_id: string;
+  operation: string;
+  risk_level: string;
+  args_hash?: string;
+  details?: Record<string, unknown>;
+  created_at?: number;
+  expires_at?: number;
+  status: string;
+  display_summary?: string;
+};
+
+export type CodingCheckpoint = {
+  snapshot_id: string;
+  path?: string;
+  kind?: string;
+  files?: string[];
+  created_at?: string;
+  metadata?: Record<string, unknown>;
+  [key: string]: unknown;
+};
+
+export type CodingDiffResponse = {
+  diff: string;
+  stat?: string;
+  files?: string[];
+  files_changed?: number;
+  workspace_id?: string | null;
+  workspace_root?: string | null;
+};
+
+export type CodingTerminalResponse = {
+  command: string;
+  approval_required?: boolean;
+  classification?: string;
+  risk_reasons?: string[];
+  risk?: Record<string, unknown>;
+  exit_code?: number | null;
+  stdout?: string;
+  stderr?: string;
+  workspace_id?: string | null;
+  workspace_root?: string | null;
+};
+
+export type BrowserArtifact = {
+  artifact_id: string;
+  session_id: string;
+  action: string;
+  created_at: string;
+  url?: string | null;
+  text?: string | null;
+  console?: unknown[];
+  screenshot?: {
+    path?: string;
+    data_url?: string;
+    mime_type?: string;
+    image_size?: { width?: number; height?: number };
+  } | null;
+  metadata?: Record<string, unknown>;
+};
+
+export type McpServerRecord = {
+  server_id: string;
+  name?: string;
+  server_name?: string;
+  transport?: string;
+  status?: string;
+  connected?: boolean;
+  tools?: unknown[];
+  permissions?: Record<string, unknown>;
+  config?: Record<string, unknown>;
+};
+
+export type CodingAgentSession = {
+  session_id: string;
+  status: string;
+  task?: string;
+  agents?: Array<Record<string, unknown>>;
+  shared_context?: Record<string, unknown>;
+  agent_contexts?: Record<string, unknown>;
+  [key: string]: unknown;
+};
+
 export type CompanyAgent = {
   id?: string;
   agent_id: string;
@@ -1644,5 +1727,148 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ workspace_id: workspaceId }),
     });
+  },
+
+  getGitStatus(options?: { workspace_id?: string | null }) {
+    return request<CodingGitStatus & { workspace_id?: string | null; workspace_root?: string | null }>(
+      withQuery("/api/coding/git/status", { workspace_id: options?.workspace_id }),
+      { cache: "no-store" },
+    );
+  },
+
+  getGitDiff(options?: { workspace_id?: string | null; ref?: string | null }) {
+    return request<CodingDiffResponse>(
+      withQuery("/api/coding/git/diff", { workspace_id: options?.workspace_id, ref: options?.ref }),
+      { cache: "no-store" },
+    );
+  },
+
+  runTerminalCommand(command: string, options?: {
+    workspace_id?: string | null;
+    cwd?: string | null;
+    timeout?: number;
+    approval_token?: string;
+  }) {
+    return request<CodingTerminalResponse>("/api/coding/terminal/exec", {
+      method: "POST",
+      body: JSON.stringify({ command, ...(options ?? {}) }),
+    });
+  },
+
+  listCodingApprovals(options?: { status?: string; include_expired?: boolean; limit?: number }) {
+    return request<{ requests: CodingApprovalRequest[]; pending: CodingApprovalRequest[]; count: number }>(
+      withQuery("/api/coding/approvals", {
+        status: options?.status,
+        include_expired: options?.include_expired,
+        limit: options?.limit,
+      }),
+      { cache: "no-store" },
+    );
+  },
+
+  approveCodingApproval(requestId: string) {
+    return request<Record<string, unknown>>("/api/coding/approvals/approve", {
+      method: "POST",
+      body: JSON.stringify({ approval_request_id: requestId }),
+    });
+  },
+
+  denyCodingApproval(requestId: string, reason?: string) {
+    return request<Record<string, unknown>>("/api/coding/approvals/deny", {
+      method: "POST",
+      body: JSON.stringify({ approval_request_id: requestId, reason }),
+    });
+  },
+
+  listCodingCheckpoints(options?: { workspace_id?: string | null; limit?: number }) {
+    return request<{ checkpoints: CodingCheckpoint[]; workspace_id?: string | null; workspace_root?: string | null }>(
+      withQuery("/api/coding/checkpoints", { workspace_id: options?.workspace_id, limit: options?.limit }),
+      { cache: "no-store" },
+    );
+  },
+
+  createCodingCheckpoint(payload?: {
+    workspace_id?: string | null;
+    paths?: string[];
+    operation?: string;
+    metadata?: Record<string, unknown>;
+  }) {
+    return request<{ checkpoint: CodingCheckpoint; workspace_id?: string | null; workspace_root?: string | null }>(
+      "/api/coding/checkpoints",
+      {
+        method: "POST",
+        body: JSON.stringify(payload ?? {}),
+      },
+    );
+  },
+
+  restoreCodingSnapshot(snapshotId: string, options?: {
+    workspace_id?: string | null;
+    paths?: string[];
+    approval_token?: string;
+  }) {
+    return request<Record<string, unknown>>("/api/coding/files/restore", {
+      method: "POST",
+      body: JSON.stringify({ snapshot_id: snapshotId, ...(options ?? {}) }),
+    });
+  },
+
+  listBrowserArtifacts(options?: { session_id?: string; limit?: number }) {
+    return request<{ artifacts: BrowserArtifact[]; count: number }>(
+      withQuery("/api/browser/artifacts", { session_id: options?.session_id, limit: options?.limit }),
+      { cache: "no-store" },
+    );
+  },
+
+  listMcpServers() {
+    return request<{ servers: McpServerRecord[]; count: number }>("/api/tools/mcp", { cache: "no-store" });
+  },
+
+  registerMcpServer(server: Partial<McpServerRecord> & { server_id?: string; name?: string; config?: Record<string, unknown> }) {
+    return request<{ server: McpServerRecord }>("/api/tools/mcp", {
+      method: "POST",
+      body: JSON.stringify({ server }),
+    });
+  },
+
+  connectMcpServer(payload: {
+    server_id?: string;
+    server_name?: string;
+    config?: Record<string, unknown>;
+    approval_token?: string;
+  }) {
+    return request<Record<string, unknown>>("/api/tools/mcp/connect", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  createCodingAgentSession(payload: {
+    task: string;
+    workspace_id?: string | null;
+    agents?: Array<Record<string, unknown>>;
+    metadata?: Record<string, unknown>;
+  }) {
+    return request<{ session: CodingAgentSession; merge_report?: Record<string, unknown> }>(
+      "/api/coding/agent/sessions",
+      {
+        method: "POST",
+        body: JSON.stringify(payload),
+      },
+    );
+  },
+
+  getCodingAgentSessionStatus(sessionId: string) {
+    return request<CodingAgentSession>(
+      withQuery("/api/coding/agent/sessions/status", { session_id: sessionId }),
+      { cache: "no-store" },
+    );
+  },
+
+  getCodingAgentMergeReport(sessionId: string) {
+    return request<{ session_id: string; merge_report: Record<string, unknown> }>(
+      withQuery("/api/coding/agent/sessions/merge-report", { session_id: sessionId }),
+      { cache: "no-store" },
+    );
   },
 };

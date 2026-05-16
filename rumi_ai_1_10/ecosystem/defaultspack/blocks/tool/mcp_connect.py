@@ -8,6 +8,7 @@ from _common import error, ok  # noqa: E402
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 from domain.tool.mcp_client import McpClient  # noqa: E402
+from domain.tool.mcp_registry import McpRegistry  # noqa: E402
 from domain.tool.registry import ToolRegistry  # noqa: E402
 from blocks.tool._safety import (  # noqa: E402
     approved_or_request,
@@ -32,6 +33,9 @@ def _mcp_config_path():
 
 
 def _load_saved_mcp_config(server_identifier):
+    registry_server = McpRegistry().get_server(server_identifier)
+    if registry_server:
+        return dict(registry_server.get("config") or {})
     config_path = _mcp_config_path()
     if not config_path.is_file():
         return None
@@ -126,6 +130,9 @@ def run(input_data, context):
     if approval is not None:
         return approval
 
+    mcp_registry = McpRegistry()
+    mcp_registry.add_server({"server_id": server_name, "name": server_name, "config": config})
+
     mcp_client = McpClient()
     try:
         tools_added = mcp_client.connect(server_name, config)
@@ -182,6 +189,7 @@ def run(input_data, context):
         )
 
     record_tool_execution(OPERATION, RISK, input_data, server_name=server_name, tools_added=tools_added)
+    mcp_registry.mark_connected(server_name, tools=registered_tools, approved=True)
     return ok(
         {
             "server_id": str(config.get("server_id", "") or server_name),
@@ -189,6 +197,7 @@ def run(input_data, context):
             "status": "connected",
             "tools_added": tools_added,
             "tools": registered_tools,
+            "permission": {"approved": True, "source": "approval"},
             "server": {
                 "name": server_name,
                 "transport": transport,

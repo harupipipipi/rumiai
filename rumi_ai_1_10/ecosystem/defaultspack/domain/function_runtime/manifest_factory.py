@@ -181,6 +181,7 @@ TOOL_FUNCTIONS: tuple[FunctionSpec, ...] = tuple(
         ("tool_schema", "Get a registered tool schema.", "low", "blocks.tool.schema"),
         ("tool_mcp_connect", "Connect an MCP server.", "high", "blocks.tool.mcp_connect"),
         ("tool_mcp_list", "List MCP servers.", "low", "blocks.tool.mcp_list"),
+        ("tool_mcp_registry", "Manage registered MCP servers.", "medium", "blocks.tool.mcp_registry"),
         ("tool_create", "Create a dynamic tool.", "high", "blocks.tool.create"),
         ("tool_update", "Update a dynamic tool.", "high", "blocks.tool.update"),
         ("tool_delete", "Delete a dynamic tool.", "high", "blocks.tool.delete"),
@@ -236,7 +237,21 @@ CODING_FUNCTIONS: tuple[FunctionSpec, ...] = tuple(
         ("coding_git_branch_create", "Create a git branch.", "high", "blocks.coding.git_branch"),
         ("coding_git_commit", "Create a git commit.", "high", "blocks.coding.git_commit"),
         ("coding_git_push", "Push git changes.", "high", "blocks.coding.git_push"),
+        ("coding_approval_list", "List pending coding approvals.", "low", "blocks.coding.approval_list"),
+        ("coding_approval_approve", "Approve a pending coding operation.", "medium", "blocks.coding.approval_approve"),
+        ("coding_approval_deny", "Deny a pending coding operation.", "medium", "blocks.coding.approval_deny"),
+        ("coding_github_pr_read", "Read GitHub pull request metadata.", "medium", "blocks.coding.github_pr_read"),
+        ("coding_github_issue_read", "Read GitHub issue metadata.", "medium", "blocks.coding.github_issue_read"),
+        ("coding_github_ci_status", "Read GitHub pull request CI status.", "medium", "blocks.coding.github_ci_status"),
+        ("coding_agent_session_create", "Create a multi-agent coding workspace session.", "medium", "blocks.agent.coding_session_create"),
+        ("coding_agent_session_status", "Get a multi-agent coding workspace session.", "low", "blocks.agent.coding_session_status"),
+        ("coding_agent_session_merge_report", "Get a multi-agent coding workspace merge report.", "low", "blocks.agent.coding_session_merge_report"),
     )
+)
+
+
+BROWSER_ARTIFACT_FUNCTIONS: tuple[FunctionSpec, ...] = (
+    _spec("browser_artifacts", "List persistent browser coding artifacts.", ("tool", "browser"), block="blocks.browser.artifacts"),
 )
 
 
@@ -421,6 +436,7 @@ FUNCTION_SPECS: tuple[FunctionSpec, ...] = (
     + TOOL_FUNCTIONS
     + CODING_FUNCTIONS
     + AGENT_FUNCTIONS
+    + BROWSER_ARTIFACT_FUNCTIONS
     + DATA_FUNCTIONS
     + RESEARCH_MEDIA_UI_DEV_FUNCTIONS
     + MANAGEMENT_FUNCTIONS

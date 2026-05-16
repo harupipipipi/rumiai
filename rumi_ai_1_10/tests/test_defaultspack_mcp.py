@@ -157,7 +157,7 @@ def test_mcp_connect_accepts_server_id_and_saved_config(monkeypatch, tmp_path):
     monkeypatch.setattr(mcp_connect_block, "McpClient", lambda: fake_client)
     monkeypatch.setattr(mcp_connect_block, "ToolRegistry", lambda: fake_registry)
 
-    result = mcp_connect_block.run({"server_id": "filesystem"}, {})
+    result = mcp_connect_block.run({"server_id": "filesystem"}, {"_tool_server_approved": True})
 
     assert result["status"] == "ok"
     assert fake_client.connected[0][0] == "filesystem"

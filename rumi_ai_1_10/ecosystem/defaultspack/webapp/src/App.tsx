@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent } from "react";
 
 import { CompanyWorkspacePanel } from "./components/company/CompanyWorkspacePanel";
+import { CodingCockpit } from "./components/coding/CodingCockpit";
 import { ConversationSpotlight } from "./components/ConversationSpotlight";
 import type { ChatItem } from "./components/HistoryBoard";
 import type { ToolPreviewItem, ToolPreviewMode } from "./components/ToolPreview";
@@ -2669,6 +2670,15 @@ export default function App() {
               </div>
             )}
           </div>
+
+          {mode === "coding" && (
+            <CodingCockpit
+              workspaces={codingWorkspaces}
+              selectedWorkspaceId={selectedCodingWorkspaceId}
+              onWorkspaceSelect={handleCodingWorkspaceSelect}
+              onWorkspacesRefresh={() => void loadCodingWorkspaces()}
+            />
+          )}
 
           {isActivityPreviewVisible && (
             <aside className="rumi-activity-preview-pane" aria-label="Activity preview">

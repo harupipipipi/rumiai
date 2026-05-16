@@ -1,0 +1,43 @@
+{
+  "function_id": "coding_approval_deny",
+  "description": "Deny a pending coding operation.",
+  "tags": [
+    "coding"
+  ],
+  "risk": "medium",
+  "requires": [
+    "coding.approval.deny"
+  ],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.coding.approval_deny",
+    "defaultspack.coding.approval_deny",
+    "defaults.coding.approval.deny",
+    "defaultspack.coding.approval.deny"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.coding.approval_deny",
+      "default_args": {}
+    }
+  }
+}
