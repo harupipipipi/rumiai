@@ -18,7 +18,6 @@ from blocks.chat.send import (
     _is_retryable_ai_error,
     _params_without_thinking,
     _redact_sensitive_value,
-    _stub_response,
     _tool_blocked_response,
     _tool_limit_message,
     _tool_result_artifacts,
@@ -800,7 +799,12 @@ class ChatRunEngine:
                 response = blocked_response
                 break
 
-        return response or _stub_response()
+        return response or _ai_error_response(
+            prepared.model,
+            "AI provider did not return a response",
+            prepared.params,
+            events=list(self._activity_events),
+        )
 
     def _model_turn(
         self,
@@ -1003,7 +1007,12 @@ class ChatRunEngine:
                 return response
             raise
         if not isinstance(response, dict):
-            response = _stub_response()
+            response = _ai_error_response(
+                prepared.model,
+                "AI provider returned an invalid response",
+                prepared.params,
+                events=list(self._activity_events),
+            )
         if not _tool_use_blocks(response) and not self._response_text(response).strip():
             retry_params = _params_without_thinking(prepared.params)
             if retry_params != prepared.params:
@@ -1062,7 +1071,12 @@ class ChatRunEngine:
         return result
 
     def _final_response(self, prepared: PreparedChatRun, response: dict[str, Any]) -> dict[str, Any]:
-        finalized = dict(response or _stub_response())
+        finalized = dict(response or _ai_error_response(
+            prepared.model,
+            "AI provider did not return a final response",
+            prepared.params,
+            events=list(self._activity_events),
+        ))
         if not _tool_use_blocks(finalized) and not self._response_text(finalized).strip():
             finalized["content"] = [{"type": "text", "text": _empty_response_message(finalized.get("finish_reason"))}]
             metadata = dict(finalized.get("metadata") or {})

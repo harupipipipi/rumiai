@@ -25,7 +25,7 @@ def test_capabilities():
     d = MacCGEventPidDriver()
     caps = d.capabilities()
     assert isinstance(caps, ComputerCapabilities)
-    assert caps.can_pid_event is True
+    assert caps.can_pid_event is d.is_available()
     assert caps.can_semantic_action is False
 
 
@@ -57,7 +57,41 @@ def test_click_with_pid_confidence():
 
 def test_is_available():
     d = MacCGEventPidDriver()
-    if sys.platform == "darwin":
-        assert d.is_available() is True
-    else:
-        assert d.is_available() is False
+    from rumi_ai_1_10.ecosystem.rumi_default_tools_pack.domain.computer.mac.cgevent import (
+        cgevent_smoke_test,
+    )
+
+    assert d.is_available() is (sys.platform == "darwin" and cgevent_smoke_test().get("available") is True)
+
+
+def test_scroll_posts_to_pid_helper(monkeypatch):
+    from rumi_ai_1_10.ecosystem.rumi_default_tools_pack.domain.computer.mac import cgevent
+
+    calls = []
+    monkeypatch.setattr(
+        cgevent,
+        "post_scroll_to_pid",
+        lambda **kwargs: calls.append(kwargs) or True,
+    )
+
+    result = MacCGEventPidDriver().scroll(
+        ComputerTarget(pid=123),
+        x=10,
+        y=20,
+        direction="up",
+        clicks=4,
+    )
+
+    assert result.executed is True
+    assert result.confidence == "experimental"
+    assert calls == [{"pid": 123, "x": 10, "y": 20, "direction": "up", "clicks": 4}]
+
+
+def test_cgevent_key_helper_rejects_unrepresentable_combo(monkeypatch):
+    from rumi_ai_1_10.ecosystem.rumi_default_tools_pack.domain.computer.mac import cgevent
+
+    monkeypatch.setattr(cgevent.sys, "platform", "darwin")
+    monkeypatch.setattr(cgevent, "_CG_AVAILABLE", True)
+    monkeypatch.setattr(cgevent, "MODIFIER_FLAGS", {"cmd": 1})
+
+    assert cgevent.post_key_to_pid(123, key_combo="hyper+s") is False

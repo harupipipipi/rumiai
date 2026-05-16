@@ -9,7 +9,12 @@ from __future__ import annotations
 import os
 from typing import Any, Dict, List
 
-from ecosystem.defaultspack.domain.ai_client.providers import build_profile_catalog, get_all_known_models, get_provider_catalog
+from ecosystem.defaultspack.domain.ai_client.providers import (
+    build_profile_catalog,
+    get_all_known_models,
+    get_provider_catalog,
+    validate_provider_catalog_coverage,
+)
 from ecosystem.defaultspack.domain.ai_client.api_key_store import provider_named_api_keys
 
 
@@ -26,6 +31,10 @@ def list_model_catalog(provider: str = "") -> List[Dict[str, Any]]:
 
 def list_profile_catalog() -> List[Dict[str, Any]]:
     return [_with_legacy_profile_fields(profile) for profile in build_profile_catalog()]
+
+
+def validate_catalog_coverage() -> List[Dict[str, Any]]:
+    return validate_provider_catalog_coverage()
 
 
 def _with_legacy_provider_fields(provider: Dict[str, Any]) -> Dict[str, Any]:

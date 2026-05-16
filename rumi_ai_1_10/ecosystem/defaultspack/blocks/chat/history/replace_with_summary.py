@@ -23,6 +23,7 @@ from blocks._common import ok, error
 from domain.chat.store import ChatStore
 from domain.chat.message_converter import convert_to_standard
 from domain.chat.history_editor import replace_range_with_message
+from blocks.chat.send import _ai_direct_complete
 
 
 def _build_summarize_prompt(standard_messages, instruction=None):
@@ -60,15 +61,12 @@ def _build_summarize_prompt(standard_messages, instruction=None):
     ]
 
 
-def _stub_summary(standard_messages):
-    """Fallback summary when AI is unavailable."""
-    count = len(standard_messages)
+def _unavailable_summary(standard_messages):
+    """Structured error used by legacy callers if AI summarization is unavailable."""
     return {
-        "content": [
-            {"type": "text", "text": "[Summary of " + str(count) + " messages]"}
-        ],
-        "finish_reason": "stop",
-        "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+        "success": False,
+        "error": "AI summarization is unavailable",
+        "error_type": "not_implemented",
     }
 
 
@@ -147,10 +145,19 @@ def run(input_data, context):
             }
             response = call_handler("defaults.ai.complete", ai_params)
         except Exception as exc:
-            print("[replace_with_summary] AI call failed: " + str(exc))
-            response = _stub_summary(standard_messages)
+            return error("AI request failed: " + str(exc), "AI_ERROR")
+        if isinstance(response, dict) and response.get("status") == "error":
+            err = response.get("error", {})
+            message = err.get("message") if isinstance(err, dict) else None
+            return error(str(message or "AI request failed"), "AI_ERROR")
+        if isinstance(response, dict) and response.get("status") == "ok":
+            response = response.get("data", {})
     else:
-        response = _stub_summary(standard_messages)
+        response, ai_error = _ai_direct_complete(model, summarize_prompt, [], {})
+        if ai_error is not None:
+            return error(ai_error, "AI_ERROR")
+    if not isinstance(response, dict):
+        return error("AI provider returned an invalid response", "AI_ERROR")
 
     summary_text = _extract_text(response)
 

@@ -97,6 +97,7 @@ class Profiler:
 
     def _record(self, name: str, elapsed: float) -> None:
         """計測結果を記録する。"""
+        elapsed = max(float(elapsed), 1e-12)
         with self._lock:
             section = self._ensure_section(name)
             section["samples"].append(elapsed)
@@ -121,11 +122,11 @@ class Profiler:
             with profiler.profile("my_section"):
                 do_work()
         """
-        start = time.monotonic()
+        start = time.perf_counter()
         try:
             yield
         finally:
-            elapsed = time.monotonic() - start
+            elapsed = time.perf_counter() - start
             self._record(name, elapsed)
 
     def profile_func(self, func: Callable[..., Any]) -> Callable[..., Any]:
@@ -163,11 +164,11 @@ class Profiler:
 
         @functools.wraps(func)
         async def wrapper(*args: Any, **kwargs: Any) -> Any:
-            start = time.monotonic()
+            start = time.perf_counter()
             try:
                 return await func(*args, **kwargs)
             finally:
-                elapsed = time.monotonic() - start
+                elapsed = time.perf_counter() - start
                 self._record(section_name, elapsed)
 
         return wrapper

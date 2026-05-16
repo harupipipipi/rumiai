@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import json
+import platform
+import re
+import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -17,6 +20,10 @@ class PackCandidate:
     recommended: bool = False
     risk_level: str = "normal"
     all_ok_eligible: bool = False
+    depends_on: List[Dict[str, str]] = None
+    compatibility: Dict[str, Any] = None
+    marketplace: Dict[str, Any] = None
+    signing: Dict[str, Any] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -28,6 +35,10 @@ class PackCandidate:
             "recommended": self.recommended,
             "risk_level": self.risk_level,
             "all_ok_eligible": self.all_ok_eligible,
+            "depends_on": list(self.depends_on or []),
+            "compatibility": dict(self.compatibility or {}),
+            "marketplace": dict(self.marketplace or {}),
+            "signing": dict(self.signing or {}),
         }
 
 
@@ -60,6 +71,85 @@ class PackSelector:
             return ""
         return str(data.get("pack_identity", ""))
 
+    @staticmethod
+    def _as_dict(value: Any) -> Dict[str, Any]:
+        return dict(value) if isinstance(value, dict) else {}
+
+    @staticmethod
+    def _normalize_dependency_specs(value: Any) -> List[Dict[str, str]]:
+        raw_items = value if isinstance(value, list) else []
+        if isinstance(value, dict):
+            raw_items = [
+                {"pack_id": key, **spec} if isinstance(spec, dict) else {"pack_id": key}
+                for key, spec in value.items()
+            ]
+        result: List[Dict[str, str]] = []
+        seen: set[str] = set()
+        for item in raw_items:
+            if isinstance(item, str):
+                spec = {"pack_id": item}
+            elif isinstance(item, dict):
+                pack_id = item.get("pack_id") or item.get("id") or item.get("name")
+                if not pack_id:
+                    continue
+                spec = {"pack_id": str(pack_id)}
+                version = item.get("version") or item.get("constraint") or item.get("version_constraint")
+                if version:
+                    spec["version"] = str(version)
+            else:
+                continue
+            if spec["pack_id"] not in seen:
+                seen.add(spec["pack_id"])
+                result.append(spec)
+        return result
+
+    @staticmethod
+    def _parse_version(value: Any) -> tuple[int, ...]:
+        return tuple(int(part) for part in re.findall(r"\d+", str(value or "")))
+
+    @classmethod
+    def _version_satisfies(cls, actual: Any, constraint: str) -> bool:
+        actual_version = cls._parse_version(actual)
+        if not actual_version:
+            return False
+        for raw_part in str(constraint or "").split(","):
+            part = raw_part.strip()
+            if not part:
+                continue
+            match = re.match(r"^(>=|<=|==|>|<)?\s*([0-9][0-9A-Za-z.+-]*)$", part)
+            if not match:
+                return False
+            op = match.group(1) or "=="
+            required = cls._parse_version(match.group(2))
+            if not required:
+                return False
+            size = max(len(actual_version), len(required))
+            left = actual_version + (0,) * (size - len(actual_version))
+            right = required + (0,) * (size - len(required))
+            if op == "==" and left != right:
+                return False
+            if op == ">=" and left < right:
+                return False
+            if op == ">" and left <= right:
+                return False
+            if op == "<=" and left > right:
+                return False
+            if op == "<" and left >= right:
+                return False
+        return True
+
+    @staticmethod
+    def _platform_aliases(platform_name: str) -> set[str]:
+        normalized = str(platform_name or sys.platform).lower()
+        aliases = {normalized}
+        if normalized.startswith("win"):
+            aliases.update({"windows", "win", "win32", "x86_64-pc-windows-msvc"})
+        elif normalized == "darwin" or "mac" in normalized:
+            aliases.update({"macos", "mac", "darwin", "apple", "aarch64-apple-darwin", "x86_64-apple-darwin"})
+        elif normalized.startswith("linux"):
+            aliases.update({"linux", "ubuntu", "x86_64-unknown-linux-gnu"})
+        return aliases
+
     def scan_candidates(self) -> List[PackCandidate]:
         candidates: List[PackCandidate] = []
         setup_pack_root = self._resolve_setup_pack_root()
@@ -74,6 +164,15 @@ class PackSelector:
             setup_pack_id = str(data.get("pack_id") or pack_json.parent.name)
             target_pack_id = str(data.get("target_pack_id") or setup_pack_id)
             identity = self._read_pack_identity(ecosystem_root, target_pack_id)
+            compatibility = self._as_dict(data.get("compatibility"))
+            for source_key, compatibility_key in (
+                ("target_pack_version", "target_pack_version"),
+                ("target_version", "target_pack_version"),
+                ("python_requires", "python"),
+                ("platforms", "platforms"),
+            ):
+                if source_key in data and compatibility_key not in compatibility:
+                    compatibility[compatibility_key] = data[source_key]
             candidates.append(
                 PackCandidate(
                     pack_id=setup_pack_id,
@@ -89,9 +188,110 @@ class PackSelector:
                             data.get("all_ok_eligible", False),
                         )
                     ),
+                    depends_on=self._normalize_dependency_specs(
+                        data.get("depends_on", data.get("dependencies", []))
+                    ),
+                    compatibility=compatibility,
+                    marketplace=self._as_dict(data.get("marketplace")),
+                    signing=self._as_dict(data.get("signing")),
                 )
             )
         return candidates
+
+    def validate_candidates(
+        self,
+        *,
+        installed_packs: Optional[Dict[str, Dict[str, Any]]] = None,
+        platform_name: Optional[str] = None,
+        python_version: Optional[str] = None,
+        require_signed: bool = False,
+    ) -> List[Dict[str, Any]]:
+        """Validate setup-pack compatibility before granting/installing packs."""
+        installed_packs = installed_packs or {}
+        platform_aliases = self._platform_aliases(platform_name or sys.platform)
+        python_version = python_version or platform.python_version()
+        issues: List[Dict[str, Any]] = []
+
+        for candidate in self.scan_candidates():
+            for dep in candidate.depends_on or []:
+                dep_id = dep.get("pack_id", "")
+                installed = installed_packs.get(dep_id)
+                if installed is None:
+                    issues.append({
+                        "type": "missing_dependency",
+                        "pack_id": candidate.pack_id,
+                        "depends_on": dep_id,
+                        "severity": "error",
+                    })
+                    continue
+                constraint = dep.get("version")
+                if constraint and not self._version_satisfies(installed.get("version"), constraint):
+                    issues.append({
+                        "type": "version_mismatch",
+                        "pack_id": candidate.pack_id,
+                        "depends_on": dep_id,
+                        "required": constraint,
+                        "actual": installed.get("version"),
+                        "severity": "error",
+                    })
+
+            compatibility = candidate.compatibility or {}
+            platforms = compatibility.get("platforms")
+            if isinstance(platforms, list) and platforms:
+                supported = {str(item).lower() for item in platforms if isinstance(item, str)}
+                if supported and platform_aliases.isdisjoint(supported):
+                    issues.append({
+                        "type": "unsupported_platform",
+                        "pack_id": candidate.pack_id,
+                        "supported": sorted(supported),
+                        "actual": platform_name or sys.platform,
+                        "severity": "error",
+                    })
+
+            python_requires = compatibility.get("python") or compatibility.get("python_requires")
+            if isinstance(python_requires, str) and python_requires.strip():
+                if not self._version_satisfies(python_version, python_requires):
+                    issues.append({
+                        "type": "python_version_mismatch",
+                        "pack_id": candidate.pack_id,
+                        "required": python_requires,
+                        "actual": python_version,
+                        "severity": "error",
+                    })
+
+            signing = candidate.signing or {}
+            signature = signing.get("signature")
+            algorithm = signing.get("algorithm")
+            signing_required = require_signed or bool(signing.get("required"))
+            if signing and (signature is not None or algorithm is not None):
+                if not isinstance(signature, str) or not signature.strip():
+                    issues.append({
+                        "type": "invalid_signature",
+                        "pack_id": candidate.pack_id,
+                        "severity": "error" if signing_required else "warning",
+                    })
+                if algorithm is not None and not isinstance(algorithm, str):
+                    issues.append({
+                        "type": "invalid_signature_algorithm",
+                        "pack_id": candidate.pack_id,
+                        "severity": "error",
+                    })
+            elif signing_required:
+                issues.append({
+                    "type": "unsigned_pack",
+                    "pack_id": candidate.pack_id,
+                    "severity": "error",
+                })
+
+            marketplace = candidate.marketplace or {}
+            if marketplace and not any(marketplace.get(key) for key in ("id", "url", "source")):
+                issues.append({
+                    "type": "invalid_marketplace_metadata",
+                    "pack_id": candidate.pack_id,
+                    "severity": "warning",
+                })
+
+        return issues
 
     def select_and_grant(self, pack_id: str) -> Dict[str, Any]:
         candidates = {c.pack_id: c for c in self.scan_candidates()}

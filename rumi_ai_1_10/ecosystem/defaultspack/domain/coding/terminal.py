@@ -1,10 +1,12 @@
 """ターミナル操作ドメインロジック."""
 
+import json
 import os
 import shutil
 import shlex
 import subprocess
 import sys
+import time
 import uuid
 
 
@@ -25,6 +27,8 @@ LOW_RISK_TOKENS = {"pwd", "ls", "dir", "cat", "head", "tail", "git status", "git
 SHELL_METACHARS = {";", "&&", "||", "|", ">", "<", "`", "$(", "${"}
 MAX_OUTPUT_BYTES = 128 * 1024
 ENV_ALLOWLIST = {"PATH", "HOME", "USER", "USERNAME", "USERPROFILE", "TEMP", "TMP", "SYSTEMROOT"}
+SNAPSHOT_DIR = ".rumi_snapshots"
+COMMAND_LOG_FILE = "terminal_log.jsonl"
 
 
 class Terminal:
@@ -38,6 +42,23 @@ class Terminal:
     def history(self):
         """実行履歴を返す。"""
         return list(self._history)
+
+    def _command_log_path(self):
+        return os.path.join(self._root, SNAPSHOT_DIR, COMMAND_LOG_FILE)
+
+    def _record_command(self, record):
+        entry = dict(record)
+        entry.setdefault("created_at", time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
+        self._history.append(entry)
+        try:
+            log_dir = os.path.dirname(self._command_log_path())
+            os.makedirs(log_dir, exist_ok=True)
+            with open(self._command_log_path(), "a", encoding="utf-8") as handle:
+                json.dump(entry, handle, ensure_ascii=False, sort_keys=True)
+                handle.write("\n")
+        except Exception:
+            pass
+        return entry
 
     def _resolve_cwd(self, cwd):
         if cwd is None or cwd == "":
@@ -70,8 +91,9 @@ class Terminal:
             args = [str(item) for item in command]
         else:
             args = shlex.split(str(command), posix=True)
-        if args and args[0] == "python3" and shutil.which("python3") is None:
-            args[0] = sys.executable
+        if args and args[0].lower() in {"python", "python3"}:
+            if sys.platform == "win32" or shutil.which(args[0]) is None:
+                args[0] = sys.executable
         return args
 
     def _process_env(self, env):
@@ -93,6 +115,16 @@ class Terminal:
         """コマンドを実行する。medium/high risk は approved が必要。"""
         risk = self.classify(command)
         if risk["approval_required"] and not approved:
+            self._record_command({
+                "type": "execute",
+                "command": command,
+                "cwd": cwd,
+                "timeout": timeout,
+                "risk": risk,
+                "approval_required": True,
+                "executed": False,
+                "exit_code": None,
+            })
             return {
                 "command": command,
                 "approval_required": True,
@@ -104,7 +136,7 @@ class Terminal:
         resolved_cwd = self._resolve_cwd(cwd)
         normalized_command = " ".join(str(command).strip().split())
         if normalized_command == "pwd":
-            return {
+            result = {
                 "command": command,
                 "cwd": resolved_cwd,
                 "risk": risk,
@@ -112,6 +144,17 @@ class Terminal:
                 "stdout": resolved_cwd + "\n",
                 "stderr": "",
             }
+            self._record_command({
+                "type": "execute",
+                "command": command,
+                "cwd": resolved_cwd,
+                "timeout": timeout,
+                "risk": risk,
+                "approval_required": False,
+                "executed": True,
+                "exit_code": 0,
+            })
+            return result
         record = {
             "type": "execute",
             "command": command,
@@ -119,7 +162,6 @@ class Terminal:
             "timeout": timeout,
             "risk": risk,
         }
-        self._history.append(record)
         use_shell = self._uses_shell_syntax(command)
         args = command if use_shell else self._command_args(command)
         completed = subprocess.run(
@@ -131,7 +173,7 @@ class Terminal:
             capture_output=True,
             timeout=timeout,
         )
-        return {
+        result = {
             "command": command,
             "cwd": resolved_cwd,
             "risk": risk,
@@ -139,6 +181,13 @@ class Terminal:
             "stdout": self._truncate_output(completed.stdout),
             "stderr": self._truncate_output(completed.stderr),
         }
+        record.update({
+            "approval_required": False,
+            "executed": True,
+            "exit_code": completed.returncode,
+        })
+        self._record_command(record)
+        return result
 
     def stream(self, command, cwd=None, timeout=30, approved=False):
         """長時間実行用のストリーム開始メタデータを返す。
@@ -148,6 +197,16 @@ class Terminal:
         """
         risk = self.classify(command)
         if risk["approval_required"] and not approved:
+            self._record_command({
+                "type": "stream",
+                "command": command,
+                "cwd": cwd,
+                "timeout": timeout,
+                "risk": risk,
+                "approval_required": True,
+                "executed": False,
+                "started": False,
+            })
             return {
                 "command": command,
                 "approval_required": True,
@@ -158,7 +217,7 @@ class Terminal:
         resolved_cwd = self._resolve_cwd(cwd)
         normalized_command = " ".join(str(command).strip().split())
         if normalized_command == "pwd":
-            return {
+            result = {
                 "command": command,
                 "cwd": resolved_cwd,
                 "stream_id": stream_id,
@@ -170,14 +229,28 @@ class Terminal:
                 "stderr": "",
                 "timed_out": False,
             }
+            self._record_command({
+                "type": "stream",
+                "command": command,
+                "cwd": resolved_cwd,
+                "timeout": timeout,
+                "stream_id": stream_id,
+                "risk": risk,
+                "approval_required": False,
+                "executed": True,
+                "started": True,
+                "exit_code": 0,
+                "timed_out": False,
+            })
+            return result
         record = {
             "type": "stream",
             "command": command,
             "cwd": resolved_cwd,
+            "timeout": timeout,
             "stream_id": stream_id,
             "risk": risk,
         }
-        self._history.append(record)
         use_shell = self._uses_shell_syntax(command)
         args = command if use_shell else self._command_args(command)
         process = subprocess.Popen(
@@ -196,7 +269,7 @@ class Terminal:
             process.kill()
             stdout, stderr = process.communicate()
             timed_out = True
-        return {
+        result = {
             "command": command,
             "cwd": resolved_cwd,
             "stream_id": stream_id,
@@ -208,3 +281,12 @@ class Terminal:
             "stderr": self._truncate_output(stderr),
             "timed_out": timed_out,
         }
+        record.update({
+            "approval_required": False,
+            "executed": True,
+            "started": True,
+            "exit_code": process.returncode,
+            "timed_out": timed_out,
+        })
+        self._record_command(record)
+        return result

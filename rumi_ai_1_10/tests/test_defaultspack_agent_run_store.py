@@ -125,3 +125,36 @@ def test_agent_run_store_redacts_tool_arguments_before_persisting(tmp_path, monk
 
     assert "sk-live" not in row["arguments_json"]
     assert "[REDACTED]" in row["arguments_json"]
+
+
+def test_multi_agent_session_records_isolated_workspace_contracts(tmp_path, monkeypatch):
+    from domain.agent.multi import MultiAgentOrchestrator
+
+    orchestrator = MultiAgentOrchestrator()
+    monkeypatch.setattr(
+        orchestrator,
+        "_ai_complete",
+        lambda messages, model, tools: {"status": "ok", "data": {"content": "[DONE] ok"}},
+    )
+
+    result = orchestrator.execute(
+        "coordinate",
+        [
+            {"agent_id": "coder", "name": "coder", "role": "code", "model": "stub/default"},
+            {"agent_id": "reviewer", "name": "reviewer", "role": "review", "model": "stub/default"},
+        ],
+        max_turns=1,
+        workspace_root=tmp_path,
+        worktree_mode="metadata_only",
+    )
+
+    contexts = result["result"]["agent_contexts"]
+    coder_workspace = contexts["coder"]["workspace"]
+    reviewer_workspace = contexts["reviewer"]["workspace"]
+
+    assert coder_workspace["contract_version"] == "rumi.agent_workspace.v1"
+    assert coder_workspace["mode"] == "isolated_workspace"
+    assert coder_workspace["workspace_root"] != reviewer_workspace["workspace_root"]
+    assert Path(coder_workspace["workspace_root"]).is_dir()
+    assert Path(reviewer_workspace["workspace_root"]).is_dir()
+    assert result["result"]["shared_context"]["workspace"]["base_workspace_root"] == str(tmp_path.resolve())

@@ -225,6 +225,7 @@ CODING_FUNCTIONS: tuple[FunctionSpec, ...] = tuple(
         ("coding_file_restore", "Restore a workspace checkpoint.", "high", "blocks.coding.file_restore"),
         ("coding_checkpoint_create", "Create a reversible workspace checkpoint.", "medium", "blocks.coding.file_checkpoint"),
         ("coding_checkpoint_list", "List workspace checkpoints.", "low", "blocks.coding.file_checkpoint"),
+        ("coding_checkpoint_restore", "Restore a reversible workspace checkpoint.", "high", "blocks.coding.file_restore"),
         ("coding_file_search", "Search workspace files.", "low", "blocks.coding.file_search"),
         ("coding_file_list", "List workspace files.", "low", "blocks.coding.file_list"),
         ("coding_terminal_exec", "Execute a terminal command.", "high", "blocks.coding.terminal_exec"),

@@ -6,6 +6,16 @@ from typing import Any, Dict, List, Optional
 from .categories import DEFAULT_CATEGORY_SPECS
 
 _ID_PATTERN = re.compile(r"^[A-Za-z0-9_.\-/]{1,256}$")
+_MARKETPLACE_STATUSES = {"verified", "unverified", "blacklisted", "bundled", "local"}
+_SIGNING_MODES = {
+    "none",
+    "repository_reviewed",
+    "repository_trusted",
+    "marketplace",
+    "sha256",
+    "hmac",
+    "ed25519",
+}
 
 
 class ManifestValidationError(ValueError):
@@ -33,6 +43,43 @@ def _normalize_env_field(value: Any, key_name: str) -> str | List[str]:
                 normalized.append(env_name)
         return normalized
     raise ManifestValidationError(f"{key_name} must be a string or array of strings")
+
+
+def _normalize_marketplace(value: Any) -> Dict[str, Any]:
+    marketplace = _as_dict(value, "manifest.marketplace")
+    if not marketplace:
+        return {}
+    status = str(marketplace.get("status") or "unverified").strip().lower()
+    if status not in _MARKETPLACE_STATUSES:
+        raise ManifestValidationError(f"manifest.marketplace.status is unsupported: {status}")
+    normalized = dict(marketplace)
+    normalized["status"] = status
+    if "publisher" in normalized:
+        normalized["publisher"] = str(normalized.get("publisher") or "").strip()
+    if "registry" in normalized:
+        normalized["registry"] = str(normalized.get("registry") or "").strip()
+    return normalized
+
+
+def _normalize_signing(value: Any) -> Dict[str, Any]:
+    signing = _as_dict(value, "manifest.signing")
+    if not signing:
+        return {}
+    mode = str(signing.get("mode") or "none").strip().lower()
+    if mode not in _SIGNING_MODES:
+        raise ManifestValidationError(f"manifest.signing.mode is unsupported: {mode}")
+    normalized = dict(signing)
+    normalized["mode"] = mode
+    normalized["verified"] = bool(signing.get("verified", False))
+    if bool(signing.get("required")) and not (
+        normalized["verified"]
+        or str(signing.get("signature") or "").strip()
+        or str(signing.get("sha256") or "").strip()
+    ):
+        raise ManifestValidationError(
+            "manifest.signing requires signature, sha256, or verified=true"
+        )
+    return normalized
 
 
 def validate_manifest(
@@ -77,6 +124,8 @@ def validate_manifest(
     normalized["capabilities"] = _as_dict(
         manifest.get("capabilities"), "manifest.capabilities"
     )
+    normalized["marketplace"] = _normalize_marketplace(manifest.get("marketplace"))
+    normalized["signing"] = _normalize_signing(manifest.get("signing"))
 
     if category == "llm_provider":
         adapter = str(manifest.get("adapter", "")).strip()

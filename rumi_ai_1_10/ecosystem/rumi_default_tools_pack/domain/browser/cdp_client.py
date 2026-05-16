@@ -106,20 +106,36 @@ class BrowserCDPClient:
         return result.get("root") if isinstance(result.get("root"), dict) else result
 
     def click(self, tab: CDPTab, x: int, y: int, button: str = "left") -> None:
+        if button not in {"left", "right", "middle"}:
+            raise ValueError(f"Unsupported CDP mouse button: {button}")
         cdp_button = "right" if button == "right" else "middle" if button == "middle" else "left"
         base = {"x": x, "y": y, "button": cdp_button, "clickCount": 1}
         self.call(tab, "Input.dispatchMouseEvent", {"type": "mousePressed", **base})
         self.call(tab, "Input.dispatchMouseEvent", {"type": "mouseReleased", **base})
 
     def type_text(self, tab: CDPTab, text: str) -> None:
+        if not text:
+            raise ValueError("No text supplied for CDP typing")
         self.call(tab, "Input.insertText", {"text": text})
 
     def press_key(self, tab: CDPTab, key: str) -> None:
-        self.call(tab, "Input.dispatchKeyEvent", {"type": "keyDown", "key": key})
-        self.call(tab, "Input.dispatchKeyEvent", {"type": "keyUp", "key": key})
+        self.press_key_combo(tab, key)
+
+    def press_key_combo(self, tab: CDPTab, key_combo: str) -> None:
+        key, modifiers = _cdp_key_combo(key_combo)
+        params = {"key": key, "modifiers": modifiers}
+        if len(key) == 1 and modifiers in {0, 8}:
+            params["text"] = key
+        self.call(tab, "Input.dispatchKeyEvent", {"type": "keyDown", **params})
+        self.call(tab, "Input.dispatchKeyEvent", {"type": "keyUp", "key": key, "modifiers": modifiers})
 
     def scroll(self, tab: CDPTab, x: int, y: int, direction: str, clicks: int) -> None:
-        amount = max(1, int(clicks or 1)) * 120
+        clicks = int(clicks or 0)
+        if clicks <= 0:
+            raise ValueError("Scroll clicks must be greater than zero")
+        if direction not in {"up", "down", "left", "right"}:
+            raise ValueError(f"Unsupported CDP scroll direction: {direction}")
+        amount = clicks * 120
         delta_x = -amount if direction == "left" else amount if direction == "right" else 0
         delta_y = -amount if direction == "up" else amount if direction == "down" else 0
         self.call(tab, "Input.dispatchMouseEvent", {
@@ -140,3 +156,48 @@ class BrowserCDPClient:
 def data_url_to_bytes(data_url: str) -> bytes:
     _, _, payload = data_url.partition(",")
     return base64.b64decode(payload) if payload else b""
+
+
+def _cdp_key_combo(key_combo: str) -> tuple[str, int]:
+    parts = [part.strip().lower() for part in str(key_combo).replace("+", " ").split() if part.strip()]
+    if not parts:
+        raise ValueError("No key supplied for CDP key input")
+    key = parts[-1]
+    modifiers = 0
+    modifier_bits = {
+        "alt": 1,
+        "option": 1,
+        "ctrl": 2,
+        "control": 2,
+        "cmd": 4,
+        "command": 4,
+        "meta": 4,
+        "shift": 8,
+    }
+    for modifier in parts[:-1]:
+        if modifier not in modifier_bits:
+            raise ValueError(f"Unsupported CDP key modifier: {modifier}")
+        modifiers |= modifier_bits[modifier]
+    key_aliases = {
+        "enter": "Enter",
+        "return": "Enter",
+        "escape": "Escape",
+        "esc": "Escape",
+        "tab": "Tab",
+        "backspace": "Backspace",
+        "delete": "Delete",
+        "space": " ",
+        "left": "ArrowLeft",
+        "right": "ArrowRight",
+        "up": "ArrowUp",
+        "down": "ArrowDown",
+        "pageup": "PageUp",
+        "pagedown": "PageDown",
+        "home": "Home",
+        "end": "End",
+    }
+    if key.startswith("f") and key[1:].isdigit():
+        number = int(key[1:])
+        if 1 <= number <= 24:
+            return f"F{number}", modifiers
+    return key_aliases.get(key, key.upper() if len(key) == 1 else key), modifiers

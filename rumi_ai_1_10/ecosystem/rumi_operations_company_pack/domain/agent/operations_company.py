@@ -201,6 +201,18 @@ class OperationsCompanyRuntime:
                 "session_search": True,
                 "persist_decisions_incidents_handoffs": True,
             },
+            "workspace": {
+                "contract_version": "rumi.agent_workspace.v1",
+                "mode": "isolated_per_agent",
+                "write_scope": "agent_workspace_root",
+                "shared_workspace": "operations_company/shared",
+                "agent_workspace_template": "operations_company/agents/{agent_id}",
+                "worktree": {
+                    "supported": True,
+                    "mode": "metadata_only",
+                    "branch_template": "rumi/{agent_id}/{task_id}",
+                },
+            },
             "scheduler": {
                 "enabled": True,
                 "default_heartbeat_minutes": 15,

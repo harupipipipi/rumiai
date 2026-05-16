@@ -477,6 +477,15 @@ class CapabilityExecutor:
             vocab_aliases=vocab_aliases,
         )
 
+    @staticmethod
+    def _entry_grant_config(entry):
+        grant_config = getattr(entry, "grant_config", None)
+        if grant_config is None:
+            manifest = getattr(entry, "manifest", None)
+            if isinstance(manifest, dict):
+                grant_config = manifest.get("grant_config")
+        return grant_config
+
     # ------------------------------------------------------------------
     # _unified_execute
     # ------------------------------------------------------------------
@@ -546,7 +555,8 @@ class CapabilityExecutor:
 
         # 3. Grant チェック（opt-in: grant_config が非 None のときのみ）
         grant_config = {}
-        if entry.grant_config is not None:
+        entry_grant_config = self._entry_grant_config(entry)
+        if entry_grant_config is not None:
             grant_result = self._grant_manager.check(principal_id, effective_permission_id)
             if not grant_result.allowed:
                 resp = CapabilityResponse(success=False, error="Permission denied", error_type="grant_denied",
@@ -593,7 +603,10 @@ class CapabilityExecutor:
                 error_type="invalid_calling_convention", latency_ms=(time.time() - start_time) * 1000)
         if calling_convention == "block":
             return self._dispatch_core_function(principal_id=principal_id, entry=entry, args=args,
-                                                 request_id=request_id, start_time=start_time)
+                                                 request_id=request_id, start_time=start_time,
+                                                 effective_permission_id=effective_permission_id,
+                                                 grant_config=grant_config,
+                                                 timeout_seconds=timeout_seconds)
         if calling_convention == "subprocess":
             entrypoint = entry.entrypoint or "main.py:run"
             function_dir = Path(entry.function_dir) if entry.function_dir else Path(".")
@@ -741,13 +754,14 @@ class CapabilityExecutor:
                             detail_reason=f"Principal '{principal_id}' does not meet caller_requires: {entry.caller_requires}")
                 return resp
         calling_convention = getattr(entry, "calling_convention", None)
+        dispatch_grant_config = dict(self._entry_grant_config(entry) or {})
         if calling_convention and calling_convention in _VALID_CALLING_CONVENTIONS:
             resp = self._dispatch_by_calling_convention(
                 calling_convention=calling_convention,
                 entry=entry,
                 principal_id=principal_id,
                 effective_permission_id="function.call",
-                grant_config={},
+                grant_config=dispatch_grant_config,
                 args=args,
                 timeout_seconds=request.get("timeout_seconds", DEFAULT_FUNCTION_TIMEOUT),
                 request_id=request_id,
@@ -755,7 +769,10 @@ class CapabilityExecutor:
             )
         elif is_core:
             resp = self._dispatch_core_function(principal_id=principal_id, entry=entry, args=args,
-                                                 request_id=request_id, start_time=start_time)
+                                                 request_id=request_id, start_time=start_time,
+                                                 effective_permission_id="function.call",
+                                                 grant_config=dispatch_grant_config,
+                                                 timeout_seconds=request.get("timeout_seconds", DEFAULT_FUNCTION_TIMEOUT))
         elif entry.host_execution:
             resp = self._execute_host_function(principal_id=principal_id, entry=entry, args=args,
                                                 request_id=request_id, start_time=start_time)
@@ -962,11 +979,97 @@ class CapabilityExecutor:
         except Exception as e:
             return CapabilityResponse(success=False, error=f"Function execution error: {e}", error_type="internal_error", latency_ms=(time.time() - start_time) * 1000)
 
-    def _dispatch_core_function(self, principal_id, entry, args, request_id, start_time):
+    def _core_function_error_type(self, output, default="function_execution_error"):
+        if isinstance(output, dict):
+            return str(output.get("error_type") or output.get("code") or default)
+        return default
+
+    def _normalize_core_function_response(self, resp):
+        if not resp.success:
+            return resp
+        output = resp.output
+        if isinstance(output, dict) and (output.get("success") is False or output.get("status") == "error" or "error" in output):
+            return CapabilityResponse(
+                success=False,
+                output=output,
+                error=str(output.get("error") or output.get("message") or "Core function failed"),
+                error_type=self._core_function_error_type(output),
+                latency_ms=resp.latency_ms,
+            )
+        return resp
+
+    def _execute_core_python_block(self, principal_id, entry, args, request_id, start_time,
+                                   effective_permission_id, grant_config, timeout_seconds):
+        function_dir, main_py_path = entry.function_dir, entry.main_py_path
+        if function_dir is None:
+            qualified_name = getattr(entry, "qualified_name", f"{entry.pack_id}:{entry.function_id}")
+            return CapabilityResponse(
+                success=False,
+                error=f"Core function '{qualified_name}' has no function_dir",
+                error_type="not_implemented",
+                latency_ms=(time.time() - start_time) * 1000,
+            )
+        if main_py_path is None:
+            main_py_path = Path(function_dir) / "main.py"
+        if not Path(function_dir).is_dir():
+            return CapabilityResponse(
+                success=False,
+                error=f"Core function_dir not found: {function_dir}",
+                error_type="function_dir_not_found",
+                latency_ms=(time.time() - start_time) * 1000,
+            )
+        if not Path(main_py_path).is_file():
+            return CapabilityResponse(
+                success=False,
+                error=f"Core function entrypoint not found: {main_py_path}",
+                error_type="not_implemented",
+                latency_ms=(time.time() - start_time) * 1000,
+            )
+        timeout = min(max(float(timeout_seconds or DEFAULT_FUNCTION_TIMEOUT), 1.0), MAX_TIMEOUT)
+        context = {
+            "principal_id": principal_id,
+            "pack_id": entry.pack_id,
+            "function_id": entry.function_id,
+            "permission_id": effective_permission_id,
+            "grant_config": grant_config or {},
+            "request_id": request_id,
+            "ts": self._now_ts(),
+        }
+        input_json = self._build_runner_payload(str(main_py_path), "execute", context, args)
+        try:
+            resp = self._run_runner_on_host(
+                payload=input_json,
+                cwd=str(Path(function_dir)),
+                timeout=timeout,
+                start_time=start_time,
+                failure_prefix="Core function execution failed",
+            )
+            return self._normalize_core_function_response(resp)
+        except subprocess.TimeoutExpired:
+            return CapabilityResponse(success=False, error=f"Core function execution timed out after {timeout}s",
+                                      error_type="timeout", latency_ms=(time.time() - start_time) * 1000)
+        except Exception as e:
+            return CapabilityResponse(success=False, error=f"Core function execution error: {e}",
+                                      error_type="internal_error", latency_ms=(time.time() - start_time) * 1000)
+
+    def _dispatch_core_function(self, principal_id, entry, args, request_id, start_time,
+                                effective_permission_id=None, grant_config=None, timeout_seconds=None):
         pack_id, function_id = entry.pack_id, entry.function_id
-        grant_config = entry.manifest.get("grant_config", {})
+        grant_config = dict(grant_config or {})
+        permission_id = effective_permission_id or (entry.vocab_aliases[0] if getattr(entry, "vocab_aliases", None) else entry.qualified_name)
+        if pack_id == "core_flow_capability" and function_id == "run":
+            return self._execute_flow_run(principal_id=principal_id, permission_id=FLOW_RUN_PERMISSION_ID,
+                                          grant_config=grant_config, args=args,
+                                          timeout_seconds=timeout_seconds or DEFAULT_FUNCTION_TIMEOUT,
+                                          request_id=request_id, start_time=start_time)
         di_service_name = self._core_function_handlers.get(pack_id)
         if di_service_name is None:
+            if entry.main_py_path or entry.function_dir:
+                return self._execute_core_python_block(principal_id=principal_id, entry=entry, args=args,
+                                                       request_id=request_id, start_time=start_time,
+                                                       effective_permission_id=permission_id,
+                                                       grant_config=grant_config,
+                                                       timeout_seconds=timeout_seconds)
             return CapabilityResponse(success=False, error=f"No handler registered for core pack: {pack_id}", error_type="unknown_core_function", latency_ms=(time.time() - start_time) * 1000)
         method_name = f"handle_{function_id}"
         try:
@@ -983,8 +1086,10 @@ class CapabilityExecutor:
         except Exception as e:
             return CapabilityResponse(success=False, error=f"Core function failed: {e}", error_type="function_execution_error", latency_ms=(time.time() - start_time) * 1000)
         latency_ms = (time.time() - start_time) * 1000
-        if isinstance(result, dict) and "error" in result:
-            return CapabilityResponse(success=False, output=result, error=result["error"], error_type="function_execution_error", latency_ms=latency_ms)
+        if isinstance(result, dict) and (result.get("success") is False or result.get("status") == "error" or "error" in result):
+            return CapabilityResponse(success=False, output=result,
+                                      error=str(result.get("error") or result.get("message") or "Core function failed"),
+                                      error_type=self._core_function_error_type(result), latency_ms=latency_ms)
         return CapabilityResponse(success=True, output=result, latency_ms=latency_ms)
 
     def _execute_binary_function(self, principal_id, entry, args, request_id, start_time):

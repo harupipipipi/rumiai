@@ -62,14 +62,6 @@ _COMPUTER_USE_LINE_TARGET_RE = re.compile(r"(?<![A-Za-z])line(?![A-Za-z])|ライ
 _COMPUTER_USE_CHATGPT_TARGET_RE = re.compile(r"chat\s*gpt|chatgpt", re.IGNORECASE)
 
 
-def _stub_response():
-    return {
-        "content": [{"type": "text", "text": "[stub] AI response placeholder"}],
-        "finish_reason": "stop",
-        "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
-    }
-
-
 def _conversation_system_prompt(conv, manager):
     prompt_id = str((conv or {}).get("system_prompt_id") or "").strip()
     if not prompt_id:
@@ -90,11 +82,7 @@ def _conversation_system_prompt(conv, manager):
 
 
 def _has_real_provider(client, model):
-    """model に対応する実プロバイダーが登録されているか判定する。
-    stub プロバイダーに解決される場合は False を返す。
-    ただし model が 'stub/' で始まる場合は意図的な stub 利用とみなし True を返す。"""
-    if model.startswith("stub/"):
-        return True
+    """Return True only when a non-stub provider will handle the request."""
     provider, _ = client.resolve_provider(model)
     from domain.ai_client.providers.stub_provider import StubProvider
     return not isinstance(provider, StubProvider)
@@ -1376,7 +1364,12 @@ def _complete_with_tools(model, messages, tools, context, call_handler, params):
         _raise_if_cancelled(context)
 
         if not isinstance(response, dict):
-            response = _stub_response()
+            response = _ai_error_response(
+                model,
+                "AI provider returned an invalid response",
+                params,
+                events,
+            )
         tool_uses = _tool_use_blocks(response)
         if not tool_uses and not _response_text(response).strip():
             retry_params = _params_without_thinking(params)
@@ -1555,7 +1548,12 @@ def _complete_with_tools(model, messages, tools, context, call_handler, params):
             response = blocked_response
             break
 
-    response = response or _stub_response()
+    response = response or _ai_error_response(
+        model,
+        "AI provider did not return a response",
+        params,
+        events,
+    )
     if not _tool_use_blocks(response) and not _response_text(response).strip():
         content = response.get("content")
         if not isinstance(content, list):

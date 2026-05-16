@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "clean": "node scripts/clean.mjs",
     "lint": "tsc --noEmit",
+    "audit": "npm audit --audit-level=high",
     "test": "node --import tsx --test src/lib/*.test.ts scripts/*.test.mjs"
   },
   "dependencies": {

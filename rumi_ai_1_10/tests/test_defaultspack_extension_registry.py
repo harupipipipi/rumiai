@@ -76,6 +76,46 @@ def test_manifest_validation_requires_provider_adapter_or_entrypoint():
         )
 
 
+def test_manifest_validation_preserves_marketplace_and_signing_metadata():
+    manifest = validate_manifest(
+        {
+            "id": "x",
+            "category": "llm_provider",
+            "version": "1",
+            "adapter": "openai_compatible",
+            "marketplace": {
+                "registry": "bundled",
+                "publisher": "rumi-ai",
+                "status": "verified",
+            },
+            "signing": {
+                "mode": "repository_reviewed",
+                "verified": True,
+            },
+        },
+        expected_category="llm_provider",
+    )
+
+    assert manifest["marketplace"]["status"] == "verified"
+    assert manifest["marketplace"]["publisher"] == "rumi-ai"
+    assert manifest["signing"]["mode"] == "repository_reviewed"
+    assert manifest["signing"]["verified"] is True
+
+
+def test_manifest_validation_rejects_required_signing_without_signature():
+    with pytest.raises(ManifestValidationError):
+        validate_manifest(
+            {
+                "id": "x",
+                "category": "llm_provider",
+                "version": "1",
+                "adapter": "openai_compatible",
+                "signing": {"mode": "ed25519", "required": True},
+            },
+            expected_category="llm_provider",
+        )
+
+
 def test_discovery_scans_manifest_categories(tmp_path: Path):
     root = tmp_path / "extensions"
     _write_json(

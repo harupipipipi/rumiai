@@ -28,10 +28,15 @@ def run(input_data, context=None):
         paths = _coerce_paths(input_data.get("paths"))
         metadata = input_data.get("metadata")
         metadata = metadata if isinstance(metadata, dict) else {}
-        checkpoint = ops.checkpoint_before_mutation(
-            input_data.get("operation", "manual"),
-            paths,
-            metadata=metadata,
+        checkpoint_metadata = {
+            "operation": str(input_data.get("operation") or "manual"),
+            "kind": "manual",
+        }
+        checkpoint_metadata.update(metadata)
+        checkpoint = ops.worktree_checkpoint(
+            paths=paths,
+            metadata=checkpoint_metadata,
+            include_missing=True,
         )
         return ok({"checkpoint": checkpoint})
     except ValueError as exc:

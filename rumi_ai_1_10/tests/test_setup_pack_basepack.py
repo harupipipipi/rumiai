@@ -15,3 +15,6 @@ def test_basepack_setup_profile_is_discoverable() -> None:
     assert candidate.display_name == "Basepack"
     assert candidate.risk_level == "low"
     assert candidate.all_ok_eligible is True
+    assert candidate.compatibility["target_pack_version"] == ">=2.0.0"
+    assert candidate.marketplace["status"] == "verified"
+    assert candidate.signing["mode"] == "repository_reviewed"

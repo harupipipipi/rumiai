@@ -36,11 +36,12 @@ class SubagentController:
 
         model = str(arguments.get("model") or context.get("model") or parent.get("model") or "stub/default")
         title = str(arguments.get("title") or task[:48] or "Subagent").strip()
+        agent_id = str(arguments.get("agent_id") or "subagent")
         child = store.create_conversation(
             model=model,
             parent_conversation_id=parent_id,
             conversation_kind="subagent",
-            agent_id=str(arguments.get("agent_id") or "subagent"),
+            agent_id=agent_id,
             tags=[*list(parent.get("tags", [])), "subagent"],
             metadata={
                 "parent_conversation_id": parent_id,
@@ -50,6 +51,30 @@ class SubagentController:
                 },
             },
         )
+        parent_workspace = store.conversation_workspace_dir(parent_id).resolve()
+        child_workspace = store.conversation_workspace_dir(child["id"]).resolve()
+        child_workspace.mkdir(parents=True, exist_ok=True)
+        workspace_contract = {
+            "contract_version": "rumi.agent_workspace.v1",
+            "mode": "child_conversation_workspace",
+            "isolation": "per_child_conversation",
+            "write_scope": "child_workspace_root",
+            "agent_id": agent_id,
+            "parent_conversation_id": parent_id,
+            "child_conversation_id": child["id"],
+            "parent_workspace_root": str(parent_workspace),
+            "workspace_root": str(child_workspace),
+            "worktree": {
+                "mode": str(arguments.get("worktree_mode") or context.get("worktree_mode") or "metadata_only"),
+                "path": str(child_workspace),
+            },
+        }
+        child_metadata = dict(child.get("metadata") or {})
+        subagent_metadata = dict(child_metadata.get("subagent") or {})
+        subagent_metadata["workspace"] = workspace_contract
+        child_metadata["subagent"] = subagent_metadata
+        child_metadata["workspace"] = workspace_contract
+        child = store.update_conversation(child["id"], {"metadata": child_metadata}) or child
         child = store.update_conversation(child["id"], {"title": title}) or child
         user_msg = store.add_message(
             child["id"],
@@ -81,6 +106,7 @@ class SubagentController:
             "title": title,
             "task": task,
             "summary": summary,
+            "workspace": workspace_contract,
         }
 
     @staticmethod

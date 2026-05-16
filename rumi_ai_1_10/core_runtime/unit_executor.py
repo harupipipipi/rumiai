@@ -858,7 +858,13 @@ if __name__ == "__main__":
         # A-13: Build enriched audit_extra with denial_reason
         extra = dict(audit_extra) if audit_extra else {}
         if mono_start is not None:
-            extra["execution_time_ms"] = (time.monotonic() - mono_start) * 1000
+            elapsed_ms = (time.monotonic() - mono_start) * 1000
+            if elapsed_ms <= 0:
+                try:
+                    elapsed_ms = max(elapsed_ms, (time.perf_counter() - mono_start) * 1000)
+                except Exception:
+                    pass
+            extra["execution_time_ms"] = max(elapsed_ms, 0.0)
         extra["denial_reason"] = error
         self._audit_execution(
             principal_id, unit_ref, mode, result, internal_detail,

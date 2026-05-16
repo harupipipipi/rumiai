@@ -323,6 +323,16 @@ class AIClient:
             return f"{provider_id}/{model_id}"
         return f"{provider_id}/{model}"
 
+    @staticmethod
+    def _provider_unconfigured_message(model):
+        provider_name = "stub"
+        if isinstance(model, str) and "/" in model:
+            provider_name = model.split("/", 1)[0] or provider_name
+        return (
+            f"{provider_name}: provider is not configured. "
+            "Configure a real or local AI provider before sending a message."
+        )
+
     def _api_route_attempts(self, model, route_refs):
         attempts = []
         for route_ref in route_refs:
@@ -406,17 +416,8 @@ class AIClient:
         if handled:
             return routed
         provider, model_name = self.resolve_provider(model)
-        if (
-            provider.__class__.__name__ == "StubProvider"
-            and isinstance(model, str)
-            and "/" in model
-            and not model.startswith("stub/")
-        ):
-            provider_name = model.split("/", 1)[0]
-            raise RuntimeError(
-                f"{provider_name}: provider is not configured. "
-                "Set the provider API key before sending a message."
-            )
+        if provider.__class__.__name__ == "StubProvider":
+            raise RuntimeError(self._provider_unconfigured_message(model))
         try:
             return provider.complete(model_name, messages, tools or [], params or {})
         except NotImplementedError as e:
@@ -427,17 +428,8 @@ class AIClient:
         if handled:
             return routed
         provider, model_name = self.resolve_provider(model)
-        if (
-            provider.__class__.__name__ == "StubProvider"
-            and isinstance(model, str)
-            and "/" in model
-            and not model.startswith("stub/")
-        ):
-            provider_name = model.split("/", 1)[0]
-            raise RuntimeError(
-                f"{provider_name}: provider is not configured. "
-                "Set the provider API key before sending a message."
-            )
+        if provider.__class__.__name__ == "StubProvider":
+            raise RuntimeError(self._provider_unconfigured_message(model))
         try:
             return provider.stream(model_name, messages, tools or [], params or {})
         except NotImplementedError as e:

@@ -5,10 +5,12 @@
 
 import difflib
 import glob
+import hashlib
 import json
 import os
 import re
 import shutil
+import subprocess
 import tempfile
 import time
 import uuid
@@ -16,6 +18,10 @@ import uuid
 MAX_TEXT_FILE_BYTES = 2 * 1024 * 1024
 SNAPSHOT_DIR = ".rumi_snapshots"
 SNAPSHOT_MANIFEST = "snapshot.json"
+SNAPSHOT_CONTENT_DIR = "contents"
+TERMINAL_LOG = "terminal_log.jsonl"
+WORKTREE_SCHEMA_VERSION = 2
+COMMAND_LOG_LIMIT = 50
 SNAPSHOT_ID_PATTERN = re.compile(r"^\d{8}T\d{6}Z-[0-9a-fA-F]{8}$")
 PROTECTED_PATHS = {".git", SNAPSHOT_DIR}
 
@@ -62,6 +68,17 @@ class FileOps:
         if rel in PROTECTED_PATHS or parts & PROTECTED_PATHS:
             raise PermissionError("Protected workspace path cannot be modified: " + rel)
 
+    def _is_protected_rel(self, rel):
+        rel = str(rel or "").replace("\\", "/").strip("/")
+        if not rel or rel == ".":
+            return False
+        parts = set(rel.split("/"))
+        return rel in PROTECTED_PATHS or bool(parts & PROTECTED_PATHS)
+
+    def _is_inside_root(self, resolved):
+        real = os.path.realpath(resolved)
+        return real == self._root or real.startswith(self._root + os.sep)
+
     def _ensure_text_size(self, resolved):
         if os.path.exists(resolved) and os.path.isfile(resolved):
             size = os.path.getsize(resolved)
@@ -74,6 +91,325 @@ class FileOps:
         with open(resolved, "rb") as handle:
             sample = handle.read(4096)
         return b"\0" in sample
+
+    def _sha256_file(self, resolved):
+        digest = hashlib.sha256()
+        with open(resolved, "rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
+
+    def _safe_stat(self, resolved):
+        try:
+            stat = os.stat(resolved)
+        except OSError:
+            return {}
+        return {
+            "mode": stat.st_mode,
+            "mtime_ns": getattr(stat, "st_mtime_ns", int(stat.st_mtime * 1000000000)),
+            "size": stat.st_size,
+        }
+
+    def _split_git_z(self, raw):
+        if not raw:
+            return []
+        return [item for item in raw.split("\0") if item]
+
+    def _filter_git_porcelain_v1(self, text):
+        lines = []
+        for line in str(text or "").splitlines():
+            if len(line) >= 4 and self._is_protected_rel(line[3:]):
+                continue
+            lines.append(line)
+        return "\n".join(lines) + ("\n" if lines else "")
+
+    def _filter_git_porcelain_v2(self, text):
+        lines = []
+        for line in str(text or "").splitlines():
+            if line.startswith("#"):
+                lines.append(line)
+                continue
+            if (" " + SNAPSHOT_DIR + "/") in line or line.endswith(" " + SNAPSHOT_DIR):
+                continue
+            lines.append(line)
+        return "\n".join(lines) + ("\n" if lines else "")
+
+    def _run_git_text(self, args, cwd=None, timeout=10):
+        completed = subprocess.run(
+            ["git"] + list(args),
+            cwd=cwd or self._root,
+            text=True,
+            capture_output=True,
+            timeout=timeout,
+        )
+        if completed.returncode != 0:
+            raise RuntimeError(completed.stderr.strip() or completed.stdout.strip() or "git command failed")
+        return completed.stdout
+
+    def _run_git_bytes(self, args, cwd=None, timeout=10):
+        completed = subprocess.run(
+            ["git"] + list(args),
+            cwd=cwd or self._root,
+            capture_output=True,
+            timeout=timeout,
+        )
+        if completed.returncode != 0:
+            raise RuntimeError(
+                completed.stderr.decode("utf-8", errors="replace").strip()
+                or completed.stdout.decode("utf-8", errors="replace").strip()
+                or "git command failed"
+            )
+        return completed.stdout
+
+    def _git_metadata(self):
+        metadata = {
+            "available": False,
+            "root": None,
+            "head": None,
+            "head_short": None,
+            "branch": None,
+            "status": {},
+            "tracked_paths": [],
+            "dirty_paths": [],
+        }
+        try:
+            git_root = os.path.realpath(self._run_git_text(["rev-parse", "--show-toplevel"]).strip())
+            if not (
+                git_root == self._root
+                or git_root.startswith(self._root + os.sep)
+                or self._root.startswith(git_root + os.sep)
+            ):
+                metadata["error"] = "git root is outside workspace root: " + git_root
+                return metadata
+            metadata["available"] = True
+            metadata["root"] = git_root
+            try:
+                metadata["head"] = self._run_git_text(["rev-parse", "HEAD"]).strip()
+                metadata["head_short"] = self._run_git_text(["rev-parse", "--short", "HEAD"]).strip()
+            except Exception as exc:
+                metadata["head_error"] = str(exc)
+            try:
+                metadata["branch"] = self._run_git_text(["rev-parse", "--abbrev-ref", "HEAD"]).strip()
+            except Exception as exc:
+                metadata["branch_error"] = str(exc)
+            porcelain = self._filter_git_porcelain_v1(self._run_git_text(["status", "--porcelain=v1"]))
+            porcelain_v2 = self._filter_git_porcelain_v2(
+                self._run_git_text(["status", "--porcelain=v2", "--branch"])
+            )
+            staged = self._split_git_z(self._run_git_text(["diff", "--name-only", "--cached", "-z"]))
+            modified = self._split_git_z(self._run_git_text(["diff", "--name-only", "-z"]))
+            deleted = self._split_git_z(self._run_git_text(["ls-files", "--deleted", "-z"]))
+            untracked = self._split_git_z(self._run_git_text(["ls-files", "--others", "-z"]))
+            tracked = self._split_git_z(self._run_git_text(["ls-files", "-z"]))
+        except Exception as exc:
+            metadata["error"] = str(exc)
+            return metadata
+
+        def to_workspace_rel(git_path):
+            resolved = os.path.realpath(os.path.join(git_root, git_path))
+            if resolved != self._root and not resolved.startswith(self._root + os.sep):
+                return None
+            return self._relative(resolved)
+
+        tracked_paths = {}
+        for git_path in tracked:
+            rel = to_workspace_rel(git_path)
+            if rel and not self._is_protected_rel(rel):
+                tracked_paths[rel] = git_path.replace("\\", "/")
+
+        dirty_map = {}
+        for label, paths in (
+            ("staged", staged),
+            ("modified", modified),
+            ("deleted", deleted),
+            ("untracked", untracked),
+        ):
+            for git_path in paths:
+                rel = to_workspace_rel(git_path)
+                if not rel or self._is_protected_rel(rel):
+                    continue
+                entry = dirty_map.setdefault(
+                    rel,
+                    {
+                        "path": rel,
+                        "git_path": git_path.replace("\\", "/"),
+                        "statuses": [],
+                        "tracked": rel in tracked_paths,
+                    },
+                )
+                if label not in entry["statuses"]:
+                    entry["statuses"].append(label)
+
+        dirty_paths = []
+        for rel in sorted(dirty_map):
+            entry = dirty_map[rel]
+            entry["statuses"].sort()
+            dirty_paths.append(entry)
+
+        metadata["status"] = {
+            "clean": not bool(porcelain.strip()),
+            "porcelain": porcelain,
+            "porcelain_v2": porcelain_v2,
+            "staged": [item for item in (to_workspace_rel(path) for path in staged) if item],
+            "modified": [item for item in (to_workspace_rel(path) for path in modified) if item],
+            "deleted": [item for item in (to_workspace_rel(path) for path in deleted) if item],
+            "untracked": [item for item in (to_workspace_rel(path) for path in untracked) if item],
+        }
+        metadata["tracked_paths"] = [
+            {"path": rel, "git_path": git_path}
+            for rel, git_path in sorted(tracked_paths.items())
+        ]
+        metadata["dirty_paths"] = dirty_paths
+        return metadata
+
+    def _git_status_for_path(self, git_metadata):
+        status_by_path = {}
+        tracked_by_path = {}
+        for item in git_metadata.get("tracked_paths", []):
+            if isinstance(item, dict) and item.get("path"):
+                tracked_by_path[str(item["path"])] = str(item.get("git_path") or item["path"])
+        for item in git_metadata.get("dirty_paths", []):
+            if isinstance(item, dict) and item.get("path"):
+                status_by_path[str(item["path"])] = item
+        return tracked_by_path, status_by_path
+
+    def _worktree_manifest(self, git_metadata=None):
+        git_metadata = git_metadata or {}
+        tracked_by_path, status_by_path = self._git_status_for_path(git_metadata)
+        entries = []
+        for dirpath, dirnames, filenames in os.walk(self._root):
+            dirnames[:] = [
+                dirname
+                for dirname in sorted(dirnames)
+                if not self._is_protected_rel(self._relative(os.path.join(dirpath, dirname)))
+                and self._is_inside_root(os.path.join(dirpath, dirname))
+            ]
+            for dirname in dirnames:
+                resolved = os.path.join(dirpath, dirname)
+                rel = self._relative(resolved)
+                entry = {
+                    "path": rel,
+                    "type": "dir",
+                }
+                stat = self._safe_stat(resolved)
+                if stat:
+                    entry["mtime_ns"] = stat["mtime_ns"]
+                    entry["mode"] = stat["mode"]
+                entries.append(entry)
+            for filename in sorted(filenames):
+                resolved = os.path.join(dirpath, filename)
+                rel = self._relative(resolved)
+                if self._is_protected_rel(rel) or not os.path.isfile(resolved) or not self._is_inside_root(resolved):
+                    continue
+                stat = self._safe_stat(resolved)
+                entry = {
+                    "path": rel,
+                    "type": "file",
+                    "size": stat.get("size", 0),
+                    "mtime_ns": stat.get("mtime_ns"),
+                    "mode": stat.get("mode"),
+                    "sha256": self._sha256_file(resolved),
+                }
+                if git_metadata.get("available"):
+                    git_path = tracked_by_path.get(rel)
+                    dirty = status_by_path.get(rel)
+                    entry["git"] = {
+                        "tracked": rel in tracked_by_path,
+                        "dirty": dirty is not None or rel not in tracked_by_path,
+                        "git_path": git_path or rel,
+                        "statuses": list(dirty.get("statuses", [])) if dirty else (
+                            ["untracked"] if rel not in tracked_by_path else []
+                        ),
+                    }
+                entries.append(entry)
+        return entries
+
+    def _path_entry(self, item, include_missing=False):
+        resolved = self._resolve(item)
+        rel = self._relative(resolved)
+        entry = {
+            "path": rel,
+            "requested_path": str(item),
+            "existed": os.path.exists(resolved),
+            "is_dir": os.path.isdir(resolved),
+            "is_file": os.path.isfile(resolved),
+        }
+        if os.path.isfile(resolved):
+            entry["size"] = os.path.getsize(resolved)
+            entry["sha256"] = self._sha256_file(resolved)
+        elif include_missing and not os.path.exists(resolved):
+            entry["missing"] = True
+        return entry
+
+    def _copy_snapshot_content(self, snapshot_root, rel, captured_from):
+        resolved = self._resolve(rel)
+        if not os.path.isfile(resolved):
+            return False
+        destination = os.path.join(snapshot_root, SNAPSHOT_CONTENT_DIR, rel)
+        parent = os.path.dirname(destination)
+        if parent and not os.path.isdir(parent):
+            os.makedirs(parent, exist_ok=True)
+        shutil.copy2(resolved, destination)
+        captured_from.append({
+            "path": rel,
+            "size": os.path.getsize(resolved),
+            "sha256": self._sha256_file(resolved),
+        })
+        return True
+
+    def _capture_worktree_contents(self, snapshot_root, worktree_entries, git_metadata):
+        captured = []
+        missing_dirty = []
+        files_by_path = {
+            entry["path"]: entry
+            for entry in worktree_entries
+            if entry.get("type") == "file" and entry.get("path")
+        }
+        if git_metadata.get("available"):
+            candidate_paths = {
+                entry["path"]
+                for entry in worktree_entries
+                if entry.get("type") == "file"
+                and (
+                    not entry.get("git", {}).get("tracked")
+                    or entry.get("git", {}).get("dirty")
+                )
+            }
+            for dirty in git_metadata.get("dirty_paths", []):
+                if not isinstance(dirty, dict) or not dirty.get("path"):
+                    continue
+                rel = str(dirty["path"])
+                if rel not in files_by_path:
+                    missing_dirty.append(dict(dirty))
+                else:
+                    candidate_paths.add(rel)
+        else:
+            candidate_paths = set(files_by_path)
+
+        for rel in sorted(candidate_paths):
+            if self._is_protected_rel(rel):
+                continue
+            self._copy_snapshot_content(snapshot_root, rel, captured)
+        return captured, missing_dirty
+
+    def _read_terminal_log(self, limit=COMMAND_LOG_LIMIT):
+        log_path = self._resolve(os.path.join(SNAPSHOT_DIR, TERMINAL_LOG))
+        if not os.path.isfile(log_path):
+            return []
+        try:
+            with open(log_path, "r", encoding="utf-8") as handle:
+                lines = handle.readlines()
+        except OSError:
+            return []
+        entries = []
+        for line in lines[-int(limit or COMMAND_LOG_LIMIT):]:
+            try:
+                loaded = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(loaded, dict):
+                entries.append(loaded)
+        return entries
 
     def read_file(self, path):
         """ファイルを読み取り、内容を文字列で返す。"""
@@ -123,8 +459,8 @@ class FileOps:
         }
         if isinstance(metadata, dict):
             checkpoint_metadata.update(metadata)
-        return self.snapshot(
-            clean_paths or ["."],
+        return self.worktree_checkpoint(
+            paths=clean_paths or ["."],
             metadata=checkpoint_metadata,
             include_missing=True,
         )
@@ -238,6 +574,70 @@ class FileOps:
             loaded = json.load(handle)
         return loaded if isinstance(loaded, dict) else {}
 
+    def worktree_checkpoint(self, paths=None, metadata=None, include_missing=False, include_terminal_log=True):
+        """Create a whole-worktree checkpoint with restorable dirty content."""
+        snapshot_id = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime()) + "-" + str(uuid.uuid4())[:8]
+        snapshot_root = self._resolve(os.path.join(SNAPSHOT_DIR, snapshot_id))
+        selected = [paths] if isinstance(paths, str) else (paths if paths else ["."])
+        path_entries = [self._path_entry(item, include_missing=include_missing) for item in selected]
+        git_metadata = self._git_metadata()
+        worktree_entries = self._worktree_manifest(git_metadata)
+        os.makedirs(snapshot_root, exist_ok=True)
+        captured, missing_dirty = self._capture_worktree_contents(
+            snapshot_root,
+            worktree_entries,
+            git_metadata,
+        )
+        command_log = self._read_terminal_log() if include_terminal_log else []
+        manifest = {
+            "schema_version": WORKTREE_SCHEMA_VERSION,
+            "kind": "worktree",
+            "snapshot_id": snapshot_id,
+            "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "workspace_root": self._root,
+            "paths": path_entries,
+            "metadata": dict(metadata or {}) if isinstance(metadata, dict) else {},
+            "worktree": {
+                "manifest": worktree_entries,
+                "captured_files": captured,
+                "missing_dirty_paths": missing_dirty,
+                "git": git_metadata,
+                "terminal": {
+                    "available": bool(command_log),
+                    "commands": command_log,
+                },
+            },
+        }
+        with open(self._snapshot_manifest_path(snapshot_root), "w", encoding="utf-8") as handle:
+            json.dump(manifest, handle, ensure_ascii=False, indent=2, sort_keys=True)
+            handle.write("\n")
+        requested_missing = [
+            entry["path"]
+            for entry in path_entries
+            if entry.get("existed") is False
+        ]
+        covered = sorted({item["path"] for item in captured}.union(requested_missing))
+        return {
+            "snapshot_id": snapshot_id,
+            "path": self._relative(snapshot_root),
+            "kind": "worktree",
+            "files": covered,
+            "captured_files": [item["path"] for item in captured],
+            "manifest_files": len([item for item in worktree_entries if item.get("type") == "file"]),
+            "manifest_entries": len(worktree_entries),
+            "git": {
+                "available": bool(git_metadata.get("available")),
+                "head": git_metadata.get("head"),
+                "branch": git_metadata.get("branch"),
+                "clean": git_metadata.get("status", {}).get("clean"),
+                "dirty_paths": [item.get("path") for item in git_metadata.get("dirty_paths", [])],
+            },
+            "terminal": {
+                "commands": len(command_log),
+            },
+            "metadata": manifest["metadata"],
+        }
+
     def snapshot(self, paths=None, metadata=None, include_missing=False):
         """対象ファイルを workspace 内の .rumi_snapshots にコピーする。"""
         snapshot_id = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime()) + "-" + str(uuid.uuid4())[:8]
@@ -296,6 +696,134 @@ class FileOps:
             "metadata": manifest["metadata"],
         }
 
+    def _selection_rels(self, paths):
+        selected = [paths] if isinstance(paths, str) else (paths if paths else ["."])
+        result = []
+        for item in selected:
+            resolved = self._resolve(item)
+            result.append(self._relative(resolved))
+        return result
+
+    def _is_selected(self, rel, selected_rels):
+        rel = str(rel or ".").replace("\\", "/").strip("/")
+        rel = rel or "."
+        for selected in selected_rels:
+            selected = str(selected or ".").replace("\\", "/").strip("/")
+            selected = selected or "."
+            if selected == "." or rel == selected or rel.startswith(selected.rstrip("/") + "/"):
+                return True
+        return False
+
+    def _content_source_path(self, snapshot_root, rel):
+        source = os.path.realpath(os.path.join(snapshot_root, SNAPSHOT_CONTENT_DIR, rel))
+        content_root = os.path.realpath(os.path.join(snapshot_root, SNAPSHOT_CONTENT_DIR))
+        if source != content_root and not source.startswith(content_root + os.sep):
+            raise ValueError("Snapshot content path traversal detected: " + str(rel))
+        return source
+
+    def _git_blob_for_checkpoint(self, manifest, entry):
+        git_metadata = manifest.get("worktree", {}).get("git", {})
+        if not git_metadata.get("available") or not git_metadata.get("head"):
+            return None
+        git_root = os.path.realpath(git_metadata.get("root") or self._root)
+        if not os.path.isdir(git_root):
+            return None
+        git_info = entry.get("git", {}) if isinstance(entry.get("git"), dict) else {}
+        git_path = str(git_info.get("git_path") or entry.get("path") or "").replace("\\", "/")
+        if not git_path:
+            return None
+        try:
+            return self._run_git_bytes(
+                ["show", "{}:{}".format(git_metadata["head"], git_path)],
+                cwd=git_root,
+                timeout=30,
+            )
+        except Exception:
+            return None
+
+    def _remove_current_paths_not_in_checkpoint(self, checkpoint_paths, checkpoint_dirs, selected_rels):
+        current_entries = self._worktree_manifest({})
+        removed = []
+        for entry in sorted(
+            current_entries,
+            key=lambda item: (str(item.get("path", "")).count("/"), item.get("path", "")),
+            reverse=True,
+        ):
+            rel = entry.get("path")
+            if not rel or not self._is_selected(rel, selected_rels) or rel in checkpoint_paths:
+                continue
+            resolved = self._resolve(rel)
+            self._ensure_unprotected_mutation(resolved)
+            if entry.get("type") == "file" and os.path.isfile(resolved):
+                os.remove(resolved)
+                removed.append(rel)
+            elif entry.get("type") == "dir" and rel not in checkpoint_dirs and os.path.isdir(resolved):
+                try:
+                    os.rmdir(resolved)
+                    removed.append(rel)
+                except OSError:
+                    pass
+        return removed
+
+    def _restore_worktree_snapshot(self, snapshot_id, snapshot_root, manifest, paths=None):
+        worktree = manifest.get("worktree", {})
+        entries = [
+            entry
+            for entry in worktree.get("manifest", [])
+            if isinstance(entry, dict) and entry.get("path")
+        ]
+        selected_rels = self._selection_rels(paths)
+        checkpoint_paths = {entry["path"] for entry in entries}
+        checkpoint_dirs = {entry["path"] for entry in entries if entry.get("type") == "dir"}
+        removed = self._remove_current_paths_not_in_checkpoint(
+            checkpoint_paths,
+            checkpoint_dirs,
+            selected_rels,
+        )
+        restored = []
+        warnings = []
+
+        for entry in sorted(entries, key=lambda item: (item.get("type") != "dir", item.get("path", ""))):
+            rel = entry["path"]
+            if not self._is_selected(rel, selected_rels):
+                continue
+            destination = self._resolve(rel)
+            self._ensure_unprotected_mutation(destination)
+            if entry.get("type") == "dir":
+                if os.path.isfile(destination):
+                    os.remove(destination)
+                    removed.append(rel)
+                os.makedirs(destination, exist_ok=True)
+                continue
+            if entry.get("type") != "file":
+                continue
+            parent = os.path.dirname(destination)
+            if parent and not os.path.isdir(parent):
+                os.makedirs(parent, exist_ok=True)
+            if os.path.isdir(destination):
+                shutil.rmtree(destination)
+                removed.append(rel)
+            source = self._content_source_path(snapshot_root, rel)
+            if os.path.isfile(source):
+                shutil.copy2(source, destination)
+                restored.append(rel)
+                continue
+            blob = self._git_blob_for_checkpoint(manifest, entry)
+            if blob is not None:
+                with open(destination, "wb") as handle:
+                    handle.write(blob)
+                restored.append(rel)
+                continue
+            warnings.append("No checkpoint content available for " + rel)
+
+        return {
+            "snapshot_id": snapshot_id,
+            "kind": "worktree",
+            "restored": restored,
+            "removed": sorted(dict.fromkeys(removed)),
+            "warnings": warnings,
+        }
+
     def restore_snapshot(self, snapshot_id, paths=None):
         """snapshot_id から workspace に復元する。"""
         self._validate_snapshot_id(snapshot_id)
@@ -303,6 +831,8 @@ class FileOps:
         if not os.path.isdir(snapshot_root):
             raise FileNotFoundError(f"Snapshot not found: {snapshot_id}")
         manifest = self._load_snapshot_manifest(snapshot_id)
+        if manifest.get("kind") == "worktree":
+            return self._restore_worktree_snapshot(snapshot_id, snapshot_root, manifest, paths=paths)
         path_entries = {}
         for entry in manifest.get("paths", []):
             if not isinstance(entry, dict):
@@ -374,9 +904,22 @@ class FileOps:
             entries.append({
                 "snapshot_id": name,
                 "path": self._relative(path),
+                "kind": manifest.get("kind", "file"),
                 "created_at": manifest.get("created_at"),
                 "metadata": manifest.get("metadata", {}),
                 "paths": manifest.get("paths", []),
+                "worktree": {
+                    "manifest_entries": len(manifest.get("worktree", {}).get("manifest", [])),
+                    "captured_files": len(manifest.get("worktree", {}).get("captured_files", [])),
+                    "git": {
+                        "available": bool(manifest.get("worktree", {}).get("git", {}).get("available")),
+                        "head": manifest.get("worktree", {}).get("git", {}).get("head"),
+                        "branch": manifest.get("worktree", {}).get("git", {}).get("branch"),
+                    },
+                    "terminal_commands": len(
+                        manifest.get("worktree", {}).get("terminal", {}).get("commands", [])
+                    ),
+                } if manifest.get("kind") == "worktree" else None,
             })
             if len(entries) >= int(limit):
                 break

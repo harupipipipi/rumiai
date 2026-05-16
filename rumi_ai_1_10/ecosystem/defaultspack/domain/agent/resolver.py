@@ -18,7 +18,9 @@ class Resolver:
         err_threshold = agent_def.get("loop", {}).get("error_fallback_threshold", 3)
         if consec_err >= err_threshold and model_config.get("fallback"):
             return model_config["fallback"]
-        return model_config.get("default", "stub")
+        if model_config.get("default"):
+            return model_config["default"]
+        raise ValueError("agent model.default is required")
 
     def resolve_tools(self, agent_def, step):
         """Resolve the list of enabled tools for a given step.

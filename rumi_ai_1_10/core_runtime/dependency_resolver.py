@@ -168,6 +168,11 @@ def _version_satisfies(actual: Any, constraint: str) -> bool:
     return True
 
 
+def version_satisfies(actual: Any, constraint: str) -> bool:
+    """Return whether ``actual`` satisfies a simple comma-separated version constraint."""
+    return _version_satisfies(actual, constraint)
+
+
 def extract_dependencies(pack_info: Dict[str, Any]) -> List[str]:
     """
     単一 pack の manifest / ecosystem dict から依存 pack_id を抽出する。

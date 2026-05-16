@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import shutil
+import time
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
@@ -88,7 +89,19 @@ class ExtensionManager:
             json.dumps(request.to_dict(), ensure_ascii=False, indent=2) + "\n",
             encoding="utf-8",
         )
-        tmp.replace(path)
+        for attempt in range(5):
+            try:
+                tmp.replace(path)
+                break
+            except PermissionError:
+                if attempt == 4:
+                    path.write_text(tmp.read_text(encoding="utf-8"), encoding="utf-8")
+                    try:
+                        tmp.unlink()
+                    except OSError:
+                        pass
+                    break
+                time.sleep(0.05)
         self._requests[request.request_id] = request
 
     @staticmethod
