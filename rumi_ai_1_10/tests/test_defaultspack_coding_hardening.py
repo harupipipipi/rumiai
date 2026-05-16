@@ -104,6 +104,30 @@ def test_worktree_checkpoint_captures_git_manifest_dirty_contents_and_terminal_l
     assert worktree["terminal"]["commands"][-1]["command"] == "pwd"
 
 
+def test_worktree_checkpoint_skips_ignored_dependency_dirs_for_targeted_mutations(tmp_path):
+    from domain.coding.file_ops import FileOps
+
+    _init_git_repo(tmp_path)
+    (tmp_path / ".gitignore").write_text("node_modules/\n", encoding="utf-8")
+    (tmp_path / "tracked.txt").write_text("clean\n", encoding="utf-8")
+    _git_commit_all(tmp_path)
+    (tmp_path / "tracked.txt").write_text("dirty\n", encoding="utf-8")
+    vendor_file = tmp_path / "node_modules" / "pkg" / "index.js"
+    vendor_file.parent.mkdir(parents=True)
+    vendor_file.write_text("ignored dependency\n", encoding="utf-8")
+
+    checkpoint = FileOps(tmp_path).checkpoint_before_mutation("file.write", ["tracked.txt"])
+    manifest_path = tmp_path / checkpoint["path"] / "snapshot.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest_paths = {entry["path"] for entry in manifest["worktree"]["manifest"]}
+    captured_paths = {entry["path"] for entry in manifest["worktree"]["captured_files"]}
+
+    assert "tracked.txt" in manifest_paths
+    assert "tracked.txt" in captured_paths
+    assert "node_modules/pkg/index.js" not in manifest_paths
+    assert "node_modules/pkg/index.js" not in captured_paths
+
+
 def test_worktree_checkpoint_restore_recovers_dirty_untracked_and_clean_tracked_files(tmp_path):
     from domain.coding.file_ops import FileOps
 

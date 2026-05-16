@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional
 from .categories import DEFAULT_CATEGORY_SPECS
 
 _ID_PATTERN = re.compile(r"^[A-Za-z0-9_.\-/]{1,256}$")
-_MARKETPLACE_STATUSES = {"verified", "unverified", "blacklisted", "bundled", "local"}
+_MARKETPLACE_STATUSES = {"verified", "unverified", "bundled", "local"}
 _SIGNING_MODES = {
     "none",
     "repository_reviewed",
@@ -50,6 +50,8 @@ def _normalize_marketplace(value: Any) -> Dict[str, Any]:
     if not marketplace:
         return {}
     status = str(marketplace.get("status") or "unverified").strip().lower()
+    if status == "blacklisted":
+        raise ManifestValidationError("manifest.marketplace.status is blocked: blacklisted")
     if status not in _MARKETPLACE_STATUSES:
         raise ManifestValidationError(f"manifest.marketplace.status is unsupported: {status}")
     normalized = dict(marketplace)

@@ -24,6 +24,26 @@ WORKTREE_SCHEMA_VERSION = 2
 COMMAND_LOG_LIMIT = 50
 SNAPSHOT_ID_PATTERN = re.compile(r"^\d{8}T\d{6}Z-[0-9a-fA-F]{8}$")
 PROTECTED_PATHS = {".git", SNAPSHOT_DIR}
+CHECKPOINT_SKIPPED_DIRS = {
+    ".cache",
+    ".mypy_cache",
+    ".next",
+    ".nox",
+    ".nuxt",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".svelte-kit",
+    ".tox",
+    ".turbo",
+    ".venv",
+    "__pycache__",
+    "build",
+    "coverage",
+    "dist",
+    "node_modules",
+    "target",
+    "venv",
+}
 
 
 class FileOps:
@@ -74,6 +94,29 @@ class FileOps:
             return False
         parts = set(rel.split("/"))
         return rel in PROTECTED_PATHS or bool(parts & PROTECTED_PATHS)
+
+    def _normalize_rel(self, rel):
+        rel = str(rel or ".").replace("\\", "/").strip("/")
+        return rel or "."
+
+    def _has_explicit_selection_inside(self, rel, selected_rels):
+        rel = self._normalize_rel(rel)
+        for selected in selected_rels:
+            selected = self._normalize_rel(selected)
+            if selected == ".":
+                continue
+            if (
+                selected == rel
+                or selected.startswith(rel.rstrip("/") + "/")
+                or rel.startswith(selected.rstrip("/") + "/")
+            ):
+                return True
+        return False
+
+    def _is_skipped_checkpoint_dir(self, rel, selected_rels):
+        rel = self._normalize_rel(rel)
+        first = rel.split("/", 1)[0]
+        return first in CHECKPOINT_SKIPPED_DIRS and not self._has_explicit_selection_inside(rel, selected_rels)
 
     def _is_inside_root(self, resolved):
         real = os.path.realpath(resolved)
@@ -199,7 +242,7 @@ class FileOps:
             staged = self._split_git_z(self._run_git_text(["diff", "--name-only", "--cached", "-z"]))
             modified = self._split_git_z(self._run_git_text(["diff", "--name-only", "-z"]))
             deleted = self._split_git_z(self._run_git_text(["ls-files", "--deleted", "-z"]))
-            untracked = self._split_git_z(self._run_git_text(["ls-files", "--others", "-z"]))
+            untracked = self._split_git_z(self._run_git_text(["ls-files", "--others", "--exclude-standard", "-z"]))
             tracked = self._split_git_z(self._run_git_text(["ls-files", "-z"]))
         except Exception as exc:
             metadata["error"] = str(exc)
@@ -273,15 +316,101 @@ class FileOps:
                 status_by_path[str(item["path"])] = item
         return tracked_by_path, status_by_path
 
-    def _worktree_manifest(self, git_metadata=None):
+    def _append_manifest_dir(self, entries_by_path, rel):
+        rel = self._normalize_rel(rel)
+        if rel == "." or self._is_protected_rel(rel) or rel in entries_by_path:
+            return
+        resolved = self._resolve(rel)
+        if not os.path.isdir(resolved) or not self._is_inside_root(resolved):
+            return
+        entry = {
+            "path": rel,
+            "type": "dir",
+        }
+        stat = self._safe_stat(resolved)
+        if stat:
+            entry["mtime_ns"] = stat["mtime_ns"]
+            entry["mode"] = stat["mode"]
+        entries_by_path[rel] = entry
+
+    def _append_manifest_file(self, entries_by_path, rel, tracked_by_path, status_by_path, git_available=False):
+        rel = self._normalize_rel(rel)
+        if self._is_protected_rel(rel):
+            return
+        try:
+            resolved = self._resolve(rel)
+        except ValueError:
+            return
+        if not os.path.isfile(resolved) or not self._is_inside_root(resolved):
+            return
+        parts = rel.split("/")
+        for index in range(1, len(parts)):
+            self._append_manifest_dir(entries_by_path, "/".join(parts[:index]))
+        stat = self._safe_stat(resolved)
+        entry = {
+            "path": rel,
+            "type": "file",
+            "size": stat.get("size", 0),
+            "mtime_ns": stat.get("mtime_ns"),
+            "mode": stat.get("mode"),
+            "sha256": self._sha256_file(resolved),
+        }
+        if git_available:
+            git_path = tracked_by_path.get(rel)
+            dirty = status_by_path.get(rel)
+            entry["git"] = {
+                "tracked": rel in tracked_by_path,
+                "dirty": dirty is not None or rel not in tracked_by_path,
+                "git_path": git_path or rel,
+                "statuses": list(dirty.get("statuses", [])) if dirty else (
+                    ["untracked"] if rel not in tracked_by_path else []
+                ),
+            }
+        entries_by_path[rel] = entry
+
+    def _git_manifest_candidates(self, tracked_by_path, status_by_path, selected_rels):
+        selected_rels = [self._normalize_rel(rel) for rel in (selected_rels or ["."])]
+        candidates = set(status_by_path)
+        if "." in selected_rels:
+            candidates.update(tracked_by_path)
+        else:
+            candidates.update(
+                rel
+                for rel in tracked_by_path
+                if self._is_selected(rel, selected_rels)
+            )
+            candidates.update(rel for rel in selected_rels if rel != ".")
+        return sorted(candidate for candidate in candidates if not self._is_protected_rel(candidate))
+
+    def _worktree_manifest(self, git_metadata=None, selected_rels=None):
         git_metadata = git_metadata or {}
         tracked_by_path, status_by_path = self._git_status_for_path(git_metadata)
+        selected_rels = [self._normalize_rel(rel) for rel in (selected_rels or ["."])]
+        if git_metadata.get("available"):
+            entries_by_path = {}
+            for rel in self._git_manifest_candidates(tracked_by_path, status_by_path, selected_rels):
+                self._append_manifest_file(
+                    entries_by_path,
+                    rel,
+                    tracked_by_path,
+                    status_by_path,
+                    git_available=True,
+                )
+            return [
+                entries_by_path[path]
+                for path in sorted(entries_by_path, key=lambda item: (item.count("/"), item))
+            ]
+
         entries = []
         for dirpath, dirnames, filenames in os.walk(self._root):
             dirnames[:] = [
                 dirname
                 for dirname in sorted(dirnames)
                 if not self._is_protected_rel(self._relative(os.path.join(dirpath, dirname)))
+                and not self._is_skipped_checkpoint_dir(
+                    self._relative(os.path.join(dirpath, dirname)),
+                    selected_rels,
+                )
                 and self._is_inside_root(os.path.join(dirpath, dirname))
             ]
             for dirname in dirnames:
@@ -299,7 +428,12 @@ class FileOps:
             for filename in sorted(filenames):
                 resolved = os.path.join(dirpath, filename)
                 rel = self._relative(resolved)
-                if self._is_protected_rel(rel) or not os.path.isfile(resolved) or not self._is_inside_root(resolved):
+                if (
+                    self._is_protected_rel(rel)
+                    or self._is_skipped_checkpoint_dir(rel, selected_rels)
+                    or not os.path.isfile(resolved)
+                    or not self._is_inside_root(resolved)
+                ):
                     continue
                 stat = self._safe_stat(resolved)
                 entry = {
@@ -310,17 +444,6 @@ class FileOps:
                     "mode": stat.get("mode"),
                     "sha256": self._sha256_file(resolved),
                 }
-                if git_metadata.get("available"):
-                    git_path = tracked_by_path.get(rel)
-                    dirty = status_by_path.get(rel)
-                    entry["git"] = {
-                        "tracked": rel in tracked_by_path,
-                        "dirty": dirty is not None or rel not in tracked_by_path,
-                        "git_path": git_path or rel,
-                        "statuses": list(dirty.get("statuses", [])) if dirty else (
-                            ["untracked"] if rel not in tracked_by_path else []
-                        ),
-                    }
                 entries.append(entry)
         return entries
 
@@ -580,8 +703,9 @@ class FileOps:
         snapshot_root = self._resolve(os.path.join(SNAPSHOT_DIR, snapshot_id))
         selected = [paths] if isinstance(paths, str) else (paths if paths else ["."])
         path_entries = [self._path_entry(item, include_missing=include_missing) for item in selected]
+        selected_rels = [entry["path"] for entry in path_entries if entry.get("path")]
         git_metadata = self._git_metadata()
-        worktree_entries = self._worktree_manifest(git_metadata)
+        worktree_entries = self._worktree_manifest(git_metadata, selected_rels=selected_rels)
         os.makedirs(snapshot_root, exist_ok=True)
         captured, missing_dirty = self._capture_worktree_contents(
             snapshot_root,
@@ -701,15 +825,13 @@ class FileOps:
         result = []
         for item in selected:
             resolved = self._resolve(item)
-            result.append(self._relative(resolved))
+            result.append(self._normalize_rel(self._relative(resolved)))
         return result
 
     def _is_selected(self, rel, selected_rels):
-        rel = str(rel or ".").replace("\\", "/").strip("/")
-        rel = rel or "."
+        rel = self._normalize_rel(rel)
         for selected in selected_rels:
-            selected = str(selected or ".").replace("\\", "/").strip("/")
-            selected = selected or "."
+            selected = self._normalize_rel(selected)
             if selected == "." or rel == selected or rel.startswith(selected.rstrip("/") + "/"):
                 return True
         return False
@@ -742,7 +864,7 @@ class FileOps:
             return None
 
     def _remove_current_paths_not_in_checkpoint(self, checkpoint_paths, checkpoint_dirs, selected_rels):
-        current_entries = self._worktree_manifest({})
+        current_entries = self._worktree_manifest({}, selected_rels=selected_rels)
         removed = []
         for entry in sorted(
             current_entries,

@@ -102,6 +102,20 @@ def test_manifest_validation_preserves_marketplace_and_signing_metadata():
     assert manifest["signing"]["verified"] is True
 
 
+def test_manifest_validation_rejects_blacklisted_marketplace_status():
+    with pytest.raises(ManifestValidationError, match="blacklisted"):
+        validate_manifest(
+            {
+                "id": "x",
+                "category": "llm_provider",
+                "version": "1",
+                "adapter": "openai_compatible",
+                "marketplace": {"status": "blacklisted", "registry": "test"},
+            },
+            expected_category="llm_provider",
+        )
+
+
 def test_manifest_validation_rejects_required_signing_without_signature():
     with pytest.raises(ManifestValidationError):
         validate_manifest(

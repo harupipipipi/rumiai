@@ -4,6 +4,8 @@ import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULTSPACK_ROOT = ROOT / "ecosystem" / "defaultspack"
 sys.path.insert(0, str(ROOT))
@@ -158,3 +160,37 @@ def test_multi_agent_session_records_isolated_workspace_contracts(tmp_path, monk
     assert Path(coder_workspace["workspace_root"]).is_dir()
     assert Path(reviewer_workspace["workspace_root"]).is_dir()
     assert result["result"]["shared_context"]["workspace"]["base_workspace_root"] == str(tmp_path.resolve())
+
+
+def test_multi_agent_workspace_copy_skips_symlink_targets(tmp_path, monkeypatch):
+    from domain.agent.multi import MultiAgentOrchestrator
+
+    outside = tmp_path.parent / "outside-secret.txt"
+    outside.write_text("secret-data", encoding="utf-8")
+    link = tmp_path / "leak.txt"
+    try:
+        link.symlink_to(outside)
+    except (NotImplementedError, OSError) as exc:
+        pytest.skip(f"symlink creation is unavailable on this platform: {exc}")
+    (tmp_path / "real.txt").write_text("real-data", encoding="utf-8")
+
+    orchestrator = MultiAgentOrchestrator()
+    monkeypatch.setattr(
+        orchestrator,
+        "_ai_complete",
+        lambda messages, model, tools: {"status": "ok", "data": {"content": "[DONE] ok"}},
+    )
+
+    result = orchestrator.execute(
+        "coordinate",
+        [{"agent_id": "coder", "name": "coder", "role": "code", "model": "stub/default"}],
+        max_turns=1,
+        workspace_root=tmp_path,
+        worktree_mode="copy",
+    )
+
+    workspace = result["result"]["agent_contexts"]["coder"]["workspace"]
+    workspace_root = Path(workspace["workspace_root"])
+    assert (workspace_root / "real.txt").read_text(encoding="utf-8") == "real-data"
+    assert not (workspace_root / "leak.txt").exists()
+    assert "leak.txt" not in workspace["base_manifest"]

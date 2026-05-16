@@ -192,7 +192,7 @@ def _workspace_manifest(root):
     if not root_path.is_dir():
         return manifest
     for path in sorted(root_path.rglob("*")):
-        if not path.is_file() or _workspace_ignore(path.relative_to(root_path)):
+        if path.is_symlink() or not path.is_file() or _workspace_ignore(path.relative_to(root_path)):
             continue
         rel = path.relative_to(root_path).as_posix()
         digest = hashlib.sha256()
@@ -209,6 +209,8 @@ def _copy_workspace(base, destination):
     for path in sorted(base.rglob("*")):
         rel = path.relative_to(base)
         if _workspace_ignore(rel):
+            continue
+        if path.is_symlink():
             continue
         target = destination / rel
         if path.is_dir():
