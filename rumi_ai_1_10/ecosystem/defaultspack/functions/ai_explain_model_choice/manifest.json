@@ -1,0 +1,43 @@
+{
+  "function_id": "ai_explain_model_choice",
+  "description": "Explain a model routing decision.",
+  "tags": [
+    "ai",
+    "model",
+    "routing"
+  ],
+  "risk": "low",
+  "requires": [],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.ai.explain_model_choice",
+    "defaultspack.ai.explain_model_choice",
+    "defaults.ai.explain.model.choice",
+    "defaultspack.ai.explain.model.choice"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.ai.explain_model_choice",
+      "default_args": {}
+    }
+  }
+}

@@ -37,12 +37,30 @@ def test_model_runtime_settings_preferred_model_and_thinking_level(tmp_path):
     service = ModelRuntimeSettingsService(tmp_path)
 
     assert service.get_preferred_model() == "stub/default"
+    assert service.get_preferred_model_group() == "default"
     preferred = service.set_preferred_model("stub/default")
     assert preferred["profile_id"] == "stub/default"
+    group = service.set_preferred_model_group("vision")
+    assert group["group_id"] == "vision"
+    route = service.set_auto_route_within_group(False)
+    assert route["enabled"] is False
 
     updated = service.set_thinking_level("high")
     assert updated["level"] == "high"
     assert service.get_thinking_level()["level"] == "high"
+
+
+def test_model_runtime_settings_utility_models_and_groups(tmp_path):
+    service = ModelRuntimeSettingsService(tmp_path)
+    settings = service.update_settings(
+        {
+            "utility_models": {"tool_selector": "google/gemini-2.5-flash"},
+            "model_groups": {"custom": {"label": "Custom", "allowed_models": ["stub/default"]}},
+        }
+    )
+    assert settings["utility_models"]["tool_selector"] == "google/gemini-2.5-flash"
+    assert settings["utility_models"]["vision_ocr"] == ""
+    assert settings["model_groups"]["custom"]["allowed_models"] == ["stub/default"]
 
 
 def test_model_runtime_settings_normalizes_model_api_routes(tmp_path):
