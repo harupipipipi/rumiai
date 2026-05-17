@@ -14,6 +14,16 @@ from .profile_catalog import merge_curated_and_profiles, profile_dir_for
 
 _GOOGLE_FUNCTION_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_.:-]{0,127}$")
 _GOOGLE_FUNCTION_NAME_ALLOWED_RE = re.compile(r"[^A-Za-z0-9_.:-]+")
+_TRANSIENT_GOOGLE_HTTP_CODES = {429, 500, 502, 503, 504}
+_TRANSIENT_GOOGLE_CONNECTION_TOKENS = (
+    "connection reset",
+    "connection aborted",
+    "remote end closed",
+    "timed out",
+    "timeout",
+    "temporarily unavailable",
+    "temporary failure",
+)
 
 
 class GoogleProvider(OpenAICompatibleProvider):
@@ -573,7 +583,7 @@ class GoogleProvider(OpenAICompatibleProvider):
             headers["x-goog-api-key"] = bearer_token
         elif bearer_token:
             headers["Authorization"] = "Bearer " + bearer_token
-        max_attempts = 4
+        max_attempts = 5
         request_timeout = self._request_timeout({"request_timeout": timeout} if timeout is not None else None)
         for attempt in range(max_attempts):
             req = urllib.request.Request(url, data=data, headers=headers, method="POST")
@@ -581,28 +591,41 @@ class GoogleProvider(OpenAICompatibleProvider):
                 return urllib.request.urlopen(req, context=self._ssl_ctx, timeout=request_timeout)
             except urllib.error.HTTPError as exc:
                 err_body = exc.read().decode("utf-8", errors="replace")
-                if exc.code in {500, 503} and attempt < max_attempts - 1:
+                if exc.code in _TRANSIENT_GOOGLE_HTTP_CODES and attempt < max_attempts - 1:
                     time.sleep(0.5 * (attempt + 1))
                     continue
-                transient = " (temporary Google backend error; retry shortly)" if exc.code in {500, 503} else ""
+                transient = " (temporary Google backend error; retry shortly)" if exc.code in _TRANSIENT_GOOGLE_HTTP_CODES else ""
                 raise RuntimeError("Google API error {}{}: {}".format(exc.code, transient, err_body))
             except urllib.error.URLError as exc:
+                if self._is_transient_google_connection_error(exc) and attempt < max_attempts - 1:
+                    time.sleep(0.5 * (attempt + 1))
+                    continue
                 raise RuntimeError("Google API connection error: {}".format(exc.reason))
+            except (TimeoutError, OSError) as exc:
+                if self._is_transient_google_connection_error(exc) and attempt < max_attempts - 1:
+                    time.sleep(0.5 * (attempt + 1))
+                    continue
+                raise RuntimeError("Google API connection error: {}".format(exc))
         raise RuntimeError("Google API request failed")
+
+    @staticmethod
+    def _is_transient_google_connection_error(exc: Exception) -> bool:
+        reason = getattr(exc, "reason", exc)
+        if isinstance(reason, (TimeoutError, ConnectionResetError, ConnectionAbortedError)):
+            return True
+        message = str(reason or exc).lower()
+        return any(token in message for token in _TRANSIENT_GOOGLE_CONNECTION_TOKENS)
 
     @staticmethod
     def _is_transient_google_api_error(exc: Exception) -> bool:
         message = str(exc)
-        return (
-            "Google API error 500" in message
-            or "Google API error 503" in message
-            or "OpenAI API error 500" in message
-            or "OpenAI API error 503" in message
-            or "Internal error encountered" in message
+        lowered = message.lower()
+        return bool(re.search(r"(Google API error|OpenAI API error) (429|500|502|503|504)", message)) or any(
+            token in lowered for token in ("internal error encountered",) + _TRANSIENT_GOOGLE_CONNECTION_TOKENS
         )
 
     def _request_json(self, path, body):
-        max_attempts = 4
+        max_attempts = 5
         last_error: Exception | None = None
         for attempt in range(max_attempts):
             try:
@@ -615,7 +638,7 @@ class GoogleProvider(OpenAICompatibleProvider):
         raise last_error or RuntimeError("Google API request failed")
 
     def _request_stream(self, path, body):
-        max_attempts = 4
+        max_attempts = 5
         last_error: Exception | None = None
         for attempt in range(max_attempts):
             try:

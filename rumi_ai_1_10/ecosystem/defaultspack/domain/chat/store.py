@@ -7,6 +7,7 @@ import re
 import base64
 import tempfile
 import threading
+import errno
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
@@ -103,18 +104,45 @@ class ChatStore:
             prefix="." + path.name + ".",
             suffix=".tmp",
         )
+        tmp_path = Path(tmp_name)
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as handle:
                 json.dump(payload, handle, ensure_ascii=False, indent=2)
                 handle.flush()
                 os.fsync(handle.fileno())
-            Path(tmp_name).replace(path)
+            self._replace_atomic_file(tmp_path, path)
         except BaseException:
             try:
-                os.unlink(tmp_name)
+                tmp_path.unlink()
             except OSError:
                 pass
             raise
+
+    @staticmethod
+    def _is_transient_replace_error(exc):
+        winerror = getattr(exc, "winerror", None)
+        errno_value = getattr(exc, "errno", None)
+        if isinstance(exc, PermissionError):
+            return True
+        if winerror in {5, 32}:
+            return True
+        if errno_value in {errno.EACCES, errno.EBUSY, errno.EPERM}:
+            return True
+        message = str(exc).lower()
+        return "access is denied" in message or "permission denied" in message
+
+    def _replace_atomic_file(self, tmp_path, path):
+        last_error = None
+        for attempt in range(8):
+            try:
+                tmp_path.replace(path)
+                return
+            except OSError as exc:
+                last_error = exc
+                if not self._is_transient_replace_error(exc) or attempt >= 7:
+                    break
+                time.sleep(min(0.05 * (2 ** attempt), 0.5))
+        raise last_error
 
     def _save_conversations(self):
         with self._lock:
@@ -127,8 +155,12 @@ class ChatStore:
                 "updated_at": _now_ms(),
                 "conversations": self._conversations,
             }
-            self._atomic_write_json(self._storage_path, payload)
             self._save_conversation_files()
+            try:
+                self._atomic_write_json(self._storage_path, payload)
+            except OSError as exc:
+                if not self._is_transient_replace_error(exc):
+                    raise
 
     # ----------------------------------------------------------
     # Conversation CRUD

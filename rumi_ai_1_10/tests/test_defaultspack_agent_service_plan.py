@@ -114,6 +114,71 @@ def test_chat_store_atomic_write_preserves_existing_json_on_replace_failure(tmp_
     ChatStore._instance = None
 
 
+def test_chat_store_atomic_write_retries_transient_replace_failure(tmp_path, monkeypatch):
+    import domain.chat.store as chat_store_module
+    from domain.chat.store import ChatStore
+
+    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
+    ChatStore._instance = None
+    store = ChatStore()
+    target = tmp_path / "conversations.json"
+    target.write_text('{"ok": true}', encoding="utf-8")
+    original_replace = chat_store_module.Path.replace
+    attempts = []
+
+    def flaky_replace(self, destination):
+        if destination == target and self.name.startswith(".conversations.json.") and len(attempts) < 2:
+            attempts.append(self.name)
+            raise PermissionError("Access is denied")
+        return original_replace(self, destination)
+
+    monkeypatch.setattr(chat_store_module.Path, "replace", flaky_replace)
+    monkeypatch.setattr(chat_store_module.time, "sleep", lambda _seconds: None)
+
+    store._atomic_write_json(target, {"ok": False})
+
+    assert len(attempts) == 2
+    assert json.loads(target.read_text(encoding="utf-8")) == {"ok": False}
+    assert list(tmp_path.glob(".conversations.json.*.tmp")) == []
+    ChatStore._instance = None
+
+
+def test_chat_store_save_conversations_keeps_history_when_index_is_locked(tmp_path, monkeypatch):
+    import domain.chat.store as chat_store_module
+    from domain.chat.store import ChatStore
+
+    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
+    ChatStore._instance = None
+    store = ChatStore()
+    conversation = store.create_conversation(model="stub/default")
+    original_replace = chat_store_module.Path.replace
+
+    def lock_index_replace(self, destination):
+        if destination == storage_path and self.name.startswith(".conversations.json."):
+            raise PermissionError("Access is denied")
+        return original_replace(self, destination)
+
+    monkeypatch.setattr(chat_store_module.Path, "replace", lock_index_replace)
+    monkeypatch.setattr(chat_store_module.time, "sleep", lambda _seconds: None)
+
+    message = store.add_message(
+        conversation["id"],
+        {"role": "user", "content": [{"type": "text", "text": "hello"}]},
+    )
+
+    history_path = (
+        storage_path.parent
+        / "conversations"
+        / conversation["id"]
+        / "history.json"
+    )
+    history = json.loads(history_path.read_text(encoding="utf-8"))
+    assert message["id"] in [item["id"] for item in history["conversation"]["messages"]]
+    ChatStore._instance = None
+
+
 def test_model_profiles_expose_required_context_and_thinking_metadata():
     from ecosystem.defaultspack.backend.ai_client.provider_catalog import list_profile_catalog
 

@@ -73,6 +73,7 @@ def _reset_singletons(monkeypatch, tmp_path):
         "OPENAI_COMPATIBLE_API_KEY",
         "OPENAI_COMPATIBLE_BASE_URL",
         "RUMI_DEFAULTSPACK_ENABLE_CLOUD_PROVIDERS",
+        "RUMI_DEFAULTSPACK_ENABLE_LOCAL_PROVIDERS",
     ):
         monkeypatch.delenv(env_name, raising=False)
     permission_policy_module._POLICY_STORE = None
@@ -206,6 +207,17 @@ def test_runtime_tool_creator_keeps_stub_only_environment_as_no_provider():
 
     with pytest.raises(RuntimeError, match="No AI provider available"):
         creator.generate_from_description("say hello")
+
+
+def test_ai_client_can_opt_into_default_local_runtime_providers(monkeypatch):
+    from ecosystem.defaultspack.domain.ai_client.client import AIClient
+
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_ENABLE_LOCAL_PROVIDERS", "1")
+    _reset_defaultspack_domain_singletons()
+    client = AIClient()
+
+    provider_ids = {provider["provider_id"] for provider in client.list_providers()}
+    assert "lmstudio" in provider_ids
 
 
 def test_permission_policy_persists_and_blocks_tool_list_and_invoke(tmp_path):
