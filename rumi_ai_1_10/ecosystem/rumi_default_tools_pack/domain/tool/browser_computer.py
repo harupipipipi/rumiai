@@ -3507,12 +3507,20 @@ $proc = Get-Process -Id $procId -ErrorAction SilentlyContinue
             parsed_modifiers.extend(part for part in parts[:-1] if part)
             normalized = parts[-1] if parts else normalized
             raw = normalized
+        if normalized in {"back", "backward", "browserback", "browser_back"} and any(
+            modifier in {"alt", "option"} for modifier in parsed_modifiers
+        ):
+            normalized = "left"
+            raw = "left"
         key_map = {
             "enter": "{ENTER}",
             "return": "{ENTER}",
             "escape": "{ESC}",
             "esc": "{ESC}",
             "tab": "{TAB}",
+            "back": "{BACKSPACE}",
+            "bksp": "{BACKSPACE}",
+            "bs": "{BACKSPACE}",
             "backspace": "{BACKSPACE}",
             "delete": "{DELETE}",
             "pageup": "{PGUP}",
