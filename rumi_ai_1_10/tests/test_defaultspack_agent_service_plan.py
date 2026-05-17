@@ -179,6 +179,53 @@ def test_chat_store_save_conversations_keeps_history_when_index_is_locked(tmp_pa
     ChatStore._instance = None
 
 
+def test_chat_store_save_conversations_ignores_locked_history_file(tmp_path, monkeypatch):
+    import domain.chat.store as chat_store_module
+    from domain.chat.store import ChatStore
+
+    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
+    ChatStore._instance = None
+    store = ChatStore()
+    locked_conversation = store.create_conversation(model="stub/default")
+    active_conversation = store.create_conversation(model="stub/default")
+    locked_history_path = (
+        storage_path.parent
+        / "conversations"
+        / locked_conversation["id"]
+        / "history.json"
+    )
+    original_replace = chat_store_module.Path.replace
+
+    def lock_history_replace(self, destination):
+        if destination == locked_history_path and self.name.startswith(".history.json."):
+            raise PermissionError("Access is denied")
+        return original_replace(self, destination)
+
+    monkeypatch.setattr(chat_store_module.Path, "replace", lock_history_replace)
+    monkeypatch.setattr(chat_store_module.time, "sleep", lambda _seconds: None)
+
+    message = store.add_message(
+        active_conversation["id"],
+        {"role": "user", "content": [{"type": "text", "text": "still saved"}]},
+    )
+
+    active_history_path = (
+        storage_path.parent
+        / "conversations"
+        / active_conversation["id"]
+        / "history.json"
+    )
+    active_history = json.loads(active_history_path.read_text(encoding="utf-8"))
+    persisted = json.loads(storage_path.read_text(encoding="utf-8"))
+    assert message["id"] in [item["id"] for item in active_history["conversation"]["messages"]]
+    assert message["id"] in [
+        item["id"]
+        for item in persisted["conversations"][active_conversation["id"]]["messages"]
+    ]
+    ChatStore._instance = None
+
+
 def test_model_profiles_expose_required_context_and_thinking_metadata():
     from ecosystem.defaultspack.backend.ai_client.provider_catalog import list_profile_catalog
 

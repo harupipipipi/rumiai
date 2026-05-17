@@ -883,7 +883,11 @@ class ChatStore:
     def _save_conversation_files(self):
         with self._lock:
             for conversation_id, conversation in self._conversations.items():
-                self._save_conversation_file(str(conversation_id), conversation)
+                try:
+                    self._save_conversation_file(str(conversation_id), conversation)
+                except OSError as exc:
+                    if not self._is_transient_replace_error(exc):
+                        raise
 
     def _save_conversation_file(self, conversation_id, conversation):
         with self._lock:
