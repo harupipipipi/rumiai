@@ -48,6 +48,7 @@ def run(context):
         ("POST", "/api/agent/multi/execute", _lazy("blocks.agent.multi_execute"), {}),
         ("GET", "/api/agent/multi/{id}/status", _lazy("blocks.agent.multi_status"), {"id": "session_id"}),
         ("POST", "/api/agent/multi/{id}/message", _lazy("blocks.agent.multi_message"), {"id": "session_id"}),
+        ("POST", "/api/agent/subagent", _lazy("blocks.agent.run_subagent"), {}),
         # ---- Instruction route ----
         ("POST", "/api/agent/{id}/instruct", _lazy("blocks.agent.add_instruction"), {"id": "execution_id"}),
         # ---- Interrupt & control routes (T13) ----

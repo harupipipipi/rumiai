@@ -15,8 +15,17 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 from blocks._common import gen_id
 from blocks.chat._context_helpers import enrich_messages, extract_user_text
 from domain.ai_client.model_runtime_settings import ModelRuntimeSettingsService
+from domain.ai_client.model_router import ModelRoutingRequest, route_model_request
+from domain.ai_client.model_search import get_model_capabilities
 from domain.chat.message_converter import convert_to_standard
+from domain.chat.modality_detector import detect_modalities
 from domain.chat.store import ChatStore
+from domain.chat.tool_selection_schema import COMPUTER_TOOL_IDS
+from domain.vision.image_bridge import (
+    apply_vision_bridge_to_messages,
+    conversation_image_context,
+    describe_images,
+)
 from domain.chat.tool_recommender import effective_tool_assist_mode, recommend_tool_ids, tool_assist_limit
 from domain.prompt.manager import get_manager
 from domain.tool.registry import ToolRegistry
@@ -73,6 +82,7 @@ class PreparedChatRun:
     tools_called: list[str]
     connected_tool_names: set[str]
     call_handler: Any
+    model_routing: dict[str, Any]
 
 
 def validate_chat_run_input(input_data: dict[str, Any]) -> str | None:
@@ -140,8 +150,10 @@ def prepare_chat_run(input_data: dict[str, Any], context: dict[str, Any] | None 
         standard_messages.insert(0, {"role": "system", "content": system_prompt})
 
     params = dict(prepared_input.get("params") or {})
+    model_settings_service = ModelRuntimeSettingsService()
+    model_settings = model_settings_service.get_settings()
     if "thinking_level" not in params:
-        params["thinking_level"] = ModelRuntimeSettingsService().get_effective_thinking_level(
+        params["thinking_level"] = model_settings_service.get_effective_thinking_level(
             profile_id=model,
             conversation_id=conversation_id,
         )["level"]
@@ -163,6 +175,58 @@ def prepare_chat_run(input_data: dict[str, Any], context: dict[str, Any] | None 
         }
 
     raw_tools, provider_tools, tool_context = _available_tools(request_context, prepared_input, user_text=user_text)
+    modalities = detect_modalities(content, metadata)
+    routing_decision = route_model_request(
+        ModelRoutingRequest(
+            conversation_id=conversation_id,
+            user_text=user_text,
+            has_images=bool(modalities.get("has_images")),
+            has_files=bool(modalities.get("has_files")),
+            requested_tools=[tool_name_from_definition(tool) for tool in raw_tools if tool_name_from_definition(tool)],
+            requires_tool_calling=bool(provider_tools),
+            requested_thinking_level=params.get("thinking_level"),
+            preferred_model=model,
+            preferred_group=str(model_settings.get("preferred_model_group") or "default"),
+            auto_route_within_group=bool(model_settings.get("auto_route_within_group", True)),
+            task_hints={"modalities": modalities},
+            settings=model_settings,
+        )
+    )
+    model = routing_decision.selected_model
+    selected_capabilities = get_model_capabilities(model) or {}
+    if params.get("thinking_level") not in (None, "", "none") and not selected_capabilities.get("supports_thinking"):
+        params["thinking_level"] = "none"
+    if provider_tools and not selected_capabilities.get("supports_tool_calling") and not request_context.get("user_requested_computer_use"):
+        tool_context["tool_suggestion_context"] = {
+            "message": "Selected model does not support provider tool calling; tools were not attached.",
+            "suggested_tools": [tool_name_from_definition(tool) for tool in raw_tools if tool_name_from_definition(tool)],
+        }
+        provider_tools = []
+    if routing_decision.bridge_required:
+        bridge_result = describe_images(
+            messages=standard_messages,
+            attachments=(metadata or {}).get("attachments") if isinstance(metadata, dict) else [],
+            conversation_context=user_text,
+            model=routing_decision.bridge_plan.get("model", ""),
+            call_handler=request_context.get("call_handler"),
+        )
+        standard_messages = apply_vision_bridge_to_messages(standard_messages, bridge_result)
+        existing_metadata = conversation.get("metadata") if isinstance(conversation.get("metadata"), dict) else {}
+        store.update_conversation(
+            conversation_id,
+            {
+                "metadata": {
+                    **existing_metadata,
+                    "conversation_image_context": conversation_image_context(bridge_result),
+                }
+            },
+        )
+        if isinstance(metadata, dict):
+            metadata["vision_bridge_result"] = bridge_result
+            store.update_message(conversation_id, user_message["id"], {"metadata": metadata})
+    request_context["model"] = model
+    request_context["chat_params"] = params
+    request_context["model_routing"] = routing_decision.to_dict()
     connected_names = connected_tool_names(
         provider_tools,
         tool_context.get("runtime_profile") if isinstance(tool_context, dict) else None,
@@ -190,6 +254,7 @@ def prepare_chat_run(input_data: dict[str, Any], context: dict[str, Any] | None 
         tools_called=[tool_name_from_definition(tool) for tool in raw_tools if tool_name_from_definition(tool)],
         connected_tool_names=connected_names,
         call_handler=request_context.get("call_handler"),
+        model_routing=routing_decision.to_dict(),
     )
 
 

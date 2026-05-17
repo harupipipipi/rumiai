@@ -1,0 +1,11 @@
+{
+  "type": "vision",
+  "id": "vision",
+  "version": "1.0.0",
+  "description": "Vision bridge domain - structured image understanding for non-vision model routing",
+  "connectivity": {
+    "provides": [
+      "defaults.vision.describe_images"
+    ]
+  }
+}

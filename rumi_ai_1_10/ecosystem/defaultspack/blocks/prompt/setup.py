@@ -32,6 +32,8 @@ def run(context):
         ("PUT", "/api/prompts/{name}", _lazy("blocks.prompt.update"), {"name": "name"}),
         ("DELETE", "/api/prompts/{name}", _lazy("blocks.prompt.delete"), {"name": "name"}),
         ("POST", "/api/prompts/convert", _lazy("blocks.prompt.convert"), {}),
+        ("POST", "/api/prompts/lint", _lazy("blocks.prompt.lint_prompt"), {}),
+        ("POST", "/api/prompts/compact", _lazy("blocks.prompt.compact_prompt"), {}),
         # --- advanced ルート ---
         ("POST", "/api/prompts/build", _lazy("blocks.prompt.advanced.build"), {}),
         ("GET", "/api/prompts/context-vars", _lazy("blocks.prompt.advanced.context_vars"), {}),

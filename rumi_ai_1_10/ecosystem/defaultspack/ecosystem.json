@@ -13,6 +13,7 @@
       "memory",
       "knowledge",
       "media",
+      "vision",
       "frontend",
       "dev",
       "capability",
@@ -96,7 +97,9 @@
           "defaults.agent.multi_status",
           "defaultspack.agent.multi_status",
           "defaults.agent.multi_message",
-          "defaultspack.agent.multi_message"
+          "defaultspack.agent.multi_message",
+          "defaults.agent.run_subagent",
+          "defaultspack.agent.run_subagent"
         ]
       }
     },
@@ -145,6 +148,16 @@
           "defaultspack.ai.stream",
           "defaults.ai.models",
           "defaultspack.ai.models",
+          "defaults.ai.search_models",
+          "defaultspack.ai.search_models",
+          "defaults.ai.get_model_capabilities",
+          "defaultspack.ai.get_model_capabilities",
+          "defaults.ai.recommend_model",
+          "defaultspack.ai.recommend_model",
+          "defaults.ai.route_model",
+          "defaultspack.ai.route_model",
+          "defaults.ai.explain_model_choice",
+          "defaultspack.ai.explain_model_choice",
           "defaults.ai.providers",
           "defaultspack.ai.providers",
           "defaults.ai.embed",
@@ -210,7 +223,11 @@
           "defaults.prompt.delete",
           "defaultspack.prompt.delete",
           "defaults.prompt.convert",
-          "defaultspack.prompt.convert"
+          "defaultspack.prompt.convert",
+          "defaults.prompt.lint_prompt",
+          "defaultspack.prompt.lint_prompt",
+          "defaults.prompt.compact_prompt",
+          "defaultspack.prompt.compact_prompt"
         ]
       }
     },
@@ -357,6 +374,17 @@
         ]
       }
     },
+    "vision": {
+      "type": "vision",
+      "id": "vision",
+      "path": "blocks/vision",
+      "connectivity": {
+        "provides": [
+          "defaults.vision.describe_images",
+          "defaultspack.vision.describe_images"
+        ]
+      }
+    },
     "frontend": {
       "type": "frontend",
       "id": "frontend",
@@ -445,6 +473,7 @@
     "prompt:prompt",
     "context:context",
     "media:media",
+    "vision:vision",
     "ai_client:ai_client",
     "tool:tool",
     "coding:coding",
