@@ -28,6 +28,7 @@ from domain.webhook.endpoint_resolver import ProviderEndpointResolver
 
 
 _LOGGER = logging.getLogger(__name__)
+_LINE_WEBHOOK_ACK_TEXT = "\u5c4a\u3044\u305f\u3088\uff01"
 
 
 def run(input_data, context):
@@ -109,23 +110,25 @@ def _handle_event(
     decision = AudiencePolicy(policy).evaluate(external_event, mentioned=mentioned)
     if not decision.allowed:
         return _policy_denied_result(external_event, decision)
+    acknowledgement = _send_line_webhook_acknowledgement(event, endpoint=endpoint)
+    runtime_context.setdefault("line_webhook_acknowledgement", acknowledgement)
     if _should_process_line_event_in_background(endpoint):
-        return _dispatch_line_event_in_background(
+        return _with_line_acknowledgement(_dispatch_line_event_in_background(
             external_event,
             input_profile_id=endpoint.input_profile_id,
             audience_policy=policy,
             audience_decision=decision,
             context=runtime_context,
             mentioned=mentioned,
-        )
-    return _dispatch_line_event(
+        ), acknowledgement)
+    return _with_line_acknowledgement(_dispatch_line_event(
         external_event,
         input_profile_id=endpoint.input_profile_id,
         audience_policy=policy,
         audience_decision=decision,
         context=runtime_context,
         mentioned=mentioned,
-    )
+    ), acknowledgement)
 
 
 def _dispatch_line_event(
@@ -193,6 +196,9 @@ def _dispatch_line_event_in_background(
 
 
 def _send_response_plan(plan: dict[str, Any], external_event, *, context: dict[str, Any] | None = None) -> Dict[str, Any]:
+    acknowledgement = context.get("line_webhook_acknowledgement") if isinstance(context, dict) else {}
+    if isinstance(acknowledgement, dict) and acknowledgement.get("sent") is True:
+        return {"sent": False, "reason": "LINE reply token already used for webhook acknowledgement"}
     action_plan = (plan.get("metadata") or {}).get("response_action_plan") if isinstance(plan.get("metadata"), dict) else {}
     if isinstance(action_plan, dict) and not action_plan.get("external_reply", True):
         return {"sent": False, "reason": "external reply suppressed by response prompt policy"}
@@ -272,6 +278,36 @@ def _verify_line(headers: Dict[str, str], raw_body: bytes) -> Dict[str, Any]:
 
 def _send_line_reply(reply_token: str, text: str) -> Dict[str, Any]:
     return LineResponseAdapter().send_text_reply(reply_token, text_limit(text, 5000))
+
+
+def _send_line_webhook_acknowledgement(event: dict[str, Any], *, endpoint: WebhookEndpoint) -> Dict[str, Any]:
+    if not _line_webhook_ack_enabled(endpoint):
+        return {"sent": False, "reason": "LINE webhook acknowledgement disabled"}
+    reply_token = str(event.get("replyToken") or "").strip()
+    if not reply_token:
+        return {"sent": False, "reason": "missing reply token"}
+    result = _send_line_reply(reply_token, _LINE_WEBHOOK_ACK_TEXT)
+    return {
+        **result,
+        "text": _LINE_WEBHOOK_ACK_TEXT,
+    }
+
+
+def _with_line_acknowledgement(result: Dict[str, Any], acknowledgement: dict[str, Any]) -> Dict[str, Any]:
+    return {**result, "acknowledgement": acknowledgement}
+
+
+def _line_webhook_ack_enabled(endpoint: WebhookEndpoint) -> bool:
+    response = endpoint.response if isinstance(endpoint.response, dict) else {}
+    mode = str(response.get("mode") or "").strip().lower()
+    if mode != "computer_use_line_biz":
+        return False
+    configured = None
+    for key in ("reply_on_receive", "acknowledge_on_receive", "send_webhook_acknowledgement"):
+        if key in response:
+            configured = response.get(key)
+            break
+    return True if configured is None else _truthy(configured)
 
 
 def _apply_endpoint_response_context(runtime_context: dict[str, Any], endpoint: WebhookEndpoint) -> dict[str, Any]:

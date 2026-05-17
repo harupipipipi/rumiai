@@ -55,6 +55,7 @@ def _install_line_endpoint(
     monkeypatch.setenv("RUMI_DEFAULTSPACK_WEBHOOK_ENDPOINTS_PATH", str(endpoint_path))
     monkeypatch.setenv("RUMI_DEFAULTSPACK_EXTERNAL_SOURCES_PATH", str(tmp_path / "external_sources.json"))
     monkeypatch.setenv("RUMI_DEFAULTSPACK_SECRETS_DIR", str(tmp_path / "secrets"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_FRONTEND_SETTINGS_PATH", str(tmp_path / "frontend_settings.json"))
     monkeypatch.setenv("LINE_CHANNEL_SECRET", SECRET)
     store = WebhookEndpointStore(endpoint_path)
     store.upsert(
@@ -100,6 +101,113 @@ def test_line_route_uses_endpoint_enabled_flag(monkeypatch, tmp_path):
 
     assert result["status"] == "error"
     assert result["_http_status"] == 403
+
+
+def test_line_route_sends_webhook_acknowledgement_when_reply_token_and_access_token_exist(monkeypatch, tmp_path):
+    from blocks.integrations import line as line_block  # noqa: E402
+
+    _install_line_endpoint(
+        monkeypatch,
+        tmp_path,
+        enabled=True,
+        response={"mode": "computer_use_line_biz"},
+    )
+    monkeypatch.setenv("LINE_CHANNEL_ACCESS_TOKEN", "line-access-token")
+    monkeypatch.setattr(line_block.AudiencePolicyRegistry, "resolve", lambda self, policy_id, event=None: {"default": "allow"})
+    calls: list[dict[str, Any]] = []
+    captured: dict[str, Any] = {}
+
+    def fake_dispatch(event, *, input_profile_id, audience_policy, audience_decision, context, send_response, mentioned=False):
+        captured["context"] = context
+        return {
+            "status": "ok",
+            "assistant_text": "done",
+            "response_plan": {"provider": "line", "messages": [{"type": "text", "text": "done"}]},
+        }
+
+    monkeypatch.setattr(line_block, "dispatch_external_event", fake_dispatch)
+    monkeypatch.setattr(
+        line_adapter_module,
+        "post_json",
+        lambda url, headers, body: calls.append({"url": url, "headers": headers, "body": body}) or {"ok": True},
+    )
+    payload = {
+        "destination": "Udestination",
+        "events": [
+            {
+                "type": "message",
+                "mode": "active",
+                "webhookEventId": "evt-ack",
+                "replyToken": "reply-ack",
+                "source": {"type": "user", "userId": "Uactor"},
+                "message": {"id": "m1", "type": "text", "text": "hello"},
+            }
+        ],
+    }
+
+    result = line_block.run(_signed_line_payload(payload), {})
+
+    event_result = result["data"]["events"][0]
+    assert calls == [
+        {
+            "url": "https://api.line.me/v2/bot/message/reply",
+            "headers": {"Authorization": "Bearer line-access-token"},
+            "body": {"replyToken": "reply-ack", "messages": [{"type": "text", "text": "\u5c4a\u3044\u305f\u3088\uff01"}]},
+        }
+    ]
+    assert event_result["acknowledgement"]["sent"] is True
+    assert event_result["acknowledgement"]["text"] == "\u5c4a\u3044\u305f\u3088\uff01"
+    assert captured["context"]["line_webhook_acknowledgement"]["sent"] is True
+    assert event_result["reply"] == {"sent": False, "reason": "LINE reply token already used for webhook acknowledgement"}
+
+
+def test_line_route_does_not_acknowledge_normal_line_reply_mode(monkeypatch, tmp_path):
+    from blocks.integrations import line as line_block  # noqa: E402
+
+    _install_line_endpoint(monkeypatch, tmp_path, enabled=True)
+    monkeypatch.setenv("LINE_CHANNEL_ACCESS_TOKEN", "line-access-token")
+    monkeypatch.setattr(line_block.AudiencePolicyRegistry, "resolve", lambda self, policy_id, event=None: {"default": "allow"})
+    calls: list[dict[str, Any]] = []
+
+    def fake_dispatch(event, *, input_profile_id, audience_policy, audience_decision, context, send_response, mentioned=False):
+        return {
+            "status": "ok",
+            "assistant_text": "normal reply",
+            "response_plan": {"provider": "line", "messages": [{"type": "text", "text": "normal reply"}]},
+        }
+
+    monkeypatch.setattr(line_block, "dispatch_external_event", fake_dispatch)
+    monkeypatch.setattr(
+        line_adapter_module,
+        "post_json",
+        lambda url, headers, body: calls.append({"url": url, "headers": headers, "body": body}) or {"ok": True},
+    )
+    payload = {
+        "destination": "Udestination",
+        "events": [
+            {
+                "type": "message",
+                "mode": "active",
+                "webhookEventId": "evt-normal",
+                "replyToken": "reply-normal",
+                "source": {"type": "user", "userId": "Uactor"},
+                "message": {"id": "m1", "type": "text", "text": "hello"},
+            }
+        ],
+    }
+
+    result = line_block.run(_signed_line_payload(payload), {})
+
+    event_result = result["data"]["events"][0]
+    assert event_result["acknowledgement"]["sent"] is False
+    assert event_result["reply"]["sent"] is True
+    assert calls == [
+        {
+            "url": "https://api.line.me/v2/bot/message/reply",
+            "headers": {"Authorization": "Bearer line-access-token"},
+            "body": {"replyToken": "reply-normal", "messages": [{"type": "text", "text": "normal reply"}]},
+        }
+    ]
 
 
 def test_line_route_preserves_top_level_destination_and_endpoint_policy(monkeypatch, tmp_path):
