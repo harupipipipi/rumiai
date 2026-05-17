@@ -136,6 +136,23 @@ function compactProfileName(name: string): string {
     .trim();
 }
 
+function capabilityBadges(profile: ModelProfile | null | undefined): string[] {
+  if (!profile) return [];
+  const badges: string[] = [];
+  if (profile.supports_vision || profile.supports_image_input) badges.push("Vision");
+  if (profile.supports_tool_calling) badges.push("Tools");
+  if (profile.supports_thinking) badges.push("Thinking");
+  if (profile.supports_fast || profile.speed_tier === "fast") badges.push("Fast");
+  if ((profile.max_context_tokens ?? profile.max_context ?? 0) >= 100000) badges.push("Long Context");
+  return badges;
+}
+
+function modelRouteReason(profile: ModelProfile | null | undefined): string {
+  if (!profile) return "";
+  const knowledge = typeof profile.knowledge_level === "number" ? `KL ${profile.knowledge_level}` : "";
+  return [...capabilityBadges(profile), knowledge].filter(Boolean).join(" / ");
+}
+
 function groupToolItems(items: ComposerExtensionItem[]): ToolGroup[] {
   const groups = new Map<string, ToolGroup>();
   for (const item of items) {
@@ -413,6 +430,7 @@ function ModelDropdown({
               <div className="px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-zinc-600">{provider}</div>
               {profiles.map((profile) => {
                 const needsKey = profileNeedsApiKey(profile);
+                const badges = capabilityBadges(profile).slice(0, 4);
                 return (
                   <button
                     key={profile.profile_id}
@@ -439,14 +457,24 @@ function ModelDropdown({
                       <span className="block truncate text-[10px] text-zinc-500">
                         {profile.provider_display_name ?? profile.provider_id} · {profile.provider_id}/{profile.model_id}
                       </span>
+                      {badges.length > 0 && (
+                        <span className="mt-1 flex flex-wrap gap-1">
+                          {badges.map((badge) => (
+                            <span key={badge} className="rounded border border-zinc-700 px-1.5 py-0.5 text-[9px] leading-none text-zinc-400">
+                              {badge}
+                            </span>
+                          ))}
+                        </span>
+                      )}
                     </span>
                     {needsKey ? (
                       <span className="flex-shrink-0 rounded-full border border-amber-500/30 px-2 py-0.5 text-[10px] text-amber-300">
                         API key
                       </span>
                     ) : (
-                      <span className="flex-shrink-0 text-[10px] text-zinc-500">
-                        {profile.max_context_tokens ?? profile.max_context ?? "?"}
+                      <span className="flex-shrink-0 text-right text-[10px] text-zinc-500">
+                        <span className="block">{profile.max_context_tokens ?? profile.max_context ?? "?"}</span>
+                        {typeof profile.knowledge_level === "number" && <span className="block">KL {profile.knowledge_level}</span>}
                       </span>
                     )}
                   </button>
@@ -792,6 +820,8 @@ export function ComposerRenderer({
     || toolId === "browser_use"
     || toolId === "browser_companion"
   ));
+  const hasAttachedImages = attachedFiles.some((file) => String(file.type ?? "").startsWith("image/"));
+  const imageBridgePlanned = hasAttachedImages && !selectedProfile?.supports_vision && !selectedProfile?.supports_image_input;
   const toolGroups = useMemo(() => groupToolItems(toolItems), [toolItems]);
   const activeToolGroup = toolGroups.find((group) => group.id === openToolGroup) ?? toolGroups[0] ?? null;
   const showToolGroups = toolItems.length > 4;
@@ -1350,6 +1380,7 @@ export function ComposerRenderer({
                     <div className="grid gap-0.5">
                       {selectableProfiles.map((profile) => {
                         const needsKey = needsApiKey(profile);
+                        const badges = capabilityBadges(profile).slice(0, 3);
                         return (
                                   <button
                                     key={profile.profile_id}
@@ -1376,6 +1407,15 @@ export function ComposerRenderer({
                               <span className="block truncate text-[10px] text-zinc-500">
                                 {profile.provider_display_name ?? profile.provider_id} · {profile.provider_id} · {profile.max_context_tokens ?? profile.max_context ?? "?"} ctx
                               </span>
+                              {badges.length > 0 && (
+                                <span className="mt-1 flex flex-wrap gap-1">
+                                  {badges.map((badge) => (
+                                    <span key={badge} className="rounded border border-zinc-700 px-1 py-0.5 text-[9px] leading-none text-zinc-400">
+                                      {badge}
+                                    </span>
+                                  ))}
+                                </span>
+                              )}
                             </span>
                             {needsKey && (
                               <span className="flex-shrink-0 rounded-full border border-amber-500/30 px-2 py-0.5 text-[10px] text-amber-300">
@@ -1578,6 +1618,11 @@ export function ComposerRenderer({
                   Computer ON
                 </span>
               )}
+              {imageBridgePlanned && (
+                <span className="inline-flex items-center gap-1 rounded-full border border-sky-500/30 bg-sky-500/10 px-2 py-0.5 text-[11px] font-medium text-sky-300">
+                  Vision Bridge
+                </span>
+              )}
             </div>
 
             <div className="rumi-composer-submit-area flex flex-shrink-0 items-center justify-end gap-2">
@@ -1603,7 +1648,7 @@ export function ComposerRenderer({
                     <ChevronDown size={12} className={`transition-transform ${modelDropdownOpen ? "rotate-180" : ""}`} />
                   </button>
                   <span className="block max-w-[150px] truncate text-[10px] leading-none text-zinc-500">
-                    {selectedProviderLabel}
+                    {modelRouteReason(selectedProfile) || selectedProviderLabel}
                   </span>
                   {modelDropdownOpen && (
                     <ModelDropdown

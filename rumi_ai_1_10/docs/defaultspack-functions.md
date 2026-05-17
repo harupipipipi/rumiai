@@ -50,6 +50,25 @@ Model runtime settings are owned by `ModelRuntimeSettingsService`. The main entr
 
 When chat or AI completion params do not include `thinking_level`, defaultspack resolves the effective level server-side from conversation, profile, then global settings.
 
+## Model Capabilities And Routing
+
+The model catalog now exposes capability metadata used by profile-aware routing:
+
+- `defaultspack:ai_search_models` / `defaults.ai.search_models`
+- `defaultspack:ai_get_model_capabilities` / `defaults.ai.get_model_capabilities`
+- `defaultspack:ai_recommend_model` / `defaults.ai.recommend_model`
+- `defaultspack:ai_route_model` / `defaults.ai.route_model`
+- `defaultspack:ai_explain_model_choice` / `defaults.ai.explain_model_choice`
+
+Capability fields include `supports_vision`, `supports_tool_calling`, `supports_thinking`, `supports_fast`, `speed_tier`, `quality_tier`, `knowledge_level`, `knowledge_band`, and role recommendations. `knowledge_level` is a relative rumiai routing score, not an absolute claim about intelligence.
+
+Vision fallback and utility subagents are available through:
+
+- `defaultspack:vision_describe_images` / `defaults.vision.describe_images`
+- `defaultspack:agent_run_subagent` / `defaults.agent.run_subagent`
+- `defaultspack:prompt_lint_prompt` / `defaults.prompt.lint_prompt`
+- `defaultspack:prompt_compact_prompt` / `defaults.prompt.compact_prompt`
+
 ## Flow Example
 
 ```yaml

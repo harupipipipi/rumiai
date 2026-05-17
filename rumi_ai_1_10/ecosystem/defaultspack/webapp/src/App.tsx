@@ -479,6 +479,7 @@ function profileDefaults(profile: ModelProfile | null | undefined): Record<strin
 
 function profilePriceTier(profile: ModelProfile | null | undefined): string {
   if (!profile) return "";
+  if (profile.cost_tier) return String(profile.cost_tier);
   const defaults = profileDefaults(profile);
   const pricing = profile.pricing ?? (profile.metadata?.pricing as Record<string, unknown> | undefined) ?? {};
   const explicit = String(
@@ -497,6 +498,7 @@ function profilePriceTier(profile: ModelProfile | null | undefined): string {
 
 function profileSupportsFast(profile: ModelProfile | null | undefined): boolean {
   if (!profile) return false;
+  if (profile.supports_fast || profile.speed_tier === "fast") return true;
   const defaults = profileDefaults(profile);
   const tags = Array.isArray(profile.metadata?.tags) ? profile.metadata?.tags : [];
   const traits = Array.isArray(profile.metadata?.traits) ? profile.metadata?.traits : [];
