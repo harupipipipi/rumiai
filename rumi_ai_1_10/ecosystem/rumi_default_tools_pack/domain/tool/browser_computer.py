@@ -1389,6 +1389,9 @@ class BrowserComputerController:
             self._focus_action_target(action_payload)
         if action == "computer.drag" and payload.get("physical") is True:
             self._focus_action_target(action_payload)
+        foreground_error = self._foreground_action_focus_error(action, action_payload)
+        if foreground_error is not None:
+            return foreground_error
         # --- Attempt ComputerSeatService delegation ---
         seat_result = self._try_computer_seat_action(action, action_payload)
         if seat_result is not None and seat_result.get("executed"):
@@ -1546,6 +1549,69 @@ class BrowserComputerController:
         if app and self._activate_app_name(filters.get("app", "")):
             return True
         return False
+
+    def _foreground_action_focus_error(self, action: str, payload: dict[str, Any]) -> dict[str, Any] | None:
+        if action not in {"computer.type", "computer.key", "computer.scroll", "computer.click", "computer.drag"}:
+            return None
+        if action in {"computer.click", "computer.drag"} and payload.get("physical") is not True:
+            return None
+        target = self._foreground_action_target(payload)
+        if target is None:
+            return None
+        active = self._active_window()
+        if active and self._window_records_match(active, target):
+            return None
+        self._focus_window(target)
+        time.sleep(0.2)
+        active = self._active_window()
+        if active and self._window_records_match(active, target):
+            return None
+        filters = self._window_filter(payload)
+        if active and self._window_matches_filter(
+            active,
+            app=filters.get("app", "").lower(),
+            title=filters.get("title", "").lower(),
+        ):
+            return None
+        return {
+            "action": action,
+            "executed": False,
+            "is_error": True,
+            "platform": platform.system(),
+            "reason": "Foreground input target is not active. Refusing to type, press keys, scroll, or physically click into the wrong app.",
+            "active_window": active,
+            "selected_window": target,
+            "recovery": {
+                "kind": "focus_required",
+                "note": "Bring the selected app/window to the foreground, then retry the foreground input action.",
+            },
+        }
+
+    def _foreground_action_target(self, payload: dict[str, Any]) -> dict[str, Any] | None:
+        selected = self._capture_target(payload)
+        if selected and self._is_usable_target_window(selected):
+            return selected
+        if self._has_window_filter(payload):
+            selected = self._matching_window(payload)
+            if selected and self._is_usable_target_window(selected):
+                return selected
+        return None
+
+    @classmethod
+    def _window_records_match(cls, active: dict[str, Any], target: dict[str, Any]) -> bool:
+        try:
+            active_id = int(active.get("window_id") or 0)
+            target_id = int(target.get("window_id") or 0)
+        except Exception:
+            active_id = 0
+            target_id = 0
+        if active_id and target_id and active_id == target_id:
+            return True
+        target_app = str(target.get("app") or "").strip().lower()
+        target_title = str(target.get("title") or "").strip().lower()
+        if not (target_app or target_title):
+            return False
+        return cls._window_matches_filter(active, app=target_app, title=target_title)
 
     @classmethod
     def _window_matches_filter(cls, window: dict[str, Any], *, app: str = "", title: str = "") -> bool:

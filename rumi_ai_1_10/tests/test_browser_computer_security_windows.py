@@ -233,6 +233,89 @@ def test_windows_focus_window_uses_foreground_api(tmp_path, monkeypatch):
     assert "$hwnd = [IntPtr]1234" in scripts[0]
 
 
+def test_foreground_type_refuses_when_selected_window_is_not_active(tmp_path, monkeypatch):
+    from ecosystem.rumi_default_tools_pack.domain.tool import browser_computer
+
+    controller = _controller(tmp_path)
+    target_window = {
+        "app": "chrome",
+        "title": "LINE Chat - Google Chrome",
+        "x": 10,
+        "y": 20,
+        "width": 900,
+        "height": 700,
+        "window_id": 200,
+    }
+    active_window = {
+        "app": "Codex",
+        "title": "Codex",
+        "x": 0,
+        "y": 0,
+        "width": 900,
+        "height": 700,
+        "window_id": 100,
+    }
+    focus_calls = []
+
+    monkeypatch.setattr(browser_computer.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(controller, "_matching_window", lambda payload: target_window)
+    monkeypatch.setattr(controller, "_active_window", lambda: active_window)
+    monkeypatch.setattr(controller, "_focus_window", lambda window: focus_calls.append(window))
+    monkeypatch.setattr(controller, "_try_computer_seat_action", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        controller,
+        "_windows_desktop_action",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("type must not hit the active Codex window")),
+    )
+
+    result = controller.run(
+        "computer.type",
+        {"text": "hello", "app": "Google Chrome", "title": "LINE Chat"},
+        yolo_mode=True,
+    )
+
+    assert result["is_error"] is True
+    assert result["executed"] is False
+    assert result["recovery"]["kind"] == "focus_required"
+    assert result["active_window"]["app"] == "Codex"
+    assert result["selected_window"]["title"] == "LINE Chat - Google Chrome"
+    assert focus_calls
+
+
+def test_foreground_type_executes_when_selected_window_is_active(tmp_path, monkeypatch):
+    from ecosystem.rumi_default_tools_pack.domain.tool import browser_computer
+
+    controller = _controller(tmp_path)
+    target_window = {
+        "app": "chrome",
+        "title": "LINE Chat - Google Chrome",
+        "x": 10,
+        "y": 20,
+        "width": 900,
+        "height": 700,
+        "window_id": 200,
+    }
+    desktop_actions = []
+
+    monkeypatch.setattr(browser_computer.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(controller, "_matching_window", lambda payload: target_window)
+    monkeypatch.setattr(controller, "_active_window", lambda: target_window)
+    monkeypatch.setattr(controller, "_focus_window", lambda window: None)
+    monkeypatch.setattr(controller, "_try_computer_seat_action", lambda *args, **kwargs: None)
+    monkeypatch.setattr(controller, "_windows_desktop_action", lambda action, payload: desktop_actions.append((action, payload)))
+    monkeypatch.setattr(controller, "_capture_action_result_screenshot", lambda *args, **kwargs: {})
+
+    result = controller.run(
+        "computer.type",
+        {"text": "hello", "app": "Google Chrome", "title": "LINE Chat"},
+        yolo_mode=True,
+    )
+
+    assert result["executed"] is True
+    assert result.get("is_error") is not True
+    assert desktop_actions[0][0] == "computer.type"
+
+
 def test_windows_window_listing_is_dpi_aware(tmp_path, monkeypatch):
     from ecosystem.rumi_default_tools_pack.domain.tool import browser_computer
 

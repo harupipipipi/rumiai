@@ -161,6 +161,78 @@ def test_line_route_sends_webhook_acknowledgement_when_reply_token_and_access_to
     assert event_result["reply"] == {"sent": False, "reason": "LINE reply token already used for webhook acknowledgement"}
 
 
+def test_line_computer_use_fake_receive_acknowledges_and_preserves_japanese_prompt(monkeypatch, tmp_path):
+    from blocks.integrations import line as line_block  # noqa: E402
+    from blocks.chat import send as chat_send  # noqa: E402
+
+    chat_url = "https://chat.line.biz/Uaccount/chat/Cchat"
+    _install_line_endpoint(
+        monkeypatch,
+        tmp_path,
+        enabled=True,
+        input_profile_id="line.computer_use",
+        conversation={"strategy": "external_key", "model": "stub/default"},
+        response={
+            "mode": "computer_use_line_biz",
+            "line_biz_chat_url": chat_url,
+            "auto_approve_computer_use": True,
+        },
+    )
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_INTEGRATIONS_STORE_PATH", str(tmp_path / "integrations" / "conversations.json"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_INTEGRATIONS_LOCKS_DIR", str(tmp_path / "integrations" / "event_locks"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(tmp_path / "chat" / "conversations.json"))
+    monkeypatch.setenv("LINE_CHANNEL_ACCESS_TOKEN", "line-access-token")
+    monkeypatch.setattr(line_block.AudiencePolicyRegistry, "resolve", lambda self, policy_id, event=None: {"default": "allow"})
+    calls: list[dict[str, Any]] = []
+    captured: dict[str, Any] = {}
+
+    def fake_send_run(request, context):
+        captured["request"] = request
+        captured["context"] = context
+        return {
+            "status": "ok",
+            "data": {
+                "id": "assistant-local",
+                "content": [{"type": "text", "text": "local complete"}],
+            },
+        }
+
+    monkeypatch.setattr(chat_send, "run", fake_send_run)
+    monkeypatch.setattr(
+        line_adapter_module,
+        "post_json",
+        lambda url, headers, body: calls.append({"url": url, "headers": headers, "body": body}) or {"ok": True},
+    )
+    source_text = "\u306a\u3093\u304byoutube music\u3067lofi girl\u6d41\u3057\u3066\u30fc"
+    payload = {
+        "destination": "Udestination",
+        "events": [
+            {
+                "type": "message",
+                "mode": "active",
+                "webhookEventId": "evt-fake-receive",
+                "replyToken": "reply-fake-receive",
+                "source": {"type": "user", "userId": "Uactor"},
+                "message": {"id": "m1", "type": "text", "text": source_text},
+            }
+        ],
+    }
+
+    result = line_block.run(_signed_line_payload(payload), {})
+
+    event_result = result["data"]["events"][0]
+    sent_message = calls[0]["body"]["messages"][0]["text"]
+    user_content = captured["request"]["message"]["content"]
+    assert event_result["status"] == "ok"
+    assert event_result["acknowledgement"]["sent"] is True
+    assert sent_message == "\u5c4a\u3044\u305f\u3088\uff01"
+    assert source_text in user_content
+    assert "\u7e3a" not in user_content
+    assert chat_url in user_content
+    assert captured["context"]["computer_use_target_app"] == "Google Chrome"
+    assert captured["context"]["computer_use_target_title"] == "LINE Chat"
+
+
 def test_line_route_does_not_acknowledge_normal_line_reply_mode(monkeypatch, tmp_path):
     from blocks.integrations import line as line_block  # noqa: E402
 
