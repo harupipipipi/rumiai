@@ -997,7 +997,7 @@ class ChatRunEngine:
                 prepared.provider_tools,
                 prepared.params,
                 prepared.call_handler,
-                allow_retry=not self._tool_logs,
+                allow_retry=True,
             )
         except RuntimeError as exc:
             if self._tool_logs:

@@ -1177,19 +1177,11 @@ class BrowserComputerController:
 
     def _computer_seat_target(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Build a ComputerTarget dict from payload."""
-        browser_target = payload.get("browser_tab_id") or payload.get("tab_id") or payload.get("url")
         return {
-            "kind": payload.get("kind") or ("browser_tab" if browser_target else "desktop"),
             "app": payload.get("app") or payload.get("application"),
             "pid": payload.get("pid"),
             "window_id": payload.get("window_id"),
             "window_title": payload.get("title") or payload.get("window_title"),
-            "hwnd": payload.get("hwnd"),
-            "bundle_id": payload.get("bundle_id"),
-            "browser_client_id": payload.get("browser_client_id") or payload.get("client_id"),
-            "browser_tab_id": payload.get("browser_tab_id") or payload.get("tab_id"),
-            "url": payload.get("url"),
-            "coordinate_space": payload.get("coordinate_space", "window"),
         }
 
     def _computer_seat_metadata_for_target(self, target_record: dict[str, Any] | None) -> dict[str, Any]:
@@ -1281,7 +1273,7 @@ class BrowserComputerController:
             svc = self._get_computer_seat()
             target = self._computer_seat_target(payload)
             result = svc.observe(target)
-            # If observe returned a screenshot, we could use it, but for now
+            # If observe returned a screenshot, we could use it – but for now
             # we only add metadata. The legacy _screenshot path handles the
             # actual capture with all its crop/model logic.
             return None
@@ -1304,65 +1296,6 @@ class BrowserComputerController:
         target = self._computer_seat_target(action_payload)
         try:
             if action == "computer.click":
-                seat_action = "click"
-                seat_payload = {
-                    "x": int(action_payload.get("x", 0)),
-                    "y": int(action_payload.get("y", 0)),
-                    "button": action_payload.get("button", "left"),
-                }
-            elif action == "computer.type":
-                seat_action = "type_text"
-                seat_payload = {"text": action_payload.get("text", "")}
-            elif action == "computer.key":
-                seat_action = "key"
-                seat_payload = {"key_combo": action_payload.get("key", "") or action_payload.get("key_combo", "")}
-            elif action == "computer.scroll":
-                seat_action = "scroll"
-                seat_payload = {
-                    "x": int(action_payload.get("x", 0)),
-                    "y": int(action_payload.get("y", 0)),
-                    "direction": action_payload.get("direction", "down"),
-                    "clicks": int(action_payload.get("amount", 3)),
-                }
-            elif action == "computer.move":
-                seat_action = "move"
-                seat_payload = {"x": int(action_payload.get("x", 0)), "y": int(action_payload.get("y", 0))}
-            elif action == "computer.drag":
-                seat_action = "drag"
-                seat_payload = {
-                    "x1": int(action_payload.get("x1", 0)),
-                    "y1": int(action_payload.get("y1", 0)),
-                    "x2": int(action_payload.get("x2", 0)),
-                    "y2": int(action_payload.get("y2", 0)),
-                }
-            else:
-                return None
-
-            try:
-                from ..computer.service import ComputerSeatService
-
-                is_real_seat = isinstance(svc, ComputerSeatService)
-            except Exception:
-                is_real_seat = False
-
-            if is_real_seat:
-                if not any(
-                    target.get(key)
-                    for key in (
-                        "app",
-                        "pid",
-                        "window_id",
-                        "window_title",
-                        "hwnd",
-                        "bundle_id",
-                        "browser_client_id",
-                        "browser_tab_id",
-                        "url",
-                    )
-                ):
-                    return None
-                result = svc.background_safe_action(seat_action, target, seat_payload)
-            elif action == "computer.click":
                 result = svc.click(target, x=int(action_payload.get("x", 0)), y=int(action_payload.get("y", 0)), button=action_payload.get("button", "left"))
             elif action == "computer.type":
                 result = svc.type_text(target, text=action_payload.get("text", ""))
@@ -1377,15 +1310,8 @@ class BrowserComputerController:
                 result = svc.drag(target, x1=int(action_payload.get("x1", 0)), y1=int(action_payload.get("y1", 0)), x2=int(action_payload.get("x2", 0)), y2=int(action_payload.get("y2", 0)))
             else:
                 return None
-            # Accept any non-foreground ComputerSeat driver, including a
-            # background-safe fallback. Foreground/physical drivers stay on
-            # the legacy path because it owns coordinate markers and capture.
-            if (
-                result
-                and result.get("executed")
-                and not result.get("requires_foreground")
-                and not result.get("uses_physical_input")
-            ):
+            # Only accept if a non-foreground driver handled it
+            if result and result.get("executed") and not result.get("is_fallback"):
                 return result
             return None
         except Exception:
@@ -2979,6 +2905,31 @@ end tell
                 subprocess.run(["osascript", "-e", script], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             except Exception:
                 pass
+        elif platform.system() == "Windows":
+            try:
+                hwnd = int(window.get("window_id") or 0)
+            except Exception:
+                hwnd = 0
+            if hwnd <= 0:
+                return
+            script = f"""
+$ErrorActionPreference = 'Stop'
+Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public class RumiWindowFocus {{
+  [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
+  [DllImport("user32.dll")] public static extern bool ShowWindowAsync(IntPtr hWnd, int nCmdShow);
+}}
+'@ -ErrorAction SilentlyContinue
+$hwnd = [IntPtr]{hwnd}
+[void][RumiWindowFocus]::ShowWindowAsync($hwnd, 9)
+[void][RumiWindowFocus]::SetForegroundWindow($hwnd)
+"""
+            try:
+                self._run_powershell(script)
+            except Exception:
+                pass
 
     def _darwin_move_cursor(self, payload: dict[str, Any]) -> None:
         x = int(payload.get("x", 0))
@@ -3443,6 +3394,13 @@ public class RumiDpi {
     def _windows_windows(self) -> list[dict[str, Any]]:
         script = r'''
 $ErrorActionPreference = 'Stop'
+Add-Type -TypeDefinition @'
+using System.Runtime.InteropServices;
+public class RumiDpi {
+  [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
+}
+'@ -ErrorAction SilentlyContinue
+[void][RumiDpi]::SetProcessDPIAware()
 Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;

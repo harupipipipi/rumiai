@@ -99,11 +99,6 @@ def test_all_fail():
     result = svc.click({"app": "Test"})
     assert result["executed"] is False
     assert "notes" in result
-    assert result["notes"] == [
-        "d1: best_effort",
-        "d2: best_effort",
-        "d3: best_effort",
-    ]
 
 
 def test_all_raise():

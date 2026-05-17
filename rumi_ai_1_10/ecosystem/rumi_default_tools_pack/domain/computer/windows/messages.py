@@ -30,7 +30,6 @@ WM_RBUTTONUP = 0x0205
 WM_MBUTTONDOWN = 0x0207
 WM_MBUTTONUP = 0x0208
 WM_MOUSEWHEEL = 0x020A
-WM_MOUSEHWHEEL = 0x020E
 
 MK_LBUTTON = 0x0001
 MK_RBUTTON = 0x0002
@@ -95,7 +94,7 @@ def post_click(hwnd: int, x: int, y: int, button: str = "left") -> bool:
 def post_text(hwnd: int, text: str) -> bool:
     """Send each character as ``WM_CHAR``."""
     if not text:
-        return False
+        return True
     ok = True
     for char in text:
         ok = _post(hwnd, WM_CHAR, ord(char), 0) and ok
@@ -133,18 +132,10 @@ def post_key(hwnd: int, key_combo: str) -> bool:
 
 
 def post_scroll(hwnd: int, x: int, y: int, direction: str = "down", clicks: int = 3) -> bool:
-    """Send a mouse wheel message."""
+    """Send a ``WM_MOUSEWHEEL`` message."""
     if clicks <= 0:
         return False
-    normalized = direction.lower()
-    if normalized in {"up", "down"}:
-        message = WM_MOUSEWHEEL
-        sign = 1 if normalized == "up" else -1
-    elif normalized in {"left", "right"}:
-        message = WM_MOUSEHWHEEL
-        sign = 1 if normalized == "right" else -1
-    else:
-        return False
+    sign = 1 if direction.lower() in {"up", "left"} else -1
     screen_x, screen_y = client_to_screen(hwnd, x, y)
     wparam = ((sign * WHEEL_DELTA * int(clicks)) & 0xFFFF) << 16
-    return _post(hwnd, message, wparam, make_lparam(screen_x, screen_y))
+    return _post(hwnd, WM_MOUSEWHEEL, wparam, make_lparam(screen_x, screen_y))

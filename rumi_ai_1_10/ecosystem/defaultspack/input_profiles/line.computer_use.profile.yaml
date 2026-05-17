@@ -22,6 +22,10 @@ metadata:
     message: "$.message"
 params:
   thinking_level: high
+  request_timeout: 45
+  retry:
+    max_attempts: 2
+    delays: [1]
   external_input:
     default_response:
       mode: same_response

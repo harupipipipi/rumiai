@@ -4,7 +4,9 @@ import base64
 import hashlib
 import hmac
 import json
+import logging
 import os
+import threading
 from pathlib import Path
 from typing import Any, Dict
 
@@ -23,6 +25,9 @@ from domain.integrations.http_client import post_json
 from domain.integrations.secrets import get_integration_secret, load_integration_secrets_into_env
 from domain.webhook.endpoint import WebhookEndpoint
 from domain.webhook.endpoint_resolver import ProviderEndpointResolver
+
+
+_LOGGER = logging.getLogger(__name__)
 
 
 def run(input_data, context):
@@ -104,18 +109,87 @@ def _handle_event(
     decision = AudiencePolicy(policy).evaluate(external_event, mentioned=mentioned)
     if not decision.allowed:
         return _policy_denied_result(external_event, decision)
-    result = dispatch_external_event(
+    if _should_process_line_event_in_background(endpoint):
+        return _dispatch_line_event_in_background(
+            external_event,
+            input_profile_id=endpoint.input_profile_id,
+            audience_policy=policy,
+            audience_decision=decision,
+            context=runtime_context,
+            mentioned=mentioned,
+        )
+    return _dispatch_line_event(
         external_event,
         input_profile_id=endpoint.input_profile_id,
         audience_policy=policy,
         audience_decision=decision,
         context=runtime_context,
+        mentioned=mentioned,
+    )
+
+
+def _dispatch_line_event(
+    external_event,
+    *,
+    input_profile_id: str,
+    audience_policy: dict[str, Any],
+    audience_decision,
+    context: dict[str, Any],
+    mentioned: bool = False,
+) -> Dict[str, Any]:
+    result = dispatch_external_event(
+        external_event,
+        input_profile_id=input_profile_id,
+        audience_policy=audience_policy,
+        audience_decision=audience_decision,
+        context=context,
         send_response=True,
         mentioned=mentioned,
     )
     plan = result.get("response_plan") if isinstance(result.get("response_plan"), dict) else ResponsePlanner("line").plan(RumiResponse.from_result(result))
-    reply = _send_response_plan(plan, external_event, context=runtime_context)
+    reply = _send_response_plan(plan, external_event, context=context)
     return {**result, "reply": reply}
+
+
+def _dispatch_line_event_in_background(
+    external_event,
+    *,
+    input_profile_id: str,
+    audience_policy: dict[str, Any],
+    audience_decision,
+    context: dict[str, Any],
+    mentioned: bool = False,
+) -> Dict[str, Any]:
+    event_id = str((external_event.event or {}).get("id") or "").strip()
+    background_context = dict(context or {})
+    background_context["line_background_processing"] = True
+
+    def worker() -> None:
+        try:
+            _dispatch_line_event(
+                external_event,
+                input_profile_id=input_profile_id,
+                audience_policy=audience_policy,
+                audience_decision=audience_decision,
+                context=background_context,
+                mentioned=mentioned,
+            )
+        except Exception:
+            _LOGGER.exception("LINE background event processing failed event_id=%s", event_id or "<missing>")
+
+    name_suffix = event_id or str(os.getpid())
+    thread = threading.Thread(target=worker, name=f"line-webhook-{name_suffix}", daemon=True)
+    thread.start()
+    return {
+        "status": "accepted",
+        "assistant_text": "",
+        "background_processing": True,
+        "event_id": event_id,
+        "event": external_event.as_dict(),
+        "policy": audience_decision.as_dict() if hasattr(audience_decision, "as_dict") else audience_decision,
+        "input_profile_id": input_profile_id,
+        "reply": {"sent": False, "reason": "LINE event accepted for background processing"},
+    }
 
 
 def _send_response_plan(plan: dict[str, Any], external_event, *, context: dict[str, Any] | None = None) -> Dict[str, Any]:
@@ -207,6 +281,16 @@ def _apply_endpoint_response_context(runtime_context: dict[str, Any], endpoint: 
         return updated
 
     mode = str(response.get("mode") or "").strip().lower()
+    history_mode = str(
+        response.get("chat_history_mode")
+        or response.get("external_chat_history_mode")
+        or ""
+    ).strip().lower()
+    if history_mode:
+        updated.setdefault("external_chat_history_mode", history_mode)
+    elif mode == "computer_use_line_biz":
+        updated.setdefault("external_chat_history_mode", "current_turn")
+
     prompt_prefix = str(
         response.get("prompt_prefix")
         or response.get("instruction_prefix")
@@ -237,11 +321,14 @@ def _apply_endpoint_response_context(runtime_context: dict[str, Any], endpoint: 
     target_title = str(
         response.get("target_title")
         or response.get("computer_use_target_title")
-        or ("LINE" if mode == "computer_use_line_biz" else "")
+        or ("LINE Chat" if mode == "computer_use_line_biz" else "")
         or ""
     ).strip()
     if target_title:
         updated.setdefault("computer_use_target_title", target_title)
+    if mode == "computer_use_line_biz":
+        updated.setdefault("computer_use_physical_clicks", True)
+        updated.setdefault("computer_use_reply_surface", "line_biz")
 
     tool_policy = dict(updated.get("profile_policy") if isinstance(updated.get("profile_policy"), dict) else {})
     response_tool_policy = response.get("tool_policy") if isinstance(response.get("tool_policy"), dict) else {}
@@ -276,6 +363,19 @@ def _apply_endpoint_response_context(runtime_context: dict[str, Any], endpoint: 
     return updated
 
 
+def _should_process_line_event_in_background(endpoint: WebhookEndpoint) -> bool:
+    response = endpoint.response if isinstance(endpoint.response, dict) else {}
+    if not response:
+        return False
+    mode = str(response.get("mode") or "").strip().lower()
+    if mode != "computer_use_line_biz":
+        return False
+    return any(
+        _truthy(response.get(key))
+        for key in ("background_processing", "async_processing", "run_in_background")
+    )
+
+
 def _line_biz_prompt_prefix(response: dict[str, Any], *, mode: str = "") -> str:
     resolved_mode = (mode or str(response.get("mode") or "")).strip().lower()
     if resolved_mode != "computer_use_line_biz":
@@ -296,17 +396,26 @@ def _line_biz_prompt_prefix(response: dict[str, Any], *, mode: str = "") -> str:
     return (
         "Use computer_use in Google Chrome to open "
         f"{chat_url} and reply in {reply_language} inside LINE Official Account Manager. "
+        "Before using any tools, decide the exact reply text from the external source message in this prompt. "
+        "If the source message says to reply exactly with some text, send exactly that text and nothing else. "
+        "Treat the visible LINE Biz chat history only as the destination UI; it can be stale or unrelated to this webhook event. "
+        "Do not inspect, reread, or scroll visible chat bubbles to understand the customer request. "
         "Start by checking computer.windows, and if a visible Google Chrome LINE window exists, "
         "target it with computer.select_window before screenshots or clicks. "
         "This Windows workflow only works against a visible desktop Chrome window, so if Chrome is "
         "not visible return a short local note asking for the LINE Biz window to be opened on screen. "
-        "The external source message below is already the customer message you should answer, so do not spend tool calls rereading "
-        "the same message from the UI unless that is necessary to locate the composer. "
+        "The external source message below is already the customer message you should answer. "
         "Before typing, pressing Enter, or sending, call computer.context or inspect active_window in the latest "
         "screenshot result to confirm the foreground window is the Chrome LINE chat; if Codex or another app is frontmost, "
         "refocus the LINE window with computer.select_window before continuing. "
-        "After the target chat is visible, prefer one full screenshot and only a few focused follow-up screenshots near the bottom of the chat pane. "
-        "If the reply composer is hidden, scroll to the bottom of the chat and click the large red circular reply button near the lower edge to open it. "
+        "After the target chat is visible, use screenshots only to locate the reply composer or send control near the bottom of the chat pane. "
+        "If the reply composer is hidden, scroll toward the bottom once and click the large red circular reply button near the lower edge to open it. "
+        "Any click that must affect LINE Biz must be a physical foreground click: call computer.click with physical=true. "
+        "A normal computer.click is only a virtual cursor marker and will not open the composer or press Send. "
+        "Do not use Ctrl+A or select existing chat text. "
+        "If the exact reply text is already visible in the composer, do not type it again. "
+        "To send, click the left green Send button labeled 送信, not the small dropdown arrow on its right. "
+        "Do not keep scrolling through the transcript repeatedly; after one bottom scroll, use a physical click to focus the composer/reply button. "
         "Then answer the external source message clearly, "
         "send the message in LINE Biz, and only after the send succeeds return a short local confirmation."
     )

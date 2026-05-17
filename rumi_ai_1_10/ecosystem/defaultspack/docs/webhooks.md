@@ -69,6 +69,14 @@ Some providers require a special response before normal processing:
 If processing continues asynchronously, return the provider ack first and let
 the `ResponseAdapter` deliver the eventual reply.
 
+LINE `computer_use_line_biz` endpoints can opt into that fast-ack behavior with
+`response.background_processing: true`. This only moves webhook processing to
+an in-process worker so the provider receives HTTP 200 promptly; it does not
+enable experimental background desktop drivers. Visible computer-use remains
+the default unless `RUMI_ENABLE_EXPERIMENTAL_BACKGROUND_COMPUTER_USE=1` is set.
+Those LINE Biz computer-use turns default to current-turn chat context so old
+failed tool logs and screenshots do not bloat the next external reply prompt.
+
 ## Generic Webhook Profile
 
 A generic webhook should use the same external input path:

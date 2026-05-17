@@ -114,7 +114,11 @@ def prepare_chat_run(input_data: dict[str, Any], context: dict[str, Any] | None 
     if user_message is None:
         raise RuntimeError("Failed to add user message")
 
-    standard_messages = convert_to_standard(store.get_message_chain(conversation_id, user_message["id"]))
+    if _current_turn_history_only(context):
+        message_chain = [user_message]
+    else:
+        message_chain = store.get_message_chain(conversation_id, user_message["id"])
+    standard_messages = convert_to_standard(message_chain)
     model = str((conversation or {}).get("model") or "stub/default")
     request_id = gen_id()
 
@@ -191,6 +195,18 @@ def prepare_chat_run(input_data: dict[str, Any], context: dict[str, Any] | None 
         connected_tool_names=connected_names,
         call_handler=request_context.get("call_handler"),
     )
+
+
+def _current_turn_history_only(context: dict[str, Any] | None) -> bool:
+    if not isinstance(context, dict):
+        return False
+    mode = str(
+        context.get("chat_history_mode")
+        or context.get("external_chat_history_mode")
+        or context.get("history_mode")
+        or ""
+    ).strip().lower()
+    return mode in {"current_turn", "current_message", "stateless", "none"}
 
 
 def prefocus_computer_use_target_window(prepared: PreparedChatRun) -> Any:

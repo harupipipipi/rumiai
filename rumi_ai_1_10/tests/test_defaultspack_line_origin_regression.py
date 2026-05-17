@@ -5,6 +5,8 @@ import hashlib
 import hmac
 import json
 import sys
+import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -273,11 +275,172 @@ def test_line_route_builds_line_biz_prompt_from_chat_url(monkeypatch, tmp_path):
     assert "active_window" in captured["context"]["external_prompt_prefix"]
     assert "visible desktop Chrome window" in captured["context"]["external_prompt_prefix"]
     assert "external source message below is already the customer message" in captured["context"]["external_prompt_prefix"]
+    assert "Treat the visible LINE Biz chat history only as the destination UI" in captured["context"]["external_prompt_prefix"]
+    assert "reply exactly with some text" in captured["context"]["external_prompt_prefix"]
     assert "large red circular reply button" in captured["context"]["external_prompt_prefix"]
+    assert "physical=true" in captured["context"]["external_prompt_prefix"]
+    assert "will not open the composer or press Send" in captured["context"]["external_prompt_prefix"]
+    assert "Do not use Ctrl+A" in captured["context"]["external_prompt_prefix"]
+    assert "do not type it again" in captured["context"]["external_prompt_prefix"]
+    assert "not the small dropdown arrow" in captured["context"]["external_prompt_prefix"]
+    assert "Do not keep scrolling through the transcript repeatedly" in captured["context"]["external_prompt_prefix"]
     assert captured["context"]["computer_use_target_app"] == "Google Chrome"
-    assert captured["context"]["computer_use_target_title"] == "LINE"
+    assert captured["context"]["computer_use_target_title"] == "LINE Chat"
+    assert captured["context"]["computer_use_physical_clicks"] is True
+    assert captured["context"]["computer_use_reply_surface"] == "line_biz"
     assert captured["context"]["user_requested_computer_use"] is True
+    assert captured["context"]["external_chat_history_mode"] == "current_turn"
     assert captured["context"]["response_prompt_decision"]["action"] == "store_only"
+
+
+def test_line_biz_context_defaults_clicks_to_physical():
+    from domain.tool.executor import _computer_use_payload_with_context_defaults  # noqa: E402
+
+    payload = _computer_use_payload_with_context_defaults(
+        "computer.click",
+        {"x": 100, "y": 200},
+        {
+            "computer_use_target_app": "Google Chrome",
+            "computer_use_target_title": "LINE",
+            "computer_use_physical_clicks": True,
+        },
+    )
+
+    assert payload["app"] == "Google Chrome"
+    assert payload["title"] == "LINE"
+    assert payload["physical"] is True
+
+
+def test_line_biz_context_preserves_explicit_virtual_click():
+    from domain.tool.executor import _computer_use_payload_with_context_defaults  # noqa: E402
+
+    payload = _computer_use_payload_with_context_defaults(
+        "computer.click",
+        {"x": 100, "y": 200, "physical": False},
+        {
+            "computer_use_target_app": "Google Chrome",
+            "computer_use_target_title": "LINE",
+            "computer_use_physical_clicks": True,
+        },
+    )
+
+    assert payload["physical"] is False
+
+
+def test_line_computer_use_background_processing_is_opt_in(monkeypatch, tmp_path):
+    from blocks.integrations import line as line_block  # noqa: E402
+
+    _install_line_endpoint(
+        monkeypatch,
+        tmp_path,
+        enabled=True,
+        input_profile_id="line.computer_use",
+        conversation={"strategy": "external_key", "model": "google/gemma-4-31b-it"},
+        response={
+            "mode": "computer_use_line_biz",
+            "background_processing": True,
+            "line_biz_chat_url": "https://chat.line.biz/Uaccount/chat/Cchat",
+        },
+    )
+    monkeypatch.setattr(line_block.AudiencePolicyRegistry, "resolve", lambda self, policy_id, event=None: {"default": "allow"})
+    started = threading.Event()
+    release = threading.Event()
+    finished = threading.Event()
+    captured: dict[str, Any] = {}
+
+    def fake_dispatch(event, *, input_profile_id, audience_policy, audience_decision, context, send_response, mentioned=False):
+        started.set()
+        release.wait(timeout=5)
+        captured["input_profile_id"] = input_profile_id
+        captured["context"] = context
+        captured["send_response"] = send_response
+        finished.set()
+        return {
+            "status": "ok",
+            "assistant_text": "done",
+            "response_plan": {
+                "provider": "line",
+                "messages": [],
+                "metadata": {"response_action_plan": {"type": "store_only", "external_reply": False}},
+            },
+        }
+
+    monkeypatch.setattr(line_block, "dispatch_external_event", fake_dispatch)
+    monkeypatch.setattr(LineResponseAdapter, "send", lambda self, plan, event=None, context=None: {"sent": False})
+    payload = {
+        "destination": "Udestination",
+        "events": [
+            {
+                "type": "message",
+                "mode": "active",
+                "webhookEventId": "evt-bg",
+                "replyToken": "reply-1",
+                "source": {"type": "user", "userId": "Uactor"},
+                "message": {"id": "m1", "type": "text", "text": "hello"},
+            }
+        ],
+    }
+
+    start = time.monotonic()
+    result = line_block.run(_signed_line_payload(payload), {})
+    elapsed = time.monotonic() - start
+
+    event_result = result["data"]["events"][0]
+    assert elapsed < 1
+    assert event_result["status"] == "accepted"
+    assert event_result["background_processing"] is True
+    assert event_result["event_id"] == "evt-bg"
+    assert event_result["reply"] == {"sent": False, "reason": "LINE event accepted for background processing"}
+    assert started.wait(timeout=2)
+    release.set()
+    assert finished.wait(timeout=2)
+    assert captured["input_profile_id"] == "line.computer_use"
+    assert captured["send_response"] is True
+    assert captured["context"]["line_background_processing"] is True
+    assert captured["context"]["user_requested_computer_use"] is True
+
+
+def test_line_background_processing_flag_does_not_affect_normal_line_mode(monkeypatch, tmp_path):
+    from blocks.integrations import line as line_block  # noqa: E402
+
+    _install_line_endpoint(
+        monkeypatch,
+        tmp_path,
+        enabled=True,
+        response={"mode": "same_response", "background_processing": True},
+    )
+    monkeypatch.setattr(line_block.AudiencePolicyRegistry, "resolve", lambda self, policy_id, event=None: {"default": "allow"})
+    captured: dict[str, Any] = {}
+
+    def fake_dispatch(event, *, input_profile_id, audience_policy, audience_decision, context, send_response, mentioned=False):
+        captured["called"] = True
+        return {
+            "status": "ok",
+            "assistant_text": "done",
+            "response_plan": {"provider": "line", "messages": [{"type": "text", "text": "done"}]},
+        }
+
+    monkeypatch.setattr(line_block, "dispatch_external_event", fake_dispatch)
+    monkeypatch.setattr(LineResponseAdapter, "send", lambda self, plan, event=None, context=None: {"sent": True})
+    payload = {
+        "destination": "Udestination",
+        "events": [
+            {
+                "type": "message",
+                "mode": "active",
+                "webhookEventId": "evt-sync",
+                "replyToken": "reply-1",
+                "source": {"type": "user", "userId": "Uactor"},
+                "message": {"id": "m1", "type": "text", "text": "hello"},
+            }
+        ],
+    }
+
+    result = line_block.run(_signed_line_payload(payload), {})
+
+    assert captured["called"] is True
+    assert result["data"]["events"][0]["status"] == "ok"
+    assert "background_processing" not in result["data"]["events"][0]
 
 
 def test_line_computer_use_group_message_requires_bot_mention(monkeypatch, tmp_path):

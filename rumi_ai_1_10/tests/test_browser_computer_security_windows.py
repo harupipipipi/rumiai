@@ -212,3 +212,32 @@ def test_windows_drag_steps_and_scrolls_at_point(tmp_path, monkeypatch):
     assert "Start-Sleep -Milliseconds 15" in scripts[0]
     assert "New-Object System.Drawing.Point(45, 55)" in scripts[1]
     assert "mouse_event(0x0800, 0, 0, -240" in scripts[1]
+
+
+def test_windows_focus_window_uses_foreground_api(tmp_path, monkeypatch):
+    from ecosystem.rumi_default_tools_pack.domain.tool import browser_computer
+
+    controller = _controller(tmp_path)
+    scripts = []
+    monkeypatch.setattr(browser_computer.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(controller, "_run_powershell", scripts.append)
+
+    controller._focus_window({"app": "chrome", "title": "LINE Chat - Google Chrome", "window_id": 1234})
+
+    assert scripts
+    assert "ShowWindowAsync($hwnd, 9)" in scripts[0]
+    assert "SetForegroundWindow($hwnd)" in scripts[0]
+    assert "$hwnd = [IntPtr]1234" in scripts[0]
+
+
+def test_windows_window_listing_is_dpi_aware(tmp_path, monkeypatch):
+    from ecosystem.rumi_default_tools_pack.domain.tool import browser_computer
+
+    controller = _controller(tmp_path)
+    scripts = []
+    monkeypatch.setattr(browser_computer.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(controller, "_run_powershell_capture", lambda script: scripts.append(script) or "[]")
+
+    assert controller._windows_windows() == []
+    assert scripts
+    assert "SetProcessDPIAware" in scripts[0]

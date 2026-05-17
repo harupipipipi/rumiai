@@ -158,6 +158,48 @@ class TestDefaultspackGoogleProvider(unittest.TestCase):
         self.assertEqual(len(calls), 3)
         self.assertEqual([call.args[0] for call in sleep.call_args_list], [0.5, 1.0])
 
+    def test_google_native_request_respects_request_timeout_param(self):
+        from domain.ai_client.providers.google_provider import GoogleProvider
+
+        captured = {}
+
+        with patch.dict(os.environ, {"GEMINI_API_KEY": "gemini-key"}, clear=True):
+            provider = GoogleProvider()
+
+        class FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self):
+                return json.dumps(
+                    {
+                        "candidates": [
+                            {
+                                "content": {"parts": [{"text": "ok"}]},
+                                "finishReason": "STOP",
+                            }
+                        ]
+                    }
+                ).encode("utf-8")
+
+        def fake_urlopen(request, context=None, timeout=None):
+            captured["timeout"] = timeout
+            return FakeResponse()
+
+        with patch("domain.ai_client.providers.google_provider.urllib.request.urlopen", fake_urlopen):
+            response = provider.complete(
+                "gemma-4-31b-it",
+                [{"role": "user", "content": "hello"}],
+                [],
+                {"request_timeout": 17},
+            )
+
+        self.assertEqual(captured["timeout"], 17.0)
+        self.assertEqual(response["content"][0]["text"], "ok")
+
     def test_google_openai_compatible_request_retries_transient_backend_errors(self):
         from domain.ai_client.providers.google_provider import GoogleProvider
 
@@ -430,7 +472,7 @@ class TestDefaultspackGoogleProvider(unittest.TestCase):
                     }
                 ).encode("utf-8")
 
-        def fake_native_request_json(model, body, stream=False):
+        def fake_native_request_json(model, body, stream=False, **kwargs):
             captured["model"] = model
             captured["body"] = body
             captured["stream"] = stream
@@ -483,7 +525,7 @@ class TestDefaultspackGoogleProvider(unittest.TestCase):
                     }
                 ).encode("utf-8")
 
-        def fake_native_request_json(model, body, stream=False):
+        def fake_native_request_json(model, body, stream=False, **kwargs):
             captured["model"] = model
             captured["body"] = body
             captured["stream"] = stream
@@ -537,7 +579,7 @@ class TestDefaultspackGoogleProvider(unittest.TestCase):
                     }
                 ).encode("utf-8")
 
-        def fake_native_request_json(model, body, stream=False):
+        def fake_native_request_json(model, body, stream=False, **kwargs):
             captured["body"] = body
             return FakeResponse()
 
@@ -625,7 +667,7 @@ class TestDefaultspackGoogleProvider(unittest.TestCase):
                     }
                 ).encode("utf-8")
 
-        def fake_native_request_json(model, body, stream=False):
+        def fake_native_request_json(model, body, stream=False, **kwargs):
             captured["body"] = body
             return FakeResponse()
 

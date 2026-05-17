@@ -542,7 +542,24 @@ class GoogleProvider(OpenAICompatibleProvider):
                     body[key] = value
         return body
 
-    def _native_request_json(self, model: str, body: Dict[str, Any], *, stream: bool = False):
+    @staticmethod
+    def _request_timeout(params: Dict[str, Any] | None = None) -> float:
+        params = params if isinstance(params, dict) else {}
+        raw = params.get("request_timeout") or params.get("timeout")
+        try:
+            value = float(raw)
+        except (TypeError, ValueError):
+            value = 120.0
+        return max(5.0, min(value, 120.0))
+
+    def _native_request_json(
+        self,
+        model: str,
+        body: Dict[str, Any],
+        *,
+        stream: bool = False,
+        timeout: float | None = None,
+    ):
         self._ensure_runtime_config()
         action = "streamGenerateContent" if stream else "generateContent"
         quoted_model = urllib.parse.quote(str(model), safe="")
@@ -557,10 +574,11 @@ class GoogleProvider(OpenAICompatibleProvider):
         elif bearer_token:
             headers["Authorization"] = "Bearer " + bearer_token
         max_attempts = 4
+        request_timeout = self._request_timeout({"request_timeout": timeout} if timeout is not None else None)
         for attempt in range(max_attempts):
             req = urllib.request.Request(url, data=data, headers=headers, method="POST")
             try:
-                return urllib.request.urlopen(req, context=self._ssl_ctx, timeout=120)
+                return urllib.request.urlopen(req, context=self._ssl_ctx, timeout=request_timeout)
             except urllib.error.HTTPError as exc:
                 err_body = exc.read().decode("utf-8", errors="replace")
                 if exc.code in {500, 503} and attempt < max_attempts - 1:
@@ -666,7 +684,7 @@ class GoogleProvider(OpenAICompatibleProvider):
     def _native_complete(self, model, messages, tools, params):
         name_map, reverse_name_map = self._tool_name_maps(tools)
         body = self._native_body(model, messages, tools, dict(params or {}), name_map)
-        with self._native_request_json(model, body) as resp:
+        with self._native_request_json(model, body, timeout=self._request_timeout(params)) as resp:
             raw = json.loads(resp.read().decode("utf-8"))
         text, thought, finish_reason, tool_uses = self._native_extract_parts(raw, reverse_name_map)
         content = [{"type": "text", "text": text}]
@@ -689,7 +707,7 @@ class GoogleProvider(OpenAICompatibleProvider):
     def _native_stream(self, model, messages, tools, params):
         name_map, reverse_name_map = self._tool_name_maps(tools)
         body = self._native_body(model, messages, tools, dict(params or {}), name_map)
-        resp = self._native_request_json(model, body, stream=True)
+        resp = self._native_request_json(model, body, stream=True, timeout=self._request_timeout(params))
         finish_reason = "stop"
         usage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
         try:
