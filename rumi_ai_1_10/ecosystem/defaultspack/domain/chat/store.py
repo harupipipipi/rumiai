@@ -176,40 +176,41 @@ class ChatStore:
         metadata=None,
         group_id=None,
     ):
-        cid = _gen_id()
-        now = _now_ms()
-        parent_id = str(parent_conversation_id) if parent_conversation_id else None
-        conv = {
-            "id": cid,
-            "title": "New Conversation",
-            "created_at": now,
-            "updated_at": now,
-            "model": model if model else _default_conversation_model(),
-            "system_prompt_id": system_prompt_id,
-            "agent_id": agent_id,
-            "tags": tags if tags is not None else [],
-            "is_starred": False,
-            "is_pinned": False,
-            "pinned_at": None,
-            "pin_scope": "global",
-            "is_archived": False,
-            "current_node_id": None,
-            "parent_conversation_id": parent_id,
-            "child_conversation_ids": [],
-            "conversation_kind": conversation_kind or ("subagent" if parent_id else "chat"),
-            "group_id": group_id,
-            "metadata": metadata if isinstance(metadata, dict) else {},
-            "messages": [],
-        }
-        self._conversations[cid] = conv
-        if parent_id and parent_id in self._conversations:
-            parent = self._conversations[parent_id]
-            self._normalize_conversation(parent_id, parent)
-            if cid not in parent["child_conversation_ids"]:
-                parent["child_conversation_ids"].append(cid)
-            parent["updated_at"] = now
-        self._save_conversations()
-        return copy.deepcopy(conv)
+        with self._lock:
+            cid = _gen_id()
+            now = _now_ms()
+            parent_id = str(parent_conversation_id) if parent_conversation_id else None
+            conv = {
+                "id": cid,
+                "title": "New Conversation",
+                "created_at": now,
+                "updated_at": now,
+                "model": model if model else _default_conversation_model(),
+                "system_prompt_id": system_prompt_id,
+                "agent_id": agent_id,
+                "tags": tags if tags is not None else [],
+                "is_starred": False,
+                "is_pinned": False,
+                "pinned_at": None,
+                "pin_scope": "global",
+                "is_archived": False,
+                "current_node_id": None,
+                "parent_conversation_id": parent_id,
+                "child_conversation_ids": [],
+                "conversation_kind": conversation_kind or ("subagent" if parent_id else "chat"),
+                "group_id": group_id,
+                "metadata": metadata if isinstance(metadata, dict) else {},
+                "messages": [],
+            }
+            self._conversations[cid] = conv
+            if parent_id and parent_id in self._conversations:
+                parent = self._conversations[parent_id]
+                self._normalize_conversation(parent_id, parent)
+                if cid not in parent["child_conversation_ids"]:
+                    parent["child_conversation_ids"].append(cid)
+                parent["updated_at"] = now
+            self._save_conversations()
+            return copy.deepcopy(conv)
 
     def get_conversation(self, conversation_id):
         conv = self._conversations.get(conversation_id)
@@ -279,60 +280,62 @@ class ChatStore:
         return copy.deepcopy(conv)
 
     def delete_conversation(self, conversation_id):
-        if conversation_id in self._conversations:
-            conv = self._conversations[conversation_id]
-            parent_id = conv.get("parent_conversation_id") if isinstance(conv, dict) else None
-            if parent_id in self._conversations:
-                parent = self._conversations[parent_id]
-                child_ids = parent.get("child_conversation_ids", [])
-                if isinstance(child_ids, list):
-                    parent["child_conversation_ids"] = [cid for cid in child_ids if cid != conversation_id]
-                    parent["updated_at"] = _now_ms()
-            for candidate in self._conversations.values():
-                if isinstance(candidate, dict) and candidate.get("parent_conversation_id") == conversation_id:
-                    candidate["parent_conversation_id"] = None
-            del self._conversations[conversation_id]
-            self._save_conversations()
-            return True
-        return False
+        with self._lock:
+            if conversation_id in self._conversations:
+                conv = self._conversations[conversation_id]
+                parent_id = conv.get("parent_conversation_id") if isinstance(conv, dict) else None
+                if parent_id in self._conversations:
+                    parent = self._conversations[parent_id]
+                    child_ids = parent.get("child_conversation_ids", [])
+                    if isinstance(child_ids, list):
+                        parent["child_conversation_ids"] = [cid for cid in child_ids if cid != conversation_id]
+                        parent["updated_at"] = _now_ms()
+                for candidate in self._conversations.values():
+                    if isinstance(candidate, dict) and candidate.get("parent_conversation_id") == conversation_id:
+                        candidate["parent_conversation_id"] = None
+                del self._conversations[conversation_id]
+                self._save_conversations()
+                return True
+            return False
 
     # ----------------------------------------------------------
     # Message CRUD
     # ----------------------------------------------------------
     def add_message(self, conversation_id, message_dict):
-        conv = self._conversations.get(conversation_id)
-        if conv is None:
-            return None
-        msg = copy.deepcopy(message_dict)
-        if "id" not in msg or msg["id"] is None:
-            msg["id"] = _gen_id()
-        msg["conversation_id"] = conversation_id
-        if "parent_id" not in msg or msg["parent_id"] is None:
-            msg["parent_id"] = conv["current_node_id"]
-        if "children_ids" not in msg:
-            msg["children_ids"] = []
-        if "sequence_number" not in msg or msg["sequence_number"] is None:
-            msg["sequence_number"] = len(conv["messages"]) + 1
-        if "created_at" not in msg or msg["created_at"] is None:
-            msg["created_at"] = _now_ms()
-        if "raw_text" not in msg or msg["raw_text"] is None:
-            msg["raw_text"] = self._extract_raw_text(msg.get("content", []))
-        for field in ("finish_reason", "usage", "widget", "metadata", "events", "tool_logs"):
-            if field not in msg:
-                msg[field] = None
-        parent_id = msg["parent_id"]
-        if parent_id is not None:
-            for m in conv["messages"]:
-                if m["id"] == parent_id:
-                    if msg["id"] not in m["children_ids"]:
-                        m["children_ids"].append(msg["id"])
-                    break
-        conv["messages"].append(msg)
-        conv["current_node_id"] = msg["id"]
-        conv["updated_at"] = _now_ms()
-        self._save_conversations()
-        self._persist_message_artifacts(conversation_id, msg)
-        return copy.deepcopy(msg)
+        with self._lock:
+            conv = self._conversations.get(conversation_id)
+            if conv is None:
+                return None
+            msg = copy.deepcopy(message_dict)
+            if "id" not in msg or msg["id"] is None:
+                msg["id"] = _gen_id()
+            msg["conversation_id"] = conversation_id
+            if "parent_id" not in msg or msg["parent_id"] is None:
+                msg["parent_id"] = conv["current_node_id"]
+            if "children_ids" not in msg:
+                msg["children_ids"] = []
+            if "sequence_number" not in msg or msg["sequence_number"] is None:
+                msg["sequence_number"] = len(conv["messages"]) + 1
+            if "created_at" not in msg or msg["created_at"] is None:
+                msg["created_at"] = _now_ms()
+            if "raw_text" not in msg or msg["raw_text"] is None:
+                msg["raw_text"] = self._extract_raw_text(msg.get("content", []))
+            for field in ("finish_reason", "usage", "widget", "metadata", "events", "tool_logs"):
+                if field not in msg:
+                    msg[field] = None
+            parent_id = msg["parent_id"]
+            if parent_id is not None:
+                for m in conv["messages"]:
+                    if m["id"] == parent_id:
+                        if msg["id"] not in m["children_ids"]:
+                            m["children_ids"].append(msg["id"])
+                        break
+            conv["messages"].append(msg)
+            conv["current_node_id"] = msg["id"]
+            conv["updated_at"] = _now_ms()
+            self._save_conversations()
+            self._persist_message_artifacts(conversation_id, msg)
+            return copy.deepcopy(msg)
 
     def get_message(self, conversation_id, message_id):
         conv = self._conversations.get(conversation_id)

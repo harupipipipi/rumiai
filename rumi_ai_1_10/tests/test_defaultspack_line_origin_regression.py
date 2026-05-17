@@ -233,6 +233,104 @@ def test_line_computer_use_fake_receive_acknowledges_and_preserves_japanese_prom
     assert captured["context"]["computer_use_target_title"] == "LINE Chat"
 
 
+def test_line_computer_use_fake_webhook_runs_three_browser_tasks_and_acknowledges(monkeypatch, tmp_path):
+    from blocks.integrations import line as line_block  # noqa: E402
+    from blocks.chat import send as chat_send  # noqa: E402
+
+    chat_url = "https://chat.line.biz/Uaccount/chat/Cchat"
+    _install_line_endpoint(
+        monkeypatch,
+        tmp_path,
+        enabled=True,
+        input_profile_id="line.computer_use",
+        conversation={
+            "strategy": "external_key",
+            "model": "gitlawb-opengateway/google/gemini-3.1-flash-lite-preview",
+        },
+        response={
+            "mode": "computer_use_line_biz",
+            "line_biz_chat_url": chat_url,
+            "auto_approve_computer_use": True,
+            "background_processing": True,
+        },
+    )
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_INTEGRATIONS_STORE_PATH", str(tmp_path / "integrations" / "conversations.json"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_INTEGRATIONS_LOCKS_DIR", str(tmp_path / "integrations" / "event_locks"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(tmp_path / "chat" / "conversations.json"))
+    monkeypatch.setenv("LINE_CHANNEL_ACCESS_TOKEN", "line-access-token")
+    monkeypatch.setattr(line_block.AudiencePolicyRegistry, "resolve", lambda self, policy_id, event=None: {"default": "allow"})
+
+    captured_invocations: list[tuple[dict[str, Any], dict[str, Any]]] = []
+    captured_lock = threading.Lock()
+    completed = threading.Event()
+
+    def fake_send_run(request, context):
+        with captured_lock:
+            captured_invocations.append((request, context))
+            if len(captured_invocations) >= 3:
+                completed.set()
+        return {
+            "status": "ok",
+            "data": {
+                "id": f"assistant-{len(captured_invocations)}",
+                "content": [{"type": "text", "text": "LINE Biz reply sent"}],
+            },
+        }
+
+    line_calls: list[dict[str, Any]] = []
+    monkeypatch.setattr(chat_send, "run", fake_send_run)
+    monkeypatch.setattr(
+        line_adapter_module,
+        "post_json",
+        lambda url, headers, body: line_calls.append({"url": url, "headers": headers, "body": body}) or {"ok": True},
+    )
+    tasks = [
+        "\u0059\u006f\u0075\u0054\u0075\u0062\u0065 \u004d\u0075\u0073\u0069\u0063\u3067\u004c\u006f\u0066\u0069 \u0047\u0069\u0072\u006c\u3092\u6d41\u3057\u3066",
+        "\u0047\u0065\u006d\u0069\u006e\u0069\u3067\u65e5\u5e38\u4f1a\u8a71\u3092\u3057\u3066",
+        "\u0058\u3092\u898b\u3066\u30a4\u30f3\u30bf\u30fc\u30cd\u30c3\u30c8\u306b\u89e6\u308c\u3066",
+    ]
+
+    payload = {
+        "destination": "Udestination",
+        "events": [
+            {
+                "type": "message",
+                "mode": "active",
+                "webhookEventId": f"evt-three-tasks-{index}",
+                "replyToken": f"reply-three-tasks-{index}",
+                "source": {"type": "user", "userId": "Uactor"},
+                "message": {"id": f"m-{index}", "type": "text", "text": task},
+            }
+            for index, task in enumerate(tasks, start=1)
+        ],
+    }
+
+    result = line_block.run(_signed_line_payload(payload), {})
+
+    assert result["status"] == "ok"
+    assert [event["status"] for event in result["data"]["events"]] == ["accepted", "accepted", "accepted"]
+    assert [event["acknowledgement"]["text"] for event in result["data"]["events"]] == ["\u5c4a\u3044\u305f\u3088\uff01"] * 3
+    assert completed.wait(timeout=2)
+    assert len(captured_invocations) == 3
+    assert len(line_calls) == 3
+    assert [call["body"]["messages"][0]["text"] for call in line_calls] == ["\u5c4a\u3044\u305f\u3088\uff01"] * 3
+    captured_contents = [request["message"]["content"] for request, _context in captured_invocations]
+    for task in tasks:
+        assert any(task in content for content in captured_contents)
+    for request, context in captured_invocations:
+        user_content = request["message"]["content"]
+        assert chat_url in user_content
+        assert request["params"]["retry"]["max_attempts"] == 5
+        assert request["params"]["retry"]["delays"] == [5, 15, 30, 60]
+        assert request["params"]["thinking_level"] == "high"
+        assert request["tools"] == ["computer_use", "browser_computer"]
+        assert context["computer_use_target_app"] == "Google Chrome"
+        assert context["computer_use_target_title"] == "LINE Chat"
+        assert context["line_background_processing"] is True
+        assert context["profile_policy"]["max_tool_calls"] == 30
+        assert context["profile_policy"]["yolo_mode"] is True
+
+
 def test_line_route_does_not_acknowledge_normal_line_reply_mode(monkeypatch, tmp_path):
     from blocks.integrations import line as line_block  # noqa: E402
 
