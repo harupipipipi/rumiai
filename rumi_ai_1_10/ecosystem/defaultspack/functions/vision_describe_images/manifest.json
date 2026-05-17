@@ -1,0 +1,44 @@
+{
+  "function_id": "vision_describe_images",
+  "description": "Describe attached images for non-vision models.",
+  "tags": [
+    "vision",
+    "ai"
+  ],
+  "risk": "medium",
+  "requires": [
+    "vision.describe.images"
+  ],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.vision.describe_images",
+    "defaultspack.vision.describe_images",
+    "defaults.vision.describe.images",
+    "defaultspack.vision.describe.images"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.vision.describe_images",
+      "default_args": {}
+    }
+  }
+}
