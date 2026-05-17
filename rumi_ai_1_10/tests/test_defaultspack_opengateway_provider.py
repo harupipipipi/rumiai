@@ -130,6 +130,20 @@ def test_opengateway_list_models_returns_only_allowlist():
     assert {item["id"] for item in provider.list_models()} == OPENGATEWAY_MODELS
 
 
+def test_opengateway_gemini_flash_lite_declares_verified_vision_and_thinking():
+    from domain.ai_client.providers.gitlawb_opengateway_provider import (
+        GitlawbOpengatewayProvider,
+    )
+
+    provider = GitlawbOpengatewayProvider()
+    profiles = {item["id"]: item for item in provider.list_models()}
+    gemini = profiles["gitlawb-opengateway/google/gemini-3.1-flash-lite-preview"]
+
+    assert "vision" in gemini["capabilities"]
+    assert gemini["supports_thinking"] is True
+    assert gemini["default_thinking_level"] == "high"
+
+
 def test_opengateway_rejects_non_allowlisted_models():
     from domain.ai_client.providers.gitlawb_opengateway_provider import (
         GitlawbOpengatewayProvider,
@@ -213,3 +227,13 @@ def test_opengateway_credential_required_false_allows_no_api_key():
 
     assert provider._credential_required is False
     assert "Authorization" not in provider._headers()
+
+
+def test_opengateway_uses_browser_user_agent_for_gateway_compatibility():
+    from domain.ai_client.providers.gitlawb_opengateway_provider import (
+        GitlawbOpengatewayProvider,
+    )
+
+    provider = GitlawbOpengatewayProvider()
+
+    assert provider._headers()["User-Agent"].startswith("Mozilla/5.0")

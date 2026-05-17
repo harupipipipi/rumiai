@@ -13,6 +13,11 @@
     "fast": true
   },
   "capabilities": {
-    "streaming": true
-  }
+    "streaming": true,
+    "vision": true,
+    "reasoning": true
+  },
+  "supports_thinking": true,
+  "thinking_levels": ["low", "medium", "high"],
+  "default_thinking_level": "high"
 }

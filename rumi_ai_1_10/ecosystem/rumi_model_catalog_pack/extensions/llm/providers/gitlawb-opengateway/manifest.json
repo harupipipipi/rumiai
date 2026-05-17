@@ -19,7 +19,7 @@
   },
   "capabilities": {
     "native_tool_calling": false,
-    "vision": false,
+    "vision": true,
     "embeddings": false,
     "streaming": true
   },

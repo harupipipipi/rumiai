@@ -8,6 +8,10 @@ from .openai_compatible_provider import OpenAICompatibleProvider
 class GitlawbOpengatewayProvider(OpenAICompatibleProvider):
     """Gitlawb OpenGateway provider limited to the Rumi-approved allowlist."""
 
+    DEFAULT_USER_AGENT = (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 Chrome/124 Safari/537.36"
+    )
     MODEL_IDS = {
         "mimo-v2.5-pro",
         "mimo-v2-flash",
@@ -56,10 +60,14 @@ class GitlawbOpengatewayProvider(OpenAICompatibleProvider):
             "provider_id": "gitlawb-opengateway",
             "type": "chat",
             "defaults": {"chat": True, "fast": True},
-            "capabilities": ["chat", "streaming"],
+            "capabilities": ["chat", "streaming", "vision", "reasoning"],
+            "supports_thinking": True,
+            "thinking_levels": ["low", "medium", "high"],
+            "default_thinking_level": "high",
             "metadata": {
                 "source": "gitlawb-opengateway",
                 "privacy": "external_no_key_gateway",
+                "vision_verified": True,
             },
         },
     ]
@@ -73,6 +81,7 @@ class GitlawbOpengatewayProvider(OpenAICompatibleProvider):
             default_base_url="https://opengateway.gitlawb.com/v1",
             credential_required=False,
             known_models=self.KNOWN_MODELS,
+            extra_headers={"User-Agent": self.DEFAULT_USER_AGENT},
         )
 
     @classmethod

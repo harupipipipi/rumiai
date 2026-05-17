@@ -172,7 +172,7 @@ _CURATED_PROVIDER_METADATA: Dict[str, Dict[str, Any]] = {
             "reasoning": "mimo-v2.5-pro",
             "fast": "mimo-v2-flash",
         },
-        "capabilities": ["chat", "streaming", "openai_compatible", "reasoning"],
+        "capabilities": ["chat", "streaming", "openai_compatible", "reasoning", "vision"],
     },
     "deepseek": {
         "display_name": "DeepSeek",
@@ -346,6 +346,10 @@ _CURATED_PROVIDER_MODELS: Dict[str, List[Dict[str, Any]]] = {
             "model_id": "google/gemini-3.1-flash-lite-preview",
             "name": "Gemini 3.1 Flash Lite Preview via Gitlawb OpenGateway",
             "type": "chat",
+            "capabilities": ["chat", "streaming", "vision", "reasoning"],
+            "supports_thinking": True,
+            "thinking_levels": ["low", "medium", "high"],
+            "default_thinking_level": "high",
         },
     ],
     "deepseek": [

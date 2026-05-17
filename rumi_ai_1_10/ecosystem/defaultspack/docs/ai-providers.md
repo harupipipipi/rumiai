@@ -75,6 +75,8 @@ GITLAWB_OPENGATEWAY_BASE_URL=https://opengateway.gitlawb.com/v1
 | `gitlawb-opengateway/mimo-v2-flash` | 高速な MiMo V2 Flash |
 | `gitlawb-opengateway/google/gemini-3.1-flash-lite-preview` | 高速な Gemini 3.1 Flash Lite Preview |
 
+`gitlawb-opengateway/google/gemini-3.1-flash-lite-preview` supports high thinking and verified image input through this gateway. The runtime sends a browser User-Agent for gateway compatibility.
+
 警告: この provider を選択すると、プロンプト、会話履歴、tool結果などのコンテキストが Gitlawb OpenGateway に送信される。
 
 ### stub
