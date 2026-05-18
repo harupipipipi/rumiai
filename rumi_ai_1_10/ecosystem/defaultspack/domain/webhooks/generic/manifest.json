@@ -1,0 +1,40 @@
+{
+  "id": "generic",
+  "category": "webhooks",
+  "kind": "connector_defaults",
+  "version": "1",
+  "status": "stable",
+  "order": 40,
+  "display_name": "Generic Webhook Defaults",
+  "aliases": {
+    "endpoint_ids": ["test-webhook"],
+    "profile_ids": ["generic.webhook.default"]
+  },
+  "profiles": ["generic.webhook.default"],
+  "security": {
+    "default": {
+      "mode": "shared_secret",
+      "header": "x-rumi-webhook-token"
+    }
+  },
+  "defaults": {
+    "endpoint_id": "test-webhook",
+    "endpoint": {
+      "id": "test-webhook",
+      "kind": "generic",
+      "input_profile_id": "generic.webhook.default",
+      "security": {
+        "mode": "shared_secret",
+        "header": "x-rumi-webhook-token"
+      },
+      "response": {
+        "mode": "json"
+      },
+      "enabled": false
+    }
+  },
+  "compatibility": {
+    "legacy_ids": ["test-webhook", "generic.webhook.default"]
+  },
+  "source_pack_id": "defaultspack"
+}

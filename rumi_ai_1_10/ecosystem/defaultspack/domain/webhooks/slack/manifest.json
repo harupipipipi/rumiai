@@ -1,0 +1,45 @@
+{
+  "id": "slack",
+  "category": "webhooks",
+  "kind": "connector_defaults",
+  "version": "1",
+  "status": "stable",
+  "order": 30,
+  "display_name": "Slack Webhook Defaults",
+  "aliases": {
+    "endpoint_ids": ["slack-main"],
+    "profile_ids": ["slack.default"],
+    "policy_ids": ["slack.production"]
+  },
+  "profiles": ["slack.default"],
+  "security": {
+    "default": {
+      "mode": "provider_signature"
+    }
+  },
+  "policy": {
+    "audience_policy_id": "slack.production"
+  },
+  "defaults": {
+    "endpoint_id": "slack-main",
+    "endpoint": {
+      "id": "slack-main",
+      "kind": "slack",
+      "input_profile_id": "slack.default",
+      "audience_policy_id": "slack.production",
+      "response_profile_id": "slack.default",
+      "security": {
+        "mode": "provider_signature"
+      },
+      "conversation": {
+        "strategy": "external_key",
+        "model": "google/gemini-2.5-pro"
+      },
+      "enabled": false
+    }
+  },
+  "compatibility": {
+    "legacy_ids": ["slack-main", "slack.default", "slack.production"]
+  },
+  "source_pack_id": "defaultspack"
+}

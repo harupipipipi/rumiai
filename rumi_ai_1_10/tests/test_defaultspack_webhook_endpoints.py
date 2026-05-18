@@ -14,6 +14,7 @@ sys.path.insert(0, str(DEFAULTSPACK_ROOT))
 
 from domain.external.token_store import set_external_token  # noqa: E402
 from domain.webhook.endpoint import WebhookEndpoint  # noqa: E402
+from domain.webhook.endpoint_resolver import ProviderEndpointResolver  # noqa: E402
 from domain.webhook.endpoint_store import WebhookEndpointStore  # noqa: E402
 from domain.webhook.inbound import verify_endpoint_security  # noqa: E402
 
@@ -52,6 +53,53 @@ def test_endpoint_store_new_endpoint_defaults_disabled_and_secured():
         assert endpoint["enabled"] is False
         assert endpoint["security"]["mode"] == "shared_secret"
         assert endpoint["security"]["header"] == "x-rumi-webhook-token"
+
+
+def test_default_webhook_endpoints_load_from_component_manifests():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        endpoint_path = Path(tmpdir) / "endpoints.json"
+        store = WebhookEndpointStore(endpoint_path)
+
+        endpoints = {endpoint["id"]: endpoint for endpoint in store.list_endpoints()}
+
+        assert {"line-main", "discord-main", "slack-main", "test-webhook"} <= set(endpoints)
+        assert endpoints["line-main"]["security"]["mode"] == "provider_signature"
+        assert endpoints["discord-main"]["security"]["mode"] == "provider_signature"
+        assert endpoints["slack-main"]["security"]["mode"] == "provider_signature"
+        assert endpoints["test-webhook"]["security"] == {
+            "mode": "shared_secret",
+            "header": "x-rumi-webhook-token",
+        }
+
+
+def test_endpoint_resolver_preserves_legacy_default_ids():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        endpoint_path = Path(tmpdir) / "endpoints.json"
+        store = WebhookEndpointStore(endpoint_path)
+        resolver = ProviderEndpointResolver(store)
+
+        assert resolver.resolve("line").id == "line-main"
+        assert resolver.resolve("discord").id == "discord-main"
+        assert resolver.resolve("slack").id == "slack-main"
+        assert resolver.resolve("generic").id == "test-webhook"
+        assert resolver.resolve("line", {"_endpoint_id": "line-main"}).id == "line-main"
+
+
+def test_endpoint_store_no_longer_owns_connector_defaults():
+    source = (DEFAULTSPACK_ROOT / "domain" / "webhook" / "endpoint_store.py").read_text(encoding="utf-8")
+
+    for forbidden in [
+        "line-main",
+        "discord-main",
+        "slack-main",
+        "line.default",
+        "discord.default",
+        "slack.default",
+        "generic.webhook.default",
+        "provider_signature",
+        "x-rumi-webhook-token",
+    ]:
+        assert forbidden not in source
 
 
 def test_endpoint_as_dict_redacts_inline_secret():
