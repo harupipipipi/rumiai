@@ -34,11 +34,11 @@
       }
     },
     "params": {
-      "thinking_level": "high",
+      "thinking_level": "low",
       "request_timeout": 45,
       "retry": {
-        "max_attempts": 5,
-        "delays": [5, 15, 30, 60]
+        "max_attempts": 2,
+        "delays": [2, 8]
       },
       "external_input": {
         "default_response": {
@@ -50,7 +50,7 @@
     },
     "tools": ["computer_use", "browser_computer"],
     "policy": {
-      "max_tool_calls": 30
+      "max_tool_calls": 6
     },
     "response_prompt": {
       "enabled": true,

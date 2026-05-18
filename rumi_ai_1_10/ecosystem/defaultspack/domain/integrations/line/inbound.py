@@ -6,6 +6,7 @@ import hmac
 import json
 import logging
 import os
+import re
 import threading
 from pathlib import Path
 from typing import Any, Dict
@@ -29,6 +30,19 @@ from domain.webhook.endpoint_resolver import ProviderEndpointResolver
 
 _LOGGER = logging.getLogger(__name__)
 _LINE_WEBHOOK_ACK_TEXT = "\u5c4a\u3044\u305f\u3088\uff01"
+_LINE_EXACT_REPLY_JA_RE = re.compile(
+    r"^(?P<reply>.+?)(?:\s*)(?:って|と)\s*(?:返して|返信して|送って|言って)\s*[!！。.\s]*$",
+    re.DOTALL,
+)
+_LINE_EXACT_REPLY_EN_RE = re.compile(r"reply exactly\s*[:：]\s*(?P<reply>.+)\s*$", re.IGNORECASE | re.DOTALL)
+_LINE_WRAPPING_QUOTES = (
+    ('"', '"'),
+    ("'", "'"),
+    ("\u300c", "\u300d"),
+    ("\u300e", "\u300f"),
+    ("\u201c", "\u201d"),
+    ("\u2018", "\u2019"),
+)
 
 
 def run(input_data, context):
@@ -112,6 +126,19 @@ def _handle_event(
         return _policy_denied_result(external_event, decision)
     acknowledgement = _send_line_webhook_acknowledgement(event, endpoint=endpoint)
     runtime_context.setdefault("line_webhook_acknowledgement", acknowledgement)
+    exact_reply_text = _extract_line_exact_reply_text(event, endpoint=endpoint)
+    if exact_reply_text:
+        shortcut = _dispatch_line_exact_reply(
+            external_event,
+            reply_text=exact_reply_text,
+            input_profile_id=endpoint.input_profile_id,
+            audience_policy=policy,
+            audience_decision=decision,
+            context=runtime_context,
+            mentioned=mentioned,
+        )
+        if shortcut is not None:
+            return _with_line_acknowledgement(shortcut, acknowledgement)
     if _should_process_line_event_in_background(endpoint):
         return _with_line_acknowledgement(_dispatch_line_event_in_background(
             external_event,
@@ -152,6 +179,54 @@ def _dispatch_line_event(
     plan = result.get("response_plan") if isinstance(result.get("response_plan"), dict) else ResponsePlanner("line").plan(RumiResponse.from_result(result))
     reply = _send_response_plan(plan, external_event, context=context)
     return {**result, "reply": reply}
+
+
+def _dispatch_line_exact_reply(
+    external_event,
+    *,
+    reply_text: str,
+    input_profile_id: str,
+    audience_policy: dict[str, Any],
+    audience_decision,
+    context: dict[str, Any],
+    mentioned: bool = False,
+) -> Dict[str, Any] | None:
+    origin = origin_from_external_event(external_event)
+    if not origin.source_id:
+        return None
+    push_result = LineResponseAdapter().send_text_push(origin.source_id, reply_text)
+    if push_result.get("sent") is not True:
+        _LOGGER.warning(
+            "LINE exact reply shortcut failed, falling back to normal flow: %s",
+            push_result.get("reason") or push_result.get("provider_response") or "push failed",
+        )
+        return None
+    shortcut_context = dict(context or {})
+    shortcut_context["call_handler"] = _line_exact_reply_call_handler(
+        reply_text,
+        delegate=shortcut_context.get("call_handler"),
+    )
+    shortcut_context["user_requested_computer_use"] = False
+    shortcut_context.pop("computer_use_target_app", None)
+    shortcut_context.pop("computer_use_target_title", None)
+    result = dispatch_external_event(
+        external_event,
+        input_profile_id=input_profile_id,
+        audience_policy=audience_policy,
+        audience_decision=audience_decision,
+        context=shortcut_context,
+        send_response=True,
+        mentioned=mentioned,
+    )
+    return {
+        **result,
+        "reply": {"sent": False, "reason": "LINE reply token already used for webhook acknowledgement"},
+        "push_reply": push_result,
+        "exact_reply_shortcut": {
+            "matched": True,
+            "reply_text": reply_text,
+        },
+    }
 
 
 def _dispatch_line_event_in_background(
@@ -410,6 +485,65 @@ def _should_process_line_event_in_background(endpoint: WebhookEndpoint) -> bool:
         _truthy(response.get(key))
         for key in ("background_processing", "async_processing", "run_in_background")
     )
+
+
+def _extract_line_exact_reply_text(event: dict[str, Any], *, endpoint: WebhookEndpoint) -> str:
+    response = endpoint.response if isinstance(endpoint.response, dict) else {}
+    mode = str(response.get("mode") or "").strip().lower()
+    if mode != "computer_use_line_biz":
+        return ""
+    message = event.get("message") if isinstance(event.get("message"), dict) else {}
+    if str(message.get("type") or "").strip().lower() != "text":
+        return ""
+    source_text = str(message.get("text") or "").strip()
+    if not source_text:
+        return ""
+    exact_match = _LINE_EXACT_REPLY_EN_RE.search(source_text)
+    if exact_match is not None:
+        return _strip_line_reply_wrapping_quotes(exact_match.group("reply"))
+    ja_match = _LINE_EXACT_REPLY_JA_RE.fullmatch(source_text)
+    if ja_match is None:
+        return ""
+    return _strip_line_reply_wrapping_quotes(ja_match.group("reply"))
+
+
+def _strip_line_reply_wrapping_quotes(text: str) -> str:
+    reply_text = str(text or "").strip()
+    while reply_text:
+        matched = False
+        for left, right in _LINE_WRAPPING_QUOTES:
+            if reply_text.startswith(left) and reply_text.endswith(right):
+                reply_text = reply_text[len(left): len(reply_text) - len(right)].strip()
+                matched = True
+                break
+        if not matched:
+            break
+    return reply_text
+
+
+def _line_exact_reply_call_handler(reply_text: str, *, delegate=None):
+    def handler(name: str, payload: dict[str, Any]) -> dict[str, Any]:
+        if name == "defaults.ai.complete":
+            return {
+                "status": "ok",
+                "data": {
+                    "content": [{"type": "text", "text": reply_text}],
+                    "finish_reason": "stop",
+                    "metadata": {
+                        "line_exact_reply_shortcut": True,
+                    },
+                },
+            }
+        if callable(delegate):
+            return delegate(name, payload)
+        return {
+            "status": "error",
+            "error": {
+                "message": f"LINE exact reply shortcut does not support {name}",
+            },
+        }
+
+    return handler
 
 
 def _line_biz_prompt_prefix(response: dict[str, Any], *, mode: str = "") -> str:

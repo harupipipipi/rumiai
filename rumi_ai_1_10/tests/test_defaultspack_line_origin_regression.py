@@ -161,6 +161,133 @@ def test_line_route_sends_webhook_acknowledgement_when_reply_token_and_access_to
     assert event_result["reply"] == {"sent": False, "reason": "LINE reply token already used for webhook acknowledgement"}
 
 
+def test_line_computer_use_exact_reply_shortcut_pushes_without_provider(monkeypatch, tmp_path):
+    from blocks.integrations import line as line_block  # noqa: E402
+    from domain.chat.store import ChatStore  # noqa: E402
+
+    _install_line_endpoint(
+        monkeypatch,
+        tmp_path,
+        enabled=True,
+        input_profile_id="line.computer_use",
+        conversation={"strategy": "external_key", "model": "google/gemma-4-31b-it"},
+        response={
+            "mode": "computer_use_line_biz",
+            "line_biz_chat_url": "https://chat.line.biz/Uaccount/chat/Cchat",
+            "auto_approve_computer_use": True,
+            "background_processing": False,
+            "require_group_mention": False,
+        },
+    )
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_INTEGRATIONS_STORE_PATH", str(tmp_path / "integrations" / "conversations.json"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_INTEGRATIONS_LOCKS_DIR", str(tmp_path / "integrations" / "event_locks"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(tmp_path / "chat" / "conversations.json"))
+    monkeypatch.setenv("LINE_CHANNEL_ACCESS_TOKEN", "line-access-token")
+    ChatStore._instance = None
+    monkeypatch.setattr(line_block.AudiencePolicyRegistry, "resolve", lambda self, policy_id, event=None: {"default": "allow"})
+
+    calls: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        line_adapter_module,
+        "post_json",
+        lambda url, headers, body: calls.append({"url": url, "headers": headers, "body": body}) or {"ok": True},
+    )
+    payload = {
+        "destination": "Udestination",
+        "events": [
+            {
+                "type": "message",
+                "mode": "active",
+                "webhookEventId": "evt-exact-reply",
+                "replyToken": "reply-exact-reply",
+                "source": {"type": "group", "groupId": "Cgroup", "userId": "Uactor"},
+                "message": {"id": "m1", "type": "text", "text": "helloって返して！"},
+            }
+        ],
+    }
+
+    result = line_block.run(_signed_line_payload(payload), {})
+
+    event_result = result["data"]["events"][0]
+    conversation = ChatStore().get_conversation(event_result["conversation_id"])
+    assistant = conversation["messages"][-1]
+    assert [call["url"] for call in calls] == [
+        "https://api.line.me/v2/bot/message/reply",
+        "https://api.line.me/v2/bot/message/push",
+    ]
+    assert calls[0]["body"]["messages"][0]["text"] == "\u5c4a\u3044\u305f\u3088\uff01"
+    assert calls[1]["body"] == {"to": "Cgroup", "messages": [{"type": "text", "text": "hello"}]}
+    assert event_result["status"] == "ok"
+    assert event_result["assistant_text"] == "hello"
+    assert event_result["reply"] == {"sent": False, "reason": "LINE reply token already used for webhook acknowledgement"}
+    assert event_result["push_reply"]["sent"] is True
+    assert event_result["exact_reply_shortcut"]["reply_text"] == "hello"
+    assert assistant["raw_text"] == "hello"
+    assert conversation["current_node_id"] == assistant["id"]
+
+
+def test_line_computer_use_exact_reply_shortcut_bypasses_background_processing(monkeypatch, tmp_path):
+    from blocks.integrations import line as line_block  # noqa: E402
+    from domain.chat.store import ChatStore  # noqa: E402
+
+    _install_line_endpoint(
+        monkeypatch,
+        tmp_path,
+        enabled=True,
+        input_profile_id="line.computer_use",
+        conversation={"strategy": "external_key", "model": "google/gemma-4-31b-it"},
+        response={
+            "mode": "computer_use_line_biz",
+            "line_biz_chat_url": "https://chat.line.biz/Uaccount/chat/Cchat",
+            "auto_approve_computer_use": True,
+            "background_processing": True,
+            "require_group_mention": False,
+        },
+    )
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_INTEGRATIONS_STORE_PATH", str(tmp_path / "integrations" / "conversations.json"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_INTEGRATIONS_LOCKS_DIR", str(tmp_path / "integrations" / "event_locks"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(tmp_path / "chat" / "conversations.json"))
+    monkeypatch.setenv("LINE_CHANNEL_ACCESS_TOKEN", "line-access-token")
+    ChatStore._instance = None
+    monkeypatch.setattr(line_block.AudiencePolicyRegistry, "resolve", lambda self, policy_id, event=None: {"default": "allow"})
+
+    calls: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        line_adapter_module,
+        "post_json",
+        lambda url, headers, body: calls.append({"url": url, "headers": headers, "body": body}) or {"ok": True},
+    )
+    payload = {
+        "destination": "Udestination",
+        "events": [
+            {
+                "type": "message",
+                "mode": "active",
+                "webhookEventId": "evt-exact-reply-bg",
+                "replyToken": "reply-exact-reply-bg",
+                "source": {"type": "group", "groupId": "Cgroup", "userId": "Uactor"},
+                "message": {"id": "m-bg", "type": "text", "text": "helloって返して！"},
+            }
+        ],
+    }
+
+    result = line_block.run(_signed_line_payload(payload), {})
+
+    event_result = result["data"]["events"][0]
+    conversation = ChatStore().get_conversation(event_result["conversation_id"])
+    assistant = conversation["messages"][-1]
+    assert [call["url"] for call in calls] == [
+        "https://api.line.me/v2/bot/message/reply",
+        "https://api.line.me/v2/bot/message/push",
+    ]
+    assert event_result["status"] == "ok"
+    assert "background_processing" not in event_result
+    assert event_result["assistant_text"] == "hello"
+    assert event_result["exact_reply_shortcut"]["reply_text"] == "hello"
+    assert assistant["raw_text"] == "hello"
+    assert conversation["current_node_id"] == assistant["id"]
+
+
 def test_line_computer_use_fake_receive_acknowledges_and_preserves_japanese_prompt(monkeypatch, tmp_path):
     from blocks.integrations import line as line_block  # noqa: E402
     from blocks.chat import send as chat_send  # noqa: E402
