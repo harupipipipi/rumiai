@@ -1,0 +1,35 @@
+{
+  "id": "slack",
+  "category": "integrations",
+  "kind": "webhook_connector",
+  "version": "1",
+  "status": "stable",
+  "display_name": "Slack Integration",
+  "entrypoints": {
+    "inbound": "inbound.py",
+    "security": "security.py",
+    "normalizer": "normalizer.py",
+    "output": "output.py",
+    "rules": "rules.json"
+  },
+  "routes": [
+    {
+      "method": "POST",
+      "path": "/api/integrations/slack/events",
+      "block_module": "blocks.integrations.slack"
+    }
+  ],
+  "profiles": ["slack.default"],
+  "security": {
+    "signature": "slack_v0_hmac"
+  },
+  "aliases": {
+    "provider_ids": ["slack"],
+    "endpoint_ids": ["slack-main"]
+  },
+  "compatibility": {
+    "legacy_imports": ["blocks.integrations.slack"],
+    "legacy_ids": ["slack-main", "slack.default", "slack.production"]
+  },
+  "source_pack_id": "defaultspack"
+}

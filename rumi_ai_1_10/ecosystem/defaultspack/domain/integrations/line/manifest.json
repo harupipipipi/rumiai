@@ -1,0 +1,38 @@
+{
+  "id": "line",
+  "category": "integrations",
+  "kind": "webhook_connector",
+  "version": "1",
+  "status": "stable",
+  "display_name": "LINE Integration",
+  "entrypoints": {
+    "inbound": "inbound.py",
+    "security": "security.py",
+    "normalizer": "normalizer.py",
+    "output": "output.py",
+    "rules": "rules.json"
+  },
+  "routes": [
+    {
+      "method": "POST",
+      "path": "/api/integrations/line/webhook",
+      "block_module": "blocks.integrations.line"
+    }
+  ],
+  "profiles": ["line.default", "line.computer_use"],
+  "policy": {
+    "audience_policy_id": "line.production"
+  },
+  "security": {
+    "signature": "line_channel_secret"
+  },
+  "aliases": {
+    "provider_ids": ["line"],
+    "endpoint_ids": ["line-main"]
+  },
+  "compatibility": {
+    "legacy_imports": ["blocks.integrations.line"],
+    "legacy_ids": ["line-main", "line.default", "line.production"]
+  },
+  "source_pack_id": "defaultspack"
+}
