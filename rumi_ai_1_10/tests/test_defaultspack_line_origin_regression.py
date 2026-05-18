@@ -692,7 +692,7 @@ def test_line_computer_use_fake_webhook_runs_three_browser_tasks_and_acknowledge
         assert context["computer_use_target_app"] == "Google Chrome"
         assert context["computer_use_target_title"] == "LINE Chat"
         assert context["line_background_processing"] is True
-        assert context["profile_policy"]["max_tool_calls"] == 12
+        assert context["profile_policy"]["max_tool_calls"] == 200
         assert context["profile_policy"]["yolo_mode"] is True
 
 
