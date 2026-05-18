@@ -1,0 +1,41 @@
+{
+  "function_id": "tools_select_relevant",
+  "description": "Select relevant tools for a profile-scoped chat turn.",
+  "tags": [
+    "tools"
+  ],
+  "risk": "low",
+  "requires": [],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.tools.select_relevant",
+    "defaultspack.tools.select_relevant",
+    "defaults.tools.select.relevant",
+    "defaultspack.tools.select.relevant"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.tool.select_relevant",
+      "default_args": {}
+    }
+  }
+}

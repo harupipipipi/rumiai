@@ -1,0 +1,8 @@
+flow_id: defaultspack.model_route
+description: Route a chat request to a capability-compatible model.
+steps:
+  - id: route_model
+    type: function
+    function: defaults.ai.route_model
+    input: "{{input}}"
+    output: route_model

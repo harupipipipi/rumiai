@@ -1,0 +1,43 @@
+{
+  "function_id": "ai_build_request",
+  "description": "Build a routed AI completion request.",
+  "tags": [
+    "ai"
+  ],
+  "risk": "medium",
+  "requires": [
+    "ai.build.request"
+  ],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.ai.build_request",
+    "defaultspack.ai.build_request",
+    "defaults.ai.build.request",
+    "defaultspack.ai.build.request"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.ai.build_request",
+      "default_args": {}
+    }
+  }
+}

@@ -9,6 +9,18 @@ from .risk import resolve_tool_risk
 from .sandbox import choose_sandbox_mode
 
 
+_APPROVAL_REQUIRED_NAME_PARTS = ("write", "create", "update", "delete", "patch", "commit", "push")
+_WRITE_LIKE_RISKS = {
+    "file_write",
+    "file_delete",
+    "git_write",
+    "git_push",
+    "external_message",
+    "scheduler_create",
+    "capability_mutation",
+}
+
+
 def decide_tool_policy(
     tool_def: Any,
     context: dict[str, Any] | None,
@@ -35,7 +47,7 @@ def decide_tool_policy(
     if risk in {"file_write", "file_delete"} and policy.get("allow_file_write") is False:
         return PolicyDecision(False, risk, action="deny", reason="file writes disabled", matched_by="allow_file_write", matched_value="false")
 
-    requires_approval = _requires_approval(tool_def, policy, risk)
+    requires_approval = _requires_approval(tool_def, policy, risk, name)
     if requires_approval and not approval_granted:
         return PolicyDecision(
             True,
@@ -48,24 +60,25 @@ def decide_tool_policy(
     return PolicyDecision(True, risk, action="allow", sandbox_mode=choose_sandbox_mode(policy, risk))
 
 
-def _requires_approval(tool_def: Any, policy: dict[str, Any], risk: str) -> bool:
+def _requires_approval(tool_def: Any, policy: dict[str, Any], risk: str, name: str) -> bool:
     if isinstance(tool_def, dict) and tool_def.get("requires_approval") is True:
+        return True
+    if _is_write_like_name(name):
+        return True
+    if risk in _WRITE_LIKE_RISKS:
         return True
     if policy.get("open_world_require_approval") is True and risk in {"network", "browser", "computer"}:
         return True
     if policy.get("destructive_actions_require_approval") is True and risk in {"file_delete", "git_push", "pack_install"}:
         return True
-    if policy.get("write_actions_require_approval") is True and risk in {
-        "file_write",
-        "file_delete",
-        "git_write",
-        "git_push",
-        "external_message",
-        "scheduler_create",
-        "capability_mutation",
-    }:
+    if policy.get("write_actions_require_approval") is True and risk in _WRITE_LIKE_RISKS:
         return True
     return False
+
+
+def _is_write_like_name(name: str) -> bool:
+    lowered = str(name or "").lower()
+    return any(part in lowered for part in _APPROVAL_REQUIRED_NAME_PARTS)
 
 
 def _list(value: Any) -> set[str]:

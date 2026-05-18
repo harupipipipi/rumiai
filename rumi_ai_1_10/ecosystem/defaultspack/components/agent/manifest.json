@@ -14,7 +14,8 @@
       "defaults.agent.add_instruction",
       "defaults.agent.multi_execute",
       "defaults.agent.multi_status",
-      "defaults.agent.multi_message"
+      "defaults.agent.multi_message",
+      "defaults.agent.run_subagent"
     ]
   }
 }

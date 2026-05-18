@@ -1,0 +1,43 @@
+{
+  "function_id": "ai_get_model_capabilities",
+  "description": "Get AI model capability metadata.",
+  "tags": [
+    "ai",
+    "model",
+    "catalog"
+  ],
+  "risk": "low",
+  "requires": [],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.ai.get_model_capabilities",
+    "defaultspack.ai.get_model_capabilities",
+    "defaults.ai.get.model.capabilities",
+    "defaultspack.ai.get.model.capabilities"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.ai.get_model_capabilities",
+      "default_args": {}
+    }
+  }
+}

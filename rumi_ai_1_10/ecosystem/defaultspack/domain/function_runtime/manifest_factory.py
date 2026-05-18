@@ -103,6 +103,11 @@ AI_FUNCTIONS: tuple[FunctionSpec, ...] = (
     _spec("ai_complete", "Complete a chat request using the configured AI provider.", ("ai", "model", "completion"), risk="medium", block="blocks.ai.complete"),
     _spec("ai_stream", "Start an AI streaming completion.", ("ai", "model", "stream"), risk="medium", block="blocks.ai.stream"),
     _spec("ai_models", "List available AI models.", ("ai", "model", "catalog"), block="blocks.ai.models"),
+    _spec("ai_search_models", "Search available AI models by capabilities.", ("ai", "model", "catalog"), block="blocks.ai.search_models", aliases=("defaults.ai.search_models", "defaultspack.ai.search_models")),
+    _spec("ai_get_model_capabilities", "Get AI model capability metadata.", ("ai", "model", "catalog"), block="blocks.ai.get_model_capabilities", aliases=("defaults.ai.get_model_capabilities", "defaultspack.ai.get_model_capabilities")),
+    _spec("ai_recommend_model", "Recommend an AI model for a request.", ("ai", "model", "routing"), block="blocks.ai.recommend_model", aliases=("defaults.ai.recommend_model", "defaultspack.ai.recommend_model")),
+    _spec("ai_route_model", "Route a request to a compatible model.", ("ai", "model", "routing"), risk="medium", block="blocks.ai.route_model", aliases=("defaults.ai.route_model", "defaultspack.ai.route_model")),
+    _spec("ai_explain_model_choice", "Explain a model routing decision.", ("ai", "model", "routing"), block="blocks.ai.explain_model_choice", aliases=("defaults.ai.explain_model_choice", "defaultspack.ai.explain_model_choice")),
     _spec("ai_providers", "List available AI providers.", ("ai", "provider", "catalog"), block="blocks.ai.providers"),
     _spec("ai_profiles", "List available AI model profiles.", ("ai", "profile", "catalog"), block="blocks.ai.profiles"),
     _spec("ai_embed", "Create embeddings with the configured AI provider.", ("ai", "embedding"), risk="medium", block="blocks.ai.embed"),
@@ -277,6 +282,7 @@ AGENT_FUNCTIONS: tuple[FunctionSpec, ...] = tuple(
         ("agent_queue_get", "Get the agent queue.", "low", "blocks.agent.interrupt.queue"),
         ("agent_queue_update", "Update the agent queue.", "medium", "blocks.agent.interrupt.queue"),
         ("agent_progress", "Get agent progress.", "low", "blocks.agent.interrupt.progress"),
+        ("agent_run_subagent", "Run a utility subagent.", "medium", "blocks.agent.run_subagent"),
     )
 ) + tuple(
     _spec(f"agent_schedule_{name}", f"{label} an agent schedule.", ("agent", "scheduler"), risk=risk, block=f"blocks.agent.scheduler.{module}")
@@ -361,6 +367,22 @@ DATA_FUNCTIONS: tuple[FunctionSpec, ...] = tuple(
 )
 
 
+PROFILE_WORKSPACE_FUNCTIONS: tuple[FunctionSpec, ...] = tuple(
+    _spec(function_id, description, tags, risk=risk, block=block)
+    for function_id, description, tags, risk, block in (
+        ("profile_load_active", "Load the active startup profile.", ("profile",), "low", "blocks.profile.load_active"),
+        ("profile_workspace", "Resolve and initialize a profile workspace.", ("profile",), "low", "blocks.profile.workspace"),
+        ("chat_detect_modalities", "Detect message input modalities.", ("chat",), "low", "blocks.chat.detect_modalities"),
+        ("prompt_load_effective", "Load the effective profile-scoped system prompt.", ("prompt",), "low", "blocks.prompt.load_effective"),
+        ("tools_select_relevant", "Select relevant tools for a profile-scoped chat turn.", ("tools",), "low", "blocks.tool.select_relevant"),
+        ("permissions_filter_tools", "Filter selected tools through profile permission defaults.", ("permissions",), "low", "blocks.permissions.filter_tools"),
+        ("ai_build_request", "Build a routed AI completion request.", ("ai",), "medium", "blocks.ai.build_request"),
+        ("chat_persist_turn", "Persist a profile-scoped chat turn.", ("chat",), "medium", "blocks.chat.persist_turn"),
+        ("audit_record_event", "Record a profile-scoped audit event.", ("audit",), "medium", "blocks.audit.record_event"),
+    )
+)
+
+
 RESEARCH_MEDIA_UI_DEV_FUNCTIONS: tuple[FunctionSpec, ...] = tuple(
     _spec(function_id, description, tags, risk=risk, block=block)
     for function_id, description, tags, risk, block in (
@@ -384,6 +406,9 @@ RESEARCH_MEDIA_UI_DEV_FUNCTIONS: tuple[FunctionSpec, ...] = tuple(
         ("media_tts", "Generate media speech.", ("media",), "medium", None),
         ("media_image_analyze", "Analyze an image.", ("media",), "medium", None),
         ("media_image_generate", "Generate an image.", ("media",), "medium", None),
+        ("vision_describe_images", "Describe attached images for non-vision models.", ("vision", "ai"), "medium", "blocks.vision.describe_images"),
+        ("prompt_lint_prompt", "Lint prompt redundancy and budget risk.", ("prompt",), "low", "blocks.prompt.lint_prompt"),
+        ("prompt_compact_prompt", "Suggest a safe compacted prompt.", ("prompt",), "medium", "blocks.prompt.compact_prompt"),
         ("ui_catalog", "Build the UI catalog.", ("ui",), "low", "blocks.ui.catalog"),
         ("ui_settings_get", "Get UI settings.", ("ui",), "low", "blocks.ui.settings",),
         ("ui_settings_update", "Update UI settings.", ("ui",), "medium", "blocks.ui.settings",),
@@ -438,6 +463,7 @@ FUNCTION_SPECS: tuple[FunctionSpec, ...] = (
     + AGENT_FUNCTIONS
     + BROWSER_ARTIFACT_FUNCTIONS
     + DATA_FUNCTIONS
+    + PROFILE_WORKSPACE_FUNCTIONS
     + RESEARCH_MEDIA_UI_DEV_FUNCTIONS
     + MANAGEMENT_FUNCTIONS
 )

@@ -1,0 +1,10 @@
+flow_id: defaultspack.tool_select
+description: Select relevant non-computer tools before provider attachment.
+steps:
+  - id: select_tools
+    type: function
+    function: defaults.agent.run_subagent
+    input:
+      role_id: tool_selector
+      payload: "{{input}}"
+    output: tool_selection

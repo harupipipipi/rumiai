@@ -13,6 +13,7 @@
       "memory",
       "knowledge",
       "media",
+      "vision",
       "frontend",
       "dev",
       "capability",
@@ -22,7 +23,10 @@
       "compact",
       "context",
       "scheduler",
-      "gateway"
+      "gateway",
+      "profile",
+      "permissions",
+      "audit"
     ]
   },
   "components": {
@@ -67,7 +71,11 @@
           "defaults.chat.summarize_and_trim",
           "defaultspack.chat.summarize_and_trim",
           "defaults.chat.auto_trim",
-          "defaultspack.chat.auto_trim"
+          "defaultspack.chat.auto_trim",
+          "defaults.chat.detect_modalities",
+          "defaultspack.chat.detect_modalities",
+          "defaults.chat.persist_turn",
+          "defaultspack.chat.persist_turn"
         ]
       }
     },
@@ -96,7 +104,9 @@
           "defaults.agent.multi_status",
           "defaultspack.agent.multi_status",
           "defaults.agent.multi_message",
-          "defaultspack.agent.multi_message"
+          "defaultspack.agent.multi_message",
+          "defaults.agent.run_subagent",
+          "defaultspack.agent.run_subagent"
         ]
       }
     },
@@ -145,6 +155,18 @@
           "defaultspack.ai.stream",
           "defaults.ai.models",
           "defaultspack.ai.models",
+          "defaults.ai.search_models",
+          "defaultspack.ai.search_models",
+          "defaults.ai.get_model_capabilities",
+          "defaultspack.ai.get_model_capabilities",
+          "defaults.ai.recommend_model",
+          "defaultspack.ai.recommend_model",
+          "defaults.ai.route_model",
+          "defaultspack.ai.route_model",
+          "defaults.ai.explain_model_choice",
+          "defaultspack.ai.explain_model_choice",
+          "defaults.ai.build_request",
+          "defaultspack.ai.build_request",
           "defaults.ai.providers",
           "defaultspack.ai.providers",
           "defaults.ai.embed",
@@ -187,7 +209,9 @@
           "defaults.tool.consent_check",
           "defaultspack.tool.consent_check",
           "defaults.tool.consent_confirm",
-          "defaultspack.tool.consent_confirm"
+          "defaultspack.tool.consent_confirm",
+          "defaults.tools.select_relevant",
+          "defaultspack.tools.select_relevant"
         ]
       }
     },
@@ -210,7 +234,13 @@
           "defaults.prompt.delete",
           "defaultspack.prompt.delete",
           "defaults.prompt.convert",
-          "defaultspack.prompt.convert"
+          "defaultspack.prompt.convert",
+          "defaults.prompt.lint_prompt",
+          "defaultspack.prompt.lint_prompt",
+          "defaults.prompt.compact_prompt",
+          "defaultspack.prompt.compact_prompt",
+          "defaults.prompt.load_effective",
+          "defaultspack.prompt.load_effective"
         ]
       }
     },
@@ -357,6 +387,52 @@
         ]
       }
     },
+    "vision": {
+      "type": "vision",
+      "id": "vision",
+      "path": "blocks/vision",
+      "connectivity": {
+        "provides": [
+          "defaults.vision.describe_images",
+          "defaultspack.vision.describe_images"
+        ]
+      }
+    },
+    "profile": {
+      "type": "profile",
+      "id": "profile",
+      "path": "blocks/profile",
+      "connectivity": {
+        "provides": [
+          "defaults.profile.load_active",
+          "defaultspack.profile.load_active",
+          "defaults.profile.workspace",
+          "defaultspack.profile.workspace"
+        ]
+      }
+    },
+    "permissions": {
+      "type": "permissions",
+      "id": "permissions",
+      "path": "blocks/permissions",
+      "connectivity": {
+        "provides": [
+          "defaults.permissions.filter_tools",
+          "defaultspack.permissions.filter_tools"
+        ]
+      }
+    },
+    "audit": {
+      "type": "audit",
+      "id": "audit",
+      "path": "blocks/audit",
+      "connectivity": {
+        "provides": [
+          "defaults.audit.record_event",
+          "defaultspack.audit.record_event"
+        ]
+      }
+    },
     "frontend": {
       "type": "frontend",
       "id": "frontend",
@@ -445,6 +521,7 @@
     "prompt:prompt",
     "context:context",
     "media:media",
+    "vision:vision",
     "ai_client:ai_client",
     "tool:tool",
     "coding:coding",

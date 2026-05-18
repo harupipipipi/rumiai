@@ -16,6 +16,12 @@ from ecosystem.defaultspack.domain.ai_client.providers import (
     validate_provider_catalog_coverage,
 )
 from ecosystem.defaultspack.domain.ai_client.api_key_store import provider_named_api_keys
+from ecosystem.defaultspack.domain.ai_client.model_capabilities import (
+    flatten_capability_fields,
+)
+from ecosystem.defaultspack.domain.ai_client.model_capability_schema import (
+    knowledge_band_for_level,
+)
 
 
 def list_provider_catalog() -> List[Dict[str, Any]]:
@@ -92,14 +98,69 @@ def _supports_thinking(model: Dict[str, Any]) -> bool:
     return any(token in model_id for token in ("gpt-5", "claude", "gemini", "deepseek"))
 
 
+def _capability_enrichment(model: Dict[str, Any]) -> Dict[str, Any]:
+    try:
+        return flatten_capability_fields(model)
+    except Exception:
+        supports_thinking = _supports_thinking(model)
+        return {
+            "supports_vision": False,
+            "supports_image_input": False,
+            "supports_tool_calling": False,
+            "supports_fast": False,
+            "supports_thinking": supports_thinking,
+            "thinking_levels": ["low", "medium", "high", "xhigh"] if supports_thinking else [],
+            "default_thinking_level": "medium" if supports_thinking else None,
+            "speed_tier": "balanced",
+            "quality_tier": "unknown",
+            "knowledge_level": 0,
+            "knowledge_band": knowledge_band_for_level(0),
+            "cost_tier": "unknown",
+            "latency_tier": "medium",
+            "capability_tags": ["thinking"] if supports_thinking else [],
+            "allowed_roles": ["primary_chat"],
+            "recommended_roles": ["primary_chat"],
+            "model_capabilities": {},
+        }
+
+
+def _supports_vision(model: Dict[str, Any]) -> bool:
+    return bool(_capability_enrichment(model).get("supports_vision"))
+
+
+def _supports_tool_calling(model: Dict[str, Any]) -> bool:
+    return bool(_capability_enrichment(model).get("supports_tool_calling"))
+
+
+def _supports_fast_mode(model: Dict[str, Any]) -> bool:
+    return bool(_capability_enrichment(model).get("supports_fast"))
+
+
+def _knowledge_level(model: Dict[str, Any]) -> int:
+    try:
+        return int(_capability_enrichment(model).get("knowledge_level") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _speed_tier(model: Dict[str, Any]) -> str:
+    return str(_capability_enrichment(model).get("speed_tier") or "balanced")
+
+
+def _capability_tags(model: Dict[str, Any]) -> list[str]:
+    tags = _capability_enrichment(model).get("capability_tags")
+    return [str(tag) for tag in tags] if isinstance(tags, list) else []
+
+
 def _with_legacy_model_fields(model: Dict[str, Any]) -> Dict[str, Any]:
     item = dict(model)
     canonical = _canonical_model_id(item)
     max_context = _model_context(item)
-    supports_thinking = _supports_thinking(item)
+    capability_fields = _capability_enrichment(item)
+    supports_thinking = bool(capability_fields.get("supports_thinking", _supports_thinking(item)))
     defaults = dict(item.get("defaults", {})) if isinstance(item.get("defaults"), dict) else {}
     pricing = dict(item.get("pricing", {})) if isinstance(item.get("pricing"), dict) else {}
-    thinking_levels = item.get("thinking_levels")
+    thinking_levels = capability_fields.get("thinking_levels", item.get("thinking_levels"))
     if not isinstance(thinking_levels, list):
         thinking_levels = ["low", "medium", "high", "xhigh"] if supports_thinking else []
     item["canonical_model_id"] = canonical
@@ -108,7 +169,24 @@ def _with_legacy_model_fields(model: Dict[str, Any]) -> Dict[str, Any]:
     item["max_context_tokens"] = max_context
     item["supports_thinking"] = supports_thinking
     item["thinking_levels"] = thinking_levels
-    item["default_thinking_level"] = item.get("default_thinking_level", "medium" if supports_thinking else None)
+    item["default_thinking_level"] = capability_fields.get(
+        "default_thinking_level",
+        item.get("default_thinking_level", "medium" if supports_thinking else None),
+    )
+    item["supports_vision"] = bool(capability_fields.get("supports_vision"))
+    item["supports_image_input"] = bool(capability_fields.get("supports_image_input"))
+    item["supports_tool_calling"] = bool(capability_fields.get("supports_tool_calling"))
+    item["supports_fast"] = bool(capability_fields.get("supports_fast"))
+    item["speed_tier"] = str(capability_fields.get("speed_tier") or "balanced")
+    item["quality_tier"] = str(capability_fields.get("quality_tier") or "unknown")
+    item["knowledge_level"] = int(capability_fields.get("knowledge_level") or 0)
+    item["knowledge_band"] = str(capability_fields.get("knowledge_band") or knowledge_band_for_level(item["knowledge_level"]))
+    item["cost_tier"] = str(capability_fields.get("cost_tier") or "unknown")
+    item["latency_tier"] = str(capability_fields.get("latency_tier") or "medium")
+    item["capability_tags"] = list(capability_fields.get("capability_tags") or [])
+    item["allowed_roles"] = list(capability_fields.get("allowed_roles") or [])
+    item["recommended_roles"] = list(capability_fields.get("recommended_roles") or [])
+    item["model_capabilities"] = dict(capability_fields.get("model_capabilities") or {})
     item["defaults"] = defaults
     item["pricing"] = pricing
     metadata = dict(item.get("metadata", {}))
@@ -117,6 +195,20 @@ def _with_legacy_model_fields(model: Dict[str, Any]) -> Dict[str, Any]:
             "max_context": max_context,
             "supports_thinking": supports_thinking,
             "thinking_levels": thinking_levels,
+            "supports_vision": item["supports_vision"],
+            "supports_image_input": item["supports_image_input"],
+            "supports_tool_calling": item["supports_tool_calling"],
+            "supports_fast": item["supports_fast"],
+            "speed_tier": item["speed_tier"],
+            "quality_tier": item["quality_tier"],
+            "knowledge_level": item["knowledge_level"],
+            "knowledge_band": item["knowledge_band"],
+            "cost_tier": item["cost_tier"],
+            "latency_tier": item["latency_tier"],
+            "capability_tags": item["capability_tags"],
+            "allowed_roles": item["allowed_roles"],
+            "recommended_roles": item["recommended_roles"],
+            "model_capabilities": item["model_capabilities"],
             "defaults": defaults,
             "pricing": pricing,
         }
@@ -138,6 +230,17 @@ def _with_legacy_profile_fields(profile: Dict[str, Any]) -> Dict[str, Any]:
         "metadata": item.get("metadata", {}),
         "defaults": item.get("defaults", {}),
         "pricing": item.get("pricing", {}),
+        "capabilities": item.get("capabilities", []),
+        "supports_vision": item.get("supports_vision"),
+        "supports_image_input": item.get("supports_image_input"),
+        "supports_tool_calling": item.get("supports_tool_calling"),
+        "supports_fast": item.get("supports_fast"),
+        "speed_tier": item.get("speed_tier"),
+        "quality_tier": item.get("quality_tier"),
+        "knowledge_level": item.get("knowledge_level"),
+        "knowledge_band": item.get("knowledge_band"),
+        "cost_tier": item.get("cost_tier"),
+        "model_roles": item.get("model_roles"),
     }
     enriched = _with_legacy_model_fields(model_like)
     item["max_context"] = enriched["max_context"]
@@ -145,6 +248,20 @@ def _with_legacy_profile_fields(profile: Dict[str, Any]) -> Dict[str, Any]:
     item["supports_thinking"] = enriched["supports_thinking"]
     item["thinking_levels"] = enriched["thinking_levels"]
     item["default_thinking_level"] = enriched["default_thinking_level"]
+    item["supports_vision"] = enriched["supports_vision"]
+    item["supports_image_input"] = enriched["supports_image_input"]
+    item["supports_tool_calling"] = enriched["supports_tool_calling"]
+    item["supports_fast"] = enriched["supports_fast"]
+    item["speed_tier"] = enriched["speed_tier"]
+    item["quality_tier"] = enriched["quality_tier"]
+    item["knowledge_level"] = enriched["knowledge_level"]
+    item["knowledge_band"] = enriched["knowledge_band"]
+    item["cost_tier"] = enriched["cost_tier"]
+    item["latency_tier"] = enriched["latency_tier"]
+    item["capability_tags"] = enriched["capability_tags"]
+    item["allowed_roles"] = enriched["allowed_roles"]
+    item["recommended_roles"] = enriched["recommended_roles"]
+    item["model_capabilities"] = enriched["model_capabilities"]
     item["defaults"] = enriched.get("defaults", {})
     item["pricing"] = enriched.get("pricing", {})
     item["same_model_across_providers_key"] = str(

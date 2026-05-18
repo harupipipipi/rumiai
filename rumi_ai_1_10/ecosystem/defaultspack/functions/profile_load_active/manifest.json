@@ -1,0 +1,41 @@
+{
+  "function_id": "profile_load_active",
+  "description": "Load the active startup profile.",
+  "tags": [
+    "profile"
+  ],
+  "risk": "low",
+  "requires": [],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.profile.load_active",
+    "defaultspack.profile.load_active",
+    "defaults.profile.load.active",
+    "defaultspack.profile.load.active"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.profile.load_active",
+      "default_args": {}
+    }
+  }
+}

@@ -55,6 +55,7 @@ defaults 単体で既存の AI サービス（ChatGPT / Claude / Cursor / Devin�
 - **handler** — call_handler で呼び出せるドメイン操作 API。chat、agent、coding、ai、tool、prompt、memory、media の各ドメインの基本操作。
 - **domain コード** — handler の実装。各ドメインのビジネスロジック。
 - **Flow 定義** — simple_chat、agent_chat、planning_agent。デフォルトの処理パイプライン。
+- **モデル能力ルーティング** — vision / tool / thinking / speed / knowledge_level を見て、モデルグループ内で実モデルを選ぶ。画像非対応モデルには Vision Bridge で画像文脈を渡す。
 - **通信基盤** — frontend handler + transport。HTTP、stdio、UDS 経由の通信。
 - **Widget ライブラリ** — lib/rumi_widgets/。バックエンドが UI に描画指示を出すための Python ヘルパー。
 - **シェル** — ui/shell.html。スロット定義 + Asset ローダー + Widget レンダラー。Asset を載せる空の枠。

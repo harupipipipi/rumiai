@@ -15,7 +15,8 @@
       "defaults.tool.delete",
       "defaults.tool.export",
       "defaults.tool.consent_check",
-      "defaults.tool.consent_confirm"
+      "defaults.tool.consent_confirm",
+      "defaults.tools.select_relevant"
     ]
   }
 }

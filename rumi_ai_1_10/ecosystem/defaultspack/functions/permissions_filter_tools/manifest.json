@@ -1,0 +1,41 @@
+{
+  "function_id": "permissions_filter_tools",
+  "description": "Filter selected tools through profile permission defaults.",
+  "tags": [
+    "permissions"
+  ],
+  "risk": "low",
+  "requires": [],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.permissions.filter_tools",
+    "defaultspack.permissions.filter_tools",
+    "defaults.permissions.filter.tools",
+    "defaultspack.permissions.filter.tools"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.permissions.filter_tools",
+      "default_args": {}
+    }
+  }
+}
