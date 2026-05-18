@@ -1,0 +1,27 @@
+{
+  "id": "coding_file_delete",
+  "category": "tools",
+  "kind": "tool",
+  "version": "1",
+  "status": "stable",
+  "display_name": "Coding File Delete Tool",
+  "entrypoints": {
+    "tool_manifest": "../../../tools/coding_file_delete/manifest.json"
+  },
+  "security": {
+    "approval_required": true,
+    "workspace_escape_blocked": true
+  },
+  "policy": {
+    "risk": "high",
+    "requires_approval": true,
+    "write_action": true
+  },
+  "aliases": {
+    "tool_ids": ["coding_file_delete"]
+  },
+  "compatibility": {
+    "legacy_ids": ["coding_file_delete"]
+  },
+  "source_pack_id": "rumi_default_tools_pack"
+}

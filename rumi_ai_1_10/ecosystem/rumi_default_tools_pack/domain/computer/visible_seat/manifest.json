@@ -1,0 +1,26 @@
+{
+  "id": "visible_seat",
+  "category": "computer",
+  "kind": "driver_bundle",
+  "version": "1",
+  "status": "stable",
+  "display_name": "Visible Screen Computer Seat",
+  "entrypoints": {
+    "factory": "../factory.py",
+    "service": "../service.py",
+    "registry": "../registry.py",
+    "permissions": "../permissions.py"
+  },
+  "security": {
+    "visible_screen_only": true,
+    "foreground_guards": true,
+    "background_dom_input": false,
+    "physical_actions_require_explicit_approval": true
+  },
+  "capabilities": {
+    "screenshots": true,
+    "virtual_pointer": true,
+    "physical_actions": "approval_only"
+  },
+  "source_pack_id": "rumi_default_tools_pack"
+}

@@ -1,0 +1,22 @@
+{
+  "id": "coding_git_diff",
+  "category": "tools",
+  "kind": "tool",
+  "version": "1",
+  "status": "stable",
+  "display_name": "Coding Git Diff Tool",
+  "entrypoints": {
+    "tool_manifest": "../../../tools/coding_git_diff/manifest.json"
+  },
+  "policy": {
+    "risk": "low",
+    "requires_approval": false
+  },
+  "aliases": {
+    "tool_ids": ["coding_git_diff"]
+  },
+  "compatibility": {
+    "legacy_ids": ["coding_git_diff"]
+  },
+  "source_pack_id": "rumi_default_tools_pack"
+}

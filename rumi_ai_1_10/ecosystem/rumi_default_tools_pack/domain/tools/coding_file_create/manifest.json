@@ -1,0 +1,27 @@
+{
+  "id": "coding_file_create",
+  "category": "tools",
+  "kind": "tool",
+  "version": "1",
+  "status": "stable",
+  "display_name": "Coding File Create Tool",
+  "entrypoints": {
+    "tool_manifest": "../../../tools/coding_file_create/manifest.json"
+  },
+  "security": {
+    "approval_required": true,
+    "workspace_escape_blocked": true
+  },
+  "policy": {
+    "risk": "high",
+    "requires_approval": true,
+    "write_action": true
+  },
+  "aliases": {
+    "tool_ids": ["coding_file_create"]
+  },
+  "compatibility": {
+    "legacy_ids": ["coding_file_create"]
+  },
+  "source_pack_id": "rumi_default_tools_pack"
+}

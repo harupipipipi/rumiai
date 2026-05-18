@@ -1,0 +1,23 @@
+{
+  "id": "function_bridge",
+  "category": "computer",
+  "kind": "function_bridge",
+  "version": "1",
+  "status": "stable",
+  "display_name": "Computer Function Bridge",
+  "entrypoints": {
+    "computer_use": "../../../functions/computer_use/manifest.json",
+    "computer_observe": "../../../functions/computer_observe/manifest.json",
+    "computer_doctor": "../../../functions/computer_doctor/manifest.json",
+    "computer_pid_event": "../../../functions/computer_pid_event/manifest.json",
+    "computer_semantic_action": "../../../functions/computer_semantic_action/manifest.json"
+  },
+  "security": {
+    "approval_required": true,
+    "policy_layer": "defaultspack_tool_policy"
+  },
+  "capabilities": {
+    "computer_functions": true
+  },
+  "source_pack_id": "rumi_default_tools_pack"
+}

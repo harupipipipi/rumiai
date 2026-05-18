@@ -3,6 +3,7 @@ import os
 import threading
 from pathlib import Path
 
+from ..components.registry import DomainComponentRegistry, build_domain_component_roots
 from ..extensions.runtime import get_extension_registry
 
 
@@ -64,6 +65,7 @@ class ToolRegistry:
         loaded = self._load_extension_tools()
         for pack_root in self._installed_pack_roots():
             loaded += self._load_tools_from_pack(pack_root)
+        loaded += self._load_component_tools()
         self._apply_extension_skill_metadata()
         return loaded
 
@@ -85,6 +87,56 @@ class ToolRegistry:
                 self.register(tool_def)
                 loaded += 1
         return loaded
+
+    def _load_component_tools(self) -> int:
+        loaded = 0
+        registry = DomainComponentRegistry(build_domain_component_roots(self._pack_root()))
+        for component in registry.list("tools"):
+            manifest = component.as_dict()
+            tool_manifest = self._tool_manifest_from_component(manifest)
+            if tool_manifest is None:
+                continue
+            tool_def = self._tool_from_manifest(tool_manifest)
+            if tool_def is None:
+                continue
+            metadata = dict(tool_def.get("metadata", {}))
+            metadata["source"] = "pack"
+            metadata["source_pack_id"] = component.source_pack_id
+            metadata["component_category"] = "tools"
+            metadata["component_id"] = component.id
+            metadata["component_manifest_path"] = manifest.get("source_path", "")
+            tool_def["metadata"] = metadata
+            tool_def["source_pack_id"] = component.source_pack_id
+            self.register(tool_def)
+            loaded += 1
+        return loaded
+
+    @staticmethod
+    def _tool_manifest_from_component(component_manifest: dict):
+        tool_manifest = component_manifest.get("tool_manifest")
+        if isinstance(tool_manifest, dict):
+            manifest = dict(tool_manifest)
+            manifest.setdefault("source_path", component_manifest.get("source_path", ""))
+            manifest.setdefault("source_pack_id", component_manifest.get("source_pack_id", ""))
+            return manifest
+
+        entrypoints = component_manifest.get("entrypoints")
+        rel_path = entrypoints.get("tool_manifest") if isinstance(entrypoints, dict) else None
+        if not isinstance(rel_path, str) or not rel_path.strip():
+            return None
+        source_path = component_manifest.get("source_path")
+        if not isinstance(source_path, str) or not source_path:
+            return None
+        manifest_path = (Path(source_path).parent / rel_path).resolve()
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return None
+        if not isinstance(manifest, dict):
+            return None
+        manifest["source_path"] = str(manifest_path)
+        manifest.setdefault("source_pack_id", component_manifest.get("source_pack_id", ""))
+        return manifest
 
     def _tool_from_path_manifest(self, manifest_path: Path, pack_root: Path):
         try:
