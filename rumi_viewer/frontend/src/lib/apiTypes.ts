@@ -183,6 +183,22 @@ export interface ApiStartupCatalog {
   packs: ApiStartupPack[];
 }
 
+export interface ApiProfileWorkspacePaths {
+  profile_id: string;
+  root: string;
+  profile_file: string;
+  user_data_dir: string;
+  database_dir?: string;
+  database_path: string;
+  startup_dir: string;
+  flows_dir: string;
+  prompts_dir: string;
+  ecosystem_dir?: string;
+  permissions_dir: string;
+  audit_dir?: string;
+  snapshots_dir?: string;
+}
+
 export interface ApiStartupProfile {
   version: number;
   profile_id: string;
@@ -194,6 +210,29 @@ export interface ApiStartupProfile {
   node_overrides: Record<string, string>;
   created_at: number;
   updated_at: number;
+  policy?: Record<string, unknown>;
+  permissions?: Record<string, unknown>;
+  profile_workspace?: ApiProfileWorkspacePaths;
+}
+
+export interface ApiProfileWorkspaceFile {
+  name: string;
+  path: string;
+  size: number;
+}
+
+export interface ApiProfileWorkspaceDetail {
+  profile: ApiStartupProfile;
+  profile_workspace: ApiProfileWorkspacePaths;
+  startup_config: Record<string, unknown>;
+  flows: ApiProfileWorkspaceFile[];
+  prompts: ApiProfileWorkspaceFile[];
+  resource_snapshot_manifest: Record<string, unknown>;
+  permissions: Record<string, { path: string; exists: boolean }>;
+  flow_yaml: {
+    path: string | null;
+    yaml_content: string;
+  };
 }
 
 export interface FlowsResponseData {
@@ -210,6 +249,7 @@ export interface StartupProfilesResponseData {
 
 export interface StartupProfileMutationResponseData {
   profile: ApiStartupProfile;
+  profile_workspace?: ApiProfileWorkspacePaths;
   created?: boolean;
   updated?: boolean;
   pack_added?: string;
@@ -234,6 +274,7 @@ export interface StartupProfileDeleteResponseData {
   deleted: boolean;
   deleted_profile_id: string;
   active_profile_id: string | null;
+  profile_workspace_orphaned?: boolean;
 }
 
 export interface FlowCreateResponseData {
