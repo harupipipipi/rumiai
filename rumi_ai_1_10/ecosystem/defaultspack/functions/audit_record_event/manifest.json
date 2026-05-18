@@ -1,0 +1,43 @@
+{
+  "function_id": "audit_record_event",
+  "description": "Record a profile-scoped audit event.",
+  "tags": [
+    "audit"
+  ],
+  "risk": "medium",
+  "requires": [
+    "audit.record.event"
+  ],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.audit.record_event",
+    "defaultspack.audit.record_event",
+    "defaults.audit.record.event",
+    "defaultspack.audit.record.event"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.audit.record_event",
+      "default_args": {}
+    }
+  }
+}

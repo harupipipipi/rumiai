@@ -1,0 +1,43 @@
+{
+  "function_id": "agent_run_subagent",
+  "description": "Run a utility subagent.",
+  "tags": [
+    "agent"
+  ],
+  "risk": "medium",
+  "requires": [
+    "agent.run.subagent"
+  ],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.agent.run_subagent",
+    "defaultspack.agent.run_subagent",
+    "defaults.agent.run.subagent",
+    "defaultspack.agent.run.subagent"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.agent.run_subagent",
+      "default_args": {}
+    }
+  }
+}

@@ -128,6 +128,16 @@ def _tool_display_payload(
     }
 
 
+def _should_emit_model_routing_status(model_routing: dict[str, Any] | None) -> bool:
+    if not isinstance(model_routing, dict) or not model_routing:
+        return False
+    if model_routing.get("bridge_required") or model_routing.get("warnings"):
+        return True
+    selected = str(model_routing.get("selected_model") or "")
+    original = str(model_routing.get("original_model") or "")
+    return bool(selected and original and selected != original)
+
+
 def _approval_request_from_tool_result(
     tool_name: str,
     tool_call_id: str,
@@ -523,9 +533,22 @@ class ChatRunEngine:
         try:
             yield self._emit(
                 "run_started",
-                data={"model": prepared.model, "request_id": prepared.request_id, "stream_mode": stream_mode},
+                data={
+                    "model": prepared.model,
+                    "request_id": prepared.request_id,
+                    "stream_mode": stream_mode,
+                    "model_routing": prepared.model_routing,
+                },
                 message="chat run started",
             )
+            if _should_emit_model_routing_status(prepared.model_routing):
+                yield self._emit(
+                    "status",
+                    data=prepared.model_routing,
+                    message="model routing prepared",
+                    phase="model_routing",
+                    model=prepared.model,
+                )
             yield self._emit(
                 "user_message_committed",
                 data={"message": prepared.user_message},
@@ -1093,6 +1116,7 @@ class ChatRunEngine:
                     **({"transcript": "".join(self._thinking_transcript_parts)} if self._thinking_transcript_parts else {}),
                 },
                 "thinking_level": prepared.params.get("thinking_level"),
+                "model_routing": dict(prepared.model_routing or {}),
             }
         )
         finalized["metadata"] = metadata

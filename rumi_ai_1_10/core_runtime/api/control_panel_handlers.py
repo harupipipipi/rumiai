@@ -87,6 +87,7 @@ class ControlPanelHandlersMixin:
         return StartupProfileManager(
             interface_registry=getattr(self, "interface_registry", None),
             approval_manager=getattr(self, "approval_manager", None),
+            profile_workspace_manager=getattr(self, "profile_workspace_manager", None),
         )
 
     # ------------------------------------------------------------------
@@ -319,6 +320,13 @@ class ControlPanelHandlersMixin:
             return self._panel_startup_profile_manager().launch_profile(profile_id)
         except Exception as e:
             _log_internal_error("panel_launch_startup_profile", e)
+            return {"error": _SAFE_ERROR_MSG, "status_code": 500}
+
+    def _panel_get_startup_profile_workspace(self, profile_id: str) -> Dict[str, Any]:
+        try:
+            return self._panel_startup_profile_manager().get_profile_workspace(profile_id)
+        except Exception as e:
+            _log_internal_error("panel_get_startup_profile_workspace", e)
             return {"error": _SAFE_ERROR_MSG, "status_code": 500}
 
     def _panel_add_pack_to_startup_profile(self, profile_id: str, body: Dict[str, Any]) -> Dict[str, Any]:

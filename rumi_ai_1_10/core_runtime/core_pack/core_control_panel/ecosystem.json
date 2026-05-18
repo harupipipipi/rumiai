@@ -48,6 +48,11 @@
     },
     {
       "method": "GET",
+      "path_pattern": "/api/panel/startup/profiles/{id}/workspace",
+      "handler": "_panel_get_startup_profile_workspace"
+    },
+    {
+      "method": "GET",
       "path": "/api/panel/nodes",
       "handler": "_panel_get_nodes"
     },

@@ -1,0 +1,11 @@
+{
+  "type": "audit",
+  "id": "audit",
+  "version": "1.0.0",
+  "description": "Profile-scoped audit event recording",
+  "connectivity": {
+    "provides": [
+      "defaults.audit.record_event"
+    ]
+  }
+}

@@ -9,6 +9,11 @@ from domain.ai_client.api_key_store import (
     provider_has_api_key,
     set_provider_api_key,
 )
+from domain.ai_client.model_groups import default_model_groups, normalize_model_groups
+from domain.ai_client.model_roles import (
+    normalize_utility_model_policy,
+    normalize_utility_models,
+)
 
 
 VALID_THINKING_LEVELS = {"none", "low", "medium", "high", "xhigh"}
@@ -47,6 +52,29 @@ class ModelRuntimeSettingsService:
             raise ValueError("profile_id is required")
         settings = self.update_settings({"preferred_model": profile})
         return {"profile_id": settings["preferred_model"], "settings": settings}
+
+    def get_preferred_model_group(self) -> str:
+        return str(self.get_settings().get("preferred_model_group") or "default")
+
+    def set_preferred_model_group(self, group_id: str) -> dict[str, Any]:
+        normalized = str(group_id or "").strip() or "default"
+        settings = self.update_settings({"preferred_model_group": normalized})
+        return {"group_id": settings["preferred_model_group"], "settings": settings}
+
+    def set_auto_route_within_group(self, enabled: bool) -> dict[str, Any]:
+        settings = self.update_settings({"auto_route_within_group": bool(enabled)})
+        return {"enabled": bool(settings["auto_route_within_group"]), "settings": settings}
+
+    def set_model_role(self, role_id: str, model_id: str) -> dict[str, Any]:
+        role = str(role_id or "").strip()
+        model = str(model_id or "").strip()
+        if not role:
+            raise ValueError("role_id is required")
+        settings = self.get_settings()
+        utility_models = normalize_utility_models(settings.get("utility_models"))
+        utility_models[role] = model
+        updated = self.update_settings({"utility_models": utility_models})
+        return {"role_id": role, "model_id": updated["utility_models"].get(role, ""), "settings": updated}
 
     def resolve_model_candidates(self, query: str, limit: int = 8) -> dict[str, Any]:
         cleaned_query = str(query or "").strip()
@@ -220,10 +248,16 @@ class ModelRuntimeSettingsService:
     def default_model_settings(self) -> dict[str, Any]:
         return {
             "preferred_model": DEFAULT_MODEL,
+            "preferred_model_group": "default",
+            "auto_route_within_group": True,
+            "model_groups": default_model_groups(),
+            "on_switch_to_non_vision_with_images": "auto_bridge",
             "thinking_level": DEFAULT_THINKING_LEVEL,
             "favorite_profiles": [DEFAULT_MODEL],
             "thinking_level_by_profile": {DEFAULT_MODEL: DEFAULT_THINKING_LEVEL},
             "thinking_level_by_conversation": {},
+            "utility_models": normalize_utility_models({}),
+            "utility_model_policy": normalize_utility_model_policy({}),
             "model_api_routes": "",
             "google_api_key": "",
             "google_api_key_configured": provider_has_api_key("google", pack_root=self._pack_root),
@@ -247,6 +281,19 @@ class ModelRuntimeSettingsService:
         sanitized["model_api_routes"] = self._normalize_model_api_routes(
             sanitized.get("model_api_routes", "")
         )
+        if "model_groups" in sanitized:
+            sanitized["model_groups"] = normalize_model_groups(sanitized.get("model_groups"))
+        if "utility_models" in sanitized:
+            sanitized["utility_models"] = normalize_utility_models(sanitized.get("utility_models"))
+        if "utility_model_policy" in sanitized:
+            sanitized["utility_model_policy"] = normalize_utility_model_policy(sanitized.get("utility_model_policy"))
+        if "preferred_model_group" in sanitized:
+            sanitized["preferred_model_group"] = str(sanitized.get("preferred_model_group") or "default").strip() or "default"
+        if "auto_route_within_group" in sanitized:
+            sanitized["auto_route_within_group"] = bool(sanitized.get("auto_route_within_group"))
+        if "on_switch_to_non_vision_with_images" in sanitized:
+            policy = str(sanitized.get("on_switch_to_non_vision_with_images") or "auto_bridge").strip()
+            sanitized["on_switch_to_non_vision_with_images"] = policy if policy in {"auto_bridge", "ask", "block", "ignore"} else "auto_bridge"
         return sanitized
 
     def refresh_models_settings(self, values: dict[str, Any]) -> dict[str, Any]:
@@ -291,6 +338,13 @@ class ModelRuntimeSettingsService:
             models[key] = values_by_scope if isinstance(values_by_scope, dict) else {}
         models["thinking_level"] = self._normalize_level(models.get("thinking_level"))
         models["model_api_routes"] = self._normalize_model_api_routes(models.get("model_api_routes", ""))
+        models["preferred_model_group"] = str(models.get("preferred_model_group") or "default").strip() or "default"
+        models["auto_route_within_group"] = bool(models.get("auto_route_within_group", True))
+        models["model_groups"] = normalize_model_groups(models.get("model_groups"))
+        models["utility_models"] = normalize_utility_models(models.get("utility_models"))
+        models["utility_model_policy"] = normalize_utility_model_policy(models.get("utility_model_policy"))
+        switch_policy = str(models.get("on_switch_to_non_vision_with_images") or "auto_bridge").strip()
+        models["on_switch_to_non_vision_with_images"] = switch_policy if switch_policy in {"auto_bridge", "ask", "block", "ignore"} else "auto_bridge"
         return models
 
     @staticmethod

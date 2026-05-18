@@ -1,0 +1,8 @@
+flow_id: defaultspack.vision_bridge
+description: Describe images before sending text context to a non-vision model.
+steps:
+  - id: describe_images
+    type: function
+    function: defaults.vision.describe_images
+    input: "{{input}}"
+    output: vision_bridge_result

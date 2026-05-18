@@ -1,0 +1,45 @@
+{
+  "function_id": "ai_route_model",
+  "description": "Route a request to a compatible model.",
+  "tags": [
+    "ai",
+    "model",
+    "routing"
+  ],
+  "risk": "medium",
+  "requires": [
+    "ai.route.model"
+  ],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.ai.route_model",
+    "defaultspack.ai.route_model",
+    "defaults.ai.route.model",
+    "defaultspack.ai.route.model"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.ai.route_model",
+      "default_args": {}
+    }
+  }
+}

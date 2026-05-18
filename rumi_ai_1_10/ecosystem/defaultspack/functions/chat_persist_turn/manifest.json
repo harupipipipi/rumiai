@@ -1,0 +1,43 @@
+{
+  "function_id": "chat_persist_turn",
+  "description": "Persist a profile-scoped chat turn.",
+  "tags": [
+    "chat"
+  ],
+  "risk": "medium",
+  "requires": [
+    "chat.persist.turn"
+  ],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.chat.persist_turn",
+    "defaultspack.chat.persist_turn",
+    "defaults.chat.persist.turn",
+    "defaultspack.chat.persist.turn"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.chat.persist_turn",
+      "default_args": {}
+    }
+  }
+}

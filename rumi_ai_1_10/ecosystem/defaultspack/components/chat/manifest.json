@@ -22,7 +22,9 @@
       "defaults.chat.stop",
       "defaults.chat.regenerate",
       "defaults.chat.summarize_and_trim",
-      "defaults.chat.auto_trim"
+      "defaults.chat.auto_trim",
+      "defaults.chat.detect_modalities",
+      "defaults.chat.persist_turn"
     ]
   }
 }

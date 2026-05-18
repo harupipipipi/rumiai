@@ -1,0 +1,43 @@
+{
+  "function_id": "ai_search_models",
+  "description": "Search available AI models by capabilities.",
+  "tags": [
+    "ai",
+    "model",
+    "catalog"
+  ],
+  "risk": "low",
+  "requires": [],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.ai.search_models",
+    "defaultspack.ai.search_models",
+    "defaults.ai.search.models",
+    "defaultspack.ai.search.models"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.ai.search_models",
+      "default_args": {}
+    }
+  }
+}

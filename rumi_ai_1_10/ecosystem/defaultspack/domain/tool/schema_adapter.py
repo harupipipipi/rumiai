@@ -3,6 +3,9 @@ from __future__ import annotations
 from typing import Any, Dict, Iterable, List, Optional, Set
 
 
+_APPROVAL_REQUIRED_NAME_PARTS = ("write", "create", "update", "delete", "patch", "commit", "push")
+
+
 def tool_name_from_definition(tool: Any) -> str:
     if isinstance(tool, str):
         return tool
@@ -192,6 +195,19 @@ def _normalize_policy_tool_list(value: Any) -> Set[str]:
 
 
 def tool_requires_approval_by_policy(tool: Any, policy: Optional[Dict[str, Any]]) -> bool:
+    if _is_write_like_tool_name(tool_name_from_definition(tool)):
+        return True
+    if _tool_metadata_value(tool, "write_action") is True or _tool_metadata_value(tool, "action_type") in {
+        "write",
+        "file_write",
+        "delete",
+        "create",
+        "update",
+        "patch",
+        "commit",
+        "push",
+    }:
+        return True
     if not isinstance(policy, dict) or policy.get("write_actions_require_approval") is not True:
         return False
     return _tool_metadata_value(tool, "write_action") is True or _tool_metadata_value(tool, "action_type") in {
@@ -201,6 +217,11 @@ def tool_requires_approval_by_policy(tool: Any, policy: Optional[Dict[str, Any]]
         "create",
         "update",
     }
+
+
+def _is_write_like_tool_name(name: str) -> bool:
+    lowered = str(name or "").lower()
+    return any(part in lowered for part in _APPROVAL_REQUIRED_NAME_PARTS)
 
 
 def policy_from_context(context: Dict[str, Any]) -> Dict[str, Any]:

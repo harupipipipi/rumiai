@@ -11,7 +11,10 @@
       "defaults.prompt.system",
       "defaults.prompt.update",
       "defaults.prompt.delete",
-      "defaults.prompt.convert"
+      "defaults.prompt.convert",
+      "defaults.prompt.lint_prompt",
+      "defaults.prompt.compact_prompt",
+      "defaults.prompt.load_effective"
     ]
   }
 }
