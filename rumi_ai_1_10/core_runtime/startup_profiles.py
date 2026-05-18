@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from .paths import discover_pack_locations
+from .profile_workspace import ProfileWorkspaceManager
 from .node_models import make_core_start_node
 from .port_standards import can_connect_ports as _can_connect_standard_ports
 
@@ -75,6 +76,7 @@ class StartupProfileManager:
         approval_manager: Any = None,
         ecosystem_dir: Optional[str] = None,
         seed_default_profile: Optional[bool] = None,
+        profile_workspace_manager: Optional[ProfileWorkspaceManager] = None,
     ) -> None:
         base_dir = Path(__file__).resolve().parent.parent
         user_data_dir = Path(os.environ.get("RUMI_USER_DATA") or (base_dir / "user_data"))
@@ -83,6 +85,9 @@ class StartupProfileManager:
         self.approval_manager = approval_manager
         self.ecosystem_dir = ecosystem_dir
         self.seed_default_profile = storage_path is None if seed_default_profile is None else seed_default_profile
+        self.profile_workspace_manager = profile_workspace_manager or ProfileWorkspaceManager(
+            self._workspace_user_data_root(self._storage_path)
+        )
 
     @property
     def storage_path(self) -> Path:
@@ -95,8 +100,9 @@ class StartupProfileManager:
     def list_profiles_payload(self) -> Dict[str, Any]:
         catalog = self._build_catalog()
         state = self._load_state(catalog)
+        profiles = [self._profile_with_workspace_payload(profile) for profile in state["profiles"]]
         return {
-            "profiles": copy.deepcopy(state["profiles"]),
+            "profiles": profiles,
             "active_profile_id": state.get("active_profile_id"),
             "last_launched_profile_id": state.get("last_launched_profile_id"),
             "catalog": catalog,
@@ -152,7 +158,10 @@ class StartupProfileManager:
         if state.get("active_profile_id") is None:
             state["active_profile_id"] = profile_id
         self._save_state(state)
-        return {"profile": profile, "created": True}
+        workspace_payload = self._sync_profile_workspace(profile)
+        if state.get("active_profile_id") == profile_id:
+            self._write_active_profile_marker(profile_id)
+        return {"profile": profile, "profile_workspace": workspace_payload, "created": True}
 
     def update_profile(self, profile_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         catalog = self._build_catalog()
@@ -202,7 +211,8 @@ class StartupProfileManager:
             return {"error": error, "status_code": 400}
         state["profiles"][index] = updated
         self._save_state(state)
-        return {"profile": updated, "updated": True}
+        workspace_payload = self._sync_profile_workspace(updated)
+        return {"profile": updated, "profile_workspace": workspace_payload, "updated": True}
 
     def add_pack_to_profile(self, profile_id: str, pack_id: str) -> Dict[str, Any]:
         catalog = self._build_catalog()
@@ -222,6 +232,7 @@ class StartupProfileManager:
         profile["updated_at"] = _now_ts()
         state["profiles"][index] = profile
         self._save_state(state)
+        self._sync_profile_workspace(profile)
         return {"profile": profile, "pack_added": pack_id}
 
     def remove_pack_from_profile(self, profile_id: str, pack_id: str) -> Dict[str, Any]:
@@ -248,6 +259,7 @@ class StartupProfileManager:
         profile["updated_at"] = _now_ts()
         state["profiles"][index] = profile
         self._save_state(state)
+        self._sync_profile_workspace(profile)
         return {"profile": profile, "pack_removed": pack_id}
 
     def set_node_override(self, profile_id: str, port_key: str, node_id: str) -> Dict[str, Any]:
@@ -271,6 +283,7 @@ class StartupProfileManager:
             return {"error": error, "status_code": 400}
         state["profiles"][index] = profile
         self._save_state(state)
+        self._sync_profile_workspace(profile)
         return {"profile": profile, "override_set": {"port_key": port_key, "node_id": node_id}}
 
     def clear_node_override(self, profile_id: str, port_key: str) -> Dict[str, Any]:
@@ -288,6 +301,7 @@ class StartupProfileManager:
         profile["updated_at"] = _now_ts()
         state["profiles"][index] = profile
         self._save_state(state)
+        self._sync_profile_workspace(profile)
         return {"profile": profile, "override_cleared": port_key}
 
     def duplicate_profile(self, profile_id: str) -> Dict[str, Any]:
@@ -304,7 +318,8 @@ class StartupProfileManager:
         duplicated["updated_at"] = duplicated["created_at"]
         state["profiles"].append(duplicated)
         self._save_state(state)
-        return {"profile": duplicated, "duplicated": True}
+        workspace_payload = self._sync_profile_workspace(duplicated)
+        return {"profile": duplicated, "profile_workspace": workspace_payload, "duplicated": True}
 
     def delete_profile(self, profile_id: str) -> Dict[str, Any]:
         catalog = self._build_catalog()
@@ -323,11 +338,15 @@ class StartupProfileManager:
             state["last_launched_profile_id"] = None
 
         self._save_state(state)
+        if state.get("active_profile_id"):
+            self._write_active_profile_marker(str(state["active_profile_id"]))
+        self._mark_profile_workspace_orphaned(profile_id, deleted_profile)
 
         return {
             "deleted": True,
             "deleted_profile_id": deleted_profile["profile_id"],
             "active_profile_id": state.get("active_profile_id"),
+            "profile_workspace_orphaned": True,
         }
 
     def activate_profile(self, profile_id: str) -> Dict[str, Any]:
@@ -341,7 +360,9 @@ class StartupProfileManager:
             return {"error": error, "status_code": 400}
         state["active_profile_id"] = profile_id
         self._save_state(state)
-        return {"profile": profile, "active_profile_id": profile_id, "activated": True}
+        workspace_payload = self._sync_profile_workspace(profile)
+        self._write_active_profile_marker(profile_id)
+        return {"profile": profile, "profile_workspace": workspace_payload, "active_profile_id": profile_id, "activated": True}
 
     def launch_profile(self, profile_id: str) -> Dict[str, Any]:
         catalog = self._build_catalog()
@@ -352,6 +373,7 @@ class StartupProfileManager:
         error = self._validate_profile(profile, catalog)
         if error:
             return {"error": error, "status_code": 400}
+        workspace_payload = self._sync_profile_workspace(profile)
         capability_graph = self._compile_launch_capability_graph(profile)
         raw_policy = profile.get("policy")
         policy = raw_policy if isinstance(raw_policy, dict) else {}
@@ -360,6 +382,7 @@ class StartupProfileManager:
                 "error": "Capability graph compile failed for strict startup profile",
                 "status_code": 400,
                 "profile": profile,
+                "profile_workspace": workspace_payload,
                 "active_profile_id": state.get("active_profile_id"),
                 "launched": False,
                 "capability_graph": capability_graph,
@@ -372,6 +395,7 @@ class StartupProfileManager:
         state["active_profile_id"] = profile_id
         state["last_launched_profile_id"] = profile_id
         self._save_state(state)
+        self._write_active_profile_marker(profile_id)
         self._apply_profile_to_active_ecosystem(profile, catalog, launched=True)
         self._record_capability_graph_result(capability_graph)
         handoff = self._request_launch_handoff(profile)
@@ -379,14 +403,47 @@ class StartupProfileManager:
             return {
                 "error": "Runtime handoff is unavailable; startup profile was saved but launch could not complete",
                 "status_code": 503,
+                "profile": profile,
+                "profile_workspace": workspace_payload,
+                "active_profile_id": profile_id,
+                "launched": False,
             }
         return {
             "profile": profile,
+            "profile_workspace": workspace_payload,
             "active_profile_id": profile_id,
             "launched": True,
             "restart_requested": True,
             "handoff": handoff,
             "capability_graph": capability_graph,
+        }
+
+    def get_profile_workspace(self, profile_id: str) -> Dict[str, Any]:
+        catalog = self._build_catalog()
+        state = self._load_state(catalog)
+        profile = self._get_profile(state["profiles"], profile_id)
+        if profile is None:
+            return {"error": f"Profile '{profile_id}' not found", "status_code": 404}
+        workspace_payload = self._sync_profile_workspace(profile)
+        paths = self.profile_workspace_manager.paths_for_profile(profile_id)
+        base_pack = str(profile.get("base_pack") or "")
+        snapshot_manifest_path = paths.snapshots_dir / base_pack / "manifest.lock.json"
+        manifest = self._read_json_file(snapshot_manifest_path)
+        return {
+            "profile": copy.deepcopy(profile),
+            "profile_workspace": workspace_payload,
+            "startup_config": self.profile_workspace_manager.read_startup_config(profile_id),
+            "flows": self._workspace_file_entries(paths.flows_dir, ("*.yaml", "*.yml")),
+            "prompts": self._workspace_file_entries(paths.prompts_dir, ("*.md", "*.txt", "*.yaml", "*.yml")),
+            "resource_snapshot_manifest": manifest,
+            "permissions": {
+                name: {
+                    "path": str(paths.permissions_dir / name),
+                    "exists": (paths.permissions_dir / name).is_file(),
+                }
+                for name in ("grants.yaml", "tool_policy.yaml", "approvals.yaml")
+            },
+            "flow_yaml": self._workspace_flow_yaml(paths, base_pack),
         }
 
     # ------------------------------------------------------------------
@@ -414,6 +471,114 @@ class StartupProfileManager:
         tmp_path = path.with_suffix(".tmp")
         tmp_path.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         tmp_path.replace(path)
+
+    def _profile_with_workspace_payload(self, profile: Dict[str, Any]) -> Dict[str, Any]:
+        enriched = copy.deepcopy(profile)
+        enriched["profile_workspace"] = self._sync_profile_workspace(enriched)
+        return enriched
+
+    def _sync_profile_workspace(self, profile: Dict[str, Any]) -> Dict[str, Any]:
+        paths = self.profile_workspace_manager.initialize_profile_workspace(profile)
+        self.profile_workspace_manager.save_profile_yaml(paths.profile_id, profile)
+        self.profile_workspace_manager.write_startup_config(
+            paths.profile_id,
+            {
+                "base_pack": profile.get("base_pack"),
+                "graph_id": profile.get("graph_id"),
+                "packs": list(profile.get("packs") or []),
+                "node_overrides": dict(profile.get("node_overrides") or {}),
+            },
+        )
+        self._ensure_default_resource_snapshot(profile, paths.profile_id)
+        return self.profile_workspace_manager.payload_for_profile(paths.profile_id)
+
+    def _workspace_payload_for_profile_id(self, profile_id: str) -> Dict[str, Any]:
+        return self.profile_workspace_manager.payload_for_profile(profile_id)
+
+    def _ensure_default_resource_snapshot(self, profile: Dict[str, Any], profile_id: str) -> None:
+        base_pack = str(profile.get("base_pack") or "")
+        if not base_pack:
+            return
+        manifest_path = (
+            self.profile_workspace_manager.paths_for_profile(profile_id).snapshots_dir
+            / base_pack
+            / "manifest.lock.json"
+        )
+        if manifest_path.exists():
+            return
+        try:
+            from .profile_resource_snapshot import ProfileResourceSnapshotManager
+
+            ProfileResourceSnapshotManager(
+                self.profile_workspace_manager.user_data_root,
+                ecosystem_dir=self.ecosystem_dir,
+            ).snapshot_default_resources(
+                profile_id,
+                base_pack=base_pack,
+                graph_id=profile.get("graph_id") if isinstance(profile.get("graph_id"), str) else None,
+                flow_ids=["chat_turn"],
+            )
+        except Exception:
+            logger.debug("failed to snapshot default resources for profile %s", profile_id, exc_info=True)
+
+    def _mark_profile_workspace_orphaned(self, profile_id: str, profile: Dict[str, Any]) -> None:
+        try:
+            self.profile_workspace_manager.mark_workspace_orphaned(profile_id, profile)
+        except ValueError:
+            logger.debug("invalid profile id while orphaning workspace: %s", profile_id, exc_info=True)
+
+    def _write_active_profile_marker(self, profile_id: str) -> None:
+        profiles_root = self.profile_workspace_manager.user_data_root / "profiles"
+        profiles_root.mkdir(parents=True, exist_ok=True)
+        path = profiles_root / "active_profile.json"
+        tmp_path = path.with_suffix(".tmp")
+        tmp_path.write_text(
+            json.dumps({"version": 1, "active_profile_id": profile_id}, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        tmp_path.replace(path)
+
+    def _workspace_file_entries(self, root: Path, patterns: tuple[str, ...]) -> List[Dict[str, Any]]:
+        entries: List[Dict[str, Any]] = []
+        if not root.is_dir():
+            return entries
+        for pattern in patterns:
+            for path in sorted(root.glob(pattern)):
+                if path.is_file():
+                    entries.append(
+                        {
+                            "name": path.name,
+                            "path": str(path),
+                            "size": path.stat().st_size,
+                        }
+                    )
+        return entries
+
+    def _workspace_flow_yaml(self, paths: Any, base_pack: str) -> Dict[str, Any]:
+        candidates = [
+            paths.flows_dir / "chat_turn.flow.yaml",
+            paths.snapshots_dir / base_pack / "flows" / "chat_turn.flow.yaml",
+        ]
+        for path in candidates:
+            if path.is_file():
+                return {"path": str(path), "yaml_content": path.read_text(encoding="utf-8")}
+        return {"path": None, "yaml_content": ""}
+
+    def _read_json_file(self, path: Path) -> Dict[str, Any]:
+        if not path.is_file():
+            return {}
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            return {}
+        return data if isinstance(data, dict) else {}
+
+    @staticmethod
+    def _workspace_user_data_root(storage_path: Path) -> Path:
+        parent = storage_path.parent
+        if parent.name == "settings":
+            return parent.parent
+        return parent
 
     def _default_state(self, catalog: Dict[str, Any]) -> Dict[str, Any]:
         default_profile = self._default_startup_profile(catalog) if self.seed_default_profile else None
@@ -1082,6 +1247,13 @@ class StartupProfileManager:
         active.set_metadata("startup_launched", bool(launched))
         active.set_metadata("startup_launch_requested_at", _now_ts() if launched else None)
         active.set_metadata("startup_surface_open_pending", bool(launched))
+        try:
+            workspace_payload = self._workspace_payload_for_profile_id(profile["profile_id"])
+            active.set_metadata("startup_profile_workspace", workspace_payload)
+            active.set_metadata("startup_profile_database_path", workspace_payload["database_path"])
+            active.set_metadata("startup_profile_user_data_dir", workspace_payload["user_data_dir"])
+        except Exception:
+            logger.debug("failed to attach startup profile workspace metadata", exc_info=True)
         if launched:
             active.set_metadata("startup_surface_open_result", None)
 
