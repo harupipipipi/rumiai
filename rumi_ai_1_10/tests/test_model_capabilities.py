@@ -45,3 +45,15 @@ def test_provider_catalog_enriches_models_and_profiles():
     sample = next(item for item in profiles if item["profile_id"] == "google/gemini-2.5-flash")
     assert "capability_tags" in sample
     assert "recommended_roles" in sample
+
+
+def test_profile_catalog_preserves_gemma_4_tool_and_vision_capabilities():
+    from ecosystem.defaultspack.backend.ai_client.provider_catalog import list_profile_catalog
+
+    profiles = list_profile_catalog()
+    gemma = next(item for item in profiles if item["profile_id"] == "google/gemma-4-31b-it")
+
+    assert gemma["supports_tool_calling"] is True
+    assert gemma["supports_vision"] is True
+    assert "tools" in gemma["capability_tags"]
+    assert "vision_ocr" in gemma["allowed_roles"]

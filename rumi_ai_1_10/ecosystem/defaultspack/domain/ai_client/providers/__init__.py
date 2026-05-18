@@ -970,10 +970,25 @@ def build_profile_catalog(active_provider_ids=None, custom_profiles=None):
             "provider_count_for_model_name": model["provider_count_for_model_name"],
             "disambiguated_name": model["disambiguated_name"],
             "type": model.get("type", "chat"),
+            "capabilities": list(model.get("capabilities", [])) if isinstance(model.get("capabilities"), list) else [],
             "defaults": dict(model.get("defaults", {})) if isinstance(model.get("defaults"), dict) else {},
             "pricing": dict(model.get("pricing", {})) if isinstance(model.get("pricing"), dict) else {},
             "metadata": metadata,
         }
+        for field_name in (
+            "supports_vision",
+            "supports_image_input",
+            "supports_tool_calling",
+            "supports_fast",
+            "speed_tier",
+            "quality_tier",
+            "knowledge_level",
+            "knowledge_band",
+            "cost_tier",
+            "model_roles",
+        ):
+            if field_name in model:
+                profile[field_name] = model.get(field_name)
         if "supports_thinking" in model:
             profile["supports_thinking"] = bool(model.get("supports_thinking"))
         if isinstance(model.get("thinking_levels"), list):
@@ -1024,6 +1039,11 @@ def build_profile_catalog(active_provider_ids=None, custom_profiles=None):
                     resolved["provider_count_for_model_name"] if resolved else 0
                 ),
                 "disambiguated_name": resolved["disambiguated_name"] if resolved else profile_name,
+                "capabilities": list(resolved.get("capabilities", []))
+                if resolved and isinstance(resolved.get("capabilities"), list)
+                else list(raw_profile.get("capabilities", []))
+                if isinstance(raw_profile.get("capabilities"), list)
+                else [],
                 "metadata": metadata,
             }
         )

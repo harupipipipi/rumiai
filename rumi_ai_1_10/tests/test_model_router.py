@@ -47,3 +47,25 @@ def test_router_returns_bridge_plan_when_no_vision_model_available():
 
     assert decision.bridge_required is True
     assert decision.bridge_plan["type"] == "vision_bridge"
+
+
+def test_router_keeps_requested_gemma_4_when_profile_catalog_preserves_capabilities():
+    from ecosystem.defaultspack.backend.ai_client.provider_catalog import list_profile_catalog
+    from domain.ai_client.model_router import ModelRoutingRequest, route_model_request
+
+    decision = route_model_request(
+        ModelRoutingRequest(
+            user_text="好きな食べ物教えて〜",
+            requested_tools=["computer_use", "browser_computer"],
+            requires_tool_calling=True,
+            requested_thinking_level="low",
+            preferred_model="google/gemma-4-31b-it",
+            preferred_group="default",
+            auto_route_within_group=True,
+            settings={"model_groups": {"default": {"allowed_models": []}}},
+        ),
+        profiles=list_profile_catalog(),
+    )
+
+    assert decision.selected_model == "google/gemma-4-31b-it"
+    assert "same_model" in decision.reason_codes
