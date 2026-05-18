@@ -1,0 +1,12 @@
+{
+  "type": "profile",
+  "id": "profile",
+  "version": "1.0.0",
+  "description": "Profile workspace loading and path resolution",
+  "connectivity": {
+    "provides": [
+      "defaults.profile.load_active",
+      "defaults.profile.workspace"
+    ]
+  }
+}

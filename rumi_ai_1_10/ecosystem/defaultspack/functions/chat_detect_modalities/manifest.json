@@ -1,0 +1,41 @@
+{
+  "function_id": "chat_detect_modalities",
+  "description": "Detect message input modalities.",
+  "tags": [
+    "chat"
+  ],
+  "risk": "low",
+  "requires": [],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.chat.detect_modalities",
+    "defaultspack.chat.detect_modalities",
+    "defaults.chat.detect.modalities",
+    "defaultspack.chat.detect.modalities"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.chat.detect_modalities",
+      "default_args": {}
+    }
+  }
+}

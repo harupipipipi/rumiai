@@ -1,0 +1,41 @@
+{
+  "function_id": "prompt_load_effective",
+  "description": "Load the effective profile-scoped system prompt.",
+  "tags": [
+    "prompt"
+  ],
+  "risk": "low",
+  "requires": [],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.prompt.load_effective",
+    "defaultspack.prompt.load_effective",
+    "defaults.prompt.load.effective",
+    "defaultspack.prompt.load.effective"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.prompt.load_effective",
+      "default_args": {}
+    }
+  }
+}

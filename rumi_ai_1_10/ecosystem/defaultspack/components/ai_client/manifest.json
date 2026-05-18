@@ -13,6 +13,7 @@
       "defaults.ai.recommend_model",
       "defaults.ai.route_model",
       "defaults.ai.explain_model_choice",
+      "defaults.ai.build_request",
       "defaults.ai.providers",
       "defaults.ai.embed",
       "defaults.ai.image_gen",

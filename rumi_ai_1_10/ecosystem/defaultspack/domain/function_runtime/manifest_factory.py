@@ -367,6 +367,22 @@ DATA_FUNCTIONS: tuple[FunctionSpec, ...] = tuple(
 )
 
 
+PROFILE_WORKSPACE_FUNCTIONS: tuple[FunctionSpec, ...] = tuple(
+    _spec(function_id, description, tags, risk=risk, block=block)
+    for function_id, description, tags, risk, block in (
+        ("profile_load_active", "Load the active startup profile.", ("profile",), "low", "blocks.profile.load_active"),
+        ("profile_workspace", "Resolve and initialize a profile workspace.", ("profile",), "low", "blocks.profile.workspace"),
+        ("chat_detect_modalities", "Detect message input modalities.", ("chat",), "low", "blocks.chat.detect_modalities"),
+        ("prompt_load_effective", "Load the effective profile-scoped system prompt.", ("prompt",), "low", "blocks.prompt.load_effective"),
+        ("tools_select_relevant", "Select relevant tools for a profile-scoped chat turn.", ("tools",), "low", "blocks.tool.select_relevant"),
+        ("permissions_filter_tools", "Filter selected tools through profile permission defaults.", ("permissions",), "low", "blocks.permissions.filter_tools"),
+        ("ai_build_request", "Build a routed AI completion request.", ("ai",), "medium", "blocks.ai.build_request"),
+        ("chat_persist_turn", "Persist a profile-scoped chat turn.", ("chat",), "medium", "blocks.chat.persist_turn"),
+        ("audit_record_event", "Record a profile-scoped audit event.", ("audit",), "medium", "blocks.audit.record_event"),
+    )
+)
+
+
 RESEARCH_MEDIA_UI_DEV_FUNCTIONS: tuple[FunctionSpec, ...] = tuple(
     _spec(function_id, description, tags, risk=risk, block=block)
     for function_id, description, tags, risk, block in (
@@ -447,6 +463,7 @@ FUNCTION_SPECS: tuple[FunctionSpec, ...] = (
     + AGENT_FUNCTIONS
     + BROWSER_ARTIFACT_FUNCTIONS
     + DATA_FUNCTIONS
+    + PROFILE_WORKSPACE_FUNCTIONS
     + RESEARCH_MEDIA_UI_DEV_FUNCTIONS
     + MANAGEMENT_FUNCTIONS
 )

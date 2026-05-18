@@ -1,0 +1,11 @@
+{
+  "type": "permissions",
+  "id": "permissions",
+  "version": "1.0.0",
+  "description": "Profile permission defaults and runtime filtering hints",
+  "connectivity": {
+    "provides": [
+      "defaults.permissions.filter_tools"
+    ]
+  }
+}

@@ -23,7 +23,10 @@
       "compact",
       "context",
       "scheduler",
-      "gateway"
+      "gateway",
+      "profile",
+      "permissions",
+      "audit"
     ]
   },
   "components": {
@@ -68,7 +71,11 @@
           "defaults.chat.summarize_and_trim",
           "defaultspack.chat.summarize_and_trim",
           "defaults.chat.auto_trim",
-          "defaultspack.chat.auto_trim"
+          "defaultspack.chat.auto_trim",
+          "defaults.chat.detect_modalities",
+          "defaultspack.chat.detect_modalities",
+          "defaults.chat.persist_turn",
+          "defaultspack.chat.persist_turn"
         ]
       }
     },
@@ -158,6 +165,8 @@
           "defaultspack.ai.route_model",
           "defaults.ai.explain_model_choice",
           "defaultspack.ai.explain_model_choice",
+          "defaults.ai.build_request",
+          "defaultspack.ai.build_request",
           "defaults.ai.providers",
           "defaultspack.ai.providers",
           "defaults.ai.embed",
@@ -200,7 +209,9 @@
           "defaults.tool.consent_check",
           "defaultspack.tool.consent_check",
           "defaults.tool.consent_confirm",
-          "defaultspack.tool.consent_confirm"
+          "defaultspack.tool.consent_confirm",
+          "defaults.tools.select_relevant",
+          "defaultspack.tools.select_relevant"
         ]
       }
     },
@@ -227,7 +238,9 @@
           "defaults.prompt.lint_prompt",
           "defaultspack.prompt.lint_prompt",
           "defaults.prompt.compact_prompt",
-          "defaultspack.prompt.compact_prompt"
+          "defaultspack.prompt.compact_prompt",
+          "defaults.prompt.load_effective",
+          "defaultspack.prompt.load_effective"
         ]
       }
     },
@@ -382,6 +395,41 @@
         "provides": [
           "defaults.vision.describe_images",
           "defaultspack.vision.describe_images"
+        ]
+      }
+    },
+    "profile": {
+      "type": "profile",
+      "id": "profile",
+      "path": "blocks/profile",
+      "connectivity": {
+        "provides": [
+          "defaults.profile.load_active",
+          "defaultspack.profile.load_active",
+          "defaults.profile.workspace",
+          "defaultspack.profile.workspace"
+        ]
+      }
+    },
+    "permissions": {
+      "type": "permissions",
+      "id": "permissions",
+      "path": "blocks/permissions",
+      "connectivity": {
+        "provides": [
+          "defaults.permissions.filter_tools",
+          "defaultspack.permissions.filter_tools"
+        ]
+      }
+    },
+    "audit": {
+      "type": "audit",
+      "id": "audit",
+      "path": "blocks/audit",
+      "connectivity": {
+        "provides": [
+          "defaults.audit.record_event",
+          "defaultspack.audit.record_event"
         ]
       }
     },
