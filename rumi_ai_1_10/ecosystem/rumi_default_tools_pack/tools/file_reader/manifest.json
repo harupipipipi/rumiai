@@ -54,6 +54,11 @@
         "required": ["path"]
       }
     },
+    "tool_category": "filesystem",
+    "action_type": "read",
+    "risk": "low",
+    "approval_policy": "allow",
+    "capability_grants": ["file.read"],
     "execution": {
       "type": "rumi_function",
       "qualified_name": "defaultspack:tool_file_reader"

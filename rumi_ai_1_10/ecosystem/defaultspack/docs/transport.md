@@ -1,12 +1,12 @@
 # Transport 層
 
-defaults Pack はフロントエンドやクライアントとの通信手段として、3 種類の transport を提供する。いずれも `transport/` ディレクトリに配置されている。
+defaultspack はフロントエンドやクライアントとの通信手段として、3 種類の transport を提供する。いずれも `transport/` ディレクトリに配置されている。
 
 ---
 
 ## 概要
 
-transport 層はクライアントからのリクエストを受け取り、対応する block の `run(input_data, context)` 関数を呼び出し、レスポンスを返す中間層である。すべての transport は同じ block を呼び出すが、利用可能なルートの範囲が異なる。HTTP transport が最も多くのルートを提供し、stdio/UDS transport はコアルートのサブセットのみを提供する。
+transport 層はクライアントからのリクエストを受け取り、`transport/registry.py` の endpoint -> flow/function 宣言を解決してレスポンスを返す中間層である。通常 chat の本線は `defaultspack.chat_turn` / `defaultspack.chat_stream_turn` を通り、既存 frontend の HTTP path、JSON shape、SSE event shape は fallback block で後方互換を維持する。`ecosystem/defaults/transport/*` は defaultspack transport への互換 shim である。
 
 transport の選択は起動時に決まる。`defaults.frontend.start` handler が `transport` パラメータに基づいて適切な transport を起動する。
 
@@ -37,7 +37,7 @@ server = start_http_server(facade)  # KernelFacade or None
 
 ### ルーティングの仕組み
 
-`_setup_routes()` メソッドで全ルートを `(method, pattern, handler)` タプルとして定義する。パターン中の `{param}` は正規表現 `(?P<param>[^/]+)` に変換され、コンパイル済み正規表現として保持される。
+`_setup_routes()` メソッドは `transport/registry.py` から canonical route specs を読み込む。flow YAML の `transport.http.routes` が最優先で、足りない endpoint は互換 fallback specs と component route specs で補われる。パターン中の `{param}` は正規表現 `(?P<param>[^/]+)` に変換され、コンパイル済み正規表現として保持される。
 
 リクエスト到着時に `_match_route(method, path)` が全ルートを順にスキャンし、メソッドとパスが一致する最初のルートのハンドラを呼び出す。パスパラメータは `groupdict()` で抽出され、各ハンドラに渡される。
 
@@ -47,14 +47,14 @@ server = start_http_server(facade)  # KernelFacade or None
 
 | メソッド | パス | handler (block) |
 |---|---|---|
-| `POST` | `/v1/chat/completions` | `blocks/chat/send.py` |
+| `POST` | `/v1/chat/completions` | `defaultspack.chat_turn` (`blocks/chat/send.py` fallback) |
 | `POST` | `/api/chat/conversations` | `blocks/chat/create_conversation.py` |
 | `GET` | `/api/chat/conversations` | `blocks/chat/list_conversations.py` |
 | `GET` | `/api/chat/conversations/{id}` | `blocks/chat/get_conversation.py` |
 | `PUT` | `/api/chat/conversations/{id}` | `blocks/chat/update_conversation.py` |
 | `DELETE` | `/api/chat/conversations/{id}` | `blocks/chat/delete_conversation.py` |
-| `POST` | `/api/chat/conversations/{id}/messages` | `blocks/chat/send.py` |
-| `POST` | `/api/chat/conversations/{id}/stream` | `blocks/chat/stream.py` |
+| `POST` | `/api/chat/conversations/{id}/messages` | `defaultspack.chat_turn` (`blocks/chat/send.py` fallback) |
+| `POST` | `/api/chat/conversations/{id}/stream` | `defaultspack.chat_stream_turn` (`blocks/chat/stream.py` fallback) |
 | `POST` | `/api/chat/conversations/{id}/export` | `blocks/chat/export_conversation.py` |
 | `POST` | `/api/chat/conversations/{id}/summarize` | `blocks/chat/summarize_and_trim.py` |
 | `POST` | `/api/chat/conversations/{id}/auto-trim` | `blocks/chat/auto_trim.py` |
@@ -118,7 +118,7 @@ Access-Control-Allow-Headers: Content-Type, Authorization
     "step_id": "http_request",
     "phase": "execute",
     "ts": "2025-01-01T00:00:00Z",  # ISO 8601
-    "owner_pack": "defaults",
+    "owner_pack": "defaultspack",
     "inputs": {},
 }
 ```
@@ -166,18 +166,18 @@ transport.start()  # ブロッキング（stdin を読み続ける）
 
 ### stdio ルート一覧
 
-stdio transport は HTTP transport のサブセットを提供する。`transport/stdio.py` の `_ROUTE_MAP` に定義されている全ルートは以下の通り:
+stdio transport は `transport/registry.py` の canonical route specs を使う。静的ファイル系を除き、HTTP と同じ endpoint -> flow/function 本線を通る。`_ROUTE_MAP` と `_ID_INJECT_MAP` は既存コード向けの互換 export である。
 
 | メソッド | パス | block モジュール | ID 注入 |
 |---|---|---|---|
-| `POST` | `/v1/chat/completions` | `blocks.chat.send` | — |
+| `POST` | `/v1/chat/completions` | `defaultspack.chat_turn` | — |
 | `POST` | `/api/chat/conversations` | `blocks.chat.create_conversation` | — |
 | `GET` | `/api/chat/conversations` | `blocks.chat.list_conversations` | — |
 | `GET` | `/api/chat/conversations/{id}` | `blocks.chat.get_conversation` | `conversation_id` ← `id` |
 | `PUT` | `/api/chat/conversations/{id}` | `blocks.chat.update_conversation` | `conversation_id` ← `id` |
 | `DELETE` | `/api/chat/conversations/{id}` | `blocks.chat.delete_conversation` | `conversation_id` ← `id` |
-| `POST` | `/api/chat/conversations/{id}/messages` | `blocks.chat.send` | `conversation_id` ← `id` |
-| `POST` | `/api/chat/conversations/{id}/stream` | `blocks.chat.stream` | `conversation_id` ← `id` |
+| `POST` | `/api/chat/conversations/{id}/messages` | `defaultspack.chat_turn` | `conversation_id` ← `id` |
+| `POST` | `/api/chat/conversations/{id}/stream` | `defaultspack.chat_stream_turn` | `conversation_id` ← `id` |
 | `POST` | `/api/chat/conversations/{id}/export` | `blocks.chat.export_conversation` | `conversation_id` ← `id` |
 | `POST` | `/api/agent/execute` | `blocks.agent.execute` | — |
 | `POST` | `/api/agent/{id}/approve` | `blocks.agent.approve` | `execution_id` ← `id` |
@@ -187,33 +187,7 @@ stdio transport は HTTP transport のサブセットを提供する。`transpor
 | `GET` | `/api/health` | （インライン） | — |
 | `GET` | `/api/context` | （インライン） | — |
 
-**合計: 16 ルート**（handler モジュール 14 + インラインシステム 2）
-
-### HTTP のみに存在するルート（stdio には含まれない）
-
-以下のルートは HTTP transport でのみ利用可能であり、stdio transport には含まれない:
-
-- `POST /api/chat/conversations/{id}/summarize` — 要約・トリム
-- `POST /api/chat/conversations/{id}/auto-trim` — 自動トリム
-- `POST /api/agent/multi/execute` — マルチエージェント実行
-- `GET /api/agent/multi/{id}/status` — マルチエージェントステータス
-- `POST /api/agent/multi/{id}/message` — マルチエージェントメッセージ
-- `POST /api/agent/{id}/instruct` — エージェント指示追加
-- `POST /api/consent/check` — 同意チェック
-- `POST /api/consent/{id}/confirm` — 同意確認
-- `PUT /api/prompts/{name}` — プロンプト更新
-- `DELETE /api/prompts/{name}` — プロンプト削除
-- `POST /api/prompts/convert` — prompt ↔ tool 変換
-- `POST /api/tools/create` — ツール作成
-- `PUT /api/tools/{name}` — ツール更新
-- `DELETE /api/tools/{name}` — ツール削除
-- `GET /api/tools/{name}/export` — ツールエクスポート
-- `GET /api/dev/inspect` — Dev: inspect
-- `GET /api/dev/prompt-history` — Dev: プロンプト履歴
-- `POST /api/dev/edit-prompt` — Dev: プロンプト編集
-- `POST /api/dev/replay` — Dev: リプレイ
-- `GET /` — 静的ファイル（shell.html）
-- `GET /static/{path}` — 静的ファイル配信
+静的ファイル配信 (`/`, `/chat`, `/static/{path}`) は HTTP transport 専用である。
 
 ### ルーティング
 
@@ -229,7 +203,7 @@ stdio transport が `_build_context()` で生成する context:
     "step_id": "stdio_request",
     "phase": "execute",
     "ts": "2025-01-01T00:00:00Z",
-    "owner_pack": "defaults",
+    "owner_pack": "defaultspack",
     "inputs": {},
 }
 ```

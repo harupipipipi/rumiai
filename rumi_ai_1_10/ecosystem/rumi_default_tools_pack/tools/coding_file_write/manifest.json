@@ -24,6 +24,9 @@
     },
     "tool_category": "filesystem_write",
     "action_type": "file_write",
+    "risk": "high",
+    "approval_policy": "ask",
+    "capability_grants": ["file.write"],
     "write_action": true,
     "requires_approval": true,
     "schema": {
@@ -36,7 +39,6 @@
         "required": ["path", "content"]
       }
     },
-    "execution": {"type": "local"},
-    "handler": "blocks.coding.file_write:run"
+    "execution": {"type": "rumi_function", "qualified_name": "defaultspack:coding_file_write"}
   }
 }

@@ -8,7 +8,7 @@ from pathlib import Path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 from blocks._common import ok, error, gen_id, timestamp
 
-from domain.ai_client.client import AIClient
+from domain.ai_client.gateway import AIClient, LLMGateway
 from domain.ai_client.model_runtime_settings import ModelRuntimeSettingsService
 from domain.chat.store import ChatStore
 from domain.chat.message_converter import convert_to_standard
@@ -81,11 +81,9 @@ def _conversation_system_prompt(conv, manager):
     return manager.get_system_prompt()
 
 
-def _has_real_provider(client, model):
+def _has_real_provider(gateway, model):
     """Return True only when a non-stub provider will handle the request."""
-    provider, _ = client.resolve_provider(model)
-    from domain.ai_client.providers.stub_provider import StubProvider
-    return not isinstance(provider, StubProvider)
+    return gateway.has_real_provider(model)
 
 
 def _is_transient_ai_error(message):
@@ -128,18 +126,20 @@ def _is_retryable_ai_error(message):
 
 
 def _ai_direct_complete(model, messages, tools=None, params=None):
-    """AIClient を直接呼び出して complete を実行する。
+    """AI gateway を通して complete を実行する。
     APIキー未設定等で実プロバイダーがない場合は明示的エラーを返す。
 
     Returns:
         (response_dict, None) on success
         (None, error_message) on failure
     """
-    client = AIClient()
-    if not _has_real_provider(client, model):
+    gateway = LLMGateway(client=AIClient())
+    if not _has_real_provider(gateway, model):
         return None, "AI provider API key not configured"
     try:
-        response = client.complete(model, messages, tools or [], params or {})
+        response = gateway.complete(
+            {"model": model, "messages": messages, "tools": tools or [], "params": params or {}}
+        )
         return response, None
     except RuntimeError as exc:
         return None, "AI request failed: " + str(exc)
@@ -753,8 +753,7 @@ def _append_assistant_tool_use_message(messages, tool_uses):
 
 def _model_supports_vision(model):
     try:
-        client = AIClient()
-        matches = client._runtime_model_matches(str(model or ""))
+        matches = LLMGateway(client=AIClient()).runtime_model_matches(str(model or ""))
     except Exception:
         matches = []
     for match in matches or []:
@@ -769,8 +768,7 @@ def _model_supports_vision(model):
 
 def _model_supports_attachments(model):
     try:
-        client = AIClient()
-        matches = client._runtime_model_matches(str(model or ""))
+        matches = LLMGateway(client=AIClient()).runtime_model_matches(str(model or ""))
     except Exception:
         matches = []
     for match in matches or []:

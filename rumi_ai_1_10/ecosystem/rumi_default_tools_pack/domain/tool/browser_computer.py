@@ -26,6 +26,7 @@ class BrowserComputerController:
 
     def __init__(self, artifact_root: Path | None = None) -> None:
         pack_root = Path(__file__).resolve().parents[2]
+        self._custom_artifact_root = artifact_root is not None
         self._artifact_root = artifact_root or pack_root / "user_data" / "artifacts" / "computer"
         self._session_path = pack_root / "user_data" / "shared" / "browser_sessions.json"
         self._approval_path = pack_root / "user_data" / "shared" / "browser_computer_approvals.json"
@@ -2033,7 +2034,8 @@ class BrowserComputerController:
                 self._write_computer_state(state)
                 return selected
             return None
-        selected = self._computer_state().get("target_window")
+        state = self._computer_state()
+        selected = state.get("target_window") if self._state_matches_artifact_root(state) else None
         if target in {"selected_window", "window", "app"} or (not target and isinstance(selected, dict)):
             selected = self._normalize_window_record(selected)
             if self._is_usable_target_window(selected):
@@ -2064,7 +2066,10 @@ class BrowserComputerController:
         selected_candidate = self._best_window_candidate(candidates, app=app, title=title)
         if selected_candidate:
             return selected_candidate
-        selected = self._normalize_window_record(self._computer_state().get("target_window"))
+        state = self._computer_state()
+        selected = self._normalize_window_record(
+            state.get("target_window") if self._state_matches_artifact_root(state) else None
+        )
         if selected and self._is_usable_target_window(selected) and self._window_matches_filter(selected, app=app, title=title):
             return selected
         return None
@@ -2358,6 +2363,21 @@ class BrowserComputerController:
         sessions["computer"] = state
         sessions["updated_at"] = self._now_iso()
         self._write_sessions(sessions)
+
+    def _state_matches_artifact_root(self, state: dict[str, Any]) -> bool:
+        if not self._custom_artifact_root:
+            return True
+        last = state.get("last_screenshot") if isinstance(state.get("last_screenshot"), dict) else {}
+        for key in ("path", "model_image_path", "unmarked_model_image_path"):
+            value = last.get(key)
+            if not isinstance(value, str) or not value:
+                continue
+            try:
+                Path(value).resolve().relative_to(self._artifact_root.resolve())
+                return True
+            except Exception:
+                return False
+        return True
 
     def _clear_target_window(self) -> None:
         state = self._computer_state()

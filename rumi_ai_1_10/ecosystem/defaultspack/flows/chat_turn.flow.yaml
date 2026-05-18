@@ -2,6 +2,18 @@ flow_id: defaultspack.chat_turn
 version: 1
 description: Profile-scoped chat turn orchestration.
 
+transport:
+  http:
+    routes:
+      - method: POST
+        path: /v1/chat/completions
+        fallback_block: blocks.chat.send
+      - method: POST
+        path: /api/chat/conversations/{id}/messages
+        path_inject:
+          id: conversation_id
+        fallback_block: blocks.chat.send
+
 inputs:
   conversation_id: string
   message: object
@@ -10,8 +22,13 @@ inputs:
 outputs:
   ai_response: object
   route_model: object
-  selected_tools: array
+  selected_tools:
+    type: array
+    value: "{{permitted_tools.tools || permitted_tools}}"
   audit_event: object
+
+result:
+  value: "{{persisted_turn.assistant_message || persisted_turn}}"
 
 steps:
   - id: load_active_profile
@@ -70,7 +87,7 @@ steps:
       profile_id: "{{active_profile.profile_id}}"
       message: "{{input.message}}"
       modalities: "{{modalities}}"
-      tools: "{{permitted_tools}}"
+      tools: "{{permitted_tools.tools}}"
       system_prompt: "{{system_prompt}}"
     output: route_model
 
@@ -101,7 +118,7 @@ steps:
       message: "{{input.message}}"
       system_prompt: "{{prompt_compaction.prompt || system_prompt}}"
       vision_bridge_result: "{{vision_bridge_result}}"
-      tools: "{{permitted_tools}}"
+      tools: "{{permitted_tools.tools}}"
       route_model: "{{route_model}}"
     output: ai_request
 
@@ -129,6 +146,21 @@ steps:
       profile_id: "{{active_profile.profile_id}}"
       event_type: chat_turn
       route_model: "{{route_model}}"
-      tools: "{{permitted_tools}}"
+      tools: "{{permitted_tools.tools}}"
       workspace: "{{profile_workspace}}"
     output: audit_event
+
+  - id: post_turn
+    type: subflow
+    flow: "{{input.post_turn_flow}}"
+    when: "{{input.post_turn_flow}}"
+    input:
+      conversation_id: "{{input.conversation_id}}"
+      message: "{{input.message}}"
+      ai_response: "{{ai_response}}"
+      persisted_turn: "{{persisted_turn}}"
+      audit_event: "{{audit_event}}"
+      route_model: "{{route_model}}"
+      workspace: "{{profile_workspace}}"
+    output: post_turn
+    on_error: continue

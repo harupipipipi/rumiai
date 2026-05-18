@@ -144,6 +144,43 @@ class TestDockerFallbackAllowed:
         mock_host.assert_called_once()
 
 
+class TestDockerStrictBoundary:
+    """strict policy 時は Docker 不可で host fallback しないこと"""
+
+    @patch("core_runtime.capability_executor.get_audit_logger", new_callable=MagicMock)
+    def test_strict_mode_blocks_host_fallback_even_when_env_allows(self, mock_audit, monkeypatch, tmp_path):
+        monkeypatch.setenv("RUMI_ALLOW_HOST_FALLBACK", "true")
+        monkeypatch.setenv("RUMI_SECURITY_MODE", "strict")
+        executor = _make_test_executor()
+
+        func_dir = tmp_path / "test_func"
+        func_dir.mkdir()
+        main_py = func_dir / "main.py"
+        main_py.write_text('def run(ctx, args): return {"ok": True}', encoding="utf-8")
+
+        entry = _MockFunctionEntry(
+            host_execution=False,
+            runtime="python",
+            function_dir=str(func_dir),
+            main_py_path=str(main_py),
+        )
+        with patch.object(executor, "_is_docker_available", return_value=False):
+            with patch("core_runtime.capability_executor._DockerRunBuilder", None):
+                with patch.object(executor, "_execute_user_function_host") as mock_host:
+                    resp = executor._execute_user_function(
+                        principal_id="test_principal",
+                        entry=entry,
+                        args={},
+                        request_id="req_strict",
+                        start_time=time.time(),
+                    )
+
+        assert resp.success is False
+        assert resp.error_type == "docker_unavailable"
+        assert "strict function isolation" in resp.error
+        mock_host.assert_not_called()
+
+
 # ===========================================================================
 # Wave 1-2: _execute_command_function ガード
 # ===========================================================================

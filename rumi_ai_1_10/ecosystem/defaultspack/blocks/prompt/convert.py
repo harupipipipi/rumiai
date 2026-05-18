@@ -1,4 +1,4 @@
-"""defaults.prompt.convert — tool ↔ prompt 相互変換 handler
+"""defaults.prompt.convert — tool ↔ prompt conversion helper
 
 入力:
     {
@@ -11,9 +11,9 @@
     tool → prompt:
         tool の parameters を変数に、description をテンプレート本文のヘッダに。
     prompt → tool:
-        テンプレートの変数を parameters に、本文を description に。
-        P2-1: register_dynamic() を使って実際にツールとして登録し、
-              execution.type="prompt" でテンプレート本文を実行できるようにする。
+        passive prompt 方針では authoring 経路として無効。
+        prompt は tool/provider/permission を動かさず、必要な場合は function/flow から
+        defaults.prompt.render を明示的に呼ぶ。
 
 出力:
     {"status": "ok", "data": {"result": {...}, "target_type": str}}
@@ -71,14 +71,10 @@ def run(input_data: dict, context: dict) -> dict:
                 f"Prompt not found: {source_name}",
                 "NOT_FOUND",
             )
-        tool_schema = template.to_tool_schema()
-
-        # P2-1: register_dynamic() を使って実際にツールとして登録する。
-        # execution.type="prompt" のツールは executor の _execute_prompt() で実行される。
-        # handler_code は不要（prompt ベースの実行パスを使う）ため None。
-        registry = ToolRegistry()
-        registry.register_dynamic(tool_schema, handler_code=None)
-
-        return ok({"result": tool_schema, "target_type": "tool"})
+        return error(
+            "Prompt-to-tool authoring is disabled. Use a rumi_function/capability tool "
+            "facade or call defaults.prompt.render from a flow.",
+            "PROMPT_TOOL_AUTHORING_DISABLED",
+        )
 
     return error("Unexpected conversion path", "INTERNAL")

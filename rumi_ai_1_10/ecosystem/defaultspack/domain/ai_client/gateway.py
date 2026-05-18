@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any, Dict, Iterable, Optional
 
 from .client import AIClient
+from .providers.stub_provider import StubProvider
 
 
 class LLMGateway:
@@ -24,3 +25,16 @@ class LLMGateway:
         tools = list(request.get("tools", []))
         params = dict(request.get("params", {}))
         return self._client.stream(model, messages, tools=tools, params=params)
+
+    def supports_stream(self, model: str) -> bool:
+        return bool(self._client.supports_stream(model))
+
+    def resolve_provider(self, model: str) -> tuple[Any, Any]:
+        return self._client.resolve_provider(model)
+
+    def has_real_provider(self, model: str) -> bool:
+        provider, _ = self.resolve_provider(model)
+        return not isinstance(provider, StubProvider)
+
+    def runtime_model_matches(self, model: str) -> list[dict[str, Any]]:
+        return list(self._client._runtime_model_matches(str(model or "")))

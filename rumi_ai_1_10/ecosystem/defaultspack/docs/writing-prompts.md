@@ -8,7 +8,7 @@ prompt はテンプレート変数を含む再利用可能なテキストテン�
 
 プロンプトは `PromptManager`（シングルトン）がインメモリ dict + `user_data/shared/prompts/` への JSON ファイル永続化で管理します。起動時に JSON ファイルから自動ロードされます。
 
-プロンプトと tool は `PromptTemplate` を通じて相互変換可能です。`blocks/prompt/convert.py` で tool → prompt、prompt → tool の変換ができます。
+プロンプトは passive layer です。tool/provider/permission を選択・実行せず、必要なときに flow/function から `defaults.prompt.render` または `defaults.prompt.resolve_for_conversation` を呼びます。
 
 ## PromptTemplate のフォーマット
 
@@ -220,7 +220,7 @@ result = context["call_handler"]("defaults.prompt.render", {
 
 **tool → prompt**: ツールの `parameters` を変数に、`summary` をテンプレート本文のヘッダに変換します。`PromptTemplate.from_tool_schema()` が使われます。
 
-**prompt → tool**: テンプレートの変数を `parameters` に、本文を `execution.body` に変換します。`PromptTemplate.to_tool_schema()` が使われ、`execution.type: "prompt"` のツールとして `ToolRegistry.register_dynamic()` で登録されます。context.* 変数は tool パラメータから除外されます。
+**prompt → tool**: authoring 経路としては無効です。`execution.type: "prompt"` の tool は作成しません。必要な場合は `defaults.prompt.render` を flow/function から呼び、tool が必要なら `rumi_function` または `capability` facade として別途定義します。
 
 ## コンテキスト取得の例
 
@@ -288,6 +288,6 @@ result = context["call_handler"]("defaults.prompt.create", {
 
 `content`（body）には `{{context.*}}` 変数を活用して、実行時のコンテキスト情報を自動的に注入させてください。ユーザーが明示的に値を指定した場合は上書きされないため、テスト時にはモック値を渡すことができます。
 
-プロンプトから tool への変換（`prompt → tool`）では、`context.*` 変数は自動的に tool のパラメータから除外されます。これはコンテキスト変数が実行時に自動注入されることを想定しているためです。
+プロンプトから tool を自動生成する authoring 経路は無効です。`context.*` 変数は `defaults.prompt.resolve_for_conversation` が受動的に解決し、tool が必要な場合は別途 `rumi_function` / `capability` facade として定義します。
 
 永続化ファイル（`user_data/shared/prompts/`）は `PromptManager` が管理しています。ファイル名は `_safe_filename(name) + ".json"` で生成され、英数字・ハイフン・アンダースコア以外の文字はアンダースコアに変換されます。

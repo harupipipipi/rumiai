@@ -2,6 +2,7 @@ from .registry import ToolRegistry
 from .mcp_client import McpClient
 from .mcp_registry import McpRegistry
 from .schema_adapter import is_tool_rejected_by_policy, policy_from_context
+from .security import is_trusted_pack_id, requires_approval_for_security, unsupported_execution_reason
 from domain.tool_policy.internal_context import internal_tool_decision_allows
 from pathlib import Path
 import json
@@ -103,6 +104,17 @@ class ToolExecutor:
                 "widget": None,
                 "rejected_by_policy": True,
             }
+        security_rejection = unsupported_execution_reason(tool_def)
+        if security_rejection is not None:
+            return {
+                "result": "Tool '{}' rejected by tool security policy: {}".format(
+                    tool_name,
+                    security_rejection,
+                ),
+                "is_error": True,
+                "widget": None,
+                "rejected_by_security": True,
+            }
 
         execution = tool_def.get("execution", {})
         exec_type = execution.get("type", "local")
@@ -170,6 +182,9 @@ class ToolExecutor:
         }
         if isinstance(context, dict) and context.get("request_id"):
             request["request_id"] = context.get("request_id")
+        forwarded_context = _function_call_context(context, tool_def)
+        if forwarded_context:
+            request["context"] = forwarded_context
         self._ensure_shared_function_registered(qualified_name)
         return self._execute_capability_request(tool_def, request, context)
 
@@ -256,17 +271,23 @@ class ToolExecutor:
         pack_id, _, function_id = qualified_name.partition(":")
         if pack_id not in {"defaultspack", "rumi_default_tools_pack"} or not function_id:
             return None
+        if _is_explicitly_untrusted_tool(tool_def if isinstance(tool_def, dict) else {}):
+            return None
         local_tool = ToolExecutor._first_party_local_tool_for_function(pack_id, function_id)
         if local_tool:
             return ToolExecutor()._execute_local(local_tool, request.get("args") or {}, context)
+        if not ToolExecutor._allows_direct_first_party_function_fallback(pack_id, function_id):
+            return None
         try:
             from core_runtime.pack_function_runtime import invoke_pack_function
 
+            fallback_context = dict(context or {}) if isinstance(context, dict) else {}
+            fallback_context.update(_function_call_context(fallback_context, tool_def))
             output = invoke_pack_function(
                 pack_id,
                 function_id,
                 args=request.get("args") or {},
-                context=context if isinstance(context, dict) else {},
+                context=fallback_context,
             )
         except Exception:
             return None
@@ -297,6 +318,36 @@ class ToolExecutor:
                 "tool_subagent": "subagent",
             }.get(function_id)
         return None
+
+    @staticmethod
+    def _allows_direct_first_party_function_fallback(pack_id, function_id):
+        return (pack_id, function_id) in {
+            ("defaultspack", "tool_calculator"),
+            ("defaultspack", "tool_web_search"),
+            ("defaultspack", "tool_reddit_search"),
+            ("defaultspack", "tool_file_reader"),
+            ("defaultspack", "tool_todo"),
+            ("defaultspack", "tool_subagent"),
+            ("defaultspack", "coding_file_read"),
+            ("defaultspack", "coding_file_list"),
+            ("defaultspack", "coding_file_search"),
+            ("defaultspack", "coding_file_create"),
+            ("defaultspack", "coding_file_write"),
+            ("defaultspack", "coding_file_patch"),
+            ("defaultspack", "coding_file_delete"),
+            ("defaultspack", "coding_file_restore"),
+            ("defaultspack", "coding_git_status"),
+            ("defaultspack", "coding_git_diff"),
+            ("defaultspack", "coding_git_commit"),
+            ("defaultspack", "coding_git_push"),
+            ("defaultspack", "coding_terminal_exec"),
+            ("rumi_default_tools_pack", "calculator"),
+            ("rumi_default_tools_pack", "file_reader"),
+            ("rumi_default_tools_pack", "reddit_search"),
+            ("rumi_default_tools_pack", "subagent"),
+            ("rumi_default_tools_pack", "todo"),
+            ("rumi_default_tools_pack", "web_search"),
+        }
 
     @staticmethod
     def _tool_response_from_pack_function_output(output):
@@ -1134,7 +1185,7 @@ def _tool_value(tool_def, key):
 
 
 def _requires_approval(tool_def):
-    return bool(_tool_value(tool_def, "requires_approval") or _tool_value(tool_def, "write_action"))
+    return requires_approval_for_security(tool_def)
 
 
 def _is_shell_or_git(tool_def):
@@ -1145,3 +1196,57 @@ def _is_shell_or_git(tool_def):
 
 def _is_policy_allow_context(context):
     return internal_tool_decision_allows(context)
+
+
+def _function_call_context(context, tool_def):
+    if not isinstance(context, dict):
+        return {}
+    forwarded = {}
+    for key in (
+        "workspace_id",
+        "workspace_root",
+        "conversation_id",
+        "conversation_workspace_dir",
+        "profile_id",
+        "run_id",
+        "request_id",
+        "profile_policy",
+        "user_requested_computer_use",
+        "computer_use_target_app",
+        "computer_use_target_title",
+        "computer_use_physical_clicks",
+    ):
+        if key in context and _json_safe_value(context.get(key)):
+            forwarded[key] = context.get(key)
+    policy = policy_from_context(context)
+    if bool(policy.get("yolo_mode")) or _is_policy_allow_context(context):
+        forwarded["_tool_server_approved"] = True
+    if _requires_approval(tool_def) and bool(context.get("_tool_server_approved")):
+        forwarded["_tool_server_approved"] = True
+    return forwarded
+
+
+def _is_explicitly_untrusted_tool(tool_def):
+    if not isinstance(tool_def, dict):
+        return False
+    metadata = tool_def.get("metadata")
+    if isinstance(metadata, dict):
+        if metadata.get("trusted") is False:
+            return True
+        source_pack_id = metadata.get("source_pack_id")
+        if isinstance(source_pack_id, str) and source_pack_id.strip():
+            return not is_trusted_pack_id(source_pack_id)
+    source_pack_id = tool_def.get("source_pack_id")
+    if isinstance(source_pack_id, str) and source_pack_id.strip():
+        return not is_trusted_pack_id(source_pack_id)
+    if "trusted" in tool_def and tool_def.get("trusted") is False:
+        return True
+    return False
+
+
+def _json_safe_value(value):
+    try:
+        json.dumps(value, ensure_ascii=False)
+        return True
+    except (TypeError, ValueError):
+        return False

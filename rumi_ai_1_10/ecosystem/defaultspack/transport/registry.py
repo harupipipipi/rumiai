@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from ecosystem.defaultspack.domain.components import get_domain_component_registry
@@ -13,6 +14,9 @@ class HttpRouteSpec:
     method: str
     pattern: str
     block_module: str = ""
+    function_name: str = ""
+    flow_id: str = ""
+    fallback_block_module: str = ""
     handler_name: str = ""
     path_inject: Dict[str, str] = field(default_factory=dict)
     defaults: Dict[str, Any] = field(default_factory=dict)
@@ -74,8 +78,18 @@ def _component_route_specs() -> List[HttpRouteSpec]:
             method = str(route.get("method") or "").strip().upper()
             pattern = str(route.get("path") or route.get("pattern") or "").strip()
             block_module = str(route.get("block_module") or "").strip()
+            function_name = str(
+                route.get("function_name")
+                or route.get("qualified_name")
+                or route.get("function")
+                or ""
+            ).strip()
+            flow_id = str(route.get("flow_id") or "").strip()
+            fallback_block_module = str(
+                route.get("fallback_block_module") or route.get("fallback_block") or ""
+            ).strip()
             handler_name = str(route.get("handler_name") or "").strip()
-            if not method or not pattern or not (block_module or handler_name):
+            if not method or not pattern or not (block_module or function_name or flow_id or handler_name):
                 continue
             path_inject = route.get("path_inject")
             defaults = route.get("defaults")
@@ -84,6 +98,9 @@ def _component_route_specs() -> List[HttpRouteSpec]:
                     method,
                     pattern,
                     block_module=block_module,
+                    function_name=function_name,
+                    flow_id=flow_id,
+                    fallback_block_module=fallback_block_module,
                     handler_name=handler_name,
                     path_inject=dict(path_inject) if isinstance(path_inject, dict) else {},
                     defaults=dict(defaults) if isinstance(defaults, dict) else {},
@@ -114,16 +131,143 @@ def component_route_diagnostics() -> list[dict[str, str]]:
     return diagnostics
 
 
+def _defaultspack_root() -> Path:
+    return Path(__file__).resolve().parents[1]
+
+
+def _read_flow_yaml(path: Path) -> dict[str, Any]:
+    try:
+        import yaml
+
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def flow_http_route_specs() -> List[HttpRouteSpec]:
+    """Load endpoint -> flow declarations embedded in top-level flow YAML."""
+    flows_dir = _defaultspack_root() / "flows"
+    specs: List[HttpRouteSpec] = []
+    if not flows_dir.is_dir():
+        return specs
+    for yaml_path in sorted(flows_dir.glob("*.flow.yaml")):
+        flow_def = _read_flow_yaml(yaml_path)
+        flow_id = str(flow_def.get("flow_id") or yaml_path.name[: -len(".flow.yaml")]).strip()
+        if not flow_id:
+            continue
+        transport = flow_def.get("transport")
+        http = transport.get("http") if isinstance(transport, dict) else None
+        routes = http.get("routes") if isinstance(http, dict) else None
+        if not isinstance(routes, list):
+            continue
+        for route in routes:
+            if not isinstance(route, dict):
+                continue
+            method = str(route.get("method") or "").strip().upper()
+            pattern = str(route.get("path") or route.get("pattern") or "").strip()
+            if not method or not pattern:
+                continue
+            path_inject = route.get("path_inject")
+            defaults = route.get("defaults")
+            specs.append(
+                HttpRouteSpec(
+                    method,
+                    pattern,
+                    flow_id=flow_id,
+                    fallback_block_module=str(
+                        route.get("fallback_block_module") or route.get("fallback_block") or ""
+                    ).strip(),
+                    path_inject=dict(path_inject) if isinstance(path_inject, dict) else {},
+                    defaults=dict(defaults) if isinstance(defaults, dict) else {},
+                )
+            )
+    return specs
+
+
+def _dedupe_http_route_specs(groups: list[list[HttpRouteSpec]]) -> list[HttpRouteSpec]:
+    result: list[HttpRouteSpec] = []
+    seen: set[tuple[str, str]] = set()
+    for group in groups:
+        for spec in group:
+            key = (spec.method, spec.pattern)
+            if key in seen:
+                continue
+            seen.add(key)
+            result.append(spec)
+    return result
+
+
+def canonical_http_route_specs(*, include_always_available: bool = True) -> list[HttpRouteSpec]:
+    """Return the canonical endpoint -> flow/function/block declaration map.
+
+    Flow YAML declarations win over compatibility fallback entries so normal
+    chat ingress can move without changing public HTTP paths.
+    """
+    flow_specs = flow_http_route_specs()
+    fallback_specs = list(_FALLBACK_HTTP_ROUTE_SPECS)
+    base_specs = _dedupe_http_route_specs([flow_specs, fallback_specs])
+    existing = {(spec.method, spec.pattern) for spec in base_specs}
+    component_specs = [
+        spec
+        for spec in _component_route_specs()
+        if (spec.method, spec.pattern) not in existing
+    ]
+    groups = [base_specs, component_specs]
+    if include_always_available:
+        groups.append(list(_ALWAYS_AVAILABLE_HTTP_ROUTE_SPECS))
+    return _dedupe_http_route_specs(groups)
+
+
+def flow_http_output_is_compatible(flow_id: str, output: Any, *, fallback_block_module: str = "") -> bool:
+    if flow_id == "defaultspack.chat_turn" and fallback_block_module == "blocks.chat.send":
+        if not isinstance(output, dict) or output.get("status") != "ok":
+            return False
+        data = output.get("data")
+        if not isinstance(data, dict):
+            return False
+        return bool(data.get("role") == "assistant" and ("content" in data or "raw_text" in data))
+    if flow_id == "defaultspack.chat_stream_turn" and fallback_block_module == "blocks.chat.stream":
+        if isinstance(output, dict) and output.get("_sse"):
+            return True
+        if (
+            isinstance(output, dict)
+            and output.get("status") == "ok"
+            and isinstance(output.get("data"), dict)
+            and output["data"].get("_sse")
+        ):
+            return True
+        return False
+    return True
+
+
 _FALLBACK_HTTP_ROUTE_SPECS = [
-    HttpRouteSpec("POST", "/v1/chat/completions", block_module="blocks.chat.send"),
+    HttpRouteSpec(
+        "POST",
+        "/v1/chat/completions",
+        flow_id="defaultspack.chat_turn",
+        fallback_block_module="blocks.chat.send",
+    ),
     HttpRouteSpec("POST", "/api/chat/conversations", block_module="blocks.chat.create_conversation"),
     HttpRouteSpec("GET", "/api/chat/conversations", block_module="blocks.chat.list_conversations"),
     HttpRouteSpec("GET", "/api/chat/conversations/{id}", block_module="blocks.chat.get_conversation", path_inject={"id": "conversation_id"}),
     HttpRouteSpec("POST", "/api/chat/search", block_module="blocks.chat.search"),
     HttpRouteSpec("PUT", "/api/chat/conversations/{id}", block_module="blocks.chat.update_conversation", path_inject={"id": "conversation_id"}),
     HttpRouteSpec("DELETE", "/api/chat/conversations/{id}", block_module="blocks.chat.delete_conversation", path_inject={"id": "conversation_id"}),
-    HttpRouteSpec("POST", "/api/chat/conversations/{id}/messages", block_module="blocks.chat.send", path_inject={"id": "conversation_id"}),
-    HttpRouteSpec("POST", "/api/chat/conversations/{id}/stream", block_module="blocks.chat.stream", path_inject={"id": "conversation_id"}),
+    HttpRouteSpec(
+        "POST",
+        "/api/chat/conversations/{id}/messages",
+        flow_id="defaultspack.chat_turn",
+        fallback_block_module="blocks.chat.send",
+        path_inject={"id": "conversation_id"},
+    ),
+    HttpRouteSpec(
+        "POST",
+        "/api/chat/conversations/{id}/stream",
+        flow_id="defaultspack.chat_stream_turn",
+        fallback_block_module="blocks.chat.stream",
+        path_inject={"id": "conversation_id"},
+    ),
     HttpRouteSpec("POST", "/api/chat/conversations/{id}/stop", block_module="blocks.chat.stop", path_inject={"id": "conversation_id"}),
     HttpRouteSpec("POST", "/api/chat/conversations/{id}/export", block_module="blocks.chat.export_conversation", path_inject={"id": "conversation_id"}),
     HttpRouteSpec("GET", "/api/chat/channels", block_module="blocks.chat.channel.list"),
@@ -401,7 +545,51 @@ def build_http_routes_from_specs(server: Any, specs: List[HttpRouteSpec]):
     ]
     for spec in ordered_specs:
         compiled = compile_http_route_pattern(spec.pattern)
-        if spec.block_module:
+        if spec.flow_id:
+            def _handler(
+                request_data,
+                path_params,
+                *,
+                flow_id=spec.flow_id,
+                fallback_block_module=spec.fallback_block_module,
+                path_inject=dict(spec.path_inject),
+                route_defaults=dict(spec.defaults),
+                route_method=spec.method,
+            ):
+                payload = dict(request_data or {})
+                payload.update(route_defaults)
+                payload["_method"] = route_method
+                return server._invoke_flow_route(
+                    flow_id,
+                    payload,
+                    path_params,
+                    path_inject,
+                    fallback_block_module=fallback_block_module,
+                )
+            handler = _handler
+        elif spec.function_name:
+            def _handler(
+                request_data,
+                path_params,
+                *,
+                function_name=spec.function_name,
+                fallback_block_module=spec.fallback_block_module,
+                path_inject=dict(spec.path_inject),
+                route_defaults=dict(spec.defaults),
+                route_method=spec.method,
+            ):
+                payload = dict(request_data or {})
+                payload.update(route_defaults)
+                payload["_method"] = route_method
+                return server._invoke_function_route(
+                    function_name,
+                    payload,
+                    path_params,
+                    path_inject,
+                    fallback_block_module=fallback_block_module,
+                )
+            handler = _handler
+        elif spec.block_module:
             def _handler(
                 request_data,
                 path_params,
@@ -432,18 +620,7 @@ def build_always_available_http_routes(server: Any):
 
 
 def build_fallback_http_routes(server: Any):
-    fallback_specs = [
-        spec
-        for spec in _FALLBACK_HTTP_ROUTE_SPECS
-        if spec.pattern not in {item.pattern for item in _ALWAYS_AVAILABLE_HTTP_ROUTE_SPECS}
-    ]
-    existing = {(spec.method, spec.pattern) for spec in [*fallback_specs, *_ALWAYS_AVAILABLE_HTTP_ROUTE_SPECS]}
-    component_specs = [
-        spec
-        for spec in _component_route_specs()
-        if (spec.method, spec.pattern) not in existing
-    ]
     return build_http_routes_from_specs(
         server,
-        fallback_specs + component_specs + _ALWAYS_AVAILABLE_HTTP_ROUTE_SPECS,
+        canonical_http_route_specs(include_always_available=True),
     )

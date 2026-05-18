@@ -25,6 +25,7 @@ from transport.registry import (
     build_always_available_http_routes,
     build_fallback_http_routes,
     compile_http_route_pattern,
+    flow_http_output_is_compatible,
     http_route_sort_key,
 )
 
@@ -49,6 +50,18 @@ _LONG_RUNNING_FALLBACK_BLOCKS = {
     "blocks.webhooks.inbound",
 }
 _LONG_RUNNING_FALLBACK_TIMEOUT_SECONDS = 300.0
+
+_CHAT_TURN_HTTP_FALLBACKS = {
+    ("POST", "/v1/chat/completions"): ("defaultspack.chat_turn", "blocks.chat.send"),
+    (
+        "POST",
+        "/api/chat/conversations/{id}/messages",
+    ): ("defaultspack.chat_turn", "blocks.chat.send"),
+    (
+        "POST",
+        "/api/chat/conversations/{id}/stream",
+    ): ("defaultspack.chat_stream_turn", "blocks.chat.stream"),
+}
 
 
 class DefaultsHttpServer:
@@ -99,8 +112,35 @@ class DefaultsHttpServer:
                         method = entry.get("method")
                         pattern = entry.get("pattern")
                         handler = entry.get("handler")
+                        flow_id = str(entry.get("flow_id") or "").strip()
+                        fallback_block_module = str(entry.get("fallback_block_module") or "").strip()
                         path_inject = entry.get("path_inject", {})
-                        if method and pattern and callable(handler):
+                        method_key = str(method or "").upper()
+                        pattern_key = str(pattern or "")
+                        mapped_flow = _CHAT_TURN_HTTP_FALLBACKS.get((method_key, pattern_key))
+                        if mapped_flow and not flow_id:
+                            flow_id, fallback_block_module = mapped_flow
+                        if method and pattern and flow_id:
+                            def _flow_handler(
+                                request_data,
+                                path_params,
+                                *,
+                                route_flow_id=flow_id,
+                                route_fallback_block_module=fallback_block_module,
+                                route_path_inject=dict(path_inject) if isinstance(path_inject, dict) else {},
+                                route_method=str(method or "").upper(),
+                            ):
+                                payload = dict(request_data or {})
+                                payload["_method"] = route_method
+                                return self._invoke_flow_route(
+                                    route_flow_id,
+                                    payload,
+                                    path_params,
+                                    route_path_inject,
+                                    fallback_block_module=route_fallback_block_module,
+                                )
+                            route_entries.append((method, pattern, _flow_handler, path_inject, index))
+                        elif method and pattern and callable(handler):
                             route_entries.append((method, pattern, handler, path_inject, index))
                     for method, pattern, handler, path_inject, index in sorted(
                         route_entries,
@@ -226,6 +266,114 @@ class DefaultsHttpServer:
         except Exception:
             pass
         return invoke_block(module_name, payload, context)
+
+    def _invoke_flow_route(
+        self,
+        flow_id,
+        request_data,
+        path_params,
+        inject=None,
+        *,
+        fallback_block_module="",
+    ):
+        payload = dict(request_data or {})
+        for source_key, dest_key in (inject or {}).items():
+            payload[dest_key] = path_params.get(source_key, "")
+        context = self._build_context()
+        context["flow_id"] = flow_id
+        context["_defaultspack_http_route_adapter"] = True
+        try:
+            from domain.flow import FlowEngine
+
+            flow_result = FlowEngine().execute(flow_id, payload, context)
+            if flow_result.is_success():
+                if self._flow_http_output_is_compatible(
+                    flow_id,
+                    flow_result.output,
+                    fallback_block_module=fallback_block_module,
+                ):
+                    return flow_result.output
+                if not fallback_block_module:
+                    return flow_result.output
+            elif not fallback_block_module:
+                return flow_result.output
+        except Exception as exc:
+            if not fallback_block_module:
+                return error(str(exc), "FLOW_ROUTE_FAILED")
+        return self._invoke_fallback_block(
+            fallback_block_module,
+            request_data,
+            path_params,
+            inject,
+        )
+
+    def _invoke_function_route(
+        self,
+        function_name,
+        request_data,
+        path_params,
+        inject=None,
+        *,
+        fallback_block_module="",
+    ):
+        payload = dict(request_data or {})
+        for source_key, dest_key in (inject or {}).items():
+            payload[dest_key] = path_params.get(source_key, "")
+        context = self._build_context()
+        context["flow_id"] = "transport_function_route"
+        context["_defaultspack_http_route_adapter"] = True
+        try:
+            from domain.function_runtime.bridge import invoke_function
+
+            timeout_seconds = self._fallback_function_timeout_seconds(
+                fallback_block_module,
+                payload,
+            )
+            result = invoke_function(
+                function_name,
+                payload,
+                context,
+                principal_id="defaultspack",
+                timeout_seconds=timeout_seconds,
+            )
+            result = self._retry_after_dev_auto_approve(
+                function_name,
+                payload,
+                context,
+                result,
+                invoke_function,
+                timeout_seconds=timeout_seconds,
+            )
+            if isinstance(result, dict) and result.get("status") != "error":
+                return result
+            if not fallback_block_module:
+                return result
+            error_info = result.get("error", {}) if isinstance(result, dict) else {}
+            error_code = str(error_info.get("code") or "")
+            if error_code not in {
+                "FUNCTION_REGISTRY_UNAVAILABLE",
+                "FUNCTION_NOT_FOUND",
+                "CAPABILITY_RUNTIME_UNAVAILABLE",
+                "CAPABILITY_EXECUTION_FAILED",
+            }:
+                return result
+        except Exception as exc:
+            if not fallback_block_module:
+                return error(str(exc), "FUNCTION_ROUTE_FAILED")
+        return self._invoke_fallback_block(
+            fallback_block_module,
+            request_data,
+            path_params,
+            inject,
+        )
+
+    @staticmethod
+    def _flow_http_output_is_compatible(flow_id, output, *, fallback_block_module=""):
+        return flow_http_output_is_compatible(
+            flow_id,
+            output,
+            fallback_block_module=fallback_block_module,
+        )
 
     def _retry_after_dev_auto_approve(
         self,

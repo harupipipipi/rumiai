@@ -166,7 +166,7 @@ skeleton = generate_skeleton("my_tool", "ツールの説明", {
 
 ### PromptTemplate (`domain/prompt/template.py`)
 
-tool と prompt の統一テンプレートシステム。両者は構造が類似している（name/description + parameters/variables + 実行ロジック/本文）。
+passive prompt template 表現。prompt は tool/provider/permission を動かさず、レンダリングされたテキストを flow/function に返す。
 
 **変数展開構文:**
 
@@ -183,7 +183,7 @@ tool と prompt の統一テンプレートシステム。両者は構造が類�
 
 `to_dict()` / `from_dict()` — シリアライズ/デシリアライズ。
 
-`to_tool_schema()` — tool の JSON Schema 形式に変換。`context.*` 変数はツールパラメータに含めない。
+`to_tool_schema()` — 互換 UI 向けの function-facade draft を返す。authoring 経路として prompt tool は登録しない。
 
 `from_tool_schema()` — tool 定義から PromptTemplate を生成。
 

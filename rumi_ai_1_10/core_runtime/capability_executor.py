@@ -595,7 +595,8 @@ class CapabilityExecutor:
 
     def _dispatch_by_calling_convention(self, calling_convention, entry, principal_id,
                                          effective_permission_id, grant_config, args,
-                                         timeout_seconds, request_id, start_time):
+                                         timeout_seconds, request_id, start_time,
+                                         request_context=None):
         """calling_convention の値で実行パスを分岐する。"""
         if calling_convention == "kernel":
             return CapabilityResponse(
@@ -617,7 +618,8 @@ class CapabilityExecutor:
             return self._execute_handler_subprocess(handler_def=adapter, principal_id=principal_id,
                                                      permission_id=effective_permission_id, grant_config=grant_config,
                                                      args=args, timeout_seconds=timeout_seconds,
-                                                     request_id=request_id, start_time=start_time)
+                                                     request_id=request_id, start_time=start_time,
+                                                     request_context=request_context)
         if calling_convention == "python_host":
             return self._execute_host_function(principal_id=principal_id, entry=entry, args=args,
                                                 request_id=request_id, start_time=start_time)
@@ -668,6 +670,7 @@ class CapabilityExecutor:
         """function.call リクエストを処理する。"""
         qualified_name = request.get("qualified_name")
         args = request.get("args", {})
+        request_context = request.get("context") if isinstance(request.get("context"), dict) else None
         request_id = request.get("request_id", "")
         if not qualified_name or not isinstance(qualified_name, str):
             resp = CapabilityResponse(success=False, error="Missing or invalid qualified_name",
@@ -766,6 +769,7 @@ class CapabilityExecutor:
                 timeout_seconds=request.get("timeout_seconds", DEFAULT_FUNCTION_TIMEOUT),
                 request_id=request_id,
                 start_time=start_time,
+                request_context=request_context,
             )
         elif is_core:
             resp = self._dispatch_core_function(principal_id=principal_id, entry=entry, args=args,
@@ -893,7 +897,11 @@ class CapabilityExecutor:
         if self._is_docker_available() and _DockerRunBuilder is not None:
             return self._execute_user_function_docker(principal_id=principal_id, entry=entry, args=args, request_id=request_id, start_time=start_time, timeout=timeout)
         else:
-            logger.warning("Docker not available, falling back to host subprocess for user function %s:%s.", pack_id, function_id)
+            logger.warning("Docker not available for user function %s:%s.", pack_id, function_id)
+            security_mode = os.environ.get("RUMI_SECURITY_MODE", "").strip().lower()
+            function_docker_policy = os.environ.get("RUMI_FUNCTION_DOCKER_POLICY", "").strip().lower()
+            if security_mode == "strict" or function_docker_policy == "strict":
+                return CapabilityResponse(success=False, error="Docker is not available and strict function isolation forbids host fallback.", error_type="docker_unavailable", latency_ms=(time.time() - start_time) * 1000)
             allow_fallback = os.environ.get("RUMI_ALLOW_HOST_FALLBACK", "").lower()
             if allow_fallback not in ("1", "true"):
                 return CapabilityResponse(success=False, error="Docker is not available and host fallback is disabled. Set RUMI_ALLOW_HOST_FALLBACK=1 to enable.", error_type="docker_unavailable", latency_ms=(time.time() - start_time) * 1000)
@@ -1215,10 +1223,11 @@ class CapabilityExecutor:
             return CapabilityResponse(success=False, output=result, error=result["error"], error_type=f"{permission_id.replace('.', '_')}_error", latency_ms=latency_ms)
         return CapabilityResponse(success=True, output=result, latency_ms=latency_ms)
 
-    def _execute_handler_subprocess(self, handler_def, principal_id, permission_id, grant_config, args, timeout_seconds, request_id, start_time):
+    def _execute_handler_subprocess(self, handler_def, principal_id, permission_id, grant_config, args, timeout_seconds, request_id, start_time, request_context=None):
         ep_file, ep_func = handler_def.entrypoint.rsplit(":", 1)
         handler_py_path = handler_def.handler_dir / ep_file
-        context = {"principal_id": principal_id, "permission_id": permission_id, "handler_id": handler_def.handler_id, "grant_config": grant_config, "request_id": request_id, "ts": self._now_ts()}
+        context = dict(request_context or {}) if isinstance(request_context, dict) else {}
+        context.update({"principal_id": principal_id, "permission_id": permission_id, "handler_id": handler_def.handler_id, "grant_config": grant_config, "request_id": request_id, "ts": self._now_ts()})
         input_json = self._build_runner_payload(str(handler_py_path), ep_func, context, args)
         try:
             return self._run_runner_on_host(

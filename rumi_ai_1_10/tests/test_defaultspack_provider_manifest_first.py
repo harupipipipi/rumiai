@@ -1,0 +1,120 @@
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parent.parent
+DEFAULTSPACK_ROOT = ROOT / "ecosystem" / "defaultspack"
+sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(DEFAULTSPACK_ROOT))
+
+
+def _write_openai_compatible_extension(root: Path) -> Path:
+    provider_dir = root / "llm" / "providers" / "acme"
+    models_dir = provider_dir / "models"
+    models_dir.mkdir(parents=True)
+    (provider_dir / "manifest.json").write_text(
+        json.dumps(
+            {
+                "id": "acme",
+                "category": "llm_provider",
+                "version": "1",
+                "display_name": "Acme AI",
+                "enabled": True,
+                "priority": 5,
+                "adapter": "openai_compatible",
+                "api_key_env": "ACME_API_KEY",
+                "base_url_env": "ACME_BASE_URL",
+                "default_base_url": "https://acme.example/v1",
+                "credential_required": True,
+                "catalog_only": False,
+                "default_model": "acme-chat",
+                "default_model_for": {"fast": "acme-mini"},
+                "capabilities": {"streaming": True, "native_tool_calling": True},
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    for model_id, defaults in (
+        ("acme-chat", {"chat": True}),
+        ("acme-mini", {"chat": True, "fast": True}),
+    ):
+        (models_dir / f"{model_id}.json").write_text(
+            json.dumps(
+                {
+                    "id": f"acme/{model_id}",
+                    "category": "llm_model",
+                    "version": "1",
+                    "provider_id": "acme",
+                    "model_id": model_id,
+                    "display_name": model_id,
+                    "type": "chat",
+                    "enabled": True,
+                    "defaults": defaults,
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+    return root
+
+
+def test_openai_compatible_provider_can_be_added_by_manifest_and_models(monkeypatch, tmp_path):
+    extension_root = _write_openai_compatible_extension(tmp_path / "extensions")
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_EXTENSION_ROOTS", str(extension_root))
+    monkeypatch.setenv("ACME_API_KEY", "test-key")
+
+    from domain.extensions.runtime import get_extension_registry
+    from domain.ai_client.providers import (
+        detect_available_providers,
+        get_all_known_models,
+        get_provider_catalog_map,
+    )
+
+    get_extension_registry(force_reload=True)
+    catalog = get_provider_catalog_map()
+    models = {item["id"]: item for item in get_all_known_models("acme")}
+    available = detect_available_providers()
+
+    assert catalog["acme"]["metadata"]["catalog_source"] == "extension_manifest"
+    assert catalog["acme"]["metadata"]["adapter"] == "openai_compatible"
+    assert catalog["acme"]["availability"]["supports_invoke"] is True
+    assert catalog["acme"]["availability"]["configuration_source"] == "ACME_API_KEY"
+    assert set(models) == {"acme/acme-chat", "acme/acme-mini"}
+    assert models["acme/acme-mini"]["defaults"]["fast"] is True
+    assert "acme" in available
+    assert getattr(available["acme"], "provider_id", "") == "acme"
+
+
+def test_ai_blocks_guard_prevents_new_direct_aiclient_imports():
+    allowed = {
+        "blocks/ai/embed.py",
+        "blocks/ai/image_analyze.py",
+        "blocks/ai/image_gen.py",
+        "blocks/ai/providers.py",
+        "blocks/ai/routing/analyze.py",
+        "blocks/ai/routing/log.py",
+        "blocks/ai/routing/profiles.py",
+        "blocks/ai/routing/route.py",
+        "blocks/ai/routing/rules.py",
+        "blocks/ai/stream.py",
+        "blocks/ai/transcribe.py",
+        "blocks/ai/tts.py",
+        "blocks/chat/stream.py",
+    }
+    offenders: list[str] = []
+    for base in (DEFAULTSPACK_ROOT / "blocks" / "ai", DEFAULTSPACK_ROOT / "blocks" / "chat"):
+        for path in base.rglob("*.py"):
+            text = path.read_text(encoding="utf-8")
+            has_direct_import = (
+                "from domain.ai_client.client import AIClient" in text
+                or "from ecosystem.defaultspack.domain.ai_client.client import AIClient" in text
+            )
+            rel = path.relative_to(DEFAULTSPACK_ROOT).as_posix()
+            if has_direct_import and rel not in allowed:
+                offenders.append(rel)
+
+    assert offenders == []

@@ -3,7 +3,7 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from blocks._common import ok, error, gen_id
-from domain.ai_client.client import AIClient
+from domain.ai_client.gateway import LLMGateway
 from domain.ai_client.model_runtime_settings import ModelRuntimeSettingsService
 from domain.dev.inspector import Inspector
 from domain.prompt.manager import get_manager
@@ -28,8 +28,9 @@ def run(input_data, context):
     request_id = gen_id()
 
     try:
-        client = AIClient()
-        result = client.complete(model, messages, tools=tools, params=params)
+        result = LLMGateway().complete(
+            {"model": model, "messages": messages, "tools": tools, "params": params}
+        )
     except RuntimeError as e:
         return error(str(e), "PROVIDER_ERROR")
 

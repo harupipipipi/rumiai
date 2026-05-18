@@ -44,7 +44,7 @@ tool はエージェントが AI の判断に基づいて呼び出す機能の�
 | `summary` | `string` | ツールの説明。AI がツール選択時に参照する |
 | `tags` | `string[]` | タグ。フィルタリングに使用 |
 | `schema.parameters` | `object` | JSON Schema 形式のパラメータ定義 |
-| `execution.type` | `string` | `"local"`, `"dynamic"`, `"prompt"` のいずれか |
+| `execution.type` | `string` | authorable tool は `"rumi_function"` または `"capability"`。`"local"`, `"dynamic"`, `"prompt"` は trusted first-party compatibility path のみ |
 | `created_at` | `string` | 作成日時（ISO 8601） |
 | `updated_at` | `string` | 更新日時（ISO 8601）。更新時に自動付与 |
 

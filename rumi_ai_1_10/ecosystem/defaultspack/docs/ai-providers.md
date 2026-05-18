@@ -1,8 +1,14 @@
 # AI Providers ガイド
 
-## 1. 対応プロバイダー一覧
+## 1. Provider Source Of Truth
 
-defaults の ai_client モジュールは以下のプロバイダーに対応する。各プロバイダーは `domain/ai_client/providers/` に provider.py として実装される。
+defaultspack の ai_client は manifest-first で provider を解決する。OpenAI-compatible provider は
+`extensions/llm/providers/<provider_id>/manifest.json` と `models/*.json` だけで追加できる。
+Python provider class は独自プロトコルが必要な場合だけ使う。
+
+runtime 内の curated table は互換 fallback であり、新規 provider を追加する主経路ではない。
+
+## 2. 対応プロバイダー一覧
 
 | プロバイダー ID | 説明 |
 |---|---|
@@ -15,7 +21,7 @@ defaults の ai_client モジュールは以下のプロバイダーに対応す
 | `rumi` | rumi 独自のメタプロバイダー（パイプライン、ルーティング、評価） |
 
 
-## 2. 各プロバイダーの環境変数設定
+## 3. 各プロバイダーの環境変数設定
 
 ### OpenAI
 
@@ -93,7 +99,7 @@ GITLAWB_OPENGATEWAY_BASE_URL=https://opengateway.gitlawb.com/v1
 環境変数の設定は `user_data/config.json` の `ai.providers` セクション、または OS の環境変数で行う。`config.json` の値が優先される。
 
 
-## 3. 各プロバイダーで使えるモデル一覧
+## 4. 各プロバイダーで使えるモデル一覧
 
 ### OpenAI
 
@@ -141,7 +147,7 @@ GITLAWB_OPENGATEWAY_BASE_URL=https://opengateway.gitlawb.com/v1
 | `rumi/eval` | 生成結果の自動評価・リランキング |
 
 
-## 4. モデル指定方法
+## 5. モデル指定方法
 
 ### "provider/model" 形式
 
@@ -181,7 +187,7 @@ provider を省略した場合、ai_client が既知のモデル名からプロ�
 ```
 
 
-## 5. プロファイルの設定方法
+## 6. プロファイルの設定方法
 
 プロファイルは `user_data/shared/ai_models/{provider_id}/profiles/{profile_name}/` に配置する。
 
@@ -244,7 +250,7 @@ user_data/shared/ai_models/
 `ui/events.ui.yaml` はストリーミング中のアニメーション Widget を定義する任意ファイルである。詳細は ai_client.md を参照。
 
 
-## 6. 対応機能マトリクス
+## 7. 対応機能マトリクス
 
 | 機能 | OpenAI | Anthropic | Google | stub | rumi |
 |---|---|---|---|---|---|

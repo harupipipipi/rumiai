@@ -613,6 +613,8 @@ def _infer_kind(provider_id: str, manifest: Dict[str, Any], curated: Dict[str, A
 
 
 def _provider_catalog_only(provider_id: str, manifest: Dict[str, Any], curated: Dict[str, Any]) -> bool:
+    if "catalog_only" in manifest:
+        return bool(manifest["catalog_only"])
     if "catalog_only" in curated:
         return bool(curated["catalog_only"])
     adapter = str(manifest.get("adapter", "")).strip()
@@ -620,15 +622,34 @@ def _provider_catalog_only(provider_id: str, manifest: Dict[str, Any], curated: 
 
 
 def _provider_supports_invoke(provider_id: str, manifest: Dict[str, Any], curated: Dict[str, Any]) -> bool:
+    if "supports_invoke" in manifest:
+        return bool(manifest["supports_invoke"])
     if "supports_invoke" in curated:
         return bool(curated["supports_invoke"])
     adapter = str(manifest.get("adapter", "")).strip()
     entrypoint = str(manifest.get("entrypoint", "")).strip()
-    return bool(entrypoint or adapter == "python_entrypoint" or provider_id in {"stub", "rumi"})
+    return bool(
+        entrypoint
+        or adapter in {"python_entrypoint", "openai_compatible"}
+        or provider_id in {"stub", "rumi"}
+    )
+
+
+def _catalog_source(provider_id: str, manifest: Dict[str, Any]) -> str:
+    if manifest.get("source_path"):
+        return "extension_manifest"
+    if manifest.get("component_manifest_path"):
+        return "component_manifest"
+    if manifest:
+        return "manifest"
+    if provider_id in _CURATED_PROVIDER_METADATA:
+        return "curated_fallback"
+    return "runtime_active"
 
 
 def _merge_provider_entry(provider_id: str, manifest: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     manifest = dict(manifest or {})
+    manifest_was_present = bool(manifest)
     component_metadata = dict(provider_component_metadata_map().get(provider_id, {}))
     curated = {**dict(_CURATED_PROVIDER_METADATA.get(provider_id, {})), **component_metadata}
     component_provider_manifest = curated.pop("provider_manifest", {})
@@ -678,6 +699,8 @@ def _merge_provider_entry(provider_id: str, manifest: Optional[Dict[str, Any]] =
         "entrypoint": entrypoint,
         "priority": int(manifest.get("priority", 100)),
         "manifest": manifest,
+        "catalog_source": _catalog_source(provider_id, manifest),
+        "curated_fallback_used": bool(provider_id in _CURATED_PROVIDER_METADATA and manifest_was_present),
     }
 
 
@@ -755,6 +778,10 @@ def get_provider_catalog(active_provider_ids=None):
                     "default_model_for": dict(entry.get("default_model_for", {})),
                     "adapter": entry.get("adapter", ""),
                     "entrypoint": entry.get("entrypoint", ""),
+                    "catalog_source": entry.get("catalog_source", ""),
+                    "curated_fallback_used": bool(entry.get("curated_fallback_used", False)),
+                    "manifest_path": entry.get("manifest", {}).get("source_path")
+                    or entry.get("manifest", {}).get("component_manifest_path", ""),
                     "oauth": provider_oauth_status(entry["provider_id"]),
                 },
             }

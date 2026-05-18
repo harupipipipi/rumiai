@@ -24,6 +24,7 @@ if _pack_root not in sys.path:
 
 from blocks._common import ok, error, timestamp, gen_id
 from bridge.block_adapter import invoke_block
+from transport.registry import flow_http_output_is_compatible
 from transport.cli_formatter import (
     format_markdown,
     format_json,
@@ -82,6 +83,47 @@ def save_config(config):
         json.dump(config, f, indent=2, ensure_ascii=False)
 
 
+def _sse_events_from_result(result):
+    if isinstance(result, dict) and result.get("_sse"):
+        return result.get("events", [])
+    if (
+        isinstance(result, dict)
+        and result.get("status") == "ok"
+        and isinstance(result.get("data"), dict)
+        and result["data"].get("_sse")
+    ):
+        return result["data"].get("events", [])
+    return None
+
+
+def _cli_chunk_from_sse_event(event):
+    if isinstance(event, bytes):
+        try:
+            event = json.loads(event.decode("utf-8").removeprefix("data:").strip())
+        except Exception:
+            return None
+    if not isinstance(event, dict):
+        return None
+    event_type = str(event.get("type") or "")
+    if event_type == "delta":
+        return {"type": "content_delta", "delta": {"text": str(event.get("delta") or "")}}
+    if event_type == "content_delta":
+        data = event.get("data") if isinstance(event.get("data"), dict) else {}
+        delta = event.get("delta") if isinstance(event.get("delta"), dict) else {}
+        text = data.get("delta") or delta.get("text") or event.get("text") or ""
+        return {"type": "content_delta", "delta": {"text": str(text)}}
+    if event_type in {"done", "stream_end"}:
+        return {"type": "stream_end", "message": event.get("message")}
+    if event_type == "error":
+        err = event.get("error")
+        if isinstance(err, dict):
+            message = err.get("message") or str(err)
+        else:
+            message = str(err or event.get("message") or "Stream failed")
+        return {"type": "error", "message": message}
+    return None
+
+
 # ── Backend Adapters ─────────────────────────────────────────
 
 class DirectBackend:
@@ -104,6 +146,27 @@ class DirectBackend:
     def _call_block(self, module_name, params):
         return invoke_block(module_name, dict(params or {}), self._ctx())
 
+    def _call_flow(self, flow_id, params, *, fallback_block_module=""):
+        try:
+            from domain.flow import FlowEngine
+
+            result = FlowEngine().execute(flow_id, dict(params or {}), self._ctx())
+            if result.is_success():
+                if flow_http_output_is_compatible(
+                    flow_id,
+                    result.output,
+                    fallback_block_module=fallback_block_module,
+                ):
+                    return result.output
+                if not fallback_block_module:
+                    return result.output
+            elif not fallback_block_module:
+                return result.output
+        except Exception as exc:
+            if not fallback_block_module:
+                return error("Flow failed: " + str(exc))
+        return self._call_block(fallback_block_module, params)
+
     def create_conversation(self, params):
         return self._call_block("blocks.chat.create_conversation", params)
 
@@ -120,85 +183,39 @@ class DirectBackend:
         return self._call_block("blocks.chat.delete_conversation", params)
 
     def send_message(self, params):
-        return self._call_block("blocks.chat.send", params)
+        return self._call_flow(
+            "defaultspack.chat_turn",
+            params,
+            fallback_block_module="blocks.chat.send",
+        )
 
     def send_message_stream(self, conversation_id, message_content, model):
-        """Send a message and stream the AI response chunk by chunk.
-
-        Bypasses the stream block and calls AIClient.stream() directly
-        so that chunks can be yielded as they arrive.
-
-        Yields dicts: {"type": "content_delta", "delta": {"text": "..."}}
-                      {"type": "stream_end", "message": <saved_msg_dict>}
-        """
-        from domain.chat.store import ChatStore
-        from domain.chat.message_converter import convert_to_standard
-        from domain.chat.message_builder import build_assistant_message
-        from domain.ai_client.client import AIClient
-        from domain.prompt.manager import get_manager
-
-        store = ChatStore()
-        conv = store.get_conversation(conversation_id)
-        if conv is None:
-            yield {"type": "error", "message": "Conversation not found"}
-            return
-
-        content = [{"type": "text", "text": message_content}]
-        user_msg_dict = {"role": "user", "content": content}
-        user_msg = store.add_message(conversation_id, user_msg_dict)
-        if user_msg is None:
-            yield {"type": "error", "message": "Failed to add user message"}
-            return
-
-        chain = store.get_message_chain(conversation_id, user_msg["id"])
-        standard_messages = convert_to_standard(chain)
-
-        manager = get_manager()
-        system_prompt = manager.get_system_prompt()
-        if system_prompt:
-            standard_messages.insert(0, {"role": "system", "content": system_prompt})
-
-        effective_model = model or conv.get("model", "stub/default")
-
-        client = AIClient()
-        text_parts = []
-        finish_reason = "stop"
-        usage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
-
-        try:
-            stream_result = client.stream(effective_model, standard_messages)
-            for chunk in stream_result:
-                chunk_type = chunk.get("type", "")
-                if chunk_type == "content_delta":
-                    delta = chunk.get("delta", {})
-                    delta_text = delta.get("text", "")
-                    if delta_text:
-                        text_parts.append(delta_text)
-                        yield {"type": "content_delta", "delta": {"text": delta_text}}
-                elif chunk_type == "stream_end":
-                    finish_reason = chunk.get("finish_reason", "stop")
-                    usage = chunk.get("usage", usage)
-        except Exception as exc:
-            yield {"type": "error", "message": "AI stream failed: " + str(exc)}
-            return
-
-        # Save the assembled assistant message
-        full_text = "".join(text_parts)
-        response = {
-            "content": [{"type": "text", "text": full_text}],
-            "finish_reason": finish_reason,
-            "usage": usage,
-        }
-        seq = user_msg.get("sequence_number", 1) + 1
-        assistant_msg_dict = build_assistant_message(
-            conversation_id=conversation_id,
-            parent_id=user_msg["id"],
-            sequence_number=seq,
-            response=response,
-            model=effective_model,
+        """Send a message through the canonical stream flow and yield CLI chunks."""
+        result = self._call_flow(
+            "defaultspack.chat_stream_turn",
+            {
+                "conversation_id": conversation_id,
+                "message": {"role": "user", "content": message_content},
+                "model": model,
+            },
+            fallback_block_module="blocks.chat.stream",
         )
-        assistant_msg = store.add_message(conversation_id, assistant_msg_dict)
-        yield {"type": "stream_end", "message": assistant_msg}
+        events = _sse_events_from_result(result)
+        if events is None:
+            if isinstance(result, dict) and result.get("status") == "error":
+                err = result.get("error") or {}
+                message = err.get("message") if isinstance(err, dict) else str(err)
+                yield {"type": "error", "message": message or "Request failed"}
+                return
+            text = extract_text_from_response(result.get("data") if isinstance(result, dict) else result)
+            if text:
+                yield {"type": "content_delta", "delta": {"text": text}}
+            yield {"type": "stream_end", "message": result.get("data") if isinstance(result, dict) else None}
+            return
+        for event in events:
+            chunk = _cli_chunk_from_sse_event(event)
+            if chunk is not None:
+                yield chunk
 
     def list_models(self, params):
         return self._call_block("blocks.ai.models", params)

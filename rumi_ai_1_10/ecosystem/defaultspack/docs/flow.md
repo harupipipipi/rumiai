@@ -1,4 +1,3 @@
-```markdown
 # flow.md — Rumi AI OS Flow Engine 設計書
 
 ## 1. 概要
@@ -1439,4 +1438,3 @@ async def run(ctx: FlowContext) -> FlowResult:
 ```
 
 この Flow は user_data に置かれる。defaults の仕組み（call_handler, emit_event, emit_widget）だけを使い、検索→取得→要約→レポート生成の複雑なパイプラインを実現している。defaults 側の変更はゼロ。
-```

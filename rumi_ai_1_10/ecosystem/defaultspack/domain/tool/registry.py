@@ -5,6 +5,13 @@ from pathlib import Path
 
 from ..components.registry import DomainComponentRegistry, build_domain_component_roots
 from ..extensions.runtime import get_extension_registry
+from .security import (
+    appears_write_or_execute_capable,
+    is_trusted_pack_id,
+    normalize_risk,
+    source_pack_id_from_manifest,
+    unsupported_execution_reason,
+)
 
 
 class ToolRegistry:
@@ -71,18 +78,19 @@ class ToolRegistry:
 
     def _load_tools_from_pack(self, pack_root: Path) -> int:
         loaded = 0
+        pack_id = self._pack_id_from_root(pack_root)
         for manifest_path in sorted((pack_root / "tools").glob("*/manifest.json")):
-            tool_def = self._tool_from_path_manifest(manifest_path, pack_root)
+            tool_def = self._tool_from_path_manifest(manifest_path, pack_root, pack_id)
             if tool_def is not None:
                 self.register(tool_def)
                 loaded += 1
         for manifest_path in sorted((pack_root / "tools").glob("*/tool.json")):
-            tool_def = self._tool_from_path_manifest(manifest_path, pack_root)
+            tool_def = self._tool_from_path_manifest(manifest_path, pack_root, pack_id)
             if tool_def is not None:
                 self.register(tool_def)
                 loaded += 1
         for manifest_path in sorted((pack_root / "extensions" / "tools").glob("*/manifest.json")):
-            tool_def = self._tool_from_path_manifest(manifest_path, pack_root)
+            tool_def = self._tool_from_path_manifest(manifest_path, pack_root, pack_id)
             if tool_def is not None:
                 self.register(tool_def)
                 loaded += 1
@@ -96,7 +104,7 @@ class ToolRegistry:
             tool_manifest = self._tool_manifest_from_component(manifest)
             if tool_manifest is None:
                 continue
-            tool_def = self._tool_from_manifest(tool_manifest)
+            tool_def = self._tool_from_manifest(tool_manifest, source_pack_id=component.source_pack_id)
             if tool_def is None:
                 continue
             metadata = dict(tool_def.get("metadata", {}))
@@ -138,7 +146,7 @@ class ToolRegistry:
         manifest.setdefault("source_pack_id", component_manifest.get("source_pack_id", ""))
         return manifest
 
-    def _tool_from_path_manifest(self, manifest_path: Path, pack_root: Path):
+    def _tool_from_path_manifest(self, manifest_path: Path, pack_root: Path, pack_id: str | None = None):
         try:
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
@@ -146,10 +154,11 @@ class ToolRegistry:
         if not isinstance(manifest, dict):
             return None
         manifest["source_path"] = str(manifest_path)
-        tool_def = self._tool_from_manifest(manifest)
+        pack_id = pack_id or self._pack_id_from_root(pack_root)
+        manifest.setdefault("source_pack_id", pack_id)
+        tool_def = self._tool_from_manifest(manifest, source_pack_id=pack_id)
         if tool_def is None:
             return None
-        pack_id = self._pack_id_from_root(pack_root)
         metadata = dict(tool_def.get("metadata", {}))
         metadata["source_pack_id"] = pack_id
         metadata["source"] = "pack"
@@ -179,7 +188,7 @@ class ToolRegistry:
             return 0
 
         for manifest in manifests:
-            tool_def = self._tool_from_manifest(manifest)
+            tool_def = self._tool_from_manifest(manifest, allow_legacy_compat=True)
             if tool_def is None:
                 continue
             self.register(tool_def)
@@ -234,7 +243,7 @@ class ToolRegistry:
         return applied
 
     @staticmethod
-    def _tool_from_manifest(manifest):
+    def _tool_from_manifest(manifest, source_pack_id: str = "", allow_legacy_compat: bool = False):
         config = manifest.get("config", {}) or {}
         tool_id = str(config.get("tool_id", manifest.get("id", ""))).strip()
         if not tool_id:
@@ -249,18 +258,100 @@ class ToolRegistry:
         write_action = bool(config.get("write_action", False))
         requires_approval = bool(config.get("requires_approval", False))
         action_type = str(config.get("action_type", "")).strip()
-        risk = str(config.get("risk", manifest.get("risk", "")) or "").strip().lower()
-        if not risk:
-            risk = "high" if write_action or requires_approval or action_type in {"write", "execute", "delete"} else "low"
-        if risk not in {"low", "medium", "high"}:
-            risk = "low"
+        approval_policy = str(config.get("approval_policy", "")).strip()
+        raw_capability_grants = config.get("capability_grants", []) or []
+        if isinstance(raw_capability_grants, list):
+            capability_grants = [str(item) for item in raw_capability_grants if str(item).strip()]
+        elif isinstance(raw_capability_grants, str) and raw_capability_grants.strip():
+            capability_grants = [raw_capability_grants.strip()]
+        else:
+            capability_grants = []
         tags = list(config.get("tags", manifest.get("tags", [])) or [])
-        if risk == "high" and "danger" not in tags:
-            tags.append("danger")
         if not execution:
             execution = {"type": "local"}
         if handler and "handler" not in execution:
             execution["handler"] = handler
+        pack_id = source_pack_id_from_manifest(manifest, source_pack_id)
+        trusted = is_trusted_pack_id(pack_id)
+        # Some older registry/UI paths built manifests without a pack identity.
+        # Keep them visible for compatibility, but the executor still rejects the
+        # untrusted legacy execution path via unsupported_execution_reason().
+        legacy_compat = bool(allow_legacy_compat or not pack_id)
+        raw_risk = config.get("risk", manifest.get("risk", ""))
+        provisional = {
+            "tool_id": tool_id,
+            "name": str(config.get("name", tool_id)),
+            "summary": str(config.get("summary", manifest.get("description", ""))),
+            "description": str(manifest.get("description", "")),
+            "tags": tags,
+            "schema": dict(
+                config.get(
+                    "schema",
+                    {
+                        "parameters": {
+                            "type": "object",
+                            "properties": {},
+                            "required": [],
+                        }
+                    },
+                )
+            ),
+            "execution": execution,
+            "category": str(config.get("tool_category", config.get("category", ""))),
+            "action_type": action_type,
+            "approval_policy": approval_policy,
+            "capability_grants": capability_grants,
+            "write_action": write_action,
+            "requires_approval": requires_approval,
+            "metadata": {
+                "source_pack_id": pack_id,
+                "trusted": trusted,
+                "category": str(config.get("tool_category", config.get("category", ""))),
+                "action_type": action_type,
+                "approval_policy": approval_policy,
+                "capability_grants": capability_grants,
+                "write_action": write_action,
+                "requires_approval": requires_approval,
+            },
+            "source_pack_id": pack_id,
+            "trusted": trusted,
+        }
+        risk, risk_was_unknown = normalize_risk(raw_risk, provisional, trusted)
+        inferred_unsafe = appears_write_or_execute_capable(provisional)
+        if inferred_unsafe and not trusted:
+            risk = "high"
+        requires_approval = bool(requires_approval or (not trusted and (risk == "high" or inferred_unsafe)))
+        provisional["risk"] = risk
+        provisional["requires_approval"] = requires_approval
+        provisional["metadata"]["risk"] = risk
+        provisional["metadata"]["requires_approval"] = requires_approval
+        if risk_was_unknown:
+            provisional["metadata"]["risk_defaulted"] = True
+        rejection_reason = unsupported_execution_reason(provisional)
+        if rejection_reason is not None and legacy_compat and str(execution.get("type") or "local").lower() in {
+            "local",
+            "handler",
+            "dynamic",
+            "prompt",
+        }:
+            risk = "high"
+            requires_approval = True
+            provisional["risk"] = risk
+            provisional["requires_approval"] = requires_approval
+            provisional["metadata"]["risk"] = risk
+            provisional["metadata"]["requires_approval"] = requires_approval
+            provisional["metadata"]["legacy_compat_unexecutable"] = True
+            provisional["metadata"]["security_rejection"] = rejection_reason
+        elif rejection_reason is not None:
+            return None
+        legacy_compat_metadata = {}
+        if provisional["metadata"].get("legacy_compat_unexecutable"):
+            legacy_compat_metadata = {
+                "legacy_compat_unexecutable": True,
+                "security_rejection": provisional["metadata"].get("security_rejection", ""),
+            }
+        if risk == "high" and "danger" not in tags:
+            tags.append("danger")
         return {
             "tool_id": tool_id,
             "name": str(config.get("name", tool_id)),
@@ -282,18 +373,27 @@ class ToolRegistry:
             "execution": execution,
             "category": str(config.get("tool_category", config.get("category", ""))),
             "action_type": action_type,
+            "approval_policy": approval_policy,
+            "capability_grants": capability_grants,
             "write_action": write_action,
             "requires_approval": requires_approval,
             "ui": dict(ui),
+            "trusted": trusted,
+            "source_pack_id": pack_id,
             "metadata": {
                 "source": "extension",
                 "manifest_path": manifest.get("source_path", ""),
-                "source_pack_id": manifest.get("source_pack_id", ""),
+                "source_pack_id": pack_id,
+                "trusted": trusted,
                 "category": str(config.get("tool_category", config.get("category", ""))),
                 "action_type": action_type,
+                "approval_policy": approval_policy,
+                "capability_grants": capability_grants,
                 "write_action": write_action,
                 "requires_approval": requires_approval,
                 "risk": risk,
+                **({"risk_defaulted": True} if risk_was_unknown else {}),
+                **legacy_compat_metadata,
             },
         }
 
@@ -323,6 +423,13 @@ class ToolRegistry:
                         tool_def["handler_code"] = f.read()
                 except OSError:
                     pass
+            metadata = dict(tool_def.get("metadata", {}))
+            metadata.setdefault("source", "user")
+            metadata.setdefault("trusted", False)
+            tool_def["metadata"] = metadata
+            tool_def.setdefault("trusted", False)
+            if unsupported_execution_reason(tool_def) is not None:
+                continue
             with self._lock:
                 self._tools[tool_def["tool_id"]] = tool_def
 
@@ -401,6 +508,14 @@ class ToolRegistry:
         if "execution" not in tool_def:
             tool_def["execution"] = {}
         tool_def["execution"]["type"] = "dynamic"
+        metadata = dict(tool_def.get("metadata", {}))
+        metadata.setdefault("source", "user")
+        metadata.setdefault("trusted", False)
+        tool_def["metadata"] = metadata
+        tool_def.setdefault("trusted", False)
+        rejection_reason = unsupported_execution_reason(tool_def)
+        if rejection_reason is not None:
+            raise ValueError(rejection_reason)
 
         if handler_code is not None:
             tool_def["handler_code"] = handler_code

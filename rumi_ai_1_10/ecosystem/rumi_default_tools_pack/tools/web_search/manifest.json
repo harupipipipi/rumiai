@@ -54,6 +54,11 @@
         "required": ["query"]
       }
     },
+    "tool_category": "network",
+    "action_type": "read",
+    "risk": "medium",
+    "approval_policy": "allow",
+    "capability_grants": ["network.read"],
     "execution": {
       "type": "rumi_function",
       "qualified_name": "defaultspack:tool_web_search"
