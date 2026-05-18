@@ -765,6 +765,66 @@ def test_line_webhook_test_route_builds_signed_payload_and_uses_line_route(monke
     assert captured_requests[0]["message"]["content"] == "高度なタスクを3つ順番に実行して"
 
 
+def test_line_webhook_simulation_dry_run_suppresses_line_biz_computer_use(monkeypatch, tmp_path):
+    from blocks.integrations import line as line_block  # noqa: E402
+    from blocks.integrations import line_webhook_test  # noqa: E402
+
+    _install_line_endpoint(
+        monkeypatch,
+        tmp_path,
+        enabled=True,
+        input_profile_id="line.computer_use",
+        conversation={"strategy": "external_key", "model": "stub/default"},
+        response={
+            "mode": "computer_use_line_biz",
+            "line_biz_chat_url": "https://chat.line.biz/Uaccount/chat/Cchat",
+            "require_group_mention": False,
+        },
+    )
+    monkeypatch.setenv("LINE_CHANNEL_ACCESS_TOKEN", "line-access-token")
+    monkeypatch.setattr(line_block.AudiencePolicyRegistry, "resolve", lambda self, policy_id, event=None: {"default": "allow"})
+
+    captured: dict[str, Any] = {}
+    line_calls: list[dict[str, Any]] = []
+
+    def fake_dispatch(event, *, input_profile_id, audience_policy, audience_decision, context, send_response, mentioned=False):
+        captured["input_profile_id"] = input_profile_id
+        captured["context"] = context
+        return {
+            "status": "ok",
+            "assistant_text": "LINE_SIM_OK",
+            "response_plan": {"provider": "line", "messages": [{"type": "text", "text": "LINE_SIM_OK"}]},
+        }
+
+    monkeypatch.setattr(line_block, "dispatch_external_event", fake_dispatch)
+    monkeypatch.setattr(
+        line_adapter_module,
+        "post_json",
+        lambda url, headers, body: line_calls.append({"url": url, "headers": headers, "body": body}) or {"ok": True},
+    )
+
+    result = line_webhook_test.run(
+        {
+            "event_id": "evt-simulated-ai-dry-run",
+            "text": "Reply with LINE_SIM_OK in one sentence.",
+            "source": {"type": "group", "groupId": "Cgroup", "userId": "Uactor"},
+            "send_external": False,
+        },
+        {},
+    )
+
+    assert result["status"] == "ok"
+    event_result = result["data"]["result"]["events"][0]
+    assert event_result["assistant_text"] == "LINE_SIM_OK"
+    assert event_result["simulation_input_profile_id"] == "line.default"
+    assert event_result["acknowledgement"]["simulated"] is True
+    assert captured["input_profile_id"] == "line.default"
+    assert "computer_use_target_app" not in captured["context"]
+    assert "computer_use_target_title" not in captured["context"]
+    assert captured["context"]["line_webhook_simulation_delivery"]["computer_use_suppressed"] is True
+    assert line_calls == []
+
+
 def test_line_biz_background_events_are_serialized_per_target(monkeypatch, tmp_path):
     from blocks.integrations import line as line_block  # noqa: E402
     from blocks.chat import send as chat_send  # noqa: E402

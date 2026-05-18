@@ -103,6 +103,9 @@ def simulate_webhook(input_data, context):
     simulation_context["line_webhook_simulation_send_external"] = _truthy(
         input_data.get("send_external") or input_data.get("send_line_api")
     )
+    simulation_context["line_webhook_simulation_computer_use"] = _truthy(
+        input_data.get("simulate_computer_use") or input_data.get("computer_use")
+    )
     simulated_response_text = str(
         input_data.get("assistant_text")
         or input_data.get("simulate_assistant_text")
@@ -210,9 +213,10 @@ def _dispatch_line_event(
     context: dict[str, Any],
     mentioned: bool = False,
 ) -> Dict[str, Any]:
+    effective_input_profile_id = _line_simulation_input_profile_id(input_profile_id, context)
     result = dispatch_external_event(
         external_event,
-        input_profile_id=input_profile_id,
+        input_profile_id=effective_input_profile_id,
         audience_policy=audience_policy,
         audience_decision=audience_decision,
         context=context,
@@ -221,7 +225,7 @@ def _dispatch_line_event(
     )
     plan = result.get("response_plan") if isinstance(result.get("response_plan"), dict) else ResponsePlanner("line").plan(RumiResponse.from_result(result))
     reply = _send_response_plan(plan, external_event, context=context)
-    return {**result, "reply": reply}
+    return {**result, "reply": reply, **({"simulation_input_profile_id": effective_input_profile_id} if effective_input_profile_id != input_profile_id else {})}
 
 
 def _dispatch_line_exact_reply(
@@ -539,6 +543,17 @@ def _apply_endpoint_response_context(runtime_context: dict[str, Any], endpoint: 
         return updated
 
     mode = str(response.get("mode") or "").strip().lower()
+    if mode == "computer_use_line_biz" and _line_simulation_without_external_send(updated):
+        updated.setdefault("external_chat_history_mode", "current_turn")
+        updated.setdefault(
+            "line_webhook_simulation_delivery",
+            {
+                "mode": "dry_run",
+                "computer_use_suppressed": True,
+                "reason": "LINE webhook simulation is running without external LINE API or LINE Biz delivery",
+            },
+        )
+        return updated
     history_mode = str(
         response.get("chat_history_mode")
         or response.get("external_chat_history_mode")
@@ -747,6 +762,18 @@ def _line_simulation_without_external_send(context: dict[str, Any] | None) -> bo
     return bool(context.get("line_webhook_simulation")) and not _truthy(
         context.get("line_webhook_simulation_send_external")
     )
+
+
+def _line_simulation_input_profile_id(input_profile_id: str, context: dict[str, Any] | None) -> str:
+    profile_id = str(input_profile_id or "").strip()
+    context = context if isinstance(context, dict) else {}
+    if (
+        profile_id == "line.computer_use"
+        and _line_simulation_without_external_send(context)
+        and not _truthy(context.get("line_webhook_simulation_computer_use"))
+    ):
+        return "line.default"
+    return profile_id
 
 
 def _line_biz_prompt_prefix(response: dict[str, Any], *, mode: str = "") -> str:
