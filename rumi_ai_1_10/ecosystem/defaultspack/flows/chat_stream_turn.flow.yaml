@@ -19,6 +19,9 @@ inputs:
 outputs:
   stream_result: object
 
+result:
+  value: "{{stream_result}}"
+
 steps:
   - id: stream_chat
     type: function

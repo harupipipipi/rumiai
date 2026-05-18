@@ -74,6 +74,7 @@ def test_chat_stream_turn_flow_is_declared_for_stream_endpoint():
     assert engine.validate_flow("defaultspack.chat_stream_turn") == []
     assert route["path"] == "/api/chat/conversations/{id}/stream"
     assert route["fallback_block"] == "blocks.chat.stream"
+    assert _stream_flow()["result"]["value"] == "{{stream_result}}"
     assert _stream_flow()["steps"][0]["function"] == "defaults.chat.stream"
 
 
@@ -164,6 +165,69 @@ def test_chat_turn_runs_optional_post_turn_subflow(monkeypatch):
         if function_name == "test.webhook.forward":
             return {"status": "ok", "data": {"sent": True, "to": "line"}}
         data_by_function = {
+            "defaults.profile.load_active": {"profile_id": "profile-1", "policy": {"post_turn_flow": "test.post_turn"}},
+            "defaults.profile.workspace": {"root": "/tmp/work"},
+            "defaults.chat.detect_modalities": {"text": True},
+            "defaults.prompt.load_effective": "system prompt",
+            "defaults.tools.select_relevant": {"tools": []},
+            "defaults.permissions.filter_tools": {"tools": []},
+            "defaults.ai.route_model": {"bridge_required": False, "bridge_plan": {}},
+            "defaults.prompt.compact_prompt": {"prompt": "system prompt"},
+            "defaults.ai.build_request": {"messages": []},
+            "defaults.ai.complete": {"content": [{"type": "text", "text": "hello"}]},
+            "defaults.chat.persist_turn": {
+                "assistant_message": {
+                    "id": "assistant-1",
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": "hello"}],
+                }
+            },
+            "defaults.audit.record_event": {"id": "audit-1"},
+        }
+        return {"status": "ok", "data": data_by_function[function_name]}
+
+    monkeypatch.setattr(engine, "_invoke_function_step", fake_invoke)
+
+    result = engine.execute(
+        "defaultspack.chat_turn",
+        {
+            "conversation_id": "conversation-1",
+            "profile_id": "profile-1",
+            "message": {"content": "hi"},
+        },
+    )
+
+    assert result.is_success()
+    assert calls[-1][0] == "test.webhook.forward"
+    assert calls[-1][1]["assistant"]["id"] == "assistant-1"
+    assert result.metadata["step_outputs"]["post_turn"]["forwarded"] == {"sent": True, "to": "line"}
+
+
+def test_chat_turn_ignores_request_controlled_post_turn_subflow(monkeypatch):
+    from ecosystem.defaultspack.domain.flow import FlowEngine
+
+    FlowEngine.reset_instance()
+    engine = FlowEngine()
+    engine._flows["test.untrusted_request_flow"] = {
+        "flow_id": "test.untrusted_request_flow",
+        "_declarative": True,
+        "steps": [
+            {
+                "id": "forward",
+                "type": "function",
+                "function": "test.webhook.forward",
+                "input": {},
+                "output": "forwarded",
+            }
+        ],
+    }
+    calls = []
+
+    def fake_invoke(function_name, step_input, flow_context):
+        calls.append((function_name, step_input))
+        if function_name == "test.webhook.forward":
+            return {"status": "ok", "data": {"sent": True}}
+        data_by_function = {
             "defaults.profile.load_active": {"profile_id": "profile-1", "policy": {}},
             "defaults.profile.workspace": {"root": "/tmp/work"},
             "defaults.chat.detect_modalities": {"text": True},
@@ -193,14 +257,12 @@ def test_chat_turn_runs_optional_post_turn_subflow(monkeypatch):
             "conversation_id": "conversation-1",
             "profile_id": "profile-1",
             "message": {"content": "hi"},
-            "post_turn_flow": "test.post_turn",
+            "post_turn_flow": "test.untrusted_request_flow",
         },
     )
 
     assert result.is_success()
-    assert calls[-1][0] == "test.webhook.forward"
-    assert calls[-1][1]["assistant"]["id"] == "assistant-1"
-    assert result.metadata["step_outputs"]["post_turn"]["forwarded"] == {"sent": True, "to": "line"}
+    assert "test.webhook.forward" not in [call[0] for call in calls]
 
 
 def test_declarative_flow_rejects_legacy_persist_step_type():
@@ -217,6 +279,35 @@ def test_declarative_flow_rejects_legacy_persist_step_type():
     errors = engine.validate_flow("test.bad_persist")
 
     assert any("unsupported type 'persist'" in item for item in errors)
+
+
+def test_declarative_flow_condition_treats_falsey_strings_as_false():
+    from ecosystem.defaultspack.domain.flow import FlowEngine
+
+    FlowEngine.reset_instance()
+    engine = FlowEngine()
+    values = {
+        "input": {
+            "false_string": "false",
+            "zero_string": "0",
+            "off_string": "off",
+            "none_string": "none",
+            "true_string": "yes",
+        }
+    }
+
+    assert engine._condition_matches("false", values) is False
+    assert engine._condition_matches("0", values) is False
+    assert engine._condition_matches("no", values) is False
+    assert engine._condition_matches("off", values) is False
+    assert engine._condition_matches("null", values) is False
+    assert engine._condition_matches("none", values) is False
+    assert engine._condition_matches("{{input.false_string}}", values) is False
+    assert engine._condition_matches("{{input.zero_string}}", values) is False
+    assert engine._condition_matches("{{input.off_string}}", values) is False
+    assert engine._condition_matches("{{input.none_string}}", values) is False
+    assert engine._condition_matches("{{input.true_string}}", values) is True
+    assert engine._condition_matches(None, values) is True
 
 
 def test_declarative_flow_executes_branch_and_parallel_steps(monkeypatch):

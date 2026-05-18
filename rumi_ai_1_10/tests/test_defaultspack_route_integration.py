@@ -536,6 +536,7 @@ def test_registry_chat_send_route_is_adapted_to_chat_turn_flow():
 
     assert source == "registry"
     assert path_inject == {"id": "conversation_id"}
+    assert getattr(handler, "_defaultspack_flow_route_handler", False) is True
     assert handler({"message": {"content": "hi"}}, params) == {
         "status": "ok",
         "data": {"flow": True},
@@ -549,6 +550,63 @@ def test_registry_chat_send_route_is_adapted_to_chat_turn_flow():
             "blocks.chat.send",
         )
     ]
+
+
+def test_registry_chat_flow_handler_keeps_path_params_through_http_dispatch_shape():
+    from ecosystem.defaultspack.transport.http import DefaultsHttpServer
+
+    def hardcoded_chat_send(request_data, context):
+        return {"handler": "legacy", "request_data": request_data}
+
+    class Facade:
+        def get_interface(self, key, strategy=None):
+            if key != "io.http.route":
+                return None
+            return [
+                {
+                    "method": "POST",
+                    "pattern": "/api/chat/conversations/{id}/messages",
+                    "handler": hardcoded_chat_send,
+                    "path_inject": {"id": "conversation_id"},
+                },
+            ]
+
+    server = DefaultsHttpServer(Facade())
+    calls = []
+
+    def fake_flow_route(
+        flow_id,
+        request_data,
+        path_params,
+        inject=None,
+        *,
+        fallback_block_module="",
+    ):
+        calls.append((flow_id, request_data, path_params, inject or {}, fallback_block_module))
+        return {"status": "ok", "data": {"flow": True}}
+
+    server._invoke_flow_route = fake_flow_route
+    handler, params, source, path_inject = server._match_route(
+        "POST",
+        "/api/chat/conversations/c1/messages",
+    )
+    request_data = {"message": {"content": "hi"}}
+    for url_param, data_key in path_inject.items():
+        request_data[data_key] = params.get(url_param, "")
+    request_data["_method"] = "POST"
+    request_data["_actual_method"] = "POST"
+
+    if getattr(handler, "_defaultspack_flow_route_handler", False):
+        result = handler(request_data, params)
+    else:
+        context = server._build_context()
+        context["_facade"] = server.facade
+        result = handler(request_data, context)
+
+    assert source == "registry"
+    assert result == {"status": "ok", "data": {"flow": True}}
+    assert calls[-1][2] == {"id": "c1"}
+    assert calls[-1][1]["conversation_id"] == "c1"
 
 
 def test_registry_chat_stream_route_is_adapted_to_chat_stream_turn_flow():

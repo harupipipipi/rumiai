@@ -5,7 +5,7 @@ from typing import Any
 
 TRUSTED_TOOL_PACK_IDS = {"defaultspack", "rumi_default_tools_pack"}
 SUPPORTED_AUTHORABLE_EXECUTION_TYPES = {"rumi_function", "capability", "mcp"}
-TRUSTED_LEGACY_EXECUTION_TYPES = {"local", "handler", "dynamic", "prompt"}
+TRUSTED_LEGACY_EXECUTION_TYPES = {"local", "handler", "dynamic"}
 VALID_RISKS = {"low", "medium", "high"}
 
 _UNSAFE_ACTION_TYPES = {
@@ -75,12 +75,7 @@ def source_pack_id_from_manifest(manifest: dict[str, Any], fallback: str = "") -
 
 
 def is_trusted_tool(tool_def: dict[str, Any]) -> bool:
-    if source_pack_id_from_tool(tool_def) in TRUSTED_TOOL_PACK_IDS:
-        return True
-    metadata = tool_def.get("metadata")
-    if isinstance(metadata, dict) and metadata.get("trusted") is True:
-        return True
-    return bool(tool_def.get("trusted") is True)
+    return source_pack_id_from_tool(tool_def) in TRUSTED_TOOL_PACK_IDS
 
 
 def is_trusted_pack_id(pack_id: str) -> bool:

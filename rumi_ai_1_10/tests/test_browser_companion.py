@@ -213,20 +213,14 @@ def test_browser_companion_bridge_routes_support_batch_results(tmp_path, monkeyp
     assert completed["result"]["is_error"] is False
 
 
-def test_browser_companion_pack_not_approved_falls_back_to_local(monkeypatch):
+def test_browser_companion_pack_not_approved_does_not_fall_back_to_local(monkeypatch):
     from domain.tool.executor import ToolExecutor
 
-    captured = {}
+    called = {"local": False}
 
     def fake_execute_local(self, tool_name, arguments, context):
-        captured["tool_name"] = tool_name
-        captured["arguments"] = arguments
-        captured["context"] = context
-        return {
-            "result": "browser_companion page.snapshot completed",
-            "is_error": False,
-            "widget": {"type": "browser_companion", "action": "page.snapshot"},
-        }
+        called["local"] = True
+        raise AssertionError("browser_companion must not bypass pack approval")
 
     class FakeResponse:
         success = False
@@ -245,7 +239,5 @@ def test_browser_companion_pack_not_approved_falls_back_to_local(monkeypatch):
         FakeResponse(),
     )
 
-    assert result["is_error"] is False
-    assert captured["tool_name"] == "browser_companion"
-    assert captured["arguments"]["action"] == "page.snapshot"
-    assert captured["arguments"]["include_capture"] is True
+    assert result is None
+    assert called["local"] is False

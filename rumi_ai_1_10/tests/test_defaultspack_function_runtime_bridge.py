@@ -141,9 +141,7 @@ def test_high_risk_defaultspack_function_rejects_unapproved_external_caller():
 
     assert result["status"] == "error"
     assert result["error"]["code"] == "CALLER_REQUIRES_DENIED"
-    assert permission_manager.caller_checks == [
-        ("external_pack", ["user.approved.high_risk"])
-    ]
+    assert permission_manager.caller_checks == []
 
 
 def test_dispatcher_runs_thinking_level_function(tmp_path, monkeypatch):

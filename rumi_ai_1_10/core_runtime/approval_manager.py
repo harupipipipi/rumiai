@@ -50,6 +50,9 @@ from .paths import (
 logger = logging.getLogger(__name__)
 
 
+TRUSTED_BUILTIN_PACK_IDS = {"defaultspack", "rumi_default_tools_pack"}
+
+
 from .hmac_key_manager import (
     generate_or_load_signing_key,
     compute_data_hmac,
@@ -142,6 +145,10 @@ class ApprovalManager:
     def _is_core_pack(self, pack_id: str) -> bool:
         """core_pack かどうかを判定する（pack_id が CORE_PACK_ID_PREFIX で始まるか）"""
         return pack_id.startswith(CORE_PACK_ID_PREFIX)
+
+    def _is_trusted_builtin_pack(self, pack_id: str) -> bool:
+        """Bundled runtime packs are shipped with the host and do not use user grants."""
+        return str(pack_id or "").strip() in TRUSTED_BUILTIN_PACK_IDS
     
     def _invalidate_hash_cache(self, pack_id: str) -> None:
         """指定 pack のハッシュキャッシュを無効化する"""
@@ -453,7 +460,11 @@ class ApprovalManager:
             - reason: 不合格の場合の理由
         """
         # W22-A: core_pack は常時承認済み
-        if self._is_core_pack(pack_id):
+        # defaultspack / rumi_default_tools_pack are bundled host runtime packs;
+        # they still go through permission and caller_requires checks in the
+        # capability executor, but they are not user-installed packs waiting for
+        # grants.json approval.
+        if self._is_core_pack(pack_id) or self._is_trusted_builtin_pack(pack_id):
             return True, None
 
         with self._lock:

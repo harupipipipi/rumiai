@@ -155,7 +155,7 @@ class ToolRegistry:
             return None
         manifest["source_path"] = str(manifest_path)
         pack_id = pack_id or self._pack_id_from_root(pack_root)
-        manifest.setdefault("source_pack_id", pack_id)
+        manifest["source_pack_id"] = pack_id
         tool_def = self._tool_from_manifest(manifest, source_pack_id=pack_id)
         if tool_def is None:
             return None
@@ -271,7 +271,7 @@ class ToolRegistry:
             execution = {"type": "local"}
         if handler and "handler" not in execution:
             execution["handler"] = handler
-        pack_id = source_pack_id_from_manifest(manifest, source_pack_id)
+        pack_id = str(source_pack_id or "").strip() or source_pack_id_from_manifest(manifest)
         trusted = is_trusted_pack_id(pack_id)
         # Some older registry/UI paths built manifests without a pack identity.
         # Keep them visible for compatibility, but the executor still rejects the
@@ -424,10 +424,12 @@ class ToolRegistry:
                 except OSError:
                     pass
             metadata = dict(tool_def.get("metadata", {}))
-            metadata.setdefault("source", "user")
-            metadata.setdefault("trusted", False)
+            metadata["source"] = "user"
+            metadata["source_pack_id"] = "user_dynamic"
+            metadata["trusted"] = False
             tool_def["metadata"] = metadata
-            tool_def.setdefault("trusted", False)
+            tool_def["source_pack_id"] = "user_dynamic"
+            tool_def["trusted"] = False
             if unsupported_execution_reason(tool_def) is not None:
                 continue
             with self._lock:
@@ -509,10 +511,12 @@ class ToolRegistry:
             tool_def["execution"] = {}
         tool_def["execution"]["type"] = "dynamic"
         metadata = dict(tool_def.get("metadata", {}))
-        metadata.setdefault("source", "user")
-        metadata.setdefault("trusted", False)
+        metadata["source"] = "user"
+        metadata["source_pack_id"] = "user_dynamic"
+        metadata["trusted"] = False
         tool_def["metadata"] = metadata
-        tool_def.setdefault("trusted", False)
+        tool_def["source_pack_id"] = "user_dynamic"
+        tool_def["trusted"] = False
         rejection_reason = unsupported_execution_reason(tool_def)
         if rejection_reason is not None:
             raise ValueError(rejection_reason)

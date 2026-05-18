@@ -1292,20 +1292,14 @@ def test_chat_send_retries_empty_thinking_response_without_thinking(monkeypatch)
     ]
 
 
-def test_browser_computer_pack_not_approved_falls_back_to_local(monkeypatch):
+def test_browser_computer_pack_not_approved_does_not_fall_back_to_local(monkeypatch):
     from domain.tool.executor import ToolExecutor
 
-    captured = {}
+    called = {"local": False}
 
     def fake_execute_local(self, tool_name, arguments, context):
-        captured["tool_name"] = tool_name
-        captured["arguments"] = arguments
-        captured["context"] = context
-        return {
-            "result": "browser_computer computer.click completed",
-            "is_error": False,
-            "widget": {"type": "browser_computer", "action": "computer.click"},
-        }
+        called["local"] = True
+        raise AssertionError("browser_computer must not bypass pack approval")
 
     class FakeResponse:
         success = False
@@ -1324,26 +1318,18 @@ def test_browser_computer_pack_not_approved_falls_back_to_local(monkeypatch):
         FakeResponse(),
     )
 
-    assert result["is_error"] is False
-    assert captured["tool_name"] == "browser_computer"
-    assert captured["arguments"]["action"] == "computer.click"
-    assert captured["context"]["user_requested_computer_use"] is True
+    assert result is None
+    assert called["local"] is False
 
 
-def test_computer_use_function_registry_unavailable_falls_back_to_local(monkeypatch):
+def test_computer_use_function_registry_unavailable_does_not_fall_back_to_local(monkeypatch):
     from domain.tool.executor import ToolExecutor
 
-    captured = {}
+    called = {"local": False}
 
     def fake_execute_local(self, tool_name, arguments, context):
-        captured["tool_name"] = tool_name
-        captured["arguments"] = arguments
-        captured["context"] = context
-        return {
-            "result": "computer_use computer.context completed",
-            "is_error": False,
-            "widget": {"type": "computer_use", "action": "computer.context"},
-        }
+        called["local"] = True
+        raise AssertionError("computer_use must not bypass the capability boundary")
 
     class FakeResponse:
         success = False
@@ -1362,10 +1348,8 @@ def test_computer_use_function_registry_unavailable_falls_back_to_local(monkeypa
         FakeResponse(),
     )
 
-    assert result["is_error"] is False
-    assert captured["tool_name"] == "computer_use"
-    assert captured["arguments"]["action"] == "context"
-    assert captured["context"]["conversation_id"] == "conv-test"
+    assert result is None
+    assert called["local"] is False
 
 
 def test_browser_computer_click_can_use_virtual_cursor_for_preview(tmp_path, monkeypatch):
@@ -4739,17 +4723,12 @@ def test_chat_text_sets_computer_use_chrome_line_target_preferences():
     assert prefs["computer_use_target_title"] == "LINE"
 
 
-def test_user_requested_computer_use_preapproves_interactive_actions(monkeypatch):
+def test_user_requested_computer_use_requires_approval_for_interactive_actions(monkeypatch):
     from domain.tool.executor import ToolExecutor
     from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
 
-    captured = {}
-
     def fake_run(self, action, payload=None, *, yolo_mode=False):
-        captured["action"] = action
-        captured["payload"] = payload
-        captured["yolo_mode"] = yolo_mode
-        return {"action": action, "executed": True}
+        raise AssertionError("browser_computer must not run before approval")
 
     monkeypatch.setattr(BrowserComputerController, "run", fake_run)
 
@@ -4760,24 +4739,21 @@ def test_user_requested_computer_use_preapproves_interactive_actions(monkeypatch
     )
 
     assert result["is_error"] is False
-    assert captured == {
+    assert result["widget"]["type"] == "approval_request"
+    assert result["widget"]["tool_name"] == "browser_computer"
+    assert result["widget"]["risk_level"] == "high"
+    assert result["widget"]["arguments"] == {
         "action": "browser.open_url",
-        "payload": {"url": "https://chatgpt.com", "persistent": False},
-        "yolo_mode": False,
+        "payload": {"url": "https://chatgpt.com"},
     }
 
 
-def test_user_requested_computer_use_preapproves_drag(monkeypatch):
+def test_user_requested_computer_use_requires_approval_for_drag(monkeypatch):
     from domain.tool.executor import ToolExecutor
     from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
 
-    captured = {}
-
     def fake_run(self, action, payload=None, *, yolo_mode=False):
-        captured["action"] = action
-        captured["payload"] = payload
-        captured["yolo_mode"] = yolo_mode
-        return {"action": action, "executed": True}
+        raise AssertionError("computer_use must not run before approval")
 
     monkeypatch.setattr(BrowserComputerController, "run", fake_run)
 
@@ -4788,10 +4764,15 @@ def test_user_requested_computer_use_preapproves_drag(monkeypatch):
     )
 
     assert result["is_error"] is False
-    assert captured == {
-        "action": "computer.drag",
-        "payload": {"x1": 10, "y1": 20, "x2": 30, "y2": 40},
-        "yolo_mode": False,
+    assert result["widget"]["type"] == "approval_request"
+    assert result["widget"]["tool_name"] == "computer_use"
+    assert result["widget"]["risk_level"] == "high"
+    assert result["widget"]["arguments"] == {
+        "action": "drag",
+        "x1": 10,
+        "y1": 20,
+        "x2": 30,
+        "y2": 40,
     }
 
 
@@ -4807,18 +4788,12 @@ def test_browser_computer_function_defaults_do_not_force_physical_click():
     assert payload == {"x": 10, "y": 20}
 
 
-def test_browser_computer_executor_propagates_controller_errors(monkeypatch):
+def test_browser_computer_executor_returns_approval_before_controller_errors(monkeypatch):
     from domain.tool.executor import ToolExecutor
     from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
 
     def fake_run(self, action, payload=None, *, yolo_mode=False):
-        return {
-            "action": action,
-            "executed": False,
-            "is_error": True,
-            "reason": "Background computer-use is disabled.",
-            "recovery": {"kind": "visible_window_required"},
-        }
+        raise AssertionError("computer_use controller must not run before approval")
 
     monkeypatch.setattr(BrowserComputerController, "run", fake_run)
 
@@ -4828,9 +4803,10 @@ def test_browser_computer_executor_propagates_controller_errors(monkeypatch):
         {"user_requested_computer_use": True},
     )
 
-    assert result["is_error"] is True
-    assert "failed" in result["result"]
-    assert result["widget"]["recovery"]["kind"] == "visible_window_required"
+    assert result["is_error"] is False
+    assert result["widget"]["type"] == "approval_request"
+    assert result["widget"]["tool_name"] == "computer_use"
+    assert result["widget"]["arguments"] == {"action": "type", "text": "hello", "app": "Google Chrome"}
 
 
 def test_browser_open_url_uses_foreground_default_browser(monkeypatch):
@@ -5207,6 +5183,7 @@ def test_computer_click_physical_true_operates_visible_action(tmp_path, monkeypa
     controller = BrowserComputerController(artifact_root=tmp_path)
     controller._session_path = tmp_path / "shared" / "browser_sessions.json"
     monkeypatch.setattr(controller, "_darwin_click", lambda payload: clicks.append(dict(payload)))
+    monkeypatch.setattr(controller, "_foreground_action_focus_error", lambda action, payload: None)
 
     result = controller.run(
         "computer.click",

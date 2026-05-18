@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -42,6 +43,50 @@ def test_tool_security_rejects_untrusted_legacy_execution_manifests_without_writ
         }
 
         assert ToolRegistry._tool_from_manifest(manifest, source_pack_id="community_pack") is None
+
+
+def test_tool_security_uses_loader_pack_id_over_manifest_claimed_trust():
+    manifest = {
+        "id": "spoofed_first_party",
+        "source_pack_id": "defaultspack",
+        "description": "Pretends to be first-party while running a local handler.",
+        "config": {
+            "name": "Spoofed First Party",
+            "risk": "low",
+            "execution": {
+                "type": "local",
+                "handler": "blocks.coding.file_write:run",
+            },
+        },
+    }
+
+    assert ToolRegistry._tool_from_manifest(manifest, source_pack_id="community_pack") is None
+
+
+def test_dynamic_tool_cannot_self_declare_trusted(tmp_path, monkeypatch):
+    monkeypatch.setattr(ToolRegistry, "_resolve_tools_dir", lambda self: str(tmp_path / "tools"))
+    ToolRegistry._instance = None
+    registry = ToolRegistry()
+
+    try:
+        registry.register_dynamic(
+            {
+                "tool_id": "self_trusted_dynamic",
+                "name": "self_trusted_dynamic",
+                "metadata": {
+                    "source": "user",
+                    "source_pack_id": "defaultspack",
+                    "trusted": True,
+                },
+                "trusted": True,
+                "schema": {"parameters": {"type": "object", "properties": {}}},
+            },
+            handler_code="def run(args, context):\n    return {'result': 'ran'}\n",
+        )
+    except ValueError as exc:
+        assert "trusted first-party" in str(exc)
+    else:
+        raise AssertionError("self-trusted dynamic tool was accepted")
 
 
 def test_tool_security_promotes_deceptive_function_tool_without_write_action_to_high_risk():
@@ -227,6 +272,245 @@ def test_migrated_coding_function_does_not_fall_back_to_direct_local_tool():
     )
 
     assert result is None
+
+
+def test_permission_denied_function_call_never_falls_back_to_pack_function():
+    class FakeResponse:
+        success = False
+        error_type = "permission_denied"
+        error = "Permission denied: function.call"
+
+    result = ToolExecutor._fallback_function_call_if_first_party_unapproved(
+        {"name": "coding_file_write", "metadata": {"source_pack_id": "defaultspack"}},
+        {
+            "type": "function.call",
+            "qualified_name": "defaultspack:coding_file_write",
+            "args": {"path": "blocked.txt", "content": "blocked"},
+        },
+        {"profile_policy": {"yolo_mode": True}},
+        FakeResponse(),
+    )
+
+    assert result is None
+
+
+def test_high_risk_first_party_function_registry_unavailable_fails_closed():
+    class FakeResponse:
+        success = False
+        error_type = "function_registry_unavailable"
+        error = "Function registry unavailable"
+
+    for qualified_name in (
+        "rumi_default_tools_pack:computer_use",
+        "rumi_default_tools_pack:browser_computer",
+        "rumi_default_tools_pack:browser_use",
+        "rumi_default_tools_pack:browser_companion",
+        "defaultspack:coding_file_write",
+        "defaultspack:coding_git_push",
+        "defaultspack:coding_terminal_exec",
+    ):
+        result = ToolExecutor._fallback_function_call_if_first_party_unapproved(
+            {"name": qualified_name.rsplit(":", 1)[-1], "metadata": {"source_pack_id": qualified_name.split(":", 1)[0]}},
+            {
+                "type": "function.call",
+                "qualified_name": qualified_name,
+                "args": {},
+            },
+            {"profile_policy": {"yolo_mode": True}},
+            FakeResponse(),
+        )
+        assert result is None
+
+
+def test_terminal_git_write_file_write_fallbacks_are_blocked_without_grant():
+    class FakeResponse:
+        success = False
+        error_type = "function_registry_unavailable"
+
+    for qualified_name in (
+        "defaultspack:coding_terminal_exec",
+        "defaultspack:coding_git_commit",
+        "defaultspack:coding_git_push",
+        "defaultspack:coding_file_create",
+        "defaultspack:coding_file_write",
+        "defaultspack:coding_file_patch",
+        "defaultspack:coding_file_delete",
+        "defaultspack:coding_file_restore",
+    ):
+        result = ToolExecutor._fallback_function_call_if_first_party_unapproved(
+            {"name": qualified_name.rsplit(":", 1)[-1], "metadata": {"source_pack_id": "defaultspack"}},
+            {
+                "type": "function.call",
+                "qualified_name": qualified_name,
+                "args": {},
+            },
+            {},
+            FakeResponse(),
+        )
+        assert result is None
+
+
+def test_host_and_network_functions_do_not_use_direct_fallback_when_registry_unavailable():
+    class FakeResponse:
+        success = False
+        error_type = "function_registry_unavailable"
+
+    for qualified_name in (
+        "defaultspack:tool_file_reader",
+        "defaultspack:tool_web_search",
+        "defaultspack:coding_file_read",
+        "defaultspack:coding_git_status",
+    ):
+        result = ToolExecutor._fallback_function_call_if_first_party_unapproved(
+            {"name": qualified_name.rsplit(":", 1)[-1], "metadata": {"source_pack_id": "defaultspack"}},
+            {
+                "type": "function.call",
+                "qualified_name": qualified_name,
+                "args": {},
+            },
+            {"profile_policy": {"yolo_mode": True}},
+            FakeResponse(),
+        )
+        assert result is None
+
+
+def test_computer_use_pack_functions_are_approval_gated():
+    functions_root = ROOT / "ecosystem" / "rumi_default_tools_pack" / "functions"
+    expected_requires = {
+        "computer_use": ["computer.control"],
+        "browser_computer": ["browser.control", "computer.control"],
+        "browser_use": ["browser.control", "computer.control"],
+        "browser_companion": ["browser.control", "computer.control"],
+    }
+
+    for function_id, requires in expected_requires.items():
+        manifest = json.loads((functions_root / function_id / "manifest.json").read_text(encoding="utf-8"))
+        assert manifest["risk"] == "high"
+        assert manifest["requires"] == requires
+        assert manifest["caller_requires"] == ["user.approved.high_risk"]
+
+
+def test_computer_use_rumi_function_does_not_bypass_capability_executor_when_user_requested(monkeypatch):
+    seen = {}
+
+    class FakeCapabilityExecutor:
+        def execute(self, principal_id, request):
+            seen["principal_id"] = principal_id
+            seen["request"] = request
+            return SimpleNamespace(success=True, output={"result": "via capability"}, error=None)
+
+    def fail_local(*args, **kwargs):
+        raise AssertionError("computer_use must not bypass CapabilityExecutor")
+
+    monkeypatch.setattr(ToolExecutor, "_execute_local", fail_local)
+
+    result = ToolExecutor()._execute_rumi_function(
+        {
+            "tool_id": "computer_use",
+            "name": "computer_use",
+            "execution": {
+                "type": "rumi_function",
+                "qualified_name": "rumi_default_tools_pack:computer_use",
+            },
+            "risk": "high",
+            "requires_approval": True,
+            "capability_grants": ["computer.control"],
+            "metadata": {"source_pack_id": "rumi_default_tools_pack"},
+        },
+        {"action": "screenshot"},
+        {
+            "user_requested_computer_use": True,
+            "capability_executor": FakeCapabilityExecutor(),
+        },
+    )
+
+    assert result["is_error"] is False
+    assert result["result"] == "via capability"
+    assert seen["principal_id"] == "rumi_default_tools_pack"
+    assert seen["request"]["qualified_name"] == "rumi_default_tools_pack:computer_use"
+
+
+def test_computer_use_physical_action_returns_approval_before_local_execution(monkeypatch):
+    class FakeCapabilityExecutor:
+        def execute(self, principal_id, request):
+            return SimpleNamespace(
+                success=False,
+                error_type="caller_requires_denied",
+                error="Caller does not meet caller_requires",
+            )
+
+    def fail_local(*args, **kwargs):
+        raise AssertionError("physical computer action must not run before approval")
+
+    monkeypatch.setattr(ToolExecutor, "_execute_local", fail_local)
+
+    result = ToolExecutor()._execute_rumi_function(
+        {
+            "tool_id": "computer_use",
+            "name": "computer_use",
+            "execution": {
+                "type": "rumi_function",
+                "qualified_name": "rumi_default_tools_pack:computer_use",
+            },
+            "risk": "high",
+            "requires_approval": True,
+            "capability_grants": ["computer.control"],
+            "metadata": {"source_pack_id": "rumi_default_tools_pack"},
+        },
+        {"action": "click", "physical": True, "x": 10, "y": 20},
+        {
+            "user_requested_computer_use": True,
+            "capability_executor": FakeCapabilityExecutor(),
+        },
+    )
+
+    assert result["is_error"] is False
+    assert result["widget"]["type"] == "approval_request"
+    assert result["widget"]["risk_level"] == "high"
+    assert result["widget"]["arguments"]["action"] == "click"
+    assert result["widget"]["arguments"]["physical"] is True
+
+
+def test_prefocus_computer_target_window_does_not_execute_without_approval(monkeypatch):
+    class FakeCapabilityExecutor:
+        def execute(self, principal_id, request):
+            return SimpleNamespace(
+                success=False,
+                error_type="caller_requires_denied",
+                error="Caller does not meet caller_requires",
+            )
+
+    def fail_local(*args, **kwargs):
+        raise AssertionError("select_window must be approval-gated")
+
+    monkeypatch.setattr(ToolExecutor, "_execute_local", fail_local)
+
+    result = ToolExecutor()._execute_rumi_function(
+        {
+            "tool_id": "browser_computer",
+            "name": "browser_computer",
+            "execution": {
+                "type": "rumi_function",
+                "qualified_name": "rumi_default_tools_pack:browser_computer",
+            },
+            "risk": "high",
+            "requires_approval": True,
+            "capability_grants": ["browser.control", "computer.control"],
+            "metadata": {"source_pack_id": "rumi_default_tools_pack"},
+        },
+        {"action": "computer.select_window", "payload": {"app": "Google Chrome", "title": "LINE"}},
+        {
+            "user_requested_computer_use": True,
+            "computer_use_target_app": "Google Chrome",
+            "computer_use_target_title": "LINE",
+            "capability_executor": FakeCapabilityExecutor(),
+        },
+    )
+
+    assert result["is_error"] is False
+    assert result["widget"]["type"] == "approval_request"
+    assert result["widget"]["tool_name"] == "browser_computer"
+    assert result["widget"]["risk_level"] == "high"
 
 
 def test_rumi_function_tool_forwards_server_approval_context():

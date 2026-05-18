@@ -152,8 +152,8 @@ steps:
 
   - id: post_turn
     type: subflow
-    flow: "{{input.post_turn_flow}}"
-    when: "{{input.post_turn_flow}}"
+    flow: "{{active_profile.post_turn_flow || active_profile.policy.post_turn_flow || profile_workspace.post_turn_flow}}"
+    when: "{{active_profile.post_turn_flow || active_profile.policy.post_turn_flow || profile_workspace.post_turn_flow}}"
     input:
       conversation_id: "{{input.conversation_id}}"
       message: "{{input.message}}"

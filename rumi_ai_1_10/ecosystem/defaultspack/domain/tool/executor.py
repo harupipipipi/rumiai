@@ -150,9 +150,6 @@ class ToolExecutor:
         if exec_type == "dynamic":
             return self._execute_dynamic(tool_def, arguments, context)
 
-        if exec_type == "prompt":
-            return self._execute_prompt(tool_def, arguments, context)
-
         handler = str(execution.get("handler") or "")
         if handler and not handler.endswith(":ToolExecutor.execute"):
             return self._execute_handler(tool_def, arguments, context)
@@ -171,10 +168,6 @@ class ToolExecutor:
                 "widget": None,
             }
         pack_id, _, function_id = qualified_name.partition(":")
-        if isinstance(context, dict) and context.get("user_requested_computer_use"):
-            local_tool = self._first_party_local_tool_for_function(pack_id, function_id)
-            if local_tool in {"browser_computer", "browser_use", "computer_use", "browser_companion"}:
-                return self._execute_local(local_tool, arguments or {}, context)
         request = {
             "type": "function.call",
             "qualified_name": qualified_name,
@@ -230,7 +223,7 @@ class ToolExecutor:
                 "is_error": True,
                 "widget": None,
             }
-        return self._tool_response_from_capability(response)
+        return self._tool_response_from_capability(response, tool_def, request.get("args") or {})
 
     @staticmethod
     def _local_tool_fallback_for_capability_response(response, request):
@@ -238,16 +231,12 @@ class ToolExecutor:
             return None
         if request.get("type") != "function.call":
             return None
-        if getattr(response, "error_type", None) not in {"function_not_found", "pack_not_approved"}:
+        if getattr(response, "error_type", None) not in {"function_not_found", "function_registry_unavailable"}:
             return None
         qualified_name = str(request.get("qualified_name") or "")
         return {
             "defaultspack:tool_calculator": "calculator",
-            "defaultspack:tool_web_search": "web_search",
-            "defaultspack:tool_reddit_search": "reddit_search",
-            "defaultspack:tool_file_reader": "file_reader",
-            "defaultspack:tool_todo": "todo",
-            "defaultspack:tool_subagent": "subagent",
+            "rumi_default_tools_pack:calculator": "calculator",
         }.get(qualified_name)
 
     @staticmethod
@@ -257,16 +246,10 @@ class ToolExecutor:
         if bool(getattr(response, "success", False)):
             return None
         if getattr(response, "error_type", "") not in {
-            "pack_not_approved",
-            "permission_denied",
             "function_not_found",
             "function_registry_unavailable",
         }:
             return None
-        if getattr(response, "error_type", "") == "permission_denied":
-            message = str(getattr(response, "error", "") or "")
-            if "function.call" not in message:
-                return None
         qualified_name = str(request.get("qualified_name") or "")
         pack_id, _, function_id = qualified_name.partition(":")
         if pack_id not in {"defaultspack", "rumi_default_tools_pack"} or not function_id:
@@ -297,25 +280,11 @@ class ToolExecutor:
     def _first_party_local_tool_for_function(pack_id, function_id):
         if pack_id == "rumi_default_tools_pack":
             return {
-                "browser_companion": "browser_companion",
-                "browser_computer": "browser_computer",
-                "browser_use": "browser_use",
-                "computer_use": "computer_use",
                 "calculator": "calculator",
-                "file_reader": "file_reader",
-                "reddit_search": "reddit_search",
-                "subagent": "subagent",
-                "todo": "todo",
-                "web_search": "web_search",
             }.get(function_id)
         if pack_id == "defaultspack":
             return {
                 "tool_calculator": "calculator",
-                "tool_web_search": "web_search",
-                "tool_reddit_search": "reddit_search",
-                "tool_file_reader": "file_reader",
-                "tool_todo": "todo",
-                "tool_subagent": "subagent",
             }.get(function_id)
         return None
 
@@ -323,30 +292,7 @@ class ToolExecutor:
     def _allows_direct_first_party_function_fallback(pack_id, function_id):
         return (pack_id, function_id) in {
             ("defaultspack", "tool_calculator"),
-            ("defaultspack", "tool_web_search"),
-            ("defaultspack", "tool_reddit_search"),
-            ("defaultspack", "tool_file_reader"),
-            ("defaultspack", "tool_todo"),
-            ("defaultspack", "tool_subagent"),
-            ("defaultspack", "coding_file_read"),
-            ("defaultspack", "coding_file_list"),
-            ("defaultspack", "coding_file_search"),
-            ("defaultspack", "coding_file_create"),
-            ("defaultspack", "coding_file_write"),
-            ("defaultspack", "coding_file_patch"),
-            ("defaultspack", "coding_file_delete"),
-            ("defaultspack", "coding_file_restore"),
-            ("defaultspack", "coding_git_status"),
-            ("defaultspack", "coding_git_diff"),
-            ("defaultspack", "coding_git_commit"),
-            ("defaultspack", "coding_git_push"),
-            ("defaultspack", "coding_terminal_exec"),
             ("rumi_default_tools_pack", "calculator"),
-            ("rumi_default_tools_pack", "file_reader"),
-            ("rumi_default_tools_pack", "reddit_search"),
-            ("rumi_default_tools_pack", "subagent"),
-            ("rumi_default_tools_pack", "todo"),
-            ("rumi_default_tools_pack", "web_search"),
         }
 
     @staticmethod
@@ -462,11 +408,17 @@ class ToolExecutor:
         return "defaultspack"
 
     @staticmethod
-    def _tool_response_from_capability(response):
+    def _tool_response_from_capability(response, tool_def=None, arguments=None):
         success = bool(getattr(response, "success", False))
         output = getattr(response, "output", None)
         error = getattr(response, "error", None)
         if not success:
+            if (
+                getattr(response, "error_type", None) == "caller_requires_denied"
+                and isinstance(tool_def, dict)
+                and _requires_approval(tool_def)
+            ):
+                return _approval_required_tool_response(tool_def, arguments or {})
             return {
                 "result": str(error or "Capability execution failed"),
                 "is_error": True,
@@ -545,40 +497,6 @@ class ToolExecutor:
             }
         return {
             "result": str(result) if result is not None else "",
-            "is_error": False,
-            "widget": None,
-        }
-
-    def _execute_prompt(self, tool_def, arguments, context):
-        """
-        P2-1: prompt ベースのツール実行パス。
-        execution.type == "prompt" のツールを実行する。
-        テンプレート本文の {{var}} を arguments で展開し、結果を返す。
-        """
-        import re
-
-        execution = tool_def.get("execution", {})
-        body = execution.get("body", "")
-        if not body:
-            return {
-                "result": "Prompt tool '{}' has no body".format(
-                    tool_def.get("name", "unknown")
-                ),
-                "is_error": True,
-                "widget": None,
-            }
-
-        # テンプレート変数を展開
-        def replace_var(match):
-            var_name = match.group(1).strip()
-            if var_name in arguments:
-                return str(arguments[var_name])
-            return match.group(0)  # 未知の変数はそのまま残す
-
-        rendered = re.sub(r"\{\{\s*([\w.]+)\s*\}\}", replace_var, body)
-
-        return {
-            "result": rendered,
             "is_error": False,
             "widget": None,
         }
@@ -1188,6 +1106,39 @@ def _requires_approval(tool_def):
     return requires_approval_for_security(tool_def)
 
 
+def _approval_required_tool_response(tool_def, arguments):
+    return {
+        "result": "Tool '{}' requires approval".format(tool_def.get("name", tool_def.get("tool_id", "tool"))),
+        "is_error": False,
+        "widget": {
+            "type": "approval_request",
+            "tool_name": tool_def.get("name", tool_def.get("tool_id", "tool")),
+            "approval_required": True,
+            "risk_level": "high" if _is_high_risk_approval(tool_def) else "medium",
+            "arguments": dict(arguments or {}),
+        },
+    }
+
+
+def _is_high_risk_approval(tool_def):
+    if str(_tool_value(tool_def, "risk") or "").strip().lower() == "high":
+        return True
+    grants = _tool_value(tool_def, "capability_grants")
+    if isinstance(grants, list):
+        high_risk_prefixes = (
+            "browser.",
+            "computer.",
+            "file.write",
+            "git.write",
+            "network.send",
+            "terminal.exec",
+        )
+        for grant in grants:
+            if str(grant or "").strip().startswith(high_risk_prefixes):
+                return True
+    return _is_shell_or_git(tool_def)
+
+
 def _is_shell_or_git(tool_def):
     action_type = str(_tool_value(tool_def, "action_type") or "")
     category = str(_tool_value(tool_def, "category") or "")
@@ -1218,12 +1169,25 @@ def _function_call_context(context, tool_def):
     ):
         if key in context and _json_safe_value(context.get(key)):
             forwarded[key] = context.get(key)
+    if "workspace_root" not in forwarded and _needs_cwd_workspace_default(tool_def):
+        forwarded["workspace_root"] = str(Path.cwd())
     policy = policy_from_context(context)
     if bool(policy.get("yolo_mode")) or _is_policy_allow_context(context):
         forwarded["_tool_server_approved"] = True
     if _requires_approval(tool_def) and bool(context.get("_tool_server_approved")):
         forwarded["_tool_server_approved"] = True
     return forwarded
+
+
+def _needs_cwd_workspace_default(tool_def):
+    grants = _tool_value(tool_def, "capability_grants")
+    if isinstance(grants, list):
+        for grant in grants:
+            value = str(grant or "").strip()
+            if value.startswith(("file.", "git.", "terminal.")):
+                return True
+    category = str(_tool_value(tool_def, "category") or "").strip()
+    return category in {"coding", "file", "filesystem", "git", "shell", "terminal"}
 
 
 def _is_explicitly_untrusted_tool(tool_def):

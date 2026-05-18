@@ -181,6 +181,37 @@ class TestDockerStrictBoundary:
         mock_host.assert_not_called()
 
 
+class TestHighRiskApprovalCallerRequires:
+    """user.approved.high_risk は permissive permission では満たせないこと"""
+
+    @patch("core_runtime.capability_executor.get_audit_logger", new_callable=MagicMock)
+    def test_permissive_permission_manager_does_not_satisfy_high_risk_approval(self, mock_audit):
+        executor = _make_test_executor()
+        entry = _MockFunctionEntry(
+            pack_id="rumi_default_tools_pack",
+            function_id="computer_use",
+            qualified_name="rumi_default_tools_pack:computer_use",
+            caller_requires=["user.approved.high_risk"],
+        )
+        executor._function_registry.get.return_value = entry
+        executor._permission_manager = MagicMock()
+        executor._permission_manager.has_permission.return_value = True
+        executor._permission_manager.check_caller_requires.return_value = True
+
+        resp = executor.execute(
+            "rumi_default_tools_pack",
+            {
+                "type": "function.call",
+                "qualified_name": "rumi_default_tools_pack:computer_use",
+                "args": {"action": "click"},
+            },
+        )
+
+        assert resp.success is False
+        assert resp.error_type == "caller_requires_denied"
+        executor._permission_manager.check_caller_requires.assert_not_called()
+
+
 # ===========================================================================
 # Wave 1-2: _execute_command_function ガード
 # ===========================================================================

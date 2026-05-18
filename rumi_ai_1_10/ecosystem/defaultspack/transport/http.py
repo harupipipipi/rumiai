@@ -139,6 +139,7 @@ class DefaultsHttpServer:
                                     route_path_inject,
                                     fallback_block_module=route_fallback_block_module,
                                 )
+                            _flow_handler._defaultspack_flow_route_handler = True
                             route_entries.append((method, pattern, _flow_handler, path_inject, index))
                         elif method and pattern and callable(handler):
                             route_entries.append((method, pattern, handler, path_inject, index))
@@ -920,9 +921,12 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
                         request_data[data_key] = path_params.get(url_param, "")
                 request_data["_method"] = method
                 request_data["_actual_method"] = method
-                context = self.server_ref._build_context()
-                context["_facade"] = self.server_ref.facade
-                result = handler(request_data, context)
+                if getattr(handler, "_defaultspack_flow_route_handler", False):
+                    result = handler(request_data, path_params or {})
+                else:
+                    context = self.server_ref._build_context()
+                    context["_facade"] = self.server_ref.facade
+                    result = handler(request_data, context)
             else:
                 request_data["_method"] = method
                 request_data["_actual_method"] = method

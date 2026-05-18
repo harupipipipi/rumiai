@@ -444,7 +444,20 @@ class FlowEngine:
     def _condition_matches(self, condition, values):
         if condition in (None, ""):
             return True
-        return bool(self._resolve_value(condition, values))
+        return self._condition_truthy(self._resolve_value(condition, values))
+
+    @staticmethod
+    def _condition_truthy(value):
+        if value is None:
+            return False
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in {"", "false", "0", "no", "off", "null", "none"}:
+                return False
+            return True
+        return bool(value)
 
     def _invoke_function_step(self, function_name, step_input, flow_context):
         from domain.function_runtime.bridge import invoke_function
