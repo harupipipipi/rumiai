@@ -1,0 +1,23 @@
+{
+  "id": "line",
+  "category": "gateway_channels",
+  "kind": "channel_adapter",
+  "version": "1",
+  "status": "stable",
+  "display_name": "LINE Gateway Channel",
+  "entrypoints": {
+    "adapter": "adapter.py"
+  },
+  "capabilities": {
+    "external_reply": true,
+    "webhook_origin": true
+  },
+  "aliases": {
+    "channel_ids": ["line"]
+  },
+  "compatibility": {
+    "legacy_imports": ["domain.gateway.channels.line"],
+    "legacy_ids": ["line"]
+  },
+  "source_pack_id": "defaultspack"
+}

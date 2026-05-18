@@ -1,0 +1,1 @@
+"""Discord gateway channel component."""

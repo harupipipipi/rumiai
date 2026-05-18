@@ -1,0 +1,23 @@
+{
+  "id": "discord",
+  "category": "gateway_channels",
+  "kind": "channel_adapter",
+  "version": "1",
+  "status": "stable",
+  "display_name": "Discord Gateway Channel",
+  "entrypoints": {
+    "adapter": "adapter.py"
+  },
+  "capabilities": {
+    "external_reply": true,
+    "webhook_origin": true
+  },
+  "aliases": {
+    "channel_ids": ["discord"]
+  },
+  "compatibility": {
+    "legacy_imports": ["domain.gateway.channels.discord"],
+    "legacy_ids": ["discord"]
+  },
+  "source_pack_id": "defaultspack"
+}

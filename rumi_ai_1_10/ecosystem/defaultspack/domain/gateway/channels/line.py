@@ -1,5 +1,3 @@
-from .base import ChannelAdapter
+from domain.gateway_channels.line.adapter import LineChannel
 
-
-class LineChannel(ChannelAdapter):
-    channel = "line"
+__all__ = ["LineChannel"]

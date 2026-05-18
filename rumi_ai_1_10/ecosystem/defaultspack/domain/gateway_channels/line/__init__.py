@@ -1,0 +1,1 @@
+"""LINE gateway channel component."""

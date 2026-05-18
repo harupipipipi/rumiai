@@ -1,0 +1,19 @@
+{
+  "id": "static",
+  "category": "webhook_url_providers",
+  "kind": "public_url_provider",
+  "version": "1",
+  "status": "stable",
+  "display_name": "Static URL Provider",
+  "entrypoints": {
+    "provider": "provider.py"
+  },
+  "aliases": {
+    "provider_ids": ["static"]
+  },
+  "compatibility": {
+    "legacy_imports": ["domain.webhook.url_providers.static"],
+    "legacy_ids": ["static"]
+  },
+  "source_pack_id": "defaultspack"
+}

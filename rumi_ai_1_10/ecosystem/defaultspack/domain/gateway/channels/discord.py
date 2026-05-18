@@ -1,5 +1,3 @@
-from .base import ChannelAdapter
+from domain.gateway_channels.discord.adapter import DiscordChannel
 
-
-class DiscordChannel(ChannelAdapter):
-    channel = "discord"
+__all__ = ["DiscordChannel"]
