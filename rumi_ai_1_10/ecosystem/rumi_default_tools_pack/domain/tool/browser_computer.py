@@ -1272,7 +1272,7 @@ class BrowserComputerController:
         try:
             svc = self._get_computer_seat()
             target = self._computer_seat_target(payload)
-            result = svc.observe(target)
+            svc.observe(target)
             # If observe returned a screenshot, we could use it – but for now
             # we only add metadata. The legacy _screenshot path handles the
             # actual capture with all its crop/model logic.
@@ -1333,6 +1333,8 @@ class BrowserComputerController:
         approval_payload = self._desktop_approval_payload(action, payload, action_payload, virtual_only=virtual_only)
         if not (yolo_mode or self._consume_approval(payload, action, approval_payload)):
             return self._approval_required(action, approval_payload)
+        if action in {"computer.click", "computer.drag"} and payload.get("physical") is True:
+            self._focus_action_target(action_payload)
         if action == "computer.drag":
             action_payload, click_marker, drag_marker = self._resolve_drag_points(payload, remember_cursor=True)
         elif action in {"computer.move", "computer.click"}:
@@ -1386,8 +1388,6 @@ class BrowserComputerController:
                 },
             }
         if action in {"computer.type", "computer.key", "computer.scroll"}:
-            self._focus_action_target(action_payload)
-        if action == "computer.drag" and payload.get("physical") is True:
             self._focus_action_target(action_payload)
         foreground_error = self._foreground_action_focus_error(action, action_payload)
         if foreground_error is not None:
@@ -2978,19 +2978,66 @@ end tell
                 hwnd = 0
             if hwnd <= 0:
                 return
+            title = self._ps_single(raw_title)
+            app_name = self._ps_single(raw_app)
             script = f"""
 $ErrorActionPreference = 'Stop'
+Add-Type -AssemblyName Microsoft.VisualBasic -ErrorAction SilentlyContinue
 Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
 public class RumiWindowFocus {{
   [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
   [DllImport("user32.dll")] public static extern bool ShowWindowAsync(IntPtr hWnd, int nCmdShow);
+  [DllImport("user32.dll")] public static extern bool BringWindowToTop(IntPtr hWnd);
+  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+  [DllImport("user32.dll")] public static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
+  [DllImport("kernel32.dll")] public static extern uint GetCurrentThreadId();
 }}
 '@ -ErrorAction SilentlyContinue
 $hwnd = [IntPtr]{hwnd}
-[void][RumiWindowFocus]::ShowWindowAsync($hwnd, 9)
-[void][RumiWindowFocus]::SetForegroundWindow($hwnd)
+$title = '{title}'
+$appName = '{app_name}'
+$front = [RumiWindowFocus]::GetForegroundWindow()
+[uint32]$frontProcId = 0
+[uint32]$targetProcId = 0
+$frontThread = if ($front -ne [IntPtr]::Zero) {{ [RumiWindowFocus]::GetWindowThreadProcessId($front, [ref]$frontProcId) }} else {{ 0 }}
+$targetThread = [RumiWindowFocus]::GetWindowThreadProcessId($hwnd, [ref]$targetProcId)
+$currentThread = [RumiWindowFocus]::GetCurrentThreadId()
+$attachedFront = $false
+$attachedTarget = $false
+try {{
+  if ($frontThread -and $frontThread -ne $currentThread) {{
+    $attachedFront = [RumiWindowFocus]::AttachThreadInput($currentThread, $frontThread, $true)
+  }}
+  if ($targetThread -and $targetThread -ne $currentThread -and $targetThread -ne $frontThread) {{
+    $attachedTarget = [RumiWindowFocus]::AttachThreadInput($currentThread, $targetThread, $true)
+  }}
+  [void][RumiWindowFocus]::ShowWindowAsync($hwnd, 9)
+  [void][RumiWindowFocus]::BringWindowToTop($hwnd)
+  [void][RumiWindowFocus]::SetForegroundWindow($hwnd)
+  Start-Sleep -Milliseconds 150
+  if ([RumiWindowFocus]::GetForegroundWindow() -ne $hwnd) {{
+    if ($title) {{
+      [void][Microsoft.VisualBasic.Interaction]::AppActivate($title)
+    }} elseif ($targetProcId) {{
+      [void][Microsoft.VisualBasic.Interaction]::AppActivate([int]$targetProcId)
+    }} elseif ($appName) {{
+      [void][Microsoft.VisualBasic.Interaction]::AppActivate($appName)
+    }}
+    Start-Sleep -Milliseconds 150
+    [void][RumiWindowFocus]::BringWindowToTop($hwnd)
+    [void][RumiWindowFocus]::SetForegroundWindow($hwnd)
+  }}
+}} finally {{
+  if ($attachedTarget) {{
+    [void][RumiWindowFocus]::AttachThreadInput($currentThread, $targetThread, $false)
+  }}
+  if ($attachedFront) {{
+    [void][RumiWindowFocus]::AttachThreadInput($currentThread, $frontThread, $false)
+  }}
+}}
 """
             try:
                 self._run_powershell(script)
@@ -3422,8 +3469,34 @@ public class RumiDpi {
             self._run_powershell(script)
             return
         if action == "computer.type":
-            text = self._ps_single(self._windows_sendkeys_escape_text(str(payload.get("text", ""))))
-            self._run_powershell("\n".join(prelude + [f"[System.Windows.Forms.SendKeys]::SendWait('{text}')"]))
+            raw_text = str(payload.get("text", ""))
+            if raw_text.isascii():
+                text = self._ps_single(self._windows_sendkeys_escape_text(raw_text))
+                script = "\n".join(prelude + [f"[System.Windows.Forms.SendKeys]::SendWait('{text}')"])
+            else:
+                paste_text = self._ps_single(raw_text)
+                script = "\n".join(
+                    prelude
+                    + [
+                        f"$rumiPasteText = '{paste_text}'",
+                        "$rumiOriginalClipboard = $null",
+                        "$rumiHadClipboard = $false",
+                        "try { $rumiOriginalClipboard = Get-Clipboard -Raw -ErrorAction Stop; $rumiHadClipboard = $true } catch {}",
+                        "try {",
+                        "  Set-Clipboard -Value $rumiPasteText",
+                        "  Start-Sleep -Milliseconds 50",
+                        "  [System.Windows.Forms.SendKeys]::SendWait('^v')",
+                        "  Start-Sleep -Milliseconds 50",
+                        "} finally {",
+                        "  if ($rumiHadClipboard) {",
+                        "    Set-Clipboard -Value $rumiOriginalClipboard",
+                        "  } else {",
+                        "    Set-Clipboard -Value ''",
+                        "  }",
+                        "}",
+                    ]
+                )
+            self._run_powershell(script)
             return
         if action == "computer.key":
             key = self._windows_send_key(str(payload.get("key", "ENTER")), payload.get("modifiers") or payload.get("modifier"))

@@ -229,8 +229,128 @@ def test_windows_focus_window_uses_foreground_api(tmp_path, monkeypatch):
 
     assert scripts
     assert "ShowWindowAsync($hwnd, 9)" in scripts[0]
+    assert "BringWindowToTop($hwnd)" in scripts[0]
     assert "SetForegroundWindow($hwnd)" in scripts[0]
+    assert "AppActivate($title)" in scripts[0]
     assert "$hwnd = [IntPtr]1234" in scripts[0]
+
+
+def test_windows_type_uses_clipboard_paste_for_non_ascii_text(tmp_path, monkeypatch):
+    controller = _controller(tmp_path)
+    scripts = []
+
+    monkeypatch.setattr(controller, "_run_powershell", scripts.append)
+
+    controller._windows_desktop_action("computer.type", {"text": "こんにちは"})
+
+    assert scripts
+    assert "Set-Clipboard -Value $rumiPasteText" in scripts[0]
+    assert "[System.Windows.Forms.SendKeys]::SendWait('^v')" in scripts[0]
+
+
+def test_physical_click_refocuses_before_final_coordinate_resolution(tmp_path, monkeypatch):
+    from ecosystem.rumi_default_tools_pack.domain.tool import browser_computer
+
+    controller = _controller(tmp_path)
+    steps = []
+    desktop_actions = []
+    focused = {"value": False}
+
+    monkeypatch.setattr(browser_computer.platform, "system", lambda: "Windows")
+
+    def fake_resolve_action_point(payload, **kwargs):
+        remember_cursor = kwargs.get("remember_cursor", False)
+        steps.append(("resolve_click", remember_cursor, focused["value"]))
+        if remember_cursor and focused["value"]:
+            return ({"x": 110, "y": 220, "app": "Google Chrome", "title": "LINE Chat"}, None)
+        return ({"x": 10, "y": 20, "app": "Google Chrome", "title": "LINE Chat"}, None)
+
+    def fake_focus_action_target(payload):
+        steps.append(("focus_click", payload["x"], payload["y"]))
+        focused["value"] = True
+        return True
+
+    monkeypatch.setattr(controller, "_resolve_action_point", fake_resolve_action_point)
+    monkeypatch.setattr(controller, "_focus_action_target", fake_focus_action_target)
+    monkeypatch.setattr(controller, "_foreground_action_focus_error", lambda *args, **kwargs: None)
+    monkeypatch.setattr(controller, "_try_computer_seat_action", lambda *args, **kwargs: None)
+    monkeypatch.setattr(controller, "_windows_desktop_action", lambda action, payload: desktop_actions.append((action, payload)))
+    monkeypatch.setattr(controller, "_capture_action_result_screenshot", lambda *args, **kwargs: {})
+
+    result = controller.run(
+        "computer.click",
+        {"physical": True, "app": "Google Chrome", "title": "LINE Chat"},
+        yolo_mode=True,
+    )
+
+    assert result["executed"] is True
+    assert steps[:3] == [
+        ("resolve_click", False, False),
+        ("focus_click", 10, 20),
+        ("resolve_click", True, True),
+    ]
+    assert desktop_actions == [
+        (
+            "computer.click",
+            {"x": 110, "y": 220, "app": "Google Chrome", "title": "LINE Chat"},
+        )
+    ]
+
+
+def test_physical_drag_refocuses_before_final_coordinate_resolution(tmp_path, monkeypatch):
+    from ecosystem.rumi_default_tools_pack.domain.tool import browser_computer
+
+    controller = _controller(tmp_path)
+    steps = []
+    desktop_actions = []
+    focused = {"value": False}
+
+    monkeypatch.setattr(browser_computer.platform, "system", lambda: "Windows")
+
+    def fake_resolve_drag_points(payload, remember_cursor=False):
+        steps.append(("resolve_drag", remember_cursor, focused["value"]))
+        if remember_cursor and focused["value"]:
+            return (
+                {"x1": 101, "y1": 202, "x2": 303, "y2": 404, "app": "Google Chrome", "title": "LINE Chat"},
+                None,
+                None,
+            )
+        return (
+            {"x1": 1, "y1": 2, "x2": 30, "y2": 40, "app": "Google Chrome", "title": "LINE Chat"},
+            None,
+            None,
+        )
+
+    def fake_focus_action_target(payload):
+        steps.append(("focus_drag", payload["x1"], payload["y1"], payload["x2"], payload["y2"]))
+        focused["value"] = True
+        return True
+
+    monkeypatch.setattr(controller, "_resolve_drag_points", fake_resolve_drag_points)
+    monkeypatch.setattr(controller, "_focus_action_target", fake_focus_action_target)
+    monkeypatch.setattr(controller, "_foreground_action_focus_error", lambda *args, **kwargs: None)
+    monkeypatch.setattr(controller, "_try_computer_seat_action", lambda *args, **kwargs: None)
+    monkeypatch.setattr(controller, "_windows_desktop_action", lambda action, payload: desktop_actions.append((action, payload)))
+    monkeypatch.setattr(controller, "_capture_action_result_screenshot", lambda *args, **kwargs: {})
+
+    result = controller.run(
+        "computer.drag",
+        {"physical": True, "app": "Google Chrome", "title": "LINE Chat"},
+        yolo_mode=True,
+    )
+
+    assert result["executed"] is True
+    assert steps[:3] == [
+        ("resolve_drag", False, False),
+        ("focus_drag", 1, 2, 30, 40),
+        ("resolve_drag", True, True),
+    ]
+    assert desktop_actions == [
+        (
+            "computer.drag",
+            {"x1": 101, "y1": 202, "x2": 303, "y2": 404, "app": "Google Chrome", "title": "LINE Chat"},
+        )
+    ]
 
 
 def test_foreground_type_refuses_when_selected_window_is_not_active(tmp_path, monkeypatch):

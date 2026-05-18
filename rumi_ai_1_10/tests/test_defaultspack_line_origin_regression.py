@@ -923,9 +923,13 @@ def test_line_route_builds_line_biz_prompt_from_chat_url(monkeypatch, tmp_path):
     assert "large red circular reply button" in captured["context"]["external_prompt_prefix"]
     assert "physical=true" in captured["context"]["external_prompt_prefix"]
     assert "will not open the composer or press Send" in captured["context"]["external_prompt_prefix"]
+    assert "physically click inside the bottom reply composer/input field" in captured["context"]["external_prompt_prefix"]
     assert "Do not use Ctrl+A" in captured["context"]["external_prompt_prefix"]
+    assert "confirm the reply text is visible inside the bottom composer before sending" in captured["context"]["external_prompt_prefix"]
+    assert "do not send an empty composer" in captured["context"]["external_prompt_prefix"]
     assert "do not type it again" in captured["context"]["external_prompt_prefix"]
     assert "not the small dropdown arrow" in captured["context"]["external_prompt_prefix"]
+    assert "The send button text is 送信." in captured["context"]["external_prompt_prefix"]
     assert "Do not keep scrolling through the transcript repeatedly" in captured["context"]["external_prompt_prefix"]
     assert captured["context"]["computer_use_target_app"] == "Google Chrome"
     assert captured["context"]["computer_use_target_title"] == "LINE Chat"

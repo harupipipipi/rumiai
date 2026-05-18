@@ -756,6 +756,31 @@ class ChatRunEngine:
                     yield event
                 result = self._execute_tool(prepared, tool_name, tool_call_id, arguments)
                 self._raise_if_cancelled()
+                recovery_kind = _tool_result_recovery_kind(result)
+                if self._should_retry_focus_blocked_tool(prepared, tool_name, recovery_kind):
+                    try:
+                        from domain.chat.run_request import prefocus_computer_use_target_window
+
+                        prefocus_result = prefocus_computer_use_target_window(prepared)
+                    except Exception:
+                        prefocus_result = None
+                    if prefocus_result is not None:
+                        yield self._emit(
+                            "status",
+                            data={
+                                "tool_name": tool_name,
+                                "tool_call_id": tool_call_id,
+                                "recovery_kind": recovery_kind,
+                                "retry": "after_refocus",
+                            },
+                            message="computer_use target window was refocused, retrying the blocked action",
+                            phase="tool_recovery_retry",
+                            tool_name=tool_name,
+                            tool_call_id=tool_call_id,
+                        )
+                        self._sync_draft(draft, force=True)
+                        result = self._execute_tool(prepared, tool_name, tool_call_id, arguments)
+                        self._raise_if_cancelled()
                 summary = _tool_result_summary(tool_name, result)
                 artifacts = _tool_result_artifacts(result)
                 status = "failed" if _tool_result_is_error(result) else "completed"
@@ -827,6 +852,25 @@ class ChatRunEngine:
             "AI provider did not return a response",
             prepared.params,
             events=list(self._activity_events),
+        )
+
+    @staticmethod
+    def _should_retry_focus_blocked_tool(
+        prepared: PreparedChatRun,
+        tool_name: str,
+        recovery_kind: str,
+    ) -> bool:
+        if recovery_kind != "focus_required":
+            return False
+        if tool_name not in {"browser_computer", "browser_use", "computer_use"}:
+            return False
+        if not isinstance(prepared.request_context, dict):
+            return False
+        if not prepared.request_context.get("user_requested_computer_use"):
+            return False
+        return bool(
+            prepared.request_context.get("computer_use_target_app")
+            or prepared.request_context.get("computer_use_target_title")
         )
 
     def _model_turn(
