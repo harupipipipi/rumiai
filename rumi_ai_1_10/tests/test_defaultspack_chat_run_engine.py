@@ -213,6 +213,7 @@ def test_complete_turn_retries_transient_ai_error_after_tool_use():
         tools_called=[],
         connected_tool_names=set(),
         call_handler=None,
+        model_routing={},
     )
 
     response = engine._complete_turn(prepared, [{"role": "user", "content": "hello"}])
