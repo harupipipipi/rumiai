@@ -17,9 +17,23 @@ def _default_pack_root() -> Path:
     return Path(__file__).resolve().parents[2]
 
 
+def _is_dir(path: Path) -> bool:
+    try:
+        return path.is_dir()
+    except OSError:
+        return False
+
+
+def _is_file(path: Path) -> bool:
+    try:
+        return path.is_file()
+    except OSError:
+        return False
+
+
 def _coerce_domain_root(path: Path | str) -> Path:
     candidate = Path(path).expanduser()
-    if (candidate / "ecosystem.json").is_file():
+    if _is_file(candidate / "ecosystem.json"):
         return candidate / "domain"
     return candidate
 
@@ -50,11 +64,15 @@ def build_domain_component_roots(
     roots: list[Path] = []
 
     _append_unique(roots, pack_root / "domain")
-    if ecosystem_dir.is_dir():
-        for sibling in sorted(ecosystem_dir.iterdir()):
+    if _is_dir(ecosystem_dir):
+        try:
+            siblings = sorted(ecosystem_dir.iterdir())
+        except OSError:
+            siblings = []
+        for sibling in siblings:
             if sibling == pack_root:
                 continue
-            if sibling.is_dir() and (sibling / "ecosystem.json").is_file() and (sibling / "domain").is_dir():
+            if _is_dir(sibling) and _is_file(sibling / "ecosystem.json") and _is_dir(sibling / "domain"):
                 _append_unique(roots, sibling / "domain")
 
     _append_unique(roots, pack_root / "user_data" / "shared" / "domain_components")

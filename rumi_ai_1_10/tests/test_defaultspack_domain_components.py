@@ -69,6 +69,32 @@ def test_component_roots_include_sibling_ecosystem_packs(tmp_path):
     assert catalog / "domain" in roots
 
 
+def test_component_roots_skip_unreadable_sibling_pack_candidates(tmp_path, monkeypatch):
+    ecosystem = tmp_path / "ecosystem"
+    defaultspack = ecosystem / "defaultspack"
+    catalog = ecosystem / "rumi_model_catalog_pack"
+    restricted = ecosystem / "restricted"
+    _write_json(defaultspack / "ecosystem.json", {"pack_id": "defaultspack"})
+    _write_json(catalog / "ecosystem.json", {"pack_id": "rumi_model_catalog_pack"})
+    (catalog / "domain").mkdir(parents=True)
+    restricted.mkdir(parents=True)
+
+    original_is_file = Path.is_file
+
+    def fake_is_file(path: Path) -> bool:
+        if path == restricted / "ecosystem.json":
+            raise PermissionError("blocked test path")
+        return original_is_file(path)
+
+    monkeypatch.setattr(Path, "is_file", fake_is_file)
+
+    roots = build_domain_component_roots(defaultspack)
+
+    assert defaultspack / "domain" in roots
+    assert catalog / "domain" in roots
+    assert restricted / "domain" not in roots
+
+
 def test_component_registry_supports_category_scoped_aliases(tmp_path):
     root = tmp_path / "pack" / "domain"
     _write_json(
