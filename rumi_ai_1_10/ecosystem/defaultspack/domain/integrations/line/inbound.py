@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+from contextlib import nullcontext
 import hashlib
 import hmac
 import json
@@ -8,6 +9,7 @@ import logging
 import os
 import re
 import threading
+import time
 from pathlib import Path
 from typing import Any, Dict
 
@@ -29,6 +31,8 @@ from domain.webhook.endpoint_resolver import ProviderEndpointResolver
 
 _LOGGER = logging.getLogger(__name__)
 _LINE_WEBHOOK_ACK_TEXT = "\u5c4a\u3044\u305f\u3088\uff01"
+_LINE_BIZ_TASK_LOCKS_GUARD = threading.Lock()
+_LINE_BIZ_TASK_LOCKS: dict[str, threading.Lock] = {}
 _LINE_EXACT_REPLY_JA_RE = re.compile(
     r"^(?:(?:もう一回|もう1回|もう一度|再度)\s*)?(?P<reply>.+?)(?:\s*)(?:って|と)\s*(?:返して|返信して|送って|言って)(?:\s*(?:ほしい|欲しい))?(?:\s*(?:な|ね|よ|よね|かな))?\s*[!！。.\s]*$",
     re.DOTALL,
@@ -84,6 +88,45 @@ def run(input_data, context):
     return ok({"verified": verification["verified"], "endpoint": endpoint.as_dict(), "events": results})
 
 
+def simulate_webhook(input_data, context):
+    endpoint = ProviderEndpointResolver().resolve("line", input_data if isinstance(input_data, dict) else {})
+    if endpoint is None:
+        return {**error("LINE webhook endpoint not found", "WEBHOOK_ENDPOINT_NOT_FOUND"), "_http_status": 404}
+    if not endpoint.enabled:
+        return {**error("LINE webhook endpoint disabled", "WEBHOOK_ENDPOINT_DISABLED"), "_http_status": 403}
+    payload = _line_simulation_payload(input_data if isinstance(input_data, dict) else {}, endpoint=endpoint)
+    signed_input, sign_error = _line_simulation_signed_input(payload)
+    if sign_error:
+        return {**error(sign_error, "LINE_SIMULATION_SIGNATURE_UNAVAILABLE"), "_http_status": 400}
+    simulation_context = dict(context or {})
+    simulation_context["line_webhook_simulation"] = True
+    simulation_context["line_webhook_simulation_send_external"] = _truthy(
+        input_data.get("send_external") or input_data.get("send_line_api")
+    )
+    simulated_response_text = str(
+        input_data.get("assistant_text")
+        or input_data.get("simulate_assistant_text")
+        or ""
+    ).strip()
+    if simulated_response_text:
+        simulation_context["call_handler"] = _line_simulation_call_handler(
+            simulated_response_text,
+            delegate=simulation_context.get("call_handler"),
+        )
+    result = run(signed_input, simulation_context)
+    if isinstance(result, dict) and result.get("status") == "ok":
+        data = result.get("data") if isinstance(result.get("data"), dict) else {}
+        return ok(
+            {
+                "simulated": True,
+                "same_route": "/api/integrations/line/webhook",
+                "payload": payload,
+                "result": data,
+            }
+        )
+    return result
+
+
 def _handle_event(
     event: Dict[str, Any],
     context,
@@ -123,7 +166,7 @@ def _handle_event(
     decision = AudiencePolicy(policy).evaluate(external_event, mentioned=mentioned)
     if not decision.allowed:
         return _policy_denied_result(external_event, decision)
-    acknowledgement = _send_line_webhook_acknowledgement(event, endpoint=endpoint)
+    acknowledgement = _send_line_webhook_acknowledgement(event, endpoint=endpoint, context=runtime_context)
     runtime_context.setdefault("line_webhook_acknowledgement", acknowledgement)
     exact_reply_text = _extract_line_exact_reply_text(event, endpoint=endpoint)
     if exact_reply_text:
@@ -146,6 +189,7 @@ def _handle_event(
             audience_decision=decision,
             context=runtime_context,
             mentioned=mentioned,
+            endpoint=endpoint,
         ), acknowledgement)
     return _with_line_acknowledgement(_dispatch_line_event(
         external_event,
@@ -193,7 +237,15 @@ def _dispatch_line_exact_reply(
     origin = origin_from_external_event(external_event)
     if not origin.source_id:
         return None
-    push_result = LineResponseAdapter().send_text_push(origin.source_id, reply_text)
+    if _line_simulation_without_external_send(context):
+        push_result = {
+            "sent": True,
+            "simulated": True,
+            "mode": "push_to_origin",
+            "target_id": origin.source_id,
+        }
+    else:
+        push_result = LineResponseAdapter().send_text_push(origin.source_id, reply_text)
     if push_result.get("sent") is not True:
         _LOGGER.warning(
             "LINE exact reply shortcut failed, falling back to normal flow: %s",
@@ -236,21 +288,26 @@ def _dispatch_line_event_in_background(
     audience_decision,
     context: dict[str, Any],
     mentioned: bool = False,
+    endpoint: WebhookEndpoint | None = None,
 ) -> Dict[str, Any]:
     event_id = str((external_event.event or {}).get("id") or "").strip()
     background_context = dict(context or {})
     background_context["line_background_processing"] = True
+    serial_key = _line_biz_serial_key(endpoint)
+    if serial_key:
+        background_context["line_background_serial_key"] = serial_key
 
     def worker() -> None:
         try:
-            _dispatch_line_event(
-                external_event,
-                input_profile_id=input_profile_id,
-                audience_policy=audience_policy,
-                audience_decision=audience_decision,
-                context=background_context,
-                mentioned=mentioned,
-            )
+            with _line_biz_task_lock(serial_key):
+                _dispatch_line_event(
+                    external_event,
+                    input_profile_id=input_profile_id,
+                    audience_policy=audience_policy,
+                    audience_decision=audience_decision,
+                    context=background_context,
+                    mentioned=mentioned,
+                )
         except Exception:
             _LOGGER.exception("LINE background event processing failed event_id=%s", event_id or "<missing>")
 
@@ -262,6 +319,8 @@ def _dispatch_line_event_in_background(
         "assistant_text": "",
         "background_processing": True,
         "event_id": event_id,
+        "serialized": bool(serial_key),
+        "serial_key": serial_key,
         "event": external_event.as_dict(),
         "policy": audience_decision.as_dict() if hasattr(audience_decision, "as_dict") else audience_decision,
         "input_profile_id": input_profile_id,
@@ -293,6 +352,88 @@ def _payload_from_raw_body(input_data, raw_body: bytes) -> tuple[dict[str, Any],
 
 def _has_raw_body(input_data) -> bool:
     return isinstance(input_data, dict) and ("_raw_body_base64" in input_data or "_raw_body" in input_data)
+
+
+def _line_simulation_payload(input_data: dict[str, Any], *, endpoint: WebhookEndpoint) -> dict[str, Any]:
+    payload = input_data.get("payload") if isinstance(input_data.get("payload"), dict) else None
+    if payload is not None and isinstance(payload.get("events"), list):
+        return dict(payload)
+    if isinstance(input_data.get("events"), list):
+        return {
+            "destination": str(input_data.get("destination") or "Udestination"),
+            "events": [event for event in input_data["events"] if isinstance(event, dict)],
+        }
+    texts = input_data.get("texts") if isinstance(input_data.get("texts"), list) else None
+    if texts is None:
+        text = str(input_data.get("text") or input_data.get("message") or "").strip()
+        texts = [text] if text else ["hello"]
+    source = input_data.get("source") if isinstance(input_data.get("source"), dict) else {}
+    source_type = str(source.get("type") or input_data.get("source_type") or "group").strip() or "group"
+    actor_id = str(source.get("userId") or input_data.get("user_id") or "Usimulated").strip() or "Usimulated"
+    scope_id = str(
+        source.get("groupId")
+        or source.get("roomId")
+        or source.get("userId")
+        or input_data.get("scope_id")
+        or input_data.get("group_id")
+        or input_data.get("room_id")
+        or input_data.get("line_source_id")
+        or "Csimulated"
+    ).strip()
+    if source_type == "user":
+        line_source = {"type": "user", "userId": scope_id or actor_id}
+    elif source_type == "room":
+        line_source = {"type": "room", "roomId": scope_id or "Rsimulated", "userId": actor_id}
+    else:
+        line_source = {"type": "group", "groupId": scope_id or "Csimulated", "userId": actor_id}
+    metadata_destination = endpoint.metadata.get("destination") if isinstance(endpoint.metadata, dict) else ""
+    destination = str(input_data.get("destination") or metadata_destination or "").strip()
+    if not destination:
+        destination = "Udestination"
+    base_event_id = str(input_data.get("event_id") or input_data.get("webhookEventId") or "").strip()
+    now_ms = int(time.time() * 1000)
+    events = []
+    for index, raw_text in enumerate(texts, start=1):
+        text = str(raw_text or "").strip()
+        suffix = index if len(texts) > 1 else 1
+        event_id = base_event_id or f"sim-line-{now_ms}-{suffix}"
+        if len(texts) > 1:
+            event_id = f"{event_id}-{suffix}" if base_event_id else event_id
+        events.append(
+            {
+                "type": "message",
+                "mode": str(input_data.get("mode") or "active"),
+                "webhookEventId": event_id,
+                "replyToken": str(input_data.get("reply_token") or f"sim-reply-{now_ms}-{suffix}"),
+                "source": dict(line_source),
+                "message": {
+                    "id": str(input_data.get("message_id") or f"sim-message-{now_ms}-{suffix}"),
+                    "type": "text",
+                    "text": text,
+                },
+            }
+        )
+    payload = {"destination": destination, "events": events}
+    model = str(input_data.get("model") or "").strip()
+    if model:
+        payload["model"] = model
+    return payload
+
+
+def _line_simulation_signed_input(payload: dict[str, Any]) -> tuple[dict[str, Any], str]:
+    raw = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    secret = get_integration_secret("line", "LINE_CHANNEL_SECRET")
+    headers: dict[str, str] = {}
+    if secret:
+        digest = hmac.new(secret.encode("utf-8"), raw, hashlib.sha256).digest()
+        headers["x-line-signature"] = base64.b64encode(digest).decode("ascii")
+    elif not allow_unsigned_webhook_dev():
+        return {}, "LINE channel secret not configured; simulation cannot satisfy provider_signature verification"
+    return {
+        **payload,
+        "_raw_body_base64": base64.b64encode(raw).decode("ascii"),
+        "_headers": headers,
+    }, ""
 
 
 def _apply_external_output_context(runtime_context: dict[str, Any]) -> None:
@@ -354,12 +495,19 @@ def _send_line_reply(reply_token: str, text: str) -> Dict[str, Any]:
     return LineResponseAdapter().send_text_reply(reply_token, text_limit(text, 5000))
 
 
-def _send_line_webhook_acknowledgement(event: dict[str, Any], *, endpoint: WebhookEndpoint) -> Dict[str, Any]:
+def _send_line_webhook_acknowledgement(event: dict[str, Any], *, endpoint: WebhookEndpoint, context: dict[str, Any] | None = None) -> Dict[str, Any]:
     if not _line_webhook_ack_enabled(endpoint):
         return {"sent": False, "reason": "LINE webhook acknowledgement disabled"}
     reply_token = str(event.get("replyToken") or "").strip()
     if not reply_token:
         return {"sent": False, "reason": "missing reply token"}
+    if _line_simulation_without_external_send(context):
+        return {
+            "sent": True,
+            "simulated": True,
+            "reply_token": "***",
+            "text": _LINE_WEBHOOK_ACK_TEXT,
+        }
     result = _send_line_reply(reply_token, _LINE_WEBHOOK_ACK_TEXT)
     return {
         **result,
@@ -486,6 +634,30 @@ def _should_process_line_event_in_background(endpoint: WebhookEndpoint) -> bool:
     )
 
 
+def _line_biz_serial_key(endpoint: WebhookEndpoint | None) -> str:
+    if endpoint is None:
+        return ""
+    response = endpoint.response if isinstance(endpoint.response, dict) else {}
+    mode = str(response.get("mode") or "").strip().lower()
+    if mode != "computer_use_line_biz":
+        return ""
+    if "serialize_background_tasks" in response and not _truthy(response.get("serialize_background_tasks")):
+        return ""
+    chat_url = str(response.get("line_biz_chat_url") or response.get("chat_url") or response.get("computer_use_target_url") or "").strip()
+    return f"line-biz:{chat_url or endpoint.id}"
+
+
+def _line_biz_task_lock(serial_key: str):
+    if not serial_key:
+        return nullcontext()
+    with _LINE_BIZ_TASK_LOCKS_GUARD:
+        lock = _LINE_BIZ_TASK_LOCKS.get(serial_key)
+        if lock is None:
+            lock = threading.Lock()
+            _LINE_BIZ_TASK_LOCKS[serial_key] = lock
+        return lock
+
+
 def _extract_line_exact_reply_text(event: dict[str, Any], *, endpoint: WebhookEndpoint) -> str:
     response = endpoint.response if isinstance(endpoint.response, dict) else {}
     mode = str(response.get("mode") or "").strip().lower()
@@ -543,6 +715,38 @@ def _line_exact_reply_call_handler(reply_text: str, *, delegate=None):
         }
 
     return handler
+
+
+def _line_simulation_call_handler(response_text: str, *, delegate=None):
+    def handler(name: str, payload: dict[str, Any]) -> dict[str, Any]:
+        if name == "defaults.ai.complete":
+            return {
+                "status": "ok",
+                "data": {
+                    "content": [{"type": "text", "text": response_text}],
+                    "finish_reason": "stop",
+                    "metadata": {
+                        "line_webhook_simulation": True,
+                    },
+                },
+            }
+        if callable(delegate):
+            return delegate(name, payload)
+        return {
+            "status": "error",
+            "error": {
+                "message": f"LINE webhook simulation does not support {name}",
+            },
+        }
+
+    return handler
+
+
+def _line_simulation_without_external_send(context: dict[str, Any] | None) -> bool:
+    context = context if isinstance(context, dict) else {}
+    return bool(context.get("line_webhook_simulation")) and not _truthy(
+        context.get("line_webhook_simulation_send_external")
+    )
 
 
 def _line_biz_prompt_prefix(response: dict[str, Any], *, mode: str = "") -> str:

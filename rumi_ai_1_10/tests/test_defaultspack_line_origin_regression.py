@@ -696,6 +696,151 @@ def test_line_computer_use_fake_webhook_runs_three_browser_tasks_and_acknowledge
         assert context["profile_policy"]["yolo_mode"] is True
 
 
+def test_line_webhook_test_route_builds_signed_payload_and_uses_line_route(monkeypatch, tmp_path):
+    from blocks.integrations import line as line_block  # noqa: E402
+    from blocks.integrations import line_webhook_test  # noqa: E402
+    from blocks.chat import send as chat_send  # noqa: E402
+
+    _install_line_endpoint(
+        monkeypatch,
+        tmp_path,
+        enabled=True,
+        input_profile_id="line.computer_use",
+        conversation={"strategy": "external_key", "model": "stub/default"},
+        response={
+            "mode": "computer_use_line_biz",
+            "line_biz_chat_url": "https://chat.line.biz/Uaccount/chat/Cchat",
+            "background_processing": True,
+            "require_group_mention": False,
+        },
+    )
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_INTEGRATIONS_STORE_PATH", str(tmp_path / "integrations" / "conversations.json"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_INTEGRATIONS_LOCKS_DIR", str(tmp_path / "integrations" / "event_locks"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(tmp_path / "chat" / "conversations.json"))
+    monkeypatch.setenv("LINE_CHANNEL_ACCESS_TOKEN", "line-access-token")
+    monkeypatch.setattr(line_block.AudiencePolicyRegistry, "resolve", lambda self, policy_id, event=None: {"default": "allow"})
+
+    completed = threading.Event()
+    captured_requests: list[dict[str, Any]] = []
+
+    def fake_send_run(request, context):
+        captured_requests.append(request)
+        completed.set()
+        return {
+            "status": "ok",
+            "data": {
+                "id": "assistant-simulated",
+                "content": [{"type": "text", "text": "simulated complete"}],
+            },
+        }
+
+    line_calls: list[dict[str, Any]] = []
+    monkeypatch.setattr(chat_send, "run", fake_send_run)
+    monkeypatch.setattr(
+        line_adapter_module,
+        "post_json",
+        lambda url, headers, body: line_calls.append({"url": url, "headers": headers, "body": body}) or {"ok": True},
+    )
+
+    result = line_webhook_test.run(
+        {
+            "event_id": "evt-simulated-line",
+            "text": "高度なタスクを3つ順番に実行して",
+            "source": {"type": "group", "groupId": "Cgroup", "userId": "Uactor"},
+        },
+        {},
+    )
+
+    assert result["status"] == "ok"
+    data = result["data"]
+    assert data["simulated"] is True
+    assert data["same_route"] == "/api/integrations/line/webhook"
+    event_result = data["result"]["events"][0]
+    assert event_result["status"] == "accepted"
+    assert event_result["serialized"] is True
+    assert event_result["acknowledgement"]["text"] == "\u5c4a\u3044\u305f\u3088\uff01"
+    assert event_result["acknowledgement"]["simulated"] is True
+    assert line_calls == []
+    assert completed.wait(timeout=2)
+    assert captured_requests[0]["message"]["content"] == "高度なタスクを3つ順番に実行して"
+
+
+def test_line_biz_background_events_are_serialized_per_target(monkeypatch, tmp_path):
+    from blocks.integrations import line as line_block  # noqa: E402
+    from blocks.chat import send as chat_send  # noqa: E402
+
+    _install_line_endpoint(
+        monkeypatch,
+        tmp_path,
+        enabled=True,
+        input_profile_id="line.computer_use",
+        conversation={"strategy": "external_key", "model": "stub/default"},
+        response={
+            "mode": "computer_use_line_biz",
+            "line_biz_chat_url": "https://chat.line.biz/Uaccount/chat/Cchat",
+            "background_processing": True,
+            "require_group_mention": False,
+        },
+    )
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_INTEGRATIONS_STORE_PATH", str(tmp_path / "integrations" / "conversations.json"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_INTEGRATIONS_LOCKS_DIR", str(tmp_path / "integrations" / "event_locks"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(tmp_path / "chat" / "conversations.json"))
+    monkeypatch.setenv("LINE_CHANNEL_ACCESS_TOKEN", "line-access-token")
+    monkeypatch.setattr(line_block.AudiencePolicyRegistry, "resolve", lambda self, policy_id, event=None: {"default": "allow"})
+    monkeypatch.setattr(line_adapter_module, "post_json", lambda url, headers, body: {"ok": True})
+
+    order: list[str] = []
+    order_lock = threading.Lock()
+    completed = threading.Event()
+
+    def fake_send_run(request, context):
+        text = request["message"]["content"]
+        with order_lock:
+            order.append(f"start:{text}")
+        time.sleep(0.05)
+        with order_lock:
+            order.append(f"end:{text}")
+            if len([item for item in order if item.startswith("end:")]) >= 2:
+                completed.set()
+        return {
+            "status": "ok",
+            "data": {
+                "id": f"assistant-{text}",
+                "content": [{"type": "text", "text": "done"}],
+            },
+        }
+
+    monkeypatch.setattr(chat_send, "run", fake_send_run)
+    payload = {
+        "destination": "Udestination",
+        "events": [
+            {
+                "type": "message",
+                "mode": "active",
+                "webhookEventId": "evt-serial-1",
+                "replyToken": "reply-serial-1",
+                "source": {"type": "group", "groupId": "Cgroup", "userId": "Uactor"},
+                "message": {"id": "m-serial-1", "type": "text", "text": "task-1"},
+            },
+            {
+                "type": "message",
+                "mode": "active",
+                "webhookEventId": "evt-serial-2",
+                "replyToken": "reply-serial-2",
+                "source": {"type": "group", "groupId": "Cgroup", "userId": "Uactor"},
+                "message": {"id": "m-serial-2", "type": "text", "text": "task-2"},
+            },
+        ],
+    }
+
+    result = line_block.run(_signed_line_payload(payload), {})
+
+    assert result["status"] == "ok"
+    assert [event["serialized"] for event in result["data"]["events"]] == [True, True]
+    assert completed.wait(timeout=2)
+    assert order == ["start:task-1", "end:task-1", "start:task-2", "end:task-2"]
+
+
 def test_line_route_does_not_acknowledge_normal_line_reply_mode(monkeypatch, tmp_path):
     from blocks.integrations import line as line_block  # noqa: E402
 

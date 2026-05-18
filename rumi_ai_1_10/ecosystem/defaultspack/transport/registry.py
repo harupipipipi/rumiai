@@ -145,6 +145,7 @@ _FALLBACK_HTTP_ROUTE_SPECS = [
     HttpRouteSpec("POST", "/api/integrations/secrets", block_module="blocks.integrations.secrets"),
     HttpRouteSpec("POST", "/api/integrations/slack/events", block_module="blocks.integrations.slack"),
     HttpRouteSpec("POST", "/api/integrations/line/webhook", block_module="blocks.integrations.line"),
+    HttpRouteSpec("POST", "/api/integrations/line/webhook/test", block_module="blocks.integrations.line_webhook_test"),
     HttpRouteSpec("POST", "/api/integrations/discord/interactions", block_module="blocks.integrations.discord"),
     HttpRouteSpec("POST", "/api/integrations/discord/events", block_module="blocks.integrations.discord"),
     HttpRouteSpec("POST", "/api/integrations/p2p/events", block_module="blocks.integrations.p2p"),

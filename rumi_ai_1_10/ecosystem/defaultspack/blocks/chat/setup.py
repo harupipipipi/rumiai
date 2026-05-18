@@ -60,6 +60,7 @@ def run(context):
         ("POST", "/api/integrations/secrets", _lazy("blocks.integrations.secrets"), {}),
         ("POST", "/api/integrations/slack/events", _lazy("blocks.integrations.slack"), {}),
         ("POST", "/api/integrations/line/webhook", _lazy("blocks.integrations.line"), {}),
+        ("POST", "/api/integrations/line/webhook/test", _lazy("blocks.integrations.line_webhook_test"), {}),
         ("POST", "/api/integrations/discord/interactions", _lazy("blocks.integrations.discord"), {}),
         ("POST", "/api/integrations/discord/events", _lazy("blocks.integrations.discord"), {}),
         ("GET", "/api/external/tokens", _lazy("blocks.external.tokens"), {}),

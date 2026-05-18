@@ -1,7 +1,7 @@
 import sys
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
-from blocks._common import ok, error, gen_id, timestamp
+from blocks._common import ok
 
 from domain.chat.store import ChatStore
 
@@ -60,7 +60,7 @@ def _blank_to_none(value):
 def run(input_data, context):
     store = ChatStore()
     params = _merged_input(input_data or {})
-    limit = max(0, _int_with_default(params.get("limit"), 50))
+    limit = max(0, _int_with_default(params.get("limit"), 500))
     offset = max(0, _int_with_default(params.get("offset"), 0))
     conversations, total = store.list_conversations(
         limit=limit,

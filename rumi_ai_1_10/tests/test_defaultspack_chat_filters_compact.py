@@ -89,6 +89,26 @@ def test_chat_store_filters_and_sorts_pinned_conversations(tmp_path, monkeypatch
     ChatStore._instance = None
 
 
+def test_chat_list_default_limit_keeps_deep_link_targets_visible(tmp_path, monkeypatch):
+    from blocks.chat.list_conversations import run as list_conversations
+    from domain.chat.store import ChatStore
+
+    store = _reset_chat_store(monkeypatch, tmp_path)
+    for index in range(60):
+        store.update_conversation(
+            store.create_conversation(model="stub/default")["id"],
+            {"title": f"Conversation {index}"},
+        )
+
+    result = list_conversations({}, {})
+
+    assert result["status"] == "ok"
+    assert result["data"]["total"] == 60
+    assert len(result["data"]["conversations"]) == 60
+
+    ChatStore._instance = None
+
+
 def test_chat_store_normalizes_legacy_conversations_with_pin_fields(tmp_path, monkeypatch):
     from domain.chat.store import ChatStore
 

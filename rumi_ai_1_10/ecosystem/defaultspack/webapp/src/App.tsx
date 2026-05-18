@@ -1132,7 +1132,9 @@ export default function App() {
     const result = await api.listConversations();
     setConversations(result.conversations);
 
-    const targetId = preferredId ?? activeConversationId ?? chatIdFromLocation() ?? result.conversations[0]?.id ?? null;
+    const locationConversationId = chatIdFromLocation();
+    const explicitTargetId = preferredId ?? locationConversationId ?? activeConversationId ?? null;
+    const targetId = explicitTargetId ?? result.conversations[0]?.id ?? null;
     if (!targetId) {
       setActiveConversationId(null);
       setActiveConversation(null);
@@ -1141,6 +1143,14 @@ export default function App() {
     }
 
     if (!result.conversations.some((conversation) => conversation.id === targetId)) {
+      if (explicitTargetId) {
+        try {
+          await loadConversation(explicitTargetId);
+          return;
+        } catch (loadError) {
+          console.error(loadError);
+        }
+      }
       await loadConversation(result.conversations[0]?.id ?? null);
       return;
     }
