@@ -4,10 +4,11 @@ import hashlib
 import json
 import shutil
 import time
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
-import yaml
+import yaml  # type: ignore[import-untyped]
 
 from .paths import discover_pack_locations
 from .profile_workspace import ProfileWorkspaceManager
@@ -297,18 +298,18 @@ class ProfileResourceSnapshotManager:
                 if isinstance(block, str):
                     block_refs.append(block)
                 elif isinstance(block, dict):
-                    ref = (
+                    block_ref = (
                         block.get("ref")
                         or block.get("block")
                         or block.get("handler")
                         or block.get("function")
                         or block.get("id")
                     )
-                    if ref:
-                        block_refs.append(str(ref))
+                    if block_ref:
+                        block_refs.append(str(block_ref))
         return {"nodes": sorted(set(node_refs)), "blocks": sorted(set(block_refs))}
 
-    def _unique_strings(self, values: list[str | None]) -> list[str]:
+    def _unique_strings(self, values: Iterable[str | None]) -> list[str]:
         result = []
         seen = set()
         for value in values:
