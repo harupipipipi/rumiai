@@ -223,14 +223,183 @@ def test_line_computer_use_fake_receive_acknowledges_and_preserves_japanese_prom
     event_result = result["data"]["events"][0]
     sent_message = calls[0]["body"]["messages"][0]["text"]
     user_content = captured["request"]["message"]["content"]
+    runtime_content = captured["request"]["message"]["metadata"]["external"]["runtime_content"]
     assert event_result["status"] == "ok"
     assert event_result["acknowledgement"]["sent"] is True
     assert sent_message == "\u5c4a\u3044\u305f\u3088\uff01"
-    assert source_text in user_content
+    assert user_content == source_text
+    assert source_text in runtime_content
     assert "\u7e3a" not in user_content
-    assert chat_url in user_content
+    assert chat_url not in user_content
+    assert chat_url in runtime_content
     assert captured["context"]["computer_use_target_app"] == "Google Chrome"
     assert captured["context"]["computer_use_target_title"] == "LINE Chat"
+
+
+def test_line_runtime_prompt_is_hidden_from_stored_user_message(monkeypatch, tmp_path):
+    from domain.chat.run_request import prepare_chat_run  # noqa: E402
+    from domain.chat.store import ChatStore  # noqa: E402
+
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(tmp_path / "chat" / "conversations.json"))
+    store = ChatStore()
+    conversation = store.create_conversation(model="stub/default", tags=["integration:line"])
+    conversation = store.update_conversation(conversation["id"], {"title": "line Uactor"}) or conversation
+    source_text = "\u306a\u3093\u304bYouTube Music\u3067Lofi Girl\u6d41\u3057\u3066\u30fc"
+    runtime_content = (
+        "Use computer_use in Google Chrome to open https://chat.line.biz/Uaccount/chat/Cchat "
+        "and reply in Japanese inside LINE Official Account Manager.\n\n"
+        "[External source: line source message]\n"
+        + source_text
+    )
+
+    prepared = prepare_chat_run(
+        {
+            "conversation_id": conversation["id"],
+            "message": {
+                "role": "user",
+                "content": source_text,
+                "metadata": {
+                    "source": "external_integration",
+                    "external": {
+                        "provider": "line",
+                        "source_text": source_text,
+                        "runtime_content": runtime_content,
+                    },
+                },
+            },
+            "tools": ["computer_use", "browser_computer"],
+        },
+        {"external_chat_history_mode": "current_turn"},
+    )
+
+    assert prepared.user_message["raw_text"] == source_text
+    assert prepared.user_message["content"] == [{"type": "text", "text": source_text}]
+    assert "Use computer_use in Google Chrome" not in prepared.user_message["raw_text"]
+    assert prepared.standard_messages[-1]["content"] == runtime_content
+
+
+def test_line_computer_use_natural_message_invokes_line_biz_send_tools(monkeypatch, tmp_path):
+    from blocks.integrations import line as line_block  # noqa: E402
+    from domain.chat.store import ChatStore  # noqa: E402
+
+    chat_url = "https://chat.line.biz/Uaccount/chat/Cchat"
+    _install_line_endpoint(
+        monkeypatch,
+        tmp_path,
+        enabled=True,
+        input_profile_id="line.computer_use",
+        conversation={"strategy": "external_key", "model": "stub/default"},
+        response={
+            "mode": "computer_use_line_biz",
+            "line_biz_chat_url": chat_url,
+            "auto_approve_computer_use": True,
+        },
+    )
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_INTEGRATIONS_STORE_PATH", str(tmp_path / "integrations" / "conversations.json"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_INTEGRATIONS_LOCKS_DIR", str(tmp_path / "integrations" / "event_locks"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(tmp_path / "chat" / "conversations.json"))
+    monkeypatch.setenv("LINE_CHANNEL_ACCESS_TOKEN", "line-access-token")
+    monkeypatch.setattr(line_block.AudiencePolicyRegistry, "resolve", lambda self, policy_id, event=None: {"default": "allow"})
+
+    line_calls: list[dict[str, Any]] = []
+    ai_messages: list[list[dict[str, Any]]] = []
+    tool_invocations: list[dict[str, Any]] = []
+    source_text = "\u306a\u3093\u304bYouTube Music\u3067Lofi Girl\u6d41\u3057\u3066\u30fc"
+
+    def call_handler(name, payload):
+        if name == "defaults.ai.complete":
+            ai_messages.append(payload["messages"])
+            if len(ai_messages) == 1:
+                return {
+                    "status": "ok",
+                    "data": {
+                        "content": [
+                            {
+                                "type": "tool_use",
+                                "id": "type-reply",
+                                "name": "browser_computer",
+                                "input": {
+                                    "action": "computer.type",
+                                    "payload": {"text": "Lofi Girl\u3092\u6d41\u3057\u307e\u3059\u306d\u3002"},
+                                },
+                            }
+                        ],
+                        "finish_reason": "tool_use",
+                    },
+                }
+            if len(ai_messages) == 2:
+                return {
+                    "status": "ok",
+                    "data": {
+                        "content": [
+                            {
+                                "type": "tool_use",
+                                "id": "click-send",
+                                "name": "browser_computer",
+                                "input": {
+                                    "action": "computer.click",
+                                    "payload": {"normalized_x": 512, "normalized_y": 930, "physical": True},
+                                },
+                            }
+                        ],
+                        "finish_reason": "tool_use",
+                    },
+                }
+            return {
+                "status": "ok",
+                "data": {
+                    "content": [{"type": "text", "text": "LINE Biz reply sent"}],
+                    "finish_reason": "stop",
+                },
+            }
+        if name == "defaults.tool.invoke":
+            tool_invocations.append(payload)
+            return {"status": "ok", "data": {"result": "ok", "is_error": False}}
+        raise AssertionError(name)
+
+    monkeypatch.setattr(
+        line_adapter_module,
+        "post_json",
+        lambda url, headers, body: line_calls.append({"url": url, "headers": headers, "body": body}) or {"ok": True},
+    )
+    payload = {
+        "destination": "Udestination",
+        "events": [
+            {
+                "type": "message",
+                "mode": "active",
+                "webhookEventId": "evt-line-biz-send",
+                "replyToken": "reply-line-biz-send",
+                "source": {"type": "user", "userId": "Uactor"},
+                "message": {"id": "m1", "type": "text", "text": source_text},
+            }
+        ],
+    }
+
+    result = line_block.run(_signed_line_payload(payload), {"call_handler": call_handler})
+
+    event_result = result["data"]["events"][0]
+    conversation = ChatStore().get_conversation(event_result["conversation_id"])
+    user_message = next(message for message in conversation["messages"] if message["role"] == "user")
+    first_model_prompt = json.dumps(ai_messages[0], ensure_ascii=False)
+    assert event_result["status"] == "ok"
+    assert line_calls[0]["body"]["messages"][0]["text"] == "\u5c4a\u3044\u305f\u3088\uff01"
+    assert user_message["raw_text"] == source_text
+    assert "Use computer_use" not in user_message["raw_text"]
+    assert source_text in first_model_prompt
+    assert chat_url in first_model_prompt
+    assert any(
+        call["tool_name"] == "browser_computer"
+        and call["arguments"]["action"] == "computer.type"
+        and "Lofi Girl" in call["arguments"]["payload"]["text"]
+        for call in tool_invocations
+    )
+    assert any(
+        call["tool_name"] == "browser_computer"
+        and call["arguments"]["action"] == "computer.click"
+        and call["arguments"]["payload"].get("physical") is True
+        for call in tool_invocations
+    )
 
 
 def test_line_computer_use_fake_webhook_runs_three_browser_tasks_and_acknowledges(monkeypatch, tmp_path):
@@ -285,9 +454,9 @@ def test_line_computer_use_fake_webhook_runs_three_browser_tasks_and_acknowledge
         lambda url, headers, body: line_calls.append({"url": url, "headers": headers, "body": body}) or {"ok": True},
     )
     tasks = [
-        "\u0059\u006f\u0075\u0054\u0075\u0062\u0065 \u004d\u0075\u0073\u0069\u0063\u3067\u004c\u006f\u0066\u0069 \u0047\u0069\u0072\u006c\u3092\u6d41\u3057\u3066",
-        "\u0047\u0065\u006d\u0069\u006e\u0069\u3067\u65e5\u5e38\u4f1a\u8a71\u3092\u3057\u3066",
-        "\u0058\u3092\u898b\u3066\u30a4\u30f3\u30bf\u30fc\u30cd\u30c3\u30c8\u306b\u89e6\u308c\u3066",
+        "\u306a\u3093\u304bYouTube Music\u3067Lofi Girl\u6d41\u3057\u3066\u30fc",
+        "Gemini\u3067\u3061\u3087\u3063\u3068\u96d1\u8ac7\u3057\u3066",
+        "X\u3061\u3087\u3063\u3068\u898b\u3066\u30a4\u30f3\u30bf\u30fc\u30cd\u30c3\u30c8\u89e6\u3063\u3066",
     ]
 
     payload = {
@@ -315,11 +484,17 @@ def test_line_computer_use_fake_webhook_runs_three_browser_tasks_and_acknowledge
     assert len(line_calls) == 3
     assert [call["body"]["messages"][0]["text"] for call in line_calls] == ["\u5c4a\u3044\u305f\u3088\uff01"] * 3
     captured_contents = [request["message"]["content"] for request, _context in captured_invocations]
-    for task in tasks:
-        assert any(task in content for content in captured_contents)
+    assert sorted(captured_contents) == sorted(tasks)
     for request, context in captured_invocations:
         user_content = request["message"]["content"]
-        assert chat_url in user_content
+        runtime_content = request["message"]["metadata"]["external"]["runtime_content"]
+        assert user_content in tasks
+        assert chat_url not in user_content
+        assert "Use browser_computer only" not in user_content
+        assert "Open this URL directly" not in user_content
+        assert "Then reply with exactly: Complete" not in user_content
+        assert user_content in runtime_content
+        assert chat_url in runtime_content
         assert request["params"]["retry"]["max_attempts"] == 5
         assert request["params"]["retry"]["delays"] == [5, 15, 30, 60]
         assert request["params"]["thinking_level"] == "high"

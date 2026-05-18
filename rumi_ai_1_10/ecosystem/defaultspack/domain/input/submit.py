@@ -36,8 +36,9 @@ def submit_input(envelope: RumiInputEnvelope | dict[str, Any], context: dict[str
 
     metadata = dict(envelope.metadata)
     metadata.setdefault("source", source)
-    cleaned_text = apply_external_source_context(cleaned_text, envelope, source=source, metadata=metadata)
-    cleaned_text = apply_external_runtime_prompt(cleaned_text, context)
+    display_text = cleaned_text
+    runtime_text = apply_external_source_context(display_text, envelope, source=source, metadata=metadata)
+    runtime_text = apply_external_runtime_prompt(runtime_text, context)
     resolver = ExternalConversationResolver(integration_store=integration_store)
     conversation = resolver.resolve(
         provider=provider,
@@ -53,7 +54,7 @@ def submit_input(envelope: RumiInputEnvelope | dict[str, Any], context: dict[str
         "conversation_id": conversation["id"],
         "message": {
             "role": str(envelope.role or "user"),
-            "content": cleaned_text,
+            "content": display_text,
             "metadata": {
                 "source": "external_integration",
                 "external": {
@@ -61,6 +62,8 @@ def submit_input(envelope: RumiInputEnvelope | dict[str, Any], context: dict[str
                     "external_key": external_key,
                     "event_id": event_id,
                     **metadata,
+                    "source_text": display_text,
+                    **({"runtime_content": runtime_text} if runtime_text != display_text else {}),
                 },
             },
         },
