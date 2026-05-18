@@ -328,4 +328,3 @@ Only allowed legacy/import compatibility locations should remain.
 - Be careful with browser/computer tests on macOS. Shared
   `browser_sessions.json` can retain selected window state between tests.
 - Keep this as one PR unless the user explicitly asks to split it.
-
