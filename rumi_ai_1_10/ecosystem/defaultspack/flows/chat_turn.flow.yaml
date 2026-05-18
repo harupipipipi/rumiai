@@ -1,40 +1,134 @@
 flow_id: defaultspack.chat_turn
-description: Transparent model routing, multimodal fallback, prompt preparation, tool selection, and chat completion.
+version: 1
+description: Profile-scoped chat turn orchestration.
+
+inputs:
+  conversation_id: string
+  message: object
+  profile_id: string?
+
+outputs:
+  ai_response: object
+  route_model: object
+  selected_tools: array
+  audit_event: object
+
 steps:
-  - id: load_model_settings
+  - id: load_active_profile
     type: function
-    function: defaults.ai.get_preferred_model
-    output: model_settings
+    function: defaults.profile.load_active
+    input:
+      profile_id: "{{input.profile_id}}"
+    output: active_profile
+
+  - id: load_profile_workspace
+    type: function
+    function: defaults.profile.workspace
+    input:
+      profile_id: "{{active_profile.profile_id}}"
+    output: profile_workspace
+
   - id: detect_input_modalities
     type: function
-    function: defaults.context.token_estimate
-    input: "{{input}}"
-    output: modality_hint
+    function: defaults.chat.detect_modalities
+    input:
+      message: "{{input.message}}"
+    output: modalities
+
+  - id: load_system_prompt
+    type: function
+    function: defaults.prompt.load_effective
+    input:
+      profile_id: "{{active_profile.profile_id}}"
+      conversation_id: "{{input.conversation_id}}"
+      workspace: "{{profile_workspace}}"
+    output: system_prompt
+
+  - id: discover_relevant_tools
+    type: function
+    function: defaults.tools.select_relevant
+    input:
+      profile_id: "{{active_profile.profile_id}}"
+      message: "{{input.message}}"
+      workspace: "{{profile_workspace}}"
+    output: tool_selection
+
+  - id: apply_permissions
+    type: function
+    function: defaults.permissions.filter_tools
+    input:
+      profile_id: "{{active_profile.profile_id}}"
+      tools: "{{tool_selection.tools}}"
+      policy: "{{active_profile.policy}}"
+      workspace: "{{profile_workspace}}"
+    output: permitted_tools
+
   - id: route_model
     type: function
     function: defaults.ai.route_model
-    input: "{{input}}"
+    input:
+      profile_id: "{{active_profile.profile_id}}"
+      message: "{{input.message}}"
+      modalities: "{{modalities}}"
+      tools: "{{permitted_tools}}"
+      system_prompt: "{{system_prompt}}"
     output: route_model
+
   - id: maybe_run_vision_bridge
     type: function
     function: defaults.vision.describe_images
     when: "{{route_model.bridge_required}}"
-    input: "{{input}}"
+    input:
+      message: "{{input.message}}"
+      model: "{{route_model.bridge_plan.model}}"
+      conversation_id: "{{input.conversation_id}}"
     output: vision_bridge_result
-  - id: compact_prompts
+
+  - id: compact_prompt_if_needed
     type: function
     function: defaults.prompt.compact_prompt
-    input: "{{input.prompt}}"
-    output: prompt_compaction
-  - id: select_tools
-    type: function
-    function: defaults.agent.run_subagent
     input:
-      role_id: tool_selector
-      payload: "{{input}}"
-    output: tool_selection
+      profile_id: "{{active_profile.profile_id}}"
+      prompt: "{{system_prompt}}"
+      route_model: "{{route_model}}"
+    output: prompt_compaction
+
+  - id: build_ai_request
+    type: function
+    function: defaults.ai.build_request
+    input:
+      conversation_id: "{{input.conversation_id}}"
+      message: "{{input.message}}"
+      system_prompt: "{{prompt_compaction.prompt || system_prompt}}"
+      vision_bridge_result: "{{vision_bridge_result}}"
+      tools: "{{permitted_tools}}"
+      route_model: "{{route_model}}"
+    output: ai_request
+
   - id: call_ai
     type: function
     function: defaults.ai.complete
-    input: "{{input}}"
+    input: "{{ai_request}}"
     output: ai_response
+
+  - id: persist_turn
+    type: function
+    function: defaults.chat.persist_turn
+    input:
+      conversation_id: "{{input.conversation_id}}"
+      message: "{{input.message}}"
+      ai_response: "{{ai_response}}"
+      route_model: "{{route_model}}"
+      workspace: "{{profile_workspace}}"
+    output: persisted_turn
+
+  - id: audit
+    type: function
+    function: defaults.audit.record_event
+    input:
+      profile_id: "{{active_profile.profile_id}}"
+      event_type: chat_turn
+      route_model: "{{route_model}}"
+      tools: "{{permitted_tools}}"
+      workspace: "{{profile_workspace}}"
+    output: audit_event
