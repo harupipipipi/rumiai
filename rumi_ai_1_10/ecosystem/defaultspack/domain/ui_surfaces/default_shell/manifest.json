@@ -1,0 +1,39 @@
+{
+  "id": "default_shell",
+  "category": "ui_surfaces",
+  "kind": "frontend_shell",
+  "version": "1",
+  "status": "stable",
+  "display_name": "Default Shell UI Surface",
+  "entrypoints": {
+    "rules": "rules.json"
+  },
+  "ui": {
+    "app": {
+      "id": "defaultspack",
+      "name": "RumiDP"
+    },
+    "sidebar_items": [
+      {
+        "id": "component-manifests",
+        "label": "Components",
+        "category": "system",
+        "description": "Manifest-backed component diagnostics.",
+        "tags": ["component", "diagnostics"],
+        "origin": {
+          "kind": "component",
+          "path": "domain/components"
+        },
+        "panel": {
+          "kind": "info",
+          "title": "Components",
+          "notes": ["Domain surfaces can now advertise routes and UI metadata from component manifests."]
+        }
+      }
+    ]
+  },
+  "compatibility": {
+    "legacy_ids": ["default_chat_shell"]
+  },
+  "source_pack_id": "defaultspack"
+}

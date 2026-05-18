@@ -1,0 +1,21 @@
+{
+  "id": "discord_production",
+  "category": "audience_policies",
+  "kind": "external_audience_policy",
+  "version": "1",
+  "status": "stable",
+  "display_name": "Discord Production Audience Policy",
+  "entrypoints": {
+    "rules": "rules.json"
+  },
+  "policy": {
+    "audience_policy_id": "discord.production"
+  },
+  "aliases": {
+    "policy_ids": ["discord.production"]
+  },
+  "compatibility": {
+    "legacy_ids": ["discord.production"]
+  },
+  "source_pack_id": "defaultspack"
+}

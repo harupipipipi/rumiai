@@ -1,0 +1,10 @@
+{
+  "signature_verification": "slack_v0_hmac",
+  "signature_timestamp_tolerance_seconds": 300,
+  "url_verification": true,
+  "default_input_profile": "slack.default",
+  "default_audience_policy": {
+    "default": "allow"
+  },
+  "ignored_events": ["bot_message", "empty_message", "unsupported_event"]
+}

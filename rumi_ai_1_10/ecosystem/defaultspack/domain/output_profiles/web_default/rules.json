@@ -1,0 +1,16 @@
+{
+  "profile": {
+    "id": "web.default",
+    "provider": "web",
+    "version": 1,
+    "display_name": "Web/Local Output",
+    "transport": "web",
+    "mode": "local_store_or_json",
+    "capabilities_profile": "web",
+    "safety": {
+      "external_network_send": false,
+      "recheck_sensitivity": true,
+      "recheck_capabilities": true
+    }
+  }
+}

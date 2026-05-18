@@ -1,0 +1,19 @@
+{
+  "id": "slack_default",
+  "category": "output_profiles",
+  "kind": "external_output_profile",
+  "version": "1",
+  "status": "stable",
+  "display_name": "Slack Default Output Profile",
+  "entrypoints": {
+    "rules": "rules.json"
+  },
+  "profiles": ["slack.default"],
+  "aliases": {
+    "profile_ids": ["slack.default"]
+  },
+  "compatibility": {
+    "legacy_ids": ["slack.default"]
+  },
+  "source_pack_id": "defaultspack"
+}

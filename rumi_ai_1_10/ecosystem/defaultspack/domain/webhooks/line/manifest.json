@@ -1,0 +1,45 @@
+{
+  "id": "line",
+  "category": "webhooks",
+  "kind": "connector_defaults",
+  "version": "1",
+  "status": "stable",
+  "order": 10,
+  "display_name": "LINE Webhook Defaults",
+  "aliases": {
+    "endpoint_ids": ["line-main"],
+    "profile_ids": ["line.default"],
+    "policy_ids": ["line.production"]
+  },
+  "profiles": ["line.default"],
+  "security": {
+    "default": {
+      "mode": "provider_signature"
+    }
+  },
+  "policy": {
+    "audience_policy_id": "line.production"
+  },
+  "defaults": {
+    "endpoint_id": "line-main",
+    "endpoint": {
+      "id": "line-main",
+      "kind": "line",
+      "input_profile_id": "line.default",
+      "audience_policy_id": "line.production",
+      "response_profile_id": "line.default",
+      "security": {
+        "mode": "provider_signature"
+      },
+      "conversation": {
+        "strategy": "external_key",
+        "model": "google/gemini-2.5-pro"
+      },
+      "enabled": false
+    }
+  },
+  "compatibility": {
+    "legacy_ids": ["line-main", "line.default", "line.production"]
+  },
+  "source_pack_id": "defaultspack"
+}

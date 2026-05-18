@@ -32,6 +32,7 @@ from pathlib import Path
 from typing import Any
 
 from ..extensions.runtime import get_extension_registry, get_extensions_root
+from .component_prompts import component_prompt_records
 from .template import PromptTemplate
 
 
@@ -204,11 +205,15 @@ class PromptManager:
                 }
         return prompts
 
+    def _component_prompts(self) -> dict[str, dict]:
+        return component_prompt_records()
+
     # -- 一覧 ---------------------------------------------------------------
     def list_prompts(self) -> list[dict]:
         """保存されたプロンプト一覧を返す。"""
         self._ensure_loaded()
         combined = dict(self._pack_prompts())
+        combined.update(self._component_prompts())
         combined.update(self._extension_prompts())
         combined.update(self._prompts)
         return list(combined.values())
@@ -220,7 +225,11 @@ class PromptManager:
         prompt = self._prompts.get(prompt_id)
         if prompt is not None:
             return prompt
-        return self._extension_prompts().get(prompt_id) or self._pack_prompts().get(prompt_id)
+        return (
+            self._extension_prompts().get(prompt_id)
+            or self._component_prompts().get(prompt_id)
+            or self._pack_prompts().get(prompt_id)
+        )
 
     def get_prompt_by_name(self, name: str) -> dict | None:
         """name でプロンプトを取得する。存在しなければ None。"""
@@ -228,7 +237,11 @@ class PromptManager:
         pid = self._name_index.get(name)
         if pid is not None:
             return self._prompts.get(pid)
-        return self._extension_prompts().get(name) or self._pack_prompts().get(name)
+        return (
+            self._extension_prompts().get(name)
+            or self._component_prompts().get(name)
+            or self._pack_prompts().get(name)
+        )
 
     # -- 作成 ---------------------------------------------------------------
     def create_prompt(self, data: dict) -> dict:

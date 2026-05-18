@@ -1,0 +1,26 @@
+{
+  "id": "external_send",
+  "category": "tools",
+  "kind": "tool",
+  "version": "1",
+  "status": "stable",
+  "display_name": "External Send Tool",
+  "entrypoints": {
+    "tool_manifest": "../../../tools/external_send/manifest.json"
+  },
+  "security": {
+    "approval_required": true,
+    "external_network_send": true
+  },
+  "policy": {
+    "risk": "medium",
+    "requires_approval": true
+  },
+  "aliases": {
+    "tool_ids": ["external_send"]
+  },
+  "compatibility": {
+    "legacy_ids": ["external_send"]
+  },
+  "source_pack_id": "defaultspack"
+}

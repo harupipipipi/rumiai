@@ -1,0 +1,19 @@
+{
+  "id": "slack_default",
+  "category": "input_profiles",
+  "kind": "external_input_profile",
+  "version": "1",
+  "status": "stable",
+  "display_name": "Slack Default Input Profile",
+  "entrypoints": {
+    "rules": "rules.json"
+  },
+  "profiles": ["slack.default"],
+  "aliases": {
+    "profile_ids": ["slack.default"]
+  },
+  "compatibility": {
+    "legacy_ids": ["slack.default"]
+  },
+  "source_pack_id": "defaultspack"
+}

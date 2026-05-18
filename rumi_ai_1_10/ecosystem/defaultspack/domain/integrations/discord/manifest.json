@@ -1,0 +1,40 @@
+{
+  "id": "discord",
+  "category": "integrations",
+  "kind": "webhook_connector",
+  "version": "1",
+  "status": "stable",
+  "display_name": "Discord Integration",
+  "entrypoints": {
+    "inbound": "inbound.py",
+    "security": "security.py",
+    "normalizer": "normalizer.py",
+    "output": "output.py",
+    "rules": "rules.json"
+  },
+  "routes": [
+    {
+      "method": "POST",
+      "path": "/api/integrations/discord/interactions",
+      "block_module": "blocks.integrations.discord"
+    },
+    {
+      "method": "POST",
+      "path": "/api/integrations/discord/events",
+      "block_module": "blocks.integrations.discord"
+    }
+  ],
+  "profiles": ["discord.default", "discord.bot_channel"],
+  "security": {
+    "signature": "discord_ed25519"
+  },
+  "aliases": {
+    "provider_ids": ["discord"],
+    "endpoint_ids": ["discord-main"]
+  },
+  "compatibility": {
+    "legacy_imports": ["blocks.integrations.discord"],
+    "legacy_ids": ["discord-main", "discord.default", "discord.production"]
+  },
+  "source_pack_id": "defaultspack"
+}

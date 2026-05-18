@@ -1,0 +1,22 @@
+{
+  "id": "coding_git_status",
+  "category": "tools",
+  "kind": "tool",
+  "version": "1",
+  "status": "stable",
+  "display_name": "Coding Git Status Tool",
+  "entrypoints": {
+    "tool_manifest": "../../../tools/coding_git_status/manifest.json"
+  },
+  "policy": {
+    "risk": "low",
+    "requires_approval": false
+  },
+  "aliases": {
+    "tool_ids": ["coding_git_status"]
+  },
+  "compatibility": {
+    "legacy_ids": ["coding_git_status"]
+  },
+  "source_pack_id": "rumi_default_tools_pack"
+}

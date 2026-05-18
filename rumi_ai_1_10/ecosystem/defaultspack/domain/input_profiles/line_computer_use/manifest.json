@@ -1,0 +1,19 @@
+{
+  "id": "line_computer_use",
+  "category": "input_profiles",
+  "kind": "external_input_profile",
+  "version": "1",
+  "status": "stable",
+  "display_name": "LINE Computer Use Input Profile",
+  "entrypoints": {
+    "rules": "rules.json"
+  },
+  "profiles": ["line.computer_use"],
+  "aliases": {
+    "profile_ids": ["line.computer_use"]
+  },
+  "compatibility": {
+    "legacy_ids": ["line.computer_use"]
+  },
+  "source_pack_id": "defaultspack"
+}

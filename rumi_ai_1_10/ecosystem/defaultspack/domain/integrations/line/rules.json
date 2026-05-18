@@ -1,0 +1,15 @@
+{
+  "signature_verification": "line_channel_secret",
+  "origin_source_recording": true,
+  "audience_policy": "line.production",
+  "computer_use_line_biz": {
+    "acknowledgement_text": "\u5c4a\u3044\u305f\u3088\uff01",
+    "reply_on_receive": true,
+    "background_flags": ["background_processing", "async_processing", "run_in_background"],
+    "suppress_reply_token_reuse_after_acknowledgement": true,
+    "default_chat_history_mode": "current_turn",
+    "target_app": "Google Chrome",
+    "target_title": "LINE Chat",
+    "physical_clicks": true
+  }
+}

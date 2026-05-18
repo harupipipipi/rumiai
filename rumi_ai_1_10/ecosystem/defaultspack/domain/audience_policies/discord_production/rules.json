@@ -1,0 +1,10 @@
+{
+  "policy": {
+    "id": "discord.production",
+    "provider": "discord",
+    "default": "allow",
+    "require": {
+      "verified": true
+    }
+  }
+}

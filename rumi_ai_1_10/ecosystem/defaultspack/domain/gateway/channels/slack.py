@@ -1,5 +1,3 @@
-from .base import ChannelAdapter
+from domain.gateway_channels.slack.adapter import SlackChannel
 
-
-class SlackChannel(ChannelAdapter):
-    channel = "slack"
+__all__ = ["SlackChannel"]

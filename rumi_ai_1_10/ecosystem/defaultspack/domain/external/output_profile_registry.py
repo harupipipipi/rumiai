@@ -5,6 +5,7 @@ from typing import Any
 
 import yaml
 
+from .component_profiles import profile_specs_from_components
 from .output_profile import OutputProfile
 
 
@@ -14,7 +15,16 @@ class OutputProfileRegistry:
 
     def list_profiles(self) -> list[OutputProfile]:
         profiles: list[OutputProfile] = []
-        for directory in self._profile_dirs():
+        for directory in self._builtin_profile_dirs():
+            for path in sorted(directory.glob("*.profile.yaml")):
+                profile = self._load(path)
+                if profile is not None:
+                    profiles.append(profile)
+        profiles.extend(
+            OutputProfile.from_dict(spec)
+            for spec in profile_specs_from_components(self.pack_root, "output_profiles")
+        )
+        for directory in self._custom_profile_dirs():
             for path in sorted(directory.glob("*.profile.yaml")):
                 profile = self._load(path)
                 if profile is not None:
@@ -41,11 +51,11 @@ class OutputProfileRegistry:
                 return profile
         return None
 
-    def _profile_dirs(self) -> list[Path]:
-        return [
-            self.pack_root / "output_profiles",
-            self.pack_root / "user_data" / "shared" / "output_profiles",
-        ]
+    def _builtin_profile_dirs(self) -> list[Path]:
+        return [self.pack_root / "output_profiles"]
+
+    def _custom_profile_dirs(self) -> list[Path]:
+        return [self.pack_root / "user_data" / "shared" / "output_profiles"]
 
     @staticmethod
     def _load(path: Path) -> OutputProfile | None:

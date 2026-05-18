@@ -1,0 +1,22 @@
+{
+  "id": "coding_file_read",
+  "category": "tools",
+  "kind": "tool",
+  "version": "1",
+  "status": "stable",
+  "display_name": "Coding File Read Tool",
+  "entrypoints": {
+    "tool_manifest": "../../../tools/coding_file_read/manifest.json"
+  },
+  "policy": {
+    "risk": "low",
+    "requires_approval": false
+  },
+  "aliases": {
+    "tool_ids": ["coding_file_read"]
+  },
+  "compatibility": {
+    "legacy_ids": ["coding_file_read"]
+  },
+  "source_pack_id": "rumi_default_tools_pack"
+}

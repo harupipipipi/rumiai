@@ -1,0 +1,19 @@
+{
+  "id": "generic_webhook",
+  "category": "output_profiles",
+  "kind": "external_output_profile",
+  "version": "1",
+  "status": "stable",
+  "display_name": "Generic Webhook Output Profile",
+  "entrypoints": {
+    "rules": "rules.json"
+  },
+  "profiles": ["generic.webhook"],
+  "aliases": {
+    "profile_ids": ["generic.webhook"]
+  },
+  "compatibility": {
+    "legacy_ids": ["generic.webhook"]
+  },
+  "source_pack_id": "defaultspack"
+}

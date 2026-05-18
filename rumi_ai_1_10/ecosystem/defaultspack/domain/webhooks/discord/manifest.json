@@ -1,0 +1,45 @@
+{
+  "id": "discord",
+  "category": "webhooks",
+  "kind": "connector_defaults",
+  "version": "1",
+  "status": "stable",
+  "order": 20,
+  "display_name": "Discord Webhook Defaults",
+  "aliases": {
+    "endpoint_ids": ["discord-main"],
+    "profile_ids": ["discord.default", "discord.bot_channel"],
+    "policy_ids": ["discord.production"]
+  },
+  "profiles": ["discord.default", "discord.bot_channel"],
+  "security": {
+    "default": {
+      "mode": "provider_signature"
+    }
+  },
+  "policy": {
+    "audience_policy_id": "discord.production"
+  },
+  "defaults": {
+    "endpoint_id": "discord-main",
+    "endpoint": {
+      "id": "discord-main",
+      "kind": "discord",
+      "input_profile_id": "discord.default",
+      "audience_policy_id": "discord.production",
+      "response_profile_id": "discord.bot_channel",
+      "security": {
+        "mode": "provider_signature"
+      },
+      "conversation": {
+        "strategy": "external_key",
+        "model": "google/gemini-2.5-pro"
+      },
+      "enabled": false
+    }
+  },
+  "compatibility": {
+    "legacy_ids": ["discord-main", "discord.default", "discord.bot_channel", "discord.production"]
+  },
+  "source_pack_id": "defaultspack"
+}

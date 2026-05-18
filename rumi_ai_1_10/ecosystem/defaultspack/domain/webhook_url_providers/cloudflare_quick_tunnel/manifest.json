@@ -1,0 +1,23 @@
+{
+  "id": "cloudflare_quick_tunnel",
+  "category": "webhook_url_providers",
+  "kind": "public_url_provider",
+  "version": "1",
+  "status": "stable",
+  "display_name": "Cloudflare Quick Tunnel URL Provider",
+  "entrypoints": {
+    "provider": "provider.py"
+  },
+  "security": {
+    "external_process": "cloudflared",
+    "network": "public_tunnel"
+  },
+  "aliases": {
+    "provider_ids": ["cloudflare_quick_tunnel"]
+  },
+  "compatibility": {
+    "legacy_imports": ["domain.webhook.url_providers.cloudflare_quick_tunnel"],
+    "legacy_ids": ["cloudflare_quick_tunnel"]
+  },
+  "source_pack_id": "defaultspack"
+}

@@ -1,0 +1,20 @@
+{
+  "id": "cdp_driver",
+  "category": "browser",
+  "kind": "driver",
+  "version": "1",
+  "status": "stable",
+  "display_name": "Browser CDP Driver",
+  "entrypoints": {
+    "client": "../cdp_client.py"
+  },
+  "security": {
+    "background_key_combos": false,
+    "driver_scope": "browser_cdp"
+  },
+  "capabilities": {
+    "browser_session": true,
+    "cdp": true
+  },
+  "source_pack_id": "rumi_default_tools_pack"
+}

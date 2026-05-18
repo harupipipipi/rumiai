@@ -1,0 +1,19 @@
+{
+  "id": "discord_default",
+  "category": "input_profiles",
+  "kind": "external_input_profile",
+  "version": "1",
+  "status": "stable",
+  "display_name": "Discord Default Input Profile",
+  "entrypoints": {
+    "rules": "rules.json"
+  },
+  "profiles": ["discord.default"],
+  "aliases": {
+    "profile_ids": ["discord.default"]
+  },
+  "compatibility": {
+    "legacy_ids": ["discord.default"]
+  },
+  "source_pack_id": "defaultspack"
+}

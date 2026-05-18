@@ -1,0 +1,24 @@
+{
+  "id": "coding",
+  "prompt_id": "coding",
+  "category": "prompts",
+  "kind": "prompt",
+  "version": "1",
+  "status": "stable",
+  "display_name": "Coding Prompt",
+  "description": "General coding assistant prompt surface.",
+  "entrypoints": {
+    "prompt": "prompt.md",
+    "rules": "rules.json"
+  },
+  "capabilities": {
+    "coding": true
+  },
+  "aliases": {
+    "prompt_ids": ["coding"]
+  },
+  "compatibility": {
+    "legacy_ids": ["coding"]
+  },
+  "source_pack_id": "defaultspack"
+}

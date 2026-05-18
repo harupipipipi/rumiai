@@ -1,0 +1,24 @@
+{
+  "id": "default_chat",
+  "prompt_id": "default_chat",
+  "category": "prompts",
+  "kind": "prompt",
+  "version": "1",
+  "status": "stable",
+  "display_name": "Default Chat Prompt",
+  "description": "Default chat prompt component for defaultspack.",
+  "entrypoints": {
+    "prompt": "prompt.md",
+    "rules": "rules.json"
+  },
+  "capabilities": {
+    "chat": true
+  },
+  "aliases": {
+    "prompt_ids": ["default_chat"]
+  },
+  "compatibility": {
+    "legacy_ids": ["default_chat"]
+  },
+  "source_pack_id": "defaultspack"
+}

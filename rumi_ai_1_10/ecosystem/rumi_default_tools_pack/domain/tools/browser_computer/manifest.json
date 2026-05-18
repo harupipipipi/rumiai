@@ -1,0 +1,34 @@
+{
+  "id": "browser_computer",
+  "category": "tools",
+  "kind": "tool",
+  "version": "1",
+  "status": "stable",
+  "display_name": "Browser / Computer Tool",
+  "entrypoints": {
+    "tool_manifest": "../../../tools/browser_computer/manifest.json",
+    "handler": "../../tool/browser_computer.py"
+  },
+  "security": {
+    "approval_required": true,
+    "visible_screen_only": true,
+    "hidden_background_control": false
+  },
+  "policy": {
+    "risk": "high",
+    "requires_approval": true,
+    "physical_actions_require_explicit_approval": true
+  },
+  "capabilities": {
+    "browser": true,
+    "computer": true,
+    "physical_clicks": "approval_only"
+  },
+  "aliases": {
+    "tool_ids": ["browser_computer"]
+  },
+  "compatibility": {
+    "legacy_ids": ["browser_computer"]
+  },
+  "source_pack_id": "rumi_default_tools_pack"
+}

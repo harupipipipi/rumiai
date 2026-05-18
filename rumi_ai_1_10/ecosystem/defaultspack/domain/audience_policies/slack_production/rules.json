@@ -1,0 +1,10 @@
+{
+  "policy": {
+    "id": "slack.production",
+    "provider": "slack",
+    "default": "allow",
+    "require": {
+      "verified": true
+    }
+  }
+}

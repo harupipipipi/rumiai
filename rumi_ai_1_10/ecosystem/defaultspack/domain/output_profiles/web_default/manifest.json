@@ -1,0 +1,19 @@
+{
+  "id": "web_default",
+  "category": "output_profiles",
+  "kind": "external_output_profile",
+  "version": "1",
+  "status": "stable",
+  "display_name": "Web/Local Output Profile",
+  "entrypoints": {
+    "rules": "rules.json"
+  },
+  "profiles": ["web.default"],
+  "aliases": {
+    "profile_ids": ["web.default"]
+  },
+  "compatibility": {
+    "legacy_ids": ["web.default"]
+  },
+  "source_pack_id": "defaultspack"
+}

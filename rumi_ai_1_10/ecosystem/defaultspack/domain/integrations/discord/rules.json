@@ -1,0 +1,15 @@
+{
+  "signature_verification": "discord_ed25519",
+  "ping_response_type": 1,
+  "application_command_response_types": {
+    "message_with_source": 4,
+    "deferred_channel_message_with_source": 5
+  },
+  "default_input_profile": "discord.default",
+  "default_audience_policy": {
+    "default": "allow"
+  },
+  "allowed_mentions": {
+    "parse": []
+  }
+}

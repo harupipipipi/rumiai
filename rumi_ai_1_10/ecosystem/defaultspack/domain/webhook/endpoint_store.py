@@ -7,6 +7,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from .component_defaults import default_endpoint_payloads, default_security_for_kind
 from .endpoint import WebhookEndpoint
 
 
@@ -23,13 +24,7 @@ def _safe_endpoint_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
     security = safe.get("security")
     if not isinstance(security, dict) or not security:
-        if kind in {"line", "discord", "slack"}:
-            safe["security"] = {"mode": "provider_signature"}
-        else:
-            safe["security"] = {
-                "mode": "shared_secret",
-                "header": "x-rumi-webhook-token",
-            }
+        safe["security"] = default_security_for_kind(kind)
 
     return safe
 
@@ -107,43 +102,4 @@ class WebhookEndpointStore:
 
     @staticmethod
     def _default_endpoints() -> list[WebhookEndpoint]:
-        return [
-            WebhookEndpoint(
-                id="line-main",
-                kind="line",
-                input_profile_id="line.default",
-                audience_policy_id="line.production",
-                response_profile_id="line.default",
-                security={"mode": "provider_signature"},
-                conversation={"strategy": "external_key", "model": "google/gemini-2.5-pro"},
-                enabled=False,
-            ),
-            WebhookEndpoint(
-                id="discord-main",
-                kind="discord",
-                input_profile_id="discord.default",
-                audience_policy_id="discord.production",
-                response_profile_id="discord.bot_channel",
-                security={"mode": "provider_signature"},
-                conversation={"strategy": "external_key", "model": "google/gemini-2.5-pro"},
-                enabled=False,
-            ),
-            WebhookEndpoint(
-                id="slack-main",
-                kind="slack",
-                input_profile_id="slack.default",
-                audience_policy_id="slack.production",
-                response_profile_id="slack.default",
-                security={"mode": "provider_signature"},
-                conversation={"strategy": "external_key", "model": "google/gemini-2.5-pro"},
-                enabled=False,
-            ),
-            WebhookEndpoint(
-                id="test-webhook",
-                kind="generic",
-                input_profile_id="generic.webhook.default",
-                security={"mode": "shared_secret", "header": "x-rumi-webhook-token"},
-                response={"mode": "json"},
-                enabled=False,
-            ),
-        ]
+        return [WebhookEndpoint.from_dict(payload) for payload in default_endpoint_payloads()]
