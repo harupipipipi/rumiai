@@ -511,11 +511,11 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         from domain.frontend.registry import FrontendRegistry
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            endpoint_path = Path(tmpdir) / "endpoints.json"
-            with patch.dict(os.environ, {"RUMI_DEFAULTSPACK_WEBHOOK_ENDPOINTS_PATH": str(endpoint_path)}, clear=False):
-                with patch("domain.frontend.registry.AIClient") as mock_client:
-                    mock_client.return_value.list_models.return_value = [{"id": "stub/default"}]
-                    settings = FrontendRegistry(pack_root=DEFAULTSPACK_ROOT).get_settings()
+            pack_root = Path(tmpdir)
+            shutil.copytree(DEFAULTSPACK_ROOT / "external_io_templates", pack_root / "external_io_templates")
+            with patch("domain.frontend.registry.AIClient") as mock_client:
+                mock_client.return_value.list_models.return_value = [{"id": "stub/default"}]
+                settings = FrontendRegistry(pack_root=pack_root).get_settings()
 
         sections = {section["id"]: section for section in settings["sections"]}
         values = settings["values"]

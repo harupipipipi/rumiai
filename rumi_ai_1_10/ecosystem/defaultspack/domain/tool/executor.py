@@ -1078,6 +1078,7 @@ def _computer_use_payload_with_context_defaults(action, payload, context):
         return payload
     target_app = context.get("computer_use_target_app")
     target_title = context.get("computer_use_target_title")
+    physical_clicks = _truthy(context.get("computer_use_physical_clicks"))
     if action == "browser.open_url":
         if isinstance(target_app, str) and target_app.strip() and not any(
             payload.get(key) for key in ("app", "application", "browser", "browser_app")
@@ -1097,6 +1098,8 @@ def _computer_use_payload_with_context_defaults(action, payload, context):
             and action not in {"computer.select_app", "computer.show_app"}
         ):
             payload.setdefault("title", target_title.strip())
+        if physical_clicks and action == "computer.click" and "physical" not in payload:
+            payload["physical"] = True
     return payload
 
 

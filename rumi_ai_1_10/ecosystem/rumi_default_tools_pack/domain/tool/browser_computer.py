@@ -1177,19 +1177,11 @@ class BrowserComputerController:
 
     def _computer_seat_target(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Build a ComputerTarget dict from payload."""
-        browser_target = payload.get("browser_tab_id") or payload.get("tab_id") or payload.get("url")
         return {
-            "kind": payload.get("kind") or ("browser_tab" if browser_target else "desktop"),
             "app": payload.get("app") or payload.get("application"),
             "pid": payload.get("pid"),
             "window_id": payload.get("window_id"),
             "window_title": payload.get("title") or payload.get("window_title"),
-            "hwnd": payload.get("hwnd"),
-            "bundle_id": payload.get("bundle_id"),
-            "browser_client_id": payload.get("browser_client_id") or payload.get("client_id"),
-            "browser_tab_id": payload.get("browser_tab_id") or payload.get("tab_id"),
-            "url": payload.get("url"),
-            "coordinate_space": payload.get("coordinate_space", "window"),
         }
 
     def _computer_seat_metadata_for_target(self, target_record: dict[str, Any] | None) -> dict[str, Any]:
@@ -1281,7 +1273,7 @@ class BrowserComputerController:
             svc = self._get_computer_seat()
             target = self._computer_seat_target(payload)
             result = svc.observe(target)
-            # If observe returned a screenshot, we could use it, but for now
+            # If observe returned a screenshot, we could use it – but for now
             # we only add metadata. The legacy _screenshot path handles the
             # actual capture with all its crop/model logic.
             return None
@@ -1304,65 +1296,6 @@ class BrowserComputerController:
         target = self._computer_seat_target(action_payload)
         try:
             if action == "computer.click":
-                seat_action = "click"
-                seat_payload = {
-                    "x": int(action_payload.get("x", 0)),
-                    "y": int(action_payload.get("y", 0)),
-                    "button": action_payload.get("button", "left"),
-                }
-            elif action == "computer.type":
-                seat_action = "type_text"
-                seat_payload = {"text": action_payload.get("text", "")}
-            elif action == "computer.key":
-                seat_action = "key"
-                seat_payload = {"key_combo": action_payload.get("key", "") or action_payload.get("key_combo", "")}
-            elif action == "computer.scroll":
-                seat_action = "scroll"
-                seat_payload = {
-                    "x": int(action_payload.get("x", 0)),
-                    "y": int(action_payload.get("y", 0)),
-                    "direction": action_payload.get("direction", "down"),
-                    "clicks": int(action_payload.get("amount", 3)),
-                }
-            elif action == "computer.move":
-                seat_action = "move"
-                seat_payload = {"x": int(action_payload.get("x", 0)), "y": int(action_payload.get("y", 0))}
-            elif action == "computer.drag":
-                seat_action = "drag"
-                seat_payload = {
-                    "x1": int(action_payload.get("x1", 0)),
-                    "y1": int(action_payload.get("y1", 0)),
-                    "x2": int(action_payload.get("x2", 0)),
-                    "y2": int(action_payload.get("y2", 0)),
-                }
-            else:
-                return None
-
-            try:
-                from ..computer.service import ComputerSeatService
-
-                is_real_seat = isinstance(svc, ComputerSeatService)
-            except Exception:
-                is_real_seat = False
-
-            if is_real_seat:
-                if not any(
-                    target.get(key)
-                    for key in (
-                        "app",
-                        "pid",
-                        "window_id",
-                        "window_title",
-                        "hwnd",
-                        "bundle_id",
-                        "browser_client_id",
-                        "browser_tab_id",
-                        "url",
-                    )
-                ):
-                    return None
-                result = svc.background_safe_action(seat_action, target, seat_payload)
-            elif action == "computer.click":
                 result = svc.click(target, x=int(action_payload.get("x", 0)), y=int(action_payload.get("y", 0)), button=action_payload.get("button", "left"))
             elif action == "computer.type":
                 result = svc.type_text(target, text=action_payload.get("text", ""))
@@ -1377,15 +1310,8 @@ class BrowserComputerController:
                 result = svc.drag(target, x1=int(action_payload.get("x1", 0)), y1=int(action_payload.get("y1", 0)), x2=int(action_payload.get("x2", 0)), y2=int(action_payload.get("y2", 0)))
             else:
                 return None
-            # Accept any non-foreground ComputerSeat driver, including a
-            # background-safe fallback. Foreground/physical drivers stay on
-            # the legacy path because it owns coordinate markers and capture.
-            if (
-                result
-                and result.get("executed")
-                and not result.get("requires_foreground")
-                and not result.get("uses_physical_input")
-            ):
+            # Only accept if a non-foreground driver handled it
+            if result and result.get("executed") and not result.get("is_fallback"):
                 return result
             return None
         except Exception:
@@ -1463,6 +1389,9 @@ class BrowserComputerController:
             self._focus_action_target(action_payload)
         if action == "computer.drag" and payload.get("physical") is True:
             self._focus_action_target(action_payload)
+        foreground_error = self._foreground_action_focus_error(action, action_payload)
+        if foreground_error is not None:
+            return foreground_error
         # --- Attempt ComputerSeatService delegation ---
         seat_result = self._try_computer_seat_action(action, action_payload)
         if seat_result is not None and seat_result.get("executed"):
@@ -1620,6 +1549,69 @@ class BrowserComputerController:
         if app and self._activate_app_name(filters.get("app", "")):
             return True
         return False
+
+    def _foreground_action_focus_error(self, action: str, payload: dict[str, Any]) -> dict[str, Any] | None:
+        if action not in {"computer.type", "computer.key", "computer.scroll", "computer.click", "computer.drag"}:
+            return None
+        if action in {"computer.click", "computer.drag"} and payload.get("physical") is not True:
+            return None
+        target = self._foreground_action_target(payload)
+        if target is None:
+            return None
+        active = self._active_window()
+        if active and self._window_records_match(active, target):
+            return None
+        self._focus_window(target)
+        time.sleep(0.2)
+        active = self._active_window()
+        if active and self._window_records_match(active, target):
+            return None
+        filters = self._window_filter(payload)
+        if active and self._window_matches_filter(
+            active,
+            app=filters.get("app", "").lower(),
+            title=filters.get("title", "").lower(),
+        ):
+            return None
+        return {
+            "action": action,
+            "executed": False,
+            "is_error": True,
+            "platform": platform.system(),
+            "reason": "Foreground input target is not active. Refusing to type, press keys, scroll, or physically click into the wrong app.",
+            "active_window": active,
+            "selected_window": target,
+            "recovery": {
+                "kind": "focus_required",
+                "note": "Bring the selected app/window to the foreground, then retry the foreground input action.",
+            },
+        }
+
+    def _foreground_action_target(self, payload: dict[str, Any]) -> dict[str, Any] | None:
+        selected = self._capture_target(payload)
+        if selected and self._is_usable_target_window(selected):
+            return selected
+        if self._has_window_filter(payload):
+            selected = self._matching_window(payload)
+            if selected and self._is_usable_target_window(selected):
+                return selected
+        return None
+
+    @classmethod
+    def _window_records_match(cls, active: dict[str, Any], target: dict[str, Any]) -> bool:
+        try:
+            active_id = int(active.get("window_id") or 0)
+            target_id = int(target.get("window_id") or 0)
+        except Exception:
+            active_id = 0
+            target_id = 0
+        if active_id and target_id and active_id == target_id:
+            return True
+        target_app = str(target.get("app") or "").strip().lower()
+        target_title = str(target.get("title") or "").strip().lower()
+        if not (target_app or target_title):
+            return False
+        return cls._window_matches_filter(active, app=target_app, title=target_title)
 
     @classmethod
     def _window_matches_filter(cls, window: dict[str, Any], *, app: str = "", title: str = "") -> bool:
@@ -2979,6 +2971,31 @@ end tell
                 subprocess.run(["osascript", "-e", script], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             except Exception:
                 pass
+        elif platform.system() == "Windows":
+            try:
+                hwnd = int(window.get("window_id") or 0)
+            except Exception:
+                hwnd = 0
+            if hwnd <= 0:
+                return
+            script = f"""
+$ErrorActionPreference = 'Stop'
+Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public class RumiWindowFocus {{
+  [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
+  [DllImport("user32.dll")] public static extern bool ShowWindowAsync(IntPtr hWnd, int nCmdShow);
+}}
+'@ -ErrorAction SilentlyContinue
+$hwnd = [IntPtr]{hwnd}
+[void][RumiWindowFocus]::ShowWindowAsync($hwnd, 9)
+[void][RumiWindowFocus]::SetForegroundWindow($hwnd)
+"""
+            try:
+                self._run_powershell(script)
+            except Exception:
+                pass
 
     def _darwin_move_cursor(self, payload: dict[str, Any]) -> None:
         x = int(payload.get("x", 0))
@@ -3444,6 +3461,13 @@ public class RumiDpi {
         script = r'''
 $ErrorActionPreference = 'Stop'
 Add-Type -TypeDefinition @'
+using System.Runtime.InteropServices;
+public class RumiDpi {
+  [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
+}
+'@ -ErrorAction SilentlyContinue
+[void][RumiDpi]::SetProcessDPIAware()
+Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -3549,12 +3573,20 @@ $proc = Get-Process -Id $procId -ErrorAction SilentlyContinue
             parsed_modifiers.extend(part for part in parts[:-1] if part)
             normalized = parts[-1] if parts else normalized
             raw = normalized
+        if normalized in {"back", "backward", "browserback", "browser_back"} and any(
+            modifier in {"alt", "option"} for modifier in parsed_modifiers
+        ):
+            normalized = "left"
+            raw = "left"
         key_map = {
             "enter": "{ENTER}",
             "return": "{ENTER}",
             "escape": "{ESC}",
             "esc": "{ESC}",
             "tab": "{TAB}",
+            "back": "{BACKSPACE}",
+            "bksp": "{BACKSPACE}",
+            "bs": "{BACKSPACE}",
             "backspace": "{BACKSPACE}",
             "delete": "{DELETE}",
             "pageup": "{PGUP}",

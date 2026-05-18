@@ -373,7 +373,7 @@ jobs:
       - name: Run mac computer driver smoke tests
         working-directory: rumi_ai_1_10
         run: |
-          pytest tests/test_mac_foreground_driver.py tests/test_mac_cgevent_pid_driver.py tests/test_local_visible_driver.py tests/test_computer_foreground_io.py -v
+          pytest tests/test_mac_cgevent_pid_driver.py tests/test_browser_cdp_driver.py tests/test_computer_fallback_order.py tests/test_computer_seat_service.py tests/test_computer_seat_default_factory.py -v
 
   windows-python-smoke:
     runs-on: windows-latest

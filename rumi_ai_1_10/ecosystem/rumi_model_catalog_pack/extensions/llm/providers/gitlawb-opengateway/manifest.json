@@ -1,0 +1,30 @@
+{
+  "id": "gitlawb-opengateway",
+  "category": "llm_provider",
+  "version": "1",
+  "display_name": "Gitlawb OpenGateway",
+  "enabled": true,
+  "priority": 45,
+  "adapter": "python_entrypoint",
+  "entrypoint": "domain.ai_client.providers.gitlawb_opengateway_provider:GitlawbOpengatewayProvider",
+  "api_key_env": "",
+  "base_url_env": "GITLAWB_OPENGATEWAY_BASE_URL",
+  "credential_required": false,
+  "default_base_url": "https://opengateway.gitlawb.com/v1",
+  "default_model": "mimo-v2.5-pro",
+  "default_model_for": {
+    "chat": "mimo-v2.5-pro",
+    "reasoning": "mimo-v2.5-pro",
+    "fast": "mimo-v2-flash"
+  },
+  "capabilities": {
+    "native_tool_calling": false,
+    "vision": true,
+    "embeddings": false,
+    "streaming": true
+  },
+  "config": {
+    "model_sync": "fixed_allowlist",
+    "privacy": "external_no_key_gateway"
+  }
+}

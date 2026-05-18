@@ -28,7 +28,7 @@ def test_screenshot_result_method_has_required_fields():
     )
     # Read the source to verify schema fields are present
     src_path = Path(__file__).resolve().parent.parent / "ecosystem" / "rumi_default_tools_pack" / "domain" / "tool" / "browser_computer.py"
-    content = src_path.read_text()
+    content = src_path.read_text(encoding="utf-8")
     for field in REQUIRED_SCHEMA_FIELDS:
         assert f'"{field}"' in content or f"'{field}'" in content, f"Missing schema field: {field}"
 
@@ -48,7 +48,7 @@ def test_screenshot_dry_run_schema():
 def test_screenshot_result_includes_computer_seat_metadata():
     """When screenshot succeeds, it should include additive computer_seat metadata."""
     src_path = Path(__file__).resolve().parent.parent / "ecosystem" / "rumi_default_tools_pack" / "domain" / "tool" / "browser_computer.py"
-    content = src_path.read_text()
+    content = src_path.read_text(encoding="utf-8")
     # Verify the code adds computer_seat metadata
     assert "computer_seat" in content
     assert "driver_chain_order" in content

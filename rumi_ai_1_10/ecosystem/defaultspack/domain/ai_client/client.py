@@ -50,14 +50,26 @@ class AIClient:
             available = detect_available_providers()
             provider_catalog = get_provider_catalog_map()
             cloud_enabled = _cloud_runtime_enabled()
+            local_default_enabled = self._local_default_runtime_enabled()
             for name, instance in available.items():
                 entry = provider_catalog.get(name, {})
+                availability = entry.get("availability", {}) if isinstance(entry.get("availability"), dict) else {}
+                if (
+                    availability.get("configuration_source") == "default_local_endpoint"
+                    and not local_default_enabled
+                ):
+                    continue
                 if not cloud_enabled and entry.get("kind") not in {"builtin", "local"}:
                     if not provider_has_api_key(name):
                         continue
                 self._providers[name] = instance
         except Exception:
             pass
+
+    @staticmethod
+    def _local_default_runtime_enabled():
+        value = str(os.environ.get("RUMI_DEFAULTSPACK_ENABLE_LOCAL_PROVIDERS", "") or "").strip().lower()
+        return value in {"1", "true", "yes", "on"}
 
     def _auto_register_rumi(self):
         """rumi プロバイダーを自動登録する（他のプロバイダーが1つ以上ある場合のみ）。"""

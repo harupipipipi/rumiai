@@ -1,0 +1,22 @@
+{
+  "id": "gitlawb-opengateway/mimo-v2.5-pro",
+  "category": "llm_model",
+  "version": "1",
+  "provider_id": "gitlawb-opengateway",
+  "model_id": "mimo-v2.5-pro",
+  "display_name": "MiMo V2.5 Pro via Gitlawb OpenGateway",
+  "type": "reasoning",
+  "enabled": true,
+  "priority": 1,
+  "defaults": {
+    "chat": true,
+    "reasoning": true
+  },
+  "capabilities": {
+    "streaming": true,
+    "reasoning": true
+  },
+  "supports_thinking": true,
+  "thinking_levels": ["low", "medium", "high", "xhigh"],
+  "default_thinking_level": "medium"
+}

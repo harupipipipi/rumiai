@@ -133,3 +133,151 @@ def test_chat_send_and_stream_wrappers_write_inspector_logs(tmp_path, monkeypatc
     assert stream_log["context_info"]["source"] == "blocks.chat.stream"
     assert stream_log["context_info"]["message_count"] >= 1
     ChatStore._instance = None
+
+
+def test_prepare_chat_run_current_turn_history_mode_excludes_old_tool_logs(tmp_path, monkeypatch):
+    from domain.chat.run_request import prepare_chat_run
+    from domain.chat.store import ChatStore
+
+    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
+    ChatStore._instance = None
+
+    store = ChatStore()
+    conversation = store.create_conversation(model="stub/default")
+    old_user = store.add_message(conversation["id"], {"role": "user", "content": "old external request"})
+    store.add_message(
+        conversation["id"],
+        {
+            "role": "assistant",
+            "parent_id": old_user["id"],
+            "content": [{"type": "text", "text": "old failed reply"}],
+            "tool_logs": [{"tool_name": "browser_computer", "result": {"large": "x" * 5000}}],
+        },
+    )
+
+    prepared = prepare_chat_run(
+        {
+            "conversation_id": conversation["id"],
+            "message": {"role": "user", "content": "fresh external request"},
+            "tools": [],
+        },
+        {"external_chat_history_mode": "current_turn"},
+    )
+    combined = "\n".join(str(message.get("content") or "") for message in prepared.standard_messages)
+
+    assert "fresh external request" in combined
+    assert "old external request" not in combined
+    assert "old failed reply" not in combined
+    ChatStore._instance = None
+
+
+def test_complete_turn_retries_transient_ai_error_after_tool_use():
+    from domain.chat.run_request import PreparedChatRun
+    from domain.chat.stream_engine import ChatRunEngine
+
+    class FlakyClient:
+        def __init__(self):
+            self.calls = 0
+
+        def complete(self, model, messages, tools=None, params=None):
+            self.calls += 1
+            if self.calls == 1:
+                raise RuntimeError("Google API error 500: Internal error encountered.")
+            return {
+                "content": [{"type": "text", "text": "continued"}],
+                "finish_reason": "stop",
+            }
+
+    client = FlakyClient()
+    engine = ChatRunEngine(store=object(), client=client)
+    engine._tool_logs = [{"tool_name": "browser_computer", "result": {"status": "ok"}}]
+    prepared = PreparedChatRun(
+        conversation_id="conv-1",
+        conversation={"id": "conv-1"},
+        input_data={},
+        request_id="req-1",
+        content=[],
+        metadata=None,
+        user_message={"id": "user-1"},
+        model="google/gemma-4-31b-it",
+        params={"retry": {"max_attempts": 2, "delays": [0]}},
+        request_context={},
+        tool_context={},
+        standard_messages=[],
+        user_text="hello",
+        system_prompt="",
+        enrich_info={},
+        raw_tools=[],
+        provider_tools=[],
+        tools_called=[],
+        connected_tool_names=set(),
+        call_handler=None,
+        model_routing={},
+    )
+
+    response = engine._complete_turn(prepared, [{"role": "user", "content": "hello"}])
+
+    assert client.calls == 2
+    assert response["content"] == [{"type": "text", "text": "continued"}]
+    assert any(event.get("type") == "ai_retry_scheduled" for event in engine._activity_events)
+
+
+def test_legacy_complete_with_tools_retries_transient_ai_error_after_tool_use():
+    from blocks.chat import send
+
+    ai_calls = 0
+    tool_calls = 0
+
+    def call_handler(name, payload):
+        nonlocal ai_calls, tool_calls
+        if name == "defaults.ai.complete":
+            ai_calls += 1
+            if ai_calls == 1:
+                return {
+                    "status": "ok",
+                    "data": {
+                        "content": [
+                            {
+                                "type": "tool_use",
+                                "id": "call-1",
+                                "name": "browser_computer",
+                                "input": {"action": "computer.context", "payload": {}},
+                            }
+                        ],
+                        "finish_reason": "tool_use",
+                    },
+                }
+            if ai_calls == 2:
+                return {
+                    "status": "error",
+                    "error": {"message": "Google API error 500: Internal error encountered."},
+                }
+            return {
+                "status": "ok",
+                "data": {
+                    "content": [{"type": "text", "text": "continued after retry"}],
+                    "finish_reason": "stop",
+                },
+            }
+        if name == "defaults.tool.invoke":
+            tool_calls += 1
+            return {
+                "status": "ok",
+                "data": {"result": "ok", "is_error": False, "widget": None},
+            }
+        raise AssertionError(name)
+
+    response = send._complete_with_tools(
+        "google/gemma-4-31b-it",
+        [{"role": "user", "content": "hello"}],
+        [{"name": "browser_computer"}],
+        {"profile_policy": {"max_tool_calls": 3}},
+        call_handler,
+        {"retry": {"max_attempts": 2, "delays": [0]}},
+    )
+
+    assert ai_calls == 3
+    assert tool_calls == 1
+    assert response["content"] == [{"type": "text", "text": "continued after retry"}]
+    assert any(event.get("type") == "ai_retry_scheduled" for event in response["events"])

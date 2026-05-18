@@ -1,0 +1,18 @@
+{
+  "id": "gitlawb-opengateway/mimo-v2-flash",
+  "category": "llm_model",
+  "version": "1",
+  "provider_id": "gitlawb-opengateway",
+  "model_id": "mimo-v2-flash",
+  "display_name": "MiMo V2 Flash via Gitlawb OpenGateway",
+  "type": "chat",
+  "enabled": true,
+  "priority": 2,
+  "defaults": {
+    "chat": true,
+    "fast": true
+  },
+  "capabilities": {
+    "streaming": true
+  }
+}

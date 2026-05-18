@@ -14,6 +14,16 @@ from .profile_catalog import merge_curated_and_profiles, profile_dir_for
 
 _GOOGLE_FUNCTION_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_.:-]{0,127}$")
 _GOOGLE_FUNCTION_NAME_ALLOWED_RE = re.compile(r"[^A-Za-z0-9_.:-]+")
+_TRANSIENT_GOOGLE_HTTP_CODES = {429, 500, 502, 503, 504}
+_TRANSIENT_GOOGLE_CONNECTION_TOKENS = (
+    "connection reset",
+    "connection aborted",
+    "remote end closed",
+    "timed out",
+    "timeout",
+    "temporarily unavailable",
+    "temporary failure",
+)
 
 
 class GoogleProvider(OpenAICompatibleProvider):
@@ -542,7 +552,24 @@ class GoogleProvider(OpenAICompatibleProvider):
                     body[key] = value
         return body
 
-    def _native_request_json(self, model: str, body: Dict[str, Any], *, stream: bool = False):
+    @staticmethod
+    def _request_timeout(params: Dict[str, Any] | None = None) -> float:
+        params = params if isinstance(params, dict) else {}
+        raw = params.get("request_timeout") or params.get("timeout")
+        try:
+            value = float(raw)
+        except (TypeError, ValueError):
+            value = 120.0
+        return max(5.0, min(value, 120.0))
+
+    def _native_request_json(
+        self,
+        model: str,
+        body: Dict[str, Any],
+        *,
+        stream: bool = False,
+        timeout: float | None = None,
+    ):
         self._ensure_runtime_config()
         action = "streamGenerateContent" if stream else "generateContent"
         quoted_model = urllib.parse.quote(str(model), safe="")
@@ -556,21 +583,72 @@ class GoogleProvider(OpenAICompatibleProvider):
             headers["x-goog-api-key"] = bearer_token
         elif bearer_token:
             headers["Authorization"] = "Bearer " + bearer_token
-        max_attempts = 4
+        max_attempts = 5
+        request_timeout = self._request_timeout({"request_timeout": timeout} if timeout is not None else None)
         for attempt in range(max_attempts):
             req = urllib.request.Request(url, data=data, headers=headers, method="POST")
             try:
-                return urllib.request.urlopen(req, context=self._ssl_ctx, timeout=120)
+                return urllib.request.urlopen(req, context=self._ssl_ctx, timeout=request_timeout)
             except urllib.error.HTTPError as exc:
                 err_body = exc.read().decode("utf-8", errors="replace")
-                if exc.code in {500, 503} and attempt < max_attempts - 1:
+                if exc.code in _TRANSIENT_GOOGLE_HTTP_CODES and attempt < max_attempts - 1:
                     time.sleep(0.5 * (attempt + 1))
                     continue
-                transient = " (temporary Google backend error; retry shortly)" if exc.code in {500, 503} else ""
+                transient = " (temporary Google backend error; retry shortly)" if exc.code in _TRANSIENT_GOOGLE_HTTP_CODES else ""
                 raise RuntimeError("Google API error {}{}: {}".format(exc.code, transient, err_body))
             except urllib.error.URLError as exc:
+                if self._is_transient_google_connection_error(exc) and attempt < max_attempts - 1:
+                    time.sleep(0.5 * (attempt + 1))
+                    continue
                 raise RuntimeError("Google API connection error: {}".format(exc.reason))
+            except (TimeoutError, OSError) as exc:
+                if self._is_transient_google_connection_error(exc) and attempt < max_attempts - 1:
+                    time.sleep(0.5 * (attempt + 1))
+                    continue
+                raise RuntimeError("Google API connection error: {}".format(exc))
         raise RuntimeError("Google API request failed")
+
+    @staticmethod
+    def _is_transient_google_connection_error(exc: Exception) -> bool:
+        reason = getattr(exc, "reason", exc)
+        if isinstance(reason, (TimeoutError, ConnectionResetError, ConnectionAbortedError)):
+            return True
+        message = str(reason or exc).lower()
+        return any(token in message for token in _TRANSIENT_GOOGLE_CONNECTION_TOKENS)
+
+    @staticmethod
+    def _is_transient_google_api_error(exc: Exception) -> bool:
+        message = str(exc)
+        lowered = message.lower()
+        return bool(re.search(r"(Google API error|OpenAI API error) (429|500|502|503|504)", message)) or any(
+            token in lowered for token in ("internal error encountered",) + _TRANSIENT_GOOGLE_CONNECTION_TOKENS
+        )
+
+    def _request_json(self, path, body):
+        max_attempts = 5
+        last_error: Exception | None = None
+        for attempt in range(max_attempts):
+            try:
+                return super()._request_json(path, body)
+            except RuntimeError as exc:
+                last_error = exc
+                if attempt >= max_attempts - 1 or not self._is_transient_google_api_error(exc):
+                    break
+                time.sleep(0.5 * (attempt + 1))
+        raise last_error or RuntimeError("Google API request failed")
+
+    def _request_stream(self, path, body):
+        max_attempts = 5
+        last_error: Exception | None = None
+        for attempt in range(max_attempts):
+            try:
+                return super()._request_stream(path, body)
+            except RuntimeError as exc:
+                last_error = exc
+                if attempt >= max_attempts - 1 or not self._is_transient_google_api_error(exc):
+                    break
+                time.sleep(0.5 * (attempt + 1))
+        raise last_error or RuntimeError("Google API stream request failed")
 
     @staticmethod
     def _native_usage(raw: Dict[str, Any]) -> Dict[str, int]:
@@ -629,7 +707,7 @@ class GoogleProvider(OpenAICompatibleProvider):
     def _native_complete(self, model, messages, tools, params):
         name_map, reverse_name_map = self._tool_name_maps(tools)
         body = self._native_body(model, messages, tools, dict(params or {}), name_map)
-        with self._native_request_json(model, body) as resp:
+        with self._native_request_json(model, body, timeout=self._request_timeout(params)) as resp:
             raw = json.loads(resp.read().decode("utf-8"))
         text, thought, finish_reason, tool_uses = self._native_extract_parts(raw, reverse_name_map)
         content = [{"type": "text", "text": text}]
@@ -652,7 +730,7 @@ class GoogleProvider(OpenAICompatibleProvider):
     def _native_stream(self, model, messages, tools, params):
         name_map, reverse_name_map = self._tool_name_maps(tools)
         body = self._native_body(model, messages, tools, dict(params or {}), name_map)
-        resp = self._native_request_json(model, body, stream=True)
+        resp = self._native_request_json(model, body, stream=True, timeout=self._request_timeout(params))
         finish_reason = "stop"
         usage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
         try:

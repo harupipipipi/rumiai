@@ -72,7 +72,8 @@ class BrowserCDPDriver(ComputerDriver):
         return self._with_tab(target, "type_text", lambda client, tab: client.type_text(tab, text))
 
     def key(self, target: ComputerTarget, key_combo: str = "") -> ActionResult:
-        return self._with_tab(target, "key", lambda client, tab: client.press_key_combo(tab, key_combo))
+        key = key_combo.split("+")[-1] if key_combo else ""
+        return self._with_tab(target, "key", lambda client, tab: client.press_key(tab, key))
 
     def scroll(
         self,

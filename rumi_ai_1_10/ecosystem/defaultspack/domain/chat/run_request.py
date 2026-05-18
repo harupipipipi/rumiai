@@ -124,7 +124,18 @@ def prepare_chat_run(input_data: dict[str, Any], context: dict[str, Any] | None 
     if user_message is None:
         raise RuntimeError("Failed to add user message")
 
-    standard_messages = convert_to_standard(store.get_message_chain(conversation_id, user_message["id"]))
+    if _current_turn_history_only(context):
+        message_chain = [user_message]
+    else:
+        message_chain = store.get_message_chain(conversation_id, user_message["id"])
+    standard_messages = convert_to_standard(message_chain)
+    runtime_content = _runtime_user_content_override(metadata)
+    if runtime_content:
+        _replace_current_user_content_for_model(
+            standard_messages,
+            role=str(user_message.get("role") or message.get("role") or "user"),
+            runtime_content=runtime_content,
+        )
     model = str((conversation or {}).get("model") or "stub/default")
     request_id = gen_id()
 
@@ -258,6 +269,18 @@ def prepare_chat_run(input_data: dict[str, Any], context: dict[str, Any] | None 
     )
 
 
+def _current_turn_history_only(context: dict[str, Any] | None) -> bool:
+    if not isinstance(context, dict):
+        return False
+    mode = str(
+        context.get("chat_history_mode")
+        or context.get("external_chat_history_mode")
+        or context.get("history_mode")
+        or ""
+    ).strip().lower()
+    return mode in {"current_turn", "current_message", "stateless", "none"}
+
+
 def prefocus_computer_use_target_window(prepared: PreparedChatRun) -> Any:
     if not isinstance(prepared.request_context, dict) or not prepared.request_context.get("user_requested_computer_use"):
         return None
@@ -322,6 +345,31 @@ def _prepared_user_content(store: ChatStore, conversation_id: str, message: dict
             content.extend(_attachment_text_blocks(attachments))
             content.extend(_attachment_image_blocks(attachments))
     return content if isinstance(content, list) else [{"type": "text", "text": str(content)}], metadata or None
+
+
+def _runtime_user_content_override(metadata: dict[str, Any] | None) -> str:
+    if not isinstance(metadata, dict):
+        return ""
+    external = metadata.get("external") if isinstance(metadata.get("external"), dict) else {}
+    value = external.get("runtime_content") or metadata.get("runtime_content")
+    if not isinstance(value, str):
+        return ""
+    return value.strip()
+
+
+def _replace_current_user_content_for_model(
+    standard_messages: list[dict[str, Any]],
+    *,
+    role: str,
+    runtime_content: str,
+) -> None:
+    if not runtime_content:
+        return
+    target_role = str(role or "user").strip() or "user"
+    for message in reversed(standard_messages):
+        if isinstance(message, dict) and str(message.get("role") or "user") == target_role:
+            message["content"] = runtime_content
+            return
 
 
 def _conversation_system_prompt(conv: dict[str, Any], manager: Any) -> str:

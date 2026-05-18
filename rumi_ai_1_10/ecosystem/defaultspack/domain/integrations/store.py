@@ -4,6 +4,7 @@ import json
 import os
 import time
 import hashlib
+import threading
 from pathlib import Path
 from typing import Any, Dict
 
@@ -13,6 +14,9 @@ def _now_ms() -> int:
 
 
 class IntegrationConversationStore:
+    _LOCKS: dict[str, threading.RLock] = {}
+    _LOCKS_GUARD = threading.Lock()
+
     def __init__(self, path: Path | None = None):
         self._path = path or self._default_path()
         self._data = self._load()
@@ -48,9 +52,31 @@ class IntegrationConversationStore:
     def _save(self) -> None:
         self._path.parent.mkdir(parents=True, exist_ok=True)
         self._data["updated_at"] = _now_ms()
-        tmp_path = self._path.with_suffix(self._path.suffix + ".tmp")
-        tmp_path.write_text(json.dumps(self._data, ensure_ascii=False, indent=2), encoding="utf-8")
-        tmp_path.replace(self._path)
+        tmp_path = self._path.with_name(
+            f"{self._path.name}.{os.getpid()}.{threading.get_ident()}.tmp"
+        )
+        try:
+            tmp_path.write_text(json.dumps(self._data, ensure_ascii=False, indent=2), encoding="utf-8")
+            tmp_path.replace(self._path)
+        finally:
+            try:
+                tmp_path.unlink()
+            except FileNotFoundError:
+                pass
+            except OSError:
+                pass
+
+    def _path_lock(self) -> threading.RLock:
+        try:
+            key = str(self._path.resolve())
+        except OSError:
+            key = str(self._path)
+        with self._LOCKS_GUARD:
+            lock = self._LOCKS.get(key)
+            if lock is None:
+                lock = threading.RLock()
+                self._LOCKS[key] = lock
+            return lock
 
     @staticmethod
     def connection_key(provider: str, external_key: str) -> str:
@@ -104,8 +130,9 @@ class IntegrationConversationStore:
     def is_event_processed(self, provider: str, event_id: str | None) -> bool:
         if not event_id:
             return False
-        self._reload()
-        return self.event_key(provider, event_id) in self._data["processed_events"]
+        with self._path_lock():
+            self._reload()
+            return self.event_key(provider, event_id) in self._data["processed_events"]
 
     def is_event_in_progress(self, provider: str, event_id: str | None) -> bool:
         if not event_id:
@@ -116,25 +143,26 @@ class IntegrationConversationStore:
     def claim_event(self, provider: str, event_id: str | None, *, metadata: Dict[str, Any] | None = None) -> bool:
         if not event_id:
             return True
-        self._reload()
-        if self.event_key(provider, event_id) in self._data["processed_events"]:
-            return False
-        self._prune_stale_event_lock(provider, event_id)
-        path = self._event_lock_path(provider, event_id)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        payload = {
-            "provider": provider,
-            "event_id": event_id,
-            "claimed_at": _now_ms(),
-            **(metadata if isinstance(metadata, dict) else {}),
-        }
-        try:
-            fd = os.open(str(path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-        except FileExistsError:
-            return False
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            handle.write(json.dumps(payload, ensure_ascii=False, indent=2))
-        return True
+        with self._path_lock():
+            self._reload()
+            if self.event_key(provider, event_id) in self._data["processed_events"]:
+                return False
+            self._prune_stale_event_lock(provider, event_id)
+            path = self._event_lock_path(provider, event_id)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            payload = {
+                "provider": provider,
+                "event_id": event_id,
+                "claimed_at": _now_ms(),
+                **(metadata if isinstance(metadata, dict) else {}),
+            }
+            try:
+                fd = os.open(str(path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            except FileExistsError:
+                return False
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                handle.write(json.dumps(payload, ensure_ascii=False, indent=2))
+            return True
 
     def release_event_claim(self, provider: str, event_id: str | None) -> None:
         if not event_id:
@@ -149,15 +177,16 @@ class IntegrationConversationStore:
     def mark_event_processed(self, provider: str, event_id: str | None, result: Dict[str, Any]) -> None:
         if not event_id:
             return
-        self._reload()
-        self._data["processed_events"][self.event_key(provider, event_id)] = {
-            "provider": provider,
-            "event_id": event_id,
-            "conversation_id": result.get("conversation_id"),
-            "assistant_message_id": result.get("assistant_message_id"),
-            "processed_at": _now_ms(),
-        }
-        self._save()
+        with self._path_lock():
+            self._reload()
+            self._data["processed_events"][self.event_key(provider, event_id)] = {
+                "provider": provider,
+                "event_id": event_id,
+                "conversation_id": result.get("conversation_id"),
+                "assistant_message_id": result.get("assistant_message_id"),
+                "processed_at": _now_ms(),
+            }
+            self._save()
         self.release_event_claim(provider, event_id)
 
     def get_or_create_conversation(
@@ -170,51 +199,53 @@ class IntegrationConversationStore:
         chat_store,
         model: str | None = None,
     ) -> Dict[str, Any]:
-        key = self.connection_key(provider, external_key)
-        existing = self._data["connections"].get(key)
-        if isinstance(existing, dict):
-            conversation_id = existing.get("conversation_id")
-            if conversation_id:
-                conversation = chat_store.get_conversation(str(conversation_id))
-                if conversation is not None:
-                    updates: Dict[str, Any] = {}
-                    requested_model = str(model or "").strip()
-                    if requested_model and str(conversation.get("model") or "").strip() != requested_model:
-                        updates["model"] = requested_model
-                    if isinstance(metadata, dict) and metadata:
-                        existing_metadata = (
-                            conversation.get("metadata") if isinstance(conversation.get("metadata"), dict) else {}
-                        )
-                        merged_metadata = {**existing_metadata, **metadata}
-                        if merged_metadata != existing_metadata:
-                            updates["metadata"] = merged_metadata
-                    if updates:
-                        conversation = chat_store.update_conversation(str(conversation_id), updates) or conversation
-                    existing["updated_at"] = _now_ms()
-                    if isinstance(metadata, dict) and metadata:
-                        existing["metadata"] = {**(existing.get("metadata") if isinstance(existing.get("metadata"), dict) else {}), **metadata}
-                    self._save()
-                    return conversation
+        with self._path_lock():
+            self._reload()
+            key = self.connection_key(provider, external_key)
+            existing = self._data["connections"].get(key)
+            if isinstance(existing, dict):
+                conversation_id = existing.get("conversation_id")
+                if conversation_id:
+                    conversation = chat_store.get_conversation(str(conversation_id))
+                    if conversation is not None:
+                        updates: Dict[str, Any] = {}
+                        requested_model = str(model or "").strip()
+                        if requested_model and str(conversation.get("model") or "").strip() != requested_model:
+                            updates["model"] = requested_model
+                        if isinstance(metadata, dict) and metadata:
+                            existing_metadata = (
+                                conversation.get("metadata") if isinstance(conversation.get("metadata"), dict) else {}
+                            )
+                            merged_metadata = {**existing_metadata, **metadata}
+                            if merged_metadata != existing_metadata:
+                                updates["metadata"] = merged_metadata
+                        if updates:
+                            conversation = chat_store.update_conversation(str(conversation_id), updates) or conversation
+                        existing["updated_at"] = _now_ms()
+                        if isinstance(metadata, dict) and metadata:
+                            existing["metadata"] = {**(existing.get("metadata") if isinstance(existing.get("metadata"), dict) else {}), **metadata}
+                        self._save()
+                        return conversation
 
-        conversation = chat_store.create_conversation(
-            model=model,
-            conversation_kind="external",
-            tags=["integration:" + str(provider or "").strip()],
-            metadata={
-                "external_provider": provider,
+            conversation = chat_store.create_conversation(
+                model=model,
+                conversation_kind="external",
+                tags=["integration:" + str(provider or "").strip()],
+                metadata={
+                    "external_provider": provider,
+                    "external_key": external_key,
+                    **(metadata if isinstance(metadata, dict) else {}),
+                },
+            )
+            clean_title = str(title or "").strip()[:120] or "{} chat".format(provider)
+            conversation = chat_store.update_conversation(conversation["id"], {"title": clean_title}) or conversation
+            self._data["connections"][key] = {
+                "provider": provider,
                 "external_key": external_key,
-                **(metadata if isinstance(metadata, dict) else {}),
-            },
-        )
-        clean_title = str(title or "").strip()[:120] or "{} chat".format(provider)
-        conversation = chat_store.update_conversation(conversation["id"], {"title": clean_title}) or conversation
-        self._data["connections"][key] = {
-            "provider": provider,
-            "external_key": external_key,
-            "conversation_id": conversation["id"],
-            "created_at": _now_ms(),
-            "updated_at": _now_ms(),
-            "metadata": metadata if isinstance(metadata, dict) else {},
-        }
-        self._save()
-        return conversation
+                "conversation_id": conversation["id"],
+                "created_at": _now_ms(),
+                "updated_at": _now_ms(),
+                "metadata": metadata if isinstance(metadata, dict) else {},
+            }
+            self._save()
+            return conversation

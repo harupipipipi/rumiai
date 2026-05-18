@@ -158,6 +158,174 @@ class TestDefaultspackGoogleProvider(unittest.TestCase):
         self.assertEqual(len(calls), 3)
         self.assertEqual([call.args[0] for call in sleep.call_args_list], [0.5, 1.0])
 
+    def test_google_native_request_retries_rate_limit_and_gateway_errors(self):
+        from domain.ai_client.providers.google_provider import GoogleProvider
+
+        codes = [429, 502, 504]
+        calls = []
+
+        with patch.dict(os.environ, {"GEMINI_API_KEY": "gemini-key"}, clear=True):
+            provider = GoogleProvider()
+
+        def fake_urlopen(request, context=None, timeout=None):
+            calls.append((request, context, timeout))
+            if codes:
+                code = codes.pop(0)
+                raise urllib.error.HTTPError(
+                    request.full_url,
+                    code,
+                    "temporary",
+                    {},
+                    io.BytesIO(b'{"error":{"message":"temporary"}}'),
+                )
+            return io.BytesIO(b'{"ok":true}')
+
+        with patch("domain.ai_client.providers.google_provider.urllib.request.urlopen", fake_urlopen), patch(
+            "domain.ai_client.providers.google_provider.time.sleep"
+        ) as sleep:
+            response = provider._native_request_json("gemini-test", {"contents": []})
+
+        self.assertEqual(response.read(), b'{"ok":true}')
+        self.assertEqual(len(calls), 4)
+        self.assertEqual([call.args[0] for call in sleep.call_args_list], [0.5, 1.0, 1.5])
+
+    def test_google_native_request_retries_transient_connection_errors(self):
+        from domain.ai_client.providers.google_provider import GoogleProvider
+
+        calls = []
+
+        with patch.dict(os.environ, {"GEMINI_API_KEY": "gemini-key"}, clear=True):
+            provider = GoogleProvider()
+
+        def fake_urlopen(request, context=None, timeout=None):
+            calls.append((request, context, timeout))
+            if len(calls) < 2:
+                raise urllib.error.URLError(TimeoutError("timed out"))
+            return io.BytesIO(b'{"ok":true}')
+
+        with patch("domain.ai_client.providers.google_provider.urllib.request.urlopen", fake_urlopen), patch(
+            "domain.ai_client.providers.google_provider.time.sleep"
+        ) as sleep:
+            response = provider._native_request_json("gemini-test", {"contents": []})
+
+        self.assertEqual(response.read(), b'{"ok":true}')
+        self.assertEqual(len(calls), 2)
+        self.assertEqual([call.args[0] for call in sleep.call_args_list], [0.5])
+
+    def test_google_native_request_respects_request_timeout_param(self):
+        from domain.ai_client.providers.google_provider import GoogleProvider
+
+        captured = {}
+
+        with patch.dict(os.environ, {"GEMINI_API_KEY": "gemini-key"}, clear=True):
+            provider = GoogleProvider()
+
+        class FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self):
+                return json.dumps(
+                    {
+                        "candidates": [
+                            {
+                                "content": {"parts": [{"text": "ok"}]},
+                                "finishReason": "STOP",
+                            }
+                        ]
+                    }
+                ).encode("utf-8")
+
+        def fake_urlopen(request, context=None, timeout=None):
+            captured["timeout"] = timeout
+            return FakeResponse()
+
+        with patch("domain.ai_client.providers.google_provider.urllib.request.urlopen", fake_urlopen):
+            response = provider.complete(
+                "gemma-4-31b-it",
+                [{"role": "user", "content": "hello"}],
+                [],
+                {"request_timeout": 17},
+            )
+
+        self.assertEqual(captured["timeout"], 17.0)
+        self.assertEqual(response["content"][0]["text"], "ok")
+
+    def test_google_openai_compatible_request_retries_transient_backend_errors(self):
+        from domain.ai_client.providers.google_provider import GoogleProvider
+
+        calls = []
+
+        with patch.dict(os.environ, {"GEMINI_API_KEY": "gemini-key"}, clear=True):
+            provider = GoogleProvider()
+
+        class FakeResponse(io.BytesIO):
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        def fake_urlopen(request, context=None, timeout=None):
+            calls.append((request, context, timeout))
+            if len(calls) < 3:
+                raise urllib.error.HTTPError(
+                    request.full_url,
+                    500,
+                    "Internal error encountered.",
+                    {},
+                    io.BytesIO(b'{"error":{"code":500,"message":"Internal error encountered."}}'),
+                )
+            return FakeResponse(b'{"ok":true}')
+
+        with patch("domain.ai_client.providers.openai_provider.urllib.request.urlopen", fake_urlopen), patch(
+            "domain.ai_client.providers.google_provider.time.sleep"
+        ) as sleep:
+            response = provider._request_json("/chat/completions", {"model": "gemma-4-31b-it", "messages": []})
+
+        self.assertEqual(response, {"ok": True})
+        self.assertEqual(len(calls), 3)
+        self.assertEqual([call.args[0] for call in sleep.call_args_list], [0.5, 1.0])
+
+    def test_google_openai_compatible_request_retries_transient_gateway_errors(self):
+        from domain.ai_client.providers.google_provider import GoogleProvider
+
+        calls = []
+
+        with patch.dict(os.environ, {"GEMINI_API_KEY": "gemini-key"}, clear=True):
+            provider = GoogleProvider()
+
+        class FakeResponse(io.BytesIO):
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        def fake_urlopen(request, context=None, timeout=None):
+            calls.append((request, context, timeout))
+            if len(calls) < 2:
+                raise urllib.error.HTTPError(
+                    request.full_url,
+                    504,
+                    "Gateway Timeout",
+                    {},
+                    io.BytesIO(b'{"error":{"code":504,"message":"temporary"}}'),
+                )
+            return FakeResponse(b'{"ok":true}')
+
+        with patch("domain.ai_client.providers.openai_provider.urllib.request.urlopen", fake_urlopen), patch(
+            "domain.ai_client.providers.google_provider.time.sleep"
+        ) as sleep:
+            response = provider._request_json("/chat/completions", {"model": "gemini-2.5-flash", "messages": []})
+
+        self.assertEqual(response, {"ok": True})
+        self.assertEqual(len(calls), 2)
+        self.assertEqual([call.args[0] for call in sleep.call_args_list], [0.5])
+
     def test_google_native_request_uses_bearer_auth_for_browser_oauth(self):
         from domain.ai_client.providers.google_provider import GoogleProvider
 
@@ -394,7 +562,7 @@ class TestDefaultspackGoogleProvider(unittest.TestCase):
                     }
                 ).encode("utf-8")
 
-        def fake_native_request_json(model, body, stream=False):
+        def fake_native_request_json(model, body, stream=False, **kwargs):
             captured["model"] = model
             captured["body"] = body
             captured["stream"] = stream
@@ -447,7 +615,7 @@ class TestDefaultspackGoogleProvider(unittest.TestCase):
                     }
                 ).encode("utf-8")
 
-        def fake_native_request_json(model, body, stream=False):
+        def fake_native_request_json(model, body, stream=False, **kwargs):
             captured["model"] = model
             captured["body"] = body
             captured["stream"] = stream
@@ -501,7 +669,7 @@ class TestDefaultspackGoogleProvider(unittest.TestCase):
                     }
                 ).encode("utf-8")
 
-        def fake_native_request_json(model, body, stream=False):
+        def fake_native_request_json(model, body, stream=False, **kwargs):
             captured["body"] = body
             return FakeResponse()
 
@@ -589,7 +757,7 @@ class TestDefaultspackGoogleProvider(unittest.TestCase):
                     }
                 ).encode("utf-8")
 
-        def fake_native_request_json(model, body, stream=False):
+        def fake_native_request_json(model, body, stream=False, **kwargs):
             captured["body"] = body
             return FakeResponse()
 

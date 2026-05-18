@@ -1343,7 +1343,7 @@ def _complete_with_tools(model, messages, tools, context, call_handler, params):
                 call_handler,
                 events,
                 context,
-                allow_retry=not tool_logs,
+                allow_retry=True,
             )
         except RuntimeError as exc:
             ai_error = str(exc)
