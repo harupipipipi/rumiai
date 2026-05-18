@@ -153,12 +153,18 @@ def test_line_route_sends_webhook_acknowledgement_when_reply_token_and_access_to
             "url": "https://api.line.me/v2/bot/message/reply",
             "headers": {"Authorization": "Bearer line-access-token"},
             "body": {"replyToken": "reply-ack", "messages": [{"type": "text", "text": "\u5c4a\u3044\u305f\u3088\uff01"}]},
-        }
+        },
+        {
+            "url": "https://api.line.me/v2/bot/message/push",
+            "headers": {"Authorization": "Bearer line-access-token"},
+            "body": {"to": "Uactor", "messages": [{"type": "text", "text": "done"}]},
+        },
     ]
     assert event_result["acknowledgement"]["sent"] is True
     assert event_result["acknowledgement"]["text"] == "\u5c4a\u3044\u305f\u3088\uff01"
     assert captured["context"]["line_webhook_acknowledgement"]["sent"] is True
-    assert event_result["reply"] == {"sent": False, "reason": "LINE reply token already used for webhook acknowledgement"}
+    assert event_result["reply"] == {"sent": False, "reason": "LINE completion sent by push after webhook acknowledgement"}
+    assert event_result["completion_push"]["sent"] is True
 
 
 def test_line_computer_use_exact_reply_shortcut_pushes_without_provider(monkeypatch, tmp_path):
@@ -423,7 +429,11 @@ def test_line_computer_use_fake_receive_acknowledges_and_preserves_japanese_prom
     assert chat_url not in user_content
     assert chat_url in runtime_content
     assert captured["context"]["computer_use_target_app"] == "Google Chrome"
-    assert captured["context"]["computer_use_target_title"] == "LINE Chat"
+    assert "computer_use_target_title" not in captured["context"]
+    assert captured["context"]["computer_use_reply_surface"] == "line_push"
+    assert event_result["completion_push"]["sent"] is True
+    assert calls[1]["url"].endswith("/message/push")
+    assert calls[1]["body"] == {"to": "Uactor", "messages": [{"type": "text", "text": "local complete"}]}
 
 
 def test_line_runtime_prompt_is_hidden_from_stored_user_message(monkeypatch, tmp_path):
@@ -670,9 +680,15 @@ def test_line_computer_use_fake_webhook_runs_three_browser_tasks_and_acknowledge
     assert [event["status"] for event in result["data"]["events"]] == ["accepted", "accepted", "accepted"]
     assert [event["acknowledgement"]["text"] for event in result["data"]["events"]] == ["\u5c4a\u3044\u305f\u3088\uff01"] * 3
     assert completed.wait(timeout=2)
+    deadline = time.time() + 2
+    while len(line_calls) < 6 and time.time() < deadline:
+        time.sleep(0.01)
     assert len(captured_invocations) == 3
-    assert len(line_calls) == 3
-    assert [call["body"]["messages"][0]["text"] for call in line_calls] == ["\u5c4a\u3044\u305f\u3088\uff01"] * 3
+    assert len(line_calls) == 6
+    ack_calls = [call for call in line_calls if call["url"].endswith("/message/reply")]
+    push_calls = [call for call in line_calls if call["url"].endswith("/message/push")]
+    assert [call["body"]["messages"][0]["text"] for call in ack_calls] == ["\u5c4a\u3044\u305f\u3088\uff01"] * 3
+    assert [call["body"]["messages"][0]["text"] for call in push_calls] == ["LINE Biz reply sent"] * 3
     captured_contents = [request["message"]["content"] for request, _context in captured_invocations]
     assert sorted(captured_contents) == sorted(tasks)
     for request, context in captured_invocations:
@@ -690,7 +706,8 @@ def test_line_computer_use_fake_webhook_runs_three_browser_tasks_and_acknowledge
         assert request["params"]["thinking_level"] == "low"
         assert request["tools"] == ["computer_use", "browser_computer"]
         assert context["computer_use_target_app"] == "Google Chrome"
-        assert context["computer_use_target_title"] == "LINE Chat"
+        assert "computer_use_target_title" not in context
+        assert context["computer_use_reply_surface"] == "line_push"
         assert context["line_background_processing"] is True
         assert context["profile_policy"]["max_tool_calls"] == 200
         assert context["profile_policy"]["yolo_mode"] is True
@@ -1116,35 +1133,24 @@ def test_line_route_builds_line_biz_prompt_from_chat_url(monkeypatch, tmp_path):
 
     assert result["status"] == "ok"
     assert chat_url in captured["context"]["external_prompt_prefix"]
-    assert "LINE Official Account Manager" in captured["context"]["external_prompt_prefix"]
+    assert "system will deliver that final text to LINE by push" in captured["context"]["external_prompt_prefix"]
+    assert "do not open or type into LINE Biz" in captured["context"]["external_prompt_prefix"]
     assert "computer.windows" in captured["context"]["external_prompt_prefix"]
-    assert "computer.select_window" in captured["context"]["external_prompt_prefix"]
     assert "computer.context" in captured["context"]["external_prompt_prefix"]
-    assert "active_window" in captured["context"]["external_prompt_prefix"]
-    assert "visible desktop Chrome window" in captured["context"]["external_prompt_prefix"]
     assert "external source message below is already the customer message" in captured["context"]["external_prompt_prefix"]
-    assert "Treat the visible LINE Biz chat history only as the destination UI" in captured["context"]["external_prompt_prefix"]
+    assert "Do not inspect, reread, scroll, type into, or send from visible LINE Biz" in captured["context"]["external_prompt_prefix"]
     assert "reply exactly with some text" in captured["context"]["external_prompt_prefix"]
     assert "perform that task first with computer_use in Chrome" in captured["context"]["external_prompt_prefix"]
     assert "For YouTube or media playback requests" in captured["context"]["external_prompt_prefix"]
+    assert "For requests to stop YouTube" in captured["context"]["external_prompt_prefix"]
+    assert "For requests to close Chrome" in captured["context"]["external_prompt_prefix"]
     assert "browser.open_url with the exact URL" in captured["context"]["external_prompt_prefix"]
     assert "do not type the URL into an address bar" in captured["context"]["external_prompt_prefix"]
     assert "do not merely" in captured["context"]["external_prompt_prefix"]
-    assert "large red circular reply button" in captured["context"]["external_prompt_prefix"]
-    assert "physical=true" in captured["context"]["external_prompt_prefix"]
-    assert "will not open the composer or press Send" in captured["context"]["external_prompt_prefix"]
-    assert "physically click inside the bottom reply composer/input field" in captured["context"]["external_prompt_prefix"]
-    assert "Do not use Ctrl+A" in captured["context"]["external_prompt_prefix"]
-    assert "confirm the reply text is visible inside the bottom composer before sending" in captured["context"]["external_prompt_prefix"]
-    assert "do not send an empty composer" in captured["context"]["external_prompt_prefix"]
-    assert "do not type it again" in captured["context"]["external_prompt_prefix"]
-    assert "not the small dropdown arrow" in captured["context"]["external_prompt_prefix"]
-    assert "The send button text is 送信." in captured["context"]["external_prompt_prefix"]
-    assert "Do not keep scrolling through the transcript repeatedly" in captured["context"]["external_prompt_prefix"]
     assert captured["context"]["computer_use_target_app"] == "Google Chrome"
-    assert captured["context"]["computer_use_target_title"] == "LINE Chat"
-    assert captured["context"]["computer_use_physical_clicks"] is True
-    assert captured["context"]["computer_use_reply_surface"] == "line_biz"
+    assert "computer_use_target_title" not in captured["context"]
+    assert "computer_use_physical_clicks" not in captured["context"]
+    assert captured["context"]["computer_use_reply_surface"] == "line_push"
     assert captured["context"]["computer_use_allow_task_observation"] is True
     assert captured["context"]["user_requested_computer_use"] is True
     assert captured["context"]["external_chat_history_mode"] == "current_turn"

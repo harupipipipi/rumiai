@@ -225,7 +225,15 @@ def _dispatch_line_event(
     )
     plan = result.get("response_plan") if isinstance(result.get("response_plan"), dict) else ResponsePlanner("line").plan(RumiResponse.from_result(result))
     reply = _send_response_plan(plan, external_event, context=context)
-    return {**result, "reply": reply, **({"simulation_input_profile_id": effective_input_profile_id} if effective_input_profile_id != input_profile_id else {})}
+    completion_push = _send_line_completion_push(result, external_event, context=context)
+    if completion_push is not None and completion_push.get("sent") is True:
+        reply = {"sent": False, "reason": "LINE completion sent by push after webhook acknowledgement"}
+    return {
+        **result,
+        "reply": reply,
+        **({"completion_push": completion_push} if completion_push is not None else {}),
+        **({"simulation_input_profile_id": effective_input_profile_id} if effective_input_profile_id != input_profile_id else {}),
+    }
 
 
 def _dispatch_line_exact_reply(
@@ -340,6 +348,43 @@ def _send_response_plan(plan: dict[str, Any], external_event, *, context: dict[s
     if isinstance(action_plan, dict) and not action_plan.get("external_reply", True):
         return {"sent": False, "reason": "external reply suppressed by response prompt policy"}
     return LineResponseAdapter().send(plan, event=external_event, context=context)
+
+
+def _send_line_completion_push(result: dict[str, Any], external_event, *, context: dict[str, Any] | None = None) -> Dict[str, Any] | None:
+    if not _line_completion_push_enabled(context):
+        return None
+    text = text_limit(str(result.get("assistant_text") or result.get("text") or "").strip(), 5000)
+    if not text:
+        return {"sent": False, "reason": "missing completion text", "mode": "push_to_origin"}
+    origin = origin_from_external_event(external_event)
+    if not origin.source_id:
+        return {"sent": False, "reason": "missing push target", "mode": "push_to_origin"}
+    if _line_simulation_without_external_send(context):
+        return {
+            "sent": True,
+            "simulated": True,
+            "mode": "push_to_origin",
+            "target_id": origin.source_id,
+            "text": text,
+        }
+    return LineResponseAdapter().send_text_push(origin.source_id, text)
+
+
+def _line_completion_push_enabled(context: dict[str, Any] | None) -> bool:
+    context = context if isinstance(context, dict) else {}
+    endpoint = context.get("webhook_endpoint") if isinstance(context.get("webhook_endpoint"), dict) else {}
+    response = endpoint.get("response") if isinstance(endpoint.get("response"), dict) else {}
+    mode = str(response.get("mode") or "").strip().lower()
+    if mode != "computer_use_line_biz":
+        return False
+    if _truthy(response.get("use_line_biz_reply") or response.get("send_completion_in_line_biz")):
+        return False
+    if "completion_push" in response:
+        return _truthy(response.get("completion_push"))
+    if "push_completion" in response:
+        return _truthy(response.get("push_completion"))
+    acknowledgement = context.get("line_webhook_acknowledgement")
+    return isinstance(acknowledgement, dict) and acknowledgement.get("sent") is True
 
 
 def _payload_from_raw_body(input_data, raw_body: bytes) -> tuple[dict[str, Any], str]:
@@ -594,14 +639,16 @@ def _apply_endpoint_response_context(runtime_context: dict[str, Any], endpoint: 
     target_title = str(
         response.get("target_title")
         or response.get("computer_use_target_title")
-        or ("LINE Chat" if mode == "computer_use_line_biz" else "")
         or ""
     ).strip()
     if target_title:
         updated.setdefault("computer_use_target_title", target_title)
     if mode == "computer_use_line_biz":
-        updated.setdefault("computer_use_physical_clicks", True)
-        updated.setdefault("computer_use_reply_surface", "line_biz")
+        if _truthy(response.get("use_line_biz_reply") or response.get("send_completion_in_line_biz")):
+            updated.setdefault("computer_use_physical_clicks", True)
+            updated.setdefault("computer_use_reply_surface", "line_biz")
+        else:
+            updated.setdefault("computer_use_reply_surface", "line_push")
         updated.setdefault("computer_use_allow_task_observation", True)
 
     tool_policy = dict(updated.get("profile_policy") if isinstance(updated.get("profile_policy"), dict) else {})
@@ -794,6 +841,29 @@ def _line_biz_prompt_prefix(response: dict[str, Any], *, mode: str = "") -> str:
         or response.get("reply_language")
         or "Japanese"
     ).strip()
+    return (
+        "Handle the LINE webhook source message below. "
+        f"The configured LINE Biz chat URL is {chat_url}, but do not open or type into LINE Biz unless a later instruction explicitly asks for LINE Biz UI delivery. "
+        f"Write the final completion text in {reply_language}; the system will deliver that final text to LINE by push after the webhook acknowledgement. "
+        "First decide whether the external source message asks for a text reply or asks you to perform a computer/browser task. "
+        "If the source message says to reply exactly with some text, send exactly that text and nothing else. "
+        "If the source message asks you to perform an action on the computer, such as opening a URL, playing media, "
+        "searching, clicking, or checking a page, perform that task first with computer_use in Chrome; do not merely "
+        "send an acknowledgement that you will do it. When an explicit URL is present, your first tool action for that "
+        "task should be browser.open_url with the exact URL; do not type the URL into an address bar or search box "
+        "unless browser.open_url fails. Keep tool use efficient and avoid repeated screenshots of the same state. "
+        "For YouTube or media playback requests, open the requested URL "
+        "or search result directly, start playback, verify from computer.context or a screenshot that the media page is visible "
+        "and playback appears started, then return a concise completion reply. "
+        "For requests to stop YouTube, pause or close the YouTube tab/window and verify playback is stopped or the YouTube window is gone. "
+        "For requests to close Chrome, close the requested Chrome window or Chrome app after finishing any required browser task, then verify with computer.windows. "
+        "If the task is blocked, send the concrete blocker instead of claiming success. "
+        "Do not inspect, reread, scroll, type into, or send from visible LINE Biz chat bubbles to understand or answer this webhook event. "
+        "Use computer.windows or computer.context to identify the correct browser window when needed. "
+        "The external source message below is already the customer message you should answer. "
+        "After completing the requested action, answer the external source message clearly and concisely. "
+        "Do not say a task succeeded unless the relevant page, playback state, or window list was checked."
+    )
     return (
         "Use computer_use in Google Chrome to open "
         f"{chat_url} and reply in {reply_language} inside LINE Official Account Manager. "
