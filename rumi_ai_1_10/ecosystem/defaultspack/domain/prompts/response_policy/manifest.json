@@ -1,0 +1,24 @@
+{
+  "id": "response_policy",
+  "prompt_id": "response_policy",
+  "category": "prompts",
+  "kind": "prompt",
+  "version": "1",
+  "status": "stable",
+  "display_name": "Response Policy Prompt",
+  "description": "Prompt surface for external response policy decisions.",
+  "entrypoints": {
+    "prompt": "prompt.md",
+    "rules": "rules.json"
+  },
+  "capabilities": {
+    "response_policy": true
+  },
+  "aliases": {
+    "prompt_ids": ["response_policy"]
+  },
+  "compatibility": {
+    "legacy_ids": ["response_policy"]
+  },
+  "source_pack_id": "defaultspack"
+}

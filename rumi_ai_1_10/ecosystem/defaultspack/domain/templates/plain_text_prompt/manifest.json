@@ -1,0 +1,16 @@
+{
+  "id": "plain_text_prompt",
+  "category": "templates",
+  "kind": "prompt_template",
+  "version": "1",
+  "status": "stable",
+  "display_name": "Plain Text Prompt Template",
+  "entrypoints": {
+    "template": "template.md",
+    "rules": "rules.json"
+  },
+  "capabilities": {
+    "plain_text": true
+  },
+  "source_pack_id": "defaultspack"
+}

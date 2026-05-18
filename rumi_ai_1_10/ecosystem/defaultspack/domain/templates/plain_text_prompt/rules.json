@@ -1,0 +1,9 @@
+{
+  "variables": [
+    {
+      "name": "body",
+      "type": "string",
+      "required": true
+    }
+  ]
+}

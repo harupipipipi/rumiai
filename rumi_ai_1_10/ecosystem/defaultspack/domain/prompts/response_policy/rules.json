@@ -1,0 +1,10 @@
+{
+  "variables": [],
+  "rendering": {
+    "engine": "plain_text"
+  },
+  "policy": {
+    "provider_independent": true,
+    "tool_registry_independent": true
+  }
+}
