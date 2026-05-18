@@ -4,6 +4,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
+from ecosystem.defaultspack.domain.components import get_domain_component_registry
 from ecosystem.defaultspack.domain.extensions.runtime import get_extension_registry
 
 
@@ -54,6 +55,63 @@ def compile_http_route_pattern(pattern: str):
         pattern,
     )
     return re.compile("^" + regex_pattern + "$")
+
+
+def _component_route_specs() -> List[HttpRouteSpec]:
+    specs: List[HttpRouteSpec] = []
+    try:
+        components = get_domain_component_registry().list()
+    except Exception:
+        return specs
+    for component in components:
+        manifest = component.as_dict()
+        routes = manifest.get("routes")
+        if not isinstance(routes, list):
+            continue
+        for route in routes:
+            if not isinstance(route, dict):
+                continue
+            method = str(route.get("method") or "").strip().upper()
+            pattern = str(route.get("path") or route.get("pattern") or "").strip()
+            block_module = str(route.get("block_module") or "").strip()
+            handler_name = str(route.get("handler_name") or "").strip()
+            if not method or not pattern or not (block_module or handler_name):
+                continue
+            path_inject = route.get("path_inject")
+            defaults = route.get("defaults")
+            specs.append(
+                HttpRouteSpec(
+                    method,
+                    pattern,
+                    block_module=block_module,
+                    handler_name=handler_name,
+                    path_inject=dict(path_inject) if isinstance(path_inject, dict) else {},
+                    defaults=dict(defaults) if isinstance(defaults, dict) else {},
+                )
+            )
+    return specs
+
+
+def component_http_route_specs() -> List[HttpRouteSpec]:
+    return list(_component_route_specs())
+
+
+def component_route_diagnostics() -> list[dict[str, str]]:
+    diagnostics: list[dict[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for spec in _component_route_specs():
+        key = (spec.method, spec.pattern)
+        if key in seen:
+            diagnostics.append(
+                {
+                    "level": "warning",
+                    "code": "component_route_duplicate",
+                    "message": f"duplicate component route {spec.method} {spec.pattern}",
+                    "source": "domain component manifests",
+                }
+            )
+        seen.add(key)
+    return diagnostics
 
 
 _FALLBACK_HTTP_ROUTE_SPECS = [
@@ -379,7 +437,13 @@ def build_fallback_http_routes(server: Any):
         for spec in _FALLBACK_HTTP_ROUTE_SPECS
         if spec.pattern not in {item.pattern for item in _ALWAYS_AVAILABLE_HTTP_ROUTE_SPECS}
     ]
+    existing = {(spec.method, spec.pattern) for spec in [*fallback_specs, *_ALWAYS_AVAILABLE_HTTP_ROUTE_SPECS]}
+    component_specs = [
+        spec
+        for spec in _component_route_specs()
+        if (spec.method, spec.pattern) not in existing
+    ]
     return build_http_routes_from_specs(
         server,
-        fallback_specs + _ALWAYS_AVAILABLE_HTTP_ROUTE_SPECS,
+        fallback_specs + component_specs + _ALWAYS_AVAILABLE_HTTP_ROUTE_SPECS,
     )

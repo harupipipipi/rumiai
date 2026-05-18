@@ -12,6 +12,7 @@ from domain.ai_client.api_key_store import provider_key_status, set_provider_api
 from domain.ai_client.model_runtime_settings import ModelRuntimeSettingsService
 from domain.capability.catalog import CapabilityCatalog
 from domain.chat.store import ChatStore
+from domain.components.registry import DomainComponentRegistry, build_domain_component_roots
 from domain.dev.inspector import Inspector
 from domain.extensions.activation import selected_extension_pack_ids
 from domain.extensions.runtime import get_extension_registry
@@ -22,6 +23,7 @@ from domain.external.source_store import ExternalSourceStore, external_source_ke
 from domain.external.token_store import external_token_status, set_external_token
 from domain.tool.registry import ToolRegistry
 from domain.webhook.endpoint_store import WebhookEndpointStore
+from transport.registry import component_http_route_specs, component_route_diagnostics
 
 
 class FrontendRegistry:
@@ -57,6 +59,7 @@ class FrontendRegistry:
             "chat_rendering": {
                 "renderers": self._chat_renderers(ui_surfaces, extensions),
             },
+            "routes": self._route_metadata(),
             "extension_points": self._extension_points(),
             "diagnostics": self._diagnostics(shell, parts, component_bindings),
         }
@@ -1329,7 +1332,47 @@ class FrontendRegistry:
             surfaces = get_extension_registry().ui_surfaces().list(enabled_only=True)
         except Exception:
             surfaces = []
-        return [surface for surface in surfaces if isinstance(surface, dict)]
+        return [
+            *[surface for surface in surfaces if isinstance(surface, dict)],
+            *self._load_component_ui_surfaces(),
+        ]
+
+    def _load_component_ui_surfaces(self) -> list[dict[str, Any]]:
+        try:
+            registry = DomainComponentRegistry(build_domain_component_roots(self._pack_root))
+        except Exception:
+            return []
+        surfaces: list[dict[str, Any]] = []
+        for component in registry.list("ui_surfaces"):
+            manifest = component.as_dict()
+            config = manifest.get("ui")
+            if not isinstance(config, dict):
+                config = {}
+            surfaces.append(
+                {
+                    "id": component.id,
+                    "category": "ui_surface",
+                    "config": config,
+                    "_source": manifest.get("source_path", ""),
+                    "source_pack_id": component.source_pack_id,
+                }
+            )
+        return surfaces
+
+    def _route_metadata(self) -> dict[str, Any]:
+        specs = component_http_route_specs()
+        return {
+            "manifest_backed": [
+                {
+                    "method": spec.method,
+                    "path": spec.pattern,
+                    "block_module": spec.block_module,
+                    "handler_name": spec.handler_name,
+                }
+                for spec in specs
+            ],
+            "diagnostics": component_route_diagnostics(),
+        }
 
     def _load_extensions(self) -> list[dict[str, Any]]:
         extensions = []
