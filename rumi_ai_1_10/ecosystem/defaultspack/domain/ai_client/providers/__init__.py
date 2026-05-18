@@ -8,6 +8,11 @@ from ...extensions.loading import import_entrypoint
 from ...extensions.runtime import get_extension_registry
 from ..api_key_store import load_provider_api_keys_into_env, provider_has_api_key
 from ..oauth_store import provider_has_oauth_connection, provider_oauth_status
+from .component_metadata import (
+    model_manifests_from_provider_components,
+    provider_component_metadata_map,
+    provider_manifests_from_components,
+)
 from .openai_compatible_provider import OpenAICompatibleProvider
 from .provider_catalog import OPENAI_COMPATIBLE_PROVIDER_CLASSES
 from . import google_provider as google_provider
@@ -537,6 +542,8 @@ def _provider_manifest_map() -> Dict[str, Dict[str, Any]]:
         provider_id = str(manifest.get("id", "")).strip()
         if provider_id:
             manifests[provider_id] = dict(manifest)
+    for provider_id, manifest in provider_manifests_from_components().items():
+        manifests.setdefault(provider_id, dict(manifest))
     return manifests
 
 
@@ -618,7 +625,11 @@ def _provider_supports_invoke(provider_id: str, manifest: Dict[str, Any], curate
 
 def _merge_provider_entry(provider_id: str, manifest: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     manifest = dict(manifest or {})
-    curated = dict(_CURATED_PROVIDER_METADATA.get(provider_id, {}))
+    component_metadata = dict(provider_component_metadata_map().get(provider_id, {}))
+    curated = {**dict(_CURATED_PROVIDER_METADATA.get(provider_id, {})), **component_metadata}
+    component_provider_manifest = curated.pop("provider_manifest", {})
+    if isinstance(component_provider_manifest, dict):
+        manifest = {**component_provider_manifest, **manifest}
     display_name = str(
         manifest.get("display_name")
         or curated.get("display_name")
@@ -802,6 +813,7 @@ def _load_models_for_provider(entry: Dict[str, Any]) -> List[Dict[str, Any]]:
             models.append(item)
 
     _append(_load_model_manifests(provider_id))
+    _append(model_manifests_from_provider_components(provider_id))
     _append(_load_known_models_from_entry(str(entry.get("entrypoint", ""))))
     _append(_CURATED_PROVIDER_MODELS.get(provider_id, []))
     return models

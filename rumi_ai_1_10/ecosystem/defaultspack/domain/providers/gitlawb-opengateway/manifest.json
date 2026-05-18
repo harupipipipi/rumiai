@@ -1,0 +1,85 @@
+{
+  "id": "gitlawb-opengateway",
+  "provider_id": "gitlawb-opengateway",
+  "category": "providers",
+  "kind": "llm_provider",
+  "version": "1",
+  "status": "stable",
+  "display_name": "Gitlawb OpenGateway",
+  "entrypoints": {
+    "adapter": "../ai_client/providers/gitlawb_opengateway_provider.py",
+    "models": "models.json"
+  },
+  "security": {
+    "credential_required": false,
+    "privacy": "external_no_key_gateway",
+    "browser_user_agent": true,
+    "fixed_model_allowlist": true
+  },
+  "capabilities": {
+    "chat": true,
+    "streaming": true,
+    "reasoning": true,
+    "vision": true,
+    "openai_compatible": true
+  },
+  "provider_metadata": {
+    "display_name": "Gitlawb OpenGateway",
+    "kind": "aggregator",
+    "description": "No-key Gitlawb OpenGateway allowlist for MiMo and Gemini Flash Lite.",
+    "env_vars": [],
+    "base_url_envs": ["GITLAWB_OPENGATEWAY_BASE_URL"],
+    "catalog_only": false,
+    "supports_invoke": true,
+    "default_base_url": "https://opengateway.gitlawb.com/v1",
+    "default_model": "mimo-v2.5-pro",
+    "default_model_for": {
+      "chat": "mimo-v2.5-pro",
+      "reasoning": "mimo-v2.5-pro",
+      "fast": "mimo-v2-flash"
+    },
+    "capabilities": ["chat", "streaming", "openai_compatible", "reasoning", "vision"]
+  },
+  "provider_manifest": {
+    "id": "gitlawb-opengateway",
+    "category": "llm_provider",
+    "version": "1",
+    "display_name": "Gitlawb OpenGateway",
+    "enabled": true,
+    "priority": 45,
+    "adapter": "python_entrypoint",
+    "entrypoint": "domain.ai_client.providers.gitlawb_opengateway_provider:GitlawbOpengatewayProvider",
+    "api_key_env": "",
+    "base_url_env": "GITLAWB_OPENGATEWAY_BASE_URL",
+    "credential_required": false,
+    "default_base_url": "https://opengateway.gitlawb.com/v1",
+    "default_model": "mimo-v2.5-pro",
+    "default_model_for": {
+      "chat": "mimo-v2.5-pro",
+      "reasoning": "mimo-v2.5-pro",
+      "fast": "mimo-v2-flash"
+    },
+    "capabilities": {
+      "native_tool_calling": false,
+      "vision": true,
+      "embeddings": false,
+      "streaming": true
+    },
+    "config": {
+      "model_sync": "fixed_allowlist",
+      "privacy": "external_no_key_gateway"
+    }
+  },
+  "aliases": {
+    "provider_ids": ["gitlawb-opengateway"]
+  },
+  "compatibility": {
+    "legacy_ids": [
+      "gitlawb-opengateway",
+      "gitlawb-opengateway/mimo-v2.5-pro",
+      "gitlawb-opengateway/mimo-v2-flash",
+      "gitlawb-opengateway/google/gemini-3.1-flash-lite-preview"
+    ]
+  },
+  "source_pack_id": "defaultspack"
+}

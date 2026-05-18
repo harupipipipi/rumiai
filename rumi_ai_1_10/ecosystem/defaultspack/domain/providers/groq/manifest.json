@@ -1,0 +1,39 @@
+{
+  "id": "groq",
+  "provider_id": "groq",
+  "category": "providers",
+  "kind": "llm_provider",
+  "version": "1",
+  "status": "stable",
+  "display_name": "Groq",
+  "entrypoints": {
+    "adapter": "../ai_client/providers/openai_compatible_provider.py"
+  },
+  "security": {
+    "credential_required": true
+  },
+  "capabilities": {
+    "chat": true,
+    "tool_calls": true
+  },
+  "provider_metadata": {
+    "display_name": "Groq",
+    "kind": "cloud",
+    "env_vars": ["GROQ_API_KEY"],
+    "base_url_envs": ["GROQ_BASE_URL"],
+    "catalog_only": true,
+    "supports_invoke": false,
+    "default_model": "llama-3.3-70b-versatile",
+    "default_model_for": {
+      "fast": "llama-3.3-70b-versatile"
+    },
+    "capabilities": ["chat", "tool_calls"]
+  },
+  "aliases": {
+    "provider_ids": ["groq"]
+  },
+  "compatibility": {
+    "legacy_ids": ["groq"]
+  },
+  "source_pack_id": "defaultspack"
+}
