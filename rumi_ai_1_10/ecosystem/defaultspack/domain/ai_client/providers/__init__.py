@@ -695,6 +695,8 @@ def _provider_is_configured(entry: Dict[str, Any]) -> tuple[bool, Optional[str]]
             return True, env_name
     if entry.get("kind") == "local" and entry.get("default_base_url"):
         return True, "default_local_endpoint"
+    if not bool(entry.get("credential_required", True)) and entry.get("default_base_url"):
+        return True, "default_base_url"
     if entry["provider_id"] == "stub":
         return True, "builtin"
     return False, None

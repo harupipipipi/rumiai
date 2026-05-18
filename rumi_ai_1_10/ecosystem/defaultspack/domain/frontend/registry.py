@@ -1764,7 +1764,7 @@ class FrontendRegistry:
         model_type = str(profile.get("type") or "chat").strip().lower()
         availability = profile.get("availability") if isinstance(profile.get("availability"), dict) else {}
 
-        if model_type and model_type != "chat":
+        if model_type and model_type not in {"chat", "reasoning"}:
             return False
         if provider_id == "rumi":
             return False

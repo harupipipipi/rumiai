@@ -47,6 +47,21 @@ def test_provider_catalog_includes_opengateway():
     assert provider["base_url_envs"] == ["GITLAWB_OPENGATEWAY_BASE_URL"]
     assert provider["metadata"]["default_base_url"] == "https://opengateway.gitlawb.com/v1"
     assert provider["availability"]["base_url_hint"] == "https://opengateway.gitlawb.com/v1"
+    assert provider["availability"]["configured"] is True
+    assert provider["availability"]["configuration_source"] == "default_base_url"
+
+
+def test_frontend_model_options_include_no_key_opengateway_models():
+    from domain.frontend.registry import FrontendRegistry
+
+    registry = FrontendRegistry(pack_root=DEFAULTSPACK_ROOT)
+
+    options = {item["value"]: item for item in registry._model_route_options()}
+
+    for model_id in OPENGATEWAY_MODELS:
+        assert model_id in options
+        assert options[model_id]["provider_id"] == "gitlawb-opengateway"
+        assert options[model_id]["configured"] is True
 
 
 def test_opengateway_not_auto_registered_without_cloud_opt_in():
