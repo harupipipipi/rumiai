@@ -23,6 +23,9 @@
     },
     "tool_category": "filesystem_write",
     "action_type": "restore",
+    "risk": "high",
+    "approval_policy": "ask",
+    "capability_grants": ["file.write"],
     "write_action": true,
     "requires_approval": true,
     "schema": {
@@ -35,7 +38,6 @@
         "required": ["snapshot_id"]
       }
     },
-    "execution": {"type": "local"},
-    "handler": "blocks.coding.file_restore:run"
+    "execution": {"type": "rumi_function", "qualified_name": "defaultspack:coding_file_restore"}
   }
 }

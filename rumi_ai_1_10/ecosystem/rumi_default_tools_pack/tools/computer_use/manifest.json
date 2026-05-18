@@ -84,6 +84,10 @@
       "type": "rumi_function",
       "qualified_name": "rumi_default_tools_pack:computer_use"
     },
+    "tool_category": "desktop",
+    "risk": "high",
+    "approval_policy": "ask",
+    "capability_grants": ["computer.control"],
     "requires_approval": true,
     "action_type": "desktop",
     "ui": {

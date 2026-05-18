@@ -1,0 +1,73 @@
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+import yaml
+
+
+ROOT = Path(__file__).resolve().parent.parent
+DEFAULTSPACK_ROOT = ROOT / "ecosystem" / "defaultspack"
+sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(DEFAULTSPACK_ROOT))
+
+from blocks.prompt.load_effective import run  # noqa: E402
+
+
+def _workspace(tmp_path: Path, *, prompt_id: str = "default_chat") -> dict:
+    root = tmp_path / "profiles" / "p1"
+    prompts_dir = root / "prompts"
+    snapshots_dir = root / "ecosystem" / "snapshots"
+    prompts_dir.mkdir(parents=True)
+    snapshots_dir.mkdir(parents=True)
+    profile_file = root / "profile.yaml"
+    profile_file.write_text(
+        yaml.safe_dump(
+            {
+                "profile_id": "p1",
+                "base_pack": "defaultspack",
+                "system_prompt_id": prompt_id,
+            },
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+    return {
+        "profile_file": str(profile_file),
+        "prompts_dir": str(prompts_dir),
+        "snapshots_dir": str(snapshots_dir),
+    }
+
+
+def test_effective_prompt_prefers_profile_override_over_snapshot(tmp_path: Path):
+    workspace = _workspace(tmp_path)
+    Path(workspace["prompts_dir"], "default_chat.system.md").write_text("profile override\n", encoding="utf-8")
+    snapshot_prompt = Path(workspace["snapshots_dir"], "defaultspack", "prompts", "default_chat")
+    snapshot_prompt.mkdir(parents=True)
+    (snapshot_prompt / "prompt.md").write_text("snapshot prompt\n", encoding="utf-8")
+
+    result = run({"profile_id": "p1", "workspace": workspace}, {})
+
+    assert result["data"]["content"] == "profile override\n"
+    assert result["data"]["source_type"] == "profile_override"
+
+
+def test_effective_prompt_uses_snapshot_before_pack_default(tmp_path: Path):
+    workspace = _workspace(tmp_path)
+    snapshot_prompt = Path(workspace["snapshots_dir"], "defaultspack", "prompts", "default_chat")
+    snapshot_prompt.mkdir(parents=True)
+    (snapshot_prompt / "prompt.md").write_text("snapshot prompt\n", encoding="utf-8")
+
+    result = run({"profile_id": "p1", "workspace": workspace}, {})
+
+    assert result["data"]["content"] == "snapshot prompt\n"
+    assert result["data"]["source_type"] == "profile_snapshot"
+
+
+def test_effective_prompt_falls_back_to_defaultspack_prompt_component(tmp_path: Path):
+    workspace = _workspace(tmp_path)
+
+    result = run({"profile_id": "p1", "workspace": workspace}, {})
+
+    assert "default chat assistant" in result["data"]["content"]
+    assert result["data"]["source_type"] == "pack_default"

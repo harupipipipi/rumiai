@@ -29,6 +29,11 @@
         }
       }
     },
+    "tool_category": "network",
+    "action_type": "read",
+    "risk": "medium",
+    "approval_policy": "ask",
+    "capability_grants": ["network.read", "network.send"],
     "execution": {
       "type": "rumi_function",
       "qualified_name": "rumi_default_tools_pack:rumi_api"

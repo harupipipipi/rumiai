@@ -28,6 +28,7 @@ from blocks.chat.send import (
     _tool_visibility_message,
 )
 from domain.ai_client.client import AIClient
+from domain.ai_client.gateway import LLMGateway
 from domain.chat.cancellation import get_chat_cancellation_registry
 from domain.chat.message_builder import build_assistant_message
 from domain.chat.run_request import PreparedChatRun, prepare_chat_run
@@ -480,9 +481,15 @@ class _AssistantDraft:
 
 
 class ChatRunEngine:
-    def __init__(self, *, store: ChatStore | None = None, client: AIClient | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        store: ChatStore | None = None,
+        client: AIClient | None = None,
+        gateway: LLMGateway | None = None,
+    ) -> None:
         self._store = store or ChatStore()
-        self._client = client or AIClient()
+        self._gateway = gateway or LLMGateway(client=client)
         self._run_id = ""
         self._conversation_id = ""
         self._event_seq = 0
@@ -849,7 +856,7 @@ class ChatRunEngine:
                     self._sync_draft(draft, thinking_state="completed")
             return response, tool_uses
 
-        if not self._client.supports_stream(prepared.model):
+        if not self._gateway.supports_stream(prepared.model):
             response = self._complete_turn(prepared, messages)
             tool_uses = _tool_use_blocks(response)
             if not tool_uses:
@@ -867,11 +874,13 @@ class ChatRunEngine:
         attempts = _ai_retry_attempts(prepared.params)
         for attempt_index in range(attempts):
             try:
-                self._current_stream = self._client.stream(
-                    prepared.model,
-                    messages,
-                    tools=prepared.provider_tools,
-                    params=prepared.params,
+                self._current_stream = self._gateway.stream(
+                    {
+                        "model": prepared.model,
+                        "messages": messages,
+                        "tools": prepared.provider_tools,
+                        "params": prepared.params,
+                    }
                 )
                 self._raise_if_cancelled()
                 for chunk in self._current_stream:
@@ -1181,7 +1190,7 @@ class ChatRunEngine:
 
     def _provider_supports_stream_tool_calls(self, model: str) -> bool:
         try:
-            provider, _ = self._client.resolve_provider(model)
+            provider, _ = self._gateway.resolve_provider(model)
         except Exception:
             return False
         name = provider.__class__.__name__.lower()
@@ -1264,7 +1273,9 @@ class ChatRunEngine:
                     if isinstance(response, dict) and response.get("status") == "ok":
                         return response.get("data", {})
                     return response
-                return self._client.complete(model, messages, tools or [], params or {})
+                return self._gateway.complete(
+                    {"model": model, "messages": messages, "tools": tools or [], "params": params or {}}
+                )
             except Exception as exc:
                 last_error = str(exc)
                 if attempt_index >= attempts - 1 or not _is_retryable_ai_error(last_error):
@@ -1453,11 +1464,13 @@ class ChatRunEngine:
         transcript: str = "",
     ) -> dict[str, Any] | None:
         try:
-            response = self._client.complete(
-                prepared.model,
-                messages,
-                [],
-                _params_without_thinking(prepared.params),
+            response = self._gateway.complete(
+                {
+                    "model": prepared.model,
+                    "messages": messages,
+                    "tools": [],
+                    "params": _params_without_thinking(prepared.params),
+                }
             )
         except Exception:
             return None

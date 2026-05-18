@@ -23,6 +23,9 @@
     },
     "tool_category": "git",
     "action_type": "commit",
+    "risk": "high",
+    "approval_policy": "ask",
+    "capability_grants": ["git.write"],
     "write_action": true,
     "requires_approval": true,
     "schema": {
@@ -35,7 +38,6 @@
         "required": ["message"]
       }
     },
-    "execution": {"type": "local"},
-    "handler": "blocks.coding.git_commit:run"
+    "execution": {"type": "rumi_function", "qualified_name": "defaultspack:coding_git_commit"}
   }
 }

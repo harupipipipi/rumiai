@@ -81,6 +81,7 @@ MAX_ARGS_SUMMARY_LENGTH = 500
 
 logger = logging.getLogger(__name__)
 FUNCTION_RUNNER_PATH = Path(__file__).with_name("function_runner.py")
+TRUSTED_BUILTIN_PACK_IDS = {"defaultspack", "rumi_default_tools_pack"}
 
 # デフォルトタイムアウト
 DEFAULT_TIMEOUT = 30.0
@@ -595,7 +596,8 @@ class CapabilityExecutor:
 
     def _dispatch_by_calling_convention(self, calling_convention, entry, principal_id,
                                          effective_permission_id, grant_config, args,
-                                         timeout_seconds, request_id, start_time):
+                                         timeout_seconds, request_id, start_time,
+                                         request_context=None):
         """calling_convention の値で実行パスを分岐する。"""
         if calling_convention == "kernel":
             return CapabilityResponse(
@@ -617,7 +619,8 @@ class CapabilityExecutor:
             return self._execute_handler_subprocess(handler_def=adapter, principal_id=principal_id,
                                                      permission_id=effective_permission_id, grant_config=grant_config,
                                                      args=args, timeout_seconds=timeout_seconds,
-                                                     request_id=request_id, start_time=start_time)
+                                                     request_id=request_id, start_time=start_time,
+                                                     request_context=request_context)
         if calling_convention == "python_host":
             return self._execute_host_function(principal_id=principal_id, entry=entry, args=args,
                                                 request_id=request_id, start_time=start_time)
@@ -668,6 +671,7 @@ class CapabilityExecutor:
         """function.call リクエストを処理する。"""
         qualified_name = request.get("qualified_name")
         args = request.get("args", {})
+        request_context = request.get("context") if isinstance(request.get("context"), dict) else None
         request_id = request.get("request_id", "")
         if not qualified_name or not isinstance(qualified_name, str):
             resp = CapabilityResponse(success=False, error="Missing or invalid qualified_name",
@@ -703,6 +707,7 @@ class CapabilityExecutor:
             return resp
         pack_id = entry.pack_id
         is_core = pack_id.startswith(_CORE_PACK_ID_PREFIX)
+        is_trusted_builtin = pack_id in TRUSTED_BUILTIN_PACK_IDS
         if self._approval_manager is not None:
             try:
                 approved_result = self._approval_manager.is_pack_approved_and_verified(pack_id)
@@ -727,7 +732,7 @@ class CapabilityExecutor:
                     self._audit(principal_id, "function.call", None, resp, args, request_id,
                                 detail_reason=f"approval_manager error for pack '{pack_id}': {exc}")
                     return resp
-        if not is_core and entry.requires and self._permission_manager is not None:
+        if not (is_core or is_trusted_builtin) and entry.requires and self._permission_manager is not None:
             for req_perm in entry.requires:
                 if not self._permission_manager.has_permission(pack_id, req_perm):
                     resp = CapabilityResponse(success=False,
@@ -736,7 +741,7 @@ class CapabilityExecutor:
                     self._audit(principal_id, "function.call", None, resp, args, request_id,
                                 detail_reason=f"Pack '{pack_id}' lacks required permission '{req_perm}'")
                     return resp
-        if self._permission_manager is not None:
+        if self._permission_manager is not None and principal_id not in TRUSTED_BUILTIN_PACK_IDS:
             if not self._permission_manager.has_permission(principal_id, "function.call"):
                 resp = CapabilityResponse(success=False, error="Permission denied: function.call",
                                           error_type="permission_denied", latency_ms=(time.time() - start_time) * 1000)
@@ -745,8 +750,19 @@ class CapabilityExecutor:
                 return resp
         if entry.caller_requires:
             caller_ok = False
-            if self._permission_manager is not None and hasattr(self._permission_manager, "check_caller_requires"):
+            high_risk_approval_only = self._caller_requires_high_risk_approval_only(entry.caller_requires)
+            if (
+                not high_risk_approval_only
+                and self._permission_manager is not None
+                and hasattr(self._permission_manager, "check_caller_requires")
+            ):
                 caller_ok = self._permission_manager.check_caller_requires(principal_id, entry.caller_requires)
+            if not caller_ok and self._request_context_satisfies_caller_requires(
+                principal_id,
+                entry.caller_requires,
+                request_context,
+            ):
+                caller_ok = True
             if not caller_ok:
                 resp = CapabilityResponse(success=False, error="Caller does not meet caller_requires",
                                           error_type="caller_requires_denied", latency_ms=(time.time() - start_time) * 1000)
@@ -766,6 +782,7 @@ class CapabilityExecutor:
                 timeout_seconds=request.get("timeout_seconds", DEFAULT_FUNCTION_TIMEOUT),
                 request_id=request_id,
                 start_time=start_time,
+                request_context=request_context,
             )
         elif is_core:
             resp = self._dispatch_core_function(principal_id=principal_id, entry=entry, args=args,
@@ -782,6 +799,22 @@ class CapabilityExecutor:
         self._audit(principal_id, "function.call", None, resp, args, request_id,
                     extra_details={"qualified_name": qualified_name, "pack_id": pack_id, "is_core": is_core, "calling_convention": calling_convention})
         return resp
+
+    @staticmethod
+    def _request_context_satisfies_caller_requires(principal_id, caller_requires, request_context):
+        if principal_id not in TRUSTED_BUILTIN_PACK_IDS:
+            return False
+        if not isinstance(request_context, dict):
+            return False
+        if request_context.get("_tool_server_approved") is not True:
+            return False
+        required = {str(item or "").strip() for item in caller_requires or []}
+        return bool(required) and required <= {"user.approved.high_risk"}
+
+    @staticmethod
+    def _caller_requires_high_risk_approval_only(caller_requires):
+        required = {str(item or "").strip() for item in caller_requires or []}
+        return bool(required) and required <= {"user.approved.high_risk"}
 
     # ------------------------------------------------------------------
     # Docker / user function helpers
@@ -893,7 +926,11 @@ class CapabilityExecutor:
         if self._is_docker_available() and _DockerRunBuilder is not None:
             return self._execute_user_function_docker(principal_id=principal_id, entry=entry, args=args, request_id=request_id, start_time=start_time, timeout=timeout)
         else:
-            logger.warning("Docker not available, falling back to host subprocess for user function %s:%s.", pack_id, function_id)
+            logger.warning("Docker not available for user function %s:%s.", pack_id, function_id)
+            security_mode = os.environ.get("RUMI_SECURITY_MODE", "").strip().lower()
+            function_docker_policy = os.environ.get("RUMI_FUNCTION_DOCKER_POLICY", "").strip().lower()
+            if security_mode == "strict" or function_docker_policy == "strict":
+                return CapabilityResponse(success=False, error="Docker is not available and strict function isolation forbids host fallback.", error_type="docker_unavailable", latency_ms=(time.time() - start_time) * 1000)
             allow_fallback = os.environ.get("RUMI_ALLOW_HOST_FALLBACK", "").lower()
             if allow_fallback not in ("1", "true"):
                 return CapabilityResponse(success=False, error="Docker is not available and host fallback is disabled. Set RUMI_ALLOW_HOST_FALLBACK=1 to enable.", error_type="docker_unavailable", latency_ms=(time.time() - start_time) * 1000)
@@ -1215,10 +1252,11 @@ class CapabilityExecutor:
             return CapabilityResponse(success=False, output=result, error=result["error"], error_type=f"{permission_id.replace('.', '_')}_error", latency_ms=latency_ms)
         return CapabilityResponse(success=True, output=result, latency_ms=latency_ms)
 
-    def _execute_handler_subprocess(self, handler_def, principal_id, permission_id, grant_config, args, timeout_seconds, request_id, start_time):
+    def _execute_handler_subprocess(self, handler_def, principal_id, permission_id, grant_config, args, timeout_seconds, request_id, start_time, request_context=None):
         ep_file, ep_func = handler_def.entrypoint.rsplit(":", 1)
         handler_py_path = handler_def.handler_dir / ep_file
-        context = {"principal_id": principal_id, "permission_id": permission_id, "handler_id": handler_def.handler_id, "grant_config": grant_config, "request_id": request_id, "ts": self._now_ts()}
+        context = dict(request_context or {}) if isinstance(request_context, dict) else {}
+        context.update({"principal_id": principal_id, "permission_id": permission_id, "handler_id": handler_def.handler_id, "grant_config": grant_config, "request_id": request_id, "ts": self._now_ts()})
         input_json = self._build_runner_payload(str(handler_py_path), ep_func, context, args)
         try:
             return self._run_runner_on_host(

@@ -88,7 +88,7 @@ handler は薄い入口であり、バリデーションと domain 呼び出し�
 - **`domain/agent/multi.py`** — `MultiAgentOrchestrator`: マルチエージェントのオーケストレーション。
 - **`domain/tool/registry.py`** — `ToolRegistry`: ツール定義の登録・管理。シングルトン。インメモリ + `user_data/shared/tools/` への永続化。
 - **`domain/prompt/manager.py`** — `PromptManager`: プロンプトの CRUD。インメモリ + `user_data/shared/prompts/` への永続化。
-- **`domain/prompt/template.py`** — `PromptTemplate`: tool と prompt の統一テンプレートシステム。
+- **`domain/prompt/template.py`** — `PromptTemplate`: passive prompt template representation.
 - **`domain/prompt/renderer.py`** — `render()`: `{{variable}}` をテンプレート変数で置換する。
 - **`domain/ai_client/client.py`** — `AIClient`: AI プロバイダーの抽象化。
 

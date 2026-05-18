@@ -47,6 +47,417 @@ def test_fallback_sorting_keeps_static_agent_company_status_before_generic_statu
     )
 
 
+def test_chat_send_fallback_specs_target_chat_turn_flow():
+    from ecosystem.defaultspack.transport.registry import _FALLBACK_HTTP_ROUTE_SPECS
+
+    specs = {
+        (spec.method, spec.pattern): spec
+        for spec in _FALLBACK_HTTP_ROUTE_SPECS
+    }
+
+    completion = specs[("POST", "/v1/chat/completions")]
+    message = specs[("POST", "/api/chat/conversations/{id}/messages")]
+    assert completion.flow_id == "defaultspack.chat_turn"
+    assert completion.fallback_block_module == "blocks.chat.send"
+    assert completion.block_module == ""
+    assert message.flow_id == "defaultspack.chat_turn"
+    assert message.path_inject == {"id": "conversation_id"}
+    stream = specs[("POST", "/api/chat/conversations/{id}/stream")]
+    assert stream.flow_id == "defaultspack.chat_stream_turn"
+    assert stream.fallback_block_module == "blocks.chat.stream"
+    assert stream.path_inject == {"id": "conversation_id"}
+
+
+def test_flow_yaml_routes_are_the_canonical_chat_ingress():
+    from ecosystem.defaultspack.transport.registry import (
+        canonical_http_route_specs,
+        flow_http_route_specs,
+    )
+
+    flow_specs = {(spec.method, spec.pattern): spec for spec in flow_http_route_specs()}
+    canonical = {(spec.method, spec.pattern): spec for spec in canonical_http_route_specs()}
+
+    assert flow_specs[("POST", "/v1/chat/completions")].flow_id == "defaultspack.chat_turn"
+    assert flow_specs[("POST", "/api/chat/conversations/{id}/messages")].flow_id == "defaultspack.chat_turn"
+    assert flow_specs[("POST", "/api/chat/conversations/{id}/stream")].flow_id == "defaultspack.chat_stream_turn"
+    assert canonical[("POST", "/api/chat/conversations/{id}/stream")].flow_id == "defaultspack.chat_stream_turn"
+
+
+def test_chat_send_route_handler_invokes_flow_route_before_block_fallback():
+    from ecosystem.defaultspack.transport.registry import (
+        HttpRouteSpec,
+        build_http_routes_from_specs,
+    )
+
+    class Server:
+        def __init__(self):
+            self.calls = []
+
+        def _invoke_flow_route(
+            self,
+            flow_id,
+            request_data,
+            path_params,
+            inject=None,
+            *,
+            fallback_block_module="",
+        ):
+            self.calls.append(
+                {
+                    "flow_id": flow_id,
+                    "request_data": request_data,
+                    "path_params": path_params,
+                    "inject": inject or {},
+                    "fallback_block_module": fallback_block_module,
+                }
+            )
+            return {"status": "ok"}
+
+    server = Server()
+    routes = build_http_routes_from_specs(
+        server,
+        [
+            HttpRouteSpec(
+                "POST",
+                "/api/chat/conversations/{id}/messages",
+                flow_id="defaultspack.chat_turn",
+                fallback_block_module="blocks.chat.send",
+                path_inject={"id": "conversation_id"},
+            ),
+        ],
+    )
+    method, compiled, handler, source, path_inject = routes[0]
+    match = compiled.match("/api/chat/conversations/c1/messages")
+
+    assert method == "POST"
+    assert source == "fallback"
+    assert path_inject == {"id": "conversation_id"}
+    assert match is not None
+    assert handler({"message": {"content": "hi"}}, match.groupdict()) == {"status": "ok"}
+    assert server.calls == [
+        {
+            "flow_id": "defaultspack.chat_turn",
+            "request_data": {"message": {"content": "hi"}, "_method": "POST"},
+            "path_params": {"id": "c1"},
+            "inject": {"id": "conversation_id"},
+            "fallback_block_module": "blocks.chat.send",
+        }
+    ]
+
+
+def test_http_flow_route_falls_back_to_legacy_chat_block():
+    from ecosystem.defaultspack.transport.http import DefaultsHttpServer
+    from ecosystem.defaultspack.domain.flow.result import FlowResult
+
+    server = DefaultsHttpServer.__new__(DefaultsHttpServer)
+    server._build_context = lambda: {"request_id": "req-1"}
+    calls = []
+
+    def fake_fallback(module_name, request_data, path_params, inject=None):
+        calls.append((module_name, request_data, path_params, inject or {}))
+        return {"status": "ok", "data": {"legacy": True}}
+
+    class FakeEngine:
+        def execute(self, flow_id, trigger_input, context=None):
+            return FlowResult(
+                status="error",
+                output={"status": "error", "error": {"code": "NOT_READY"}},
+                metadata={"flow_id": flow_id},
+            )
+
+    server._invoke_fallback_block = fake_fallback
+    import domain.flow as flow_module
+
+    original = flow_module.FlowEngine
+    flow_module.FlowEngine = FakeEngine
+    try:
+        result = server._invoke_flow_route(
+            "defaultspack.chat_turn",
+            {"message": {"content": "hi"}},
+            {"id": "c1"},
+            {"id": "conversation_id"},
+            fallback_block_module="blocks.chat.send",
+        )
+    finally:
+        flow_module.FlowEngine = original
+
+    assert result == {"status": "ok", "data": {"legacy": True}}
+    assert calls == [
+        (
+            "blocks.chat.send",
+            {"message": {"content": "hi"}},
+            {"id": "c1"},
+            {"id": "conversation_id"},
+        )
+    ]
+
+
+def test_http_chat_flow_route_falls_back_when_success_output_is_not_chat_message():
+    from ecosystem.defaultspack.transport.http import DefaultsHttpServer
+    from ecosystem.defaultspack.domain.flow.result import FlowResult
+
+    server = DefaultsHttpServer.__new__(DefaultsHttpServer)
+    server._build_context = lambda: {"request_id": "req-1"}
+    calls = []
+
+    def fake_fallback(module_name, request_data, path_params, inject=None):
+        calls.append((module_name, request_data, path_params, inject or {}))
+        return {"status": "ok", "data": {"id": "assistant-1", "role": "assistant"}}
+
+    class FakeEngine:
+        def execute(self, flow_id, trigger_input, context=None):
+            return FlowResult(
+                status="completed",
+                output={"status": "ok", "data": {"outputs": {"ai_response": {"content": []}}}},
+                metadata={"flow_id": flow_id},
+            )
+
+    server._invoke_fallback_block = fake_fallback
+    import domain.flow as flow_module
+
+    original = flow_module.FlowEngine
+    flow_module.FlowEngine = FakeEngine
+    try:
+        result = server._invoke_flow_route(
+            "defaultspack.chat_turn",
+            {"message": {"content": "hi"}},
+            {"id": "c1"},
+            {"id": "conversation_id"},
+            fallback_block_module="blocks.chat.send",
+        )
+    finally:
+        flow_module.FlowEngine = original
+
+    assert result == {"status": "ok", "data": {"id": "assistant-1", "role": "assistant"}}
+    assert calls == [
+        (
+            "blocks.chat.send",
+            {"message": {"content": "hi"}},
+            {"id": "c1"},
+            {"id": "conversation_id"},
+        )
+    ]
+
+
+def test_http_chat_flow_route_returns_compatible_chat_message_output():
+    from ecosystem.defaultspack.transport.http import DefaultsHttpServer
+    from ecosystem.defaultspack.domain.flow.result import FlowResult
+
+    server = DefaultsHttpServer.__new__(DefaultsHttpServer)
+    server._build_context = lambda: {"request_id": "req-1"}
+
+    class FakeEngine:
+        def execute(self, flow_id, trigger_input, context=None):
+            return FlowResult(
+                status="completed",
+                output={
+                    "status": "ok",
+                    "data": {
+                        "id": "assistant-1",
+                        "role": "assistant",
+                        "content": [{"type": "text", "text": "hi"}],
+                    },
+                },
+                metadata={"flow_id": flow_id},
+            )
+
+    server._invoke_fallback_block = lambda *_args, **_kwargs: {"status": "error"}
+    import domain.flow as flow_module
+
+    original = flow_module.FlowEngine
+    flow_module.FlowEngine = FakeEngine
+    try:
+        result = server._invoke_flow_route(
+            "defaultspack.chat_turn",
+            {"message": {"content": "hi"}},
+            {"id": "c1"},
+            {"id": "conversation_id"},
+            fallback_block_module="blocks.chat.send",
+        )
+    finally:
+        flow_module.FlowEngine = original
+
+    assert result == {
+        "status": "ok",
+        "data": {
+            "id": "assistant-1",
+            "role": "assistant",
+            "content": [{"type": "text", "text": "hi"}],
+        },
+    }
+
+
+def test_http_chat_stream_flow_route_falls_back_when_output_is_not_sse():
+    from ecosystem.defaultspack.transport.http import DefaultsHttpServer
+    from ecosystem.defaultspack.domain.flow.result import FlowResult
+
+    server = DefaultsHttpServer.__new__(DefaultsHttpServer)
+    server._build_context = lambda: {"request_id": "req-1"}
+    calls = []
+
+    def fake_fallback(module_name, request_data, path_params, inject=None):
+        calls.append((module_name, request_data, path_params, inject or {}))
+        return {"status": "ok", "data": {"_sse": True, "events": [{"type": "done"}]}}
+
+    class FakeEngine:
+        def execute(self, flow_id, trigger_input, context=None):
+            return FlowResult(
+                status="completed",
+                output={"status": "ok", "data": {"outputs": {"stream_result": {}}}},
+                metadata={"flow_id": flow_id},
+            )
+
+    server._invoke_fallback_block = fake_fallback
+    import domain.flow as flow_module
+
+    original = flow_module.FlowEngine
+    flow_module.FlowEngine = FakeEngine
+    try:
+        result = server._invoke_flow_route(
+            "defaultspack.chat_stream_turn",
+            {"message": {"content": "hi"}},
+            {"id": "c1"},
+            {"id": "conversation_id"},
+            fallback_block_module="blocks.chat.stream",
+        )
+    finally:
+        flow_module.FlowEngine = original
+
+    assert result == {"status": "ok", "data": {"_sse": True, "events": [{"type": "done"}]}}
+    assert calls == [
+        (
+            "blocks.chat.stream",
+            {"message": {"content": "hi"}},
+            {"id": "c1"},
+            {"id": "conversation_id"},
+        )
+    ]
+
+
+def test_http_chat_stream_flow_route_returns_compatible_sse_output():
+    from ecosystem.defaultspack.transport.http import DefaultsHttpServer
+    from ecosystem.defaultspack.domain.flow.result import FlowResult
+
+    server = DefaultsHttpServer.__new__(DefaultsHttpServer)
+    server._build_context = lambda: {"request_id": "req-1"}
+
+    class FakeEngine:
+        def execute(self, flow_id, trigger_input, context=None):
+            return FlowResult(
+                status="completed",
+                output={"status": "ok", "data": {"_sse": True, "events": [{"type": "done"}]}},
+                metadata={"flow_id": flow_id},
+            )
+
+    server._invoke_fallback_block = lambda *_args, **_kwargs: {"status": "error"}
+    import domain.flow as flow_module
+
+    original = flow_module.FlowEngine
+    flow_module.FlowEngine = FakeEngine
+    try:
+        result = server._invoke_flow_route(
+            "defaultspack.chat_stream_turn",
+            {"message": {"content": "hi"}},
+            {"id": "c1"},
+            {"id": "conversation_id"},
+            fallback_block_module="blocks.chat.stream",
+        )
+    finally:
+        flow_module.FlowEngine = original
+
+    assert result == {"status": "ok", "data": {"_sse": True, "events": [{"type": "done"}]}}
+
+
+def test_stdio_chat_message_uses_canonical_chat_turn_flow():
+    from ecosystem.defaultspack.domain.flow.result import FlowResult
+    from ecosystem.defaultspack.transport.stdio import DefaultsStdioTransport
+
+    calls = []
+
+    class FakeEngine:
+        def execute(self, flow_id, trigger_input, context=None):
+            calls.append((flow_id, trigger_input, context))
+            return FlowResult(
+                status="completed",
+                output={
+                    "status": "ok",
+                    "data": {
+                        "role": "assistant",
+                        "content": [{"type": "text", "text": "hello"}],
+                    },
+                },
+                metadata={"flow_id": flow_id},
+            )
+
+    import domain.flow as flow_module
+
+    original = flow_module.FlowEngine
+    flow_module.FlowEngine = FakeEngine
+    try:
+        result = DefaultsStdioTransport()._handle_request(
+            {
+                "method": "POST",
+                "path": "/api/chat/conversations/c1/messages",
+                "data": {"message": {"content": "hi"}},
+            }
+        )
+    finally:
+        flow_module.FlowEngine = original
+
+    assert result == {
+        "status": "ok",
+        "data": {
+            "role": "assistant",
+            "content": [{"type": "text", "text": "hello"}],
+        },
+    }
+    assert calls[0][0] == "defaultspack.chat_turn"
+    assert calls[0][1]["conversation_id"] == "c1"
+
+
+def test_cli_direct_send_message_uses_canonical_chat_turn_flow():
+    from ecosystem.defaultspack.domain.flow.result import FlowResult
+    from ecosystem.defaultspack.transport.cli import DirectBackend
+
+    calls = []
+
+    class FakeEngine:
+        def execute(self, flow_id, trigger_input, context=None):
+            calls.append((flow_id, trigger_input, context))
+            return FlowResult(
+                status="completed",
+                output={
+                    "status": "ok",
+                    "data": {
+                        "role": "assistant",
+                        "content": [{"type": "text", "text": "hello"}],
+                    },
+                },
+                metadata={"flow_id": flow_id},
+            )
+
+    import domain.flow as flow_module
+
+    original = flow_module.FlowEngine
+    flow_module.FlowEngine = FakeEngine
+    try:
+        result = DirectBackend().send_message(
+            {"conversation_id": "c1", "message": {"content": "hi"}}
+        )
+    finally:
+        flow_module.FlowEngine = original
+
+    assert result == {
+        "status": "ok",
+        "data": {
+            "role": "assistant",
+            "content": [{"type": "text", "text": "hello"}],
+        },
+    }
+    assert calls[0][0] == "defaultspack.chat_turn"
+    assert calls[0][1]["conversation_id"] == "c1"
+
+
 def test_registry_sorting_keeps_static_agent_company_status_before_generic_status():
     from ecosystem.defaultspack.transport.http import DefaultsHttpServer
 
@@ -82,6 +493,176 @@ def test_registry_sorting_keeps_static_agent_company_status_before_generic_statu
     assert params == {}
     assert source == "registry"
     assert path_inject == {}
+
+
+def test_registry_chat_send_route_is_adapted_to_chat_turn_flow():
+    from ecosystem.defaultspack.transport.http import DefaultsHttpServer
+
+    def hardcoded_chat_send(request_data, context):
+        return {"handler": "legacy", "request_data": request_data}
+
+    class Facade:
+        def get_interface(self, key, strategy=None):
+            if key != "io.http.route":
+                return None
+            return [
+                {
+                    "method": "POST",
+                    "pattern": "/api/chat/conversations/{id}/messages",
+                    "handler": hardcoded_chat_send,
+                    "path_inject": {"id": "conversation_id"},
+                },
+            ]
+
+    server = DefaultsHttpServer(Facade())
+    calls = []
+
+    def fake_flow_route(
+        flow_id,
+        request_data,
+        path_params,
+        inject=None,
+        *,
+        fallback_block_module="",
+    ):
+        calls.append((flow_id, request_data, path_params, inject or {}, fallback_block_module))
+        return {"status": "ok", "data": {"flow": True}}
+
+    server._invoke_flow_route = fake_flow_route
+    handler, params, source, path_inject = server._match_route(
+        "POST",
+        "/api/chat/conversations/c1/messages",
+    )
+
+    assert source == "registry"
+    assert path_inject == {"id": "conversation_id"}
+    assert getattr(handler, "_defaultspack_flow_route_handler", False) is True
+    assert handler({"message": {"content": "hi"}}, params) == {
+        "status": "ok",
+        "data": {"flow": True},
+    }
+    assert calls == [
+        (
+            "defaultspack.chat_turn",
+            {"message": {"content": "hi"}, "_method": "POST"},
+            {"id": "c1"},
+            {"id": "conversation_id"},
+            "blocks.chat.send",
+        )
+    ]
+
+
+def test_registry_chat_flow_handler_keeps_path_params_through_http_dispatch_shape():
+    from ecosystem.defaultspack.transport.http import DefaultsHttpServer
+
+    def hardcoded_chat_send(request_data, context):
+        return {"handler": "legacy", "request_data": request_data}
+
+    class Facade:
+        def get_interface(self, key, strategy=None):
+            if key != "io.http.route":
+                return None
+            return [
+                {
+                    "method": "POST",
+                    "pattern": "/api/chat/conversations/{id}/messages",
+                    "handler": hardcoded_chat_send,
+                    "path_inject": {"id": "conversation_id"},
+                },
+            ]
+
+    server = DefaultsHttpServer(Facade())
+    calls = []
+
+    def fake_flow_route(
+        flow_id,
+        request_data,
+        path_params,
+        inject=None,
+        *,
+        fallback_block_module="",
+    ):
+        calls.append((flow_id, request_data, path_params, inject or {}, fallback_block_module))
+        return {"status": "ok", "data": {"flow": True}}
+
+    server._invoke_flow_route = fake_flow_route
+    handler, params, source, path_inject = server._match_route(
+        "POST",
+        "/api/chat/conversations/c1/messages",
+    )
+    request_data = {"message": {"content": "hi"}}
+    for url_param, data_key in path_inject.items():
+        request_data[data_key] = params.get(url_param, "")
+    request_data["_method"] = "POST"
+    request_data["_actual_method"] = "POST"
+
+    if getattr(handler, "_defaultspack_flow_route_handler", False):
+        result = handler(request_data, params)
+    else:
+        context = server._build_context()
+        context["_facade"] = server.facade
+        result = handler(request_data, context)
+
+    assert source == "registry"
+    assert result == {"status": "ok", "data": {"flow": True}}
+    assert calls[-1][2] == {"id": "c1"}
+    assert calls[-1][1]["conversation_id"] == "c1"
+
+
+def test_registry_chat_stream_route_is_adapted_to_chat_stream_turn_flow():
+    from ecosystem.defaultspack.transport.http import DefaultsHttpServer
+
+    def hardcoded_chat_stream(request_data, context):
+        return {"handler": "legacy", "request_data": request_data}
+
+    class Facade:
+        def get_interface(self, key, strategy=None):
+            if key != "io.http.route":
+                return None
+            return [
+                {
+                    "method": "POST",
+                    "pattern": "/api/chat/conversations/{id}/stream",
+                    "handler": hardcoded_chat_stream,
+                    "path_inject": {"id": "conversation_id"},
+                },
+            ]
+
+    server = DefaultsHttpServer(Facade())
+    calls = []
+
+    def fake_flow_route(
+        flow_id,
+        request_data,
+        path_params,
+        inject=None,
+        *,
+        fallback_block_module="",
+    ):
+        calls.append((flow_id, request_data, path_params, inject or {}, fallback_block_module))
+        return {"status": "ok", "data": {"_sse": True, "events": [{"type": "done"}]}}
+
+    server._invoke_flow_route = fake_flow_route
+    handler, params, source, path_inject = server._match_route(
+        "POST",
+        "/api/chat/conversations/c1/stream",
+    )
+
+    assert source == "registry"
+    assert path_inject == {"id": "conversation_id"}
+    assert handler({"message": {"content": "hi"}}, params) == {
+        "status": "ok",
+        "data": {"_sse": True, "events": [{"type": "done"}]},
+    }
+    assert calls == [
+        (
+            "defaultspack.chat_stream_turn",
+            {"message": {"content": "hi"}, "_method": "POST"},
+            {"id": "c1"},
+            {"id": "conversation_id"},
+            "blocks.chat.stream",
+        )
+    ]
 
 
 @pytest.mark.parametrize(

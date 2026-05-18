@@ -244,10 +244,11 @@ def prompt_to_unified(prompt_def: dict) -> UnifiedTemplate:
 # ---------------------------------------------------------------------------
 
 def unified_to_tool(ut: UnifiedTemplate) -> dict:
-    """UnifiedTemplate からツール定義 dict を生成する。
+    """UnifiedTemplate から function facade 形式のツール定義 dict を生成する。
 
-    生成される execution.type は "prompt" で、template の内容が body として使われる。
-    つまり、このツールを invoke すると template の {{var}} を引数で展開した結果が返る。
+    Prompt text is passive. Converted prompt-like templates never create an
+    executable ``execution.type="prompt"`` tool; callers must go through the
+    trusted prompt_render function if they need rendered text.
 
     Returns:
         ToolRegistry 互換の tool_def dict
@@ -269,16 +270,20 @@ def unified_to_tool(ut: UnifiedTemplate) -> dict:
             "parameters": parameters,
         },
         "execution": {
-            "type": "prompt",
-            "body": ut.template,
+            "type": "rumi_function",
+            "qualified_name": "defaultspack:prompt_render",
+        },
+        "metadata": {
+            "template_facade_preview": True,
+            "template_body": ut.template,
         },
     }
 
-    # handler_code があればセットする（dynamic ツールとして使う場合）
+    # Keep legacy handler code as inert metadata; dynamic execution is no
+    # longer an authoring path for converted templates.
     handler_code = ut.metadata.get("handler_code")
     if handler_code:
-        tool_def["execution"]["type"] = "dynamic"
-        tool_def["handler_code"] = handler_code
+        tool_def["metadata"]["legacy_handler_code"] = handler_code
 
     return tool_def
 

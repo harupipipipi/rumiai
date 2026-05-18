@@ -24,6 +24,9 @@
     },
     "tool_category": "shell",
     "action_type": "shell",
+    "risk": "high",
+    "approval_policy": "ask",
+    "capability_grants": ["terminal.exec"],
     "requires_approval": true,
     "schema": {
       "parameters": {
@@ -36,7 +39,6 @@
         "required": ["command"]
       }
     },
-    "execution": {"type": "local"},
-    "handler": "blocks.coding.terminal_exec:run"
+    "execution": {"type": "rumi_function", "qualified_name": "defaultspack:coding_terminal_exec"}
   }
 }

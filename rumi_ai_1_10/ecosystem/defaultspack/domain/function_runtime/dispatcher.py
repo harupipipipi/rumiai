@@ -32,6 +32,8 @@ def run_defaultspack_function(
 
 
 def get_handler(function_id: str):
+    if function_id in _PROMPT_HANDLERS:
+        return _PROMPT_HANDLERS[function_id]
     if function_id in _MODEL_RUNTIME_HANDLERS:
         return _MODEL_RUNTIME_HANDLERS[function_id]
     if function_id in TOOL_FUNCTION_ACTIONS:
@@ -204,6 +206,25 @@ def _validate_model_params(args: dict[str, Any], context: dict[str, Any]) -> dic
         if not validation.get("valid"):
             return error(validation.get("message", "invalid thinking level"), "INVALID_INPUT", details=validation)
     return ok({"valid": True})
+
+
+def _validate_prompt_template(args: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
+    del context
+    from domain.prompt.effective import validate_prompt_template
+
+    return ok(validate_prompt_template(args))
+
+
+def _resolve_prompt_for_conversation(args: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
+    from domain.prompt.effective import resolve_prompt_for_conversation
+
+    return ok(resolve_prompt_for_conversation(args, context))
+
+
+_PROMPT_HANDLERS = {
+    "prompt_validate_template": _validate_prompt_template,
+    "prompt_resolve_for_conversation": _resolve_prompt_for_conversation,
+}
 
 
 _MODEL_RUNTIME_HANDLERS = {

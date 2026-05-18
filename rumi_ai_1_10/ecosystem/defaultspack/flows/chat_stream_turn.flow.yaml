@@ -1,0 +1,35 @@
+flow_id: defaultspack.chat_stream_turn
+version: 1
+description: Profile-scoped streaming chat turn ingress.
+
+transport:
+  http:
+    routes:
+      - method: POST
+        path: /api/chat/conversations/{id}/stream
+        path_inject:
+          id: conversation_id
+        fallback_block: blocks.chat.stream
+
+inputs:
+  conversation_id: string
+  message: object
+  profile_id: string?
+
+outputs:
+  stream_result: object
+
+result:
+  value: "{{stream_result}}"
+
+steps:
+  - id: stream_chat
+    type: function
+    function: defaults.chat.stream
+    input:
+      conversation_id: "{{input.conversation_id}}"
+      message: "{{input.message}}"
+      profile_id: "{{input.profile_id}}"
+      model: "{{input.model}}"
+      params: "{{input.params}}"
+    output: stream_result

@@ -1,6 +1,9 @@
 {
   "function_id": "browser_companion",
   "description": "Operate a paired browser extension that uses the user's live browser session and DOM context.",
+  "risk": "high",
+  "requires": ["browser.control", "computer.control"],
+  "caller_requires": ["user.approved.high_risk"],
   "calling_convention": "subprocess",
   "entrypoint": "main.py:run",
   "host_execution": false,

@@ -22,6 +22,9 @@
     },
     "tool_category": "filesystem",
     "action_type": "read",
+    "risk": "low",
+    "approval_policy": "allow",
+    "capability_grants": ["file.read"],
     "schema": {
       "parameters": {
         "type": "object",
@@ -31,7 +34,6 @@
         "required": ["path"]
       }
     },
-    "execution": {"type": "local"},
-    "handler": "blocks.coding.file_read:run"
+    "execution": {"type": "rumi_function", "qualified_name": "defaultspack:coding_file_read"}
   }
 }

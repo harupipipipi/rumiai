@@ -1,6 +1,9 @@
 {
   "function_id": "browser_computer",
   "description": "Run approved browser/computer actions.",
+  "risk": "high",
+  "requires": ["browser.control", "computer.control"],
+  "caller_requires": ["user.approved.high_risk"],
   "calling_convention": "subprocess",
   "host_execution": false,
   "input_schema": {"type": "object"}

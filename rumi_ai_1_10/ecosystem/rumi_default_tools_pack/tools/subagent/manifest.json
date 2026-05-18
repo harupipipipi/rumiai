@@ -25,6 +25,11 @@
       "type": "rumi_function",
       "qualified_name": "defaultspack:tool_subagent"
     },
+    "tool_category": "agent",
+    "action_type": "execute",
+    "risk": "medium",
+    "approval_policy": "ask",
+    "capability_grants": [],
     "ui": {
       "group_id": "agent",
       "group_label": "Agent",

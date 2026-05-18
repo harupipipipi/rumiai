@@ -309,6 +309,14 @@ class TestMiscOperations:
         assert is_valid is False
         assert reason == "not_approved"
 
+    def test_bundled_defaultspack_is_trusted_without_user_grant(self, tmp_path, monkeypatch):
+        mgr, _ = _make_manager(tmp_path, monkeypatch=monkeypatch)
+
+        for pack_id in ("defaultspack", "rumi_default_tools_pack"):
+            is_valid, reason = mgr.is_pack_approved_and_verified(pack_id)
+            assert is_valid is True
+            assert reason is None
+
     def test_is_pack_blocked(self, tmp_path, monkeypatch):
         mgr, _ = _make_manager(tmp_path, monkeypatch=monkeypatch)
         mgr.reject("testpack")

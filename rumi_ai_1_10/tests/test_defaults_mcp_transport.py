@@ -73,6 +73,16 @@ def test_defaults_http_fallback_routes_include_mcp_endpoints():
     assert ("POST", "^/api/tools/mcp/connect$") in routes
 
 
+def test_defaults_transport_modules_are_thin_defaultspack_shims():
+    from ecosystem.defaults.transport.http import DefaultsHttpServer as DefaultsHttpServerShim
+    from ecosystem.defaults.transport.stdio import DefaultsStdioTransport as DefaultsStdioTransportShim
+    from ecosystem.defaultspack.transport.http import DefaultsHttpServer
+    from ecosystem.defaultspack.transport.stdio import DefaultsStdioTransport
+
+    assert DefaultsHttpServerShim is DefaultsHttpServer
+    assert DefaultsStdioTransportShim is DefaultsStdioTransport
+
+
 def test_defaults_mcp_client_supports_stdio_command_and_args(demo_mcp_server_path):
     from ecosystem.defaults.domain.tool.mcp_client import McpClient
 

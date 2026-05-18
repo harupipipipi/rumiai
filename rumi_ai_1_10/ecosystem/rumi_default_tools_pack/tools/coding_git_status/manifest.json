@@ -30,6 +30,9 @@
     },
     "tool_category": "git",
     "action_type": "read",
+    "risk": "low",
+    "approval_policy": "allow",
+    "capability_grants": ["git.read"],
     "schema": {
       "parameters": {
         "type": "object",
@@ -39,7 +42,6 @@
         "required": []
       }
     },
-    "execution": {"type": "local"},
-    "handler": "blocks.coding.git_status:run"
+    "execution": {"type": "rumi_function", "qualified_name": "defaultspack:coding_git_status"}
   }
 }

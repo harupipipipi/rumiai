@@ -49,7 +49,9 @@ def test_prompt_manager_lists_component_prompts_and_preserves_custom_persistence
 def test_prompt_layer_remains_provider_and_tool_independent():
     prompt_sources = [
         DEFAULTSPACK_ROOT / "domain" / "prompt" / "component_prompts.py",
+        DEFAULTSPACK_ROOT / "domain" / "prompt" / "effective.py",
         DEFAULTSPACK_ROOT / "domain" / "prompt" / "resolver.py",
+        DEFAULTSPACK_ROOT / "domain" / "prompt" / "template.py",
     ]
     source = "\n".join(path.read_text(encoding="utf-8") for path in prompt_sources)
 

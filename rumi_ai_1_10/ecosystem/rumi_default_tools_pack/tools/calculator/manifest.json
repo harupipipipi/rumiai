@@ -46,6 +46,11 @@
         "required": ["expression"]
       }
     },
+    "tool_category": "utility",
+    "action_type": "read",
+    "risk": "low",
+    "approval_policy": "allow",
+    "capability_grants": [],
     "execution": {
       "type": "rumi_function",
       "qualified_name": "defaultspack:tool_calculator"

@@ -77,6 +77,11 @@
       "type": "rumi_function",
       "qualified_name": "rumi_default_tools_pack:browser_companion"
     },
+    "tool_category": "browser",
+    "action_type": "desktop",
+    "risk": "high",
+    "approval_policy": "ask",
+    "capability_grants": ["browser.control", "computer.control"],
     "requires_approval": true,
     "ui": {
       "group_id": "browser",

@@ -1,11 +1,7 @@
-"""PromptTemplate — tool と prompt の統一テンプレートシステム。
+"""PromptTemplate — passive prompt template representation.
 
-tool と prompt は構造が類似している:
-    - name / description
-    - parameters (tool) ⇔ variables (prompt)
-    - 実行ロジック (tool) ⇔ テンプレート本文 (prompt)
-
-PromptTemplate はこの共通基盤を提供する。
+Prompt templates describe text layers only. They do not grant permissions,
+select providers, or become executable tools by themselves.
 
 変数展開:
     {{variable_name}}           — 通常変数（ユーザー指定）
@@ -90,26 +86,14 @@ class PromptTemplate:
         )
 
     # ------------------------------------------------------------------
-    # tool JSON Schema 変換
+    # Compatibility schema conversion
     # ------------------------------------------------------------------
     def to_tool_schema(self) -> dict:
-        """tool の JSON Schema 形式に変換する。
+        """Return a non-registered function-facade draft for legacy callers.
 
-        Returns:
-            {
-                "tool_id":   str,
-                "name":      str,
-                "summary":   str,
-                "tags":      ["prompt-converted"],
-                "schema": {
-                    "parameters": {
-                        "type": "object",
-                        "properties": {...},
-                        "required": [...]
-                    }
-                },
-                "execution": {"type": "prompt", "body": str}
-            }
+        Prompt-to-tool authoring is intentionally disabled at runtime. This
+        draft exists only for older UI previews and points at the trusted
+        prompt_render function instead of introducing a prompt execution path.
         """
         properties: dict[str, dict] = {}
         required: list[str] = []
@@ -144,8 +128,12 @@ class PromptTemplate:
                 }
             },
             "execution": {
-                "type": "prompt",
-                "body": self.body,
+                "type": "rumi_function",
+                "qualified_name": "defaultspack:prompt_render",
+            },
+            "metadata": {
+                "prompt_facade_preview": True,
+                "template_body": self.body,
             },
         }
 

@@ -1,6 +1,9 @@
 {
   "function_id": "computer_use",
   "description": "Run computer_use tool actions through the shared browser/computer controller.",
+  "risk": "high",
+  "requires": ["computer.control"],
+  "caller_requires": ["user.approved.high_risk"],
   "calling_convention": "subprocess",
   "host_execution": false,
   "input_schema": {"type": "object"}

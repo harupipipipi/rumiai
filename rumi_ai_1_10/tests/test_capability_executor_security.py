@@ -144,6 +144,74 @@ class TestDockerFallbackAllowed:
         mock_host.assert_called_once()
 
 
+class TestDockerStrictBoundary:
+    """strict policy 時は Docker 不可で host fallback しないこと"""
+
+    @patch("core_runtime.capability_executor.get_audit_logger", new_callable=MagicMock)
+    def test_strict_mode_blocks_host_fallback_even_when_env_allows(self, mock_audit, monkeypatch, tmp_path):
+        monkeypatch.setenv("RUMI_ALLOW_HOST_FALLBACK", "true")
+        monkeypatch.setenv("RUMI_SECURITY_MODE", "strict")
+        executor = _make_test_executor()
+
+        func_dir = tmp_path / "test_func"
+        func_dir.mkdir()
+        main_py = func_dir / "main.py"
+        main_py.write_text('def run(ctx, args): return {"ok": True}', encoding="utf-8")
+
+        entry = _MockFunctionEntry(
+            host_execution=False,
+            runtime="python",
+            function_dir=str(func_dir),
+            main_py_path=str(main_py),
+        )
+        with patch.object(executor, "_is_docker_available", return_value=False):
+            with patch("core_runtime.capability_executor._DockerRunBuilder", None):
+                with patch.object(executor, "_execute_user_function_host") as mock_host:
+                    resp = executor._execute_user_function(
+                        principal_id="test_principal",
+                        entry=entry,
+                        args={},
+                        request_id="req_strict",
+                        start_time=time.time(),
+                    )
+
+        assert resp.success is False
+        assert resp.error_type == "docker_unavailable"
+        assert "strict function isolation" in resp.error
+        mock_host.assert_not_called()
+
+
+class TestHighRiskApprovalCallerRequires:
+    """user.approved.high_risk は permissive permission では満たせないこと"""
+
+    @patch("core_runtime.capability_executor.get_audit_logger", new_callable=MagicMock)
+    def test_permissive_permission_manager_does_not_satisfy_high_risk_approval(self, mock_audit):
+        executor = _make_test_executor()
+        entry = _MockFunctionEntry(
+            pack_id="rumi_default_tools_pack",
+            function_id="computer_use",
+            qualified_name="rumi_default_tools_pack:computer_use",
+            caller_requires=["user.approved.high_risk"],
+        )
+        executor._function_registry.get.return_value = entry
+        executor._permission_manager = MagicMock()
+        executor._permission_manager.has_permission.return_value = True
+        executor._permission_manager.check_caller_requires.return_value = True
+
+        resp = executor.execute(
+            "rumi_default_tools_pack",
+            {
+                "type": "function.call",
+                "qualified_name": "rumi_default_tools_pack:computer_use",
+                "args": {"action": "click"},
+            },
+        )
+
+        assert resp.success is False
+        assert resp.error_type == "caller_requires_denied"
+        executor._permission_manager.check_caller_requires.assert_not_called()
+
+
 # ===========================================================================
 # Wave 1-2: _execute_command_function ガード
 # ===========================================================================

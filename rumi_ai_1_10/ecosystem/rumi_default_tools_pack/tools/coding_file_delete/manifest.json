@@ -23,6 +23,9 @@
     },
     "tool_category": "filesystem_write",
     "action_type": "delete",
+    "risk": "high",
+    "approval_policy": "ask",
+    "capability_grants": ["file.write"],
     "write_action": true,
     "requires_approval": true,
     "schema": {
@@ -34,7 +37,6 @@
         "required": ["path"]
       }
     },
-    "execution": {"type": "local"},
-    "handler": "blocks.coding.file_delete:run"
+    "execution": {"type": "rumi_function", "qualified_name": "defaultspack:coding_file_delete"}
   }
 }

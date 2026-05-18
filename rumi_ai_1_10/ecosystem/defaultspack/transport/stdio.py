@@ -1,56 +1,68 @@
-import sys, os
+import importlib
+import json
+import os
+import sys
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from blocks._common import ok, error, not_implemented, timestamp, gen_id
+from blocks._common import error, ok, timestamp
+from bridge.block_adapter import invoke_block
+from transport.registry import (
+    canonical_http_route_specs,
+    compile_http_route_pattern,
+    flow_http_output_is_compatible,
+    http_route_sort_key,
+)
 
-import json
-import importlib
+
+def _route_specs():
+    specs = canonical_http_route_specs(include_always_available=True)
+    unsupported_handlers = {"_handle_chat_redirect", "_handle_static", "_handle_static_file"}
+    return [
+        spec
+        for _, spec in sorted(
+            enumerate(specs),
+            key=lambda item: http_route_sort_key(item[1].method, item[1].pattern, item[0]),
+        )
+        if spec.handler_name not in unsupported_handlers
+    ]
 
 
-_ROUTE_MAP = [
-    ("POST", "/v1/chat/completions", "blocks.chat.send"),
-    ("POST", "/api/chat/conversations", "blocks.chat.create_conversation"),
-    ("GET", "/api/chat/conversations", "blocks.chat.list_conversations"),
-    ("GET", "/api/chat/conversations/{id}", "blocks.chat.get_conversation"),
-    ("PUT", "/api/chat/conversations/{id}", "blocks.chat.update_conversation"),
-    ("DELETE", "/api/chat/conversations/{id}", "blocks.chat.delete_conversation"),
-    ("POST", "/api/chat/conversations/{id}/messages", "blocks.chat.send"),
-    ("POST", "/api/chat/conversations/{id}/stream", "blocks.chat.stream"),
-    ("POST", "/api/chat/conversations/{id}/stop", "blocks.chat.stop"),
-    ("POST", "/api/chat/conversations/{id}/export", "blocks.chat.export_conversation"),
-    ("POST", "/api/agent/execute", "blocks.agent.execute"),
-    ("POST", "/api/agent/{id}/approve", "blocks.agent.approve"),
-    ("POST", "/api/agent/{id}/reject", "blocks.agent.reject"),
-    ("POST", "/api/agent/{id}/cancel", "blocks.agent.cancel"),
-    ("GET", "/api/agent/{id}/status", "blocks.agent.status"),
-    ("GET", "/api/health", None),
-    ("GET", "/api/context", None),
-]
+def _match_route_spec(method, path):
+    for spec in _route_specs():
+        if spec.method != method:
+            continue
+        match = compile_http_route_pattern(spec.pattern).match(path)
+        if match is not None:
+            return spec, match.groupdict()
+    return None, {}
 
-_ID_INJECT_MAP = {
-    "/api/chat/conversations/{id}": ("conversation_id", "id"),
-    "/api/chat/conversations/{id}/messages": ("conversation_id", "id"),
-    "/api/chat/conversations/{id}/stream": ("conversation_id", "id"),
-    "/api/chat/conversations/{id}/stop": ("conversation_id", "id"),
-    "/api/chat/conversations/{id}/export": ("conversation_id", "id"),
-    "/api/agent/{id}/approve": ("execution_id", "id"),
-    "/api/agent/{id}/reject": ("execution_id", "id"),
-    "/api/agent/{id}/cancel": ("execution_id", "id"),
-    "/api/agent/{id}/status": ("execution_id", "id"),
-}
+
+def _legacy_module_name(spec):
+    if spec is None:
+        return None
+    return spec.block_module or spec.fallback_block_module or spec.flow_id or spec.function_name or None
 
 
 def _match_route(method, path):
-    import re
-    for route_method, pattern, module_name in _ROUTE_MAP:
-        if route_method != method:
+    spec, path_params = _match_route_spec(method, path)
+    if spec is None:
+        return None, None, {}
+    return spec.pattern, _legacy_module_name(spec), path_params
+
+
+def _legacy_id_inject_map():
+    mapping = {}
+    for spec in _route_specs():
+        if len(spec.path_inject or {}) != 1:
             continue
-        regex = re.sub(r"\{(\w+)\}", r"(?P<\1>[^/]+)", pattern)
-        regex = "^" + regex + "$"
-        m = re.match(regex, path)
-        if m is not None:
-            return pattern, module_name, m.groupdict()
-    return None, None, {}
+        source_key, dest_key = next(iter(spec.path_inject.items()))
+        mapping[spec.pattern] = (dest_key, source_key)
+    return mapping
+
+
+_ID_INJECT_MAP = _legacy_id_inject_map()
+_ROUTE_MAP = [(spec.method, spec.pattern, _legacy_module_name(spec)) for spec in _route_specs()]
 
 
 class DefaultsStdioTransport:
@@ -78,24 +90,112 @@ class DefaultsStdioTransport:
         self._running = False
 
     def _handle_request(self, request):
-        method = request.get("method", "GET").upper()
-        path = request.get("path", "")
+        method = str(request.get("method", "GET")).upper()
+        path = str(request.get("path", ""))
         data = request.get("data", {})
+        if not isinstance(data, dict):
+            data = {}
 
-        pattern, module_name, path_params = _match_route(method, path)
-
-        if pattern is None:
+        spec, path_params = _match_route_spec(method, path)
+        if spec is None:
             return error("not found: " + method + " " + path)
 
-        if pattern == "/api/health" and module_name is None:
+        if spec.pattern == "/api/health" and not _legacy_module_name(spec):
             return ok({"status": "healthy", "pack": "defaultspack", "ts": timestamp()})
 
-        if pattern == "/api/context" and module_name is None:
+        if spec.pattern == "/api/context" and not _legacy_module_name(spec):
             return ok({"pack": "defaultspack", "ts": timestamp()})
 
-        if pattern in _ID_INJECT_MAP:
-            field_name, param_name = _ID_INJECT_MAP[pattern]
-            data[field_name] = path_params.get(param_name, "")
+        payload = dict(data)
+        payload.update(dict(spec.defaults or {}))
+        payload["_method"] = method
+        for source_key, dest_key in (spec.path_inject or {}).items():
+            payload[dest_key] = path_params.get(source_key, "")
+
+        if spec.flow_id:
+            return self._invoke_flow_route(
+                spec.flow_id,
+                payload,
+                fallback_block_module=spec.fallback_block_module,
+            )
+        if spec.function_name:
+            return self._invoke_function_route(
+                spec.function_name,
+                payload,
+                fallback_block_module=spec.fallback_block_module,
+            )
+        if spec.block_module:
+            return self._invoke_fallback_block(spec.block_module, payload)
+        if spec.handler_name == "_handle_health":
+            return ok({"status": "healthy", "pack": "defaultspack", "ts": timestamp()})
+        if spec.handler_name == "_handle_context_info":
+            return ok({"pack": "defaultspack", "ts": timestamp()})
+        return error("handler not available")
+
+    def _invoke_flow_route(self, flow_id, payload, *, fallback_block_module=""):
+        context = self._build_context()
+        context["flow_id"] = flow_id
+        try:
+            from domain.flow import FlowEngine
+
+            flow_result = FlowEngine().execute(flow_id, payload, context)
+            if flow_result.is_success():
+                if flow_http_output_is_compatible(
+                    flow_id,
+                    flow_result.output,
+                    fallback_block_module=fallback_block_module,
+                ):
+                    return flow_result.output
+                if not fallback_block_module:
+                    return flow_result.output
+            elif not fallback_block_module:
+                return flow_result.output
+        except Exception as exc:
+            if not fallback_block_module:
+                return error(str(exc), "FLOW_ROUTE_FAILED")
+        return self._invoke_fallback_block(fallback_block_module, payload)
+
+    def _invoke_function_route(self, function_name, payload, *, fallback_block_module=""):
+        try:
+            from domain.function_runtime.bridge import invoke_function
+
+            result = invoke_function(function_name, payload, self._build_context(), principal_id="defaultspack")
+            if isinstance(result, dict) and result.get("status") != "error":
+                return result
+            if not fallback_block_module:
+                return result
+        except Exception as exc:
+            if not fallback_block_module:
+                return error(str(exc), "FUNCTION_ROUTE_FAILED")
+        return self._invoke_fallback_block(fallback_block_module, payload)
+
+    def _invoke_fallback_block(self, module_name, payload):
+        if not module_name:
+            return error("handler not available")
+        try:
+            from domain.function_runtime.bridge import invoke_function
+            from domain.function_runtime.registry import function_id_for_block_module
+
+            function_id = function_id_for_block_module(module_name)
+            if function_id:
+                result = invoke_function(
+                    f"defaultspack:{function_id}",
+                    payload,
+                    self._build_context(),
+                    principal_id="defaultspack",
+                )
+                if isinstance(result, dict) and result.get("status") != "error":
+                    return result
+                error_code = str((result.get("error") or {}).get("code") or "") if isinstance(result, dict) else ""
+                if error_code not in {
+                    "FUNCTION_REGISTRY_UNAVAILABLE",
+                    "FUNCTION_NOT_FOUND",
+                    "CAPABILITY_RUNTIME_UNAVAILABLE",
+                    "CAPABILITY_EXECUTION_FAILED",
+                }:
+                    return result
+        except Exception:
+            pass
 
         try:
             mod = importlib.import_module(module_name)
@@ -103,11 +203,13 @@ class DefaultsStdioTransport:
         except (ImportError, AttributeError) as exc:
             return error("handler not available: " + str(exc))
 
-        context = self._build_context()
         try:
-            return handler_run(data, context)
+            return invoke_block(module_name, payload, self._build_context())
         except Exception as exc:
-            return error("handler error: " + str(exc))
+            try:
+                return handler_run(payload, self._build_context())
+            except Exception:
+                return error("handler error: " + str(exc))
 
     def _send_response(self, data):
         line = json.dumps(data, ensure_ascii=False) + "\n"
