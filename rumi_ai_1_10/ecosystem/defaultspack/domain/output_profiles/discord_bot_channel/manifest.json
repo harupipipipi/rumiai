@@ -1,0 +1,19 @@
+{
+  "id": "discord_bot_channel",
+  "category": "output_profiles",
+  "kind": "external_output_profile",
+  "version": "1",
+  "status": "stable",
+  "display_name": "Discord Bot Channel Output Profile",
+  "entrypoints": {
+    "rules": "rules.json"
+  },
+  "profiles": ["discord.bot_channel"],
+  "aliases": {
+    "profile_ids": ["discord.bot_channel"]
+  },
+  "compatibility": {
+    "legacy_ids": ["discord.bot_channel"]
+  },
+  "source_pack_id": "defaultspack"
+}

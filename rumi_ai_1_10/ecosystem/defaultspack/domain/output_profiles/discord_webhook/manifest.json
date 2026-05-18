@@ -1,0 +1,19 @@
+{
+  "id": "discord_webhook",
+  "category": "output_profiles",
+  "kind": "external_output_profile",
+  "version": "1",
+  "status": "stable",
+  "display_name": "Discord Webhook Output Profile",
+  "entrypoints": {
+    "rules": "rules.json"
+  },
+  "profiles": ["discord.webhook"],
+  "aliases": {
+    "profile_ids": ["discord.webhook"]
+  },
+  "compatibility": {
+    "legacy_ids": ["discord.webhook"]
+  },
+  "source_pack_id": "defaultspack"
+}

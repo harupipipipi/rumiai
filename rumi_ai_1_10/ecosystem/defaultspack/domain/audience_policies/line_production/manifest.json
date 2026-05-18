@@ -1,0 +1,21 @@
+{
+  "id": "line_production",
+  "category": "audience_policies",
+  "kind": "external_audience_policy",
+  "version": "1",
+  "status": "stable",
+  "display_name": "LINE Production Audience Policy",
+  "entrypoints": {
+    "rules": "rules.json"
+  },
+  "policy": {
+    "audience_policy_id": "line.production"
+  },
+  "aliases": {
+    "policy_ids": ["line.production"]
+  },
+  "compatibility": {
+    "legacy_ids": ["line.production"]
+  },
+  "source_pack_id": "defaultspack"
+}

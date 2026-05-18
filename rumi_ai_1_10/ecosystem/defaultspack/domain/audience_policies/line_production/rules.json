@@ -1,0 +1,18 @@
+{
+  "policy": {
+    "id": "line.production",
+    "provider": "line",
+    "default": "deny",
+    "require": {
+      "verified": true,
+      "message_types": ["text"]
+    },
+    "rate_limit": {
+      "per_actor_per_minute": 10,
+      "per_scope_per_minute": 30
+    },
+    "allow_saved_sources": true,
+    "allow": [],
+    "deny": []
+  }
+}

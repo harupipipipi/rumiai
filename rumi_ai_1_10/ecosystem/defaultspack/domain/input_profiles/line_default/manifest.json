@@ -1,0 +1,19 @@
+{
+  "id": "line_default",
+  "category": "input_profiles",
+  "kind": "external_input_profile",
+  "version": "1",
+  "status": "stable",
+  "display_name": "LINE Default Input Profile",
+  "entrypoints": {
+    "rules": "rules.json"
+  },
+  "profiles": ["line.default"],
+  "aliases": {
+    "profile_ids": ["line.default"]
+  },
+  "compatibility": {
+    "legacy_ids": ["line.default"]
+  },
+  "source_pack_id": "defaultspack"
+}

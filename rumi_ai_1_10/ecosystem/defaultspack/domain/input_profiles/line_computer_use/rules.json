@@ -1,0 +1,62 @@
+{
+  "profile": {
+    "id": "line.computer_use",
+    "provider": "line",
+    "version": 1,
+    "display_name": "LINE Computer Use",
+    "match": {
+      "event_type": "message"
+    },
+    "input": {
+      "role": "user",
+      "content": {
+        "when": [
+          {
+            "if": "$.message.type == 'text'",
+            "value": "$.message.text"
+          },
+          {
+            "else": true,
+            "value": "LINE ${$.message.type} message received. messageId=${$.message.id}"
+          }
+        ]
+      }
+    },
+    "metadata": {
+      "source": {
+        "kind": "integration",
+        "provider": "line"
+      },
+      "line": {
+        "reply_token": "$.replyToken",
+        "source": "$.source",
+        "message": "$.message"
+      }
+    },
+    "params": {
+      "thinking_level": "high",
+      "request_timeout": 45,
+      "retry": {
+        "max_attempts": 5,
+        "delays": [5, 15, 30, 60]
+      },
+      "external_input": {
+        "default_response": {
+          "mode": "same_response",
+          "include_source_context": true,
+          "source_context_format": "${provider} source message"
+        }
+      }
+    },
+    "tools": ["computer_use", "browser_computer"],
+    "policy": {
+      "max_tool_calls": 30
+    },
+    "response_prompt": {
+      "enabled": true,
+      "mode": "plan_only",
+      "allowed_actions": ["reply_text", "store_only"],
+      "fallback_action": "reply_text"
+    }
+  }
+}

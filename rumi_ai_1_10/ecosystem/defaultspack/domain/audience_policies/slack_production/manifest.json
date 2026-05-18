@@ -1,0 +1,21 @@
+{
+  "id": "slack_production",
+  "category": "audience_policies",
+  "kind": "external_audience_policy",
+  "version": "1",
+  "status": "stable",
+  "display_name": "Slack Production Audience Policy",
+  "entrypoints": {
+    "rules": "rules.json"
+  },
+  "policy": {
+    "audience_policy_id": "slack.production"
+  },
+  "aliases": {
+    "policy_ids": ["slack.production"]
+  },
+  "compatibility": {
+    "legacy_ids": ["slack.production"]
+  },
+  "source_pack_id": "defaultspack"
+}

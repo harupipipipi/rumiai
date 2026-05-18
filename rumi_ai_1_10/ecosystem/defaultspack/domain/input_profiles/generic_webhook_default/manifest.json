@@ -1,0 +1,19 @@
+{
+  "id": "generic_webhook_default",
+  "category": "input_profiles",
+  "kind": "external_input_profile",
+  "version": "1",
+  "status": "stable",
+  "display_name": "Generic Webhook Default Input Profile",
+  "entrypoints": {
+    "rules": "rules.json"
+  },
+  "profiles": ["generic.webhook.default"],
+  "aliases": {
+    "profile_ids": ["generic.webhook.default"]
+  },
+  "compatibility": {
+    "legacy_ids": ["generic.webhook.default"]
+  },
+  "source_pack_id": "defaultspack"
+}
