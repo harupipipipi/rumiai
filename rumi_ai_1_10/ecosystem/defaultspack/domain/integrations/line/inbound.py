@@ -22,7 +22,6 @@ from domain.external.response import RumiResponse
 from domain.external.response_planner import ResponsePlanner
 from domain.external.source_store import ExternalSourceStore
 from domain.external.targeting import origin_from_external_event
-from domain.integrations.http_client import post_json
 from domain.integrations.secrets import get_integration_secret, load_integration_secrets_into_env
 from domain.webhook.endpoint import WebhookEndpoint
 from domain.webhook.endpoint_resolver import ProviderEndpointResolver
@@ -31,7 +30,7 @@ from domain.webhook.endpoint_resolver import ProviderEndpointResolver
 _LOGGER = logging.getLogger(__name__)
 _LINE_WEBHOOK_ACK_TEXT = "\u5c4a\u3044\u305f\u3088\uff01"
 _LINE_EXACT_REPLY_JA_RE = re.compile(
-    r"^(?P<reply>.+?)(?:\s*)(?:って|と)\s*(?:返して|返信して|送って|言って)\s*[!！。.\s]*$",
+    r"^(?:(?:もう一回|もう1回|もう一度|再度)\s*)?(?P<reply>.+?)(?:\s*)(?:って|と)\s*(?:返して|返信して|送って|言って)(?:\s*(?:ほしい|欲しい))?(?:\s*(?:な|ね|よ|よね|かな))?\s*[!！。.\s]*$",
     re.DOTALL,
 )
 _LINE_EXACT_REPLY_EN_RE = re.compile(r"reply exactly\s*[:：]\s*(?P<reply>.+)\s*$", re.IGNORECASE | re.DOTALL)

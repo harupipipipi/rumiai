@@ -288,6 +288,69 @@ def test_line_computer_use_exact_reply_shortcut_bypasses_background_processing(m
     assert conversation["current_node_id"] == assistant["id"]
 
 
+def test_line_computer_use_exact_reply_shortcut_supports_again_phrase(monkeypatch, tmp_path):
+    from blocks.integrations import line as line_block  # noqa: E402
+    from domain.chat.store import ChatStore  # noqa: E402
+
+    _install_line_endpoint(
+        monkeypatch,
+        tmp_path,
+        enabled=True,
+        input_profile_id="line.computer_use",
+        conversation={"strategy": "external_key", "model": "google/gemma-4-31b-it"},
+        response={
+            "mode": "computer_use_line_biz",
+            "line_biz_chat_url": "https://chat.line.biz/Uaccount/chat/Cchat",
+            "auto_approve_computer_use": True,
+            "background_processing": True,
+            "require_group_mention": False,
+        },
+    )
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_INTEGRATIONS_STORE_PATH", str(tmp_path / "integrations" / "conversations.json"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_INTEGRATIONS_LOCKS_DIR", str(tmp_path / "integrations" / "event_locks"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(tmp_path / "chat" / "conversations.json"))
+    monkeypatch.setenv("LINE_CHANNEL_ACCESS_TOKEN", "line-access-token")
+    ChatStore._instance = None
+    monkeypatch.setattr(line_block.AudiencePolicyRegistry, "resolve", lambda self, policy_id, event=None: {"default": "allow"})
+
+    calls: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        line_adapter_module,
+        "post_json",
+        lambda url, headers, body: calls.append({"url": url, "headers": headers, "body": body}) or {"ok": True},
+    )
+    payload = {
+        "destination": "Udestination",
+        "events": [
+            {
+                "type": "message",
+                "mode": "active",
+                "webhookEventId": "evt-exact-reply-again",
+                "replyToken": "reply-exact-reply-again",
+                "source": {"type": "group", "groupId": "Cgroup", "userId": "Uactor"},
+                "message": {"id": "m-again", "type": "text", "text": "もう一回helloって言って欲しいな。"},
+            }
+        ],
+    }
+
+    result = line_block.run(_signed_line_payload(payload), {})
+
+    event_result = result["data"]["events"][0]
+    conversation = ChatStore().get_conversation(event_result["conversation_id"])
+    assistant = conversation["messages"][-1]
+    assert [call["url"] for call in calls] == [
+        "https://api.line.me/v2/bot/message/reply",
+        "https://api.line.me/v2/bot/message/push",
+    ]
+    assert calls[1]["body"] == {"to": "Cgroup", "messages": [{"type": "text", "text": "hello"}]}
+    assert event_result["status"] == "ok"
+    assert "background_processing" not in event_result
+    assert event_result["assistant_text"] == "hello"
+    assert event_result["exact_reply_shortcut"]["reply_text"] == "hello"
+    assert assistant["raw_text"] == "hello"
+    assert conversation["current_node_id"] == assistant["id"]
+
+
 def test_line_computer_use_fake_receive_acknowledges_and_preserves_japanese_prompt(monkeypatch, tmp_path):
     from blocks.integrations import line as line_block  # noqa: E402
     from blocks.chat import send as chat_send  # noqa: E402
@@ -622,14 +685,14 @@ def test_line_computer_use_fake_webhook_runs_three_browser_tasks_and_acknowledge
         assert "Then reply with exactly: Complete" not in user_content
         assert user_content in runtime_content
         assert chat_url in runtime_content
-        assert request["params"]["retry"]["max_attempts"] == 5
-        assert request["params"]["retry"]["delays"] == [5, 15, 30, 60]
-        assert request["params"]["thinking_level"] == "high"
+        assert request["params"]["retry"]["max_attempts"] == 2
+        assert request["params"]["retry"]["delays"] == [2, 8]
+        assert request["params"]["thinking_level"] == "low"
         assert request["tools"] == ["computer_use", "browser_computer"]
         assert context["computer_use_target_app"] == "Google Chrome"
         assert context["computer_use_target_title"] == "LINE Chat"
         assert context["line_background_processing"] is True
-        assert context["profile_policy"]["max_tool_calls"] == 30
+        assert context["profile_policy"]["max_tool_calls"] == 6
         assert context["profile_policy"]["yolo_mode"] is True
 
 
