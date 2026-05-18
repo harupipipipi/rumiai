@@ -50,7 +50,7 @@
     },
     "tools": ["computer_use", "browser_computer"],
     "policy": {
-      "max_tool_calls": 6
+      "max_tool_calls": 12
     },
     "response_prompt": {
       "enabled": true,

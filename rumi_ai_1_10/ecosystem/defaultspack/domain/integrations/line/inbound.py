@@ -602,6 +602,7 @@ def _apply_endpoint_response_context(runtime_context: dict[str, Any], endpoint: 
     if mode == "computer_use_line_biz":
         updated.setdefault("computer_use_physical_clicks", True)
         updated.setdefault("computer_use_reply_surface", "line_biz")
+        updated.setdefault("computer_use_allow_task_observation", True)
 
     tool_policy = dict(updated.get("profile_policy") if isinstance(updated.get("profile_policy"), dict) else {})
     response_tool_policy = response.get("tool_policy") if isinstance(response.get("tool_policy"), dict) else {}
@@ -796,8 +797,18 @@ def _line_biz_prompt_prefix(response: dict[str, Any], *, mode: str = "") -> str:
     return (
         "Use computer_use in Google Chrome to open "
         f"{chat_url} and reply in {reply_language} inside LINE Official Account Manager. "
-        "Before using any tools, decide the exact reply text from the external source message in this prompt. "
+        "Before using LINE Biz delivery controls, decide whether the external source message asks for a text reply "
+        "or asks you to perform a computer/browser task. "
         "If the source message says to reply exactly with some text, send exactly that text and nothing else. "
+        "If the source message asks you to perform an action on the computer, such as opening a URL, playing media, "
+        "searching, clicking, or checking a page, perform that task first with computer_use in Chrome; do not merely "
+        "send an acknowledgement that you will do it. When an explicit URL is present, your first tool action for that "
+        "task should be browser.open_url with the exact URL; do not type the URL into an address bar or search box "
+        "unless browser.open_url fails. Keep tool use efficient and avoid repeated screenshots of the same state. "
+        "For YouTube or media playback requests, open the requested URL "
+        "or search result directly, start playback, verify from computer.context or a screenshot that the media page is visible "
+        "and playback appears started, then return to the LINE Biz chat and send a concise completion reply. "
+        "If the task is blocked, return to LINE Biz and send the concrete blocker instead of claiming success. "
         "Treat the visible LINE Biz chat history only as the destination UI; it can be stale or unrelated to this webhook event. "
         "Do not inspect, reread, or scroll visible chat bubbles to understand the customer request. "
         "Start by checking computer.windows, and if a visible Google Chrome LINE window exists, "

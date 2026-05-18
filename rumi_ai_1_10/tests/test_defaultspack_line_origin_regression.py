@@ -692,7 +692,7 @@ def test_line_computer_use_fake_webhook_runs_three_browser_tasks_and_acknowledge
         assert context["computer_use_target_app"] == "Google Chrome"
         assert context["computer_use_target_title"] == "LINE Chat"
         assert context["line_background_processing"] is True
-        assert context["profile_policy"]["max_tool_calls"] == 6
+        assert context["profile_policy"]["max_tool_calls"] == 12
         assert context["profile_policy"]["yolo_mode"] is True
 
 
@@ -1125,6 +1125,11 @@ def test_line_route_builds_line_biz_prompt_from_chat_url(monkeypatch, tmp_path):
     assert "external source message below is already the customer message" in captured["context"]["external_prompt_prefix"]
     assert "Treat the visible LINE Biz chat history only as the destination UI" in captured["context"]["external_prompt_prefix"]
     assert "reply exactly with some text" in captured["context"]["external_prompt_prefix"]
+    assert "perform that task first with computer_use in Chrome" in captured["context"]["external_prompt_prefix"]
+    assert "For YouTube or media playback requests" in captured["context"]["external_prompt_prefix"]
+    assert "browser.open_url with the exact URL" in captured["context"]["external_prompt_prefix"]
+    assert "do not type the URL into an address bar" in captured["context"]["external_prompt_prefix"]
+    assert "do not merely" in captured["context"]["external_prompt_prefix"]
     assert "large red circular reply button" in captured["context"]["external_prompt_prefix"]
     assert "physical=true" in captured["context"]["external_prompt_prefix"]
     assert "will not open the composer or press Send" in captured["context"]["external_prompt_prefix"]
@@ -1140,6 +1145,7 @@ def test_line_route_builds_line_biz_prompt_from_chat_url(monkeypatch, tmp_path):
     assert captured["context"]["computer_use_target_title"] == "LINE Chat"
     assert captured["context"]["computer_use_physical_clicks"] is True
     assert captured["context"]["computer_use_reply_surface"] == "line_biz"
+    assert captured["context"]["computer_use_allow_task_observation"] is True
     assert captured["context"]["user_requested_computer_use"] is True
     assert captured["context"]["external_chat_history_mode"] == "current_turn"
     assert captured["context"]["response_prompt_decision"]["action"] == "store_only"
@@ -1177,6 +1183,22 @@ def test_line_biz_context_preserves_explicit_virtual_click():
     )
 
     assert payload["physical"] is False
+
+
+def test_line_biz_context_allows_untargeted_task_observation():
+    from domain.tool.executor import _computer_use_payload_with_context_defaults  # noqa: E402
+
+    payload = _computer_use_payload_with_context_defaults(
+        "computer.screenshot",
+        {},
+        {
+            "computer_use_target_app": "Google Chrome",
+            "computer_use_target_title": "LINE",
+            "computer_use_allow_task_observation": True,
+        },
+    )
+
+    assert payload == {}
 
 
 def test_line_computer_use_background_processing_is_opt_in(monkeypatch, tmp_path):

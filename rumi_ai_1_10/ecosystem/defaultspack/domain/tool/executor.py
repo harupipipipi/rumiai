@@ -1076,6 +1076,23 @@ def _computer_use_payload_with_context_defaults(action, payload, context):
     payload = dict(payload or {})
     if not isinstance(context, dict):
         return payload
+    if (
+        _truthy(context.get("computer_use_allow_task_observation"))
+        and action in {"computer.screenshot", "computer.context", "computer.observe"}
+        and not any(
+            payload.get(key)
+            for key in (
+                "app",
+                "application",
+                "browser",
+                "browser_app",
+                "title",
+                "title_contains",
+                "window_title",
+            )
+        )
+    ):
+        return payload
     target_app = context.get("computer_use_target_app")
     target_title = context.get("computer_use_target_title")
     physical_clicks = _truthy(context.get("computer_use_physical_clicks"))
