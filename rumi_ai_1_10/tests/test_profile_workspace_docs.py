@@ -25,6 +25,15 @@ def test_profile_workspace_docs_exist_and_cover_required_topics():
     profile_doc = (docs_dir / "profile_workspace.md").read_text(encoding="utf-8")
     for phrase in ["profile.yaml", "user_data", "database", "startup", "flows", "prompts", "permissions", "migration"]:
         assert phrase in profile_doc
+    for phrase in [
+        "resolve_runtime_database_path",
+        "resolve_runtime_user_data_dir",
+        "ChatStore",
+        "MemoryStore",
+        "Attachments",
+        "does not migrate every runtime store",
+    ]:
+        assert phrase in profile_doc
 
     permissions_doc = (docs_dir / "permissions_policy.md").read_text(encoding="utf-8")
     assert "defaults only" in permissions_doc

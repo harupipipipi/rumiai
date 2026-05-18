@@ -11,7 +11,7 @@ TESTS_DIR = Path(__file__).resolve().parent
 if str(TESTS_DIR) not in sys.path:
     sys.path.insert(0, str(TESTS_DIR))
 
-from test_startup_profiles import _FakeActiveEcosystem, _discover_locations, _startup_graph, _write_pack
+from test_startup_profiles import _FakeActiveEcosystem, _FakeApprovalManager, _discover_locations, _startup_graph, _write_pack
 
 
 def _manager(tmp_path: Path, eco_root: Path) -> tuple[StartupProfileManager, list]:
@@ -25,6 +25,7 @@ def _manager(tmp_path: Path, eco_root: Path) -> tuple[StartupProfileManager, lis
     locations = _discover_locations(eco_root, ["defaultspack"])
     manager = StartupProfileManager(
         storage_path=tmp_path / "user_data" / "settings" / "startup_profiles.json",
+        approval_manager=_FakeApprovalManager(reason_by_pack={"defaultspack": None}),
         profile_workspace_manager=ProfileWorkspaceManager(tmp_path / "user_data"),
     )
     return manager, locations
@@ -42,9 +43,11 @@ def test_startup_profile_launch_initializes_workspace(tmp_path: Path):
 
     assert response["launched"] is True
     assert Path(response["profile_workspace"]["database_path"]) == tmp_path / "user_data" / "profiles" / "p1" / "database" / "rumi.sqlite"
+    assert Path(response["profile_database_path"]) == tmp_path / "user_data" / "profiles" / "p1" / "database" / "rumi.sqlite"
     assert (tmp_path / "user_data" / "profiles" / "p1" / "profile.yaml").is_file()
     assert active.metadata["startup_profile_workspace"]["profile_id"] == "p1"
     assert Path(active.metadata["startup_profile_database_path"]) == tmp_path / "user_data" / "profiles" / "p1" / "database" / "rumi.sqlite"
+    assert Path(active.metadata["profile_database_path"]) == tmp_path / "user_data" / "profiles" / "p1" / "database" / "rumi.sqlite"
 
 
 def test_list_profiles_payload_includes_workspace_paths(tmp_path: Path):

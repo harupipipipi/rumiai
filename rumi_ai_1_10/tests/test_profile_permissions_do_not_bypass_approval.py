@@ -33,7 +33,7 @@ def test_profile_permissions_cannot_disable_required_approval(tmp_path: Path):
         {
             "profile_id": "p1",
             "workspace": {"permissions_dir": str(permissions_dir)},
-            "tools": [{"name": "coding_file_write", "risk": "high", "approved": True}],
+            "tools": [{"name": "coding_file_write", "approved": True}],
         },
         {},
     )
@@ -41,4 +41,5 @@ def test_profile_permissions_cannot_disable_required_approval(tmp_path: Path):
     tool = result["data"]["tools"][0]
     assert tool["requires_approval"] is True
     assert "approved" not in tool
+    assert result["data"]["policy"]["write_actions_require_approval"] is True
     assert result["data"]["policy"]["allow_client_supplied_approved"] is False

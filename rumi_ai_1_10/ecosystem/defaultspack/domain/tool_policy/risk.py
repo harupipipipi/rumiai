@@ -5,6 +5,10 @@ from typing import Any
 from .models import ToolRisk
 
 
+_FILE_WRITE_NAME_PARTS = ("write", "create", "update", "patch")
+_FILE_DELETE_NAME_PARTS = ("delete",)
+
+
 def resolve_tool_risk(tool_def: Any, tool_name: str = "") -> str:
     if not isinstance(tool_def, dict):
         return ToolRisk.READ_ONLY.value
@@ -20,9 +24,9 @@ def resolve_tool_risk(tool_def: Any, tool_name: str = "") -> str:
         values.update(str(execution.get(key) or "").lower() for key in ("category", "action_type", "risk", "type"))
     name = (tool_name or tool_def.get("name") or tool_def.get("tool_id") or "").lower()
 
-    if "git_push" in values or name.startswith("git_push") or "push" in name and "git" in name:
+    if "git_push" in values or name.startswith("git_push") or "push" in name:
         return ToolRisk.GIT_PUSH.value
-    if "git_write" in values or name.startswith("git_commit") or name.startswith("git_branch"):
+    if "git_write" in values or name.startswith("git_commit") or name.startswith("git_branch") or "commit" in name:
         return ToolRisk.GIT_WRITE.value
     if "shell" in values or "terminal" in values or "exec" in values:
         return ToolRisk.SHELL.value
@@ -40,8 +44,14 @@ def resolve_tool_risk(tool_def: Any, tool_name: str = "") -> str:
         return ToolRisk.SCHEDULER_CREATE.value
     if "pack_install" in values or "install" in name:
         return ToolRisk.PACK_INSTALL.value
-    if tool_def.get("write_action") is True or values.intersection({"write", "create", "update"}):
+    if (
+        tool_def.get("write_action") is True
+        or values.intersection({"write", "create", "update", "patch"})
+        or any(part in name for part in _FILE_WRITE_NAME_PARTS)
+    ):
         return ToolRisk.FILE_WRITE.value
-    if values.intersection({"delete", "remove", "destructive"}):
+    if values.intersection({"delete", "remove", "destructive"}) or any(
+        part in name for part in _FILE_DELETE_NAME_PARTS
+    ):
         return ToolRisk.FILE_DELETE.value
     return ToolRisk.READ_ONLY.value

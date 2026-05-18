@@ -29,6 +29,7 @@ class ProfileResourceSnapshotManager:
         *,
         base_pack: str,
         graph_id: str | None = None,
+        graph_ids: list[str] | None = None,
         flow_ids: list[str] | None = None,
         prompt_ids: list[str] | None = None,
     ) -> dict[str, Any]:
@@ -41,23 +42,35 @@ class ProfileResourceSnapshotManager:
         prompts_root.mkdir(parents=True, exist_ok=True)
 
         items: list[dict[str, Any]] = []
-        for flow_id in flow_ids or ["chat_turn"]:
+        requested_flow_ids = self._unique_strings(flow_ids or ["chat_turn"])
+        requested_prompt_ids = self._unique_strings(prompt_ids or [])
+        requested_graph_ids = self._unique_strings(graph_ids or ([graph_id] if graph_id else []))
+
+        for flow_id in requested_flow_ids:
             source = self._resolve_flow_path(pack_path, flow_id)
             if source is None:
                 continue
             dest = flows_root / source.name
             self._copy_with_record(pack_path, source, snapshot_root, dest, "flow", items)
 
-        for prompt_id in prompt_ids or []:
-            source = self._resolve_prompt_path(pack_path, prompt_id)
-            if source is None:
-                continue
-            dest = prompts_root / source.name
-            self._copy_with_record(pack_path, source, snapshot_root, dest, "prompt", items)
+        for prompt_id in requested_prompt_ids:
+            for source in self._resolve_prompt_paths(pack_path, prompt_id):
+                dest = prompts_root / self._prompt_snapshot_relative_path(pack_path, source)
+                self._copy_with_record(pack_path, source, snapshot_root, dest, "prompt", items)
 
-        graph_refs = self._graph_refs(pack_path, graph_id)
-        nodes_payload = {"version": 1, "graph_id": graph_id, "nodes": graph_refs["nodes"]}
-        blocks_payload = {"version": 1, "graph_id": graph_id, "blocks": graph_refs["blocks"]}
+        graph_refs = self._graph_refs_for_ids(pack_path, requested_graph_ids)
+        nodes_payload = {
+            "version": 1,
+            "graph_id": graph_id,
+            "graph_ids": requested_graph_ids,
+            "nodes": graph_refs["nodes"],
+        }
+        blocks_payload = {
+            "version": 1,
+            "graph_id": graph_id,
+            "graph_ids": requested_graph_ids,
+            "blocks": graph_refs["blocks"],
+        }
         (snapshot_root / "nodes.json").write_text(
             json.dumps(nodes_payload, ensure_ascii=False, indent=2) + "\n",
             encoding="utf-8",
@@ -73,6 +86,10 @@ class ProfileResourceSnapshotManager:
             "source_pack": base_pack,
             "source_pack_path": str(pack_path),
             "source_graph_id": graph_id,
+            "graph_ids": requested_graph_ids,
+            "graph_refs": graph_refs,
+            "requested_flow_ids": requested_flow_ids,
+            "requested_prompt_ids": requested_prompt_ids,
             "snapshot_at": int(time.time()),
             "items": items,
         }
@@ -104,25 +121,90 @@ class ProfileResourceSnapshotManager:
                     pack_path / "flows" / f"{flow_id}.flow.yaml",
                     pack_path / "flows" / f"{flow_id}.yaml",
                     pack_path / "flows" / flow_id / "flow.yaml",
+                    pack_path / "flows" / f"{flow_id.rsplit('.', 1)[-1]}.flow.yaml",
+                    pack_path / "flows" / flow_id.rsplit(".", 1)[-1] / "flow.yaml",
                 ]
             )
-        return next((path for path in candidates if path.is_file()), None)
+        source = next((path for path in candidates if path.is_file()), None)
+        if source is not None:
+            return source
+        flows_dir = pack_path / "flows"
+        if not flows_dir.is_dir():
+            return None
+        for candidate in sorted(list(flows_dir.glob("*.yaml")) + list(flows_dir.glob("*/*.yaml"))):
+            try:
+                data = yaml.safe_load(candidate.read_text(encoding="utf-8")) or {}
+            except (OSError, yaml.YAMLError):
+                continue
+            if isinstance(data, dict) and data.get("flow_id") == flow_id:
+                return candidate
+        return None
 
     def _resolve_prompt_path(self, pack_path: Path, prompt_id: str) -> Path | None:
+        paths = self._resolve_prompt_paths(pack_path, prompt_id)
+        return paths[0] if paths else None
+
+    def _resolve_prompt_paths(self, pack_path: Path, prompt_id: str) -> list[Path]:
         raw = Path(prompt_id)
         candidates = []
-        if raw.suffix:
+        if raw.suffix in {".md", ".txt", ".json", ".yaml", ".yml"}:
             candidates.append(pack_path / raw)
             candidates.append(pack_path / "prompts" / raw.name)
         else:
+            prompt_name = prompt_id.rsplit(".", 1)[-1]
             candidates.extend(
                 [
                     pack_path / "prompts" / f"{prompt_id}.md",
                     pack_path / "prompts" / f"{prompt_id}.prompt.md",
+                    pack_path / "prompts" / f"{prompt_id}.system.md",
+                    pack_path / "prompts" / prompt_id / "manifest.json",
+                    pack_path / "prompts" / prompt_id / "prompt.md",
                     pack_path / "extensions" / "prompts" / prompt_id / "manifest.json",
                 ]
             )
-        return next((path for path in candidates if path.is_file()), None)
+            if prompt_name != prompt_id:
+                candidates.extend(
+                    [
+                        pack_path / "prompts" / f"{prompt_name}.md",
+                        pack_path / "prompts" / f"{prompt_name}.prompt.md",
+                        pack_path / "prompts" / f"{prompt_name}.system.md",
+                        pack_path / "prompts" / prompt_name / "manifest.json",
+                        pack_path / "prompts" / prompt_name / "prompt.md",
+                        pack_path / "extensions" / "prompts" / prompt_name / "manifest.json",
+                    ]
+                )
+        source = next((path for path in candidates if path.is_file()), None)
+        if source is None:
+            return []
+        if source.name == "manifest.json" and source.parent.parent.name in {"prompts"}:
+            return self._prompt_manifest_files(source)
+        return [source]
+
+    def _prompt_manifest_files(self, manifest_path: Path) -> list[Path]:
+        files = [manifest_path]
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            manifest = {}
+        if isinstance(manifest, dict):
+            config = manifest.get("config")
+            template_file = config.get("template_file") if isinstance(config, dict) else None
+            if isinstance(template_file, str) and template_file:
+                candidate = manifest_path.parent / template_file
+                if candidate.is_file():
+                    files.append(candidate)
+        fallback = manifest_path.parent / "prompt.md"
+        if fallback.is_file() and fallback not in files:
+            files.append(fallback)
+        return files
+
+    def _prompt_snapshot_relative_path(self, pack_path: Path, source: Path) -> Path:
+        for prompt_root in (pack_path / "extensions" / "prompts", pack_path / "prompts"):
+            try:
+                return source.relative_to(prompt_root)
+            except ValueError:
+                continue
+        return Path(source.name)
 
     def _copy_with_record(
         self,
@@ -144,18 +226,57 @@ class ProfileResourceSnapshotManager:
             }
         )
 
-    def _graph_refs(self, pack_path: Path, graph_id: str | None) -> dict[str, Any]:
+    def _graph_refs_for_ids(self, pack_path: Path, graph_ids: list[str]) -> dict[str, Any]:
+        graph_entries = []
+        node_refs = []
+        block_refs = []
+        for graph_id in graph_ids:
+            graph_path = self._resolve_graph_path(pack_path, graph_id)
+            if graph_path is None:
+                continue
+            refs = self._graph_refs_from_path(graph_path)
+            node_refs.extend(refs["nodes"])
+            block_refs.extend(refs["blocks"])
+            graph_entries.append(
+                {
+                    "graph_id": graph_id,
+                    "source": graph_path.relative_to(pack_path).as_posix(),
+                    "nodes": refs["nodes"],
+                    "blocks": refs["blocks"],
+                }
+            )
+        return {
+            "graphs": graph_entries,
+            "nodes": sorted(set(node_refs)),
+            "blocks": sorted(set(block_refs)),
+        }
+
+    def _resolve_graph_path(self, pack_path: Path, graph_id: str | None) -> Path | None:
         if not graph_id:
-            return {"nodes": [], "blocks": []}
+            return None
         graph_name = graph_id.rsplit(".", 1)[-1]
         candidates = [
             pack_path / "graphs" / f"{graph_name}.graph.yaml",
             pack_path / "graphs" / f"{graph_name}.yaml",
             pack_path / "graphs" / f"{graph_id}.graph.yaml",
+            pack_path / "graphs" / f"{graph_id.replace('.', '_')}.graph.yaml",
         ]
         graph_path = next((path for path in candidates if path.is_file()), None)
-        if graph_path is None:
-            return {"nodes": [], "blocks": []}
+        if graph_path is not None:
+            return graph_path
+        graphs_dir = pack_path / "graphs"
+        if not graphs_dir.is_dir():
+            return None
+        for candidate in sorted(list(graphs_dir.glob("*.yaml")) + list(graphs_dir.glob("*.yml"))):
+            try:
+                data = yaml.safe_load(candidate.read_text(encoding="utf-8")) or {}
+            except (OSError, yaml.YAMLError):
+                continue
+            if isinstance(data, dict) and data.get("graph_id") == graph_id:
+                return candidate
+        return None
+
+    def _graph_refs_from_path(self, graph_path: Path) -> dict[str, list[str]]:
         data = yaml.safe_load(graph_path.read_text(encoding="utf-8")) or {}
         nodes = data.get("nodes") if isinstance(data, dict) else []
         node_refs = []
@@ -170,7 +291,35 @@ class ProfileResourceSnapshotManager:
                 block = node.get("block") or node.get("handler") or node.get("function")
                 if block:
                     block_refs.append(str(block))
+        blocks = data.get("blocks") if isinstance(data, dict) else []
+        if isinstance(blocks, list):
+            for block in blocks:
+                if isinstance(block, str):
+                    block_refs.append(block)
+                elif isinstance(block, dict):
+                    ref = (
+                        block.get("ref")
+                        or block.get("block")
+                        or block.get("handler")
+                        or block.get("function")
+                        or block.get("id")
+                    )
+                    if ref:
+                        block_refs.append(str(ref))
         return {"nodes": sorted(set(node_refs)), "blocks": sorted(set(block_refs))}
+
+    def _unique_strings(self, values: list[str | None]) -> list[str]:
+        result = []
+        seen = set()
+        for value in values:
+            if not isinstance(value, str):
+                continue
+            normalized = value.strip()
+            if not normalized or normalized in seen:
+                continue
+            seen.add(normalized)
+            result.append(normalized)
+        return result
 
     def _sha256(self, path: Path) -> str:
         digest = hashlib.sha256()

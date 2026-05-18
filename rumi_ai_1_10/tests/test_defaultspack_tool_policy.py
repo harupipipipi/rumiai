@@ -25,6 +25,21 @@ def test_tool_policy_requires_approval_for_write_risk():
     assert decision.allowed is True
     assert decision.action == "ask"
     assert decision.requires_approval is True
+    assert decision.risk == "file_write"
+
+
+def test_tool_policy_requires_approval_for_write_name_even_when_profile_disables():
+    tool = {"name": "coding_file_write"}
+    decision = decide_tool_policy(
+        tool,
+        {"profile_policy": {"write_actions_require_approval": False, "allow_client_supplied_approved": True}},
+        tool_name="coding_file_write",
+    )
+
+    assert decision.allowed is True
+    assert decision.action == "ask"
+    assert decision.requires_approval is True
+    assert decision.risk == "file_write"
 
 
 def test_tool_policy_denies_shell_when_disabled():

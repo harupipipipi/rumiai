@@ -40,6 +40,11 @@ def _requires_network(tool):
     return isinstance(tool, dict) and bool(tool.get("requires_network") or tool.get("network"))
 
 
+def _is_write_like_tool(name):
+    lowered = name.lower()
+    return any(action in lowered for action in _WRITE_ACTIONS)
+
+
 def run(input_data, context):
     del context
     data = input_data if isinstance(input_data, dict) else {}
@@ -49,7 +54,7 @@ def run(input_data, context):
     workspace_policy = _load_policy(data.get("workspace"))
     policy = {
         "network_default": workspace_policy.get("network_default", "deny"),
-        "write_actions_require_approval": bool(workspace_policy.get("write_actions_require_approval", True)),
+        "write_actions_require_approval": True,
         "high_risk_tools_require_approval": bool(workspace_policy.get("high_risk_tools_require_approval", True)),
         "allow_client_supplied_approved": False,
     }
@@ -62,7 +67,7 @@ def run(input_data, context):
         requires_approval = False
         if risk == "high":
             requires_approval = True
-        if policy["write_actions_require_approval"] and any(action in name.lower() for action in _WRITE_ACTIONS):
+        if _is_write_like_tool(name):
             requires_approval = True
         if policy["network_default"] == "deny" and _requires_network(tool):
             blocked.append({"tool": tool, "reason": "network_denied_by_profile_default"})

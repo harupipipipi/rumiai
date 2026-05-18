@@ -383,6 +383,8 @@ class StartupProfileManager:
                 "status_code": 400,
                 "profile": profile,
                 "profile_workspace": workspace_payload,
+                "profile_database_path": workspace_payload["database_path"],
+                "profile_user_data_dir": workspace_payload["user_data_dir"],
                 "active_profile_id": state.get("active_profile_id"),
                 "launched": False,
                 "capability_graph": capability_graph,
@@ -405,12 +407,16 @@ class StartupProfileManager:
                 "status_code": 503,
                 "profile": profile,
                 "profile_workspace": workspace_payload,
+                "profile_database_path": workspace_payload["database_path"],
+                "profile_user_data_dir": workspace_payload["user_data_dir"],
                 "active_profile_id": profile_id,
                 "launched": False,
             }
         return {
             "profile": profile,
             "profile_workspace": workspace_payload,
+            "profile_database_path": workspace_payload["database_path"],
+            "profile_user_data_dir": workspace_payload["user_data_dir"],
             "active_profile_id": profile_id,
             "launched": True,
             "restart_requested": True,
@@ -504,7 +510,7 @@ class StartupProfileManager:
             / base_pack
             / "manifest.lock.json"
         )
-        if manifest_path.exists():
+        if self._profile_snapshot_manifest_is_current(manifest_path, profile):
             return
         try:
             from .profile_resource_snapshot import ProfileResourceSnapshotManager
@@ -516,10 +522,79 @@ class StartupProfileManager:
                 profile_id,
                 base_pack=base_pack,
                 graph_id=profile.get("graph_id") if isinstance(profile.get("graph_id"), str) else None,
-                flow_ids=["chat_turn"],
+                graph_ids=self._snapshot_graph_ids(profile),
+                flow_ids=self._snapshot_flow_ids(profile),
+                prompt_ids=self._snapshot_prompt_ids(profile),
             )
         except Exception:
             logger.debug("failed to snapshot default resources for profile %s", profile_id, exc_info=True)
+
+    def _profile_snapshot_manifest_is_current(self, manifest_path: Path, profile: Dict[str, Any]) -> bool:
+        if not manifest_path.exists():
+            return False
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            return False
+        return (
+            isinstance(manifest, dict)
+            and manifest.get("requested_flow_ids") == self._snapshot_flow_ids(profile)
+            and manifest.get("requested_prompt_ids") == self._snapshot_prompt_ids(profile)
+            and manifest.get("graph_ids") == self._snapshot_graph_ids(profile)
+            and isinstance(manifest.get("graph_refs"), dict)
+        )
+
+    def _snapshot_flow_ids(self, profile: Dict[str, Any]) -> List[str]:
+        flow_ids = ["chat_turn"]
+        default_flow = profile.get("default_flow")
+        if isinstance(default_flow, str) and default_flow.strip():
+            flow_ids.append(default_flow.strip())
+        return self._unique_string_list(flow_ids)
+
+    def _snapshot_graph_ids(self, profile: Dict[str, Any]) -> List[str]:
+        return self._unique_string_list([profile.get("graph_id"), profile.get("default_graph")])
+
+    def _snapshot_prompt_ids(self, profile: Dict[str, Any]) -> List[str]:
+        prompt_ids: List[Any] = [
+            profile.get("system_prompt_id"),
+            profile.get("default_prompt_id"),
+        ]
+        metadata = profile.get("metadata")
+        if isinstance(metadata, dict):
+            prompt_ids.extend(
+                [
+                    metadata.get("system_prompt_id"),
+                    metadata.get("default_prompt_id"),
+                    metadata.get("prompt_id"),
+                ]
+            )
+            for key in ("default_prompt", "prompt"):
+                prompt_meta = metadata.get(key)
+                if isinstance(prompt_meta, str):
+                    prompt_ids.append(prompt_meta)
+                elif isinstance(prompt_meta, dict):
+                    prompt_ids.extend(
+                        [
+                            prompt_meta.get("id"),
+                            prompt_meta.get("prompt_id"),
+                            prompt_meta.get("system_prompt_id"),
+                            prompt_meta.get("default_prompt_id"),
+                        ]
+                    )
+        return self._unique_string_list(prompt_ids)
+
+    def _unique_string_list(self, values: List[Any]) -> List[str]:
+        result: List[str] = []
+        seen = set()
+        for value in values:
+            if not isinstance(value, str):
+                continue
+            normalized = value.strip()
+            if not normalized or normalized in seen:
+                continue
+            seen.add(normalized)
+            result.append(normalized)
+        return result
 
     def _mark_profile_workspace_orphaned(self, profile_id: str, profile: Dict[str, Any]) -> None:
         try:
@@ -1252,6 +1327,8 @@ class StartupProfileManager:
             active.set_metadata("startup_profile_workspace", workspace_payload)
             active.set_metadata("startup_profile_database_path", workspace_payload["database_path"])
             active.set_metadata("startup_profile_user_data_dir", workspace_payload["user_data_dir"])
+            active.set_metadata("profile_database_path", workspace_payload["database_path"])
+            active.set_metadata("profile_user_data_dir", workspace_payload["user_data_dir"])
         except Exception:
             logger.debug("failed to attach startup profile workspace metadata", exc_info=True)
         if launched:
@@ -1388,17 +1465,19 @@ class StartupProfileManager:
         return discovered
 
     def _approval_runtime_issues(self, pack_id: str) -> List[str]:
-        try:
-            from .approval_manager import get_approval_manager
-        except Exception:
-            logger.debug("approval manager import is unavailable", exc_info=True)
-            return []
+        approval_manager = self.approval_manager
+        if approval_manager is None:
+            try:
+                from .approval_manager import get_approval_manager
+            except Exception:
+                logger.debug("approval manager import is unavailable", exc_info=True)
+                return []
 
-        try:
-            approval_manager = get_approval_manager()
-        except Exception:
-            logger.debug("failed to load approval manager", exc_info=True)
-            return []
+            try:
+                approval_manager = get_approval_manager()
+            except Exception:
+                logger.debug("failed to load approval manager", exc_info=True)
+                return []
 
         if approval_manager is None or not hasattr(approval_manager, "get_approval"):
             return []
@@ -1461,6 +1540,7 @@ class StartupProfileManager:
         node_settings = payload.get("node_settings")
         policy = payload.get("policy")
         permissions = payload.get("permissions")
+        metadata = payload.get("metadata")
 
         return {
             "kind": str(payload.get("kind") or "runtime_profile"),
@@ -1468,6 +1548,12 @@ class StartupProfileManager:
             "locale": payload.get("locale") if isinstance(payload.get("locale"), str) else "ja",
             "default_flow": payload.get("default_flow") if isinstance(payload.get("default_flow"), str) else None,
             "default_graph": payload.get("default_graph") if isinstance(payload.get("default_graph"), str) else None,
+            "system_prompt_id": (
+                payload.get("system_prompt_id") if isinstance(payload.get("system_prompt_id"), str) else None
+            ),
+            "default_prompt_id": (
+                payload.get("default_prompt_id") if isinstance(payload.get("default_prompt_id"), str) else None
+            ),
             "capability_profile_id": (
                 payload.get("capability_profile_id") if isinstance(payload.get("capability_profile_id"), str) else None
             ),
@@ -1485,6 +1571,7 @@ class StartupProfileManager:
             "node_settings": dict(node_settings) if isinstance(node_settings, dict) else {},
             "policy": dict(policy) if isinstance(policy, dict) else {},
             "permissions": dict(permissions) if isinstance(permissions, dict) else {},
+            "metadata": dict(metadata) if isinstance(metadata, dict) else {},
         }
 
     def _runtime_profile_field_names(self) -> List[str]:
@@ -1494,6 +1581,8 @@ class StartupProfileManager:
             "locale",
             "default_flow",
             "default_graph",
+            "system_prompt_id",
+            "default_prompt_id",
             "capability_profile_id",
             "launch_capability_graph",
             "last_runtime_profile_key",
@@ -1503,6 +1592,7 @@ class StartupProfileManager:
             "node_settings",
             "policy",
             "permissions",
+            "metadata",
         ]
 
     def _string_list(self, value: Any) -> List[str]:
