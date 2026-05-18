@@ -30,7 +30,7 @@ def test_integration_components_advertise_legacy_routes_and_imports():
     assert slack.manifest["routes"][0]["path"] == "/api/integrations/slack/events"
 
 
-def test_legacy_integration_blocks_alias_component_modules():
+def test_legacy_integration_blocks_alias_component_modules(monkeypatch):
     from blocks.integrations import discord as discord_block  # noqa: E402
     from blocks.integrations import line as line_block  # noqa: E402
     from blocks.integrations import slack as slack_block  # noqa: E402
@@ -41,6 +41,11 @@ def test_legacy_integration_blocks_alias_component_modules():
     assert line_block is line_inbound
     assert discord_block is discord_inbound
     assert slack_block is slack_inbound
+    assert sys.modules["blocks.integrations.line"] is line_inbound
+    assert sys.modules["blocks.integrations.discord"] is discord_inbound
+    assert sys.modules["blocks.integrations.slack"] is slack_inbound
     assert line_block.run is line_inbound.run
     assert discord_block.DISCORD_PING == 1
     assert slack_block.run is slack_inbound.run
+    monkeypatch.setattr(line_block, "_shim_patch_probe", "patched", raising=False)
+    assert getattr(line_inbound, "_shim_patch_probe") == "patched"
