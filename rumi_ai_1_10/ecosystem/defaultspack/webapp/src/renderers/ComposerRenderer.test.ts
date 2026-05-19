@@ -132,6 +132,46 @@ test("composer uses the main input as steer while generating", () => {
   assert.doesNotMatch(html, /フォローアップの変更を求める/);
 });
 
+test("composer renders the current steer above the main input", () => {
+  const html = renderToStaticMarkup(
+    createElement(ComposerRenderer, {
+      input: "",
+      placeholder: "メッセージを入力...",
+      isGenerating: true,
+      selectedProfile: {
+        profile_id: "stub/default",
+        display_name: "Stub Default",
+        provider_id: "stub",
+        model_id: "default",
+      },
+      favoriteProfiles: [],
+      inlineExtensions: [],
+      belowExtensions: [],
+      thinkingLevel: null,
+      contextUsage: { ratio: 0, usedTokens: 0, maxContext: 0, label: "0%" },
+      steerStatus: "ステアを反映しました",
+      steerPreviewItems: [
+        {
+          id: "steer_1",
+          prompt: "結論を先にして、短く返して",
+          status: "injected",
+          visible: true,
+        },
+      ],
+      onInputChange: () => undefined,
+      onSubmit: () => undefined,
+      onModelProfileSelect: () => undefined,
+      onThinkingLevelChange: () => undefined,
+      onSteerSubmit: () => undefined,
+    }),
+  );
+
+  assert.match(html, /これがステア/);
+  assert.match(html, /反映済み/);
+  assert.match(html, /結論を先にして、短く返して/);
+  assert.doesNotMatch(html, /フォローアップの変更を求める/);
+});
+
 test("composer asks for an API key when an unconfigured Gemini model is selected", () => {
   assert.equal(profileNeedsApiKey({
     profile_id: "google/gemini-2.5-flash",

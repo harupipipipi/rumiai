@@ -338,6 +338,26 @@ function isActivityStreamEvent(event: ChatStreamEvent): event is ChatToolStreamE
   );
 }
 
+function isConversationSteerItem(value: unknown): value is ConversationSteerItem {
+  return Boolean(
+    value
+    && typeof value === "object"
+    && "id" in value
+    && "prompt" in value
+  );
+}
+
+function activeComposerSteerItems(items: ConversationSteerItem[], isRunning: boolean): ConversationSteerItem[] {
+  return items
+    .filter((item) => item.visible !== false && String(item.prompt ?? "").trim())
+    .filter((item) => {
+      const status = String(item.status || "").toLowerCase();
+      return status === "queued" || status === "sending" || (isRunning && status === "injected");
+    })
+    .slice(-3)
+    .reverse();
+}
+
 function profileKey(profile: ModelProfile | null | undefined, fallback: string): string {
   return profile?.profile_id || profile?.qualified_model_id || fallback;
 }
@@ -2446,6 +2466,20 @@ export default function App() {
           };
         });
 
+        if (activityEvent.phase === "conversation_steer") {
+          const processed = Array.isArray(activityEvent.processed)
+            ? activityEvent.processed.filter(isConversationSteerItem)
+            : [];
+          if (processed.length > 0) {
+            setSteerItems((current) => {
+              const byId = new Map(current.map((item) => [item.id, item]));
+              for (const item of processed) byId.set(item.id, item);
+              return Array.from(byId.values());
+            });
+            setModelSteerStatus("ステアを反映しました");
+          }
+        }
+
         const status = typeof activityEvent.message === "string" && activityEvent.message.trim()
           ? activityEvent.message.trim()
           : pendingRequests[conversation.id]?.status ?? `${activeProfile?.display_name ?? preferredModel} が思考中`;
@@ -2630,6 +2664,7 @@ export default function App() {
       steerStatus={modelSteerStatus}
       steerBusy={modelSteerBusy}
       steerQueuedCount={steerItems.filter((item) => item.status === "queued").length}
+      steerPreviewItems={isCentered ? [] : activeComposerSteerItems(steerItems, isGenerating || isConversationPending)}
       onExtensionSelect={handleComposerExtensionSelect}
       onCommandSelect={handleComposerCommand}
       onModelCommandCandidateSelect={handleModelCommandCandidateSelect}

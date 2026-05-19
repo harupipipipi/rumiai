@@ -137,6 +137,21 @@ function compactProfileName(name: string): string {
     .trim();
 }
 
+function steerStatusLabel(status: string | undefined): string {
+  switch (String(status || "").toLowerCase()) {
+    case "queued":
+      return "待機中";
+    case "injected":
+      return "反映済み";
+    case "sending":
+      return "送信中";
+    case "sent":
+      return "送信済み";
+    default:
+      return "ステア";
+  }
+}
+
 function capabilityBadges(profile: ModelProfile | null | undefined): string[] {
   if (!profile) return [];
   const badges: string[] = [];
@@ -760,6 +775,7 @@ export function ComposerRenderer({
   steerStatus = null,
   steerBusy = false,
   steerQueuedCount = 0,
+  steerPreviewItems = [],
   onExtensionSelect,
   onCommandSelect,
   onModelCommandCandidateSelect,
@@ -857,6 +873,9 @@ export function ComposerRenderer({
   const showThinkingLevelChips = Boolean(thinkingMatch && thinkingCommand && levels.length > 0);
   const hasModelCommandCandidates = !isSteerMode && modelCommandCandidates.length > 0;
   const showCommandSuggestions = !hasModelCommandCandidates && matchedCommands.length > 0;
+  const visibleSteerPreviewItems = steerPreviewItems.filter((item) => (
+    item.visible !== false && String(item.prompt ?? "").trim()
+  ));
   const currentModeMeta = MODE_META[mode];
   const ModeIcon = currentModeMeta.icon;
   const directoryEntries = (codingContext?.entries ?? []).filter((entry) => entry.is_dir);
@@ -1521,6 +1540,40 @@ export function ComposerRenderer({
               {attachedFiles.map((file) => (
                 <FilePreviewCard key={file.id} file={file} onRemove={onFileRemove} />
               ))}
+            </div>
+          )}
+
+          {!isNewConversation && visibleSteerPreviewItems.length > 0 && (
+            <div className="mx-3 mt-3 overflow-hidden rounded-t-2xl border border-zinc-700/60 bg-[#262627] shadow-sm max-[640px]:mx-2 max-[640px]:mt-2">
+              <div className="flex min-h-8 items-center justify-between gap-2 border-b border-zinc-700/45 px-3 py-1.5 max-[640px]:px-2">
+                <div className="flex min-w-0 items-center gap-2 text-zinc-400">
+                  <CornerDownRight size={14} className="flex-shrink-0 text-zinc-500" />
+                  <span className="truncate text-[12px] font-medium text-zinc-300">これがステア</span>
+                  {visibleSteerPreviewItems.length > 1 && (
+                    <span className="rounded-full border border-zinc-700 px-1.5 py-0.5 text-[9px] leading-none text-zinc-500">
+                      {visibleSteerPreviewItems.length}
+                    </span>
+                  )}
+                </div>
+                <div className="flex flex-shrink-0 items-center gap-1.5 text-[10px] text-zinc-500">
+                  {steerBusy && <Loader2 size={11} className="animate-spin" />}
+                  {steerStatus && <span className="max-w-[160px] truncate">{steerStatus}</span>}
+                </div>
+              </div>
+              <div className="grid gap-1.5 px-3 py-2 max-[640px]:px-2">
+                {visibleSteerPreviewItems.map((item) => (
+                  <div key={item.id} className="grid gap-1 rounded-lg bg-zinc-950/35 px-2.5 py-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="rounded border border-zinc-700/70 px-1.5 py-0.5 text-[9px] leading-none text-zinc-500">
+                        {steerStatusLabel(item.status)}
+                      </span>
+                    </div>
+                    <div className="max-h-20 overflow-y-auto whitespace-pre-wrap break-words text-[12px] leading-5 text-zinc-300">
+                      {String(item.prompt ?? "").trim()}
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
 
