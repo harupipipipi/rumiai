@@ -65,6 +65,23 @@ class ConversationSteerStore:
     def process_for_conversation(self, conversation_id: str, *, context: dict[str, Any] | None = None) -> list[dict[str, Any]]:
         return self.process(target_type="conversation", target_id=conversation_id, conversation_id=conversation_id, context=context)
 
+    def consume_for_conversation(self, conversation_id: str) -> list[dict[str, Any]]:
+        """Consume queued steer items so an active run can inject them into its next model turn."""
+        consumed: list[dict[str, Any]] = []
+        for item in self.list(status="queued"):
+            if not self._matches(item, target_type="conversation", target_id=conversation_id, conversation_id=conversation_id):
+                continue
+            updated = self.mark(
+                item["id"],
+                {
+                    "status": "injected",
+                    "injected_at": timestamp(),
+                    "result": {"kind": "runtime_instruction", "conversation_id": conversation_id},
+                },
+            )
+            consumed.append(updated or item)
+        return consumed
+
     def process(
         self,
         *,

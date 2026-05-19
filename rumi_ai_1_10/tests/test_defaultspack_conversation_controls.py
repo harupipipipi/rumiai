@@ -34,6 +34,23 @@ def test_conversation_steer_queues_and_processes_followup(monkeypatch, tmp_path)
     assert calls[0]["context"]["_conversation_steer_autosend"] is True
 
 
+def test_conversation_steer_can_be_consumed_for_running_turn(monkeypatch, tmp_path):
+    from blocks.conversation.steer import run as steer
+    from domain.chat.steer import ConversationSteerStore
+
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_STEER_STORE_PATH", str(tmp_path / "steer.json"))
+
+    queued = steer({"conversation_id": "conv-1", "prompt": "change course"}, {})
+    consumed = ConversationSteerStore().consume_for_conversation("conv-1")
+    processed = steer({"action": "process", "conversation_id": "conv-1"}, {})
+
+    assert queued["status"] == "ok"
+    assert consumed[0]["status"] == "injected"
+    assert consumed[0]["prompt"] == "change course"
+    assert processed["status"] == "ok"
+    assert processed["data"]["processed"] == []
+
+
 def test_conversation_handoff_creates_move_card_without_initial_send(monkeypatch, tmp_path):
     from blocks.conversation.handoff import run as handoff
 

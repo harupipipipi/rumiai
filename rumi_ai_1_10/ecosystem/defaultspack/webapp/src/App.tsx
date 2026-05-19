@@ -6,7 +6,7 @@ import { ConversationSpotlight } from "./components/ConversationSpotlight";
 import type { ChatItem } from "./components/HistoryBoard";
 import type { ToolPreviewItem, ToolPreviewMode } from "./components/ToolPreview";
 import { buildToolPreviewDisplayItems, hasCanvasItems } from "./components/ToolPreview";
-import { api, defaultspackApiFetch, type ChatActivityEvent, type ChatContentBlock, type ChatMessage, type ChatStreamEvent, type ChatToolStreamEvent, type CodingWorkspaceRecord, type ComposerCommandExecuteResult, type ComposerCommandItem, type ComposerCommandMode, type ComposerWidgetAction, type Conversation, type ConversationSearchResult, type ConversationSteerItem, type ModelCommandCandidate, type ModelProfile, type ModelSearchItem, type OperationsCompanyStatus, type SettingsSection, type SidebarAction, type SidebarItem, type UICatalog } from "./lib/api";
+import { api, defaultspackApiFetch, type ChatActivityEvent, type ChatContentBlock, type ChatMessage, type ChatStreamEvent, type ChatToolStreamEvent, type CodingWorkspaceRecord, type ComposerCommandExecuteResult, type ComposerCommandItem, type ComposerCommandMode, type ComposerWidgetAction, type Conversation, type ConversationSearchResult, type ConversationSteerItem, type ModelCommandCandidate, type ModelProfile, type OperationsCompanyStatus, type SettingsSection, type SidebarAction, type SidebarItem, type UICatalog } from "./lib/api";
 import { reduceBrowserStateFromEvents } from "./lib/browserState";
 import { deriveConversationTitle, formatRelativeTime, messageToText, orderConversationMessages } from "./lib/chat";
 import { cn } from "./lib/cn";
@@ -34,188 +34,6 @@ type ComposerCandidateMenuState = {
   query: string;
   candidates: ModelCommandCandidate[];
 } | null;
-
-function modelSearchBadges(model: ModelSearchItem): string[] {
-  const badges: string[] = [];
-  if (model.configured) badges.push("ready");
-  if (model.requires_api_key || model.api_key_required) badges.push("key");
-  if (model.supports_vision || model.supports_image_input) badges.push("vision");
-  if (model.supports_thinking) badges.push("thinking");
-  if (model.supports_fast || model.speed_tier === "fast") badges.push("fast");
-  if (model.cost_tier) badges.push(String(model.cost_tier));
-  return badges.slice(0, 5);
-}
-
-function ModelSteerTestPanel({
-  open,
-  conversationId,
-  activeModelId,
-  query,
-  results,
-  status,
-  steerDraft,
-  steerItems,
-  busy,
-  onToggleOpen,
-  onQueryChange,
-  onSearch,
-  onSelectModel,
-  onSteerDraftChange,
-  onQueueSteer,
-  onProcessSteer,
-  onRefreshSteer,
-  onCancelSteer,
-}: {
-  open: boolean;
-  conversationId: string | null;
-  activeModelId: string;
-  query: string;
-  results: ModelSearchItem[];
-  status: string | null;
-  steerDraft: string;
-  steerItems: ConversationSteerItem[];
-  busy: boolean;
-  onToggleOpen: () => void;
-  onQueryChange: (value: string) => void;
-  onSearch: () => void;
-  onSelectModel: (profileId: string) => void;
-  onSteerDraftChange: (value: string) => void;
-  onQueueSteer: () => void;
-  onProcessSteer: () => void;
-  onRefreshSteer: () => void;
-  onCancelSteer: (id: string) => void;
-}) {
-  if (!open) {
-    return (
-      <div className="mx-auto mb-2 flex w-[min(920px,calc(100%-32px))] justify-end">
-        <button
-          type="button"
-          onClick={onToggleOpen}
-          className="rounded-md border border-zinc-800 bg-zinc-950/90 px-3 py-1.5 text-[11px] text-zinc-400 shadow-lg transition-colors hover:border-zinc-700 hover:text-zinc-100"
-        >
-          Model / Steer
-        </button>
-      </div>
-    );
-  }
-
-  return (
-    <section className="mx-auto mb-2 w-[min(920px,calc(100%-32px))] rounded-lg border border-zinc-800 bg-zinc-950/95 p-3 shadow-2xl">
-      <div className="flex items-center justify-between gap-3">
-        <div className="min-w-0">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-zinc-500">Model / Steer Test</p>
-          <p className="mt-0.5 truncate font-mono text-[10px] text-zinc-600">{activeModelId || "no model selected"}</p>
-        </div>
-        <button
-          type="button"
-          onClick={onToggleOpen}
-          className="rounded-md px-2 py-1 text-[11px] text-zinc-500 hover:bg-zinc-900 hover:text-zinc-200"
-        >
-          close
-        </button>
-      </div>
-
-      <div className="mt-3 grid gap-3 lg:grid-cols-[1.1fr_0.9fr]">
-        <div className="space-y-2">
-          <form
-            className="flex gap-2"
-            onSubmit={(event) => {
-              event.preventDefault();
-              onSearch();
-            }}
-          >
-            <input
-              value={query}
-              onChange={(event) => onQueryChange(event.target.value)}
-              placeholder="mimo, vision, fast, provider..."
-              className="h-8 min-w-0 flex-1 rounded-md border border-zinc-800 bg-zinc-900 px-2 text-[12px] text-zinc-200 outline-none placeholder:text-zinc-600 focus:border-zinc-600"
-            />
-            <button
-              type="submit"
-              disabled={busy}
-              className="h-8 rounded-md bg-zinc-100 px-3 text-[12px] font-semibold text-zinc-950 hover:bg-white disabled:opacity-40"
-            >
-              Search
-            </button>
-          </form>
-          <div className="max-h-36 overflow-y-auto rounded-md border border-zinc-800 bg-black/20">
-            {results.length > 0 ? results.map((model) => {
-              const profileId = String(model.profile_id || model.qualified_model_id || "");
-              const badges = modelSearchBadges(model);
-              return (
-                <button
-                  key={profileId}
-                  type="button"
-                  onClick={() => profileId && onSelectModel(profileId)}
-                  className="block w-full border-b border-zinc-900 px-2.5 py-2 text-left transition-colors last:border-0 hover:bg-zinc-900/80"
-                >
-                  <span className="block truncate text-[12px] font-medium text-zinc-200">{model.label || model.display_name || profileId}</span>
-                  <span className="mt-1 flex min-w-0 flex-wrap items-center gap-1.5">
-                    <span className="truncate font-mono text-[10px] text-zinc-600">{profileId}</span>
-                    {badges.map((badge) => (
-                      <span key={badge} className="rounded border border-zinc-800 px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-zinc-500">{badge}</span>
-                    ))}
-                  </span>
-                </button>
-              );
-            }) : (
-              <div className="px-3 py-4 text-[11px] text-zinc-600">Search results will appear here.</div>
-            )}
-          </div>
-        </div>
-
-        <div className="space-y-2">
-          <textarea
-            value={steerDraft}
-            onChange={(event) => onSteerDraftChange(event.target.value)}
-            placeholder="このタスクが終わったら自動で送るステア..."
-            className="h-20 w-full resize-none rounded-md border border-zinc-800 bg-zinc-900 px-2 py-2 text-[12px] text-zinc-200 outline-none placeholder:text-zinc-600 focus:border-zinc-600"
-          />
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={onQueueSteer}
-              disabled={busy || !conversationId || !steerDraft.trim()}
-              className="h-8 rounded-md bg-zinc-100 px-3 text-[12px] font-semibold text-zinc-950 hover:bg-white disabled:opacity-40"
-            >
-              Queue
-            </button>
-            <button
-              type="button"
-              onClick={onProcessSteer}
-              disabled={busy || !conversationId}
-              className="h-8 rounded-md border border-zinc-800 px-3 text-[12px] text-zinc-300 hover:border-zinc-700 hover:text-zinc-100 disabled:opacity-40"
-            >
-              Send queued
-            </button>
-            <button
-              type="button"
-              onClick={onRefreshSteer}
-              disabled={busy || !conversationId}
-              className="h-8 rounded-md px-2 text-[11px] text-zinc-500 hover:bg-zinc-900 hover:text-zinc-200 disabled:opacity-40"
-            >
-              refresh
-            </button>
-          </div>
-          <div className="max-h-16 overflow-y-auto text-[10px] text-zinc-500">
-            {steerItems.length > 0 ? steerItems.slice(0, 4).map((item) => (
-              <div key={item.id} className="flex items-center gap-2 border-t border-zinc-900 py-1 first:border-t-0">
-                <span className="min-w-[52px] rounded border border-zinc-800 px-1.5 py-0.5 text-center">{item.status}</span>
-                <span className="min-w-0 flex-1 truncate">{item.prompt}</span>
-                {item.status === "queued" && (
-                  <button type="button" onClick={() => onCancelSteer(item.id)} className="text-zinc-600 hover:text-zinc-200">cancel</button>
-                )}
-              </div>
-            )) : (
-              <p className="py-1 text-zinc-600">{conversationId ? "No queued steer." : "Open a conversation to use steer."}</p>
-            )}
-          </div>
-          {status && <p className="truncate text-[10px] text-zinc-500">{status}</p>}
-        </div>
-      </div>
-    </section>
-  );
-}
 
 function useLocalStorage<T>(key: string, defaultValue: T): [T, (v: T | ((prev: T) => T)) => void] {
   const [value, setValue] = useState<T>(() => {
@@ -963,9 +781,6 @@ export default function App() {
   const [showPreview, setShowPreview] = useLocalStorage("rumi-show-preview", false);
   const [isHistoryMinimized, setIsHistoryMinimized] = useLocalStorage("rumi-history-minimized", false);
   const [isNewChatLaunching, setIsNewChatLaunching] = useState(false);
-  const [isModelSteerPanelOpen, setIsModelSteerPanelOpen] = useLocalStorage("rumi-model-steer-test-open", true);
-  const [modelSearchQuery, setModelSearchQuery] = useLocalStorage("rumi-model-search-query", "mimo");
-  const [modelSearchResults, setModelSearchResults] = useState<ModelSearchItem[]>([]);
   const [modelSteerStatus, setModelSteerStatus] = useState<string | null>(null);
   const [modelSteerBusy, setModelSteerBusy] = useState(false);
   const [steerDraft, setSteerDraft] = useLocalStorage("rumi-steer-draft", "");
@@ -1774,24 +1589,9 @@ export default function App() {
     });
   };
 
-  const runModelSearch = useCallback(async (queryOverride?: string) => {
-    const query = (queryOverride ?? modelSearchQuery).trim() || "mimo";
-    setModelSearchQuery(query);
-    setModelSteerBusy(true);
-    setModelSteerStatus("Searching models...");
-    try {
-      const result = await api.searchModels({ query, max_results: 12 });
-      setModelSearchResults(result.models ?? []);
-      setModelSteerStatus(`${result.models?.length ?? 0} model(s) found`);
-    } catch (searchError) {
-      setModelSteerStatus(searchError instanceof Error ? searchError.message : "Model search failed");
-    } finally {
-      setModelSteerBusy(false);
-    }
-  }, [modelSearchQuery, setModelSearchQuery]);
-
-  const refreshSteerQueue = useCallback(async () => {
-    if (!activeConversationId) {
+  const refreshSteerQueue = useCallback(async (conversationIdOverride?: string) => {
+    const conversationId = conversationIdOverride ?? activeConversationId;
+    if (!conversationId) {
       setSteerItems([]);
       return;
     }
@@ -1799,11 +1599,12 @@ export default function App() {
     try {
       const result = await api.conversationSteer({
         action: "list",
-        conversation_id: activeConversationId,
+        conversation_id: conversationId,
       });
       const items = "items" in result && Array.isArray(result.items) ? result.items : [];
       setSteerItems(items);
-      setModelSteerStatus(`${items.filter((item) => item.status === "queued").length} queued steer item(s)`);
+      const queuedCount = items.filter((item) => item.status === "queued").length;
+      setModelSteerStatus(queuedCount ? `${queuedCount}件のステアが待機中` : null);
     } catch (steerError) {
       setModelSteerStatus(steerError instanceof Error ? steerError.message : "Steer refresh failed");
     } finally {
@@ -1824,37 +1625,20 @@ export default function App() {
         conversation_id: activeConversationId,
         visible: true,
         auto_send: true,
+        metadata: {
+          source: "composer_steer",
+          live: isGenerating || isConversationPending,
+        },
       });
       setSteerDraft("");
-      setModelSteerStatus("Steer queued for this conversation");
+      setModelSteerStatus(isGenerating || isConversationPending ? "ステアを送りました" : "ステアを予約しました");
       await refreshSteerQueue();
     } catch (steerError) {
       setModelSteerStatus(steerError instanceof Error ? steerError.message : "Steer queue failed");
     } finally {
       setModelSteerBusy(false);
     }
-  }, [activeConversationId, refreshSteerQueue, setSteerDraft, steerDraft]);
-
-  const processConversationSteer = useCallback(async () => {
-    if (!activeConversationId) return;
-    setModelSteerBusy(true);
-    try {
-      const result = await api.conversationSteer({
-        action: "process",
-        target_type: "conversation",
-        target_id: activeConversationId,
-        conversation_id: activeConversationId,
-      });
-      const processed = "processed" in result && Array.isArray(result.processed) ? result.processed.length : 0;
-      setModelSteerStatus(`${processed} steer item(s) sent`);
-      await refreshSteerQueue();
-      await refreshConversations(activeConversationId);
-    } catch (steerError) {
-      setModelSteerStatus(steerError instanceof Error ? steerError.message : "Steer send failed");
-    } finally {
-      setModelSteerBusy(false);
-    }
-  }, [activeConversationId, refreshSteerQueue]);
+  }, [activeConversationId, isConversationPending, isGenerating, refreshSteerQueue, setSteerDraft, steerDraft]);
 
   const cancelConversationSteer = useCallback(async (steerId: string) => {
     if (!steerId) return;
@@ -1870,15 +1654,19 @@ export default function App() {
     }
   }, [refreshSteerQueue]);
 
-  useEffect(() => {
-    if (!isModelSteerPanelOpen || modelSearchResults.length > 0) return;
-    void runModelSearch(modelSearchQuery || "mimo");
-  }, [isModelSteerPanelOpen, modelSearchQuery, modelSearchResults.length, runModelSearch]);
+  const clearComposerSteer = useCallback(() => {
+    setSteerDraft("");
+    const queued = steerItems.filter((item) => item.status === "queued");
+    for (const item of queued) {
+      void cancelConversationSteer(item.id);
+    }
+    setModelSteerStatus(queued.length ? "ステアを取り消しました" : null);
+  }, [cancelConversationSteer, setSteerDraft, steerItems]);
 
   useEffect(() => {
-    if (!isModelSteerPanelOpen || !activeConversationId) return;
+    if (!activeConversationId) return;
     void refreshSteerQueue();
-  }, [activeConversationId, isModelSteerPanelOpen, refreshSteerQueue]);
+  }, [activeConversationId, refreshSteerQueue]);
 
   const handleComposerExtensionSelect = (item: ComposerExtensionItem) => {
     setActiveSidebarItemId(item.id);
@@ -2800,6 +2588,7 @@ export default function App() {
       }
 
       await refreshConversations(conversation.id);
+      await refreshSteerQueue(conversation.id).catch(console.error);
     } catch (submitError) {
       console.error("Chat error:", submitError);
       if (isCancelledStreamError(submitError)) {
@@ -2858,6 +2647,11 @@ export default function App() {
       droppedWidgets={droppedWidgets}
       selectedToolIds={selectedToolIds}
       keyboardButtonNavigation={keyboardButtonNavigation}
+      steerVisible={!isCentered && Boolean(activeConversationId) && (isGenerating || isConversationPending || Boolean(steerDraft.trim()) || steerItems.some((item) => item.status === "queued"))}
+      steerDraft={steerDraft}
+      steerStatus={modelSteerStatus}
+      steerBusy={modelSteerBusy}
+      steerQueuedCount={steerItems.filter((item) => item.status === "queued").length}
       onExtensionSelect={handleComposerExtensionSelect}
       onCommandSelect={handleComposerCommand}
       onModelCommandCandidateSelect={handleModelCommandCandidateSelect}
@@ -2868,6 +2662,9 @@ export default function App() {
       onInputChange={handleComposerInputChange}
       onSubmit={handleSubmit}
       onStopGenerating={handleStopGenerating}
+      onSteerDraftChange={setSteerDraft}
+      onSteerSubmit={() => void queueConversationSteer()}
+      onSteerClear={clearComposerSteer}
       onModeChange={handleModeChange}
       onFileAttach={handleFileAttach}
       onAtFileAttach={handleAtFileAttach}
@@ -2972,26 +2769,6 @@ export default function App() {
 
             {showRegion("composer") && !isNewConversation && (
               <div className="relative">
-                <ModelSteerTestPanel
-                  open={isModelSteerPanelOpen}
-                  conversationId={activeConversationId}
-                  activeModelId={preferredModel}
-                  query={modelSearchQuery}
-                  results={modelSearchResults}
-                  status={modelSteerStatus}
-                  steerDraft={steerDraft}
-                  steerItems={steerItems}
-                  busy={modelSteerBusy}
-                  onToggleOpen={() => setIsModelSteerPanelOpen((value) => !value)}
-                  onQueryChange={setModelSearchQuery}
-                  onSearch={() => void runModelSearch()}
-                  onSelectModel={handleModelProfileSelect}
-                  onSteerDraftChange={setSteerDraft}
-                  onQueueSteer={() => void queueConversationSteer()}
-                  onProcessSteer={() => void processConversationSteer()}
-                  onRefreshSteer={() => void refreshSteerQueue()}
-                  onCancelSteer={(steerId) => void cancelConversationSteer(steerId)}
-                />
                 {showRegion("activity_preview") && !effectiveShowPreview && canShowCanvas && (
                   <CanvasPeek
                     previews={canvasPreviews}

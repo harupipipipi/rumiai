@@ -117,6 +117,11 @@ export type ComposerRendererProps = {
   droppedWidgets?: DroppedWidget[];
   selectedToolIds?: string[];
   keyboardButtonNavigation?: boolean;
+  steerVisible?: boolean;
+  steerDraft?: string;
+  steerStatus?: string | null;
+  steerBusy?: boolean;
+  steerQueuedCount?: number;
   onExtensionSelect?: (item: ComposerExtensionItem) => void;
   onCommandSelect?: (commandId: string, rawInput?: string) => void;
   onModelCommandCandidateSelect?: (candidate: ModelCommandCandidate) => void;
@@ -127,6 +132,9 @@ export type ComposerRendererProps = {
   onInputChange: (value: string) => void;
   onSubmit: (event: FormEvent) => void;
   onStopGenerating?: () => void;
+  onSteerDraftChange?: (value: string) => void;
+  onSteerSubmit?: () => void;
+  onSteerClear?: () => void;
   onModeChange?: (mode: AppMode) => void;
   onFileAttach?: (files: AttachedFile[]) => void;
   onAtFileAttach?: (path: string) => void;

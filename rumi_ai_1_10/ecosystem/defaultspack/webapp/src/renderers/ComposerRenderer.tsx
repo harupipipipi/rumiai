@@ -3,6 +3,7 @@ import {
   Bot,
   ChevronDown,
   Code2,
+  CornerDownRight,
   File,
   FileText,
   Folder,
@@ -12,6 +13,7 @@ import {
   MessageSquare,
   Mic,
   MousePointerClick,
+  MoreHorizontal,
   Paperclip,
   PanelRightOpen,
   Plus,
@@ -20,6 +22,7 @@ import {
   SlidersHorizontal,
   Sparkles,
   Square,
+  Trash2,
   Wrench,
   X,
 } from "lucide-react";
@@ -756,6 +759,11 @@ export function ComposerRenderer({
   droppedWidgets = [],
   selectedToolIds = [],
   keyboardButtonNavigation = false,
+  steerVisible = false,
+  steerDraft = "",
+  steerStatus = null,
+  steerBusy = false,
+  steerQueuedCount = 0,
   onExtensionSelect,
   onCommandSelect,
   onModelCommandCandidateSelect,
@@ -766,6 +774,9 @@ export function ComposerRenderer({
   onInputChange,
   onSubmit,
   onStopGenerating,
+  onSteerDraftChange,
+  onSteerSubmit,
+  onSteerClear,
   onModeChange,
   onFileAttach,
   onAtFileAttach,
@@ -1213,6 +1224,26 @@ export function ComposerRenderer({
     ],
   );
 
+  const handleSteerKeyDown = useCallback(
+    (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      event.stopPropagation();
+      if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+        event.preventDefault();
+        if (steerDraft.trim() && !steerBusy) {
+          onSteerSubmit?.();
+        }
+        return;
+      }
+      if (event.key === "Enter" && !event.shiftKey) {
+        event.preventDefault();
+        if (steerDraft.trim() && !steerBusy) {
+          onSteerSubmit?.();
+        }
+      }
+    },
+    [onSteerSubmit, steerBusy, steerDraft],
+  );
+
   return (
     <div
       className={`${isNewConversation ? "w-full px-5" : "px-5 pb-5 pt-2 bg-[#09090b] flex-shrink-0 max-[640px]:px-2 max-[640px]:pb-2"}`}
@@ -1488,6 +1519,64 @@ export function ComposerRenderer({
                 </div>
               </div>
             </>
+          )}
+
+          {steerVisible && !isNewConversation && (
+            <div className="mx-3 mt-3 overflow-hidden rounded-t-2xl border border-zinc-700/60 bg-[#262627] shadow-sm max-[640px]:mx-2 max-[640px]:mt-2">
+              <div className="flex min-h-9 items-center justify-between gap-2 border-b border-zinc-700/50 px-3 py-1.5 text-zinc-400 max-[640px]:px-2">
+                <div className="flex min-w-0 items-center gap-2">
+                  <CornerDownRight size={15} className="flex-shrink-0 text-zinc-500" />
+                  <span className="truncate text-[13px] font-medium text-zinc-300">これがステア</span>
+                  {steerQueuedCount > 0 && (
+                    <span className="rounded-full border border-zinc-700 px-1.5 py-0.5 text-[10px] leading-none text-zinc-500">
+                      {steerQueuedCount}
+                    </span>
+                  )}
+                </div>
+                <div className="flex flex-shrink-0 items-center gap-1">
+                  <button
+                    type="button"
+                    tabIndex={chromeButtonTabIndex}
+                    disabled={steerBusy || !steerDraft.trim()}
+                    onClick={() => onSteerSubmit?.()}
+                    className="inline-flex h-7 items-center gap-1.5 rounded-lg px-2 text-[12px] font-medium text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-100 disabled:cursor-not-allowed disabled:opacity-40"
+                    title="指示を送る"
+                  >
+                    <CornerDownRight size={13} />
+                    <span className="max-[520px]:hidden">指示を送る</span>
+                  </button>
+                  <button
+                    type="button"
+                    tabIndex={chromeButtonTabIndex}
+                    onClick={() => onSteerClear?.()}
+                    className="flex h-7 w-7 items-center justify-center rounded-lg text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-100"
+                    title="ステアを消す"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                  <button
+                    type="button"
+                    tabIndex={chromeButtonTabIndex}
+                    className="flex h-7 w-7 items-center justify-center rounded-lg text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-100"
+                    title={steerStatus || "ステア"}
+                  >
+                    <MoreHorizontal size={15} />
+                  </button>
+                </div>
+              </div>
+              <textarea
+                value={steerDraft}
+                onChange={(event) => onSteerDraftChange?.(event.target.value)}
+                onKeyDown={handleSteerKeyDown}
+                placeholder="フォローアップの変更を求める"
+                className="min-h-[48px] max-h-[96px] w-full resize-none border-none bg-[#2b2b2d] px-4 py-3 text-[15px] leading-[1.45] text-zinc-100 outline-none placeholder:text-zinc-500 max-[640px]:min-h-[44px] max-[640px]:px-3 max-[640px]:py-2.5 max-[640px]:text-[13px]"
+              />
+              {steerStatus && (
+                <div className="border-t border-zinc-700/40 px-4 py-1 text-[10px] text-zinc-500 max-[640px]:px-3">
+                  {steerStatus}
+                </div>
+              )}
+            </div>
           )}
 
           {isNewConversation && attachedFiles.length > 0 && (

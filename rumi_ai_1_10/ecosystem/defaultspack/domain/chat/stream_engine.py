@@ -734,6 +734,8 @@ class ChatRunEngine:
 
         for step_index in range(max(1, tool_limit + 1)):
             self._raise_if_cancelled()
+            for event in self._inject_conversation_steer(prepared.conversation_id, working_messages):
+                yield event
             response, tool_uses = yield from self._model_turn(prepared, working_messages, draft)
             if tool_uses and step_index >= tool_limit:
                 response = {
@@ -859,6 +861,35 @@ class ChatRunEngine:
             "AI provider did not return a response",
             prepared.params,
             events=list(self._activity_events),
+        )
+
+    def _inject_conversation_steer(self, conversation_id: str, working_messages: list[dict[str, Any]]) -> Iterator[dict[str, Any]]:
+        try:
+            from domain.chat.steer import ConversationSteerStore
+
+            items = ConversationSteerStore().consume_for_conversation(conversation_id)
+        except Exception as exc:
+            yield self._emit(
+                "status",
+                data={"error": str(exc)},
+                message="conversation steer の取得に失敗しました",
+                phase="conversation_steer_failed",
+            )
+            return
+        prompts = [str(item.get("prompt") or "").strip() for item in items if isinstance(item, dict) and str(item.get("prompt") or "").strip()]
+        if not prompts:
+            return
+        working_messages.append(
+            {
+                "role": "user",
+                "content": "[RUNTIME INSTRUCTION - User steering while the task is running]\n" + "\n\n".join(prompts),
+            }
+        )
+        yield self._emit(
+            "status",
+            data={"processed": items},
+            message="ステアを次の判断に反映しました",
+            phase="conversation_steer",
         )
 
     def _model_turn(
