@@ -783,7 +783,6 @@ export default function App() {
   const [isNewChatLaunching, setIsNewChatLaunching] = useState(false);
   const [modelSteerStatus, setModelSteerStatus] = useState<string | null>(null);
   const [modelSteerBusy, setModelSteerBusy] = useState(false);
-  const [steerDraft, setSteerDraft] = useLocalStorage("rumi-steer-draft", "");
   const [steerItems, setSteerItems] = useState<ConversationSteerItem[]>([]);
   const [previewMode, setPreviewMode] = useLocalStorage<ToolPreviewMode>("rumi-preview-mode", "auto");
   const [canvasMemo, setCanvasMemo] = useLocalStorage("rumi-canvas-memo", "");
@@ -1612,8 +1611,8 @@ export default function App() {
     }
   }, [activeConversationId]);
 
-  const queueConversationSteer = useCallback(async () => {
-    const prompt = steerDraft.trim();
+  const queueConversationSteer = useCallback(async (promptOverride?: string) => {
+    const prompt = String(promptOverride ?? input).trim();
     if (!activeConversationId || !prompt) return;
     setModelSteerBusy(true);
     try {
@@ -1630,7 +1629,7 @@ export default function App() {
           live: isGenerating || isConversationPending,
         },
       });
-      setSteerDraft("");
+      setInput("");
       setModelSteerStatus(isGenerating || isConversationPending ? "ステアを送りました" : "ステアを予約しました");
       await refreshSteerQueue();
     } catch (steerError) {
@@ -1638,30 +1637,7 @@ export default function App() {
     } finally {
       setModelSteerBusy(false);
     }
-  }, [activeConversationId, isConversationPending, isGenerating, refreshSteerQueue, setSteerDraft, steerDraft]);
-
-  const cancelConversationSteer = useCallback(async (steerId: string) => {
-    if (!steerId) return;
-    setModelSteerBusy(true);
-    try {
-      await api.conversationSteer({ action: "cancel", id: steerId });
-      setModelSteerStatus("Steer cancelled");
-      await refreshSteerQueue();
-    } catch (steerError) {
-      setModelSteerStatus(steerError instanceof Error ? steerError.message : "Steer cancel failed");
-    } finally {
-      setModelSteerBusy(false);
-    }
-  }, [refreshSteerQueue]);
-
-  const clearComposerSteer = useCallback(() => {
-    setSteerDraft("");
-    const queued = steerItems.filter((item) => item.status === "queued");
-    for (const item of queued) {
-      void cancelConversationSteer(item.id);
-    }
-    setModelSteerStatus(queued.length ? "ステアを取り消しました" : null);
-  }, [cancelConversationSteer, setSteerDraft, steerItems]);
+  }, [activeConversationId, input, isConversationPending, isGenerating, refreshSteerQueue, setInput]);
 
   useEffect(() => {
     if (!activeConversationId) return;
@@ -1932,6 +1908,10 @@ export default function App() {
 
   const handleComposerInputChange = (value: string) => {
     setInput(value);
+    if (isGenerating || isConversationPending) {
+      setComposerCandidateMenu(null);
+      return;
+    }
     const modelQuery = modelCommandInputQuery(value);
     if (composerCandidateMenu && modelQuery !== composerCandidateMenu.query) {
       setComposerCandidateMenu(null);
@@ -2647,8 +2627,6 @@ export default function App() {
       droppedWidgets={droppedWidgets}
       selectedToolIds={selectedToolIds}
       keyboardButtonNavigation={keyboardButtonNavigation}
-      steerVisible={!isCentered && Boolean(activeConversationId) && (isGenerating || isConversationPending || Boolean(steerDraft.trim()) || steerItems.some((item) => item.status === "queued"))}
-      steerDraft={steerDraft}
       steerStatus={modelSteerStatus}
       steerBusy={modelSteerBusy}
       steerQueuedCount={steerItems.filter((item) => item.status === "queued").length}
@@ -2662,9 +2640,7 @@ export default function App() {
       onInputChange={handleComposerInputChange}
       onSubmit={handleSubmit}
       onStopGenerating={handleStopGenerating}
-      onSteerDraftChange={setSteerDraft}
-      onSteerSubmit={() => void queueConversationSteer()}
-      onSteerClear={clearComposerSteer}
+      onSteerSubmit={(prompt) => void queueConversationSteer(prompt)}
       onModeChange={handleModeChange}
       onFileAttach={handleFileAttach}
       onAtFileAttach={handleAtFileAttach}

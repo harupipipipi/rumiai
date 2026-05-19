@@ -13,7 +13,6 @@ import {
   MessageSquare,
   Mic,
   MousePointerClick,
-  MoreHorizontal,
   Paperclip,
   PanelRightOpen,
   Plus,
@@ -22,7 +21,6 @@ import {
   SlidersHorizontal,
   Sparkles,
   Square,
-  Trash2,
   Wrench,
   X,
 } from "lucide-react";
@@ -759,8 +757,6 @@ export function ComposerRenderer({
   droppedWidgets = [],
   selectedToolIds = [],
   keyboardButtonNavigation = false,
-  steerVisible = false,
-  steerDraft = "",
   steerStatus = null,
   steerBusy = false,
   steerQueuedCount = 0,
@@ -774,9 +770,7 @@ export function ComposerRenderer({
   onInputChange,
   onSubmit,
   onStopGenerating,
-  onSteerDraftChange,
   onSteerSubmit,
-  onSteerClear,
   onModeChange,
   onFileAttach,
   onAtFileAttach,
@@ -838,12 +832,13 @@ export function ComposerRenderer({
   const activeToolGroup = toolGroups.find((group) => group.id === openToolGroup) ?? toolGroups[0] ?? null;
   const showToolGroups = toolItems.length > 4;
   const isEscapedSlash = input.startsWith("//");
-  const slashText = input.startsWith("/") && !isEscapedSlash ? input.slice(1) : "";
+  const isSteerMode = isGenerating && !isNewConversation;
+  const slashText = !isSteerMode && input.startsWith("/") && !isEscapedSlash ? input.slice(1) : "";
   const slashCommandName = slashText.trimStart().split(/\s+/, 1)[0] ?? "";
   const slashQuery = slashCommandName.toLowerCase();
   const thinkingCommand = commands.find((command) => command.id === "think");
-  const thinkingMatch = input.startsWith("/") && !isEscapedSlash ? thinkingCommandMatch(input) : null;
-  const matchedCommands = input.startsWith("/") && !isEscapedSlash
+  const thinkingMatch = !isSteerMode && input.startsWith("/") && !isEscapedSlash ? thinkingCommandMatch(input) : null;
+  const matchedCommands = !isSteerMode && input.startsWith("/") && !isEscapedSlash
     ? thinkingMatch && thinkingCommand && levels.length > 0
       ? levels
           .filter((level) => !thinkingMatch.query || level.toLowerCase().includes(thinkingMatch.query))
@@ -860,7 +855,7 @@ export function ComposerRenderer({
         })
     : [];
   const showThinkingLevelChips = Boolean(thinkingMatch && thinkingCommand && levels.length > 0);
-  const hasModelCommandCandidates = modelCommandCandidates.length > 0;
+  const hasModelCommandCandidates = !isSteerMode && modelCommandCandidates.length > 0;
   const showCommandSuggestions = !hasModelCommandCandidates && matchedCommands.length > 0;
   const currentModeMeta = MODE_META[mode];
   const ModeIcon = currentModeMeta.icon;
@@ -1120,7 +1115,12 @@ export function ComposerRenderer({
     (event: React.SyntheticEvent) => {
       if (isGenerating) {
         event.preventDefault();
-        onStopGenerating?.();
+        const prompt = input.trim();
+        if (prompt && !steerBusy) {
+          onSteerSubmit?.(prompt);
+        } else if (!prompt) {
+          onStopGenerating?.();
+        }
         return;
       }
       if (needsApiKey(selectedProfile)) {
@@ -1130,12 +1130,14 @@ export function ComposerRenderer({
       }
       onSubmit(event);
     },
-    [isGenerating, needsApiKey, onStopGenerating, onSubmit, selectedProfile],
+    [input, isGenerating, needsApiKey, onStopGenerating, onSteerSubmit, onSubmit, selectedProfile, steerBusy],
   );
 
   const handleSendButtonPointerDown = useCallback(
     (event: React.PointerEvent<HTMLButtonElement>) => {
-      if (event.button !== 0 || isGenerating || (!input.trim() && attachedFiles.length === 0)) return;
+      if (event.button !== 0) return;
+      if (!isGenerating && !input.trim() && attachedFiles.length === 0) return;
+      if (isGenerating && !input.trim()) return;
       submitPointerHandledRef.current = true;
       handleSubmitWithApiKeyGuard(event);
     },
@@ -1151,12 +1153,16 @@ export function ComposerRenderer({
       }
       if (isGenerating) {
         event.preventDefault();
-        onStopGenerating?.();
+        if (input.trim()) {
+          handleSubmitWithApiKeyGuard(event);
+        } else {
+          onStopGenerating?.();
+        }
         return;
       }
       handleSubmitWithApiKeyGuard(event);
     },
-    [handleSubmitWithApiKeyGuard, isGenerating, onStopGenerating],
+    [handleSubmitWithApiKeyGuard, input, isGenerating, onStopGenerating],
   );
 
   const handleKeyDown = useCallback(
@@ -1166,12 +1172,14 @@ export function ComposerRenderer({
         return;
       }
 
-      const modelCandidateAction = modelCandidateMenuKeyAction(
-        event.key,
-        event.shiftKey,
-        selectedModelCandidateIndex,
-        modelCommandCandidates.length,
-      );
+      const modelCandidateAction = isSteerMode
+        ? { handled: false as const }
+        : modelCandidateMenuKeyAction(
+            event.key,
+            event.shiftKey,
+            selectedModelCandidateIndex,
+            modelCommandCandidates.length,
+          );
       if (modelCandidateAction.handled) {
         event.preventDefault();
         if (modelCandidateAction.type === "move") {
@@ -1181,6 +1189,12 @@ export function ComposerRenderer({
         } else if (modelCandidateAction.type === "close") {
           onModelCommandCandidatesClose?.();
         }
+        return;
+      }
+
+      if (event.key === "Enter" && !event.shiftKey && isSteerMode) {
+        event.preventDefault();
+        handleSubmitWithApiKeyGuard(event);
         return;
       }
 
@@ -1215,6 +1229,7 @@ export function ComposerRenderer({
     [
       chooseModelCommandCandidate,
       handleSubmitWithApiKeyGuard,
+      isSteerMode,
       matchedCommands,
       modelCommandCandidates,
       onModelCommandCandidatesClose,
@@ -1222,26 +1237,6 @@ export function ComposerRenderer({
       selectedCommandIndex,
       selectedModelCandidateIndex,
     ],
-  );
-
-  const handleSteerKeyDown = useCallback(
-    (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
-      event.stopPropagation();
-      if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
-        event.preventDefault();
-        if (steerDraft.trim() && !steerBusy) {
-          onSteerSubmit?.();
-        }
-        return;
-      }
-      if (event.key === "Enter" && !event.shiftKey) {
-        event.preventDefault();
-        if (steerDraft.trim() && !steerBusy) {
-          onSteerSubmit?.();
-        }
-      }
-    },
-    [onSteerSubmit, steerBusy, steerDraft],
   );
 
   return (
@@ -1521,64 +1516,6 @@ export function ComposerRenderer({
             </>
           )}
 
-          {steerVisible && !isNewConversation && (
-            <div className="mx-3 mt-3 overflow-hidden rounded-t-2xl border border-zinc-700/60 bg-[#262627] shadow-sm max-[640px]:mx-2 max-[640px]:mt-2">
-              <div className="flex min-h-9 items-center justify-between gap-2 border-b border-zinc-700/50 px-3 py-1.5 text-zinc-400 max-[640px]:px-2">
-                <div className="flex min-w-0 items-center gap-2">
-                  <CornerDownRight size={15} className="flex-shrink-0 text-zinc-500" />
-                  <span className="truncate text-[13px] font-medium text-zinc-300">これがステア</span>
-                  {steerQueuedCount > 0 && (
-                    <span className="rounded-full border border-zinc-700 px-1.5 py-0.5 text-[10px] leading-none text-zinc-500">
-                      {steerQueuedCount}
-                    </span>
-                  )}
-                </div>
-                <div className="flex flex-shrink-0 items-center gap-1">
-                  <button
-                    type="button"
-                    tabIndex={chromeButtonTabIndex}
-                    disabled={steerBusy || !steerDraft.trim()}
-                    onClick={() => onSteerSubmit?.()}
-                    className="inline-flex h-7 items-center gap-1.5 rounded-lg px-2 text-[12px] font-medium text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-100 disabled:cursor-not-allowed disabled:opacity-40"
-                    title="指示を送る"
-                  >
-                    <CornerDownRight size={13} />
-                    <span className="max-[520px]:hidden">指示を送る</span>
-                  </button>
-                  <button
-                    type="button"
-                    tabIndex={chromeButtonTabIndex}
-                    onClick={() => onSteerClear?.()}
-                    className="flex h-7 w-7 items-center justify-center rounded-lg text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-100"
-                    title="ステアを消す"
-                  >
-                    <Trash2 size={14} />
-                  </button>
-                  <button
-                    type="button"
-                    tabIndex={chromeButtonTabIndex}
-                    className="flex h-7 w-7 items-center justify-center rounded-lg text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-100"
-                    title={steerStatus || "ステア"}
-                  >
-                    <MoreHorizontal size={15} />
-                  </button>
-                </div>
-              </div>
-              <textarea
-                value={steerDraft}
-                onChange={(event) => onSteerDraftChange?.(event.target.value)}
-                onKeyDown={handleSteerKeyDown}
-                placeholder="フォローアップの変更を求める"
-                className="min-h-[48px] max-h-[96px] w-full resize-none border-none bg-[#2b2b2d] px-4 py-3 text-[15px] leading-[1.45] text-zinc-100 outline-none placeholder:text-zinc-500 max-[640px]:min-h-[44px] max-[640px]:px-3 max-[640px]:py-2.5 max-[640px]:text-[13px]"
-              />
-              {steerStatus && (
-                <div className="border-t border-zinc-700/40 px-4 py-1 text-[10px] text-zinc-500 max-[640px]:px-3">
-                  {steerStatus}
-                </div>
-              )}
-            </div>
-          )}
-
           {isNewConversation && attachedFiles.length > 0 && (
             <div className="flex gap-4 overflow-x-auto px-6 pb-2 pt-5">
               {attachedFiles.map((file) => (
@@ -1593,16 +1530,17 @@ export function ComposerRenderer({
             value={input}
             onChange={(event) => handleInputChange(event.target.value)}
             placeholder={
-              mode === "coding"
+              isSteerMode
+                ? "実行中のAIへステアを入力..."
+                : mode === "coding"
                 ? "コーディング指示を入力... (@ でファイル添付)"
                 : placeholder
             }
-            disabled={isGenerating}
             className={`${
               isNewConversation
                 ? "rumi-composer-input-new min-h-[54px] px-6 pt-4 text-[18px] font-medium leading-[1.5] placeholder:text-zinc-500"
                 : "min-h-[34px] px-5 pt-3 text-[15px] max-[640px]:min-h-[32px] max-[640px]:px-3 max-[640px]:pt-2.5 max-[640px]:pb-0 max-[640px]:text-[13px]"
-            } rumi-composer-textarea w-full select-text bg-transparent border-none outline-none text-zinc-100 pb-0 resize-none max-h-[130px] disabled:opacity-50`}
+            } rumi-composer-textarea w-full select-text bg-transparent border-none outline-none text-zinc-100 pb-0 resize-none max-h-[130px]`}
             onKeyDownCapture={(event) => {
               if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "a") {
                 event.stopPropagation();
@@ -1610,6 +1548,24 @@ export function ComposerRenderer({
             }}
             onKeyDown={handleKeyDown}
           />
+
+          {isSteerMode && (
+            <div className="flex min-h-5 items-center gap-2 px-5 pt-1 text-[10px] leading-none text-zinc-500 max-[640px]:px-3">
+              <CornerDownRight size={12} className="flex-shrink-0" />
+              <span className="truncate">
+                {input.trim() ? "Enterでステアを送信" : "AI実行中。入力するとステアになります"}
+              </span>
+              {steerBusy && <Loader2 size={11} className="flex-shrink-0 animate-spin" />}
+              {steerQueuedCount > 0 && (
+                <span className="flex-shrink-0 rounded-full border border-zinc-700 px-1.5 py-0.5 text-[9px] leading-none">
+                  {steerQueuedCount}件待機
+                </span>
+              )}
+              {steerStatus && (
+                <span className="min-w-0 truncate text-zinc-600">{steerStatus}</span>
+              )}
+            </div>
+          )}
 
           <input
             ref={fileInputRef}
@@ -1802,13 +1758,15 @@ export function ComposerRenderer({
                         disabled={!isGenerating && (!input.trim() && attachedFiles.length === 0)}
                 onPointerDown={handleSendButtonPointerDown}
                 onClick={handleSendButtonClick}
-                title={isGenerating ? "停止" : "送信"}
+                title={isGenerating ? (input.trim() ? "ステアを送る" : "停止") : "送信"}
                 className={`rumi-send-button ${
                   isNewConversation ? "h-9 w-9" : "w-8 h-8 max-[640px]:h-7 max-[640px]:w-7"
                 } flex flex-shrink-0 items-center justify-center bg-zinc-200 text-black rounded-lg disabled:opacity-30 disabled:cursor-not-allowed hover:bg-white shadow-sm transition-colors`}
               >
-                {isGenerating ? (
+                {isGenerating && !input.trim() ? (
                   <Square size={13} fill="currentColor" strokeWidth={2.2} />
+                ) : isGenerating ? (
+                  <CornerDownRight size={15} strokeWidth={2.4} />
                 ) : (
                   <ArrowUp size={16} strokeWidth={2.4} />
                 )}

@@ -10,6 +10,7 @@ import {
   modelCandidateMenuKeyAction,
   nextModelCandidateIndex,
   profileNeedsApiKey,
+  ComposerRenderer,
   resolveComposerWidgetDrop,
   shouldFocusComposerForSlashKey,
 } from "./ComposerRenderer";
@@ -96,6 +97,39 @@ test("composer model drop selects the model instead of creating a widget chip", 
   );
 
   assert.deepEqual(action, { type: "select_model", profileId: "openai/gpt-4.1" });
+});
+
+test("composer uses the main input as steer while generating", () => {
+  const html = renderToStaticMarkup(
+    createElement(ComposerRenderer, {
+      input: "次は短くして",
+      placeholder: "メッセージを入力...",
+      isGenerating: true,
+      selectedProfile: {
+        profile_id: "stub/default",
+        display_name: "Stub Default",
+        provider_id: "stub",
+        model_id: "default",
+      },
+      favoriteProfiles: [],
+      inlineExtensions: [],
+      belowExtensions: [],
+      thinkingLevel: null,
+      contextUsage: { ratio: 0, usedTokens: 0, maxContext: 0, label: "0%" },
+      onInputChange: () => undefined,
+      onSubmit: () => undefined,
+      onModelProfileSelect: () => undefined,
+      onThinkingLevelChange: () => undefined,
+      onSteerSubmit: () => undefined,
+    }),
+  );
+
+  assert.match(html, /実行中のAIへステアを入力/);
+  assert.match(html, /Enterでステアを送信/);
+  assert.match(html, /title="ステアを送る"/);
+  assert.doesNotMatch(html, /textarea[^>]*disabled/);
+  assert.doesNotMatch(html, /これがステア/);
+  assert.doesNotMatch(html, /フォローアップの変更を求める/);
 });
 
 test("composer asks for an API key when an unconfigured Gemini model is selected", () => {
