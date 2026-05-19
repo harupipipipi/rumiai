@@ -72,6 +72,9 @@ body {
 
 .rumi-history-collapse-inner {
   min-height: 0;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
   transform-origin: 50% 0;
   transition: transform 260ms cubic-bezier(0.2, 0.82, 0.2, 1);
 }

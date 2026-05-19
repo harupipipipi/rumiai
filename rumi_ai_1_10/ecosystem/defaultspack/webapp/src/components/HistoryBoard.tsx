@@ -512,7 +512,7 @@ function SortableChatItem({ chat, activeChatId, onChatSelect, onRename, onToggle
     transform: CSS.Transform.toString(transform),
     transition,
     opacity: isDragging ? 0.3 : 1,
-    paddingLeft: `${depth * 16 + 8}px`,
+    paddingLeft: `${depth * 14 + 6}px`,
   };
 
   const handleBlur = () => {
@@ -521,9 +521,9 @@ function SortableChatItem({ chat, activeChatId, onChatSelect, onRename, onToggle
     else setTitle(chat.title);
   };
 
-  const icon = chat.type === 'research' ? <Globe size={14} className="text-zinc-500 flex-shrink-0" /> :
-               chat.type === 'code' ? <Terminal size={14} className="text-zinc-500 flex-shrink-0" /> :
-               <MessageSquare size={14} className="text-zinc-500 flex-shrink-0" />;
+  const icon = chat.type === 'research' ? <Globe size={13} className="text-zinc-500 flex-shrink-0" /> :
+               chat.type === 'code' ? <Terminal size={13} className="text-zinc-500 flex-shrink-0" /> :
+               <MessageSquare size={13} className="text-zinc-500 flex-shrink-0" />;
 
   return (
     <>
@@ -533,7 +533,7 @@ function SortableChatItem({ chat, activeChatId, onChatSelect, onRename, onToggle
         {...attributes}
         {...listeners}
         className={cn(
-          "w-full flex items-center gap-2 pr-2 py-1.5 rounded-md text-left group/chat transition-colors cursor-grab active:cursor-grabbing outline-none",
+          "box-border w-full max-w-full min-h-7 flex items-center gap-1.5 pr-1.5 py-1 rounded-[3px] text-left group/chat transition-colors cursor-grab active:cursor-grabbing outline-none",
           isActive ? "bg-zinc-800/80" : "hover:bg-zinc-800/50",
           chat.conversationKind === "subagent" && "text-zinc-400",
           isDragging && "ring-1 ring-emerald-500/50 z-50"
@@ -542,7 +542,7 @@ function SortableChatItem({ chat, activeChatId, onChatSelect, onRename, onToggle
         onDoubleClick={(e) => { e.stopPropagation(); setIsEditing(true); }}
         tabIndex={0}
       >
-        <GripVertical size={12} className="text-zinc-700 group-hover/chat:text-zinc-500 flex-shrink-0" />
+        <GripVertical size={10} className="w-3 text-zinc-700 group-hover/chat:text-zinc-500 flex-shrink-0" />
         {icon}
         {hasChildren && (
           <button
@@ -568,11 +568,11 @@ function SortableChatItem({ chat, activeChatId, onChatSelect, onRename, onToggle
               if (e.key === 'Escape') { setIsEditing(false); setTitle(chat.title); }
             }}
             onClick={(e) => e.stopPropagation()}
-            className="bg-zinc-900 text-zinc-100 text-sm px-1 py-0.5 rounded outline-none w-full border border-emerald-500/50"
+            className="bg-zinc-900 text-zinc-100 text-[13px] px-1 py-0.5 rounded outline-none w-full border border-emerald-500/50"
           />
         ) : (
           <span className={cn(
-            "text-sm truncate flex-1 select-none",
+            "min-w-0 text-[13px] truncate flex-1 select-none",
             isActive ? "text-zinc-100" : "text-zinc-300 group-hover/chat:text-zinc-100"
           )}>{chat.title}</span>
         )}
@@ -665,20 +665,20 @@ function SubGroup({ group, activeChatId, onChatSelect, onChatRename, onToggleCol
       ref={(node) => { setSortRef(node); setDropRef(node); }}
       style={style}
       className={cn(
-        "transition-colors rounded-md",
+        "transition-colors rounded-[3px]",
         isOver && !isDragging && "bg-emerald-500/5 ring-1 ring-emerald-500/20",
         isDragging && "ring-1 ring-emerald-500/50"
       )}
     >
       <div
-        className="flex items-center gap-1.5 py-1.5 px-1 rounded-md hover:bg-zinc-800/50 cursor-default group/folder"
-        style={{ paddingLeft: `${depth * 16 + 4}px` }}
+        className="flex h-7 items-center gap-1 px-1 rounded-[3px] hover:bg-zinc-800/50 cursor-default group/folder"
+        style={{ paddingLeft: `${depth * 14 + 4}px` }}
         onClick={() => onToggleCollapse(group.id)}
       >
-        <ChevronRight size={14} className={cn("text-zinc-600 transition-transform duration-200 flex-shrink-0", !group.isCollapsed && "rotate-90")} />
+        <ChevronRight size={13} className={cn("text-zinc-600 transition-transform duration-200 flex-shrink-0", !group.isCollapsed && "rotate-90")} />
         {group.isCollapsed
-          ? <Folder size={14} className="text-zinc-500 flex-shrink-0" />
-          : <FolderOpen size={14} className="text-zinc-400 flex-shrink-0" />}
+          ? <Folder size={13} className="text-zinc-500 flex-shrink-0" />
+          : <FolderOpen size={13} className="text-zinc-400 flex-shrink-0" />}
         {isEditing ? (
           <input
             autoFocus
@@ -690,11 +690,11 @@ function SubGroup({ group, activeChatId, onChatSelect, onChatRename, onToggleCol
               if (e.key === 'Escape') { setIsEditing(false); setTitle(group.title); }
             }}
             onClick={(e) => e.stopPropagation()}
-            className="bg-zinc-900 text-zinc-100 text-xs px-1 py-0.5 rounded outline-none flex-1 border border-emerald-500/50"
+            className="bg-zinc-900 text-zinc-100 text-[12px] px-1 py-0.5 rounded outline-none flex-1 border border-emerald-500/50"
           />
         ) : (
           <span
-            className="text-xs font-medium text-zinc-400 truncate flex-1 select-none group-hover/folder:text-zinc-200"
+            className="min-w-0 text-[12px] font-medium text-zinc-400 truncate flex-1 select-none group-hover/folder:text-zinc-200"
             onDoubleClick={(e) => { e.stopPropagation(); setIsEditing(true); }}
           >
             {group.title}
@@ -704,18 +704,18 @@ function SubGroup({ group, activeChatId, onChatSelect, onChatRename, onToggleCol
         <div
           {...attributes}
           {...listeners}
-          className="p-0.5 text-zinc-700 hover:text-zinc-400 opacity-0 group-hover/folder:opacity-100 transition-all cursor-grab active:cursor-grabbing"
+          className="flex h-5 w-4 items-center justify-center text-zinc-700 hover:text-zinc-400 opacity-0 group-hover/folder:opacity-100 transition-all cursor-grab active:cursor-grabbing"
           onClick={(e) => e.stopPropagation()}
           title="Drag to move"
         >
-          <GripVertical size={12} />
+          <GripVertical size={10} />
         </div>
         <button
           onClick={(e) => { e.stopPropagation(); onUngroup(group.id); }}
-          className="text-zinc-600 hover:text-zinc-300 opacity-0 group-hover/folder:opacity-100 transition-all p-0.5"
+          className="flex h-5 w-5 items-center justify-center text-zinc-600 hover:text-zinc-300 opacity-0 group-hover/folder:opacity-100 transition-all"
           title="Ungroup"
         >
-          <X size={12} />
+          <X size={11} />
         </button>
       </div>
 
@@ -809,7 +809,7 @@ function DroppableColumn({ group, activeChatId, onChatSelect, onNewTask, onSetti
     <div
       ref={setDropRef}
       className={cn(
-        "w-full flex-shrink-0 border-b border-zinc-800/60 bg-[#09090b] flex flex-col transition-all duration-300",
+        "w-full flex-shrink-0 border-b border-zinc-900/80 bg-[#09090b] flex flex-col transition-all duration-300",
         isDraggedOver && !isDragging && "ring-2 ring-inset ring-emerald-500/50 bg-emerald-500/[0.08]",
       )}
     >
@@ -817,26 +817,26 @@ function DroppableColumn({ group, activeChatId, onChatSelect, onNewTask, onSetti
       <div
         onClick={() => onToggleCollapse(group.id)}
         className={cn(
-          "h-12 flex items-center px-3 border-b border-zinc-800/60 justify-between hover:bg-zinc-900/50 transition-colors cursor-pointer group/colheader",
+          "h-7 flex items-center px-2 border-b border-zinc-900/70 justify-between hover:bg-zinc-900/50 transition-colors cursor-pointer group/colheader",
           isDraggedOver && !isDragging && "bg-emerald-500/15"
         )}
       >
-        <div className="flex items-center gap-2 text-zinc-100 font-medium flex-1 min-w-0">
+        <div className="flex items-center gap-1.5 text-zinc-100 font-medium flex-1 min-w-0">
           <div
             {...dragHandleProps}
             onClick={(event) => event.stopPropagation()}
             className={cn(
-              "flex h-6 w-4 flex-shrink-0 items-center justify-center rounded text-zinc-700 transition-all cursor-grab active:cursor-grabbing hover:bg-zinc-800 hover:text-zinc-400",
+              "flex h-5 w-3 flex-shrink-0 items-center justify-center rounded text-zinc-700 transition-all cursor-grab active:cursor-grabbing hover:bg-zinc-800 hover:text-zinc-400",
               group.isCollapsed ? "opacity-100" : "opacity-0 group-hover/colheader:opacity-100"
             )}
             title="Drag group"
           >
-            <GripVertical size={12} />
+            <GripVertical size={10} />
           </div>
-          <ChevronRight size={14} className={cn("transition-transform duration-200 text-zinc-500 flex-shrink-0", !group.isCollapsed && "rotate-90")} />
-          <div className="w-5 h-5 rounded bg-zinc-800 text-zinc-400 flex-shrink-0 flex items-center justify-center text-[10px] font-bold border border-zinc-700">
-            {group.title.charAt(0)}
-          </div>
+          <ChevronRight size={13} className={cn("transition-transform duration-200 text-zinc-500 flex-shrink-0", !group.isCollapsed && "rotate-90")} />
+          {group.isCollapsed
+            ? <Folder size={13} className="text-zinc-500 flex-shrink-0" />
+            : <FolderOpen size={13} className="text-zinc-400 flex-shrink-0" />}
           {isEditing ? (
             <input
               autoFocus
@@ -848,21 +848,21 @@ function DroppableColumn({ group, activeChatId, onChatSelect, onNewTask, onSetti
                 if (e.key === 'Escape') { setIsEditing(false); setTitle(group.title); }
               }}
               onClick={(e) => e.stopPropagation()}
-              className="bg-zinc-800 text-zinc-100 text-sm px-1 py-0.5 rounded outline-none w-full border border-emerald-500/50"
+              className="bg-zinc-800 text-zinc-100 text-[12px] px-1 py-0.5 rounded outline-none w-full border border-emerald-500/50"
             />
           ) : (
             <span
               onDoubleClick={(e) => { e.stopPropagation(); setIsEditing(true); }}
-              className="truncate flex-1 cursor-text select-none hover:text-white transition-colors text-sm"
+              className="min-w-0 truncate flex-1 cursor-text select-none hover:text-white transition-colors text-[12px]"
             >
               {group.title}
             </span>
           )}
-          <span className="text-[10px] text-zinc-600 flex-shrink-0">{totalChats}</span>
+          <span className="ml-auto text-[10px] text-zinc-600 flex-shrink-0">{totalChats}</span>
         </div>
-        <div className="flex items-center gap-1 opacity-0 group-hover/colheader:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
-          <button onClick={() => onNewTask(group.id)} className="p-1 text-zinc-500 hover:text-emerald-400 transition-colors" title="New chat in group">
-            <Plus size={14} />
+        <div className="flex items-center gap-0.5 opacity-0 group-hover/colheader:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
+          <button onClick={() => onNewTask(group.id)} className="flex h-5 w-5 items-center justify-center text-zinc-500 hover:text-emerald-400 transition-colors" title="New chat in group">
+            <Plus size={13} />
           </button>
         </div>
       </div>
@@ -874,7 +874,7 @@ function DroppableColumn({ group, activeChatId, onChatSelect, onNewTask, onSetti
           group.isCollapsed && "is-collapsed"
         )}
       >
-        <div className="rumi-history-collapse-inner px-1 py-2 space-y-0.5">
+        <div className="rumi-history-collapse-inner px-1 py-0.5 space-y-px">
           <SortableContext items={group.chats.map(c => c.id)} strategy={verticalListSortingStrategy}>
             {group.chats.map(chat => (
               <SortableChatItem
