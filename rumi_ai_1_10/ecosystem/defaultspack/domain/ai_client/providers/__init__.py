@@ -724,10 +724,10 @@ def _provider_is_configured(entry: Dict[str, Any]) -> tuple[bool, Optional[str]]
     for env_name in entry.get("base_url_envs", []):
         if _truthy_env(env_name):
             return True, env_name
-    if not bool(entry.get("credential_required", True)) and entry.get("default_base_url"):
-        return True, "no_key_gateway"
     if entry.get("kind") == "local" and entry.get("default_base_url"):
         return True, "default_local_endpoint"
+    if not bool(entry.get("credential_required", True)) and entry.get("default_base_url"):
+        return True, "no_key_gateway"
     if entry["provider_id"] == "stub":
         return True, "builtin"
     return False, None

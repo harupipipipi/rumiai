@@ -6,7 +6,7 @@ import os
 import re
 import sys
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -28,6 +28,7 @@ from domain.vision.image_bridge import (
 )
 from domain.chat.tool_recommender import effective_tool_assist_mode, recommend_tool_ids, tool_assist_limit
 from domain.prompt.manager import get_manager
+from domain.skill_trigger import RuntimeSkillTriggerService
 from domain.tool.registry import ToolRegistry
 from domain.tool.schema_adapter import (
     adapt_tool_definitions,
@@ -83,6 +84,8 @@ class PreparedChatRun:
     connected_tool_names: set[str]
     call_handler: Any
     model_routing: dict[str, Any]
+    chat_references: dict[str, Any] = field(default_factory=dict)
+    matched_skills: list[dict[str, Any]] = field(default_factory=list)
 
 
 def validate_chat_run_input(input_data: dict[str, Any]) -> str | None:
@@ -113,6 +116,9 @@ def prepare_chat_run(input_data: dict[str, Any], context: dict[str, Any] | None 
 
     message = input_data.get("message") if isinstance(input_data.get("message"), dict) else {}
     content, metadata = _prepared_user_content(store, conversation_id, message)
+    chat_references = _chat_references(store, conversation_id, metadata)
+    metadata = dict(metadata) if isinstance(metadata, dict) else {}
+    metadata.setdefault("chat_references", chat_references)
     user_message = store.add_message(
         conversation_id,
         {
@@ -159,6 +165,10 @@ def prepare_chat_run(input_data: dict[str, Any], context: dict[str, Any] | None 
             standard_messages.insert(0, {"role": "system", "content": system_prompt})
     if system_prompt and (not standard_messages or standard_messages[0].get("role") != "system"):
         standard_messages.insert(0, {"role": "system", "content": system_prompt})
+    chat_reference_prompt = _format_chat_references_for_prompt(chat_references)
+    if chat_reference_prompt:
+        insert_at = 1 if standard_messages and standard_messages[0].get("role") == "system" else 0
+        standard_messages.insert(insert_at, {"role": "system", "content": chat_reference_prompt})
 
     params = dict(prepared_input.get("params") or {})
     model_settings_service = ModelRuntimeSettingsService()
@@ -175,6 +185,8 @@ def prepare_chat_run(input_data: dict[str, Any], context: dict[str, Any] | None 
         request_context = _apply_computer_use_context_preferences(request_context, user_text)
     request_context["conversation_id"] = conversation_id
     request_context["conversation_workspace_dir"] = str(store.conversation_workspace_dir(conversation_id))
+    request_context["chat_references"] = chat_references
+    request_context["history_json_path"] = chat_references["history_json_path"]
     request_context["model"] = model
     request_context["chat_params"] = params
     request_context["request_id"] = request_id
@@ -243,6 +255,20 @@ def prepare_chat_run(input_data: dict[str, Any], context: dict[str, Any] | None 
         tool_context.get("runtime_profile") if isinstance(tool_context, dict) else None,
         agent_id=tool_context.get("agent_id") if isinstance(tool_context, dict) else None,
     )
+    tool_context["chat_references"] = chat_references
+    tool_context["history_json_path"] = chat_references["history_json_path"]
+    skill_eval = RuntimeSkillTriggerService().evaluate(
+        user_text=user_text,
+        tool_names=[tool_name_from_definition(tool) for tool in raw_tools if tool_name_from_definition(tool)],
+        context=request_context,
+    )
+    matched_skills = skill_eval.get("matched", []) if isinstance(skill_eval, dict) else []
+    skill_instructions = str(skill_eval.get("instructions") or "").strip() if isinstance(skill_eval, dict) else ""
+    if skill_instructions:
+        insert_at = 1 if standard_messages and standard_messages[0].get("role") == "system" else 0
+        standard_messages.insert(insert_at, {"role": "system", "content": skill_instructions})
+        request_context["matched_skill_instructions"] = matched_skills
+        tool_context["matched_skill_instructions"] = matched_skills
 
     return PreparedChatRun(
         conversation_id=conversation_id,
@@ -266,6 +292,8 @@ def prepare_chat_run(input_data: dict[str, Any], context: dict[str, Any] | None 
         connected_tool_names=connected_names,
         call_handler=request_context.get("call_handler"),
         model_routing=routing_decision.to_dict(),
+        chat_references=chat_references,
+        matched_skills=matched_skills,
     )
 
 
@@ -345,6 +373,91 @@ def _prepared_user_content(store: ChatStore, conversation_id: str, message: dict
             content.extend(_attachment_text_blocks(attachments))
             content.extend(_attachment_image_blocks(attachments))
     return content if isinstance(content, list) else [{"type": "text", "text": str(content)}], metadata or None
+
+
+def _chat_references(store: ChatStore, conversation_id: str, metadata: dict[str, Any] | None = None) -> dict[str, Any]:
+    conversation_dir = store.conversation_dir(conversation_id)
+    workspace_dir = store.conversation_workspace_dir(conversation_id)
+    history_path = conversation_dir / "history.json"
+    dropped_widgets = metadata.get("dropped_widgets") if isinstance(metadata, dict) and isinstance(metadata.get("dropped_widgets"), list) else []
+    references = []
+    for widget in dropped_widgets:
+        if not isinstance(widget, dict):
+            continue
+        widget_meta = widget.get("metadata") if isinstance(widget.get("metadata"), dict) else {}
+        ref_id = str(widget_meta.get("conversation_id") or widget.get("sourceItemId") or "").strip()
+        if not ref_id or ref_id == conversation_id:
+            continue
+        ref_conv = store.get_conversation(ref_id) or {}
+        ref_dir = store.conversation_dir(ref_id)
+        references.append(
+            {
+                "conversation_id": ref_id,
+                "title": str(widget_meta.get("title") or ref_conv.get("title") or widget.get("label") or ref_id),
+                "summary": _summarize_referenced_conversation(ref_conv),
+                "history_json_path": str(ref_dir / "history.json"),
+            }
+        )
+    return {
+        "conversation_id": conversation_id,
+        "conversation_dir": str(conversation_dir),
+        "workspace_dir": str(workspace_dir),
+        "history_json_path": str(history_path),
+        "history_path": str(history_path),
+        "references": references,
+    }
+
+
+def _format_chat_references_for_prompt(chat_references: dict[str, Any]) -> str:
+    refs = chat_references.get("references") if isinstance(chat_references, dict) else []
+    if not isinstance(refs, list) or not refs:
+        return ""
+    lines = ["--- Dropped Chat References ---"]
+    for index, ref in enumerate(refs, 1):
+        if not isinstance(ref, dict):
+            continue
+        lines.append(
+            "[{}] chat_id={} title={} history_json={}\nsummary: {}".format(
+                index,
+                ref.get("conversation_id") or "",
+                ref.get("title") or "",
+                ref.get("history_json_path") or "",
+                ref.get("summary") or "",
+            )
+        )
+    return "\n".join(lines).strip()
+
+
+def _summarize_referenced_conversation(conversation: dict[str, Any]) -> str:
+    messages = conversation.get("messages") if isinstance(conversation, dict) and isinstance(conversation.get("messages"), list) else []
+    snippets = []
+    for message in messages[-8:]:
+        if not isinstance(message, dict):
+            continue
+        role = str(message.get("role") or "message")
+        text = _content_text(message.get("content"))
+        if text:
+            snippets.append(f"{role}: {text[:240]}")
+    return "\n".join(snippets)[-1600:]
+
+
+def _content_text(content: Any) -> str:
+    if isinstance(content, str):
+        return content.strip()
+    if not isinstance(content, list):
+        return ""
+    parts = []
+    for block in content:
+        if isinstance(block, str):
+            parts.append(block)
+        elif isinstance(block, dict):
+            if block.get("type") == "text":
+                parts.append(str(block.get("text") or ""))
+            elif block.get("type") in {"image", "image_url"}:
+                parts.append("[image]")
+            elif block.get("type"):
+                parts.append(f"[{block.get('type')}]")
+    return " ".join(part.strip() for part in parts if str(part).strip())
 
 
 def _runtime_user_content_override(metadata: dict[str, Any] | None) -> str:

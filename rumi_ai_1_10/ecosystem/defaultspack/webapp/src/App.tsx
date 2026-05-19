@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type
 import { CompanyWorkspacePanel } from "./components/company/CompanyWorkspacePanel";
 import { CodingCockpit } from "./components/coding/CodingCockpit";
 import { ConversationSpotlight } from "./components/ConversationSpotlight";
+import { WarmActionIcon } from "./components/WarmActionIcon";
 import type { ChatItem } from "./components/HistoryBoard";
 import type { ToolPreviewItem, ToolPreviewMode } from "./components/ToolPreview";
 import { buildToolPreviewDisplayItems, hasCanvasItems } from "./components/ToolPreview";
@@ -34,6 +35,214 @@ type ComposerCandidateMenuState = {
   query: string;
   candidates: ModelCommandCandidate[];
 } | null;
+
+type WorkspacePanelMode = "composer" | "calendar";
+
+type CalendarMemo = {
+  id?: string;
+  title?: string;
+  content?: string;
+  updated_at?: string;
+  folder_slug?: string;
+};
+
+type CalendarTask = {
+  id?: string;
+  name?: string;
+  description?: string;
+  status?: string;
+  schedule_type?: string;
+  schedule_config?: Record<string, unknown>;
+  task?: Record<string, unknown>;
+  task_config?: Record<string, unknown>;
+  next_run_at?: string | null;
+};
+
+function recordArray(value: unknown, keys: string[]): Record<string, unknown>[] {
+  if (Array.isArray(value)) return value.filter((item): item is Record<string, unknown> => isRecord(item));
+  if (!isRecord(value)) return [];
+  for (const key of keys) {
+    const child = value[key];
+    if (Array.isArray(child)) return child.filter((item): item is Record<string, unknown> => isRecord(item));
+  }
+  const data = value.data;
+  if (isRecord(data)) {
+    for (const key of keys) {
+      const child = data[key];
+      if (Array.isArray(child)) return child.filter((item): item is Record<string, unknown> => isRecord(item));
+    }
+  }
+  return [];
+}
+
+function CalendarComposerPanel({
+  onClose,
+  onResult,
+}: {
+  onClose: () => void;
+  onResult: (label: string, result: unknown) => void;
+}) {
+  const [memos, setMemos] = useState<CalendarMemo[]>([]);
+  const [tasks, setTasks] = useState<CalendarTask[]>([]);
+  const [prompt, setPrompt] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState<string | null>(null);
+
+  const refreshCalendar = useCallback(async () => {
+    setBusy(true);
+    setStatus(null);
+    try {
+      const [scheduleResult, memoResult] = await Promise.allSettled([
+        api.listSchedules(),
+        api.invokeTool("memo_list_notes", { folder_id: "calendar", limit: 12 }),
+      ]);
+      if (scheduleResult.status === "fulfilled") {
+        setTasks(recordArray(scheduleResult.value, ["schedules", "items", "tasks"]) as CalendarTask[]);
+      }
+      if (memoResult.status === "fulfilled") {
+        setMemos(recordArray(memoResult.value, ["notes", "results", "items"]) as CalendarMemo[]);
+      }
+      const failed = [scheduleResult, memoResult].filter((item) => item.status === "rejected").length;
+      setStatus(failed ? `${failed}件のカレンダー情報を読めませんでした` : null);
+    } catch (calendarError) {
+      setStatus(calendarError instanceof Error ? calendarError.message : "Calendar refresh failed");
+    } finally {
+      setBusy(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshCalendar();
+  }, [refreshCalendar]);
+
+  const createRecurringTask = async () => {
+    const message = prompt.trim();
+    if (!message) return;
+    setBusy(true);
+    setStatus(null);
+    try {
+      const result = await api.createSchedule({
+        name: message.slice(0, 48),
+        description: "Created from Rumi calendar composer",
+        schedule_type: "interval",
+        schedule_config: { interval: { value: 1, unit: "days" } },
+        task: { message, model: "default", timeout: 300 },
+      });
+      onResult("calendar-schedule-create", result);
+      setPrompt("");
+      await refreshCalendar();
+    } catch (createError) {
+      setStatus(createError instanceof Error ? createError.message : "Task creation failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const triggerTask = async (taskId: string) => {
+    const result = await api.triggerSchedule(taskId);
+    onResult("calendar-schedule-trigger", result);
+    await refreshCalendar();
+  };
+
+  const pauseOrResumeTask = async (task: CalendarTask) => {
+    const taskId = String(task.id ?? "");
+    if (!taskId) return;
+    const paused = String(task.status ?? "").toLowerCase() === "paused";
+    const result = paused ? await api.resumeSchedule(taskId) : await api.pauseSchedule(taskId);
+    onResult(paused ? "calendar-schedule-resume" : "calendar-schedule-pause", result);
+    await refreshCalendar();
+  };
+
+  return (
+    <section className="mx-auto mb-4 w-[min(920px,calc(100vw-32px))] rounded-[28px] border border-amber-200/12 bg-gradient-to-br from-[#17130f]/96 via-[#10100f]/96 to-[#0b0b0c]/96 p-4 shadow-[0_24px_80px_rgba(0,0,0,0.42)]">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-3">
+          <WarmActionIcon kind="calendar" size="lg" />
+          <div className="min-w-0">
+            <h2 className="truncate text-sm font-semibold text-zinc-100">AI Calendar</h2>
+            <p className="truncate text-xs text-zinc-500">AIカレンダーメモと定期タスクを入力欄の代わりに確認します。</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <button type="button" onClick={() => void refreshCalendar()} className="rounded-xl border border-zinc-800 px-3 py-2 text-xs text-zinc-300 hover:border-amber-200/20 hover:bg-zinc-900" disabled={busy}>
+            Refresh
+          </button>
+          <button type="button" onClick={onClose} className="rounded-xl border border-zinc-800 px-3 py-2 text-xs text-zinc-400 hover:border-zinc-700 hover:bg-zinc-900">
+            Composer
+          </button>
+        </div>
+      </div>
+
+      {status && <div className="mb-3 rounded-xl border border-orange-400/20 bg-orange-300/10 px-3 py-2 text-xs text-orange-100">{status}</div>}
+
+      <div className="grid gap-3 md:grid-cols-[1fr_1fr]">
+        <div className="rounded-2xl border border-zinc-800/80 bg-black/20 p-3">
+          <div className="mb-2 flex items-center justify-between">
+            <h3 className="text-xs font-semibold text-zinc-200">Calendar memos</h3>
+            <span className="text-[10px] text-zinc-600">{memos.length} notes</span>
+          </div>
+          <div className="space-y-2">
+            {memos.length === 0 ? (
+              <p className="rounded-xl border border-dashed border-zinc-800 px-3 py-6 text-center text-xs text-zinc-600">calendarフォルダのメモはまだありません。</p>
+            ) : memos.map((memo) => (
+              <article key={String(memo.id ?? memo.title)} className="rounded-xl border border-zinc-800 bg-zinc-950/55 px-3 py-2">
+                <div className="truncate text-xs font-medium text-zinc-200">{String(memo.title ?? "Untitled memo")}</div>
+                <p className="mt-1 line-clamp-3 text-[11px] leading-5 text-zinc-500">{String(memo.content ?? "")}</p>
+              </article>
+            ))}
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-zinc-800/80 bg-black/20 p-3">
+          <div className="mb-2 flex items-center justify-between">
+            <h3 className="text-xs font-semibold text-zinc-200">Recurring tasks</h3>
+            <span className="text-[10px] text-zinc-600">{tasks.length} tasks</span>
+          </div>
+          <div className="space-y-2">
+            {tasks.length === 0 ? (
+              <p className="rounded-xl border border-dashed border-zinc-800 px-3 py-6 text-center text-xs text-zinc-600">定期タスクはまだありません。</p>
+            ) : tasks.map((task) => {
+              const taskId = String(task.id ?? "");
+              const paused = String(task.status ?? "").toLowerCase() === "paused";
+              return (
+                <article key={taskId || String(task.name)} className="rounded-xl border border-zinc-800 bg-zinc-950/55 px-3 py-2">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="truncate text-xs font-medium text-zinc-200">{String(task.name ?? taskId ?? "Scheduled task")}</div>
+                      <p className="mt-1 text-[10px] text-zinc-600">{String(task.schedule_type ?? "schedule")} · {String(task.status ?? "active")}</p>
+                    </div>
+                    {taskId && (
+                      <div className="flex shrink-0 gap-1">
+                        <button type="button" onClick={() => void triggerTask(taskId)} className="rounded-lg border border-zinc-800 px-2 py-1 text-[10px] text-zinc-300 hover:border-amber-200/20">Run</button>
+                        <button type="button" onClick={() => void pauseOrResumeTask(task)} className="rounded-lg border border-zinc-800 px-2 py-1 text-[10px] text-zinc-300 hover:border-amber-200/20">{paused ? "Resume" : "Pause"}</button>
+                      </div>
+                    )}
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-3 rounded-2xl border border-zinc-800/80 bg-zinc-950/45 p-3">
+        <label className="mb-2 block text-xs font-medium text-zinc-300" htmlFor="calendar-task-prompt">定期タスクを追加</label>
+        <div className="flex gap-2">
+          <input
+            id="calendar-task-prompt"
+            value={prompt}
+            onChange={(event) => setPrompt(event.target.value)}
+            placeholder="例: 毎朝、昨日の作業を要約して今日のTODOを作って"
+            className="min-w-0 flex-1 rounded-xl border border-zinc-800 bg-black/35 px-3 py-2 text-sm text-zinc-200 outline-none placeholder:text-zinc-700 focus:border-amber-200/30"
+          />
+          <button type="button" onClick={() => void createRecurringTask()} disabled={busy || !prompt.trim()} className="rounded-xl bg-gradient-to-br from-amber-100 to-orange-300 px-4 py-2 text-xs font-semibold text-zinc-950 disabled:opacity-50">
+            Add daily
+          </button>
+        </div>
+      </div>
+    </section>
+  );
+}
 
 function useLocalStorage<T>(key: string, defaultValue: T): [T, (v: T | ((prev: T) => T)) => void] {
   const [value, setValue] = useState<T>(() => {
@@ -799,6 +1008,7 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showPreview, setShowPreview] = useLocalStorage("rumi-show-preview", false);
+  const [workspacePanelMode, setWorkspacePanelMode] = useState<WorkspacePanelMode>("composer");
   const [isHistoryMinimized, setIsHistoryMinimized] = useLocalStorage("rumi-history-minimized", false);
   const [isNewChatLaunching, setIsNewChatLaunching] = useState(false);
   const [modelSteerStatus, setModelSteerStatus] = useState<string | null>(null);
@@ -2580,7 +2790,7 @@ export default function App() {
           selected_tools: selectedToolIds,
           dropped_widgets: droppedWidgets
             .filter((widget) => widget.widgetKind === "tool_toggle" || widget.type === "tool" ? selectedToolIdSet.has(widget.sourceItemId || widget.id) : widget.enabled !== false)
-            .map(({ id, type, label, widgetKind, sourceItemId }) => ({ id, type, label, widgetKind, sourceItemId })),
+            .map(({ id, type, label, widgetKind, sourceItemId, metadata }) => ({ id, type, label, widgetKind, sourceItemId, metadata })),
         },
       }, {
         onEvent: updateStreamingActivity,
@@ -2707,6 +2917,7 @@ export default function App() {
               account={catalog?.app?.account}
               onChatSelect={handleHistoryClick}
               onNewTask={handleNewTask}
+              onCalendarOpen={() => setWorkspacePanelMode("calendar")}
               onSettingsClick={() => setIsSettingsOpen(true)}
               onChatMetadataChange={handleHistoryMetadataChange}
               onMinimize={() => setIsHistoryMinimized(true)}
@@ -2722,6 +2933,7 @@ export default function App() {
               account={catalog?.app?.account}
               onChatSelect={handleHistoryClick}
               onNewTask={handleNewTask}
+              onCalendarOpen={() => setWorkspacePanelMode("calendar")}
               onSettingsClick={() => setIsSettingsOpen(true)}
               onChatMetadataChange={handleHistoryMetadataChange}
               onRestore={() => setIsHistoryMinimized(false)}
@@ -2751,7 +2963,12 @@ export default function App() {
                   <h1 className="rumi-greeting mx-auto mb-7 max-w-[720px] px-4 text-center text-[clamp(24px,3.2vw,44px)] font-medium leading-tight text-zinc-200">
                     {getNewConversationGreeting()}
                   </h1>
-                  {renderComposer(true)}
+                  {workspacePanelMode === "calendar" ? (
+                    <CalendarComposerPanel
+                      onClose={() => setWorkspacePanelMode("composer")}
+                      onResult={(label, result) => pushActionPreview({ id: label, label, icon: "calendar" }, label, result)}
+                    />
+                  ) : renderComposer(true)}
                 </div>
               </div>
             ) : (
@@ -2810,7 +3027,12 @@ export default function App() {
                     </div>
                   </div>
                 )}
-              {renderComposer(false)}
+                {workspacePanelMode === "calendar" ? (
+                  <CalendarComposerPanel
+                    onClose={() => setWorkspacePanelMode("composer")}
+                    onResult={(label, result) => pushActionPreview({ id: label, label, icon: "calendar" }, label, result)}
+                  />
+                ) : renderComposer(false)}
               </div>
             )}
           </div>

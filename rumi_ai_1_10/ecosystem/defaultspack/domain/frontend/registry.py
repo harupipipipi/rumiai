@@ -1005,6 +1005,49 @@ class FrontendRegistry:
                 ],
             },
             {
+                "id": "triggers",
+                "label": "Triggers",
+                "description": "発火判断と、入力に関係ない候補を落とすための設定。",
+                "fields": [
+                    {
+                        "id": "mode",
+                        "label": "Trigger Mode",
+                        "type": "select",
+                        "default": "vector",
+                        "options": [
+                            {"value": "vector", "label": "Vector / memo match"},
+                            {"value": "llm", "label": "LLM decides"},
+                        ],
+                        "help": "発火要因をベクトル/メモ照合で見るか、LLMに判断させるかを選びます。",
+                    },
+                    {
+                        "id": "filter_unrelated",
+                        "label": "Filter Unrelated",
+                        "type": "toggle",
+                        "default": False,
+                        "help": "LLM判断時に、発火候補と入力が無関係なら候補を落とすためのフラグです。",
+                    },
+                    {
+                        "id": "model",
+                        "label": "Trigger LLM",
+                        "type": "text",
+                        "default": "",
+                        "help": "空なら現在の既定モデルを継承します。",
+                        "advanced": True,
+                    },
+                    {
+                        "id": "vector_threshold",
+                        "label": "Vector Threshold",
+                        "type": "number",
+                        "default": 0.1,
+                        "min": 0,
+                        "max": 1,
+                        "help": "vector mode の発火候補スコアしきい値です。外部返信の既定動作は維持します。",
+                        "advanced": True,
+                    },
+                ],
+            },
+            {
                 "id": "tools",
                 "label": "Tools",
                 "description": "Tool composer defaults and selection behavior.",
@@ -1997,6 +2040,19 @@ class FrontendRegistry:
         legacy_default_target = self._legacy_default_target(refreshed)
         if "default_target" not in tools or (not str(tools.get("default_target") or "").strip() and legacy_default_target):
             tools["default_target"] = legacy_default_target
+
+        triggers = refreshed.setdefault("triggers", {})
+        if not isinstance(triggers, dict):
+            triggers = {}
+            refreshed["triggers"] = triggers
+        trigger_mode = str(triggers.get("mode") or "vector").strip().lower()
+        triggers["mode"] = trigger_mode if trigger_mode in {"vector", "llm"} else "vector"
+        triggers["filter_unrelated"] = bool(triggers.get("filter_unrelated", False))
+        triggers["model"] = str(triggers.get("model") or "").strip()
+        try:
+            triggers["vector_threshold"] = max(0.0, min(1.0, float(triggers.get("vector_threshold", 0.1))))
+        except (TypeError, ValueError):
+            triggers["vector_threshold"] = 0.1
 
         models = refreshed.setdefault("models", {})
         if not isinstance(models, dict):

@@ -545,6 +545,7 @@ class ChatRunEngine:
                     "request_id": prepared.request_id,
                     "stream_mode": stream_mode,
                     "model_routing": prepared.model_routing,
+                    "chat_references": dict(prepared.chat_references or {}),
                 },
                 message="chat run started",
             )
@@ -1182,8 +1183,11 @@ class ChatRunEngine:
                 },
                 "thinking_level": prepared.params.get("thinking_level"),
                 "model_routing": dict(prepared.model_routing or {}),
+                "chat_references": dict(prepared.chat_references or {}),
             }
         )
+        if prepared.matched_skills:
+            metadata["matched_skill_instructions"] = list(prepared.matched_skills)
         finalized["metadata"] = metadata
         finalized["events"] = list(self._activity_events)
         finalized["tool_logs"] = list(self._tool_logs)
@@ -1291,6 +1295,8 @@ class ChatRunEngine:
                     "unknown_selected_tools": unknown_selected_tools,
                     "knowledge_results": enrich_info.get("knowledge_results", []),
                     "memory_results": enrich_info.get("memory_results", []),
+                    "chat_references": dict(prepared.chat_references or {}),
+                    "matched_skill_instructions": list(prepared.matched_skills or []),
                     "finish_reason": response.get("finish_reason"),
                     "usage": usage,
                     "metadata": metadata,

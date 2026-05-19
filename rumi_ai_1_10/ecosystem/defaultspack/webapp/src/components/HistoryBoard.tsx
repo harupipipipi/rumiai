@@ -26,14 +26,16 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import {
   Globe, Terminal, MessageSquare, Plus, ChevronRight, Settings,
-  GripVertical, FolderOpen, Folder, FolderPlus, MessageSquarePlus, PanelLeftClose, PanelLeftOpen, X,
+  GripVertical, FolderOpen, Folder, PanelLeftClose, PanelLeftOpen, X,
 } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
+import { HISTORY_CHAT_DROP_MIME, historyChatDragPayload } from '../lib/historyComposer';
 import { ConversationPinStarMenu } from './history/ConversationPinStarMenu';
 import { ConversationSearchBar } from './history/ConversationSearchBar';
 import { ConversationTagFilter } from './history/ConversationTagFilter';
+import { WarmActionIcon } from './WarmActionIcon';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -532,6 +534,13 @@ function SortableChatItem({ chat, activeChatId, onChatSelect, onRename, onToggle
         style={style}
         {...attributes}
         {...listeners}
+        draggable
+        onDragStart={(event) => {
+          const payload = historyChatDragPayload(chat);
+          event.dataTransfer.setData(HISTORY_CHAT_DROP_MIME, JSON.stringify(payload));
+          event.dataTransfer.setData("text/plain", chat.title);
+          event.dataTransfer.effectAllowed = "copyMove";
+        }}
         className={cn(
           "box-border w-full max-w-full min-h-7 flex items-center gap-1.5 pr-1.5 py-1 rounded-[3px] text-left group/chat transition-colors cursor-grab active:cursor-grabbing outline-none",
           isActive ? "bg-zinc-800/80" : "hover:bg-zinc-800/50",
@@ -975,6 +984,7 @@ interface HistoryBoardProps {
   account?: AccountInfo;
   onChatSelect: (chatId: string) => void;
   onNewTask: () => void;
+  onCalendarOpen?: () => void;
   onSettingsClick: () => void;
   onChatMetadataChange?: (chatId: string, updates: { is_pinned?: boolean; is_starred?: boolean; tags?: string[] }) => void;
   onMinimize?: () => void;
@@ -987,6 +997,141 @@ function visitChats(chats: ChatItem[], visitor: (chat: ChatItem) => void) {
     visitor(chat);
     visitChats(chat.children ?? [], visitor);
   }
+}
+
+export type HistoryCalendarSummary = {
+  total: number;
+  today: number;
+  recent: number;
+  older: number;
+  pinned: number;
+  starred: number;
+};
+
+export type CalendarMonthCell = {
+  day: number;
+  isToday: boolean;
+} | null;
+
+export function buildHistoryCalendarSummary(chatItems: ChatItem[]): HistoryCalendarSummary {
+  const summary: HistoryCalendarSummary = {
+    total: 0,
+    today: 0,
+    recent: 0,
+    older: 0,
+    pinned: 0,
+    starred: 0,
+  };
+
+  visitChats(chatItems, (chat) => {
+    summary.total += 1;
+    if (chat.date === "Today") summary.today += 1;
+    else if (chat.date === "Yesterday" || chat.date === "Previous 7 Days") summary.recent += 1;
+    else summary.older += 1;
+    if (chat.isPinned) summary.pinned += 1;
+    if (chat.isStarred) summary.starred += 1;
+  });
+
+  return summary;
+}
+
+export function buildCalendarMonthDays(reference = new Date()): CalendarMonthCell[] {
+  const year = reference.getFullYear();
+  const month = reference.getMonth();
+  const firstDay = new Date(year, month, 1).getDay();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const today = new Date();
+
+  return Array.from({ length: firstDay + daysInMonth }, (_, index) => {
+    if (index < firstDay) return null;
+    const day = index - firstDay + 1;
+    return {
+      day,
+      isToday: today.getFullYear() === year && today.getMonth() === month && today.getDate() === day,
+    };
+  });
+}
+
+function HistoryCalendarPanel({
+  chatItems,
+  onClose,
+}: {
+  chatItems: ChatItem[];
+  onClose: () => void;
+}) {
+  const summary = useMemo(() => buildHistoryCalendarSummary(chatItems), [chatItems]);
+  const monthCells = useMemo(() => buildCalendarMonthDays(), []);
+  const monthLabel = useMemo(() => new Intl.DateTimeFormat(undefined, { month: "long", year: "numeric" }).format(new Date()), []);
+  const buckets = [
+    { label: "Today", value: summary.today, tone: "text-amber-200 border-amber-300/20 bg-amber-300/10" },
+    { label: "Recent", value: summary.recent, tone: "text-orange-200 border-orange-300/20 bg-orange-300/10" },
+    { label: "Older", value: summary.older, tone: "text-zinc-300 border-zinc-700 bg-zinc-900/70" },
+  ];
+
+  return (
+    <div className="rounded-2xl border border-zinc-800/90 bg-[#111110]/95 p-3 shadow-[0_22px_60px_rgba(0,0,0,0.36)]">
+      <div className="mb-3 flex items-center justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-2">
+          <WarmActionIcon kind="calendar" size="md" />
+          <div className="min-w-0">
+            <p className="truncate text-[12px] font-semibold text-zinc-200">Calendar</p>
+            <p className="truncate text-[10px] text-zinc-600">{summary.total} chats in history</p>
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          className="flex h-7 w-7 items-center justify-center rounded-lg text-zinc-600 transition-colors hover:bg-zinc-800 hover:text-zinc-200"
+          aria-label="Close calendar"
+        >
+          <X size={13} />
+        </button>
+      </div>
+
+      <div className="rounded-xl border border-zinc-800/80 bg-black/20 p-2">
+        <div className="mb-2 flex items-center justify-between px-1">
+          <span className="text-[11px] font-medium text-zinc-300">{monthLabel}</span>
+          <span className="text-[10px] text-zinc-600">quick view</span>
+        </div>
+        <div className="grid grid-cols-7 gap-1 text-center text-[9px] font-medium uppercase tracking-wide text-zinc-700">
+          {["S", "M", "T", "W", "T", "F", "S"].map((day, index) => (
+            <span key={`${day}-${index}`}>{day}</span>
+          ))}
+        </div>
+        <div className="mt-1 grid grid-cols-7 gap-1">
+          {monthCells.map((cell, index) => (
+            <span
+              key={cell ? `day-${cell.day}` : `blank-${index}`}
+              className={cn(
+                "flex h-7 items-center justify-center rounded-lg text-[10px]",
+                cell?.isToday
+                  ? "bg-gradient-to-br from-amber-200 to-orange-300 font-semibold text-zinc-950 shadow-[0_8px_18px_rgba(251,191,36,0.18)]"
+                  : cell
+                    ? "bg-zinc-900/70 text-zinc-400"
+                    : "bg-transparent",
+              )}
+            >
+              {cell?.day ?? ""}
+            </span>
+          ))}
+        </div>
+      </div>
+
+      <div className="mt-3 grid grid-cols-3 gap-1.5">
+        {buckets.map((bucket) => (
+          <div key={bucket.label} className={cn("rounded-xl border px-2 py-2", bucket.tone)}>
+            <div className="text-[15px] font-semibold leading-none">{bucket.value}</div>
+            <div className="mt-1 text-[9px] uppercase tracking-wide opacity-75">{bucket.label}</div>
+          </div>
+        ))}
+      </div>
+
+      <div className="mt-2 flex gap-1.5 text-[10px] text-zinc-500">
+        <span className="rounded-full border border-zinc-800 px-2 py-1">Pinned {summary.pinned}</span>
+        <span className="rounded-full border border-zinc-800 px-2 py-1">Starred {summary.starred}</span>
+      </div>
+    </div>
+  );
 }
 
 function filterChatTree(chats: ChatItem[], query: string, activeTag: string | null): ChatItem[] {
@@ -1010,9 +1155,10 @@ function filterChatTree(chats: ChatItem[], query: string, activeTag: string | nu
   return chats.map(filterOne).filter((chat): chat is ChatItem => Boolean(chat));
 }
 
-export function HistoryBoard({ activeChatId, chatItems, account, onChatSelect, onNewTask, onSettingsClick, onChatMetadataChange, onMinimize, onRestore, isCompact = false }: HistoryBoardProps) {
+export function HistoryBoard({ activeChatId, chatItems, account, onChatSelect, onNewTask, onCalendarOpen, onSettingsClick, onChatMetadataChange, onMinimize, onRestore, isCompact = false }: HistoryBoardProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [activeTag, setActiveTag] = useState<string | null>(null);
+  const [isCalendarOpen, setIsCalendarOpen] = useState(false);
   const visibleChatItems = useMemo(() => filterChatTree(chatItems, searchQuery, activeTag), [activeTag, chatItems, searchQuery]);
   const [customGroups, setCustomGroups] = useState<CustomGroupInfo[]>(() => loadCustomGroups());
   const [groups, setGroups] = useState<ChatGroup[]>(() => buildGroupsFromChats(visibleChatItems, customGroups));
@@ -1296,7 +1442,12 @@ export function HistoryBoard({ activeChatId, chatItems, account, onChatSelect, o
 
   if (isCompact) {
     return (
-      <div className="flex h-full w-full flex-col items-center bg-[#09090b] text-zinc-400">
+      <div className="relative flex h-full w-full flex-col items-center bg-[#09090b] text-zinc-400">
+        {isCalendarOpen && (
+          <div className="absolute left-full top-2 z-50 ml-2 w-72">
+            <HistoryCalendarPanel chatItems={chatItems} onClose={() => setIsCalendarOpen(false)} />
+          </div>
+        )}
         <div className="flex w-full flex-col items-center gap-1 border-b border-zinc-800/60 px-1.5 py-2">
           {onRestore && (
             <button
@@ -1311,19 +1462,34 @@ export function HistoryBoard({ activeChatId, chatItems, account, onChatSelect, o
           )}
           <button
             onClick={handleCreateChat}
-            className="flex h-9 w-9 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-100"
+            className="flex h-9 w-9 items-center justify-center rounded-xl text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-100"
             title="New Chat"
             aria-label="New Chat"
           >
-            <MessageSquarePlus size={16} />
+            <WarmActionIcon kind="newChat" size="lg" />
           </button>
           <button
             onClick={handleCreateGroup}
-            className="flex h-9 w-9 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-100"
+            className="flex h-9 w-9 items-center justify-center rounded-xl text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-100"
             title="New Group"
             aria-label="New Group"
           >
-            <FolderPlus size={16} />
+            <WarmActionIcon kind="group" size="lg" />
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              onCalendarOpen?.();
+              setIsCalendarOpen((value) => !value);
+            }}
+            className={cn(
+              "flex h-9 w-9 items-center justify-center rounded-xl transition-colors",
+              isCalendarOpen ? "bg-zinc-800 text-zinc-100" : "text-zinc-500 hover:bg-zinc-800 hover:text-zinc-100",
+            )}
+            title="Calendar"
+            aria-label="Calendar"
+          >
+            <WarmActionIcon kind="calendar" size="lg" />
           </button>
         </div>
 
@@ -1389,22 +1555,44 @@ export function HistoryBoard({ activeChatId, chatItems, account, onChatSelect, o
               </button>
             )}
           </div>
+          <div className="grid grid-cols-2 gap-1.5">
+            <button
+              onClick={handleCreateChat}
+              className="flex min-w-0 items-center gap-2 rounded-xl border border-amber-200/10 bg-zinc-900/45 px-2.5 py-2 text-left text-xs font-medium text-zinc-300 transition-colors hover:border-amber-200/20 hover:bg-zinc-800 hover:text-zinc-100"
+              title="New Chat"
+            >
+              <WarmActionIcon kind="newChat" size="sm" />
+              <span className="truncate">New Chat</span>
+            </button>
+            <button
+              onClick={handleCreateGroup}
+              className="flex min-w-0 items-center gap-2 rounded-xl border border-orange-200/10 bg-zinc-900/45 px-2.5 py-2 text-left text-xs font-medium text-zinc-300 transition-colors hover:border-orange-200/20 hover:bg-zinc-800 hover:text-zinc-100"
+              title="New Group"
+            >
+              <WarmActionIcon kind="group" size="sm" />
+              <span className="truncate">New Group</span>
+            </button>
+          </div>
           <button
-            onClick={handleCreateChat}
-            className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs font-medium text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-100"
-            title="New Chat"
+            type="button"
+            onClick={() => {
+              onCalendarOpen?.();
+              setIsCalendarOpen((value) => !value);
+            }}
+            className={cn(
+              "flex w-full items-center gap-2 rounded-xl border px-2.5 py-2 text-left text-xs font-medium transition-colors",
+              isCalendarOpen
+                ? "border-amber-200/25 bg-amber-300/10 text-amber-100"
+                : "border-zinc-800/80 bg-zinc-900/35 text-zinc-400 hover:border-amber-200/15 hover:bg-zinc-800 hover:text-zinc-100",
+            )}
+            title="Calendar"
+            aria-expanded={isCalendarOpen}
           >
-            <MessageSquarePlus size={14} />
-            <span>New Chat</span>
+            <WarmActionIcon kind="calendar" size="sm" />
+            <span className="truncate">Calendar</span>
+            <span className="ml-auto rounded-full border border-zinc-700 px-1.5 py-0.5 text-[10px] text-zinc-500">{chatItems.length}</span>
           </button>
-          <button
-            onClick={handleCreateGroup}
-            className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs font-medium text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-100"
-            title="New Group"
-          >
-            <FolderPlus size={14} />
-            <span>New Group</span>
-          </button>
+          {isCalendarOpen && <HistoryCalendarPanel chatItems={chatItems} onClose={() => setIsCalendarOpen(false)} />}
           <ConversationSearchBar value={searchQuery} resultCount={visibleChatCount} onChange={setSearchQuery} />
           <ConversationTagFilter tags={allTags} activeTag={activeTag} onChange={setActiveTag} />
         </div>

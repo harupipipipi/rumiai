@@ -56,7 +56,7 @@ class MemorySQLiteStore:
         return conn
 
     def _migrate(self, conn: sqlite3.Connection) -> None:
-        run_migrations(conn, [(1, self._migration_1)], table_name="memory_migrations")
+        run_migrations(conn, [(1, self._migration_1), (2, self._migration_2)], table_name="memory_migrations")
 
     @staticmethod
     def _migration_1(conn: sqlite3.Connection) -> None:
@@ -91,6 +91,56 @@ class MemorySQLiteStore:
             )
         except sqlite3.OperationalError:
             pass
+
+    @staticmethod
+    def _migration_2(conn: sqlite3.Connection) -> None:
+        conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS memo_folders(
+              id TEXT PRIMARY KEY,
+              name TEXT NOT NULL,
+              slug TEXT NOT NULL UNIQUE,
+              description TEXT,
+              metadata_json TEXT,
+              created_at TEXT,
+              updated_at TEXT,
+              archived_at TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_memo_folders_slug ON memo_folders(slug);
+
+            CREATE TABLE IF NOT EXISTS memo_notes(
+              id TEXT PRIMARY KEY,
+              folder_id TEXT NOT NULL,
+              title TEXT NOT NULL,
+              content TEXT NOT NULL,
+              metadata_json TEXT,
+              source TEXT,
+              created_at TEXT,
+              updated_at TEXT,
+              archived_at TEXT,
+              FOREIGN KEY(folder_id) REFERENCES memo_folders(id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_memo_notes_folder ON memo_notes(folder_id, updated_at);
+            CREATE INDEX IF NOT EXISTS idx_memo_notes_updated ON memo_notes(updated_at);
+            """
+        )
+        now = utc_now()
+        conn.execute(
+            """
+            INSERT INTO memo_folders(id, name, slug, description, metadata_json, created_at, updated_at, archived_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, NULL)
+            ON CONFLICT(id) DO NOTHING
+            """,
+            (
+                "personalization",
+                "Personalization",
+                "personalization",
+                "Default folder for stable user preferences and personalization notes.",
+                json.dumps({"default": True, "kind": "personalization"}, ensure_ascii=False, sort_keys=True),
+                now,
+                now,
+            ),
+        )
 
     def add(
         self,
@@ -148,8 +198,22 @@ class MemorySQLiteStore:
                     entry.updated_at,
                     entry.archived_at,
                 ),
-            )
+        )
         return entry.to_dict()
+
+    @staticmethod
+    def json_dumps(value: Any) -> str:
+        return json.dumps(redact_sensitive(value or {}), ensure_ascii=False, sort_keys=True)
+
+    @staticmethod
+    def json_loads(value: Any) -> dict[str, Any]:
+        if isinstance(value, dict):
+            return value
+        try:
+            parsed = json.loads(str(value or "{}"))
+        except json.JSONDecodeError:
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
 
     def get(self, memory_id: str) -> dict[str, Any] | None:
         row = self.conn.execute("SELECT rowid, * FROM memory_entries WHERE id = ?", (memory_id,)).fetchone()

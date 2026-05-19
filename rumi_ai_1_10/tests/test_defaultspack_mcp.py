@@ -14,11 +14,24 @@ from ecosystem.defaultspack.domain.tool.registry import ToolRegistry
 
 @pytest.fixture(autouse=True)
 def _reset_mcp_singletons():
+    _disconnect_mcp_servers()
     McpClient._instance = None
     ToolRegistry._instance = None
     yield
+    _disconnect_mcp_servers()
     McpClient._instance = None
     ToolRegistry._instance = None
+
+
+def _disconnect_mcp_servers() -> None:
+    client = McpClient._instance
+    if client is None:
+        return
+    for server in client.list_servers():
+        try:
+            client.disconnect(server["name"])
+        except Exception:
+            pass
 
 
 def _write_demo_mcp_server(path: Path) -> None:
@@ -75,6 +88,68 @@ for raw_line in sys.stdin:
         continue
     sys.stdout.write(json.dumps(response) + "\\n")
     sys.stdout.flush()
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+
+def _write_digest_mcp_server(path: Path) -> None:
+    path.write_text(
+        """
+import hashlib
+import json
+import sys
+
+
+def respond(message, result):
+    sys.stdout.write(json.dumps({"jsonrpc": "2.0", "id": message.get("id"), "result": result}) + "\\n")
+    sys.stdout.flush()
+
+
+for raw_line in sys.stdin:
+    raw_line = raw_line.strip()
+    if not raw_line:
+        continue
+    message = json.loads(raw_line)
+    method = message.get("method")
+    if method == "initialize":
+        respond(message, {
+            "protocolVersion": "2024-11-05",
+            "capabilities": {"tools": {}},
+            "serverInfo": {"name": "digest-demo", "version": "0.1.0"},
+        })
+    elif method == "tools/list":
+        respond(message, {
+            "tools": [{
+                "name": "digest",
+                "description": "Compute a digest from caller supplied numbers and label.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "label": {"type": "string"},
+                        "numbers": {"type": "array", "items": {"type": "number"}},
+                    },
+                    "required": ["label", "numbers"],
+                },
+            }]
+        })
+    elif method == "tools/call":
+        arguments = message.get("params", {}).get("arguments", {})
+        numbers = [int(value) for value in arguments.get("numbers", [])]
+        label = str(arguments.get("label", ""))
+        digest = hashlib.sha256(json.dumps(arguments, sort_keys=True).encode("utf-8")).hexdigest()[:12]
+        respond(message, {
+            "content": [{
+                "type": "text",
+                "text": json.dumps({
+                    "label": label,
+                    "sum": sum(numbers),
+                    "count": len(numbers),
+                    "digest": digest,
+                }, sort_keys=True),
+            }]
+        })
 """.strip()
         + "\n",
         encoding="utf-8",
@@ -218,6 +293,104 @@ def test_mcp_connect_approval_binds_resolved_saved_config(monkeypatch, tmp_path)
 
     assert tampered["status"] == "error"
     assert tampered["error"]["code"] == "APPROVAL_ARGUMENTS_CHANGED"
+
+
+def test_chat_run_executes_prefixless_mcp_tool_with_tool_log_evidence(monkeypatch, tmp_path):
+    from domain.chat.store import ChatStore
+    from domain.chat.stream_engine import ChatRunEngine
+
+    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_MCP_REGISTRY_PATH", str(tmp_path / "mcp_servers.json"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_AUDIT_PATH", str(tmp_path / "audit.jsonl"))
+    ChatStore._instance = None
+    ToolRegistry._instance = None
+    McpClient._instance = None
+
+    server_path = tmp_path / "digest_mcp_server.py"
+    _write_digest_mcp_server(server_path)
+    connect_result = mcp_connect_block.run(
+        {
+            "server_id": "digest_server",
+            "config": {
+                "server_id": "digest_server",
+                "transport": "stdio",
+                "command": sys.executable,
+                "args": [str(server_path)],
+            },
+        },
+        {"_tool_server_approved": True},
+    )
+
+    assert connect_result["status"] == "ok"
+    tool_id = connect_result["data"]["tools"][0]
+    assert tool_id == "mcp__digest_server__digest"
+
+    requested_payload = {"label": "invoice-" + tmp_path.name[-6:], "numbers": [7, 11, 13]}
+    expected_sum = sum(requested_payload["numbers"])
+
+    class EvidenceCheckingClient:
+        def __init__(self):
+            self.calls = 0
+
+        def supports_stream(self, _model):
+            return True
+
+        def stream(self, _model, messages, tools=None, params=None):
+            self.calls += 1
+            if self.calls == 1:
+                function_names = [tool["function"]["name"] for tool in tools or []]
+                assert tool_id in function_names
+                yield {"type": "tool_call_start", "id": "call_digest", "name": tool_id}
+                yield {
+                    "type": "tool_call_delta",
+                    "id": "call_digest",
+                    "name": tool_id,
+                    "arguments_chunk": json.dumps(requested_payload),
+                }
+                yield {"type": "tool_call_end", "id": "call_digest", "name": tool_id}
+                yield {"type": "stream_end", "finish_reason": "tool_calls"}
+                return
+
+            tool_messages = [
+                message
+                for message in messages
+                if message.get("role") == "tool" and message.get("name") == tool_id
+            ]
+            assert tool_messages, "final model turn must receive the MCP result as a tool message"
+            evidence = json.loads(tool_messages[-1]["content"])
+            assert evidence["label"] == requested_payload["label"]
+            assert evidence["sum"] == expected_sum
+            yield {
+                "type": "content_delta",
+                "delta": {"type": "text", "text": f"{evidence['label']} total={evidence['sum']} digest={evidence['digest']}"},
+            }
+            yield {"type": "stream_end", "finish_reason": "stop"}
+
+        def complete(self, *_args, **_kwargs):
+            raise AssertionError("streaming tool path should be used")
+
+    monkeypatch.setattr(ChatRunEngine, "_provider_supports_stream_tool_calls", staticmethod(lambda _model: True))
+
+    store = ChatStore()
+    conversation = store.create_conversation(model="openai/gpt-5.4")
+    events = list(
+        ChatRunEngine(client=EvidenceCheckingClient()).stream(
+            {
+                "conversation_id": conversation["id"],
+                "message": {"role": "user", "content": "Calculate the invoice total with the MCP digest tool."},
+                "tools": [tool_id],
+            },
+            {},
+            stream_mode=True,
+        )
+    )
+
+    final_message = [event["data"]["message"] for event in events if event["type"] == "done"][-1]
+    assert f"{requested_payload['label']} total={expected_sum}" in final_message["raw_text"]
+    assert final_message["metadata"]["attached_tools"] == [tool_id]
+    assert final_message["tool_logs"][0]["tool_name"] == tool_id
+    assert json.loads(final_message["tool_logs"][0]["result"]["data"]["result"])["sum"] == expected_sum
 
 
 def test_mcp_list_filters_by_server_id(monkeypatch):

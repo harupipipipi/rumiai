@@ -1,5 +1,4 @@
 import {
-  ArrowUp,
   Bot,
   ChevronDown,
   Code2,
@@ -11,16 +10,13 @@ import {
   KeyRound,
   Loader2,
   MessageSquare,
-  Mic,
   MousePointerClick,
-  Paperclip,
   PanelRightOpen,
   Plus,
   RefreshCw,
   Search,
   SlidersHorizontal,
   Sparkles,
-  Square,
   Wrench,
   X,
 } from "lucide-react";
@@ -39,8 +35,10 @@ import type { ModelCommandCandidate, ModelProfile } from "../lib/api";
 import { CodingCommandPanel } from "../components/coding/CodingCommandPanel";
 import { CodingWorkspaceBadge } from "../components/coding/CodingWorkspaceBadge";
 import { CodingWorkspacePicker } from "../components/coding/CodingWorkspacePicker";
+import { WarmActionIcon } from "../components/WarmActionIcon";
 import { fileToAttachment } from "../lib/attachments";
 import { resolveComposerWidgetDrop } from "../lib/composerWidgets";
+import { HISTORY_CHAT_DROP_MIME, parseHistoryChatDrop } from "../lib/historyComposer";
 import { sortedToolGroups, toolGroupFor } from "../lib/toolUi";
 
 export { resolveComposerWidgetDrop } from "../lib/composerWidgets";
@@ -236,6 +234,24 @@ function DroppedWidgetChip({
   onAction?: (widget: DroppedWidget) => void;
   onToggle?: (id: string) => void;
 }) {
+  if (widget.type === "conversation") {
+    return (
+      <button
+        type="button"
+        title={widget.description ?? widget.label}
+        onClick={() => onToggle?.(widget.id)}
+        className={`inline-flex max-w-[220px] items-center gap-1 rounded-md border px-2 py-0.5 text-[11px] transition-colors ${
+          widget.enabled === false
+            ? "border-zinc-700/60 bg-zinc-800/50 text-zinc-500"
+            : "border-amber-500/30 bg-amber-500/10 text-amber-200 hover:bg-amber-500/15"
+        }`}
+      >
+        <MessageSquare size={10} />
+        <span className="truncate">{widget.label}</span>
+      </button>
+    );
+  }
+
   if (widget.widgetKind !== "tool_toggle" && widget.type !== "tool") {
     const Icon = widget.widgetKind === "button"
       ? MousePointerClick
@@ -1105,6 +1121,13 @@ export function ComposerRenderer({
         return;
       }
 
+      const historyData = event.dataTransfer.getData(HISTORY_CHAT_DROP_MIME);
+      if (historyData) {
+        const widget = parseHistoryChatDrop(historyData);
+        if (widget) onDropWidget?.(widget);
+        return;
+      }
+
       const data = event.dataTransfer.getData("application/rumi-widget");
       if (data) {
         try {
@@ -1663,7 +1686,7 @@ export function ComposerRenderer({
                 onClick={() => setMenuOpen((value) => !value)}
                 className="h-8 w-8 flex flex-shrink-0 items-center justify-center text-zinc-400 hover:text-zinc-100 hover:bg-zinc-700/60 rounded-lg transition-colors disabled:opacity-50"
               >
-                <Plus size={18} />
+                <WarmActionIcon kind="menu" size="md" />
               </button>
                       <button
                         type="button"
@@ -1677,7 +1700,7 @@ export function ComposerRenderer({
                     : "text-zinc-400 hover:text-zinc-100 hover:bg-zinc-700/60"
                 } h-8 w-8 flex flex-shrink-0 items-center justify-center rounded-lg transition-colors disabled:opacity-50`}
               >
-                <Paperclip size={16} />
+                <WarmActionIcon kind="attach" size="md" />
               </button>
                       <button
                         type="button"
@@ -1686,7 +1709,7 @@ export function ComposerRenderer({
                 title="音声入力"
                 className="h-8 w-8 flex flex-shrink-0 items-center justify-center text-zinc-400 hover:text-zinc-100 hover:bg-zinc-700/60 rounded-lg transition-colors disabled:opacity-50 max-[640px]:hidden"
               >
-                <Mic size={16} />
+                <WarmActionIcon kind="mic" size="md" />
               </button>
 
               <div className="group/mode relative flex">
@@ -1817,11 +1840,11 @@ export function ComposerRenderer({
                 } flex flex-shrink-0 items-center justify-center bg-zinc-200 text-black rounded-lg disabled:opacity-30 disabled:cursor-not-allowed hover:bg-white shadow-sm transition-colors`}
               >
                 {isGenerating && !input.trim() ? (
-                  <Square size={13} fill="currentColor" strokeWidth={2.2} />
+                  <WarmActionIcon kind="stop" size={isNewConversation ? "lg" : "md"} className="shadow-none ring-0" />
                 ) : isGenerating ? (
                   <CornerDownRight size={15} strokeWidth={2.4} />
                 ) : (
-                  <ArrowUp size={16} strokeWidth={2.4} />
+                  <WarmActionIcon kind="send" size={isNewConversation ? "lg" : "md"} className="shadow-none ring-0" />
                 )}
               </button>
             </div>

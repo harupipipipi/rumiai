@@ -64,6 +64,8 @@ defaults 単体で既存の AI サービス（ChatGPT / Claude / Cursor / Devin�
 
 | やりたいこと | 読む場所 |
 |---|---|
+| docs の入口から探したい | `docs/index.md` |
+| PR97 の全体像と UI/chat/tool/MCP/skill/memory/scheduler/trigger の関係を知りたい | `docs/defaultspack-explained.md` |
 | AI agent service defaults の全体像を見たい | `docs/ai_agent_services_feature_catalog.md`, `docs/local_agent_implementation_plan.md` |
 | ローカル優先・承認・安全方針を見たい | `docs/local_first_policy.md`, `docs/safety_permission_audit_design.md` |
 | capability / profile / preset を機械可読に見たい | `/api/agent-service/manifest`, `/api/capabilities`, `capabilities/`, `profiles/`, `presets/` |
@@ -832,6 +834,8 @@ user_data/
 
 | ファイル | サイズ | 内容 |
 |---------|--------|------|
+| `docs/index.md` | - | defaultspack docs 入口 |
+| `docs/defaultspack-explained.md` | - | PR97 向け全体像と主要フロー図 |
 | `docs/architecture_defaults.md` | 3.9KB | defaults 全体アーキテクチャ |
 | `docs/agent.md` | 41KB | エージェント設計 |
 | `docs/ai_client.md` | 53KB | AI クライアント設計 |

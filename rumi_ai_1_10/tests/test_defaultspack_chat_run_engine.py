@@ -172,6 +172,102 @@ def test_prepare_chat_run_current_turn_history_mode_excludes_old_tool_logs(tmp_p
     ChatStore._instance = None
 
 
+def test_prepare_chat_run_injects_matched_skill_and_chat_references(tmp_path, monkeypatch):
+    import json
+
+    from domain.chat.run_request import prepare_chat_run
+    from domain.chat.store import ChatStore
+
+    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
+    extensions_root = tmp_path / "extensions"
+    skill_dir = extensions_root / "skills" / "line-mention"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "manifest.json").write_text(
+        json.dumps(
+            {
+                "id": "feedback/line-mention",
+                "category": "skill",
+                "version": "1",
+                "enabled": True,
+                "display_name": "LINE mention skill",
+                "description": "Only respond to LINE groups when mentioned.",
+                "triggers": ["LINE", "mention"],
+                "instructions": "For LINE group chats, respond only when Rumi is mentioned.",
+            }
+        ),
+        encoding="utf-8",
+    )
+    unrelated_skill_dir = extensions_root / "skills" / "finance-only"
+    unrelated_skill_dir.mkdir(parents=True)
+    (unrelated_skill_dir / "manifest.json").write_text(
+        json.dumps(
+            {
+                "id": "feedback/finance-only",
+                "category": "skill",
+                "version": "1",
+                "enabled": True,
+                "display_name": "Finance only",
+                "triggers": ["portfolio-rebalance"],
+                "instructions": "This must not appear in unrelated LINE prompts.",
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_EXTENSION_ROOTS", str(extensions_root))
+    ChatStore._instance = None
+
+    store = ChatStore()
+    reference = store.create_conversation(model="stub/default")
+    store.update_conversation(reference["id"], {"title": "Reference planning chat"})
+    store.add_message(reference["id"], {"role": "user", "content": "We decided the rollout should avoid marker-based tests."})
+    store.add_message(reference["id"], {"role": "assistant", "content": "Use tool_logs and metadata as evidence instead."})
+    conversation = store.create_conversation(model="stub/default")
+    prepared = prepare_chat_run(
+        {
+            "conversation_id": conversation["id"],
+            "message": {
+                "role": "user",
+                "content": "LINE mention behavior please",
+                "metadata": {
+                    "dropped_widgets": [
+                        {
+                            "id": "conversation:" + reference["id"],
+                            "type": "conversation",
+                            "label": "Reference planning chat",
+                            "sourceItemId": reference["id"],
+                            "metadata": {
+                                "conversation_id": reference["id"],
+                                "title": "Reference planning chat",
+                            },
+                        }
+                    ]
+                },
+            },
+            "tools": [],
+        },
+        {},
+    )
+    combined = "\n".join(str(message.get("content") or "") for message in prepared.standard_messages)
+
+    assert "active system-level instructions" in combined
+    assert "For LINE group chats" in combined
+    assert "portfolio-rebalance" not in combined
+    assert prepared.matched_skills[0]["id"] == "feedback/line-mention"
+    assert prepared.chat_references["history_json_path"].endswith("history.json")
+    assert prepared.chat_references["references"][0]["conversation_id"] == reference["id"]
+    assert prepared.chat_references["references"][0]["title"] == "Reference planning chat"
+    assert "avoid marker-based tests" in prepared.chat_references["references"][0]["summary"]
+    assert "Dropped Chat References" in combined
+    assert reference["id"] in combined
+    assert prepared.request_context["chat_references"] == prepared.chat_references
+    assert prepared.tool_context["history_json_path"] == prepared.chat_references["history_json_path"]
+    stored_user = ChatStore().get_message(conversation["id"], prepared.user_message["id"])
+    assert stored_user["metadata"]["chat_references"]["history_json_path"] == prepared.chat_references["history_json_path"]
+    assert stored_user["metadata"]["chat_references"]["references"][0]["conversation_id"] == reference["id"]
+    ChatStore._instance = None
+
+
 def test_complete_turn_retries_transient_ai_error_after_tool_use():
     from domain.chat.run_request import PreparedChatRun
     from domain.chat.stream_engine import ChatRunEngine

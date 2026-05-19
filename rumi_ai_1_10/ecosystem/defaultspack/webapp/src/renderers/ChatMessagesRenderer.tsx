@@ -1,7 +1,8 @@
-import { AlertTriangle, Check, Clock, Copy, ExternalLink, Image as ImageIcon, Loader2, X } from "lucide-react";
+import { AlertTriangle, Check, Clock, Copy, ExternalLink, Image as ImageIcon, Loader2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
 
+import { ArtifactPreviewDialog, type ArtifactPreviewDialogItem } from "../components/ArtifactPreviewDialog";
 import { cn } from "../lib/cn";
 import { elapsedDurationLabel } from "../lib/duration";
 import { buildToolActivityGroups, toolFolderFor } from "../lib/toolActivity";
@@ -45,78 +46,17 @@ function imageSizeLabel(size: BrowserScreenshot["image_size"]): string {
   return width > 0 && height > 0 ? `${width} x ${height}` : "";
 }
 
-function BrowserImagePreviewDialog({
-  image,
-  onClose,
-}: {
-  image: ImagePreviewRequest | null;
-  onClose: () => void;
-}) {
-  useEffect(() => {
-    if (!image) return undefined;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [image, onClose]);
-
+function artifactDialogItemFromImagePreview(image: ImagePreviewRequest | null): ArtifactPreviewDialogItem | null {
   if (!image) return null;
-
-  return (
-    <div className="rumi-image-preview-backdrop fixed inset-0 z-50 flex items-center justify-center bg-black/72 px-4 py-5 backdrop-blur-md" role="dialog" aria-modal="true" aria-label={image.title}>
-      <button type="button" className="absolute inset-0 cursor-default" aria-label="画像プレビューを閉じる" onClick={onClose} />
-      <section className="rumi-image-preview-shell relative flex h-[min(88vh,980px)] w-[min(94vw,1180px)] flex-col overflow-hidden rounded-xl border border-zinc-800 bg-[#0b0b0d] shadow-[0_28px_90px_rgba(0,0,0,0.55)]">
-        <header className="flex min-h-12 items-center justify-between gap-3 border-b border-zinc-800 bg-zinc-950/95 px-3 py-2">
-          <div className="flex min-w-0 items-center gap-2">
-            <ImageIcon size={15} className="shrink-0 text-zinc-500" />
-            <div className="min-w-0">
-              <div className="truncate text-[12px] font-medium text-zinc-200">{image.title}</div>
-              {image.subtitle && <div className="truncate text-[10px] text-zinc-600">{image.subtitle}</div>}
-            </div>
-          </div>
-          <div className="flex shrink-0 items-center gap-1.5">
-            {image.href && (
-              <a
-                href={image.href}
-                target="_blank"
-                rel="noreferrer"
-                aria-label="元画像を開く"
-                title="元画像を開く"
-                className="flex h-8 w-8 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-zinc-900 hover:text-zinc-200 focus-visible:bg-zinc-900 focus-visible:text-zinc-200 focus-visible:outline-none"
-              >
-                <ExternalLink size={15} />
-              </a>
-            )}
-            <button
-              type="button"
-              aria-label="閉じる"
-              title="閉じる"
-              className="flex h-8 w-8 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-zinc-900 hover:text-zinc-200 focus-visible:bg-zinc-900 focus-visible:text-zinc-200 focus-visible:outline-none"
-              onClick={onClose}
-            >
-              <X size={16} />
-            </button>
-          </div>
-        </header>
-        <div className="min-h-0 flex-1 overflow-auto bg-black">
-          <div className="rumi-image-preview-media flex min-h-full items-center justify-center p-4">
-            <img src={image.src} alt={image.alt} className="max-h-full max-w-full rounded-lg border border-zinc-800/80 object-contain shadow-[0_18px_70px_rgba(0,0,0,0.45)]" />
-          </div>
-        </div>
-        {image.details && image.details.length > 0 && (
-          <dl className="grid max-h-36 shrink-0 grid-cols-[max-content_minmax(0,1fr)] gap-x-3 gap-y-1.5 overflow-auto border-t border-zinc-800 bg-zinc-950/95 px-3 py-2 font-mono text-[10px] leading-5">
-            {image.details.map((detail) => (
-              <div key={`${detail.label}-${detail.value}`} className="contents">
-                <dt className="text-zinc-600">{detail.label}</dt>
-                <dd className="min-w-0 break-words text-zinc-400">{detail.value}</dd>
-              </div>
-            ))}
-          </dl>
-        )}
-      </section>
-    </div>
-  );
+  return {
+    kind: "image",
+    title: image.title,
+    subtitle: image.subtitle,
+    href: image.href,
+    imageUrl: image.src,
+    imageAlt: image.alt,
+    details: image.details,
+  };
 }
 
 function MessageBlock({
@@ -957,7 +897,7 @@ export function ChatMessagesRenderer({
           </div>
         </div>
       )}
-      <BrowserImagePreviewDialog image={imagePreview} onClose={() => setImagePreview(null)} />
+      <ArtifactPreviewDialog item={artifactDialogItemFromImagePreview(imagePreview)} onClose={() => setImagePreview(null)} />
     </>
   );
 }

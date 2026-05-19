@@ -1495,6 +1495,20 @@ export const api = {
     return request<Record<string, unknown>>("/api/agent/schedules");
   },
 
+  createSchedule(payload: Record<string, unknown>) {
+    return request<Record<string, unknown>>("/api/agent/schedules", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  updateSchedule(scheduleId: string, payload: Record<string, unknown>) {
+    return request<Record<string, unknown>>(`/api/agent/schedules/${encodeURIComponent(scheduleId)}`, {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    });
+  },
+
   getOperationsCompanyStatus() {
     return request<OperationsCompanyStatus>("/api/agent/company/status");
   },
@@ -1682,6 +1696,20 @@ export const api = {
 
   triggerSchedule(scheduleId: string) {
     return request<Record<string, unknown>>(`/api/agent/schedules/${scheduleId}/trigger`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+  },
+
+  pauseSchedule(scheduleId: string) {
+    return request<Record<string, unknown>>(`/api/agent/schedules/${encodeURIComponent(scheduleId)}/pause`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+  },
+
+  resumeSchedule(scheduleId: string) {
+    return request<Record<string, unknown>>(`/api/agent/schedules/${encodeURIComponent(scheduleId)}/resume`, {
       method: "POST",
       body: JSON.stringify({}),
     });

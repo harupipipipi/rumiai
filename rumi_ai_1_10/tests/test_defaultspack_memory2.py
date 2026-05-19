@@ -12,6 +12,7 @@ sys.path.insert(0, str(DEFAULTSPACK_ROOT))
 from domain.memory.store import MemoryStore  # noqa: E402
 from domain.memory2.flush import flush_memory  # noqa: E402
 from domain.memory2.markdown_store import MarkdownMemoryStore  # noqa: E402
+from domain.memory2.memos import DEFAULT_PERSONALIZATION_FOLDER_ID, MemoStore  # noqa: E402
 from domain.memory2.sqlite_store import MemorySQLiteStore  # noqa: E402
 
 
@@ -65,3 +66,33 @@ def test_memory_sqlite_store_supports_parallel_thread_access(tmp_path, monkeypat
 
     assert max(results) >= 1
     assert store.search("secret-value", limit=5) == []
+
+
+def test_memory2_memo_folders_notes_and_first_party_tools(tmp_path, monkeypatch):
+    from domain.tool.executor import ToolExecutor
+    from domain.tool.registry import ToolRegistry
+
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_MEMORY2_DIR", str(tmp_path / "memory"))
+    MemorySQLiteStore._instance = None
+    ToolRegistry._instance = None
+
+    memos = MemoStore()
+    folders = memos.list_folders()
+    assert folders[0]["id"] == DEFAULT_PERSONALIZATION_FOLDER_ID
+
+    note = memos.create_note("Favorite greeting: おはよう", title="Greeting")
+    assert note["folder_id"] == DEFAULT_PERSONALIZATION_FOLDER_ID
+    assert Path(note["markdown_path"]).exists()
+    assert memos.search_notes("greeting")[0]["id"] == note["id"]
+
+    tools = {tool["tool_id"]: tool for tool in ToolRegistry().list_tools()}
+    assert "memo_create_note" in tools
+    assert "memo_search_notes" in tools
+
+    executed = ToolExecutor().execute(
+        "memo_create_note",
+        {"title": "Tone", "content": "Use concise, warm replies."},
+        {"profile_policy": {"yolo_mode": True}},
+    )
+    assert executed["is_error"] is False
+    assert memos.search_notes("warm replies")

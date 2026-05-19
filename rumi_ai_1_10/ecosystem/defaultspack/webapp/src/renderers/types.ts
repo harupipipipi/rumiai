@@ -58,6 +58,7 @@ export type HistoryBoardRendererProps = {
   account?: NonNullable<UICatalog["app"]>["account"];
   onChatSelect: (conversationId: string) => void;
   onNewTask: () => void;
+  onCalendarOpen?: () => void;
   onSettingsClick: () => void;
   onChatMetadataChange?: (chatId: string, updates: { is_pinned?: boolean; is_starred?: boolean; tags?: string[] }) => void;
   onMinimize?: () => void;
@@ -231,4 +232,5 @@ export type DroppedWidget = {
   sourceItemId?: string;
   description?: string;
   icon?: string;
+  metadata?: Record<string, unknown>;
 };
