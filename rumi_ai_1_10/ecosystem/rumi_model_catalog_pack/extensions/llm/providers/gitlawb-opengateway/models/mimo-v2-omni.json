@@ -1,0 +1,26 @@
+{
+  "id": "gitlawb-opengateway/mimo-v2-omni",
+  "category": "llm_model",
+  "version": "1",
+  "provider_id": "gitlawb-opengateway",
+  "model_id": "mimo-v2-omni",
+  "display_name": "MiMo V2 Omni via Gitlawb OpenGateway",
+  "type": "chat",
+  "enabled": true,
+  "priority": 3,
+  "defaults": {
+    "chat": true,
+    "vision": true
+  },
+  "capabilities": {
+    "streaming": true,
+    "vision": true
+  },
+  "metadata": {
+    "source": "gitlawb-opengateway",
+    "privacy": "external_no_key_gateway",
+    "vision_verified": true,
+    "openai_base_url": "https://opengateway.gitlawb.com/v1",
+    "openai_model": "mimo-v2-omni"
+  }
+}

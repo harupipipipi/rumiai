@@ -22,6 +22,7 @@ from domain.components.registry import DomainComponentRegistry, build_domain_com
 OPENGATEWAY_MODELS = {
     "gitlawb-opengateway/mimo-v2.5-pro",
     "gitlawb-opengateway/mimo-v2-flash",
+    "gitlawb-opengateway/mimo-v2-omni",
     "gitlawb-opengateway/google/gemini-3.1-flash-lite-preview",
 }
 

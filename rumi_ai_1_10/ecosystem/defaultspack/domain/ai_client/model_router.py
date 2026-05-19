@@ -76,6 +76,7 @@ def route_model_request(
     needs_thinking = str(routing_request.requested_thinking_level or "").strip() not in {"", "none"}
     original_in_group = any(_same_model(item, original) for item in candidates)
     explicit_model_outside_group = bool(original_caps and not original_in_group)
+    route_from_preferred_for_tools = _is_auto_route_anchor(original, original_caps)
     keep_original = bool(
         original_caps
         and (
@@ -83,7 +84,7 @@ def route_model_request(
             or _compatible(
                 original_caps,
                 needs_vision=needs_vision,
-                needs_tools=needs_tools,
+                needs_tools=needs_tools and route_from_preferred_for_tools,
                 needs_thinking=False,
             )
         )
@@ -240,6 +241,25 @@ def _same_model(model: dict[str, Any], model_id: str) -> bool:
         str(model.get("qualified_model_id") or ""),
         "{}/{}".format(model.get("provider_id") or model.get("provider") or "", model.get("model_id") or ""),
     }
+
+
+def _is_auto_route_anchor(model_id: str, model: dict[str, Any] | None = None) -> bool:
+    profile_id = str(model_id or "").strip()
+    aliases = {
+        "",
+        "default",
+        "stub/default",
+    }
+    if isinstance(model, dict):
+        aliases.update(
+            {
+                str(model.get("profile_id") or ""),
+                str(model.get("qualified_model_id") or ""),
+            }
+            if str(model.get("provider_id") or "") == "stub"
+            else set()
+        )
+    return profile_id in aliases
 
 
 def _resolve_utility_models(settings: dict[str, Any], candidates: list[dict[str, Any]]) -> dict[str, str]:
