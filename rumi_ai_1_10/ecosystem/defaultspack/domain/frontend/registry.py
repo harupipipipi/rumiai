@@ -613,6 +613,38 @@ class FrontendRegistry:
                         "help": "1行に model: provider/api-name を優先順で書きます。例: google/gemini-2.5-pro: google/main, google/backup。制限時は次の API へ切り替えます。",
                     },
                     {
+                        "id": "api_routes",
+                        "label": "Structured API Routes",
+                        "type": "textarea",
+                        "default": "[]",
+                        "help": "高度設定: JSON配列/オブジェクトで model と apis を定義します。旧 Model API Priority も読み取り互換です。",
+                        "advanced": True,
+                    },
+                    {
+                        "id": "api_bound_profiles",
+                        "label": "API-bound Profiles",
+                        "type": "textarea",
+                        "default": "[]",
+                        "help": "高度設定: このAPI keyだけで使えるモデル profile をJSONで追加します。",
+                        "advanced": True,
+                    },
+                    {
+                        "id": "composite_models",
+                        "label": "Composite Models",
+                        "type": "textarea",
+                        "default": "[]",
+                        "help": "高度設定: fallback_chain / ensemble の合体モデルをJSONで定義します。",
+                        "advanced": True,
+                    },
+                    {
+                        "id": "model_notes",
+                        "label": "Model Notes",
+                        "type": "textarea",
+                        "default": "{}",
+                        "help": "高度設定: モデルごとの特徴を自分の言葉で書き、検索とルーティングの判断材料にします。",
+                        "advanced": True,
+                    },
+                    {
                         "id": "thinking_level",
                         "label": "Thinking Level",
                         "type": "select",
@@ -655,6 +687,20 @@ class FrontendRegistry:
                         "type": "api_keys",
                         "default": [],
                         "help": "provider と名前を付けて複数の API key を保存できます。値は再表示されません。",
+                    },
+                ],
+            },
+            {
+                "id": "line",
+                "label": "LINE",
+                "description": "LINE 受信時の反応条件。",
+                "fields": [
+                    {
+                        "id": "mention_policy",
+                        "label": "Mention Policy",
+                        "type": "textarea",
+                        "default": "{\"group_room_mention_required\":true}",
+                        "help": "group/room では既定でメンション時のみ反応します。1:1 は従来通り反応します。",
                     },
                 ],
             },
@@ -1887,6 +1933,11 @@ class FrontendRegistry:
                         pack_root=self._pack_root,
                         api_id=name,
                         name=name,
+                        base_url=str(api_key_patch.get("base_url") or "").strip() or None,
+                        allowed_models=api_key_patch.get("allowed_models"),
+                        default_model=str(api_key_patch.get("default_model") or "").strip() or None,
+                        notes=str(api_key_patch.get("notes") or "").strip() or None,
+                        quota_label=str(api_key_patch.get("quota_label") or "").strip() or None,
                     )
             apis["api_keys"] = []
         external_output = sanitized.get("external_output")
@@ -1959,6 +2010,18 @@ class FrontendRegistry:
             if legacy_routes and not models.get("model_api_routes"):
                 models["model_api_routes"] = legacy_routes
         refreshed["models"] = ModelRuntimeSettingsService(self._pack_root).refresh_models_settings(models)
+        line = refreshed.setdefault("line", {})
+        if not isinstance(line, dict):
+            line = {}
+            refreshed["line"] = line
+        mention_policy = line.setdefault("mention_policy", {"group_room_mention_required": True})
+        if isinstance(mention_policy, str):
+            try:
+                parsed = json.loads(mention_policy)
+                if isinstance(parsed, dict):
+                    line["mention_policy"] = parsed
+            except Exception:
+                pass
         external_input = refreshed.setdefault("external_input", {})
         if not isinstance(external_input, dict):
             external_input = {}

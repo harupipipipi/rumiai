@@ -1,0 +1,42 @@
+{
+  "function_id": "conversation_steer",
+  "description": "Queue, list, cancel, or process a follow-up steer after a conversation task completes.",
+  "tags": [
+    "conversation",
+    "steer"
+  ],
+  "risk": "medium",
+  "requires": [
+    "conversation.steer"
+  ],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.conversation.steer",
+    "defaultspack.conversation.steer"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.conversation.steer",
+      "default_args": {}
+    }
+  }
+}

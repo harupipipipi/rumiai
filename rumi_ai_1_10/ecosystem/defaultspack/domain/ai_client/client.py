@@ -3,10 +3,11 @@ import sys
 import json
 import re
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
-from domain.ai_client.api_key_store import provider_has_api_key, read_provider_api_key
+from domain.ai_client.api_key_store import provider_api_metadata, provider_has_api_key, provider_named_api_keys, read_provider_api_key
 from domain.ai_client.providers import (
     _cloud_runtime_enabled,
     build_profile_catalog,
@@ -284,16 +285,20 @@ class AIClient:
         return Path(__file__).resolve().parents[2] / "user_data" / "shared" / "frontend_settings.json"
 
     def _api_routes(self):
-        try:
-            data = json.loads(self._settings_path().read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
+        data = self._settings_data()
+        if not data:
             return {}
         models = data.get("models") if isinstance(data.get("models"), dict) else {}
         apis = data.get("apis") if isinstance(data.get("apis"), dict) else {}
+        routes = {}
+        for item in self._structured_api_routes(models.get("api_routes") or apis.get("api_routes")):
+            model_ref = str(item.get("model") or "").strip()
+            route_refs = [str(route).strip() for route in item.get("routes", []) if str(route).strip()]
+            if model_ref and route_refs:
+                routes[model_ref] = route_refs
         raw_routes = models.get("model_api_routes") or apis.get("model_api_routes") or ""
         if isinstance(raw_routes, list):
             raw_routes = "\n".join(str(item) for item in raw_routes)
-        routes = {}
         for raw_line in str(raw_routes or "").splitlines():
             line = raw_line.strip()
             if not line or line.startswith("#"):
@@ -304,7 +309,52 @@ class AIClient:
             model_ref = match.group(1).strip()
             route_refs = [item.strip() for item in match.group(2).split(",") if item.strip()]
             if model_ref and route_refs:
-                routes[model_ref] = route_refs
+                routes.setdefault(model_ref, route_refs)
+        return routes
+
+    def _settings_data(self):
+        try:
+            return json.loads(self._settings_path().read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return {}
+
+    @staticmethod
+    def _jsonish(value, fallback):
+        if isinstance(value, str):
+            text = value.strip()
+            if not text:
+                return fallback
+            try:
+                return json.loads(text)
+            except json.JSONDecodeError:
+                return fallback
+        return value
+
+    def _structured_api_routes(self, value):
+        parsed = self._jsonish(value, [])
+        if isinstance(parsed, dict):
+            raw_items = [
+                {"model": key, **(route if isinstance(route, dict) else {"routes": route})}
+                for key, route in parsed.items()
+            ]
+        elif isinstance(parsed, list):
+            raw_items = parsed
+        else:
+            raw_items = []
+        routes = []
+        for item in raw_items:
+            if not isinstance(item, dict):
+                continue
+            model_ref = str(item.get("model") or item.get("profile_id") or "").strip()
+            raw_routes = item.get("routes", item.get("apis", item.get("api_refs", [])))
+            if isinstance(raw_routes, str):
+                route_refs = [part.strip() for part in raw_routes.split(",") if part.strip()]
+            elif isinstance(raw_routes, list):
+                route_refs = [str(part).strip() for part in raw_routes if str(part or "").strip()]
+            else:
+                route_refs = []
+            if model_ref and route_refs:
+                routes.append({"model": model_ref, "routes": route_refs})
         return routes
 
     def _routes_for_model(self, model):
@@ -327,7 +377,24 @@ class AIClient:
     @staticmethod
     def _is_rate_limit_error(exc):
         message = str(exc).lower()
-        return any(token in message for token in ("429", "rate limit", "rate_limit", "quota", "resource_exhausted"))
+        return any(
+            token in message
+            for token in (
+                "429",
+                "rate limit",
+                "rate_limit",
+                "quota",
+                "resource_exhausted",
+                "provider_error",
+                "provider error",
+                "timeout",
+                "timed out",
+                "temporarily",
+                "503",
+                "502",
+                "504",
+            )
+        )
 
     def _model_for_route(self, model, provider_id):
         if isinstance(model, str) and "/" in model:
@@ -358,10 +425,66 @@ class AIClient:
             provider, model_name = self.resolve_provider(route_model)
             if provider.__class__.__name__ == "StubProvider":
                 continue
-            attempts.append((provider, model_name, api_key))
+            attempts.append((provider, model_name, api_key, provider_api_metadata(provider_id, api_id)))
         return attempts
 
+    def _api_bound_profile_parts(self, model):
+        if not isinstance(model, str) or "/" not in model:
+            return None
+        parts = model.split("/")
+        if len(parts) < 3:
+            return None
+        provider_id = parts[0].strip()
+        api_id = parts[1].strip()
+        model_id = "/".join(parts[2:]).strip()
+        if not provider_id or not api_id or not model_id:
+            return None
+        if not read_provider_api_key(provider_id, api_id):
+            return None
+        metadata = provider_api_metadata(provider_id, api_id)
+        allowed = {str(item) for item in metadata.get("allowed_models", []) if str(item or "").strip()}
+        if allowed and model_id not in allowed and f"{provider_id}/{model_id}" not in allowed:
+            return None
+        return provider_id, api_id, model_id, metadata
+
+    def _call_api_bound_profile(self, method_name, model, messages, tools=None, params=None):
+        parts = self._api_bound_profile_parts(model)
+        if parts is None:
+            return None, False
+        provider_id, api_id, model_id, metadata = parts
+        api_key = read_provider_api_key(provider_id, api_id)
+        route_model = f"{provider_id}/{model_id}"
+        provider, model_name = self.resolve_provider(route_model)
+        if provider.__class__.__name__ == "StubProvider":
+            return None, False
+        if method_name == "stream":
+            return self._stream_with_api_routes([(provider, model_name, api_key, metadata)], messages, tools, params), True
+        return self._call_provider_with_overrides(provider, model_name, api_key, metadata, method_name, messages, tools, params), True
+
+    def _call_provider_with_overrides(self, provider, model_name, api_key, metadata, method_name, messages, tools=None, params=None):
+        previous_key = getattr(provider, "_api_key", None)
+        previous_base_url = getattr(provider, "_base_url", None)
+        previous_base_url_attr = getattr(provider, "BASE_URL", None)
+        base_url = str((metadata or {}).get("base_url") or "").strip().rstrip("/")
+        try:
+            if previous_key is not None and api_key:
+                provider._api_key = api_key
+            if base_url and previous_base_url is not None:
+                provider._base_url = base_url
+                provider.BASE_URL = base_url
+            method = getattr(provider, method_name)
+            return method(model_name, messages, tools or [], params or {})
+        finally:
+            if previous_key is not None:
+                provider._api_key = previous_key
+            if previous_base_url is not None:
+                provider._base_url = previous_base_url
+                provider.BASE_URL = previous_base_url_attr
+
     def _call_with_api_routes(self, method_name, model, messages, tools=None, params=None):
+        routed, handled = self._call_api_bound_profile(method_name, model, messages, tools, params)
+        if handled:
+            return routed, True
         route_refs = self._routes_for_model(model)
         if not route_refs:
             return None, False
@@ -384,31 +507,31 @@ class AIClient:
             provider, model_name = self.resolve_provider(route_model)
             if provider.__class__.__name__ == "StubProvider":
                 continue
-            previous_key = getattr(provider, "_api_key", None)
+            metadata = provider_api_metadata(provider_id, api_id)
             try:
-                if previous_key is not None:
-                    provider._api_key = api_key
-                method = getattr(provider, method_name)
-                return method(model_name, messages, tools or [], params or {}), True
+                return self._call_provider_with_overrides(provider, model_name, api_key, metadata, method_name, messages, tools, params), True
             except Exception as exc:
                 last_error = exc
                 if not self._is_rate_limit_error(exc):
                     raise
-            finally:
-                if previous_key is not None:
-                    provider._api_key = previous_key
         if last_error is not None:
             raise last_error
         return None, False
 
     def _stream_with_api_routes(self, route_attempts, messages, tools=None, params=None):
         last_error = None
-        for provider, model_name, api_key in route_attempts:
+        for provider, model_name, api_key, metadata in route_attempts:
             previous_key = getattr(provider, "_api_key", None)
+            previous_base_url = getattr(provider, "_base_url", None)
+            previous_base_url_attr = getattr(provider, "BASE_URL", None)
+            base_url = str((metadata or {}).get("base_url") or "").strip().rstrip("/")
             yielded = False
             try:
                 if previous_key is not None:
                     provider._api_key = api_key
+                if base_url and previous_base_url is not None:
+                    provider._base_url = base_url
+                    provider.BASE_URL = base_url
                 for chunk in provider.stream(model_name, messages, tools or [], params or {}):
                     yielded = True
                     yield chunk
@@ -420,10 +543,297 @@ class AIClient:
             finally:
                 if previous_key is not None:
                     provider._api_key = previous_key
+                if previous_base_url is not None:
+                    provider._base_url = previous_base_url
+                    provider.BASE_URL = previous_base_url_attr
         if last_error is not None:
             raise last_error
 
+    def _composite_models(self):
+        data = self._settings_data()
+        models = data.get("models") if isinstance(data.get("models"), dict) else {}
+        raw = self._jsonish(models.get("composite_models"), [])
+        if isinstance(raw, dict):
+            items = [{"id": key, **(value if isinstance(value, dict) else {})} for key, value in raw.items()]
+        elif isinstance(raw, list):
+            items = raw
+        else:
+            items = []
+        composites = {}
+        for item in items:
+            if not isinstance(item, dict) or item.get("enabled", True) is False:
+                continue
+            composite_id = str(item.get("id") or item.get("profile_id") or item.get("name") or "").strip()
+            if composite_id:
+                composites[composite_id] = item
+        return composites
+
+    def _composite_for_model(self, model):
+        if not isinstance(model, str):
+            return None
+        composites = self._composite_models()
+        if model in composites:
+            return composites[model]
+        if "/" in model:
+            tail = model.split("/", 1)[1]
+            return composites.get(tail)
+        return None
+
+    def _complete_composite(self, composite, messages, tools=None, params=None):
+        mode = str(composite.get("mode") or composite.get("type") or "fallback_chain")
+        members = composite.get("members", composite.get("models", composite.get("chain", [])))
+        if isinstance(members, str):
+            members = [part.strip() for part in members.split(",") if part.strip()]
+        if not isinstance(members, list) or not members:
+            raise RuntimeError("composite model has no members")
+        if mode == "ensemble":
+            return self._complete_ensemble(composite, members, messages, tools, params)
+        return self._complete_fallback_chain(members, messages, tools, params)
+
+    def _member_model(self, member):
+        if isinstance(member, dict):
+            return str(member.get("model") or member.get("profile_id") or "").strip()
+        return str(member or "").strip()
+
+    def _complete_fallback_chain(self, members, messages, tools=None, params=None):
+        last_error = None
+        for member in members:
+            model = self._member_model(member)
+            if not model:
+                continue
+            if not self._member_conditions_match(member, messages, tools, params):
+                continue
+            try:
+                next_params = dict(params or {})
+                next_params["_composite_depth"] = int(next_params.get("_composite_depth", 0) or 0) + 1
+                return self.complete(model, messages, tools or [], next_params)
+            except Exception as exc:
+                last_error = exc
+                if not self._should_fallback_from_member_error(member, exc):
+                    raise
+        if last_error is not None:
+            raise last_error
+        raise RuntimeError("composite fallback chain had no runnable members")
+
+    def _member_conditions_match(self, member, messages, tools=None, params=None):
+        if not isinstance(member, dict):
+            return True
+        conditions = member.get("conditions") or member.get("when") or {}
+        if not isinstance(conditions, dict) or not conditions:
+            return True
+        has_images = self._messages_have_images(messages)
+        has_tools = bool(tools)
+        if "has_images" in conditions and bool(conditions.get("has_images")) != has_images:
+            return False
+        if "requires_vision" in conditions and bool(conditions.get("requires_vision")) != has_images:
+            return False
+        if "has_tools" in conditions and bool(conditions.get("has_tools")) != has_tools:
+            return False
+        if "requires_tools" in conditions and bool(conditions.get("requires_tools")) != has_tools:
+            return False
+        text_contains = conditions.get("text_contains") or conditions.get("contains")
+        if text_contains and not self._condition_text_matches(text_contains, self._messages_text(messages)):
+            return False
+        task_types = conditions.get("task_types") or conditions.get("task_type")
+        if task_types and not self._condition_task_type_matches(task_types, params or {}):
+            return False
+        return True
+
+    def _should_fallback_from_member_error(self, member, exc):
+        fallback_on = member.get("fallback_on") if isinstance(member, dict) else None
+        values = self._fallback_on_values(fallback_on)
+        if not values:
+            return self._is_rate_limit_error(exc)
+        if "*" in values or "any" in values or "all" in values:
+            return True
+        kind = self._error_kind(exc)
+        aliases = {
+            "429": "rate_limit",
+            "rate_limit_error": "rate_limit",
+            "rate-limit": "rate_limit",
+            "quota_exceeded": "quota",
+            "resource_exhausted": "quota",
+            "provider error": "provider_error",
+            "server_error": "provider_error",
+            "5xx": "provider_error",
+            "timed_out": "timeout",
+        }
+        normalized = {aliases.get(value, value) for value in values}
+        return kind in normalized
+
+    @staticmethod
+    def _fallback_on_values(value):
+        if isinstance(value, str):
+            raw = re.split(r"[,\s]+", value)
+        elif isinstance(value, list):
+            raw = value
+        else:
+            raw = []
+        return {str(item or "").strip().casefold() for item in raw if str(item or "").strip()}
+
+    @staticmethod
+    def _error_kind(exc):
+        message = str(exc).casefold()
+        if "429" in message or "rate limit" in message or "rate_limit" in message:
+            return "rate_limit"
+        if "quota" in message or "resource_exhausted" in message:
+            return "quota"
+        if "timeout" in message or "timed out" in message:
+            return "timeout"
+        if "401" in message or "403" in message or "unauthorized" in message or "forbidden" in message:
+            return "unauthorized"
+        if any(token in message for token in ("provider_error", "provider error", "502", "503", "504", "temporarily")):
+            return "provider_error"
+        return "unknown"
+
+    @classmethod
+    def _condition_text_matches(cls, expected, text):
+        haystack = str(text or "").casefold()
+        if isinstance(expected, str):
+            needles = [expected]
+        elif isinstance(expected, list):
+            needles = expected
+        else:
+            return True
+        needles = [str(item or "").strip().casefold() for item in needles if str(item or "").strip()]
+        return not needles or any(needle in haystack for needle in needles)
+
+    @staticmethod
+    def _condition_task_type_matches(expected, params):
+        hints = params.get("task_hints") if isinstance(params.get("task_hints"), dict) else {}
+        actual = str(params.get("task_type") or hints.get("task_type") or hints.get("type") or "").strip().casefold()
+        if not actual:
+            return False
+        if isinstance(expected, str):
+            options = [expected]
+        elif isinstance(expected, list):
+            options = expected
+        else:
+            return True
+        return actual in {str(item or "").strip().casefold() for item in options if str(item or "").strip()}
+
+    @staticmethod
+    def _messages_text(messages):
+        parts = []
+        for message in messages or []:
+            if not isinstance(message, dict):
+                continue
+            content = message.get("content")
+            if isinstance(content, str):
+                parts.append(content)
+            elif isinstance(content, list):
+                for block in content:
+                    if isinstance(block, dict):
+                        parts.append(str(block.get("text") or block.get("content") or ""))
+        return "\n".join(parts)
+
+    @staticmethod
+    def _messages_have_images(messages):
+        for message in messages or []:
+            if not isinstance(message, dict):
+                continue
+            content = message.get("content")
+            if isinstance(content, list):
+                for block in content:
+                    if not isinstance(block, dict):
+                        continue
+                    block_type = str(block.get("type") or "").casefold()
+                    mime = str(block.get("mime_type") or block.get("mime") or "").casefold()
+                    if block_type in {"image", "image_url", "input_image"} or mime.startswith("image/"):
+                        return True
+        return False
+
+    def _complete_ensemble(self, composite, members, messages, tools=None, params=None):
+        member_models = [self._member_model(member) for member in members if self._member_model(member)]
+        if not member_models:
+            raise RuntimeError("composite ensemble has no runnable members")
+        responses = []
+        errors = []
+
+        def call_member(model):
+            next_params = dict(params or {})
+            next_params["_composite_depth"] = int(next_params.get("_composite_depth", 0) or 0) + 1
+            return model, self.complete(model, messages, tools or [], next_params)
+
+        with ThreadPoolExecutor(max_workers=min(4, len(member_models))) as executor:
+            futures = [executor.submit(call_member, model) for model in member_models]
+            for future in as_completed(futures):
+                try:
+                    model, response = future.result()
+                    responses.append({"model": model, "response": response, "text": self._response_text(response)})
+                except Exception as exc:
+                    errors.append(str(exc))
+        if not responses:
+            raise RuntimeError("all ensemble members failed: " + "; ".join(errors))
+        merge_model = str(composite.get("merge_model") or composite.get("synthesizer_model") or "").strip()
+        if merge_model:
+            synthesis_prompt = [
+                {
+                    "role": "system",
+                    "content": "Merge multiple model answers into one concise final answer. Preserve correct details and note uncertainty only when answers conflict.",
+                },
+                {
+                    "role": "user",
+                    "content": json.dumps(
+                        {
+                            "original_messages": messages,
+                            "member_answers": [
+                                {"model": item["model"], "answer": item["text"]}
+                                for item in responses
+                            ],
+                            "member_errors": errors,
+                        },
+                        ensure_ascii=False,
+                    ),
+                },
+            ]
+            next_params = dict(params or {})
+            next_params["_composite_depth"] = int(next_params.get("_composite_depth", 0) or 0) + 1
+            merged = self.complete(merge_model, synthesis_prompt, [], next_params)
+            metadata = dict(merged.get("metadata") or {}) if isinstance(merged, dict) else {}
+            metadata["ensemble"] = {"members": [item["model"] for item in responses], "errors": errors}
+            if isinstance(merged, dict):
+                merged["metadata"] = metadata
+            return merged
+        return {
+            "content": [
+                {
+                    "type": "text",
+                    "text": "\n\n".join(f"[{item['model']}]\n{item['text']}" for item in responses),
+                }
+            ],
+            "finish_reason": "ensemble",
+            "usage": {},
+            "metadata": {"ensemble": {"members": [item["model"] for item in responses], "errors": errors}},
+        }
+
+    @staticmethod
+    def _response_text(response):
+        if not isinstance(response, dict):
+            return str(response or "")
+        content = response.get("content")
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            parts = []
+            for block in content:
+                if isinstance(block, dict):
+                    parts.append(str(block.get("text") or block.get("content") or ""))
+                else:
+                    parts.append(str(block))
+            return "\n".join(part for part in parts if part)
+        choices = response.get("choices")
+        if isinstance(choices, list) and choices:
+            message = choices[0].get("message") if isinstance(choices[0], dict) else {}
+            if isinstance(message, dict):
+                return str(message.get("content") or "")
+        return ""
+
     def complete(self, model, messages, tools=None, params=None):
+        params = dict(params or {})
+        composite = self._composite_for_model(model) if int(params.get("_composite_depth", 0) or 0) < 3 else None
+        if composite is not None:
+            return self._complete_composite(composite, messages, tools, params)
         routed, handled = self._call_with_api_routes("complete", model, messages, tools, params)
         if handled:
             return routed
@@ -436,6 +846,12 @@ class AIClient:
             raise RuntimeError(str(e)) from None
 
     def stream(self, model, messages, tools=None, params=None):
+        params = dict(params or {})
+        composite = self._composite_for_model(model) if int(params.get("_composite_depth", 0) or 0) < 3 else None
+        if composite is not None:
+            response = self._complete_composite(composite, messages, tools, params)
+            text = self._response_text(response)
+            return iter([{"type": "text_delta", "text": text}, {"finish_reason": response.get("finish_reason", "stop") if isinstance(response, dict) else "stop"}])
         routed, handled = self._call_with_api_routes("stream", model, messages, tools, params)
         if handled:
             return routed
@@ -536,13 +952,63 @@ class AIClient:
             active_provider_ids=active_provider_ids,
             custom_profiles=self._profiles,
         )
+        try:
+            from domain.ai_client.model_runtime_settings import ModelRuntimeSettingsService
+
+            service = ModelRuntimeSettingsService()
+            profiles.extend(service.runtime_defined_profiles(service.get_settings()))
+            profiles.extend(self._api_key_bound_profiles())
+        except Exception:
+            pass
         profiles = [
             profile
             for profile in profiles
-            if not profile.get("provider_id") or profile.get("provider_id") in active_provider_ids
+            if (
+                not profile.get("provider_id")
+                or profile.get("provider_id") in active_provider_ids
+                or profile.get("provider_id") == "composite"
+                or (isinstance(profile.get("metadata"), dict) and profile["metadata"].get("api_bound"))
+            )
         ]
         if provider is not None:
             profiles = [profile for profile in profiles if profile.get("provider_id") == provider]
+        return profiles
+
+    def _api_key_bound_profiles(self):
+        profiles = []
+        for api_key in provider_named_api_keys():
+            provider_id = str(api_key.get("provider_id") or "").strip()
+            api_id = str(api_key.get("api_id") or "").strip()
+            allowed = [str(item).strip() for item in api_key.get("allowed_models", []) if str(item or "").strip()]
+            default_model = str(api_key.get("default_model") or "").strip()
+            if default_model and default_model not in allowed:
+                allowed.insert(0, default_model)
+            for model_id in allowed:
+                display = f"{model_id} ({api_key.get('name') or api_id})"
+                profile_id = f"{provider_id}/{api_id}/{model_id}"
+                profiles.append(
+                    {
+                        "id": profile_id,
+                        "profile_id": profile_id,
+                        "qualified_model_id": profile_id,
+                        "provider_id": provider_id,
+                        "provider": provider_id,
+                        "model_id": model_id,
+                        "model": model_id,
+                        "display_name": display,
+                        "name": display,
+                        "type": "chat",
+                        "configured": True,
+                        "availability": {"configured": True, "active": True, "status": "configured", "api_bound": True},
+                        "metadata": {
+                            "api_bound": True,
+                            "api_id": api_id,
+                            "base_url": api_key.get("base_url", ""),
+                            "notes": api_key.get("notes", ""),
+                            "quota_label": api_key.get("quota_label", ""),
+                        },
+                    }
+                )
         return profiles
 
     def embed(self, model, input_text):

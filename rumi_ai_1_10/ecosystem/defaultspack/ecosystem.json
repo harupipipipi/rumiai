@@ -13,6 +13,7 @@
       "memory",
       "knowledge",
       "media",
+      "recording",
       "vision",
       "frontend",
       "dev",
@@ -384,6 +385,17 @@
           "defaultspack.media.clipboard_write",
           "defaults.media.screenshot",
           "defaultspack.media.screenshot"
+        ]
+      }
+    },
+    "recording": {
+      "type": "recording",
+      "id": "recording",
+      "path": "blocks/recording",
+      "connectivity": {
+        "provides": [
+          "defaults.recording.capture",
+          "defaultspack.recording.capture"
         ]
       }
     },

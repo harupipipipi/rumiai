@@ -15,6 +15,7 @@ class GitlawbOpengatewayProvider(OpenAICompatibleProvider):
     MODEL_IDS = {
         "mimo-v2.5-pro",
         "mimo-v2-flash",
+        "mimo-v2-omni",
         "google/gemini-3.1-flash-lite-preview",
     }
     KNOWN_MODELS = [
@@ -52,6 +53,24 @@ class GitlawbOpengatewayProvider(OpenAICompatibleProvider):
             },
         },
         {
+            "id": "gitlawb-opengateway/mimo-v2-omni",
+            "model_id": "mimo-v2-omni",
+            "name": "MiMo V2 Omni via Gitlawb OpenGateway",
+            "display_name": "MiMo V2 Omni via Gitlawb OpenGateway",
+            "provider": "gitlawb-opengateway",
+            "provider_id": "gitlawb-opengateway",
+            "type": "chat",
+            "defaults": {"chat": True, "vision": True},
+            "capabilities": ["chat", "streaming", "vision"],
+            "metadata": {
+                "source": "gitlawb-opengateway",
+                "privacy": "external_no_key_gateway",
+                "vision_verified": True,
+                "openai_base_url": "https://opengateway.gitlawb.com/v1",
+                "openai_model": "mimo-v2-omni",
+            },
+        },
+        {
             "id": "gitlawb-opengateway/google/gemini-3.1-flash-lite-preview",
             "model_id": "google/gemini-3.1-flash-lite-preview",
             "name": "Gemini 3.1 Flash Lite Preview via Gitlawb OpenGateway",
@@ -81,7 +100,10 @@ class GitlawbOpengatewayProvider(OpenAICompatibleProvider):
             default_base_url="https://opengateway.gitlawb.com/v1",
             credential_required=False,
             known_models=self.KNOWN_MODELS,
-            extra_headers={"User-Agent": self.DEFAULT_USER_AGENT},
+            extra_headers={
+                "Authorization": "Bearer anything",
+                "User-Agent": self.DEFAULT_USER_AGENT,
+            },
         )
 
     @classmethod

@@ -1,0 +1,44 @@
+{
+  "function_id": "recording_capture",
+  "description": "List devices and capture screen, microphone, or system audio recordings.",
+  "tags": [
+    "recording",
+    "media"
+  ],
+  "risk": "high",
+  "requires": [
+    "recording.capture"
+  ],
+  "caller_requires": [
+    "user.approved.high_risk"
+  ],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.recording.capture",
+    "defaultspack.recording.capture"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.recording.capture",
+      "default_args": {}
+    }
+  }
+}

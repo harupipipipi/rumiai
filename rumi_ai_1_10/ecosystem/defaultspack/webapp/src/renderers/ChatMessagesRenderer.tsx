@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
 
 import { cn } from "../lib/cn";
+import { elapsedDurationLabel } from "../lib/duration";
 import { buildToolActivityGroups, toolFolderFor } from "../lib/toolActivity";
 import { api, type BrowserScreenshot, type ChatContentBlock } from "../lib/api";
 import type { ChatMessagesRendererProps } from "./types";
@@ -326,6 +327,33 @@ function MessageActionBar({
 }
 
 function WidgetCard({ widget }: { widget: Record<string, unknown> }) {
+  if (String(widget.kind ?? "") === "conversation_handoff") {
+    const title = String(widget.title ?? "移動先");
+    const conversationId = String(widget.conversation_id ?? "");
+    const urlPath = String(widget.url_path ?? "");
+    const deepLink = String(widget.deep_link ?? "");
+    const model = typeof widget.model === "string" ? widget.model : "";
+    const href = urlPath || deepLink || "#";
+    return (
+      <div className="mt-2 w-[min(420px,100%)] rounded-lg border border-emerald-500/25 bg-emerald-500/10 p-3">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="text-[11px] font-medium uppercase tracking-[0.18em] text-emerald-300">{title}</div>
+            <div className="mt-1 truncate font-mono text-[12px] text-zinc-200">{conversationId}</div>
+            {model && <div className="mt-1 truncate text-[11px] text-zinc-500">{model}</div>}
+          </div>
+          <a
+            href={href}
+            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-emerald-400/30 text-emerald-200 transition-colors hover:bg-emerald-400/10 focus-visible:bg-emerald-400/10 focus-visible:outline-none"
+            aria-label="移動先を開く"
+            title="移動先を開く"
+          >
+            <ExternalLink size={15} />
+          </a>
+        </div>
+      </div>
+    );
+  }
   return (
     <details className="mt-2 rounded-lg border border-blue-500/20 bg-blue-500/10 p-3">
       <summary className="cursor-pointer select-none text-[10px] uppercase tracking-wider text-blue-300">
@@ -333,6 +361,62 @@ function WidgetCard({ widget }: { widget: Record<string, unknown> }) {
       </summary>
       <pre className="mt-2 overflow-x-auto text-[11px] font-mono text-zinc-200">{JSON.stringify(widget, null, 2)}</pre>
     </details>
+  );
+}
+
+function activityPhase(status: string | null | undefined, toolNames: string[]): { label: string; detail: string } {
+  const text = String(status ?? "").toLowerCase();
+  if (text.includes("scheduler") || text.includes("待機")) {
+    return { label: "待機中", detail: status || "予定時刻まで待機しています" };
+  }
+  if (text.includes("handoff") || text.includes("移動")) {
+    return { label: "移動準備中", detail: status || "新しい会話を準備しています" };
+  }
+  if (toolNames.length > 0 || text.includes("tool") || text.includes("実行")) {
+    return { label: "tool 実行中", detail: status || `${toolNames.length} 件を進めています` };
+  }
+  return { label: "考えています", detail: status || "応答を組み立てています" };
+}
+
+function useActivityNow(enabled: boolean): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!enabled) return undefined;
+    const interval = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(interval);
+  }, [enabled]);
+  return now;
+}
+
+function RumiActivityLoading({
+  status,
+  toolNames,
+  startedAt,
+  compact = false,
+}: {
+  status?: string | null;
+  toolNames: string[];
+  startedAt?: number | null;
+  compact?: boolean;
+}) {
+  const phase = activityPhase(status, toolNames);
+  const now = useActivityNow(Boolean(startedAt));
+  const elapsed = startedAt ? elapsedDurationLabel(startedAt, now) : "";
+  return (
+    <div className={cn("rumi-activity-loading flex items-center gap-3 rounded-lg border border-zinc-800 bg-zinc-950/72 px-3 py-2 text-zinc-300", compact ? "w-fit" : "w-[min(440px,calc(100vw-48px))]")}>
+      <div className="rumi-loading-bars flex h-5 w-6 items-end gap-1" aria-hidden="true">
+        <span />
+        <span />
+        <span />
+      </div>
+      <div className="min-w-0">
+        <div className="flex min-w-0 items-baseline gap-2">
+          <span className="truncate text-[12px] font-medium text-zinc-200">{phase.label}</span>
+          {elapsed && <span className="shrink-0 font-mono text-[10px] leading-none text-zinc-600">{elapsed}</span>}
+        </div>
+        <div className="truncate text-[11px] text-zinc-500">{phase.detail}</div>
+      </div>
+    </div>
   );
 }
 
@@ -634,7 +718,14 @@ function ToolActivityTray({
   message: ChatMessagesRendererProps["messages"][number];
   onOpenToolPreview?: (previewId: string) => void;
 }) {
-  const groups = buildToolActivityGroups(message.toolLogs ?? [], message.events ?? [], { conversationId: message.conversationId });
+  const hasRunningActivity = (message.events ?? []).some((event) => (
+    event.type === "tool_call" ||
+    event.type === "tool_call_started" ||
+    event.phase === "tool_call" ||
+    event.phase === "tool_call_started"
+  ));
+  const now = useActivityNow(hasRunningActivity);
+  const groups = buildToolActivityGroups(message.toolLogs ?? [], message.events ?? [], { conversationId: message.conversationId, now });
   if (groups.length === 0) return null;
   const previewableCallIds = new Set(
     (message.events ?? [])
@@ -666,7 +757,10 @@ function ToolActivityTray({
                 <>
                   <span className={cn("mt-1 h-1.5 w-1.5 rounded-full", item.status === "failed" ? "bg-red-400" : item.status === "running" ? "animate-pulse bg-blue-300" : "bg-zinc-700")} />
                   <span className="min-w-0 max-w-full">
-                    <span className="block truncate text-[13px] leading-5 text-zinc-300">{item.input || item.detail || item.toolName}</span>
+                    <span className="flex min-w-0 items-baseline gap-2 text-[13px] leading-5 text-zinc-300">
+                      <span className="truncate">{item.input || item.detail || item.toolName}</span>
+                      {item.durationLabel && <span className="shrink-0 font-mono text-[10px] text-zinc-600">{item.durationLabel}</span>}
+                    </span>
                     {statusLine && (
                       <span className={cn("block truncate text-[11px] leading-5", item.status === "failed" ? "text-red-300" : "text-zinc-500")}>
                         {statusLine}
@@ -707,7 +801,8 @@ function ToolActivityTray({
   );
 }
 
-function PendingToolTray({ toolNames }: { toolNames: string[] }) {
+function PendingToolTray({ toolNames, toolStartedAt = {} }: { toolNames: string[]; toolStartedAt?: Record<string, number> }) {
+  const now = useActivityNow(toolNames.some((name) => Boolean(toolStartedAt[name])));
   if (toolNames.length === 0) return null;
   const groups = new Map<string, { label: string; names: string[] }>();
   for (const name of toolNames) {
@@ -735,8 +830,9 @@ function PendingToolTray({ toolNames }: { toolNames: string[] }) {
             </div>
             <div className="ml-1.5 flex flex-wrap gap-1.5 border-l border-zinc-800/70 pl-3">
               {group.names.map((name) => (
-                <span key={name} className="max-w-[220px] truncate rounded-md bg-zinc-900/50 px-2 py-1 text-[11px] text-zinc-300">
-                  {name}
+                <span key={name} className="inline-flex max-w-[220px] items-baseline rounded-md bg-zinc-900/50 px-2 py-1 text-[11px] text-zinc-300">
+                  <span className="truncate">{name}</span>
+                  {toolStartedAt[name] && <span className="ml-1.5 font-mono text-[10px] text-zinc-600">{elapsedDurationLabel(toolStartedAt[name], now)}</span>}
                 </span>
               ))}
             </div>
@@ -755,6 +851,8 @@ export function ChatMessagesRenderer({
   isGenerating,
   pendingStatus,
   pendingToolNames = [],
+  pendingStartedAt,
+  pendingToolStartedAt = {},
   messages,
   messagesEndRef,
   unknownBlockStrategy,
@@ -770,7 +868,7 @@ export function ChatMessagesRenderer({
 
       {!isMessagesRegionVisible ? null : isLoading ? (
         <div className="flex-1 flex items-center justify-center">
-          <Loader2 size={18} className="animate-spin text-zinc-500" />
+          <RumiActivityLoading status={pendingStatus} toolNames={pendingToolNames} startedAt={pendingStartedAt} />
         </div>
       ) : isNewConversation ? (
         <div className="flex-1" />
@@ -787,6 +885,9 @@ export function ChatMessagesRenderer({
                         <span className="text-[10px] text-zinc-500 font-mono flex items-center gap-1">
                           <Clock size={10} /> {message.metadata.executionTime}
                         </span>
+                      )}
+                      {message.metadata?.thinkingDuration && (
+                        <span className="font-mono text-[10px] text-zinc-600">thinking {message.metadata.thinkingDuration}</span>
                       )}
                     </div>
                   )}
@@ -845,12 +946,9 @@ export function ChatMessagesRenderer({
             {isGenerating && (
               <div className="flex gap-3">
                 <div className="text-zinc-400 text-[13px] flex flex-col gap-1 mt-1.5">
-                  <div className="flex items-center gap-2">
-                    <Loader2 size={14} className="text-zinc-400 animate-spin" />
-                    <span className="animate-pulse">{pendingStatus || "Processing..."}</span>
-                  </div>
+                  <RumiActivityLoading status={pendingStatus} toolNames={pendingToolNames} startedAt={pendingStartedAt} compact />
                   {pendingToolNames.length > 0 && (
-                    <PendingToolTray toolNames={pendingToolNames} />
+                    <PendingToolTray toolNames={pendingToolNames} toolStartedAt={pendingToolStartedAt} />
                   )}
                 </div>
               </div>

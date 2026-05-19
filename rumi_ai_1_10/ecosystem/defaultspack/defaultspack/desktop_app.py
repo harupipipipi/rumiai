@@ -48,6 +48,12 @@ def main() -> int:
         load_integration_secrets_into_env()
     except Exception:
         pass
+    try:
+        from domain.scheduler.daemon import start_scheduler_daemon
+
+        start_scheduler_daemon()
+    except Exception:
+        pass
 
     from transport.http import DefaultsHttpServer
 
@@ -64,7 +70,7 @@ def main() -> int:
     from defaultspack.native_webview import open_desktop_surface
 
     surface_result = open_desktop_surface(url, title="Rumi Defaultspack")
-    if surface_result in {"disabled", "webview"}:
+    if surface_result == "webview":
         if server is not None:
             server.stop()
         return 0

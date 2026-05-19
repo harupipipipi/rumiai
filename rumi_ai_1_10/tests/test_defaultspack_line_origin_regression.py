@@ -509,7 +509,7 @@ def test_line_computer_use_fake_webhook_runs_three_browser_tasks_and_acknowledge
 def test_line_route_does_not_acknowledge_normal_line_reply_mode(monkeypatch, tmp_path):
     from blocks.integrations import line as line_block  # noqa: E402
 
-    _install_line_endpoint(monkeypatch, tmp_path, enabled=True)
+    _install_line_endpoint(monkeypatch, tmp_path, enabled=True, metadata={"require_group_mention": False})
     monkeypatch.setenv("LINE_CHANNEL_ACCESS_TOKEN", "line-access-token")
     monkeypatch.setattr(line_block.AudiencePolicyRegistry, "resolve", lambda self, policy_id, event=None: {"default": "allow"})
     calls: list[dict[str, Any]] = []
@@ -558,7 +558,7 @@ def test_line_route_does_not_acknowledge_normal_line_reply_mode(monkeypatch, tmp
 def test_line_route_preserves_top_level_destination_and_endpoint_policy(monkeypatch, tmp_path):
     from blocks.integrations import line as line_block  # noqa: E402
 
-    _install_line_endpoint(monkeypatch, tmp_path, enabled=True)
+    _install_line_endpoint(monkeypatch, tmp_path, enabled=True, metadata={"require_group_mention": False})
     _remember_line_group(monkeypatch, tmp_path)
     captured: dict[str, Any] = {}
 
@@ -931,6 +931,79 @@ def test_line_computer_use_group_message_requires_bot_mention(monkeypatch, tmp_p
     assert event_result["event"]["metadata"]["line_mention"]["require_group_mention"] is True
 
 
+def test_line_default_group_message_requires_bot_mention(monkeypatch, tmp_path):
+    from blocks.integrations import line as line_block  # noqa: E402
+
+    _install_line_endpoint(monkeypatch, tmp_path, enabled=True, input_profile_id="line.default")
+    monkeypatch.setattr(line_block.AudiencePolicyRegistry, "resolve", lambda self, policy_id, event=None: {"default": "allow"})
+    monkeypatch.setattr(
+        line_block,
+        "dispatch_external_event",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("dispatch should not run without mention")),
+    )
+    payload = {
+        "destination": "Udestination",
+        "events": [
+            {
+                "type": "message",
+                "mode": "active",
+                "webhookEventId": "evt-default-group",
+                "replyToken": "reply-default-group",
+                "source": {"type": "group", "groupId": "Cgroup", "userId": "Uactor"},
+                "message": {"id": "m1", "type": "text", "text": "hello"},
+            }
+        ],
+    }
+
+    result = line_block.run(_signed_line_payload(payload), {})
+
+    event_result = result["data"]["events"][0]
+    assert event_result["status"] == "denied"
+    assert event_result["policy"]["reason"] == "mention required"
+    assert event_result["event"]["metadata"]["line_mention"]["require_group_mention"] is True
+
+
+def test_line_direct_user_message_still_dispatches_without_mention(monkeypatch, tmp_path):
+    from blocks.integrations import line as line_block  # noqa: E402
+
+    _install_line_endpoint(monkeypatch, tmp_path, enabled=True, input_profile_id="line.default")
+    monkeypatch.setattr(line_block.AudiencePolicyRegistry, "resolve", lambda self, policy_id, event=None: {"default": "allow"})
+    captured: dict[str, Any] = {}
+
+    def fake_dispatch(event, *, input_profile_id, audience_policy, audience_decision, context, send_response, mentioned=False):
+        captured["called"] = True
+        captured["mentioned"] = mentioned
+        captured["event"] = event
+        return {
+            "status": "ok",
+            "assistant_text": "done",
+            "response_plan": {"provider": "line", "messages": []},
+        }
+
+    monkeypatch.setattr(line_block, "dispatch_external_event", fake_dispatch)
+    monkeypatch.setattr(LineResponseAdapter, "send", lambda self, plan, event=None, context=None: {"sent": False})
+    payload = {
+        "destination": "Udestination",
+        "events": [
+            {
+                "type": "message",
+                "mode": "active",
+                "webhookEventId": "evt-user-no-mention",
+                "replyToken": "reply-user-no-mention",
+                "source": {"type": "user", "userId": "Uactor"},
+                "message": {"id": "m1", "type": "text", "text": "hello"},
+            }
+        ],
+    }
+
+    result = line_block.run(_signed_line_payload(payload), {})
+
+    assert result["data"]["events"][0]["status"] == "ok"
+    assert captured["called"] is True
+    assert captured["mentioned"] is False
+    assert captured["event"].metadata["line_mention"]["require_group_mention"] is False
+
+
 def test_line_computer_use_group_message_dispatches_when_bot_is_mentioned(monkeypatch, tmp_path):
     from blocks.integrations import line as line_block  # noqa: E402
 
@@ -1002,7 +1075,7 @@ def test_line_computer_use_group_message_dispatches_when_bot_is_mentioned(monkey
 def test_line_route_empty_events_ack_ok_without_dispatch(monkeypatch, tmp_path):
     from blocks.integrations import line as line_block  # noqa: E402
 
-    _install_line_endpoint(monkeypatch, tmp_path, enabled=True)
+    _install_line_endpoint(monkeypatch, tmp_path, enabled=True, metadata={"require_group_mention": False})
     monkeypatch.setattr(
         line_block,
         "dispatch_external_event",
@@ -1018,7 +1091,7 @@ def test_line_route_empty_events_ack_ok_without_dispatch(monkeypatch, tmp_path):
 def test_line_route_processes_signed_raw_payload_only(monkeypatch, tmp_path):
     from blocks.integrations import line as line_block  # noqa: E402
 
-    _install_line_endpoint(monkeypatch, tmp_path, enabled=True)
+    _install_line_endpoint(monkeypatch, tmp_path, enabled=True, metadata={"require_group_mention": False})
     monkeypatch.setattr(
         line_block,
         "dispatch_external_event",
@@ -1046,7 +1119,7 @@ def test_line_route_processes_signed_raw_payload_only(monkeypatch, tmp_path):
 def test_line_route_unknown_verified_source_is_saved_disabled_and_denied(monkeypatch, tmp_path):
     from blocks.integrations import line as line_block  # noqa: E402
 
-    _install_line_endpoint(monkeypatch, tmp_path, enabled=True)
+    _install_line_endpoint(monkeypatch, tmp_path, enabled=True, metadata={"require_group_mention": False})
 
     def fail_dispatch(*args, **kwargs):
         raise AssertionError("dispatch_external_event should not run for denied source")
@@ -1087,7 +1160,7 @@ def test_line_route_unknown_verified_source_is_saved_disabled_and_denied(monkeyp
 def test_line_route_frontend_push_to_saved_origin_reaches_adapter(monkeypatch, tmp_path):
     from blocks.integrations import line as line_block  # noqa: E402
 
-    _install_line_endpoint(monkeypatch, tmp_path, enabled=True)
+    _install_line_endpoint(monkeypatch, tmp_path, enabled=True, metadata={"require_group_mention": False})
     _remember_line_group(monkeypatch, tmp_path, group_id="Cgroup", allow_push=True)
     settings_path = tmp_path / "frontend_settings.json"
     settings_path.write_text(

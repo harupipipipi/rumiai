@@ -44,6 +44,25 @@ def test_search_models_filters_by_capabilities():
     assert result["filters_applied"]["requires"]["vision"] is True
 
 
+def test_search_models_matches_multi_word_queries_across_model_separators():
+    from domain.ai_client.model_search import search_models
+
+    profiles = [
+        _profile(
+            "gitlawb-opengateway/mimo-v2-omni",
+            display_name="MiMo V2 Omni via Gitlawb OpenGateway",
+            provider_display_name="Gitlawb OpenGateway",
+            supports_vision=True,
+            capability_tags=["vision"],
+            recommended_roles=["primary_chat", "vision_ocr"],
+        ),
+    ]
+
+    result = search_models({"query": "mimo omni", "max_results": 5}, profiles=profiles)
+
+    assert [item["profile_id"] for item in result["models"]] == ["gitlawb-opengateway/mimo-v2-omni"]
+
+
 def test_recommend_model_reports_reason_codes():
     from domain.ai_client.model_search import recommend_model
 

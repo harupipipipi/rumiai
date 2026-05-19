@@ -1,0 +1,45 @@
+{
+  "function_id": "skill_create_from_feedback",
+  "description": "Create a Rumi extension skill from corrective feedback.",
+  "tags": [
+    "skill",
+    "feedback",
+    "dream"
+  ],
+  "risk": "medium",
+  "requires": [
+    "skill.create.from.feedback"
+  ],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.skill.create_from_feedback",
+    "defaultspack.skill.create_from_feedback",
+    "defaults.skill.create.from.feedback",
+    "defaultspack.skill.create.from.feedback"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.skill.create_from_feedback",
+      "default_args": {}
+    }
+  }
+}

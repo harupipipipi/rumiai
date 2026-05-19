@@ -11,6 +11,9 @@ class SchedulerJob:
     kind: str
     schedule: str
     prompt: str = ""
+    target_conversation_id: str = ""
+    model: str = ""
+    system_prompt_id: str = ""
     agent_id: str = "main"
     session_target: str = "fresh"
     context_from: list[str] = field(default_factory=list)
@@ -21,6 +24,7 @@ class SchedulerJob:
     no_agent: bool = False
     script: list[str] | None = None
     timeout_seconds: int = 60
+    params: dict[str, Any] = field(default_factory=dict)
     enabled: bool = True
     next_run_at: str = ""
     last_run_at: str = ""

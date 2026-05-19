@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import re
 from typing import Any
 
 from domain.ai_client.model_groups import normalize_model_groups
@@ -30,7 +31,7 @@ def search_models(filters: dict[str, Any] | None = None, *, profiles: list[dict[
         if not isinstance(profile, dict) or str(profile.get("type") or "chat") not in {"", "chat", "reasoning"}:
             continue
         item = _public_model(profile)
-        if query and query not in _search_text(item):
+        if query and not _matches_query(item, query):
             continue
         if provider_id and item.get("provider_id") != provider_id:
             continue
@@ -131,11 +132,23 @@ def models_for_group(group_id: str, settings: dict[str, Any] | None, profiles: l
 
 
 def _profile_catalog() -> list[dict[str, Any]]:
+    profiles: list[dict[str, Any]] = []
     try:
         from ecosystem.defaultspack.backend.ai_client.provider_catalog import list_profile_catalog
     except ModuleNotFoundError:
         from backend.ai_client.provider_catalog import list_profile_catalog
-    return list_profile_catalog()
+    try:
+        profiles = [profile for profile in list_profile_catalog() if isinstance(profile, dict)]
+    except Exception:
+        profiles = []
+    try:
+        from domain.ai_client.model_runtime_settings import ModelRuntimeSettingsService
+
+        service = ModelRuntimeSettingsService()
+        profiles.extend(service.runtime_defined_profiles(service.get_settings()))
+    except Exception:
+        pass
+    return profiles
 
 
 def _public_model(profile: dict[str, Any]) -> dict[str, Any]:
@@ -180,6 +193,11 @@ def _public_model(profile: dict[str, Any]) -> dict[str, Any]:
         "max_context": profile.get("max_context"),
         "availability": deepcopy(availability),
         "metadata": deepcopy(profile.get("metadata") if isinstance(profile.get("metadata"), dict) else {}),
+        "notes": str(
+            profile.get("notes")
+            or (profile.get("metadata") if isinstance(profile.get("metadata"), dict) else {}).get("notes")
+            or ""
+        ),
     }
 
 
@@ -218,10 +236,45 @@ def _score_model(item: dict[str, Any], filters: dict[str, Any]) -> int:
 
 
 def _search_text(item: dict[str, Any]) -> str:
-    return " ".join(
+    parts = [
         str(item.get(key) or "")
-        for key in ("profile_id", "qualified_model_id", "label", "display_name", "provider_id", "model_id", "knowledge_band")
-    ).casefold()
+        for key in (
+            "profile_id",
+            "qualified_model_id",
+            "label",
+            "display_name",
+            "provider_id",
+            "provider_display_name",
+            "model_id",
+            "speed_tier",
+            "quality_tier",
+            "knowledge_band",
+            "cost_tier",
+            "notes",
+        )
+    ]
+    for key in ("capability_tags", "recommended_roles", "allowed_roles", "thinking_levels"):
+        value = item.get(key)
+        if isinstance(value, list):
+            parts.extend(str(entry) for entry in value)
+    metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+    for key in ("notes", "source", "privacy", "provider_kind", "openai_model", "openai_base_url"):
+        parts.append(str(metadata.get(key) or ""))
+    return " ".join(parts).casefold()
+
+
+def _normalize_search_text(value: str) -> str:
+    return re.sub(r"[\W_]+", " ", value.casefold()).strip()
+
+
+def _matches_query(item: dict[str, Any], query: str) -> bool:
+    text = _search_text(item)
+    normalized_text = _normalize_search_text(text)
+    normalized_query = _normalize_search_text(query)
+    if query in text or (normalized_query and normalized_query in normalized_text):
+        return True
+    tokens = [token for token in normalized_query.split() if token]
+    return bool(tokens) and all(token in normalized_text or token in text for token in tokens)
 
 
 def _recommendation_reasons(selected: dict[str, Any] | None, request: dict[str, Any]) -> list[str]:

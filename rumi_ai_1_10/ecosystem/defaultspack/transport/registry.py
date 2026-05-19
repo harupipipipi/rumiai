@@ -220,6 +220,12 @@ def canonical_http_route_specs(*, include_always_available: bool = True) -> list
 
 
 def flow_http_output_is_compatible(flow_id: str, output: Any, *, fallback_block_module: str = "") -> bool:
+    def _has_streamable_events(data: Any) -> bool:
+        if not isinstance(data, dict) or not data.get("_sse"):
+            return False
+        events = data.get("events", [])
+        return not isinstance(events, (str, bytes))
+
     if flow_id == "defaultspack.chat_turn" and fallback_block_module == "blocks.chat.send":
         if not isinstance(output, dict) or output.get("status") != "ok":
             return False
@@ -228,13 +234,12 @@ def flow_http_output_is_compatible(flow_id: str, output: Any, *, fallback_block_
             return False
         return bool(data.get("role") == "assistant" and ("content" in data or "raw_text" in data))
     if flow_id == "defaultspack.chat_stream_turn" and fallback_block_module == "blocks.chat.stream":
-        if isinstance(output, dict) and output.get("_sse"):
+        if _has_streamable_events(output):
             return True
         if (
             isinstance(output, dict)
             and output.get("status") == "ok"
-            and isinstance(output.get("data"), dict)
-            and output["data"].get("_sse")
+            and _has_streamable_events(output.get("data"))
         ):
             return True
         return False
@@ -252,6 +257,9 @@ _FALLBACK_HTTP_ROUTE_SPECS = [
     HttpRouteSpec("GET", "/api/chat/conversations", block_module="blocks.chat.list_conversations"),
     HttpRouteSpec("GET", "/api/chat/conversations/{id}", block_module="blocks.chat.get_conversation", path_inject={"id": "conversation_id"}),
     HttpRouteSpec("POST", "/api/chat/search", block_module="blocks.chat.search"),
+    HttpRouteSpec("POST", "/api/chat/handoffs", block_module="blocks.conversation.handoff"),
+    HttpRouteSpec("POST", "/api/chat/steer", block_module="blocks.conversation.steer"),
+    HttpRouteSpec("POST", "/api/chat/guidance", block_module="blocks.conversation.guidance"),
     HttpRouteSpec("PUT", "/api/chat/conversations/{id}", block_module="blocks.chat.update_conversation", path_inject={"id": "conversation_id"}),
     HttpRouteSpec("DELETE", "/api/chat/conversations/{id}", block_module="blocks.chat.delete_conversation", path_inject={"id": "conversation_id"}),
     HttpRouteSpec(
@@ -469,6 +477,17 @@ _FALLBACK_HTTP_ROUTE_SPECS = [
     HttpRouteSpec("PUT", "/api/tools/{name}", block_module="blocks.tool.update", path_inject={"name": "name"}),
     HttpRouteSpec("DELETE", "/api/tools/{name}", block_module="blocks.tool.delete", path_inject={"name": "name"}),
     HttpRouteSpec("GET", "/api/tools/{name}/export", block_module="blocks.tool.export", path_inject={"name": "name"}),
+    HttpRouteSpec("POST", "/api/scheduler/create", block_module="blocks.scheduler.create"),
+    HttpRouteSpec("GET", "/api/scheduler/list", block_module="blocks.scheduler.list"),
+    HttpRouteSpec("PUT", "/api/scheduler/{id}", block_module="blocks.scheduler.update", path_inject={"id": "job_id"}),
+    HttpRouteSpec("DELETE", "/api/scheduler/{id}", block_module="blocks.scheduler.delete", path_inject={"id": "job_id"}),
+    HttpRouteSpec("POST", "/api/scheduler/{id}/pause", block_module="blocks.scheduler.pause", path_inject={"id": "job_id"}),
+    HttpRouteSpec("POST", "/api/scheduler/{id}/resume", block_module="blocks.scheduler.resume", path_inject={"id": "job_id"}),
+    HttpRouteSpec("POST", "/api/scheduler/{id}/run-now", block_module="blocks.scheduler.run_now", path_inject={"id": "job_id"}),
+    HttpRouteSpec("POST", "/api/scheduler/tick", block_module="blocks.scheduler.tick"),
+    HttpRouteSpec("GET", "/api/scheduler/status", block_module="blocks.scheduler.status"),
+    HttpRouteSpec("GET", "/api/recording/devices", block_module="blocks.recording.capture", defaults={"action": "list_devices"}),
+    HttpRouteSpec("POST", "/api/recording/capture", block_module="blocks.recording.capture"),
     HttpRouteSpec("GET", "/api/agent-service/manifest", block_module="blocks.capability.manifest"),
     HttpRouteSpec("POST", "/api/coding/files/diff", block_module="blocks.coding.file_diff"),
     HttpRouteSpec("POST", "/api/coding/files/patch", block_module="blocks.coding.file_patch"),

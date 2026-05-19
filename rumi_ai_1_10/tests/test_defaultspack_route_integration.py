@@ -334,6 +334,53 @@ def test_http_chat_stream_flow_route_falls_back_when_output_is_not_sse():
     ]
 
 
+def test_http_chat_stream_flow_route_falls_back_when_sse_events_are_stringified():
+    from ecosystem.defaultspack.transport.http import DefaultsHttpServer
+    from ecosystem.defaultspack.domain.flow.result import FlowResult
+
+    server = DefaultsHttpServer.__new__(DefaultsHttpServer)
+    server._build_context = lambda: {"request_id": "req-1"}
+    calls = []
+
+    def fake_fallback(module_name, request_data, path_params, inject=None):
+        calls.append((module_name, request_data, path_params, inject or {}))
+        return {"_sse": True, "events": [{"type": "done"}]}
+
+    class FakeEngine:
+        def execute(self, flow_id, trigger_input, context=None):
+            return FlowResult(
+                status="completed",
+                output={"status": "ok", "data": {"_sse": True, "events": "<generator object _engine_events>"}},
+                metadata={"flow_id": flow_id},
+            )
+
+    server._invoke_fallback_block = fake_fallback
+    import domain.flow as flow_module
+
+    original = flow_module.FlowEngine
+    flow_module.FlowEngine = FakeEngine
+    try:
+        result = server._invoke_flow_route(
+            "defaultspack.chat_stream_turn",
+            {"message": {"content": "hi"}},
+            {"id": "c1"},
+            {"id": "conversation_id"},
+            fallback_block_module="blocks.chat.stream",
+        )
+    finally:
+        flow_module.FlowEngine = original
+
+    assert result == {"_sse": True, "events": [{"type": "done"}]}
+    assert calls == [
+        (
+            "blocks.chat.stream",
+            {"message": {"content": "hi"}},
+            {"id": "c1"},
+            {"id": "conversation_id"},
+        )
+    ]
+
+
 def test_http_chat_stream_flow_route_returns_compatible_sse_output():
     from ecosystem.defaultspack.transport.http import DefaultsHttpServer
     from ecosystem.defaultspack.domain.flow.result import FlowResult

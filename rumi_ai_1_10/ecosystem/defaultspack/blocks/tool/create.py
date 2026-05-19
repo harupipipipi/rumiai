@@ -2,6 +2,7 @@ import sys, os; sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..")
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 from domain.tool.registry import ToolRegistry
 from domain.tool.builder import generate_handler_code_with_ai
+from domain.tool.runtime_creator import RuntimeToolCreator
 from blocks.tool._safety import (
     approved_or_request,
     record_tool_attempt,
@@ -44,9 +45,25 @@ def run(input_data, context):
     # handler_code が null / 未指定の場合は AI で生成
     if handler_code is None:
         model = input_data.get("model")
-        handler_code = generate_handler_code_with_ai(
-            name, description, parameters, model=model
-        )
+        try:
+            handler_code = generate_handler_code_with_ai(
+                name, description, parameters, model=model
+            )
+        except Exception as exc:
+            record_tool_failure(OPERATION, RISK, input_data, str(exc), tool_name=name)
+            return error("Failed to generate handler_code: {}".format(exc), "GENERATION_ERROR")
+
+    validation = RuntimeToolCreator().validate_tool_definition(
+        {
+            "name": name,
+            "description": description,
+            "parameters": parameters,
+            "handler_code": handler_code,
+        }
+    )
+    if not validation.get("valid"):
+        record_tool_failure(OPERATION, RISK, input_data, "; ".join(validation.get("errors", [])), tool_name=name)
+        return error("Tool validation failed: {}".format("; ".join(validation.get("errors", []))), "VALIDATION_ERROR")
 
     tool_def = {
         "tool_id": name,
@@ -58,6 +75,14 @@ def run(input_data, context):
         },
         "execution": {"type": "dynamic"},
         "created_at": timestamp(),
+        "requires_approval": True,
+        "approval_policy": "user_approved",
+        "metadata": {
+            "source": "tool_create",
+            "agent_callable": True,
+            "created_by": str((context or {}).get("agent_id") or (context or {}).get("run_source") or "user"),
+            "validation": validation,
+        },
     }
 
     try:
@@ -73,4 +98,5 @@ def run(input_data, context):
         "summary": registered["summary"],
         "handler_code": handler_code,
         "created_at": registered.get("created_at", ""),
+        "validation": validation,
     })

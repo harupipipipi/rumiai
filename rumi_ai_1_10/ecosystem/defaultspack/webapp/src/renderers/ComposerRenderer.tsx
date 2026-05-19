@@ -797,6 +797,7 @@ export function ComposerRenderer({
   const menuButtonRef = useRef<HTMLButtonElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const submitPointerHandledRef = useRef(false);
   const lastModelPickerRequestIdRef = useRef(modelPickerRequestId);
   const chromeButtonTabIndex = keyboardButtonNavigation ? undefined : -1;
   const profileName = profileDisplayName(selectedProfile);
@@ -1105,7 +1106,7 @@ export function ComposerRenderer({
   }, []);
 
   const handleSubmitWithApiKeyGuard = useCallback(
-    (event: React.FormEvent) => {
+    (event: React.SyntheticEvent) => {
       if (isGenerating) {
         event.preventDefault();
         onStopGenerating?.();
@@ -1119,6 +1120,32 @@ export function ComposerRenderer({
       onSubmit(event);
     },
     [isGenerating, needsApiKey, onStopGenerating, onSubmit, selectedProfile],
+  );
+
+  const handleSendButtonPointerDown = useCallback(
+    (event: React.PointerEvent<HTMLButtonElement>) => {
+      if (event.button !== 0 || isGenerating || (!input.trim() && attachedFiles.length === 0)) return;
+      submitPointerHandledRef.current = true;
+      handleSubmitWithApiKeyGuard(event);
+    },
+    [attachedFiles.length, handleSubmitWithApiKeyGuard, input, isGenerating],
+  );
+
+  const handleSendButtonClick = useCallback(
+    (event: React.MouseEvent<HTMLButtonElement>) => {
+      if (submitPointerHandledRef.current) {
+        submitPointerHandledRef.current = false;
+        event.preventDefault();
+        return;
+      }
+      if (isGenerating) {
+        event.preventDefault();
+        onStopGenerating?.();
+        return;
+      }
+      handleSubmitWithApiKeyGuard(event);
+    },
+    [handleSubmitWithApiKeyGuard, isGenerating, onStopGenerating],
   );
 
   const handleKeyDown = useCallback(
@@ -1681,10 +1708,11 @@ export function ComposerRenderer({
                 )}
               </div>
                       <button
-                        type={isGenerating ? "button" : "submit"}
+                        type="button"
                         tabIndex={chromeButtonTabIndex}
                         disabled={!isGenerating && (!input.trim() && attachedFiles.length === 0)}
-                onClick={isGenerating ? onStopGenerating : undefined}
+                onPointerDown={handleSendButtonPointerDown}
+                onClick={handleSendButtonClick}
                 title={isGenerating ? "停止" : "送信"}
                 className={`rumi-send-button ${
                   isNewConversation ? "h-9 w-9" : "w-8 h-8 max-[640px]:h-7 max-[640px]:w-7"

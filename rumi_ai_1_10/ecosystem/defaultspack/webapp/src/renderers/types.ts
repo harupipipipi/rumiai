@@ -20,6 +20,7 @@ export type ChatUiMessage = {
     toolUsed?: string;
     modelName?: string;
     thinkingLabel?: string;
+    thinkingDuration?: string;
     thinkingTranscript?: string;
     attachedToolCount?: number;
   };
@@ -81,6 +82,8 @@ export type ChatMessagesRendererProps = {
   isGenerating: boolean;
   pendingStatus?: string | null;
   pendingToolNames?: string[];
+  pendingStartedAt?: number | null;
+  pendingToolStartedAt?: Record<string, number>;
   messages: ChatUiMessage[];
   messagesEndRef: MutableRefObject<HTMLDivElement | null>;
   unknownBlockStrategy: string;

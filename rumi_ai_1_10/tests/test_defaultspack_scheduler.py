@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 import json
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -97,3 +98,37 @@ def test_scheduler_disabled_blocks_create_and_tick(tmp_path, monkeypatch):
 
 def test_schedule_parser_understands_interval():
     assert parse_next_run("every 1h") > parse_next_run("now")
+
+
+def test_schedule_parser_understands_one_shot_delay():
+    now = datetime(2026, 5, 19, 0, 0, tzinfo=timezone.utc)
+
+    assert parse_next_run("in 30m", now=now) == now + timedelta(minutes=30)
+
+
+def test_schedule_parser_understands_weekly_wall_clock():
+    now = datetime(2026, 5, 19, 0, 0, tzinfo=timezone.utc)  # Tuesday
+
+    assert parse_next_run("every Monday 09:00", now=now) == datetime(2026, 5, 25, 9, 0, tzinfo=timezone.utc)
+
+
+def test_scheduler_tick_sends_due_job_to_chat(tmp_path, monkeypatch):
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_SCHEDULER_DIR", str(tmp_path / "scheduler"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(tmp_path / "chat" / "conversations.json"))
+    calls: list[dict] = []
+
+    def fake_send_chat(payload, context):
+        calls.append({"payload": payload, "context": context})
+        return {"status": "ok", "data": {"id": "assistant-1"}}
+
+    monkeypatch.setattr("blocks.chat.send.run", fake_send_chat)
+    created = create_job({"name": "remind", "kind": "one_shot", "schedule": "now", "prompt": "ping", "session_target": "fresh"}, {})
+
+    result = tick_scheduler({}, {})
+
+    assert result["status"] == "ok"
+    assert result["data"]["count"] == 1
+    assert calls[0]["payload"]["message"]["content"] == "ping"
+    assert calls[0]["payload"]["message"]["metadata"]["source"] == "scheduler"
+    assert result["data"]["ran"][0]["result"]["conversation_id"]
+    assert SchedulerJobStore().get(created["data"]["job_id"])["enabled"] is False

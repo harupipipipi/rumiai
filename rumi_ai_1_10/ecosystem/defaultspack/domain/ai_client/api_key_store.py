@@ -65,6 +65,65 @@ def _write_api_metadata(data: dict[str, dict[str, Any]], pack_root: Path | None 
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
+def _metadata_patch(
+    *,
+    provider_id: str,
+    api_id: str,
+    name: str,
+    existing: dict[str, Any] | None = None,
+    base_url: str | None = None,
+    allowed_models: Any = None,
+    default_model: str | None = None,
+    notes: str | None = None,
+    quota_label: str | None = None,
+) -> dict[str, Any]:
+    metadata = dict(existing or {})
+    metadata.update(
+        {
+            "provider_id": str(provider_id or "").strip(),
+            "api_id": str(api_id or "").strip(),
+            "name": str(name or api_id or provider_id).strip(),
+        }
+    )
+    optional_strings = {
+        "base_url": base_url,
+        "default_model": default_model,
+        "notes": notes,
+        "quota_label": quota_label,
+    }
+    for key, value in optional_strings.items():
+        if value is None:
+            continue
+        cleaned = str(value or "").strip()
+        if cleaned:
+            metadata[key] = cleaned
+        else:
+            metadata.pop(key, None)
+
+    if allowed_models is not None:
+        models = _normalize_allowed_models(allowed_models)
+        if models:
+            metadata["allowed_models"] = models
+        else:
+            metadata.pop("allowed_models", None)
+    return metadata
+
+
+def _normalize_allowed_models(value: Any) -> list[str]:
+    if isinstance(value, str):
+        raw_items = value.replace(",", "\n").splitlines()
+    elif isinstance(value, (list, tuple, set)):
+        raw_items = list(value)
+    else:
+        return []
+    normalized: list[str] = []
+    for item in raw_items:
+        model_id = str(item or "").strip()
+        if model_id and model_id not in normalized:
+            normalized.append(model_id)
+    return normalized
+
+
 def _get_store(pack_root: Path | None = None):
     from core_runtime.secrets_store import SecretsStore
 
@@ -186,6 +245,11 @@ def set_provider_api_key(
     pack_root: Path | None = None,
     api_id: str | None = None,
     name: str | None = None,
+    base_url: str | None = None,
+    allowed_models: Any = None,
+    default_model: str | None = None,
+    notes: str | None = None,
+    quota_label: str | None = None,
 ) -> dict[str, Any]:
     named = bool(api_id or name)
     key = named_provider_secret_key(provider_id, api_id=api_id, name=name) if named else provider_secret_key(provider_id)
@@ -229,11 +293,17 @@ def set_provider_api_key(
     if result.success:
         if named:
             metadata = _read_api_metadata(pack_root)
-            metadata[key] = {
-                "provider_id": str(provider_id or "").strip(),
-                "api_id": normalized_api_id,
-                "name": display_name,
-            }
+            metadata[key] = _metadata_patch(
+                provider_id=provider_id,
+                api_id=normalized_api_id,
+                name=display_name,
+                existing=metadata.get(key, {}),
+                base_url=base_url,
+                allowed_models=allowed_models,
+                default_model=default_model,
+                notes=notes,
+                quota_label=quota_label,
+            )
             _write_api_metadata(metadata, pack_root)
         if not named:
             os.environ[key] = cleaned
@@ -250,6 +320,11 @@ def set_provider_api_key(
         "key": key,
         "configured": bool(result.success),
         "created": bool(result.created),
+        "base_url": str(base_url or "").strip(),
+        "allowed_models": _normalize_allowed_models(allowed_models),
+        "default_model": str(default_model or "").strip(),
+        "notes": str(notes or "").strip(),
+        "quota_label": str(quota_label or "").strip(),
         "error": result.error,
     }
 
@@ -273,6 +348,11 @@ def rename_provider_api_key(
     *,
     pack_root: Path | None = None,
     new_api_id: str | None = None,
+    base_url: str | None = None,
+    allowed_models: Any = None,
+    default_model: str | None = None,
+    notes: str | None = None,
+    quota_label: str | None = None,
 ) -> dict[str, Any]:
     provider_id = str(provider_id or "").strip()
     api_id = str(api_id or "").strip()
@@ -285,11 +365,17 @@ def rename_provider_api_key(
     new_key = named_provider_secret_key(provider_id, api_id=target_api_id)
     metadata = _read_api_metadata(pack_root)
     if old_key == new_key:
-        metadata[old_key] = {
-            "provider_id": provider_id,
-            "api_id": api_id,
-            "name": display_name,
-        }
+        metadata[old_key] = _metadata_patch(
+            provider_id=provider_id,
+            api_id=api_id,
+            name=display_name,
+            existing=metadata.get(old_key, {}),
+            base_url=base_url,
+            allowed_models=allowed_models,
+            default_model=default_model,
+            notes=notes,
+            quota_label=quota_label,
+        )
         _write_api_metadata(metadata, pack_root)
         return {
             "success": True,
@@ -318,6 +404,11 @@ def rename_provider_api_key(
         pack_root=pack_root,
         api_id=target_api_id,
         name=display_name,
+        base_url=base_url,
+        allowed_models=allowed_models,
+        default_model=default_model,
+        notes=notes,
+        quota_label=quota_label,
     )
     if not saved.get("success"):
         return saved
@@ -331,11 +422,17 @@ def rename_provider_api_key(
         os.environ.pop(old_key, None)
         metadata = _read_api_metadata(pack_root)
         metadata.pop(old_key, None)
-        metadata[new_key] = {
-            "provider_id": provider_id,
-            "api_id": str(saved.get("api_id") or target_api_id),
-            "name": display_name,
-        }
+        metadata[new_key] = _metadata_patch(
+            provider_id=provider_id,
+            api_id=str(saved.get("api_id") or target_api_id),
+            name=display_name,
+            existing=metadata.get(new_key, {}),
+            base_url=base_url,
+            allowed_models=allowed_models,
+            default_model=default_model,
+            notes=notes,
+            quota_label=quota_label,
+        )
         _write_api_metadata(metadata, pack_root)
         _refresh_provider_env(provider_id, pack_root=pack_root)
     return {
@@ -400,19 +497,37 @@ def provider_named_api_keys(provider_id: str = "", *, pack_root: Path | None = N
         api_id = _api_id_from_named_key(key, key_provider)
         stored_meta = metadata.get(key, {})
         display_name = str(stored_meta.get("name") or api_id.replace("_", " ").title())
-        items.append(
-            {
-                "api_id": api_id,
-                "name": display_name,
-                "provider_id": key_provider,
-                "key": key,
-                "label": f"{key_provider}:{api_id}:***",
-                "configured": bool(meta.exists),
-                "created_at": meta.created_at,
-                "updated_at": meta.updated_at,
-            }
-        )
+        item = {
+            "api_id": api_id,
+            "name": display_name,
+            "provider_id": key_provider,
+            "key": key,
+            "label": f"{key_provider}:{api_id}:***",
+            "configured": bool(meta.exists),
+            "created_at": meta.created_at,
+            "updated_at": meta.updated_at,
+            "base_url": str(stored_meta.get("base_url") or ""),
+            "allowed_models": _normalize_allowed_models(stored_meta.get("allowed_models", [])),
+            "default_model": str(stored_meta.get("default_model") or ""),
+            "notes": str(stored_meta.get("notes") or ""),
+            "quota_label": str(stored_meta.get("quota_label") or ""),
+        }
+        items.append(item)
     return sorted(items, key=lambda item: (str(item.get("provider_id")), str(item.get("api_id"))))
+
+
+def provider_api_metadata(provider_id: str, api_id: str, *, pack_root: Path | None = None) -> dict[str, Any]:
+    provider_id = str(provider_id or "").strip()
+    api_id = str(api_id or "").strip()
+    if not provider_id or not api_id:
+        return {}
+    key = named_provider_secret_key(provider_id, api_id=api_id)
+    metadata = _read_api_metadata(pack_root).get(key, {})
+    if not isinstance(metadata, dict):
+        return {}
+    result = dict(metadata)
+    result["allowed_models"] = _normalize_allowed_models(result.get("allowed_models", []))
+    return result
 
 
 def read_provider_api_key(provider_id: str, api_id: str, *, pack_root: Path | None = None) -> str | None:

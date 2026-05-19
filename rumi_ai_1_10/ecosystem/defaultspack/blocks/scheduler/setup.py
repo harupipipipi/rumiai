@@ -35,3 +35,9 @@ def run(context):
             {"method": method, "pattern": pattern, "handler": handler, "path_inject": path_inject},
             meta={"_source_component": source_component},
         )
+    try:
+        from domain.scheduler.daemon import start_scheduler_daemon
+
+        start_scheduler_daemon()
+    except Exception:
+        pass

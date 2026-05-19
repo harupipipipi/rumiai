@@ -47,3 +47,26 @@ def test_router_returns_bridge_plan_when_no_vision_model_available():
 
     assert decision.bridge_required is True
     assert decision.bridge_plan["type"] == "vision_bridge"
+
+
+def test_router_honors_explicit_model_outside_active_group():
+    from domain.ai_client.model_router import ModelRoutingRequest, route_model_request
+
+    profiles = [
+        {"profile_id": "google/gemini", "qualified_model_id": "google/gemini", "provider_id": "google", "model_id": "gemini", "type": "chat", "configured": True, "supports_vision": True, "supports_tool_calling": True, "supports_thinking": True, "speed_tier": "balanced", "knowledge_level": 85},
+        {"profile_id": "gitlawb-opengateway/mimo-v2-omni", "qualified_model_id": "gitlawb-opengateway/mimo-v2-omni", "provider_id": "gitlawb-opengateway", "model_id": "mimo-v2-omni", "type": "chat", "configured": True, "supports_vision": True, "supports_tool_calling": False, "supports_thinking": False, "speed_tier": "balanced", "knowledge_level": 75},
+    ]
+    decision = route_model_request(
+        ModelRoutingRequest(
+            has_images=False,
+            requested_thinking_level="high",
+            preferred_model="gitlawb-opengateway/mimo-v2-omni",
+            preferred_group="default",
+            auto_route_within_group=True,
+            settings={"model_groups": {"default": {"allowed_models": ["google/gemini"]}}},
+        ),
+        profiles=profiles,
+    )
+
+    assert decision.selected_model == "gitlawb-opengateway/mimo-v2-omni"
+    assert "thinking_level_normalized" in decision.reason_codes

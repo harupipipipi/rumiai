@@ -72,6 +72,7 @@ test("updates streamed tool activity when a completion event arrives before the 
       tool_name: "computer_use",
       arguments: { action: "click", app: "Notion", x: 120, y: 340 },
       message: "computer_use を使用中",
+      timestamp: 1_700_000_000_000,
     },
     {
       type: "tool_call_completed",
@@ -81,12 +82,30 @@ test("updates streamed tool activity when a completion event arrives before the 
       arguments: { action: "click", app: "Notion", x: 120, y: 340 },
       message: "computer_use の結果を受け取りました",
       is_error: false,
+      timestamp: 1_700_000_003_200,
     },
   ]);
 
   assert.equal(groups.length, 1);
   assert.equal(groups[0].items[0].status, "completed");
   assert.equal(groups[0].items[0].input, "click Notion (120, 340)");
+  assert.equal(groups[0].items[0].durationLabel, "3s");
+});
+
+test("shows live elapsed time for running streamed tool activity", () => {
+  const groups = buildToolActivityGroups([], [
+    {
+      type: "tool_call_started",
+      phase: "tool_call_started",
+      tool_call_id: "call_1",
+      tool_name: "coding_file_list",
+      arguments: { path: "src" },
+      timestamp: 1_700_000_010_000,
+    },
+  ], { now: 1_700_000_072_000 });
+
+  assert.equal(groups[0].items[0].status, "running");
+  assert.equal(groups[0].items[0].durationLabel, "1m 2s");
 });
 
 test("uses streamed completion results and artifacts before final logs arrive", () => {

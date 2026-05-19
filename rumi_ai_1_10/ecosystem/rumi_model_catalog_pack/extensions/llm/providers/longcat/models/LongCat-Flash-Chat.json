@@ -1,0 +1,18 @@
+{
+  "id": "longcat/LongCat-Flash-Chat",
+  "category": "llm_model",
+  "version": "1",
+  "provider_id": "longcat",
+  "model_id": "LongCat-Flash-Chat",
+  "display_name": "LongCat Flash Chat",
+  "type": "chat",
+  "enabled": true,
+  "priority": 1,
+  "defaults": {
+    "chat": true,
+    "fast": true
+  },
+  "metadata": {
+    "docs": "https://longcat.chat/platform/docs/"
+  }
+}

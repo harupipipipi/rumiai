@@ -217,6 +217,46 @@ TOOL_FUNCTIONS: tuple[FunctionSpec, ...] = tuple(
 )
 
 
+SKILL_FUNCTIONS: tuple[FunctionSpec, ...] = (
+    _spec(
+        "skill_create_from_feedback",
+        "Create a Rumi extension skill from corrective feedback.",
+        ("skill", "feedback", "dream"),
+        risk="medium",
+        block="blocks.skill.create_from_feedback",
+        aliases=("defaults.skill.create_from_feedback", "defaultspack.skill.create_from_feedback"),
+    ),
+)
+
+
+CONVERSATION_FUNCTIONS: tuple[FunctionSpec, ...] = (
+    _spec(
+        "conversation_guidance",
+        "Inject high-priority guidance into a running conversation or agent task.",
+        ("conversation", "guidance", "interrupt"),
+        risk="medium",
+        block="blocks.conversation.guidance",
+        aliases=("defaults.conversation.guidance", "defaultspack.conversation.guidance"),
+    ),
+    _spec(
+        "conversation_steer",
+        "Queue, list, cancel, or process a follow-up steer after a conversation task completes.",
+        ("conversation", "steer"),
+        risk="medium",
+        block="blocks.conversation.steer",
+        aliases=("defaults.conversation.steer", "defaultspack.conversation.steer"),
+    ),
+    _spec(
+        "conversation_handoff",
+        "Create a new conversation, optionally seed it with a prompt, and return a move card.",
+        ("conversation", "handoff"),
+        risk="medium",
+        block="blocks.conversation.handoff",
+        aliases=("defaults.conversation.handoff", "defaultspack.conversation.handoff"),
+    ),
+)
+
+
 CODING_FUNCTIONS: tuple[FunctionSpec, ...] = tuple(
     _spec(function_id, description, ("coding",), risk=risk, block=block)
     for function_id, description, risk, block in (
@@ -257,6 +297,18 @@ CODING_FUNCTIONS: tuple[FunctionSpec, ...] = tuple(
 
 BROWSER_ARTIFACT_FUNCTIONS: tuple[FunctionSpec, ...] = (
     _spec("browser_artifacts", "List persistent browser coding artifacts.", ("tool", "browser"), block="blocks.browser.artifacts"),
+)
+
+
+RECORDING_FUNCTIONS: tuple[FunctionSpec, ...] = (
+    _spec(
+        "recording_capture",
+        "List devices and capture screen, microphone, or system audio recordings.",
+        ("recording", "media"),
+        risk="high",
+        block="blocks.recording.capture",
+        aliases=("defaults.recording.capture", "defaultspack.recording.capture"),
+    ),
 )
 
 
@@ -459,9 +511,12 @@ FUNCTION_SPECS: tuple[FunctionSpec, ...] = (
     AI_FUNCTIONS
     + CHAT_FUNCTIONS
     + TOOL_FUNCTIONS
+    + SKILL_FUNCTIONS
+    + CONVERSATION_FUNCTIONS
     + CODING_FUNCTIONS
     + AGENT_FUNCTIONS
     + BROWSER_ARTIFACT_FUNCTIONS
+    + RECORDING_FUNCTIONS
     + DATA_FUNCTIONS
     + PROFILE_WORKSPACE_FUNCTIONS
     + RESEARCH_MEDIA_UI_DEV_FUNCTIONS

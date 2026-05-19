@@ -680,6 +680,14 @@ class ChatRunEngine:
                 data={"message": stored},
                 message="assistant message completed",
             )
+            steer_processed = self._process_conversation_steer(prepared.conversation_id, context or {})
+            if steer_processed:
+                yield self._emit(
+                    "status",
+                    data={"processed": steer_processed},
+                    message="次の steer を送信しました",
+                    phase="conversation_steer",
+                )
             yield self._emit(
                 "done",
                 data={"message": stored},
@@ -688,6 +696,23 @@ class ChatRunEngine:
         finally:
             self._cancel_event.set()
             cancellation_registry.unregister(prepared.conversation_id, request_cancel)
+
+    def _process_conversation_steer(self, conversation_id: str, context: dict[str, Any]) -> list[dict[str, Any]]:
+        try:
+            from domain.chat.steer import ConversationSteerStore
+
+            return ConversationSteerStore().process_for_conversation(
+                conversation_id,
+                context=context,
+            )
+        except Exception as exc:
+            self._emit(
+                "status",
+                data={"error": str(exc)},
+                message="conversation steer の処理に失敗しました",
+                phase="conversation_steer_failed",
+            )
+            return []
 
     def _execute(self, prepared: PreparedChatRun, draft: _AssistantDraft | None) -> Iterator[dict[str, Any]]:
         working_messages = list(prepared.standard_messages)

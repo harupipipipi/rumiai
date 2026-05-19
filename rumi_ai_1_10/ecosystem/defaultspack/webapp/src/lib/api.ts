@@ -511,6 +511,53 @@ export type ModelCommandCandidate = {
   [key: string]: unknown;
 };
 
+export type ModelSearchItem = ModelCommandCandidate & {
+  label?: string;
+  supports_vision?: boolean;
+  supports_image_input?: boolean;
+  supports_tool_calling?: boolean;
+  supports_thinking?: boolean;
+  supports_fast?: boolean;
+  speed_tier?: string;
+  quality_tier?: string;
+  cost_tier?: string;
+  knowledge_level?: number;
+  capability_tags?: string[];
+  recommended_roles?: string[];
+  notes?: string;
+  score?: number;
+};
+
+export type ModelSearchResponse = {
+  models: ModelSearchItem[];
+  filters_applied: Record<string, unknown>;
+};
+
+export type ConversationSteerItem = {
+  id: string;
+  prompt: string;
+  target_type?: string;
+  target_id?: string;
+  conversation_id?: string;
+  status: string;
+  visible?: boolean;
+  auto_send?: boolean;
+  created_at?: string;
+  updated_at?: string;
+  error?: string;
+  metadata?: Record<string, unknown>;
+  [key: string]: unknown;
+};
+
+export type ConversationSteerResponse =
+  | ConversationSteerItem
+  | {
+    items?: ConversationSteerItem[];
+    processed?: ConversationSteerItem[];
+    cancelled?: boolean;
+    item?: ConversationSteerItem | null;
+  };
+
 export type Conversation = {
   id: string;
   title: string;
@@ -572,10 +619,23 @@ export type SidebarFieldOption = {
   value: string | number | boolean;
   label: string;
   provider_id?: string;
+  provider_display_name?: string;
   model_id?: string;
   qualified_model_id?: string;
   configured?: boolean;
   local?: boolean;
+  supports_vision?: boolean;
+  supports_image_input?: boolean;
+  supports_tool_calling?: boolean;
+  supports_thinking?: boolean;
+  supports_fast?: boolean;
+  speed_tier?: string;
+  quality_tier?: string;
+  cost_tier?: string;
+  knowledge_level?: number;
+  capability_tags?: string[];
+  recommended_roles?: string[];
+  notes?: string;
 };
 
 export type SidebarField = {
@@ -1165,6 +1225,20 @@ export const api = {
     return request<{ profiles: ModelProfile[]; count: number }>("/api/ai/profiles");
   },
 
+  searchModels(filters: Record<string, unknown>) {
+    return request<ModelSearchResponse>("/api/ai/models/search", {
+      method: "POST",
+      body: JSON.stringify(filters),
+    });
+  },
+
+  conversationSteer(payload: Record<string, unknown>) {
+    return request<ConversationSteerResponse>("/api/chat/steer", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
   health() {
     return request<{ status: string; pack: string; ts: string }>("/api/health");
   },
@@ -1210,7 +1284,15 @@ export const api = {
     });
   },
 
-  saveProviderApiKey(providerId: string, value: string, options?: { apiId?: string; name?: string }) {
+  saveProviderApiKey(providerId: string, value: string, options?: {
+    apiId?: string;
+    name?: string;
+    baseUrl?: string;
+    allowedModels?: string[];
+    defaultModel?: string;
+    notes?: string;
+    quotaLabel?: string;
+  }) {
     return request<{ provider_id: string; api_id?: string; name?: string; configured: boolean }>("/api/ai/provider-key", {
       method: "POST",
       body: JSON.stringify({
@@ -1218,6 +1300,11 @@ export const api = {
         value,
         api_id: options?.apiId,
         name: options?.name,
+        base_url: options?.baseUrl,
+        allowed_models: options?.allowedModels,
+        default_model: options?.defaultModel,
+        notes: options?.notes,
+        quota_label: options?.quotaLabel,
       }),
     });
   },

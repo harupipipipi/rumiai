@@ -18,6 +18,7 @@ sys.path.insert(0, str(DEFAULTSPACK_ROOT))
 OPENGATEWAY_MODELS = {
     "gitlawb-opengateway/mimo-v2.5-pro",
     "gitlawb-opengateway/mimo-v2-flash",
+    "gitlawb-opengateway/mimo-v2-omni",
     "gitlawb-opengateway/google/gemini-3.1-flash-lite-preview",
 }
 
@@ -226,7 +227,7 @@ def test_opengateway_credential_required_false_allows_no_api_key():
         provider._ensure_runtime_config()
 
     assert provider._credential_required is False
-    assert "Authorization" not in provider._headers()
+    assert provider._headers()["Authorization"] == "Bearer anything"
 
 
 def test_opengateway_uses_browser_user_agent_for_gateway_compatibility():

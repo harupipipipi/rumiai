@@ -106,6 +106,26 @@ class TestDefaultspackProviderExpansion(unittest.TestCase):
         self.assertEqual(model_name, "tencent/hy3-preview:free")
         self.assertEqual(getattr(provider, "provider_id", ""), "openrouter")
 
+    def test_gitlawb_opengateway_includes_mimo_v2_omni(self):
+        from domain.ai_client.client import AIClient
+        from domain.ai_client.providers.gitlawb_opengateway_provider import GitlawbOpengatewayProvider
+
+        AIClient._instance = None
+        with patch.dict(os.environ, {"RUMI_DEFAULTSPACK_ENABLE_CLOUD_PROVIDERS": "1"}, clear=True):
+            client = AIClient()
+
+        try:
+            models = client.list_models(provider="gitlawb-opengateway")
+            provider, model_name = client.resolve_provider("gitlawb-opengateway/mimo-v2-omni")
+        finally:
+            AIClient._instance = None
+
+        model = next(item for item in models if item["id"] == "gitlawb-opengateway/mimo-v2-omni")
+        self.assertEqual(model_name, "mimo-v2-omni")
+        self.assertEqual(getattr(provider, "provider_id", ""), "gitlawb-opengateway")
+        self.assertIn("vision", model.get("capabilities", []))
+        self.assertEqual(GitlawbOpengatewayProvider()._headers()["Authorization"], "Bearer anything")
+
     def test_ai_client_does_not_stub_unconfigured_openrouter_completion(self):
         from domain.ai_client.client import AIClient
 
@@ -150,6 +170,243 @@ class TestDefaultspackProviderExpansion(unittest.TestCase):
                 AIClient._instance = None
 
         self.assertEqual(routes["google/gemini-test"], ["google/models-main"])
+
+    def test_structured_api_routes_take_priority_over_text_routes(self):
+        from domain.ai_client.client import AIClient
+
+        AIClient._instance = None
+        with tempfile.TemporaryDirectory() as tmpdir:
+            settings_path = Path(tmpdir) / "frontend_settings.json"
+            settings_path.write_text(
+                json.dumps(
+                    {
+                        "models": {
+                            "api_routes": [
+                                {"model": "google/gemini-test", "apis": ["google/main", "google/backup"]}
+                            ],
+                            "model_api_routes": "google/gemini-test: google/legacy",
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            client = AIClient()
+
+            try:
+                with patch.object(client, "_settings_path", return_value=settings_path):
+                    routes = client._api_routes()
+            finally:
+                AIClient._instance = None
+
+        self.assertEqual(routes["google/gemini-test"], ["google/main", "google/backup"])
+
+    def test_named_api_metadata_persists_api_bound_model_data(self):
+        from domain.ai_client.api_key_store import provider_api_metadata, provider_named_api_keys, set_provider_api_key
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.dict(os.environ, {"RUMI_DEFAULTSPACK_SECRETS_DIR": tmpdir}, clear=True):
+                set_provider_api_key(
+                    "longcat",
+                    "secret",
+                    api_id="work",
+                    name="work",
+                    base_url="https://api.longcat.chat/openai/v1",
+                    allowed_models=["LongCat-Flash-Chat"],
+                    default_model="LongCat-Flash-Chat",
+                    notes="fast longcat route",
+                    quota_label="paid",
+                )
+
+                metadata = provider_api_metadata("longcat", "work")
+                keys = provider_named_api_keys("longcat")
+
+        self.assertEqual(metadata["base_url"], "https://api.longcat.chat/openai/v1")
+        self.assertEqual(metadata["allowed_models"], ["LongCat-Flash-Chat"])
+        self.assertEqual(metadata["default_model"], "LongCat-Flash-Chat")
+        self.assertEqual(keys[0]["quota_label"], "paid")
+
+    def test_composite_fallback_chain_uses_next_model_on_quota_error(self):
+        from domain.ai_client.client import AIClient
+
+        class FailingProvider:
+            def complete(self, model, messages, tools, params):
+                raise RuntimeError("429 rate limit")
+
+        class SuccessProvider:
+            def complete(self, model, messages, tools, params):
+                return {"content": [{"type": "text", "text": f"ok:{model}"}], "finish_reason": "stop"}
+
+        AIClient._instance = None
+        with tempfile.TemporaryDirectory() as tmpdir:
+            settings_path = Path(tmpdir) / "frontend_settings.json"
+            settings_path.write_text(
+                json.dumps(
+                    {
+                        "models": {
+                            "composite_models": [
+                                {
+                                    "id": "combo/default",
+                                    "mode": "fallback_chain",
+                                    "members": ["fail/model-a", "win/model-b"],
+                                }
+                            ]
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            client = AIClient()
+            client.register_provider("fail", FailingProvider())
+            client.register_provider("win", SuccessProvider())
+
+            try:
+                with patch.object(client, "_settings_path", return_value=settings_path):
+                    response = client.complete("combo/default", [{"role": "user", "content": "hello"}])
+            finally:
+                AIClient._instance = None
+
+        self.assertEqual(response["content"][0]["text"], "ok:model-b")
+
+    def test_composite_fallback_chain_honors_member_conditions(self):
+        from domain.ai_client.client import AIClient
+
+        class EchoProvider:
+            def complete(self, model, messages, tools, params):
+                return {"content": [{"type": "text", "text": f"ok:{model}"}], "finish_reason": "stop"}
+
+        AIClient._instance = None
+        with tempfile.TemporaryDirectory() as tmpdir:
+            settings_path = Path(tmpdir) / "frontend_settings.json"
+            settings_path.write_text(
+                json.dumps(
+                    {
+                        "models": {
+                            "composite_models": [
+                                {
+                                    "id": "combo/conditional",
+                                    "mode": "fallback_chain",
+                                    "members": [
+                                        {"model": "plain/text", "conditions": {"has_images": False}},
+                                        {"model": "vision/omni", "conditions": {"has_images": True}},
+                                    ],
+                                }
+                            ]
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            client = AIClient()
+            client.register_provider("plain", EchoProvider())
+            client.register_provider("vision", EchoProvider())
+
+            try:
+                with patch.object(client, "_settings_path", return_value=settings_path):
+                    response = client.complete(
+                        "combo/conditional",
+                        [
+                            {
+                                "role": "user",
+                                "content": [
+                                    {"type": "text", "text": "describe this"},
+                                    {"type": "image_url", "image_url": {"url": "https://example.com/a.png"}},
+                                ],
+                            }
+                        ],
+                    )
+            finally:
+                AIClient._instance = None
+
+        self.assertEqual(response["content"][0]["text"], "ok:omni")
+
+    def test_composite_fallback_chain_uses_fallback_on_error_kind(self):
+        from domain.ai_client.client import AIClient
+
+        class TimeoutProvider:
+            def complete(self, model, messages, tools, params):
+                raise RuntimeError("request timed out")
+
+        class SuccessProvider:
+            def complete(self, model, messages, tools, params):
+                return {"content": [{"type": "text", "text": f"ok:{model}"}], "finish_reason": "stop"}
+
+        AIClient._instance = None
+        with tempfile.TemporaryDirectory() as tmpdir:
+            settings_path = Path(tmpdir) / "frontend_settings.json"
+            settings_path.write_text(
+                json.dumps(
+                    {
+                        "models": {
+                            "composite_models": [
+                                {
+                                    "id": "combo/error-routing",
+                                    "mode": "fallback_chain",
+                                    "members": [
+                                        {"model": "slow/model-a", "fallback_on": ["timeout"]},
+                                        "win/model-b",
+                                    ],
+                                }
+                            ]
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            client = AIClient()
+            client.register_provider("slow", TimeoutProvider())
+            client.register_provider("win", SuccessProvider())
+
+            try:
+                with patch.object(client, "_settings_path", return_value=settings_path):
+                    response = client.complete("combo/error-routing", [{"role": "user", "content": "hello"}])
+            finally:
+                AIClient._instance = None
+
+        self.assertEqual(response["content"][0]["text"], "ok:model-b")
+
+    def test_composite_ensemble_merges_member_answers_without_synthesizer(self):
+        from domain.ai_client.client import AIClient
+
+        class EchoProvider:
+            def __init__(self, prefix):
+                self.prefix = prefix
+
+            def complete(self, model, messages, tools, params):
+                return {"content": [{"type": "text", "text": f"{self.prefix}:{model}"}], "finish_reason": "stop"}
+
+        AIClient._instance = None
+        with tempfile.TemporaryDirectory() as tmpdir:
+            settings_path = Path(tmpdir) / "frontend_settings.json"
+            settings_path.write_text(
+                json.dumps(
+                    {
+                        "models": {
+                            "composite_models": [
+                                {
+                                    "id": "combo/ensemble",
+                                    "mode": "ensemble",
+                                    "members": ["a/one", "b/two"],
+                                }
+                            ]
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            client = AIClient()
+            client.register_provider("a", EchoProvider("a"))
+            client.register_provider("b", EchoProvider("b"))
+
+            try:
+                with patch.object(client, "_settings_path", return_value=settings_path):
+                    response = client.complete("combo/ensemble", [{"role": "user", "content": "hello"}])
+            finally:
+                AIClient._instance = None
+
+        text = response["content"][0]["text"]
+        self.assertIn("[a/one]", text)
+        self.assertIn("[b/two]", text)
+        self.assertEqual(set(response["metadata"]["ensemble"]["members"]), {"a/one", "b/two"})
 
     def test_api_route_stream_keeps_named_key_until_generator_is_consumed(self):
         from domain.ai_client import client as client_module

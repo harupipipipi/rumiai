@@ -502,15 +502,41 @@ def _require_line_group_mention(endpoint: WebhookEndpoint, external_event) -> bo
     metadata = endpoint.metadata if isinstance(endpoint.metadata, dict) else {}
     configured = None
     for container in (metadata, response, conversation):
-        for key in ("require_group_mention", "group_mention_only", "mention_only_in_groups"):
+        for key in ("require_group_mention", "group_mention_only", "mention_only_in_groups", "group_room_mention_required"):
             if key in container:
                 configured = container.get(key)
                 break
         if configured is not None:
             break
     if configured is None:
-        return endpoint.input_profile_id == "line.computer_use" or str(response.get("mode") or "").strip().lower() == "computer_use_line_biz"
+        configured = _line_mention_policy_default()
+    if configured is None:
+        configured = True
     return _truthy(configured)
+
+
+def _line_mention_policy_default() -> Any:
+    try:
+        override = os.environ.get("RUMI_DEFAULTSPACK_FRONTEND_SETTINGS_PATH")
+        path = Path(override) if override else Path(__file__).resolve().parents[3] / "user_data" / "shared" / "frontend_settings.json"
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return True
+    if not isinstance(data, dict):
+        return True
+    line_settings = data.get("line") if isinstance(data.get("line"), dict) else {}
+    policy = line_settings.get("mention_policy")
+    if isinstance(policy, dict):
+        for key in ("group_room_mention_required", "require_group_mention", "groups_require_mention"):
+            if key in policy:
+                return policy.get(key)
+    if policy is not None:
+        text = str(policy).strip().lower()
+        if text in {"mention_required", "groups_only", "group_room", "true", "on", "1"}:
+            return True
+        if text in {"always", "all", "false", "off", "0"}:
+            return False
+    return True
 
 
 def _require_audience_mention(policy: dict[str, Any]) -> dict[str, Any]:
