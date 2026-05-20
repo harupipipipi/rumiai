@@ -52,11 +52,100 @@ def test_cerebras_manifest_first_runtime_provider(monkeypatch):
     assert provider["metadata"]["adapter"] == "openai_compatible"
     assert provider["metadata"]["default_base_url"] == "https://api.cerebras.ai/v1"
     assert provider["default_model_for"]["coding"] == "zai-glm-4.7"
-    assert {"cerebras/gpt-oss-120b", "cerebras/zai-glm-4.7"}.issubset(models)
+    assert {
+        "cerebras/gpt-oss-120b",
+        "cerebras/zai-glm-4.7",
+        "cerebras/qwen-3-235b-a22b-instruct-2507",
+        "cerebras/llama3.1-8b",
+    }.issubset(models)
     assert provider["metadata"]["config"]["service_tier_request_injection"] == "explicit_only"
 
     monkeypatch.setenv("CEREBRAS_API_KEY", "test-cerebras-key")
     assert "cerebras" in detect_available_providers()
+
+
+def test_cerebras_openai_compatible_params_match_model_contract():
+    from domain.ai_client.providers.openai_compatible_provider import OpenAICompatibleProvider
+
+    captured = {}
+    provider = OpenAICompatibleProvider(
+        provider_id="cerebras",
+        api_key="test-cerebras-key",
+        default_base_url="https://api.cerebras.ai/v1",
+        credential_required=False,
+        known_models=[
+            {
+                "id": "cerebras/gpt-oss-120b",
+                "model_id": "gpt-oss-120b",
+                "display_name": "GPT OSS 120B",
+                "capabilities": {"reasoning": True},
+                "metadata": {
+                    "request_example": {
+                        "max_completion_tokens": 32768,
+                        "temperature": 1,
+                        "top_p": 1,
+                        "reasoning_effort": "high",
+                    }
+                },
+            },
+            {
+                "id": "cerebras/llama3.1-8b",
+                "model_id": "llama3.1-8b",
+                "display_name": "Llama 3.1 8B",
+                "capabilities": {"reasoning": False},
+                "metadata": {
+                    "request_defaults": {
+                        "max_completion_tokens": 2048,
+                        "temperature": 0.2,
+                        "top_p": 1,
+                    }
+                },
+            },
+        ],
+    )
+
+    def fake_request_json(path, body):
+        captured.setdefault("bodies", []).append(body)
+        return {"choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}]}
+
+    with patch.object(provider, "_request_json", side_effect=fake_request_json):
+        provider.complete(
+            "gpt-oss-120b",
+            [{"role": "user", "content": "hi"}],
+            [],
+            {"thinking_level": "high", "max_tokens": 123},
+        )
+        provider.complete(
+            "llama3.1-8b",
+            [{"role": "user", "content": "hi"}],
+            [],
+            {"thinking_level": "medium", "max_tokens": 99},
+        )
+
+    gpt_body, llama_body = captured["bodies"]
+    assert gpt_body["max_completion_tokens"] == 123
+    assert gpt_body["temperature"] == 1
+    assert gpt_body["top_p"] == 1
+    assert gpt_body["reasoning_effort"] == "high"
+    assert "max_tokens" not in gpt_body
+
+    assert llama_body["max_completion_tokens"] == 99
+    assert llama_body["temperature"] == 0.2
+    assert llama_body["top_p"] == 1
+    assert "reasoning_effort" not in llama_body
+    assert "max_tokens" not in llama_body
+
+
+def test_cerebras_thinking_normalization_only_emits_supported_reasoning_params():
+    from domain.ai_client.model_runtime_settings import ModelRuntimeSettingsService
+
+    service = ModelRuntimeSettingsService()
+
+    gpt = service.normalize_for_provider("cerebras", "gpt-oss-120b", "high")
+    llama = service.normalize_for_provider("cerebras", "llama3.1-8b", "high")
+
+    assert gpt["provider_params"] == {"reasoning_effort": "high"}
+    assert llama["provider_params"] == {}
 
 
 def test_nvidia_manifest_first_runtime_provider_accepts_either_key(monkeypatch):
@@ -68,9 +157,16 @@ def test_nvidia_manifest_first_runtime_provider_accepts_either_key(monkeypatch):
     assert provider["metadata"]["adapter"] == "openai_compatible"
     assert provider["metadata"]["default_base_url"] == "https://integrate.api.nvidia.com/v1"
     assert provider["env_vars"] == ["NVIDIA_API_KEY", "NGC_API_KEY"]
+    assert provider["default_model_for"]["coding"] == "qwen/qwen3-coder-480b-a35b-instruct"
+    assert provider["default_model_for"]["fast"] == "nvidia/nvidia-nemotron-nano-9b-v2"
     assert {
+        "nvidia/nvidia/llama-3.3-nemotron-super-49b-v1.5",
         "nvidia/nvidia/llama-3.3-nemotron-super-49b-v1",
         "nvidia/meta/llama-3.3-70b-instruct",
+        "nvidia/openai/gpt-oss-120b",
+        "nvidia/openai/gpt-oss-20b",
+        "nvidia/qwen/qwen3-coder-480b-a35b-instruct",
+        "nvidia/deepseek-ai/deepseek-v4-flash",
     }.issubset(models)
 
     monkeypatch.delenv("NVIDIA_API_KEY", raising=False)
@@ -84,6 +180,25 @@ def test_cloud_provider_keys_are_persistable_in_secret_store():
     assert provider_secret_keys("groq") == ["GROQ_API_KEY"]
     assert provider_secret_keys("cerebras") == ["CEREBRAS_API_KEY"]
     assert provider_secret_keys("nvidia") == ["NVIDIA_API_KEY", "NGC_API_KEY"]
+
+
+def test_cloud_model_capability_false_values_are_preserved():
+    from ecosystem.defaultspack.backend.ai_client.provider_catalog import list_profile_catalog
+
+    profiles = {item["profile_id"]: item for item in list_profile_catalog()}
+
+    cerebras_gpt_oss = profiles["cerebras/gpt-oss-120b"]
+    cerebras_zai = profiles["cerebras/zai-glm-4.7"]
+    nvidia_nemotron = profiles["nvidia/nvidia/llama-3.3-nemotron-super-49b-v1.5"]
+
+    for profile in (cerebras_gpt_oss, cerebras_zai, nvidia_nemotron):
+        assert profile["supports_vision"] is False
+        assert "vision" not in profile["capability_tags"]
+        assert profile["supports_tool_calling"] is True
+
+    assert cerebras_gpt_oss["model_capabilities"]["capabilities"]["parallel_tool_calls"] is False
+    assert cerebras_zai["model_capabilities"]["capabilities"]["parallel_tool_calls"] is True
+    assert nvidia_nemotron["model_capabilities"]["capabilities"]["parallel_tool_calls"] is True
 
 
 def test_moonshot_manifest_first_runtime_provider(monkeypatch):

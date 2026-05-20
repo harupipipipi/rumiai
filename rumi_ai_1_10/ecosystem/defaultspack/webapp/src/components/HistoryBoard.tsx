@@ -25,8 +25,8 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import {
-  Globe, Terminal, MessageSquare, Plus, ChevronRight, Settings,
-  GripVertical, FolderOpen, Folder, PanelLeftClose, PanelLeftOpen, X,
+  Globe, Terminal, Plus, ChevronRight, Settings,
+  GripVertical, FolderOpen, Folder, PanelLeftClose, PanelLeftOpen, SquarePen, X,
 } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -525,7 +525,7 @@ function SortableChatItem({ chat, activeChatId, onChatSelect, onRename, onToggle
 
   const icon = chat.type === 'research' ? <Globe size={13} className="text-zinc-500 flex-shrink-0" /> :
                chat.type === 'code' ? <Terminal size={13} className="text-zinc-500 flex-shrink-0" /> :
-               <MessageSquare size={13} className="text-zinc-500 flex-shrink-0" />;
+               <SquarePen size={13} className="text-zinc-500 flex-shrink-0" />;
 
   return (
     <>
@@ -1503,7 +1503,7 @@ export function HistoryBoard({ activeChatId, chatItems, account, onChatSelect, o
                 title={chat.title}
                 aria-label={chat.title}
               >
-                <MessageSquare size={17} strokeWidth={1.9} />
+                <SquarePen size={17} strokeWidth={1.9} />
                 {isActive && <span className="absolute left-0 h-5 w-0.5 rounded-r bg-emerald-400" />}
               </button>
             );
@@ -1658,7 +1658,7 @@ export function HistoryBoard({ activeChatId, chatItems, account, onChatSelect, o
             <GripVertical size={12} className="text-zinc-500" />
             {activeChat.type === 'research' ? <Globe size={14} className="text-zinc-400" /> :
              activeChat.type === 'code' ? <Terminal size={14} className="text-zinc-400" /> :
-             <MessageSquare size={14} className="text-zinc-400" />}
+             <SquarePen size={14} className="text-zinc-400" />}
             <span className="text-sm truncate text-zinc-100">{activeChat.title}</span>
           </div>
         ) : null}

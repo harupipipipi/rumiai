@@ -3354,6 +3354,8 @@ export default function App() {
     setAttachedFiles([]);
     let submittedConversationId: string | null = null;
     const shouldKeepSelectedToolsAfterSend = keepSelectedToolsAfterSend(settingsValues);
+    const submittedToolIds = [...selectedToolIds];
+    const submittedToolIdSet = new Set(submittedToolIds);
     const selectedToolLabels = [
       ...selectedTools.map((item) => item.label || item.id),
     ];
@@ -3577,6 +3579,7 @@ export default function App() {
             ...(operationsToolDenylist.length ? { tool_denylist: operationsToolDenylist } : {}),
           }
         : {};
+      const shouldSendExplicitToolSelection = !isOperationsMode || submittedToolIds.length > 0;
 
       await api.streamMessage(conversation.id, userText, {
         thinking_level: activeProfile?.supports_thinking ? selectedThinkingLevel : null,
@@ -3584,10 +3587,10 @@ export default function App() {
           ...(yoloMode ? { yolo_mode: true, allow_shell: true, allow_file_write: true, write_actions_require_approval: false } : {}),
           ...operationsPolicy,
           ...(mode === "coding" && selectedCodingWorkspaceId ? { workspace_id: selectedCodingWorkspaceId } : {}),
-          ...(selectedToolIds.length ? { selected_tools: selectedToolIds } : {}),
+          ...(shouldSendExplicitToolSelection ? { selected_tools: submittedToolIds } : {}),
         },
         attachments: submittedAttachments,
-        tools: selectedToolIds.length ? selectedToolIds : undefined,
+        tools: shouldSendExplicitToolSelection ? submittedToolIds : undefined,
         metadata: {
           mode: isOperationsMode ? "operations_company" : mode,
           ...(isOperationsMode ? {
@@ -3601,9 +3604,9 @@ export default function App() {
             workspace_label: codingWorkspaces.find((workspace) => workspace.workspace_id === selectedCodingWorkspaceId)?.label,
           } : {}),
           attachments: submittedAttachments.map(({ name, size, type, truncated, source, sourcePath }) => ({ name, size, type, truncated, source, sourcePath })),
-          selected_tools: selectedToolIds,
+          selected_tools: submittedToolIds,
           dropped_widgets: droppedWidgets
-            .filter((widget) => widget.widgetKind === "tool_toggle" || widget.type === "tool" ? selectedToolIdSet.has(widget.sourceItemId || widget.id) : widget.enabled !== false)
+            .filter((widget) => widget.widgetKind === "tool_toggle" || widget.type === "tool" ? submittedToolIdSet.has(widget.sourceItemId || widget.id) : widget.enabled !== false)
             .map(({ id, type, label, widgetKind, sourceItemId, metadata }) => ({ id, type, label, widgetKind, sourceItemId, metadata })),
         },
       }, {

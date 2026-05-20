@@ -32,7 +32,9 @@
     "default_model_for": {
       "chat": "nvidia/llama-3.3-nemotron-super-49b-v1",
       "reasoning": "nvidia/llama-3.3-nemotron-super-49b-v1",
-      "general": "meta/llama-3.3-70b-instruct"
+      "general": "meta/llama-3.3-70b-instruct",
+      "fast": "nvidia/nvidia-nemotron-nano-9b-v2",
+      "coding": "qwen/qwen3-coder-480b-a35b-instruct"
     },
     "capabilities": ["chat", "streaming", "tool_calls", "reasoning", "openai_compatible"]
   },
@@ -54,7 +56,9 @@
     "default_model_for": {
       "chat": "nvidia/llama-3.3-nemotron-super-49b-v1",
       "reasoning": "nvidia/llama-3.3-nemotron-super-49b-v1",
-      "general": "meta/llama-3.3-70b-instruct"
+      "general": "meta/llama-3.3-70b-instruct",
+      "fast": "nvidia/nvidia-nemotron-nano-9b-v2",
+      "coding": "qwen/qwen3-coder-480b-a35b-instruct"
     },
     "capabilities": {
       "native_tool_calling": true,

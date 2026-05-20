@@ -1,16 +1,15 @@
 import {
   CalendarDays,
   FilePlus2,
-  FolderPlus,
-  MessageSquarePlus,
   Mic,
   Paperclip,
   Plus,
   SendHorizontal,
   Settings,
   Square,
-  type LucideIcon,
+  type LucideProps,
 } from "lucide-react";
+import type { ElementType } from "react";
 
 import { cn } from "../lib/cn";
 
@@ -26,13 +25,53 @@ export type WarmActionIconKind =
   | "stop"
   | "tool";
 
-const ICONS: Record<WarmActionIconKind, LucideIcon> = {
+function NewChatIcon({ size = 24, strokeWidth = 2, ...props }: LucideProps) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={strokeWidth}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      {...props}
+    >
+      <path d="M11 4H7.5C5.57 4 4 5.57 4 7.5v9C4 18.43 5.57 20 7.5 20h9c1.93 0 3.5-1.57 3.5-3.5V13" />
+      <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+    </svg>
+  );
+}
+
+function NewFolderIcon({ size = 24, strokeWidth = 2, ...props }: LucideProps) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={strokeWidth}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      {...props}
+    >
+      <path d="M13 19H6.5C4.57 19 3 17.43 3 15.5V7.5C3 5.57 4.57 4 6.5 4H9.5C10.8 4 11.2 7 12.5 7H18.5C20.43 7 22 8.57 22 10.5V12.5" />
+      <path d="M15 16.5H21M18 13.5V19.5" />
+    </svg>
+  );
+}
+
+const ICONS: Record<WarmActionIconKind, ElementType<LucideProps>> = {
   attach: Paperclip,
   calendar: CalendarDays,
-  group: FolderPlus,
+  group: NewFolderIcon,
   menu: Plus,
   mic: Mic,
-  newChat: MessageSquarePlus,
+  newChat: NewChatIcon,
   send: SendHorizontal,
   settings: Settings,
   stop: Square,
@@ -40,16 +79,16 @@ const ICONS: Record<WarmActionIconKind, LucideIcon> = {
 };
 
 const TONES: Record<WarmActionIconKind, string> = {
-  attach: "from-zinc-100/14 via-zinc-500/10 to-zinc-950/30 text-zinc-100 ring-zinc-400/10",
-  calendar: "from-zinc-100/16 via-zinc-600/12 to-zinc-950/35 text-zinc-100 ring-zinc-300/12",
-  group: "from-zinc-100/15 via-stone-400/12 to-zinc-950/35 text-zinc-100 ring-zinc-300/12",
-  menu: "from-zinc-100/12 via-zinc-500/10 to-zinc-950/35 text-zinc-100 ring-zinc-400/10",
-  mic: "from-zinc-100/14 via-stone-500/10 to-zinc-950/35 text-zinc-100 ring-zinc-400/10",
-  newChat: "from-zinc-100/18 via-zinc-500/12 to-zinc-950/35 text-zinc-50 ring-zinc-300/14",
-  send: "from-zinc-50 via-zinc-200 to-zinc-400 text-zinc-950 ring-white/30",
-  settings: "from-zinc-100/10 via-zinc-500/10 to-zinc-950/30 text-zinc-100 ring-zinc-300/10",
-  stop: "from-zinc-50 via-zinc-200 to-zinc-400 text-zinc-950 ring-white/30",
-  tool: "from-zinc-100/14 via-zinc-500/10 to-zinc-950/35 text-zinc-100 ring-zinc-300/12",
+  attach: "text-zinc-100",
+  calendar: "text-zinc-100",
+  group: "text-zinc-100",
+  menu: "text-zinc-100",
+  mic: "text-zinc-100",
+  newChat: "text-zinc-50",
+  send: "bg-zinc-100 text-zinc-950",
+  settings: "text-zinc-100",
+  stop: "bg-zinc-100 text-zinc-950",
+  tool: "text-zinc-100",
 };
 
 type WarmActionIconProps = {
@@ -77,7 +116,7 @@ export function WarmActionIcon({
     <span
       aria-hidden="true"
       className={cn(
-        "inline-flex shrink-0 items-center justify-center bg-gradient-to-br shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_8px_18px_rgba(0,0,0,0.22)] ring-1",
+        "inline-flex shrink-0 items-center justify-center bg-transparent",
         sizing.shell,
         TONES[kind],
         className,

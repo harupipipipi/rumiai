@@ -23,6 +23,7 @@ VALID_THINKING_LEVELS = {"none", "low", "medium", "high", "xhigh"}
 DEFAULT_MODEL = "stub/default"
 LEGACY_CLOUD_DEFAULT_MODEL = "openrouter/tencent/hy3-preview:free"
 DEFAULT_THINKING_LEVEL = "medium"
+CEREBRAS_REASONING_MODELS = {"gpt-oss-120b", "zai-glm-4.7"}
 
 
 class ModelRuntimeSettingsService:
@@ -240,6 +241,16 @@ class ModelRuntimeSettingsService:
             else:
                 result["provider_params"] = {}
             result["level"] = effort if normalized == "xhigh" and provider == "openai" else normalized
+        elif provider == "cerebras":
+            model_key = str(model_id or "").strip()
+            if model_key.startswith("cerebras/"):
+                model_key = model_key.split("/", 1)[1]
+            effort = "high" if normalized == "xhigh" else normalized
+            if effort != "none" and model_key in CEREBRAS_REASONING_MODELS:
+                result["provider_params"] = {"reasoning_effort": effort}
+            else:
+                result["provider_params"] = {}
+            result["level"] = effort if normalized == "xhigh" else normalized
         elif provider == "anthropic":
             result["provider_params"] = {"thinking_level": normalized}
         elif provider == "google":

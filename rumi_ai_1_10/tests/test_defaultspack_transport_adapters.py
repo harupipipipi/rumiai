@@ -82,6 +82,52 @@ class TestDefaultspackTransportAdapters(unittest.TestCase):
         finally:
             sys.path[:] = original_path
 
+    def test_chat_send_explicit_empty_selected_tools_blocks_inferred_computer_tools(self):
+        repo_root = Path(__file__).resolve().parent.parent
+        pack_root = repo_root / "ecosystem" / "defaultspack"
+        original_path = list(sys.path)
+        try:
+            sys.path.insert(0, str(pack_root))
+            chat_send = importlib.import_module("blocks.chat.send")
+            updated = chat_send._with_inferred_tools(
+                {
+                    "tools": [],
+                    "params": {"tool_policy": {"selected_tools": []}},
+                    "message": {"metadata": {"selected_tools": []}},
+                },
+                ["computer_use", "browser_computer"],
+            )
+            self.assertEqual(updated["tools"], [])
+        finally:
+            sys.path[:] = original_path
+
+    def test_chat_send_metadata_selected_tools_disables_auto_tool_resolution(self):
+        repo_root = Path(__file__).resolve().parent.parent
+        pack_root = repo_root / "ecosystem" / "defaultspack"
+        original_path = list(sys.path)
+        try:
+            sys.path.insert(0, str(pack_root))
+            chat_send = importlib.import_module("blocks.chat.send")
+            captured = {}
+            original_resolve = chat_send._resolve_selected_tools
+
+            def fake_resolve(raw_tools):
+                captured["raw_tools"] = raw_tools
+                return [], []
+
+            try:
+                chat_send._resolve_selected_tools = fake_resolve
+                updated = chat_send._available_tools(
+                    {},
+                    {"message": {"metadata": {"selected_tools": []}}},
+                )
+            finally:
+                chat_send._resolve_selected_tools = original_resolve
+            self.assertEqual(captured["raw_tools"], [])
+            self.assertEqual(updated[0], [])
+        finally:
+            sys.path[:] = original_path
+
 
 if __name__ == "__main__":
     unittest.main()

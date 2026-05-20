@@ -1,15 +1,15 @@
 {
-  "id": "nvidia/meta/llama-3.3-70b-instruct",
+  "id": "nvidia/deepseek-ai/deepseek-v4-flash",
   "category": "llm_model",
   "version": "1",
   "provider_id": "nvidia",
-  "model_id": "meta/llama-3.3-70b-instruct",
-  "display_name": "Llama 3.3 70B Instruct via NVIDIA NIM",
+  "model_id": "deepseek-ai/deepseek-v4-flash",
+  "display_name": "DeepSeek V4 Flash via NVIDIA NIM",
   "type": "chat",
   "enabled": true,
-  "priority": 2,
+  "priority": 9,
   "defaults": {
-    "general": true
+    "fast": true
   },
   "capabilities": {
     "chat": true,

@@ -1,22 +1,19 @@
 {
-  "id": "nvidia/meta/llama-3.3-70b-instruct",
+  "id": "nvidia/qwen/qwen3-next-80b-a3b-instruct",
   "category": "llm_model",
   "version": "1",
   "provider_id": "nvidia",
-  "model_id": "meta/llama-3.3-70b-instruct",
-  "display_name": "Llama 3.3 70B Instruct via NVIDIA NIM",
+  "model_id": "qwen/qwen3-next-80b-a3b-instruct",
+  "display_name": "Qwen3 Next 80B A3B Instruct via NVIDIA NIM",
   "type": "chat",
   "enabled": true,
-  "priority": 2,
-  "defaults": {
-    "general": true
-  },
+  "priority": 7,
   "capabilities": {
     "chat": true,
     "streaming": true,
     "reasoning": false,
     "tool_calls": true,
-    "parallel_tool_calls": false,
+    "parallel_tool_calls": true,
     "vision": false
   }
 }

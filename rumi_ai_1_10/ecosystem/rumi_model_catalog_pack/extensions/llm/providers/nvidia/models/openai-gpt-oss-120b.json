@@ -1,17 +1,13 @@
 {
-  "id": "nvidia/nvidia/llama-3.3-nemotron-super-49b-v1",
+  "id": "nvidia/openai/gpt-oss-120b",
   "category": "llm_model",
   "version": "1",
   "provider_id": "nvidia",
-  "model_id": "nvidia/llama-3.3-nemotron-super-49b-v1",
-  "display_name": "Llama 3.3 Nemotron Super 49B via NVIDIA NIM",
+  "model_id": "openai/gpt-oss-120b",
+  "display_name": "GPT OSS 120B via NVIDIA NIM",
   "type": "reasoning",
   "enabled": true,
-  "priority": 1,
-  "defaults": {
-    "chat": true,
-    "reasoning": true
-  },
+  "priority": 4,
   "capabilities": {
     "chat": true,
     "streaming": true,
@@ -21,6 +17,6 @@
     "vision": false
   },
   "supports_thinking": true,
-  "thinking_levels": ["low", "medium", "high"],
+  "thinking_levels": ["low", "medium", "high", "xhigh"],
   "default_thinking_level": "medium"
 }

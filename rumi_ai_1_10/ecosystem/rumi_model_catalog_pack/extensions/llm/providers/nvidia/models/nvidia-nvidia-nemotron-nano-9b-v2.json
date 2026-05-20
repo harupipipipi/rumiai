@@ -1,22 +1,22 @@
 {
-  "id": "nvidia/meta/llama-3.3-70b-instruct",
+  "id": "nvidia/nvidia/nvidia-nemotron-nano-9b-v2",
   "category": "llm_model",
   "version": "1",
   "provider_id": "nvidia",
-  "model_id": "meta/llama-3.3-70b-instruct",
-  "display_name": "Llama 3.3 70B Instruct via NVIDIA NIM",
+  "model_id": "nvidia/nvidia-nemotron-nano-9b-v2",
+  "display_name": "NVIDIA Nemotron Nano 9B v2 via NVIDIA NIM",
   "type": "chat",
   "enabled": true,
-  "priority": 2,
+  "priority": 15,
   "defaults": {
-    "general": true
+    "fast": true
   },
   "capabilities": {
     "chat": true,
     "streaming": true,
     "reasoning": false,
     "tool_calls": true,
-    "parallel_tool_calls": false,
+    "parallel_tool_calls": true,
     "vision": false
   }
 }

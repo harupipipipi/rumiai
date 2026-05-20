@@ -886,6 +886,16 @@ def _load_models_for_provider(entry: Dict[str, Any]) -> List[Dict[str, Any]]:
     return models
 
 
+def _capability_fields(raw_capabilities: Any) -> tuple[List[str], Dict[str, Any]]:
+    if isinstance(raw_capabilities, dict):
+        capability_map = dict(raw_capabilities)
+        return [str(key) for key, value in capability_map.items() if bool(value)], capability_map
+    if isinstance(raw_capabilities, (list, tuple, set)):
+        capability_list = [str(item) for item in raw_capabilities if str(item or "").strip()]
+        return capability_list, {item: True for item in capability_list}
+    return [], {}
+
+
 def _normalize_model_token(value: Any) -> str:
     return str(value or "").strip().lower()
 
@@ -949,6 +959,9 @@ def get_all_known_models(provider_id=None, active_provider_ids=None):
             defaults = dict(raw.get("defaults", {}))
             metadata = dict(raw.get("metadata", {}))
             pricing = dict(raw.get("pricing", {})) if isinstance(raw.get("pricing"), dict) else {}
+            capabilities, capability_map = _capability_fields(raw.get("capabilities", []))
+            if capability_map and "capabilities" not in metadata:
+                metadata["capabilities"] = capability_map
             metadata.update(
                 {
                     "provider_model_key": qualified_model_id,
@@ -971,7 +984,7 @@ def get_all_known_models(provider_id=None, active_provider_ids=None):
                 "display_name": display_name,
                 "type": str(raw.get("type", "chat")),
                 "context_window": int(raw.get("context_window", 0) or 0),
-                "capabilities": list(raw.get("capabilities", [])),
+                "capabilities": capabilities,
                 "availability": dict(provider_entry["availability"]),
                 "supports_invoke": bool(provider_entry["availability"].get("supports_invoke", False)),
                 "defaults": defaults,

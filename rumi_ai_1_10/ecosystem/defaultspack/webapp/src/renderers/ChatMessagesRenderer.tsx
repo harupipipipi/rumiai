@@ -304,6 +304,24 @@ function WidgetCard({ widget }: { widget: Record<string, unknown> }) {
   );
 }
 
+export function summarizePendingToolNames(toolNames: string[], visibleLimit = 2): { hiddenCount: number; summary: string; totalCount: number; visibleNames: string[] } {
+  const uniqueNames = Array.from(new Set(toolNames.map((name) => name.trim()).filter(Boolean)));
+  const visibleNames = uniqueNames.slice(0, visibleLimit);
+  const hiddenCount = Math.max(0, uniqueNames.length - visibleNames.length);
+  const listed = visibleNames.join("、");
+  const summary = hiddenCount > 0
+    ? `${listed}、その他 ${hiddenCount} 個が見込まれました`
+    : listed
+      ? `${listed} が見込まれました`
+      : "";
+  return {
+    hiddenCount,
+    summary,
+    totalCount: uniqueNames.length,
+    visibleNames,
+  };
+}
+
 function activityPhase(status: string | null | undefined, toolNames: string[]): { label: string; detail: string } {
   const text = String(status ?? "").toLowerCase();
   if (text.includes("scheduler") || text.includes("待機")) {
@@ -313,7 +331,8 @@ function activityPhase(status: string | null | undefined, toolNames: string[]): 
     return { label: "移動準備中", detail: status || "新しい会話を準備しています" };
   }
   if (toolNames.length > 0 || text.includes("tool") || text.includes("実行")) {
-    return { label: "tool 実行中", detail: status || `${toolNames.length} 件を進めています` };
+    const summary = summarizePendingToolNames(toolNames).summary;
+    return { label: "tool 準備中", detail: summary || status || "tool を確認しています" };
   }
   return { label: "考えています", detail: status || "応答を組み立てています" };
 }
@@ -743,41 +762,30 @@ function ToolActivityTray({
 
 function PendingToolTray({ toolNames, toolStartedAt = {} }: { toolNames: string[]; toolStartedAt?: Record<string, number> }) {
   const now = useActivityNow(toolNames.some((name) => Boolean(toolStartedAt[name])));
-  if (toolNames.length === 0) return null;
-  const groups = new Map<string, { label: string; names: string[] }>();
-  for (const name of toolNames) {
-    const folder = toolFolderFor(name);
-    const existing = groups.get(folder.id);
-    if (existing) {
-      existing.names.push(name);
-    } else {
-      groups.set(folder.id, { label: folder.label, names: [name] });
-    }
-  }
+  const summary = summarizePendingToolNames(toolNames);
+  if (summary.totalCount === 0) return null;
 
   return (
     <div className="mt-2 ml-5 w-[min(820px,calc(100vw-64px))] px-1 py-2">
       <div className="mb-2 flex items-center gap-2 text-[11px] font-medium text-zinc-400">
         <Loader2 size={12} className="animate-spin text-blue-300" />
-        <span>実行中の tool</span>
+        <span>見込まれた tool</span>
       </div>
-      <div className="space-y-2">
-        {[...groups.entries()].map(([id, group]) => (
-          <div key={id} className="space-y-1.5">
-            <div className="flex items-center gap-1.5 text-[11px] text-zinc-500">
-              <span className="h-1.5 w-1.5 rounded-full bg-zinc-700" />
-              <span>{group.label}</span>
-            </div>
-            <div className="ml-1.5 flex flex-wrap gap-1.5 border-l border-zinc-800/70 pl-3">
-              {group.names.map((name) => (
-                <span key={name} className="inline-flex max-w-[220px] items-baseline rounded-md bg-zinc-900/50 px-2 py-1 text-[11px] text-zinc-300">
-                  <span className="truncate">{name}</span>
-                  {toolStartedAt[name] && <span className="ml-1.5 font-mono text-[10px] text-zinc-600">{elapsedDurationLabel(toolStartedAt[name], now)}</span>}
-                </span>
-              ))}
-            </div>
-          </div>
-        ))}
+      <div className="flex flex-wrap gap-1.5">
+        {summary.visibleNames.map((name) => {
+          const folder = toolFolderFor(name);
+          return (
+            <span key={name} className="inline-flex max-w-[220px] items-baseline gap-1.5 rounded-md bg-zinc-900/50 px-2 py-1 text-[11px] text-zinc-300" title={folder.label}>
+              <span className="truncate">{name}</span>
+              {toolStartedAt[name] && <span className="font-mono text-[10px] text-zinc-600">{elapsedDurationLabel(toolStartedAt[name], now)}</span>}
+            </span>
+          );
+        })}
+        {summary.hiddenCount > 0 && (
+          <span className="inline-flex items-center rounded-md bg-zinc-900/40 px-2 py-1 text-[11px] text-zinc-500">
+            その他 {summary.hiddenCount} 個が見込まれました
+          </span>
+        )}
       </div>
     </div>
   );

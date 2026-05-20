@@ -80,7 +80,7 @@ def infer_model_capabilities(model: dict[str, Any]) -> ModelCapabilityRecord:
             json_schema=structured_output,
             structured_output=structured_output,
             thinking=supports_thinking,
-            parallel_tool_calls=supports_tool_calling and provider_id in {"openai", "google", "openai_compatible", "genspark"},
+            parallel_tool_calls=_supports_parallel_tool_calls(item, supports_tool_calling, provider_id),
             streaming=_capability_truthy(item, "streaming", default=True),
         ),
         thinking=ThinkingCapability(
@@ -144,6 +144,15 @@ def _supports_tool_calling(model: dict[str, Any]) -> bool:
     if _capability_truthy(model, "tool_calling", "tool_calls", "native_tool_calling", "tools"):
         return True
     return provider_id in TOOL_CAPABLE_PROVIDERS and bool(TOOL_MODEL_RE.search(model_id))
+
+
+def _supports_parallel_tool_calls(model: dict[str, Any], supports_tool_calling: bool, provider_id: str) -> bool:
+    if not supports_tool_calling:
+        return False
+    explicit = _explicit_bool(model, "parallel_tool_calls")
+    if explicit is not None:
+        return explicit
+    return provider_id in {"openai", "google", "openai_compatible", "genspark"}
 
 
 def _supports_fast_mode(model: dict[str, Any]) -> bool:

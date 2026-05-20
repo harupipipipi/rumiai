@@ -138,3 +138,41 @@ def test_run_request_tool_assist_off_keeps_unselected_tools_empty(monkeypatch):
 
     assert resolved == []
     assert unknown == []
+
+
+def test_run_request_explicit_empty_selected_tools_blocks_inferred_computer_tools():
+    from domain.chat import run_request
+
+    updated = run_request._with_inferred_tools(
+        {
+            "tools": [],
+            "params": {"tool_policy": {"selected_tools": []}},
+            "message": {"metadata": {"selected_tools": []}},
+        },
+        ["computer_use", "browser_computer"],
+    )
+
+    assert updated["tools"] == []
+
+
+def test_run_request_metadata_selected_tools_disables_auto_recommendation(monkeypatch):
+    from domain.chat import run_request
+
+    captured = {}
+
+    def fake_resolve(raw_tools, **_kwargs):
+        captured["raw_tools"] = raw_tools
+        return [], []
+
+    monkeypatch.setattr(run_request, "_resolve_selected_tools", fake_resolve)
+    monkeypatch.setattr(run_request, "resolve_runtime_profile_context", lambda context: context or {})
+    monkeypatch.setattr(run_request, "filter_tool_definitions_for_runtime_profile", lambda tools, *_args, **_kwargs: tools)
+    monkeypatch.setattr(run_request, "adapt_tool_definitions", lambda tools: tools)
+
+    run_request._available_tools(
+        {},
+        {"message": {"metadata": {"selected_tools": []}}},
+        user_text="search the web",
+    )
+
+    assert captured["raw_tools"] == []
