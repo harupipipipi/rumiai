@@ -1469,6 +1469,61 @@ def test_browser_computer_click_sets_visible_target_window(tmp_path, monkeypatch
     assert controller._background_requested({"app": "Google Chrome", "background": True}) is True
 
 
+def test_browser_computer_type_does_not_refocus_when_target_already_active(tmp_path, monkeypatch):
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+
+    controller = BrowserComputerController(artifact_root=tmp_path)
+    window = {
+        "app": "Google Chrome",
+        "title": "Google Gemini",
+        "x": 20,
+        "y": 40,
+        "width": 1200,
+        "height": 800,
+        "active": True,
+        "window_id": 7127,
+    }
+    monkeypatch.setattr(controller, "_active_window", lambda: dict(window))
+    monkeypatch.setattr(
+        controller,
+        "_focus_window",
+        lambda selected: (_ for _ in ()).throw(AssertionError("already-active target should not be refocused")),
+    )
+
+    assert controller._focus_action_target({"window": dict(window)}) is True
+
+
+def test_browser_computer_active_window_capture_replaces_stale_selected_window(tmp_path, monkeypatch):
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+
+    controller = BrowserComputerController(artifact_root=tmp_path)
+    controller._session_path = tmp_path / "shared" / "browser_sessions.json"
+    stale_window = {
+        "app": "Google Chrome",
+        "title": "Old Gemini",
+        "x": 10,
+        "y": 20,
+        "width": 800,
+        "height": 600,
+        "window_id": 7127,
+    }
+    active_window = {
+        "app": "Google Chrome",
+        "title": "Rumi CUA Advanced Test",
+        "x": 0,
+        "y": 37,
+        "width": 1470,
+        "height": 919,
+        "active": True,
+        "window_id": 3023,
+    }
+    controller._write_computer_state({"target_window": stale_window})
+    monkeypatch.setattr(controller, "_active_window", lambda: dict(active_window))
+
+    assert controller._capture_target({"target": "active_window"})["window_id"] == 3023
+    assert controller._computer_state()["target_window"]["title"] == "Rumi CUA Advanced Test"
+
+
 def test_browser_computer_background_type_request_is_visible_only_error(tmp_path, monkeypatch):
     from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
     import ecosystem.rumi_default_tools_pack.domain.tool.browser_computer as browser_computer
