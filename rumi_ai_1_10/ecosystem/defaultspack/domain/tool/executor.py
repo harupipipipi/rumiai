@@ -215,6 +215,7 @@ class ToolExecutor:
             if fallback is not None:
                 return fallback
             denied_fallback = self._fallback_local_tool_if_first_party_capability_denied(
+                tool_def,
                 request,
                 context,
                 response,
@@ -232,7 +233,7 @@ class ToolExecutor:
             }
         return self._tool_response_from_capability(response, tool_def, request.get("args") or {})
 
-    def _fallback_local_tool_if_first_party_capability_denied(self, request, context, response):
+    def _fallback_local_tool_if_first_party_capability_denied(self, tool_def, request, context, response):
         if request.get("type") != "function.call":
             return None
         if bool(getattr(response, "success", False)):
@@ -243,6 +244,12 @@ class ToolExecutor:
         pack_id, _, function_id = qualified_name.partition(":")
         local_tool = self._first_party_browser_computer_tool_for_function(pack_id, function_id)
         if local_tool not in {"browser_computer", "browser_use", "computer_use"}:
+            return None
+        if (
+            _requires_approval(tool_def)
+            and _context_is_user_requested_computer_use(context)
+            and not _context_has_tool_server_approval(context)
+        ):
             return None
         return self._execute_local(local_tool, request.get("args") or {}, context)
 
@@ -1178,6 +1185,19 @@ def _is_shell_or_git(tool_def):
 
 def _is_policy_allow_context(context):
     return internal_tool_decision_allows(context)
+
+
+def _context_has_tool_server_approval(context):
+    if not isinstance(context, dict):
+        return False
+    policy = policy_from_context(context)
+    if bool(policy.get("yolo_mode")) or _is_policy_allow_context(context):
+        return True
+    return bool(context.get("_tool_server_approved"))
+
+
+def _context_is_user_requested_computer_use(context):
+    return isinstance(context, dict) and bool(context.get("user_requested_computer_use"))
 
 
 def _function_call_context(context, tool_def):
