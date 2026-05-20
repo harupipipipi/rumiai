@@ -71,6 +71,36 @@ def test_workspace_resolver_prefers_id_then_legacy_root_then_cwd(tmp_path, codin
     assert by_cwd.source == "cwd"
 
 
+def test_workspace_resolver_inherits_profile_policy_when_explicit_values_missing(tmp_path, coding_workspace_store):
+    from domain.coding.workspace_resolver import WorkspaceResolver
+    from domain.coding.workspace_store import WorkspaceStore
+
+    group_root = tmp_path / "group"
+    explicit_root = tmp_path / "explicit"
+    legacy_root = tmp_path / "legacy"
+    group_root.mkdir()
+    explicit_root.mkdir()
+    legacy_root.mkdir()
+    WorkspaceStore().create(group_root, workspace_id="group-ws")
+    WorkspaceStore().create(explicit_root, workspace_id="explicit-ws")
+
+    resolver = WorkspaceResolver()
+    inherited = resolver.resolve({}, {"profile_policy": {"workspace_id": "group-ws"}})
+    inherited_root = resolver.resolve({}, {"profile_policy": {"workspace_root": str(legacy_root)}})
+    explicit = resolver.resolve(
+        {"workspace_id": "explicit-ws"},
+        {"profile_policy": {"workspace_id": "group-ws"}},
+    )
+
+    assert inherited.root_path == str(group_root.resolve())
+    assert inherited.workspace_id == "group-ws"
+    assert inherited.source == "workspace_id"
+    assert inherited_root.root_path == str(legacy_root.resolve())
+    assert inherited_root.source == "workspace_root"
+    assert explicit.root_path == str(explicit_root.resolve())
+    assert explicit.workspace_id == "explicit-ws"
+
+
 def test_workspace_trust_policy_gates_workspace_id_mutations(tmp_path, coding_workspace_store):
     from blocks.coding.file_write import run as file_write_run
     from blocks.coding.workspace.trust import run as trust_run

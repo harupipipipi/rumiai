@@ -47,12 +47,14 @@ export function CodingCockpit({
   selectedWorkspaceId,
   onWorkspaceSelect,
   onWorkspacesRefresh,
+  consoleScopeKey,
   variant = "sidecar",
 }: {
   workspaces: CodingWorkspaceRecord[];
   selectedWorkspaceId?: string | null;
   onWorkspaceSelect?: (workspaceId: string) => void;
   onWorkspacesRefresh?: () => void;
+  consoleScopeKey?: string;
   variant?: "sidecar" | "sidebar";
 }) {
   const selectedWorkspace = useMemo(
@@ -211,7 +213,11 @@ export function CodingCockpit({
         <ApprovalQueue onApproved={handleApprovalApproved} />
         <DiffPanel workspaceId={activeWorkspaceId} />
         <CheckpointPanel workspaceId={activeWorkspaceId} />
-        <TerminalPanel workspaceId={activeWorkspaceId} approvedDecision={approvedTerminalDecision} />
+        <TerminalPanel
+          workspaceId={activeWorkspaceId}
+          approvedDecision={approvedTerminalDecision}
+          storageKey={`rumi-terminal-logs:${consoleScopeKey ?? activeWorkspaceId ?? "default"}`}
+        />
 
         <section className="border-b border-zinc-800/60 p-3" aria-label="Browser artifacts">
           <div className="mb-2 flex items-center gap-2">
