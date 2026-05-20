@@ -1,0 +1,39 @@
+{
+  "id": "cerebras/qwen-3-235b-a22b-instruct-2507",
+  "category": "llm_model",
+  "version": "1",
+  "provider_id": "cerebras",
+  "model_id": "qwen-3-235b-a22b-instruct-2507",
+  "display_name": "Qwen 3 235B Instruct via Cerebras",
+  "type": "chat",
+  "enabled": true,
+  "priority": 3,
+  "defaults": {
+    "general": true
+  },
+  "capabilities": {
+    "chat": true,
+    "streaming": true,
+    "reasoning": false,
+    "tool_calls": true,
+    "function_calling": true,
+    "structured_outputs": true,
+    "json_mode": true,
+    "tool_choice": true,
+    "parallel_tool_calls": false,
+    "response_format": true,
+    "vision": false
+  },
+  "context_window": 131072,
+  "max_context": 131072,
+  "max_context_tokens": 131072,
+  "metadata": {
+    "service_tier_supported": true,
+    "owned_by": "Qwen",
+    "preview": true
+  },
+  "pricing": {
+    "prompt": "0.0000006",
+    "completion": "0.0000012"
+  }
+}

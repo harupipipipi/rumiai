@@ -1378,6 +1378,44 @@ def test_browser_computer_click_can_use_virtual_cursor_for_preview(tmp_path, mon
     assert result["click_marker"]["screen_y"] == 20
 
 
+def test_browser_computer_screenshot_falls_back_to_window_capture_when_rect_capture_fails(tmp_path, monkeypatch):
+    from subprocess import CalledProcessError
+
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+    import ecosystem.rumi_default_tools_pack.domain.tool.browser_computer as browser_computer
+
+    controller = BrowserComputerController(artifact_root=tmp_path)
+    monkeypatch.setattr(browser_computer.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(
+        controller,
+        "_capture_target",
+        lambda payload: {
+            "app": "Google Chrome",
+            "title": "defaultspack luxe shell",
+            "window_id": 3023,
+            "capture_rect": {"x": 0, "y": 37, "width": 1470, "height": 919},
+        },
+    )
+    calls = []
+
+    def fake_run(command, check):
+        del check
+        calls.append(command)
+        if "-R" in command:
+            raise CalledProcessError(1, command)
+        assert "-l" in command
+        return None
+
+    monkeypatch.setattr(browser_computer.subprocess, "run", fake_run)
+
+    result = controller._capture_screenshot(tmp_path / "shot.png", {"app": "Google Chrome"})
+
+    assert result["target_window"]["window_id"] == 3023
+    assert calls[0][2] == "-R"
+    assert calls[1][2] == "-l"
+    assert calls[1][3] == "3023"
+
+
 def test_browser_computer_key_rejects_background_requests(tmp_path, monkeypatch):
     from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
     import ecosystem.rumi_default_tools_pack.domain.tool.browser_computer as browser_computer
@@ -1429,6 +1467,61 @@ def test_browser_computer_click_sets_visible_target_window(tmp_path, monkeypatch
     assert state["target_window"]["app"] == "Google Chrome"
     assert controller._background_requested({}) is False
     assert controller._background_requested({"app": "Google Chrome", "background": True}) is True
+
+
+def test_browser_computer_type_does_not_refocus_when_target_already_active(tmp_path, monkeypatch):
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+
+    controller = BrowserComputerController(artifact_root=tmp_path)
+    window = {
+        "app": "Google Chrome",
+        "title": "Google Gemini",
+        "x": 20,
+        "y": 40,
+        "width": 1200,
+        "height": 800,
+        "active": True,
+        "window_id": 7127,
+    }
+    monkeypatch.setattr(controller, "_active_window", lambda: dict(window))
+    monkeypatch.setattr(
+        controller,
+        "_focus_window",
+        lambda selected: (_ for _ in ()).throw(AssertionError("already-active target should not be refocused")),
+    )
+
+    assert controller._focus_action_target({"window": dict(window)}) is True
+
+
+def test_browser_computer_active_window_capture_replaces_stale_selected_window(tmp_path, monkeypatch):
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+
+    controller = BrowserComputerController(artifact_root=tmp_path)
+    controller._session_path = tmp_path / "shared" / "browser_sessions.json"
+    stale_window = {
+        "app": "Google Chrome",
+        "title": "Old Gemini",
+        "x": 10,
+        "y": 20,
+        "width": 800,
+        "height": 600,
+        "window_id": 7127,
+    }
+    active_window = {
+        "app": "Google Chrome",
+        "title": "Rumi CUA Advanced Test",
+        "x": 0,
+        "y": 37,
+        "width": 1470,
+        "height": 919,
+        "active": True,
+        "window_id": 3023,
+    }
+    controller._write_computer_state({"target_window": stale_window})
+    monkeypatch.setattr(controller, "_active_window", lambda: dict(active_window))
+
+    assert controller._capture_target({"target": "active_window"})["window_id"] == 3023
+    assert controller._computer_state()["target_window"]["title"] == "Rumi CUA Advanced Test"
 
 
 def test_browser_computer_background_type_request_is_visible_only_error(tmp_path, monkeypatch):
@@ -4871,6 +4964,44 @@ def test_browser_open_url_can_target_vivaldi_foreground(monkeypatch):
     assert "browser_target" not in result
     assert "chrome_target" not in result
     assert calls[0][0] == ["open", "-a", "Vivaldi", "https://chatgpt.com"]
+
+
+def test_browser_open_url_approval_payload_target_app_runs_foreground(tmp_path, monkeypatch):
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+    import ecosystem.rumi_default_tools_pack.domain.tool.browser_computer as browser_computer
+
+    calls = []
+
+    def fake_popen(command, **kwargs):
+        calls.append((command, kwargs))
+
+        class Process:
+            pass
+
+        return Process()
+
+    monkeypatch.setattr(browser_computer.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(browser_computer.subprocess, "Popen", fake_popen)
+
+    controller = BrowserComputerController()
+    controller._approval_path = tmp_path / "shared" / "browser_computer_approvals.json"
+    approval = controller.run(
+        "browser.open_url",
+        {"url": "https://gemini.google.com/app", "persistent": False, "app": "Google Chrome"},
+    )
+
+    assert approval["requires_approval"] is True
+    assert approval["payload"]["target_app"] == "Google Chrome"
+
+    result = controller.run(
+        "browser.open_url",
+        {**approval["payload"], "approval_token": approval["approval_token"]},
+    )
+
+    assert result["opened"] is True
+    assert result["managed_profile"] is False
+    assert result["target_app"] == "Google Chrome"
+    assert calls[0][0] == ["open", "-a", "Google Chrome", "https://gemini.google.com/app"]
 
 
 def test_browser_open_url_app_target_bypasses_managed_profile(monkeypatch):

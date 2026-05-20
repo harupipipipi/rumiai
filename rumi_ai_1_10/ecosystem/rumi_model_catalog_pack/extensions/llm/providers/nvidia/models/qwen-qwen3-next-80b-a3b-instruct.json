@@ -1,0 +1,19 @@
+{
+  "id": "nvidia/qwen/qwen3-next-80b-a3b-instruct",
+  "category": "llm_model",
+  "version": "1",
+  "provider_id": "nvidia",
+  "model_id": "qwen/qwen3-next-80b-a3b-instruct",
+  "display_name": "Qwen3 Next 80B A3B Instruct via NVIDIA NIM",
+  "type": "chat",
+  "enabled": true,
+  "priority": 7,
+  "capabilities": {
+    "chat": true,
+    "streaming": true,
+    "reasoning": false,
+    "tool_calls": true,
+    "parallel_tool_calls": true,
+    "vision": false
+  }
+}

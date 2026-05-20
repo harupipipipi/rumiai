@@ -1,0 +1,22 @@
+{
+  "id": "nvidia/nvidia/llama-3.1-nemotron-ultra-253b-v1",
+  "category": "llm_model",
+  "version": "1",
+  "provider_id": "nvidia",
+  "model_id": "nvidia/llama-3.1-nemotron-ultra-253b-v1",
+  "display_name": "Llama 3.1 Nemotron Ultra 253B via NVIDIA NIM",
+  "type": "reasoning",
+  "enabled": true,
+  "priority": 13,
+  "capabilities": {
+    "chat": true,
+    "streaming": true,
+    "reasoning": true,
+    "tool_calls": true,
+    "parallel_tool_calls": true,
+    "vision": false
+  },
+  "supports_thinking": true,
+  "thinking_levels": ["low", "medium", "high"],
+  "default_thinking_level": "medium"
+}

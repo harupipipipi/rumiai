@@ -571,3 +571,18 @@ body {
   background-color: transparent;
   padding: 0;
 }
+
+/* Minimal shell: remove visual frames while preserving content and layout. */
+#root *,
+#root *::before,
+#root *::after {
+  border-width: 0 !important;
+  box-shadow: none !important;
+  text-shadow: none !important;
+}
+
+#root :is(input, textarea, select, button):focus,
+#root :is(input, textarea, select, button):focus-visible {
+  outline: none !important;
+  box-shadow: none !important;
+}

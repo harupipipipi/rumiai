@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { messageCopyText, shouldRenderImageBlockInChat, streamedBrowserScreenshots } from "./ChatMessagesRenderer";
+import { messageCopyText, shouldRenderImageBlockInChat, streamedBrowserScreenshots, summarizePendingToolNames } from "./ChatMessagesRenderer";
 import type { ChatUiMessage } from "./types";
 
 function message(overrides: Partial<ChatUiMessage>): ChatUiMessage {
@@ -25,6 +25,14 @@ test("message copy text includes visible text and code blocks", () => {
 
 test("message copy text falls back to raw text", () => {
   assert.equal(messageCopyText(message({ rawText: "fallback text" })), "fallback text");
+});
+
+test("pending tool summary shows two names and the remaining count", () => {
+  const summary = summarizePendingToolNames(["web_search", "browser", "calendar", "web_search"]);
+
+  assert.deepEqual(summary.visibleNames, ["web_search", "browser"]);
+  assert.equal(summary.hiddenCount, 1);
+  assert.equal(summary.summary, "web_search、browser、その他 1 個が見込まれました");
 });
 
 test("image blocks stay out of chat unless explicitly marked for display", () => {

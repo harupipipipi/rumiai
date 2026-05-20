@@ -1526,6 +1526,7 @@ class BrowserComputerController:
         return str(
             payload.get("app")
             or payload.get("application")
+            or payload.get("target_app")
             or payload.get("browser")
             or payload.get("browser_app")
             or ""
@@ -1539,6 +1540,9 @@ class BrowserComputerController:
         title = filters.get("title", "").lower()
         selected = self._capture_target(payload)
         if selected and self._window_matches_filter(selected, app=app, title=title):
+            active = self._active_window()
+            if active and self._window_records_match(active, selected):
+                return True
             self._focus_window(selected)
             return True
         if app or title:
@@ -1984,7 +1988,13 @@ class BrowserComputerController:
                         int(capture_rect.get("width", 0)),
                         int(capture_rect.get("height", 0)),
                     )
-                    subprocess.run(["screencapture", "-x", "-R", rect, str(path)], check=True)
+                    try:
+                        subprocess.run(["screencapture", "-x", "-R", rect, str(path)], check=True)
+                    except subprocess.CalledProcessError:
+                        window_id = target.get("window_id")
+                        if not window_id:
+                            raise
+                        subprocess.run(["screencapture", "-x", "-l", str(int(window_id)), str(path)], check=True)
                 else:
                     window_id = target.get("window_id")
                     if window_id:
@@ -2022,7 +2032,12 @@ class BrowserComputerController:
         if target in {"primary_display", "all_displays", "screen", "display", "desktop"}:
             return None
         if target in {"active_window", "front_window"}:
-            return self._active_window()
+            active = self._active_window()
+            if active and self._is_usable_target_window(active):
+                state = self._computer_state()
+                state["target_window"] = active
+                self._write_computer_state(state)
+            return active
         if isinstance(payload.get("window"), dict):
             selected = self._normalize_window_record(payload.get("window"))
             return selected if self._is_usable_target_window(selected) else None

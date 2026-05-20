@@ -17,6 +17,7 @@
     "streaming": true,
     "reasoning": true,
     "tool_calls": true,
+    "parallel_tool_calls": false,
     "vision": false
   },
   "supports_thinking": true,

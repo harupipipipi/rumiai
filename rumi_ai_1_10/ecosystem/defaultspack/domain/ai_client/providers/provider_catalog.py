@@ -82,7 +82,9 @@ _OPENAI_COMPATIBLE_PROVIDERS = [
         "default_base_url": "https://api.cerebras.ai/v1",
         "supports_embeddings": False,
         "curated_models": [
-            _chat("cerebras", "llama-3.3-70b", "Llama 3.3 70B"),
+            _chat("cerebras", "gpt-oss-120b", "GPT OSS 120B"),
+            _chat("cerebras", "zai-glm-4.7", "ZAI GLM 4.7"),
+            _chat("cerebras", "qwen-3-235b-a22b-instruct-2507", "Qwen 3 235B Instruct"),
             _chat("cerebras", "llama3.1-8b", "Llama 3.1 8B"),
         ],
     },
@@ -143,8 +145,12 @@ _OPENAI_COMPATIBLE_PROVIDERS = [
         "default_base_url": "https://integrate.api.nvidia.com/v1",
         "supports_embeddings": False,
         "curated_models": [
+            _chat("nvidia", "nvidia/llama-3.3-nemotron-super-49b-v1.5", "Nemotron Super 49B v1.5"),
             _chat("nvidia", "meta/llama-3.3-70b-instruct", "Meta Llama 3.3 70B Instruct"),
-            _chat("nvidia", "nvidia/llama-3.3-nemotron-super-49b-v1", "Nemotron Super 49B"),
+            _chat("nvidia", "openai/gpt-oss-120b", "GPT OSS 120B"),
+            _chat("nvidia", "openai/gpt-oss-20b", "GPT OSS 20B"),
+            _chat("nvidia", "qwen/qwen3-coder-480b-a35b-instruct", "Qwen3 Coder 480B A35B Instruct"),
+            _chat("nvidia", "nvidia/llama-3.3-nemotron-super-49b-v1", "Nemotron Super 49B v1"),
         ],
     },
     {

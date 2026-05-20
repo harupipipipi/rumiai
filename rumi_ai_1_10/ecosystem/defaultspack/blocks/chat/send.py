@@ -439,6 +439,8 @@ def _infer_requested_tools_from_message(user_text):
 def _with_inferred_tools(input_data, inferred_tool_ids):
     if not inferred_tool_ids:
         return input_data
+    if _has_explicit_selected_tools(input_data):
+        return input_data
     raw_tools = input_data.get("tools")
     existing_tools = list(raw_tools) if isinstance(raw_tools, list) else []
     merged = []
@@ -452,6 +454,16 @@ def _with_inferred_tools(input_data, inferred_tool_ids):
     updated = dict(input_data)
     updated["tools"] = merged
     return updated
+
+
+def _has_explicit_selected_tools(input_data):
+    params = input_data.get("params") if isinstance(input_data.get("params"), dict) else {}
+    tool_policy = params.get("tool_policy") if isinstance(params.get("tool_policy"), dict) else {}
+    if "selected_tools" in tool_policy:
+        return True
+    message = input_data.get("message") if isinstance(input_data.get("message"), dict) else {}
+    metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
+    return "selected_tools" in metadata
 
 
 def _computer_use_preferences_from_text(user_text):
@@ -479,6 +491,15 @@ def _apply_computer_use_context_preferences(context, user_text):
 
 def _available_tools(context, input_data):
     raw_tools = input_data.get("tools")
+    params = input_data.get("params") if isinstance(input_data.get("params"), dict) else {}
+    tool_policy = params.get("tool_policy") if isinstance(params.get("tool_policy"), dict) else {}
+    if raw_tools is None and "selected_tools" in tool_policy:
+        raw_tools = tool_policy.get("selected_tools")
+    if raw_tools is None:
+        message = input_data.get("message") if isinstance(input_data.get("message"), dict) else {}
+        metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
+        if "selected_tools" in metadata:
+            raw_tools = metadata.get("selected_tools")
     try:
         tools, unknown_tools = _resolve_selected_tools(raw_tools)
     except Exception:

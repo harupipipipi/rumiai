@@ -213,11 +213,16 @@ class OpenAIProvider(BaseProvider):
             translated["reasoning_effort"] = "high" if thinking_level == "xhigh" else thinking_level
         return translated
 
+    def _translate_model_params(self, model, params):
+        del model
+        return dict(params or {})
+
     @staticmethod
     def _copy_chat_params(body, params):
         for k in (
             "temperature",
             "max_tokens",
+            "max_completion_tokens",
             "top_p",
             "frequency_penalty",
             "presence_penalty",
@@ -263,6 +268,7 @@ class OpenAIProvider(BaseProvider):
 
     def complete(self, model, messages, tools, params):
         params = self._translate_params(params)
+        params = self._translate_model_params(model, params)
         body = {"model": model, "messages": self.build_request(messages)}
         if tools:
             body["tools"] = tools
@@ -272,6 +278,7 @@ class OpenAIProvider(BaseProvider):
 
     def stream(self, model, messages, tools, params):
         params = self._translate_params(params)
+        params = self._translate_model_params(model, params)
         body = {"model": model, "messages": self.build_request(messages)}
         if tools:
             body["tools"] = tools

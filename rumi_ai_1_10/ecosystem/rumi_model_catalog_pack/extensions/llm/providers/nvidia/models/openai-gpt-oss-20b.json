@@ -1,0 +1,25 @@
+{
+  "id": "nvidia/openai/gpt-oss-20b",
+  "category": "llm_model",
+  "version": "1",
+  "provider_id": "nvidia",
+  "model_id": "openai/gpt-oss-20b",
+  "display_name": "GPT OSS 20B via NVIDIA NIM",
+  "type": "reasoning",
+  "enabled": true,
+  "priority": 5,
+  "defaults": {
+    "fast": true
+  },
+  "capabilities": {
+    "chat": true,
+    "streaming": true,
+    "reasoning": true,
+    "tool_calls": true,
+    "parallel_tool_calls": false,
+    "vision": false
+  },
+  "supports_thinking": true,
+  "thinking_levels": ["low", "medium", "high"],
+  "default_thinking_level": "medium"
+}

@@ -1,0 +1,25 @@
+{
+  "id": "nvidia/qwen/qwen3-coder-480b-a35b-instruct",
+  "category": "llm_model",
+  "version": "1",
+  "provider_id": "nvidia",
+  "model_id": "qwen/qwen3-coder-480b-a35b-instruct",
+  "display_name": "Qwen3 Coder 480B A35B Instruct via NVIDIA NIM",
+  "type": "chat",
+  "enabled": true,
+  "priority": 6,
+  "defaults": {
+    "coding": true
+  },
+  "capabilities": {
+    "chat": true,
+    "streaming": true,
+    "reasoning": false,
+    "tool_calls": true,
+    "parallel_tool_calls": true,
+    "vision": false
+  },
+  "context_window": 262144,
+  "max_context": 262144,
+  "max_context_tokens": 262144
+}

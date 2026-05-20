@@ -14,6 +14,20 @@ class OpenAICompatibleProvider(OpenAIProvider):
     KNOWN_MODELS: List[Dict[str, Any]] = []
     curated_models: List[Dict[str, Any]] = []
     DISPLAY_NAME = "OpenAI Compatible"
+    _SUPPRESS_DEFAULT_REASONING_PARAM = "_suppress_default_reasoning_effort"
+    _CEREBRAS_REQUEST_DEFAULTS: Dict[str, Dict[str, Any]] = {
+        "gpt-oss-120b": {
+            "temperature": 1,
+            "top_p": 1,
+            "reasoning_effort": "high",
+        },
+        "llama3.1-8b": {
+            "max_completion_tokens": 2048,
+            "temperature": 0.2,
+            "top_p": 1,
+        },
+    }
+    _CEREBRAS_REASONING_MODELS = {"gpt-oss-120b", "zai-glm-4.7"}
 
     def __init__(
         self,
@@ -214,6 +228,99 @@ class OpenAICompatibleProvider(OpenAIProvider):
             if key in raw:
                 normalized[key] = raw[key]
         return normalized
+
+    def _known_model_entry(self, model: str) -> Dict[str, Any]:
+        model_ref = str(model or "").strip()
+        model_id = model_ref.split("/", 1)[1] if "/" in model_ref and model_ref.startswith(f"{self.provider_id}/") else model_ref
+        qualified = f"{self.provider_id}/{model_id}" if model_id else model_ref
+        for item in self.KNOWN_MODELS:
+            if not isinstance(item, dict):
+                continue
+            if model_ref in {
+                str(item.get("id") or "").strip(),
+                str(item.get("model_id") or "").strip(),
+            }:
+                return item
+            if qualified and qualified == str(item.get("id") or "").strip():
+                return item
+        return {}
+
+    @staticmethod
+    def _capability_map(model_entry: Dict[str, Any]) -> Dict[str, Any]:
+        raw = model_entry.get("capabilities") if isinstance(model_entry, dict) else {}
+        if isinstance(raw, dict):
+            capability_map = dict(raw)
+        elif isinstance(raw, list):
+            capability_map = {str(item): True for item in raw if str(item or "").strip()}
+        else:
+            capability_map = {}
+        metadata = model_entry.get("metadata") if isinstance(model_entry, dict) else {}
+        if isinstance(metadata, dict) and isinstance(metadata.get("capabilities"), dict):
+            capability_map.update(metadata["capabilities"])
+        return capability_map
+
+    def _model_request_defaults(self, model: str, model_entry: Dict[str, Any]) -> Dict[str, Any]:
+        metadata = model_entry.get("metadata") if isinstance(model_entry, dict) else {}
+        for key in ("request_defaults", "default_request_params"):
+            defaults = metadata.get(key) if isinstance(metadata, dict) else None
+            if isinstance(defaults, dict):
+                return dict(defaults)
+        model_id = str(model or "").strip()
+        if "/" in model_id and model_id.startswith(f"{self.provider_id}/"):
+            model_id = model_id.split("/", 1)[1]
+        if self.provider_id == "cerebras":
+            return dict(self._CEREBRAS_REQUEST_DEFAULTS.get(model_id, {}))
+        return {}
+
+    def _model_supports_reasoning(self, model: str, model_entry: Dict[str, Any]) -> bool:
+        capability_map = self._capability_map(model_entry)
+        if "reasoning" in capability_map:
+            return bool(capability_map.get("reasoning"))
+        if "thinking" in capability_map:
+            return bool(capability_map.get("thinking"))
+        if isinstance(model_entry, dict) and "supports_thinking" in model_entry:
+            return bool(model_entry.get("supports_thinking"))
+        model_id = str(model or "").strip()
+        if "/" in model_id and model_id.startswith(f"{self.provider_id}/"):
+            model_id = model_id.split("/", 1)[1]
+        return self.provider_id == "cerebras" and model_id in self._CEREBRAS_REASONING_MODELS
+
+    @staticmethod
+    def _translate_params(params):
+        raw = dict(params or {})
+        translated = OpenAIProvider._translate_params(raw)
+        thinking_level = str(raw.get("thinking_level") or "").strip().lower()
+        reasoning_effort = str(raw.get("reasoning_effort") or "").strip().lower()
+        if thinking_level == "none" or reasoning_effort == "none":
+            translated.pop("reasoning_effort", None)
+            translated[OpenAICompatibleProvider._SUPPRESS_DEFAULT_REASONING_PARAM] = True
+        return translated
+
+    def _translate_cerebras_model_params(self, model: str, params: Dict[str, Any]) -> Dict[str, Any]:
+        translated = dict(params or {})
+        suppress_default_reasoning = bool(translated.pop(self._SUPPRESS_DEFAULT_REASONING_PARAM, False))
+        if str(translated.get("reasoning_effort") or "").strip().lower() == "none":
+            suppress_default_reasoning = True
+            translated.pop("reasoning_effort", None)
+        if "max_tokens" in translated:
+            if "max_completion_tokens" not in translated:
+                translated["max_completion_tokens"] = translated["max_tokens"]
+            translated.pop("max_tokens", None)
+
+        model_entry = self._known_model_entry(model)
+        for key, value in self._model_request_defaults(model, model_entry).items():
+            if key == "reasoning_effort" and suppress_default_reasoning:
+                continue
+            translated.setdefault(key, value)
+
+        if not self._model_supports_reasoning(model, model_entry):
+            translated.pop("reasoning_effort", None)
+        return translated
+
+    def _translate_model_params(self, model, params):
+        if self.provider_id == "cerebras":
+            return self._translate_cerebras_model_params(model, params)
+        return super()._translate_model_params(model, params)
 
     def list_models(self):
         provider_name = str(self.provider_id or getattr(self, "provider_name", "") or "").strip()

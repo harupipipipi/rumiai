@@ -7,6 +7,7 @@ import { CodingWorkspacePicker } from "../components/coding/CodingWorkspacePicke
 import {
   filterAtMentionFiles,
   insertAtMentionText,
+  composerChromeWidgetStyle,
   modelCandidateMenuKeyAction,
   nextModelCandidateIndex,
   profileNeedsApiKey,
@@ -90,6 +91,49 @@ test("slash key focuses composer only for plain document shortcuts", () => {
   assert.equal(shouldFocusComposerForSlashKey({ ...base, defaultPrevented: true }, null), false);
 });
 
+test("composer chrome widgets declare layout widths separately from actions", () => {
+  assert.deepEqual(
+    composerChromeWidgetStyle({ basis: "14rem", min: "11rem", max: "15rem", shrink: 1 }),
+    { flex: "0 1 14rem", minWidth: "11rem", maxWidth: "15rem" },
+  );
+
+  const html = renderToStaticMarkup(
+    createElement(ComposerRenderer, {
+      input: "",
+      placeholder: "メッセージを入力...",
+      isGenerating: false,
+      selectedProfile: {
+        profile_id: "google/gemini",
+        display_name: "Gemini",
+        provider_id: "google",
+        model_id: "gemini",
+        supports_thinking: true,
+        thinking_levels: ["high"],
+      },
+      favoriteProfiles: [],
+      inlineExtensions: [],
+      belowExtensions: [],
+      thinkingLevel: "high",
+      contextUsage: { ratio: 0, usedTokens: 0, maxContext: 0, label: "0%" },
+      onInputChange: () => undefined,
+      onSubmit: () => undefined,
+      onModelProfileSelect: () => undefined,
+      onThinkingLevelChange: () => undefined,
+    }),
+  );
+
+  assert.match(html, /data-composer-widget="file-attach"/);
+  assert.match(html, /data-composer-widget="model-control"/);
+  assert.match(html, /data-composer-widget="send"/);
+  assert.match(html, /data-composer-widget="file-attach" data-composer-slot="leading"/);
+  assert.match(html, /data-composer-widget="model-control" data-composer-slot="trailing"/);
+  assert.match(html, /style="[^"]*flex:0 1 14rem;min-width:11rem;max-width:15rem/);
+  assert.match(html, /class="[^"]*flex w-full min-w-0 items-center/);
+  assert.match(html, /class="[^"]*min-w-0 flex-1 truncate/);
+  assert.match(html, /aria-label="Thinking level"/);
+  assert.doesNotMatch(html, />thinking</);
+});
+
 test("composer model drop selects the model instead of creating a widget chip", () => {
   const action = resolveComposerWidgetDrop(
     { id: "openai/gpt-4.1", type: "model", label: "GPT 4.1" },
@@ -166,7 +210,7 @@ test("composer renders the current steer above the main input", () => {
     }),
   );
 
-  assert.match(html, /これがステア/);
+  assert.doesNotMatch(html, /これがステア/);
   assert.match(html, /反映済み/);
   assert.match(html, /結論を先にして、短く返して/);
   assert.doesNotMatch(html, /フォローアップの変更を求める/);

@@ -149,7 +149,8 @@ def prepare_chat_run(input_data: dict[str, Any], context: dict[str, Any] | None 
     system_prompt = _conversation_system_prompt(conversation, manager)
     user_text = extract_user_text(content)
     inferred_tool_ids = _infer_requested_tools_from_message(user_text)
-    prepared_input = _with_inferred_tools(input_data, inferred_tool_ids)
+    effective_inferred_tool_ids = [] if _has_explicit_selected_tools(input_data) else inferred_tool_ids
+    prepared_input = _with_inferred_tools(input_data, effective_inferred_tool_ids)
 
     try:
         enrich_info = enrich_messages(standard_messages, system_prompt, conversation_id, user_text, manager)
@@ -183,7 +184,7 @@ def prepare_chat_run(input_data: dict[str, Any], context: dict[str, Any] | None 
         )["level"]
 
     request_context = dict(context or {})
-    if inferred_tool_ids:
+    if effective_inferred_tool_ids:
         request_context["user_requested_computer_use"] = True
         request_context = _apply_computer_use_context_preferences(request_context, user_text)
     request_context["conversation_id"] = conversation_id
@@ -639,6 +640,8 @@ def _infer_requested_tools_from_message(user_text: str) -> list[str]:
 def _with_inferred_tools(input_data: dict[str, Any], inferred_tool_ids: list[str]) -> dict[str, Any]:
     if not inferred_tool_ids:
         return input_data
+    if _has_explicit_selected_tools(input_data):
+        return input_data
     raw_tools = input_data.get("tools")
     existing_tools = list(raw_tools) if isinstance(raw_tools, list) else []
     merged = []
@@ -652,6 +655,16 @@ def _with_inferred_tools(input_data: dict[str, Any], inferred_tool_ids: list[str
     updated = dict(input_data)
     updated["tools"] = merged
     return updated
+
+
+def _has_explicit_selected_tools(input_data: dict[str, Any]) -> bool:
+    params = input_data.get("params") if isinstance(input_data.get("params"), dict) else {}
+    tool_policy = params.get("tool_policy") if isinstance(params.get("tool_policy"), dict) else {}
+    if "selected_tools" in tool_policy:
+        return True
+    message = input_data.get("message") if isinstance(input_data.get("message"), dict) else {}
+    metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
+    return "selected_tools" in metadata
 
 
 def _computer_use_preferences_from_text(user_text: str) -> dict[str, Any]:
@@ -688,6 +701,11 @@ def _available_tools(
     tool_policy = params.get("tool_policy") if isinstance(params.get("tool_policy"), dict) else {}
     if raw_tools is None and isinstance(tool_policy, dict) and "selected_tools" in tool_policy:
         raw_tools = tool_policy.get("selected_tools")
+    if raw_tools is None:
+        message = input_data.get("message") if isinstance(input_data.get("message"), dict) else {}
+        metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
+        if "selected_tools" in metadata:
+            raw_tools = metadata.get("selected_tools")
     try:
         tools, unknown_tools = _resolve_selected_tools(raw_tools, user_text=user_text, context=context)
     except Exception:

@@ -394,6 +394,96 @@ def test_complete_turn_retries_transient_ai_error_after_tool_use():
     assert any(event.get("type") == "ai_retry_scheduled" for event in engine._activity_events)
 
 
+def test_stream_empty_thinking_retry_preserves_tools_for_tool_calls():
+    from domain.chat.run_request import PreparedChatRun
+    from domain.chat.stream_engine import ChatRunEngine
+
+    class GoogleProvider:
+        pass
+
+    class FakeGateway:
+        def __init__(self):
+            self.complete_requests = []
+
+        def resolve_provider(self, model):
+            return GoogleProvider(), model
+
+        def supports_stream(self, model):
+            return True
+
+        def stream(self, request):
+            yield {"type": "thinking_delta", "delta": {"type": "text", "text": "I should use a tool."}}
+            yield {"type": "stream_end", "finish_reason": "stop", "usage": {"input_tokens": 1, "output_tokens": 0, "total_tokens": 1}}
+
+        def complete(self, request):
+            self.complete_requests.append(request)
+            return {
+                "content": [
+                    {"type": "text", "text": ""},
+                    {
+                        "type": "tool_use",
+                        "id": "call-browser-1",
+                        "name": "browser_computer",
+                        "input": {"action": "computer.context", "payload": {}},
+                    },
+                ],
+                "finish_reason": "tool_calls",
+                "usage": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
+            }
+
+    gateway = FakeGateway()
+    engine = ChatRunEngine(store=object(), gateway=gateway)
+    provider_tools = [
+        {
+            "type": "function",
+            "function": {
+                "name": "browser_computer",
+                "parameters": {"type": "object", "properties": {}},
+            },
+        }
+    ]
+    prepared = PreparedChatRun(
+        conversation_id="conv-1",
+        conversation={"id": "conv-1"},
+        input_data={},
+        request_id="req-1",
+        content=[],
+        metadata=None,
+        user_message={"id": "user-1"},
+        model="google/gemma-4-31b-it",
+        params={"thinking_level": "high", "reasoning_effort": "high"},
+        request_context={},
+        tool_context={},
+        standard_messages=[],
+        user_text="computer use使ってみて",
+        system_prompt="",
+        enrich_info={},
+        raw_tools=provider_tools,
+        provider_tools=provider_tools,
+        tools_called=["browser_computer"],
+        connected_tool_names={"browser_computer"},
+        call_handler=None,
+        model_routing={},
+    )
+
+    generator = engine._model_turn(prepared, [{"role": "user", "content": "computer use使ってみて"}], None)
+    events = []
+    try:
+        while True:
+            events.append(next(generator))
+    except StopIteration as exc:
+        response, tool_uses = exc.value
+
+    assert gateway.complete_requests
+    assert gateway.complete_requests[0]["tools"] == provider_tools
+    assert "thinking_level" not in gateway.complete_requests[0]["params"]
+    assert "reasoning_effort" not in gateway.complete_requests[0]["params"]
+    assert response["metadata"]["recovered_from_empty_stream"] is True
+    assert response["metadata"]["fallback_kept_tools"] is True
+    assert tool_uses[0]["name"] == "browser_computer"
+    assert any(event.get("type") == "thinking_delta" for event in events)
+
+
 def test_legacy_complete_with_tools_retries_transient_ai_error_after_tool_use():
     from blocks.chat import send
 

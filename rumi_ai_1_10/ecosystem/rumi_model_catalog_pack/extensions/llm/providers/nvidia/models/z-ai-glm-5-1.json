@@ -1,0 +1,19 @@
+{
+  "id": "nvidia/z-ai/glm-5.1",
+  "category": "llm_model",
+  "version": "1",
+  "provider_id": "nvidia",
+  "model_id": "z-ai/glm-5.1",
+  "display_name": "GLM 5.1 via NVIDIA NIM",
+  "type": "chat",
+  "enabled": true,
+  "priority": 21,
+  "capabilities": {
+    "chat": true,
+    "streaming": true,
+    "reasoning": false,
+    "tool_calls": true,
+    "parallel_tool_calls": true,
+    "vision": false
+  }
+}

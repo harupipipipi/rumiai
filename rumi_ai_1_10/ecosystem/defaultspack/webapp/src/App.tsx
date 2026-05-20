@@ -8,6 +8,7 @@ import type { ChatItem } from "./components/HistoryBoard";
 import type { ToolPreviewItem, ToolPreviewMode } from "./components/ToolPreview";
 import { buildToolPreviewDisplayItems, hasCanvasItems } from "./components/ToolPreview";
 import { api, defaultspackApiFetch, type ChatActivityEvent, type ChatContentBlock, type ChatMessage, type ChatStreamEvent, type ChatToolStreamEvent, type CodingWorkspaceRecord, type ComposerCommandExecuteResult, type ComposerCommandItem, type ComposerCommandMode, type ComposerWidgetAction, type Conversation, type ConversationSearchResult, type ConversationSteerItem, type ModelCommandCandidate, type ModelProfile, type OperationsCompanyStatus, type SettingsSection, type SidebarAction, type SidebarItem, type UICatalog } from "./lib/api";
+import { pendingBrowserApproval, type BrowserApproval } from "./lib/browserApproval";
 import { reduceBrowserStateFromEvents } from "./lib/browserState";
 import { deriveConversationTitle, formatRelativeTime, messageToText, orderConversationMessages } from "./lib/chat";
 import { cn } from "./lib/cn";
@@ -22,13 +23,6 @@ import { hasWorkspaceAttachment, workspaceFileToAttachment } from "./lib/workspa
 import { resolveDefaultspackRenderers } from "./renderers/defaultspackRenderers";
 import { RendererBoundary } from "./renderers/trustedRendererLoader";
 import type { AppMode, AttachedFile, ChatUiMessage, CodingContext, ComposerExtensionItem, ContextUsageInfo, DroppedWidget } from "./renderers/types";
-
-type BrowserApproval = {
-  action: string;
-  payload: Record<string, unknown>;
-  token: string;
-  toolName: string;
-};
 
 type ComposerCandidateMenuState = {
   mode: "model";
@@ -1384,15 +1378,11 @@ function profileKey(profile: ModelProfile | null | undefined, fallback: string):
 }
 
 function getNewConversationPlaceholder(): string {
-  const hour = new Date().getHours();
-  if (hour < 5) return "夜更かし中ですね。今日はどうしましたか？";
-  if (hour < 11) return "おはようございます。今日はどうしましたか？";
-  if (hour < 17) return "今日はどうしましたか？";
-  return "こんばんは。今日はどうしましたか？";
+  return "指示を入力するか、/ でツール・コマンドを選択します...";
 }
 
 function getNewConversationGreeting(): string {
-  return "今日は何をしましょう？";
+  return "Defaults Console";
 }
 
 function findProfile(profiles: ModelProfile[], modelId: string): ModelProfile | null {
@@ -1759,41 +1749,6 @@ function modelCommandInputQuery(value: string): string | null {
   const match = value.trim().match(/^\/models?(?:\s+([\s\S]*))?$/i);
   if (!match) return null;
   return String(match[1] ?? "").trim();
-}
-
-function pendingBrowserApproval(messages: ChatUiMessage[]): BrowserApproval | null {
-  const approvalFromCandidate = (candidate: Record<string, unknown> | undefined, fallbackToolName = "browser_computer"): BrowserApproval | null => {
-    if (!candidate?.requires_approval && !candidate?.approval_required) return null;
-    if (!candidate.approval_token) return null;
-    const rawPayload = candidate.payload;
-    const toolName = String(candidate.tool_name ?? fallbackToolName);
-    return {
-      action: String(candidate.action ?? "browser.session"),
-      payload: rawPayload && typeof rawPayload === "object" ? rawPayload as Record<string, unknown> : {},
-      token: String(candidate.approval_token),
-      toolName,
-    };
-  };
-
-  for (const message of [...messages].reverse()) {
-    if (message.role === "user") return null;
-    if (message.role !== "agent") continue;
-    for (const event of [...(message.events ?? [])].reverse()) {
-      if (event.type !== "approval_requested" && event.phase !== "approval_requested") continue;
-      const approval = approvalFromCandidate(event as Record<string, unknown>, String(event.tool_name ?? "browser_computer"));
-      if (approval) return approval;
-    }
-    for (const log of [...(message.toolLogs ?? [])].reverse()) {
-      if (!["browser_computer", "browser_companion", "browser_use", "computer_use"].includes(String(log.tool_name))) continue;
-      const result = log.result as Record<string, unknown> | undefined;
-      const data = (result?.data ?? result) as Record<string, unknown> | undefined;
-      const widget = data?.widget as Record<string, unknown> | undefined;
-      const candidate = (widget?.requires_approval || widget?.approval_required ? widget : data) as Record<string, unknown> | undefined;
-      const approval = approvalFromCandidate(candidate, String(log.tool_name));
-      if (approval) return approval;
-    }
-  }
-  return null;
 }
 
 export default function App() {
@@ -3158,9 +3113,11 @@ export default function App() {
         ...browserApproval.payload,
         approval_token: browserApproval.token,
       };
-      const result = browserApproval.toolName === "browser_computer"
-        ? await api.browserComputer(browserApproval.action, approvedArguments)
-        : await api.invokeTool(browserApproval.toolName, { ...approvedArguments, action: browserApproval.action });
+      const result = await api.approveBrowserComputerAction(
+        browserApproval.toolName,
+        browserApproval.action,
+        approvedArguments,
+      );
       pushActionPreview(
         { id: "browser.approval", label: "Approved Browser Action", icon: "browser" },
         "browser-approval",
@@ -3354,6 +3311,8 @@ export default function App() {
     setAttachedFiles([]);
     let submittedConversationId: string | null = null;
     const shouldKeepSelectedToolsAfterSend = keepSelectedToolsAfterSend(settingsValues);
+    const submittedToolIds = [...selectedToolIds];
+    const submittedToolIdSet = new Set(submittedToolIds);
     const selectedToolLabels = [
       ...selectedTools.map((item) => item.label || item.id),
     ];
@@ -3577,6 +3536,7 @@ export default function App() {
             ...(operationsToolDenylist.length ? { tool_denylist: operationsToolDenylist } : {}),
           }
         : {};
+      const shouldSendExplicitToolSelection = !isOperationsMode || submittedToolIds.length > 0;
 
       await api.streamMessage(conversation.id, userText, {
         thinking_level: activeProfile?.supports_thinking ? selectedThinkingLevel : null,
@@ -3584,10 +3544,10 @@ export default function App() {
           ...(yoloMode ? { yolo_mode: true, allow_shell: true, allow_file_write: true, write_actions_require_approval: false } : {}),
           ...operationsPolicy,
           ...(mode === "coding" && selectedCodingWorkspaceId ? { workspace_id: selectedCodingWorkspaceId } : {}),
-          ...(selectedToolIds.length ? { selected_tools: selectedToolIds } : {}),
+          ...(shouldSendExplicitToolSelection ? { selected_tools: submittedToolIds } : {}),
         },
         attachments: submittedAttachments,
-        tools: selectedToolIds.length ? selectedToolIds : undefined,
+        tools: shouldSendExplicitToolSelection ? submittedToolIds : undefined,
         metadata: {
           mode: isOperationsMode ? "operations_company" : mode,
           ...(isOperationsMode ? {
@@ -3601,9 +3561,9 @@ export default function App() {
             workspace_label: codingWorkspaces.find((workspace) => workspace.workspace_id === selectedCodingWorkspaceId)?.label,
           } : {}),
           attachments: submittedAttachments.map(({ name, size, type, truncated, source, sourcePath }) => ({ name, size, type, truncated, source, sourcePath })),
-          selected_tools: selectedToolIds,
+          selected_tools: submittedToolIds,
           dropped_widgets: droppedWidgets
-            .filter((widget) => widget.widgetKind === "tool_toggle" || widget.type === "tool" ? selectedToolIdSet.has(widget.sourceItemId || widget.id) : widget.enabled !== false)
+            .filter((widget) => widget.widgetKind === "tool_toggle" || widget.type === "tool" ? submittedToolIdSet.has(widget.sourceItemId || widget.id) : widget.enabled !== false)
             .map(({ id, type, label, widgetKind, sourceItemId, metadata }) => ({ id, type, label, widgetKind, sourceItemId, metadata })),
         },
       }, {

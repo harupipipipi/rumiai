@@ -17,12 +17,27 @@
     "streaming": true,
     "reasoning": true,
     "tool_calls": true,
+    "function_calling": true,
+    "structured_outputs": true,
+    "json_mode": true,
+    "tool_choice": true,
+    "parallel_tool_calls": true,
+    "response_format": true,
     "vision": false
   },
+  "context_window": 131072,
+  "max_context": 131072,
+  "max_context_tokens": 131072,
   "supports_thinking": true,
   "thinking_levels": ["low", "medium", "high"],
   "default_thinking_level": "medium",
   "metadata": {
-    "service_tier_supported": true
+    "service_tier_supported": true,
+    "owned_by": "Z.ai",
+    "preview": true
+  },
+  "pricing": {
+    "prompt": "0.00000225",
+    "completion": "0.00000275"
   }
 }

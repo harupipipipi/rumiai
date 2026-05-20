@@ -1,0 +1,22 @@
+{
+  "id": "nvidia/qwen/qwen3-next-80b-a3b-thinking",
+  "category": "llm_model",
+  "version": "1",
+  "provider_id": "nvidia",
+  "model_id": "qwen/qwen3-next-80b-a3b-thinking",
+  "display_name": "Qwen3 Next 80B A3B Thinking via NVIDIA NIM",
+  "type": "reasoning",
+  "enabled": true,
+  "priority": 8,
+  "capabilities": {
+    "chat": true,
+    "streaming": true,
+    "reasoning": true,
+    "tool_calls": true,
+    "parallel_tool_calls": false,
+    "vision": false
+  },
+  "supports_thinking": true,
+  "thinking_levels": ["low", "medium", "high"],
+  "default_thinking_level": "medium"
+}

@@ -1,0 +1,19 @@
+{
+  "id": "nvidia/deepseek-ai/deepseek-v4-pro",
+  "category": "llm_model",
+  "version": "1",
+  "provider_id": "nvidia",
+  "model_id": "deepseek-ai/deepseek-v4-pro",
+  "display_name": "DeepSeek V4 Pro via NVIDIA NIM",
+  "type": "chat",
+  "enabled": true,
+  "priority": 10,
+  "capabilities": {
+    "chat": true,
+    "streaming": true,
+    "reasoning": false,
+    "tool_calls": true,
+    "parallel_tool_calls": false,
+    "vision": false
+  }
+}

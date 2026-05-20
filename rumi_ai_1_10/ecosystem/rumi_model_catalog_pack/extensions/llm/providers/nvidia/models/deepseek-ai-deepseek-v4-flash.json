@@ -1,0 +1,22 @@
+{
+  "id": "nvidia/deepseek-ai/deepseek-v4-flash",
+  "category": "llm_model",
+  "version": "1",
+  "provider_id": "nvidia",
+  "model_id": "deepseek-ai/deepseek-v4-flash",
+  "display_name": "DeepSeek V4 Flash via NVIDIA NIM",
+  "type": "chat",
+  "enabled": true,
+  "priority": 9,
+  "defaults": {
+    "fast": true
+  },
+  "capabilities": {
+    "chat": true,
+    "streaming": true,
+    "reasoning": false,
+    "tool_calls": true,
+    "parallel_tool_calls": false,
+    "vision": false
+  }
+}
