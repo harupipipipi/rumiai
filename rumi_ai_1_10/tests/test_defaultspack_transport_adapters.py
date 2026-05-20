@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import importlib
+import os
+import socket
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -125,6 +128,52 @@ class TestDefaultspackTransportAdapters(unittest.TestCase):
                 chat_send._resolve_selected_tools = original_resolve
             self.assertEqual(captured["raw_tools"], [])
             self.assertEqual(updated[0], [])
+        finally:
+            sys.path[:] = original_path
+
+    def test_http_transport_drains_rejected_post_body_before_next_request(self):
+        repo_root = Path(__file__).resolve().parent.parent
+        pack_root = repo_root / "ecosystem" / "defaultspack"
+        original_path = list(sys.path)
+        try:
+            sys.path.insert(0, str(pack_root))
+            transport_http = importlib.import_module("transport.http")
+            with mock.patch.dict(os.environ, {"DEFAULTS_HTTP_PORT": "0"}):
+                server = transport_http.DefaultsHttpServer(None)
+                server.start()
+            try:
+                port = server._server.server_address[1]
+                body = b'{"action":"x"}'
+                raw = (
+                    b"POST /api/tools/browser-computer HTTP/1.1\r\n"
+                    b"Host: 127.0.0.1\r\n"
+                    b"Origin: http://127.0.0.1\r\n"
+                    b"Content-Type: application/json\r\n"
+                    + f"Content-Length: {len(body)}\r\n".encode("ascii")
+                    + b"\r\n"
+                    + body
+                    + b"GET /missing-after-drain HTTP/1.1\r\n"
+                    + b"Host: 127.0.0.1\r\n"
+                    + b"Connection: close\r\n\r\n"
+                )
+                with socket.create_connection(("127.0.0.1", port), timeout=5) as sock:
+                    sock.sendall(raw)
+                    sock.settimeout(5)
+                    chunks = []
+                    while True:
+                        try:
+                            chunk = sock.recv(65536)
+                        except socket.timeout:
+                            break
+                        if not chunk:
+                            break
+                        chunks.append(chunk)
+                response = b"".join(chunks).decode("utf-8", errors="replace")
+                self.assertIn("HTTP/1.1 403", response)
+                self.assertIn("not found: GET /missing-after-drain", response)
+                self.assertNotIn("Bad request syntax", response)
+            finally:
+                server.stop()
         finally:
             sys.path[:] = original_path
 

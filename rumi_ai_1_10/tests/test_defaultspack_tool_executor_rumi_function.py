@@ -48,3 +48,43 @@ def test_tool_executor_no_longer_builds_private_function_registry():
     from domain.tool.executor import ToolExecutor
 
     assert not hasattr(ToolExecutor, "_build_function_registry")
+
+
+def test_tool_executor_falls_back_to_local_browser_computer_when_capability_requires_approval(monkeypatch):
+    from domain.tool.executor import ToolExecutor
+
+    capability_executor = MagicMock()
+    capability_executor.execute.return_value = SimpleNamespace(
+        success=False,
+        output=None,
+        error="approval required",
+        error_type="caller_requires_denied",
+    )
+    captured = {}
+
+    def fake_execute_local(self, tool_name, arguments, context):
+        captured["tool_name"] = tool_name
+        captured["arguments"] = arguments
+        captured["context"] = context
+        return {"result": "browser_computer computer.windows completed", "is_error": False, "widget": {"type": tool_name}}
+
+    monkeypatch.setattr(ToolExecutor, "_execute_local", fake_execute_local)
+    tool_def = {
+        "tool_id": "browser_computer",
+        "name": "browser_computer",
+        "requires_approval": True,
+        "execution": {
+            "type": "rumi_function",
+            "qualified_name": "rumi_default_tools_pack:browser_computer",
+        },
+    }
+
+    result = ToolExecutor()._execute_rumi_function(
+        tool_def,
+        {"action": "computer.windows"},
+        {"principal_id": "defaultspack", "capability_executor": capability_executor},
+    )
+
+    assert result["is_error"] is False
+    assert captured["tool_name"] == "browser_computer"
+    assert captured["arguments"] == {"action": "computer.windows"}

@@ -214,6 +214,13 @@ class ToolExecutor:
             )
             if fallback is not None:
                 return fallback
+            denied_fallback = self._fallback_local_tool_if_first_party_capability_denied(
+                request,
+                context,
+                response,
+            )
+            if denied_fallback is not None:
+                return denied_fallback
             fallback_tool = self._local_tool_fallback_for_capability_response(response, request)
             if fallback_tool:
                 return self._execute_local(fallback_tool, request.get("args") or {}, context)
@@ -224,6 +231,30 @@ class ToolExecutor:
                 "widget": None,
             }
         return self._tool_response_from_capability(response, tool_def, request.get("args") or {})
+
+    def _fallback_local_tool_if_first_party_capability_denied(self, request, context, response):
+        if request.get("type") != "function.call":
+            return None
+        if bool(getattr(response, "success", False)):
+            return None
+        if getattr(response, "error_type", "") != "caller_requires_denied":
+            return None
+        qualified_name = str(request.get("qualified_name") or "")
+        pack_id, _, function_id = qualified_name.partition(":")
+        local_tool = self._first_party_browser_computer_tool_for_function(pack_id, function_id)
+        if local_tool not in {"browser_computer", "browser_use", "computer_use"}:
+            return None
+        return self._execute_local(local_tool, request.get("args") or {}, context)
+
+    @staticmethod
+    def _first_party_browser_computer_tool_for_function(pack_id, function_id):
+        if pack_id != "rumi_default_tools_pack":
+            return None
+        return {
+            "browser_computer": "browser_computer",
+            "browser_use": "browser_use",
+            "computer_use": "computer_use",
+        }.get(function_id)
 
     @staticmethod
     def _local_tool_fallback_for_capability_response(response, request):

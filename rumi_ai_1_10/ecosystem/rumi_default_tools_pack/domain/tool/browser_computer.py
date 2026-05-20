@@ -1984,7 +1984,13 @@ class BrowserComputerController:
                         int(capture_rect.get("width", 0)),
                         int(capture_rect.get("height", 0)),
                     )
-                    subprocess.run(["screencapture", "-x", "-R", rect, str(path)], check=True)
+                    try:
+                        subprocess.run(["screencapture", "-x", "-R", rect, str(path)], check=True)
+                    except subprocess.CalledProcessError:
+                        window_id = target.get("window_id")
+                        if not window_id:
+                            raise
+                        subprocess.run(["screencapture", "-x", "-l", str(int(window_id)), str(path)], check=True)
                 else:
                     window_id = target.get("window_id")
                     if window_id:
