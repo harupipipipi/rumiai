@@ -4911,6 +4911,44 @@ def test_browser_open_url_can_target_vivaldi_foreground(monkeypatch):
     assert calls[0][0] == ["open", "-a", "Vivaldi", "https://chatgpt.com"]
 
 
+def test_browser_open_url_approval_payload_target_app_runs_foreground(tmp_path, monkeypatch):
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+    import ecosystem.rumi_default_tools_pack.domain.tool.browser_computer as browser_computer
+
+    calls = []
+
+    def fake_popen(command, **kwargs):
+        calls.append((command, kwargs))
+
+        class Process:
+            pass
+
+        return Process()
+
+    monkeypatch.setattr(browser_computer.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(browser_computer.subprocess, "Popen", fake_popen)
+
+    controller = BrowserComputerController()
+    controller._approval_path = tmp_path / "shared" / "browser_computer_approvals.json"
+    approval = controller.run(
+        "browser.open_url",
+        {"url": "https://gemini.google.com/app", "persistent": False, "app": "Google Chrome"},
+    )
+
+    assert approval["requires_approval"] is True
+    assert approval["payload"]["target_app"] == "Google Chrome"
+
+    result = controller.run(
+        "browser.open_url",
+        {**approval["payload"], "approval_token": approval["approval_token"]},
+    )
+
+    assert result["opened"] is True
+    assert result["managed_profile"] is False
+    assert result["target_app"] == "Google Chrome"
+    assert calls[0][0] == ["open", "-a", "Google Chrome", "https://gemini.google.com/app"]
+
+
 def test_browser_open_url_app_target_bypasses_managed_profile(monkeypatch):
     from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
     import ecosystem.rumi_default_tools_pack.domain.tool.browser_computer as browser_computer
