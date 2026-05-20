@@ -18,6 +18,7 @@ class FunctionSpec:
     aliases: tuple[str, ...] = ()
     requires: tuple[str, ...] = ()
     caller_requires: tuple[str, ...] = ()
+    input_schema: dict[str, Any] | None = None
 
 
 def _alias_pair(namespace: str, operation: str) -> tuple[str, str]:
@@ -60,6 +61,7 @@ def _spec(
     aliases: tuple[str, ...] = (),
     requires: tuple[str, ...] | None = None,
     caller_requires: tuple[str, ...] | None = None,
+    input_schema: dict[str, Any] | None = None,
 ) -> FunctionSpec:
     all_aliases = tuple(dict.fromkeys([*_default_aliases(function_id), *aliases]))
     return FunctionSpec(
@@ -72,6 +74,7 @@ def _spec(
         aliases=all_aliases,
         requires=_requires(function_id, risk) if requires is None else requires,
         caller_requires=_caller_requires(risk) if caller_requires is None else caller_requires,
+        input_schema=input_schema,
     )
 
 
@@ -87,7 +90,7 @@ def manifest_for(spec: FunctionSpec) -> dict[str, Any]:
         "calling_convention": "subprocess",
         "entrypoint": "main.py:run",
         "vocab_aliases": list(spec.aliases),
-        "input_schema": dict(OBJECT_SCHEMA),
+        "input_schema": dict(spec.input_schema or OBJECT_SCHEMA),
         "output_schema": dict(ENVELOPE_SCHEMA),
         "extensions": {
             "defaultspack": {
@@ -215,6 +218,25 @@ TOOL_FUNCTIONS: tuple[FunctionSpec, ...] = tuple(
         ("computer_scroll", "Scroll with the computer controller.", ("tool", "computer"), "high"),
     )
 )
+SKILL_CREATE_FROM_FEEDBACK_INPUT_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "anyOf": [{"required": ["feedback"]}, {"required": ["correction"]}],
+    "properties": {
+        "feedback": {"type": "string", "minLength": 1},
+        "correction": {"type": "string", "minLength": 1},
+        "applies_to_tools": {"oneOf": [{"type": "array", "items": {"type": "string"}}, {"type": "string"}]},
+        "tool_ids": {"oneOf": [{"type": "array", "items": {"type": "string"}}, {"type": "string"}]},
+        "triggers": {"oneOf": [{"type": "array", "items": {"type": "string"}}, {"type": "string"}]},
+        "keywords": {"oneOf": [{"type": "array", "items": {"type": "string"}}, {"type": "string"}]},
+        "skill_id": {"type": "string"},
+        "name": {"type": "string"},
+        "display_name": {"type": "string"},
+        "description": {"type": "string"},
+        "conversation_id": {"type": "string"},
+        "message_id": {"type": "string"},
+    },
+}
 
 
 SKILL_FUNCTIONS: tuple[FunctionSpec, ...] = (
@@ -222,9 +244,10 @@ SKILL_FUNCTIONS: tuple[FunctionSpec, ...] = (
         "skill_create_from_feedback",
         "Create a Rumi extension skill from corrective feedback.",
         ("skill", "feedback", "dream"),
-        risk="medium",
+        risk="high",
         block="blocks.skill.create_from_feedback",
         aliases=("defaults.skill.create_from_feedback", "defaultspack.skill.create_from_feedback"),
+        input_schema=SKILL_CREATE_FROM_FEEDBACK_INPUT_SCHEMA,
     ),
 )
 

@@ -12,9 +12,24 @@ from domain.memory2.dreaming import record_dream
 
 
 _SLUG_RE = re.compile(r"[^a-z0-9_]+")
+_ALLOWED_PAYLOAD_KEYS = {
+    "feedback",
+    "correction",
+    "applies_to_tools",
+    "tool_ids",
+    "triggers",
+    "keywords",
+    "skill_id",
+    "name",
+    "display_name",
+    "description",
+    "conversation_id",
+    "message_id",
+}
 
 
 def create_skill_from_feedback(payload: dict[str, Any]) -> dict[str, Any]:
+    payload = _sanitize_payload(payload)
     feedback = str(payload.get("feedback") or payload.get("correction") or "").strip()
     if not feedback:
         raise ValueError("feedback is required")
@@ -27,7 +42,7 @@ def create_skill_from_feedback(payload: dict[str, Any]) -> dict[str, Any]:
         "id": f"feedback/{skill_id}",
         "category": "skill",
         "version": "1",
-        "enabled": payload.get("enabled", True) is not False,
+        "enabled": False,
         "display_name": str(payload.get("display_name") or f"Feedback: {skill_id}"),
         "description": str(payload.get("description") or feedback[:240]),
         "triggers": triggers,
@@ -68,14 +83,21 @@ def create_skill_from_feedback(payload: dict[str, Any]) -> dict[str, Any]:
         "manifest": validated,
         "manifest_path": str(manifest_path),
         "dream_path": dream_path,
-        "enabled": bool(validated.get("enabled", True)),
+        "enabled": bool(validated.get("enabled", False)),
+        "activation_required": True,
     }
 
 
+def _sanitize_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        return {}
+    unknown = sorted(str(key) for key in payload if str(key) not in _ALLOWED_PAYLOAD_KEYS)
+    if unknown:
+        raise ValueError("unsupported fields: " + ", ".join(unknown))
+    return {str(key): value for key, value in payload.items() if str(key) in _ALLOWED_PAYLOAD_KEYS}
+
+
 def _skills_root(payload: dict[str, Any]) -> Path:
-    root = payload.get("extensions_root")
-    if root:
-        return Path(str(root)).expanduser() / "skills"
     return Path(__file__).resolve().parents[1] / "user_data" / "shared" / "extensions" / "skills"
 
 

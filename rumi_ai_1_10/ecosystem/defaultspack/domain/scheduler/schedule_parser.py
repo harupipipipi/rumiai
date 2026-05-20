@@ -49,7 +49,8 @@ def utc_now() -> datetime:
 
 def parse_next_run(schedule: str, *, now: datetime | None = None) -> datetime:
     now = now or utc_now()
-    text = str(schedule or "").strip().lower()
+    original = str(schedule or "").strip()
+    text = original.lower()
     if not text or text in {"now", "once", "one_shot"}:
         return now
     match = re.match(r"(?:in|after)\s+(\d+)\s*([smhd])", text)
@@ -65,7 +66,7 @@ def parse_next_run(schedule: str, *, now: datetime | None = None) -> datetime:
         return parse_next_run("every " + text.split(":", 1)[1], now=now)
     if _looks_like_cron(text):
         return _next_cron(text, now)
-    return now
+    raise ValueError(f"unsupported schedule syntax: {original or '<empty>'}")
 
 
 def is_due(next_run_at: str, *, now: datetime | None = None) -> bool:
@@ -84,12 +85,7 @@ def iso(dt: datetime) -> str:
 
 
 def _looks_like_cron(text: str) -> bool:
-    parts = text.split()
-    return len(parts) == 5 and all(_cron_part_supported(part) for part in parts)
-
-
-def _cron_part_supported(part: str) -> bool:
-    return part == "*" or part.isdigit() or "," in part
+    return len(text.split()) == 5
 
 
 def _add_interval(now: datetime, amount: int, unit: str) -> datetime:
@@ -114,30 +110,94 @@ def _next_weekly(now: datetime, weekday: int, hour: int, minute: int) -> datetim
 
 
 def _next_cron(text: str, now: datetime) -> datetime:
-    minute_expr, hour_expr, _day_expr, _month_expr, weekday_expr = text.split()
+    minute_expr, hour_expr, day_expr, month_expr, weekday_expr = text.split()
+    minutes = _parse_cron_values(minute_expr, 0, 59, "minute")
+    hours = _parse_cron_values(hour_expr, 0, 23, "hour")
+    days = _parse_cron_values(day_expr, 1, 31, "day-of-month")
+    months = _parse_cron_values(month_expr, 1, 12, "month")
+    weekdays = _parse_cron_weekdays(weekday_expr)
+    day_is_any = day_expr == "*"
+    weekday_is_any = weekday_expr == "*"
     candidate = now.replace(second=0, microsecond=0) + timedelta(minutes=1)
-    for _ in range(366 * 24 * 60):
+    for _ in range(366 * 24 * 60 * 5):
+        day_matches = candidate.day in days
+        weekday_matches = candidate.weekday() in weekdays
+        if day_is_any and weekday_is_any:
+            calendar_day_matches = True
+        elif day_is_any:
+            calendar_day_matches = weekday_matches
+        elif weekday_is_any:
+            calendar_day_matches = day_matches
+        else:
+            # Match common cron behavior: day-of-month and day-of-week are ORed
+            # when both are restricted.
+            calendar_day_matches = day_matches or weekday_matches
         if (
-            _matches_cron_value(candidate.minute, minute_expr)
-            and _matches_cron_value(candidate.hour, hour_expr)
-            and _matches_cron_weekday(candidate.weekday(), weekday_expr)
+            candidate.minute in minutes
+            and candidate.hour in hours
+            and candidate.month in months
+            and calendar_day_matches
         ):
             return candidate
         candidate += timedelta(minutes=1)
-    return now + timedelta(days=1)
+    raise ValueError(f"cron schedule has no next run within five years: {text}")
 
 
-def _matches_cron_value(value: int, expr: str) -> bool:
-    if expr == "*":
-        return True
-    options = {int(part) for part in expr.split(",") if part.isdigit()}
-    return value in options
+def _parse_cron_values(expr: str, minimum: int, maximum: int, field_name: str) -> set[int]:
+    expr = str(expr or "").strip()
+    if not expr:
+        raise ValueError(f"empty cron {field_name} field")
+    values: set[int] = set()
+    for raw_part in expr.split(","):
+        part = raw_part.strip()
+        if not part:
+            raise ValueError(f"empty cron {field_name} list item")
+        base, step = _split_cron_step(part, field_name)
+        if base == "*":
+            start, end = minimum, maximum
+        elif "-" in base:
+            start_text, end_text = base.split("-", 1)
+            start = _parse_cron_int(start_text, minimum, maximum, field_name)
+            end = _parse_cron_int(end_text, minimum, maximum, field_name)
+            if end < start:
+                raise ValueError(f"unsupported wrapping cron {field_name} range: {part}")
+        else:
+            start = end = _parse_cron_int(base, minimum, maximum, field_name)
+        values.update(range(start, end + 1, step))
+    if not values:
+        raise ValueError(f"cron {field_name} field matched no values")
+    return values
 
 
-def _matches_cron_weekday(value: int, expr: str) -> bool:
-    if expr == "*":
-        return True
-    # Cron accepts both 0 and 7 as Sunday; Python uses Monday=0.
-    cron_value = (value + 1) % 7
-    options = {int(part) for part in expr.split(",") if part.isdigit()}
-    return cron_value in options or (cron_value == 0 and 7 in options)
+def _split_cron_step(part: str, field_name: str) -> tuple[str, int]:
+    if "/" not in part:
+        return part, 1
+    base, step_text = part.split("/", 1)
+    if not base:
+        raise ValueError(f"unsupported cron {field_name} step: {part}")
+    try:
+        step = int(step_text)
+    except ValueError as exc:
+        raise ValueError(f"invalid cron {field_name} step: {part}") from exc
+    if step <= 0:
+        raise ValueError(f"cron {field_name} step must be positive: {part}")
+    return base, step
+
+
+def _parse_cron_int(value: str, minimum: int, maximum: int, field_name: str) -> int:
+    try:
+        number = int(value)
+    except ValueError as exc:
+        raise ValueError(f"invalid cron {field_name} value: {value}") from exc
+    if number < minimum or number > maximum:
+        raise ValueError(f"cron {field_name} value out of range: {number}")
+    return number
+
+
+def _parse_cron_weekdays(expr: str) -> set[int]:
+    raw_values = _parse_cron_values(expr, 0, 7, "day-of-week")
+    weekdays = set()
+    for value in raw_values:
+        # Cron accepts both 0 and 7 as Sunday; Python uses Monday=0.
+        weekdays.add(6 if value in {0, 7} else value - 1)
+    return weekdays

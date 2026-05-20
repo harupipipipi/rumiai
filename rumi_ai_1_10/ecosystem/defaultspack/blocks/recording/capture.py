@@ -11,6 +11,8 @@ def run(input_data, context=None):
     payload = input_data if isinstance(input_data, dict) else {}
     try:
         result = RecordingCaptureService().run(payload)
+    except ValueError as exc:
+        return error(str(exc), "INVALID_INPUT")
     except Exception as exc:
         return error(str(exc), "RECORDING_CAPTURE_ERROR")
     if isinstance(result, dict) and result.get("is_error"):

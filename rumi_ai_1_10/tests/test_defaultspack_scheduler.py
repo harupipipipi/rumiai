@@ -12,6 +12,7 @@ sys.path.insert(0, str(DEFAULTSPACK_ROOT))
 
 from blocks.scheduler.create import run as create_job  # noqa: E402
 from blocks.scheduler.tick import run as tick_scheduler  # noqa: E402
+from blocks.scheduler.update import run as update_job  # noqa: E402
 from domain.scheduler.job_store import SchedulerJobStore  # noqa: E402
 from domain.scheduler.schedule_parser import parse_next_run  # noqa: E402
 
@@ -110,6 +111,35 @@ def test_schedule_parser_understands_weekly_wall_clock():
     now = datetime(2026, 5, 19, 0, 0, tzinfo=timezone.utc)  # Tuesday
 
     assert parse_next_run("every Monday 09:00", now=now) == datetime(2026, 5, 25, 9, 0, tzinfo=timezone.utc)
+
+
+def test_schedule_parser_supports_cron_steps_day_month_and_weekday():
+    now = datetime(2026, 5, 20, 10, 2, tzinfo=timezone.utc)
+
+    assert parse_next_run("*/5 * * * *", now=now) == datetime(2026, 5, 20, 10, 5, tzinfo=timezone.utc)
+    assert parse_next_run("0 9 1 * *", now=now) == datetime(2026, 6, 1, 9, 0, tzinfo=timezone.utc)
+    assert parse_next_run("0 9 * * 1", now=now) == datetime(2026, 5, 25, 9, 0, tzinfo=timezone.utc)
+
+
+def test_scheduler_rejects_unsupported_schedule_instead_of_running_now(tmp_path, monkeypatch):
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_SCHEDULER_DIR", str(tmp_path / "scheduler"))
+
+    result = create_job({"name": "bad cron", "kind": "interval", "schedule": "*/x * * * *", "prompt": "ping"}, {})
+
+    assert result["status"] == "error"
+    assert result["error"]["code"] == "INVALID_INPUT"
+    assert SchedulerJobStore().list() == []
+
+
+def test_scheduler_rejects_unsupported_schedule_on_update(tmp_path, monkeypatch):
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_SCHEDULER_DIR", str(tmp_path / "scheduler"))
+    created = create_job({"name": "safe cron", "kind": "interval", "schedule": "*/5 * * * *", "prompt": "ping"}, {})
+
+    result = update_job({"job_id": created["data"]["job_id"], "updates": {"schedule": "0 9 broken * *"}}, {})
+
+    assert result["status"] == "error"
+    assert result["error"]["code"] == "INVALID_INPUT"
+    assert SchedulerJobStore().get(created["data"]["job_id"])["schedule"] == "*/5 * * * *"
 
 
 def test_scheduler_tick_sends_due_job_to_chat(tmp_path, monkeypatch):

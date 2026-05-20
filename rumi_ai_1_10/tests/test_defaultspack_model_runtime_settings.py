@@ -81,6 +81,43 @@ def test_model_runtime_settings_normalizes_model_api_routes(tmp_path):
     )
 
 
+def test_api_bound_profile_reports_missing_api_key_after_delete(tmp_path, monkeypatch):
+    from domain.ai_client.api_key_store import set_provider_api_key
+
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_SECRETS_DIR", str(tmp_path / "secrets"))
+    service = ModelRuntimeSettingsService(tmp_path)
+    settings = service.update_settings(
+        {
+            "api_bound_profiles": [
+                {
+                    "provider_id": "longcat",
+                    "api_id": "work",
+                    "model_id": "LongCat-Flash-Chat",
+                }
+            ]
+        }
+    )
+
+    set_provider_api_key(
+        "longcat",
+        "secret",
+        api_id="work",
+        name="Work",
+        allowed_models=["LongCat-Flash-Chat"],
+        default_model="LongCat-Flash-Chat",
+        pack_root=tmp_path,
+    )
+    configured = service.runtime_defined_profiles(settings)[0]
+    assert configured["configured"] is True
+    assert configured["availability"]["status"] == "configured"
+
+    set_provider_api_key("longcat", "", api_id="work", name="Work", pack_root=tmp_path)
+    missing = service.runtime_defined_profiles(settings)[0]
+    assert missing["configured"] is False
+    assert missing["availability"]["active"] is False
+    assert missing["availability"]["status"] == "missing_api_key"
+
+
 def test_effective_thinking_level_resolution_order(tmp_path):
     service = ModelRuntimeSettingsService(tmp_path)
     service.set_thinking_level("low", scope="global")

@@ -92,7 +92,7 @@ class RecordingCaptureService:
                 "system_audio_available": False,
             }
         command, artifact = self._build_ffmpeg_command(request, selection)
-        self.artifact_dir.mkdir(parents=True, exist_ok=True)
+        Path(artifact).parent.mkdir(parents=True, exist_ok=True)
         process = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, text=True)
         session = {
             "id": payload.get("session_id") or gen_id("rec_"),
@@ -114,7 +114,7 @@ class RecordingCaptureService:
             "path": artifact,
             "mime": session["mime"],
             "devices": selection,
-            "command": command,
+            "command_summary": self._command_summary(command),
         }
 
     def stop(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -287,7 +287,7 @@ class RecordingCaptureService:
         return None
 
     def _build_ffmpeg_command(self, request: dict[str, Any], selection: dict[str, Any]) -> tuple[list[str], str]:
-        out_dir = Path(str(request.get("output_dir") or self.artifact_dir))
+        out_dir = self._resolve_output_dir(request.get("output_dir"))
         stem = str(request.get("filename") or "").strip()
         if not stem:
             stem = "recording_" + time.strftime("%Y%m%d_%H%M%S", time.localtime())
@@ -315,6 +315,26 @@ class RecordingCaptureService:
             command.extend(["-c:a", "aac"])
         command.append(artifact)
         return command, artifact
+
+    def _resolve_output_dir(self, requested: Any) -> Path:
+        artifact_root = self.artifact_dir.expanduser().resolve()
+        if requested in (None, ""):
+            return artifact_root
+        candidate = Path(str(requested)).expanduser()
+        if not candidate.is_absolute():
+            candidate = artifact_root / candidate
+        resolved = candidate.resolve()
+        if resolved != artifact_root and artifact_root not in resolved.parents:
+            raise ValueError("output_dir must be inside the recording artifact directory")
+        return resolved
+
+    @staticmethod
+    def _command_summary(command: list[str]) -> dict[str, Any]:
+        return {
+            "executable": Path(str(command[0])).name if command else "",
+            "uses_overwrite": "-y" in command,
+            "input_kind": "avfoundation" if "avfoundation" in command else "",
+        }
 
     @staticmethod
     def _mime_for_path(path: str) -> str:

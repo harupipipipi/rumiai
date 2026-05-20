@@ -11,6 +11,7 @@ from .oauth_store import provider_has_oauth_connection, provider_oauth_status
 
 PROVIDER_SECRET_KEYS: Dict[str, List[str]] = {
     "anthropic": ["ANTHROPIC_API_KEY"],
+    "cerebras": ["CEREBRAS_API_KEY"],
     "deepseek": ["DEEPSEEK_API_KEY"],
     "glm": ["GLM_API_KEY"],
     "groq": ["GROQ_API_KEY"],
@@ -19,6 +20,8 @@ PROVIDER_SECRET_KEYS: Dict[str, List[str]] = {
     "lmstudio": ["LMSTUDIO_API_KEY"],
     "longcat": ["LONGCAT_API_KEY"],
     "mistral": ["MISTRAL_API_KEY"],
+    "moonshotai": ["MOONSHOT_API_KEY"],
+    "nvidia": ["NVIDIA_API_KEY", "NGC_API_KEY"],
     "ollama": ["OLLAMA_API_KEY"],
     "openai": ["OPENAI_API_KEY"],
     "openai_compatible": ["OPENAI_COMPATIBLE_API_KEY"],

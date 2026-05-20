@@ -446,6 +446,25 @@ class TestDefaultspackProviderExpansion(unittest.TestCase):
         finally:
             AIClient._instance = None
 
+    def test_provider_models_with_slashes_are_not_misread_as_api_bound_profiles(self):
+        from domain.ai_client.api_key_store import set_provider_api_key
+        from domain.ai_client.client import AIClient
+
+        AIClient._instance = None
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.dict(os.environ, {"RUMI_DEFAULTSPACK_SECRETS_DIR": tmpdir}, clear=True):
+                set_provider_api_key("nvidia", "secret")
+                client = AIClient()
+
+                try:
+                    self.assertIsNone(client._api_bound_profile_parts("nvidia/meta/llama-3.1-70b-instruct"))
+                    provider, model_name = client.resolve_provider("nvidia/meta/llama-3.1-70b-instruct")
+                finally:
+                    AIClient._instance = None
+
+        self.assertEqual(provider.provider_id, "nvidia")
+        self.assertEqual(model_name, "meta/llama-3.1-70b-instruct")
+
 
 if __name__ == "__main__":
     unittest.main()

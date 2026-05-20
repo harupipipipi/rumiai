@@ -439,6 +439,16 @@ class AIClient:
         model_id = "/".join(parts[2:]).strip()
         if not provider_id or not api_id or not model_id:
             return None
+        named_key = next(
+            (
+                item
+                for item in provider_named_api_keys(provider_id)
+                if str(item.get("api_id") or "").strip() == api_id and item.get("configured")
+            ),
+            None,
+        )
+        if not named_key:
+            return None
         if not read_provider_api_key(provider_id, api_id):
             return None
         metadata = provider_api_metadata(provider_id, api_id)
@@ -983,6 +993,13 @@ class AIClient:
             default_model = str(api_key.get("default_model") or "").strip()
             if default_model and default_model not in allowed:
                 allowed.insert(0, default_model)
+            configured = bool(api_key.get("configured") and read_provider_api_key(provider_id, api_id))
+            availability = {
+                "configured": configured,
+                "active": configured,
+                "status": "configured" if configured else "missing_api_key",
+                "api_bound": True,
+            }
             for model_id in allowed:
                 display = f"{model_id} ({api_key.get('name') or api_id})"
                 profile_id = f"{provider_id}/{api_id}/{model_id}"
@@ -998,8 +1015,8 @@ class AIClient:
                         "display_name": display,
                         "name": display,
                         "type": "chat",
-                        "configured": True,
-                        "availability": {"configured": True, "active": True, "status": "configured", "api_bound": True},
+                        "configured": configured,
+                        "availability": dict(availability),
                         "metadata": {
                             "api_bound": True,
                             "api_id": api_id,

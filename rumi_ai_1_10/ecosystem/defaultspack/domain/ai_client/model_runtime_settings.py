@@ -6,7 +6,10 @@ from pathlib import Path
 from typing import Any
 
 from domain.ai_client.api_key_store import (
+    provider_api_metadata,
     provider_has_api_key,
+    provider_named_api_keys,
+    read_provider_api_key,
     set_provider_api_key,
 )
 from domain.ai_client.model_groups import default_model_groups, normalize_model_groups
@@ -571,6 +574,8 @@ class ModelRuntimeSettingsService:
             model_id = str(profile.get("model_id") or "")
             api_id = str(profile.get("api_id") or "")
             profile_id = str(profile.get("profile_id") or f"{provider_id}/{api_id}/{model_id}")
+            availability = self._api_bound_profile_availability(provider_id, api_id)
+            metadata = provider_api_metadata(provider_id, api_id, pack_root=self._pack_root)
             profiles.append(
                 {
                     "id": profile_id,
@@ -583,16 +588,13 @@ class ModelRuntimeSettingsService:
                     "display_name": str(profile.get("display_name") or f"{model_id} ({api_id})"),
                     "name": str(profile.get("display_name") or model_id),
                     "type": "chat",
-                    "configured": True,
-                    "availability": {
-                        "configured": True,
-                        "active": True,
-                        "status": "configured",
-                        "api_bound": True,
-                    },
+                    "configured": availability["configured"],
+                    "availability": availability,
                     "metadata": {
                         "api_bound": True,
                         "api_id": api_id,
+                        "base_url": str(metadata.get("base_url") or ""),
+                        "quota_label": str(metadata.get("quota_label") or ""),
                         "notes": str(profile.get("notes") or model_notes.get(profile_id) or model_notes.get(f"{provider_id}/{model_id}") or ""),
                     },
                 }
@@ -648,6 +650,27 @@ class ModelRuntimeSettingsService:
             except Exception:
                 pass
         return [self._fallback_stub_profile(), *self.runtime_defined_profiles(settings)]
+
+    def _api_bound_profile_availability(self, provider_id: str, api_id: str) -> dict[str, Any]:
+        named_key = next(
+            (
+                item
+                for item in provider_named_api_keys(provider_id, pack_root=self._pack_root)
+                if str(item.get("api_id") or "").strip() == api_id
+            ),
+            None,
+        )
+        configured = bool(
+            named_key
+            and named_key.get("configured")
+            and read_provider_api_key(provider_id, api_id, pack_root=self._pack_root)
+        )
+        return {
+            "configured": configured,
+            "active": configured,
+            "status": "configured" if configured else "missing_api_key",
+            "api_bound": True,
+        }
 
     def _list_profile_catalog_for_resolution(self, settings: dict[str, Any]) -> list[dict[str, Any]]:
         try:
