@@ -210,7 +210,7 @@ test("composer renders the current steer above the main input", () => {
     }),
   );
 
-  assert.match(html, /これがステア/);
+  assert.doesNotMatch(html, /これがステア/);
   assert.match(html, /反映済み/);
   assert.match(html, /結論を先にして、短く返して/);
   assert.doesNotMatch(html, /フォローアップの変更を求める/);

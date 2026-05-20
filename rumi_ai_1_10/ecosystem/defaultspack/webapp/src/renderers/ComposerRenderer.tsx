@@ -204,7 +204,7 @@ function steerStatusLabel(status: string | undefined): string {
     case "sent":
       return "送信済み";
     default:
-      return "ステア";
+      return "入力";
   }
 }
 
@@ -1867,31 +1867,30 @@ export function ComposerRenderer({
           )}
 
           {!isNewConversation && visibleSteerPreviewItems.length > 0 && (
-            <div className="mx-3 mt-3 overflow-hidden rounded-t-2xl border border-zinc-700/60 bg-[#262627] shadow-sm max-[640px]:mx-2 max-[640px]:mt-2">
-              <div className="flex min-h-8 items-center justify-between gap-2 border-b border-zinc-700/45 px-3 py-1.5 max-[640px]:px-2">
-                <div className="flex min-w-0 items-center gap-2 text-zinc-400">
-                  <CornerDownRight size={14} className="flex-shrink-0 text-zinc-500" />
-                  <span className="truncate text-[12px] font-medium text-zinc-300">これがステア</span>
+            <div className="mx-2 mt-1 overflow-hidden rounded-xl bg-zinc-900/45 px-2 py-1.5 max-[640px]:mx-1.5 max-[640px]:px-1.5">
+              <div className="flex items-center justify-between gap-2 pb-1 text-[10px] leading-none text-zinc-500">
+                <div className="flex min-w-0 items-center gap-1.5">
+                  <CornerDownRight size={12} className="flex-shrink-0" />
                   {visibleSteerPreviewItems.length > 1 && (
-                    <span className="rounded-full border border-zinc-700 px-1.5 py-0.5 text-[9px] leading-none text-zinc-500">
+                    <span className="rounded-full bg-zinc-800/80 px-1.5 py-0.5 text-[9px] leading-none">
                       {visibleSteerPreviewItems.length}
                     </span>
                   )}
                 </div>
-                <div className="flex flex-shrink-0 items-center gap-1.5 text-[10px] text-zinc-500">
-                  {steerBusy && <Loader2 size={11} className="animate-spin" />}
-                  {steerStatus && <span className="max-w-[160px] truncate">{steerStatus}</span>}
+                <div className="flex min-w-0 flex-shrink items-center justify-end gap-1.5">
+                  {steerBusy && <Loader2 size={11} className="flex-shrink-0 animate-spin" />}
+                  {steerStatus && <span className="truncate">{steerStatus}</span>}
                 </div>
               </div>
-              <div className="grid gap-1.5 px-3 py-2 max-[640px]:px-2">
+              <div className="grid gap-1">
                 {visibleSteerPreviewItems.map((item) => (
-                  <div key={item.id} className="grid gap-1 rounded-lg bg-zinc-950/35 px-2.5 py-2">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="rounded border border-zinc-700/70 px-1.5 py-0.5 text-[9px] leading-none text-zinc-500">
+                  <div key={item.id} className="grid gap-1 rounded-lg bg-zinc-950/30 px-2 py-1.5">
+                    <div className="flex items-center gap-2">
+                      <span className="rounded bg-zinc-800/80 px-1.5 py-0.5 text-[9px] leading-none text-zinc-500">
                         {steerStatusLabel(item.status)}
                       </span>
                     </div>
-                    <div className="max-h-20 overflow-y-auto whitespace-pre-wrap break-words text-[12px] leading-5 text-zinc-300">
+                    <div className="max-h-16 overflow-y-auto whitespace-pre-wrap break-words text-[12px] leading-4 text-zinc-300">
                       {String(item.prompt ?? "").trim()}
                     </div>
                   </div>
