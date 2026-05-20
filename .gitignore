@@ -16,8 +16,13 @@
 
 # === 共通の不要ファイル ===
 venv/
+.venv/
 __pycache__/
 *.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
 .DS_Store
 *.exe
 *.zip
