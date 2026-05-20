@@ -457,13 +457,13 @@ class TestDefaultspackProviderExpansion(unittest.TestCase):
                 client = AIClient()
 
                 try:
-                    self.assertIsNone(client._api_bound_profile_parts("nvidia/meta/llama-3.1-70b-instruct"))
-                    provider, model_name = client.resolve_provider("nvidia/meta/llama-3.1-70b-instruct")
+                    self.assertIsNone(client._api_bound_profile_parts("nvidia/meta/llama-3.3-70b-instruct"))
+                    provider, model_name = client.resolve_provider("nvidia/meta/llama-3.3-70b-instruct")
                 finally:
                     AIClient._instance = None
 
         self.assertEqual(provider.provider_id, "nvidia")
-        self.assertEqual(model_name, "meta/llama-3.1-70b-instruct")
+        self.assertEqual(model_name, "meta/llama-3.3-70b-instruct")
 
 
 if __name__ == "__main__":

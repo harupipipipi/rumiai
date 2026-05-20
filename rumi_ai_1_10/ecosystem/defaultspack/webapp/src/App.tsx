@@ -455,8 +455,9 @@ function CalendarComposerPanel({
   settings: CalendarSettings;
 }) {
   const today = new Date();
-  const year = today.getFullYear();
-  const month = today.getMonth();
+  const [visibleMonth, setVisibleMonth] = useState(() => new Date(today.getFullYear(), today.getMonth(), 1));
+  const year = visibleMonth.getFullYear();
+  const month = visibleMonth.getMonth();
   const monthStart = new Date(year, month, 1);
   const weekStartIndex = settings.weekStart === "monday" ? 1 : 0;
   const weekLabels = ["日", "月", "火", "水", "木", "金", "土"];
@@ -475,6 +476,7 @@ function CalendarComposerPanel({
   const [isTimeMenuOpen, setIsTimeMenuOpen] = useState(false);
   const [lastAgentResult, setLastAgentResult] = useState<string | null>(null);
   const calendarRef = useRef<HTMLElement | null>(null);
+  const suppressNextCellOpenRef = useRef(false);
 
   useEffect(() => {
     setDraftKind(settings.defaultItemType);
@@ -541,6 +543,31 @@ function CalendarComposerPanel({
     top: `${(activeEditor.cell.row / 6) * 100}%`,
     transform: `${activeEditor.cell.col >= 5 ? "translateX(calc(-100% - 10px))" : "translateX(10px)"} ${activeEditor.cell.row >= 4 ? "translateY(calc(-100% - 10px))" : "translateY(36px)"}`,
   } : undefined;
+
+  const dismissActiveEditorForSelection = (suppressCellMouseUp = false) => {
+    if (!activeEditor) return false;
+    suppressNextCellOpenRef.current = suppressCellMouseUp;
+    setActiveEditor(null);
+    setDragState(null);
+    setIsTimeMenuOpen(false);
+    return true;
+  };
+
+  const moveVisibleMonth = (offset: number) => {
+    suppressNextCellOpenRef.current = false;
+    setActiveEditor(null);
+    setDragState(null);
+    setIsTimeMenuOpen(false);
+    setVisibleMonth((current) => new Date(current.getFullYear(), current.getMonth() + offset, 1));
+  };
+
+  const returnToToday = () => {
+    suppressNextCellOpenRef.current = false;
+    setActiveEditor(null);
+    setDragState(null);
+    setIsTimeMenuOpen(false);
+    setVisibleMonth(new Date(today.getFullYear(), today.getMonth(), 1));
+  };
 
   const resetDraftForCreate = (kind = settings.defaultItemType) => {
     setDraftTitle("");
@@ -709,6 +736,7 @@ function CalendarComposerPanel({
   const handleCellMouseDown = (event: ReactMouseEvent<HTMLDivElement>, cell: CalendarCell) => {
     if (event.button !== 0 || cell.isCurrentMonth === false && !settings.showOutsideDays) return;
     event.preventDefault();
+    if (dismissActiveEditorForSelection(true)) return;
     setDragState({ startKey: cell.key, currentKey: cell.key, startedAt: Date.now() });
   };
 
@@ -719,6 +747,10 @@ function CalendarComposerPanel({
   const handleCellMouseUp = (event: ReactMouseEvent<HTMLDivElement>, cell: CalendarCell) => {
     if (event.button !== 0) return;
     event.preventDefault();
+    if (suppressNextCellOpenRef.current) {
+      suppressNextCellOpenRef.current = false;
+      return;
+    }
     const currentDrag = dragState;
     setDragState(null);
     if (!currentDrag) {
@@ -739,6 +771,35 @@ function CalendarComposerPanel({
       aria-label="Calendar month"
       className="relative h-full min-h-0 w-full overflow-hidden rounded-[26px] border border-zinc-800 bg-[#101112] shadow-[0_24px_80px_rgba(0,0,0,0.36)]"
     >
+      <div className="pointer-events-none absolute left-4 top-3 z-20 flex items-center gap-2">
+        <button
+          type="button"
+          aria-label="Previous month"
+          title="Previous month"
+          className="pointer-events-auto flex h-8 w-8 items-center justify-center rounded-lg border border-zinc-700/80 bg-zinc-950/82 text-lg leading-none text-zinc-300 shadow-lg backdrop-blur transition-colors hover:border-zinc-500 hover:bg-zinc-900 hover:text-zinc-50"
+          onClick={() => moveVisibleMonth(-1)}
+        >
+          ‹
+        </button>
+        <button
+          type="button"
+          aria-label="Today"
+          title="Today"
+          className="pointer-events-auto rounded-lg border border-zinc-700/80 bg-zinc-950/82 px-3 py-1.5 text-[12px] font-semibold text-zinc-200 shadow-lg backdrop-blur transition-colors hover:border-zinc-500 hover:bg-zinc-900 hover:text-zinc-50"
+          onClick={returnToToday}
+        >
+          {year}年{month + 1}月
+        </button>
+        <button
+          type="button"
+          aria-label="Next month"
+          title="Next month"
+          className="pointer-events-auto flex h-8 w-8 items-center justify-center rounded-lg border border-zinc-700/80 bg-zinc-950/82 text-lg leading-none text-zinc-300 shadow-lg backdrop-blur transition-colors hover:border-zinc-500 hover:bg-zinc-900 hover:text-zinc-50"
+          onClick={() => moveVisibleMonth(1)}
+        >
+          ›
+        </button>
+      </div>
       <div className="grid h-full min-h-[620px] grid-cols-7 grid-rows-6 overflow-hidden">
         {calendarCells.map((cell, index) => {
           const visibleItems = (itemsByDate[cell.key] ?? []).slice(0, settings.maxItemsPerDay);
@@ -757,6 +818,7 @@ function CalendarComposerPanel({
               onKeyDown={(event) => {
                 if (event.key === "Enter" || event.key === " ") {
                   event.preventDefault();
+                  if (dismissActiveEditorForSelection()) return;
                   openCreateEditor(cell);
                 }
               }}
@@ -798,8 +860,11 @@ function CalendarComposerPanel({
                     title={item.title}
                     onPointerDown={(event) => event.stopPropagation()}
                     onPointerUp={(event) => event.stopPropagation()}
+                    onMouseDown={(event) => event.stopPropagation()}
+                    onMouseUp={(event) => event.stopPropagation()}
                     onClick={(event) => {
                       event.stopPropagation();
+                      if (dismissActiveEditorForSelection()) return;
                       openEditEditor(item, cell);
                     }}
                   >
@@ -817,9 +882,10 @@ function CalendarComposerPanel({
       </div>
       {activeEditor && settings.quickAddEnabled && (
         <form
+          key={`${activeEditor.mode}-${activeEditor.itemId ?? "new"}-${activeEditor.startKey}-${activeEditor.endKey}`}
           role="dialog"
           aria-label={`${calendarRangeLabel(activeEditor.startKey, activeEditor.endKey)}に追加`}
-          className="absolute z-30 w-[min(320px,calc(100%-24px))] rounded-2xl border border-zinc-700 bg-zinc-950/95 p-3 text-left shadow-[0_24px_70px_rgba(0,0,0,0.65)] backdrop-blur"
+          className="rumi-calendar-popover absolute z-30 w-[min(320px,calc(100%-24px))] rounded-2xl border border-zinc-700 bg-zinc-950/95 p-3 text-left shadow-[0_24px_70px_rgba(0,0,0,0.65)] backdrop-blur"
           style={popoverStyle}
           onPointerDown={(event) => event.stopPropagation()}
           onClick={(event) => event.stopPropagation()}
@@ -2715,7 +2781,7 @@ export default function App() {
         }
         return;
       case "set_mode_coding":
-        handleModeChange("coding");
+        handleModeChange(mode === "coding" ? "chat" : "coding");
         return;
       case "set_mode_chat":
         handleModeChange("chat");

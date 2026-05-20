@@ -69,8 +69,8 @@ def test_nvidia_manifest_first_runtime_provider_accepts_either_key(monkeypatch):
     assert provider["metadata"]["default_base_url"] == "https://integrate.api.nvidia.com/v1"
     assert provider["env_vars"] == ["NVIDIA_API_KEY", "NGC_API_KEY"]
     assert {
-        "nvidia/nvidia/llama-3.1-nemotron-70b-instruct",
-        "nvidia/meta/llama-3.1-70b-instruct",
+        "nvidia/nvidia/llama-3.3-nemotron-super-49b-v1",
+        "nvidia/meta/llama-3.3-70b-instruct",
     }.issubset(models)
 
     monkeypatch.delenv("NVIDIA_API_KEY", raising=False)

@@ -1,10 +1,10 @@
 {
-  "id": "nvidia/nvidia/llama-3.1-nemotron-70b-instruct",
+  "id": "nvidia/nvidia/llama-3.3-nemotron-super-49b-v1",
   "category": "llm_model",
   "version": "1",
   "provider_id": "nvidia",
-  "model_id": "nvidia/llama-3.1-nemotron-70b-instruct",
-  "display_name": "Llama 3.1 Nemotron 70B Instruct via NVIDIA NIM",
+  "model_id": "nvidia/llama-3.3-nemotron-super-49b-v1",
+  "display_name": "Llama 3.3 Nemotron Super 49B via NVIDIA NIM",
   "type": "reasoning",
   "enabled": true,
   "priority": 1,

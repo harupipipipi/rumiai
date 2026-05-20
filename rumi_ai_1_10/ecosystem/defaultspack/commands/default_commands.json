@@ -99,7 +99,7 @@
     "id": "coding",
     "name": "coding",
     "label": "Coding Mode",
-    "description": "Switch to coding mode.",
+    "description": "Toggle coding mode.",
     "category": "mode",
     "visibility": "default",
     "risk": "low",

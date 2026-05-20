@@ -305,6 +305,11 @@ body {
   animation: rumi-preview-media-enter 320ms 50ms cubic-bezier(0.2, 0.82, 0.2, 1) both;
 }
 
+.rumi-calendar-popover {
+  transform-origin: 18px 18px;
+  animation: rumi-calendar-popover-enter 180ms cubic-bezier(0.2, 0.82, 0.2, 1) both;
+}
+
 .rumi-history-rail {
   animation: none;
 }
@@ -451,6 +456,19 @@ body {
   }
 }
 
+@keyframes rumi-calendar-popover-enter {
+  from {
+    opacity: 0;
+    filter: blur(6px);
+    scale: 0.965;
+  }
+  to {
+    opacity: 1;
+    filter: blur(0);
+    scale: 1;
+  }
+}
+
 @media (max-width: 720px) {
   .rumi-greeting {
     white-space: normal;
@@ -499,6 +517,7 @@ body {
   .rumi-image-preview-backdrop,
   .rumi-image-preview-shell,
   .rumi-image-preview-media,
+  .rumi-calendar-popover,
   .rumi-loading-bars span {
     animation: none;
   }

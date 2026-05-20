@@ -87,9 +87,8 @@ GITLAWB_OPENGATEWAY_BASE_URL=https://opengateway.gitlawb.com/v1
 | `gitlawb-opengateway/mimo-v2-omni` | 画像入力対応の MiMo V2 Omni |
 | `gitlawb-opengateway/mimo-v2-pro` | reasoning 用の MiMo V2 Pro |
 | `gitlawb-opengateway/mimo-v2.5` | reasoning 用の MiMo V2.5 |
-| `gitlawb-opengateway/google/gemini-3.1-flash-lite-preview` | 高速な Gemini 3.1 Flash Lite Preview |
 
-`mimo` 系は Gitlawb OpenGateway の OpenAI-compatible `POST /v1/chat/completions` に送信され、違いは `model` のみ。`mimo-v2-omni` の画像認識では OpenAI 互換の `content` 配列形式を使う。Gemini Flash Lite と MiMo Omni はこの gateway で verified image input として扱う。runtime は gateway 互換性のため Browser User-Agent を付与する。
+`mimo` 系は Gitlawb OpenGateway の OpenAI-compatible `POST /v1/chat/completions` に送信され、違いは `model` のみ。`mimo-v2-omni` の画像認識では OpenAI 互換の `content` 配列形式を使う。runtime は gateway 互換性のため Browser User-Agent を付与する。
 
 ### Cloud OpenAI-compatible providers
 

@@ -268,7 +268,29 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
     }
 
     if (path === "/api/ui/commands") {
-      return fulfill(route, { commands: [] });
+      return fulfill(route, {
+        commands: [
+          {
+            id: "coding",
+            name: "coding",
+            label: "Coding Mode",
+            description: "Toggle coding mode.",
+            category: "mode",
+            visibility: "default",
+            risk: "low",
+            modes: ["chat", "coding", "agent"],
+            execution: { type: "frontend", action: "set_mode_coding" },
+          },
+        ],
+      });
+    }
+
+    if (path === "/api/ui/commands/execute" && method === "POST") {
+      const payload = request.postDataJSON() as Record<string, unknown>;
+      return fulfill(route, {
+        executed: true,
+        action: payload.command === "coding" ? "set_mode_coding" : "",
+      });
     }
 
     if (path === "/api/ai/profiles") {
@@ -487,7 +509,22 @@ test("calendar mode opens quick add and renders new tasks in blue", async ({ pag
 
   const now = new Date();
   const dayKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-09`;
+  const nextDayKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-10`;
+  const nextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+  const nextMonthKey = `${nextMonth.getFullYear()}-${String(nextMonth.getMonth() + 1).padStart(2, "0")}-01`;
   const dayLabel = `${now.getFullYear()}年${now.getMonth() + 1}月9日`;
+  const nextDayLabel = `${now.getFullYear()}年${now.getMonth() + 1}月10日`;
+  await page.getByLabel("Next month").click();
+  await expect(page.getByTestId(`calendar-day-${nextMonthKey}`)).toBeVisible();
+  await page.getByLabel("Today").click();
+  await page.getByTestId(`calendar-day-${dayKey}`).click();
+  await expect(page.getByRole("dialog", { name: `${dayLabel}に追加` })).toBeVisible();
+  await page.getByTestId(`calendar-day-${nextDayKey}`).click();
+  await expect(page.getByRole("dialog", { name: `${dayLabel}に追加` })).toBeHidden();
+  await expect(page.getByRole("dialog", { name: `${nextDayLabel}に追加` })).toBeHidden();
+  await page.getByTestId(`calendar-day-${nextDayKey}`).click();
+  await expect(page.getByRole("dialog", { name: `${nextDayLabel}に追加` })).toBeVisible();
+  await page.keyboard.press("Escape");
   await page.getByTestId(`calendar-day-${dayKey}`).click();
   await expect(page.getByRole("dialog", { name: `${dayLabel}に追加` })).toBeVisible();
 
@@ -581,6 +618,20 @@ test("history card drag uses rumi history MIME and sends dropped_widgets metadat
     conversation_id: "c-smoke",
     title: "Preview Calendar Chat",
   });
+});
+
+test("coding slash command toggles coding mode off again", async ({ page }) => {
+  await openDefaultspack(page, "/chat");
+
+  await page.locator("textarea.rumi-composer-textarea").fill("/coding");
+  await page.keyboard.press("Enter");
+  await expect(page).toHaveURL(/\/coding(?:\?|$)/);
+  await expect(page.getByRole("button", { name: "Coding widget" })).toBeVisible();
+
+  await page.locator("textarea.rumi-composer-textarea").fill("/coding");
+  await page.keyboard.press("Enter");
+  await expect(page).toHaveURL(/\/chat(?:\?|$)/);
+  await expect(page.getByRole("button", { name: "Coding widget" })).toBeHidden();
 });
 
 test("tool timeline shows streamed activity details", async ({ page }) => {

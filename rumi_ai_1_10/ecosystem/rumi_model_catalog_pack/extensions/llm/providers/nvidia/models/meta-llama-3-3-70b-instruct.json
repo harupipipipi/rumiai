@@ -1,10 +1,10 @@
 {
-  "id": "nvidia/meta/llama-3.1-70b-instruct",
+  "id": "nvidia/meta/llama-3.3-70b-instruct",
   "category": "llm_model",
   "version": "1",
   "provider_id": "nvidia",
-  "model_id": "meta/llama-3.1-70b-instruct",
-  "display_name": "Llama 3.1 70B Instruct via NVIDIA NIM",
+  "model_id": "meta/llama-3.3-70b-instruct",
+  "display_name": "Llama 3.3 70B Instruct via NVIDIA NIM",
   "type": "chat",
   "enabled": true,
   "priority": 2,

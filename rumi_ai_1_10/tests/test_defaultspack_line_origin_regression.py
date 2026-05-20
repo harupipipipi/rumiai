@@ -414,7 +414,7 @@ def test_line_computer_use_fake_webhook_runs_three_browser_tasks_and_acknowledge
         input_profile_id="line.computer_use",
         conversation={
             "strategy": "external_key",
-            "model": "gitlawb-opengateway/google/gemini-3.1-flash-lite-preview",
+            "model": "gitlawb-opengateway/mimo-v2-omni",
         },
         response={
             "mode": "computer_use_line_biz",

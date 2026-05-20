@@ -28,11 +28,11 @@
     "catalog_only": false,
     "supports_invoke": true,
     "default_base_url": "https://integrate.api.nvidia.com/v1",
-    "default_model": "nvidia/llama-3.1-nemotron-70b-instruct",
+    "default_model": "nvidia/llama-3.3-nemotron-super-49b-v1",
     "default_model_for": {
-      "chat": "nvidia/llama-3.1-nemotron-70b-instruct",
-      "reasoning": "nvidia/llama-3.1-nemotron-70b-instruct",
-      "general": "meta/llama-3.1-70b-instruct"
+      "chat": "nvidia/llama-3.3-nemotron-super-49b-v1",
+      "reasoning": "nvidia/llama-3.3-nemotron-super-49b-v1",
+      "general": "meta/llama-3.3-70b-instruct"
     },
     "capabilities": ["chat", "streaming", "tool_calls", "reasoning", "openai_compatible"]
   },
@@ -50,11 +50,11 @@
     "catalog_only": false,
     "supports_invoke": true,
     "default_base_url": "https://integrate.api.nvidia.com/v1",
-    "default_model": "nvidia/llama-3.1-nemotron-70b-instruct",
+    "default_model": "nvidia/llama-3.3-nemotron-super-49b-v1",
     "default_model_for": {
-      "chat": "nvidia/llama-3.1-nemotron-70b-instruct",
-      "reasoning": "nvidia/llama-3.1-nemotron-70b-instruct",
-      "general": "meta/llama-3.1-70b-instruct"
+      "chat": "nvidia/llama-3.3-nemotron-super-49b-v1",
+      "reasoning": "nvidia/llama-3.3-nemotron-super-49b-v1",
+      "general": "meta/llama-3.3-70b-instruct"
     },
     "capabilities": {
       "native_tool_calling": true,

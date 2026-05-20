@@ -35,9 +35,9 @@ The manifest is the discovery contract. It carries ids, category/kind, version/s
 - Gitlawb OpenGateway model ids remain:
   - `gitlawb-opengateway/mimo-v2.5-pro`
   - `gitlawb-opengateway/mimo-v2-flash`
-  - `gitlawb-opengateway/google/gemini-3.1-flash-lite-preview`
+  - `gitlawb-opengateway/mimo-v2-omni`
 - No-key behavior, default base URL behavior, browser User-Agent behavior, and fixed model allowlist behavior are preserved.
-- Gemini 3.1 Flash Lite Preview keeps high thinking and verified image metadata.
+- MiMo Omni keeps verified image metadata.
 - `rumi_model_catalog_pack` provider/model manifests are preserved and remain manifest-backed.
 - LINE Biz webhook acknowledgement/background processing is preserved, including acknowledgement text, reply token reuse suppression, current-turn chat history mode, physical click prompt behavior, origin/source recording, signature verification, and audience policy behavior.
 - Browser/computer driver safety remains preserved in `rumi_default_tools_pack`, including visible-screen-only behavior, foreground guards, approval-required physical actions, URL scheme restrictions, and fallback order.

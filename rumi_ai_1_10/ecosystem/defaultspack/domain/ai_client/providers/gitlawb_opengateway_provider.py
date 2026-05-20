@@ -18,7 +18,6 @@ class GitlawbOpengatewayProvider(OpenAICompatibleProvider):
         "mimo-v2-pro",
         "mimo-v2.5",
         "mimo-v2.5-pro",
-        "google/gemini-3.1-flash-lite-preview",
     }
     KNOWN_MODELS = [
         {
@@ -110,25 +109,6 @@ class GitlawbOpengatewayProvider(OpenAICompatibleProvider):
                 "privacy": "external_no_key_gateway",
                 "openai_base_url": "https://opengateway.gitlawb.com/v1",
                 "openai_model": "mimo-v2.5",
-            },
-        },
-        {
-            "id": "gitlawb-opengateway/google/gemini-3.1-flash-lite-preview",
-            "model_id": "google/gemini-3.1-flash-lite-preview",
-            "name": "Gemini 3.1 Flash Lite Preview via Gitlawb OpenGateway",
-            "display_name": "Gemini 3.1 Flash Lite Preview via Gitlawb OpenGateway",
-            "provider": "gitlawb-opengateway",
-            "provider_id": "gitlawb-opengateway",
-            "type": "chat",
-            "defaults": {"chat": True, "fast": True},
-            "capabilities": ["chat", "streaming", "vision", "reasoning"],
-            "supports_thinking": True,
-            "thinking_levels": ["low", "medium", "high"],
-            "default_thinking_level": "high",
-            "metadata": {
-                "source": "gitlawb-opengateway",
-                "privacy": "external_no_key_gateway",
-                "vision_verified": True,
             },
         },
     ]

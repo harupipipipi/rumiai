@@ -37,7 +37,12 @@ def _register_aliases(module: ModuleType, original_name: str, canonical_name: st
 def import_module(module_name: str) -> ModuleType:
     original_name = str(module_name or "").strip()
     canonical_name = normalize_module_name(original_name)
-    module = importlib.import_module(canonical_name)
+    try:
+        module = importlib.import_module(canonical_name)
+    except ModuleNotFoundError:
+        if canonical_name == original_name:
+            raise
+        module = importlib.import_module(original_name)
     _register_aliases(module, original_name or canonical_name, canonical_name)
     return module
 
