@@ -29,12 +29,42 @@ The repository keeps the runtime implementation under `rumi_ai_1_10/`, while `ru
 - `rumi_viewer/`: desktop shell and control panel frontend source
 - `rumi_mobile/`: Flutter iOS/Android app for trusted-LAN defaultspack access
 
+## Setup
+
+### Prerequisites
+
+- Python 3.10+
+- Node.js 18+
+- npm
+- Rust / Cargo (`rumi_viewer` を触る場合)
+- Flutter SDK (`rumi_mobile` を触る場合)
+
+### Clone and install
+
+```bash
+git clone https://github.com/harupipipipi/rumiai.git
+cd rumiai
+
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+pip install -r rumi_ai_1_10/requirements.txt -r rumi_ai_1_10/requirements-dev.txt
+pip install -e ./rumi_ai_1_10
+
+cd rumi_viewer/frontend
+npm install
+cd ../..
+```
+
 ## Start
 
 ```bash
+source .venv/bin/activate
 python -m rumi_ai --health
 python -m rumi_ai
 ```
+
+`--health` はシステムボリューム使用率も確認します。`disk` probe が `DEGRADED` / `DOWN` の場合は、コード不具合ではなく空き容量不足の可能性があります。
 
 ## Common Tasks
 
@@ -63,6 +93,7 @@ cargo tauri dev
 ## Development
 
 ```bash
+source .venv/bin/activate
 cd rumi_ai_1_10
 python -m pytest tests/test_capability_trust_store.py
 ```
