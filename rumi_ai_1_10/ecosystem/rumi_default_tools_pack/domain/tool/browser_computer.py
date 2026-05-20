@@ -1526,6 +1526,7 @@ class BrowserComputerController:
         return str(
             payload.get("app")
             or payload.get("application")
+            or payload.get("target_app")
             or payload.get("browser")
             or payload.get("browser_app")
             or ""
