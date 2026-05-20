@@ -5,8 +5,11 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from blocks._common import error, ok
 from domain.ai_client.api_key_store import (
+    delete_custom_provider,
     delete_provider_api_key,
+    list_custom_providers,
     provider_key_status,
+    register_custom_provider,
     rename_provider_api_key,
     set_provider_api_key,
 )
@@ -16,12 +19,31 @@ def run(input_data, context):
     del context
     method = (input_data or {}).get("_method", "GET").upper()
     if method == "GET":
-        return ok({"providers": provider_key_status()})
+        return ok({
+            "providers": provider_key_status(),
+            "custom_providers": list_custom_providers(),
+        })
     if method == "POST":
         action = str((input_data or {}).get("action", "upsert")).strip().lower()
         provider_id = str((input_data or {}).get("provider_id", "")).strip()
         api_id = str((input_data or {}).get("api_id", "")).strip()
         name = str((input_data or {}).get("name", "")).strip()
+        kind_value = (input_data or {}).get("kind")
+        if action == "register_provider":
+            label = str((input_data or {}).get("label") or provider_id).strip()
+            result = register_custom_provider(
+                provider_id,
+                label=label or None,
+                kind=str(kind_value or "").strip() or None,
+            )
+            if not result.get("success"):
+                return error(result.get("error") or "failed to register provider", "PROVIDER_REGISTER_FAILED")
+            return ok({key: value for key, value in result.items() if key != "error"})
+        if action == "delete_provider":
+            result = delete_custom_provider(provider_id)
+            if not result.get("success"):
+                return error(result.get("error") or "failed to delete provider", "PROVIDER_DELETE_FAILED")
+            return ok({key: value for key, value in result.items() if key != "error"})
         if action == "delete":
             result = delete_provider_api_key(provider_id, api_id)
         elif action == "rename":
@@ -36,6 +58,7 @@ def run(input_data, context):
                 default_model=(input_data or {}).get("default_model"),
                 notes=(input_data or {}).get("notes"),
                 quota_label=(input_data or {}).get("quota_label"),
+                kind=str(kind_value or "").strip() or None,
             )
         else:
             value = str((input_data or {}).get("value", ""))
@@ -49,6 +72,7 @@ def run(input_data, context):
                 default_model=(input_data or {}).get("default_model"),
                 notes=(input_data or {}).get("notes"),
                 quota_label=(input_data or {}).get("quota_label"),
+                kind=str(kind_value or "").strip() or None,
             )
         if not result.get("success"):
             return error(result.get("error") or "failed to save api key", "API_KEY_SAVE_FAILED")

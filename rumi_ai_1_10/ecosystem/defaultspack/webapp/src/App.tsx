@@ -2486,6 +2486,7 @@ export default function App() {
         const name = String(payload.name ?? apiId).trim();
         const secret = String(payload.value ?? "");
         const action = String(payload.action ?? "upsert").trim();
+        const kind = String(payload.kind ?? "").trim() || undefined;
         if (action === "oauth_refresh") {
           if (providerId) {
             void refreshProviderOAuthStatus(providerId).catch(console.error);
@@ -2493,6 +2494,17 @@ export default function App() {
             void refreshCatalog().catch(console.error);
           }
           return current;
+        } else if (action === "register_provider" && providerId) {
+          void api.registerCustomProvider(providerId, {
+            label: String(payload.label ?? "").trim() || undefined,
+            kind,
+          })
+            .then(() => refreshCatalog())
+            .catch(console.error);
+        } else if (action === "delete_provider" && providerId) {
+          void api.deleteCustomProvider(providerId)
+            .then(() => refreshCatalog())
+            .catch(console.error);
         } else if (action === "delete" && providerId && apiId) {
           void api.deleteProviderApiKey(providerId, apiId)
             .then(() => refreshCatalog())
@@ -2512,6 +2524,7 @@ export default function App() {
             defaultModel: String(payload.default_model ?? "").trim() || undefined,
             quotaLabel: String(payload.quota_label ?? "").trim() || undefined,
             notes: String(payload.notes ?? "").trim() || undefined,
+            kind,
           })
             .then(() => refreshCatalog())
             .catch(console.error);
