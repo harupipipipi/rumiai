@@ -8,6 +8,7 @@ import type { ChatItem } from "./components/HistoryBoard";
 import type { ToolPreviewItem, ToolPreviewMode } from "./components/ToolPreview";
 import { buildToolPreviewDisplayItems, hasCanvasItems } from "./components/ToolPreview";
 import { api, defaultspackApiFetch, type ChatActivityEvent, type ChatContentBlock, type ChatMessage, type ChatStreamEvent, type ChatToolStreamEvent, type CodingWorkspaceRecord, type ComposerCommandExecuteResult, type ComposerCommandItem, type ComposerCommandMode, type ComposerWidgetAction, type Conversation, type ConversationSearchResult, type ConversationSteerItem, type ModelCommandCandidate, type ModelProfile, type OperationsCompanyStatus, type SettingsSection, type SidebarAction, type SidebarItem, type UICatalog } from "./lib/api";
+import { pendingBrowserApproval, type BrowserApproval } from "./lib/browserApproval";
 import { reduceBrowserStateFromEvents } from "./lib/browserState";
 import { deriveConversationTitle, formatRelativeTime, messageToText, orderConversationMessages } from "./lib/chat";
 import { cn } from "./lib/cn";
@@ -22,13 +23,6 @@ import { hasWorkspaceAttachment, workspaceFileToAttachment } from "./lib/workspa
 import { resolveDefaultspackRenderers } from "./renderers/defaultspackRenderers";
 import { RendererBoundary } from "./renderers/trustedRendererLoader";
 import type { AppMode, AttachedFile, ChatUiMessage, CodingContext, ComposerExtensionItem, ContextUsageInfo, DroppedWidget } from "./renderers/types";
-
-type BrowserApproval = {
-  action: string;
-  payload: Record<string, unknown>;
-  token: string;
-  toolName: string;
-};
 
 type ComposerCandidateMenuState = {
   mode: "model";
@@ -1755,41 +1749,6 @@ function modelCommandInputQuery(value: string): string | null {
   const match = value.trim().match(/^\/models?(?:\s+([\s\S]*))?$/i);
   if (!match) return null;
   return String(match[1] ?? "").trim();
-}
-
-function pendingBrowserApproval(messages: ChatUiMessage[]): BrowserApproval | null {
-  const approvalFromCandidate = (candidate: Record<string, unknown> | undefined, fallbackToolName = "browser_computer"): BrowserApproval | null => {
-    if (!candidate?.requires_approval && !candidate?.approval_required) return null;
-    if (!candidate.approval_token) return null;
-    const rawPayload = candidate.payload;
-    const toolName = String(candidate.tool_name ?? fallbackToolName);
-    return {
-      action: String(candidate.action ?? "browser.session"),
-      payload: rawPayload && typeof rawPayload === "object" ? rawPayload as Record<string, unknown> : {},
-      token: String(candidate.approval_token),
-      toolName,
-    };
-  };
-
-  for (const message of [...messages].reverse()) {
-    if (message.role === "user") return null;
-    if (message.role !== "agent") continue;
-    for (const event of [...(message.events ?? [])].reverse()) {
-      if (event.type !== "approval_requested" && event.phase !== "approval_requested") continue;
-      const approval = approvalFromCandidate(event as Record<string, unknown>, String(event.tool_name ?? "browser_computer"));
-      if (approval) return approval;
-    }
-    for (const log of [...(message.toolLogs ?? [])].reverse()) {
-      if (!["browser_computer", "browser_companion", "browser_use", "computer_use"].includes(String(log.tool_name))) continue;
-      const result = log.result as Record<string, unknown> | undefined;
-      const data = (result?.data ?? result) as Record<string, unknown> | undefined;
-      const widget = data?.widget as Record<string, unknown> | undefined;
-      const candidate = (widget?.requires_approval || widget?.approval_required ? widget : data) as Record<string, unknown> | undefined;
-      const approval = approvalFromCandidate(candidate, String(log.tool_name));
-      if (approval) return approval;
-    }
-  }
-  return null;
 }
 
 export default function App() {

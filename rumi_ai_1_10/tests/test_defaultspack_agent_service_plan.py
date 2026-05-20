@@ -1378,6 +1378,44 @@ def test_browser_computer_click_can_use_virtual_cursor_for_preview(tmp_path, mon
     assert result["click_marker"]["screen_y"] == 20
 
 
+def test_browser_computer_screenshot_falls_back_to_window_capture_when_rect_capture_fails(tmp_path, monkeypatch):
+    from subprocess import CalledProcessError
+
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+    import ecosystem.rumi_default_tools_pack.domain.tool.browser_computer as browser_computer
+
+    controller = BrowserComputerController(artifact_root=tmp_path)
+    monkeypatch.setattr(browser_computer.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(
+        controller,
+        "_capture_target",
+        lambda payload: {
+            "app": "Google Chrome",
+            "title": "defaultspack luxe shell",
+            "window_id": 3023,
+            "capture_rect": {"x": 0, "y": 37, "width": 1470, "height": 919},
+        },
+    )
+    calls = []
+
+    def fake_run(command, check):
+        del check
+        calls.append(command)
+        if "-R" in command:
+            raise CalledProcessError(1, command)
+        assert "-l" in command
+        return None
+
+    monkeypatch.setattr(browser_computer.subprocess, "run", fake_run)
+
+    result = controller._capture_screenshot(tmp_path / "shot.png", {"app": "Google Chrome"})
+
+    assert result["target_window"]["window_id"] == 3023
+    assert calls[0][2] == "-R"
+    assert calls[1][2] == "-l"
+    assert calls[1][3] == "3023"
+
+
 def test_browser_computer_key_rejects_background_requests(tmp_path, monkeypatch):
     from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
     import ecosystem.rumi_default_tools_pack.domain.tool.browser_computer as browser_computer

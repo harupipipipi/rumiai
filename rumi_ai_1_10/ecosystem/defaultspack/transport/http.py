@@ -881,14 +881,6 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
         try:
             parsed_url = urllib.parse.urlsplit(self.path)
             path = parsed_url.path
-            handler, path_params, source, path_inject = self.server_ref._match_route(method, path)
-            if handler is None:
-                self._send_json(404, error("not found: " + method + " " + path))
-                return
-            sensitive_error = self._sensitive_request_error(method, path)
-            if sensitive_error:
-                self._send_json(sensitive_error[0], error(sensitive_error[1], sensitive_error[2]))
-                return
             request_data = {
                 key: values[-1]
                 for key, values in urllib.parse.parse_qs(parsed_url.query, keep_blank_values=True).items()
@@ -919,6 +911,15 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
                             self._send_json(400, error("JSON body must be an object"))
                             return
                     request_data.update(body_data)
+
+            handler, path_params, source, path_inject = self.server_ref._match_route(method, path)
+            if handler is None:
+                self._send_json(404, error("not found: " + method + " " + path))
+                return
+            sensitive_error = self._sensitive_request_error(method, path)
+            if sensitive_error:
+                self._send_json(sensitive_error[0], error(sensitive_error[1], sensitive_error[2]))
+                return
 
             if source == "registry":
                 # Inject path parameters into request_data per route config
