@@ -72,6 +72,7 @@ def test_edge_haze_manager_compiles_starts_and_stops_on_macos(tmp_path, monkeypa
     monkeypatch.setattr(edge_haze.shutil, "which", lambda name: "/usr/bin/swiftc" if name == "swiftc" else None)
     monkeypatch.setattr(edge_haze.subprocess, "run", fake_run)
     monkeypatch.setattr(edge_haze.subprocess, "Popen", fake_popen)
+    monkeypatch.setenv("RUMI_COMPUTER_USE_HAZE", "1")
 
     manager = ComputerUseEdgeHazeManager(
         pack_root=tmp_path,

@@ -62,6 +62,8 @@ class ComputerUseEdgeHazeManager:
         settings = self.settings()
         if not settings.enabled:
             return False
+        if os.environ.get("PYTEST_CURRENT_TEST") and "RUMI_COMPUTER_USE_HAZE" not in os.environ:
+            return False
         if platform.system() != "Darwin":
             return False
         binary = self._ensure_binary()
