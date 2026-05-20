@@ -245,11 +245,7 @@ class ToolExecutor:
         local_tool = self._first_party_browser_computer_tool_for_function(pack_id, function_id)
         if local_tool not in {"browser_computer", "browser_use", "computer_use"}:
             return None
-        if (
-            _requires_approval(tool_def)
-            and _context_is_user_requested_computer_use(context)
-            and not _context_has_tool_server_approval(context)
-        ):
+        if _requires_approval(tool_def) and not _context_has_tool_server_approval(context):
             return None
         return self._execute_local(local_tool, request.get("args") or {}, context)
 
@@ -1194,10 +1190,6 @@ def _context_has_tool_server_approval(context):
     if bool(policy.get("yolo_mode")) or _is_policy_allow_context(context):
         return True
     return bool(context.get("_tool_server_approved"))
-
-
-def _context_is_user_requested_computer_use(context):
-    return isinstance(context, dict) and bool(context.get("user_requested_computer_use"))
 
 
 def _function_call_context(context, tool_def):

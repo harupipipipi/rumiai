@@ -14,6 +14,7 @@ class OpenAICompatibleProvider(OpenAIProvider):
     KNOWN_MODELS: List[Dict[str, Any]] = []
     curated_models: List[Dict[str, Any]] = []
     DISPLAY_NAME = "OpenAI Compatible"
+    _SUPPRESS_DEFAULT_REASONING_PARAM = "_suppress_default_reasoning_effort"
     _CEREBRAS_REQUEST_DEFAULTS: Dict[str, Dict[str, Any]] = {
         "gpt-oss-120b": {
             "temperature": 1,
@@ -284,8 +285,23 @@ class OpenAICompatibleProvider(OpenAIProvider):
             model_id = model_id.split("/", 1)[1]
         return self.provider_id == "cerebras" and model_id in self._CEREBRAS_REASONING_MODELS
 
+    @staticmethod
+    def _translate_params(params):
+        raw = dict(params or {})
+        translated = OpenAIProvider._translate_params(raw)
+        thinking_level = str(raw.get("thinking_level") or "").strip().lower()
+        reasoning_effort = str(raw.get("reasoning_effort") or "").strip().lower()
+        if thinking_level == "none" or reasoning_effort == "none":
+            translated.pop("reasoning_effort", None)
+            translated[OpenAICompatibleProvider._SUPPRESS_DEFAULT_REASONING_PARAM] = True
+        return translated
+
     def _translate_cerebras_model_params(self, model: str, params: Dict[str, Any]) -> Dict[str, Any]:
         translated = dict(params or {})
+        suppress_default_reasoning = bool(translated.pop(self._SUPPRESS_DEFAULT_REASONING_PARAM, False))
+        if str(translated.get("reasoning_effort") or "").strip().lower() == "none":
+            suppress_default_reasoning = True
+            translated.pop("reasoning_effort", None)
         if "max_tokens" in translated:
             if "max_completion_tokens" not in translated:
                 translated["max_completion_tokens"] = translated["max_tokens"]
@@ -293,6 +309,8 @@ class OpenAICompatibleProvider(OpenAIProvider):
 
         model_entry = self._known_model_entry(model)
         for key, value in self._model_request_defaults(model, model_entry).items():
+            if key == "reasoning_effort" and suppress_default_reasoning:
+                continue
             translated.setdefault(key, value)
 
         if not self._model_supports_reasoning(model, model_entry):

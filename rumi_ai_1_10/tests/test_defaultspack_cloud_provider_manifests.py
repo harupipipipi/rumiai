@@ -136,15 +136,54 @@ def test_cerebras_openai_compatible_params_match_model_contract():
     assert "max_tokens" not in llama_body
 
 
+def test_cerebras_explicit_none_thinking_does_not_restore_default_reasoning_effort():
+    from domain.ai_client.providers.openai_compatible_provider import OpenAICompatibleProvider
+
+    captured = {}
+    provider = OpenAICompatibleProvider(
+        provider_id="cerebras",
+        api_key="test-cerebras-key",
+        default_base_url="https://api.cerebras.ai/v1",
+        credential_required=False,
+        known_models=[
+            {
+                "id": "cerebras/gpt-oss-120b",
+                "model_id": "gpt-oss-120b",
+                "display_name": "GPT OSS 120B",
+                "capabilities": {"reasoning": True},
+            },
+        ],
+    )
+
+    def fake_request_json(path, body):
+        captured["body"] = body
+        return {"choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}]}
+
+    with patch.object(provider, "_request_json", side_effect=fake_request_json):
+        provider.complete(
+            "gpt-oss-120b",
+            [{"role": "user", "content": "hi"}],
+            [],
+            {"thinking_level": "none"},
+        )
+
+    body = captured["body"]
+    assert body["temperature"] == 1
+    assert body["top_p"] == 1
+    assert "reasoning_effort" not in body
+
+
 def test_cerebras_thinking_normalization_only_emits_supported_reasoning_params():
     from domain.ai_client.model_runtime_settings import ModelRuntimeSettingsService
 
     service = ModelRuntimeSettingsService()
 
     gpt = service.normalize_for_provider("cerebras", "gpt-oss-120b", "high")
+    gpt_none = service.normalize_for_provider("cerebras", "gpt-oss-120b", "none")
     llama = service.normalize_for_provider("cerebras", "llama3.1-8b", "high")
 
     assert gpt["provider_params"] == {"reasoning_effort": "high"}
+    assert gpt_none["provider_params"] == {}
     assert llama["provider_params"] == {}
 
 
