@@ -1224,6 +1224,76 @@ class FrontendRegistry:
                 ],
             },
             {
+                "id": "computer_use_haze",
+                "label": "Computer Use Haze",
+                "description": "Visible edge glow while computer-use performs screen-mutating actions.",
+                "fields": [
+                    {
+                        "id": "enabled",
+                        "label": "Enable Haze",
+                        "type": "toggle",
+                        "default": True,
+                        "help": "computer use の可視操作中、画面端にクリック透過のもやもやを表示します。",
+                    },
+                    {
+                        "id": "preset",
+                        "label": "Gradient Preset",
+                        "type": "select",
+                        "default": "aurora",
+                        "options": [
+                            {"value": "aurora", "label": "Aurora"},
+                            {"value": "ocean", "label": "Ocean"},
+                            {"value": "ember", "label": "Ember"},
+                            {"value": "custom", "label": "Custom"},
+                        ],
+                    },
+                    {
+                        "id": "start_color",
+                        "label": "Start Color",
+                        "type": "color",
+                        "default": "#6EE7F9",
+                    },
+                    {
+                        "id": "end_color",
+                        "label": "End Color",
+                        "type": "color",
+                        "default": "#A78BFA",
+                    },
+                    {
+                        "id": "accent_color",
+                        "label": "Accent Color",
+                        "type": "color",
+                        "default": "#F0ABFC",
+                    },
+                    {
+                        "id": "opacity",
+                        "label": "Opacity",
+                        "type": "number",
+                        "default": 0.36,
+                        "min": 0.05,
+                        "max": 0.9,
+                    },
+                    {
+                        "id": "edge_width",
+                        "label": "Edge Width",
+                        "type": "number",
+                        "default": 150,
+                        "min": 40,
+                        "max": 420,
+                        "advanced": True,
+                    },
+                    {
+                        "id": "animation_speed",
+                        "label": "Animation Speed",
+                        "type": "number",
+                        "default": 1,
+                        "min": 0.1,
+                        "max": 4,
+                        "advanced": True,
+                    },
+                ],
+            },
+            {
                 "id": "debug",
                 "label": "Debug",
                 "description": "モデル呼び出しとcomputer use調査用のログ設定。",
@@ -1843,6 +1913,16 @@ class FrontendRegistry:
                 "tool_assist_mode": "auto",
                 "tool_assist_limit": 8,
             },
+            "computer_use_haze": {
+                "enabled": True,
+                "preset": "aurora",
+                "start_color": "#6EE7F9",
+                "end_color": "#A78BFA",
+                "accent_color": "#F0ABFC",
+                "opacity": 0.36,
+                "edge_width": 150,
+                "animation_speed": 1,
+            },
             "debug": {
                 "ai_request_logging": False,
             },
@@ -2103,6 +2183,20 @@ class FrontendRegistry:
                 result[key] = value
         return result
 
+    @staticmethod
+    def _sanitize_hex_color(value: Any, default: str) -> str:
+        candidate = str(value or "").strip()
+        if re.match(r"^#[0-9a-fA-F]{6}$", candidate):
+            return candidate.upper()
+        return default
+
+    @staticmethod
+    def _clamped_float(value: Any, default: float, minimum: float, maximum: float) -> float:
+        try:
+            return max(minimum, min(maximum, float(value)))
+        except (TypeError, ValueError):
+            return default
+
     def _sanitize_settings_patch(self, patch: dict[str, Any]) -> dict[str, Any]:
         sanitized = deepcopy(patch)
         apis = sanitized.get("apis")
@@ -2188,6 +2282,20 @@ class FrontendRegistry:
         legacy_default_target = self._legacy_default_target(refreshed)
         if "default_target" not in tools or (not str(tools.get("default_target") or "").strip() and legacy_default_target):
             tools["default_target"] = legacy_default_target
+
+        haze = refreshed.setdefault("computer_use_haze", {})
+        if not isinstance(haze, dict):
+            haze = {}
+            refreshed["computer_use_haze"] = haze
+        haze["enabled"] = bool(haze.get("enabled", True))
+        preset = str(haze.get("preset") or "aurora").strip().lower()
+        haze["preset"] = preset if preset in {"aurora", "ocean", "ember", "custom"} else "aurora"
+        haze["start_color"] = self._sanitize_hex_color(haze.get("start_color"), "#6EE7F9")
+        haze["end_color"] = self._sanitize_hex_color(haze.get("end_color"), "#A78BFA")
+        haze["accent_color"] = self._sanitize_hex_color(haze.get("accent_color"), "#F0ABFC")
+        haze["opacity"] = self._clamped_float(haze.get("opacity"), 0.36, 0.05, 0.9)
+        haze["edge_width"] = int(self._clamped_float(haze.get("edge_width"), 150, 40, 420))
+        haze["animation_speed"] = self._clamped_float(haze.get("animation_speed"), 1, 0.1, 4)
 
         triggers = refreshed.setdefault("triggers", {})
         if not isinstance(triggers, dict):

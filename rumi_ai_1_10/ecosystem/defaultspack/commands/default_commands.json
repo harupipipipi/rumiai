@@ -121,7 +121,7 @@
     "id": "agent",
     "name": "agent",
     "label": "Agent Mode",
-    "description": "Switch to agent mode.",
+    "description": "Toggle agent mode.",
     "category": "mode",
     "visibility": "default",
     "risk": "low",

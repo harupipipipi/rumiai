@@ -4,7 +4,7 @@ import { CompanyWorkspacePanel } from "./components/company/CompanyWorkspacePane
 import { CodingCockpit } from "./components/coding/CodingCockpit";
 import { ConversationSpotlight } from "./components/ConversationSpotlight";
 import { WarmActionIcon } from "./components/WarmActionIcon";
-import type { ChatItem } from "./components/HistoryBoard";
+import type { ChatItem, HistoryBoardNewTaskOptions } from "./components/HistoryBoard";
 import type { ToolPreviewItem, ToolPreviewMode } from "./components/ToolPreview";
 import { buildToolPreviewDisplayItems, hasCanvasItems } from "./components/ToolPreview";
 import { api, defaultspackApiFetch, type ChatActivityEvent, type ChatContentBlock, type ChatMessage, type ChatStreamEvent, type ChatToolStreamEvent, type CodingWorkspaceRecord, type ComposerCommandExecuteResult, type ComposerCommandItem, type ComposerCommandMode, type ComposerWidgetAction, type Conversation, type ConversationSearchResult, type ConversationSteerItem, type ModelCommandCandidate, type ModelProfile, type OperationsCompanyStatus, type SettingsSection, type SidebarAction, type SidebarItem, type UICatalog } from "./lib/api";
@@ -31,6 +31,13 @@ type ComposerCandidateMenuState = {
 } | null;
 
 type WorkspacePanelMode = "composer" | "calendar";
+
+type PendingNewTaskContext = {
+  groupId?: string;
+  workspaceId?: string | null;
+  workspaceLabel?: string | null;
+  workspaceRoot?: string | null;
+};
 
 type CalendarItemKind = "task" | "event" | "reminder";
 
@@ -1075,6 +1082,38 @@ function writeJsonLocalStorage<T>(key: string, value: T) {
   }
 }
 
+function cleanOptionalString(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function workspaceContextFromMetadata(metadata: Record<string, unknown> | null | undefined): PendingNewTaskContext {
+  return {
+    groupId: cleanOptionalString(metadata?.group_id ?? metadata?.groupId) ?? undefined,
+    workspaceId: cleanOptionalString(metadata?.workspace_id ?? metadata?.workspaceId),
+    workspaceLabel: cleanOptionalString(metadata?.workspace_label ?? metadata?.workspaceLabel),
+    workspaceRoot: cleanOptionalString(metadata?.workspace_root ?? metadata?.workspaceRoot ?? metadata?.rootPath),
+  };
+}
+
+function workspaceContextFromConversation(conversation: Conversation | null | undefined): PendingNewTaskContext {
+  const metadataContext = workspaceContextFromMetadata(conversation?.metadata);
+  return {
+    ...metadataContext,
+    groupId: cleanOptionalString(conversation?.group_id) ?? metadataContext.groupId,
+  };
+}
+
+function workspaceContextFromHistoryOptions(options?: HistoryBoardNewTaskOptions): PendingNewTaskContext | null {
+  if (!options) return null;
+  const context: PendingNewTaskContext = {
+    groupId: cleanOptionalString(options.groupId) ?? undefined,
+    workspaceId: cleanOptionalString(options.workspaceId),
+    workspaceLabel: cleanOptionalString(options.workspaceLabel),
+    workspaceRoot: cleanOptionalString(options.workspaceRoot),
+  };
+  return context.groupId || context.workspaceId || context.workspaceRoot ? context : null;
+}
+
 function formatBoardDate(updatedAt: number): string {
   const diffHours = (Date.now() - updatedAt) / 3_600_000;
   if (diffHours < 24) return "Today";
@@ -1795,6 +1834,7 @@ export default function App() {
   const [codingContext, setCodingContext] = useState<CodingContext | null>(null);
   const [codingWorkspaces, setCodingWorkspaces] = useState<CodingWorkspaceRecord[]>([]);
   const [selectedCodingWorkspaceId, setSelectedCodingWorkspaceId] = useState<string | null>(null);
+  const [pendingNewTaskContext, setPendingNewTaskContext] = useState<PendingNewTaskContext | null>(null);
   const [codingDirectory, setCodingDirectory] = useState(".");
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
   const [droppedWidgets, setDroppedWidgets] = useState<DroppedWidget[]>([]);
@@ -1928,8 +1968,20 @@ export default function App() {
     }
   }, []);
 
+  const activeConversationWorkspaceContext = useMemo(
+    () => workspaceContextFromConversation(activeConversation),
+    [activeConversation],
+  );
+  const effectiveWorkspaceId = pendingNewTaskContext?.workspaceId
+    ?? activeConversationWorkspaceContext.workspaceId
+    ?? selectedCodingWorkspaceId;
+  const effectiveGroupId = pendingNewTaskContext?.groupId
+    ?? activeConversationWorkspaceContext.groupId
+    ?? undefined;
+  const effectiveConsoleKey = `${effectiveGroupId ?? "ungrouped"}:${effectiveWorkspaceId ?? "no-workspace"}`;
+
   const loadCodingContext = useCallback(async () => {
-    const workspaceId = selectedCodingWorkspaceId;
+    const workspaceId = effectiveWorkspaceId;
     try {
       const [result, branchInfo] = await Promise.all([
         api.getCodingContext({ directory: codingDirectory, workspace_id: workspaceId }),
@@ -1948,7 +2000,7 @@ export default function App() {
     } catch {
       setCodingContext(null);
     }
-  }, [codingDirectory, selectedCodingWorkspaceId]);
+  }, [codingDirectory, effectiveWorkspaceId]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -2307,7 +2359,12 @@ export default function App() {
     }
   }, [pendingRequests, activeConversationId]);
 
-  const handleNewTask = () => {
+  const handleNewTask = (options?: HistoryBoardNewTaskOptions) => {
+    const nextContext = workspaceContextFromHistoryOptions(options);
+    setPendingNewTaskContext(nextContext);
+    if (nextContext?.workspaceId) {
+      setMode("coding");
+    }
     setActiveConversationId(null);
     setActiveConversation(null);
     setPreviews([]);
@@ -2336,6 +2393,7 @@ export default function App() {
 
   const handleHistoryClick = (conversationId: string) => {
     setError(null);
+    setPendingNewTaskContext(null);
     setWorkspacePanelMode("composer");
     void loadConversation(conversationId);
   };
@@ -2742,7 +2800,7 @@ export default function App() {
         handleModeChange("chat");
         return;
       case "set_mode_agent":
-        handleModeChange("agent");
+        handleModeChange(mode === "agent" ? "chat" : "agent");
         return;
       case "toggle_yolo":
         setYoloMode((value) => parseCommandBoolean(args.enabled, !value));
@@ -2934,7 +2992,7 @@ export default function App() {
   };
 
   const handleCodingBranchSwitch = (branch: string, create = false) => {
-    void api.switchGitBranch(branch, create, { workspace_id: selectedCodingWorkspaceId })
+    void api.switchGitBranch(branch, create, { workspace_id: effectiveWorkspaceId })
       .then(() => loadCodingContext())
       .catch((branchError) => setError(branchError instanceof Error ? branchError.message : "ブランチ切り替えに失敗しました。"));
   };
@@ -2951,7 +3009,7 @@ export default function App() {
     if (mode !== "coding") return;
     if (hasWorkspaceAttachment(attachedFiles, path)) return;
 
-    void api.readWorkspaceFile(path, { workspace_id: selectedCodingWorkspaceId })
+    void api.readWorkspaceFile(path, { workspace_id: effectiveWorkspaceId })
       .then((result) => {
         setAttachedFiles((prev) => {
           if (hasWorkspaceAttachment(prev, path)) return prev;
@@ -2979,20 +3037,23 @@ export default function App() {
       .catch((workspaceError) => setError(workspaceError instanceof Error ? workspaceError.message : "workspace trust failed."));
   };
 
-  const handleCodingWorkspaceCreate = () => {
-    const rootPath = codingContext?.rootFolder;
+  const handleCodingWorkspaceCreate = async (rootPathOverride?: string) => {
+    const rootPath = rootPathOverride?.trim() || codingContext?.rootFolder;
     if (!rootPath) {
       setError("Current coding context has no workspace root to add.");
-      return;
+      return null;
     }
-    void api.createCodingWorkspace({ root_path: rootPath, trusted: false })
-      .then((result) => api.selectCodingWorkspace(result.workspace.workspace_id))
-      .then((result) => {
-        setSelectedCodingWorkspaceId(result.selected_workspace_id);
-        return loadCodingWorkspaces();
-      })
-      .then(() => loadCodingContext())
-      .catch((workspaceError) => setError(workspaceError instanceof Error ? workspaceError.message : "workspace creation failed."));
+    try {
+      const created = await api.createCodingWorkspace({ root_path: rootPath, trusted: false });
+      const selected = await api.selectCodingWorkspace(created.workspace.workspace_id);
+      setSelectedCodingWorkspaceId(selected.selected_workspace_id);
+      await loadCodingWorkspaces();
+      await loadCodingContext();
+      return created.workspace;
+    } catch (workspaceError) {
+      setError(workspaceError instanceof Error ? workspaceError.message : "workspace creation failed.");
+      throw workspaceError;
+    }
   };
 
   const handleFileRemove = (fileId: string) => {
@@ -3316,22 +3377,42 @@ export default function App() {
     const selectedToolLabels = [
       ...selectedTools.map((item) => item.label || item.id),
     ];
+    const activeContextForSubmit = workspaceContextFromConversation(activeConversation);
+    const groupIdForSubmit = pendingNewTaskContext?.groupId ?? activeContextForSubmit.groupId;
+    const workspaceIdForSubmit = pendingNewTaskContext?.workspaceId
+      ?? activeContextForSubmit.workspaceId
+      ?? (mode === "coding" ? selectedCodingWorkspaceId : null);
+    const workspaceLabelForSubmit = pendingNewTaskContext?.workspaceLabel
+      ?? activeContextForSubmit.workspaceLabel
+      ?? codingWorkspaces.find((workspace) => workspace.workspace_id === workspaceIdForSubmit)?.label
+      ?? null;
+    const workspaceRootForSubmit = pendingNewTaskContext?.workspaceRoot
+      ?? activeContextForSubmit.workspaceRoot
+      ?? codingWorkspaces.find((workspace) => workspace.workspace_id === workspaceIdForSubmit)?.root_path
+      ?? null;
+    const isCodingWorkspaceSubmit = mode === "coding" || Boolean(workspaceIdForSubmit);
 
     try {
       let conversation = activeConversation;
       if (!conversation) {
         conversation = await api.createConversation({
           model: preferredModel || "stub/default",
-          conversation_kind: mode === "coding" ? "coding" : null,
-          tags: mode === "coding" ? ["coding"] : undefined,
-          metadata: mode === "coding"
+          conversation_kind: isCodingWorkspaceSubmit ? "coding" : null,
+          group_id: groupIdForSubmit ?? null,
+          tags: isCodingWorkspaceSubmit ? ["coding"] : undefined,
+          metadata: {
+            ...(groupIdForSubmit ? { group_id: groupIdForSubmit } : {}),
+            ...(isCodingWorkspaceSubmit
             ? {
                 mode: "coding",
-                workspace_id: selectedCodingWorkspaceId,
-                workspace_label: codingWorkspaces.find((workspace) => workspace.workspace_id === selectedCodingWorkspaceId)?.label,
+                workspace_id: workspaceIdForSubmit,
+                workspace_label: workspaceLabelForSubmit,
+                workspace_root: workspaceRootForSubmit,
               }
-            : undefined,
+              : {}),
+          },
         });
+        setPendingNewTaskContext(null);
         setActiveConversationId(conversation.id);
       }
       const isOperationsMode = isOperationsConversation(conversation);
@@ -3543,22 +3624,24 @@ export default function App() {
         tool_policy: {
           ...(yoloMode ? { yolo_mode: true, allow_shell: true, allow_file_write: true, write_actions_require_approval: false } : {}),
           ...operationsPolicy,
-          ...(mode === "coding" && selectedCodingWorkspaceId ? { workspace_id: selectedCodingWorkspaceId } : {}),
+          ...(isCodingWorkspaceSubmit && workspaceIdForSubmit ? { workspace_id: workspaceIdForSubmit } : {}),
           ...(shouldSendExplicitToolSelection ? { selected_tools: submittedToolIds } : {}),
         },
         attachments: submittedAttachments,
         tools: shouldSendExplicitToolSelection ? submittedToolIds : undefined,
         metadata: {
-          mode: isOperationsMode ? "operations_company" : mode,
+          mode: isOperationsMode ? "operations_company" : isCodingWorkspaceSubmit ? "coding" : mode,
+          ...(groupIdForSubmit ? { group_id: groupIdForSubmit } : {}),
           ...(isOperationsMode ? {
             profile_id: "defaultspack.operations_company",
             agent_id: "client_manager",
             conversation_strategy: "one_agent_one_conversation",
             internal_channel: "ops-company",
           } : {}),
-          ...(mode === "coding" ? {
-            workspace_id: selectedCodingWorkspaceId,
-            workspace_label: codingWorkspaces.find((workspace) => workspace.workspace_id === selectedCodingWorkspaceId)?.label,
+          ...(isCodingWorkspaceSubmit ? {
+            workspace_id: workspaceIdForSubmit,
+            workspace_label: workspaceLabelForSubmit,
+            workspace_root: workspaceRootForSubmit,
           } : {}),
           attachments: submittedAttachments.map(({ name, size, type, truncated, source, sourcePath }) => ({ name, size, type, truncated, source, sourcePath })),
           selected_tools: submittedToolIds,
@@ -3624,7 +3707,8 @@ export default function App() {
     <CodingCockpit
       variant="sidebar"
       workspaces={codingWorkspaces}
-      selectedWorkspaceId={selectedCodingWorkspaceId}
+      selectedWorkspaceId={effectiveWorkspaceId}
+      consoleScopeKey={effectiveConsoleKey}
       onWorkspaceSelect={handleCodingWorkspaceSelect}
       onWorkspacesRefresh={() => void loadCodingWorkspaces()}
     />
@@ -3652,7 +3736,7 @@ export default function App() {
       mode={mode}
       codingContext={codingContext}
       codingWorkspaces={codingWorkspaces}
-      selectedCodingWorkspaceId={selectedCodingWorkspaceId}
+      selectedCodingWorkspaceId={effectiveWorkspaceId}
       attachedFiles={attachedFiles}
       droppedWidgets={droppedWidgets}
       selectedToolIds={selectedToolIds}
@@ -3703,6 +3787,12 @@ export default function App() {
               account={catalog?.app?.account}
               onChatSelect={handleHistoryClick}
               onNewTask={handleNewTask}
+              codingWorkspaces={codingWorkspaces}
+              selectedCodingWorkspaceId={effectiveWorkspaceId}
+              onCodingWorkspaceCreate={handleCodingWorkspaceCreate}
+              onCodingWorkspacesRefresh={async () => {
+                await loadCodingWorkspaces();
+              }}
               onCalendarOpen={handleCalendarModeToggle}
               isCalendarActive={isCalendarMode}
               onSettingsClick={() => setIsSettingsOpen(true)}
@@ -3720,6 +3810,12 @@ export default function App() {
               account={catalog?.app?.account}
               onChatSelect={handleHistoryClick}
               onNewTask={handleNewTask}
+              codingWorkspaces={codingWorkspaces}
+              selectedCodingWorkspaceId={effectiveWorkspaceId}
+              onCodingWorkspaceCreate={handleCodingWorkspaceCreate}
+              onCodingWorkspacesRefresh={async () => {
+                await loadCodingWorkspaces();
+              }}
               onCalendarOpen={handleCalendarModeToggle}
               isCalendarActive={isCalendarMode}
               onSettingsClick={() => setIsSettingsOpen(true)}

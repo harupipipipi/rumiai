@@ -53,6 +53,11 @@ def _value_for(key: str, input_data: dict[str, Any], context: dict[str, Any]) ->
         value = nested_inputs.get(key)
         if value not in (None, ""):
             return value
+    profile_policy = context.get("profile_policy")
+    if isinstance(profile_policy, dict):
+        value = profile_policy.get(key)
+        if value not in (None, ""):
+            return value
     return None
 
 

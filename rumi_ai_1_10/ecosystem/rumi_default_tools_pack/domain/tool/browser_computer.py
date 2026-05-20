@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import platform
@@ -92,6 +93,15 @@ class BrowserComputerController:
         if action in {"computer.doctor", "computer.diagnose"}:
             return self._computer_seat_doctor()
         raise ValueError(f"Unsupported browser/computer action: {action}")
+
+    def _edge_haze(self, action: str, payload: dict[str, Any]):
+        try:
+            from ..computer.mac.edge_haze import ComputerUseEdgeHazeManager
+
+            pack_root = Path(__file__).resolve().parents[2]
+            return ComputerUseEdgeHazeManager.from_pack_root(pack_root).active(action=action, payload=payload)
+        except Exception:
+            return contextlib.nullcontext()
 
     def _open_url(self, url: str, *, payload: dict[str, Any], dry_run: bool, yolo_mode: bool) -> dict[str, Any]:
         if not url.startswith(("http://", "https://", "file://")):
@@ -1228,7 +1238,8 @@ class BrowserComputerController:
                 element_or_point = {"id": payload["element_id"]}
             elif payload.get("point"):
                 element_or_point = tuple(payload["point"])
-            result = svc.semantic_action(target, intent=payload.get("intent", ""), element_or_point=element_or_point)
+            with self._edge_haze("computer.semantic_action", payload):
+                result = svc.semantic_action(target, intent=payload.get("intent", ""), element_or_point=element_or_point)
             result["action"] = "computer.semantic_action"
             return result
         except Exception as e:
@@ -1242,16 +1253,17 @@ class BrowserComputerController:
             svc = self._get_computer_seat()
             target = {"app": None, "pid": payload.get("pid"), "window_id": None, "window_title": None}
             action = payload.get("sub_action") or payload.get("action_type") or payload.get("action") or "click"
-            if action == "click":
-                result = svc.click(target, x=payload.get("x", 0), y=payload.get("y", 0), button=payload.get("button", "left"))
-            elif action == "type_text":
-                result = svc.type_text(target, text=payload.get("text", ""))
-            elif action == "key":
-                result = svc.key(target, key_combo=payload.get("key_combo", ""))
-            elif action == "scroll":
-                result = svc.scroll(target, x=payload.get("x", 0), y=payload.get("y", 0), direction=payload.get("direction", "down"), clicks=payload.get("clicks", 3))
-            else:
-                return {"action": "computer.pid_event", "error": f"Unknown sub-action: {action}"}
+            with self._edge_haze("computer.pid_event", payload):
+                if action == "click":
+                    result = svc.click(target, x=payload.get("x", 0), y=payload.get("y", 0), button=payload.get("button", "left"))
+                elif action == "type_text":
+                    result = svc.type_text(target, text=payload.get("text", ""))
+                elif action == "key":
+                    result = svc.key(target, key_combo=payload.get("key_combo", ""))
+                elif action == "scroll":
+                    result = svc.scroll(target, x=payload.get("x", 0), y=payload.get("y", 0), direction=payload.get("direction", "down"), clicks=payload.get("clicks", 3))
+                else:
+                    return {"action": "computer.pid_event", "error": f"Unknown sub-action: {action}"}
             result["action"] = "computer.pid_event"
             result["_experimental"] = True
             return result
@@ -1394,7 +1406,8 @@ class BrowserComputerController:
         if foreground_error is not None:
             return foreground_error
         # --- Attempt ComputerSeatService delegation ---
-        seat_result = self._try_computer_seat_action(action, action_payload)
+        with self._edge_haze(action, action_payload):
+            seat_result = self._try_computer_seat_action(action, action_payload)
         if seat_result is not None and seat_result.get("executed"):
             result: dict[str, Any] = {"action": action, "executed": True, "platform": system}
             result["driver"] = seat_result.get("driver", "computer_seat")
@@ -1424,26 +1437,27 @@ class BrowserComputerController:
                 result.update(screenshot)
             return result
         # --- Legacy platform-specific fallback ---
-        if system == "Darwin" and action == "computer.move":
-            self._darwin_move_cursor(action_payload)
-        elif system == "Darwin" and action == "computer.click":
-            self._darwin_click(action_payload)
-        elif system == "Darwin" and action == "computer.drag":
-            self._darwin_drag(action_payload)
-        elif system == "Darwin" and action == "computer.type":
-            self._darwin_type(action_payload)
-        elif system == "Darwin":
-            script = self._apple_script(action, action_payload)
-            subprocess.run(["osascript", "-e", script], check=True)
-        elif system == "Windows":
-            self._windows_desktop_action(action, action_payload)
-        else:
-            return {
-                "action": action,
-                "supported": False,
-                "platform": system,
-                "reason": "Desktop actions are supported on macOS and Windows.",
-            }
+        with self._edge_haze(action, action_payload):
+            if system == "Darwin" and action == "computer.move":
+                self._darwin_move_cursor(action_payload)
+            elif system == "Darwin" and action == "computer.click":
+                self._darwin_click(action_payload)
+            elif system == "Darwin" and action == "computer.drag":
+                self._darwin_drag(action_payload)
+            elif system == "Darwin" and action == "computer.type":
+                self._darwin_type(action_payload)
+            elif system == "Darwin":
+                script = self._apple_script(action, action_payload)
+                subprocess.run(["osascript", "-e", script], check=True)
+            elif system == "Windows":
+                self._windows_desktop_action(action, action_payload)
+            else:
+                return {
+                    "action": action,
+                    "supported": False,
+                    "platform": system,
+                    "reason": "Desktop actions are supported on macOS and Windows.",
+                }
         result: dict[str, Any] = {"action": action, "executed": True, "platform": system}
         if action in {"computer.type", "computer.key", "computer.scroll"}:
             result["driver"] = "foreground_input"

@@ -17,6 +17,11 @@ function formatReadonlyValue(value: unknown, fallback: unknown): string {
   return String(resolved);
 }
 
+function colorFieldValue(value: unknown, fallback: unknown): string {
+  const resolved = String(value ?? fallback ?? "#ffffff").trim();
+  return /^#[0-9a-fA-F]{6}$/.test(resolved) ? resolved : "#ffffff";
+}
+
 async function copyTextToClipboard(text: string): Promise<void> {
   if (navigator.clipboard?.writeText) {
     await navigator.clipboard.writeText(text);
@@ -972,7 +977,7 @@ function SettingsField({
   const isSecretConfigured = Boolean(value);
 
   let control: ReactElement;
-  switch (field.type) {
+  switch (String(field.type)) {
     case "model_api_routes": {
       const routeText = String(value ?? "");
       const selectedModel = routeModel || String(routeOptions[0]?.value ?? "");
@@ -1704,6 +1709,27 @@ function SettingsField({
         />
       );
       break;
+    case "color": {
+      const colorValue = colorFieldValue(value, field.default);
+      control = (
+        <div className="flex min-w-0 items-center gap-2">
+          <input
+            type="color"
+            value={colorValue}
+            onChange={(event) => onChange(sectionId, field.id, event.target.value.toUpperCase())}
+            className="h-10 w-12 shrink-0 cursor-pointer rounded-lg border border-zinc-800 bg-zinc-900 p-1"
+            aria-label={field.label}
+          />
+          <input
+            type="text"
+            value={colorValue.toUpperCase()}
+            onChange={(event) => onChange(sectionId, field.id, event.target.value)}
+            className="min-w-[110px] bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 font-mono text-sm text-zinc-200 outline-none"
+          />
+        </div>
+      );
+      break;
+    }
     case "readonly":
       control = (
         <div className="group/readonly flex items-start justify-between gap-3 rounded-lg border border-zinc-800 bg-zinc-900/40 px-3 py-2">

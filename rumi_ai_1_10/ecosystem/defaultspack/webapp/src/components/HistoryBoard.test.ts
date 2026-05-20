@@ -5,7 +5,9 @@ import {
   buildCalendarMonthDays,
   buildGroupsFromChats,
   buildHistoryCalendarSummary,
+  loadCustomGroups,
   type ChatItem,
+  type CustomGroupInfo,
 } from "./HistoryBoard";
 import { droppedWidgetFromHistoryChat, historyChatDragPayload, parseHistoryChatDrop } from "../lib/historyComposer";
 
@@ -85,6 +87,70 @@ test("buildGroupsFromChats groups metadata chats in compact workspace buckets", 
   assert.equal(groups[3]?.subGroups[0]?.title, "#design");
   assert.deepEqual(groups[3]?.subGroups[0]?.chats.map((chat) => chat.id), ["tagged-1"]);
   assert.deepEqual(groups[4]?.chats.map((chat) => chat.id), ["plain-1"]);
+});
+
+test("buildGroupsFromChats keeps custom group workspace metadata and matching chats", () => {
+  const chats: ChatItem[] = [
+    {
+      id: "group-chat",
+      title: "Group coding task",
+      date: "Today",
+      type: "chat",
+      metadata: { group_id: "group-1", workspace_id: "ws-main", mode: "coding" },
+    },
+    {
+      id: "plain-chat",
+      title: "Plain task",
+      date: "Today",
+      type: "chat",
+    },
+  ];
+  const customGroups: CustomGroupInfo[] = [{
+    id: "group-1",
+    title: "Main Repo",
+    workspaceId: "ws-main",
+    workspaceLabel: "Main",
+    workspaceRoot: "/repo/main",
+  }];
+
+  const groups = buildGroupsFromChats(chats, customGroups);
+
+  assert.equal(groups[0]?.id, "group-1");
+  assert.equal(groups[0]?.workspaceId, "ws-main");
+  assert.equal(groups[0]?.workspaceLabel, "Main");
+  assert.equal(groups[0]?.workspaceRoot, "/repo/main");
+  assert.deepEqual(groups[0]?.chats.map((chat) => chat.id), ["group-chat"]);
+  assert.equal(groups.find((group) => group.title === "Recent")?.chats[0]?.id, "plain-chat");
+});
+
+test("loadCustomGroups migrates legacy and snake_case workspace records", () => {
+  const previousDescriptor = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+  const values = new Map<string, string>();
+  values.set("rumi-history-custom-groups", JSON.stringify([
+    { id: "legacy", title: "Legacy" },
+    { id: "snake", title: "Snake", workspace_id: "ws1", workspace_label: "Repo", workspace_root: "/repo" },
+    { id: "", title: "ignored" },
+  ]));
+  Object.defineProperty(globalThis, "localStorage", {
+    configurable: true,
+    value: {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, value),
+    },
+  });
+
+  try {
+    assert.deepEqual(loadCustomGroups(), [
+      { id: "legacy", title: "Legacy", workspaceId: null, workspaceLabel: null, workspaceRoot: null },
+      { id: "snake", title: "Snake", workspaceId: "ws1", workspaceLabel: "Repo", workspaceRoot: "/repo" },
+    ]);
+  } finally {
+    if (previousDescriptor) {
+      Object.defineProperty(globalThis, "localStorage", previousDescriptor);
+    } else {
+      Reflect.deleteProperty(globalThis, "localStorage");
+    }
+  }
 });
 
 test("history calendar summary counts visible chat buckets and highlights", () => {
