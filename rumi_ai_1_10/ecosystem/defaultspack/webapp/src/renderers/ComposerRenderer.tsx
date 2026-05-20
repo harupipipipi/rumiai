@@ -18,7 +18,7 @@ import {
   Wrench,
   X,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 
 import type {
   AttachedFile,
@@ -59,6 +59,67 @@ const MODE_META: Record<AppMode, { label: string; icon: typeof MessageSquare; de
   coding: { label: "Coding", icon: Code2, description: "コード編集・Git操作" },
   agent: { label: "Agent", icon: Bot, description: "自律エージェント" },
 };
+
+type ComposerChromeWidth = {
+  basis: string;
+  min?: string;
+  max?: string;
+  grow?: number;
+  shrink?: number;
+};
+
+type ComposerChromeSlot = "leading" | "trailing";
+
+type ComposerChromeWidgetSpec = {
+  id: string;
+  slot: ComposerChromeSlot;
+  order: number;
+  visible?: boolean;
+  mobile?: "show" | "hide";
+  width: ComposerChromeWidth;
+  className?: string;
+  render: () => ReactNode;
+};
+
+const COMPOSER_CHROME_WIDTHS = {
+  icon: { basis: "2rem", min: "2rem", max: "2rem" },
+  mode: { basis: "auto", min: "2rem", max: "7rem", shrink: 1 },
+  badge: { basis: "auto", min: "0", max: "11rem", shrink: 1 },
+  model: { basis: "14rem", min: "11rem", max: "15rem", shrink: 1 },
+  send: { basis: "2rem", min: "2rem", max: "2rem" },
+  sendLarge: { basis: "2.25rem", min: "2.25rem", max: "2.25rem" },
+} satisfies Record<string, ComposerChromeWidth>;
+
+export function composerChromeWidgetStyle(width: ComposerChromeWidth): CSSProperties {
+  return {
+    flex: `${width.grow ?? 0} ${width.shrink ?? 0} ${width.basis}`,
+    minWidth: width.min,
+    maxWidth: width.max,
+  };
+}
+
+function composerChromeWidgetsForSlot(
+  widgets: ComposerChromeWidgetSpec[],
+  slot: ComposerChromeSlot,
+): ComposerChromeWidgetSpec[] {
+  return widgets
+    .filter((widget) => widget.slot === slot && widget.visible !== false)
+    .sort((left, right) => left.order - right.order);
+}
+
+function ComposerChromeWidget({ widget }: { widget: ComposerChromeWidgetSpec }) {
+  const mobileClass = widget.mobile === "hide" ? "max-[640px]:hidden" : "";
+  return (
+    <div
+      data-composer-widget={widget.id}
+      data-composer-slot={widget.slot}
+      className={`rumi-composer-widget flex min-w-0 items-center ${mobileClass} ${widget.className ?? ""}`}
+      style={composerChromeWidgetStyle(widget.width)}
+    >
+      {widget.render()}
+    </div>
+  );
+}
 
 const LOCAL_MODEL_PROVIDER_IDS = new Set(["stub", "ollama", "lmstudio", "vllm", "llamacpp", "llama_cpp"]);
 const API_KEY_PROVIDER_IDS = new Set([
@@ -1277,6 +1338,249 @@ export function ComposerRenderer({
     ],
   );
 
+  const chromeWidgets: ComposerChromeWidgetSpec[] = [
+    {
+      id: "menu",
+      slot: "leading",
+      order: 10,
+      width: COMPOSER_CHROME_WIDTHS.icon,
+      render: () => (
+        <button
+          ref={menuButtonRef}
+          type="button"
+          tabIndex={chromeButtonTabIndex}
+          disabled={isGenerating}
+          title="追加"
+          onClick={() => setMenuOpen((value) => !value)}
+          className="h-8 w-8 flex flex-shrink-0 items-center justify-center text-zinc-400 hover:text-zinc-100 hover:bg-zinc-700/60 rounded-lg transition-colors disabled:opacity-50"
+        >
+          <WarmActionIcon kind="menu" size="md" />
+        </button>
+      ),
+    },
+    {
+      id: "file-attach",
+      slot: "leading",
+      order: 20,
+      width: COMPOSER_CHROME_WIDTHS.icon,
+      render: () => (
+        <button
+          type="button"
+          tabIndex={chromeButtonTabIndex}
+          disabled={isGenerating}
+          title="ファイル添付（複数選択可）"
+          onClick={() => fileInputRef.current?.click()}
+          className={`${
+            isNewConversation
+              ? "border border-zinc-700/70 bg-zinc-900/30 text-zinc-300 hover:border-zinc-600 hover:bg-zinc-800/70"
+              : "text-zinc-400 hover:text-zinc-100 hover:bg-zinc-700/60"
+          } h-8 w-8 flex flex-shrink-0 items-center justify-center rounded-lg transition-colors disabled:opacity-50`}
+        >
+          <WarmActionIcon kind="attach" size="md" />
+        </button>
+      ),
+    },
+    {
+      id: "voice-input",
+      slot: "leading",
+      order: 30,
+      mobile: "hide",
+      width: COMPOSER_CHROME_WIDTHS.icon,
+      render: () => (
+        <button
+          type="button"
+          tabIndex={chromeButtonTabIndex}
+          disabled={isGenerating}
+          title="音声入力"
+          className="h-8 w-8 flex flex-shrink-0 items-center justify-center text-zinc-400 hover:text-zinc-100 hover:bg-zinc-700/60 rounded-lg transition-colors disabled:opacity-50"
+        >
+          <WarmActionIcon kind="mic" size="md" />
+        </button>
+      ),
+    },
+    {
+      id: "mode",
+      slot: "leading",
+      order: 40,
+      width: COMPOSER_CHROME_WIDTHS.mode,
+      render: () => (
+        <div className="group/mode relative flex min-w-0 max-w-full">
+          <button
+            type="button"
+            tabIndex={chromeButtonTabIndex}
+            disabled={isGenerating}
+            title={`モード: ${currentModeMeta.label}`}
+            onClick={() => setModeSelectorOpen((v) => !v)}
+            className={`h-8 flex min-w-0 flex-shrink-0 items-center gap-1.5 rounded-lg px-2.5 transition-colors disabled:opacity-50 ${
+              mode === "coding"
+                ? "text-emerald-400 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30"
+                : mode === "agent"
+                  ? "text-violet-400 bg-violet-500/10 hover:bg-violet-500/20 border border-violet-500/30"
+                  : "text-zinc-400 hover:text-zinc-100 hover:bg-zinc-700/60"
+            }`}
+          >
+            <ModeIcon size={14} className="flex-shrink-0" />
+            <span className="truncate text-[11px] font-medium max-[640px]:hidden">{currentModeMeta.label}</span>
+          </button>
+          {mode !== "chat" && (
+            <button
+              type="button"
+              tabIndex={chromeButtonTabIndex}
+              aria-label="モードを閉じる"
+              title="Chat に戻す"
+              onClick={(event) => {
+                event.stopPropagation();
+                setModeSelectorOpen(false);
+                onModeChange?.("chat");
+              }}
+              className="absolute -right-1 -top-1 hidden h-4 w-4 items-center justify-center rounded-full border border-zinc-700 bg-zinc-900 text-zinc-400 shadow-sm hover:bg-zinc-800 hover:text-zinc-100 group-hover/mode:flex"
+            >
+              <X size={10} />
+            </button>
+          )}
+          {modeSelectorOpen && (
+            <ModeSelector
+              mode={mode}
+              onModeChange={(m) => onModeChange?.(m)}
+              onClose={() => setModeSelectorOpen(false)}
+            />
+          )}
+        </div>
+      ),
+    },
+    {
+      id: "yolo-status",
+      slot: "leading",
+      order: 50,
+      visible: yoloMode,
+      width: COMPOSER_CHROME_WIDTHS.badge,
+      className: "overflow-hidden",
+      render: () => (
+        <span className="rounded-full border border-orange-500/30 px-2 py-0.5 text-[11px] text-orange-300">
+          YOLO
+        </span>
+      ),
+    },
+    {
+      id: "computer-use-status",
+      slot: "leading",
+      order: 60,
+      visible: computerUseSelected,
+      width: COMPOSER_CHROME_WIDTHS.badge,
+      className: "overflow-hidden",
+      render: () => (
+        <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[11px] font-medium text-emerald-300">
+          <MousePointerClick size={12} className="flex-shrink-0" />
+          <span className="truncate">Computer ON</span>
+        </span>
+      ),
+    },
+    {
+      id: "vision-bridge-status",
+      slot: "leading",
+      order: 70,
+      visible: imageBridgePlanned,
+      width: COMPOSER_CHROME_WIDTHS.badge,
+      className: "overflow-hidden",
+      render: () => (
+        <span className="inline-flex items-center rounded-full border border-sky-500/30 bg-sky-500/10 px-2 py-0.5 text-[11px] font-medium text-sky-300">
+          <span className="truncate">Vision Bridge</span>
+        </span>
+      ),
+    },
+    {
+      id: "model-control",
+      slot: "trailing",
+      order: 10,
+      mobile: "hide",
+      width: COMPOSER_CHROME_WIDTHS.model,
+      className: "rumi-model-control",
+      render: () => (
+        <div className="rumi-model-control flex w-full min-w-0 items-center gap-1.5 bg-zinc-800/40 rounded-lg px-2.5 py-1 border border-zinc-700/40">
+          <div
+            title={contextTitle}
+            className="h-3.5 w-3.5 flex-shrink-0 rounded-full p-[2px]"
+            style={{
+              background: `conic-gradient(#a1a1aa ${contextDegrees}deg, #52525b ${contextDegrees}deg)`,
+            }}
+          >
+            <div className="h-full w-full rounded-full bg-zinc-800" />
+          </div>
+          <div className="relative min-w-0 max-w-full flex-1">
+            <button
+              type="button"
+              tabIndex={chromeButtonTabIndex}
+              disabled={isGenerating}
+              onClick={() => setModelDropdownOpen((v) => !v)}
+              className="flex w-full min-w-0 items-center gap-1 text-[12px] font-medium text-zinc-300 hover:text-zinc-100 transition-colors disabled:opacity-50"
+            >
+              <span className="min-w-0 flex-1 truncate">{compactProfileName(profileName)}</span>
+              <ChevronDown size={12} className={`flex-shrink-0 transition-transform ${modelDropdownOpen ? "rotate-180" : ""}`} />
+            </button>
+            <span className="block truncate text-[10px] leading-none text-zinc-500">
+              {modelRouteReason(selectedProfile) || selectedProviderLabel}
+            </span>
+            {modelDropdownOpen && (
+              <ModelDropdown
+                profiles={selectableProfiles}
+                selectedProfile={selectedProfile}
+                isGenerating={isGenerating}
+                onSelect={requestModelProfileSelect}
+                onClose={() => setModelDropdownOpen(false)}
+              />
+            )}
+          </div>
+          {levels.length > 0 && (
+            <label className="inline-flex flex-shrink-0 items-center border-l border-zinc-700/50 pl-1.5 ml-0.5 text-[11px] font-medium text-zinc-500">
+              <select
+                value={thinkingLevel ?? levels[0]}
+                onChange={(event) => onThinkingLevelChange(event.target.value)}
+                disabled={isGenerating}
+                tabIndex={chromeButtonTabIndex}
+                className="bg-transparent text-[11px] font-medium text-zinc-400 outline-none cursor-pointer hover:text-zinc-200 transition-colors disabled:opacity-50"
+                aria-label="Thinking level"
+                title="Thinking level"
+              >
+                {levels.map((level) => (
+                  <option key={level} value={level} className="bg-zinc-900 text-zinc-100">
+                    {THINKING_LABELS[level] ?? level}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+        </div>
+      ),
+    },
+    {
+      id: "send",
+      slot: "trailing",
+      order: 20,
+      width: isNewConversation ? COMPOSER_CHROME_WIDTHS.sendLarge : COMPOSER_CHROME_WIDTHS.send,
+      render: () => (
+        <button
+          type="button"
+          tabIndex={chromeButtonTabIndex}
+          disabled={!isGenerating && (!input.trim() && attachedFiles.length === 0)}
+          onPointerDown={handleSendButtonPointerDown}
+          onClick={handleSendButtonClick}
+          title={isGenerating ? (input.trim() ? "ステアを送る" : "停止") : "送信"}
+          className={`rumi-send-button ${
+            isNewConversation ? "h-9 w-9" : "w-8 h-8 max-[640px]:h-7 max-[640px]:w-7"
+          } flex flex-shrink-0 items-center justify-center bg-zinc-200 text-black rounded-lg disabled:opacity-30 disabled:cursor-not-allowed hover:bg-white shadow-sm transition-colors`}
+        >
+          {isGenerating && !input.trim() ? (
+            <WarmActionIcon kind="stop" size={isNewConversation ? "lg" : "md"} className="shadow-none ring-0" />
+          ) : isGenerating ? (
+            <CornerDownRight size={15} strokeWidth={2.4} />
+          ) : (
+            <WarmActionIcon kind="send" size={isNewConversation ? "lg" : "md"} className="shadow-none ring-0" />
+          )}
+        </button>
+      ),
+    },
+  ];
+
   return (
     <div
       className={`${isNewConversation ? "w-full px-5" : "px-5 pb-5 pt-2 bg-[#09090b] flex-shrink-0 max-[640px]:px-2 max-[640px]:pb-2"}`}
@@ -1673,176 +1977,15 @@ export function ComposerRenderer({
             } flex items-center justify-between gap-2 pt-0 max-[640px]:gap-1.5`}
           >
             <div className="flex min-w-0 items-center gap-1 overflow-hidden">
-                      <button
-                        ref={menuButtonRef}
-                        type="button"
-                        tabIndex={chromeButtonTabIndex}
-                        disabled={isGenerating}
-                title="追加"
-                onClick={() => setMenuOpen((value) => !value)}
-                className="h-8 w-8 flex flex-shrink-0 items-center justify-center text-zinc-400 hover:text-zinc-100 hover:bg-zinc-700/60 rounded-lg transition-colors disabled:opacity-50"
-              >
-                <WarmActionIcon kind="menu" size="md" />
-              </button>
-                      <button
-                        type="button"
-                        tabIndex={chromeButtonTabIndex}
-                        disabled={isGenerating}
-                title="ファイル添付（複数選択可）"
-                onClick={() => fileInputRef.current?.click()}
-                className={`${
-                  isNewConversation
-                    ? "border border-zinc-700/70 bg-zinc-900/30 text-zinc-300 hover:border-zinc-600 hover:bg-zinc-800/70"
-                    : "text-zinc-400 hover:text-zinc-100 hover:bg-zinc-700/60"
-                } h-8 w-8 flex flex-shrink-0 items-center justify-center rounded-lg transition-colors disabled:opacity-50`}
-              >
-                <WarmActionIcon kind="attach" size="md" />
-              </button>
-                      <button
-                        type="button"
-                        tabIndex={chromeButtonTabIndex}
-                        disabled={isGenerating}
-                title="音声入力"
-                className="h-8 w-8 flex flex-shrink-0 items-center justify-center text-zinc-400 hover:text-zinc-100 hover:bg-zinc-700/60 rounded-lg transition-colors disabled:opacity-50 max-[640px]:hidden"
-              >
-                <WarmActionIcon kind="mic" size="md" />
-              </button>
-
-              <div className="group/mode relative flex">
-                        <button
-                          type="button"
-                          tabIndex={chromeButtonTabIndex}
-                          disabled={isGenerating}
-                  title={`モード: ${currentModeMeta.label}`}
-                  onClick={() => setModeSelectorOpen((v) => !v)}
-                  className={`h-8 flex flex-shrink-0 items-center gap-1.5 rounded-lg px-2.5 transition-colors disabled:opacity-50 ${
-                    mode === "coding"
-                      ? "text-emerald-400 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30"
-                      : mode === "agent"
-                        ? "text-violet-400 bg-violet-500/10 hover:bg-violet-500/20 border border-violet-500/30"
-                        : "text-zinc-400 hover:text-zinc-100 hover:bg-zinc-700/60"
-                  }`}
-                >
-                  <ModeIcon size={14} />
-                  <span className="text-[11px] font-medium max-[640px]:hidden">{currentModeMeta.label}</span>
-                </button>
-                {mode !== "chat" && (
-                          <button
-                            type="button"
-                            tabIndex={chromeButtonTabIndex}
-                            aria-label="モードを閉じる"
-                    title="Chat に戻す"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      setModeSelectorOpen(false);
-                      onModeChange?.("chat");
-                    }}
-                    className="absolute -right-1 -top-1 hidden h-4 w-4 items-center justify-center rounded-full border border-zinc-700 bg-zinc-900 text-zinc-400 shadow-sm hover:bg-zinc-800 hover:text-zinc-100 group-hover/mode:flex"
-                  >
-                    <X size={10} />
-                  </button>
-                )}
-                {modeSelectorOpen && (
-                  <ModeSelector
-                    mode={mode}
-                    onModeChange={(m) => onModeChange?.(m)}
-                    onClose={() => setModeSelectorOpen(false)}
-                  />
-                )}
-              </div>
-
-              {yoloMode && (
-                <span className="rounded-full border border-orange-500/30 px-2 py-0.5 text-[11px] text-orange-300">
-                  YOLO
-                </span>
-              )}
-              {computerUseSelected && (
-                <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[11px] font-medium text-emerald-300">
-                  <MousePointerClick size={12} />
-                  Computer ON
-                </span>
-              )}
-              {imageBridgePlanned && (
-                <span className="inline-flex items-center gap-1 rounded-full border border-sky-500/30 bg-sky-500/10 px-2 py-0.5 text-[11px] font-medium text-sky-300">
-                  Vision Bridge
-                </span>
-              )}
+              {composerChromeWidgetsForSlot(chromeWidgets, "leading").map((widget) => (
+                <ComposerChromeWidget key={widget.id} widget={widget} />
+              ))}
             </div>
 
             <div className="rumi-composer-submit-area flex flex-shrink-0 items-center justify-end gap-2">
-              <div className="rumi-model-control flex items-center gap-1.5 bg-zinc-800/40 rounded-lg px-2.5 py-1 border border-zinc-700/40 max-[640px]:hidden">
-                <div
-                  title={contextTitle}
-                  className="h-3.5 w-3.5 flex-shrink-0 rounded-full p-[2px]"
-                  style={{
-                    background: `conic-gradient(#a1a1aa ${contextDegrees}deg, #52525b ${contextDegrees}deg)`,
-                  }}
-                >
-                  <div className="h-full w-full rounded-full bg-zinc-800" />
-                </div>
-                <div className="relative">
-                          <button
-                            type="button"
-                            tabIndex={chromeButtonTabIndex}
-                            disabled={isGenerating}
-                    onClick={() => setModelDropdownOpen((v) => !v)}
-                    className="flex items-center gap-1 text-[12px] font-medium text-zinc-300 hover:text-zinc-100 transition-colors disabled:opacity-50"
-                  >
-                    <span className="max-w-[120px] truncate">{compactProfileName(profileName)}</span>
-                    <ChevronDown size={12} className={`transition-transform ${modelDropdownOpen ? "rotate-180" : ""}`} />
-                  </button>
-                  <span className="block max-w-[150px] truncate text-[10px] leading-none text-zinc-500">
-                    {modelRouteReason(selectedProfile) || selectedProviderLabel}
-                  </span>
-                  {modelDropdownOpen && (
-                    <ModelDropdown
-                      profiles={selectableProfiles}
-                      selectedProfile={selectedProfile}
-                      isGenerating={isGenerating}
-                      onSelect={requestModelProfileSelect}
-                      onClose={() => setModelDropdownOpen(false)}
-                    />
-                  )}
-                </div>
-                {levels.length > 0 && (
-                  <label className="inline-flex items-center gap-1 border-l border-zinc-700/50 pl-1.5 ml-0.5 text-[11px] font-medium text-zinc-500">
-                    <span>thinking</span>
-                    <select
-                      value={thinkingLevel ?? levels[0]}
-                      onChange={(event) => onThinkingLevelChange(event.target.value)}
-                              disabled={isGenerating}
-                              tabIndex={chromeButtonTabIndex}
-                              className="bg-transparent text-[11px] font-medium text-zinc-400 outline-none cursor-pointer hover:text-zinc-200 transition-colors disabled:opacity-50"
-                      title="Thinking level"
-                    >
-                      {levels.map((level) => (
-                        <option key={level} value={level} className="bg-zinc-900 text-zinc-100">
-                          {THINKING_LABELS[level] ?? level}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                )}
-              </div>
-                      <button
-                        type="button"
-                        tabIndex={chromeButtonTabIndex}
-                        disabled={!isGenerating && (!input.trim() && attachedFiles.length === 0)}
-                onPointerDown={handleSendButtonPointerDown}
-                onClick={handleSendButtonClick}
-                title={isGenerating ? (input.trim() ? "ステアを送る" : "停止") : "送信"}
-                className={`rumi-send-button ${
-                  isNewConversation ? "h-9 w-9" : "w-8 h-8 max-[640px]:h-7 max-[640px]:w-7"
-                } flex flex-shrink-0 items-center justify-center bg-zinc-200 text-black rounded-lg disabled:opacity-30 disabled:cursor-not-allowed hover:bg-white shadow-sm transition-colors`}
-              >
-                {isGenerating && !input.trim() ? (
-                  <WarmActionIcon kind="stop" size={isNewConversation ? "lg" : "md"} className="shadow-none ring-0" />
-                ) : isGenerating ? (
-                  <CornerDownRight size={15} strokeWidth={2.4} />
-                ) : (
-                  <WarmActionIcon kind="send" size={isNewConversation ? "lg" : "md"} className="shadow-none ring-0" />
-                )}
-              </button>
+              {composerChromeWidgetsForSlot(chromeWidgets, "trailing").map((widget) => (
+                <ComposerChromeWidget key={widget.id} widget={widget} />
+              ))}
             </div>
           </div>
 
