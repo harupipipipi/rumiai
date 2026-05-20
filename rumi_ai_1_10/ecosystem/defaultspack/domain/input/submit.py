@@ -36,6 +36,7 @@ def submit_input(envelope: RumiInputEnvelope | dict[str, Any], context: dict[str
 
     metadata = dict(envelope.metadata)
     metadata.setdefault("source", source)
+    runtime_metadata = _runtime_metadata(context)
     display_text = cleaned_text
     runtime_text = apply_external_source_context(display_text, envelope, source=source, metadata=metadata)
     runtime_text = apply_external_runtime_prompt(runtime_text, context)
@@ -62,6 +63,7 @@ def submit_input(envelope: RumiInputEnvelope | dict[str, Any], context: dict[str
                     "external_key": external_key,
                     "event_id": event_id,
                     **metadata,
+                    **runtime_metadata,
                     "source_text": display_text,
                     **({"runtime_content": runtime_text} if runtime_text != display_text else {}),
                 },
@@ -90,6 +92,8 @@ def submit_input(envelope: RumiInputEnvelope | dict[str, Any], context: dict[str
             "assistant_message_id": assistant.get("id"),
             "assistant_text": _extract_assistant_text(assistant),
         }
+        if runtime_metadata:
+            payload["metadata"] = runtime_metadata
         integration_store.mark_event_processed(provider, event_id, payload)
         return payload
     finally:
@@ -145,6 +149,16 @@ def apply_external_source_context(
         details.append(f"actor={actor_text}")
     detail_text = f" ({', '.join(details)})" if details else ""
     return f"[External source: {prefix}{detail_text}]\n{text}".strip()
+
+
+def _runtime_metadata(context: dict[str, Any] | None) -> dict[str, Any]:
+    context = context if isinstance(context, dict) else {}
+    metadata: dict[str, Any] = {}
+    for key in ("trigger_decision", "external_pipeline"):
+        value = context.get(key)
+        if isinstance(value, dict):
+            metadata[key] = value
+    return metadata
 
 
 def apply_external_runtime_prompt(text: str, context: dict[str, Any] | None = None) -> str:

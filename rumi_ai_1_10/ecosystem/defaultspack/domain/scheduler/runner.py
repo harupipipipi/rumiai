@@ -11,6 +11,8 @@ class SchedulerRunner:
     def run(self, job: dict[str, Any]) -> dict[str, Any]:
         if job.get("no_agent"):
             return self._run_script(job)
+        if job.get("target_conversation_id") or str(job.get("session_target") or "").strip().lower() in {"fresh", "current"}:
+            return self._send_chat_task(job)
         return self._run_agent(job)
 
     def _run_script(self, job: dict[str, Any]) -> dict[str, Any]:
@@ -59,3 +61,48 @@ class SchedulerRunner:
             context,
         )
         return {"status": result.get("status"), "agent_result": result, "created_at": utc_now()}
+
+    def _send_chat_task(self, job: dict[str, Any]) -> dict[str, Any]:
+        from blocks.chat.send import run as send_chat
+        from domain.chat.store import ChatStore
+
+        store = ChatStore()
+        target = str(job.get("target_conversation_id") or job.get("conversation_id") or "").strip()
+        created = None
+        if not target or str(job.get("session_target") or "").strip().lower() == "fresh":
+            created = store.create_conversation(
+                model=str(job.get("model") or "") or None,
+                system_prompt_id=str(job.get("system_prompt_id") or "") or None,
+                agent_id=str(job.get("agent_id") or "scheduler"),
+                tags=["scheduler"],
+                conversation_kind="scheduled",
+                metadata={"scheduler_job_id": job.get("job_id"), "scheduler_job_name": job.get("name")},
+            )
+            target = str(created.get("id") or "")
+        if not target:
+            return {"status": "error", "error": "target_conversation_id is required", "created_at": utc_now()}
+        prompt = str(job.get("prompt") or "").strip()
+        if not prompt:
+            return {"status": "error", "error": "prompt is required", "conversation_id": target, "created_at": utc_now()}
+        result = send_chat(
+            {
+                "conversation_id": target,
+                "message": {
+                    "role": "user",
+                    "content": prompt,
+                    "metadata": {
+                        "source": "scheduler",
+                        "scheduler_job_id": job.get("job_id"),
+                    },
+                },
+                "params": dict(job.get("params") if isinstance(job.get("params"), dict) else {}),
+            },
+            {"run_source": "scheduler", "scheduler_job_id": job.get("job_id")},
+        )
+        return {
+            "status": "completed" if isinstance(result, dict) and result.get("status") == "ok" else "failed",
+            "conversation_id": target,
+            "created_conversation": created,
+            "chat_result": result,
+            "created_at": utc_now(),
+        }

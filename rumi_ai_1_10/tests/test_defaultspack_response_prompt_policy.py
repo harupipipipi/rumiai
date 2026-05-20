@@ -367,6 +367,88 @@ def test_pipeline_merges_input_profile_policy_into_runtime_context(monkeypatch):
     assert captured["context"]["profile_policy"]["yolo_mode"] is True
 
 
+def test_pipeline_trigger_decision_separates_fire_from_send(monkeypatch):
+    from domain.external import pipeline  # noqa: E402
+
+    profile = InputProfile.from_dict(
+        {
+            "id": "trigger.enabled",
+            "provider": "discord",
+            "version": 1,
+            "display_name": "Trigger enabled",
+            "match": {"event_type": "message"},
+            "input": {"role": "user", "content": "$.content"},
+            "metadata": {"source": {"kind": "integration", "provider": "discord"}},
+            "trigger_decision": {"enabled": True, "mode": "rules"},
+            "response_prompt": {"enabled": True, "allowed_actions": ["reply_text"]},
+        }
+    )
+
+    class FakeRegistry:
+        def get(self, _profile_id):
+            return profile
+
+    captured = {}
+
+    def fake_submit_input(envelope, context):
+        captured["context"] = context
+        return {"status": "ok", "assistant_text": "local response"}
+
+    monkeypatch.setattr(pipeline, "InputProfileRegistry", FakeRegistry)
+    monkeypatch.setattr(pipeline, "submit_input", fake_submit_input)
+
+    result = pipeline.dispatch_external_event(
+        ExternalEvent.from_dict(_event()),
+        input_profile_id="trigger.enabled",
+        context={"trigger_decision": {"action": "fire", "send_response": False, "reason": "local only"}},
+        send_response=True,
+    )
+
+    assert result["status"] == "ok"
+    assert result["metadata"]["external_pipeline"]["fire"] is True
+    assert result["metadata"]["external_pipeline"]["send"] is False
+    assert captured["context"]["external_pipeline"]["requested_send_response"] is True
+    assert result["response_plan"]["metadata"]["response_action_plan"]["external_reply"] is False
+    assert "response_prompt_decision" not in result
+
+
+def test_pipeline_trigger_decision_can_skip_chat_fire(monkeypatch):
+    from domain.external import pipeline  # noqa: E402
+
+    profile = InputProfile.from_dict(
+        {
+            "id": "trigger.skip",
+            "provider": "discord",
+            "version": 1,
+            "display_name": "Trigger skip",
+            "match": {"event_type": "message"},
+            "input": {"role": "user", "content": "$.content"},
+            "trigger_decision": {"enabled": True, "mode": "rules"},
+        }
+    )
+
+    class FakeRegistry:
+        def get(self, _profile_id):
+            return profile
+
+    def fail_submit(_envelope, _context):
+        raise AssertionError("submit_input should not run when trigger fire=false")
+
+    monkeypatch.setattr(pipeline, "InputProfileRegistry", FakeRegistry)
+    monkeypatch.setattr(pipeline, "submit_input", fail_submit)
+
+    result = pipeline.dispatch_external_event(
+        ExternalEvent.from_dict(_event()),
+        input_profile_id="trigger.skip",
+        context={"trigger_decision": {"action": "ignore", "reason": "not relevant"}},
+        send_response=True,
+    )
+
+    assert result["status"] == "ignored"
+    assert result["trigger_decision"]["fire"] is False
+    assert result["metadata"]["external_pipeline"]["send"] is False
+
+
 def test_adapters_recheck_suppressed_external_reply_before_sending():
     plan = {
         "messages": [{"type": "text", "text": "do not send"}],

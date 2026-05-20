@@ -13,9 +13,11 @@ class GitlawbOpengatewayProvider(OpenAICompatibleProvider):
         "AppleWebKit/537.36 Chrome/124 Safari/537.36"
     )
     MODEL_IDS = {
-        "mimo-v2.5-pro",
         "mimo-v2-flash",
-        "google/gemini-3.1-flash-lite-preview",
+        "mimo-v2-omni",
+        "mimo-v2-pro",
+        "mimo-v2.5",
+        "mimo-v2.5-pro",
     }
     KNOWN_MODELS = [
         {
@@ -52,22 +54,61 @@ class GitlawbOpengatewayProvider(OpenAICompatibleProvider):
             },
         },
         {
-            "id": "gitlawb-opengateway/google/gemini-3.1-flash-lite-preview",
-            "model_id": "google/gemini-3.1-flash-lite-preview",
-            "name": "Gemini 3.1 Flash Lite Preview via Gitlawb OpenGateway",
-            "display_name": "Gemini 3.1 Flash Lite Preview via Gitlawb OpenGateway",
+            "id": "gitlawb-opengateway/mimo-v2-omni",
+            "model_id": "mimo-v2-omni",
+            "name": "MiMo V2 Omni via Gitlawb OpenGateway",
+            "display_name": "MiMo V2 Omni via Gitlawb OpenGateway",
             "provider": "gitlawb-opengateway",
             "provider_id": "gitlawb-opengateway",
             "type": "chat",
-            "defaults": {"chat": True, "fast": True},
-            "capabilities": ["chat", "streaming", "vision", "reasoning"],
-            "supports_thinking": True,
-            "thinking_levels": ["low", "medium", "high"],
-            "default_thinking_level": "high",
+            "defaults": {"chat": True, "vision": True},
+            "capabilities": ["chat", "streaming", "vision"],
             "metadata": {
                 "source": "gitlawb-opengateway",
                 "privacy": "external_no_key_gateway",
                 "vision_verified": True,
+                "openai_base_url": "https://opengateway.gitlawb.com/v1",
+                "openai_model": "mimo-v2-omni",
+            },
+        },
+        {
+            "id": "gitlawb-opengateway/mimo-v2-pro",
+            "model_id": "mimo-v2-pro",
+            "name": "MiMo V2 Pro via Gitlawb OpenGateway",
+            "display_name": "MiMo V2 Pro via Gitlawb OpenGateway",
+            "provider": "gitlawb-opengateway",
+            "provider_id": "gitlawb-opengateway",
+            "type": "reasoning",
+            "defaults": {"reasoning": True},
+            "capabilities": ["chat", "reasoning", "streaming"],
+            "supports_thinking": True,
+            "thinking_levels": ["low", "medium", "high", "xhigh"],
+            "default_thinking_level": "medium",
+            "metadata": {
+                "source": "gitlawb-opengateway",
+                "privacy": "external_no_key_gateway",
+                "openai_base_url": "https://opengateway.gitlawb.com/v1",
+                "openai_model": "mimo-v2-pro",
+            },
+        },
+        {
+            "id": "gitlawb-opengateway/mimo-v2.5",
+            "model_id": "mimo-v2.5",
+            "name": "MiMo V2.5 via Gitlawb OpenGateway",
+            "display_name": "MiMo V2.5 via Gitlawb OpenGateway",
+            "provider": "gitlawb-opengateway",
+            "provider_id": "gitlawb-opengateway",
+            "type": "reasoning",
+            "defaults": {"chat": True, "reasoning": True},
+            "capabilities": ["chat", "reasoning", "streaming"],
+            "supports_thinking": True,
+            "thinking_levels": ["low", "medium", "high", "xhigh"],
+            "default_thinking_level": "medium",
+            "metadata": {
+                "source": "gitlawb-opengateway",
+                "privacy": "external_no_key_gateway",
+                "openai_base_url": "https://opengateway.gitlawb.com/v1",
+                "openai_model": "mimo-v2.5",
             },
         },
     ]
@@ -81,7 +122,10 @@ class GitlawbOpengatewayProvider(OpenAICompatibleProvider):
             default_base_url="https://opengateway.gitlawb.com/v1",
             credential_required=False,
             known_models=self.KNOWN_MODELS,
-            extra_headers={"User-Agent": self.DEFAULT_USER_AGENT},
+            extra_headers={
+                "Authorization": "Bearer anything",
+                "User-Agent": self.DEFAULT_USER_AGENT,
+            },
         )
 
     @classmethod

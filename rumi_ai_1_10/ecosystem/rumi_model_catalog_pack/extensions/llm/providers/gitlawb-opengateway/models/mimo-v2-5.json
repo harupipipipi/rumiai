@@ -1,0 +1,28 @@
+{
+  "id": "gitlawb-opengateway/mimo-v2.5",
+  "category": "llm_model",
+  "version": "1",
+  "provider_id": "gitlawb-opengateway",
+  "model_id": "mimo-v2.5",
+  "display_name": "MiMo V2.5 via Gitlawb OpenGateway",
+  "type": "reasoning",
+  "enabled": true,
+  "priority": 5,
+  "defaults": {
+    "chat": true,
+    "reasoning": true
+  },
+  "capabilities": {
+    "streaming": true,
+    "reasoning": true
+  },
+  "supports_thinking": true,
+  "thinking_levels": ["low", "medium", "high", "xhigh"],
+  "default_thinking_level": "medium",
+  "metadata": {
+    "source": "gitlawb-opengateway",
+    "privacy": "external_no_key_gateway",
+    "openai_base_url": "https://opengateway.gitlawb.com/v1",
+    "openai_model": "mimo-v2.5"
+  }
+}

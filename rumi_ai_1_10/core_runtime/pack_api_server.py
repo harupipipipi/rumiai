@@ -319,6 +319,25 @@ class PackAPIHandler(
             prefix = wm["path_prefix"]
             if request_path == prefix or request_path.startswith(prefix + "/"):
                 return wm
+        fallback_mounts = {
+            "/panel": {
+                "web_root": Path(__file__).resolve().parent / "core_pack" / "core_control_panel" / "web",
+                "spa_fallback": True,
+                "index_file": "index.html",
+                "auth_required": True,
+                "pack_id": "core_control_panel",
+            },
+            "/setup": {
+                "web_root": Path(__file__).resolve().parent / "core_pack" / "core_setup" / "web",
+                "spa_fallback": True,
+                "index_file": "index.html",
+                "auth_required": False,
+                "pack_id": "core_setup",
+            },
+        }
+        for prefix, mount in fallback_mounts.items():
+            if request_path == prefix or request_path.startswith(prefix + "/"):
+                return {"path_prefix": prefix, **mount}
         return None
 
 
@@ -375,6 +394,16 @@ class PackAPIHandler(
     def _is_pre_auth_route(self, method: str, path: str) -> bool:
         """method + path が pre_auth_table にマッチするか判定する。"""
         method_upper = method.upper()
+        core_pre_auth_routes = {
+            ("POST", "/api/panel/auth/bootstrap"),
+            ("POST", "/api/panel/auth/exchange"),
+            ("GET", "/api/setup/status"),
+            ("GET", "/api/setup/oauth/start"),
+            ("GET", "/callback"),
+            ("POST", "/api/setup/complete"),
+        }
+        if (method_upper, path) in core_pre_auth_routes:
+            return True
         # Provider webhooks must reach their own signature/shared-secret checks
         # before panel or bearer auth can apply.
         if method_upper == "POST":
@@ -707,7 +736,7 @@ class PackAPIHandler(
             self._request_auth_mode = "bearer"
             return True
 
-        if path.startswith("/api/panel/") and self._check_panel_session(method):
+        if path.startswith("/api/") and self._check_panel_session(method):
             self._request_auth_mode = "panel_session"
             return True
 
@@ -719,7 +748,7 @@ class PackAPIHandler(
             self._request_auth_mode = "bearer"
             return True
 
-        if web_mount.get("pack_id") == "core_control_panel" and self._check_panel_session(method):
+        if self._check_panel_session(method):
             self._request_auth_mode = "panel_session"
             return True
 
@@ -971,10 +1000,11 @@ class PackAPIHandler(
         path_prefix = _wm["path_prefix"]
         web_root = _wm["web_root"]
         spa_fallback = _wm.get("spa_fallback", False)
+        index_file = _wm.get("index_file", "index.html")
 
         sub_path = request_path[len(path_prefix):]
         if not sub_path or sub_path == "/":
-            sub_path = "/index.html"
+            sub_path = "/" + index_file
 
         # パストラバーサル防止
         try:
@@ -986,7 +1016,7 @@ class PackAPIHandler(
 
         if not target.is_file():
             # SPA フォールバック: 拡張子のないパスは index.html に解決
-            index_fallback = web_root / "index.html"
+            index_fallback = web_root / index_file
             if spa_fallback and index_fallback.is_file() and "." not in target.name:
                 target = index_fallback
             else:
@@ -1089,6 +1119,13 @@ class PackAPIHandler(
             else:
                 _health = {"status": "ok", "needs_setup": True}
             self._send_response(APIResponse(True, data=_health))
+            return
+
+        if _pre_auth_path == "/":
+            self.send_response(302)
+            self.send_header("Location", "/panel/")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
             return
 
         # --- テーブル駆動: 静的配信 (web_mount) ---

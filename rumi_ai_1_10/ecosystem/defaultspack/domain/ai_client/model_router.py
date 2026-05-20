@@ -75,14 +75,18 @@ def route_model_request(
     needs_tools = bool(routing_request.requires_tool_calling or routing_request.requested_tools)
     needs_thinking = str(routing_request.requested_thinking_level or "").strip() not in {"", "none"}
     original_in_group = any(_same_model(item, original) for item in candidates)
+    explicit_model_outside_group = bool(original_caps and not original_in_group)
+    route_from_preferred_for_tools = _is_auto_route_anchor(original, original_caps)
     keep_original = bool(
         original_caps
-        and original_in_group
-        and _compatible(
-            original_caps,
-            needs_vision=needs_vision,
-            needs_tools=needs_tools,
-            needs_thinking=needs_thinking,
+        and (
+            explicit_model_outside_group
+            or _compatible(
+                original_caps,
+                needs_vision=needs_vision,
+                needs_tools=needs_tools and route_from_preferred_for_tools,
+                needs_thinking=False,
+            )
         )
     )
 
@@ -190,6 +194,8 @@ def _compatible(model: dict[str, Any], *, needs_vision: bool, needs_tools: bool,
 
 def _best_candidate(candidates: list[dict[str, Any]], request: ModelRoutingRequest) -> dict[str, Any]:
     text = request.user_text or ""
+    text_key = text.casefold()
+    notes = request.settings.get("model_notes") if isinstance(request.settings, dict) and isinstance(request.settings.get("model_notes"), dict) else {}
     is_short = len(text.strip()) <= 80 and not request.has_images and not request.has_files
     def score(model: dict[str, Any]) -> tuple[int, str]:
         value = int(model.get("knowledge_level") or 0)
@@ -203,6 +209,12 @@ def _best_candidate(candidates: list[dict[str, Any]], request: ModelRoutingReque
             value += 16
         if request.preferred_group == "fast" and model.get("speed_tier") == "fast":
             value += 20
+        profile_id = str(model.get("profile_id") or model.get("qualified_model_id") or "")
+        note = str(model.get("notes") or notes.get(profile_id) or notes.get(str(model.get("qualified_model_id") or "")) or "").casefold()
+        if note:
+            for token in ("code", "coding", "tool", "vision", "image", "fast", "cheap", "deep", "long", "japanese", "日本語", "画像"):
+                if token in text_key and token in note:
+                    value += 10
         return value, str(model.get("label") or model.get("profile_id") or "")
     return sorted(candidates, key=lambda item: (-score(item)[0], score(item)[1].casefold()))[0]
 
@@ -229,6 +241,25 @@ def _same_model(model: dict[str, Any], model_id: str) -> bool:
         str(model.get("qualified_model_id") or ""),
         "{}/{}".format(model.get("provider_id") or model.get("provider") or "", model.get("model_id") or ""),
     }
+
+
+def _is_auto_route_anchor(model_id: str, model: dict[str, Any] | None = None) -> bool:
+    profile_id = str(model_id or "").strip()
+    aliases = {
+        "",
+        "default",
+        "stub/default",
+    }
+    if isinstance(model, dict):
+        aliases.update(
+            {
+                str(model.get("profile_id") or ""),
+                str(model.get("qualified_model_id") or ""),
+            }
+            if str(model.get("provider_id") or "") == "stub"
+            else set()
+        )
+    return profile_id in aliases
 
 
 def _resolve_utility_models(settings: dict[str, Any], candidates: list[dict[str, Any]]) -> dict[str, str]:

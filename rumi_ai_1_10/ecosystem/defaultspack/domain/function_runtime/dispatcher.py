@@ -163,6 +163,11 @@ def _set_provider_key(args: dict[str, Any], context: dict[str, Any]) -> dict[str
         str(args.get("value") or ""),
         api_id=args.get("api_id"),
         name=args.get("name"),
+        base_url=args.get("base_url"),
+        allowed_models=args.get("allowed_models"),
+        default_model=args.get("default_model"),
+        notes=args.get("notes"),
+        quota_label=args.get("quota_label"),
     )
     if not result.get("success"):
         return error(result.get("error") or "failed to save api key", "API_KEY_SAVE_FAILED")
@@ -191,6 +196,11 @@ def _rename_provider_key(args: dict[str, Any], context: dict[str, Any]) -> dict[
         str(args.get("api_id") or "").strip(),
         str(args.get("name") or args.get("new_name") or "").strip(),
         new_api_id=args.get("new_api_id"),
+        base_url=args.get("base_url"),
+        allowed_models=args.get("allowed_models"),
+        default_model=args.get("default_model"),
+        notes=args.get("notes"),
+        quota_label=args.get("quota_label"),
     )
     if not result.get("success"):
         return error(result.get("error") or "failed to rename api key", "API_KEY_RENAME_FAILED")

@@ -1,0 +1,55 @@
+{
+  "models": [
+    {
+      "id": "moonshotai/kimi-k2-0711-preview",
+      "category": "llm_model",
+      "version": "1",
+      "provider_id": "moonshotai",
+      "model_id": "kimi-k2-0711-preview",
+      "display_name": "Kimi K2 0711 Preview",
+      "type": "chat",
+      "enabled": true,
+      "priority": 1,
+      "defaults": {
+        "chat": true,
+        "coding": true,
+        "agent": true
+      },
+      "capabilities": {
+        "chat": true,
+        "streaming": true,
+        "reasoning": true,
+        "tool_calls": true,
+        "vision": false
+      },
+      "supports_thinking": true,
+      "thinking_levels": ["low", "medium", "high"],
+      "default_thinking_level": "medium",
+      "metadata": {
+        "preview": true,
+        "official_model_ids_need_refresh": true
+      }
+    },
+    {
+      "id": "moonshotai/moonshot-v1-8k",
+      "category": "llm_model",
+      "version": "1",
+      "provider_id": "moonshotai",
+      "model_id": "moonshot-v1-8k",
+      "display_name": "Moonshot V1 8K",
+      "type": "chat",
+      "enabled": true,
+      "priority": 2,
+      "defaults": {
+        "legacy": true
+      },
+      "capabilities": {
+        "chat": true,
+        "streaming": true,
+        "reasoning": false,
+        "tool_calls": true,
+        "vision": false
+      }
+    }
+  ]
+}

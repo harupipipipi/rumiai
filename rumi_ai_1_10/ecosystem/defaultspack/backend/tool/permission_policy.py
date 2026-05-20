@@ -8,6 +8,8 @@ import os
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+from domain.tool.security import is_safe_first_party_memo_tool
+
 
 _ACTION_ALLOW = "allow"
 _ACTION_DENY = "deny"
@@ -157,6 +159,11 @@ class ToolPermissionPolicyStore:
                 action = policy["execution_types"][execution_type]
                 matched_by = "execution_types"
                 matched_value = execution_type
+
+        if matched_by == "default_action" and isinstance(tool, dict) and is_safe_first_party_memo_tool(tool):
+            action = _ACTION_ALLOW
+            matched_by = "first_party_memo"
+            matched_value = tool_id or display_name or tool_name
 
         allowed = action == _ACTION_ALLOW
         reason = ""

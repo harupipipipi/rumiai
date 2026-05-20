@@ -1,6 +1,6 @@
 import type { FormEvent, MutableRefObject, ReactNode } from "react";
 
-import type { ChatActivityEvent, ChatContentBlock, CodingContextEntry, CodingGitStatus, CodingWorkspaceRecord, ComposerWidgetAction, ModelCommandCandidate, ModelProfile, SettingsSection, SidebarAction, SidebarItem, ToolLogEntry, UICatalog } from "../lib/api";
+import type { ChatActivityEvent, ChatContentBlock, CodingContextEntry, CodingGitStatus, CodingWorkspaceRecord, ComposerWidgetAction, ConversationSteerItem, ModelCommandCandidate, ModelProfile, SettingsSection, SidebarAction, SidebarItem, ToolLogEntry, UICatalog } from "../lib/api";
 import type { ComposerCommandItem } from "../lib/api";
 import type { ChatItem } from "../components/HistoryBoard";
 import type { ToolPreviewItem, ToolPreviewMode } from "../components/ToolPreview";
@@ -20,6 +20,7 @@ export type ChatUiMessage = {
     toolUsed?: string;
     modelName?: string;
     thinkingLabel?: string;
+    thinkingDuration?: string;
     thinkingTranscript?: string;
     attachedToolCount?: number;
   };
@@ -57,6 +58,8 @@ export type HistoryBoardRendererProps = {
   account?: NonNullable<UICatalog["app"]>["account"];
   onChatSelect: (conversationId: string) => void;
   onNewTask: () => void;
+  onCalendarOpen?: () => void;
+  isCalendarActive?: boolean;
   onSettingsClick: () => void;
   onChatMetadataChange?: (chatId: string, updates: { is_pinned?: boolean; is_starred?: boolean; tags?: string[] }) => void;
   onMinimize?: () => void;
@@ -81,6 +84,8 @@ export type ChatMessagesRendererProps = {
   isGenerating: boolean;
   pendingStatus?: string | null;
   pendingToolNames?: string[];
+  pendingStartedAt?: number | null;
+  pendingToolStartedAt?: Record<string, number>;
   messages: ChatUiMessage[];
   messagesEndRef: MutableRefObject<HTMLDivElement | null>;
   unknownBlockStrategy: string;
@@ -114,6 +119,10 @@ export type ComposerRendererProps = {
   droppedWidgets?: DroppedWidget[];
   selectedToolIds?: string[];
   keyboardButtonNavigation?: boolean;
+  steerStatus?: string | null;
+  steerBusy?: boolean;
+  steerQueuedCount?: number;
+  steerPreviewItems?: ConversationSteerItem[];
   onExtensionSelect?: (item: ComposerExtensionItem) => void;
   onCommandSelect?: (commandId: string, rawInput?: string) => void;
   onModelCommandCandidateSelect?: (candidate: ModelCommandCandidate) => void;
@@ -124,6 +133,7 @@ export type ComposerRendererProps = {
   onInputChange: (value: string) => void;
   onSubmit: (event: FormEvent) => void;
   onStopGenerating?: () => void;
+  onSteerSubmit?: (prompt: string) => void;
   onModeChange?: (mode: AppMode) => void;
   onFileAttach?: (files: AttachedFile[]) => void;
   onAtFileAttach?: (path: string) => void;
@@ -158,6 +168,7 @@ export type RightSidebarRendererProps = {
   settingsSections: SettingsSection[];
   selectedToolIds?: string[];
   companyPanel?: ReactNode;
+  codingPanel?: ReactNode;
   keyboardButtonNavigation?: boolean;
   onSettingChange: SettingChangeHandler;
   onOpenSettings: () => void;
@@ -223,4 +234,5 @@ export type DroppedWidget = {
   sourceItemId?: string;
   description?: string;
   icon?: string;
+  metadata?: Record<string, unknown>;
 };

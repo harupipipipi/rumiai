@@ -598,6 +598,8 @@ class Scheduler:
                 from blocks.chat.send import run as chat_send_run
 
                 params = {}
+                if task_cfg.get("model"):
+                    params["model"] = task_cfg.get("model")
                 if isinstance(task_cfg.get("tool_policy"), dict):
                     params["tool_policy"] = task_cfg["tool_policy"]
                 if task_cfg.get("thinking_level"):

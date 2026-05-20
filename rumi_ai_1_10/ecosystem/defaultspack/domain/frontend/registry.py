@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+import re
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
@@ -528,6 +529,137 @@ class FrontendRegistry:
                 ],
             },
             {
+                "id": "calendar",
+                "label": "Calendar",
+                "description": "カレンダー画面のクリック追加、週表示、予定色を調整します。",
+                "fields": [
+                    {
+                        "id": "quick_add_enabled",
+                        "label": "Click To Add",
+                        "type": "toggle",
+                        "default": True,
+                        "help": "日付セルをクリックした時に、新規追加カードを開きます。",
+                    },
+                    {
+                        "id": "default_item_type",
+                        "label": "Default Item Type",
+                        "type": "select",
+                        "default": "task",
+                        "options": [
+                            {"value": "task", "label": "Task / 青"},
+                            {"value": "event", "label": "Event / 緑"},
+                            {"value": "reminder", "label": "Reminder / グレー"},
+                        ],
+                        "help": "新規追加カードで最初に選ばれる種類です。",
+                    },
+                    {
+                        "id": "default_time",
+                        "label": "Default Time",
+                        "type": "text",
+                        "default": "09:00",
+                        "help": "新規追加カードの初期時刻です。例: 09:00 / 午前9:00",
+                    },
+                    {
+                        "id": "time_slot_minutes",
+                        "label": "Time Slot Minutes",
+                        "type": "select",
+                        "default": 15,
+                        "options": [
+                            {"value": 15, "label": "15 minutes"},
+                            {"value": 30, "label": "30 minutes"},
+                            {"value": 60, "label": "60 minutes"},
+                        ],
+                        "help": "時刻ドロップダウンの刻み幅です。",
+                    },
+                    {
+                        "id": "show_time_picker",
+                        "label": "Show Time Picker",
+                        "type": "toggle",
+                        "default": True,
+                        "help": "時刻入力時にスクロール式の候補を表示します。",
+                    },
+                    {
+                        "id": "agent_task_default",
+                        "label": "Agent Task Default",
+                        "type": "toggle",
+                        "default": False,
+                        "help": "Task作成時に、AI agent実行の候補を初期ONにします。",
+                    },
+                    {
+                        "id": "agent_model",
+                        "label": "Agent Model",
+                        "type": "text",
+                        "default": "",
+                        "help": "空なら設定済みの非embeddingモデルを自動選択します。例: google/gemini-2.5-flash",
+                    },
+                    {
+                        "id": "agent_current_chat",
+                        "label": "Run In Current Chat",
+                        "type": "toggle",
+                        "default": False,
+                        "help": "ONなら予定時刻に現在の会話へ送信します。OFFなら独立したagent実行にします。",
+                    },
+                    {
+                        "id": "week_start",
+                        "label": "Week Starts On",
+                        "type": "select",
+                        "default": "sunday",
+                        "options": [
+                            {"value": "sunday", "label": "Sunday"},
+                            {"value": "monday", "label": "Monday"},
+                        ],
+                        "help": "月表示の左端の曜日を選びます。",
+                    },
+                    {
+                        "id": "show_outside_days",
+                        "label": "Show Outside Days",
+                        "type": "toggle",
+                        "default": True,
+                        "help": "前月/翌月の日付を薄く表示します。",
+                    },
+                    {
+                        "id": "dim_weekends",
+                        "label": "Dim Weekends",
+                        "type": "toggle",
+                        "default": True,
+                        "help": "土日セルをほんの少し暗くします。",
+                    },
+                    {
+                        "id": "task_color",
+                        "label": "Task Color",
+                        "type": "select",
+                        "default": "blue",
+                        "options": [
+                            {"value": "blue", "label": "Blue"},
+                            {"value": "cyan", "label": "Cyan"},
+                            {"value": "slate", "label": "Slate"},
+                        ],
+                        "help": "Taskバーの色。既定は青です。",
+                    },
+                    {
+                        "id": "event_color",
+                        "label": "Event Color",
+                        "type": "select",
+                        "default": "green",
+                        "options": [
+                            {"value": "green", "label": "Green"},
+                            {"value": "blue", "label": "Blue"},
+                            {"value": "slate", "label": "Slate"},
+                        ],
+                        "help": "Eventバーの色。既定は緑です。",
+                    },
+                    {
+                        "id": "max_items_per_day",
+                        "label": "Visible Items / Day",
+                        "type": "number",
+                        "default": 3,
+                        "min": 1,
+                        "max": 6,
+                        "help": "1日に表示する予定バーの上限です。",
+                    },
+                ],
+            },
+            {
                 "id": "chat_rendering",
                 "label": "Chat Rendering",
                 "description": "block / widget rendering rules for the conversation pane.",
@@ -613,6 +745,38 @@ class FrontendRegistry:
                         "help": "1行に model: provider/api-name を優先順で書きます。例: google/gemini-2.5-pro: google/main, google/backup。制限時は次の API へ切り替えます。",
                     },
                     {
+                        "id": "api_routes",
+                        "label": "Structured API Routes",
+                        "type": "textarea",
+                        "default": "[]",
+                        "help": "高度設定: JSON配列/オブジェクトで model と apis を定義します。旧 Model API Priority も読み取り互換です。",
+                        "advanced": True,
+                    },
+                    {
+                        "id": "api_bound_profiles",
+                        "label": "API-bound Profiles",
+                        "type": "textarea",
+                        "default": "[]",
+                        "help": "高度設定: このAPI keyだけで使えるモデル profile をJSONで追加します。",
+                        "advanced": True,
+                    },
+                    {
+                        "id": "composite_models",
+                        "label": "Composite Models",
+                        "type": "textarea",
+                        "default": "[]",
+                        "help": "高度設定: fallback_chain / ensemble の合体モデルをJSONで定義します。",
+                        "advanced": True,
+                    },
+                    {
+                        "id": "model_notes",
+                        "label": "Model Notes",
+                        "type": "textarea",
+                        "default": "{}",
+                        "help": "高度設定: モデルごとの特徴を自分の言葉で書き、検索とルーティングの判断材料にします。",
+                        "advanced": True,
+                    },
+                    {
                         "id": "thinking_level",
                         "label": "Thinking Level",
                         "type": "select",
@@ -655,6 +819,20 @@ class FrontendRegistry:
                         "type": "api_keys",
                         "default": [],
                         "help": "provider と名前を付けて複数の API key を保存できます。値は再表示されません。",
+                    },
+                ],
+            },
+            {
+                "id": "line",
+                "label": "LINE",
+                "description": "LINE 受信時の反応条件。",
+                "fields": [
+                    {
+                        "id": "mention_policy",
+                        "label": "Mention Policy",
+                        "type": "textarea",
+                        "default": "{\"group_room_mention_required\":true}",
+                        "help": "group/room では既定でメンション時のみ反応します。1:1 は従来通り反応します。",
                     },
                 ],
             },
@@ -955,6 +1133,49 @@ class FrontendRegistry:
                         "type": "textarea",
                         "default": "",
                         "help": "例: Google Chromeをcomputer_useで操作して起動し、指定のLINE Official Account Manager URLにアクセスして返答する。",
+                    },
+                ],
+            },
+            {
+                "id": "triggers",
+                "label": "Triggers",
+                "description": "発火判断と、入力に関係ない候補を落とすための設定。",
+                "fields": [
+                    {
+                        "id": "mode",
+                        "label": "Trigger Mode",
+                        "type": "select",
+                        "default": "vector",
+                        "options": [
+                            {"value": "vector", "label": "Vector / memo match"},
+                            {"value": "llm", "label": "LLM decides"},
+                        ],
+                        "help": "発火要因をベクトル/メモ照合で見るか、LLMに判断させるかを選びます。",
+                    },
+                    {
+                        "id": "filter_unrelated",
+                        "label": "Filter Unrelated",
+                        "type": "toggle",
+                        "default": False,
+                        "help": "LLM判断時に、発火候補と入力が無関係なら候補を落とすためのフラグです。",
+                    },
+                    {
+                        "id": "model",
+                        "label": "Trigger LLM",
+                        "type": "text",
+                        "default": "",
+                        "help": "空なら現在の既定モデルを継承します。",
+                        "advanced": True,
+                    },
+                    {
+                        "id": "vector_threshold",
+                        "label": "Vector Threshold",
+                        "type": "number",
+                        "default": 0.1,
+                        "min": 0,
+                        "max": 1,
+                        "help": "vector mode の発火候補スコアしきい値です。外部返信の既定動作は維持します。",
+                        "advanced": True,
                     },
                 ],
             },
@@ -1593,6 +1814,22 @@ class FrontendRegistry:
                 "language": "ja",
             },
             "preview": {"auto_open": False, "default_mode": "auto", "max_items": 12},
+            "calendar": {
+                "agent_current_chat": False,
+                "agent_model": "",
+                "agent_task_default": False,
+                "default_time": "09:00",
+                "quick_add_enabled": True,
+                "default_item_type": "task",
+                "week_start": "sunday",
+                "show_outside_days": True,
+                "show_time_picker": True,
+                "dim_weekends": True,
+                "task_color": "blue",
+                "time_slot_minutes": 15,
+                "event_color": "green",
+                "max_items_per_day": 3,
+            },
             "chat_rendering": {"show_widgets": True, "unknown_block_strategy": "hidden"},
             "models": {
                 **ModelRuntimeSettingsService(self._pack_root).default_model_settings(),
@@ -1887,6 +2124,11 @@ class FrontendRegistry:
                         pack_root=self._pack_root,
                         api_id=name,
                         name=name,
+                        base_url=str(api_key_patch.get("base_url") or "").strip() or None,
+                        allowed_models=api_key_patch.get("allowed_models"),
+                        default_model=str(api_key_patch.get("default_model") or "").strip() or None,
+                        notes=str(api_key_patch.get("notes") or "").strip() or None,
+                        quota_label=str(api_key_patch.get("quota_label") or "").strip() or None,
                     )
             apis["api_keys"] = []
         external_output = sanitized.get("external_output")
@@ -1947,6 +2189,50 @@ class FrontendRegistry:
         if "default_target" not in tools or (not str(tools.get("default_target") or "").strip() and legacy_default_target):
             tools["default_target"] = legacy_default_target
 
+        triggers = refreshed.setdefault("triggers", {})
+        if not isinstance(triggers, dict):
+            triggers = {}
+            refreshed["triggers"] = triggers
+        trigger_mode = str(triggers.get("mode") or "vector").strip().lower()
+        triggers["mode"] = trigger_mode if trigger_mode in {"vector", "llm"} else "vector"
+        triggers["filter_unrelated"] = bool(triggers.get("filter_unrelated", False))
+        triggers["model"] = str(triggers.get("model") or "").strip()
+        try:
+            triggers["vector_threshold"] = max(0.0, min(1.0, float(triggers.get("vector_threshold", 0.1))))
+        except (TypeError, ValueError):
+            triggers["vector_threshold"] = 0.1
+
+        calendar = refreshed.setdefault("calendar", {})
+        if not isinstance(calendar, dict):
+            calendar = {}
+            refreshed["calendar"] = calendar
+        calendar["quick_add_enabled"] = bool(calendar.get("quick_add_enabled", True))
+        calendar["agent_current_chat"] = bool(calendar.get("agent_current_chat", False))
+        calendar["agent_model"] = str(calendar.get("agent_model") or "").strip()
+        calendar["agent_task_default"] = bool(calendar.get("agent_task_default", False))
+        default_time = str(calendar.get("default_time") or "09:00").strip()
+        calendar["default_time"] = default_time if re.match(r"^\d{1,2}:\d{2}$", default_time) else "09:00"
+        try:
+            slot_minutes = int(calendar.get("time_slot_minutes", 15))
+        except (TypeError, ValueError):
+            slot_minutes = 15
+        calendar["time_slot_minutes"] = slot_minutes if slot_minutes in {15, 30, 60} else 15
+        item_type = str(calendar.get("default_item_type") or "task").strip().lower()
+        calendar["default_item_type"] = item_type if item_type in {"task", "event", "reminder"} else "task"
+        week_start = str(calendar.get("week_start") or "sunday").strip().lower()
+        calendar["week_start"] = week_start if week_start in {"sunday", "monday"} else "sunday"
+        calendar["show_outside_days"] = bool(calendar.get("show_outside_days", True))
+        calendar["show_time_picker"] = bool(calendar.get("show_time_picker", True))
+        calendar["dim_weekends"] = bool(calendar.get("dim_weekends", True))
+        task_color = str(calendar.get("task_color") or "blue").strip().lower()
+        calendar["task_color"] = task_color if task_color in {"blue", "cyan", "slate"} else "blue"
+        event_color = str(calendar.get("event_color") or "green").strip().lower()
+        calendar["event_color"] = event_color if event_color in {"green", "blue", "slate"} else "green"
+        try:
+            calendar["max_items_per_day"] = max(1, min(6, int(calendar.get("max_items_per_day", 3))))
+        except (TypeError, ValueError):
+            calendar["max_items_per_day"] = 3
+
         models = refreshed.setdefault("models", {})
         if not isinstance(models, dict):
             models = {}
@@ -1959,6 +2245,18 @@ class FrontendRegistry:
             if legacy_routes and not models.get("model_api_routes"):
                 models["model_api_routes"] = legacy_routes
         refreshed["models"] = ModelRuntimeSettingsService(self._pack_root).refresh_models_settings(models)
+        line = refreshed.setdefault("line", {})
+        if not isinstance(line, dict):
+            line = {}
+            refreshed["line"] = line
+        mention_policy = line.setdefault("mention_policy", {"group_room_mention_required": True})
+        if isinstance(mention_policy, str):
+            try:
+                parsed = json.loads(mention_policy)
+                if isinstance(parsed, dict):
+                    line["mention_policy"] = parsed
+            except Exception:
+                pass
         external_input = refreshed.setdefault("external_input", {})
         if not isinstance(external_input, dict):
             external_input = {}

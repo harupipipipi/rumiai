@@ -1,0 +1,44 @@
+{
+  "function_id": "memory_memo_folders",
+  "description": "Manage memo folders.",
+  "tags": [
+    "memory",
+    "memo"
+  ],
+  "risk": "medium",
+  "requires": [
+    "memory.memo.folders"
+  ],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.memory.memo_folders",
+    "defaultspack.memory.memo_folders",
+    "defaults.memory.memo.folders",
+    "defaultspack.memory.memo.folders"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.memory.memo_folders",
+      "default_args": {}
+    }
+  }
+}

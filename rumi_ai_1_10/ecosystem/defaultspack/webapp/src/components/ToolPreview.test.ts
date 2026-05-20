@@ -1,7 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { buildToolPreviewDisplayItems, hasCanvasItems, type ToolPreviewItem } from "./ToolPreview";
+import {
+  artifactDialogItemFromToolPreview,
+  buildToolPreviewDisplayItems,
+  buildToolPreviewTimelineItems,
+  hasCanvasItems,
+  type ToolPreviewItem,
+} from "./ToolPreview";
 
 const previews: ToolPreviewItem[] = [
   {
@@ -35,4 +41,27 @@ test("tool preview items put the active item first without injecting empty memo"
 test("memo is shown first only when it is active or has content", () => {
   assert.equal(buildToolPreviewDisplayItems(previews, "", "__memo__")[0]?.id, "__memo__");
   assert.equal(buildToolPreviewDisplayItems(previews, "draft note", null)[0]?.id, "__memo__");
+});
+
+test("tool preview timeline is chronological regardless of display ordering", () => {
+  const displayItems = buildToolPreviewDisplayItems(previews, "", "tool-a");
+
+  assert.deepEqual(displayItems.map((item) => item.id), ["first", "second"]);
+  assert.deepEqual(buildToolPreviewTimelineItems(displayItems).map((item) => item.id), ["second", "first"]);
+});
+
+test("tool preview artifacts map to reusable foreground dialog items", () => {
+  const image = artifactDialogItemFromToolPreview({
+    id: "img",
+    toolStepId: "tool-img",
+    timestamp: 3,
+    data: { type: "image", url: "data:image/png;base64,abc", alt: "screenshot", path: "/tmp/screen.png" },
+  });
+  const file = artifactDialogItemFromToolPreview(previews[0]);
+
+  assert.equal(image.kind, "image");
+  assert.equal(image.imageUrl, "data:image/png;base64,abc");
+  assert.equal(image.href, undefined);
+  assert.equal(file.kind, "file");
+  assert.equal(file.title, "a.txt");
 });

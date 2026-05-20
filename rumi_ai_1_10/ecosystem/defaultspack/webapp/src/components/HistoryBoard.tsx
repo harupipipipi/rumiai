@@ -26,14 +26,16 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import {
   Globe, Terminal, MessageSquare, Plus, ChevronRight, Settings,
-  GripVertical, FolderOpen, Folder, FolderPlus, MessageSquarePlus, PanelLeftClose, PanelLeftOpen, X,
+  GripVertical, FolderOpen, Folder, PanelLeftClose, PanelLeftOpen, X,
 } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
+import { HISTORY_CHAT_DROP_MIME, historyChatDragPayload } from '../lib/historyComposer';
 import { ConversationPinStarMenu } from './history/ConversationPinStarMenu';
 import { ConversationSearchBar } from './history/ConversationSearchBar';
 import { ConversationTagFilter } from './history/ConversationTagFilter';
+import { WarmActionIcon } from './WarmActionIcon';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -512,7 +514,7 @@ function SortableChatItem({ chat, activeChatId, onChatSelect, onRename, onToggle
     transform: CSS.Transform.toString(transform),
     transition,
     opacity: isDragging ? 0.3 : 1,
-    paddingLeft: `${depth * 16 + 8}px`,
+    paddingLeft: `${depth * 14 + 6}px`,
   };
 
   const handleBlur = () => {
@@ -521,9 +523,9 @@ function SortableChatItem({ chat, activeChatId, onChatSelect, onRename, onToggle
     else setTitle(chat.title);
   };
 
-  const icon = chat.type === 'research' ? <Globe size={14} className="text-zinc-500 flex-shrink-0" /> :
-               chat.type === 'code' ? <Terminal size={14} className="text-zinc-500 flex-shrink-0" /> :
-               <MessageSquare size={14} className="text-zinc-500 flex-shrink-0" />;
+  const icon = chat.type === 'research' ? <Globe size={13} className="text-zinc-500 flex-shrink-0" /> :
+               chat.type === 'code' ? <Terminal size={13} className="text-zinc-500 flex-shrink-0" /> :
+               <MessageSquare size={13} className="text-zinc-500 flex-shrink-0" />;
 
   return (
     <>
@@ -532,8 +534,16 @@ function SortableChatItem({ chat, activeChatId, onChatSelect, onRename, onToggle
         style={style}
         {...attributes}
         {...listeners}
+        draggable
+        onDragStart={(event) => {
+          const payload = historyChatDragPayload(chat);
+          event.dataTransfer.setData(HISTORY_CHAT_DROP_MIME, JSON.stringify(payload));
+          event.dataTransfer.setData("text/plain", chat.title);
+          event.dataTransfer.effectAllowed = "copyMove";
+        }}
+        data-testid={`history-chat-card-${chat.id}`}
         className={cn(
-          "w-full flex items-center gap-2 pr-2 py-1.5 rounded-md text-left group/chat transition-colors cursor-grab active:cursor-grabbing outline-none",
+          "box-border w-full max-w-full min-h-7 flex items-center gap-1.5 pr-1.5 py-1 rounded-[3px] text-left group/chat transition-colors cursor-grab active:cursor-grabbing outline-none",
           isActive ? "bg-zinc-800/80" : "hover:bg-zinc-800/50",
           chat.conversationKind === "subagent" && "text-zinc-400",
           isDragging && "ring-1 ring-emerald-500/50 z-50"
@@ -542,7 +552,7 @@ function SortableChatItem({ chat, activeChatId, onChatSelect, onRename, onToggle
         onDoubleClick={(e) => { e.stopPropagation(); setIsEditing(true); }}
         tabIndex={0}
       >
-        <GripVertical size={12} className="text-zinc-700 group-hover/chat:text-zinc-500 flex-shrink-0" />
+        <GripVertical size={10} className="w-3 text-zinc-700 group-hover/chat:text-zinc-500 flex-shrink-0" />
         {icon}
         {hasChildren && (
           <button
@@ -568,11 +578,11 @@ function SortableChatItem({ chat, activeChatId, onChatSelect, onRename, onToggle
               if (e.key === 'Escape') { setIsEditing(false); setTitle(chat.title); }
             }}
             onClick={(e) => e.stopPropagation()}
-            className="bg-zinc-900 text-zinc-100 text-sm px-1 py-0.5 rounded outline-none w-full border border-emerald-500/50"
+            className="bg-zinc-900 text-zinc-100 text-[13px] px-1 py-0.5 rounded outline-none w-full border border-emerald-500/50"
           />
         ) : (
           <span className={cn(
-            "text-sm truncate flex-1 select-none",
+            "min-w-0 text-[13px] truncate flex-1 select-none",
             isActive ? "text-zinc-100" : "text-zinc-300 group-hover/chat:text-zinc-100"
           )}>{chat.title}</span>
         )}
@@ -665,20 +675,20 @@ function SubGroup({ group, activeChatId, onChatSelect, onChatRename, onToggleCol
       ref={(node) => { setSortRef(node); setDropRef(node); }}
       style={style}
       className={cn(
-        "transition-colors rounded-md",
+        "transition-colors rounded-[3px]",
         isOver && !isDragging && "bg-emerald-500/5 ring-1 ring-emerald-500/20",
         isDragging && "ring-1 ring-emerald-500/50"
       )}
     >
       <div
-        className="flex items-center gap-1.5 py-1.5 px-1 rounded-md hover:bg-zinc-800/50 cursor-default group/folder"
-        style={{ paddingLeft: `${depth * 16 + 4}px` }}
+        className="flex h-7 items-center gap-1 px-1 rounded-[3px] hover:bg-zinc-800/50 cursor-default group/folder"
+        style={{ paddingLeft: `${depth * 14 + 4}px` }}
         onClick={() => onToggleCollapse(group.id)}
       >
-        <ChevronRight size={14} className={cn("text-zinc-600 transition-transform duration-200 flex-shrink-0", !group.isCollapsed && "rotate-90")} />
+        <ChevronRight size={13} className={cn("text-zinc-600 transition-transform duration-200 flex-shrink-0", !group.isCollapsed && "rotate-90")} />
         {group.isCollapsed
-          ? <Folder size={14} className="text-zinc-500 flex-shrink-0" />
-          : <FolderOpen size={14} className="text-zinc-400 flex-shrink-0" />}
+          ? <Folder size={13} className="text-zinc-500 flex-shrink-0" />
+          : <FolderOpen size={13} className="text-zinc-400 flex-shrink-0" />}
         {isEditing ? (
           <input
             autoFocus
@@ -690,11 +700,11 @@ function SubGroup({ group, activeChatId, onChatSelect, onChatRename, onToggleCol
               if (e.key === 'Escape') { setIsEditing(false); setTitle(group.title); }
             }}
             onClick={(e) => e.stopPropagation()}
-            className="bg-zinc-900 text-zinc-100 text-xs px-1 py-0.5 rounded outline-none flex-1 border border-emerald-500/50"
+            className="bg-zinc-900 text-zinc-100 text-[12px] px-1 py-0.5 rounded outline-none flex-1 border border-emerald-500/50"
           />
         ) : (
           <span
-            className="text-xs font-medium text-zinc-400 truncate flex-1 select-none group-hover/folder:text-zinc-200"
+            className="min-w-0 text-[12px] font-medium text-zinc-400 truncate flex-1 select-none group-hover/folder:text-zinc-200"
             onDoubleClick={(e) => { e.stopPropagation(); setIsEditing(true); }}
           >
             {group.title}
@@ -704,18 +714,18 @@ function SubGroup({ group, activeChatId, onChatSelect, onChatRename, onToggleCol
         <div
           {...attributes}
           {...listeners}
-          className="p-0.5 text-zinc-700 hover:text-zinc-400 opacity-0 group-hover/folder:opacity-100 transition-all cursor-grab active:cursor-grabbing"
+          className="flex h-5 w-4 items-center justify-center text-zinc-700 hover:text-zinc-400 opacity-0 group-hover/folder:opacity-100 transition-all cursor-grab active:cursor-grabbing"
           onClick={(e) => e.stopPropagation()}
           title="Drag to move"
         >
-          <GripVertical size={12} />
+          <GripVertical size={10} />
         </div>
         <button
           onClick={(e) => { e.stopPropagation(); onUngroup(group.id); }}
-          className="text-zinc-600 hover:text-zinc-300 opacity-0 group-hover/folder:opacity-100 transition-all p-0.5"
+          className="flex h-5 w-5 items-center justify-center text-zinc-600 hover:text-zinc-300 opacity-0 group-hover/folder:opacity-100 transition-all"
           title="Ungroup"
         >
-          <X size={12} />
+          <X size={11} />
         </button>
       </div>
 
@@ -809,7 +819,7 @@ function DroppableColumn({ group, activeChatId, onChatSelect, onNewTask, onSetti
     <div
       ref={setDropRef}
       className={cn(
-        "w-full flex-shrink-0 border-b border-zinc-800/60 bg-[#09090b] flex flex-col transition-all duration-300",
+        "w-full flex-shrink-0 border-b border-zinc-900/80 bg-[#09090b] flex flex-col transition-all duration-300",
         isDraggedOver && !isDragging && "ring-2 ring-inset ring-emerald-500/50 bg-emerald-500/[0.08]",
       )}
     >
@@ -817,26 +827,26 @@ function DroppableColumn({ group, activeChatId, onChatSelect, onNewTask, onSetti
       <div
         onClick={() => onToggleCollapse(group.id)}
         className={cn(
-          "h-12 flex items-center px-3 border-b border-zinc-800/60 justify-between hover:bg-zinc-900/50 transition-colors cursor-pointer group/colheader",
+          "h-7 flex items-center px-2 border-b border-zinc-900/70 justify-between hover:bg-zinc-900/50 transition-colors cursor-pointer group/colheader",
           isDraggedOver && !isDragging && "bg-emerald-500/15"
         )}
       >
-        <div className="flex items-center gap-2 text-zinc-100 font-medium flex-1 min-w-0">
+        <div className="flex items-center gap-1.5 text-zinc-100 font-medium flex-1 min-w-0">
           <div
             {...dragHandleProps}
             onClick={(event) => event.stopPropagation()}
             className={cn(
-              "flex h-6 w-4 flex-shrink-0 items-center justify-center rounded text-zinc-700 transition-all cursor-grab active:cursor-grabbing hover:bg-zinc-800 hover:text-zinc-400",
+              "flex h-5 w-3 flex-shrink-0 items-center justify-center rounded text-zinc-700 transition-all cursor-grab active:cursor-grabbing hover:bg-zinc-800 hover:text-zinc-400",
               group.isCollapsed ? "opacity-100" : "opacity-0 group-hover/colheader:opacity-100"
             )}
             title="Drag group"
           >
-            <GripVertical size={12} />
+            <GripVertical size={10} />
           </div>
-          <ChevronRight size={14} className={cn("transition-transform duration-200 text-zinc-500 flex-shrink-0", !group.isCollapsed && "rotate-90")} />
-          <div className="w-5 h-5 rounded bg-zinc-800 text-zinc-400 flex-shrink-0 flex items-center justify-center text-[10px] font-bold border border-zinc-700">
-            {group.title.charAt(0)}
-          </div>
+          <ChevronRight size={13} className={cn("transition-transform duration-200 text-zinc-500 flex-shrink-0", !group.isCollapsed && "rotate-90")} />
+          {group.isCollapsed
+            ? <Folder size={13} className="text-zinc-500 flex-shrink-0" />
+            : <FolderOpen size={13} className="text-zinc-400 flex-shrink-0" />}
           {isEditing ? (
             <input
               autoFocus
@@ -848,21 +858,21 @@ function DroppableColumn({ group, activeChatId, onChatSelect, onNewTask, onSetti
                 if (e.key === 'Escape') { setIsEditing(false); setTitle(group.title); }
               }}
               onClick={(e) => e.stopPropagation()}
-              className="bg-zinc-800 text-zinc-100 text-sm px-1 py-0.5 rounded outline-none w-full border border-emerald-500/50"
+              className="bg-zinc-800 text-zinc-100 text-[12px] px-1 py-0.5 rounded outline-none w-full border border-emerald-500/50"
             />
           ) : (
             <span
               onDoubleClick={(e) => { e.stopPropagation(); setIsEditing(true); }}
-              className="truncate flex-1 cursor-text select-none hover:text-white transition-colors text-sm"
+              className="min-w-0 truncate flex-1 cursor-text select-none hover:text-white transition-colors text-[12px]"
             >
               {group.title}
             </span>
           )}
-          <span className="text-[10px] text-zinc-600 flex-shrink-0">{totalChats}</span>
+          <span className="ml-auto text-[10px] text-zinc-600 flex-shrink-0">{totalChats}</span>
         </div>
-        <div className="flex items-center gap-1 opacity-0 group-hover/colheader:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
-          <button onClick={() => onNewTask(group.id)} className="p-1 text-zinc-500 hover:text-emerald-400 transition-colors" title="New chat in group">
-            <Plus size={14} />
+        <div className="flex items-center gap-0.5 opacity-0 group-hover/colheader:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
+          <button onClick={() => onNewTask(group.id)} className="flex h-5 w-5 items-center justify-center text-zinc-500 hover:text-emerald-400 transition-colors" title="New chat in group">
+            <Plus size={13} />
           </button>
         </div>
       </div>
@@ -874,7 +884,7 @@ function DroppableColumn({ group, activeChatId, onChatSelect, onNewTask, onSetti
           group.isCollapsed && "is-collapsed"
         )}
       >
-        <div className="rumi-history-collapse-inner px-1 py-2 space-y-0.5">
+        <div className="rumi-history-collapse-inner px-1 py-0.5 space-y-px">
           <SortableContext items={group.chats.map(c => c.id)} strategy={verticalListSortingStrategy}>
             {group.chats.map(chat => (
               <SortableChatItem
@@ -975,6 +985,8 @@ interface HistoryBoardProps {
   account?: AccountInfo;
   onChatSelect: (chatId: string) => void;
   onNewTask: () => void;
+  onCalendarOpen?: () => void;
+  isCalendarActive?: boolean;
   onSettingsClick: () => void;
   onChatMetadataChange?: (chatId: string, updates: { is_pinned?: boolean; is_starred?: boolean; tags?: string[] }) => void;
   onMinimize?: () => void;
@@ -987,6 +999,141 @@ function visitChats(chats: ChatItem[], visitor: (chat: ChatItem) => void) {
     visitor(chat);
     visitChats(chat.children ?? [], visitor);
   }
+}
+
+export type HistoryCalendarSummary = {
+  total: number;
+  today: number;
+  recent: number;
+  older: number;
+  pinned: number;
+  starred: number;
+};
+
+export type CalendarMonthCell = {
+  day: number;
+  isToday: boolean;
+} | null;
+
+export function buildHistoryCalendarSummary(chatItems: ChatItem[]): HistoryCalendarSummary {
+  const summary: HistoryCalendarSummary = {
+    total: 0,
+    today: 0,
+    recent: 0,
+    older: 0,
+    pinned: 0,
+    starred: 0,
+  };
+
+  visitChats(chatItems, (chat) => {
+    summary.total += 1;
+    if (chat.date === "Today") summary.today += 1;
+    else if (chat.date === "Yesterday" || chat.date === "Previous 7 Days") summary.recent += 1;
+    else summary.older += 1;
+    if (chat.isPinned) summary.pinned += 1;
+    if (chat.isStarred) summary.starred += 1;
+  });
+
+  return summary;
+}
+
+export function buildCalendarMonthDays(reference = new Date()): CalendarMonthCell[] {
+  const year = reference.getFullYear();
+  const month = reference.getMonth();
+  const firstDay = new Date(year, month, 1).getDay();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const today = new Date();
+
+  return Array.from({ length: firstDay + daysInMonth }, (_, index) => {
+    if (index < firstDay) return null;
+    const day = index - firstDay + 1;
+    return {
+      day,
+      isToday: today.getFullYear() === year && today.getMonth() === month && today.getDate() === day,
+    };
+  });
+}
+
+function HistoryCalendarPanel({
+  chatItems,
+  onClose,
+}: {
+  chatItems: ChatItem[];
+  onClose: () => void;
+}) {
+  const summary = useMemo(() => buildHistoryCalendarSummary(chatItems), [chatItems]);
+  const monthCells = useMemo(() => buildCalendarMonthDays(), []);
+  const monthLabel = useMemo(() => new Intl.DateTimeFormat(undefined, { month: "long", year: "numeric" }).format(new Date()), []);
+  const buckets = [
+    { label: "Today", value: summary.today, tone: "text-zinc-100 border-zinc-600/50 bg-zinc-800/70" },
+    { label: "Recent", value: summary.recent, tone: "text-zinc-200 border-zinc-700 bg-zinc-900/75" },
+    { label: "Older", value: summary.older, tone: "text-zinc-400 border-zinc-800 bg-zinc-950/70" },
+  ];
+
+  return (
+    <div className="rounded-2xl border border-zinc-800/90 bg-[#111110]/95 p-3 shadow-[0_22px_60px_rgba(0,0,0,0.36)]">
+      <div className="mb-3 flex items-center justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-2">
+          <WarmActionIcon kind="calendar" size="md" />
+          <div className="min-w-0">
+            <p className="truncate text-[12px] font-semibold text-zinc-200">Calendar widget</p>
+            <p className="truncate text-[10px] text-zinc-600">{summary.total} chats in history</p>
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          className="flex h-7 w-7 items-center justify-center rounded-lg text-zinc-600 transition-colors hover:bg-zinc-800 hover:text-zinc-200"
+          aria-label="Close calendar"
+        >
+          <X size={13} />
+        </button>
+      </div>
+
+      <div className="rounded-xl border border-zinc-800/80 bg-black/20 p-2">
+        <div className="mb-2 flex items-center justify-between px-1">
+          <span className="text-[11px] font-medium text-zinc-300">{monthLabel}</span>
+          <span className="text-[10px] text-zinc-600">quick view</span>
+        </div>
+        <div className="grid grid-cols-7 gap-1 text-center text-[9px] font-medium uppercase tracking-wide text-zinc-700">
+          {["S", "M", "T", "W", "T", "F", "S"].map((day, index) => (
+            <span key={`${day}-${index}`}>{day}</span>
+          ))}
+        </div>
+        <div className="mt-1 grid grid-cols-7 gap-1">
+          {monthCells.map((cell, index) => (
+            <span
+              key={cell ? `day-${cell.day}` : `blank-${index}`}
+              className={cn(
+                "flex h-7 items-center justify-center rounded-lg text-[10px]",
+                cell?.isToday
+                  ? "bg-zinc-100 font-semibold text-zinc-950 shadow-[0_8px_18px_rgba(255,255,255,0.08)]"
+                  : cell
+                    ? "bg-zinc-900/70 text-zinc-400"
+                    : "bg-transparent",
+              )}
+            >
+              {cell?.day ?? ""}
+            </span>
+          ))}
+        </div>
+      </div>
+
+      <div className="mt-3 grid grid-cols-3 gap-1.5">
+        {buckets.map((bucket) => (
+          <div key={bucket.label} className={cn("rounded-xl border px-2 py-2", bucket.tone)}>
+            <div className="text-[15px] font-semibold leading-none">{bucket.value}</div>
+            <div className="mt-1 text-[9px] uppercase tracking-wide opacity-75">{bucket.label}</div>
+          </div>
+        ))}
+      </div>
+
+      <div className="mt-2 flex gap-1.5 text-[10px] text-zinc-500">
+        <span className="rounded-full border border-zinc-800 px-2 py-1">Pinned {summary.pinned}</span>
+        <span className="rounded-full border border-zinc-800 px-2 py-1">Starred {summary.starred}</span>
+      </div>
+    </div>
+  );
 }
 
 function filterChatTree(chats: ChatItem[], query: string, activeTag: string | null): ChatItem[] {
@@ -1010,7 +1157,7 @@ function filterChatTree(chats: ChatItem[], query: string, activeTag: string | nu
   return chats.map(filterOne).filter((chat): chat is ChatItem => Boolean(chat));
 }
 
-export function HistoryBoard({ activeChatId, chatItems, account, onChatSelect, onNewTask, onSettingsClick, onChatMetadataChange, onMinimize, onRestore, isCompact = false }: HistoryBoardProps) {
+export function HistoryBoard({ activeChatId, chatItems, account, onChatSelect, onNewTask, onCalendarOpen, isCalendarActive = false, onSettingsClick, onChatMetadataChange, onMinimize, onRestore, isCompact = false }: HistoryBoardProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [activeTag, setActiveTag] = useState<string | null>(null);
   const visibleChatItems = useMemo(() => filterChatTree(chatItems, searchQuery, activeTag), [activeTag, chatItems, searchQuery]);
@@ -1296,7 +1443,7 @@ export function HistoryBoard({ activeChatId, chatItems, account, onChatSelect, o
 
   if (isCompact) {
     return (
-      <div className="flex h-full w-full flex-col items-center bg-[#09090b] text-zinc-400">
+      <div className="relative flex h-full w-full flex-col items-center bg-[#09090b] text-zinc-400">
         <div className="flex w-full flex-col items-center gap-1 border-b border-zinc-800/60 px-1.5 py-2">
           {onRestore && (
             <button
@@ -1311,19 +1458,33 @@ export function HistoryBoard({ activeChatId, chatItems, account, onChatSelect, o
           )}
           <button
             onClick={handleCreateChat}
-            className="flex h-9 w-9 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-100"
+            className="flex h-9 w-9 items-center justify-center rounded-xl text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-100"
             title="New Chat"
             aria-label="New Chat"
           >
-            <MessageSquarePlus size={16} />
+            <WarmActionIcon kind="newChat" size="lg" />
           </button>
           <button
             onClick={handleCreateGroup}
-            className="flex h-9 w-9 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-100"
+            className="flex h-9 w-9 items-center justify-center rounded-xl text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-100"
             title="New Group"
             aria-label="New Group"
           >
-            <FolderPlus size={16} />
+            <WarmActionIcon kind="group" size="lg" />
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              onCalendarOpen?.();
+            }}
+            className={cn(
+              "flex h-9 w-9 items-center justify-center rounded-xl transition-colors",
+              isCalendarActive ? "bg-zinc-800 text-zinc-100" : "text-zinc-500 hover:bg-zinc-800 hover:text-zinc-100",
+            )}
+            title="Calendar"
+            aria-label="Calendar"
+          >
+            <WarmActionIcon kind="calendar" size="lg" />
           </button>
         </div>
 
@@ -1374,7 +1535,7 @@ export function HistoryBoard({ activeChatId, chatItems, account, onChatSelect, o
     >
       <div className="relative flex flex-col h-full min-w-0">
         {/* Top action bar */}
-        <div className="flex flex-col gap-1 px-3 py-2 border-b border-zinc-800/60 flex-shrink-0">
+        <div className="flex flex-col gap-1 px-4 py-4 flex-shrink-0">
           <div className="flex h-8 items-center justify-between gap-2 px-2.5">
             <span className="text-xs font-semibold tracking-wide text-zinc-400">RumiDP</span>
             {onMinimize && (
@@ -1389,21 +1550,41 @@ export function HistoryBoard({ activeChatId, chatItems, account, onChatSelect, o
               </button>
             )}
           </div>
+          <div className="mt-2 flex flex-col gap-1.5">
+            <button
+              onClick={handleCreateChat}
+              className="flex min-w-0 items-center gap-2 rounded-lg px-1.5 py-1.5 text-left text-xs font-medium text-zinc-300 transition-colors hover:bg-zinc-900/70 hover:text-zinc-100"
+              title="New Chat"
+            >
+              <WarmActionIcon kind="newChat" size="sm" />
+              <span className="truncate">New Chat</span>
+            </button>
+            <button
+              onClick={handleCreateGroup}
+              className="flex min-w-0 items-center gap-2 rounded-lg px-1.5 py-1.5 text-left text-xs font-medium text-zinc-300 transition-colors hover:bg-zinc-900/70 hover:text-zinc-100"
+              title="New Group"
+            >
+              <WarmActionIcon kind="group" size="sm" />
+              <span className="truncate">New Group</span>
+            </button>
+          </div>
           <button
-            onClick={handleCreateChat}
-            className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs font-medium text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-100"
-            title="New Chat"
+            type="button"
+            onClick={() => {
+              onCalendarOpen?.();
+            }}
+            className={cn(
+              "flex w-full items-center gap-2 rounded-lg px-1.5 py-1.5 text-left text-xs font-medium transition-colors",
+              isCalendarActive
+                ? "bg-zinc-800/80 text-zinc-100"
+                : "text-zinc-400 hover:bg-zinc-900/70 hover:text-zinc-100",
+            )}
+            title="Calendar"
+            aria-expanded={isCalendarActive}
           >
-            <MessageSquarePlus size={14} />
-            <span>New Chat</span>
-          </button>
-          <button
-            onClick={handleCreateGroup}
-            className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs font-medium text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-100"
-            title="New Group"
-          >
-            <FolderPlus size={14} />
-            <span>New Group</span>
+            <WarmActionIcon kind="calendar" size="sm" />
+            <span className="truncate">Calendar</span>
+            <span className="ml-auto text-[10px] text-zinc-600">{chatItems.length}</span>
           </button>
           <ConversationSearchBar value={searchQuery} resultCount={visibleChatCount} onChange={setSearchQuery} />
           <ConversationTagFilter tags={allTags} activeTag={activeTag} onChange={setActiveTag} />

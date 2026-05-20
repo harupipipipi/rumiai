@@ -18,6 +18,7 @@ class FunctionSpec:
     aliases: tuple[str, ...] = ()
     requires: tuple[str, ...] = ()
     caller_requires: tuple[str, ...] = ()
+    input_schema: dict[str, Any] | None = None
 
 
 def _alias_pair(namespace: str, operation: str) -> tuple[str, str]:
@@ -60,6 +61,7 @@ def _spec(
     aliases: tuple[str, ...] = (),
     requires: tuple[str, ...] | None = None,
     caller_requires: tuple[str, ...] | None = None,
+    input_schema: dict[str, Any] | None = None,
 ) -> FunctionSpec:
     all_aliases = tuple(dict.fromkeys([*_default_aliases(function_id), *aliases]))
     return FunctionSpec(
@@ -72,6 +74,7 @@ def _spec(
         aliases=all_aliases,
         requires=_requires(function_id, risk) if requires is None else requires,
         caller_requires=_caller_requires(risk) if caller_requires is None else caller_requires,
+        input_schema=input_schema,
     )
 
 
@@ -87,7 +90,7 @@ def manifest_for(spec: FunctionSpec) -> dict[str, Any]:
         "calling_convention": "subprocess",
         "entrypoint": "main.py:run",
         "vocab_aliases": list(spec.aliases),
-        "input_schema": dict(OBJECT_SCHEMA),
+        "input_schema": dict(spec.input_schema or OBJECT_SCHEMA),
         "output_schema": dict(ENVELOPE_SCHEMA),
         "extensions": {
             "defaultspack": {
@@ -215,6 +218,66 @@ TOOL_FUNCTIONS: tuple[FunctionSpec, ...] = tuple(
         ("computer_scroll", "Scroll with the computer controller.", ("tool", "computer"), "high"),
     )
 )
+SKILL_CREATE_FROM_FEEDBACK_INPUT_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "anyOf": [{"required": ["feedback"]}, {"required": ["correction"]}],
+    "properties": {
+        "feedback": {"type": "string", "minLength": 1},
+        "correction": {"type": "string", "minLength": 1},
+        "applies_to_tools": {"oneOf": [{"type": "array", "items": {"type": "string"}}, {"type": "string"}]},
+        "tool_ids": {"oneOf": [{"type": "array", "items": {"type": "string"}}, {"type": "string"}]},
+        "triggers": {"oneOf": [{"type": "array", "items": {"type": "string"}}, {"type": "string"}]},
+        "keywords": {"oneOf": [{"type": "array", "items": {"type": "string"}}, {"type": "string"}]},
+        "skill_id": {"type": "string"},
+        "name": {"type": "string"},
+        "display_name": {"type": "string"},
+        "description": {"type": "string"},
+        "conversation_id": {"type": "string"},
+        "message_id": {"type": "string"},
+    },
+}
+
+
+SKILL_FUNCTIONS: tuple[FunctionSpec, ...] = (
+    _spec(
+        "skill_create_from_feedback",
+        "Create a Rumi extension skill from corrective feedback.",
+        ("skill", "feedback", "dream"),
+        risk="high",
+        block="blocks.skill.create_from_feedback",
+        aliases=("defaults.skill.create_from_feedback", "defaultspack.skill.create_from_feedback"),
+        input_schema=SKILL_CREATE_FROM_FEEDBACK_INPUT_SCHEMA,
+    ),
+)
+
+
+CONVERSATION_FUNCTIONS: tuple[FunctionSpec, ...] = (
+    _spec(
+        "conversation_guidance",
+        "Inject high-priority guidance into a running conversation or agent task.",
+        ("conversation", "guidance", "interrupt"),
+        risk="medium",
+        block="blocks.conversation.guidance",
+        aliases=("defaults.conversation.guidance", "defaultspack.conversation.guidance"),
+    ),
+    _spec(
+        "conversation_steer",
+        "Queue, list, cancel, or process a follow-up steer after a conversation task completes.",
+        ("conversation", "steer"),
+        risk="medium",
+        block="blocks.conversation.steer",
+        aliases=("defaults.conversation.steer", "defaultspack.conversation.steer"),
+    ),
+    _spec(
+        "conversation_handoff",
+        "Create a new conversation, optionally seed it with a prompt, and return a move card.",
+        ("conversation", "handoff"),
+        risk="medium",
+        block="blocks.conversation.handoff",
+        aliases=("defaults.conversation.handoff", "defaultspack.conversation.handoff"),
+    ),
+)
 
 
 CODING_FUNCTIONS: tuple[FunctionSpec, ...] = tuple(
@@ -257,6 +320,18 @@ CODING_FUNCTIONS: tuple[FunctionSpec, ...] = tuple(
 
 BROWSER_ARTIFACT_FUNCTIONS: tuple[FunctionSpec, ...] = (
     _spec("browser_artifacts", "List persistent browser coding artifacts.", ("tool", "browser"), block="blocks.browser.artifacts"),
+)
+
+
+RECORDING_FUNCTIONS: tuple[FunctionSpec, ...] = (
+    _spec(
+        "recording_capture",
+        "List devices and capture screen, microphone, or system audio recordings.",
+        ("recording", "media"),
+        risk="high",
+        block="blocks.recording.capture",
+        aliases=("defaults.recording.capture", "defaultspack.recording.capture"),
+    ),
 )
 
 
@@ -334,6 +409,9 @@ DATA_FUNCTIONS: tuple[FunctionSpec, ...] = tuple(
         ("memory_project_context", "Get project memory context.", ("memory",), "low", "blocks.memory.project_context"),
         ("memory_vector_store", "Store memory vector data.", ("memory",), "medium", "blocks.memory.vector_store"),
         ("memory_vector_query", "Query memory vectors.", ("memory",), "low", "blocks.memory.vector_query"),
+        ("memory_memo", "Dispatch memo folder or note operations.", ("memory", "memo"), "medium", "blocks.memory.memo"),
+        ("memory_memo_folders", "Manage memo folders.", ("memory", "memo"), "medium", "blocks.memory.memo_folders"),
+        ("memory_memo_notes", "Manage memo notes.", ("memory", "memo"), "medium", "blocks.memory.memo_notes"),
         ("memory_list", "List memories.", ("memory",), "low", None),
         ("memory_update", "Update memory.", ("memory",), "medium", None),
         ("memory_delete", "Delete memory.", ("memory",), "high", None),
@@ -459,9 +537,12 @@ FUNCTION_SPECS: tuple[FunctionSpec, ...] = (
     AI_FUNCTIONS
     + CHAT_FUNCTIONS
     + TOOL_FUNCTIONS
+    + SKILL_FUNCTIONS
+    + CONVERSATION_FUNCTIONS
     + CODING_FUNCTIONS
     + AGENT_FUNCTIONS
     + BROWSER_ARTIFACT_FUNCTIONS
+    + RECORDING_FUNCTIONS
     + DATA_FUNCTIONS
     + PROFILE_WORKSPACE_FUNCTIONS
     + RESEARCH_MEDIA_UI_DEV_FUNCTIONS

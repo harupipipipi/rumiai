@@ -25,6 +25,20 @@ class Scheduler:
         for job in self.store.list():
             if not job.get("enabled", True) or not is_due(job.get("next_run_at", "")):
                 continue
+            next_run_at = ""
+            if job.get("kind") != "one_shot":
+                try:
+                    next_run_at = iso(parse_next_run(str(job.get("schedule") or "now")))
+                except ValueError as exc:
+                    self.store.update(
+                        job["job_id"],
+                        {
+                            "enabled": False,
+                            "last_error": f"invalid schedule: {exc}",
+                            "updated_at": utc_now(),
+                        },
+                    )
+                    continue
             result = self.runner.run(job)
             delivery = deliver(job, result)
             record = {"job_id": job["job_id"], "result": result, "delivery": delivery, "created_at": utc_now()}
@@ -33,7 +47,7 @@ class Scheduler:
             if job.get("kind") == "one_shot":
                 updates["enabled"] = False
             else:
-                updates["next_run_at"] = iso(parse_next_run(str(job.get("schedule") or "now")))
+                updates["next_run_at"] = next_run_at
             self.store.update(job["job_id"], updates)
             ran.append(record)
         return {"ran": ran, "count": len(ran)}

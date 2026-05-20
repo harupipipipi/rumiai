@@ -1,10 +1,10 @@
-import { useEffect, useState, type ReactElement } from "react";
+import { useEffect, useMemo, useState, type ReactElement } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { Check, ChevronDown, Copy, Loader2, MoreVertical, Pencil, Search, Trash2, X } from "lucide-react";
 
 import { cn } from "../lib/cn";
 import { api } from "../lib/api";
-import type { SettingsSection } from "../lib/api";
+import type { ModelSearchItem, SettingsSection } from "../lib/api";
 import { t } from "../lib/i18n";
 import { selectedApisForModel, toggleModelApiRoute, updateModelApiRouteText } from "../lib/modelApiRoutes";
 import { settingsFieldSearchText, settingsSectionSearchText } from "../lib/settingsSearch";
@@ -53,11 +53,9 @@ function registeredApiRows(providers: Array<Record<string, unknown>>): Array<Rec
   return rows.filter((api) => Boolean(api.configured));
 }
 
-function modelRouteOptions(field: SettingsSection["fields"][number]): Array<Record<string, unknown>> {
+function modelRouteOptions(field: SettingsSection["fields"][number]): NonNullable<SettingsSection["fields"][number]["options"]> {
   return Array.isArray(field.options)
-    ? field.options
-      .filter((item) => Boolean(item) && typeof item === "object")
-      .map((item) => item as unknown as Record<string, unknown>)
+    ? field.options.filter((item) => Boolean(item) && typeof item === "object")
     : [];
 }
 
@@ -67,7 +65,7 @@ function fieldApiProviderRows(field: SettingsSection["fields"][number]): Array<R
     : [];
 }
 
-function routeProviderForOption(option: Record<string, unknown> | undefined, modelId: string): string {
+function routeProviderForOption(option: SettingsModelOption | NonNullable<SettingsSection["fields"][number]["options"]>[number] | undefined, modelId: string): string {
   const provider = String(option?.provider_id ?? "").trim();
   if (provider) return provider;
   return modelId.includes("/") ? modelId.split("/", 1)[0] ?? "" : "";
@@ -233,6 +231,271 @@ function CustomSelect({
                 {option.value === value && <Check size={13} className="shrink-0 text-emerald-300" />}
               </button>
             ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+type SettingsModelOption = {
+  value: string;
+  label: string;
+  provider_id?: string;
+  provider_display_name?: string;
+  model_id?: string;
+  qualified_model_id?: string;
+  configured?: boolean;
+  local?: boolean;
+  supports_vision?: boolean;
+  supports_image_input?: boolean;
+  supports_tool_calling?: boolean;
+  supports_thinking?: boolean;
+  supports_fast?: boolean;
+  speed_tier?: string;
+  quality_tier?: string;
+  cost_tier?: string;
+  knowledge_level?: number;
+  capability_tags?: string[];
+  recommended_roles?: string[];
+  notes?: string;
+};
+
+function modelFieldOptionToOption(option: NonNullable<SettingsSection["fields"][number]["options"]>[number]): SettingsModelOption {
+  return {
+    value: String(option.value ?? ""),
+    label: String(option.label ?? option.value ?? ""),
+    provider_id: option.provider_id,
+    provider_display_name: option.provider_display_name,
+    model_id: option.model_id,
+    qualified_model_id: option.qualified_model_id,
+    configured: option.configured,
+    local: option.local,
+    supports_vision: option.supports_vision,
+    supports_image_input: option.supports_image_input,
+    supports_tool_calling: option.supports_tool_calling,
+    supports_thinking: option.supports_thinking,
+    supports_fast: option.supports_fast,
+    speed_tier: option.speed_tier,
+    quality_tier: option.quality_tier,
+    cost_tier: option.cost_tier,
+    knowledge_level: option.knowledge_level,
+    capability_tags: option.capability_tags,
+    recommended_roles: option.recommended_roles,
+    notes: option.notes,
+  };
+}
+
+function modelSearchItemToOption(item: ModelSearchItem): SettingsModelOption {
+  return {
+    value: String(item.profile_id ?? item.qualified_model_id ?? `${item.provider_id ?? ""}/${item.model_id ?? ""}`),
+    label: String(item.label ?? item.display_name ?? item.profile_id ?? ""),
+    provider_id: item.provider_id,
+    provider_display_name: item.provider_display_name,
+    model_id: item.model_id,
+    qualified_model_id: item.qualified_model_id,
+    configured: item.configured,
+    local: Boolean(item.local),
+    supports_vision: item.supports_vision,
+    supports_image_input: item.supports_image_input,
+    supports_tool_calling: item.supports_tool_calling,
+    supports_thinking: item.supports_thinking,
+    supports_fast: item.supports_fast,
+    speed_tier: item.speed_tier,
+    quality_tier: item.quality_tier,
+    cost_tier: item.cost_tier,
+    knowledge_level: item.knowledge_level,
+    capability_tags: item.capability_tags,
+    recommended_roles: item.recommended_roles,
+    notes: item.notes,
+  };
+}
+
+function modelOptionSearchText(option: SettingsModelOption): string {
+  return [
+    option.value,
+    option.label,
+    option.provider_id,
+    option.provider_display_name,
+    option.model_id,
+    option.qualified_model_id,
+    option.speed_tier,
+    option.quality_tier,
+    option.cost_tier,
+    option.notes,
+    ...(option.capability_tags ?? []),
+    ...(option.recommended_roles ?? []),
+  ].filter(Boolean).join(" ").toLowerCase();
+}
+
+function normalizeModelSearchText(value: string): string {
+  return value.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+}
+
+function modelOptionMatchesSearch(option: SettingsModelOption, query: string): boolean {
+  const rawText = modelOptionSearchText(option);
+  const normalizedText = normalizeModelSearchText(rawText);
+  const rawQuery = query.trim().toLowerCase();
+  const normalizedQuery = normalizeModelSearchText(rawQuery);
+  if (!normalizedQuery) return true;
+  if (rawText.includes(rawQuery) || normalizedText.includes(normalizedQuery)) return true;
+  return normalizedQuery.split(/\s+/).every((token) => normalizedText.includes(token) || rawText.includes(token));
+}
+
+function dedupeModelOptions(options: SettingsModelOption[]): SettingsModelOption[] {
+  const seen = new Set<string>();
+  const deduped: SettingsModelOption[] = [];
+  for (const option of options) {
+    if (!option.value || seen.has(option.value)) continue;
+    seen.add(option.value);
+    deduped.push(option);
+  }
+  return deduped;
+}
+
+function modelOptionBadges(option: SettingsModelOption): string[] {
+  const badges: string[] = [];
+  if (option.configured) badges.push("ready");
+  if (option.local) badges.push("local");
+  if (option.supports_vision || option.supports_image_input) badges.push("vision");
+  if (option.supports_tool_calling) badges.push("tools");
+  if (option.supports_thinking) badges.push("thinking");
+  if (option.supports_fast || option.speed_tier === "fast") badges.push("fast");
+  if (option.cost_tier && option.cost_tier !== "unknown") badges.push(option.cost_tier);
+  return badges.slice(0, 4);
+}
+
+function SettingsModelSearchSelect({
+  value,
+  options,
+  onChange,
+  placeholder = "モデルを検索",
+}: {
+  value: string;
+  options: SettingsModelOption[];
+  onChange: (value: string) => void;
+  placeholder?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [remoteResults, setRemoteResults] = useState<ModelSearchItem[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const trimmedQuery = query.trim();
+  const selected = options.find((option) => option.value === value || option.qualified_model_id === value)
+    ?? remoteResults.map(modelSearchItemToOption).find((option) => option.value === value || option.qualified_model_id === value)
+    ?? (value ? { value, label: value } : null);
+
+  useEffect(() => {
+    if (!open) return;
+    const timer = window.setTimeout(() => {
+      setBusy(true);
+      setError("");
+      api.searchModels({ query: query.trim(), max_results: 30 })
+        .then((result) => {
+          setRemoteResults(result.models ?? []);
+        })
+        .catch((searchError: unknown) => {
+          setRemoteResults([]);
+          setError(searchError instanceof Error ? searchError.message : "Model search failed");
+        })
+        .finally(() => setBusy(false));
+    }, query.trim() ? 160 : 0);
+    return () => window.clearTimeout(timer);
+  }, [open, query]);
+
+  const visibleOptions = useMemo(() => {
+    const localMatches = trimmedQuery
+      ? options.filter((option) => modelOptionMatchesSearch(option, trimmedQuery))
+      : options;
+    const merged = dedupeModelOptions([
+      ...(selected ? [selected] : []),
+      ...localMatches,
+      ...remoteResults.map(modelSearchItemToOption),
+    ]);
+    return merged.slice(0, 40);
+  }, [trimmedQuery, options, remoteResults, selected]);
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((current) => !current)}
+        className="flex w-full items-center justify-between gap-2 rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-left text-sm text-zinc-200 outline-none transition-colors hover:border-zinc-700 focus:border-emerald-500/70"
+      >
+        <span className="min-w-0">
+          <span className="block truncate">{selected?.label || value || "Select model"}</span>
+          {(selected?.provider_id || selected?.model_id) && (
+            <span className="block truncate text-[11px] text-zinc-500">
+              {[selected.provider_id, selected.model_id].filter(Boolean).join(" / ")}
+            </span>
+          )}
+        </span>
+        <ChevronDown size={14} className={cn("shrink-0 text-zinc-500 transition-transform", open && "rotate-180")} />
+      </button>
+      {open && (
+        <>
+          <button type="button" aria-label="close model search" className="fixed inset-0 z-10 cursor-default" onClick={() => setOpen(false)} />
+          <div className="absolute left-0 right-0 top-[calc(100%+6px)] z-20 overflow-hidden rounded-lg border border-zinc-700 bg-zinc-950 shadow-2xl">
+            <label className="m-2 flex h-9 items-center gap-2 rounded-lg border border-zinc-800 bg-black/30 px-3 text-xs text-zinc-500 focus-within:border-zinc-600 focus-within:text-zinc-300">
+              <Search size={14} />
+              <input
+                autoFocus
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder={placeholder}
+                className="min-w-0 flex-1 bg-transparent text-zinc-200 outline-none placeholder:text-zinc-600"
+              />
+              {busy && <Loader2 size={13} className="animate-spin text-zinc-500" />}
+              {query && (
+                <button
+                  type="button"
+                  onClick={() => setQuery("")}
+                  className="rounded p-0.5 text-zinc-600 hover:bg-zinc-800 hover:text-zinc-300"
+                  aria-label="clear model search"
+                >
+                  <X size={13} />
+                </button>
+              )}
+            </label>
+            {error && <div className="border-t border-zinc-800 px-3 py-2 text-[11px] text-rose-300">{error}</div>}
+            <div className="max-h-72 overflow-y-auto border-t border-zinc-800 p-1">
+              {visibleOptions.length > 0 ? visibleOptions.map((option) => {
+                const active = option.value === value || option.qualified_model_id === value;
+                const badges = modelOptionBadges(option);
+                return (
+                  <button
+                    key={option.value}
+                    type="button"
+                    onClick={() => {
+                      onChange(option.value);
+                      setOpen(false);
+                    }}
+                    className={cn(
+                      "flex w-full items-start justify-between gap-3 rounded-md px-2.5 py-2 text-left transition-colors",
+                      active ? "bg-zinc-800 text-zinc-100" : "text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200",
+                    )}
+                  >
+                    <span className="min-w-0">
+                      <span className="block truncate text-sm font-medium text-zinc-100">{option.label}</span>
+                      <span className="block truncate text-[11px] text-zinc-500">
+                        {[option.provider_id, option.model_id || option.qualified_model_id || option.value].filter(Boolean).join(" / ")}
+                      </span>
+                    </span>
+                    <span className="flex max-w-[160px] flex-wrap justify-end gap-1">
+                      {badges.map((badge) => (
+                        <span key={badge} className="rounded-full border border-zinc-700 px-1.5 py-0.5 text-[10px] text-zinc-400">
+                          {badge}
+                        </span>
+                      ))}
+                      {active && <Check size={13} className="mt-1 shrink-0 text-emerald-300" />}
+                    </span>
+                  </button>
+                );
+              }) : (
+                <div className="px-3 py-5 text-xs text-zinc-600">一致するモデルがありません。</div>
+              )}
+            </div>
           </div>
         </>
       )}
@@ -666,6 +929,11 @@ function SettingsField({
   const [apiProvider, setApiProvider] = useState("google");
   const [apiName, setApiName] = useState("main");
   const [apiSecret, setApiSecret] = useState("");
+  const [apiBaseUrl, setApiBaseUrl] = useState("");
+  const [apiAllowedModels, setApiAllowedModels] = useState("");
+  const [apiDefaultModel, setApiDefaultModel] = useState("");
+  const [apiQuotaLabel, setApiQuotaLabel] = useState("");
+  const [apiNotes, setApiNotes] = useState("");
   const [apiSaveState, setApiSaveState] = useState<"idle" | "saved">("idle");
   const [tokenProvider, setTokenProvider] = useState("line");
   const [tokenName, setTokenName] = useState("main");
@@ -720,20 +988,15 @@ function SettingsField({
           <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(180px,0.42fr)]">
             <label className="space-y-1.5">
               <span className="text-[11px] uppercase tracking-[0.2em] text-zinc-600">Model</span>
-              <select
+              <SettingsModelSearchSelect
                 value={selectedModel}
-                onChange={(event) => {
+                options={routeOptions.map(modelFieldOptionToOption)}
+                placeholder="model/provider/notes で検索"
+                onChange={(nextModel) => {
                   setRouteModelTouched(true);
-                  setRouteModel(event.target.value);
+                  setRouteModel(nextModel);
                 }}
-                className="w-full rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 outline-none transition-colors hover:border-zinc-700 focus:border-emerald-500/70"
-              >
-                {routeOptions.map((option) => (
-                  <option key={String(option.value ?? "")} value={String(option.value ?? "")}>
-                    {String(option.label ?? option.value ?? "")}
-                  </option>
-                ))}
-              </select>
+              />
             </label>
             <div className="rounded-lg border border-zinc-800 bg-zinc-950/70 px-3 py-2">
               <p className="text-[11px] uppercase tracking-[0.2em] text-zinc-600">Provider</p>
@@ -899,7 +1162,9 @@ function SettingsField({
                         </>
                       )}
                     </div>
-                    <span className="truncate text-sm text-zinc-500">No guardrails</span>
+	                    <span className="truncate text-sm text-zinc-500">
+	                      {String(api.quota_label ?? api.default_model ?? api.base_url ?? "No guardrails")}
+	                    </span>
                     <span className="truncate text-sm text-zinc-500">Never</span>
                     <span className="truncate text-sm text-zinc-500">Never</span>
                     <div className="relative flex justify-end">
@@ -966,8 +1231,8 @@ function SettingsField({
               )}
             </div>
           </div>
-          <div className="grid gap-2 md:grid-cols-[160px_1fr_1.4fr_auto]">
-            <CustomSelect
+	          <div className="grid gap-2 md:grid-cols-[160px_1fr_1.4fr_auto]">
+	            <CustomSelect
               value={apiProvider}
               onChange={setApiProvider}
               options={uniqueProviderOptions.map((providerId) => ({ value: providerId, label: providerId }))}
@@ -992,7 +1257,7 @@ function SettingsField({
               placeholder={`${apiProvider} API key`}
               className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-200 outline-none"
             />
-            <button
+	            <button
               type="button"
               disabled={!apiProvider.trim() || !apiName.trim() || !apiSecret.trim()}
               onClick={() => {
@@ -1000,23 +1265,80 @@ function SettingsField({
                 onChange(sectionId, field.id, {
                   action: "upsert",
                   provider_id: apiProvider,
-                  api_id: apiName,
-                  name: apiName,
-                  value: apiSecret,
-                });
-                setApiSecret("");
-                setApiSaveState("saved");
-              }}
+	                  api_id: apiName,
+	                  name: apiName,
+	                  value: apiSecret,
+	                  base_url: apiBaseUrl.trim(),
+	                  allowed_models: apiAllowedModels.split(",").map((item) => item.trim()).filter(Boolean),
+	                  default_model: apiDefaultModel.trim(),
+	                  quota_label: apiQuotaLabel.trim(),
+	                  notes: apiNotes.trim(),
+	                });
+	                setApiSecret("");
+	                setApiBaseUrl("");
+	                setApiAllowedModels("");
+	                setApiDefaultModel("");
+	                setApiQuotaLabel("");
+	                setApiNotes("");
+	                setApiSaveState("saved");
+	              }}
               className={cn(
                 "rounded-lg border px-3 py-2 text-xs transition-colors",
                 apiProvider.trim() && apiName.trim() && apiSecret.trim()
                   ? "bg-zinc-100 text-zinc-950 border-zinc-100"
                   : "bg-zinc-900 text-zinc-600 border-zinc-800 cursor-not-allowed",
               )}
-            >
-              Save API
-            </button>
-          </div>
+	            >
+	              Save API
+	            </button>
+	          </div>
+	          <div className="grid gap-2 md:grid-cols-2">
+	            <input
+	              value={apiBaseUrl}
+	              onChange={(event) => {
+	                setApiBaseUrl(event.target.value);
+	                setApiSaveState("idle");
+	              }}
+	              placeholder="base_url (optional)"
+	              className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-200 outline-none"
+	            />
+	            <input
+	              value={apiDefaultModel}
+	              onChange={(event) => {
+	                setApiDefaultModel(event.target.value);
+	                setApiSaveState("idle");
+	              }}
+	              placeholder="default model for this API"
+	              className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-200 outline-none"
+	            />
+	            <input
+	              value={apiAllowedModels}
+	              onChange={(event) => {
+	                setApiAllowedModels(event.target.value);
+	                setApiSaveState("idle");
+	              }}
+	              placeholder="allowed models, comma separated"
+	              className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-200 outline-none"
+	            />
+	            <input
+	              value={apiQuotaLabel}
+	              onChange={(event) => {
+	                setApiQuotaLabel(event.target.value);
+	                setApiSaveState("idle");
+	              }}
+	              placeholder="quota label"
+	              className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-200 outline-none"
+	            />
+	            <textarea
+	              value={apiNotes}
+	              onChange={(event) => {
+	                setApiNotes(event.target.value);
+	                setApiSaveState("idle");
+	              }}
+	              placeholder="notes for routing"
+	              className="min-h-20 bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-200 outline-none md:col-span-2"
+	            />
+	          </div>
           {apiSaveState === "saved" && <p className="text-[11px] text-emerald-400">Saved</p>}
         </div>
       );
@@ -1355,7 +1677,14 @@ function SettingsField({
       );
       break;
     case "select":
-      control = (
+      control = field.id === "preferred_model" ? (
+        <SettingsModelSearchSelect
+          value={String(value ?? field.default ?? "")}
+          onChange={(nextValue) => onChange(sectionId, field.id, nextValue)}
+          options={(field.options ?? []).map(modelFieldOptionToOption)}
+          placeholder="model/provider/特徴メモで検索"
+        />
+      ) : (
         <CustomSelect
           value={String(value ?? field.default ?? "")}
           onChange={(nextValue) => onChange(sectionId, field.id, nextValue)}

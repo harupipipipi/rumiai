@@ -18,7 +18,9 @@ sys.path.insert(0, str(DEFAULTSPACK_ROOT))
 OPENGATEWAY_MODELS = {
     "gitlawb-opengateway/mimo-v2.5-pro",
     "gitlawb-opengateway/mimo-v2-flash",
-    "gitlawb-opengateway/google/gemini-3.1-flash-lite-preview",
+    "gitlawb-opengateway/mimo-v2-omni",
+    "gitlawb-opengateway/mimo-v2-pro",
+    "gitlawb-opengateway/mimo-v2.5",
 }
 
 
@@ -91,10 +93,8 @@ def test_opengateway_auto_registered_with_cloud_opt_in():
     [
         ("gitlawb-opengateway/mimo-v2.5-pro", "mimo-v2.5-pro"),
         ("gitlawb-opengateway/mimo-v2-flash", "mimo-v2-flash"),
-        (
-            "gitlawb-opengateway/google/gemini-3.1-flash-lite-preview",
-            "google/gemini-3.1-flash-lite-preview",
-        ),
+        ("gitlawb-opengateway/mimo-v2-pro", "mimo-v2-pro"),
+        ("gitlawb-opengateway/mimo-v2.5", "mimo-v2.5"),
     ],
 )
 def test_opengateway_resolve_provider(model_ref, model_id):
@@ -130,18 +130,17 @@ def test_opengateway_list_models_returns_only_allowlist():
     assert {item["id"] for item in provider.list_models()} == OPENGATEWAY_MODELS
 
 
-def test_opengateway_gemini_flash_lite_declares_verified_vision_and_thinking():
+def test_opengateway_omni_declares_verified_vision():
     from domain.ai_client.providers.gitlawb_opengateway_provider import (
         GitlawbOpengatewayProvider,
     )
 
     provider = GitlawbOpengatewayProvider()
     profiles = {item["id"]: item for item in provider.list_models()}
-    gemini = profiles["gitlawb-opengateway/google/gemini-3.1-flash-lite-preview"]
+    omni = profiles["gitlawb-opengateway/mimo-v2-omni"]
 
-    assert "vision" in gemini["capabilities"]
-    assert gemini["supports_thinking"] is True
-    assert gemini["default_thinking_level"] == "high"
+    assert "vision" in omni["capabilities"]
+    assert omni["metadata"]["vision_verified"] is True
 
 
 def test_opengateway_rejects_non_allowlisted_models():
@@ -226,7 +225,7 @@ def test_opengateway_credential_required_false_allows_no_api_key():
         provider._ensure_runtime_config()
 
     assert provider._credential_required is False
-    assert "Authorization" not in provider._headers()
+    assert provider._headers()["Authorization"] == "Bearer anything"
 
 
 def test_opengateway_uses_browser_user_agent_for_gateway_compatibility():

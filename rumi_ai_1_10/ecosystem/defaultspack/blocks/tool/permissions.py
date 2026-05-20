@@ -69,4 +69,9 @@ def run_check(input_data, context):
 
 
 def run(input_data, context):
+    handler = str((input_data or {}).get("_handler") or "").strip()
+    if handler == "run_put":
+        return run_put(input_data, context)
+    if handler == "run_check":
+        return run_check(input_data, context)
     return run_get(input_data, context)

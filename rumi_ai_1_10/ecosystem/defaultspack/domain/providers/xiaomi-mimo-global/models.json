@@ -1,0 +1,57 @@
+{
+  "models": [
+    {
+      "id": "xiaomi-mimo-global/mimo-v2.5-pro",
+      "category": "llm_model",
+      "version": "1",
+      "provider_id": "xiaomi-mimo-global",
+      "model_id": "mimo-v2.5-pro",
+      "display_name": "MiMo V2.5 Pro",
+      "type": "reasoning",
+      "enabled": true,
+      "defaults": {
+        "chat": true,
+        "reasoning": true
+      },
+      "capabilities": {
+        "chat": true,
+        "streaming": true,
+        "reasoning": true,
+        "tool_calls": true,
+        "vision": false
+      },
+      "supports_thinking": true,
+      "thinking_levels": ["low", "medium", "high", "xhigh"],
+      "default_thinking_level": "medium",
+      "metadata": {
+        "region": "global",
+        "token_plan_region_scoped": true,
+        "do_not_use_without_confirmed_official_api": true
+      }
+    },
+    {
+      "id": "xiaomi-mimo-global/mimo-v2-flash",
+      "category": "llm_model",
+      "version": "1",
+      "provider_id": "xiaomi-mimo-global",
+      "model_id": "mimo-v2-flash",
+      "display_name": "MiMo V2 Flash",
+      "type": "chat",
+      "enabled": true,
+      "defaults": {
+        "fast": true
+      },
+      "capabilities": {
+        "chat": true,
+        "streaming": true,
+        "reasoning": false,
+        "vision": false
+      },
+      "metadata": {
+        "region": "global",
+        "token_plan_region_scoped": true,
+        "do_not_use_without_confirmed_official_api": true
+      }
+    }
+  ]
+}

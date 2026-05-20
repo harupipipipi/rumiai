@@ -143,8 +143,8 @@ _OPENAI_COMPATIBLE_PROVIDERS = [
         "default_base_url": "https://integrate.api.nvidia.com/v1",
         "supports_embeddings": False,
         "curated_models": [
-            _chat("nvidia", "meta/llama-3.1-70b-instruct", "Meta Llama 3.1 70B Instruct"),
-            _chat("nvidia", "nvidia/llama-3.1-nemotron-70b-instruct", "Nemotron 70B Instruct"),
+            _chat("nvidia", "meta/llama-3.3-70b-instruct", "Meta Llama 3.3 70B Instruct"),
+            _chat("nvidia", "nvidia/llama-3.3-nemotron-super-49b-v1", "Nemotron Super 49B"),
         ],
     },
     {
@@ -272,4 +272,3 @@ for _spec in _OPENAI_COMPATIBLE_PROVIDERS:
     OPENAI_COMPATIBLE_PROVIDER_SPECS[_spec["provider_name"]] = dict(_spec)
     OPENAI_COMPATIBLE_PROVIDER_CLASSES[_spec["provider_name"]] = _provider_cls
     globals()[_class_name] = _provider_cls
-

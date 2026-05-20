@@ -5,6 +5,7 @@ export type PendingChatRequest = {
   startedAt: number;
   status: string;
   toolNames: string[];
+  toolStartedAt?: Record<string, number>;
   recoveredFromLocation?: boolean;
 };
 

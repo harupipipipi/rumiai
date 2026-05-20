@@ -166,9 +166,10 @@ class AgentEngine:
         parts = []
         has_urgent = False
         for instr in pending:
-            prefix = "[URGENT] " if instr["priority"] == "urgent" else ""
+            priority = str(instr.get("priority") or "")
+            prefix = "[URGENT] " if priority in {"urgent", "high"} else ""
             parts.append(prefix + instr["instruction"])
-            if instr["priority"] == "urgent":
+            if priority in {"urgent", "high"}:
                 has_urgent = True
         if len(parts) == 1:
             combined = parts[0]
@@ -192,6 +193,31 @@ class AgentEngine:
             ],
         })
         return True
+
+    def _process_conversation_steer(self, execution):
+        try:
+            from domain.chat.steer import ConversationSteerStore
+
+            context = dict(getattr(execution, "context", {}) or {})
+            conversation_id = str(context.get("conversation_id") or "")
+            processed = ConversationSteerStore().process_for_agent_run(
+                execution.execution_id,
+                conversation_id=conversation_id,
+                context=context,
+            )
+            if processed:
+                execution.add_step("conversation_steer", {
+                    "processed": len(processed),
+                    "items": [
+                        {"id": item.get("id"), "status": item.get("status")}
+                        for item in processed
+                        if isinstance(item, dict)
+                    ],
+                })
+            return processed
+        except Exception as exc:
+            execution.add_step("conversation_steer_error", {"error": str(exc)})
+            return []
 
     def _ai_complete(self, messages, model, context, tools=None):
         from blocks.ai.complete import run as ai_complete_run
@@ -431,6 +457,7 @@ class AgentEngine:
         execution.messages.append({"role": "assistant", "content": parsed["content"]})
         self._transcripts.append_message(execution.context["transcript_id"], execution.messages[-1])
         execution.add_step("response", {"content": parsed["content"]})
+        self._process_conversation_steer(execution)
         self._persist_execution(execution, "run_completed", {"result": parsed["content"]})
         return {
             "execution_id": execution_id,
@@ -562,6 +589,7 @@ class AgentEngine:
         execution.messages.append({"role": "assistant", "content": parsed["content"]})
         self._transcripts.append_message(execution.context["transcript_id"], execution.messages[-1])
         execution.add_step("response", {"content": parsed["content"]})
+        self._process_conversation_steer(execution)
         self._persist_execution(execution, "run_completed", {"result": parsed["content"]})
         return {
             "execution_id": execution_id,
@@ -637,6 +665,7 @@ class AgentEngine:
         execution.messages.append({"role": "assistant", "content": parsed["content"]})
         self._transcripts.append_message(execution.context["transcript_id"], execution.messages[-1])
         execution.add_step("response", {"content": parsed["content"]})
+        self._process_conversation_steer(execution)
         self._persist_execution(execution, "run_completed", {"result": parsed["content"]})
         return {
             "execution_id": execution_id,

@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from domain.tool.schema_adapter import policy_from_context, tool_name_from_definition
+from domain.tool.security import is_safe_first_party_memo_tool
 
 from .models import PolicyDecision
 from .risk import resolve_tool_risk
@@ -61,6 +62,8 @@ def decide_tool_policy(
 
 
 def _requires_approval(tool_def: Any, policy: dict[str, Any], risk: str, name: str) -> bool:
+    if isinstance(tool_def, dict) and is_safe_first_party_memo_tool(tool_def):
+        return False
     if isinstance(tool_def, dict) and tool_def.get("requires_approval") is True:
         return True
     if _is_write_like_name(name):

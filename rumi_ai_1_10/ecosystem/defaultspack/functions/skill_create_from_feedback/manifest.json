@@ -1,0 +1,139 @@
+{
+  "function_id": "skill_create_from_feedback",
+  "description": "Create a Rumi extension skill from corrective feedback.",
+  "tags": [
+    "skill",
+    "feedback",
+    "dream"
+  ],
+  "risk": "high",
+  "requires": [
+    "skill.create.from.feedback"
+  ],
+  "caller_requires": [
+    "user.approved.high_risk"
+  ],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.skill.create_from_feedback",
+    "defaultspack.skill.create_from_feedback",
+    "defaults.skill.create.from.feedback",
+    "defaultspack.skill.create.from.feedback"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "anyOf": [
+      {
+        "required": [
+          "feedback"
+        ]
+      },
+      {
+        "required": [
+          "correction"
+        ]
+      }
+    ],
+    "properties": {
+      "feedback": {
+        "type": "string",
+        "minLength": 1
+      },
+      "correction": {
+        "type": "string",
+        "minLength": 1
+      },
+      "applies_to_tools": {
+        "oneOf": [
+          {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          {
+            "type": "string"
+          }
+        ]
+      },
+      "tool_ids": {
+        "oneOf": [
+          {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          {
+            "type": "string"
+          }
+        ]
+      },
+      "triggers": {
+        "oneOf": [
+          {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          {
+            "type": "string"
+          }
+        ]
+      },
+      "keywords": {
+        "oneOf": [
+          {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          {
+            "type": "string"
+          }
+        ]
+      },
+      "skill_id": {
+        "type": "string"
+      },
+      "name": {
+        "type": "string"
+      },
+      "display_name": {
+        "type": "string"
+      },
+      "description": {
+        "type": "string"
+      },
+      "conversation_id": {
+        "type": "string"
+      },
+      "message_id": {
+        "type": "string"
+      }
+    }
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.skill.create_from_feedback",
+      "default_args": {}
+    }
+  }
+}

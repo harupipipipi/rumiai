@@ -1,0 +1,61 @@
+{
+  "models": [
+    {
+      "id": "cerebras/gpt-oss-120b",
+      "category": "llm_model",
+      "version": "1",
+      "provider_id": "cerebras",
+      "model_id": "gpt-oss-120b",
+      "display_name": "GPT OSS 120B via Cerebras",
+      "type": "reasoning",
+      "enabled": true,
+      "priority": 1,
+      "defaults": {
+        "chat": true,
+        "reasoning": true,
+        "fast": true
+      },
+      "capabilities": {
+        "chat": true,
+        "streaming": true,
+        "reasoning": true,
+        "tool_calls": true,
+        "vision": false
+      },
+      "supports_thinking": true,
+      "thinking_levels": ["low", "medium", "high", "xhigh"],
+      "default_thinking_level": "medium",
+      "metadata": {
+        "service_tier_supported": true
+      }
+    },
+    {
+      "id": "cerebras/zai-glm-4.7",
+      "category": "llm_model",
+      "version": "1",
+      "provider_id": "cerebras",
+      "model_id": "zai-glm-4.7",
+      "display_name": "ZAI GLM 4.7 via Cerebras",
+      "type": "chat",
+      "enabled": true,
+      "priority": 2,
+      "defaults": {
+        "coding": true,
+        "agent": true
+      },
+      "capabilities": {
+        "chat": true,
+        "streaming": true,
+        "reasoning": true,
+        "tool_calls": true,
+        "vision": false
+      },
+      "supports_thinking": true,
+      "thinking_levels": ["low", "medium", "high"],
+      "default_thinking_level": "medium",
+      "metadata": {
+        "service_tier_supported": true
+      }
+    }
+  ]
+}

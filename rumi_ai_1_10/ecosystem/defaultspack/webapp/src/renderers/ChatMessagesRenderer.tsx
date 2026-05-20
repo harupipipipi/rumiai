@@ -1,8 +1,10 @@
-import { AlertTriangle, Check, Clock, Copy, ExternalLink, Image as ImageIcon, Loader2, X } from "lucide-react";
+import { AlertTriangle, Check, Clock, Copy, ExternalLink, Image as ImageIcon, Loader2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
 
+import { ArtifactPreviewDialog, type ArtifactPreviewDialogItem } from "../components/ArtifactPreviewDialog";
 import { cn } from "../lib/cn";
+import { elapsedDurationLabel } from "../lib/duration";
 import { buildToolActivityGroups, toolFolderFor } from "../lib/toolActivity";
 import { api, type BrowserScreenshot, type ChatContentBlock } from "../lib/api";
 import type { ChatMessagesRendererProps } from "./types";
@@ -44,78 +46,17 @@ function imageSizeLabel(size: BrowserScreenshot["image_size"]): string {
   return width > 0 && height > 0 ? `${width} x ${height}` : "";
 }
 
-function BrowserImagePreviewDialog({
-  image,
-  onClose,
-}: {
-  image: ImagePreviewRequest | null;
-  onClose: () => void;
-}) {
-  useEffect(() => {
-    if (!image) return undefined;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [image, onClose]);
-
+function artifactDialogItemFromImagePreview(image: ImagePreviewRequest | null): ArtifactPreviewDialogItem | null {
   if (!image) return null;
-
-  return (
-    <div className="rumi-image-preview-backdrop fixed inset-0 z-50 flex items-center justify-center bg-black/72 px-4 py-5 backdrop-blur-md" role="dialog" aria-modal="true" aria-label={image.title}>
-      <button type="button" className="absolute inset-0 cursor-default" aria-label="画像プレビューを閉じる" onClick={onClose} />
-      <section className="rumi-image-preview-shell relative flex h-[min(88vh,980px)] w-[min(94vw,1180px)] flex-col overflow-hidden rounded-xl border border-zinc-800 bg-[#0b0b0d] shadow-[0_28px_90px_rgba(0,0,0,0.55)]">
-        <header className="flex min-h-12 items-center justify-between gap-3 border-b border-zinc-800 bg-zinc-950/95 px-3 py-2">
-          <div className="flex min-w-0 items-center gap-2">
-            <ImageIcon size={15} className="shrink-0 text-zinc-500" />
-            <div className="min-w-0">
-              <div className="truncate text-[12px] font-medium text-zinc-200">{image.title}</div>
-              {image.subtitle && <div className="truncate text-[10px] text-zinc-600">{image.subtitle}</div>}
-            </div>
-          </div>
-          <div className="flex shrink-0 items-center gap-1.5">
-            {image.href && (
-              <a
-                href={image.href}
-                target="_blank"
-                rel="noreferrer"
-                aria-label="元画像を開く"
-                title="元画像を開く"
-                className="flex h-8 w-8 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-zinc-900 hover:text-zinc-200 focus-visible:bg-zinc-900 focus-visible:text-zinc-200 focus-visible:outline-none"
-              >
-                <ExternalLink size={15} />
-              </a>
-            )}
-            <button
-              type="button"
-              aria-label="閉じる"
-              title="閉じる"
-              className="flex h-8 w-8 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-zinc-900 hover:text-zinc-200 focus-visible:bg-zinc-900 focus-visible:text-zinc-200 focus-visible:outline-none"
-              onClick={onClose}
-            >
-              <X size={16} />
-            </button>
-          </div>
-        </header>
-        <div className="min-h-0 flex-1 overflow-auto bg-black">
-          <div className="rumi-image-preview-media flex min-h-full items-center justify-center p-4">
-            <img src={image.src} alt={image.alt} className="max-h-full max-w-full rounded-lg border border-zinc-800/80 object-contain shadow-[0_18px_70px_rgba(0,0,0,0.45)]" />
-          </div>
-        </div>
-        {image.details && image.details.length > 0 && (
-          <dl className="grid max-h-36 shrink-0 grid-cols-[max-content_minmax(0,1fr)] gap-x-3 gap-y-1.5 overflow-auto border-t border-zinc-800 bg-zinc-950/95 px-3 py-2 font-mono text-[10px] leading-5">
-            {image.details.map((detail) => (
-              <div key={`${detail.label}-${detail.value}`} className="contents">
-                <dt className="text-zinc-600">{detail.label}</dt>
-                <dd className="min-w-0 break-words text-zinc-400">{detail.value}</dd>
-              </div>
-            ))}
-          </dl>
-        )}
-      </section>
-    </div>
-  );
+  return {
+    kind: "image",
+    title: image.title,
+    subtitle: image.subtitle,
+    href: image.href,
+    imageUrl: image.src,
+    imageAlt: image.alt,
+    details: image.details,
+  };
 }
 
 function MessageBlock({
@@ -326,6 +267,33 @@ function MessageActionBar({
 }
 
 function WidgetCard({ widget }: { widget: Record<string, unknown> }) {
+  if (String(widget.kind ?? "") === "conversation_handoff") {
+    const title = String(widget.title ?? "移動先");
+    const conversationId = String(widget.conversation_id ?? "");
+    const urlPath = String(widget.url_path ?? "");
+    const deepLink = String(widget.deep_link ?? "");
+    const model = typeof widget.model === "string" ? widget.model : "";
+    const href = urlPath || deepLink || "#";
+    return (
+      <div className="mt-2 w-[min(420px,100%)] rounded-lg border border-emerald-500/25 bg-emerald-500/10 p-3">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="text-[11px] font-medium uppercase tracking-[0.18em] text-emerald-300">{title}</div>
+            <div className="mt-1 truncate font-mono text-[12px] text-zinc-200">{conversationId}</div>
+            {model && <div className="mt-1 truncate text-[11px] text-zinc-500">{model}</div>}
+          </div>
+          <a
+            href={href}
+            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-emerald-400/30 text-emerald-200 transition-colors hover:bg-emerald-400/10 focus-visible:bg-emerald-400/10 focus-visible:outline-none"
+            aria-label="移動先を開く"
+            title="移動先を開く"
+          >
+            <ExternalLink size={15} />
+          </a>
+        </div>
+      </div>
+    );
+  }
   return (
     <details className="mt-2 rounded-lg border border-blue-500/20 bg-blue-500/10 p-3">
       <summary className="cursor-pointer select-none text-[10px] uppercase tracking-wider text-blue-300">
@@ -333,6 +301,62 @@ function WidgetCard({ widget }: { widget: Record<string, unknown> }) {
       </summary>
       <pre className="mt-2 overflow-x-auto text-[11px] font-mono text-zinc-200">{JSON.stringify(widget, null, 2)}</pre>
     </details>
+  );
+}
+
+function activityPhase(status: string | null | undefined, toolNames: string[]): { label: string; detail: string } {
+  const text = String(status ?? "").toLowerCase();
+  if (text.includes("scheduler") || text.includes("待機")) {
+    return { label: "待機中", detail: status || "予定時刻まで待機しています" };
+  }
+  if (text.includes("handoff") || text.includes("移動")) {
+    return { label: "移動準備中", detail: status || "新しい会話を準備しています" };
+  }
+  if (toolNames.length > 0 || text.includes("tool") || text.includes("実行")) {
+    return { label: "tool 実行中", detail: status || `${toolNames.length} 件を進めています` };
+  }
+  return { label: "考えています", detail: status || "応答を組み立てています" };
+}
+
+function useActivityNow(enabled: boolean): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!enabled) return undefined;
+    const interval = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(interval);
+  }, [enabled]);
+  return now;
+}
+
+function RumiActivityLoading({
+  status,
+  toolNames,
+  startedAt,
+  compact = false,
+}: {
+  status?: string | null;
+  toolNames: string[];
+  startedAt?: number | null;
+  compact?: boolean;
+}) {
+  const phase = activityPhase(status, toolNames);
+  const now = useActivityNow(Boolean(startedAt));
+  const elapsed = startedAt ? elapsedDurationLabel(startedAt, now) : "";
+  return (
+    <div className={cn("rumi-activity-loading flex items-center gap-3 rounded-lg border border-zinc-800 bg-zinc-950/72 px-3 py-2 text-zinc-300", compact ? "w-fit" : "w-[min(440px,calc(100vw-48px))]")}>
+      <div className="rumi-loading-bars flex h-5 w-6 items-end gap-1" aria-hidden="true">
+        <span />
+        <span />
+        <span />
+      </div>
+      <div className="min-w-0">
+        <div className="flex min-w-0 items-baseline gap-2">
+          <span className="truncate text-[12px] font-medium text-zinc-200">{phase.label}</span>
+          {elapsed && <span className="shrink-0 font-mono text-[10px] leading-none text-zinc-600">{elapsed}</span>}
+        </div>
+        <div className="truncate text-[11px] text-zinc-500">{phase.detail}</div>
+      </div>
+    </div>
   );
 }
 
@@ -634,7 +658,14 @@ function ToolActivityTray({
   message: ChatMessagesRendererProps["messages"][number];
   onOpenToolPreview?: (previewId: string) => void;
 }) {
-  const groups = buildToolActivityGroups(message.toolLogs ?? [], message.events ?? [], { conversationId: message.conversationId });
+  const hasRunningActivity = (message.events ?? []).some((event) => (
+    event.type === "tool_call" ||
+    event.type === "tool_call_started" ||
+    event.phase === "tool_call" ||
+    event.phase === "tool_call_started"
+  ));
+  const now = useActivityNow(hasRunningActivity);
+  const groups = buildToolActivityGroups(message.toolLogs ?? [], message.events ?? [], { conversationId: message.conversationId, now });
   if (groups.length === 0) return null;
   const previewableCallIds = new Set(
     (message.events ?? [])
@@ -666,7 +697,10 @@ function ToolActivityTray({
                 <>
                   <span className={cn("mt-1 h-1.5 w-1.5 rounded-full", item.status === "failed" ? "bg-red-400" : item.status === "running" ? "animate-pulse bg-blue-300" : "bg-zinc-700")} />
                   <span className="min-w-0 max-w-full">
-                    <span className="block truncate text-[13px] leading-5 text-zinc-300">{item.input || item.detail || item.toolName}</span>
+                    <span className="flex min-w-0 items-baseline gap-2 text-[13px] leading-5 text-zinc-300">
+                      <span className="truncate">{item.input || item.detail || item.toolName}</span>
+                      {item.durationLabel && <span className="shrink-0 font-mono text-[10px] text-zinc-600">{item.durationLabel}</span>}
+                    </span>
                     {statusLine && (
                       <span className={cn("block truncate text-[11px] leading-5", item.status === "failed" ? "text-red-300" : "text-zinc-500")}>
                         {statusLine}
@@ -707,7 +741,8 @@ function ToolActivityTray({
   );
 }
 
-function PendingToolTray({ toolNames }: { toolNames: string[] }) {
+function PendingToolTray({ toolNames, toolStartedAt = {} }: { toolNames: string[]; toolStartedAt?: Record<string, number> }) {
+  const now = useActivityNow(toolNames.some((name) => Boolean(toolStartedAt[name])));
   if (toolNames.length === 0) return null;
   const groups = new Map<string, { label: string; names: string[] }>();
   for (const name of toolNames) {
@@ -735,8 +770,9 @@ function PendingToolTray({ toolNames }: { toolNames: string[] }) {
             </div>
             <div className="ml-1.5 flex flex-wrap gap-1.5 border-l border-zinc-800/70 pl-3">
               {group.names.map((name) => (
-                <span key={name} className="max-w-[220px] truncate rounded-md bg-zinc-900/50 px-2 py-1 text-[11px] text-zinc-300">
-                  {name}
+                <span key={name} className="inline-flex max-w-[220px] items-baseline rounded-md bg-zinc-900/50 px-2 py-1 text-[11px] text-zinc-300">
+                  <span className="truncate">{name}</span>
+                  {toolStartedAt[name] && <span className="ml-1.5 font-mono text-[10px] text-zinc-600">{elapsedDurationLabel(toolStartedAt[name], now)}</span>}
                 </span>
               ))}
             </div>
@@ -755,6 +791,8 @@ export function ChatMessagesRenderer({
   isGenerating,
   pendingStatus,
   pendingToolNames = [],
+  pendingStartedAt,
+  pendingToolStartedAt = {},
   messages,
   messagesEndRef,
   unknownBlockStrategy,
@@ -770,7 +808,7 @@ export function ChatMessagesRenderer({
 
       {!isMessagesRegionVisible ? null : isLoading ? (
         <div className="flex-1 flex items-center justify-center">
-          <Loader2 size={18} className="animate-spin text-zinc-500" />
+          <RumiActivityLoading status={pendingStatus} toolNames={pendingToolNames} startedAt={pendingStartedAt} />
         </div>
       ) : isNewConversation ? (
         <div className="flex-1" />
@@ -787,6 +825,9 @@ export function ChatMessagesRenderer({
                         <span className="text-[10px] text-zinc-500 font-mono flex items-center gap-1">
                           <Clock size={10} /> {message.metadata.executionTime}
                         </span>
+                      )}
+                      {message.metadata?.thinkingDuration && (
+                        <span className="font-mono text-[10px] text-zinc-600">thinking {message.metadata.thinkingDuration}</span>
                       )}
                     </div>
                   )}
@@ -845,12 +886,9 @@ export function ChatMessagesRenderer({
             {isGenerating && (
               <div className="flex gap-3">
                 <div className="text-zinc-400 text-[13px] flex flex-col gap-1 mt-1.5">
-                  <div className="flex items-center gap-2">
-                    <Loader2 size={14} className="text-zinc-400 animate-spin" />
-                    <span className="animate-pulse">{pendingStatus || "Processing..."}</span>
-                  </div>
+                  <RumiActivityLoading status={pendingStatus} toolNames={pendingToolNames} startedAt={pendingStartedAt} compact />
                   {pendingToolNames.length > 0 && (
-                    <PendingToolTray toolNames={pendingToolNames} />
+                    <PendingToolTray toolNames={pendingToolNames} toolStartedAt={pendingToolStartedAt} />
                   )}
                 </div>
               </div>
@@ -859,7 +897,7 @@ export function ChatMessagesRenderer({
           </div>
         </div>
       )}
-      <BrowserImagePreviewDialog image={imagePreview} onClose={() => setImagePreview(null)} />
+      <ArtifactPreviewDialog item={artifactDialogItemFromImagePreview(imagePreview)} onClose={() => setImagePreview(null)} />
     </>
   );
 }

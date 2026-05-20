@@ -22,7 +22,9 @@ from domain.components.registry import DomainComponentRegistry, build_domain_com
 OPENGATEWAY_MODELS = {
     "gitlawb-opengateway/mimo-v2.5-pro",
     "gitlawb-opengateway/mimo-v2-flash",
-    "gitlawb-opengateway/google/gemini-3.1-flash-lite-preview",
+    "gitlawb-opengateway/mimo-v2-omni",
+    "gitlawb-opengateway/mimo-v2-pro",
+    "gitlawb-opengateway/mimo-v2.5",
 }
 
 
@@ -40,16 +42,14 @@ def test_gitlawb_provider_component_preserves_no_key_allowlist_metadata():
     metadata = provider_component_metadata_map()["gitlawb-opengateway"]
     models = model_manifests_from_provider_components("gitlawb-opengateway")
     model_ids = {model["id"] for model in models}
-    gemini = next(model for model in models if model["id"].endswith("gemini-3.1-flash-lite-preview"))
+    omni = next(model for model in models if model["id"].endswith("mimo-v2-omni"))
 
     assert metadata["default_base_url"] == "https://opengateway.gitlawb.com/v1"
     assert metadata["env_vars"] == []
     assert metadata["base_url_envs"] == ["GITLAWB_OPENGATEWAY_BASE_URL"]
     assert metadata["provider_manifest"]["credential_required"] is False
     assert model_ids == OPENGATEWAY_MODELS
-    assert gemini["supports_thinking"] is True
-    assert gemini["default_thinking_level"] == "high"
-    assert gemini["metadata"]["vision_verified"] is True
+    assert omni["metadata"]["vision_verified"] is True
 
 
 def test_provider_catalog_interops_with_model_catalog_pack_manifests():
@@ -58,7 +58,7 @@ def test_provider_catalog_interops_with_model_catalog_pack_manifests():
 
     assert catalog["gitlawb-opengateway"]["metadata"]["default_base_url"] == "https://opengateway.gitlawb.com/v1"
     assert set(models) == OPENGATEWAY_MODELS
-    assert models["gitlawb-opengateway/google/gemini-3.1-flash-lite-preview"]["metadata"]["vision_verified"] is True
+    assert models["gitlawb-opengateway/mimo-v2-omni"]["metadata"]["vision_verified"] is True
 
     provider_manifest_path = MODEL_CATALOG_ROOT / "extensions" / "llm" / "providers" / "gitlawb-opengateway" / "manifest.json"
     provider_manifest = json.loads(provider_manifest_path.read_text(encoding="utf-8"))

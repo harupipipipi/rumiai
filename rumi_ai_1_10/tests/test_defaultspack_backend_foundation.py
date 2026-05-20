@@ -24,6 +24,10 @@ class _FakeInterfaceRegistry:
 @pytest.fixture(autouse=True)
 def _reset_singletons(monkeypatch, tmp_path):
     from ecosystem.defaultspack.backend.tool import permission_policy as permission_policy_module
+    try:
+        from backend.tool import permission_policy as top_level_permission_policy_module
+    except Exception:
+        top_level_permission_policy_module = None
 
     monkeypatch.setenv(
         "RUMI_DEFAULTSPACK_TOOL_PERMISSION_POLICY_PATH",
@@ -77,9 +81,13 @@ def _reset_singletons(monkeypatch, tmp_path):
     ):
         monkeypatch.delenv(env_name, raising=False)
     permission_policy_module._POLICY_STORE = None
+    if top_level_permission_policy_module is not None:
+        top_level_permission_policy_module._POLICY_STORE = None
     _reset_defaultspack_domain_singletons()
     yield
     permission_policy_module._POLICY_STORE = None
+    if top_level_permission_policy_module is not None:
+        top_level_permission_policy_module._POLICY_STORE = None
     _reset_defaultspack_domain_singletons()
 
 
@@ -125,6 +133,44 @@ def test_ai_and_tool_setup_register_new_foundation_routes():
     assert ("GET", "/api/tools/permissions") in tool_routes
     assert ("PUT", "/api/tools/permissions") in tool_routes
     assert ("POST", "/api/tools/permissions/check") in tool_routes
+
+
+def test_fallback_http_registry_exposes_tool_permission_routes():
+    from ecosystem.defaultspack.transport.registry import canonical_http_route_specs
+
+    routes = {(spec.method, spec.pattern, spec.block_module) for spec in canonical_http_route_specs()}
+
+    assert ("GET", "/api/tools/permissions", "blocks.tool.permissions") in routes
+    assert ("PUT", "/api/tools/permissions", "blocks.tool.permissions") in routes
+    assert ("POST", "/api/tools/permissions/check", "blocks.tool.permissions") in routes
+    assert ("GET", "/api/tools/{name}/permissions", "blocks.tool.permissions") in routes
+    assert ("PUT", "/api/tools/{name}/permissions", "blocks.tool.permissions") in routes
+
+
+def test_tool_permissions_run_dispatches_http_method_handlers(tmp_path, monkeypatch):
+    from ecosystem.defaultspack.blocks.tool import permissions
+    from ecosystem.defaultspack.backend.tool import permission_policy as permission_policy_module
+    from backend.tool import permission_policy as top_level_permission_policy_module
+
+    monkeypatch.setenv(
+        "RUMI_DEFAULTSPACK_TOOL_PERMISSION_POLICY_PATH",
+        str(tmp_path / "permission_policy.json"),
+    )
+    permission_policy_module._POLICY_STORE = None
+    top_level_permission_policy_module._POLICY_STORE = None
+
+    put_result = permissions.run(
+        {"_handler": "run_put", "policy": {"tools": {"calculator": "allow"}}},
+        {},
+    )
+    assert put_result["status"] == "ok"
+
+    check_result = permissions.run(
+        {"_handler": "run_check", "tool_name": "calculator", "arguments": {}},
+        {},
+    )
+    assert check_result["status"] == "ok"
+    assert check_result["data"]["decision"]["allowed"] is True
 
 
 def test_provider_catalog_and_profiles_include_local_and_collision_metadata():

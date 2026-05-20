@@ -6,7 +6,10 @@ from pathlib import Path
 from typing import Any
 
 from domain.ai_client.api_key_store import (
+    provider_api_metadata,
     provider_has_api_key,
+    provider_named_api_keys,
+    read_provider_api_key,
     set_provider_api_key,
 )
 from domain.ai_client.model_groups import default_model_groups, normalize_model_groups
@@ -93,7 +96,7 @@ class ModelRuntimeSettingsService:
         }
         scored: list[dict[str, Any]] = []
         seen: set[str] = set()
-        for profile in self._list_profile_catalog():
+        for profile in self._list_profile_catalog_for_resolution(settings):
             if not self._is_chat_profile(profile):
                 continue
             candidate = self._candidate_from_profile(profile, favorites)
@@ -259,6 +262,10 @@ class ModelRuntimeSettingsService:
             "utility_models": normalize_utility_models({}),
             "utility_model_policy": normalize_utility_model_policy({}),
             "model_api_routes": "",
+            "api_routes": [],
+            "api_bound_profiles": [],
+            "composite_models": [],
+            "model_notes": {},
             "google_api_key": "",
             "google_api_key_configured": provider_has_api_key("google", pack_root=self._pack_root),
             "openrouter_api_key": "",
@@ -281,6 +288,14 @@ class ModelRuntimeSettingsService:
         sanitized["model_api_routes"] = self._normalize_model_api_routes(
             sanitized.get("model_api_routes", "")
         )
+        if "api_routes" in sanitized:
+            sanitized["api_routes"] = self._normalize_api_routes(sanitized.get("api_routes"))
+        if "api_bound_profiles" in sanitized:
+            sanitized["api_bound_profiles"] = self._normalize_api_bound_profiles(sanitized.get("api_bound_profiles"))
+        if "composite_models" in sanitized:
+            sanitized["composite_models"] = self._normalize_composite_models(sanitized.get("composite_models"))
+        if "model_notes" in sanitized:
+            sanitized["model_notes"] = self._normalize_model_notes(sanitized.get("model_notes"))
         if "model_groups" in sanitized:
             sanitized["model_groups"] = normalize_model_groups(sanitized.get("model_groups"))
         if "utility_models" in sanitized:
@@ -338,6 +353,10 @@ class ModelRuntimeSettingsService:
             models[key] = values_by_scope if isinstance(values_by_scope, dict) else {}
         models["thinking_level"] = self._normalize_level(models.get("thinking_level"))
         models["model_api_routes"] = self._normalize_model_api_routes(models.get("model_api_routes", ""))
+        models["api_routes"] = self._normalize_api_routes(models.get("api_routes"))
+        models["api_bound_profiles"] = self._normalize_api_bound_profiles(models.get("api_bound_profiles"))
+        models["composite_models"] = self._normalize_composite_models(models.get("composite_models"))
+        models["model_notes"] = self._normalize_model_notes(models.get("model_notes"))
         models["preferred_model_group"] = str(models.get("preferred_model_group") or "default").strip() or "default"
         models["auto_route_within_group"] = bool(models.get("auto_route_within_group", True))
         models["model_groups"] = normalize_model_groups(models.get("model_groups"))
@@ -354,6 +373,173 @@ class ModelRuntimeSettingsService:
         else:
             lines = [line.strip() for line in str(value or "").splitlines() if line.strip()]
         return "\n".join(lines) + ("\n" if lines else "")
+
+    @staticmethod
+    def _parse_jsonish(value: Any, fallback: Any) -> Any:
+        if isinstance(value, str):
+            text = value.strip()
+            if not text:
+                return fallback
+            try:
+                return json.loads(text)
+            except json.JSONDecodeError:
+                return fallback
+        return value
+
+    @classmethod
+    def _normalize_model_notes(cls, value: Any) -> dict[str, str]:
+        parsed = cls._parse_jsonish(value, {})
+        if not isinstance(parsed, dict):
+            return {}
+        return {
+            str(key).strip(): str(note or "").strip()
+            for key, note in parsed.items()
+            if str(key).strip() and str(note or "").strip()
+        }
+
+    @classmethod
+    def _normalize_api_routes(cls, value: Any) -> list[dict[str, Any]]:
+        parsed = cls._parse_jsonish(value, [])
+        if isinstance(parsed, dict):
+            raw_items = [
+                {"model": key, **(route if isinstance(route, dict) else {"routes": route})}
+                for key, route in parsed.items()
+            ]
+        elif isinstance(parsed, list):
+            raw_items = parsed
+        else:
+            raw_items = []
+        normalized: list[dict[str, Any]] = []
+        for item in raw_items:
+            if not isinstance(item, dict):
+                continue
+            model = str(item.get("model") or item.get("model_ref") or item.get("profile_id") or "").strip()
+            if not model:
+                continue
+            routes = item.get("routes", item.get("apis", item.get("api_refs", [])))
+            if isinstance(routes, str):
+                route_refs = [part.strip() for part in routes.split(",") if part.strip()]
+            elif isinstance(routes, list):
+                route_refs = [str(part).strip() for part in routes if str(part or "").strip()]
+            else:
+                route_refs = []
+            if not route_refs:
+                continue
+            fallback_on = item.get("fallback_on", item.get("retry_on", []))
+            if isinstance(fallback_on, str):
+                fallback_values = [part.strip() for part in fallback_on.split(",") if part.strip()]
+            elif isinstance(fallback_on, list):
+                fallback_values = [str(part).strip() for part in fallback_on if str(part or "").strip()]
+            else:
+                fallback_values = []
+            normalized.append(
+                {
+                    "model": model,
+                    "routes": route_refs,
+                    "fallback_on": fallback_values or ["429", "quota", "rate_limit", "provider_error", "timeout"],
+                }
+            )
+        return normalized
+
+    @classmethod
+    def _normalize_api_bound_profiles(cls, value: Any) -> list[dict[str, Any]]:
+        parsed = cls._parse_jsonish(value, [])
+        if isinstance(parsed, dict):
+            raw_items = list(parsed.values())
+        elif isinstance(parsed, list):
+            raw_items = parsed
+        else:
+            raw_items = []
+        normalized: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for item in raw_items:
+            if not isinstance(item, dict):
+                continue
+            provider_id = str(item.get("provider_id") or item.get("provider") or "").strip()
+            api_id = str(item.get("api_id") or item.get("api") or "").strip()
+            model_id = str(item.get("model_id") or item.get("model") or "").strip()
+            if not provider_id or not api_id or not model_id:
+                continue
+            profile_id = str(item.get("profile_id") or f"{provider_id}/{api_id}/{model_id}").strip()
+            if profile_id in seen:
+                continue
+            seen.add(profile_id)
+            normalized.append(
+                {
+                    "profile_id": profile_id,
+                    "qualified_model_id": profile_id,
+                    "provider_id": provider_id,
+                    "api_id": api_id,
+                    "model_id": model_id,
+                    "display_name": str(item.get("display_name") or item.get("name") or f"{model_id} ({api_id})").strip(),
+                    "notes": str(item.get("notes") or "").strip(),
+                    "enabled": item.get("enabled", True) is not False,
+                }
+            )
+        return normalized
+
+    @classmethod
+    def _normalize_composite_models(cls, value: Any) -> list[dict[str, Any]]:
+        parsed = cls._parse_jsonish(value, [])
+        if isinstance(parsed, dict):
+            raw_items = [
+                {"id": key, **(item if isinstance(item, dict) else {})}
+                for key, item in parsed.items()
+            ]
+        elif isinstance(parsed, list):
+            raw_items = parsed
+        else:
+            raw_items = []
+        normalized: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for item in raw_items:
+            if not isinstance(item, dict):
+                continue
+            composite_id = str(item.get("id") or item.get("profile_id") or item.get("name") or "").strip()
+            mode = str(item.get("mode") or item.get("type") or "fallback_chain").strip()
+            if not composite_id or composite_id in seen or mode not in {"fallback_chain", "ensemble"}:
+                continue
+            raw_members = item.get("members", item.get("models", item.get("chain", [])))
+            if isinstance(raw_members, str):
+                members = [{"model": part.strip()} for part in raw_members.split(",") if part.strip()]
+            elif isinstance(raw_members, list):
+                members = [
+                    part if isinstance(part, dict) else {"model": str(part or "").strip()}
+                    for part in raw_members
+                    if (isinstance(part, dict) or str(part or "").strip())
+                ]
+            else:
+                members = []
+            cleaned_members = []
+            for member in members:
+                model = str(member.get("model") or member.get("profile_id") or "").strip()
+                if not model:
+                    continue
+                cleaned_members.append(
+                    {
+                        **dict(member),
+                        "model": model,
+                        "when": member.get("when") if isinstance(member.get("when"), dict) else {},
+                        "fallback_on": member.get("fallback_on") if isinstance(member.get("fallback_on"), list) else [],
+                    }
+                )
+            if not cleaned_members:
+                continue
+            normalized.append(
+                {
+                    "id": composite_id,
+                    "profile_id": composite_id,
+                    "display_name": str(item.get("display_name") or item.get("label") or composite_id).strip(),
+                    "mode": mode,
+                    "members": cleaned_members,
+                    "merge_model": str(item.get("merge_model") or item.get("synthesizer_model") or "").strip(),
+                    "conditions": item.get("conditions") if isinstance(item.get("conditions"), dict) else {},
+                    "notes": str(item.get("notes") or "").strip(),
+                    "enabled": item.get("enabled", True) is not False,
+                }
+            )
+            seen.add(composite_id)
+        return normalized
 
     def _read_all(self) -> dict[str, Any]:
         values: dict[str, Any] = {"models": self.default_model_settings()}
@@ -377,7 +563,75 @@ class ModelRuntimeSettingsService:
         level = str(value or "").strip()
         return level if level in VALID_THINKING_LEVELS else DEFAULT_THINKING_LEVEL
 
-    def _list_profile_catalog(self) -> list[dict[str, Any]]:
+    def runtime_defined_profiles(self, settings: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+        settings = settings if isinstance(settings, dict) else self.get_settings()
+        model_notes = self._normalize_model_notes(settings.get("model_notes"))
+        profiles: list[dict[str, Any]] = []
+        for profile in self._normalize_api_bound_profiles(settings.get("api_bound_profiles")):
+            if profile.get("enabled") is False:
+                continue
+            provider_id = str(profile.get("provider_id") or "")
+            model_id = str(profile.get("model_id") or "")
+            api_id = str(profile.get("api_id") or "")
+            profile_id = str(profile.get("profile_id") or f"{provider_id}/{api_id}/{model_id}")
+            availability = self._api_bound_profile_availability(provider_id, api_id)
+            metadata = provider_api_metadata(provider_id, api_id, pack_root=self._pack_root)
+            profiles.append(
+                {
+                    "id": profile_id,
+                    "profile_id": profile_id,
+                    "qualified_model_id": profile_id,
+                    "provider_id": provider_id,
+                    "provider": provider_id,
+                    "model_id": model_id,
+                    "model": model_id,
+                    "display_name": str(profile.get("display_name") or f"{model_id} ({api_id})"),
+                    "name": str(profile.get("display_name") or model_id),
+                    "type": "chat",
+                    "configured": availability["configured"],
+                    "availability": availability,
+                    "metadata": {
+                        "api_bound": True,
+                        "api_id": api_id,
+                        "base_url": str(metadata.get("base_url") or ""),
+                        "quota_label": str(metadata.get("quota_label") or ""),
+                        "notes": str(profile.get("notes") or model_notes.get(profile_id) or model_notes.get(f"{provider_id}/{model_id}") or ""),
+                    },
+                }
+            )
+        for composite in self._normalize_composite_models(settings.get("composite_models")):
+            if composite.get("enabled") is False:
+                continue
+            profile_id = str(composite.get("profile_id") or composite.get("id") or "")
+            profiles.append(
+                {
+                    "id": profile_id,
+                    "profile_id": profile_id,
+                    "qualified_model_id": profile_id,
+                    "provider_id": "composite",
+                    "provider": "composite",
+                    "model_id": profile_id,
+                    "model": profile_id,
+                    "display_name": str(composite.get("display_name") or profile_id),
+                    "name": str(composite.get("display_name") or profile_id),
+                    "type": "chat",
+                    "configured": True,
+                    "availability": {
+                        "configured": True,
+                        "active": True,
+                        "status": "configured",
+                        "composite": True,
+                    },
+                    "metadata": {
+                        "composite": True,
+                        "mode": composite.get("mode"),
+                        "notes": str(composite.get("notes") or model_notes.get(profile_id) or ""),
+                    },
+                }
+            )
+        return profiles
+
+    def _list_profile_catalog(self, settings: dict[str, Any] | None = None) -> list[dict[str, Any]]:
         try:
             from ecosystem.defaultspack.backend.ai_client.provider_catalog import list_profile_catalog
         except ModuleNotFoundError:
@@ -390,10 +644,41 @@ class ModelRuntimeSettingsService:
             try:
                 profiles = list_profile_catalog()
                 if isinstance(profiles, list) and profiles:
-                    return [profile for profile in profiles if isinstance(profile, dict)]
+                    combined = [profile for profile in profiles if isinstance(profile, dict)]
+                    combined.extend(self.runtime_defined_profiles(settings))
+                    return combined
             except Exception:
                 pass
-        return [self._fallback_stub_profile()]
+        return [self._fallback_stub_profile(), *self.runtime_defined_profiles(settings)]
+
+    def _api_bound_profile_availability(self, provider_id: str, api_id: str) -> dict[str, Any]:
+        named_key = next(
+            (
+                item
+                for item in provider_named_api_keys(provider_id, pack_root=self._pack_root)
+                if str(item.get("api_id") or "").strip() == api_id
+            ),
+            None,
+        )
+        configured = bool(
+            named_key
+            and named_key.get("configured")
+            and read_provider_api_key(provider_id, api_id, pack_root=self._pack_root)
+        )
+        return {
+            "configured": configured,
+            "active": configured,
+            "status": "configured" if configured else "missing_api_key",
+            "api_bound": True,
+        }
+
+    def _list_profile_catalog_for_resolution(self, settings: dict[str, Any]) -> list[dict[str, Any]]:
+        try:
+            return self._list_profile_catalog(settings=settings)
+        except TypeError as exc:
+            if "unexpected keyword argument 'settings'" not in str(exc):
+                raise
+            return self._list_profile_catalog()
 
     @staticmethod
     def _fallback_stub_profile() -> dict[str, Any]:
@@ -437,6 +722,7 @@ class ModelRuntimeSettingsService:
             profile_id = qualified_model_id
 
         availability = profile.get("availability") if isinstance(profile.get("availability"), dict) else {}
+        metadata = profile.get("metadata") if isinstance(profile.get("metadata"), dict) else {}
         provider_display_name = str(
             profile.get("provider_display_name")
             or profile.get("provider_name")
@@ -489,6 +775,8 @@ class ModelRuntimeSettingsService:
             "api_key_required": requires_api_key,
             "api_key_configured": configured,
             "availability": deepcopy(availability),
+            "metadata": deepcopy(metadata),
+            "notes": str(profile.get("notes") or metadata.get("notes") or "").strip(),
             "type": str(profile.get("type") or "chat"),
             "favorite": favorite,
             "label": label,
@@ -522,6 +810,8 @@ class ModelRuntimeSettingsService:
         search_fields = exact_id_fields | exact_fields | {
             provider_id,
             provider_display_name,
+            str(candidate.get("notes") or ""),
+            str((candidate.get("metadata") or {}).get("notes") if isinstance(candidate.get("metadata"), dict) else ""),
         }
         normalized_exact_ids = {self._normalize_search_key(item) for item in exact_id_fields if item}
         normalized_exact_fields = {self._normalize_search_key(item) for item in exact_fields if item}

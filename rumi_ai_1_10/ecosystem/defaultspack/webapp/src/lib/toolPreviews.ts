@@ -97,6 +97,24 @@ export function streamActivityEventKey(event: ChatActivityEvent): string {
   return `event:${event.type}:${event.phase ?? ""}:${event.message ?? ""}`;
 }
 
+function isToolStartEvent(event: ChatActivityEvent): boolean {
+  return (
+    event.type === "tool_call" ||
+    event.type === "tool_call_started" ||
+    event.phase === "tool_call" ||
+    event.phase === "tool_call_started"
+  );
+}
+
+function isToolEndEvent(event: ChatActivityEvent): boolean {
+  return (
+    event.type === "tool_call_completed" ||
+    event.type === "tool_result" ||
+    event.phase === "tool_call_completed" ||
+    event.phase === "tool_result"
+  );
+}
+
 export function mergeStreamActivityEvent(base: ChatActivityEvent, update: ChatActivityEvent): ChatActivityEvent {
   const baseRevision = Number(base.state_revision ?? -1);
   const updateRevision = Number(update.state_revision ?? -1);
@@ -111,6 +129,14 @@ export function mergeStreamActivityEvent(base: ChatActivityEvent, update: ChatAc
     return base;
   }
   const merged: ChatActivityEvent = { ...base, ...update };
+  const baseStartedAt = base.started_at ?? base.startedAt ?? (isToolStartEvent(base) ? base.timestamp : undefined);
+  const updateStartedAt = update.started_at ?? update.startedAt ?? (isToolStartEvent(update) ? update.timestamp : undefined);
+  const baseCompletedAt = base.completed_at ?? base.completedAt ?? (isToolEndEvent(base) ? base.timestamp : undefined);
+  const updateCompletedAt = update.completed_at ?? update.completedAt ?? (isToolEndEvent(update) ? update.timestamp : undefined);
+  const startedAt = baseStartedAt ?? updateStartedAt;
+  const completedAt = updateCompletedAt ?? baseCompletedAt;
+  if (startedAt !== undefined) merged.started_at = startedAt;
+  if (completedAt !== undefined) merged.completed_at = completedAt;
   for (const key of ["arguments", "result", "artifact", "artifacts", "output", "message", "timestamp"]) {
     if (merged[key] === undefined && base[key] !== undefined) {
       merged[key] = base[key];

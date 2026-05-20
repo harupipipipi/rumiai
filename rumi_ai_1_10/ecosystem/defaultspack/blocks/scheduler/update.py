@@ -20,6 +20,8 @@ def run(input_data, context=None):
         job = SchedulerJobStore().update(job_id, updates)
     except SchedulerPolicyError as exc:
         return error(str(exc), "PERMISSION_DENIED")
+    except ValueError as exc:
+        return error(str(exc), "INVALID_INPUT")
     if not job:
         return error("job not found", "NOT_FOUND")
     return ok(job)

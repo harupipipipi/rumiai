@@ -1,11 +1,13 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import {
-  X, Globe, Terminal, FileText, Image, ExternalLink,
+  X, Globe, FileText, Image, ExternalLink,
   ChevronLeft, ChevronRight,
-  Eye, EyeOff, Code, NotebookPen
+  Eye, EyeOff, Code, NotebookPen, Maximize2
 } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
+
+import { ArtifactPreviewDialog, type ArtifactPreviewDialogItem } from './ArtifactPreviewDialog';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -100,6 +102,110 @@ export function buildToolPreviewDisplayItems(
   const active = items.find((item) => matchesPreviewId(item, activePreviewId));
   if (!active) return items;
   return [active, ...items.filter((item) => item.id !== active.id)];
+}
+
+export function buildToolPreviewTimelineItems(items: ToolPreviewItem[]): ToolPreviewItem[] {
+  return [...items].sort((left, right) => {
+    const leftTime = Number.isFinite(left.timestamp) ? left.timestamp : 0;
+    const rightTime = Number.isFinite(right.timestamp) ? right.timestamp : 0;
+    return leftTime - rightTime || left.id.localeCompare(right.id);
+  });
+}
+
+function shortPreviewDetail(value: unknown, limit = 260): string {
+  const text = typeof value === 'string' ? value : String(value ?? '');
+  const compact = text.replace(/\s+/g, ' ').trim();
+  return compact.length > limit ? `${compact.slice(0, limit - 3)}...` : compact;
+}
+
+function previewTitle(data: ToolPreviewData): string {
+  if (data.type === 'web') return data.title || data.url || 'Web preview';
+  if (data.type === 'code') return data.filename || 'Code preview';
+  if (data.type === 'file') return data.filename || data.path || 'File preview';
+  return data.alt || data.path || 'Image preview';
+}
+
+function safeHref(url: string | undefined): string | undefined {
+  if (!url || url.startsWith('data:')) return undefined;
+  return url;
+}
+
+export function artifactDialogItemFromToolPreview(item: ToolPreviewItem): ArtifactPreviewDialogItem {
+  const details = [
+    { label: 'toolStepId', value: item.toolStepId },
+    { label: 'timestamp', value: String(item.timestamp) },
+  ];
+
+  if (item.id === MEMO_PREVIEW_ID) {
+    return {
+      kind: 'file',
+      title: 'memo.md',
+      subtitle: 'local memo',
+      language: 'markdown',
+      content: item.data.type === 'file' ? item.data.content : '',
+      details,
+    };
+  }
+
+  const data = item.data;
+  if (data.type === 'image') {
+    return {
+      kind: 'image',
+      title: previewTitle(data),
+      subtitle: data.path || data.prompt || 'image artifact',
+      href: safeHref(data.url),
+      imageUrl: data.url,
+      imageAlt: data.alt,
+      details: [
+        ...details,
+        ...(data.path ? [{ label: 'path', value: data.path }] : []),
+        ...(data.prompt ? [{ label: 'prompt', value: shortPreviewDetail(data.prompt) }] : []),
+      ],
+    };
+  }
+
+  if (data.type === 'file') {
+    return {
+      kind: 'file',
+      title: previewTitle(data),
+      subtitle: data.path || data.size,
+      href: data.url,
+      content: data.content,
+      language: data.filename.split('.').pop()?.toLowerCase() || 'text',
+      details: [
+        ...details,
+        { label: 'size', value: data.size },
+        ...(data.path ? [{ label: 'path', value: data.path }] : []),
+      ],
+    };
+  }
+
+  if (data.type === 'code') {
+    return {
+      kind: 'file',
+      title: previewTitle(data),
+      subtitle: data.language || 'code',
+      content: data.diff || data.content,
+      language: data.language,
+      details: [
+        ...details,
+        ...(data.additions !== undefined ? [{ label: 'additions', value: String(data.additions) }] : []),
+        ...(data.deletions !== undefined ? [{ label: 'deletions', value: String(data.deletions) }] : []),
+      ],
+    };
+  }
+
+  return {
+    kind: 'tool',
+    title: previewTitle(data),
+    subtitle: data.url,
+    href: data.url,
+    imageUrl: data.screenshot,
+    imageAlt: data.title,
+    content: [data.title, data.url, data.snippet].filter(Boolean).join('\n\n'),
+    language: 'web',
+    details,
+  };
 }
 
 // ============================================================
@@ -610,7 +716,7 @@ function ImagePreviewContent({ data }: { data: ImagePreview }) {
 // Bottom tab navigation
 // ============================================================
 
-function PreviewNav({
+function PreviewTimeline({
   items,
   currentIndex,
   onSelect,
@@ -620,61 +726,76 @@ function PreviewNav({
   onSelect: (i: number) => void;
 }) {
   const navRef = React.useRef<HTMLDivElement>(null);
+  const timelineItems = useMemo(() => buildToolPreviewTimelineItems(items), [items]);
+  const currentItem = items[Math.min(currentIndex, items.length - 1)];
+  const timelineIndex = Math.max(0, timelineItems.findIndex((item) => item.id === currentItem?.id));
+
+  const selectTimelineIndex = (index: number) => {
+    const item = timelineItems[index];
+    if (!item) return;
+    const displayIndex = items.findIndex((candidate) => candidate.id === item.id);
+    if (displayIndex >= 0) onSelect(displayIndex);
+  };
 
   // Auto-scroll to active tab
   useEffect(() => {
     if (navRef.current) {
-      const activeTab = navRef.current.children[currentIndex] as HTMLElement;
+      const activeTab = navRef.current.querySelector(`[data-preview-id="${currentItem?.id}"]`) as HTMLElement | null;
       if (activeTab) {
         activeTab.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
       }
     }
-  }, [currentIndex]);
+  }, [currentItem?.id]);
 
   return (
-    <div
-      ref={navRef}
-      className="flex items-center gap-0.5 px-2 py-1.5 bg-zinc-900/80 border-t border-zinc-800/60 flex-shrink-0 overflow-x-auto"
-    >
-      {items.map((item, i) => {
-        const icon =
-          item.data.type === 'web' ? <Globe size={10} /> :
-          item.data.type === 'code' ? <Code size={10} /> :
-          item.data.type === 'file' ? <FileText size={10} /> :
-          <Image size={10} />;
+    <div className="border-t border-zinc-800/60 bg-zinc-900/80 px-2 py-2">
+      <div className="flex items-center gap-2">
+        <span className="shrink-0 text-[10px] font-medium uppercase tracking-wide text-zinc-600">Timeline</span>
+        <input
+          type="range"
+          min={0}
+          max={Math.max(0, timelineItems.length - 1)}
+          value={timelineIndex}
+          disabled={timelineItems.length <= 1}
+          aria-label="Tool preview chronological timeline"
+          onChange={(event) => selectTimelineIndex(Number(event.target.value))}
+          className="h-1.5 min-w-0 flex-1 accent-amber-300"
+        />
+        <span className="shrink-0 font-mono text-[10px] text-zinc-600">
+          {timelineIndex + 1}/{timelineItems.length}
+        </span>
+      </div>
+      <div
+        ref={navRef}
+        className="mt-2 flex items-center gap-0.5 overflow-x-auto"
+      >
+        {timelineItems.map((item, i) => {
+          const icon =
+            item.data.type === 'web' ? <Globe size={10} /> :
+            item.data.type === 'code' ? <Code size={10} /> :
+            item.data.type === 'file' ? <FileText size={10} /> :
+            <Image size={10} />;
+          const label = previewTitle(item.data);
+          const displayIndex = items.findIndex((candidate) => candidate.id === item.id);
 
-        let label = '';
-        switch (item.data.type) {
-          case 'web':
-            label = (item.data as WebPreview).title;
-            break;
-          case 'code':
-            label = (item.data as CodePreview).filename;
-            break;
-          case 'file':
-            label = (item.data as FilePreview).filename;
-            break;
-          case 'image':
-            label = (item.data as ImagePreview).alt;
-            break;
-        }
-
-        return (
-          <button
-            key={item.id}
-            onClick={() => onSelect(i)}
-            className={cn(
-              'flex items-center gap-1 px-2 py-1 rounded text-[10px] whitespace-nowrap transition-colors flex-shrink-0',
-              i === currentIndex
-                ? 'bg-zinc-800 text-zinc-200'
-                : 'text-zinc-600 hover:text-zinc-400 hover:bg-zinc-800/50'
-            )}
-          >
-            {icon}
-            <span className="max-w-[80px] truncate">{label}</span>
-          </button>
-        );
-      })}
+          return (
+            <button
+              key={item.id}
+              data-preview-id={item.id}
+              onClick={() => selectTimelineIndex(i)}
+              className={cn(
+                'flex flex-shrink-0 items-center gap-1 rounded px-2 py-1 text-[10px] whitespace-nowrap transition-colors',
+                displayIndex === currentIndex
+                  ? 'bg-zinc-800 text-zinc-200'
+                  : 'text-zinc-600 hover:bg-zinc-800/50 hover:text-zinc-400'
+              )}
+            >
+              {icon}
+              <span className="max-w-[80px] truncate">{label}</span>
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -705,6 +826,7 @@ export function ToolPreviewPanel({
   onMemoChange,
 }: ToolPreviewPanelProps) {
   const [currentIndex, setCurrentIndex] = useState(0);
+  const [foregroundPreview, setForegroundPreview] = useState<ArtifactPreviewDialogItem | null>(null);
   const displayItems = useMemo(
     () => buildToolPreviewDisplayItems(previews, memo, activePreviewId),
     [activePreviewId, memo, previews],
@@ -735,6 +857,10 @@ export function ToolPreviewPanel({
       setCurrentIndex(0);
     }
   }, [currentIndex, displayItems.length]);
+
+  useEffect(() => {
+    if (!isVisible) setForegroundPreview(null);
+  }, [isVisible]);
 
   if (!isVisible || displayItems.length === 0) return null;
 
@@ -799,6 +925,15 @@ export function ToolPreviewPanel({
             {mode === 'auto' ? 'Auto' : 'Manual'}
           </button>
 
+          <button
+            onClick={() => setForegroundPreview(artifactDialogItemFromToolPreview(current))}
+            className="p-1 text-zinc-600 hover:text-zinc-300 transition-colors"
+            title="Foreground preview"
+            aria-label="Open foreground preview"
+          >
+            <Maximize2 size={13} />
+          </button>
+
           {/* Navigation arrows */}
           <button
             onClick={() => setCurrentIndex(i => Math.max(0, i - 1))}
@@ -828,12 +963,13 @@ export function ToolPreviewPanel({
       {/* Content */}
       <div className="flex-1 overflow-hidden">{renderContent()}</div>
 
-      {/* Bottom tab nav */}
-      <PreviewNav
+      {/* Chronological seekbar */}
+      <PreviewTimeline
         items={displayItems}
         currentIndex={currentIndex}
         onSelect={setCurrentIndex}
       />
+      <ArtifactPreviewDialog item={foregroundPreview} onClose={() => setForegroundPreview(null)} />
     </div>
   );
 }

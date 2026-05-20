@@ -14,7 +14,7 @@ def tool_name_from_definition(tool: Any) -> str:
     function_def = tool.get("function")
     if isinstance(function_def, dict) and function_def.get("name"):
         return str(function_def.get("name"))
-    return str(tool.get("name") or tool.get("tool_id") or "")
+    return str(tool.get("tool_id") or tool.get("name") or "")
 
 
 def adapt_tool_definition(tool: Any) -> Any:

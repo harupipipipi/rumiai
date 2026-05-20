@@ -202,7 +202,15 @@ test("saveProviderApiKey serializes named API metadata", async () => {
   }) as typeof fetch;
 
   try {
-    await api.saveProviderApiKey("google", "secret", { apiId: "main", name: "Main" });
+    await api.saveProviderApiKey("google", "secret", {
+      apiId: "main",
+      name: "Main",
+      baseUrl: "https://example.test/v1",
+      allowedModels: ["gemini-test"],
+      defaultModel: "gemini-test",
+      quotaLabel: "paid",
+      notes: "fast route",
+    });
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -212,6 +220,11 @@ test("saveProviderApiKey serializes named API metadata", async () => {
     value: "secret",
     api_id: "main",
     name: "Main",
+    base_url: "https://example.test/v1",
+    allowed_models: ["gemini-test"],
+    default_model: "gemini-test",
+    quota_label: "paid",
+    notes: "fast route",
   });
 });
 

@@ -1,0 +1,22 @@
+{
+  "id": "groq/llama-3.1-8b-instant",
+  "category": "llm_model",
+  "version": "1",
+  "provider_id": "groq",
+  "model_id": "llama-3.1-8b-instant",
+  "display_name": "Llama 3.1 8B Instant",
+  "type": "chat",
+  "enabled": true,
+  "priority": 4,
+  "defaults": {
+    "cheap": true,
+    "fast": true
+  },
+  "capabilities": {
+    "chat": true,
+    "streaming": true,
+    "reasoning": false,
+    "tool_calls": true,
+    "vision": false
+  }
+}

@@ -10,6 +10,7 @@ from domain.external.output_profile_registry import OutputProfileRegistry
 from domain.external.response import RumiResponse
 from domain.external.response_planner import ResponsePlanner
 from domain.external.response_prompt_policy import ResponsePromptDecision, ResponsePromptPolicy
+from domain.external.trigger_decision import TriggerDecisionService
 from domain.input.submit import submit_input
 
 
@@ -41,7 +42,6 @@ def dispatch_external_event(
     if not engine.matches(event):
         return {"status": "ignored", "assistant_text": "", "reason": "input profile did not match", "input_profile_id": profile.id}
 
-    envelope = engine.to_envelope(event)
     runtime_context = dict(context or {})
     profile_policy = profile.spec.get("policy") if isinstance(getattr(profile, "spec", None), dict) else None
     if isinstance(profile_policy, dict) and profile_policy:
@@ -49,12 +49,43 @@ def dispatch_external_event(
             **profile_policy,
             **(runtime_context.get("profile_policy") if isinstance(runtime_context.get("profile_policy"), dict) else {}),
         }
+    envelope = engine.to_envelope(event)
+    trigger_decision = TriggerDecisionService.from_profile(profile, runtime_context).decide(
+        event,
+        envelope=envelope,
+        context=runtime_context,
+        requested_send_response=send_response,
+    )
+    pipeline_metadata = {
+        "fire": bool(trigger_decision.fire),
+        "send": bool(trigger_decision.send_response),
+        "requested_send_response": bool(send_response),
+        "trigger_action": trigger_decision.action,
+    }
+    runtime_context["trigger_decision"] = trigger_decision.as_dict()
+    runtime_context["external_pipeline"] = pipeline_metadata
+    if not trigger_decision.fire:
+        ignored = {
+            "status": "ignored",
+            "assistant_text": "",
+            "reason": trigger_decision.reason or "trigger decision did not fire",
+            "external_event": event.as_dict(),
+            "policy": decision.as_dict(),
+            "input_profile_id": profile.id,
+            "trigger_decision": trigger_decision.as_dict(),
+            "metadata": {"external_pipeline": pipeline_metadata},
+        }
+        if send_response:
+            ignored["response_plan"] = _suppressed_response_plan(event.provider, trigger_decision)
+        return ignored
     result = submit_input(envelope, runtime_context)
     result["external_event"] = event.as_dict()
     result["policy"] = decision.as_dict()
     result["input_profile_id"] = profile.id
+    result["trigger_decision"] = trigger_decision.as_dict()
+    _result_metadata(result)["external_pipeline"] = pipeline_metadata
     prompt_decision = None
-    if send_response:
+    if bool(trigger_decision.send_response):
         output_profile = _resolve_output_profile(event.provider, runtime_context)
         output_provider = output_profile.provider if output_profile is not None else event.provider
         if output_profile is not None:
@@ -80,6 +111,8 @@ def dispatch_external_event(
             _result_metadata(result)["response_prompt_decision"] = prompt_decision.as_dict()
             response.metadata["response_prompt_decision"] = prompt_decision.as_dict()
         result["response_plan"] = ResponsePlanner(output_provider).plan(response, prompt_decision=prompt_decision)
+    elif send_response:
+        result["response_plan"] = _suppressed_response_plan(event.provider, trigger_decision)
     return result
 
 
@@ -116,6 +149,30 @@ def _resolve_output_profile(provider: str, context: dict[str, Any]) -> Any:
         if profile is not None:
             return profile
     return registry.default_for_provider(provider)
+
+
+def _suppressed_response_plan(provider: str, trigger_decision) -> dict[str, Any]:
+    decision = trigger_decision.as_dict() if hasattr(trigger_decision, "as_dict") else {}
+    return {
+        "provider": provider,
+        "messages": [],
+        "files": [],
+        "fallbacks": [],
+        "metadata": {
+            "trigger_decision": decision,
+            "response_action_plan": {
+                "type": "trigger_suppressed_send",
+                "external_reply": False,
+                "reason": decision.get("reason") or "trigger decision disabled external send",
+            },
+            "external_pipeline": {
+                "fire": bool(decision.get("fire", True)),
+                "send": False,
+                "trigger_action": decision.get("action"),
+            },
+        },
+        "safe_defaults": ResponsePlanner(provider)._safe_defaults({}),
+    }
 
 
 def decide_response_prompt_policy(

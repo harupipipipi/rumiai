@@ -739,6 +739,12 @@ class DefaultsHttpServer:
         if os.path.isfile(shell_path):
             with open(shell_path, "r", encoding="utf-8") as f:
                 body = f.read()
+            ui_dir = os.path.dirname(shell_path)
+            for asset_name in ("shell-app.css", "shell-app.js"):
+                asset_path = os.path.join(ui_dir, asset_name)
+                if os.path.isfile(asset_path):
+                    version = str(int(os.path.getmtime(asset_path)))
+                    body = body.replace(f"/static/{asset_name}", f"/static/{asset_name}?v={version}")
             return {"_static": True, "content_type": "text/html; charset=utf-8", "body": body}
         return {"_static": True, "content_type": "text/html; charset=utf-8",
                 "body": "<!DOCTYPE html><html><body><h1>defaults pack</h1><p>shell.html not found</p></body></html>"}
@@ -953,14 +959,16 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
     @staticmethod
     def _sse_events_from_result(result):
         if isinstance(result, dict) and result.get("_sse"):
-            return result.get("events", [])
+            events = result.get("events", [])
+            return None if isinstance(events, (str, bytes)) else events
         if (
             isinstance(result, dict)
             and result.get("status") == "ok"
             and isinstance(result.get("data"), dict)
             and result["data"].get("_sse")
         ):
-            return result["data"].get("events", [])
+            events = result["data"].get("events", [])
+            return None if isinstance(events, (str, bytes)) else events
         return None
 
     def _send_json(self, status_code, data):
@@ -1010,6 +1018,7 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
         self.send_response(status_code)
         self._send_cors_headers()
         self.send_header("Content-Type", content_type)
+        self.send_header("Cache-Control", "no-store")
         self.send_header("Content-Length", str(len(body_bytes)))
         self.end_headers()
         try:

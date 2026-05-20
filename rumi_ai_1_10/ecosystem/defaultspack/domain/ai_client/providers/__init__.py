@@ -127,11 +127,19 @@ _CURATED_PROVIDER_METADATA: Dict[str, Dict[str, Any]] = {
         "description": "Fast hosted inference for open-weight models.",
         "env_vars": ["GROQ_API_KEY"],
         "base_url_envs": ["GROQ_BASE_URL"],
-        "catalog_only": True,
-        "supports_invoke": False,
-        "default_model": "llama-3.3-70b-versatile",
-        "default_model_for": {"fast": "llama-3.3-70b-versatile"},
-        "capabilities": ["chat", "tool_calls"],
+        "catalog_only": False,
+        "supports_invoke": True,
+        "default_base_url": "https://api.groq.com/openai/v1",
+        "default_model": "openai/gpt-oss-120b",
+        "default_model_for": {
+            "chat": "openai/gpt-oss-120b",
+            "reasoning": "openai/gpt-oss-120b",
+            "fast": "openai/gpt-oss-20b",
+            "general": "llama-3.3-70b-versatile",
+            "cheap": "llama-3.1-8b-instant",
+            "vision": "meta-llama/llama-4-scout-17b-16e-instruct",
+        },
+        "capabilities": ["chat", "streaming", "tool_calls", "reasoning", "vision", "openai_compatible"],
     },
     "mistral": {
         "display_name": "Mistral",
@@ -180,6 +188,7 @@ _CURATED_PROVIDER_METADATA: Dict[str, Dict[str, Any]] = {
             "chat": "mimo-v2.5-pro",
             "reasoning": "mimo-v2.5-pro",
             "fast": "mimo-v2-flash",
+            "vision": "mimo-v2-omni",
         },
         "capabilities": ["chat", "streaming", "openai_compatible", "reasoning", "vision"],
     },
@@ -246,7 +255,8 @@ _CURATED_PROVIDER_METADATA: Dict[str, Dict[str, Any]] = {
         "base_url_envs": ["LONGCAT_BASE_URL"],
         "catalog_only": True,
         "supports_invoke": False,
-        "default_model": "longcat-chat",
+        "default_model": "LongCat-Flash-Chat",
+        "default_base_url": "https://api.longcat.chat/openai/v1",
         "capabilities": ["chat", "streaming"],
     },
     "ollama": {
@@ -328,12 +338,15 @@ _CURATED_PROVIDER_MODELS: Dict[str, List[Dict[str, Any]]] = {
         {"model_id": "large", "name": "Stub Large Model", "type": "chat"},
     ],
     "groq": [
+        {"model_id": "openai/gpt-oss-120b", "name": "GPT OSS 120B via Groq", "type": "reasoning"},
+        {"model_id": "openai/gpt-oss-20b", "name": "GPT OSS 20B via Groq", "type": "reasoning"},
         {"model_id": "llama-3.3-70b-versatile", "name": "Llama 3.3 70B Versatile", "type": "chat"},
-        {"model_id": "qwen-qwq-32b", "name": "QWQ 32B", "type": "reasoning"},
+        {"model_id": "llama-3.1-8b-instant", "name": "Llama 3.1 8B Instant", "type": "chat"},
         {
-            "model_id": "deepseek-r1-distill-llama-70b",
-            "name": "DeepSeek R1 Distill Llama 70B",
-            "type": "reasoning",
+            "model_id": "meta-llama/llama-4-scout-17b-16e-instruct",
+            "name": "Llama 4 Scout 17B 16E Instruct via Groq",
+            "type": "vision",
+            "metadata": {"preview": True, "do_not_use_as_default": True},
         },
     ],
     "mistral": [
@@ -352,13 +365,28 @@ _CURATED_PROVIDER_MODELS: Dict[str, List[Dict[str, Any]]] = {
         {"model_id": "mimo-v2.5-pro", "name": "MiMo V2.5 Pro via Gitlawb OpenGateway", "type": "reasoning"},
         {"model_id": "mimo-v2-flash", "name": "MiMo V2 Flash via Gitlawb OpenGateway", "type": "chat"},
         {
-            "model_id": "google/gemini-3.1-flash-lite-preview",
-            "name": "Gemini 3.1 Flash Lite Preview via Gitlawb OpenGateway",
+            "model_id": "mimo-v2-omni",
+            "name": "MiMo V2 Omni via Gitlawb OpenGateway",
             "type": "chat",
-            "capabilities": ["chat", "streaming", "vision", "reasoning"],
+            "capabilities": ["chat", "streaming", "vision"],
+        },
+        {
+            "model_id": "mimo-v2-pro",
+            "name": "MiMo V2 Pro via Gitlawb OpenGateway",
+            "type": "reasoning",
+            "capabilities": ["chat", "reasoning", "streaming"],
             "supports_thinking": True,
-            "thinking_levels": ["low", "medium", "high"],
-            "default_thinking_level": "high",
+            "thinking_levels": ["low", "medium", "high", "xhigh"],
+            "default_thinking_level": "medium",
+        },
+        {
+            "model_id": "mimo-v2.5",
+            "name": "MiMo V2.5 via Gitlawb OpenGateway",
+            "type": "reasoning",
+            "capabilities": ["chat", "reasoning", "streaming"],
+            "supports_thinking": True,
+            "thinking_levels": ["low", "medium", "high", "xhigh"],
+            "default_thinking_level": "medium",
         },
     ],
     "deepseek": [
@@ -382,7 +410,7 @@ _CURATED_PROVIDER_MODELS: Dict[str, List[Dict[str, Any]]] = {
         }
     ],
     "glm": [{"model_id": "glm-4.5", "name": "GLM 4.5", "type": "chat"}],
-    "longcat": [{"model_id": "longcat-chat", "name": "Longcat Chat", "type": "chat"}],
+    "longcat": [{"model_id": "LongCat-Flash-Chat", "name": "LongCat Flash Chat", "type": "chat"}],
     "ollama": [
         {"model_id": "llama3.1:8b", "name": "Llama 3.1 8B", "type": "chat"},
         {"model_id": "qwen2.5-coder:7b", "name": "Qwen 2.5 Coder 7B", "type": "chat"},
@@ -410,7 +438,10 @@ _BEST_MODEL_BY_PROVIDER = {
     "anthropic": "claude-sonnet-4-0",
     "google": "gemini-2.5-pro",
     "genspark": "gpt-5-mini",
-    "groq": "llama-3.3-70b-versatile",
+    "groq": "openai/gpt-oss-120b",
+    "cerebras": "gpt-oss-120b",
+    "nvidia": "nvidia/llama-3.3-nemotron-super-49b-v1",
+    "moonshotai": "kimi-k2-0711-preview",
     "mistral": "mistral-large-latest",
     "xai": "grok-2-latest",
     "openrouter": "tencent/hy3-preview:free",
@@ -420,7 +451,7 @@ _BEST_MODEL_BY_PROVIDER = {
     "together": "llama-3.1-70b-instruct-turbo",
     "fireworks": "accounts/fireworks/models/llama-v3p1-70b-instruct",
     "glm": "glm-4.5",
-    "longcat": "longcat-chat",
+    "longcat": "LongCat-Flash-Chat",
     "ollama": "llama3.1:8b",
     "lmstudio": "deepseek-r1",
     "vllm": "deepseek-r1",
@@ -718,6 +749,8 @@ def _provider_is_configured(entry: Dict[str, Any]) -> tuple[bool, Optional[str]]
             return True, env_name
     if entry.get("kind") == "local" and entry.get("default_base_url"):
         return True, "default_local_endpoint"
+    if not bool(entry.get("credential_required", True)) and entry.get("default_base_url"):
+        return True, "no_key_gateway"
     if entry["provider_id"] == "stub":
         return True, "builtin"
     return False, None
@@ -778,6 +811,9 @@ def get_provider_catalog(active_provider_ids=None):
                     "default_model_for": dict(entry.get("default_model_for", {})),
                     "adapter": entry.get("adapter", ""),
                     "entrypoint": entry.get("entrypoint", ""),
+                    "config": dict(entry.get("manifest", {}).get("config", {}))
+                    if isinstance(entry.get("manifest", {}).get("config"), dict)
+                    else {},
                     "catalog_source": entry.get("catalog_source", ""),
                     "curated_fallback_used": bool(entry.get("curated_fallback_used", False)),
                     "manifest_path": entry.get("manifest", {}).get("source_path")
@@ -997,6 +1033,8 @@ def build_profile_catalog(active_provider_ids=None, custom_profiles=None):
             "provider_count_for_model_name": model["provider_count_for_model_name"],
             "disambiguated_name": model["disambiguated_name"],
             "type": model.get("type", "chat"),
+            "context_window": int(model.get("context_window", 0) or 0),
+            "capabilities": list(model.get("capabilities", [])),
             "defaults": dict(model.get("defaults", {})) if isinstance(model.get("defaults"), dict) else {},
             "pricing": dict(model.get("pricing", {})) if isinstance(model.get("pricing"), dict) else {},
             "metadata": metadata,

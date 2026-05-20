@@ -1,4 +1,5 @@
 import { conversationArtifactFileUrl, type ChatActivityEvent, type ToolLogEntry } from "./api";
+import { boundedDurationLabel, elapsedDurationLabel, formatCompactDuration } from "./duration";
 
 export type ToolActivityStatus = "running" | "completed" | "failed";
 
@@ -11,6 +12,7 @@ export type ToolActivityItem = {
   input: string;
   title: string;
   detail: string;
+  durationLabel?: string;
   nextStep?: string;
   status: ToolActivityStatus;
   timestamp?: number | string;
@@ -296,8 +298,34 @@ function statusForEvent(event: ChatActivityEvent): ToolActivityStatus {
   return "running";
 }
 
+function isStartEvent(event: ChatActivityEvent): boolean {
+  return (
+    event.type === "tool_call" ||
+    event.type === "tool_call_started" ||
+    event.phase === "tool_call" ||
+    event.phase === "tool_call_started"
+  );
+}
+
+function isEndEvent(event: ChatActivityEvent): boolean {
+  return (
+    event.type === "tool_call_completed" ||
+    event.type === "tool_result" ||
+    event.phase === "tool_call_completed" ||
+    event.phase === "tool_result"
+  );
+}
+
 function mergeActivityEvents(base: ChatActivityEvent, update: ChatActivityEvent): ChatActivityEvent {
   const merged: ChatActivityEvent = { ...base, ...update };
+  const baseStartedAt = base.started_at ?? base.startedAt ?? (isStartEvent(base) ? base.timestamp : undefined);
+  const updateStartedAt = update.started_at ?? update.startedAt ?? (isStartEvent(update) ? update.timestamp : undefined);
+  const baseCompletedAt = base.completed_at ?? base.completedAt ?? (isEndEvent(base) ? base.timestamp : undefined);
+  const updateCompletedAt = update.completed_at ?? update.completedAt ?? (isEndEvent(update) ? update.timestamp : undefined);
+  const startedAt = baseStartedAt ?? updateStartedAt;
+  const completedAt = updateCompletedAt ?? baseCompletedAt;
+  if (startedAt !== undefined) merged.started_at = startedAt;
+  if (completedAt !== undefined) merged.completed_at = completedAt;
   for (const key of ["arguments", "result", "artifact", "artifacts", "output", "message", "timestamp"]) {
     if (merged[key] === undefined && base[key] !== undefined) {
       merged[key] = base[key];
@@ -308,6 +336,23 @@ function mergeActivityEvents(base: ChatActivityEvent, update: ChatActivityEvent)
 
 function resultValueForEvent(event: ChatActivityEvent): unknown {
   return event.result ?? event.output ?? event.artifact ?? event.artifacts;
+}
+
+function durationLabelFromLog(log: ToolLogEntry): string {
+  const result = isRecord(log.result) ? log.result : {};
+  const data = isRecord(result.data) ? result.data : result;
+  const directMs = Number(data.duration_ms ?? data.elapsed_ms ?? result.duration_ms ?? result.elapsed_ms);
+  if (Number.isFinite(directMs) && directMs >= 0) return formatCompactDuration(directMs);
+  const seconds = Number(data.duration_seconds ?? data.elapsed_seconds ?? result.duration_seconds ?? result.elapsed_seconds);
+  if (Number.isFinite(seconds) && seconds >= 0) return formatCompactDuration(seconds * 1000);
+  return boundedDurationLabel(data.started_at ?? result.started_at, data.completed_at ?? data.finished_at ?? result.completed_at ?? result.finished_at);
+}
+
+function durationLabelFromEvent(event: ChatActivityEvent, status: ToolActivityStatus, now = Date.now()): string {
+  const startedAt = event.started_at ?? event.startedAt ?? (isStartEvent(event) ? event.timestamp : undefined);
+  const completedAt = event.completed_at ?? event.completedAt ?? (isEndEvent(event) ? event.timestamp : undefined);
+  if (status === "running") return elapsedDurationLabel(startedAt, now);
+  return boundedDurationLabel(startedAt, completedAt);
 }
 
 function collectEventArtifacts(event: ChatActivityEvent, conversationId?: string): ToolActivityArtifact[] {
@@ -323,7 +368,7 @@ function collectEventArtifacts(event: ChatActivityEvent, conversationId?: string
 export function buildToolActivityGroups(
   toolLogs: ToolLogEntry[] = [],
   events: ChatActivityEvent[] = [],
-  options: { conversationId?: string } = {},
+  options: { conversationId?: string; now?: number } = {},
 ): ToolActivityGroup[] {
   const items = buildToolActivityItems(toolLogs, events, options);
   const byFolder = new Map<string, ToolActivityGroup>();
@@ -341,7 +386,7 @@ export function buildToolActivityGroups(
 export function buildToolActivityItems(
   toolLogs: ToolLogEntry[] = [],
   events: ChatActivityEvent[] = [],
-  options: { conversationId?: string } = {},
+  options: { conversationId?: string; now?: number } = {},
 ): ToolActivityItem[] {
   const fromLogs = toolLogs
     .filter((log) => typeof log.tool_name === "string" && log.tool_name.trim())
@@ -362,6 +407,7 @@ export function buildToolActivityItems(
         input: argumentSummary,
         title: argumentSummary ? `${folder.label} / ${toolName}: ${argumentSummary}` : `${folder.label} / ${toolName}`,
         detail: resultSummary,
+        durationLabel: durationLabelFromLog(log),
         nextStep: undefined,
         status: statusForLog(log),
         timestamp: log.timestamp,
@@ -413,6 +459,7 @@ export function buildToolActivityItems(
         input: argumentSummary,
         title: argumentSummary ? `${folder.label} / ${toolName}: ${argumentSummary}` : `${folder.label} / ${toolName}`,
         detail: explicitSummary || resultSummary || fallbackDetail,
+        durationLabel: durationLabelFromEvent(event, status, options.now),
         nextStep: pickString(event, ["next_step", "nextStep"]),
         status,
         timestamp: event.timestamp,

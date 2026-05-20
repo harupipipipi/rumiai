@@ -226,6 +226,8 @@ class OpenAICompatibleProvider(OpenAIProvider):
         headers = dict(self._extra_headers)
         if self._api_key:
             headers["Authorization"] = "Bearer " + self._api_key
+        headers.setdefault("User-Agent", "RumiAI/1.0")
+        headers.setdefault("Accept", "application/json")
         if content_type:
             headers["Content-Type"] = content_type
         return headers

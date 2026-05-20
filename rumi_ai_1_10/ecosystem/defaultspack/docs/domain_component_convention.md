@@ -123,7 +123,7 @@ Examples:
 - provider id: `gitlawb-opengateway`
 - model ids: `gitlawb-opengateway/mimo-v2.5-pro`,
   `gitlawb-opengateway/mimo-v2-flash`,
-  `gitlawb-opengateway/google/gemini-3.1-flash-lite-preview`
+  `gitlawb-opengateway/mimo-v2-omni`
 
 ## Route Metadata
 

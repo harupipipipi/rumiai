@@ -31,6 +31,11 @@ def run(input_data, context):
                 api_id,
                 name,
                 new_api_id=new_api_id or None,
+                base_url=(input_data or {}).get("base_url"),
+                allowed_models=(input_data or {}).get("allowed_models"),
+                default_model=(input_data or {}).get("default_model"),
+                notes=(input_data or {}).get("notes"),
+                quota_label=(input_data or {}).get("quota_label"),
             )
         else:
             value = str((input_data or {}).get("value", ""))
@@ -39,6 +44,11 @@ def run(input_data, context):
                 value,
                 api_id=api_id or None,
                 name=name or None,
+                base_url=(input_data or {}).get("base_url"),
+                allowed_models=(input_data or {}).get("allowed_models"),
+                default_model=(input_data or {}).get("default_model"),
+                notes=(input_data or {}).get("notes"),
+                quota_label=(input_data or {}).get("quota_label"),
             )
         if not result.get("success"):
             return error(result.get("error") or "failed to save api key", "API_KEY_SAVE_FAILED")

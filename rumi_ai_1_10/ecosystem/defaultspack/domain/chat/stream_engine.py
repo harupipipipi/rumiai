@@ -37,7 +37,7 @@ from domain.chat.store import ChatStore
 from domain.dev.inspector import Inspector
 from domain.stream.events import run_event, to_legacy_chat_stream_event
 from domain.tool.executor import ToolExecutor
-from domain.tool.schema_adapter import build_tool_execution_context, max_tool_calls
+from domain.tool.schema_adapter import build_tool_execution_context, max_tool_calls, tool_name_from_definition
 
 
 class _ChatCancelled(Exception):
@@ -545,6 +545,7 @@ class ChatRunEngine:
                     "request_id": prepared.request_id,
                     "stream_mode": stream_mode,
                     "model_routing": prepared.model_routing,
+                    "chat_references": dict(prepared.chat_references or {}),
                 },
                 message="chat run started",
             )
@@ -680,6 +681,14 @@ class ChatRunEngine:
                 data={"message": stored},
                 message="assistant message completed",
             )
+            steer_processed = self._process_conversation_steer(prepared.conversation_id, context or {})
+            if steer_processed:
+                yield self._emit(
+                    "status",
+                    data={"processed": steer_processed},
+                    message="次の steer を送信しました",
+                    phase="conversation_steer",
+                )
             yield self._emit(
                 "done",
                 data={"message": stored},
@@ -688,6 +697,23 @@ class ChatRunEngine:
         finally:
             self._cancel_event.set()
             cancellation_registry.unregister(prepared.conversation_id, request_cancel)
+
+    def _process_conversation_steer(self, conversation_id: str, context: dict[str, Any]) -> list[dict[str, Any]]:
+        try:
+            from domain.chat.steer import ConversationSteerStore
+
+            return ConversationSteerStore().process_for_conversation(
+                conversation_id,
+                context=context,
+            )
+        except Exception as exc:
+            self._emit(
+                "status",
+                data={"error": str(exc)},
+                message="conversation steer の処理に失敗しました",
+                phase="conversation_steer_failed",
+            )
+            return []
 
     def _execute(self, prepared: PreparedChatRun, draft: _AssistantDraft | None) -> Iterator[dict[str, Any]]:
         working_messages = list(prepared.standard_messages)
@@ -709,6 +735,8 @@ class ChatRunEngine:
 
         for step_index in range(max(1, tool_limit + 1)):
             self._raise_if_cancelled()
+            for event in self._inject_conversation_steer(prepared.conversation_id, working_messages):
+                yield event
             response, tool_uses = yield from self._model_turn(prepared, working_messages, draft)
             if tool_uses and step_index >= tool_limit:
                 response = {
@@ -834,6 +862,35 @@ class ChatRunEngine:
             "AI provider did not return a response",
             prepared.params,
             events=list(self._activity_events),
+        )
+
+    def _inject_conversation_steer(self, conversation_id: str, working_messages: list[dict[str, Any]]) -> Iterator[dict[str, Any]]:
+        try:
+            from domain.chat.steer import ConversationSteerStore
+
+            items = ConversationSteerStore().consume_for_conversation(conversation_id)
+        except Exception as exc:
+            yield self._emit(
+                "status",
+                data={"error": str(exc)},
+                message="conversation steer の取得に失敗しました",
+                phase="conversation_steer_failed",
+            )
+            return
+        prompts = [str(item.get("prompt") or "").strip() for item in items if isinstance(item, dict) and str(item.get("prompt") or "").strip()]
+        if not prompts:
+            return
+        working_messages.append(
+            {
+                "role": "user",
+                "content": "[RUNTIME INSTRUCTION - User steering while the task is running]\n" + "\n\n".join(prompts),
+            }
+        )
+        yield self._emit(
+            "status",
+            data={"processed": items},
+            message="ステアを次の判断に反映しました",
+            phase="conversation_steer",
         )
 
     def _model_turn(
@@ -1115,19 +1172,42 @@ class ChatRunEngine:
             metadata["empty_ai_response"] = True
             finalized["metadata"] = metadata
         metadata = dict(finalized.get("metadata") or {})
+        requested_tools = list(prepared.tools_called or [])
+        attached_provider_tools = [
+            name
+            for name in (tool_name_from_definition(tool) for tool in prepared.provider_tools)
+            if name
+        ]
+        executed_tools: list[str] = []
+        for log in self._tool_logs:
+            tool_name = str(log.get("tool_name") or "").strip()
+            if tool_name and tool_name not in executed_tools:
+                executed_tools.append(tool_name)
+        model_warnings: list[str] = []
+        if isinstance(prepared.model_routing, dict) and isinstance(prepared.model_routing.get("warnings"), list):
+            model_warnings = [str(item) for item in prepared.model_routing.get("warnings", [])]
         metadata.update(
             {
                 "model": prepared.model,
                 "attached_tool_count": len(prepared.provider_tools),
-                "attached_tools": list(prepared.tools_called),
+                "requested_tools": requested_tools,
+                "attached_tools": attached_provider_tools,
+                "attached_provider_tools": attached_provider_tools,
+                "executed_tools": executed_tools,
                 "thinking": {
                     "state": "completed" if finalized.get("finish_reason") != "error" else "failed",
                     **({"transcript": "".join(self._thinking_transcript_parts)} if self._thinking_transcript_parts else {}),
                 },
                 "thinking_level": prepared.params.get("thinking_level"),
                 "model_routing": dict(prepared.model_routing or {}),
+                "chat_references": dict(prepared.chat_references or {}),
             }
         )
+        if "selected_model_does_not_support_tool_calling" in model_warnings:
+            metadata["tool_calling_unverified"] = True
+            metadata["tool_calling_unavailable_reason"] = "selected_model_does_not_support_tool_calling"
+        if prepared.matched_skills:
+            metadata["matched_skill_instructions"] = list(prepared.matched_skills)
         finalized["metadata"] = metadata
         finalized["events"] = list(self._activity_events)
         finalized["tool_logs"] = list(self._tool_logs)
@@ -1235,6 +1315,8 @@ class ChatRunEngine:
                     "unknown_selected_tools": unknown_selected_tools,
                     "knowledge_results": enrich_info.get("knowledge_results", []),
                     "memory_results": enrich_info.get("memory_results", []),
+                    "chat_references": dict(prepared.chat_references or {}),
+                    "matched_skill_instructions": list(prepared.matched_skills or []),
                     "finish_reason": response.get("finish_reason"),
                     "usage": usage,
                     "metadata": metadata,

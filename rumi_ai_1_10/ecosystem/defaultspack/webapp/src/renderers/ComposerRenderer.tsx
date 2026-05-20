@@ -1,8 +1,8 @@
 import {
-  ArrowUp,
   Bot,
   ChevronDown,
   Code2,
+  CornerDownRight,
   File,
   FileText,
   Folder,
@@ -10,16 +10,11 @@ import {
   KeyRound,
   Loader2,
   MessageSquare,
-  Mic,
   MousePointerClick,
-  Paperclip,
   PanelRightOpen,
-  Plus,
-  RefreshCw,
   Search,
   SlidersHorizontal,
   Sparkles,
-  Square,
   Wrench,
   X,
 } from "lucide-react";
@@ -35,11 +30,12 @@ import type {
   ToolGroup,
 } from "./types";
 import type { ModelCommandCandidate, ModelProfile } from "../lib/api";
-import { CodingCommandPanel } from "../components/coding/CodingCommandPanel";
 import { CodingWorkspaceBadge } from "../components/coding/CodingWorkspaceBadge";
 import { CodingWorkspacePicker } from "../components/coding/CodingWorkspacePicker";
+import { WarmActionIcon } from "../components/WarmActionIcon";
 import { fileToAttachment } from "../lib/attachments";
 import { resolveComposerWidgetDrop } from "../lib/composerWidgets";
+import { HISTORY_CHAT_DROP_MIME, parseHistoryChatDrop } from "../lib/historyComposer";
 import { sortedToolGroups, toolGroupFor } from "../lib/toolUi";
 
 export { resolveComposerWidgetDrop } from "../lib/composerWidgets";
@@ -136,6 +132,21 @@ function compactProfileName(name: string): string {
     .trim();
 }
 
+function steerStatusLabel(status: string | undefined): string {
+  switch (String(status || "").toLowerCase()) {
+    case "queued":
+      return "待機中";
+    case "injected":
+      return "反映済み";
+    case "sending":
+      return "送信中";
+    case "sent":
+      return "送信済み";
+    default:
+      return "ステア";
+  }
+}
+
 function capabilityBadges(profile: ModelProfile | null | undefined): string[] {
   if (!profile) return [];
   const badges: string[] = [];
@@ -220,6 +231,24 @@ function DroppedWidgetChip({
   onAction?: (widget: DroppedWidget) => void;
   onToggle?: (id: string) => void;
 }) {
+  if (widget.type === "conversation") {
+    return (
+      <button
+        type="button"
+        title={widget.description ?? widget.label}
+        onClick={() => onToggle?.(widget.id)}
+        className={`inline-flex max-w-[220px] items-center gap-1 rounded-md border px-2 py-0.5 text-[11px] transition-colors ${
+          widget.enabled === false
+            ? "border-zinc-700/60 bg-zinc-800/50 text-zinc-500"
+            : "border-amber-500/30 bg-amber-500/10 text-amber-200 hover:bg-amber-500/15"
+        }`}
+      >
+        <MessageSquare size={10} />
+        <span className="truncate">{widget.label}</span>
+      </button>
+    );
+  }
+
   if (widget.widgetKind !== "tool_toggle" && widget.type !== "tool") {
     const Icon = widget.widgetKind === "button"
       ? MousePointerClick
@@ -756,6 +785,10 @@ export function ComposerRenderer({
   droppedWidgets = [],
   selectedToolIds = [],
   keyboardButtonNavigation = false,
+  steerStatus = null,
+  steerBusy = false,
+  steerQueuedCount = 0,
+  steerPreviewItems = [],
   onExtensionSelect,
   onCommandSelect,
   onModelCommandCandidateSelect,
@@ -766,6 +799,7 @@ export function ComposerRenderer({
   onInputChange,
   onSubmit,
   onStopGenerating,
+  onSteerSubmit,
   onModeChange,
   onFileAttach,
   onAtFileAttach,
@@ -790,13 +824,13 @@ export function ComposerRenderer({
   const [modeSelectorOpen, setModeSelectorOpen] = useState(false);
   const [atMentionOpen, setAtMentionOpen] = useState(false);
   const [atMentionQuery, setAtMentionQuery] = useState("");
-  const [newBranchName, setNewBranchName] = useState("");
   const [selectedCommandIndex, setSelectedCommandIndex] = useState(0);
   const [selectedModelCandidateIndex, setSelectedModelCandidateIndex] = useState(0);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const menuButtonRef = useRef<HTMLButtonElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const submitPointerHandledRef = useRef(false);
   const lastModelPickerRequestIdRef = useRef(modelPickerRequestId);
   const chromeButtonTabIndex = keyboardButtonNavigation ? undefined : -1;
   const profileName = profileDisplayName(selectedProfile);
@@ -826,12 +860,13 @@ export function ComposerRenderer({
   const activeToolGroup = toolGroups.find((group) => group.id === openToolGroup) ?? toolGroups[0] ?? null;
   const showToolGroups = toolItems.length > 4;
   const isEscapedSlash = input.startsWith("//");
-  const slashText = input.startsWith("/") && !isEscapedSlash ? input.slice(1) : "";
+  const isSteerMode = isGenerating && !isNewConversation;
+  const slashText = !isSteerMode && input.startsWith("/") && !isEscapedSlash ? input.slice(1) : "";
   const slashCommandName = slashText.trimStart().split(/\s+/, 1)[0] ?? "";
   const slashQuery = slashCommandName.toLowerCase();
   const thinkingCommand = commands.find((command) => command.id === "think");
-  const thinkingMatch = input.startsWith("/") && !isEscapedSlash ? thinkingCommandMatch(input) : null;
-  const matchedCommands = input.startsWith("/") && !isEscapedSlash
+  const thinkingMatch = !isSteerMode && input.startsWith("/") && !isEscapedSlash ? thinkingCommandMatch(input) : null;
+  const matchedCommands = !isSteerMode && input.startsWith("/") && !isEscapedSlash
     ? thinkingMatch && thinkingCommand && levels.length > 0
       ? levels
           .filter((level) => !thinkingMatch.query || level.toLowerCase().includes(thinkingMatch.query))
@@ -848,8 +883,11 @@ export function ComposerRenderer({
         })
     : [];
   const showThinkingLevelChips = Boolean(thinkingMatch && thinkingCommand && levels.length > 0);
-  const hasModelCommandCandidates = modelCommandCandidates.length > 0;
+  const hasModelCommandCandidates = !isSteerMode && modelCommandCandidates.length > 0;
   const showCommandSuggestions = !hasModelCommandCandidates && matchedCommands.length > 0;
+  const visibleSteerPreviewItems = steerPreviewItems.filter((item) => (
+    item.visible !== false && String(item.prompt ?? "").trim()
+  ));
   const currentModeMeta = MODE_META[mode];
   const ModeIcon = currentModeMeta.icon;
   const directoryEntries = (codingContext?.entries ?? []).filter((entry) => entry.is_dir);
@@ -1079,6 +1117,13 @@ export function ComposerRenderer({
         return;
       }
 
+      const historyData = event.dataTransfer.getData(HISTORY_CHAT_DROP_MIME);
+      if (historyData) {
+        const widget = parseHistoryChatDrop(historyData);
+        if (widget) onDropWidget?.(widget);
+        return;
+      }
+
       const data = event.dataTransfer.getData("application/rumi-widget");
       if (data) {
         try {
@@ -1105,10 +1150,15 @@ export function ComposerRenderer({
   }, []);
 
   const handleSubmitWithApiKeyGuard = useCallback(
-    (event: React.FormEvent) => {
+    (event: React.SyntheticEvent) => {
       if (isGenerating) {
         event.preventDefault();
-        onStopGenerating?.();
+        const prompt = input.trim();
+        if (prompt && !steerBusy) {
+          onSteerSubmit?.(prompt);
+        } else if (!prompt) {
+          onStopGenerating?.();
+        }
         return;
       }
       if (needsApiKey(selectedProfile)) {
@@ -1118,7 +1168,39 @@ export function ComposerRenderer({
       }
       onSubmit(event);
     },
-    [isGenerating, needsApiKey, onStopGenerating, onSubmit, selectedProfile],
+    [input, isGenerating, needsApiKey, onStopGenerating, onSteerSubmit, onSubmit, selectedProfile, steerBusy],
+  );
+
+  const handleSendButtonPointerDown = useCallback(
+    (event: React.PointerEvent<HTMLButtonElement>) => {
+      if (event.button !== 0) return;
+      if (!isGenerating && !input.trim() && attachedFiles.length === 0) return;
+      if (isGenerating && !input.trim()) return;
+      submitPointerHandledRef.current = true;
+      handleSubmitWithApiKeyGuard(event);
+    },
+    [attachedFiles.length, handleSubmitWithApiKeyGuard, input, isGenerating],
+  );
+
+  const handleSendButtonClick = useCallback(
+    (event: React.MouseEvent<HTMLButtonElement>) => {
+      if (submitPointerHandledRef.current) {
+        submitPointerHandledRef.current = false;
+        event.preventDefault();
+        return;
+      }
+      if (isGenerating) {
+        event.preventDefault();
+        if (input.trim()) {
+          handleSubmitWithApiKeyGuard(event);
+        } else {
+          onStopGenerating?.();
+        }
+        return;
+      }
+      handleSubmitWithApiKeyGuard(event);
+    },
+    [handleSubmitWithApiKeyGuard, input, isGenerating, onStopGenerating],
   );
 
   const handleKeyDown = useCallback(
@@ -1128,12 +1210,14 @@ export function ComposerRenderer({
         return;
       }
 
-      const modelCandidateAction = modelCandidateMenuKeyAction(
-        event.key,
-        event.shiftKey,
-        selectedModelCandidateIndex,
-        modelCommandCandidates.length,
-      );
+      const modelCandidateAction = isSteerMode
+        ? { handled: false as const }
+        : modelCandidateMenuKeyAction(
+            event.key,
+            event.shiftKey,
+            selectedModelCandidateIndex,
+            modelCommandCandidates.length,
+          );
       if (modelCandidateAction.handled) {
         event.preventDefault();
         if (modelCandidateAction.type === "move") {
@@ -1143,6 +1227,12 @@ export function ComposerRenderer({
         } else if (modelCandidateAction.type === "close") {
           onModelCommandCandidatesClose?.();
         }
+        return;
+      }
+
+      if (event.key === "Enter" && !event.shiftKey && isSteerMode) {
+        event.preventDefault();
+        handleSubmitWithApiKeyGuard(event);
         return;
       }
 
@@ -1177,6 +1267,7 @@ export function ComposerRenderer({
     [
       chooseModelCommandCandidate,
       handleSubmitWithApiKeyGuard,
+      isSteerMode,
       matchedCommands,
       modelCommandCandidates,
       onModelCommandCandidatesClose,
@@ -1471,22 +1562,57 @@ export function ComposerRenderer({
             </div>
           )}
 
+          {!isNewConversation && visibleSteerPreviewItems.length > 0 && (
+            <div className="mx-3 mt-3 overflow-hidden rounded-t-2xl border border-zinc-700/60 bg-[#262627] shadow-sm max-[640px]:mx-2 max-[640px]:mt-2">
+              <div className="flex min-h-8 items-center justify-between gap-2 border-b border-zinc-700/45 px-3 py-1.5 max-[640px]:px-2">
+                <div className="flex min-w-0 items-center gap-2 text-zinc-400">
+                  <CornerDownRight size={14} className="flex-shrink-0 text-zinc-500" />
+                  <span className="truncate text-[12px] font-medium text-zinc-300">これがステア</span>
+                  {visibleSteerPreviewItems.length > 1 && (
+                    <span className="rounded-full border border-zinc-700 px-1.5 py-0.5 text-[9px] leading-none text-zinc-500">
+                      {visibleSteerPreviewItems.length}
+                    </span>
+                  )}
+                </div>
+                <div className="flex flex-shrink-0 items-center gap-1.5 text-[10px] text-zinc-500">
+                  {steerBusy && <Loader2 size={11} className="animate-spin" />}
+                  {steerStatus && <span className="max-w-[160px] truncate">{steerStatus}</span>}
+                </div>
+              </div>
+              <div className="grid gap-1.5 px-3 py-2 max-[640px]:px-2">
+                {visibleSteerPreviewItems.map((item) => (
+                  <div key={item.id} className="grid gap-1 rounded-lg bg-zinc-950/35 px-2.5 py-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="rounded border border-zinc-700/70 px-1.5 py-0.5 text-[9px] leading-none text-zinc-500">
+                        {steerStatusLabel(item.status)}
+                      </span>
+                    </div>
+                    <div className="max-h-20 overflow-y-auto whitespace-pre-wrap break-words text-[12px] leading-5 text-zinc-300">
+                      {String(item.prompt ?? "").trim()}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           <textarea
             ref={textareaRef}
             autoFocus
             value={input}
             onChange={(event) => handleInputChange(event.target.value)}
             placeholder={
-              mode === "coding"
+              isSteerMode
+                ? "実行中のAIへステアを入力..."
+                : mode === "coding"
                 ? "コーディング指示を入力... (@ でファイル添付)"
                 : placeholder
             }
-            disabled={isGenerating}
             className={`${
               isNewConversation
                 ? "rumi-composer-input-new min-h-[54px] px-6 pt-4 text-[18px] font-medium leading-[1.5] placeholder:text-zinc-500"
                 : "min-h-[34px] px-5 pt-3 text-[15px] max-[640px]:min-h-[32px] max-[640px]:px-3 max-[640px]:pt-2.5 max-[640px]:pb-0 max-[640px]:text-[13px]"
-            } rumi-composer-textarea w-full select-text bg-transparent border-none outline-none text-zinc-100 pb-0 resize-none max-h-[130px] disabled:opacity-50`}
+            } rumi-composer-textarea w-full select-text bg-transparent border-none outline-none text-zinc-100 pb-0 resize-none max-h-[130px]`}
             onKeyDownCapture={(event) => {
               if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "a") {
                 event.stopPropagation();
@@ -1494,6 +1620,24 @@ export function ComposerRenderer({
             }}
             onKeyDown={handleKeyDown}
           />
+
+          {isSteerMode && (
+            <div className="flex min-h-5 items-center gap-2 px-5 pt-1 text-[10px] leading-none text-zinc-500 max-[640px]:px-3">
+              <CornerDownRight size={12} className="flex-shrink-0" />
+              <span className="truncate">
+                {input.trim() ? "Enterでステアを送信" : "AI実行中。入力するとステアになります"}
+              </span>
+              {steerBusy && <Loader2 size={11} className="flex-shrink-0 animate-spin" />}
+              {steerQueuedCount > 0 && (
+                <span className="flex-shrink-0 rounded-full border border-zinc-700 px-1.5 py-0.5 text-[9px] leading-none">
+                  {steerQueuedCount}件待機
+                </span>
+              )}
+              {steerStatus && (
+                <span className="min-w-0 truncate text-zinc-600">{steerStatus}</span>
+              )}
+            </div>
+          )}
 
           <input
             ref={fileInputRef}
@@ -1538,7 +1682,7 @@ export function ComposerRenderer({
                 onClick={() => setMenuOpen((value) => !value)}
                 className="h-8 w-8 flex flex-shrink-0 items-center justify-center text-zinc-400 hover:text-zinc-100 hover:bg-zinc-700/60 rounded-lg transition-colors disabled:opacity-50"
               >
-                <Plus size={18} />
+                <WarmActionIcon kind="menu" size="md" />
               </button>
                       <button
                         type="button"
@@ -1552,7 +1696,7 @@ export function ComposerRenderer({
                     : "text-zinc-400 hover:text-zinc-100 hover:bg-zinc-700/60"
                 } h-8 w-8 flex flex-shrink-0 items-center justify-center rounded-lg transition-colors disabled:opacity-50`}
               >
-                <Paperclip size={16} />
+                <WarmActionIcon kind="attach" size="md" />
               </button>
                       <button
                         type="button"
@@ -1561,7 +1705,7 @@ export function ComposerRenderer({
                 title="音声入力"
                 className="h-8 w-8 flex flex-shrink-0 items-center justify-center text-zinc-400 hover:text-zinc-100 hover:bg-zinc-700/60 rounded-lg transition-colors disabled:opacity-50 max-[640px]:hidden"
               >
-                <Mic size={16} />
+                <WarmActionIcon kind="mic" size="md" />
               </button>
 
               <div className="group/mode relative flex">
@@ -1681,19 +1825,22 @@ export function ComposerRenderer({
                 )}
               </div>
                       <button
-                        type={isGenerating ? "button" : "submit"}
+                        type="button"
                         tabIndex={chromeButtonTabIndex}
                         disabled={!isGenerating && (!input.trim() && attachedFiles.length === 0)}
-                onClick={isGenerating ? onStopGenerating : undefined}
-                title={isGenerating ? "停止" : "送信"}
+                onPointerDown={handleSendButtonPointerDown}
+                onClick={handleSendButtonClick}
+                title={isGenerating ? (input.trim() ? "ステアを送る" : "停止") : "送信"}
                 className={`rumi-send-button ${
                   isNewConversation ? "h-9 w-9" : "w-8 h-8 max-[640px]:h-7 max-[640px]:w-7"
                 } flex flex-shrink-0 items-center justify-center bg-zinc-200 text-black rounded-lg disabled:opacity-30 disabled:cursor-not-allowed hover:bg-white shadow-sm transition-colors`}
               >
-                {isGenerating ? (
-                  <Square size={13} fill="currentColor" strokeWidth={2.2} />
+                {isGenerating && !input.trim() ? (
+                  <WarmActionIcon kind="stop" size={isNewConversation ? "lg" : "md"} className="shadow-none ring-0" />
+                ) : isGenerating ? (
+                  <CornerDownRight size={15} strokeWidth={2.4} />
                 ) : (
-                  <ArrowUp size={16} strokeWidth={2.4} />
+                  <WarmActionIcon kind="send" size={isNewConversation ? "lg" : "md"} className="shadow-none ring-0" />
                 )}
               </button>
             </div>
@@ -1710,11 +1857,6 @@ export function ComposerRenderer({
                 onTrust={onCodingWorkspaceTrust}
                 onCreate={onCodingWorkspaceCreate}
                 onRefresh={onCodingWorkspacesRefresh}
-              />
-              <CodingCommandPanel
-                commands={commands}
-                disabled={isGenerating}
-                onRunCommand={onCommandSelect}
               />
               <span className="inline-flex min-w-0 items-center gap-1">
                 <GitBranch size={11} />
@@ -1736,38 +1878,6 @@ export function ComposerRenderer({
                   <span className="font-mono">{codingContext.branch ?? "no git"}</span>
                 )}
               </span>
-              <form
-                className="inline-flex items-center gap-1"
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  const branch = newBranchName.trim();
-                  if (!branch) return;
-                  onCodingBranchSwitch?.(branch, true);
-                  setNewBranchName("");
-                }}
-              >
-                <input
-                  value={newBranchName}
-                  onChange={(event) => setNewBranchName(event.target.value)}
-                  disabled={isGenerating}
-                  placeholder="new branch"
-                  className="h-6 w-24 rounded-md border border-zinc-800 bg-zinc-900/40 px-2 font-mono text-[11px] text-zinc-300 outline-none placeholder:text-zinc-700 focus:border-zinc-600 disabled:opacity-50"
-                />
-                <button
-                  type="submit"
-                  disabled={isGenerating || !newBranchName.trim()}
-                  title="ブランチを作成して切り替え"
-                  className="flex h-6 w-6 items-center justify-center rounded-md text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200 disabled:opacity-40"
-                >
-                  <Plus size={12} />
-                </button>
-              </form>
-              {codingContext.rootFolder && (
-                <span className="inline-flex min-w-0 items-center gap-1">
-                  <Folder size={11} />
-                  <span className="max-w-[200px] truncate font-mono">{codingContext.rootFolder}</span>
-                </span>
-              )}
               <span className="inline-flex items-center gap-1">
                 <FileText size={11} />
                 <select
@@ -1784,17 +1894,7 @@ export function ComposerRenderer({
                     </option>
                   ))}
                 </select>
-                <span>{codingContext.files.length} files</span>
               </span>
-              <button
-                type="button"
-                onClick={onCodingContextRefresh}
-                disabled={isGenerating}
-                title="coding context を更新"
-                className="flex h-6 w-6 items-center justify-center rounded-md text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200 disabled:opacity-40"
-              >
-                <RefreshCw size={12} />
-              </button>
             </div>
           )}
         </form>

@@ -47,3 +47,76 @@ def test_router_returns_bridge_plan_when_no_vision_model_available():
 
     assert decision.bridge_required is True
     assert decision.bridge_plan["type"] == "vision_bridge"
+
+
+def test_router_honors_explicit_model_outside_active_group():
+    from domain.ai_client.model_router import ModelRoutingRequest, route_model_request
+
+    profiles = [
+        {"profile_id": "google/gemini", "qualified_model_id": "google/gemini", "provider_id": "google", "model_id": "gemini", "type": "chat", "configured": True, "supports_vision": True, "supports_tool_calling": True, "supports_thinking": True, "speed_tier": "balanced", "knowledge_level": 85},
+        {"profile_id": "gitlawb-opengateway/mimo-v2-omni", "qualified_model_id": "gitlawb-opengateway/mimo-v2-omni", "provider_id": "gitlawb-opengateway", "model_id": "mimo-v2-omni", "type": "chat", "configured": True, "supports_vision": True, "supports_tool_calling": False, "supports_thinking": False, "speed_tier": "balanced", "knowledge_level": 75},
+    ]
+    decision = route_model_request(
+        ModelRoutingRequest(
+            has_images=False,
+            requested_thinking_level="high",
+            preferred_model="gitlawb-opengateway/mimo-v2-omni",
+            preferred_group="default",
+            auto_route_within_group=True,
+            settings={"model_groups": {"default": {"allowed_models": ["google/gemini"]}}},
+        ),
+        profiles=profiles,
+    )
+
+    assert decision.selected_model == "gitlawb-opengateway/mimo-v2-omni"
+    assert "thinking_level_normalized" in decision.reason_codes
+
+
+def test_router_honors_explicit_concrete_model_when_tools_are_requested():
+    from domain.ai_client.model_router import ModelRoutingRequest, route_model_request
+
+    profiles = [
+        {"profile_id": "gitlawb-opengateway/mimo-v2-omni", "qualified_model_id": "gitlawb-opengateway/mimo-v2-omni", "provider_id": "gitlawb-opengateway", "model_id": "mimo-v2-omni", "type": "chat", "configured": True, "supports_vision": True, "supports_tool_calling": False, "supports_thinking": False, "speed_tier": "balanced", "knowledge_level": 75},
+        {"profile_id": "google/gemini-2.5-pro", "qualified_model_id": "google/gemini-2.5-pro", "provider_id": "google", "model_id": "gemini-2.5-pro", "type": "chat", "configured": True, "supports_vision": True, "supports_tool_calling": True, "supports_thinking": True, "speed_tier": "fast", "knowledge_level": 95},
+    ]
+    decision = route_model_request(
+        ModelRoutingRequest(
+            requires_tool_calling=True,
+            requested_tools=["browser_computer"],
+            requested_thinking_level="high",
+            preferred_model="gitlawb-opengateway/mimo-v2-omni",
+            preferred_group="default",
+            auto_route_within_group=True,
+            settings={"model_groups": {"default": {"allowed_models": []}}},
+        ),
+        profiles=profiles,
+    )
+
+    assert decision.selected_model == "gitlawb-opengateway/mimo-v2-omni"
+    assert "same_model" in decision.reason_codes
+    assert "routed_within_group" not in decision.reason_codes
+    assert "selected_model_does_not_support_tool_calling" in decision.warnings
+    assert "selected_model_does_not_support_thinking" in decision.warnings
+
+
+def test_router_still_routes_from_default_anchor_for_tools():
+    from domain.ai_client.model_router import ModelRoutingRequest, route_model_request
+
+    profiles = [
+        {"profile_id": "stub/default", "qualified_model_id": "stub/default", "provider_id": "stub", "model_id": "default", "type": "chat", "configured": True, "supports_vision": False, "supports_tool_calling": False, "supports_thinking": False, "speed_tier": "fast", "knowledge_level": 0},
+        {"profile_id": "google/gemini-2.5-pro", "qualified_model_id": "google/gemini-2.5-pro", "provider_id": "google", "model_id": "gemini-2.5-pro", "type": "chat", "configured": True, "supports_vision": True, "supports_tool_calling": True, "supports_thinking": True, "speed_tier": "fast", "knowledge_level": 95},
+    ]
+    decision = route_model_request(
+        ModelRoutingRequest(
+            requires_tool_calling=True,
+            requested_thinking_level="high",
+            preferred_model="stub/default",
+            preferred_group="default",
+            auto_route_within_group=True,
+            settings={"model_groups": {"default": {"allowed_models": []}}},
+        ),
+        profiles=profiles,
+    )
+
+    assert decision.selected_model == "google/gemini-2.5-pro"
+    assert "routed_within_group" in decision.reason_codes

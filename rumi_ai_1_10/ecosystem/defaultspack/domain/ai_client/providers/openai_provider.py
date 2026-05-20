@@ -39,6 +39,8 @@ class OpenAIProvider(BaseProvider):
     def _headers(self, content_type="application/json"):
         h = {
             "Authorization": "Bearer " + self._api_key,
+            "User-Agent": "RumiAI/1.0",
+            "Accept": "application/json",
         }
         if content_type:
             h["Content-Type"] = content_type
