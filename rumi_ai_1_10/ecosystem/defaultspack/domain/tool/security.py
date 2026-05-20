@@ -121,12 +121,37 @@ def normalize_risk(raw_risk: Any, tool_def: dict[str, Any], trusted: bool) -> tu
 
 
 def requires_approval_for_security(tool_def: dict[str, Any]) -> bool:
+    if is_safe_first_party_memo_tool(tool_def):
+        return False
     risk = str(_tool_value(tool_def, "risk") or "").strip().lower()
     return (
         bool(_tool_value(tool_def, "requires_approval"))
         or risk == "high"
         or appears_write_or_execute_capable(tool_def)
     )
+
+
+def is_safe_first_party_memo_tool(tool_def: dict[str, Any]) -> bool:
+    """Allow Rumi's built-in memo tools to write local memory without a dead-end approval."""
+    if not is_trusted_tool(tool_def):
+        return False
+    if _tool_value(tool_def, "requires_approval") is not False:
+        return False
+    execution = tool_def.get("execution")
+    if not isinstance(execution, dict) or str(execution.get("type") or "").strip().lower() != "handler":
+        return False
+    category = str(_tool_value(tool_def, "category") or "").strip().lower()
+    name = " ".join(
+        str(value or "").strip().lower()
+        for value in (
+            tool_def.get("tool_id"),
+            tool_def.get("name"),
+            tool_def.get("summary"),
+        )
+    )
+    tags = tool_def.get("tags") if isinstance(tool_def.get("tags"), list) else []
+    tag_text = " ".join(str(tag or "").strip().lower() for tag in tags)
+    return category == "memory" and ("memo" in name or "memo" in tag_text)
 
 
 def appears_write_or_execute_capable(tool_def: dict[str, Any]) -> bool:

@@ -4,15 +4,34 @@
   "version": "1",
   "display_name": "Groq",
   "enabled": true,
-  "priority": 70,
+  "priority": 50,
   "adapter": "openai_compatible",
   "api_key_env": "GROQ_API_KEY",
   "base_url_env": "GROQ_BASE_URL",
   "default_base_url": "https://api.groq.com/openai/v1",
   "credential_required": true,
-  "default_model": "llama-3.3-70b-versatile",
+  "catalog_only": false,
+  "supports_invoke": true,
+  "default_model": "openai/gpt-oss-120b",
+  "default_model_for": {
+    "chat": "openai/gpt-oss-120b",
+    "reasoning": "openai/gpt-oss-120b",
+    "fast": "openai/gpt-oss-20b",
+    "general": "llama-3.3-70b-versatile",
+    "cheap": "llama-3.1-8b-instant",
+    "vision": "meta-llama/llama-4-scout-17b-16e-instruct"
+  },
   "capabilities": {
     "native_tool_calling": true,
-    "streaming": true
+    "structured_outputs": true,
+    "vision": true,
+    "embeddings": false,
+    "streaming": true,
+    "reasoning": true
+  },
+  "config": {
+    "api_compatibility": "openai",
+    "model_sync": "fixed_allowlist",
+    "hidden_provider_tool_models_excluded": true
   }
 }

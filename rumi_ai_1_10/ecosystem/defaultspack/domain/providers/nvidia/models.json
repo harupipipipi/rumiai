@@ -1,0 +1,50 @@
+{
+  "models": [
+    {
+      "id": "nvidia/nvidia/llama-3.1-nemotron-70b-instruct",
+      "category": "llm_model",
+      "version": "1",
+      "provider_id": "nvidia",
+      "model_id": "nvidia/llama-3.1-nemotron-70b-instruct",
+      "display_name": "Llama 3.1 Nemotron 70B Instruct via NVIDIA NIM",
+      "type": "reasoning",
+      "enabled": true,
+      "priority": 1,
+      "defaults": {
+        "chat": true,
+        "reasoning": true
+      },
+      "capabilities": {
+        "chat": true,
+        "streaming": true,
+        "reasoning": true,
+        "tool_calls": true,
+        "vision": false
+      },
+      "supports_thinking": true,
+      "thinking_levels": ["low", "medium", "high"],
+      "default_thinking_level": "medium"
+    },
+    {
+      "id": "nvidia/meta/llama-3.1-70b-instruct",
+      "category": "llm_model",
+      "version": "1",
+      "provider_id": "nvidia",
+      "model_id": "meta/llama-3.1-70b-instruct",
+      "display_name": "Llama 3.1 70B Instruct via NVIDIA NIM",
+      "type": "chat",
+      "enabled": true,
+      "priority": 2,
+      "defaults": {
+        "general": true
+      },
+      "capabilities": {
+        "chat": true,
+        "streaming": true,
+        "reasoning": false,
+        "tool_calls": true,
+        "vision": false
+      }
+    }
+  ]
+}

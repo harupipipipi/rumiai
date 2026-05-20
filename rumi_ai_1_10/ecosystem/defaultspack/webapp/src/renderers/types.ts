@@ -59,6 +59,7 @@ export type HistoryBoardRendererProps = {
   onChatSelect: (conversationId: string) => void;
   onNewTask: () => void;
   onCalendarOpen?: () => void;
+  isCalendarActive?: boolean;
   onSettingsClick: () => void;
   onChatMetadataChange?: (chatId: string, updates: { is_pinned?: boolean; is_starred?: boolean; tags?: string[] }) => void;
   onMinimize?: () => void;
@@ -167,6 +168,7 @@ export type RightSidebarRendererProps = {
   settingsSections: SettingsSection[];
   selectedToolIds?: string[];
   companyPanel?: ReactNode;
+  codingPanel?: ReactNode;
   keyboardButtonNavigation?: boolean;
   onSettingChange: SettingChangeHandler;
   onOpenSettings: () => void;

@@ -9,6 +9,7 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(DEFAULTSPACK_ROOT))
 
 from domain.tool.executor import ToolExecutor  # noqa: E402
+from domain.tool.registry import ToolRegistry  # noqa: E402
 from domain.tool_policy.orchestrator import ToolOrchestrator  # noqa: E402
 from domain.tool_policy.policy import decide_tool_policy  # noqa: E402
 from domain.tool_policy.risk import resolve_tool_risk  # noqa: E402
@@ -40,6 +41,16 @@ def test_tool_policy_requires_approval_for_write_name_even_when_profile_disables
     assert decision.action == "ask"
     assert decision.requires_approval is True
     assert decision.risk == "file_write"
+
+
+def test_tool_policy_allows_first_party_memo_upsert_without_approval():
+    ToolRegistry._instance = None
+    tool = ToolRegistry().get("memo_note_upsert")
+    decision = decide_tool_policy(tool, {}, tool_name="memo_note_upsert")
+
+    assert decision.allowed is True
+    assert decision.action == "allow"
+    assert decision.requires_approval is False
 
 
 def test_tool_policy_denies_shell_when_disabled():

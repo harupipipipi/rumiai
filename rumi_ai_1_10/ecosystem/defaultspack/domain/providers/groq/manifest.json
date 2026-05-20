@@ -7,27 +7,75 @@
   "status": "stable",
   "display_name": "Groq",
   "entrypoints": {
-    "adapter": "../ai_client/providers/openai_compatible_provider.py"
+    "adapter": "../ai_client/providers/openai_compatible_provider.py",
+    "models": "models.json"
   },
   "security": {
     "credential_required": true
   },
   "capabilities": {
     "chat": true,
-    "tool_calls": true
+    "streaming": true,
+    "tool_calls": true,
+    "reasoning": true,
+    "vision": true,
+    "openai_compatible": true
   },
   "provider_metadata": {
     "display_name": "Groq",
     "kind": "cloud",
     "env_vars": ["GROQ_API_KEY"],
     "base_url_envs": ["GROQ_BASE_URL"],
-    "catalog_only": true,
-    "supports_invoke": false,
-    "default_model": "llama-3.3-70b-versatile",
+    "catalog_only": false,
+    "supports_invoke": true,
+    "default_base_url": "https://api.groq.com/openai/v1",
+    "default_model": "openai/gpt-oss-120b",
     "default_model_for": {
-      "fast": "llama-3.3-70b-versatile"
+      "chat": "openai/gpt-oss-120b",
+      "reasoning": "openai/gpt-oss-120b",
+      "fast": "openai/gpt-oss-20b",
+      "general": "llama-3.3-70b-versatile",
+      "cheap": "llama-3.1-8b-instant",
+      "vision": "meta-llama/llama-4-scout-17b-16e-instruct"
     },
-    "capabilities": ["chat", "tool_calls"]
+    "capabilities": ["chat", "streaming", "tool_calls", "reasoning", "vision", "openai_compatible"]
+  },
+  "provider_manifest": {
+    "id": "groq",
+    "category": "llm_provider",
+    "version": "1",
+    "display_name": "Groq",
+    "enabled": true,
+    "priority": 50,
+    "adapter": "openai_compatible",
+    "api_key_env": "GROQ_API_KEY",
+    "base_url_env": "GROQ_BASE_URL",
+    "credential_required": true,
+    "catalog_only": false,
+    "supports_invoke": true,
+    "default_base_url": "https://api.groq.com/openai/v1",
+    "default_model": "openai/gpt-oss-120b",
+    "default_model_for": {
+      "chat": "openai/gpt-oss-120b",
+      "reasoning": "openai/gpt-oss-120b",
+      "fast": "openai/gpt-oss-20b",
+      "general": "llama-3.3-70b-versatile",
+      "cheap": "llama-3.1-8b-instant",
+      "vision": "meta-llama/llama-4-scout-17b-16e-instruct"
+    },
+    "capabilities": {
+      "native_tool_calling": true,
+      "structured_outputs": true,
+      "vision": true,
+      "embeddings": false,
+      "streaming": true,
+      "reasoning": true
+    },
+    "config": {
+      "api_compatibility": "openai",
+      "model_sync": "fixed_allowlist",
+      "hidden_provider_tool_models_excluded": true
+    }
   },
   "aliases": {
     "provider_ids": ["groq"]

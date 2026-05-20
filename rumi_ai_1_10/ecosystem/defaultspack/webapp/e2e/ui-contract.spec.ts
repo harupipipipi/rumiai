@@ -174,6 +174,22 @@ const settingsValues = {
     auto_open: false,
     default_mode: "auto",
   },
+  calendar: {
+    agent_current_chat: false,
+    agent_model: "",
+    agent_task_default: false,
+    default_time: "09:00",
+    quick_add_enabled: true,
+    default_item_type: "task",
+    week_start: "sunday",
+    show_outside_days: true,
+    show_time_picker: true,
+    dim_weekends: true,
+    task_color: "blue",
+    time_slot_minutes: 15,
+    event_color: "green",
+    max_items_per_day: 3,
+  },
   chat_rendering: {
     unknown_block_strategy: "hidden",
     show_widgets: true,
@@ -461,6 +477,55 @@ test("calendar action renders a scheduler preview", async ({ page }) => {
   const preview = page.getByLabel("Activity preview");
   await expect(preview).toContainText("Calendar.json");
   await expect(preview).toContainText("nightly-review");
+});
+
+test("calendar mode opens quick add and renders new tasks in blue", async ({ page }) => {
+  await openDefaultspack(page, "/coding");
+
+  await page.locator('button[title="Calendar"]').first().click();
+  await expect(page.getByLabel("Calendar month")).toBeVisible();
+
+  const now = new Date();
+  const dayKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-09`;
+  const dayLabel = `${now.getFullYear()}年${now.getMonth() + 1}月9日`;
+  await page.getByTestId(`calendar-day-${dayKey}`).click();
+  await expect(page.getByRole("dialog", { name: `${dayLabel}に追加` })).toBeVisible();
+
+  await page.getByPlaceholder("何を追加しますか？").fill("Design review");
+  await page.getByRole("button", { name: "Add", exact: true }).click();
+
+  const task = page.getByText("Design review");
+  await expect(task).toBeVisible();
+  await expect(task).toHaveClass(/bg-blue-500\/90/);
+  await task.click();
+  await expect(page.getByRole("dialog", { name: `${dayLabel}に追加` })).toContainText("Edit item");
+  await page.getByLabel("Calendar item time").click();
+  await expect(page.getByRole("listbox", { name: "Calendar time options" })).toContainText("午前12:30");
+  await page.getByPlaceholder("何を追加しますか？").fill("Design review edited");
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(page.getByText("Design review edited")).toBeVisible();
+
+  const rangeStart = page.getByTestId(`${"calendar-day"}-${dayKey.replace("-09", "-12")}`);
+  const rangeEnd = page.getByTestId(`${"calendar-day"}-${dayKey.replace("-09", "-14")}`);
+  const startBox = await rangeStart.boundingBox();
+  const endBox = await rangeEnd.boundingBox();
+  expect(startBox).not.toBeNull();
+  expect(endBox).not.toBeNull();
+  await page.mouse.move(startBox!.x + startBox!.width / 2, startBox!.y + startBox!.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(endBox!.x + endBox!.width / 2, endBox!.y + endBox!.height / 2, { steps: 6 });
+  await page.mouse.up();
+  await expect(page.getByRole("dialog", { name: `${dayLabel.replace("9日", "12日")} - ${dayLabel.replace("9日", "14日")}に追加` })).toBeVisible();
+  await page.getByPlaceholder("何を追加しますか？").fill("Range task");
+  await page.getByRole("button", { name: "Add", exact: true }).click();
+  await expect(page.getByText("Range task")).toHaveCount(3);
+
+  await page.getByText("Range task").first().click();
+  await page.getByRole("button", { name: "Delete", exact: true }).click();
+  await expect(page.getByText("Range task")).toHaveCount(0);
+
+  await page.getByTitle("Settings").last().click();
+  await expect(page.getByRole("button", { name: "Calendar 14 controls" })).toBeVisible();
 });
 
 test("history card drag uses rumi history MIME and sends dropped_widgets metadata", async ({ page }) => {

@@ -172,6 +172,32 @@ def test_prepare_chat_run_current_turn_history_mode_excludes_old_tool_logs(tmp_p
     ChatStore._instance = None
 
 
+def test_prepare_chat_run_allows_explicit_model_override(tmp_path, monkeypatch):
+    from domain.chat.run_request import prepare_chat_run
+    from domain.chat.store import ChatStore
+
+    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
+    ChatStore._instance = None
+
+    store = ChatStore()
+    conversation = store.create_conversation(model="gitlawb-opengateway/mimo-v2-omni")
+
+    prepared = prepare_chat_run(
+        {
+            "conversation_id": conversation["id"],
+            "message": {"role": "user", "content": "scheduled reminder"},
+            "params": {"model": "google/gemini-2.5-flash"},
+            "tools": [],
+        },
+        {"run_source": "scheduler"},
+    )
+
+    assert prepared.model == "google/gemini-2.5-flash"
+    assert prepared.request_context["model"] == "google/gemini-2.5-flash"
+    ChatStore._instance = None
+
+
 def test_prepare_chat_run_injects_matched_skill_and_chat_references(tmp_path, monkeypatch):
     import json
 

@@ -7,9 +7,15 @@
   "display_name": "Llama 3.3 70B Versatile",
   "type": "chat",
   "enabled": true,
-  "priority": 1,
+  "priority": 3,
   "defaults": {
-    "chat": true
+    "general": true
+  },
+  "capabilities": {
+    "chat": true,
+    "streaming": true,
+    "reasoning": false,
+    "tool_calls": true,
+    "vision": false
   }
 }
-

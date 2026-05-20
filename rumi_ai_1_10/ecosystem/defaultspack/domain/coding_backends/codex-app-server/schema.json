@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Codex App Server Coding Backend",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "server_url": {
+      "type": "string",
+      "description": "Local or remote Codex-style app server URL."
+    },
+    "workspace_root": {
+      "type": "string",
+      "description": "Trusted workspace root. All file and terminal operations must remain inside this root."
+    },
+    "approval_mode": {
+      "type": "string",
+      "enum": ["server_side_required"],
+      "default": "server_side_required"
+    }
+  },
+  "required": ["workspace_root"]
+}

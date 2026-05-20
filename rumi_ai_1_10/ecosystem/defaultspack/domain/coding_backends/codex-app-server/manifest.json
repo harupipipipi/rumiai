@@ -1,0 +1,35 @@
+{
+  "id": "codex-app-server",
+  "category": "coding_backends",
+  "kind": "coding_backend",
+  "version": "1",
+  "status": "experimental",
+  "display_name": "Codex App Server",
+  "description": "External or local Codex-style app server backend for approval-aware coding sessions.",
+  "entrypoints": {
+    "adapter": "blocks/coding/codex_app_server.py",
+    "schema": "schema.json"
+  },
+  "security": {
+    "requires_workspace_root": true,
+    "requires_approval_for_write": true,
+    "requires_approval_for_terminal": true,
+    "requires_approval_for_git_push": true,
+    "network_default": "deny"
+  },
+  "capabilities": {
+    "coding_session": true,
+    "workspace_sync": true,
+    "terminal": true,
+    "patch": true,
+    "git": true,
+    "approval_requests": true,
+    "remote_review": true
+  },
+  "policy": {
+    "do_not_treat_as_llm_provider": true,
+    "server_side_approval_required": true,
+    "client_supplied_approved_ignored": true
+  },
+  "source_pack_id": "defaultspack"
+}

@@ -986,6 +986,7 @@ interface HistoryBoardProps {
   onChatSelect: (chatId: string) => void;
   onNewTask: () => void;
   onCalendarOpen?: () => void;
+  isCalendarActive?: boolean;
   onSettingsClick: () => void;
   onChatMetadataChange?: (chatId: string, updates: { is_pinned?: boolean; is_starred?: boolean; tags?: string[] }) => void;
   onMinimize?: () => void;
@@ -1064,9 +1065,9 @@ function HistoryCalendarPanel({
   const monthCells = useMemo(() => buildCalendarMonthDays(), []);
   const monthLabel = useMemo(() => new Intl.DateTimeFormat(undefined, { month: "long", year: "numeric" }).format(new Date()), []);
   const buckets = [
-    { label: "Today", value: summary.today, tone: "text-amber-200 border-amber-300/20 bg-amber-300/10" },
-    { label: "Recent", value: summary.recent, tone: "text-orange-200 border-orange-300/20 bg-orange-300/10" },
-    { label: "Older", value: summary.older, tone: "text-zinc-300 border-zinc-700 bg-zinc-900/70" },
+    { label: "Today", value: summary.today, tone: "text-zinc-100 border-zinc-600/50 bg-zinc-800/70" },
+    { label: "Recent", value: summary.recent, tone: "text-zinc-200 border-zinc-700 bg-zinc-900/75" },
+    { label: "Older", value: summary.older, tone: "text-zinc-400 border-zinc-800 bg-zinc-950/70" },
   ];
 
   return (
@@ -1075,7 +1076,7 @@ function HistoryCalendarPanel({
         <div className="flex min-w-0 items-center gap-2">
           <WarmActionIcon kind="calendar" size="md" />
           <div className="min-w-0">
-            <p className="truncate text-[12px] font-semibold text-zinc-200">Calendar</p>
+            <p className="truncate text-[12px] font-semibold text-zinc-200">Calendar widget</p>
             <p className="truncate text-[10px] text-zinc-600">{summary.total} chats in history</p>
           </div>
         </div>
@@ -1106,7 +1107,7 @@ function HistoryCalendarPanel({
               className={cn(
                 "flex h-7 items-center justify-center rounded-lg text-[10px]",
                 cell?.isToday
-                  ? "bg-gradient-to-br from-amber-200 to-orange-300 font-semibold text-zinc-950 shadow-[0_8px_18px_rgba(251,191,36,0.18)]"
+                  ? "bg-zinc-100 font-semibold text-zinc-950 shadow-[0_8px_18px_rgba(255,255,255,0.08)]"
                   : cell
                     ? "bg-zinc-900/70 text-zinc-400"
                     : "bg-transparent",
@@ -1156,10 +1157,9 @@ function filterChatTree(chats: ChatItem[], query: string, activeTag: string | nu
   return chats.map(filterOne).filter((chat): chat is ChatItem => Boolean(chat));
 }
 
-export function HistoryBoard({ activeChatId, chatItems, account, onChatSelect, onNewTask, onCalendarOpen, onSettingsClick, onChatMetadataChange, onMinimize, onRestore, isCompact = false }: HistoryBoardProps) {
+export function HistoryBoard({ activeChatId, chatItems, account, onChatSelect, onNewTask, onCalendarOpen, isCalendarActive = false, onSettingsClick, onChatMetadataChange, onMinimize, onRestore, isCompact = false }: HistoryBoardProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [activeTag, setActiveTag] = useState<string | null>(null);
-  const [isCalendarOpen, setIsCalendarOpen] = useState(false);
   const visibleChatItems = useMemo(() => filterChatTree(chatItems, searchQuery, activeTag), [activeTag, chatItems, searchQuery]);
   const [customGroups, setCustomGroups] = useState<CustomGroupInfo[]>(() => loadCustomGroups());
   const [groups, setGroups] = useState<ChatGroup[]>(() => buildGroupsFromChats(visibleChatItems, customGroups));
@@ -1444,11 +1444,6 @@ export function HistoryBoard({ activeChatId, chatItems, account, onChatSelect, o
   if (isCompact) {
     return (
       <div className="relative flex h-full w-full flex-col items-center bg-[#09090b] text-zinc-400">
-        {isCalendarOpen && (
-          <div className="absolute left-full top-2 z-50 ml-2 w-72">
-            <HistoryCalendarPanel chatItems={chatItems} onClose={() => setIsCalendarOpen(false)} />
-          </div>
-        )}
         <div className="flex w-full flex-col items-center gap-1 border-b border-zinc-800/60 px-1.5 py-2">
           {onRestore && (
             <button
@@ -1481,11 +1476,10 @@ export function HistoryBoard({ activeChatId, chatItems, account, onChatSelect, o
             type="button"
             onClick={() => {
               onCalendarOpen?.();
-              setIsCalendarOpen((value) => !value);
             }}
             className={cn(
               "flex h-9 w-9 items-center justify-center rounded-xl transition-colors",
-              isCalendarOpen ? "bg-zinc-800 text-zinc-100" : "text-zinc-500 hover:bg-zinc-800 hover:text-zinc-100",
+              isCalendarActive ? "bg-zinc-800 text-zinc-100" : "text-zinc-500 hover:bg-zinc-800 hover:text-zinc-100",
             )}
             title="Calendar"
             aria-label="Calendar"
@@ -1541,7 +1535,7 @@ export function HistoryBoard({ activeChatId, chatItems, account, onChatSelect, o
     >
       <div className="relative flex flex-col h-full min-w-0">
         {/* Top action bar */}
-        <div className="flex flex-col gap-1 px-3 py-2 border-b border-zinc-800/60 flex-shrink-0">
+        <div className="flex flex-col gap-1 px-4 py-4 flex-shrink-0">
           <div className="flex h-8 items-center justify-between gap-2 px-2.5">
             <span className="text-xs font-semibold tracking-wide text-zinc-400">RumiDP</span>
             {onMinimize && (
@@ -1556,10 +1550,10 @@ export function HistoryBoard({ activeChatId, chatItems, account, onChatSelect, o
               </button>
             )}
           </div>
-          <div className="grid grid-cols-2 gap-1.5">
+          <div className="mt-2 flex flex-col gap-1.5">
             <button
               onClick={handleCreateChat}
-              className="flex min-w-0 items-center gap-2 rounded-xl border border-amber-200/10 bg-zinc-900/45 px-2.5 py-2 text-left text-xs font-medium text-zinc-300 transition-colors hover:border-amber-200/20 hover:bg-zinc-800 hover:text-zinc-100"
+              className="flex min-w-0 items-center gap-2 rounded-lg px-1.5 py-1.5 text-left text-xs font-medium text-zinc-300 transition-colors hover:bg-zinc-900/70 hover:text-zinc-100"
               title="New Chat"
             >
               <WarmActionIcon kind="newChat" size="sm" />
@@ -1567,7 +1561,7 @@ export function HistoryBoard({ activeChatId, chatItems, account, onChatSelect, o
             </button>
             <button
               onClick={handleCreateGroup}
-              className="flex min-w-0 items-center gap-2 rounded-xl border border-orange-200/10 bg-zinc-900/45 px-2.5 py-2 text-left text-xs font-medium text-zinc-300 transition-colors hover:border-orange-200/20 hover:bg-zinc-800 hover:text-zinc-100"
+              className="flex min-w-0 items-center gap-2 rounded-lg px-1.5 py-1.5 text-left text-xs font-medium text-zinc-300 transition-colors hover:bg-zinc-900/70 hover:text-zinc-100"
               title="New Group"
             >
               <WarmActionIcon kind="group" size="sm" />
@@ -1578,22 +1572,20 @@ export function HistoryBoard({ activeChatId, chatItems, account, onChatSelect, o
             type="button"
             onClick={() => {
               onCalendarOpen?.();
-              setIsCalendarOpen((value) => !value);
             }}
             className={cn(
-              "flex w-full items-center gap-2 rounded-xl border px-2.5 py-2 text-left text-xs font-medium transition-colors",
-              isCalendarOpen
-                ? "border-amber-200/25 bg-amber-300/10 text-amber-100"
-                : "border-zinc-800/80 bg-zinc-900/35 text-zinc-400 hover:border-amber-200/15 hover:bg-zinc-800 hover:text-zinc-100",
+              "flex w-full items-center gap-2 rounded-lg px-1.5 py-1.5 text-left text-xs font-medium transition-colors",
+              isCalendarActive
+                ? "bg-zinc-800/80 text-zinc-100"
+                : "text-zinc-400 hover:bg-zinc-900/70 hover:text-zinc-100",
             )}
             title="Calendar"
-            aria-expanded={isCalendarOpen}
+            aria-expanded={isCalendarActive}
           >
             <WarmActionIcon kind="calendar" size="sm" />
             <span className="truncate">Calendar</span>
-            <span className="ml-auto rounded-full border border-zinc-700 px-1.5 py-0.5 text-[10px] text-zinc-500">{chatItems.length}</span>
+            <span className="ml-auto text-[10px] text-zinc-600">{chatItems.length}</span>
           </button>
-          {isCalendarOpen && <HistoryCalendarPanel chatItems={chatItems} onClose={() => setIsCalendarOpen(false)} />}
           <ConversationSearchBar value={searchQuery} resultCount={visibleChatCount} onChange={setSearchQuery} />
           <ConversationTagFilter tags={allTags} activeTag={activeTag} onChange={setActiveTag} />
         </div>

@@ -7,7 +7,7 @@
   "display_name": "Gemini 3.1 Flash Lite Preview via Gitlawb OpenGateway",
   "type": "chat",
   "enabled": true,
-  "priority": 3,
+  "priority": 6,
   "defaults": {
     "chat": true,
     "fast": true

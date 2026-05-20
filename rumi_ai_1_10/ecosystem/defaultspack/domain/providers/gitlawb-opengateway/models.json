@@ -67,6 +67,55 @@
       }
     },
     {
+      "id": "gitlawb-opengateway/mimo-v2-pro",
+      "category": "llm_model",
+      "version": "1",
+      "provider_id": "gitlawb-opengateway",
+      "model_id": "mimo-v2-pro",
+      "display_name": "MiMo V2 Pro via Gitlawb OpenGateway",
+      "type": "reasoning",
+      "enabled": true,
+      "priority": 4,
+      "defaults": {
+        "reasoning": true
+      },
+      "capabilities": ["streaming", "reasoning"],
+      "supports_thinking": true,
+      "thinking_levels": ["low", "medium", "high", "xhigh"],
+      "default_thinking_level": "medium",
+      "metadata": {
+        "source": "gitlawb-opengateway",
+        "privacy": "external_no_key_gateway",
+        "openai_base_url": "https://opengateway.gitlawb.com/v1",
+        "openai_model": "mimo-v2-pro"
+      }
+    },
+    {
+      "id": "gitlawb-opengateway/mimo-v2.5",
+      "category": "llm_model",
+      "version": "1",
+      "provider_id": "gitlawb-opengateway",
+      "model_id": "mimo-v2.5",
+      "display_name": "MiMo V2.5 via Gitlawb OpenGateway",
+      "type": "reasoning",
+      "enabled": true,
+      "priority": 5,
+      "defaults": {
+        "chat": true,
+        "reasoning": true
+      },
+      "capabilities": ["streaming", "reasoning"],
+      "supports_thinking": true,
+      "thinking_levels": ["low", "medium", "high", "xhigh"],
+      "default_thinking_level": "medium",
+      "metadata": {
+        "source": "gitlawb-opengateway",
+        "privacy": "external_no_key_gateway",
+        "openai_base_url": "https://opengateway.gitlawb.com/v1",
+        "openai_model": "mimo-v2.5"
+      }
+    },
+    {
       "id": "gitlawb-opengateway/google/gemini-3.1-flash-lite-preview",
       "category": "llm_model",
       "version": "1",
@@ -75,7 +124,7 @@
       "display_name": "Gemini 3.1 Flash Lite Preview via Gitlawb OpenGateway",
       "type": "chat",
       "enabled": true,
-      "priority": 4,
+      "priority": 6,
       "defaults": {
         "chat": true,
         "fast": true

@@ -40,16 +40,16 @@ const ICONS: Record<WarmActionIconKind, LucideIcon> = {
 };
 
 const TONES: Record<WarmActionIconKind, string> = {
-  attach: "from-stone-200/15 via-amber-200/10 to-orange-300/15 text-amber-100 ring-amber-200/10",
-  calendar: "from-amber-200/20 via-orange-300/10 to-rose-300/15 text-amber-100 ring-orange-200/15",
-  group: "from-orange-200/20 via-amber-300/15 to-yellow-200/10 text-orange-100 ring-amber-200/15",
-  menu: "from-stone-200/15 via-orange-200/10 to-amber-300/15 text-stone-100 ring-orange-200/10",
-  mic: "from-rose-200/15 via-orange-300/10 to-amber-200/10 text-rose-100 ring-rose-200/10",
-  newChat: "from-yellow-200/20 via-orange-300/15 to-rose-300/10 text-yellow-100 ring-orange-200/15",
-  send: "from-amber-100 via-orange-200 to-yellow-300 text-zinc-950 ring-amber-100/30",
-  settings: "from-stone-200/10 via-amber-200/10 to-orange-300/10 text-stone-100 ring-stone-200/10",
-  stop: "from-zinc-100 via-stone-200 to-amber-100 text-zinc-950 ring-stone-100/30",
-  tool: "from-orange-200/15 via-amber-300/10 to-stone-200/10 text-orange-100 ring-amber-200/15",
+  attach: "from-zinc-100/14 via-zinc-500/10 to-zinc-950/30 text-zinc-100 ring-zinc-400/10",
+  calendar: "from-zinc-100/16 via-zinc-600/12 to-zinc-950/35 text-zinc-100 ring-zinc-300/12",
+  group: "from-zinc-100/15 via-stone-400/12 to-zinc-950/35 text-zinc-100 ring-zinc-300/12",
+  menu: "from-zinc-100/12 via-zinc-500/10 to-zinc-950/35 text-zinc-100 ring-zinc-400/10",
+  mic: "from-zinc-100/14 via-stone-500/10 to-zinc-950/35 text-zinc-100 ring-zinc-400/10",
+  newChat: "from-zinc-100/18 via-zinc-500/12 to-zinc-950/35 text-zinc-50 ring-zinc-300/14",
+  send: "from-zinc-50 via-zinc-200 to-zinc-400 text-zinc-950 ring-white/30",
+  settings: "from-zinc-100/10 via-zinc-500/10 to-zinc-950/30 text-zinc-100 ring-zinc-300/10",
+  stop: "from-zinc-50 via-zinc-200 to-zinc-400 text-zinc-950 ring-white/30",
+  tool: "from-zinc-100/14 via-zinc-500/10 to-zinc-950/35 text-zinc-100 ring-zinc-300/12",
 };
 
 type WarmActionIconProps = {

@@ -73,12 +73,12 @@ def run(input_data: dict[str, Any], context: Any = None) -> dict[str, Any]:
 
 
 def tool_create_note(arguments: dict[str, Any] | None, context: dict[str, Any] | None = None) -> dict[str, Any]:
-    result = run({"action": "create", **(arguments or {})}, context or {})
+    result = run({"action": "create", **_normalize_note_arguments(arguments or {})}, context or {})
     return _tool_result(result, success_summary="memo note created")
 
 
 def tool_upsert_note(arguments: dict[str, Any] | None, context: dict[str, Any] | None = None) -> dict[str, Any]:
-    data = arguments if isinstance(arguments, dict) else {}
+    data = _normalize_note_arguments(arguments if isinstance(arguments, dict) else {})
     note_key = _note_key(data)
     action = "update" if note_key and MemoStore().get_note(note_key) is not None else "create"
     result = run({"action": action, **data}, context or {})
@@ -117,6 +117,22 @@ def _tool_result(result: dict[str, Any], *, success_summary: str) -> dict[str, A
 
 def _folder_key(data: dict[str, Any]) -> str:
     return str(data.get("folder_id") or data.get("folder") or data.get("folder_slug") or "").strip()
+
+
+def _normalize_note_arguments(data: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(data or {})
+    folder_key = _folder_key(normalized)
+    if "/" not in folder_key:
+        return normalized
+    parts = [part.strip() for part in folder_key.split("/") if part.strip()]
+    if len(parts) < 2:
+        return normalized
+    normalized["folder_id"] = parts[0]
+    if not str(normalized.get("title") or "").strip() and not str(normalized.get("note_id") or normalized.get("id") or "").strip():
+        normalized["title"] = parts[-1]
+    metadata = normalized.get("metadata") if isinstance(normalized.get("metadata"), dict) else {}
+    normalized["metadata"] = {**metadata, "requested_memo_path": folder_key}
+    return normalized
 
 
 def _note_key(data: dict[str, Any]) -> str:

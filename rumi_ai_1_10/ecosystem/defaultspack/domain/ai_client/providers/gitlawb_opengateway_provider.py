@@ -13,9 +13,11 @@ class GitlawbOpengatewayProvider(OpenAICompatibleProvider):
         "AppleWebKit/537.36 Chrome/124 Safari/537.36"
     )
     MODEL_IDS = {
-        "mimo-v2.5-pro",
         "mimo-v2-flash",
         "mimo-v2-omni",
+        "mimo-v2-pro",
+        "mimo-v2.5",
+        "mimo-v2.5-pro",
         "google/gemini-3.1-flash-lite-preview",
     }
     KNOWN_MODELS = [
@@ -68,6 +70,46 @@ class GitlawbOpengatewayProvider(OpenAICompatibleProvider):
                 "vision_verified": True,
                 "openai_base_url": "https://opengateway.gitlawb.com/v1",
                 "openai_model": "mimo-v2-omni",
+            },
+        },
+        {
+            "id": "gitlawb-opengateway/mimo-v2-pro",
+            "model_id": "mimo-v2-pro",
+            "name": "MiMo V2 Pro via Gitlawb OpenGateway",
+            "display_name": "MiMo V2 Pro via Gitlawb OpenGateway",
+            "provider": "gitlawb-opengateway",
+            "provider_id": "gitlawb-opengateway",
+            "type": "reasoning",
+            "defaults": {"reasoning": True},
+            "capabilities": ["chat", "reasoning", "streaming"],
+            "supports_thinking": True,
+            "thinking_levels": ["low", "medium", "high", "xhigh"],
+            "default_thinking_level": "medium",
+            "metadata": {
+                "source": "gitlawb-opengateway",
+                "privacy": "external_no_key_gateway",
+                "openai_base_url": "https://opengateway.gitlawb.com/v1",
+                "openai_model": "mimo-v2-pro",
+            },
+        },
+        {
+            "id": "gitlawb-opengateway/mimo-v2.5",
+            "model_id": "mimo-v2.5",
+            "name": "MiMo V2.5 via Gitlawb OpenGateway",
+            "display_name": "MiMo V2.5 via Gitlawb OpenGateway",
+            "provider": "gitlawb-opengateway",
+            "provider_id": "gitlawb-opengateway",
+            "type": "reasoning",
+            "defaults": {"chat": True, "reasoning": True},
+            "capabilities": ["chat", "reasoning", "streaming"],
+            "supports_thinking": True,
+            "thinking_levels": ["low", "medium", "high", "xhigh"],
+            "default_thinking_level": "medium",
+            "metadata": {
+                "source": "gitlawb-opengateway",
+                "privacy": "external_no_key_gateway",
+                "openai_base_url": "https://opengateway.gitlawb.com/v1",
+                "openai_model": "mimo-v2.5",
             },
         },
         {

@@ -1,0 +1,34 @@
+{
+  "id": "nvidia",
+  "category": "llm_provider",
+  "version": "1",
+  "display_name": "NVIDIA NIM",
+  "enabled": true,
+  "priority": 60,
+  "adapter": "openai_compatible",
+  "api_key_env": ["NVIDIA_API_KEY", "NGC_API_KEY"],
+  "base_url_env": "NVIDIA_BASE_URL",
+  "credential_required": true,
+  "catalog_only": false,
+  "supports_invoke": true,
+  "default_base_url": "https://integrate.api.nvidia.com/v1",
+  "default_model": "nvidia/llama-3.1-nemotron-70b-instruct",
+  "default_model_for": {
+    "chat": "nvidia/llama-3.1-nemotron-70b-instruct",
+    "reasoning": "nvidia/llama-3.1-nemotron-70b-instruct",
+    "general": "meta/llama-3.1-70b-instruct"
+  },
+  "capabilities": {
+    "native_tool_calling": true,
+    "structured_outputs": false,
+    "vision": false,
+    "embeddings": false,
+    "streaming": true,
+    "reasoning": true
+  },
+  "config": {
+    "api_compatibility": "openai",
+    "source_docs": "nvidia_nim_llm_apis",
+    "model_sync": "fixed_allowlist"
+  }
+}

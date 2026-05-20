@@ -12,8 +12,6 @@ import {
   MessageSquare,
   MousePointerClick,
   PanelRightOpen,
-  Plus,
-  RefreshCw,
   Search,
   SlidersHorizontal,
   Sparkles,
@@ -32,7 +30,6 @@ import type {
   ToolGroup,
 } from "./types";
 import type { ModelCommandCandidate, ModelProfile } from "../lib/api";
-import { CodingCommandPanel } from "../components/coding/CodingCommandPanel";
 import { CodingWorkspaceBadge } from "../components/coding/CodingWorkspaceBadge";
 import { CodingWorkspacePicker } from "../components/coding/CodingWorkspacePicker";
 import { WarmActionIcon } from "../components/WarmActionIcon";
@@ -827,7 +824,6 @@ export function ComposerRenderer({
   const [modeSelectorOpen, setModeSelectorOpen] = useState(false);
   const [atMentionOpen, setAtMentionOpen] = useState(false);
   const [atMentionQuery, setAtMentionQuery] = useState("");
-  const [newBranchName, setNewBranchName] = useState("");
   const [selectedCommandIndex, setSelectedCommandIndex] = useState(0);
   const [selectedModelCandidateIndex, setSelectedModelCandidateIndex] = useState(0);
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -1862,11 +1858,6 @@ export function ComposerRenderer({
                 onCreate={onCodingWorkspaceCreate}
                 onRefresh={onCodingWorkspacesRefresh}
               />
-              <CodingCommandPanel
-                commands={commands}
-                disabled={isGenerating}
-                onRunCommand={onCommandSelect}
-              />
               <span className="inline-flex min-w-0 items-center gap-1">
                 <GitBranch size={11} />
                 {branchOptions.length > 1 ? (
@@ -1887,38 +1878,6 @@ export function ComposerRenderer({
                   <span className="font-mono">{codingContext.branch ?? "no git"}</span>
                 )}
               </span>
-              <form
-                className="inline-flex items-center gap-1"
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  const branch = newBranchName.trim();
-                  if (!branch) return;
-                  onCodingBranchSwitch?.(branch, true);
-                  setNewBranchName("");
-                }}
-              >
-                <input
-                  value={newBranchName}
-                  onChange={(event) => setNewBranchName(event.target.value)}
-                  disabled={isGenerating}
-                  placeholder="new branch"
-                  className="h-6 w-24 rounded-md border border-zinc-800 bg-zinc-900/40 px-2 font-mono text-[11px] text-zinc-300 outline-none placeholder:text-zinc-700 focus:border-zinc-600 disabled:opacity-50"
-                />
-                <button
-                  type="submit"
-                  disabled={isGenerating || !newBranchName.trim()}
-                  title="ブランチを作成して切り替え"
-                  className="flex h-6 w-6 items-center justify-center rounded-md text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200 disabled:opacity-40"
-                >
-                  <Plus size={12} />
-                </button>
-              </form>
-              {codingContext.rootFolder && (
-                <span className="inline-flex min-w-0 items-center gap-1">
-                  <Folder size={11} />
-                  <span className="max-w-[200px] truncate font-mono">{codingContext.rootFolder}</span>
-                </span>
-              )}
               <span className="inline-flex items-center gap-1">
                 <FileText size={11} />
                 <select
@@ -1935,17 +1894,7 @@ export function ComposerRenderer({
                     </option>
                   ))}
                 </select>
-                <span>{codingContext.files.length} files</span>
               </span>
-              <button
-                type="button"
-                onClick={onCodingContextRefresh}
-                disabled={isGenerating}
-                title="coding context を更新"
-                className="flex h-6 w-6 items-center justify-center rounded-md text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200 disabled:opacity-40"
-              >
-                <RefreshCw size={12} />
-              </button>
             </div>
           )}
         </form>

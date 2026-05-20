@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+import re
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
@@ -524,6 +525,137 @@ class FrontendRegistry:
                         "default": 12,
                         "min": 1,
                         "max": 50,
+                    },
+                ],
+            },
+            {
+                "id": "calendar",
+                "label": "Calendar",
+                "description": "カレンダー画面のクリック追加、週表示、予定色を調整します。",
+                "fields": [
+                    {
+                        "id": "quick_add_enabled",
+                        "label": "Click To Add",
+                        "type": "toggle",
+                        "default": True,
+                        "help": "日付セルをクリックした時に、新規追加カードを開きます。",
+                    },
+                    {
+                        "id": "default_item_type",
+                        "label": "Default Item Type",
+                        "type": "select",
+                        "default": "task",
+                        "options": [
+                            {"value": "task", "label": "Task / 青"},
+                            {"value": "event", "label": "Event / 緑"},
+                            {"value": "reminder", "label": "Reminder / グレー"},
+                        ],
+                        "help": "新規追加カードで最初に選ばれる種類です。",
+                    },
+                    {
+                        "id": "default_time",
+                        "label": "Default Time",
+                        "type": "text",
+                        "default": "09:00",
+                        "help": "新規追加カードの初期時刻です。例: 09:00 / 午前9:00",
+                    },
+                    {
+                        "id": "time_slot_minutes",
+                        "label": "Time Slot Minutes",
+                        "type": "select",
+                        "default": 15,
+                        "options": [
+                            {"value": 15, "label": "15 minutes"},
+                            {"value": 30, "label": "30 minutes"},
+                            {"value": 60, "label": "60 minutes"},
+                        ],
+                        "help": "時刻ドロップダウンの刻み幅です。",
+                    },
+                    {
+                        "id": "show_time_picker",
+                        "label": "Show Time Picker",
+                        "type": "toggle",
+                        "default": True,
+                        "help": "時刻入力時にスクロール式の候補を表示します。",
+                    },
+                    {
+                        "id": "agent_task_default",
+                        "label": "Agent Task Default",
+                        "type": "toggle",
+                        "default": False,
+                        "help": "Task作成時に、AI agent実行の候補を初期ONにします。",
+                    },
+                    {
+                        "id": "agent_model",
+                        "label": "Agent Model",
+                        "type": "text",
+                        "default": "",
+                        "help": "空なら設定済みの非embeddingモデルを自動選択します。例: google/gemini-2.5-flash",
+                    },
+                    {
+                        "id": "agent_current_chat",
+                        "label": "Run In Current Chat",
+                        "type": "toggle",
+                        "default": False,
+                        "help": "ONなら予定時刻に現在の会話へ送信します。OFFなら独立したagent実行にします。",
+                    },
+                    {
+                        "id": "week_start",
+                        "label": "Week Starts On",
+                        "type": "select",
+                        "default": "sunday",
+                        "options": [
+                            {"value": "sunday", "label": "Sunday"},
+                            {"value": "monday", "label": "Monday"},
+                        ],
+                        "help": "月表示の左端の曜日を選びます。",
+                    },
+                    {
+                        "id": "show_outside_days",
+                        "label": "Show Outside Days",
+                        "type": "toggle",
+                        "default": True,
+                        "help": "前月/翌月の日付を薄く表示します。",
+                    },
+                    {
+                        "id": "dim_weekends",
+                        "label": "Dim Weekends",
+                        "type": "toggle",
+                        "default": True,
+                        "help": "土日セルをほんの少し暗くします。",
+                    },
+                    {
+                        "id": "task_color",
+                        "label": "Task Color",
+                        "type": "select",
+                        "default": "blue",
+                        "options": [
+                            {"value": "blue", "label": "Blue"},
+                            {"value": "cyan", "label": "Cyan"},
+                            {"value": "slate", "label": "Slate"},
+                        ],
+                        "help": "Taskバーの色。既定は青です。",
+                    },
+                    {
+                        "id": "event_color",
+                        "label": "Event Color",
+                        "type": "select",
+                        "default": "green",
+                        "options": [
+                            {"value": "green", "label": "Green"},
+                            {"value": "blue", "label": "Blue"},
+                            {"value": "slate", "label": "Slate"},
+                        ],
+                        "help": "Eventバーの色。既定は緑です。",
+                    },
+                    {
+                        "id": "max_items_per_day",
+                        "label": "Visible Items / Day",
+                        "type": "number",
+                        "default": 3,
+                        "min": 1,
+                        "max": 6,
+                        "help": "1日に表示する予定バーの上限です。",
                     },
                 ],
             },
@@ -1682,6 +1814,22 @@ class FrontendRegistry:
                 "language": "ja",
             },
             "preview": {"auto_open": False, "default_mode": "auto", "max_items": 12},
+            "calendar": {
+                "agent_current_chat": False,
+                "agent_model": "",
+                "agent_task_default": False,
+                "default_time": "09:00",
+                "quick_add_enabled": True,
+                "default_item_type": "task",
+                "week_start": "sunday",
+                "show_outside_days": True,
+                "show_time_picker": True,
+                "dim_weekends": True,
+                "task_color": "blue",
+                "time_slot_minutes": 15,
+                "event_color": "green",
+                "max_items_per_day": 3,
+            },
             "chat_rendering": {"show_widgets": True, "unknown_block_strategy": "hidden"},
             "models": {
                 **ModelRuntimeSettingsService(self._pack_root).default_model_settings(),
@@ -2053,6 +2201,37 @@ class FrontendRegistry:
             triggers["vector_threshold"] = max(0.0, min(1.0, float(triggers.get("vector_threshold", 0.1))))
         except (TypeError, ValueError):
             triggers["vector_threshold"] = 0.1
+
+        calendar = refreshed.setdefault("calendar", {})
+        if not isinstance(calendar, dict):
+            calendar = {}
+            refreshed["calendar"] = calendar
+        calendar["quick_add_enabled"] = bool(calendar.get("quick_add_enabled", True))
+        calendar["agent_current_chat"] = bool(calendar.get("agent_current_chat", False))
+        calendar["agent_model"] = str(calendar.get("agent_model") or "").strip()
+        calendar["agent_task_default"] = bool(calendar.get("agent_task_default", False))
+        default_time = str(calendar.get("default_time") or "09:00").strip()
+        calendar["default_time"] = default_time if re.match(r"^\d{1,2}:\d{2}$", default_time) else "09:00"
+        try:
+            slot_minutes = int(calendar.get("time_slot_minutes", 15))
+        except (TypeError, ValueError):
+            slot_minutes = 15
+        calendar["time_slot_minutes"] = slot_minutes if slot_minutes in {15, 30, 60} else 15
+        item_type = str(calendar.get("default_item_type") or "task").strip().lower()
+        calendar["default_item_type"] = item_type if item_type in {"task", "event", "reminder"} else "task"
+        week_start = str(calendar.get("week_start") or "sunday").strip().lower()
+        calendar["week_start"] = week_start if week_start in {"sunday", "monday"} else "sunday"
+        calendar["show_outside_days"] = bool(calendar.get("show_outside_days", True))
+        calendar["show_time_picker"] = bool(calendar.get("show_time_picker", True))
+        calendar["dim_weekends"] = bool(calendar.get("dim_weekends", True))
+        task_color = str(calendar.get("task_color") or "blue").strip().lower()
+        calendar["task_color"] = task_color if task_color in {"blue", "cyan", "slate"} else "blue"
+        event_color = str(calendar.get("event_color") or "green").strip().lower()
+        calendar["event_color"] = event_color if event_color in {"green", "blue", "slate"} else "green"
+        try:
+            calendar["max_items_per_day"] = max(1, min(6, int(calendar.get("max_items_per_day", 3))))
+        except (TypeError, ValueError):
+            calendar["max_items_per_day"] = 3
 
         models = refreshed.setdefault("models", {})
         if not isinstance(models, dict):

@@ -16,7 +16,12 @@ runtime 内の curated table は互換 fallback であり、新規 provider を�
 | `anthropic` | Anthropic API（Claude Opus 4, Sonnet 4, Haiku 3 等） |
 | `google` | Google Gemini API（Gemini 2.5 Pro, Gemini 2.5 Flash 等） |
 | `openrouter` | OpenRouter API（defaultspack では `tencent/hy3-preview:free` のみ） |
-| `gitlawb-opengateway` | Gitlawb OpenGateway（外部のno-key gateway。3モデルの固定allowlistのみ） |
+| `gitlawb-opengateway` | Gitlawb OpenGateway（外部のno-key gateway。MiMo/Gemini の固定allowlistのみ） |
+| `groq` | Groq OpenAI-compatible API |
+| `cerebras` | Cerebras OpenAI-compatible API |
+| `nvidia` | NVIDIA NIM OpenAI-compatible API |
+| `moonshotai` | Moonshot AI OpenAI-compatible API |
+| `xiaomi-mimo` | Xiaomi MiMo direct API の地域別 catalog entry（初期状態は実行不可） |
 | `stub` | テスト用スタブ。固定レスポンスを返す |
 | `rumi` | rumi 独自のメタプロバイダー（パイプライン、ルーティング、評価） |
 
@@ -79,9 +84,29 @@ GITLAWB_OPENGATEWAY_BASE_URL=https://opengateway.gitlawb.com/v1
 |---|---|
 | `gitlawb-opengateway/mimo-v2.5-pro` | reasoning 用の MiMo V2.5 Pro |
 | `gitlawb-opengateway/mimo-v2-flash` | 高速な MiMo V2 Flash |
+| `gitlawb-opengateway/mimo-v2-omni` | 画像入力対応の MiMo V2 Omni |
+| `gitlawb-opengateway/mimo-v2-pro` | reasoning 用の MiMo V2 Pro |
+| `gitlawb-opengateway/mimo-v2.5` | reasoning 用の MiMo V2.5 |
 | `gitlawb-opengateway/google/gemini-3.1-flash-lite-preview` | 高速な Gemini 3.1 Flash Lite Preview |
 
-`gitlawb-opengateway/google/gemini-3.1-flash-lite-preview` supports high thinking and verified image input through this gateway. The runtime sends a browser User-Agent for gateway compatibility.
+`mimo` 系は Gitlawb OpenGateway の OpenAI-compatible `POST /v1/chat/completions` に送信され、違いは `model` のみ。`mimo-v2-omni` の画像認識では OpenAI 互換の `content` 配列形式を使う。Gemini Flash Lite と MiMo Omni はこの gateway で verified image input として扱う。runtime は gateway 互換性のため Browser User-Agent を付与する。
+
+### Cloud OpenAI-compatible providers
+
+Groq / Cerebras / NVIDIA NIM / Moonshot AI は manifest-first provider として追加されている。API key が設定されている場合、`detect_available_providers()` で runtime provider として検出される。
+
+```bash
+GROQ_API_KEY=...
+CEREBRAS_API_KEY=...
+NVIDIA_API_KEY=...      # または NGC_API_KEY
+MOONSHOT_API_KEY=...
+```
+
+service tier や preview/enterprise-only 条件は metadata に保持するだけで、初期実装では request body に自動注入しない。
+
+### Xiaomi MiMo direct API
+
+`xiaomi-mimo` は Gitlawb OpenGateway とは分離された umbrella catalog entry。direct API は `xiaomi-mimo-global` と `xiaomi-mimo-cn` に地域分割し、公式 base URL / auth / token grant 条件が確認されるまでは runtime provider として自動有効化しない。
 
 警告: この provider を選択すると、プロンプト、会話履歴、tool結果などのコンテキストが Gitlawb OpenGateway に送信される。
 

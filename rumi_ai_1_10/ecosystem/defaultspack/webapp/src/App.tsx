@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent } from "react";
 
 import { CompanyWorkspacePanel } from "./components/company/CompanyWorkspacePanel";
 import { CodingCockpit } from "./components/coding/CodingCockpit";
@@ -38,208 +38,954 @@ type ComposerCandidateMenuState = {
 
 type WorkspacePanelMode = "composer" | "calendar";
 
-type CalendarMemo = {
-  id?: string;
-  title?: string;
-  content?: string;
-  updated_at?: string;
-  folder_slug?: string;
+type CalendarItemKind = "task" | "event" | "reminder";
+
+type CalendarItem = {
+  id: string;
+  date: string;
+  endDate?: string;
+  agentPrompt?: string;
+  kind: CalendarItemKind;
+  lastRunStatus?: string;
+  scheduleId?: string;
+  scheduleStatus?: string;
+  title: string;
+  time?: string;
 };
 
-type CalendarTask = {
-  id?: string;
-  name?: string;
-  description?: string;
-  status?: string;
-  schedule_type?: string;
-  schedule_config?: Record<string, unknown>;
-  task?: Record<string, unknown>;
-  task_config?: Record<string, unknown>;
-  next_run_at?: string | null;
+type CalendarSettings = {
+  agentCurrentChat: boolean;
+  agentModel: string;
+  agentTaskDefault: boolean;
+  defaultTime: string;
+  defaultItemType: CalendarItemKind;
+  dimWeekends: boolean;
+  eventColor: "green" | "blue" | "slate";
+  maxItemsPerDay: number;
+  quickAddEnabled: boolean;
+  showOutsideDays: boolean;
+  showTimePicker: boolean;
+  taskColor: "blue" | "cyan" | "slate";
+  timeSlotMinutes: 15 | 30 | 60;
+  weekStart: "sunday" | "monday";
 };
 
-function recordArray(value: unknown, keys: string[]): Record<string, unknown>[] {
-  if (Array.isArray(value)) return value.filter((item): item is Record<string, unknown> => isRecord(item));
-  if (!isRecord(value)) return [];
-  for (const key of keys) {
-    const child = value[key];
-    if (Array.isArray(child)) return child.filter((item): item is Record<string, unknown> => isRecord(item));
+type CalendarCell = {
+  col: number;
+  date: Date;
+  isCurrentMonth: boolean;
+  isToday: boolean;
+  key: string;
+  label: string;
+  row: number;
+};
+
+type CalendarEditorState = {
+  cell: CalendarCell;
+  endKey: string;
+  itemId?: string;
+  mode: "create" | "edit";
+  startKey: string;
+};
+
+type CalendarDragState = {
+  currentKey: string;
+  startKey: string;
+  startedAt: number;
+};
+
+const calendarSettingsDefaults: CalendarSettings = {
+  agentCurrentChat: false,
+  agentModel: "",
+  agentTaskDefault: false,
+  defaultTime: "09:00",
+  defaultItemType: "task",
+  dimWeekends: true,
+  eventColor: "green",
+  maxItemsPerDay: 3,
+  quickAddEnabled: true,
+  showOutsideDays: true,
+  showTimePicker: true,
+  taskColor: "blue",
+  timeSlotMinutes: 15,
+  weekStart: "sunday",
+};
+
+const calendarSettingsSection: SettingsSection = {
+  id: "calendar",
+  label: "Calendar",
+  description: "カレンダー画面のクリック追加、週表示、予定色を調整します。",
+  fields: [
+    {
+      id: "quick_add_enabled",
+      label: "Click To Add",
+      type: "toggle",
+      default: calendarSettingsDefaults.quickAddEnabled,
+      help: "日付セルをクリックした時に、新規追加カードを開きます。",
+    },
+    {
+      id: "default_item_type",
+      label: "Default Item Type",
+      type: "select",
+      default: calendarSettingsDefaults.defaultItemType,
+      options: [
+        { value: "task", label: "Task / 青" },
+        { value: "event", label: "Event / 緑" },
+        { value: "reminder", label: "Reminder / グレー" },
+      ],
+      help: "新規追加カードで最初に選ばれる種類です。",
+    },
+    {
+      id: "default_time",
+      label: "Default Time",
+      type: "text",
+      default: calendarSettingsDefaults.defaultTime,
+      help: "新規追加カードの初期時刻です。例: 09:00 / 午前9:00",
+    },
+    {
+      id: "time_slot_minutes",
+      label: "Time Slot Minutes",
+      type: "select",
+      default: calendarSettingsDefaults.timeSlotMinutes,
+      options: [
+        { value: 15, label: "15 minutes" },
+        { value: 30, label: "30 minutes" },
+        { value: 60, label: "60 minutes" },
+      ],
+      help: "時刻ドロップダウンの刻み幅です。",
+    },
+    {
+      id: "show_time_picker",
+      label: "Show Time Picker",
+      type: "toggle",
+      default: calendarSettingsDefaults.showTimePicker,
+      help: "時刻入力時にスクロール式の候補を表示します。",
+    },
+    {
+      id: "agent_task_default",
+      label: "Agent Task Default",
+      type: "toggle",
+      default: calendarSettingsDefaults.agentTaskDefault,
+      help: "Task作成時に、AI agent実行の候補を初期ONにします。",
+    },
+    {
+      id: "agent_model",
+      label: "Agent Model",
+      type: "text",
+      default: calendarSettingsDefaults.agentModel,
+      help: "空なら設定済みの非embeddingモデルを自動選択します。例: google/gemini-2.5-flash",
+    },
+    {
+      id: "agent_current_chat",
+      label: "Run In Current Chat",
+      type: "toggle",
+      default: calendarSettingsDefaults.agentCurrentChat,
+      help: "ONなら予定時刻に現在の会話へ送信します。OFFなら独立したagent実行にします。",
+    },
+    {
+      id: "week_start",
+      label: "Week Starts On",
+      type: "select",
+      default: calendarSettingsDefaults.weekStart,
+      options: [
+        { value: "sunday", label: "Sunday" },
+        { value: "monday", label: "Monday" },
+      ],
+      help: "月表示の左端の曜日を選びます。",
+    },
+    {
+      id: "show_outside_days",
+      label: "Show Outside Days",
+      type: "toggle",
+      default: calendarSettingsDefaults.showOutsideDays,
+      help: "前月/翌月の日付を薄く表示します。",
+    },
+    {
+      id: "dim_weekends",
+      label: "Dim Weekends",
+      type: "toggle",
+      default: calendarSettingsDefaults.dimWeekends,
+      help: "土日セルをほんの少し暗くします。",
+    },
+    {
+      id: "task_color",
+      label: "Task Color",
+      type: "select",
+      default: calendarSettingsDefaults.taskColor,
+      options: [
+        { value: "blue", label: "Blue" },
+        { value: "cyan", label: "Cyan" },
+        { value: "slate", label: "Slate" },
+      ],
+      help: "Taskバーの色。既定は青です。",
+    },
+    {
+      id: "event_color",
+      label: "Event Color",
+      type: "select",
+      default: calendarSettingsDefaults.eventColor,
+      options: [
+        { value: "green", label: "Green" },
+        { value: "blue", label: "Blue" },
+        { value: "slate", label: "Slate" },
+      ],
+      help: "Eventバーの色。休日や予定は緑寄りにできます。",
+    },
+    {
+      id: "max_items_per_day",
+      label: "Visible Items / Day",
+      type: "number",
+      default: calendarSettingsDefaults.maxItemsPerDay,
+      min: 1,
+      max: 6,
+      help: "1日に表示する予定バーの上限です。",
+    },
+  ],
+};
+
+function withCalendarSettingsSections(sections: SettingsSection[]): SettingsSection[] {
+  if (sections.some((section) => section.id === calendarSettingsSection.id)) return sections;
+  const insertAfter = sections.findIndex((section) => section.id === "preview");
+  if (insertAfter < 0) return [...sections, calendarSettingsSection];
+  return [
+    ...sections.slice(0, insertAfter + 1),
+    calendarSettingsSection,
+    ...sections.slice(insertAfter + 1),
+  ];
+}
+
+function withCalendarSettingsValues(values: Record<string, Record<string, unknown>>): Record<string, Record<string, unknown>> {
+  return {
+    ...values,
+    calendar: {
+      agent_current_chat: calendarSettingsDefaults.agentCurrentChat,
+      agent_model: calendarSettingsDefaults.agentModel,
+      agent_task_default: calendarSettingsDefaults.agentTaskDefault,
+      default_time: calendarSettingsDefaults.defaultTime,
+      quick_add_enabled: calendarSettingsDefaults.quickAddEnabled,
+      default_item_type: calendarSettingsDefaults.defaultItemType,
+      week_start: calendarSettingsDefaults.weekStart,
+      show_outside_days: calendarSettingsDefaults.showOutsideDays,
+      show_time_picker: calendarSettingsDefaults.showTimePicker,
+      dim_weekends: calendarSettingsDefaults.dimWeekends,
+      task_color: calendarSettingsDefaults.taskColor,
+      time_slot_minutes: calendarSettingsDefaults.timeSlotMinutes,
+      event_color: calendarSettingsDefaults.eventColor,
+      max_items_per_day: calendarSettingsDefaults.maxItemsPerDay,
+      ...(values.calendar ?? {}),
+    },
+  };
+}
+
+function calendarDateKey(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function calendarDateLabel(date: Date): string {
+  return `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日`;
+}
+
+function calendarDateFromKey(key: string): Date {
+  const [year, month, day] = key.split("-").map((part) => Number(part));
+  return new Date(year, month - 1, day);
+}
+
+function compareCalendarKeys(a: string, b: string): number {
+  return calendarDateFromKey(a).getTime() - calendarDateFromKey(b).getTime();
+}
+
+function orderedCalendarRange(startKey: string, endKey: string): [string, string] {
+  return compareCalendarKeys(startKey, endKey) <= 0 ? [startKey, endKey] : [endKey, startKey];
+}
+
+function calendarKeysBetween(startKey: string, endKey: string): string[] {
+  const [start, end] = orderedCalendarRange(startKey, endKey);
+  const current = calendarDateFromKey(start);
+  const endTime = calendarDateFromKey(end).getTime();
+  const keys: string[] = [];
+  while (current.getTime() <= endTime) {
+    keys.push(calendarDateKey(current));
+    current.setDate(current.getDate() + 1);
   }
-  const data = value.data;
-  if (isRecord(data)) {
-    for (const key of keys) {
-      const child = data[key];
-      if (Array.isArray(child)) return child.filter((item): item is Record<string, unknown> => isRecord(item));
-    }
+  return keys;
+}
+
+function calendarRangeLabel(startKey: string, endKey: string): string {
+  const [start, end] = orderedCalendarRange(startKey, endKey);
+  const startLabel = calendarDateLabel(calendarDateFromKey(start));
+  const endLabel = calendarDateLabel(calendarDateFromKey(end));
+  return start === end ? startLabel : `${startLabel} - ${endLabel}`;
+}
+
+function calendarItemCoversDate(item: CalendarItem, key: string): boolean {
+  const [start, end] = orderedCalendarRange(item.date, item.endDate ?? item.date);
+  return compareCalendarKeys(key, start) >= 0 && compareCalendarKeys(key, end) <= 0;
+}
+
+function normalizeCalendarTimeInput(value: string | undefined, fallback = calendarSettingsDefaults.defaultTime): string {
+  const source = String(value || "").trim();
+  const fallbackMatch = /^(\d{1,2}):(\d{2})/.exec(fallback);
+  const fallbackValue = fallbackMatch ? `${fallbackMatch[1].padStart(2, "0")}:${fallbackMatch[2]}` : "09:00";
+  if (!source) return fallbackValue;
+
+  const normalized = source
+    .replace(/\s+/g, "")
+    .replace(/[０-９]/g, (char) => String.fromCharCode(char.charCodeAt(0) - 0xfee0));
+  const japaneseMatch = /^(午前|午後)(\d{1,2})(?::(\d{1,2}))?/.exec(normalized);
+  if (japaneseMatch) {
+    let hour = Number(japaneseMatch[2]);
+    const minute = Number(japaneseMatch[3] ?? 0);
+    if (!Number.isFinite(hour) || !Number.isFinite(minute)) return fallbackValue;
+    if (japaneseMatch[1] === "午後" && hour < 12) hour += 12;
+    if (japaneseMatch[1] === "午前" && hour === 12) hour = 0;
+    return `${String(Math.max(0, Math.min(23, hour))).padStart(2, "0")}:${String(Math.max(0, Math.min(59, minute))).padStart(2, "0")}`;
   }
-  return [];
+  const plainMatch = /^(\d{1,2})(?::(\d{1,2}))?/.exec(normalized);
+  if (!plainMatch) return fallbackValue;
+  const hour = Number(plainMatch[1]);
+  const minute = Number(plainMatch[2] ?? 0);
+  if (!Number.isFinite(hour) || !Number.isFinite(minute)) return fallbackValue;
+  return `${String(Math.max(0, Math.min(23, hour))).padStart(2, "0")}:${String(Math.max(0, Math.min(59, minute))).padStart(2, "0")}`;
+}
+
+function formatCalendarTime(time: string | undefined): string {
+  const normalized = normalizeCalendarTimeInput(time);
+  const [hourText, minute] = normalized.split(":");
+  const hour = Number(hourText);
+  const period = hour < 12 ? "午前" : "午後";
+  const hour12 = hour % 12 || 12;
+  return `${period}${hour12}:${minute}`;
+}
+
+function buildCalendarTimeOptions(stepMinutes: CalendarSettings["timeSlotMinutes"]): string[] {
+  const step = stepMinutes === 30 || stepMinutes === 60 ? stepMinutes : 15;
+  const options: string[] = [];
+  for (let minutes = 0; minutes < 24 * 60; minutes += step) {
+    options.push(`${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`);
+  }
+  return options;
+}
+
+function calendarRunAtIso(dateKey: string, time: string): string {
+  const normalized = normalizeCalendarTimeInput(time);
+  return new Date(`${dateKey}T${normalized}:00`).toISOString();
+}
+
+function createCalendarItemId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `calendar-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function parseCalendarSettings(raw: Record<string, unknown> | undefined): CalendarSettings {
+  const value = raw ?? {};
+  const defaultItemType = String(value.default_item_type ?? calendarSettingsDefaults.defaultItemType);
+  const eventColor = String(value.event_color ?? calendarSettingsDefaults.eventColor);
+  const taskColor = String(value.task_color ?? calendarSettingsDefaults.taskColor);
+  const weekStart = String(value.week_start ?? calendarSettingsDefaults.weekStart);
+  const maxItems = Number(value.max_items_per_day ?? calendarSettingsDefaults.maxItemsPerDay);
+  const slotMinutes = Number(value.time_slot_minutes ?? calendarSettingsDefaults.timeSlotMinutes);
+  return {
+    agentCurrentChat: value.agent_current_chat === true,
+    agentModel: String(value.agent_model ?? "").trim(),
+    agentTaskDefault: value.agent_task_default === true,
+    defaultTime: normalizeCalendarTimeInput(String(value.default_time ?? calendarSettingsDefaults.defaultTime)),
+    defaultItemType: defaultItemType === "event" || defaultItemType === "reminder" ? defaultItemType : "task",
+    dimWeekends: value.dim_weekends !== false,
+    eventColor: eventColor === "blue" || eventColor === "slate" ? eventColor : "green",
+    maxItemsPerDay: Number.isFinite(maxItems) ? Math.max(1, Math.min(6, Math.round(maxItems))) : calendarSettingsDefaults.maxItemsPerDay,
+    quickAddEnabled: value.quick_add_enabled !== false,
+    showOutsideDays: value.show_outside_days !== false,
+    showTimePicker: value.show_time_picker !== false,
+    taskColor: taskColor === "cyan" || taskColor === "slate" ? taskColor : "blue",
+    timeSlotMinutes: slotMinutes === 30 || slotMinutes === 60 ? slotMinutes : 15,
+    weekStart: weekStart === "monday" ? "monday" : "sunday",
+  };
+}
+
+function calendarItemClassName(item: CalendarItem, settings: CalendarSettings): string {
+  if (item.kind === "task") {
+    if (settings.taskColor === "cyan") return "bg-cyan-500/85 text-cyan-950";
+    if (settings.taskColor === "slate") return "bg-zinc-300/85 text-zinc-950";
+    return "bg-blue-500/90 text-white";
+  }
+  if (item.kind === "event") {
+    if (settings.eventColor === "blue") return "bg-blue-500/85 text-white";
+    if (settings.eventColor === "slate") return "bg-zinc-300/85 text-zinc-950";
+    return "bg-emerald-500/85 text-emerald-950";
+  }
+  return "bg-zinc-500/80 text-zinc-50";
+}
+
+function resolveCalendarAgentModel(settings: CalendarSettings, activeModelId: string, profiles: ModelProfile[]): string {
+  if (settings.agentModel) return settings.agentModel;
+  const isUsableProfile = (profile: ModelProfile): boolean => {
+    const availability = profile.availability ?? {};
+    const metadata = profile.metadata ?? {};
+    const configurationSource = String(availability.configuration_source ?? metadata.configuration_source ?? "").toLowerCase();
+    if (configurationSource === "no_key_gateway") return false;
+    return Boolean(profile.local || availability.local === true || availability.configured === true || availability.status === "configured");
+  };
+  const activeProfile = profiles.find((profile) => profile.profile_id === activeModelId || profile.qualified_model_id === activeModelId);
+  if (activeProfile && isUsableProfile(activeProfile)) return activeModelId;
+  const configuredProfiles = profiles.filter((profile) => {
+    const id = `${profile.profile_id} ${profile.qualified_model_id} ${profile.model_id}`.toLowerCase();
+    return isUsableProfile(profile) && !id.includes("embedding");
+  });
+  const configuredProfile = configuredProfiles.find((profile) => {
+    const id = `${profile.profile_id} ${profile.qualified_model_id} ${profile.model_id}`.toLowerCase();
+    return id.includes("gemini") && id.includes("flash");
+  }) ?? configuredProfiles[0];
+  return configuredProfile?.profile_id || configuredProfile?.qualified_model_id || activeModelId || "default";
 }
 
 function CalendarComposerPanel({
-  onClose,
-  onResult,
+  conversationId,
+  modelId,
+  modelProfiles,
+  settings,
 }: {
-  onClose: () => void;
-  onResult: (label: string, result: unknown) => void;
+  conversationId: string | null;
+  modelId: string;
+  modelProfiles: ModelProfile[];
+  settings: CalendarSettings;
 }) {
-  const [memos, setMemos] = useState<CalendarMemo[]>([]);
-  const [tasks, setTasks] = useState<CalendarTask[]>([]);
-  const [prompt, setPrompt] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [status, setStatus] = useState<string | null>(null);
+  const today = new Date();
+  const year = today.getFullYear();
+  const month = today.getMonth();
+  const monthStart = new Date(year, month, 1);
+  const weekStartIndex = settings.weekStart === "monday" ? 1 : 0;
+  const weekLabels = ["日", "月", "火", "水", "木", "金", "土"];
+  const visibleWeekLabels = weekLabels.map((_, index) => weekLabels[(index + weekStartIndex) % 7]);
+  const monthStartOffset = (monthStart.getDay() - weekStartIndex + 7) % 7;
+  const [items, setItems] = useLocalStorage<CalendarItem[]>("defaultspack.calendar.items.v1", []);
+  const [activeEditor, setActiveEditor] = useState<CalendarEditorState | null>(null);
+  const [dragState, setDragState] = useState<CalendarDragState | null>(null);
+  const [draftTitle, setDraftTitle] = useState("");
+  const [draftKind, setDraftKind] = useState<CalendarItemKind>(settings.defaultItemType);
+  const [draftTime, setDraftTime] = useState(formatCalendarTime(settings.defaultTime));
+  const [draftAgentEnabled, setDraftAgentEnabled] = useState(settings.agentTaskDefault);
+  const [draftAgentPrompt, setDraftAgentPrompt] = useState("");
+  const [draftError, setDraftError] = useState<string | null>(null);
+  const [isSavingDraft, setIsSavingDraft] = useState(false);
+  const [isTimeMenuOpen, setIsTimeMenuOpen] = useState(false);
+  const [lastAgentResult, setLastAgentResult] = useState<string | null>(null);
+  const calendarRef = useRef<HTMLElement | null>(null);
 
-  const refreshCalendar = useCallback(async () => {
-    setBusy(true);
-    setStatus(null);
-    try {
-      const [scheduleResult, memoResult] = await Promise.allSettled([
-        api.listSchedules(),
-        api.invokeTool("memo_list_notes", { folder_id: "calendar", limit: 12 }),
-      ]);
-      if (scheduleResult.status === "fulfilled") {
-        setTasks(recordArray(scheduleResult.value, ["schedules", "items", "tasks"]) as CalendarTask[]);
+  useEffect(() => {
+    setDraftKind(settings.defaultItemType);
+  }, [settings.defaultItemType]);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setActiveEditor(null);
+        setDragState(null);
+        setIsTimeMenuOpen(false);
       }
-      if (memoResult.status === "fulfilled") {
-        setMemos(recordArray(memoResult.value, ["notes", "results", "items"]) as CalendarMemo[]);
-      }
-      const failed = [scheduleResult, memoResult].filter((item) => item.status === "rejected").length;
-      setStatus(failed ? `${failed}件のカレンダー情報を読めませんでした` : null);
-    } catch (calendarError) {
-      setStatus(calendarError instanceof Error ? calendarError.message : "Calendar refresh failed");
-    } finally {
-      setBusy(false);
-    }
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
   }, []);
 
   useEffect(() => {
-    void refreshCalendar();
-  }, [refreshCalendar]);
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      if (!calendarRef.current?.contains(target)) {
+        setActiveEditor(null);
+        setDragState(null);
+        setIsTimeMenuOpen(false);
+      }
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => document.removeEventListener("pointerdown", onPointerDown);
+  }, []);
 
-  const createRecurringTask = async () => {
-    const message = prompt.trim();
-    if (!message) return;
-    setBusy(true);
-    setStatus(null);
-    try {
-      const result = await api.createSchedule({
-        name: message.slice(0, 48),
-        description: "Created from Rumi calendar composer",
-        schedule_type: "interval",
-        schedule_config: { interval: { value: 1, unit: "days" } },
-        task: { message, model: "default", timeout: 300 },
+  const calendarCells = Array.from({ length: 42 }, (_, index): CalendarCell => {
+    const date = new Date(year, month, 1 + index - monthStartOffset);
+    const isCurrentMonth = date.getMonth() === month;
+    const isToday = date.getFullYear() === year && date.getMonth() === month && date.getDate() === today.getDate();
+    const row = Math.floor(index / 7);
+    const col = index % 7;
+    return {
+      col,
+      date,
+      isCurrentMonth,
+      isToday,
+      key: calendarDateKey(date),
+      label: date.getDate() === 1 ? `${date.getMonth() + 1}月 1日` : String(date.getDate()),
+      row,
+    };
+  });
+  const itemsByDate = items.reduce<Record<string, CalendarItem[]>>((acc, item) => {
+    if (!item.date || !item.title) return acc;
+    for (const key of calendarKeysBetween(item.date, item.endDate ?? item.date)) {
+      acc[key] = [...(acc[key] ?? []), item].sort((left, right) => {
+        const timeOrder = String(left.time ?? "").localeCompare(String(right.time ?? ""));
+        return timeOrder || left.title.localeCompare(right.title);
       });
-      onResult("calendar-schedule-create", result);
-      setPrompt("");
-      await refreshCalendar();
-    } catch (createError) {
-      setStatus(createError instanceof Error ? createError.message : "Task creation failed");
+    }
+    return acc;
+  }, {});
+  const activeRangeKeys = activeEditor ? new Set(calendarKeysBetween(activeEditor.startKey, activeEditor.endKey)) : new Set<string>();
+  const dragRangeKeys = dragState ? new Set(calendarKeysBetween(dragState.startKey, dragState.currentKey)) : new Set<string>();
+  const activeItem = activeEditor?.itemId ? items.find((item) => item.id === activeEditor.itemId) ?? null : null;
+  const timeOptions = buildCalendarTimeOptions(settings.timeSlotMinutes);
+  const popoverStyle = activeEditor ? {
+    left: `${(activeEditor.cell.col / 7) * 100}%`,
+    top: `${(activeEditor.cell.row / 6) * 100}%`,
+    transform: `${activeEditor.cell.col >= 5 ? "translateX(calc(-100% - 10px))" : "translateX(10px)"} ${activeEditor.cell.row >= 4 ? "translateY(calc(-100% - 10px))" : "translateY(36px)"}`,
+  } : undefined;
+
+  const resetDraftForCreate = (kind = settings.defaultItemType) => {
+    setDraftTitle("");
+    setDraftKind(kind);
+    setDraftTime(formatCalendarTime(settings.defaultTime));
+    setDraftAgentEnabled(settings.agentTaskDefault && kind === "task");
+    setDraftAgentPrompt("");
+    setDraftError(null);
+    setLastAgentResult(null);
+    setIsTimeMenuOpen(false);
+  };
+
+  const openCreateEditor = (cell: CalendarCell, startKey = cell.key, endKey = cell.key) => {
+    if (!settings.quickAddEnabled) return;
+    resetDraftForCreate(settings.defaultItemType);
+    setActiveEditor({ mode: "create", cell, startKey, endKey });
+  };
+
+  const openEditEditor = (item: CalendarItem, cell: CalendarCell) => {
+    setActiveEditor({
+      mode: "edit",
+      itemId: item.id,
+      cell,
+      startKey: item.date,
+      endKey: item.endDate ?? item.date,
+    });
+    setDraftTitle(item.title);
+    setDraftKind(item.kind);
+    setDraftTime(formatCalendarTime(item.time ?? settings.defaultTime));
+    setDraftAgentEnabled(Boolean(item.scheduleId));
+    setDraftAgentPrompt(item.agentPrompt ?? item.title);
+    setDraftError(null);
+    setLastAgentResult(item.lastRunStatus ? `Agent last run: ${item.lastRunStatus}` : null);
+    setIsTimeMenuOpen(false);
+  };
+
+  const schedulePayloadForItem = (itemId: string, title: string, startKey: string, endKey: string, time: string, agentPrompt: string) => ({
+    name: `Calendar: ${title}`,
+    description: `Created from Rumi calendar for ${calendarRangeLabel(startKey, endKey)}.`,
+    schedule_type: "once",
+    schedule_config: { run_at: calendarRunAtIso(startKey, time) },
+    task: {
+      message: agentPrompt || title,
+      model: resolveCalendarAgentModel(settings, modelId, modelProfiles),
+      conversation_id: settings.agentCurrentChat ? conversationId || null : null,
+      metadata: {
+        source: "calendar",
+        calendar_item_id: itemId,
+        calendar_start_date: startKey,
+        calendar_end_date: endKey,
+        calendar_time: normalizeCalendarTimeInput(time),
+      },
+    },
+  });
+
+  const extractScheduleRecord = (response: Record<string, unknown>): Record<string, unknown> => {
+    const data = response.data;
+    return isRecord(data) ? data : response;
+  };
+
+  const persistAgentSchedule = async (
+    existing: CalendarItem | null,
+    itemId: string,
+    title: string,
+    startKey: string,
+    endKey: string,
+    time: string,
+    agentPrompt: string,
+  ): Promise<{ scheduleId?: string; scheduleStatus?: string }> => {
+    const payload = schedulePayloadForItem(itemId, title, startKey, endKey, time, agentPrompt);
+    if (existing?.scheduleId) {
+      const updated = extractScheduleRecord(await api.updateSchedule(existing.scheduleId, payload));
+      return {
+        scheduleId: String(updated.id ?? existing.scheduleId),
+        scheduleStatus: String(updated.status ?? existing.scheduleStatus ?? "active"),
+      };
+    }
+    const created = extractScheduleRecord(await api.createSchedule(payload));
+    const scheduleId = created.id ? String(created.id) : undefined;
+    return {
+      scheduleId,
+      scheduleStatus: String(created.status ?? "active"),
+    };
+  };
+
+  const submitDraft = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!activeEditor) return;
+    setIsSavingDraft(true);
+    setDraftError(null);
+    setLastAgentResult(null);
+    const [startKey, endKey] = orderedCalendarRange(activeEditor.startKey, activeEditor.endKey);
+    const title = draftTitle.trim() || (draftKind === "task" ? "New task" : draftKind === "event" ? "New event" : "Reminder");
+    const normalizedTime = normalizeCalendarTimeInput(draftTime, settings.defaultTime);
+    const existing = activeEditor.itemId ? items.find((item) => item.id === activeEditor.itemId) ?? null : null;
+    const itemId = existing?.id ?? createCalendarItemId();
+    const agentPrompt = draftAgentPrompt.trim() || title;
+    try {
+      let scheduleId = existing?.scheduleId;
+      let scheduleStatus = existing?.scheduleStatus;
+      if (draftKind === "task" && draftAgentEnabled) {
+        const schedule = await persistAgentSchedule(existing, itemId, title, startKey, endKey, normalizedTime, agentPrompt);
+        scheduleId = schedule.scheduleId;
+        scheduleStatus = schedule.scheduleStatus;
+      } else if (existing?.scheduleId) {
+        await api.deleteSchedule(existing.scheduleId).catch(() => undefined);
+        scheduleId = undefined;
+        scheduleStatus = undefined;
+      }
+      const nextItem: CalendarItem = {
+        id: itemId,
+        date: startKey,
+        endDate: endKey === startKey ? undefined : endKey,
+        kind: draftKind,
+        title,
+        time: normalizedTime,
+        agentPrompt: draftKind === "task" && draftAgentEnabled ? agentPrompt : undefined,
+        scheduleId,
+        scheduleStatus,
+        lastRunStatus: existing?.lastRunStatus,
+      };
+      setItems((current) => activeEditor.mode === "edit"
+        ? current.map((item) => item.id === itemId ? nextItem : item)
+        : [...current, nextItem]);
+      setActiveEditor(null);
+      setDraftTitle("");
+      setIsTimeMenuOpen(false);
+    } catch (error) {
+      setDraftError(error instanceof Error ? error.message : "Agent task schedule failed.");
     } finally {
-      setBusy(false);
+      setIsSavingDraft(false);
     }
   };
 
-  const triggerTask = async (taskId: string) => {
-    const result = await api.triggerSchedule(taskId);
-    onResult("calendar-schedule-trigger", result);
-    await refreshCalendar();
+  const deleteActiveItem = async () => {
+    if (!activeItem) return;
+    setIsSavingDraft(true);
+    setDraftError(null);
+    try {
+      if (activeItem.scheduleId) await api.deleteSchedule(activeItem.scheduleId).catch(() => undefined);
+      setItems((current) => current.filter((item) => item.id !== activeItem.id));
+      setActiveEditor(null);
+    } catch (error) {
+      setDraftError(error instanceof Error ? error.message : "Delete failed.");
+    } finally {
+      setIsSavingDraft(false);
+    }
   };
 
-  const pauseOrResumeTask = async (task: CalendarTask) => {
-    const taskId = String(task.id ?? "");
-    if (!taskId) return;
-    const paused = String(task.status ?? "").toLowerCase() === "paused";
-    const result = paused ? await api.resumeSchedule(taskId) : await api.pauseSchedule(taskId);
-    onResult(paused ? "calendar-schedule-resume" : "calendar-schedule-pause", result);
-    await refreshCalendar();
+  const runActiveAgentNow = async () => {
+    if (!activeItem?.scheduleId) return;
+    setIsSavingDraft(true);
+    setDraftError(null);
+    try {
+      const response = extractScheduleRecord(await api.triggerSchedule(activeItem.scheduleId));
+      const status = String(response.status ?? "triggered");
+      setItems((current) => current.map((item) => item.id === activeItem.id ? { ...item, lastRunStatus: status } : item));
+      setLastAgentResult(`Agent run: ${status}`);
+    } catch (error) {
+      setDraftError(error instanceof Error ? error.message : "Agent trigger failed.");
+    } finally {
+      setIsSavingDraft(false);
+    }
+  };
+
+  const handleCellMouseDown = (event: ReactMouseEvent<HTMLDivElement>, cell: CalendarCell) => {
+    if (event.button !== 0 || cell.isCurrentMonth === false && !settings.showOutsideDays) return;
+    event.preventDefault();
+    setDragState({ startKey: cell.key, currentKey: cell.key, startedAt: Date.now() });
+  };
+
+  const handleCellMouseEnter = (cell: CalendarCell) => {
+    setDragState((current) => current ? { ...current, currentKey: cell.key } : current);
+  };
+
+  const handleCellMouseUp = (event: ReactMouseEvent<HTMLDivElement>, cell: CalendarCell) => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    const currentDrag = dragState;
+    setDragState(null);
+    if (!currentDrag) {
+      openCreateEditor(cell);
+      return;
+    }
+    const holdMs = Date.now() - currentDrag.startedAt;
+    const endKey = currentDrag.currentKey || cell.key;
+    openCreateEditor(cell, currentDrag.startKey, endKey);
+    if (holdMs > 360 || currentDrag.startKey !== endKey) {
+      setDraftTitle("");
+    }
   };
 
   return (
-    <section className="mx-auto mb-4 w-[min(920px,calc(100vw-32px))] rounded-[28px] border border-amber-200/12 bg-gradient-to-br from-[#17130f]/96 via-[#10100f]/96 to-[#0b0b0c]/96 p-4 shadow-[0_24px_80px_rgba(0,0,0,0.42)]">
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <div className="flex min-w-0 items-center gap-3">
-          <WarmActionIcon kind="calendar" size="lg" />
-          <div className="min-w-0">
-            <h2 className="truncate text-sm font-semibold text-zinc-100">AI Calendar</h2>
-            <p className="truncate text-xs text-zinc-500">AIカレンダーメモと定期タスクを入力欄の代わりに確認します。</p>
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <button type="button" onClick={() => void refreshCalendar()} className="rounded-xl border border-zinc-800 px-3 py-2 text-xs text-zinc-300 hover:border-amber-200/20 hover:bg-zinc-900" disabled={busy}>
-            Refresh
-          </button>
-          <button type="button" onClick={onClose} className="rounded-xl border border-zinc-800 px-3 py-2 text-xs text-zinc-400 hover:border-zinc-700 hover:bg-zinc-900">
-            Composer
-          </button>
-        </div>
+    <section
+      ref={calendarRef}
+      aria-label="Calendar month"
+      className="relative h-full min-h-0 w-full overflow-hidden rounded-[26px] border border-zinc-800 bg-[#101112] shadow-[0_24px_80px_rgba(0,0,0,0.36)]"
+    >
+      <div className="grid h-full min-h-[620px] grid-cols-7 grid-rows-6 overflow-hidden">
+        {calendarCells.map((cell, index) => {
+          const visibleItems = (itemsByDate[cell.key] ?? []).slice(0, settings.maxItemsPerDay);
+          const hiddenCount = Math.max(0, (itemsByDate[cell.key] ?? []).length - visibleItems.length);
+          const isOutsideHidden = !cell.isCurrentMonth && !settings.showOutsideDays;
+          const isWeekend = (cell.date.getDay() === 0 || cell.date.getDay() === 6) && settings.dimWeekends;
+          const isSelected = activeRangeKeys.has(cell.key);
+          const isDragSelected = dragRangeKeys.has(cell.key);
+          return (
+            <div
+              key={`${cell.date.toISOString()}-${index}`}
+              role="button"
+              tabIndex={isOutsideHidden ? -1 : 0}
+              data-testid={`calendar-day-${cell.key}`}
+              aria-label={`${calendarDateLabel(cell.date)} の予定を追加`}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  openCreateEditor(cell);
+                }
+              }}
+              onMouseDown={(event) => handleCellMouseDown(event, cell)}
+              onMouseEnter={() => handleCellMouseEnter(cell)}
+              onMouseUp={(event) => handleCellMouseUp(event, cell)}
+              className={cn(
+                "relative flex min-h-0 flex-col items-stretch border-b border-r border-zinc-800/90 px-2 py-2 text-left transition-colors hover:bg-zinc-900/70 focus:outline-none focus-visible:bg-zinc-900 focus-visible:ring-2 focus-visible:ring-blue-400/70",
+                !cell.isCurrentMonth && "text-zinc-600",
+                isOutsideHidden && "cursor-default text-transparent hover:bg-transparent",
+                isWeekend && cell.isCurrentMonth && "bg-black/10",
+                isSelected && "bg-blue-950/20 ring-2 ring-inset ring-blue-400/70",
+                isDragSelected && "bg-blue-950/35",
+              )}
+            >
+              {cell.row === 0 && (
+                <div className="mb-1.5 text-center text-[12px] font-semibold text-zinc-500">
+                  {visibleWeekLabels[cell.col]}
+                </div>
+              )}
+              <div className="flex justify-center">
+                <span
+                  className={cn(
+                    "inline-flex min-h-6 min-w-6 items-center justify-center rounded-full px-1.5 text-[13px] font-semibold leading-none text-zinc-300",
+                    !cell.isCurrentMonth && "text-zinc-500",
+                    cell.isToday && "bg-zinc-100 text-zinc-950 shadow-[0_0_0_1px_rgba(255,255,255,0.18)]",
+                  )}
+                >
+                  {isOutsideHidden ? "" : cell.label}
+                </span>
+              </div>
+              <div className="mt-2 flex min-h-0 flex-1 flex-col gap-1 overflow-hidden">
+                {visibleItems.map((item) => (
+                  <button
+                    type="button"
+                    key={item.id}
+                    data-testid={`calendar-item-${item.id}`}
+                    className={cn("truncate rounded-[7px] px-2 py-0.5 text-left text-[10.5px] font-medium leading-5 shadow-sm transition-opacity hover:opacity-90", calendarItemClassName(item, settings))}
+                    title={item.title}
+                    onPointerDown={(event) => event.stopPropagation()}
+                    onPointerUp={(event) => event.stopPropagation()}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      openEditEditor(item, cell);
+                    }}
+                  >
+                    {item.time && <span className="mr-1 opacity-75">{formatCalendarTime(item.time)}</span>}
+                    {item.title}
+                  </button>
+                ))}
+                {hiddenCount > 0 && (
+                  <div className="text-[10px] font-medium text-zinc-500">+{hiddenCount} more</div>
+                )}
+              </div>
+            </div>
+          );
+        })}
       </div>
-
-      {status && <div className="mb-3 rounded-xl border border-orange-400/20 bg-orange-300/10 px-3 py-2 text-xs text-orange-100">{status}</div>}
-
-      <div className="grid gap-3 md:grid-cols-[1fr_1fr]">
-        <div className="rounded-2xl border border-zinc-800/80 bg-black/20 p-3">
-          <div className="mb-2 flex items-center justify-between">
-            <h3 className="text-xs font-semibold text-zinc-200">Calendar memos</h3>
-            <span className="text-[10px] text-zinc-600">{memos.length} notes</span>
+      {activeEditor && settings.quickAddEnabled && (
+        <form
+          role="dialog"
+          aria-label={`${calendarRangeLabel(activeEditor.startKey, activeEditor.endKey)}に追加`}
+          className="absolute z-30 w-[min(320px,calc(100%-24px))] rounded-2xl border border-zinc-700 bg-zinc-950/95 p-3 text-left shadow-[0_24px_70px_rgba(0,0,0,0.65)] backdrop-blur"
+          style={popoverStyle}
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={(event) => event.stopPropagation()}
+          onSubmit={submitDraft}
+        >
+          <div className="mb-3 flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-[11px] uppercase tracking-[0.2em] text-zinc-600">{activeEditor.mode === "edit" ? "Edit item" : "New item"}</p>
+              <p className="truncate text-sm font-semibold text-zinc-100">{calendarRangeLabel(activeEditor.startKey, activeEditor.endKey)}</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setActiveEditor(null)}
+              className="flex h-7 w-7 items-center justify-center rounded-lg text-zinc-500 hover:bg-zinc-900 hover:text-zinc-200"
+              aria-label="Close calendar quick add"
+            >
+              ×
+            </button>
           </div>
-          <div className="space-y-2">
-            {memos.length === 0 ? (
-              <p className="rounded-xl border border-dashed border-zinc-800 px-3 py-6 text-center text-xs text-zinc-600">calendarフォルダのメモはまだありません。</p>
-            ) : memos.map((memo) => (
-              <article key={String(memo.id ?? memo.title)} className="rounded-xl border border-zinc-800 bg-zinc-950/55 px-3 py-2">
-                <div className="truncate text-xs font-medium text-zinc-200">{String(memo.title ?? "Untitled memo")}</div>
-                <p className="mt-1 line-clamp-3 text-[11px] leading-5 text-zinc-500">{String(memo.content ?? "")}</p>
-              </article>
+          <input
+            autoFocus
+            value={draftTitle}
+            onChange={(event) => setDraftTitle(event.target.value)}
+            placeholder="何を追加しますか？"
+            className="h-10 w-full rounded-xl border border-zinc-800 bg-zinc-900 px-3 text-sm text-zinc-100 outline-none placeholder:text-zinc-600 focus:border-blue-400/70"
+          />
+          <div className="mt-3 grid grid-cols-3 gap-1.5">
+            {(["task", "event", "reminder"] as CalendarItemKind[]).map((kind) => (
+              <button
+                key={kind}
+                type="button"
+                onClick={() => {
+                  setDraftKind(kind);
+                  setDraftAgentEnabled((current) => kind === "task" ? current || settings.agentTaskDefault : false);
+                }}
+                className={cn(
+                  "rounded-lg border px-2 py-1.5 text-xs font-medium capitalize transition-colors",
+                  draftKind === kind
+                    ? "border-zinc-200 bg-zinc-100 text-zinc-950"
+                    : "border-zinc-800 bg-zinc-950 text-zinc-400 hover:border-zinc-700 hover:text-zinc-100",
+                )}
+              >
+                {kind}
+              </button>
             ))}
           </div>
-        </div>
-
-        <div className="rounded-2xl border border-zinc-800/80 bg-black/20 p-3">
-          <div className="mb-2 flex items-center justify-between">
-            <h3 className="text-xs font-semibold text-zinc-200">Recurring tasks</h3>
-            <span className="text-[10px] text-zinc-600">{tasks.length} tasks</span>
+          <div className="mt-3 flex items-end gap-2">
+            <label className="relative flex-1">
+              <span className="mb-1 block text-[10px] uppercase tracking-[0.18em] text-zinc-600">Time</span>
+              <input
+                type="text"
+                value={draftTime}
+                aria-label="Calendar item time"
+                onClick={() => setIsTimeMenuOpen(settings.showTimePicker)}
+                onFocus={() => setIsTimeMenuOpen(settings.showTimePicker)}
+                onKeyDown={(event) => {
+                  if (event.key === "Escape") {
+                    event.stopPropagation();
+                    setIsTimeMenuOpen(false);
+                  }
+                  if (event.key === "Enter") {
+                    setIsTimeMenuOpen(false);
+                  }
+                }}
+                onBlur={() => window.setTimeout(() => setIsTimeMenuOpen(false), 120)}
+                onChange={(event) => {
+                  setDraftTime(event.target.value);
+                  setIsTimeMenuOpen(settings.showTimePicker);
+                }}
+                className="h-9 w-full rounded-lg border border-zinc-800 bg-zinc-900 px-2 text-xs text-zinc-200 outline-none focus:border-zinc-600"
+              />
+              {isTimeMenuOpen && settings.showTimePicker && (
+                <div
+                  role="listbox"
+                  aria-label="Calendar time options"
+                  className="absolute bottom-11 left-0 z-40 max-h-[300px] w-[210px] overflow-y-auto rounded-[22px] border border-zinc-700 bg-zinc-800 p-1.5 shadow-[0_18px_60px_rgba(0,0,0,0.55)]"
+                >
+                  {timeOptions.map((option) => (
+                    <button
+                      key={option}
+                      type="button"
+                      role="option"
+                      aria-selected={normalizeCalendarTimeInput(draftTime, settings.defaultTime) === option}
+                      className={cn(
+                        "block w-full rounded-xl px-3 py-2 text-left text-[15px] leading-6 text-zinc-100 hover:bg-zinc-700",
+                        normalizeCalendarTimeInput(draftTime, settings.defaultTime) === option && "bg-zinc-700",
+                      )}
+                      onClick={() => {
+                        setDraftTime(formatCalendarTime(option));
+                        setIsTimeMenuOpen(false);
+                      }}
+                    >
+                      {formatCalendarTime(option)}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </label>
+            <button
+              type="submit"
+              disabled={isSavingDraft}
+              className="h-9 rounded-lg bg-zinc-100 px-4 text-xs font-semibold text-zinc-950 transition-colors hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {activeEditor.mode === "edit" ? "Save" : "Add"}
+            </button>
           </div>
-          <div className="space-y-2">
-            {tasks.length === 0 ? (
-              <p className="rounded-xl border border-dashed border-zinc-800 px-3 py-6 text-center text-xs text-zinc-600">定期タスクはまだありません。</p>
-            ) : tasks.map((task) => {
-              const taskId = String(task.id ?? "");
-              const paused = String(task.status ?? "").toLowerCase() === "paused";
-              return (
-                <article key={taskId || String(task.name)} className="rounded-xl border border-zinc-800 bg-zinc-950/55 px-3 py-2">
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <div className="truncate text-xs font-medium text-zinc-200">{String(task.name ?? taskId ?? "Scheduled task")}</div>
-                      <p className="mt-1 text-[10px] text-zinc-600">{String(task.schedule_type ?? "schedule")} · {String(task.status ?? "active")}</p>
-                    </div>
-                    {taskId && (
-                      <div className="flex shrink-0 gap-1">
-                        <button type="button" onClick={() => void triggerTask(taskId)} className="rounded-lg border border-zinc-800 px-2 py-1 text-[10px] text-zinc-300 hover:border-amber-200/20">Run</button>
-                        <button type="button" onClick={() => void pauseOrResumeTask(task)} className="rounded-lg border border-zinc-800 px-2 py-1 text-[10px] text-zinc-300 hover:border-amber-200/20">{paused ? "Resume" : "Pause"}</button>
-                      </div>
-                    )}
-                  </div>
-                </article>
-              );
-            })}
+          {draftKind === "task" && (
+            <div className="mt-3 rounded-xl border border-zinc-800 bg-zinc-900/50 p-2.5">
+              <label className="flex items-center justify-between gap-3 text-xs font-medium text-zinc-200">
+                <span>Agent task</span>
+                <input
+                  type="checkbox"
+                  checked={draftAgentEnabled}
+                  onChange={(event) => setDraftAgentEnabled(event.target.checked)}
+                  className="h-4 w-4 accent-blue-500"
+                />
+              </label>
+              {draftAgentEnabled && (
+                <textarea
+                  value={draftAgentPrompt}
+                  onChange={(event) => setDraftAgentPrompt(event.target.value)}
+                  placeholder="エージェントに実行させる内容。空ならタイトルを使います。"
+                  className="mt-2 h-16 w-full resize-none rounded-lg border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-200 outline-none placeholder:text-zinc-600 focus:border-blue-400/70"
+                />
+              )}
+            </div>
+          )}
+          {(draftError || lastAgentResult || activeItem?.scheduleId) && (
+            <div className={cn(
+              "mt-3 rounded-lg border px-2.5 py-2 text-xs",
+              draftError ? "border-red-500/40 bg-red-500/10 text-red-100" : "border-blue-500/30 bg-blue-500/10 text-blue-100",
+            )}>
+              {draftError ?? lastAgentResult ?? `Agent schedule: ${activeItem?.scheduleStatus ?? "active"}`}
+            </div>
+          )}
+          {activeEditor.mode === "edit" && (
+            <div className="mt-3 flex items-center justify-between gap-2">
+              <button
+                type="button"
+                onClick={() => void deleteActiveItem()}
+                disabled={isSavingDraft}
+                className="rounded-lg border border-red-500/30 px-3 py-1.5 text-xs font-medium text-red-200 hover:bg-red-500/10 disabled:opacity-50"
+              >
+                Delete
+              </button>
+              {activeItem?.scheduleId && (
+                <button
+                  type="button"
+                  onClick={() => void runActiveAgentNow()}
+                  disabled={isSavingDraft}
+                  className="rounded-lg border border-blue-500/30 px-3 py-1.5 text-xs font-medium text-blue-100 hover:bg-blue-500/10 disabled:opacity-50"
+                >
+                  Run now
+                </button>
+              )}
+            </div>
+          )}
+          <div className="sr-only">
+            <input
+              type="time"
+              value={normalizeCalendarTimeInput(draftTime, settings.defaultTime)}
+              readOnly
+            />
           </div>
-        </div>
-      </div>
-
-      <div className="mt-3 rounded-2xl border border-zinc-800/80 bg-zinc-950/45 p-3">
-        <label className="mb-2 block text-xs font-medium text-zinc-300" htmlFor="calendar-task-prompt">定期タスクを追加</label>
-        <div className="flex gap-2">
-          <input
-            id="calendar-task-prompt"
-            value={prompt}
-            onChange={(event) => setPrompt(event.target.value)}
-            placeholder="例: 毎朝、昨日の作業を要約して今日のTODOを作って"
-            className="min-w-0 flex-1 rounded-xl border border-zinc-800 bg-black/35 px-3 py-2 text-sm text-zinc-200 outline-none placeholder:text-zinc-700 focus:border-amber-200/30"
-          />
-          <button type="button" onClick={() => void createRecurringTask()} disabled={busy || !prompt.trim()} className="rounded-xl bg-gradient-to-br from-amber-100 to-orange-300 px-4 py-2 text-xs font-semibold text-zinc-950 disabled:opacity-50">
-            Add daily
-          </button>
-        </div>
-      </div>
+        </form>
+      )}
     </section>
   );
 }
@@ -1303,8 +2049,8 @@ export default function App() {
       setModelProfiles([]);
     }
     if (nextSettings) {
-      setSettingsSections(nextSettings.sections);
-      setSettingsValues(nextSettings.values);
+      setSettingsSections(withCalendarSettingsSections(nextSettings.sections));
+      setSettingsValues(withCalendarSettingsValues(nextSettings.values));
     } else {
       if (settingsResult.status === "rejected") console.error(settingsResult.reason);
     }
@@ -1548,6 +2294,7 @@ export default function App() {
     setIsGenerating(false);
     setAttachedFiles([]);
     setDroppedWidgets([]);
+    setWorkspacePanelMode("composer");
     replaceChatIdInUrl(null, false);
   };
 
@@ -1568,6 +2315,7 @@ export default function App() {
 
   const handleHistoryClick = (conversationId: string) => {
     setError(null);
+    setWorkspacePanelMode("composer");
     void loadConversation(conversationId);
   };
 
@@ -1774,7 +2522,7 @@ export default function App() {
           .then(() => refreshCatalog())
           .catch(console.error);
       } else {
-        void api.updateUiSettings(next).then((result) => setSettingsValues(result.values)).catch(console.error);
+        void api.updateUiSettings(next).then((result) => setSettingsValues(withCalendarSettingsValues(result.values))).catch(console.error);
       }
       return next;
     });
@@ -1788,8 +2536,8 @@ export default function App() {
         ...updates,
       },
     };
-    setSettingsValues(next);
-    void api.updateUiSettings(next).then((result) => setSettingsValues(result.values)).catch(console.error);
+    setSettingsValues(withCalendarSettingsValues(next));
+    void api.updateUiSettings(next).then((result) => setSettingsValues(withCalendarSettingsValues(result.values))).catch(console.error);
   };
 
   const handleModelProfileSelect = (profileId: string) => {
@@ -2846,6 +3594,18 @@ export default function App() {
   };
 
   const Renderers = useMemo(() => resolveDefaultspackRenderers(catalog), [catalog]);
+  const codingSidebarPanel = mode === "coding" ? (
+    <CodingCockpit
+      variant="sidebar"
+      workspaces={codingWorkspaces}
+      selectedWorkspaceId={selectedCodingWorkspaceId}
+      onWorkspaceSelect={handleCodingWorkspaceSelect}
+      onWorkspacesRefresh={() => void loadCodingWorkspaces()}
+    />
+  ) : null;
+  const isCalendarMode = workspacePanelMode === "calendar";
+  const calendarSettings = parseCalendarSettings(settingsValues.calendar);
+  const handleCalendarModeToggle = () => setWorkspacePanelMode((current) => current === "calendar" ? "composer" : "calendar");
   const renderComposer = (isCentered = false) => (
     <Renderers.composer
       input={input}
@@ -2917,7 +3677,8 @@ export default function App() {
               account={catalog?.app?.account}
               onChatSelect={handleHistoryClick}
               onNewTask={handleNewTask}
-              onCalendarOpen={() => setWorkspacePanelMode("calendar")}
+              onCalendarOpen={handleCalendarModeToggle}
+              isCalendarActive={isCalendarMode}
               onSettingsClick={() => setIsSettingsOpen(true)}
               onChatMetadataChange={handleHistoryMetadataChange}
               onMinimize={() => setIsHistoryMinimized(true)}
@@ -2933,7 +3694,8 @@ export default function App() {
               account={catalog?.app?.account}
               onChatSelect={handleHistoryClick}
               onNewTask={handleNewTask}
-              onCalendarOpen={() => setWorkspacePanelMode("calendar")}
+              onCalendarOpen={handleCalendarModeToggle}
+              isCalendarActive={isCalendarMode}
               onSettingsClick={() => setIsSettingsOpen(true)}
               onChatMetadataChange={handleHistoryMetadataChange}
               onRestore={() => setIsHistoryMinimized(false)}
@@ -2944,7 +3706,7 @@ export default function App() {
 
         <main className={cn("rumi-workspace-main flex-1 flex min-w-0 bg-[#09090b] relative", isActivityPreviewVisible && "has-activity-preview")}>
           <div className={cn("rumi-chat-pane flex-1 flex flex-col min-w-0", isActivityPreviewVisible && "border-r border-zinc-800/40")}>
-            {showRegion("chat_header") && (
+            {showRegion("chat_header") && !isCalendarMode && (
               <Renderers.chatHeader
                 title={activeChatTitle}
                 showPreview={effectiveShowPreview}
@@ -2957,18 +3719,22 @@ export default function App() {
               />
             )}
 
-            {isNewConversation && !isLoading ? (
+            {isCalendarMode ? (
+              <div className="flex min-h-0 flex-1 p-1.5">
+                <CalendarComposerPanel
+                  conversationId={activeConversationId}
+                  modelId={activeModelId}
+                  modelProfiles={selectableModelProfiles}
+                  settings={calendarSettings}
+                />
+              </div>
+            ) : isNewConversation && !isLoading ? (
               <div className={cn("rumi-new-chat-stage flex flex-1 items-center justify-center px-5 pb-[10vh]", isNewChatLaunching && "is-launching")}>
                 <div className="w-full">
                   <h1 className="rumi-greeting mx-auto mb-7 max-w-[720px] px-4 text-center text-[clamp(24px,3.2vw,44px)] font-medium leading-tight text-zinc-200">
                     {getNewConversationGreeting()}
                   </h1>
-                  {workspacePanelMode === "calendar" ? (
-                    <CalendarComposerPanel
-                      onClose={() => setWorkspacePanelMode("composer")}
-                      onResult={(label, result) => pushActionPreview({ id: label, label, icon: "calendar" }, label, result)}
-                    />
-                  ) : renderComposer(true)}
+                  {renderComposer(true)}
                 </div>
               </div>
             ) : (
@@ -2995,7 +3761,7 @@ export default function App() {
               />
             )}
 
-            {showRegion("composer") && !isNewConversation && (
+            {showRegion("composer") && !isNewConversation && !isCalendarMode && (
               <div className="relative">
                 {showRegion("activity_preview") && !effectiveShowPreview && canShowCanvas && (
                   <CanvasPeek
@@ -3027,24 +3793,10 @@ export default function App() {
                     </div>
                   </div>
                 )}
-                {workspacePanelMode === "calendar" ? (
-                  <CalendarComposerPanel
-                    onClose={() => setWorkspacePanelMode("composer")}
-                    onResult={(label, result) => pushActionPreview({ id: label, label, icon: "calendar" }, label, result)}
-                  />
-                ) : renderComposer(false)}
+                {renderComposer(false)}
               </div>
             )}
           </div>
-
-          {mode === "coding" && (
-            <CodingCockpit
-              workspaces={codingWorkspaces}
-              selectedWorkspaceId={selectedCodingWorkspaceId}
-              onWorkspaceSelect={handleCodingWorkspaceSelect}
-              onWorkspacesRefresh={() => void loadCodingWorkspaces()}
-            />
-          )}
 
           {isActivityPreviewVisible && (
             <aside className="rumi-activity-preview-pane" aria-label="Activity preview">
@@ -3070,6 +3822,7 @@ export default function App() {
             settingsSections={settingsSections}
             selectedToolIds={selectedToolIds}
             companyPanel={<CompanyWorkspacePanel />}
+            codingPanel={codingSidebarPanel}
             keyboardButtonNavigation={keyboardButtonNavigation}
             onSettingChange={handleSettingChange}
             onOpenSettings={() => setIsSettingsOpen(true)}

@@ -1,0 +1,21 @@
+{
+  "id": "moonshotai/moonshot-v1-8k",
+  "category": "llm_model",
+  "version": "1",
+  "provider_id": "moonshotai",
+  "model_id": "moonshot-v1-8k",
+  "display_name": "Moonshot V1 8K",
+  "type": "chat",
+  "enabled": true,
+  "priority": 2,
+  "defaults": {
+    "legacy": true
+  },
+  "capabilities": {
+    "chat": true,
+    "streaming": true,
+    "reasoning": false,
+    "tool_calls": true,
+    "vision": false
+  }
+}

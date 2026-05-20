@@ -1,0 +1,25 @@
+{
+  "id": "groq/openai/gpt-oss-120b",
+  "category": "llm_model",
+  "version": "1",
+  "provider_id": "groq",
+  "model_id": "openai/gpt-oss-120b",
+  "display_name": "GPT OSS 120B via Groq",
+  "type": "reasoning",
+  "enabled": true,
+  "priority": 1,
+  "defaults": {
+    "chat": true,
+    "reasoning": true
+  },
+  "capabilities": {
+    "chat": true,
+    "streaming": true,
+    "reasoning": true,
+    "tool_calls": true,
+    "vision": false
+  },
+  "supports_thinking": true,
+  "thinking_levels": ["low", "medium", "high", "xhigh"],
+  "default_thinking_level": "medium"
+}

@@ -1509,6 +1509,18 @@ export const api = {
     });
   },
 
+  deleteSchedule(scheduleId: string) {
+    return request<Record<string, unknown>>(`/api/agent/schedules/${encodeURIComponent(scheduleId)}`, {
+      method: "DELETE",
+    });
+  },
+
+  getScheduleHistory(scheduleId: string) {
+    return request<Record<string, unknown>>(`/api/agent/schedules/${encodeURIComponent(scheduleId)}/history`, {
+      cache: "no-store",
+    });
+  },
+
   getOperationsCompanyStatus() {
     return request<OperationsCompanyStatus>("/api/agent/company/status");
   },

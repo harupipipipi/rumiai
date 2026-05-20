@@ -19,6 +19,8 @@ OPENGATEWAY_MODELS = {
     "gitlawb-opengateway/mimo-v2.5-pro",
     "gitlawb-opengateway/mimo-v2-flash",
     "gitlawb-opengateway/mimo-v2-omni",
+    "gitlawb-opengateway/mimo-v2-pro",
+    "gitlawb-opengateway/mimo-v2.5",
     "gitlawb-opengateway/google/gemini-3.1-flash-lite-preview",
 }
 
@@ -92,6 +94,8 @@ def test_opengateway_auto_registered_with_cloud_opt_in():
     [
         ("gitlawb-opengateway/mimo-v2.5-pro", "mimo-v2.5-pro"),
         ("gitlawb-opengateway/mimo-v2-flash", "mimo-v2-flash"),
+        ("gitlawb-opengateway/mimo-v2-pro", "mimo-v2-pro"),
+        ("gitlawb-opengateway/mimo-v2.5", "mimo-v2.5"),
         (
             "gitlawb-opengateway/google/gemini-3.1-flash-lite-preview",
             "google/gemini-3.1-flash-lite-preview",

@@ -171,6 +171,9 @@ def prepare_chat_run(input_data: dict[str, Any], context: dict[str, Any] | None 
         standard_messages.insert(insert_at, {"role": "system", "content": chat_reference_prompt})
 
     params = dict(prepared_input.get("params") or {})
+    requested_model = str(params.get("model") or params.get("profile_id") or "").strip()
+    if requested_model:
+        model = requested_model
     model_settings_service = ModelRuntimeSettingsService()
     model_settings = model_settings_service.get_settings()
     if "thinking_level" not in params:

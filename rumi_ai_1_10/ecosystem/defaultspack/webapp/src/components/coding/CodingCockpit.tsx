@@ -47,11 +47,13 @@ export function CodingCockpit({
   selectedWorkspaceId,
   onWorkspaceSelect,
   onWorkspacesRefresh,
+  variant = "sidecar",
 }: {
   workspaces: CodingWorkspaceRecord[];
   selectedWorkspaceId?: string | null;
   onWorkspaceSelect?: (workspaceId: string) => void;
   onWorkspacesRefresh?: () => void;
+  variant?: "sidecar" | "sidebar";
 }) {
   const selectedWorkspace = useMemo(
     () => workspaces.find((workspace) => workspace.workspace_id === selectedWorkspaceId) ?? workspaces[0] ?? null,
@@ -68,6 +70,7 @@ export function CodingCockpit({
   const [mcpCommand, setMcpCommand] = useState("");
   const [mcpArgs, setMcpArgs] = useState("");
   const [mcpBusy, setMcpBusy] = useState(false);
+  const isSidebar = variant === "sidebar";
 
   const loadSidecarState = useCallback(async () => {
     setStatus(null);
@@ -163,12 +166,19 @@ export function CodingCockpit({
   };
 
   return (
-    <aside className="coding-cockpit flex w-[410px] max-w-[42vw] flex-shrink-0 flex-col overflow-hidden border-l border-zinc-800/60 bg-[#0b0b0f] max-[1180px]:hidden" aria-label="Coding cockpit">
+    <aside
+      className={
+        isSidebar
+          ? "coding-cockpit flex h-full min-h-[520px] w-full flex-col overflow-hidden rounded-2xl border border-zinc-800/80 bg-[#0b0b0f]/95 shadow-[0_18px_46px_rgba(0,0,0,0.28)]"
+          : "coding-cockpit flex w-[410px] max-w-[42vw] flex-shrink-0 flex-col overflow-hidden border-l border-zinc-800/60 bg-[#0b0b0f] max-[1180px]:hidden"
+      }
+      aria-label={isSidebar ? "Coding widget" : "Coding cockpit"}
+    >
       <div className="border-b border-zinc-800/60 p-3">
         <div className="mb-2 flex items-center justify-between gap-2">
           <div className="flex min-w-0 items-center gap-2">
             <FolderGit2 size={15} className="text-zinc-300" />
-            <h1 className="truncate text-sm font-semibold text-zinc-100">Coding Cockpit</h1>
+            <h1 className="truncate text-sm font-semibold text-zinc-100">{isSidebar ? "Coding widget" : "Coding Cockpit"}</h1>
           </div>
           <button
             type="button"
