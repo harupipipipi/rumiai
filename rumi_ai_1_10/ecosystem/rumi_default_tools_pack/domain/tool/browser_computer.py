@@ -1540,6 +1540,9 @@ class BrowserComputerController:
         title = filters.get("title", "").lower()
         selected = self._capture_target(payload)
         if selected and self._window_matches_filter(selected, app=app, title=title):
+            active = self._active_window()
+            if active and self._window_records_match(active, selected):
+                return True
             self._focus_window(selected)
             return True
         if app or title:
@@ -2029,7 +2032,12 @@ class BrowserComputerController:
         if target in {"primary_display", "all_displays", "screen", "display", "desktop"}:
             return None
         if target in {"active_window", "front_window"}:
-            return self._active_window()
+            active = self._active_window()
+            if active and self._is_usable_target_window(active):
+                state = self._computer_state()
+                state["target_window"] = active
+                self._write_computer_state(state)
+            return active
         if isinstance(payload.get("window"), dict):
             selected = self._normalize_window_record(payload.get("window"))
             return selected if self._is_usable_target_window(selected) else None
