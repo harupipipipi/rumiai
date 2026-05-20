@@ -1805,14 +1805,14 @@ export function ComposerRenderer({
                   )}
                 </div>
                 {levels.length > 0 && (
-                  <label className="inline-flex items-center gap-1 border-l border-zinc-700/50 pl-1.5 ml-0.5 text-[11px] font-medium text-zinc-500">
-                    <span>thinking</span>
+                  <label className="inline-flex items-center border-l border-zinc-700/50 pl-1.5 ml-0.5 text-[11px] font-medium text-zinc-500">
                     <select
                       value={thinkingLevel ?? levels[0]}
                       onChange={(event) => onThinkingLevelChange(event.target.value)}
                               disabled={isGenerating}
                               tabIndex={chromeButtonTabIndex}
                               className="bg-transparent text-[11px] font-medium text-zinc-400 outline-none cursor-pointer hover:text-zinc-200 transition-colors disabled:opacity-50"
+                      aria-label="Thinking level"
                       title="Thinking level"
                     >
                       {levels.map((level) => (
