@@ -1,16 +1,13 @@
 {
-  "id": "nvidia/meta/llama-3.3-70b-instruct",
+  "id": "nvidia/mistralai/mistral-large",
   "category": "llm_model",
   "version": "1",
   "provider_id": "nvidia",
-  "model_id": "meta/llama-3.3-70b-instruct",
-  "display_name": "Llama 3.3 70B Instruct via NVIDIA NIM",
+  "model_id": "mistralai/mistral-large",
+  "display_name": "Mistral Large via NVIDIA NIM",
   "type": "chat",
   "enabled": true,
-  "priority": 2,
-  "defaults": {
-    "general": true
-  },
+  "priority": 18,
   "capabilities": {
     "chat": true,
     "streaming": true,

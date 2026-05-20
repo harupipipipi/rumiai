@@ -1659,7 +1659,7 @@ export function ComposerRenderer({
               {droppedWidgets.map((widget) => (
                 <DroppedWidgetChip
                   key={widget.id}
-                  widget={widget.type === "tool" ? { ...widget, enabled: selectedToolIdSet.has(widget.id) } : widget}
+                  widget={widget.type === "tool" ? { ...widget, enabled: selectedToolIdSet.has(widget.sourceItemId || widget.id) } : widget}
                   onAction={onWidgetAction}
                   onToggle={onWidgetToggle}
                 />

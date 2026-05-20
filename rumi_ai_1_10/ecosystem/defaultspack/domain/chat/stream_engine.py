@@ -1056,6 +1056,9 @@ class ChatRunEngine:
                 messages,
                 transcript="".join(self._thinking_transcript_parts),
             )
+            fallback_tool_uses = _tool_use_blocks(fallback_response) if isinstance(fallback_response, dict) else []
+            if fallback_tool_uses:
+                tool_uses = fallback_tool_uses
             fallback_text = self._text_from_content_blocks(
                 fallback_response.get("content") if isinstance(fallback_response, dict) else None
             )
@@ -1545,28 +1548,37 @@ class ChatRunEngine:
         *,
         transcript: str = "",
     ) -> dict[str, Any] | None:
-        try:
-            response = self._gateway.complete(
-                {
-                    "model": prepared.model,
-                    "messages": messages,
-                    "tools": [],
-                    "params": _params_without_thinking(prepared.params),
-                }
-            )
-        except Exception:
-            return None
-        if not isinstance(response, dict) or not self._text_from_content_blocks(response.get("content")):
-            return None
-        metadata = dict(response.get("metadata") or {})
-        if transcript:
-            metadata["thinking"] = {"state": "completed", "transcript": transcript}
-        else:
-            metadata.setdefault("thinking", {"state": "completed"})
-        metadata["recovered_from_empty_stream"] = True
-        metadata.setdefault("model", prepared.model)
-        metadata.setdefault("attached_tool_count", len(prepared.provider_tools))
-        metadata.setdefault("attached_tools", list(prepared.tools_called))
-        metadata["thinking_level"] = prepared.params.get("thinking_level")
-        response["metadata"] = metadata
-        return response
+        fallback_tool_sets: list[list[dict[str, Any]]] = []
+        if prepared.provider_tools:
+            fallback_tool_sets.append(prepared.provider_tools)
+        fallback_tool_sets.append([])
+        for tools in fallback_tool_sets:
+            try:
+                response = self._gateway.complete(
+                    {
+                        "model": prepared.model,
+                        "messages": messages,
+                        "tools": tools,
+                        "params": _params_without_thinking(prepared.params),
+                    }
+                )
+            except Exception:
+                continue
+            if not isinstance(response, dict):
+                continue
+            if not self._text_from_content_blocks(response.get("content")) and not _tool_use_blocks(response):
+                continue
+            metadata = dict(response.get("metadata") or {})
+            if transcript:
+                metadata["thinking"] = {"state": "completed", "transcript": transcript}
+            else:
+                metadata.setdefault("thinking", {"state": "completed"})
+            metadata["recovered_from_empty_stream"] = True
+            metadata["fallback_kept_tools"] = bool(tools)
+            metadata.setdefault("model", prepared.model)
+            metadata.setdefault("attached_tool_count", len(prepared.provider_tools))
+            metadata.setdefault("attached_tools", list(prepared.tools_called))
+            metadata["thinking_level"] = prepared.params.get("thinking_level")
+            response["metadata"] = metadata
+            return response
+        return None

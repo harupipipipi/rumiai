@@ -147,11 +147,13 @@ class AIClient:
             metadata = dict(raw.get("metadata", {}))
             raw_capabilities = raw.get("capabilities", [])
             if isinstance(raw_capabilities, dict):
-                capabilities = [key for key, value in raw_capabilities.items() if value]
                 capability_map = dict(raw_capabilities)
+                capabilities = [str(key) for key, value in capability_map.items() if value]
             else:
-                capabilities = list(raw_capabilities or [])
+                capabilities = [str(key) for key in raw_capabilities or [] if str(key or "").strip()]
                 capability_map = {str(key): True for key in capabilities}
+            if capability_map and "capabilities" not in metadata:
+                metadata["capabilities"] = capability_map
             context_window = int(raw.get("context_window", raw.get("max_context", raw.get("max_context_tokens", 0))) or 0)
             max_context = int(raw.get("max_context", raw.get("max_context_tokens", context_window)) or 0)
             supports_thinking = bool(

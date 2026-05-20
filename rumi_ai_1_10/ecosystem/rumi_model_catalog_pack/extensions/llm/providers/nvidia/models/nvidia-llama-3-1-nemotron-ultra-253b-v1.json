@@ -1,23 +1,19 @@
 {
-  "id": "nvidia/nvidia/llama-3.3-nemotron-super-49b-v1",
+  "id": "nvidia/nvidia/llama-3.1-nemotron-ultra-253b-v1",
   "category": "llm_model",
   "version": "1",
   "provider_id": "nvidia",
-  "model_id": "nvidia/llama-3.3-nemotron-super-49b-v1",
-  "display_name": "Llama 3.3 Nemotron Super 49B via NVIDIA NIM",
+  "model_id": "nvidia/llama-3.1-nemotron-ultra-253b-v1",
+  "display_name": "Llama 3.1 Nemotron Ultra 253B via NVIDIA NIM",
   "type": "reasoning",
   "enabled": true,
-  "priority": 1,
-  "defaults": {
-    "chat": true,
-    "reasoning": true
-  },
+  "priority": 13,
   "capabilities": {
     "chat": true,
     "streaming": true,
     "reasoning": true,
     "tool_calls": true,
-    "parallel_tool_calls": false,
+    "parallel_tool_calls": true,
     "vision": false
   },
   "supports_thinking": true,

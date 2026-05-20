@@ -1,22 +1,19 @@
 {
-  "id": "nvidia/meta/llama-3.3-70b-instruct",
+  "id": "nvidia/meta/llama-3.1-8b-instruct",
   "category": "llm_model",
   "version": "1",
   "provider_id": "nvidia",
-  "model_id": "meta/llama-3.3-70b-instruct",
-  "display_name": "Llama 3.3 70B Instruct via NVIDIA NIM",
+  "model_id": "meta/llama-3.1-8b-instruct",
+  "display_name": "Llama 3.1 8B Instruct via NVIDIA NIM",
   "type": "chat",
   "enabled": true,
-  "priority": 2,
-  "defaults": {
-    "general": true
-  },
+  "priority": 11,
   "capabilities": {
     "chat": true,
     "streaming": true,
     "reasoning": false,
     "tool_calls": true,
-    "parallel_tool_calls": false,
+    "parallel_tool_calls": true,
     "vision": false
   }
 }

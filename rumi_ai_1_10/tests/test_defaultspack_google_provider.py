@@ -720,6 +720,61 @@ class TestDefaultspackGoogleProvider(unittest.TestCase):
         self.assertEqual(response["content"][1]["id"], "call_browser_1")
         self.assertEqual(response["content"][1]["name"], "browser_use")
 
+    def test_google_native_gemma_stream_parses_thought_and_function_call(self):
+        from domain.ai_client.providers.google_provider import GoogleProvider
+
+        captured = {}
+
+        class FakeStream:
+            def __init__(self):
+                self._chunks = [
+                    b'data: {"candidates":[{"content":{"parts":[{"text":"I should use a tool.","thought":true},{"functionCall":{"id":"call_browser_1","name":"browser_use","args":{"action":"screenshot"}}}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":1,"candidatesTokenCount":1,"totalTokenCount":2}}\n\n',
+                    b"data: [DONE]\n\n",
+                ]
+
+            def read(self, _size=4096):
+                return self._chunks.pop(0) if self._chunks else b""
+
+            def close(self):
+                captured["closed"] = True
+
+        with patch.dict(os.environ, {"GEMINI_API_KEY": "gemini-key"}, clear=True):
+            provider = GoogleProvider()
+
+        def fake_native_request_json(model, body, stream=False, **kwargs):
+            captured["model"] = model
+            captured["body"] = body
+            captured["stream"] = stream
+            return FakeStream()
+
+        provider._native_request_json = fake_native_request_json
+        chunks = list(
+            provider.stream(
+                "gemma-4-31b-it",
+                [{"role": "user", "content": "use the browser"}],
+                [
+                    {
+                        "type": "function",
+                        "function": {
+                            "name": "browser_use",
+                            "description": "Control the browser.",
+                            "parameters": {"type": "object", "properties": {"action": {"type": "string"}}},
+                        },
+                    }
+                ],
+                {"thinking_level": "high"},
+            )
+        )
+
+        self.assertTrue(captured["stream"])
+        self.assertEqual(chunks[0], {"type": "thinking_delta", "delta": {"type": "text", "text": "I should use a tool."}})
+        self.assertEqual(chunks[1], {"type": "tool_call_start", "id": "call_browser_1", "name": "browser_use"})
+        self.assertEqual(chunks[2]["type"], "tool_call_delta")
+        self.assertEqual(json.loads(chunks[2]["arguments_chunk"]), {"action": "screenshot"})
+        self.assertEqual(chunks[3], {"type": "tool_call_end", "id": "call_browser_1", "name": "browser_use"})
+        self.assertEqual(chunks[-1]["finish_reason"], "tool_calls")
+        self.assertTrue(captured["closed"])
+
     def test_google_native_gemma_sanitizes_invalid_tool_names_and_restores_original_name(self):
         from domain.ai_client.providers.google_provider import GoogleProvider
 
