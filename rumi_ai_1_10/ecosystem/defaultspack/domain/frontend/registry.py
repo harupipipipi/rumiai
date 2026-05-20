@@ -122,7 +122,7 @@ class FrontendRegistry:
     def _app_metadata(self, ui_surfaces: list[dict[str, Any]]) -> dict[str, Any]:
         app: dict[str, Any] = {
             "id": "defaultspack",
-            "name": "RumiDP",
+            "name": "Console",
             "icon": "/static/assets/icons/defaultspack-icon.png",
             "account": self._rumi_account_metadata(),
         }
@@ -137,11 +137,11 @@ class FrontendRegistry:
 
     def _rumi_account_metadata(self) -> dict[str, Any]:
         account: dict[str, Any] = {
-            "display_name": "Rumi",
+            "display_name": "Developer",
             "email": "",
             "plan_label": "Local Account",
             "avatar_url": "",
-            "initial": "R",
+            "initial": "D",
             "source": "fallback",
         }
         token_payload = self._read_rumi_oauth_payload()
@@ -172,7 +172,7 @@ class FrontendRegistry:
             or token_payload.get("subscription_plan")
             or app_metadata.get("plan")
             or app_metadata.get("subscription_plan")
-            or "Rumi Account"
+            or "Local Account"
         ).strip()
         if display_name:
             account["display_name"] = display_name

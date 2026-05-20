@@ -820,7 +820,7 @@ export function ChatMessagesRenderer({
                 <div className={cn("flex flex-col min-w-0 pt-1", message.role === "user" ? "items-end max-w-[82%] lg:max-w-[70%] 2xl:max-w-[64%]" : "items-start flex-1")}>
                   {message.role === "agent" && (
                     <div className="flex items-center gap-2 mb-1.5">
-                      <span className="text-xs font-semibold text-zinc-300 tracking-wide">Rumi</span>
+                      <span className="text-xs font-semibold text-zinc-300 tracking-wide">Assistant</span>
                       {message.metadata?.executionTime && (
                         <span className="text-[10px] text-zinc-500 font-mono flex items-center gap-1">
                           <Clock size={10} /> {message.metadata.executionTime}
@@ -849,7 +849,7 @@ export function ChatMessagesRenderer({
                       {message.role === "agent" && message.metadata?.thinkingTranscript && (
                         <details className="mb-3 rounded-lg border border-zinc-800 bg-zinc-950/50 px-3 py-2 text-xs text-zinc-400">
                           <summary className="cursor-pointer select-none text-[11px] font-medium text-zinc-300">
-                            Thinking
+                            Trace
                           </summary>
                           <pre className="mt-2 max-h-40 overflow-y-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-zinc-400">
                             {message.metadata.thinkingTranscript}

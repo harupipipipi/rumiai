@@ -1,8 +1,9 @@
 import {
-  Bot,
+  ArrowUp,
   ChevronDown,
   Code2,
   CornerDownRight,
+  Cpu,
   File,
   FileText,
   Folder,
@@ -14,7 +15,6 @@ import {
   PanelRightOpen,
   Search,
   SlidersHorizontal,
-  Sparkles,
   Wrench,
   X,
 } from "lucide-react";
@@ -57,7 +57,7 @@ const RISK_BADGE_STYLES: Record<string, string> = {
 const MODE_META: Record<AppMode, { label: string; icon: typeof MessageSquare; description: string }> = {
   chat: { label: "Chat", icon: MessageSquare, description: "通常チャット" },
   coding: { label: "Coding", icon: Code2, description: "コード編集・Git操作" },
-  agent: { label: "Agent", icon: Bot, description: "自律エージェント" },
+  agent: { label: "Agent", icon: Cpu, description: "自律エージェント" },
 };
 
 const LOCAL_MODEL_PROVIDER_IDS = new Set(["stub", "ollama", "lmstudio", "vllm", "llamacpp", "llama_cpp"]);
@@ -1395,7 +1395,7 @@ export function ComposerRenderer({
                   {(
                     [
                       ["tools", "Tools", Wrench],
-                      ["models", "AI Models", Sparkles],
+                      ["models", "Models", SlidersHorizontal],
                       ["commands", "Commands", Folder],
                     ] as const
                   ).map(([id, label, Icon]) => (

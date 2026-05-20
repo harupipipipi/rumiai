@@ -28,7 +28,6 @@ import {
   Settings,
   ShieldAlert,
   SlidersHorizontal,
-  Sparkles,
   Star,
   Tag,
   Terminal,
@@ -125,7 +124,7 @@ const CATEGORY_META: Record<SidebarCategory | "all", { label: string; icon: Reac
 };
 
 const TOOL_GROUP_ICONS: Record<string, ReactElement> = {
-  agent: <Sparkles size={16} />,
+  agent: <Cpu size={16} />,
   browser: <Monitor size={16} />,
   build: <Hammer size={16} />,
   coding: <Code2 size={16} />,
@@ -152,7 +151,7 @@ const TOOL_GROUP_LABELS: Record<string, string> = {
 };
 
 const ITEM_ICONS: Record<string, ReactElement> = {
-  agent: <Sparkles size={18} />,
+  agent: <Cpu size={18} />,
   artifacts: <Archive size={18} />,
   browser: <Monitor size={18} />,
   browser_companion: <AppWindow size={18} />,
