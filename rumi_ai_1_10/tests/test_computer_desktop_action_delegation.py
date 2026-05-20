@@ -56,6 +56,33 @@ def test_seat_failure_falls_through_to_legacy(controller):
         pass
 
 
+def test_seat_executed_fallback_does_not_rerun_legacy(controller, monkeypatch):
+    """A ComputerSeat fallback success has already performed the action."""
+    svc = MagicMock()
+    result = asdict(ActionResult(action="type_text", driver="mac_apple_events", executed=True))
+    result["is_fallback"] = True
+    svc.type_text.return_value = result
+    svc.doctor.return_value = {"platform": "darwin", "driver_chain_order": [], "available_drivers": [], "unavailable_drivers": []}
+    controller._computer_seat = svc
+    monkeypatch.setattr(controller, "_focus_action_target", lambda payload: True)
+    monkeypatch.setattr(controller, "_foreground_action_focus_error", lambda action, payload: None)
+    monkeypatch.setattr(
+        controller,
+        "_darwin_type",
+        lambda payload: (_ for _ in ()).throw(AssertionError("legacy type should not run")),
+    )
+
+    outcome = controller.run(
+        "computer.type",
+        {"text": "hello", "include_screenshot": False},
+        yolo_mode=True,
+    )
+
+    assert outcome["executed"] is True
+    assert outcome["driver"] == "mac_apple_events"
+    assert outcome["is_fallback"] is True
+
+
 def test_seat_exception_falls_through(controller):
     """If _try_computer_seat_action raises, legacy code runs."""
     svc = MagicMock()

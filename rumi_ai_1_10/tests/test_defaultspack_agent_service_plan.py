@@ -5366,6 +5366,7 @@ def test_computer_type_returns_post_action_screenshot_by_default(tmp_path, monke
     controller = BrowserComputerController(artifact_root=tmp_path)
     controller._session_path = tmp_path / "shared" / "browser_sessions.json"
     monkeypatch.setattr(browser_computer.subprocess, "run", fake_run)
+    monkeypatch.setattr(controller, "_try_computer_seat_action", lambda action, payload: None)
     monkeypatch.setattr(controller, "_focus_action_target", lambda payload: True)
     monkeypatch.setattr(
         controller,
@@ -5471,7 +5472,7 @@ def test_computer_type_uses_clipboard_preserving_paste_for_non_ascii_on_macos(tm
     assert "\\u306e" not in " ".join(command)
 
 
-def test_computer_type_keeps_ascii_on_direct_keystroke_path_for_macos(tmp_path, monkeypatch):
+def test_computer_type_uses_clipboard_paste_for_ascii_on_macos(tmp_path, monkeypatch):
     from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
     import ecosystem.rumi_default_tools_pack.domain.tool.browser_computer as browser_computer
 
@@ -5486,9 +5487,13 @@ def test_computer_type_keeps_ascii_on_direct_keystroke_path_for_macos(tmp_path, 
     BrowserComputerController(artifact_root=tmp_path)._darwin_type({"text": "hello"})
 
     assert len(calls) == 1
-    script = calls[0][0][2]
-    assert script == 'tell application "System Events" to keystroke "hello"'
-    assert "set the clipboard" not in script
+    command = calls[0][0]
+    assert command[:2] == ["osascript", "-e"]
+    assert command[3:] == ["--", "hello"]
+    script = command[2]
+    assert "set the clipboard to rumiPasteText" in script
+    assert 'keystroke "v" using {command down}' in script
+    assert 'keystroke "hello"' not in script
 
 
 def test_browser_computer_manages_persistent_profiles_and_cookie_jars(tmp_path):

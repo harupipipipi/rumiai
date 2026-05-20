@@ -1296,10 +1296,9 @@ class BrowserComputerController:
     def _try_computer_seat_action(self, action: str, action_payload: dict[str, Any]) -> dict[str, Any] | None:
         """Attempt to execute a mutation action via ComputerSeatService.
 
-        Returns the ActionResult dict if a non-foreground driver executed it,
-        or None to fall through to legacy platform code. Foreground fallback
-        results are ignored because the legacy code is the canonical foreground
-        implementation with full coordinate/marker support.
+        Returns the ActionResult dict if any ComputerSeat driver executed it.
+        ``is_fallback`` means the service fell through its own driver chain; it
+        should not cause the legacy path to run the same action a second time.
         """
         try:
             svc = self._get_computer_seat()
@@ -1323,8 +1322,7 @@ class BrowserComputerController:
                 result = svc.drag(target, x1=int(action_payload.get("x1", 0)), y1=int(action_payload.get("y1", 0)), x2=int(action_payload.get("x2", 0)), y2=int(action_payload.get("y2", 0)))
             else:
                 return None
-            # Only accept if a non-foreground driver handled it
-            if result and result.get("executed") and not result.get("is_fallback"):
+            if result and result.get("executed"):
                 return result
             return None
         except Exception:
@@ -3141,10 +3139,7 @@ $hwnd = [IntPtr]{hwnd}
 
     def _darwin_type(self, payload: dict[str, Any]) -> None:
         text = str(payload.get("text", ""))
-        if text.isascii():
-            command = ["osascript", "-e", self._apple_script("computer.type", payload)]
-        else:
-            command = ["osascript", "-e", self._darwin_clipboard_paste_script(), "--", text]
+        command = ["osascript", "-e", self._darwin_clipboard_paste_script(), "--", text]
         subprocess.run(command, check=True)
 
     @staticmethod
