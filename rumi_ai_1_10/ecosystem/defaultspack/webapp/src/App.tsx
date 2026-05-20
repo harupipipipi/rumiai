@@ -1384,15 +1384,11 @@ function profileKey(profile: ModelProfile | null | undefined, fallback: string):
 }
 
 function getNewConversationPlaceholder(): string {
-  const hour = new Date().getHours();
-  if (hour < 5) return "夜更かし中ですね。今日はどうしましたか？";
-  if (hour < 11) return "おはようございます。今日はどうしましたか？";
-  if (hour < 17) return "今日はどうしましたか？";
-  return "こんばんは。今日はどうしましたか？";
+  return "指示を入力するか、/ でツール・コマンドを選択します...";
 }
 
 function getNewConversationGreeting(): string {
-  return "今日は何をしましょう？";
+  return "Defaults Console";
 }
 
 function findProfile(profiles: ModelProfile[], modelId: string): ModelProfile | null {

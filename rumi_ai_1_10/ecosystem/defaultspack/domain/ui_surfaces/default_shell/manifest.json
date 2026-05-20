@@ -11,7 +11,7 @@
   "ui": {
     "app": {
       "id": "defaultspack",
-      "name": "RumiDP"
+      "name": "Console"
     },
     "sidebar_items": [
       {

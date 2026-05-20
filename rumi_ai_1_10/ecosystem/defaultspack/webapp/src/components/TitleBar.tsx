@@ -23,7 +23,7 @@ type TitleBarProps = {
   appIcon?: string;
 };
 
-export function TitleBar({ appName = "Rumi", appIcon }: TitleBarProps) {
+export function TitleBar({ appName = "Console", appIcon }: TitleBarProps) {
   const [isMaximized, setIsMaximized] = useState(false);
   const [isTauri, setIsTauri] = useState(false);
 
@@ -81,8 +81,8 @@ export function TitleBar({ appName = "Rumi", appIcon }: TitleBarProps) {
         {appIcon ? (
           <img src={appIcon} alt="" className="w-4 h-4 rounded object-cover flex-shrink-0" />
         ) : (
-          <div className="w-4 h-4 rounded bg-white flex items-center justify-center flex-shrink-0">
-            <span className="text-[8px] font-black text-black">R</span>
+          <div className="w-4 h-4 rounded bg-zinc-800 border border-zinc-700/80 flex items-center justify-center flex-shrink-0">
+            <span className="text-[9px] font-mono font-bold text-zinc-300">&gt;</span>
           </div>
         )}
         <span className="text-[11px] font-medium text-zinc-500">

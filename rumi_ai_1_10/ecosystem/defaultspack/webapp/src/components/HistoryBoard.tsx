@@ -25,8 +25,8 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import {
-  Globe, Terminal, Plus, ChevronRight, Settings,
-  GripVertical, FolderOpen, Folder, PanelLeftClose, PanelLeftOpen, SquarePen, X,
+  Globe, Terminal, MessageSquare, Plus, ChevronRight, Settings,
+  GripVertical, FolderOpen, Folder, PanelLeftClose, PanelLeftOpen, X,
 } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -523,9 +523,16 @@ function SortableChatItem({ chat, activeChatId, onChatSelect, onRename, onToggle
     else setTitle(chat.title);
   };
 
-  const icon = chat.type === 'research' ? <Globe size={13} className="text-zinc-500 flex-shrink-0" /> :
-               chat.type === 'code' ? <Terminal size={13} className="text-zinc-500 flex-shrink-0" /> :
-               <SquarePen size={13} className="text-zinc-500 flex-shrink-0" />;
+  const icon = chat.metadata?.icon_svg ? (
+    <span
+      className="w-3.5 h-3.5 text-zinc-500 flex-shrink-0 flex items-center justify-center [&>svg]:w-full [&>svg]:h-full"
+      dangerouslySetInnerHTML={{ __html: chat.metadata.icon_svg }}
+    />
+  ) : (
+    chat.type === 'research' ? <Globe size={13} className="text-zinc-500 flex-shrink-0" /> :
+    chat.type === 'code' ? <Terminal size={13} className="text-zinc-500 flex-shrink-0" /> :
+    <MessageSquare size={13} className="text-zinc-500 flex-shrink-0" />
+  );
 
   return (
     <>
@@ -1434,8 +1441,8 @@ export function HistoryBoard({ activeChatId, chatItems, account, onChatSelect, o
   ];
 
   const collisionDetection = createCustomCollision(activeType);
-  const accountName = account?.display_name || account?.email || 'Rumi';
-  const accountPlan = account?.plan_label || 'Rumi Account';
+  const accountName = account?.display_name || account?.email || 'Developer';
+  const accountPlan = account?.plan_label || 'Local Account';
   const accountInitial = account?.initial || accountName.charAt(0).toUpperCase();
   const accountIcon = account?.avatar_url || '';
   const accountIconIsImage = /^(https?:|data:image|\/)/.test(accountIcon);
@@ -1450,8 +1457,8 @@ export function HistoryBoard({ activeChatId, chatItems, account, onChatSelect, o
               type="button"
               onClick={onRestore}
               className="flex h-9 w-9 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-100"
-              title="RumiDP を開く"
-              aria-label="RumiDP を開く"
+              title="サイドバーを開く"
+              aria-label="サイドバーを開く"
             >
               <PanelLeftOpen size={16} />
             </button>
@@ -1503,7 +1510,14 @@ export function HistoryBoard({ activeChatId, chatItems, account, onChatSelect, o
                 title={chat.title}
                 aria-label={chat.title}
               >
-                <SquarePen size={17} strokeWidth={1.9} />
+                {chat.metadata?.icon_svg ? (
+                  <span
+                    className="w-[17px] h-[17px] flex items-center justify-center [&>svg]:w-full [&>svg]:h-full"
+                    dangerouslySetInnerHTML={{ __html: chat.metadata.icon_svg }}
+                  />
+                ) : (
+                  <MessageSquare size={17} strokeWidth={1.9} />
+                )}
                 {isActive && <span className="absolute left-0 h-5 w-0.5 rounded-r bg-emerald-400" />}
               </button>
             );
@@ -1537,14 +1551,14 @@ export function HistoryBoard({ activeChatId, chatItems, account, onChatSelect, o
         {/* Top action bar */}
         <div className="flex flex-col gap-1 px-4 py-4 flex-shrink-0">
           <div className="flex h-8 items-center justify-between gap-2 px-2.5">
-            <span className="text-xs font-semibold tracking-wide text-zinc-400">RumiDP</span>
+            <span className="text-xs font-semibold tracking-wide text-zinc-400">Console</span>
             {onMinimize && (
               <button
                 type="button"
                 onClick={onMinimize}
                 className="flex h-7 w-7 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-100"
-                title="RumiDP を閉じる"
-                aria-label="RumiDP を閉じる"
+                title="サイドバーを閉じる"
+                aria-label="サイドバーを閉じる"
               >
                 <PanelLeftClose size={15} />
               </button>
@@ -1656,9 +1670,14 @@ export function HistoryBoard({ activeChatId, chatItems, account, onChatSelect, o
         ) : activeChat ? (
           <div className="w-[220px] flex items-center gap-2 px-3 py-2 rounded-lg bg-zinc-800 border border-emerald-500/50 shadow-2xl">
             <GripVertical size={12} className="text-zinc-500" />
-            {activeChat.type === 'research' ? <Globe size={14} className="text-zinc-400" /> :
+            {activeChat.metadata?.icon_svg ? (
+              <span
+                className="w-3.5 h-3.5 text-zinc-400 flex-shrink-0 flex items-center justify-center [&>svg]:w-full [&>svg]:h-full"
+                dangerouslySetInnerHTML={{ __html: activeChat.metadata.icon_svg }}
+              />
+            ) : activeChat.type === 'research' ? <Globe size={14} className="text-zinc-400" /> :
              activeChat.type === 'code' ? <Terminal size={14} className="text-zinc-400" /> :
-             <SquarePen size={14} className="text-zinc-400" />}
+             <MessageSquare size={14} className="text-zinc-400" />}
             <span className="text-sm truncate text-zinc-100">{activeChat.title}</span>
           </div>
         ) : null}

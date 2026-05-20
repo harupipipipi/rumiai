@@ -11,6 +11,7 @@ import errno
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
+from domain.chat.icon_matcher import match_icon
 
 DEFAULT_CHAT_MODEL = "stub/default"
 _SEARCH_TOKEN_RE = re.compile(r"[A-Za-z0-9_./:-]+|[\u3040-\u30ff\u3400-\u9fff]+")
@@ -180,6 +181,10 @@ class ChatStore:
             cid = _gen_id()
             now = _now_ms()
             parent_id = str(parent_conversation_id) if parent_conversation_id else None
+            metadata_dict = dict(metadata) if isinstance(metadata, dict) else {}
+            icon_info = match_icon("New Conversation", cid)
+            metadata_dict["icon_id"] = icon_info["icon_id"]
+            metadata_dict["icon_svg"] = icon_info["icon_svg"]
             conv = {
                 "id": cid,
                 "title": "New Conversation",
@@ -199,7 +204,7 @@ class ChatStore:
                 "child_conversation_ids": [],
                 "conversation_kind": conversation_kind or ("subagent" if parent_id else "chat"),
                 "group_id": group_id,
-                "metadata": metadata if isinstance(metadata, dict) else {},
+                "metadata": metadata_dict,
                 "messages": [],
             }
             self._conversations[cid] = conv
@@ -275,6 +280,15 @@ class ChatStore:
         for key, value in updates.items():
             if key not in protected:
                 conv[key] = value
+
+        if "title" in updates or "metadata" in updates:
+            if not isinstance(conv.get("metadata"), dict):
+                conv["metadata"] = {}
+            if "title" in updates or "icon_svg" not in conv["metadata"]:
+                icon_info = match_icon(conv.get("title") or "New Conversation", conversation_id)
+                conv["metadata"]["icon_id"] = icon_info["icon_id"]
+                conv["metadata"]["icon_svg"] = icon_info["icon_svg"]
+
         conv["updated_at"] = _now_ms()
         self._save_conversations()
         return copy.deepcopy(conv)
