@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { api } from "./api";
+import { api, normalizeBrowserComputerApprovalAction, usesBrowserComputerApprovalEndpoint } from "./api";
 import { frontendCommandArgs, keepSelectedToolsAfterSend, parseCommandBoolean } from "../App";
 
 test("frontend command args prefer backend-coerced values", () => {
@@ -684,6 +684,43 @@ test("invokeTool calls generic tool endpoint with tool name and arguments", asyn
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+test("browser computer approvals use the browser-computer endpoint for computer_use", async () => {
+  const originalFetch = globalThis.fetch;
+  let requestUrl = "";
+  let requestBody: any = null;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    requestUrl = String(input);
+    requestBody = JSON.parse(String(init?.body ?? "{}"));
+    return new Response(JSON.stringify({
+      status: "ok",
+      data: { approved: true },
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }) as typeof fetch;
+
+  try {
+    const result = await api.approveBrowserComputerAction("computer_use", "screenshot", {
+      app: "Google Chrome",
+      approval_token: "tok",
+    });
+    assert.equal(requestUrl, "/api/tools/browser-computer");
+    assert.deepEqual(requestBody, {
+      action: "computer.screenshot",
+      payload: { app: "Google Chrome", approval_token: "tok" },
+    });
+    assert.deepEqual(result, { approved: true });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("browser approval helpers identify visible computer tools", () => {
+  assert.equal(usesBrowserComputerApprovalEndpoint("computer_use"), true);
+  assert.equal(usesBrowserComputerApprovalEndpoint("browser_use"), true);
+  assert.equal(usesBrowserComputerApprovalEndpoint("other_tool"), false);
+  assert.equal(normalizeBrowserComputerApprovalAction("computer_use", "context"), "computer.context");
+  assert.equal(normalizeBrowserComputerApprovalAction("computer_use", "computer.screenshot"), "computer.screenshot");
 });
 
 test("coding context, branch, and workspace read helpers use existing API routes", async () => {

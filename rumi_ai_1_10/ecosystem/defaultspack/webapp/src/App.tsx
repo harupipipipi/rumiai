@@ -3158,9 +3158,11 @@ export default function App() {
         ...browserApproval.payload,
         approval_token: browserApproval.token,
       };
-      const result = browserApproval.toolName === "browser_computer"
-        ? await api.browserComputer(browserApproval.action, approvedArguments)
-        : await api.invokeTool(browserApproval.toolName, { ...approvedArguments, action: browserApproval.action });
+      const result = await api.approveBrowserComputerAction(
+        browserApproval.toolName,
+        browserApproval.action,
+        approvedArguments,
+      );
       pushActionPreview(
         { id: "browser.approval", label: "Approved Browser Action", icon: "browser" },
         "browser-approval",

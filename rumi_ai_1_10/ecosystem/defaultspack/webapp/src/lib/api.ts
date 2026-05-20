@@ -924,6 +924,58 @@ type ChatStreamHandlers = {
   signal?: AbortSignal;
 };
 
+const BROWSER_COMPUTER_APPROVAL_TOOLS = new Set([
+  "browser_computer",
+  "browser_companion",
+  "browser_use",
+  "computer_use",
+]);
+
+const COMPUTER_APPROVAL_ACTION_ALIASES = new Set([
+  "context",
+  "app_context",
+  "state",
+  "apps",
+  "list_apps",
+  "open_apps",
+  "applications",
+  "windows",
+  "list_windows",
+  "select_app",
+  "show_app",
+  "focus_app",
+  "activate_app",
+  "select_window",
+  "screenshot",
+  "move",
+  "click",
+  "drag",
+  "type",
+  "key",
+  "scroll",
+  "observe",
+  "semantic_action",
+  "press",
+  "pid_event",
+]);
+
+export function usesBrowserComputerApprovalEndpoint(toolName: string): boolean {
+  return BROWSER_COMPUTER_APPROVAL_TOOLS.has(String(toolName || "").trim());
+}
+
+export function normalizeBrowserComputerApprovalAction(toolName: string, action: string): string {
+  const normalizedAction = String(action || "").trim();
+  if (
+    usesBrowserComputerApprovalEndpoint(toolName)
+    && normalizedAction
+    && !normalizedAction.includes(".")
+    && COMPUTER_APPROVAL_ACTION_ALIASES.has(normalizedAction)
+  ) {
+    return `computer.${normalizedAction}`;
+  }
+  return normalizedAction;
+}
+
 function isUnsafeHttpMethod(method: string): boolean {
   return !["GET", "HEAD", "OPTIONS"].includes(method.toUpperCase());
 }
@@ -1471,6 +1523,23 @@ export const api = {
     return request<Record<string, unknown>>("/api/tools/browser-computer", {
       method: "POST",
       body: JSON.stringify({ action, payload: payload ?? {} }),
+    });
+  },
+
+  approveBrowserComputerAction(toolName: string, action: string, payload?: Record<string, unknown>) {
+    const normalizedAction = normalizeBrowserComputerApprovalAction(toolName, action);
+    if (usesBrowserComputerApprovalEndpoint(toolName)) {
+      return request<Record<string, unknown>>("/api/tools/browser-computer", {
+        method: "POST",
+        body: JSON.stringify({ action: normalizedAction, payload: payload ?? {} }),
+      });
+    }
+    return request<Record<string, unknown>>("/api/tools/invoke", {
+      method: "POST",
+      body: JSON.stringify({
+        tool_name: toolName,
+        arguments: { ...(payload ?? {}), action: normalizedAction },
+      }),
     });
   },
 
