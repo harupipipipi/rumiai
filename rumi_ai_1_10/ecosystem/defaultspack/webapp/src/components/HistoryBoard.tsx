@@ -541,6 +541,7 @@ function SortableChatItem({ chat, activeChatId, onChatSelect, onRename, onToggle
           event.dataTransfer.setData("text/plain", chat.title);
           event.dataTransfer.effectAllowed = "copyMove";
         }}
+        data-testid={`history-chat-card-${chat.id}`}
         className={cn(
           "box-border w-full max-w-full min-h-7 flex items-center gap-1.5 pr-1.5 py-1 rounded-[3px] text-left group/chat transition-colors cursor-grab active:cursor-grabbing outline-none",
           isActive ? "bg-zinc-800/80" : "hover:bg-zinc-800/50",

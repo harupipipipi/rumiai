@@ -30,6 +30,18 @@ function artifactPreview(artifact: BrowserArtifact): string {
   return artifact.url || artifact.text || artifact.action || artifact.artifact_id;
 }
 
+function parseMcpArgs(value: string): string[] {
+  const trimmed = value.trim();
+  if (!trimmed) return [];
+  try {
+    const parsed = JSON.parse(trimmed) as unknown;
+    if (Array.isArray(parsed)) return parsed.map((item) => String(item));
+  } catch {
+    // fall through to newline mode
+  }
+  return trimmed.split(/\r?\n/).map((item) => item.trim()).filter(Boolean);
+}
+
 export function CodingCockpit({
   workspaces,
   selectedWorkspaceId,
@@ -52,6 +64,10 @@ export function CodingCockpit({
   const [sessionTask, setSessionTask] = useState("");
   const [status, setStatus] = useState<string | null>(null);
   const [approvedTerminalDecision, setApprovedTerminalDecision] = useState<ApprovedTerminalDecision | null>(null);
+  const [mcpServerId, setMcpServerId] = useState("");
+  const [mcpCommand, setMcpCommand] = useState("");
+  const [mcpArgs, setMcpArgs] = useState("");
+  const [mcpBusy, setMcpBusy] = useState(false);
 
   const loadSidecarState = useCallback(async () => {
     setStatus(null);
@@ -108,6 +124,42 @@ export function CodingCockpit({
       token: decision.token,
       nonce: Date.now(),
     });
+  };
+
+  const connectMcpServer = async () => {
+    const serverId = mcpServerId.trim();
+    const command = mcpCommand.trim();
+    if (!serverId || !command || mcpBusy) return;
+    setMcpBusy(true);
+    setStatus(null);
+    try {
+      const config = {
+        server_id: serverId,
+        name: serverId,
+        transport: "stdio",
+        command,
+        args: parseMcpArgs(mcpArgs),
+      };
+      await api.registerMcpServer({ server_id: serverId, name: serverId, config });
+      let result = await api.connectMcpServer({ server_id: serverId });
+      if (result.approval_required && typeof result.approval_request_id === "string") {
+        const decision = await api.approveCodingApproval(result.approval_request_id);
+        if (!decision.approved || !decision.token) {
+          throw new Error("MCP approval was not granted");
+        }
+        result = await api.connectMcpServer({ server_id: serverId, approval_token: decision.token });
+      }
+      const tools = Array.isArray(result.tools) ? result.tools.length : 0;
+      setMcpServerId("");
+      setMcpCommand("");
+      setMcpArgs("");
+      await loadSidecarState();
+      setStatus(`MCP connected: ${serverId}${tools ? ` (${tools} tools)` : ""}`);
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : String(err));
+    } finally {
+      setMcpBusy(false);
+    }
   };
 
   return (
@@ -178,6 +230,41 @@ export function CodingCockpit({
           <div className="mb-2 flex items-center gap-2">
             <PlugZap size={14} className="text-violet-300" />
             <h2 className="truncate text-xs font-semibold uppercase tracking-wide text-zinc-400">MCP</h2>
+          </div>
+          <div className="mb-3 grid gap-1.5 rounded-md border border-zinc-800 bg-zinc-950/40 p-2">
+            <input
+              aria-label="MCP server id"
+              value={mcpServerId}
+              onChange={(event) => setMcpServerId(event.target.value)}
+              className="h-7 rounded-md border border-zinc-800 bg-black/30 px-2 font-mono text-[11px] text-zinc-300 outline-none"
+              placeholder="server id"
+              disabled={mcpBusy}
+            />
+            <input
+              aria-label="MCP command"
+              value={mcpCommand}
+              onChange={(event) => setMcpCommand(event.target.value)}
+              className="h-7 rounded-md border border-zinc-800 bg-black/30 px-2 font-mono text-[11px] text-zinc-300 outline-none"
+              placeholder="command"
+              disabled={mcpBusy}
+            />
+            <textarea
+              aria-label="MCP args"
+              value={mcpArgs}
+              onChange={(event) => setMcpArgs(event.target.value)}
+              className="min-h-12 resize-none rounded-md border border-zinc-800 bg-black/30 px-2 py-1 font-mono text-[11px] text-zinc-300 outline-none"
+              placeholder="args, one per line or JSON array"
+              disabled={mcpBusy}
+            />
+            <button
+              type="button"
+              onClick={() => void connectMcpServer()}
+              disabled={mcpBusy || !mcpServerId.trim() || !mcpCommand.trim()}
+              className="h-7 rounded-md bg-zinc-100 px-2 text-[11px] font-semibold text-zinc-950 hover:bg-white disabled:cursor-not-allowed disabled:bg-zinc-800 disabled:text-zinc-600"
+              title="Connect MCP server"
+            >
+              {mcpBusy ? "Connecting..." : "Connect MCP"}
+            </button>
           </div>
           <div className="space-y-1.5">
             {mcpServers.map((server) => (

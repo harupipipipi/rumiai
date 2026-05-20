@@ -220,10 +220,17 @@ def prepare_chat_run(input_data: dict[str, Any], context: dict[str, Any] | None 
     if params.get("thinking_level") not in (None, "", "none") and not selected_capabilities.get("supports_thinking"):
         params["thinking_level"] = "none"
     if provider_tools and not selected_capabilities.get("supports_tool_calling") and not request_context.get("user_requested_computer_use"):
+        unavailable_tools = [tool_name_from_definition(tool) for tool in raw_tools if tool_name_from_definition(tool)]
         tool_context["tool_suggestion_context"] = {
             "message": "Selected model does not support provider tool calling; tools were not attached.",
-            "suggested_tools": [tool_name_from_definition(tool) for tool in raw_tools if tool_name_from_definition(tool)],
+            "suggested_tools": unavailable_tools,
         }
+        tool_context["tool_calling_unverified"] = True
+        tool_context["tool_calling_unavailable_reason"] = "selected_model_does_not_support_tool_calling"
+        tool_context["requested_tools_without_provider_attachment"] = unavailable_tools
+        request_context["tool_calling_unverified"] = True
+        request_context["tool_calling_unavailable_reason"] = "selected_model_does_not_support_tool_calling"
+        request_context["requested_tools_without_provider_attachment"] = unavailable_tools
         provider_tools = []
     if routing_decision.bridge_required:
         bridge_result = describe_images(

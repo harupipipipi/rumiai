@@ -105,6 +105,11 @@ PR97 checks should not treat assistant prose or fixed marker strings as proof.
 The proof lives in structured runtime evidence that the model cannot fake by
 typing similar text.
 
+Assistant message text is never proof that a tool, MCP server, skill, trigger,
+or dropped chat context actually ran. Treat prose such as "I used the tool" as
+display text only; pass/fail decisions must read structured records produced by
+the runtime or visible UI state observed by Browser/Playwright.
+
 | Claim | Evidence to check |
 |---|---|
 | MCP was usable by Rumi | assistant message `tool_logs`, `tool_call_started`, and `tool_call_completed` contain the MCP tool id and result |
@@ -117,6 +122,12 @@ For deterministic tests, use dynamic input and assert that the final answer is
 derived from the tool result. For live browser smoke tests, keep the pass/fail
 condition on `tool_logs`, metadata, and visible UI state; the assistant text is
 only a human-readable side effect.
+
+API-only checks are allowed as diagnostics when a Browser/Playwright flow fails,
+but they do not by themselves prove that the browser workflow works. UI contract
+tests that mock `/api/...` should be named as mocked UI coverage and kept
+separate from live MCP evidence tests, which must create any server, approval,
+permission, and nonce state inside the test.
 
 ## Skills And Extensions
 

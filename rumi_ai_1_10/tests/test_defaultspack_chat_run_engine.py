@@ -263,8 +263,57 @@ def test_prepare_chat_run_injects_matched_skill_and_chat_references(tmp_path, mo
     assert prepared.request_context["chat_references"] == prepared.chat_references
     assert prepared.tool_context["history_json_path"] == prepared.chat_references["history_json_path"]
     stored_user = ChatStore().get_message(conversation["id"], prepared.user_message["id"])
+    assert stored_user["metadata"]["dropped_widgets"][0]["sourceItemId"] == reference["id"]
     assert stored_user["metadata"]["chat_references"]["history_json_path"] == prepared.chat_references["history_json_path"]
     assert stored_user["metadata"]["chat_references"]["references"][0]["conversation_id"] == reference["id"]
+    ChatStore._instance = None
+
+
+def test_prepare_chat_run_leaves_unmatched_skills_out_of_system_context(tmp_path, monkeypatch):
+    import json
+
+    from domain.chat.run_request import prepare_chat_run
+    from domain.chat.store import ChatStore
+
+    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
+    extensions_root = tmp_path / "extensions"
+    skill_dir = extensions_root / "skills" / "line-mention"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "manifest.json").write_text(
+        json.dumps(
+            {
+                "id": "feedback/line-mention",
+                "category": "skill",
+                "version": "1",
+                "enabled": True,
+                "display_name": "LINE mention skill",
+                "description": "Only respond to LINE groups when mentioned.",
+                "triggers": ["LINE", "mention"],
+                "instructions": "For LINE group chats, respond only when Rumi is mentioned.",
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_EXTENSION_ROOTS", str(extensions_root))
+    ChatStore._instance = None
+
+    store = ChatStore()
+    conversation = store.create_conversation(model="stub/default")
+    prepared = prepare_chat_run(
+        {
+            "conversation_id": conversation["id"],
+            "message": {"role": "user", "content": "Summarize the local project notes."},
+            "tools": [],
+        },
+        {},
+    )
+    combined = "\n".join(str(message.get("content") or "") for message in prepared.standard_messages)
+
+    assert prepared.matched_skills == []
+    assert "For LINE group chats" not in combined
+    assert "matched_skill_instructions" not in prepared.request_context
+    assert "matched_skill_instructions" not in prepared.tool_context
     ChatStore._instance = None
 
 

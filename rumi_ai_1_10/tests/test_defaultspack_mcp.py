@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import sys
 from pathlib import Path
 
@@ -328,6 +329,7 @@ def test_chat_run_executes_prefixless_mcp_tool_with_tool_log_evidence(monkeypatc
 
     requested_payload = {"label": "invoice-" + tmp_path.name[-6:], "numbers": [7, 11, 13]}
     expected_sum = sum(requested_payload["numbers"])
+    expected_digest = hashlib.sha256(json.dumps(requested_payload, sort_keys=True).encode("utf-8")).hexdigest()[:12]
 
     class EvidenceCheckingClient:
         def __init__(self):
@@ -387,10 +389,122 @@ def test_chat_run_executes_prefixless_mcp_tool_with_tool_log_evidence(monkeypatc
     )
 
     final_message = [event["data"]["message"] for event in events if event["type"] == "done"][-1]
-    assert f"{requested_payload['label']} total={expected_sum}" in final_message["raw_text"]
+    started = [
+        event
+        for event in final_message["events"]
+        if event.get("type") == "tool_call_started" and event.get("tool_name") == tool_id
+    ]
+    completed = [
+        event
+        for event in final_message["events"]
+        if event.get("type") == "tool_call_completed" and event.get("tool_name") == tool_id
+    ]
+    assert len(started) == 1
+    assert len(completed) == 1
     assert final_message["metadata"]["attached_tools"] == [tool_id]
+    assert final_message["metadata"]["attached_provider_tools"] == [tool_id]
+    assert final_message["metadata"]["executed_tools"] == [tool_id]
     assert final_message["tool_logs"][0]["tool_name"] == tool_id
-    assert json.loads(final_message["tool_logs"][0]["result"]["data"]["result"])["sum"] == expected_sum
+    result_payload = json.loads(final_message["tool_logs"][0]["result"]["data"]["result"])
+    assert result_payload == {
+        "label": requested_payload["label"],
+        "sum": expected_sum,
+        "count": len(requested_payload["numbers"]),
+        "digest": expected_digest,
+    }
+
+
+def test_mcp_tool_is_unverified_when_selected_model_cannot_call_tools(monkeypatch, tmp_path):
+    import domain.chat.run_request as run_request_module
+    from domain.chat.store import ChatStore
+    from domain.chat.stream_engine import ChatRunEngine
+
+    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
+    ChatStore._instance = None
+
+    tool_id = "mcp__ephemeral__digest"
+    tool_def = {
+        "type": "function",
+        "function": {
+            "name": tool_id,
+            "description": "Compute a digest.",
+            "parameters": {
+                "type": "object",
+                "properties": {"label": {"type": "string"}},
+            },
+        },
+    }
+
+    class NoToolRoutingDecision:
+        selected_model = "local/no-tools"
+        original_model = "local/no-tools"
+        selected_group = "default"
+        reason_codes = ["preferred_model", "tool_calling_unavailable"]
+        warnings = ["selected_model_does_not_support_tool_calling"]
+        bridge_required = False
+        bridge_plan = {}
+        utility_models = {}
+        explanation = "tool calling unavailable"
+
+        def to_dict(self):
+            return {
+                "selected_model": self.selected_model,
+                "original_model": self.original_model,
+                "selected_group": self.selected_group,
+                "reason_codes": list(self.reason_codes),
+                "warnings": list(self.warnings),
+                "bridge_required": self.bridge_required,
+                "bridge_plan": dict(self.bridge_plan),
+                "utility_models": dict(self.utility_models),
+                "explanation": self.explanation,
+            }
+
+    monkeypatch.setattr(run_request_module, "route_model_request", lambda _request: NoToolRoutingDecision())
+    monkeypatch.setattr(
+        run_request_module,
+        "get_model_capabilities",
+        lambda _model: {"profile_id": "local/no-tools", "supports_tool_calling": False, "supports_thinking": False},
+    )
+
+    class TextOnlyClient:
+        def complete(self, _model, _messages, tools=None, params=None):
+            del params
+            assert tools == []
+            return {
+                "content": [{"type": "text", "text": "I used a tool-like answer without tool calls."}],
+                "finish_reason": "stop",
+            }
+
+        def supports_stream(self, _model):
+            return False
+
+    store = ChatStore()
+    conversation = store.create_conversation(model="local/no-tools")
+    events = list(
+        ChatRunEngine(client=TextOnlyClient()).stream(
+            {
+                "conversation_id": conversation["id"],
+                "message": {"role": "user", "content": "Please use the MCP digest tool."},
+                "tools": [tool_def],
+            },
+            {},
+            stream_mode=False,
+        )
+    )
+
+    final_message = [event["data"]["message"] for event in events if event["type"] == "done"][-1]
+    assert final_message["tool_logs"] == []
+    assert not [event for event in final_message["events"] if event.get("type", "").startswith("tool_call_")]
+    metadata = final_message["metadata"]
+    assert metadata["requested_tools"] == [tool_id]
+    assert metadata["attached_tools"] == []
+    assert metadata["attached_provider_tools"] == []
+    assert metadata["executed_tools"] == []
+    assert metadata["tool_calling_unverified"] is True
+    assert metadata["tool_calling_unavailable_reason"] == "selected_model_does_not_support_tool_calling"
+    assert "selected_model_does_not_support_tool_calling" in metadata["model_routing"]["warnings"]
+    ChatStore._instance = None
 
 
 def test_mcp_list_filters_by_server_id(monkeypatch):

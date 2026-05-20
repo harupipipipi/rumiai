@@ -2,8 +2,14 @@ import { expect, test, type Page, type Route } from "@playwright/test";
 
 test.use({ viewport: { width: 1440, height: 900 } });
 
+// These specs exercise mocked UI contracts only. Live MCP proof is covered by
+// the Python integration tests that assert tool_logs and tool_call events.
 const now = 1_785_000_000_000;
 const historyChatDropMime = "application/rumi-history-chat";
+
+type ApiMockOptions = {
+  onStreamRequest?: (payload: Record<string, unknown>) => void;
+};
 
 function ok(data: unknown) {
   return { status: "ok", data };
@@ -16,6 +22,7 @@ function smokeConversation() {
     created_at: now - 60_000,
     updated_at: now,
     model: "stub/default",
+    conversation_kind: "coding",
     tags: ["coding"],
     is_starred: false,
     is_pinned: false,
@@ -188,11 +195,28 @@ async function fulfill(route: Route, data: unknown) {
   });
 }
 
-async function installDefaultspackApiMocks(page: Page) {
+async function fulfillStream(route: Route, message: Record<string, unknown>) {
+  await route.fulfill({
+    status: 200,
+    contentType: "text/event-stream",
+    body: [
+      `data: ${JSON.stringify({ type: "message", message })}`,
+      "",
+      `data: ${JSON.stringify({ type: "done", message })}`,
+      "",
+    ].join("\n"),
+  });
+}
+
+async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions = {}) {
   await page.addInitScript(() => {
     localStorage.clear();
     sessionStorage.clear();
   });
+
+  const mcpServers = [
+    { server_id: "filesystem", name: "Filesystem MCP", transport: "stdio", connected: true, permissions: { approved: true }, tools: ["mcp_fs_read_file"] },
+  ];
 
   await page.route("**/api/**", async (route) => {
     const request = route.request();
@@ -241,6 +265,29 @@ async function installDefaultspackApiMocks(page: Page) {
 
     if (path === "/api/chat/conversations" && method === "POST") {
       return fulfill(route, conversation);
+    }
+
+    if (path === "/api/chat/conversations/c-smoke/stream" && method === "POST") {
+      const payload = request.postDataJSON() as Record<string, unknown>;
+      options.onStreamRequest?.(payload);
+      return fulfillStream(route, {
+        id: "m-assistant-streamed",
+        role: "assistant",
+        content: [{ type: "text", text: "Structured response accepted." }],
+        raw_text: "Structured response accepted.",
+        created_at: now + 1_000,
+        conversation_id: "c-smoke",
+        parent_id: "m-user-sent",
+        children_ids: [],
+        sequence_number: 4,
+        finish_reason: "stop",
+        usage: null,
+        widget: null,
+        model: "stub/default",
+        metadata: {},
+        events: [],
+        tool_logs: [],
+      });
     }
 
     if (path === "/api/chat/conversations/c-smoke") {
@@ -314,6 +361,15 @@ async function installDefaultspackApiMocks(page: Page) {
       return fulfill(route, { diff: "-old\n+new", files_changed: 1, files: ["src/App.tsx"], workspace_id: "ws-main" });
     }
 
+    if (path === "/api/coding/approvals/approve" && method === "POST") {
+      const payload = request.postDataJSON() as Record<string, unknown>;
+      return fulfill(route, {
+        request_id: payload.approval_request_id,
+        approved: true,
+        token: "approved-mcp-token",
+      });
+    }
+
     if (path === "/api/coding/approvals") {
       return fulfill(route, { requests: [], pending: [], count: 0 });
     }
@@ -329,10 +385,49 @@ async function installDefaultspackApiMocks(page: Page) {
       });
     }
 
+    if (path === "/api/tools/mcp" && method === "POST") {
+      const payload = request.postDataJSON() as { server?: Record<string, unknown> };
+      const server = {
+        server_id: String(payload.server?.server_id ?? "contract_digest"),
+        name: String(payload.server?.name ?? payload.server?.server_id ?? "contract_digest"),
+        transport: "stdio",
+        connected: false,
+        permissions: { approved: false },
+        tools: [],
+      };
+      mcpServers.push(server);
+      return fulfill(route, { server });
+    }
+
+    if (path === "/api/tools/mcp/connect" && method === "POST") {
+      const payload = request.postDataJSON() as Record<string, unknown>;
+      const serverId = String(payload.server_id ?? payload.server_name ?? "contract_digest");
+      if (!payload.approval_token) {
+        return fulfill(route, {
+          approval_required: true,
+          approval_request_id: "apr-mcp-contract",
+          server_id: serverId,
+        });
+      }
+      const server = mcpServers.find((item) => item.server_id === serverId);
+      if (server) {
+        server.connected = true;
+        server.permissions = { approved: true };
+        server.tools = [`mcp__${serverId}__digest`];
+      }
+      return fulfill(route, {
+        server_id: serverId,
+        server_name: serverId,
+        status: "connected",
+        tools: [`mcp__${serverId}__digest`],
+        permission: { approved: true, source: "approval" },
+      });
+    }
+
     if (path === "/api/tools/mcp") {
       return fulfill(route, {
-        servers: [{ server_id: "filesystem", name: "Filesystem MCP", transport: "stdio", connected: true, permissions: { approved: true } }],
-        count: 1,
+        servers: mcpServers,
+        count: mcpServers.length,
       });
     }
 
@@ -340,8 +435,8 @@ async function installDefaultspackApiMocks(page: Page) {
   });
 }
 
-async function openDefaultspack(page: Page, path = "/chat") {
-  await installDefaultspackApiMocks(page);
+async function openDefaultspack(page: Page, path = "/chat", options: ApiMockOptions = {}) {
+  await installDefaultspackApiMocks(page, options);
   await page.goto(path);
   await expect(page.getByText("Preview Calendar Chat").first()).toBeVisible();
 }
@@ -368,30 +463,59 @@ test("calendar action renders a scheduler preview", async ({ page }) => {
   await expect(preview).toContainText("nightly-review");
 });
 
-test("history chat dnd accepts a real chat reference drop into the composer", async ({ page }) => {
-  await openDefaultspack(page);
+test("history card drag uses rumi history MIME and sends dropped_widgets metadata", async ({ page }) => {
+  const streamRequests: Record<string, unknown>[] = [];
+  await openDefaultspack(page, "/chat", {
+    onStreamRequest: (payload) => streamRequests.push(payload),
+  });
 
   await expect(page.getByText("Preview Calendar Chat").first()).toBeVisible();
   const composer = page.locator(".rumi-composer-frame");
   await expect(composer).toBeVisible();
-  const dataTransfer = await page.evaluateHandle((mime) => {
+  const dragEvidence = await page.evaluate((mime) => {
+    const source = document.querySelector('[data-testid="history-chat-card-c-smoke"]');
+    const target = document.querySelector(".rumi-composer-shell");
+    if (!source || !target) throw new Error("history card or composer target not found");
     const dataTransfer = new DataTransfer();
-    dataTransfer.setData(
-      mime,
-      JSON.stringify({
-        conversationId: "c-smoke",
-        title: "Preview Calendar Chat",
-        conversationKind: "coding",
-        tags: ["coding"],
-      }),
-    );
-    return dataTransfer;
+    source.dispatchEvent(new DragEvent("dragstart", { bubbles: true, cancelable: true, dataTransfer }));
+    const historyPayload = dataTransfer.getData(mime);
+    target.dispatchEvent(new DragEvent("dragover", { bubbles: true, cancelable: true, dataTransfer }));
+    target.dispatchEvent(new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer }));
+    return {
+      historyPayload,
+      plainText: dataTransfer.getData("text/plain"),
+    };
   }, historyChatDropMime);
-  await composer.dispatchEvent("dragover", { dataTransfer });
-  await composer.dispatchEvent("drop", { dataTransfer });
-  await dataTransfer.dispose();
 
-  await expect(page.locator(".rumi-composer-frame")).toContainText("Preview Calendar Chat");
+  expect(dragEvidence.plainText).toBe("Preview Calendar Chat");
+  expect(JSON.parse(dragEvidence.historyPayload)).toMatchObject({
+    conversationId: "c-smoke",
+    title: "Preview Calendar Chat",
+    conversationKind: "coding",
+    tags: ["coding"],
+  });
+  await expect(composer).toContainText("Preview Calendar Chat");
+
+  await page.locator("textarea.rumi-composer-textarea").fill("Use this dropped chat as context.");
+  await page.locator(".rumi-send-button").click();
+  await expect.poll(() => streamRequests.length).toBe(1);
+
+  const request = streamRequests[0];
+  const message = request.message as Record<string, unknown>;
+  const metadata = message.metadata as Record<string, unknown>;
+  const droppedWidgets = metadata.dropped_widgets as Array<Record<string, unknown>>;
+  expect(droppedWidgets).toHaveLength(1);
+  expect(droppedWidgets[0]).toMatchObject({
+    id: "conversation:c-smoke",
+    type: "conversation",
+    widgetKind: "history_context",
+    sourceItemId: "c-smoke",
+    label: "Preview Calendar Chat",
+  });
+  expect(droppedWidgets[0].metadata).toMatchObject({
+    conversation_id: "c-smoke",
+    title: "Preview Calendar Chat",
+  });
 });
 
 test("tool timeline shows streamed activity details", async ({ page }) => {
@@ -404,11 +528,25 @@ test("tool timeline shows streamed activity details", async ({ page }) => {
   await expect(timeline).toContainText("Listed 2 files");
 });
 
-test("mcp cockpit UI lists connected MCP servers", async ({ page }) => {
+test("mocked coding cockpit renders MCP server state", async ({ page }) => {
   await openDefaultspack(page, "/coding");
 
   await expect(page.getByLabel("Coding cockpit")).toBeVisible();
   const mcpServers = page.getByLabel("MCP servers");
   await expect(mcpServers).toContainText("Filesystem MCP");
   await expect(mcpServers).toContainText("approved");
+});
+
+test("mocked coding cockpit registers approves and connects an MCP server", async ({ page }) => {
+  await openDefaultspack(page, "/coding");
+
+  await page.getByLabel("MCP server id").fill("contract_digest");
+  await page.getByLabel("MCP command").fill("python");
+  await page.getByLabel("MCP args").fill("digest_server.py");
+  await page.getByTitle("Connect MCP server").click();
+
+  const mcpServers = page.getByLabel("MCP servers");
+  await expect(mcpServers).toContainText("contract_digest");
+  await expect(mcpServers).toContainText("approved");
+  await expect(page.getByText("MCP connected: contract_digest (1 tools)")).toBeVisible();
 });

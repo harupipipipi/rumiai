@@ -37,7 +37,7 @@ from domain.chat.store import ChatStore
 from domain.dev.inspector import Inspector
 from domain.stream.events import run_event, to_legacy_chat_stream_event
 from domain.tool.executor import ToolExecutor
-from domain.tool.schema_adapter import build_tool_execution_context, max_tool_calls
+from domain.tool.schema_adapter import build_tool_execution_context, max_tool_calls, tool_name_from_definition
 
 
 class _ChatCancelled(Exception):
@@ -1172,11 +1172,28 @@ class ChatRunEngine:
             metadata["empty_ai_response"] = True
             finalized["metadata"] = metadata
         metadata = dict(finalized.get("metadata") or {})
+        requested_tools = list(prepared.tools_called or [])
+        attached_provider_tools = [
+            name
+            for name in (tool_name_from_definition(tool) for tool in prepared.provider_tools)
+            if name
+        ]
+        executed_tools: list[str] = []
+        for log in self._tool_logs:
+            tool_name = str(log.get("tool_name") or "").strip()
+            if tool_name and tool_name not in executed_tools:
+                executed_tools.append(tool_name)
+        model_warnings: list[str] = []
+        if isinstance(prepared.model_routing, dict) and isinstance(prepared.model_routing.get("warnings"), list):
+            model_warnings = [str(item) for item in prepared.model_routing.get("warnings", [])]
         metadata.update(
             {
                 "model": prepared.model,
                 "attached_tool_count": len(prepared.provider_tools),
-                "attached_tools": list(prepared.tools_called),
+                "requested_tools": requested_tools,
+                "attached_tools": attached_provider_tools,
+                "attached_provider_tools": attached_provider_tools,
+                "executed_tools": executed_tools,
                 "thinking": {
                     "state": "completed" if finalized.get("finish_reason") != "error" else "failed",
                     **({"transcript": "".join(self._thinking_transcript_parts)} if self._thinking_transcript_parts else {}),
@@ -1186,6 +1203,9 @@ class ChatRunEngine:
                 "chat_references": dict(prepared.chat_references or {}),
             }
         )
+        if "selected_model_does_not_support_tool_calling" in model_warnings:
+            metadata["tool_calling_unverified"] = True
+            metadata["tool_calling_unavailable_reason"] = "selected_model_does_not_support_tool_calling"
         if prepared.matched_skills:
             metadata["matched_skill_instructions"] = list(prepared.matched_skills)
         finalized["metadata"] = metadata
