@@ -130,6 +130,8 @@ Compiler responsibilities:
 - resolve node definitions
 - call approved binding handlers
 - produce a runtime profile dict
+- derive `runtime_profile.launch.surface` when a frontend/surface binding
+  points at a launchable surface node
 - register `runtime_profile.<profile_id>.<graph_id>` in `InterfaceRegistry`
 - return diagnostics
 
@@ -190,6 +192,23 @@ Graph preview APIs:
 The viewer-facing node responses include locale-resolved labels, ports, standards, aliases, bindings, metadata, requirements, permissions, and profile node state when a profile is selected. The profile node API also returns `palette_nodes`, which contains only installed and profile-enabled nodes so the viewer does not need to hardcode node types.
 
 The compile endpoint is a preview by default in the panel alias; callers can compile without replacing the launch-time startup profile source of truth.
+
+Compile responses include `surface_launch_target` when the runtime profile
+contains a launchable frontend surface. This is the same canonical payload used
+by Startup Profile restart handoff:
+
+```json
+{
+  "kind": "desktop_app",
+  "pack_id": "frontendpack",
+  "principal_id": "frontendpack",
+  "surface": "browser",
+  "node_instance_id": "frontendpack_web_surface",
+  "node_id": "frontendpack.web_surface",
+  "component_full_id": "frontendpack:frontend:web",
+  "source": "capability_graph"
+}
+```
 
 ## Viewer Node Manager
 
