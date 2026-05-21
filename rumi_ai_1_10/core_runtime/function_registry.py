@@ -207,6 +207,13 @@ class FunctionRegistry:
         if entry.permission_id is not None:
             self._permission_id_index[entry.permission_id] = entry
 
+    def _permission_id_conflicts(self, entry: FunctionEntry) -> bool:
+        """Return True when another function already owns entry.permission_id."""
+        if entry.permission_id is None:
+            return False
+        existing = self._permission_id_index.get(entry.permission_id)
+        return existing is not None and existing.qualified_name != entry.qualified_name
+
     def _remove_from_permission_id_index(self, entry: FunctionEntry) -> None:
         """entry の permission_id を _permission_id_index から削除する。"""
         if entry.permission_id is not None and entry.permission_id in self._permission_id_index:
@@ -351,6 +358,16 @@ class FunctionRegistry:
                     "[FunctionRegistry] Duplicate registration skipped: %s", qname
                 )
                 return False
+            if self._permission_id_conflicts(resolved_entry):
+                existing = self._permission_id_index[resolved_entry.permission_id]
+                logger.warning(
+                    "[FunctionRegistry] Duplicate permission_id rejected: %s "
+                    "(existing=%s, new=%s)",
+                    resolved_entry.permission_id,
+                    existing.qualified_name,
+                    qname,
+                )
+                return False
             self._entries[qname] = resolved_entry
             self._add_to_tag_index(resolved_entry)
             self._register_vocab_aliases(resolved_entry)
@@ -381,6 +398,20 @@ class FunctionRegistry:
                     function_dir=fdef.get("function_dir"),
                     main_py_path=fdef.get("main_py_path"),
                     manifest=fdef,
+                    runtime=fdef.get("runtime", "python"),
+                    main_binary_path=fdef.get("main_binary_path"),
+                    command=fdef.get("command", []),
+                    docker_image=fdef.get("docker_image", ""),
+                    extensions=fdef.get("extensions", {}),
+                    entrypoint=fdef.get("entrypoint"),
+                    risk=fdef.get("risk"),
+                    grant_config=fdef.get("grant_config"),
+                    vocab_aliases=fdef.get("vocab_aliases"),
+                    permission_id=fdef.get("permission_id"),
+                    handler_py_sha256=fdef.get("handler_py_sha256"),
+                    is_builtin=fdef.get("is_builtin", False),
+                    grant_config_schema=fdef.get("grant_config_schema"),
+                    calling_convention=fdef.get("calling_convention"),
                 )
                 if self.register(entry):
                     result.registered += 1

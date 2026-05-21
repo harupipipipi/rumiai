@@ -30,6 +30,8 @@ def run(input_data, context=None):
         }, workspace))
     except FileNotFoundError as e:
         return error(str(e), code="FILE_NOT_FOUND")
+    except PermissionError as e:
+        return error(str(e), code="PATH_RESTRICTED")
     except ValueError as e:
         return error(str(e), code="PATH_TRAVERSAL")
     except Exception as e:

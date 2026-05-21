@@ -15,6 +15,12 @@ def run(input_data, context=None):
     record_attempt(operation, "high", {"snapshot_id": snapshot_id})
     try:
         workspace = resolve_workspace(input_data, context, mutation=True, operation=operation)
+    except PermissionError as exc:
+        record_failure(operation, "high", str(exc), {"snapshot_id": snapshot_id})
+        return error(str(exc), code="PATH_RESTRICTED")
+    except ValueError as exc:
+        record_failure(operation, "high", str(exc), {"snapshot_id": snapshot_id})
+        return error(str(exc), code="PATH_TRAVERSAL")
     except Exception as exc:
         workspace_error = workspace_error_response(exc, error)
         if workspace_error:

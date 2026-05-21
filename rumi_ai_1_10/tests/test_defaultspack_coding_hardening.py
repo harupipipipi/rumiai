@@ -330,6 +330,168 @@ def test_terminal_read_only_commands_require_approval_for_outside_workspace_path
     assert terminal.classify("cat notes.txt")["risk_level"] == "low"
 
 
+def test_workspace_jail_blocks_absolute_traversal_protected_and_secret_paths(tmp_path):
+    from blocks.coding.file_read import run as file_read_run
+    from domain.coding.file_ops import FileOps
+    from domain.coding.workspace_jail import WorkspaceJail
+
+    (tmp_path / "notes.txt").write_text("safe", encoding="utf-8")
+    (tmp_path / ".env").write_text("TOKEN=secret", encoding="utf-8")
+    (tmp_path / "id_rsa").write_text("private key", encoding="utf-8")
+    (tmp_path / ".npmrc").write_text("//registry.example/:_authToken=secret", encoding="utf-8")
+    (tmp_path / ".docker").mkdir()
+    (tmp_path / ".docker" / "config.json").write_text("{}", encoding="utf-8")
+    (tmp_path / ".git").mkdir()
+    (tmp_path / ".git" / "config").write_text("[core]\n", encoding="utf-8")
+    (tmp_path.parent / "outside.txt").write_text("outside", encoding="utf-8")
+
+    ops = FileOps(tmp_path)
+
+    assert ops.read_file("notes.txt") == "safe"
+    with pytest.raises(ValueError):
+        ops.read_file(str(tmp_path / "notes.txt"))
+    with pytest.raises(ValueError):
+        ops.read_file("../outside.txt")
+    for restricted in (".env", "id_rsa", ".npmrc", ".docker/config.json", ".git/config"):
+        with pytest.raises(PermissionError):
+            ops.read_file(restricted)
+    for path in ("C:foo", "C:\\foo", "\\\\server\\share\\x"):
+        with pytest.raises(ValueError):
+            WorkspaceJail(tmp_path).resolve_user_path(path)
+
+    blocked = file_read_run({"workspace_root": str(tmp_path), "path": ".env"}, {})
+    assert blocked["status"] == "error"
+    assert blocked["error"]["code"] == "PATH_RESTRICTED"
+
+
+def test_file_list_search_and_snapshot_hide_restricted_paths_and_external_symlinks(tmp_path):
+    from domain.coding.file_ops import FileOps
+
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "app.py").write_text("print('ok')\n", encoding="utf-8")
+    (tmp_path / ".env").write_text("TOKEN=secret", encoding="utf-8")
+    (tmp_path / "server.pem").write_text("private", encoding="utf-8")
+    (tmp_path / ".git").mkdir()
+    (tmp_path / ".git" / "config").write_text("[core]\n", encoding="utf-8")
+    outside = tmp_path.parent / "outside-link-target.txt"
+    outside.write_text("outside", encoding="utf-8")
+    try:
+        (tmp_path / "outside-link").symlink_to(outside)
+    except OSError:
+        pass
+
+    ops = FileOps(tmp_path)
+    listed = {item["path"] for item in ops.list_files(".", recursive=True)}
+    matches = set(ops.search_files("**/*", "."))
+    snapshot = ops.snapshot(["."])
+    snapshot_root = tmp_path / snapshot["path"]
+
+    assert "src/app.py" in listed
+    assert "src/app.py" in matches
+    assert ".env" not in listed
+    assert "server.pem" not in listed
+    assert ".git/config" not in listed
+    assert "outside-link" not in listed
+    assert ".env" not in matches
+    assert "server.pem" not in matches
+    assert not (snapshot_root / ".env").exists()
+    assert not (snapshot_root / "server.pem").exists()
+    assert not (snapshot_root / ".git").exists()
+    assert not (snapshot_root / "outside-link").exists()
+
+
+def test_worktree_checkpoint_and_git_ops_filter_restricted_files(tmp_path):
+    from domain.coding.file_ops import FileOps
+    from domain.coding.git_ops import GitOps
+
+    _init_git_repo(tmp_path)
+    (tmp_path / "public.txt").write_text("clean\n", encoding="utf-8")
+    (tmp_path / ".env").write_text("TOKEN=clean\n", encoding="utf-8")
+    _git_commit_all(tmp_path)
+    (tmp_path / "public.txt").write_text("dirty\n", encoding="utf-8")
+    (tmp_path / ".env").write_text("TOKEN=dirty\n", encoding="utf-8")
+    (tmp_path / "id_ed25519").write_text("private\n", encoding="utf-8")
+
+    checkpoint = FileOps(tmp_path).worktree_checkpoint(["."])
+    manifest = json.loads((tmp_path / checkpoint["path"] / "snapshot.json").read_text(encoding="utf-8"))
+    manifest_paths = {entry["path"] for entry in manifest["worktree"]["manifest"]}
+    captured_paths = {entry["path"] for entry in manifest["worktree"]["captured_files"]}
+    git_status = GitOps(tmp_path).status()
+    git_diff = GitOps(tmp_path).diff()
+
+    assert "public.txt" in manifest_paths
+    assert "public.txt" in captured_paths
+    assert ".env" not in manifest_paths
+    assert ".env" not in captured_paths
+    assert "id_ed25519" not in manifest_paths
+    checkpoint_status = manifest["worktree"]["git"]["status"]
+    for field in ("staged", "modified", "deleted", "untracked"):
+        assert ".env" not in checkpoint_status[field]
+        assert "id_ed25519" not in checkpoint_status[field]
+    assert ".env" not in git_status["modified"]
+    assert ".env" not in git_status["porcelain"]
+    assert git_diff["files"] == ["public.txt"]
+    assert "TOKEN=dirty" not in git_diff["diff"]
+
+
+def test_git_status_filters_restricted_renames_and_keeps_visible_space_paths(tmp_path):
+    from domain.coding.git_ops import GitOps
+
+    _init_git_repo(tmp_path)
+    (tmp_path / ".env").write_text("TOKEN=clean\n", encoding="utf-8")
+    (tmp_path / "public name.txt").write_text("clean\n", encoding="utf-8")
+    _git_commit_all(tmp_path)
+
+    subprocess.run(["git", "mv", ".env", "public.txt"], cwd=tmp_path, check=True)
+    (tmp_path / "public name.txt").write_text("dirty\n", encoding="utf-8")
+
+    status = GitOps(tmp_path).status()
+
+    assert ".env" not in status["porcelain"]
+    assert "public.txt" not in status["porcelain"]
+    assert "public name.txt" in status["modified"]
+
+
+def test_terminal_blocks_low_risk_reads_of_restricted_workspace_paths(tmp_path):
+    from domain.coding.terminal import Terminal
+
+    (tmp_path / ".env").write_text("TOKEN=secret\n", encoding="utf-8")
+    (tmp_path / "id_rsa").write_text("private\n", encoding="utf-8")
+    terminal = Terminal(tmp_path)
+
+    for command in ("cat .env", "head .env", "tail id_rsa", "cat .env | wc -c"):
+        decision = terminal.classify(command)
+        assert decision["classification"] == "blocked"
+        assert decision["approval_required"] is True
+        assert decision["reason"] == "restricted_workspace_path"
+
+        result = terminal.execute(command, approved=True)
+        assert result.get("blocked") is True
+        assert result["exit_code"] is None
+        assert "secret" not in result.get("stdout", "")
+        assert "private" not in result.get("stdout", "")
+
+
+def test_terminal_filters_secret_env_and_rejects_restricted_cwd(tmp_path):
+    from domain.coding.terminal import Terminal
+
+    (tmp_path / ".ssh").mkdir()
+    terminal = Terminal(tmp_path)
+    env = terminal._process_env({
+        "OPENAI_API_KEY": "secret",
+        "RUMI_TOKEN": "secret",
+        "RUMI_SAFE_FLAG": "1",
+    })
+
+    assert "OPENAI_API_KEY" not in env
+    assert "RUMI_TOKEN" not in env
+    assert env["RUMI_SAFE_FLAG"] == "1"
+    result = terminal.execute("pwd", cwd=".ssh", approved=True)
+    assert result["blocked"] is True
+    assert result["exit_code"] is None
+    assert result["risk"]["reason"] == "restricted_workspace_path"
+
+
 def test_dynamic_tool_create_uses_standard_approval_and_audit(tmp_path, monkeypatch):
     from domain.safety.approval import reset_approval_state_for_tests
     from domain.safety.audit import audit_path

@@ -68,6 +68,12 @@ def run(input_data, context=None):
                 exit_code=result.get("exit_code"),
             )
         return ok(with_workspace(result, workspace))
+    except PermissionError as e:
+        workspace_error = workspace_error_response(e, error)
+        if workspace_error:
+            return workspace_error
+        record_failure("terminal.exec", "medium", str(e), {"command": command, "cwd": cwd})
+        return error(str(e), code="PATH_RESTRICTED")
     except Exception as e:
         workspace_error = workspace_error_response(e, error)
         if workspace_error:

@@ -139,6 +139,40 @@ class TestPackOperations:
         assert hasattr(result, "skipped")
         assert hasattr(result, "errors")
 
+    def test_register_pack_rejects_duplicate_permission_id(self):
+        reg = FunctionRegistry()
+        result = reg.register_pack("p", [
+            {"function_id": "a", "permission_id": "coding.file.read"},
+            {"function_id": "b", "permission_id": "coding.file.read"},
+        ])
+
+        assert result.registered == 1
+        assert result.skipped == 1
+        assert reg.get_by_permission_id("coding.file.read") is not None
+        assert reg.get("p:b") is None
+
+    def test_register_pack_preserves_phase_a_fields(self):
+        reg = FunctionRegistry()
+        result = reg.register_pack("p", [
+            {
+                "function_id": "a",
+                "permission_id": "coding.file.read",
+                "risk": "read",
+                "grant_config": {"approval": "never"},
+                "vocab_aliases": ["coding.fs.read"],
+                "calling_convention": "block",
+            },
+        ])
+
+        entry = reg.get("p:a")
+        assert result.registered == 1
+        assert entry is not None
+        assert entry.permission_id == "coding.file.read"
+        assert entry.risk == "read"
+        assert entry.grant_config == {"approval": "never"}
+        assert entry.vocab_aliases == ["coding.fs.read"]
+        assert entry.calling_convention == "block"
+
 
 # ===================================================================
 # 3. 一覧取得
@@ -324,6 +358,17 @@ class TestDuplicateRegistration:
         assert reg.register(e1) is True
         assert reg.register(e2) is False  # 先勝ち
         assert reg.get("p:f").description == "first"
+        assert reg.count() == 1
+
+    def test_duplicate_permission_id_rejected(self):
+        reg = FunctionRegistry()
+        e1 = _make_entry(function_id="read", pack_id="p1", permission_id="coding.file.read")
+        e2 = _make_entry(function_id="read", pack_id="p2", permission_id="coding.file.read")
+
+        assert reg.register(e1) is True
+        assert reg.register(e2) is False
+        assert reg.get_by_permission_id("coding.file.read") is e1
+        assert reg.get("p2:read") is None
         assert reg.count() == 1
 
 

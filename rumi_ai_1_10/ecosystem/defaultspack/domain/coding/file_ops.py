@@ -9,11 +9,14 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import tempfile
 import time
 import uuid
+
+from .workspace_jail import WorkspaceJail
 
 MAX_TEXT_FILE_BYTES = 2 * 1024 * 1024
 SNAPSHOT_DIR = ".rumi_snapshots"
@@ -57,6 +60,7 @@ class FileOps:
         if workspace_root is None:
             workspace_root = os.getcwd()
         self._root = os.path.realpath(workspace_root)
+        self._jail = WorkspaceJail(self._root)
 
     @property
     def root(self):
@@ -67,16 +71,12 @@ class FileOps:
 
         ルート外を指す場合は ValueError を送出する。
         """
-        if os.path.isabs(path):
-            resolved = os.path.realpath(path)
-        else:
-            resolved = os.path.realpath(os.path.join(self._root, path))
-        # ルート自体、またはルート配下であることを確認
-        if resolved != self._root and not resolved.startswith(self._root + os.sep):
-            raise ValueError(
-                f"Path traversal detected: '{path}' resolves to '{resolved}' "
-                f"which is outside workspace root '{self._root}'"
-            )
+        return str(self._jail.resolve(path, allow_absolute=True))
+
+    def _resolve_user_path(self, path, operation="access"):
+        resolved = str(self._jail.resolve_user_path(path))
+        rel = self._relative(resolved)
+        self._jail.ensure_allowed(rel, operation=operation)
         return resolved
 
     def _relative(self, resolved):
@@ -84,6 +84,7 @@ class FileOps:
 
     def _ensure_unprotected_mutation(self, resolved):
         rel = self._relative(resolved)
+        self._jail.ensure_allowed(rel, operation="mutation")
         parts = set(rel.replace("\\", "/").split("/"))
         if rel in PROTECTED_PATHS or parts & PROTECTED_PATHS:
             raise PermissionError("Protected workspace path cannot be modified: " + rel)
@@ -94,6 +95,9 @@ class FileOps:
             return False
         parts = set(rel.split("/"))
         return rel in PROTECTED_PATHS or bool(parts & PROTECTED_PATHS)
+
+    def _is_restricted_rel(self, rel):
+        return self._jail.restriction_reason(rel) is not None
 
     def _normalize_rel(self, rel):
         rel = str(rel or ".").replace("\\", "/").strip("/")
@@ -158,10 +162,68 @@ class FileOps:
             return []
         return [item for item in raw.split("\0") if item]
 
+    @staticmethod
+    def _normalize_git_status_path(path):
+        text = str(path or "").strip()
+        if not text:
+            return ""
+        try:
+            parts = shlex.split(text)
+        except ValueError:
+            parts = []
+        if len(parts) == 1:
+            return parts[0]
+        return text.strip('"')
+
+    def _porcelain_v1_paths(self, path_text):
+        return tuple(
+            normalized
+            for normalized in (
+                self._normalize_git_status_path(part)
+                for part in str(path_text or "").split(" -> ")
+            )
+            if normalized
+        )
+
+    def _visible_porcelain_v1_path(self, path_text):
+        paths = self._porcelain_v1_paths(path_text)
+        return bool(paths) and all(not self._is_restricted_rel(path) for path in paths)
+
+    def _porcelain_v2_paths(self, line):
+        text = str(line or "")
+        if text.startswith("#"):
+            return ()
+        if text.startswith(("? ", "! ")):
+            return (self._normalize_git_status_path(text[2:]),)
+        if text.startswith("1 "):
+            parts = text.split(maxsplit=8)
+            return (self._normalize_git_status_path(parts[8]),) if len(parts) > 8 else ()
+        if text.startswith("2 "):
+            parts = text.split(maxsplit=9)
+            if len(parts) <= 9:
+                return ()
+            return tuple(
+                normalized
+                for normalized in (
+                    self._normalize_git_status_path(part)
+                    for part in parts[9].split("\t")
+                )
+                if normalized
+            )
+        if text.startswith("u "):
+            parts = text.split(maxsplit=10)
+            return (self._normalize_git_status_path(parts[10]),) if len(parts) > 10 else ()
+        parts = text.split()
+        return (self._normalize_git_status_path(parts[-1]),) if parts else ()
+
+    def _visible_porcelain_v2_line(self, line):
+        paths = self._porcelain_v2_paths(line)
+        return str(line).startswith("#") or (bool(paths) and all(not self._is_restricted_rel(path) for path in paths))
+
     def _filter_git_porcelain_v1(self, text):
         lines = []
         for line in str(text or "").splitlines():
-            if len(line) >= 4 and self._is_protected_rel(line[3:]):
+            if len(line) >= 4 and not self._visible_porcelain_v1_path(line[3:]):
                 continue
             lines.append(line)
         return "\n".join(lines) + ("\n" if lines else "")
@@ -169,10 +231,7 @@ class FileOps:
     def _filter_git_porcelain_v2(self, text):
         lines = []
         for line in str(text or "").splitlines():
-            if line.startswith("#"):
-                lines.append(line)
-                continue
-            if (" " + SNAPSHOT_DIR + "/") in line or line.endswith(" " + SNAPSHOT_DIR):
+            if not self._visible_porcelain_v2_line(line):
                 continue
             lines.append(line)
         return "\n".join(lines) + ("\n" if lines else "")
@@ -257,7 +316,7 @@ class FileOps:
         tracked_paths = {}
         for git_path in tracked:
             rel = to_workspace_rel(git_path)
-            if rel and not self._is_protected_rel(rel):
+            if rel and not self._is_restricted_rel(rel):
                 tracked_paths[rel] = git_path.replace("\\", "/")
 
         dirty_map = {}
@@ -269,7 +328,7 @@ class FileOps:
         ):
             for git_path in paths:
                 rel = to_workspace_rel(git_path)
-                if not rel or self._is_protected_rel(rel):
+                if not rel or self._is_restricted_rel(rel):
                     continue
                 entry = dirty_map.setdefault(
                     rel,
@@ -289,14 +348,22 @@ class FileOps:
             entry["statuses"].sort()
             dirty_paths.append(entry)
 
+        def visible_workspace_rels(paths):
+            result = []
+            for path in paths:
+                rel = to_workspace_rel(path)
+                if rel and not self._is_restricted_rel(rel):
+                    result.append(rel)
+            return result
+
         metadata["status"] = {
             "clean": not bool(porcelain.strip()),
             "porcelain": porcelain,
             "porcelain_v2": porcelain_v2,
-            "staged": [item for item in (to_workspace_rel(path) for path in staged) if item],
-            "modified": [item for item in (to_workspace_rel(path) for path in modified) if item],
-            "deleted": [item for item in (to_workspace_rel(path) for path in deleted) if item],
-            "untracked": [item for item in (to_workspace_rel(path) for path in untracked) if item],
+            "staged": visible_workspace_rels(staged),
+            "modified": visible_workspace_rels(modified),
+            "deleted": visible_workspace_rels(deleted),
+            "untracked": visible_workspace_rels(untracked),
         }
         metadata["tracked_paths"] = [
             {"path": rel, "git_path": git_path}
@@ -318,7 +385,7 @@ class FileOps:
 
     def _append_manifest_dir(self, entries_by_path, rel):
         rel = self._normalize_rel(rel)
-        if rel == "." or self._is_protected_rel(rel) or rel in entries_by_path:
+        if rel == "." or self._is_restricted_rel(rel) or rel in entries_by_path:
             return
         resolved = self._resolve(rel)
         if not os.path.isdir(resolved) or not self._is_inside_root(resolved):
@@ -335,7 +402,7 @@ class FileOps:
 
     def _append_manifest_file(self, entries_by_path, rel, tracked_by_path, status_by_path, git_available=False):
         rel = self._normalize_rel(rel)
-        if self._is_protected_rel(rel):
+        if self._is_restricted_rel(rel):
             return
         try:
             resolved = self._resolve(rel)
@@ -380,7 +447,7 @@ class FileOps:
                 if self._is_selected(rel, selected_rels)
             )
             candidates.update(rel for rel in selected_rels if rel != ".")
-        return sorted(candidate for candidate in candidates if not self._is_protected_rel(candidate))
+        return sorted(candidate for candidate in candidates if not self._is_restricted_rel(candidate))
 
     def _worktree_manifest(self, git_metadata=None, selected_rels=None):
         git_metadata = git_metadata or {}
@@ -406,7 +473,7 @@ class FileOps:
             dirnames[:] = [
                 dirname
                 for dirname in sorted(dirnames)
-                if not self._is_protected_rel(self._relative(os.path.join(dirpath, dirname)))
+                if not self._is_restricted_rel(self._relative(os.path.join(dirpath, dirname)))
                 and not self._is_skipped_checkpoint_dir(
                     self._relative(os.path.join(dirpath, dirname)),
                     selected_rels,
@@ -429,7 +496,7 @@ class FileOps:
                 resolved = os.path.join(dirpath, filename)
                 rel = self._relative(resolved)
                 if (
-                    self._is_protected_rel(rel)
+                    self._is_restricted_rel(rel)
                     or self._is_skipped_checkpoint_dir(rel, selected_rels)
                     or not os.path.isfile(resolved)
                     or not self._is_inside_root(resolved)
@@ -448,7 +515,7 @@ class FileOps:
         return entries
 
     def _path_entry(self, item, include_missing=False):
-        resolved = self._resolve(item)
+        resolved = self._resolve_user_path(item, operation="checkpoint")
         rel = self._relative(resolved)
         entry = {
             "path": rel,
@@ -465,6 +532,8 @@ class FileOps:
         return entry
 
     def _copy_snapshot_content(self, snapshot_root, rel, captured_from):
+        if self._is_restricted_rel(rel):
+            return False
         resolved = self._resolve(rel)
         if not os.path.isfile(resolved):
             return False
@@ -510,7 +579,7 @@ class FileOps:
             candidate_paths = set(files_by_path)
 
         for rel in sorted(candidate_paths):
-            if self._is_protected_rel(rel):
+            if self._is_restricted_rel(rel):
                 continue
             self._copy_snapshot_content(snapshot_root, rel, captured)
         return captured, missing_dirty
@@ -536,7 +605,7 @@ class FileOps:
 
     def read_file(self, path):
         """ファイルを読み取り、内容を文字列で返す。"""
-        resolved = self._resolve(path)
+        resolved = self._resolve_user_path(path, operation="read")
         if not os.path.isfile(resolved):
             raise FileNotFoundError(f"File not found: {path}")
         self._ensure_text_size(resolved)
@@ -550,7 +619,7 @@ class FileOps:
 
         親ディレクトリが存在しない場合は自動作成する。
         """
-        resolved = self._resolve(path)
+        resolved = self._resolve_user_path(path, operation="write")
         self._ensure_unprotected_mutation(resolved)
         parent = os.path.dirname(resolved)
         if parent and not os.path.isdir(parent):
@@ -599,7 +668,7 @@ class FileOps:
 
         親ディレクトリが存在しない場合は自動作成する。
         """
-        resolved = self._resolve(path)
+        resolved = self._resolve_user_path(path, operation="create")
         self._ensure_unprotected_mutation(resolved)
         if os.path.exists(resolved):
             raise FileExistsError(f"File already exists: {path}")
@@ -611,7 +680,7 @@ class FileOps:
 
     def delete_file(self, path):
         """ファイルを削除する。"""
-        resolved = self._resolve(path)
+        resolved = self._resolve_user_path(path, operation="delete")
         self._ensure_unprotected_mutation(resolved)
         if not os.path.isfile(resolved):
             raise FileNotFoundError(f"File not found: {path}")
@@ -624,8 +693,8 @@ class FileOps:
 
     def move_file(self, source, destination):
         """ファイルまたはディレクトリを移動する。"""
-        resolved_source = self._resolve(source)
-        resolved_destination = self._resolve(destination)
+        resolved_source = self._resolve_user_path(source, operation="move")
+        resolved_destination = self._resolve_user_path(destination, operation="move")
         self._ensure_unprotected_mutation(resolved_source)
         self._ensure_unprotected_mutation(resolved_destination)
         if not os.path.exists(resolved_source):
@@ -643,7 +712,7 @@ class FileOps:
     def diff_text(self, path, new_content):
         """既存ファイルと新しい内容の unified diff を返す。"""
         old_content = ""
-        resolved = self._resolve(path)
+        resolved = self._resolve_user_path(path, operation="diff")
         if os.path.exists(resolved):
             if not os.path.isfile(resolved):
                 raise IsADirectoryError(f"Path is not a file: {path}")
@@ -771,7 +840,7 @@ class FileOps:
         copied = []
         entries = []
         for item in selected:
-            resolved = self._resolve(item)
+            resolved = self._resolve_user_path(item, operation="snapshot")
             rel = self._relative(resolved)
             entry = {
                 "path": rel,
@@ -798,7 +867,7 @@ class FileOps:
                     resolved,
                     destination,
                     dirs_exist_ok=True,
-                    ignore=shutil.ignore_patterns(SNAPSHOT_DIR, ".git"),
+                    ignore=self._snapshot_ignore,
                 )
             else:
                 shutil.copy2(resolved, destination)
@@ -824,9 +893,20 @@ class FileOps:
         selected = [paths] if isinstance(paths, str) else (paths if paths else ["."])
         result = []
         for item in selected:
-            resolved = self._resolve(item)
+            resolved = self._resolve_user_path(item, operation="restore")
             result.append(self._normalize_rel(self._relative(resolved)))
         return result
+
+    def _snapshot_ignore(self, current_dir, names):
+        ignored = []
+        for name in names:
+            candidate = os.path.join(current_dir, name)
+            if not self._is_inside_root(candidate):
+                ignored.append(name)
+                continue
+            if self._is_restricted_rel(self._relative(candidate)):
+                ignored.append(name)
+        return set(ignored)
 
     def _is_selected(self, rel, selected_rels):
         rel = self._normalize_rel(rel)
@@ -909,7 +989,7 @@ class FileOps:
             rel = entry["path"]
             if not self._is_selected(rel, selected_rels):
                 continue
-            destination = self._resolve(rel)
+            destination = self._resolve_user_path(rel, operation="restore")
             self._ensure_unprotected_mutation(destination)
             if entry.get("type") == "dir":
                 if os.path.isfile(destination):
@@ -973,11 +1053,11 @@ class FileOps:
             entry = path_entries.get(str(item))
             if entry is None:
                 try:
-                    entry = path_entries.get(self._relative(self._resolve(item)))
+                    entry = path_entries.get(self._relative(self._resolve_user_path(item, operation="restore")))
                 except Exception:
                     entry = None
             if entry and entry.get("existed") is False:
-                destination = self._resolve(item)
+                destination = self._resolve_user_path(item, operation="restore")
                 self._ensure_unprotected_mutation(destination)
                 if os.path.isdir(destination):
                     shutil.rmtree(destination)
@@ -988,7 +1068,7 @@ class FileOps:
                 continue
             if not os.path.exists(source):
                 continue
-            destination = self._resolve(item)
+            destination = self._resolve_user_path(item, operation="restore")
             self._ensure_unprotected_mutation(destination)
             parent = os.path.dirname(destination)
             if parent and not os.path.isdir(parent):
@@ -1049,7 +1129,7 @@ class FileOps:
 
     def search_files(self, pattern, directory="."):
         """globパターンでファイルを検索し、マッチしたパスのリストを返す。"""
-        resolved_dir = self._resolve(directory)
+        resolved_dir = self._resolve_user_path(directory, operation="search")
         if not os.path.isdir(resolved_dir):
             raise NotADirectoryError(f"Directory not found: {directory}")
         full_pattern = os.path.join(resolved_dir, pattern)
@@ -1059,7 +1139,9 @@ class FileOps:
             real_m = os.path.realpath(m)
             # ワークスペース外のシンボリックリンク先を除外
             if real_m == self._root or real_m.startswith(self._root + os.sep):
-                result.append(self._relative(real_m))
+                rel = self._relative(real_m)
+                if not self._is_restricted_rel(rel):
+                    result.append(rel)
         return result
 
     def list_files(self, directory=".", recursive=False):
@@ -1067,13 +1149,18 @@ class FileOps:
 
         各エントリは {"name", "path", "is_dir", "size"} の辞書。
         """
-        resolved_dir = self._resolve(directory)
+        resolved_dir = self._resolve_user_path(directory, operation="list")
         if not os.path.isdir(resolved_dir):
             raise NotADirectoryError(f"Directory not found: {directory}")
         result = []
         if recursive:
             for dirpath, dirnames, filenames in os.walk(resolved_dir):
-                dirnames.sort()
+                dirnames[:] = [
+                    dirname
+                    for dirname in sorted(dirnames)
+                    if self._is_inside_root(os.path.join(dirpath, dirname))
+                    and not self._is_restricted_rel(self._relative(os.path.join(dirpath, dirname)))
+                ]
                 for d in sorted(dirnames):
                     full = os.path.join(dirpath, d)
                     rel = self._relative(full)
@@ -1085,7 +1172,11 @@ class FileOps:
                     })
                 for fname in sorted(filenames):
                     full = os.path.join(dirpath, fname)
+                    if not self._is_inside_root(full):
+                        continue
                     rel = self._relative(full)
+                    if self._is_restricted_rel(rel):
+                        continue
                     try:
                         size = os.path.getsize(full)
                     except OSError:
@@ -1100,7 +1191,11 @@ class FileOps:
             entries = sorted(os.listdir(resolved_dir))
             for entry in entries:
                 full = os.path.join(resolved_dir, entry)
+                if not self._is_inside_root(full):
+                    continue
                 rel = self._relative(full)
+                if self._is_restricted_rel(rel):
+                    continue
                 is_dir = os.path.isdir(full)
                 try:
                     size = 0 if is_dir else os.path.getsize(full)

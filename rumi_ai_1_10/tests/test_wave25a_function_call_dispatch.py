@@ -126,6 +126,8 @@ def _make_function_registry(entries: Dict[str, FunctionEntry] = None):
     reg = MagicMock()
     _entries = entries or {}
     reg.get.side_effect = lambda qn: _entries.get(qn)
+    reg.get_by_permission_id.return_value = None
+    reg.resolve_by_alias.return_value = None
     return reg
 
 
@@ -208,6 +210,16 @@ class TestFunctionCallRouting:
         resp = ex.execute("p", {"permission_id": "some.perm", "args": {}})
         assert resp.success is False
         assert resp.error_type == "handler_not_found"
+
+    def test_resolve_entry_uses_permission_id_index(self):
+        entry = _user_entry()
+        reg = _make_function_registry()
+        reg.get_by_permission_id.return_value = entry
+        ex = _make_executor(reg)
+
+        assert ex._resolve_entry("coding.file.read") is entry
+        reg.get_by_permission_id.assert_called_once_with("coding.file.read")
+        reg.resolve_by_alias.assert_not_called()
 
 
 # ===========================================================================

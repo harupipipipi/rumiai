@@ -46,6 +46,11 @@ def run(input_data, context=None):
             include_missing=True,
         )
         return ok(with_workspace({"checkpoint": checkpoint}, workspace))
+    except PermissionError as exc:
+        workspace_error = workspace_error_response(exc, error)
+        if workspace_error:
+            return workspace_error
+        return error(str(exc), code="PATH_RESTRICTED")
     except ValueError as exc:
         return error(str(exc), code="INVALID_INPUT")
     except Exception as exc:
