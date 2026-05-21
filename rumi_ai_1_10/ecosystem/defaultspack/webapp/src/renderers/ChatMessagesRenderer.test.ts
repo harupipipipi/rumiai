@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { messageCopyText, shouldRenderImageBlockInChat, streamedBrowserScreenshots, summarizePendingToolNames } from "./ChatMessagesRenderer";
+import { compactLogPreviewText, isCompactLogLikeMessageText, messageCopyText, shouldRenderImageBlockInChat, streamedBrowserScreenshots, summarizePendingToolNames } from "./ChatMessagesRenderer";
 import type { ChatUiMessage } from "./types";
 
 function message(overrides: Partial<ChatUiMessage>): ChatUiMessage {
@@ -33,6 +33,39 @@ test("pending tool summary shows two names and the remaining count", () => {
   assert.deepEqual(summary.visibleNames, ["web_search", "browser"]);
   assert.equal(summary.hiddenCount, 1);
   assert.equal(summary.summary, "web_search、browser、その他 1 個が見込まれました");
+});
+
+test("long terminal-style output is detected for compact display", () => {
+  const logText = JSON.stringify({
+    tool_name: "coding_terminal_exec",
+    classification: "high",
+    risk_reasons: ["shell_escape"],
+    cwd: "/tmp/project",
+    exit_code: 0,
+    stdout: Array.from({ length: 80 }, (_, index) => `pytest line ${index}`).join("\\n"),
+    stderr: "",
+  }).repeat(8);
+
+  assert.equal(isCompactLogLikeMessageText(logText), true);
+});
+
+test("ordinary long markdown is not treated as a terminal log", () => {
+  const prose = Array.from({ length: 80 }, (_, index) => (
+    `Section ${index}: this paragraph explains architecture, tradeoffs, state transitions, UI behavior, and next steps in normal prose.`
+  )).join("\n\n");
+
+  assert.equal(isCompactLogLikeMessageText(prose), false);
+});
+
+test("compact log preview keeps head and tail while normalizing escaped newlines", () => {
+  const text = `{"stdout":"${Array.from({ length: 420 }, (_, index) => `line-${index}`).join("\\n")}","exit_code":0,"classification":"high","risk_reasons":["shell_escape"],"cwd":"/tmp/project","tool_name":"coding_terminal_exec"}`;
+  const preview = compactLogPreviewText(text, 800);
+
+  assert.equal(preview.omitted, true);
+  assert.match(preview.text, /line-0/);
+  assert.match(preview.text, /line-419/);
+  assert.match(preview.text, /chars omitted/);
+  assert.equal(preview.text.includes("\\nline-"), false);
 });
 
 test("image blocks stay out of chat unless explicitly marked for display", () => {

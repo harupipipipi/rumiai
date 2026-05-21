@@ -1,6 +1,7 @@
 import { AlertTriangle, Check, Clock, Copy, ExternalLink, Image as ImageIcon, Loader2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 import { ArtifactPreviewDialog, type ArtifactPreviewDialogItem } from "../components/ArtifactPreviewDialog";
 import { cn } from "../lib/cn";
@@ -23,6 +24,34 @@ type ImagePreviewRequest = {
   details?: ImagePreviewDetail[];
 };
 
+const LOG_PREVIEW_MIN_CHARS = 1200;
+const LOG_PREVIEW_MAX_CHARS = 2200;
+const LOG_PREVIEW_HEAD_CHARS = 1300;
+const LOG_PREVIEW_TAIL_CHARS = 620;
+const markdownPlugins = [remarkGfm];
+const LOG_LIKE_TOKENS = [
+  "\\n",
+  "\"stdout\"",
+  "\"stderr\"",
+  "\"exit_code\"",
+  "\"classification\"",
+  "\"risk_reasons\"",
+  "\"cwd\"",
+  "approval_required",
+  "coding_terminal_exec",
+  "subprocess.run",
+  "rootdir:",
+  "pytest",
+  "Traceback",
+  "platform ",
+];
+
+type CompactLogPreview = {
+  omitted: boolean;
+  omittedChars: number;
+  text: string;
+};
+
 function shortDetail(value: unknown, limit = 420): string {
   let text = "";
   if (typeof value === "string") {
@@ -38,6 +67,81 @@ function shortDetail(value: unknown, limit = 420): string {
   }
   const compact = text.replace(/\s+/g, " ").trim();
   return compact.length > limit ? `${compact.slice(0, limit - 3)}...` : compact;
+}
+
+function countNeedle(text: string, needle: string): number {
+  if (!needle) return 0;
+  let count = 0;
+  let index = text.indexOf(needle);
+  while (index !== -1) {
+    count += 1;
+    index = text.indexOf(needle, index + needle.length);
+  }
+  return count;
+}
+
+export function isCompactLogLikeMessageText(text: string): boolean {
+  const trimmed = text.trim();
+  if (trimmed.length < LOG_PREVIEW_MIN_CHARS) return false;
+
+  const escapedNewlineCount = countNeedle(trimmed, "\\n");
+  const hasVeryLongLine = trimmed.split(/\r?\n/).some((line) => line.length > 260);
+  const tokenHits = LOG_LIKE_TOKENS.reduce((count, token) => (
+    trimmed.includes(token) ? count + 1 : count
+  ), 0);
+  const hasToolJsonKeys = /[{,]\s*"(stdout|stderr|exit_code|command|classification|risk_reasons|cwd)"\s*:/.test(trimmed);
+
+  return (
+    (escapedNewlineCount >= 4 && tokenHits >= 2)
+    || (hasVeryLongLine && tokenHits >= 2)
+    || (hasToolJsonKeys && tokenHits >= 2)
+  );
+}
+
+function normalizeLogPreviewText(text: string): string {
+  return text
+    .replace(/\\r\\n/g, "\n")
+    .replace(/\\n/g, "\n")
+    .replace(/\\t/g, "  ")
+    .replace(/\\"/g, "\"");
+}
+
+export function compactLogPreviewText(text: string, maxChars = LOG_PREVIEW_MAX_CHARS): CompactLogPreview {
+  const normalized = normalizeLogPreviewText(text).trim();
+  if (normalized.length <= maxChars) {
+    return { omitted: false, omittedChars: 0, text: normalized };
+  }
+
+  const head = normalized.slice(0, LOG_PREVIEW_HEAD_CHARS).trimEnd();
+  const tail = normalized.slice(-LOG_PREVIEW_TAIL_CHARS).trimStart();
+  const omittedChars = Math.max(0, normalized.length - head.length - tail.length);
+  return {
+    omitted: true,
+    omittedChars,
+    text: `${head}\n\n... ${omittedChars.toLocaleString()} chars omitted from chat view ...\n\n${tail}`,
+  };
+}
+
+function CompactLogBlock({ text }: { text: string }) {
+  const preview = compactLogPreviewText(text);
+  return (
+    <section className="rumi-log-card" aria-label="省略されたログ">
+      <div className="rumi-log-card-header">
+        <span className="rumi-log-card-kicker">Terminal log</span>
+        <span className="rumi-log-card-meta">
+          {preview.omitted ? `${preview.omittedChars.toLocaleString()} chars omitted` : "wrapped"}
+        </span>
+      </div>
+      <pre className="rumi-log-card-body">{preview.text}</pre>
+      <div className="rumi-log-card-footer">全文はメッセージのコピーから取得できます。</div>
+    </section>
+  );
+}
+
+function MessageMarkdown({ text }: { text: string }) {
+  return isCompactLogLikeMessageText(text)
+    ? <CompactLogBlock text={text} />
+    : <ReactMarkdown remarkPlugins={markdownPlugins}>{text}</ReactMarkdown>;
 }
 
 function imageSizeLabel(size: BrowserScreenshot["image_size"]): string {
@@ -71,12 +175,12 @@ function MessageBlock({
   const blockType = String(block.type ?? "text");
 
   if (blockType === "text" || blockType === "markdown") {
-    return <ReactMarkdown>{String(block.text ?? "")}</ReactMarkdown>;
+    return <MessageMarkdown text={String(block.text ?? "")} />;
   }
 
   if (blockType === "code") {
     return (
-      <pre className="bg-zinc-900 border border-zinc-800 rounded-lg p-3 overflow-x-auto text-[12px] text-zinc-200 font-mono">
+      <pre className="max-w-full overflow-x-hidden overflow-y-auto whitespace-pre-wrap break-words rounded-lg bg-zinc-900 p-3 font-mono text-[12px] text-zinc-200">
         <code>{String(block.text ?? "")}</code>
       </pre>
     );
@@ -121,7 +225,7 @@ function MessageBlock({
   if (unknownStrategy === "hidden") return null;
   if (unknownStrategy === "text") return <p>{JSON.stringify(block)}</p>;
   return (
-    <pre className="bg-zinc-900 border border-zinc-800 rounded-lg p-3 overflow-x-auto text-[11px] text-zinc-400 font-mono">
+    <pre className="max-w-full overflow-x-hidden overflow-y-auto whitespace-pre-wrap break-words rounded-lg bg-zinc-900 p-3 font-mono text-[11px] text-zinc-400">
       {JSON.stringify(block, null, 2)}
     </pre>
   );
@@ -299,7 +403,7 @@ function WidgetCard({ widget }: { widget: Record<string, unknown> }) {
       <summary className="cursor-pointer select-none text-[10px] uppercase tracking-wider text-blue-300">
         Widget details
       </summary>
-      <pre className="mt-2 overflow-x-auto text-[11px] font-mono text-zinc-200">{JSON.stringify(widget, null, 2)}</pre>
+      <pre className="mt-2 max-w-full overflow-x-hidden overflow-y-auto whitespace-pre-wrap break-words text-[11px] font-mono text-zinc-200">{JSON.stringify(widget, null, 2)}</pre>
     </details>
   );
 }
@@ -700,12 +804,12 @@ function ToolActivityTray({
   return (
     <div className="rumi-tool-activity mb-4 grid w-full gap-3 text-zinc-300">
       {groups.map((group) => (
-        <div key={group.id} className="grid gap-1.5">
-          <div className="flex items-center gap-2 text-[12px] font-medium text-zinc-400">
+        <div key={group.id} className="grid min-w-0 gap-1.5">
+          <div className="flex min-w-0 items-center gap-2 text-[12px] font-medium text-zinc-400">
             <span className="h-1.5 w-1.5 rounded-full bg-zinc-600" />
-            <span>{group.label}</span>
+            <span className="min-w-0 truncate">{group.label}</span>
           </div>
-          <div className="ml-1.5 grid gap-1.5 border-l border-zinc-800/70 pl-4">
+          <div className="ml-1.5 grid min-w-0 gap-1.5 border-l border-zinc-800/70 pl-4">
             {group.items.map((item) => {
               const artifactPreviewId = item.artifacts?.find((artifact) => artifact.url)?.path;
               const previewId = item.toolCallId && previewableCallIds.has(item.toolCallId) ? item.toolCallId : artifactPreviewId;
@@ -714,22 +818,22 @@ function ToolActivityTray({
               const statusLine = [statusLabel, item.detail].filter(Boolean).join(" · ");
               const body = (
                 <>
-                  <span className={cn("mt-1 h-1.5 w-1.5 rounded-full", item.status === "failed" ? "bg-red-400" : item.status === "running" ? "animate-pulse bg-blue-300" : "bg-zinc-700")} />
-                  <span className="min-w-0 max-w-full">
-                    <span className="flex min-w-0 items-baseline gap-2 text-[13px] leading-5 text-zinc-300">
-                      <span className="truncate">{item.input || item.detail || item.toolName}</span>
+                  <span className={cn("mt-1 h-1.5 w-1.5 shrink-0 rounded-full", item.status === "failed" ? "bg-red-400" : item.status === "running" ? "animate-pulse bg-blue-300" : "bg-zinc-700")} />
+                  <span className="min-w-0 max-w-full flex-1 overflow-hidden">
+                    <span className="flex min-w-0 max-w-full items-baseline gap-2 text-[13px] leading-5 text-zinc-300">
+                      <span className="min-w-0 flex-1 truncate">{item.input || item.detail || item.toolName}</span>
                       {item.durationLabel && <span className="shrink-0 font-mono text-[10px] text-zinc-600">{item.durationLabel}</span>}
                     </span>
                     {statusLine && (
-                      <span className={cn("block truncate text-[11px] leading-5", item.status === "failed" ? "text-red-300" : "text-zinc-500")}>
+                      <span className={cn("block max-w-full truncate text-[11px] leading-5", item.status === "failed" ? "text-red-300" : "text-zinc-500")}>
                         {statusLine}
                       </span>
                     )}
                     {item.nextStep && (
-                      <span className="block truncate text-[11px] leading-5 text-zinc-600">{item.nextStep}</span>
+                      <span className="block max-w-full truncate text-[11px] leading-5 text-zinc-600">{item.nextStep}</span>
                     )}
                     {!item.supported && item.rawJson && (
-                      <code className="mt-1 block max-h-28 overflow-auto whitespace-pre-wrap rounded-md bg-zinc-950/70 px-2 py-1.5 font-mono text-[10px] leading-4 text-zinc-500">
+                      <code className="mt-1 block max-h-28 max-w-full overflow-x-hidden overflow-y-auto whitespace-pre-wrap break-words rounded-md bg-zinc-950/70 px-2 py-1.5 font-mono text-[10px] leading-4 text-zinc-500">
                         {item.rawJson}
                       </code>
                     )}
@@ -740,7 +844,7 @@ function ToolActivityTray({
                 <button
                   key={item.id}
                   type="button"
-                  className="group/tool -ml-[5px] inline-flex max-w-full items-start gap-3 rounded-lg px-1 py-1.5 text-left transition-colors hover:bg-zinc-900/55 focus-visible:bg-zinc-900/55 focus-visible:outline-none"
+                  className="group/tool -ml-[5px] flex w-full min-w-0 max-w-full items-start gap-3 overflow-hidden rounded-lg px-1 py-1.5 text-left transition-colors hover:bg-zinc-900/55 focus-visible:bg-zinc-900/55 focus-visible:outline-none"
                   onClick={() => {
                     if (previewId) onOpenToolPreview?.(previewId);
                   }}
@@ -748,7 +852,7 @@ function ToolActivityTray({
                   {body}
                 </button>
               ) : (
-                <div key={item.id} className="-ml-[5px] flex w-fit max-w-full items-start gap-3 px-1 py-1.5">
+                <div key={item.id} className="-ml-[5px] flex w-full min-w-0 max-w-full items-start gap-3 overflow-hidden px-1 py-1.5">
                   {body}
                 </div>
               );
@@ -821,11 +925,11 @@ export function ChatMessagesRenderer({
       ) : isNewConversation ? (
         <div className="flex-1" />
       ) : (
-        <div className="flex-1 overflow-y-auto px-5 py-3 md:px-8 lg:px-10 xl:px-12">
-          <div className="w-full max-w-6xl mx-auto space-y-4">
+        <div className="flex-1 overflow-x-hidden overflow-y-auto px-5 py-3 md:px-8 lg:px-10 xl:px-12">
+          <div className="mx-auto w-full max-w-6xl min-w-0 space-y-4">
             {messages.map((message) => (
-              <div key={message.id} className={cn("rumi-message-row group/message flex gap-3 select-text", message.role === "user" ? "flex-row-reverse lg:pr-6 xl:pr-8 2xl:pr-10" : "lg:pl-10 xl:pl-14 2xl:pl-20")}>
-                <div className={cn("flex flex-col min-w-0 pt-1", message.role === "user" ? "items-end max-w-[82%] lg:max-w-[70%] 2xl:max-w-[64%]" : "items-start flex-1")}>
+              <div key={message.id} className={cn("rumi-message-row group/message flex min-w-0 gap-3 select-text", message.role === "user" ? "flex-row-reverse lg:pr-6 xl:pr-8 2xl:pr-10" : "lg:pl-8 xl:pl-12 2xl:pl-16")}>
+                <div className={cn("flex min-w-0 flex-col pt-1", message.role === "user" ? "max-w-[82%] items-end lg:max-w-[70%] 2xl:max-w-[64%]" : "flex-1 items-start")}>
                   {message.role === "agent" && (
                     <div className="flex items-center gap-2 mb-1.5">
                       <span className="text-xs font-semibold text-zinc-300 tracking-wide">Assistant</span>
@@ -840,13 +944,13 @@ export function ChatMessagesRenderer({
                     </div>
                   )}
 
-                  <div className={cn("flex max-w-full flex-col", message.role === "user" ? "items-start" : "w-full items-start")}>
+                  <div className={cn("flex min-w-0 max-w-full flex-col", message.role === "user" ? "items-start" : "w-full items-start")}>
                     {(() => {
                       const hasToolActivity = buildToolActivityGroups(message.toolLogs ?? [], message.events ?? []).length > 0;
                       return (
                     <div
                       className={cn(
-                        "rumi-message-bubble relative rounded-2xl max-w-full sm:px-4 px-3 py-3 text-[14px] outline-none select-text",
+                        "rumi-message-bubble relative max-w-full overflow-x-hidden rounded-2xl px-3 py-3 text-[14px] outline-none select-text sm:px-4",
                         message.role === "user"
                           ? "bg-zinc-800/80 text-zinc-100 rounded-tr-sm shadow-sm border border-zinc-700/50"
                           : "w-full text-zinc-200 bg-transparent",
@@ -865,7 +969,7 @@ export function ChatMessagesRenderer({
                         </details>
                       )}
 
-                      <div className="rumi-message-content markdown-body select-text leading-relaxed break-words space-y-4">
+                      <div className="rumi-message-content markdown-body min-w-0 max-w-full select-text space-y-4 overflow-x-hidden break-words leading-relaxed">
                         {message.content.length > 0 && (messageVisibleText(message) || message.content.some((block) => String(block.type ?? "text") !== "text"))
                           ? message.content.map((block, index) => (
                               <MessageBlock key={`${message.id}-${index}`} block={block} unknownStrategy={unknownBlockStrategy} onOpenImagePreview={setImagePreview} />
@@ -877,7 +981,7 @@ export function ChatMessagesRenderer({
                                   <span>レスポンス本文が空でした。stream が途中で閉じたか、thinking のみで終了した可能性があります。</span>
                                 </div>
                               )
-                            : <ReactMarkdown>{message.rawText}</ReactMarkdown>}
+                            : <MessageMarkdown text={message.rawText} />}
                       </div>
 
                       {showWidgets && message.widget && <WidgetCard widget={message.widget} />}
