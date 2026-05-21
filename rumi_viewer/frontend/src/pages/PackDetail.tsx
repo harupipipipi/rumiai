@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useAppStore } from '@/src/store';
 import { useT } from '@/src/lib/i18n';
 import { launchDefaultspackDesktop } from '@/src/lib/api';
+import { isDefaultspackLaunchPack } from '@/src/lib/defaultspackLaunch';
 import { Button } from '@/src/components/ui/Button';
 import { Badge } from '@/src/components/ui/Badge';
 import { Switch } from '@/src/components/ui/Switch';
@@ -53,6 +54,7 @@ export function PackDetail() {
   };
 
   const handleLaunchDefaultspack = async () => {
+    if (launchingDesktop) return;
     setLaunchingDesktop(true);
     try {
       const message = await launchDefaultspackDesktop();
@@ -84,7 +86,7 @@ export function PackDetail() {
             </div>
           </div>
           <div className="flex items-center gap-3 shrink-0">
-            {pack.id === 'defaultspack' && (
+            {isDefaultspackLaunchPack(pack) && (
               <Button
                 variant="outline"
                 size="sm"
@@ -92,7 +94,7 @@ export function PackDetail() {
                 loading={launchingDesktop}
               >
                 <AppWindow className="h-3.5 w-3.5" />
-                Open App
+                Open UI
               </Button>
             )}
             <span className="text-sm text-text-muted">{pack.enabled ? t('packs.enabled') : t('packs.disabled')}</span>

@@ -300,7 +300,7 @@ pub(crate) fn launch_defaultspack_desktop_impl(config: &AppConfig) -> AnyResult<
         .with_context(|| format!("failed to launch {}", app_dir.display()))?;
     info!("Launched defaultspack desktop app: {}", app_dir.display());
     Ok(format!(
-        "Launched Rumi Defaultspack from {}",
+        "Opening Rumi Defaultspack at http://localhost:8766/chat from {}",
         app_dir.display()
     ))
 }

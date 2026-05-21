@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAppStore } from '@/src/store';
 import { useT } from '@/src/lib/i18n';
 import { launchDefaultspackDesktop } from '@/src/lib/api';
+import { isDefaultspackLaunchPack } from '@/src/lib/defaultspackLaunch';
 import { Button } from '@/src/components/ui/Button';
 import { Input } from '@/src/components/ui/Input';
 import { Badge } from '@/src/components/ui/Badge';
@@ -40,6 +41,7 @@ export function Packs() {
   const filteredPacks = packs.filter(pack => pack.name.toLowerCase().includes(search.toLowerCase()));
 
   const handleLaunchDefaultspack = async () => {
+    if (launchingDesktop) return;
     setLaunchingDesktop(true);
     try {
       const message = await launchDefaultspackDesktop();
@@ -88,7 +90,13 @@ export function Packs() {
               <Card
                 key={pack.id}
                 className="cursor-pointer transition-all hover:shadow-[var(--shadow-md)]"
-                onClick={() => navigate(panelRoutes.packDetail(pack.id))}
+                onClick={() => {
+                  if (isDefaultspackLaunchPack(pack)) {
+                    void handleLaunchDefaultspack();
+                    return;
+                  }
+                  navigate(panelRoutes.packDetail(pack.id));
+                }}
               >
                 <div className="flex items-center justify-between p-5">
                   <div className="flex flex-col gap-1.5 min-w-0 flex-1">
@@ -103,7 +111,7 @@ export function Packs() {
                     <p className="text-sm text-text-muted truncate">{pack.description}</p>
                   </div>
                   <div className="ml-4 flex shrink-0 items-center gap-2" onClick={(e) => e.stopPropagation()}>
-                    {pack.id === 'defaultspack' && (
+                    {isDefaultspackLaunchPack(pack) && (
                       <Button
                         variant="outline"
                         size="sm"
@@ -111,7 +119,7 @@ export function Packs() {
                         loading={launchingDesktop}
                       >
                         <AppWindow className="h-3.5 w-3.5" />
-                        Open App
+                        Open UI
                       </Button>
                     )}
                     <Switch
