@@ -171,40 +171,13 @@ class StartupProfileManager:
             return {"error": f"Profile '{profile_id}' not found", "status_code": 404}
         current = copy.deepcopy(state["profiles"][index])
 
-        new_name = payload.get("name", current.get("name"))
-        new_base_pack = payload.get("base_pack", current.get("base_pack"))
-        new_graph_id = payload.get("graph_id", current.get("graph_id"))
-        new_packs = payload.get("packs", current.get("packs", []))
-        new_node_overrides = payload.get("node_overrides", current.get("node_overrides", {}))
-
-        graph_ports = current.get("graph_ports", [])
-        if new_base_pack and new_graph_id:
-            graph_ports = self._extract_graph_ports(new_graph_id, new_base_pack, catalog)
-
-        merged_payload = {
-            "name": new_name,
-            "base_pack": new_base_pack,
-            "graph_id": new_graph_id,
-            "packs": new_packs,
-            "node_overrides": new_node_overrides,
-        }
-        for field_name in self._runtime_profile_field_names():
-            if field_name in payload or field_name in current:
-                merged_payload[field_name] = payload.get(field_name, current.get(field_name))
-
-        updated = {
-            "version": PROFILE_VERSION,
-            "profile_id": profile_id,
-            "name": str(merged_payload.get("name") or profile_id),
-            "base_pack": str(merged_payload.get("base_pack") or ""),
-            "graph_id": str(merged_payload.get("graph_id") or ""),
-            "graph_ports": graph_ports,
-            "packs": list(merged_payload.get("packs") or []),
-            "node_overrides": dict(merged_payload.get("node_overrides") or {}),
-            **self._runtime_profile_fields(profile_id, merged_payload),
-        }
-        updated["created_at"] = current.get("created_at", _now_ts())
-        updated["updated_at"] = _now_ts()
+        updated = self._build_profile_from_payload(
+            profile_id,
+            current,
+            payload,
+            catalog,
+            updated_at=_now_ts(),
+        )
 
         error = self._validate_profile(updated, catalog)
         if error:
@@ -213,6 +186,62 @@ class StartupProfileManager:
         self._save_state(state)
         workspace_payload = self._sync_profile_workspace(updated)
         return {"profile": updated, "profile_workspace": workspace_payload, "updated": True}
+
+    def compile_profile_preview(self, profile_id: str, payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        catalog = self._build_catalog()
+        state = self._load_state(catalog)
+        current = self._get_profile(state["profiles"], profile_id)
+        if current is None:
+            return {"error": f"Profile '{profile_id}' not found", "status_code": 404}
+
+        draft_payload = payload.get("profile") if isinstance(payload, dict) and isinstance(payload.get("profile"), dict) else payload
+        profile = self._build_profile_from_payload(
+            profile_id,
+            copy.deepcopy(current),
+            draft_payload if isinstance(draft_payload, dict) else {},
+            catalog,
+            updated_at=current.get("updated_at", _now_ts()),
+        )
+        error = self._validate_profile(profile, catalog)
+        if error:
+            return {
+                "ok": False,
+                "profile_id": profile_id,
+                "profile": profile,
+                "capability_graph": {
+                    "ok": False,
+                    "graph_id": profile.get("graph_id"),
+                    "capability_profile_id": profile.get("capability_profile_id"),
+                    "surface_launch_target": None,
+                    "diagnostics": [
+                        {
+                            "level": "error",
+                            "code": "startup_profile_invalid",
+                            "message": error,
+                        }
+                    ],
+                },
+                "surface_launch_target": None,
+                "diagnostics": [
+                    {
+                        "level": "error",
+                        "code": "startup_profile_invalid",
+                        "message": error,
+                    }
+                ],
+            }
+
+        capability_graph = self._compile_launch_capability_graph(profile, register=False)
+        diagnostics = list(capability_graph.get("diagnostics") or [])
+        surface_launch_target = capability_graph.get("surface_launch_target")
+        return {
+            "ok": bool(capability_graph.get("ok")),
+            "profile_id": profile_id,
+            "profile": profile,
+            "capability_graph": capability_graph,
+            "surface_launch_target": surface_launch_target if isinstance(surface_launch_target, dict) else None,
+            "diagnostics": diagnostics,
+        }
 
     def add_pack_to_profile(self, profile_id: str, pack_id: str) -> Dict[str, Any]:
         catalog = self._build_catalog()
@@ -655,6 +684,60 @@ class StartupProfileManager:
             return parent.parent
         return parent
 
+    def _build_profile_from_payload(
+        self,
+        profile_id: str,
+        current: Dict[str, Any],
+        payload: Dict[str, Any],
+        catalog: Dict[str, Any],
+        *,
+        updated_at: int,
+    ) -> Dict[str, Any]:
+        new_name = payload.get("name", current.get("name"))
+        new_base_pack = payload.get("base_pack", current.get("base_pack"))
+        new_graph_id = payload.get("graph_id", current.get("graph_id"))
+        new_packs = payload.get("packs", current.get("packs", []))
+        new_node_overrides = payload.get("node_overrides", current.get("node_overrides", {}))
+
+        graph_ports = current.get("graph_ports", [])
+        if new_base_pack and new_graph_id:
+            graph_ports = self._extract_graph_ports(str(new_graph_id), str(new_base_pack), catalog)
+
+        merged_payload = {
+            "name": new_name,
+            "base_pack": new_base_pack,
+            "graph_id": new_graph_id,
+            "packs": new_packs,
+            "node_overrides": new_node_overrides,
+        }
+        for field_name in self._runtime_profile_field_names():
+            if field_name in payload or field_name in current:
+                merged_payload[field_name] = payload.get(field_name, current.get(field_name))
+
+        packs = (
+            self._unique_string_list(new_packs)
+            if isinstance(new_packs, list)
+            else self._unique_string_list(current.get("packs", []))
+        )
+        node_overrides = dict(new_node_overrides) if isinstance(new_node_overrides, dict) else {}
+        return {
+            "version": PROFILE_VERSION,
+            "profile_id": profile_id,
+            "name": str(merged_payload.get("name") or profile_id),
+            "base_pack": str(merged_payload.get("base_pack") or ""),
+            "graph_id": str(merged_payload.get("graph_id") or ""),
+            "graph_ports": graph_ports,
+            "packs": packs,
+            "node_overrides": {
+                str(key): str(value)
+                for key, value in node_overrides.items()
+                if isinstance(key, str) and isinstance(value, str)
+            },
+            **self._runtime_profile_fields(profile_id, merged_payload),
+            "created_at": int(current.get("created_at") or _now_ts()),
+            "updated_at": int(updated_at),
+        }
+
     def _default_state(self, catalog: Dict[str, Any]) -> Dict[str, Any]:
         default_profile = self._default_startup_profile(catalog) if self.seed_default_profile else None
         if default_profile:
@@ -930,16 +1013,29 @@ class StartupProfileManager:
     def _discover_nodes_for_pack(self, pack_id: str, pack_subdir: Any) -> List[Dict[str, Any]]:
         if not pack_subdir:
             return []
-        nodes_dir = Path(pack_subdir) / "nodes"
         result: List[Dict[str, Any]] = self._core_builtin_nodes_for_pack(pack_id)
-        if not nodes_dir.is_dir():
-            return result
-        for f in sorted(nodes_dir.glob("*.node.json")):
+        pack_path = Path(pack_subdir)
+        candidates: List[Path] = []
+        nodes_dir = pack_path / "nodes"
+        if nodes_dir.is_dir():
+            candidates.extend(sorted(nodes_dir.glob("*.node.json")))
+        components_dir = pack_path / "components"
+        if components_dir.is_dir():
+            candidates.extend(
+                component_dir / "node.json"
+                for component_dir in sorted(components_dir.iterdir())
+                if component_dir.is_dir() and (component_dir / "node.json").is_file()
+            )
+        seen = {node["node_id"] for node in result if node.get("node_id")}
+        for f in candidates:
             try:
                 data = json.loads(f.read_text(encoding="utf-8"))
                 from .node_models import load_node_document
                 definitions = load_node_document(data, source_path=str(f), pack_id=pack_id)
                 for node in definitions:
+                    if node.node_id in seen:
+                        continue
+                    seen.add(node.node_id)
                     metadata = dict(node.metadata)
                     component_id = str(metadata.get("component_id") or node.node_id.rsplit(".", 1)[-1])
                     component_type = str(metadata.get("component_type") or component_id)
@@ -1211,7 +1307,12 @@ class StartupProfileManager:
     # Capability graph compilation
     # ------------------------------------------------------------------
 
-    def _compile_launch_capability_graph(self, profile: Dict[str, Any]) -> Dict[str, Any]:
+    def _compile_launch_capability_graph(
+        self,
+        profile: Dict[str, Any],
+        *,
+        register: bool = True,
+    ) -> Dict[str, Any]:
         if not profile.get("launch_capability_graph"):
             return {
                 "ok": True,
@@ -1255,6 +1356,7 @@ class StartupProfileManager:
             interface_registry=self.interface_registry,
             approval_manager=self.approval_manager,
             ecosystem_dir=self.ecosystem_dir,
+            register=register,
         ).to_dict()
 
     def _record_capability_graph_result(self, capability_graph: Dict[str, Any]) -> None:
@@ -1270,6 +1372,11 @@ class StartupProfileManager:
             logger.debug("failed to load active ecosystem manager", exc_info=True)
             return
 
+        surface_launch_target = capability_graph.get("surface_launch_target")
+        active.set_metadata(
+            "startup_surface_launch_target",
+            surface_launch_target if isinstance(surface_launch_target, dict) else None,
+        )
         active.set_metadata(
             "startup_capability_graph",
             {
@@ -1279,6 +1386,7 @@ class StartupProfileManager:
                 "graph_id": capability_graph.get("graph_id"),
                 "capability_profile_id": capability_graph.get("capability_profile_id"),
                 "runtime_profile_key": capability_graph.get("runtime_profile_key"),
+                "surface_launch_target": surface_launch_target if isinstance(surface_launch_target, dict) else None,
                 "diagnostics": list(capability_graph.get("diagnostics") or []),
             },
         )

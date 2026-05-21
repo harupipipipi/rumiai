@@ -69,6 +69,39 @@ def test_pending_desktop_profile_launches_webview_surface():
     assert handler.calls[0]["args"]["env"]["RUMI_DEFAULTSPACK_SURFACE"] == "webview"
 
 
+def test_pending_profile_launches_graph_surface_target_pack():
+    active = FakeActive(
+        {
+            "startup_surface_open_pending": True,
+            "startup_base_pack": "defaultspack",
+            "startup_profile_id": "custom",
+            "startup_profile_surfaces": {"preferred": "browser", "enabled": ["browser"]},
+            "startup_surface_launch_target": {
+                "kind": "desktop_app",
+                "pack_id": "frontendpack",
+                "principal_id": "frontendpack",
+                "surface": "browser",
+                "env": {"FRONTENDPACK_SURFACE": "web"},
+                "source": "capability_graph",
+            },
+        }
+    )
+    handler = FakeDesktopHandler()
+
+    result = launch_pending_startup_profile_surface(
+        active_manager=active,
+        desktop_handler=handler,
+    )
+
+    assert result["launched"] is True
+    assert result["pack_id"] == "frontendpack"
+    call = handler.calls[0]
+    assert call["principal_id"] == "frontendpack"
+    assert call["args"]["pack_id"] == "frontendpack"
+    assert call["grant_config"]["allowed_packs"] == ["frontendpack"]
+    assert call["args"]["env"]["FRONTENDPACK_SURFACE"] == "web"
+
+
 def test_non_pending_surface_launch_is_noop():
     active = FakeActive({"startup_surface_open_pending": False})
 

@@ -4,6 +4,7 @@ import {
   activateStartupProfile,
   addPackToStartupProfile,
   clearStartupProfileNodeOverride,
+  compileStartupProfilePreview,
   createStartupProfile,
   deleteStartupProfile,
   duplicateStartupProfile,
@@ -17,6 +18,7 @@ import {
 } from '@/src/lib/api';
 import type {
   ApiStartupProfile,
+  StartupProfileCompilePreviewResponseData,
   StartupProfilesResponseData,
 } from '@/src/lib/apiTypes';
 import {
@@ -650,6 +652,52 @@ function EditPanel({
   handleSave, handleActivate, handleDuplicate, handleDelete, handleLaunch,
   handleAddPack, handleRemovePack, handleOverrideChange,
 }: EditPanelProps) {
+  const [compilePreview, setCompilePreview] = useState<StartupProfileCompilePreviewResponseData | null>(null);
+  const [compilePreviewError, setCompilePreviewError] = useState<string | null>(null);
+  const [compilePreviewLoading, setCompilePreviewLoading] = useState(false);
+  const compilePreviewKey = useMemo(
+    () => JSON.stringify({
+      profile_id: draft.profile_id,
+      base_pack: draft.base_pack,
+      graph_id: draft.graph_id,
+      packs: draft.packs,
+      node_overrides: draft.node_overrides,
+      launch_capability_graph: draft.launch_capability_graph,
+      capability_profile_id: draft.capability_profile_id,
+      surfaces: draft.surfaces,
+    }),
+    [draft],
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    setCompilePreviewLoading(true);
+    setCompilePreviewError(null);
+    const timeout = window.setTimeout(() => {
+      void compileStartupProfilePreview(draft.profile_id, draft)
+        .then((preview) => {
+          if (cancelled) return;
+          setCompilePreview(preview);
+        })
+        .catch((error) => {
+          if (cancelled) return;
+          setCompilePreview(null);
+          setCompilePreviewError(error instanceof Error ? error.message : 'Compile preview failed.');
+        })
+        .finally(() => {
+          if (!cancelled) setCompilePreviewLoading(false);
+        });
+    }, 300);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeout);
+    };
+  }, [draft.profile_id, compilePreviewKey]);
+
+  const launchTarget = compilePreview?.surface_launch_target ?? compilePreview?.capability_graph?.surface_launch_target ?? null;
+  const previewDiagnostics = compilePreview?.diagnostics ?? compilePreview?.capability_graph?.diagnostics ?? [];
+  const firstPreviewError = previewDiagnostics.find((item) => item.level === 'error')?.message ?? null;
+
   return (
     <section className="rounded-xl border border-border bg-bg-card p-6">
       {/* Edit header */}
@@ -823,6 +871,44 @@ function EditPanel({
 
         {/* Sidebar metadata */}
         <aside className="space-y-4">
+          <div className="rounded-lg border border-border bg-bg-main p-4">
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-xs font-medium uppercase tracking-wider text-text-muted">Launch target</div>
+              {compilePreviewLoading ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin text-text-muted" />
+              ) : compilePreview?.ok ? (
+                <Badge variant="success" className="text-[10px]">Ready</Badge>
+              ) : (
+                <Badge variant="warning" className="text-[10px]">Check</Badge>
+              )}
+            </div>
+            <div className="mt-3 space-y-2 text-sm">
+              {launchTarget ? (
+                <>
+                  <div>
+                    <div className="text-text-muted text-xs">Pack</div>
+                    <div className="mt-1 break-all rounded-md border border-border bg-bg-hover px-2.5 py-1.5 font-mono text-xs text-text-main">{launchTarget.pack_id}</div>
+                  </div>
+                  {launchTarget.node_id && (
+                    <div>
+                      <div className="text-text-muted text-xs">Node</div>
+                      <div className="mt-1 break-all rounded-md border border-border bg-bg-hover px-2.5 py-1.5 font-mono text-xs text-text-main">{launchTarget.node_id}</div>
+                    </div>
+                  )}
+                  {launchTarget.surface && (
+                    <div>
+                      <div className="text-text-muted text-xs">Surface</div>
+                      <div className="mt-0.5 text-text-main text-xs">{launchTarget.surface}</div>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div className="rounded-md border border-border bg-bg-hover px-2.5 py-2 text-xs text-text-muted">
+                  {compilePreviewError || firstPreviewError || 'No launch target resolved.'}
+                </div>
+              )}
+            </div>
+          </div>
           <div className="rounded-lg border border-border bg-bg-main p-4">
             <div className="text-xs font-medium uppercase tracking-wider text-text-muted">Metadata</div>
             <div className="mt-3 space-y-3 text-sm">

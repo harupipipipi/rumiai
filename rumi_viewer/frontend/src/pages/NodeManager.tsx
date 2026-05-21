@@ -354,6 +354,16 @@ export function NodeManager() {
                   {preview.ok ? <CheckCircle2 className="h-4 w-4 text-green-500" /> : <TriangleAlert className="h-4 w-4 text-red-500" />}
                   {preview.ok ? 'OK' : 'Failed'}
                 </div>
+                {preview.surface_launch_target && (
+                  <div className="mb-3 rounded-md border border-border bg-bg-hover p-3">
+                    <div className="text-xs font-semibold text-text-main">Launch target</div>
+                    <div className="mt-1 text-xs text-text-muted">
+                      {preview.surface_launch_target.pack_id}
+                      {' / '}
+                      {preview.surface_launch_target.node_id ?? preview.surface_launch_target.node_instance_id ?? 'desktop_app'}
+                    </div>
+                  </div>
+                )}
                 <pre className="max-h-56 overflow-auto whitespace-pre-wrap break-words text-xs text-text-muted">
                   {JSON.stringify(preview.runtime_profile ?? preview.diagnostics, null, 2)}
                 </pre>

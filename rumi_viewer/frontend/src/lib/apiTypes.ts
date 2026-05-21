@@ -210,6 +210,10 @@ export interface ApiStartupProfile {
   node_overrides: Record<string, string>;
   created_at: number;
   updated_at: number;
+  capability_profile_id?: string | null;
+  default_graph?: string | null;
+  launch_capability_graph?: boolean;
+  surfaces?: Record<string, unknown>;
   policy?: Record<string, unknown>;
   permissions?: Record<string, unknown>;
   profile_workspace?: ApiProfileWorkspacePaths;
@@ -268,6 +272,25 @@ export interface StartupProfileMutationResponseData {
     exit_code?: number;
     profile_id?: string;
   };
+}
+
+export interface StartupProfileCompilePreviewResponseData {
+  ok: boolean;
+  profile_id: string;
+  profile: ApiStartupProfile;
+  capability_graph: {
+    ok: boolean;
+    skipped?: boolean;
+    reason?: string | null;
+    graph_id?: string | null;
+    capability_profile_id?: string | null;
+    runtime_profile_key?: string | null;
+    runtime_profile?: Record<string, unknown> | null;
+    surface_launch_target?: ApiSurfaceLaunchTarget | null;
+    diagnostics: ApiCapabilityDiagnostic[];
+  };
+  surface_launch_target?: ApiSurfaceLaunchTarget | null;
+  diagnostics: ApiCapabilityDiagnostic[];
 }
 
 export interface StartupProfileDeleteResponseData {
@@ -449,11 +472,24 @@ export interface CapabilityGraphResponseData {
   graph: ApiCapabilityGraph;
 }
 
+export interface ApiSurfaceLaunchTarget {
+  kind: string;
+  pack_id: string;
+  principal_id?: string;
+  surface?: string;
+  node_instance_id?: string;
+  node_id?: string;
+  component_full_id?: string;
+  env?: Record<string, string>;
+  source?: string;
+}
+
 export interface CapabilityGraphCompileResponseData {
   ok: boolean;
   graph_id: string;
   profile_id: string;
   runtime_profile?: Record<string, unknown> | null;
+  surface_launch_target?: ApiSurfaceLaunchTarget | null;
   diagnostics: ApiCapabilityDiagnostic[];
 }
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import inspect
 import json
+import shutil
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -724,6 +725,87 @@ def test_defaultspack_startup_graph_compiles_with_memory_and_prompt_nodes() -> N
     assert agent["prompt"] == "prompt"
     assert set(result.runtime_profile["defaultspack"]["memory"]) == {"memory"}
     assert set(result.runtime_profile["defaultspack"]["prompts"]) == {"prompt"}
+
+
+def test_defaultspack_startup_graph_override_writes_frontend_launch_target(tmp_path) -> None:
+    from core_runtime.startup_capability_bridge import compile_startup_capabilities
+
+    repo_root = Path(__file__).resolve().parents[1]
+    ecosystem_root = tmp_path / "ecosystem"
+    shutil.copytree(repo_root / "ecosystem" / "defaultspack", ecosystem_root / "defaultspack")
+    frontendpack = ecosystem_root / "frontendpack"
+    frontendpack.mkdir(parents=True)
+    (frontendpack / "ecosystem.json").write_text(
+        json.dumps(
+            {
+                "pack_id": "frontendpack",
+                "pack_identity": "test:frontendpack",
+                "version": "1.0.0",
+                "enabled": True,
+                "desktop_app": {
+                    "module": "frontendpack.desktop_app",
+                    "handler": "launch",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    component_dir = frontendpack / "components" / "web"
+    component_dir.mkdir(parents=True)
+    (component_dir / "node.json").write_text(
+        json.dumps(
+            _node_doc(
+                {
+                    "node_id": "frontendpack.web_surface",
+                    "kind": "ecosystem.surface",
+                    "ports": [
+                        {
+                            "id": "surface",
+                            "direction": "output",
+                            "standards": ["rumi.surface"],
+                            "multiple": True,
+                        }
+                    ],
+                    "metadata": {
+                        "pack_id": "frontendpack",
+                        "component_type": "frontend",
+                        "component_id": "web",
+                        "category": "surface",
+                        "launch": {
+                            "kind": "desktop_app",
+                            "pack_id": "frontendpack",
+                            "surface": "browser",
+                            "default": True,
+                            "env": {"FRONTENDPACK_SURFACE": "web"},
+                        },
+                    },
+                }
+            )
+        ),
+        encoding="utf-8",
+    )
+
+    result = compile_startup_capabilities(
+        {
+            "base_pack": "defaultspack",
+            "default_graph": "defaultspack.startup",
+            "capability_profile_id": "defaultspack.startup",
+            "packs": ["defaultspack", "frontendpack"],
+            "node_overrides": {"frontend.surface": "frontendpack.web_surface"},
+            "surfaces": {"preferred": "browser", "enabled": ["browser"]},
+        },
+        interface_registry=InterfaceRegistry(),
+        approval_manager=FakeApprovalManager({"defaultspack", "frontendpack", "rumi_local_agent_pack"}),
+        ecosystem_dir=str(ecosystem_root),
+    )
+
+    assert result.ok is True
+    runtime_profile = result.runtime_profile or {}
+    assert runtime_profile["defaultspack"]["frontends"]["frontend"]["surface"] == "frontendpack_web_surface"
+    assert runtime_profile["launch"]["surface"]["pack_id"] == "frontendpack"
+    assert runtime_profile["launch"]["surface"]["node_id"] == "frontendpack.web_surface"
+    assert result.surface_launch_target is not None
+    assert result.surface_launch_target["pack_id"] == "frontendpack"
 
 
 def test_flow_step_can_explicitly_compile_defaultspack_graph() -> None:

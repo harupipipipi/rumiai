@@ -22,7 +22,7 @@ def _ensure_import_path() -> None:
 
 def _url() -> str:
     port = os.environ.get("RUMI_DEFAULTSPACK_PORT") or os.environ.get("DEFAULTS_HTTP_PORT") or "8766"
-    return f"http://127.0.0.1:{port}/chat"
+    return f"http://localhost:{port}/chat"
 
 
 def _wait_until_ready(url: str, timeout: float = 10.0) -> bool:

@@ -162,6 +162,45 @@ source.standards intersect target.standards is not empty
 
 Core compares standard strings but does not interpret domain meaning.
 
+## Surface Launch Metadata
+
+A surface node can advertise the desktop app that should open when a Startup
+Capability Graph selects it as the active frontend surface. The node must still
+expose a compatible output port; launch metadata only describes the handoff
+payload after graph compile.
+
+```json
+{
+  "node_id": "frontendpack.web_surface",
+  "kind": "ecosystem.surface",
+  "ports": [
+    {
+      "id": "surface",
+      "direction": "output",
+      "standards": ["rumi.surface"],
+      "multiple": true
+    }
+  ],
+  "metadata": {
+    "pack_id": "frontendpack",
+    "component_type": "frontend",
+    "component_id": "web",
+    "launch": {
+      "kind": "desktop_app",
+      "pack_id": "frontendpack",
+      "surface": "browser",
+      "default": true,
+      "env": {
+        "FRONTENDPACK_SURFACE": "web"
+      }
+    }
+  }
+}
+```
+
+For safety, `metadata.launch.pack_id` must match the node's own pack id. A node
+from one pack cannot point startup launch at another pack.
+
 ## Legacy Input Compatibility
 
 Legacy files may use:
