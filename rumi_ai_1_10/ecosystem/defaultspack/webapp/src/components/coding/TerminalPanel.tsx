@@ -11,6 +11,8 @@ type TerminalLog = CodingTerminalResponse & {
   replay_status?: "retrying" | "replayed";
 };
 
+const EMPTY_LOGS: TerminalLog[] = [];
+
 export type ApprovedTerminalDecision = {
   request_id: string;
   approved?: boolean;
@@ -24,19 +26,48 @@ function classificationTone(classification?: string): string {
   return "text-emerald-300";
 }
 
+function readStoredLogs(storageKey: string | undefined, fallback: TerminalLog[]): TerminalLog[] {
+  if (!storageKey) return fallback;
+  try {
+    const parsed = JSON.parse(localStorage.getItem(storageKey) || "[]");
+    return Array.isArray(parsed) ? parsed.slice(0, 8) as TerminalLog[] : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function writeStoredLogs(storageKey: string | undefined, logs: TerminalLog[]) {
+  if (!storageKey) return;
+  try {
+    localStorage.setItem(storageKey, JSON.stringify(logs.slice(0, 8)));
+  } catch {
+    // localStorage can be unavailable in restricted contexts.
+  }
+}
+
 export function TerminalPanel({
   workspaceId,
-  initialLogs = [],
+  initialLogs = EMPTY_LOGS,
   approvedDecision,
+  storageKey,
 }: {
   workspaceId?: string | null;
   initialLogs?: TerminalLog[];
   approvedDecision?: ApprovedTerminalDecision | null;
+  storageKey?: string;
 }) {
   const [command, setCommand] = useState("git status");
-  const [logs, setLogs] = useState<TerminalLog[]>(initialLogs);
+  const [logs, setLogs] = useState<TerminalLog[]>(() => readStoredLogs(storageKey, initialLogs));
   const [busy, setBusy] = useState(false);
   const handledApprovalKeys = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    setLogs(readStoredLogs(storageKey, initialLogs));
+  }, [initialLogs, storageKey]);
+
+  useEffect(() => {
+    writeStoredLogs(storageKey, logs);
+  }, [logs, storageKey]);
 
   const pushLog = (log: TerminalLog) => {
     setLogs((items) => [log, ...items].slice(0, 8));

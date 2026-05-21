@@ -2,7 +2,7 @@ import type { FormEvent, MutableRefObject, ReactNode } from "react";
 
 import type { ChatActivityEvent, ChatContentBlock, CodingContextEntry, CodingGitStatus, CodingWorkspaceRecord, ComposerWidgetAction, ConversationSteerItem, ModelCommandCandidate, ModelProfile, SettingsSection, SidebarAction, SidebarItem, ToolLogEntry, UICatalog } from "../lib/api";
 import type { ComposerCommandItem } from "../lib/api";
-import type { ChatItem } from "../components/HistoryBoard";
+import type { ChatItem, HistoryBoardNewTaskOptions } from "../components/HistoryBoard";
 import type { ToolPreviewItem, ToolPreviewMode } from "../components/ToolPreview";
 import type { LocaleSetting } from "../lib/i18n";
 
@@ -57,7 +57,7 @@ export type HistoryBoardRendererProps = {
   chatItems: ChatItem[];
   account?: NonNullable<UICatalog["app"]>["account"];
   onChatSelect: (conversationId: string) => void;
-  onNewTask: () => void;
+  onNewTask: (options?: HistoryBoardNewTaskOptions) => void;
   onCalendarOpen?: () => void;
   isCalendarActive?: boolean;
   onSettingsClick: () => void;
@@ -65,6 +65,10 @@ export type HistoryBoardRendererProps = {
   onMinimize?: () => void;
   onRestore?: () => void;
   isCompact?: boolean;
+  codingWorkspaces?: CodingWorkspaceRecord[];
+  selectedCodingWorkspaceId?: string | null;
+  onCodingWorkspaceCreate?: (rootPath: string) => Promise<CodingWorkspaceRecord | null | undefined>;
+  onCodingWorkspacesRefresh?: () => void | Promise<void>;
 };
 
 export type ChatHeaderRendererProps = {

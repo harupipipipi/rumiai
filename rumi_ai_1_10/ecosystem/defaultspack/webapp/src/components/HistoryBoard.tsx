@@ -32,6 +32,7 @@ import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
 import { HISTORY_CHAT_DROP_MIME, historyChatDragPayload } from '../lib/historyComposer';
+import type { CodingWorkspaceRecord } from '../lib/api';
 import { ConversationPinStarMenu } from './history/ConversationPinStarMenu';
 import { ConversationSearchBar } from './history/ConversationSearchBar';
 import { ConversationTagFilter } from './history/ConversationTagFilter';
@@ -70,11 +71,24 @@ export type ChatGroup = {
   subGroups: ChatGroup[];
   isCollapsed?: boolean;
   custom?: boolean;
+  workspaceId?: string | null;
+  workspaceLabel?: string | null;
+  workspaceRoot?: string | null;
 };
 
-type CustomGroupInfo = {
+export type CustomGroupInfo = {
   id: string;
   title: string;
+  workspaceId?: string | null;
+  workspaceLabel?: string | null;
+  workspaceRoot?: string | null;
+};
+
+export type HistoryBoardNewTaskOptions = {
+  groupId?: string;
+  workspaceId?: string | null;
+  workspaceLabel?: string | null;
+  workspaceRoot?: string | null;
 };
 
 export type AccountInfo = {
@@ -172,12 +186,31 @@ function hasWorkspaceGroupingMetadata(chat: ChatItem): boolean {
 
 const CUSTOM_GROUPS_STORAGE_KEY = 'rumi-history-custom-groups';
 
-function loadCustomGroups(): CustomGroupInfo[] {
+function stringOrNull(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function customGroupFromStorageItem(item: unknown): CustomGroupInfo | null {
+  if (!item || typeof item !== "object") return null;
+  const record = item as Record<string, unknown>;
+  const id = stringOrNull(record.id);
+  const title = stringOrNull(record.title);
+  if (!id || !title) return null;
+  return {
+    id,
+    title,
+    workspaceId: stringOrNull(record.workspaceId ?? record.workspace_id),
+    workspaceLabel: stringOrNull(record.workspaceLabel ?? record.workspace_label),
+    workspaceRoot: stringOrNull(record.workspaceRoot ?? record.workspace_root ?? record.rootPath),
+  };
+}
+
+export function loadCustomGroups(): CustomGroupInfo[] {
   try {
     const raw = localStorage.getItem(CUSTOM_GROUPS_STORAGE_KEY);
     const parsed = raw ? JSON.parse(raw) : [];
     return Array.isArray(parsed)
-      ? parsed.filter((item): item is CustomGroupInfo => Boolean(item?.id && item?.title))
+      ? parsed.map(customGroupFromStorageItem).filter((item): item is CustomGroupInfo => Boolean(item))
       : [];
   } catch {
     return [];
@@ -206,6 +239,8 @@ export function buildGroupsFromChats(chatItems: ChatItem[], customGroups: Custom
   };
   const tagBuckets = new Map<string, ChatItem[]>();
   const integrationGroups = new Map<string, ChatGroup>();
+  const customGroupsById = new Map(customGroups.map((group) => [group.id, group]));
+  const customChatBuckets = new Map(customGroups.map((group) => [group.id, [] as ChatItem[]]));
   const useMetadataGrouping = chatItems.some(hasWorkspaceGroupingMetadata);
 
   chatItems.forEach((chat) => {
@@ -213,6 +248,11 @@ export function buildGroupsFromChats(chatItems: ChatItem[], customGroups: Custom
       ...chat,
       type: classifyChatType(chat),
     };
+    const customGroupId = stringOrNull(normalized.metadata?.group_id ?? normalized.metadata?.groupId);
+    if (customGroupId && customGroupsById.has(customGroupId)) {
+      customChatBuckets.get(customGroupId)?.push(normalized);
+      return;
+    }
     const sectionId = typeof normalized.sectionId === "string" ? normalized.sectionId.trim() : "";
     const sectionTitle = typeof normalized.sectionTitle === "string" ? normalized.sectionTitle.trim() : "";
     if (sectionId && sectionTitle) {
@@ -331,8 +371,11 @@ export function buildGroupsFromChats(chatItems: ChatItem[], customGroups: Custom
   const custom = customGroups.map((group) => ({
     id: group.id,
     title: group.title,
+    workspaceId: group.workspaceId ?? null,
+    workspaceLabel: group.workspaceLabel ?? null,
+    workspaceRoot: group.workspaceRoot ?? null,
     isCollapsed: false,
-    chats: [],
+    chats: customChatBuckets.get(group.id) ?? [],
     subGroups: [],
     custom: true,
   }));
@@ -821,6 +864,7 @@ function DroppableColumn({ group, activeChatId, onChatSelect, onNewTask, onSetti
   };
 
   const totalChats = countChats(group);
+  const workspaceText = workspaceSummary(group.workspaceId, group.workspaceLabel, group.workspaceRoot);
 
   return (
     <div
@@ -873,6 +917,14 @@ function DroppableColumn({ group, activeChatId, onChatSelect, onNewTask, onSetti
               className="min-w-0 truncate flex-1 cursor-text select-none hover:text-white transition-colors text-[12px]"
             >
               {group.title}
+            </span>
+          )}
+          {workspaceText && (
+            <span
+              className="hidden max-w-[78px] flex-shrink truncate rounded border border-emerald-500/20 bg-emerald-500/10 px-1 py-px text-[9px] font-normal text-emerald-200 min-[260px]:inline"
+              title={group.workspaceRoot || group.workspaceId || workspaceText}
+            >
+              {workspaceText}
             </span>
           )}
           <span className="ml-auto text-[10px] text-zinc-600 flex-shrink-0">{totalChats}</span>
@@ -991,7 +1043,7 @@ interface HistoryBoardProps {
   chatItems: ChatItem[];
   account?: AccountInfo;
   onChatSelect: (chatId: string) => void;
-  onNewTask: () => void;
+  onNewTask: (options?: HistoryBoardNewTaskOptions) => void;
   onCalendarOpen?: () => void;
   isCalendarActive?: boolean;
   onSettingsClick: () => void;
@@ -999,6 +1051,27 @@ interface HistoryBoardProps {
   onMinimize?: () => void;
   onRestore?: () => void;
   isCompact?: boolean;
+  codingWorkspaces?: CodingWorkspaceRecord[];
+  selectedCodingWorkspaceId?: string | null;
+  onCodingWorkspaceCreate?: (rootPath: string) => Promise<CodingWorkspaceRecord | null | undefined>;
+  onCodingWorkspacesRefresh?: () => void | Promise<void>;
+}
+
+type GroupWorkspaceChoice = "none" | "current" | "custom";
+
+function workspaceSummary(workspaceId?: string | null, workspaceLabel?: string | null, workspaceRoot?: string | null): string {
+  if (workspaceLabel) return workspaceLabel;
+  if (workspaceRoot) return workspaceRoot.split("/").filter(Boolean).pop() || workspaceRoot;
+  return workspaceId || "";
+}
+
+function newTaskOptionsForGroup(group: ChatGroup | null, fallbackGroupId: string): HistoryBoardNewTaskOptions {
+  return {
+    groupId: group?.id ?? fallbackGroupId,
+    workspaceId: group?.workspaceId ?? null,
+    workspaceLabel: group?.workspaceLabel ?? null,
+    workspaceRoot: group?.workspaceRoot ?? null,
+  };
 }
 
 function visitChats(chats: ChatItem[], visitor: (chat: ChatItem) => void) {
@@ -1164,13 +1237,41 @@ function filterChatTree(chats: ChatItem[], query: string, activeTag: string | nu
   return chats.map(filterOne).filter((chat): chat is ChatItem => Boolean(chat));
 }
 
-export function HistoryBoard({ activeChatId, chatItems, account, onChatSelect, onNewTask, onCalendarOpen, isCalendarActive = false, onSettingsClick, onChatMetadataChange, onMinimize, onRestore, isCompact = false }: HistoryBoardProps) {
+export function HistoryBoard({
+  activeChatId,
+  chatItems,
+  account,
+  onChatSelect,
+  onNewTask,
+  onCalendarOpen,
+  isCalendarActive = false,
+  onSettingsClick,
+  onChatMetadataChange,
+  onMinimize,
+  onRestore,
+  isCompact = false,
+  codingWorkspaces = [],
+  selectedCodingWorkspaceId = null,
+  onCodingWorkspaceCreate,
+  onCodingWorkspacesRefresh,
+}: HistoryBoardProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [activeTag, setActiveTag] = useState<string | null>(null);
   const visibleChatItems = useMemo(() => filterChatTree(chatItems, searchQuery, activeTag), [activeTag, chatItems, searchQuery]);
   const [customGroups, setCustomGroups] = useState<CustomGroupInfo[]>(() => loadCustomGroups());
   const [groups, setGroups] = useState<ChatGroup[]>(() => buildGroupsFromChats(visibleChatItems, customGroups));
   const [expandedChatIds, setExpandedChatIds] = useState<Set<string>>(() => new Set());
+  const [isCreateGroupOpen, setIsCreateGroupOpen] = useState(false);
+  const [newGroupTitle, setNewGroupTitle] = useState("");
+  const [newGroupWorkspaceChoice, setNewGroupWorkspaceChoice] = useState<GroupWorkspaceChoice>("none");
+  const [newGroupCustomPath, setNewGroupCustomPath] = useState("");
+  const [newGroupError, setNewGroupError] = useState<string | null>(null);
+  const [isCreatingGroup, setIsCreatingGroup] = useState(false);
+
+  const selectedCodingWorkspace = useMemo(
+    () => codingWorkspaces.find((workspace) => workspace.workspace_id === selectedCodingWorkspaceId) ?? null,
+    [codingWorkspaces, selectedCodingWorkspaceId],
+  );
 
   useEffect(() => {
     setGroups((previousGroups) => {
@@ -1352,8 +1453,7 @@ export function HistoryBoard({ activeChatId, chatItems, account, onChatSelect, o
   };
 
   const handleNewTaskInGroup = (groupId: string) => {
-    void groupId;
-    onNewTask();
+    onNewTask(newTaskOptionsForGroup(findGroupById(groups, groupId), groupId));
   };
 
   const handleRenameChat = (chatId: string, newTitle: string) => {
@@ -1378,11 +1478,15 @@ export function HistoryBoard({ activeChatId, chatItems, account, onChatSelect, o
     }));
   };
 
-  const handleCreateGroup = () => {
-    const customGroup: CustomGroupInfo = {
-      id: `group-${Date.now()}`,
-      title: `Group ${groups.length + 1}`,
-    };
+  const openCreateGroup = () => {
+    setNewGroupTitle(`Group ${groups.length + 1}`);
+    setNewGroupWorkspaceChoice("none");
+    setNewGroupCustomPath("");
+    setNewGroupError(null);
+    setIsCreateGroupOpen((value) => !value);
+  };
+
+  const createCustomGroup = (customGroup: CustomGroupInfo) => {
     setCustomGroups((prev) => {
       const next = [...prev, customGroup];
       saveCustomGroups(next);
@@ -1396,6 +1500,59 @@ export function HistoryBoard({ activeChatId, chatItems, account, onChatSelect, o
       custom: true,
     };
     setGroups(prev => [...prev, newGroup]);
+  };
+
+  const handleCreateGroup = async (event?: React.FormEvent) => {
+    event?.preventDefault();
+    if (isCreatingGroup) return;
+    setIsCreatingGroup(true);
+    setNewGroupError(null);
+    const title = newGroupTitle.trim() || `Group ${groups.length + 1}`;
+    let workspace: Pick<CodingWorkspaceRecord, "workspace_id" | "label" | "root_path"> | null = null;
+    try {
+      if (newGroupWorkspaceChoice === "current") {
+        if (!selectedCodingWorkspaceId) {
+          setNewGroupError("Current coding workspace is not selected.");
+          return;
+        }
+        workspace = selectedCodingWorkspace ?? {
+          workspace_id: selectedCodingWorkspaceId,
+          label: selectedCodingWorkspaceId,
+          root_path: "",
+        };
+      } else if (newGroupWorkspaceChoice === "custom") {
+        const rootPath = newGroupCustomPath.trim();
+        if (!rootPath) {
+          setNewGroupError("Enter a workspace path.");
+          return;
+        }
+        if (!onCodingWorkspaceCreate) {
+          setNewGroupError("Workspace creation is unavailable.");
+          return;
+        }
+        const created = await onCodingWorkspaceCreate(rootPath);
+        if (!created?.workspace_id) {
+          setNewGroupError("Workspace creation did not return a workspace.");
+          return;
+        }
+        workspace = created;
+        await onCodingWorkspacesRefresh?.();
+      }
+
+      const customGroup: CustomGroupInfo = {
+        id: `group-${Date.now()}`,
+        title,
+        workspaceId: workspace?.workspace_id ?? null,
+        workspaceLabel: workspace?.label ?? null,
+        workspaceRoot: workspace?.root_path ?? null,
+      };
+      createCustomGroup(customGroup);
+      setIsCreateGroupOpen(false);
+    } catch (error) {
+      setNewGroupError(error instanceof Error ? error.message : "Failed to create group.");
+    } finally {
+      setIsCreatingGroup(false);
+    }
   };
 
   const handleCreateChat = () => {
@@ -1447,6 +1604,80 @@ export function HistoryBoard({ activeChatId, chatItems, account, onChatSelect, o
   const accountIcon = account?.avatar_url || '';
   const accountIconIsImage = /^(https?:|data:image|\/)/.test(accountIcon);
   const compactChats = flattenChats(groups);
+  const currentWorkspaceText = selectedCodingWorkspace
+    ? workspaceSummary(selectedCodingWorkspace.workspace_id, selectedCodingWorkspace.label, selectedCodingWorkspace.root_path)
+    : "";
+  const createGroupForm = isCreateGroupOpen ? (
+    <form
+      onSubmit={(event) => void handleCreateGroup(event)}
+      className={cn(
+        "z-50 flex w-full flex-col gap-2 rounded-lg border border-zinc-800 bg-zinc-950/95 p-2 text-xs shadow-xl shadow-black/30",
+        isCompact && "absolute left-full top-14 ml-2 w-64"
+      )}
+    >
+      <div className="flex items-center justify-between gap-2">
+        <span className="font-medium text-zinc-200">New Group</span>
+        <button
+          type="button"
+          onClick={() => setIsCreateGroupOpen(false)}
+          className="flex h-5 w-5 items-center justify-center rounded text-zinc-500 hover:bg-zinc-800 hover:text-zinc-100"
+          aria-label="Close new group form"
+        >
+          <X size={12} />
+        </button>
+      </div>
+      <input
+        value={newGroupTitle}
+        onChange={(event) => setNewGroupTitle(event.target.value)}
+        className="h-8 rounded-md border border-zinc-800 bg-zinc-900/70 px-2 text-[12px] text-zinc-100 outline-none focus:border-emerald-500/60"
+        placeholder={`Group ${groups.length + 1}`}
+      />
+      <div className="grid grid-cols-3 gap-1">
+        {([
+          ["none", "No path"],
+          ["current", "Current"],
+          ["custom", "Custom"],
+        ] as const).map(([value, label]) => (
+          <button
+            key={value}
+            type="button"
+            disabled={value === "current" && !selectedCodingWorkspaceId}
+            onClick={() => setNewGroupWorkspaceChoice(value)}
+            className={cn(
+              "h-7 rounded-md border px-1 text-[10px] transition-colors",
+              newGroupWorkspaceChoice === value
+                ? "border-emerald-500/50 bg-emerald-500/15 text-emerald-100"
+                : "border-zinc-800 bg-zinc-900/60 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100",
+              value === "current" && !selectedCodingWorkspaceId && "cursor-not-allowed opacity-50 hover:bg-zinc-900/60 hover:text-zinc-400"
+            )}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      {newGroupWorkspaceChoice === "current" && (
+        <p className="truncate rounded border border-zinc-800 bg-zinc-900/50 px-2 py-1 text-[10px] text-zinc-400" title={selectedCodingWorkspace?.root_path ?? ""}>
+          {currentWorkspaceText || "No coding workspace selected"}
+        </p>
+      )}
+      {newGroupWorkspaceChoice === "custom" && (
+        <input
+          value={newGroupCustomPath}
+          onChange={(event) => setNewGroupCustomPath(event.target.value)}
+          className="h-8 rounded-md border border-zinc-800 bg-zinc-900/70 px-2 font-mono text-[11px] text-zinc-100 outline-none focus:border-emerald-500/60"
+          placeholder="/path/to/workspace"
+        />
+      )}
+      {newGroupError && <p className="rounded border border-red-500/30 bg-red-500/10 px-2 py-1 text-[10px] text-red-200">{newGroupError}</p>}
+      <button
+        type="submit"
+        disabled={isCreatingGroup}
+        className="h-8 rounded-md bg-zinc-100 px-2 text-[11px] font-semibold text-zinc-950 transition-colors hover:bg-white disabled:cursor-wait disabled:opacity-60"
+      >
+        {isCreatingGroup ? "Creating..." : "Create Group"}
+      </button>
+    </form>
+  ) : null;
 
   if (isCompact) {
     return (
@@ -1472,13 +1703,14 @@ export function HistoryBoard({ activeChatId, chatItems, account, onChatSelect, o
             <WarmActionIcon kind="newChat" size="lg" />
           </button>
           <button
-            onClick={handleCreateGroup}
+            onClick={openCreateGroup}
             className="flex h-9 w-9 items-center justify-center rounded-xl text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-100"
             title="New Group"
             aria-label="New Group"
           >
             <WarmActionIcon kind="group" size="lg" />
           </button>
+          {createGroupForm}
           <button
             type="button"
             onClick={() => {
@@ -1574,13 +1806,14 @@ export function HistoryBoard({ activeChatId, chatItems, account, onChatSelect, o
               <span className="truncate">New Chat</span>
             </button>
             <button
-              onClick={handleCreateGroup}
+              onClick={openCreateGroup}
               className="flex min-w-0 items-center gap-2 rounded-lg px-1.5 py-1.5 text-left text-xs font-medium text-zinc-300 transition-colors hover:bg-zinc-900/70 hover:text-zinc-100"
               title="New Group"
             >
               <WarmActionIcon kind="group" size="sm" />
               <span className="truncate">New Group</span>
             </button>
+            {createGroupForm}
           </div>
           <button
             type="button"
