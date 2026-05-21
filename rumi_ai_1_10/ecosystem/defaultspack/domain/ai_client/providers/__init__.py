@@ -678,6 +678,61 @@ def _catalog_source(provider_id: str, manifest: Dict[str, Any]) -> str:
     return "runtime_active"
 
 
+def _subscription_plans(manifest: Dict[str, Any], curated: Dict[str, Any]) -> List[Dict[str, Any]]:
+    def _list_from(value: Any) -> List[Dict[str, Any]]:
+        if not isinstance(value, list):
+            return []
+        plans: List[Dict[str, Any]] = []
+        for item in value:
+            if not isinstance(item, dict):
+                continue
+            plan_id = str(item.get("id") or item.get("plan_id") or "").strip()
+            if not plan_id:
+                continue
+            plan = dict(item)
+            plan["id"] = plan_id
+            plans.append(plan)
+        return plans
+
+    config = manifest.get("config", {})
+    if not isinstance(config, dict):
+        config = {}
+
+    for value in (
+        manifest.get("subscription_plans"),
+        config.get("subscription_plans"),
+        curated.get("subscription_plans"),
+    ):
+        plans = _list_from(value)
+        if plans:
+            return plans
+
+    token_plan = str(config.get("token_plan") or curated.get("token_plan") or "").strip()
+    if not token_plan:
+        return []
+
+    default_model_for = manifest.get("default_model_for", {})
+    applies_to_models: List[str] = []
+    if isinstance(default_model_for, dict):
+        applies_to_models = [
+            str(model_id).strip()
+            for model_id in dict.fromkeys(default_model_for.values())
+            if str(model_id).strip()
+        ]
+    return [
+        {
+            "id": token_plan,
+            "type": "token_grant",
+            "status": "available_if_confirmed",
+            "region": str(config.get("region") or "").strip(),
+            "region_scoped": bool(config.get("token_plan_region_scoped", False)),
+            "requires_manual_signup": bool(config.get("token_plan_requires_manual_signup", False)),
+            "do_not_auto_enable": bool(config.get("token_plan_do_not_auto_enable", False)),
+            "applies_to_models": applies_to_models,
+        }
+    ]
+
+
 def _merge_provider_entry(provider_id: str, manifest: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     manifest = dict(manifest or {})
     manifest_was_present = bool(manifest)
@@ -710,6 +765,7 @@ def _merge_provider_entry(provider_id: str, manifest: Optional[Dict[str, Any]] =
     default_model_for = {**dict(curated.get("default_model_for", {})), **default_model_for}
     adapter = str(manifest.get("adapter", "")).strip()
     entrypoint = str(manifest.get("entrypoint", "")).strip()
+    subscription_plans = _subscription_plans(manifest, curated)
     return {
         "id": provider_id,
         "provider_id": provider_id,
@@ -728,6 +784,7 @@ def _merge_provider_entry(provider_id: str, manifest: Optional[Dict[str, Any]] =
         "credential_required": bool(manifest.get("credential_required", True)),
         "adapter": adapter,
         "entrypoint": entrypoint,
+        "subscription_plans": subscription_plans,
         "priority": int(manifest.get("priority", 100)),
         "manifest": manifest,
         "catalog_source": _catalog_source(provider_id, manifest),
@@ -803,12 +860,14 @@ def get_provider_catalog(active_provider_ids=None):
                 "default_model": entry.get("default_model", ""),
                 "default_model_for": dict(entry.get("default_model_for", {})),
                 "capabilities": list(entry.get("capabilities", [])),
+                "subscription_plans": list(entry.get("subscription_plans", [])),
                 "availability": availability,
                 "metadata": {
                     "catalog_only": bool(entry.get("catalog_only", False)),
                     "supports_invoke": bool(entry.get("supports_invoke_base") or active),
                     "default_base_url": entry.get("default_base_url", ""),
                     "default_model_for": dict(entry.get("default_model_for", {})),
+                    "subscription_plans": list(entry.get("subscription_plans", [])),
                     "adapter": entry.get("adapter", ""),
                     "entrypoint": entry.get("entrypoint", ""),
                     "config": dict(entry.get("manifest", {}).get("config", {}))

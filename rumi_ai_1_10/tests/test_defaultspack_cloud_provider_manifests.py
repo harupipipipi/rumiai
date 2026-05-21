@@ -294,6 +294,7 @@ def test_moonshot_manifest_first_runtime_provider(monkeypatch):
 
 def test_xiaomi_mimo_direct_catalog_is_separate_and_not_runtime_enabled(monkeypatch):
     from domain.ai_client.providers import detect_available_providers, get_provider_catalog_map
+    from ecosystem.defaultspack.backend.ai_client.provider_catalog import list_model_catalog, list_provider_catalog
 
     catalog = get_provider_catalog_map()
 
@@ -306,6 +307,23 @@ def test_xiaomi_mimo_direct_catalog_is_separate_and_not_runtime_enabled(monkeypa
     assert catalog["xiaomi-token-plan-sgp"]["metadata"]["default_base_url"] == "https://token-plan-sgp.xiaomimimo.com/v1"
     assert catalog["xiaomi-mimo-global"]["metadata"]["config"]["do_not_fallback_to_other_region"] is True
     assert catalog["xiaomi-mimo-cn"]["metadata"]["config"]["do_not_reuse_credentials_across_regions"] is True
+    global_plan = catalog["xiaomi-mimo-global"]["subscription_plans"][0]
+    cn_plan = catalog["xiaomi-mimo-cn"]["metadata"]["subscription_plans"][0]
+    assert global_plan["id"] == "mimo_orbit_100t_grant_if_available"
+    assert global_plan["token_quota_label"] == "100T tokens"
+    assert global_plan["region"] == "global"
+    assert global_plan["requires_manual_signup"] is True
+    assert global_plan["do_not_auto_enable"] is True
+    assert cn_plan["region"] == "cn"
+    assert cn_plan["region_scoped"] is True
+
+    api_providers = {provider["provider_id"]: provider for provider in list_provider_catalog()}
+    assert api_providers["xiaomi-mimo-global"]["subscription_plans"][0]["id"] == global_plan["id"]
+
+    global_models = {model["id"]: model for model in list_model_catalog("xiaomi-mimo-global")}
+    assert global_models["xiaomi-mimo-global/mimo-v2.5-pro"]["metadata"]["subscription_plan_ids"] == [
+        global_plan["id"]
+    ]
 
     with patch.dict(
         os.environ,

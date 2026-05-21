@@ -107,7 +107,9 @@ service tier や preview/enterprise-only 条件は metadata に保持するだ�
 
 `xiaomi-mimo` は Gitlawb OpenGateway とは分離された umbrella catalog entry。direct API は `xiaomi-mimo-global` と `xiaomi-mimo-cn` に地域分割し、公式 base URL / auth / token grant 条件が確認されるまでは runtime provider として自動有効化しない。
 
-警告: この provider を選択すると、プロンプト、会話履歴、tool結果などのコンテキストが Gitlawb OpenGateway に送信される。
+MiMo token plan は provider catalog の `subscription_plans` として保持する。現時点では `mimo_orbit_100t_grant_if_available` を catalog metadata として公開するだけで、manual signup / region scoped / do not auto enable の扱いにする。
+
+警告: この provider を実行有効化すると、プロンプト、会話履歴、tool結果などのコンテキストが Xiaomi MiMo direct API に送信される。
 
 ### stub
 
