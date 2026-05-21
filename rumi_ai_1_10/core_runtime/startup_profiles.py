@@ -930,16 +930,29 @@ class StartupProfileManager:
     def _discover_nodes_for_pack(self, pack_id: str, pack_subdir: Any) -> List[Dict[str, Any]]:
         if not pack_subdir:
             return []
-        nodes_dir = Path(pack_subdir) / "nodes"
         result: List[Dict[str, Any]] = self._core_builtin_nodes_for_pack(pack_id)
-        if not nodes_dir.is_dir():
-            return result
-        for f in sorted(nodes_dir.glob("*.node.json")):
+        pack_path = Path(pack_subdir)
+        candidates: List[Path] = []
+        nodes_dir = pack_path / "nodes"
+        if nodes_dir.is_dir():
+            candidates.extend(sorted(nodes_dir.glob("*.node.json")))
+        components_dir = pack_path / "components"
+        if components_dir.is_dir():
+            candidates.extend(
+                component_dir / "node.json"
+                for component_dir in sorted(components_dir.iterdir())
+                if component_dir.is_dir() and (component_dir / "node.json").is_file()
+            )
+        seen = {node["node_id"] for node in result if node.get("node_id")}
+        for f in candidates:
             try:
                 data = json.loads(f.read_text(encoding="utf-8"))
                 from .node_models import load_node_document
                 definitions = load_node_document(data, source_path=str(f), pack_id=pack_id)
                 for node in definitions:
+                    if node.node_id in seen:
+                        continue
+                    seen.add(node.node_id)
                     metadata = dict(node.metadata)
                     component_id = str(metadata.get("component_id") or node.node_id.rsplit(".", 1)[-1])
                     component_type = str(metadata.get("component_type") or component_id)
@@ -1270,6 +1283,11 @@ class StartupProfileManager:
             logger.debug("failed to load active ecosystem manager", exc_info=True)
             return
 
+        surface_launch_target = capability_graph.get("surface_launch_target")
+        active.set_metadata(
+            "startup_surface_launch_target",
+            surface_launch_target if isinstance(surface_launch_target, dict) else None,
+        )
         active.set_metadata(
             "startup_capability_graph",
             {
@@ -1279,6 +1297,7 @@ class StartupProfileManager:
                 "graph_id": capability_graph.get("graph_id"),
                 "capability_profile_id": capability_graph.get("capability_profile_id"),
                 "runtime_profile_key": capability_graph.get("runtime_profile_key"),
+                "surface_launch_target": surface_launch_target if isinstance(surface_launch_target, dict) else None,
                 "diagnostics": list(capability_graph.get("diagnostics") or []),
             },
         )

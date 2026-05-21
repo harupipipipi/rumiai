@@ -151,6 +151,69 @@ def _write_pack(
     return eco_path
 
 
+def _write_frontendpack(root: Path, *, component_node: bool = True) -> Path:
+    pack_dir = root / "frontendpack"
+    pack_dir.mkdir(parents=True, exist_ok=True)
+    ecosystem = {
+        "pack_id": "frontendpack",
+        "pack_identity": "rumi:ecosystem/frontendpack",
+        "enabled": True,
+        "desktop_app": {
+            "module": "frontendpack.desktop_app",
+            "handler": "launch",
+        },
+        "metadata": {
+            "name": "frontendpack",
+            "description": "frontendpack description",
+        },
+    }
+    eco_path = pack_dir / "ecosystem.json"
+    eco_path.write_text(json.dumps(ecosystem, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    base_dir = pack_dir / "components" / "web" if component_node else pack_dir / "nodes"
+    base_dir.mkdir(parents=True, exist_ok=True)
+    node_file = base_dir / ("node.json" if component_node else "web_surface.node.json")
+    node_file.write_text(
+        json.dumps(
+            {
+                "version": "rumi.node.v1",
+                "nodes": [
+                    {
+                        "node_id": "frontendpack.web_surface",
+                        "kind": "ecosystem.surface",
+                        "display_name": {"en": "Frontendpack Web Surface"},
+                        "ports": [
+                            {
+                                "id": "surface",
+                                "direction": "output",
+                                "standards": ["rumi.surface"],
+                                "multiple": True,
+                            }
+                        ],
+                        "metadata": {
+                            "pack_id": "frontendpack",
+                            "component_type": "frontend",
+                            "component_id": "web",
+                            "category": "surface",
+                            "launch": {
+                                "kind": "desktop_app",
+                                "pack_id": "frontendpack",
+                                "surface": "browser",
+                                "default": True,
+                                "env": {"FRONTENDPACK_SURFACE": "web"},
+                            },
+                        },
+                    }
+                ],
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return eco_path
+
+
 def _startup_graph(pack_id: str) -> dict:
     return {
         "graph_id": f"{pack_id}.startup",
@@ -290,6 +353,24 @@ def test_list_profiles_returns_catalog_with_packs_and_graphs(tmp_path: Path):
     assert len(pack["graphs"]) > 0
     assert len(pack["nodes"]) > 0
     assert any(node["node_id"] == "rumi.start" for node in pack["nodes"])
+
+
+def test_startup_catalog_discovers_component_node_files(tmp_path: Path):
+    eco_root = tmp_path / "ecosystem"
+    _write_pack(
+        eco_root, "defaultspack",
+        graphs=[_startup_graph("defaultspack")],
+        nodes=["agent", "ai_client", "tool", "memory", "frontend"],
+    )
+    _write_frontendpack(eco_root, component_node=True)
+    locations = _discover_locations(eco_root, ["defaultspack", "frontendpack"])
+    manager = StartupProfileManager(storage_path=tmp_path / "startup_profiles.json")
+
+    with patch("core_runtime.startup_profiles.discover_pack_locations", return_value=locations):
+        payload = manager.list_profiles_payload()
+
+    frontend_pack = next(pack for pack in payload["catalog"]["packs"] if pack["pack_id"] == "frontendpack")
+    assert any(node["node_id"] == "frontendpack.web_surface" for node in frontend_pack["nodes"])
 
 
 def test_default_manager_uses_rumi_user_data_and_seeds_default_profile(
@@ -800,6 +881,44 @@ def test_launch_profile_compiles_capability_graph_when_opted_in(tmp_path: Path):
     capability_graph = response["capability_graph"]
     assert response["launched"] is True
     assert capability_graph["ok"] is True
+
+
+def test_launch_profile_persists_graph_surface_launch_target(tmp_path: Path):
+    repo_defaultspack = Path(__file__).resolve().parents[1] / "ecosystem" / "defaultspack"
+    eco_root = tmp_path / "ecosystem"
+    shutil.copytree(repo_defaultspack, eco_root / "defaultspack")
+    _write_frontendpack(eco_root, component_node=True)
+    manager = StartupProfileManager(
+        storage_path=tmp_path / "startup_profiles.json",
+        interface_registry=InterfaceRegistry(),
+        approval_manager=_FakeApprovalManager(reason_by_pack={"defaultspack": None, "frontendpack": None}),
+        ecosystem_dir=str(eco_root),
+    )
+    active = _FakeActiveEcosystem()
+
+    with patch(
+        "backend_core.ecosystem.active_ecosystem.get_active_ecosystem_manager",
+        return_value=active,
+    ):
+        with patch("core_runtime.api.control_panel_handlers.request_kernel_restart"):
+            created = manager.create_profile({
+                "base_pack": "defaultspack",
+                "name": "Frontend Override",
+                "default_graph": "defaultspack.startup",
+                "capability_profile_id": "defaultspack.startup",
+                "launch_capability_graph": True,
+            })
+            profile_id = created["profile"]["profile_id"]
+            manager.add_pack_to_profile(profile_id, "frontendpack")
+            override = manager.set_node_override(profile_id, "frontend.surface", "frontendpack.web_surface")
+            response = manager.launch_profile(profile_id)
+
+    assert override["profile"]["node_overrides"]["frontend.surface"] == "frontendpack.web_surface"
+    capability_graph = response["capability_graph"]
+    assert capability_graph["ok"] is True
+    assert capability_graph["surface_launch_target"]["pack_id"] == "frontendpack"
+    assert active.metadata["startup_surface_launch_target"]["pack_id"] == "frontendpack"
+    assert active.metadata["startup_capability_graph"]["surface_launch_target"]["pack_id"] == "frontendpack"
 
 
 def test_launch_profile_strict_compile_failure(tmp_path: Path):

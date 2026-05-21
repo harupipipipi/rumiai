@@ -5,6 +5,12 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, Optional
 
+from .surface_launch_target import (
+    normalize_surface_launch_target,
+    resolve_surface_mode,
+    surface_env,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -30,18 +36,25 @@ def launch_pending_startup_profile_surface(
     base_pack = str(active.get_metadata("startup_base_pack", "") or "").strip()
     profile_id = str(active.get_metadata("startup_profile_id", "") or "").strip()
     surfaces = active.get_metadata("startup_profile_surfaces", {}) or {}
-    mode = _resolve_surface_mode(surfaces)
+    launch_target = normalize_surface_launch_target(
+        active.get_metadata("startup_surface_launch_target", {}) or {},
+        fallback_pack_id=base_pack,
+        surfaces=surfaces,
+    )
+    mode = (launch_target or {}).get("surface") or resolve_surface_mode(surfaces)
+    target_pack = str((launch_target or {}).get("pack_id") or "").strip()
+    principal_id = str((launch_target or {}).get("principal_id") or target_pack).strip()
 
     result: Dict[str, Any] = {
         "launched": False,
         "profile_id": profile_id,
-        "pack_id": base_pack,
+        "pack_id": target_pack or base_pack,
         "surface": mode,
     }
 
     try:
-        if not base_pack:
-            result["reason"] = "missing_base_pack"
+        if not launch_target or not target_pack:
+            result["reason"] = "missing_launch_target"
             return result
 
         handler = desktop_handler or _get_desktop_capability_handler()
@@ -49,15 +62,17 @@ def launch_pending_startup_profile_surface(
             result["reason"] = "desktop_capability_unavailable"
             return result
 
+        env = surface_env(mode)
+        env.update(dict(launch_target.get("env") or {}))
         launch = handler.handle_execute(
-            principal_id=base_pack,
+            principal_id=principal_id,
             args={
-                "pack_id": base_pack,
+                "pack_id": target_pack,
                 "action": "launch",
-                "env": _surface_env(mode),
+                "env": env,
             },
             grant_config={
-                "allowed_packs": [base_pack],
+                "allowed_packs": [target_pack],
                 "port": 8765,
             },
         )
@@ -91,30 +106,8 @@ def _get_desktop_capability_handler() -> Optional[Any]:
 
 
 def _resolve_surface_mode(surfaces: Any) -> str:
-    if not isinstance(surfaces, dict):
-        return "browser"
-    preferred = str(surfaces.get("preferred") or "").strip().lower()
-    enabled = {
-        str(surface).strip().lower()
-        for surface in surfaces.get("enabled", [])
-        if isinstance(surface, str)
-    }
-    if preferred in {"desktop", "webview", "native"}:
-        return "desktop"
-    if preferred in {"browser", "web"}:
-        return "browser"
-    if "desktop" in enabled and "browser" not in enabled and "web" not in enabled:
-        return "desktop"
-    return "browser"
+    return resolve_surface_mode(surfaces)
 
 
 def _surface_env(mode: str) -> Dict[str, str]:
-    env = {
-        "RUMI_PROFILE_SURFACE": mode,
-        "RUMI_DEFAULTSPACK_OPEN_BROWSER": "1",
-    }
-    if mode == "desktop":
-        env["RUMI_DEFAULTSPACK_SURFACE"] = "webview"
-    else:
-        env["RUMI_DEFAULTSPACK_SURFACE"] = "browser"
-    return env
+    return surface_env(mode)
