@@ -1,6 +1,7 @@
 """Git操作ドメインロジック."""
 
 import os
+import shlex
 import subprocess
 
 from .workspace_jail import WorkspaceJail
@@ -56,6 +57,64 @@ class GitOps:
     def _is_visible_git_path(self, path):
         return self._jail.restriction_reason(path) is None
 
+    @staticmethod
+    def _normalize_git_status_path(path):
+        text = str(path or "").strip()
+        if not text:
+            return ""
+        try:
+            parts = shlex.split(text)
+        except ValueError:
+            parts = []
+        if len(parts) == 1:
+            return parts[0]
+        return text.strip('"')
+
+    def _porcelain_v1_paths(self, path_text):
+        return tuple(
+            normalized
+            for normalized in (
+                self._normalize_git_status_path(part)
+                for part in str(path_text or "").split(" -> ")
+            )
+            if normalized
+        )
+
+    def _visible_porcelain_v1_path(self, path_text):
+        paths = self._porcelain_v1_paths(path_text)
+        return bool(paths) and all(self._is_visible_git_path(path) for path in paths)
+
+    def _porcelain_v2_paths(self, line):
+        text = str(line or "")
+        if text.startswith("#"):
+            return ()
+        if text.startswith(("? ", "! ")):
+            return (self._normalize_git_status_path(text[2:]),)
+        if text.startswith("1 "):
+            parts = text.split(maxsplit=8)
+            return (self._normalize_git_status_path(parts[8]),) if len(parts) > 8 else ()
+        if text.startswith("2 "):
+            parts = text.split(maxsplit=9)
+            if len(parts) <= 9:
+                return ()
+            return tuple(
+                normalized
+                for normalized in (
+                    self._normalize_git_status_path(part)
+                    for part in parts[9].split("\t")
+                )
+                if normalized
+            )
+        if text.startswith("u "):
+            parts = text.split(maxsplit=10)
+            return (self._normalize_git_status_path(parts[10]),) if len(parts) > 10 else ()
+        parts = text.split()
+        return (self._normalize_git_status_path(parts[-1]),) if parts else ()
+
+    def _visible_porcelain_v2_line(self, line):
+        paths = self._porcelain_v2_paths(line)
+        return str(line).startswith("#") or (bool(paths) and all(self._is_visible_git_path(path) for path in paths))
+
     def _run_diff_for_files(self, files, ref=None, stat=False):
         chunks = []
         for path in files:
@@ -83,9 +142,10 @@ class GitOps:
                 continue
             index_status = line[0]
             worktree_status = line[1]
-            path = line[3:]
-            if not self._is_visible_git_path(path):
+            paths = self._porcelain_v1_paths(line[3:])
+            if not paths or not all(self._is_visible_git_path(path) for path in paths):
                 continue
+            path = paths[-1]
             if line.startswith("?? "):
                 untracked.append(path)
             elif index_status != " ":
@@ -95,13 +155,12 @@ class GitOps:
         filtered_porcelain = "\n".join(
             line
             for line in porcelain.splitlines()
-            if len(line) < 4 or self._is_visible_git_path(line[3:])
+            if len(line) < 4 or self._visible_porcelain_v1_path(line[3:])
         )
         filtered_porcelain_v2 = "\n".join(
             line
             for line in porcelain_v2.splitlines()
-            if line.startswith("#")
-            or all(self._is_visible_git_path(path) for path in (line.split("\t") if "\t" in line else line.split()[-1:]))
+            if self._visible_porcelain_v2_line(line)
         )
         return {
             "branch": branch,

@@ -7,6 +7,8 @@ import sys
 from dataclasses import dataclass
 from typing import Any
 
+from .workspace_jail import WorkspaceJail
+
 
 LOW_RISK_PREFIXES = {
     "git status",
@@ -92,6 +94,8 @@ DOWNLOAD_EXEC_MARKERS = (
     "iex ",
     "Invoke-Expression",
 )
+READ_PATH_COMMANDS = {"cat", "head", "tail", "less", "more"}
+SHELL_PATH_SEPARATORS = {"|", ";", "&&", "||", ">", "<", ">>", "<<", "2>", "2>>"}
 
 
 @dataclass(frozen=True)
@@ -173,6 +177,66 @@ def _resolve_cwd(cwd: str | None, workspace_root: str) -> str:
     return resolved
 
 
+def _restricted_workspace_cwd(cwd: str | None, workspace_root: str) -> list[str]:
+    if cwd is None or cwd == "":
+        return []
+    jail = WorkspaceJail(workspace_root)
+    try:
+        resolved = jail.resolve(cwd, allow_absolute=True)
+        rel = jail.relative(resolved)
+    except Exception:
+        return []
+    if jail.restriction_reason(rel):
+        return [str(cwd)]
+    return []
+
+
+def _read_path_command(args: list[str]) -> str | None:
+    if not args:
+        return None
+    executable = os.path.basename(str(args[0])).lower()
+    if executable in READ_PATH_COMMANDS:
+        return executable
+    return None
+
+
+def _restricted_workspace_read_args(command: Any, cwd: str | None, workspace_root: str) -> list[str]:
+    try:
+        args = inspection_args(command)
+    except ValueError:
+        return []
+    if not _read_path_command(args):
+        return []
+
+    jail = WorkspaceJail(workspace_root)
+    root = os.path.realpath(workspace_root)
+    resolved_cwd = _resolve_cwd(cwd, workspace_root)
+    restricted = []
+    skip_options = True
+
+    for arg in args[1:]:
+        text = str(arg)
+        if text in SHELL_PATH_SEPARATORS:
+            continue
+        if text == "--":
+            skip_options = False
+            continue
+        if skip_options and (text.startswith("-") or text.isdigit()):
+            continue
+        try:
+            expanded = os.path.expanduser(text)
+            abs_path = os.path.realpath(
+                expanded if os.path.isabs(expanded) else os.path.join(resolved_cwd, expanded)
+            )
+            if abs_path == root or abs_path.startswith(root + os.sep):
+                rel = os.path.relpath(abs_path, root).replace(os.sep, "/")
+                if jail.restriction_reason(rel):
+                    restricted.append(text)
+        except Exception:
+            continue
+    return restricted
+
+
 def _outside_workspace_read_args(command: Any, cwd: str | None, low_risk_token: str, workspace_root: str) -> list[str]:
     try:
         args = inspection_args(command)
@@ -191,6 +255,18 @@ def classify_command(command: Any, *, cwd: str | None = None, workspace_root: st
     normalized = normalized_command(command)
     if not normalized:
         return TerminalPolicyDecision("low", False, ("empty",), "empty").to_dict()
+
+    if workspace_root:
+        restricted_paths = _restricted_workspace_cwd(cwd, workspace_root)
+        restricted_paths.extend(_restricted_workspace_read_args(command, cwd, workspace_root))
+        if restricted_paths:
+            return TerminalPolicyDecision(
+                "blocked",
+                True,
+                ("restricted_workspace_path",),
+                "restricted_workspace_path",
+                tuple(dict.fromkeys(restricted_paths)),
+            ).to_dict()
 
     reasons: list[str] = []
     if any(marker in normalized for marker in SHELL_ESCAPE_MARKERS):

@@ -10,11 +10,17 @@ PROTECTED_PATH_PARTS = frozenset({".git", ".rumi_snapshots"})
 SECRET_PATH_PARTS = frozenset({
     ".aws",
     ".azure",
+    ".docker",
     ".gnupg",
     ".kube",
     ".ssh",
+    "secrets",
 })
 SECRET_FILE_NAMES = frozenset({
+    ".dockercfg",
+    ".git-credentials",
+    ".npmrc",
+    ".pypirc",
     ".netrc",
     "credentials",
     "credentials.json",
@@ -22,10 +28,11 @@ SECRET_FILE_NAMES = frozenset({
     "id_ecdsa",
     "id_ed25519",
     "id_rsa",
+    "kubeconfig",
     "token",
     "tokens.json",
 })
-SECRET_SUFFIXES = (".key", ".pem", ".p12", ".pfx")
+SECRET_SUFFIXES = (".key", ".pem", ".p12", ".pfx", ".crt")
 SAFE_ENV_EXAMPLES = (".example", ".sample", ".template")
 
 
@@ -117,6 +124,9 @@ class WorkspaceJail:
         return os.path.isabs(os.path.expanduser(text)) or ntpath.isabs(text)
 
     def _absolute_or_root_relative(self, text: str) -> Path:
+        drive, _ = ntpath.splitdrive(text)
+        if drive and not ntpath.isabs(text):
+            raise WorkspacePathViolation("Drive-qualified paths are not accepted")
         expanded = Path(text).expanduser()
         if expanded.is_absolute():
             return expanded
@@ -127,6 +137,9 @@ class WorkspaceJail:
     def _require_relative_user_path(self, text: str) -> None:
         if text.startswith("~"):
             raise WorkspacePathViolation("Home-relative paths are not accepted")
+        drive, _ = ntpath.splitdrive(text)
+        if drive:
+            raise WorkspacePathViolation("Drive-qualified paths are not accepted")
         if self._is_absolute(text):
             raise WorkspacePathViolation("Absolute paths are not accepted")
         parts = self._relative_parts(text)
