@@ -16,6 +16,7 @@ PROVIDER_SECRET_KEYS: Dict[str, List[str]] = {
     "glm": ["GLM_API_KEY"],
     "groq": ["GROQ_API_KEY"],
     "google": ["GOOGLE_API_KEY", "GEMINI_API_KEY"],
+    "gitlawb-opengateway": ["GITLAWB_OPENGATEWAY_API_KEY"],
     "llama_cpp": ["LLAMACPP_API_KEY"],
     "lmstudio": ["LMSTUDIO_API_KEY"],
     "longcat": ["LONGCAT_API_KEY"],
@@ -30,6 +31,21 @@ PROVIDER_SECRET_KEYS: Dict[str, List[str]] = {
     "together": ["TOGETHER_API_KEY"],
     "vllm": ["VLLM_API_KEY"],
     "xai": ["XAI_API_KEY"],
+    "xiaomi-token-plan-ams": [
+        "XIAOMI_MIMO_TOKEN_PLAN_AMS_API_KEY",
+        "XIAOMI_MIMO_TOKEN_PLAN_API_KEY",
+        "MIMO_API_KEY",
+    ],
+    "xiaomi-token-plan-cn": [
+        "XIAOMI_MIMO_TOKEN_PLAN_CN_API_KEY",
+        "XIAOMI_MIMO_TOKEN_PLAN_API_KEY",
+        "MIMO_API_KEY",
+    ],
+    "xiaomi-token-plan-sgp": [
+        "XIAOMI_MIMO_TOKEN_PLAN_SGP_API_KEY",
+        "XIAOMI_MIMO_TOKEN_PLAN_API_KEY",
+        "MIMO_API_KEY",
+    ],
 }
 
 _NAMED_API_PREFIX = "RUMIAPI"
@@ -494,11 +510,11 @@ def provider_named_api_keys(provider_id: str = "", *, pack_root: Path | None = N
         key = str(meta.key or "")
         if not key.startswith(f"{_NAMED_API_PREFIX}_") or meta.deleted:
             continue
-        key_provider = _provider_from_named_key(key)
+        stored_meta = metadata.get(key, {})
+        key_provider = str(stored_meta.get("provider_id") or _provider_from_named_key(key)).strip()
         if requested_provider and key_provider != requested_provider:
             continue
-        api_id = _api_id_from_named_key(key, key_provider)
-        stored_meta = metadata.get(key, {})
+        api_id = str(stored_meta.get("api_id") or _api_id_from_named_key(key, key_provider)).strip()
         display_name = str(stored_meta.get("name") or api_id.replace("_", " ").title())
         item = {
             "api_id": api_id,

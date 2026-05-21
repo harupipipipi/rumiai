@@ -176,3 +176,105 @@ def test_run_request_metadata_selected_tools_disables_auto_recommendation(monkey
     )
 
     assert captured["raw_tools"] == []
+
+
+def test_run_request_selected_shell_tool_respects_profile_policy_yolo():
+    from domain.chat import run_request
+
+    raw_tools, provider_tools, _tool_context = run_request._available_tools(
+        {
+            "profile_policy": {
+                "yolo_mode": True,
+                "allow_shell": True,
+                "allow_file_write": True,
+                "write_actions_require_approval": False,
+            }
+        },
+        {
+            "tools": ["coding_terminal_exec"],
+            "params": {
+                "tool_policy": {
+                    "selected_tools": ["coding_terminal_exec"],
+                    "yolo_mode": True,
+                    "allow_shell": True,
+                    "allow_file_write": True,
+                    "write_actions_require_approval": False,
+                }
+            },
+        },
+        user_text="run coding_terminal_exec",
+    )
+
+    assert [tool["tool_id"] for tool in raw_tools] == ["coding_terminal_exec"]
+    assert provider_tools[0]["function"]["name"] == "coding_terminal_exec"
+
+
+def test_prepare_chat_run_promotes_tool_policy_tool_choice(tmp_path, monkeypatch):
+    from domain.chat.run_request import prepare_chat_run
+    from domain.chat.store import ChatStore
+
+    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
+    ChatStore._instance = None
+
+    store = ChatStore()
+    conversation = store.create_conversation(model="stub/default")
+
+    prepared = prepare_chat_run(
+        {
+            "conversation_id": conversation["id"],
+            "message": {"role": "user", "content": "use the calculator"},
+            "tools": [],
+            "params": {"tool_policy": {"selected_tools": [], "tool_choice": "required"}},
+        },
+        {},
+    )
+
+    assert prepared.params["tool_choice"] == "required"
+    ChatStore._instance = None
+
+
+def test_assistant_tool_history_preserves_reasoning_content():
+    from blocks.chat.send import _append_assistant_tool_use_message
+
+    messages = []
+
+    _append_assistant_tool_use_message(
+        messages,
+        [
+            {
+                "type": "tool_use",
+                "id": "call_exec",
+                "name": "coding_terminal_exec",
+                "input": {"command": "echo ok"},
+            }
+        ],
+        reasoning_content="I need the terminal result.",
+    )
+
+    assert messages == [
+        {
+            "role": "assistant",
+            "content": "",
+            "reasoning_content": "I need the terminal result.",
+            "tool_calls": [
+                {
+                    "id": "call_exec",
+                    "type": "function",
+                    "function": {
+                        "name": "coding_terminal_exec",
+                        "arguments": "{\"command\": \"echo ok\"}",
+                    },
+                }
+            ],
+        }
+    ]
+
+
+def test_coding_tools_get_larger_default_tool_limit():
+    from domain.chat.stream_engine import _default_tool_limit_for_connected_tools
+
+    assert _default_tool_limit_for_connected_tools(4, {"coding_terminal_exec"}) == 12
+    assert _default_tool_limit_for_connected_tools(4, {"coding_file_write"}) == 12
+    assert _default_tool_limit_for_connected_tools(4, {"calculator"}) == 4
+    assert _default_tool_limit_for_connected_tools(2, {"coding_terminal_exec"}) == 2
