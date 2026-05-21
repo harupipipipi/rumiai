@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
+from core_runtime.surface_launch_target import surface_launch_target_from_instance
+
 
 def register_defaultspack_binding_handlers(interface_registry: Any) -> Dict[str, Any]:
     """Register defaultspack binding handlers in InterfaceRegistry."""
@@ -83,13 +85,34 @@ def compile_frontend_node(runtime_profile: Dict[str, Any], instance: Any) -> Non
     frontend.setdefault("surfaces", [])
 
 
-def bind_frontend_surface(runtime_profile: Dict[str, Any], source: Any, target: Any) -> None:
+def bind_frontend_surface(
+    runtime_profile: Dict[str, Any],
+    source: Any,
+    target: Any,
+    nodes: Dict[str, Any] | None = None,
+    profile: Any = None,
+) -> Dict[str, Any] | None:
     frontend = _frontend_record(runtime_profile, target)
     surface_ref = _instance_ref(source)
     frontend["surface"] = surface_ref
     surfaces = frontend.setdefault("surfaces", [])
     if surface_ref not in surfaces:
         surfaces.append(surface_ref)
+    diagnostics: list[Dict[str, Any]] = []
+    launch_target = surface_launch_target_from_instance(
+        runtime_profile=runtime_profile,
+        instance=source,
+        nodes=nodes or {},
+        profile=profile,
+        surfaces=_profile_surfaces(profile),
+        diagnostics=diagnostics,
+    )
+    if launch_target:
+        frontend["surface_launch_target"] = launch_target
+        runtime_profile.setdefault("launch", {})["surface"] = launch_target
+    if diagnostics:
+        return {"diagnostics": diagnostics}
+    return None
 
 
 def compile_cli_surface_node(runtime_profile: Dict[str, Any], instance: Any) -> None:
@@ -136,3 +159,8 @@ def _node_record(instance: Any) -> Dict[str, Any]:
 
 def _instance_ref(instance: Any) -> str:
     return str(getattr(instance, "id", ""))
+
+
+def _profile_surfaces(profile: Any) -> Dict[str, Any] | None:
+    surfaces = getattr(profile, "surfaces", None)
+    return dict(surfaces) if isinstance(surfaces, dict) else None
