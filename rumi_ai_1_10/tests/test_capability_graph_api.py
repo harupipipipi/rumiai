@@ -248,6 +248,34 @@ def test_graph_compile_preview_requires_profile_and_does_not_register_by_default
     ) in fake_kernel.calls
 
 
+def test_graph_compile_preview_returns_surface_launch_target() -> None:
+    class SurfaceKernel(FakeKernel):
+        def _graph_compile(self, args: dict, _ctx: dict) -> dict:
+            self._record("kernel:graph.compile", args)
+            return {
+                "_kernel_step_status": "success",
+                "ok": True,
+                "runtime_profile": {
+                    "profile": {"surfaces": {"preferred": "browser", "enabled": ["browser"]}},
+                    "launch": {
+                        "surface": {
+                            "kind": "desktop_app",
+                            "pack_id": "frontendpack",
+                            "node_id": "frontendpack.web_surface",
+                        }
+                    },
+                },
+                "diagnostics": [],
+            }
+
+    handler = _handler(kernel=SurfaceKernel())
+
+    result = handler._capability_compile_graph("coding_graph", {"profile_id": "coding"})
+
+    assert result["surface_launch_target"]["pack_id"] == "frontendpack"
+    assert result["surface_launch_target"]["node_id"] == "frontendpack.web_surface"
+
+
 def test_draft_graph_validation_error_returns_400_diagnostics() -> None:
     handler = _handler(kernel=FakeKernel())
 

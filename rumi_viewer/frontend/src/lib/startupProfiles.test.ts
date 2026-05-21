@@ -84,6 +84,31 @@ const catalog: ApiStartupCatalog = {
       graphs: [],
       nodes: [],
     },
+    {
+      pack_id: 'frontendpack',
+      name: 'Frontend Pack',
+      description: 'Alternative frontend',
+      pack_identity: 'rumi:ecosystem/frontendpack',
+      available: true,
+      enabled: true,
+      approval_issues: [],
+      graphs: [],
+      nodes: [
+        {
+          node_id: 'frontendpack.web_surface',
+          kind: 'ecosystem.surface',
+          component_id: 'web',
+          component_type: 'frontend',
+          metadata: {
+            pack_id: 'frontendpack',
+            component_type: 'frontend',
+            component_id: 'web',
+            source_path: 'ecosystem/frontendpack/components/web/node.json',
+          },
+          ports: [{ id: 'surface', direction: 'output', standards: ['rumi.surface'] }],
+        },
+      ],
+    },
   ],
 };
 
@@ -177,6 +202,28 @@ test('compatibleNodesForPort returns only output nodes matching target standards
   const profile = makeProfile('ready', 'Ready Profile', 30);
   const compatible = compatibleNodesForPort(catalog, profile, profile.graph_ports[0]);
   assert.deepEqual(compatible.map((node) => node.node_id), ['coolpack.ai_client', 'defaultspack.ai_client']);
+});
+
+test('compatibleNodesForPort includes component surface nodes from selected packs', () => {
+  const profile = makeProfile('frontend', 'Frontend Profile', 45, {}, ['defaultspack', 'frontendpack']);
+  profile.graph_ports = [
+    {
+      port_key: 'frontend.surface',
+      node_id: 'frontend',
+      port_id: 'surface',
+      target_node_ref: 'defaultspack.frontend',
+      target_port: { id: 'surface', direction: 'input', standards: ['rumi.surface'] },
+      source_node_id: 'cli',
+      source_node_ref: 'defaultspack.cli_surface',
+      source_port_id: 'surface',
+      source_port: { id: 'surface', direction: 'output', standards: ['rumi.surface'] },
+      source_ref: 'cli.surface',
+    },
+  ];
+
+  const compatible = compatibleNodesForPort(catalog, profile, profile.graph_ports[0]);
+
+  assert.deepEqual(compatible.map((node) => node.node_id), ['frontendpack.web_surface']);
 });
 
 test('buildStartupProfileView treats the core start node default as healthy', () => {
