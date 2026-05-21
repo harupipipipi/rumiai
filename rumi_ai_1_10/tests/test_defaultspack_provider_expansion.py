@@ -111,20 +111,29 @@ class TestDefaultspackProviderExpansion(unittest.TestCase):
         from domain.ai_client.providers.gitlawb_opengateway_provider import GitlawbOpengatewayProvider
 
         AIClient._instance = None
-        with patch.dict(os.environ, {"RUMI_DEFAULTSPACK_ENABLE_CLOUD_PROVIDERS": "1"}, clear=True):
-            client = AIClient()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.dict(
+                os.environ,
+                {
+                    "RUMI_DEFAULTSPACK_ENABLE_CLOUD_PROVIDERS": "1",
+                    "RUMI_DEFAULTSPACK_SECRETS_DIR": str(Path(tmpdir) / "secrets"),
+                },
+                clear=True,
+            ):
+                client = AIClient()
 
-        try:
-            models = client.list_models(provider="gitlawb-opengateway")
-            provider, model_name = client.resolve_provider("gitlawb-opengateway/mimo-v2-omni")
-        finally:
-            AIClient._instance = None
+            try:
+                models = client.list_models(provider="gitlawb-opengateway")
+                provider, model_name = client.resolve_provider("gitlawb-opengateway/mimo-v2-omni")
+            finally:
+                AIClient._instance = None
 
         model = next(item for item in models if item["id"] == "gitlawb-opengateway/mimo-v2-omni")
         self.assertEqual(model_name, "mimo-v2-omni")
         self.assertEqual(getattr(provider, "provider_id", ""), "gitlawb-opengateway")
         self.assertIn("vision", model.get("capabilities", []))
-        self.assertEqual(GitlawbOpengatewayProvider()._headers()["Authorization"], "Bearer anything")
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(GitlawbOpengatewayProvider()._headers()["Authorization"], "Bearer anything")
 
     def test_ai_client_does_not_stub_unconfigured_openrouter_completion(self):
         from domain.ai_client.client import AIClient

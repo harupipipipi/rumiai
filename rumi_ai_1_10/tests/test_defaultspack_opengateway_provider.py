@@ -46,6 +46,7 @@ def test_provider_catalog_includes_opengateway():
 
     provider = catalog["gitlawb-opengateway"]
     assert provider["provider_id"] == "gitlawb-opengateway"
+    assert provider["env_vars"] == ["GITLAWB_OPENGATEWAY_API_KEY"]
     assert provider["base_url_envs"] == ["GITLAWB_OPENGATEWAY_BASE_URL"]
     assert provider["metadata"]["default_base_url"] == "https://opengateway.gitlawb.com/v1"
     assert provider["availability"]["base_url_hint"] == "https://opengateway.gitlawb.com/v1"
@@ -226,6 +227,42 @@ def test_opengateway_credential_required_false_allows_no_api_key():
 
     assert provider._credential_required is False
     assert provider._headers()["Authorization"] == "Bearer anything"
+
+
+def test_opengateway_optional_token_overrides_no_key_fallback():
+    from domain.ai_client.providers.gitlawb_opengateway_provider import (
+        GitlawbOpengatewayProvider,
+    )
+
+    with patch.dict(os.environ, {"GITLAWB_OPENGATEWAY_API_KEY": "test-gb-token"}, clear=True):
+        provider = GitlawbOpengatewayProvider()
+
+    assert provider._credential_required is False
+    assert provider._headers()["Authorization"] == "Bearer test-gb-token"
+
+
+def test_opengateway_api_key_can_be_saved_as_defaultspack_secret():
+    from core_runtime.secrets_store import SecretsStore
+    from domain.ai_client.api_key_store import (
+        load_provider_api_keys_into_env,
+        provider_has_api_key,
+        provider_secret_keys,
+        set_provider_api_key,
+    )
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        secrets_dir = Path(tmpdir) / "secrets"
+        with patch.dict(os.environ, {"RUMI_DEFAULTSPACK_SECRETS_DIR": str(secrets_dir)}, clear=True):
+            result = set_provider_api_key("gitlawb-opengateway", "test-gb-token")
+            store = SecretsStore(str(secrets_dir))
+
+            assert result["success"] is True
+            assert provider_secret_keys("gitlawb-opengateway") == ["GITLAWB_OPENGATEWAY_API_KEY"]
+            assert provider_has_api_key("gitlawb-opengateway") is True
+            assert store.has_secret("GITLAWB_OPENGATEWAY_API_KEY") is True
+            loaded = load_provider_api_keys_into_env()
+            assert loaded["gitlawb-opengateway"] is True
+            assert os.environ["GITLAWB_OPENGATEWAY_API_KEY"] == "test-gb-token"
 
 
 def test_opengateway_uses_browser_user_agent_for_gateway_compatibility():

@@ -16,7 +16,7 @@ runtime 内の curated table は互換 fallback であり、新規 provider を�
 | `anthropic` | Anthropic API（Claude Opus 4, Sonnet 4, Haiku 3 等） |
 | `google` | Google Gemini API（Gemini 2.5 Pro, Gemini 2.5 Flash 等） |
 | `openrouter` | OpenRouter API（defaultspack では `tencent/hy3-preview:free` のみ） |
-| `gitlawb-opengateway` | Gitlawb OpenGateway（外部のno-key gateway。MiMo/Gemini の固定allowlistのみ） |
+| `gitlawb-opengateway` | Gitlawb OpenGateway（MiMo/Gemini の固定allowlist。no-key実行と任意token-plan keyに対応） |
 | `groq` | Groq OpenAI-compatible API |
 | `cerebras` | Cerebras OpenAI-compatible API |
 | `nvidia` | NVIDIA NIM OpenAI-compatible API |
@@ -69,11 +69,12 @@ OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
 
 ### Gitlawb OpenGateway
 
-Gitlawb OpenGateway は OpenAI-compatible な外部 no-key gateway。API キーは不要だが、クラウド provider として扱うため、
-runtime で使うには明示的な opt-in が必要。
+Gitlawb OpenGateway は OpenAI-compatible な外部 gateway。API キーなしでも動くが、token-plan key がある場合は `GITLAWB_OPENGATEWAY_API_KEY` として保存・送信できる。クラウド provider として扱うため、runtime で使うには明示的な opt-in が必要。
 
 ```bash
 RUMI_DEFAULTSPACK_ENABLE_CLOUD_PROVIDERS=1
+# 任意:
+GITLAWB_OPENGATEWAY_API_KEY=tp-...
 # オプション:
 GITLAWB_OPENGATEWAY_BASE_URL=https://opengateway.gitlawb.com/v1
 ```
@@ -107,7 +108,9 @@ service tier や preview/enterprise-only 条件は metadata に保持するだ�
 
 `xiaomi-mimo` は Gitlawb OpenGateway とは分離された umbrella catalog entry。direct API は `xiaomi-mimo-global` と `xiaomi-mimo-cn` に地域分割し、公式 base URL / auth / token grant 条件が確認されるまでは runtime provider として自動有効化しない。
 
-警告: この provider を選択すると、プロンプト、会話履歴、tool結果などのコンテキストが Gitlawb OpenGateway に送信される。
+MiMo token plan は provider catalog の `subscription_plans` として保持する。現時点では `mimo_orbit_100t_grant_if_available` を catalog metadata として公開するだけで、manual signup / region scoped / do not auto enable の扱いにする。
+
+警告: この provider を実行有効化すると、プロンプト、会話履歴、tool結果などのコンテキストが Xiaomi MiMo direct API に送信される。
 
 ### stub
 

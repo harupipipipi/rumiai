@@ -45,9 +45,10 @@ def test_gitlawb_provider_component_preserves_no_key_allowlist_metadata():
     omni = next(model for model in models if model["id"].endswith("mimo-v2-omni"))
 
     assert metadata["default_base_url"] == "https://opengateway.gitlawb.com/v1"
-    assert metadata["env_vars"] == []
+    assert metadata["env_vars"] == ["GITLAWB_OPENGATEWAY_API_KEY"]
     assert metadata["base_url_envs"] == ["GITLAWB_OPENGATEWAY_BASE_URL"]
     assert metadata["provider_manifest"]["credential_required"] is False
+    assert metadata["provider_manifest"]["api_key_env"] == "GITLAWB_OPENGATEWAY_API_KEY"
     assert model_ids == OPENGATEWAY_MODELS
     assert omni["metadata"]["vision_verified"] is True
 
@@ -70,3 +71,20 @@ def test_provider_catalog_interops_with_model_catalog_pack_manifests():
         for path in (provider_manifest_path.parent / "models").glob("*.json")
     }
     assert model_manifest_ids == OPENGATEWAY_MODELS
+
+
+def test_xiaomi_mimo_provider_components_expose_token_subscription_plan():
+    metadata = provider_component_metadata_map()["xiaomi-mimo-global"]
+    catalog = get_provider_catalog_map()
+    models = {model["id"]: model for model in get_all_known_models("xiaomi-mimo-global")}
+
+    metadata_plan = metadata["subscription_plans"][0]
+    catalog_plan = catalog["xiaomi-mimo-global"]["subscription_plans"][0]
+
+    assert metadata_plan["id"] == "mimo_orbit_100t_grant_if_available"
+    assert catalog_plan["id"] == metadata_plan["id"]
+    assert catalog_plan["requires_manual_signup"] is True
+    assert catalog_plan["do_not_auto_enable"] is True
+    assert models["xiaomi-mimo-global/mimo-v2-flash"]["metadata"]["subscription_plan_ids"] == [
+        metadata_plan["id"]
+    ]
