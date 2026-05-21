@@ -7,7 +7,7 @@
   "priority": 45,
   "adapter": "python_entrypoint",
   "entrypoint": "domain.ai_client.providers.gitlawb_opengateway_provider:GitlawbOpengatewayProvider",
-  "api_key_env": "",
+  "api_key_env": "GITLAWB_OPENGATEWAY_API_KEY",
   "base_url_env": "GITLAWB_OPENGATEWAY_BASE_URL",
   "credential_required": false,
   "default_base_url": "https://opengateway.gitlawb.com/v1",
@@ -26,6 +26,7 @@
   },
   "config": {
     "model_sync": "fixed_allowlist",
-    "privacy": "external_no_key_gateway"
+    "privacy": "external_optional_token_gateway",
+    "optional_api_key": true
   }
 }

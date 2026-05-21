@@ -117,7 +117,7 @@ class GitlawbOpengatewayProvider(OpenAICompatibleProvider):
         super().__init__(
             provider_id="gitlawb-opengateway",
             display_name="Gitlawb OpenGateway",
-            api_key_env="",
+            api_key_env="GITLAWB_OPENGATEWAY_API_KEY",
             base_url_env="GITLAWB_OPENGATEWAY_BASE_URL",
             default_base_url="https://opengateway.gitlawb.com/v1",
             credential_required=False,
