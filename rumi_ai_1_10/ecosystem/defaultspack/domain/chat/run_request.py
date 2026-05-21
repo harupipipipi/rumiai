@@ -200,6 +200,12 @@ def prepare_chat_run(input_data: dict[str, Any], context: dict[str, Any] | None 
             **(request_context.get("profile_policy") if isinstance(request_context.get("profile_policy"), dict) else {}),
             **tool_policy,
         }
+        tool_choice = tool_policy.get("tool_choice")
+        if "tool_choice" not in params and (
+            isinstance(tool_choice, dict)
+            or str(tool_choice or "").strip().lower() in {"auto", "none", "required"}
+        ):
+            params["tool_choice"] = tool_choice
 
     raw_tools, provider_tools, tool_context = _available_tools(request_context, prepared_input, user_text=user_text)
     modalities = detect_modalities(content, metadata)
@@ -715,5 +721,10 @@ def _available_tools(
         resolved_context["unknown_selected_tools"] = unknown_tools
     runtime_profile = resolved_context.get("runtime_profile")
     agent_id = input_data.get("agent_id")
-    filtered = filter_tool_definitions_for_runtime_profile(tools, runtime_profile, agent_id=agent_id)
+    filtered = filter_tool_definitions_for_runtime_profile(
+        tools,
+        runtime_profile,
+        agent_id=agent_id,
+        policy_context=resolved_context,
+    )
     return filtered, adapt_tool_definitions(filtered), resolved_context

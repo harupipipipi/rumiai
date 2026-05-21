@@ -715,7 +715,32 @@ class ModelRuntimeSettingsService:
     @staticmethod
     def _is_chat_profile(profile: dict[str, Any]) -> bool:
         model_type = str(profile.get("type") or "chat").strip().lower()
-        return not model_type or model_type == "chat"
+        if not model_type or model_type == "chat":
+            return True
+        if model_type != "reasoning":
+            return False
+
+        defaults = profile.get("defaults") if isinstance(profile.get("defaults"), dict) else {}
+        raw_capabilities = profile.get("capabilities")
+        if isinstance(raw_capabilities, dict):
+            capabilities = dict(raw_capabilities)
+        elif isinstance(raw_capabilities, (list, tuple, set)):
+            capabilities = {str(item): True for item in raw_capabilities if str(item or "").strip()}
+        else:
+            capabilities = {}
+        metadata = profile.get("metadata") if isinstance(profile.get("metadata"), dict) else {}
+        metadata_capabilities = (
+            metadata.get("capabilities")
+            if isinstance(metadata.get("capabilities"), dict)
+            else {}
+        )
+        return bool(
+            defaults.get("chat")
+            or capabilities.get("chat")
+            or capabilities.get("text")
+            or metadata_capabilities.get("chat")
+            or metadata_capabilities.get("text")
+        )
 
     def _candidate_from_profile(self, profile: dict[str, Any], favorites: set[str]) -> dict[str, Any]:
         profile_id = str(profile.get("profile_id") or profile.get("id") or profile.get("qualified_model_id") or "").strip()

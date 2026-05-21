@@ -137,13 +137,15 @@ class OpenAIProvider(BaseProvider):
             role = msg.get("role", "user")
             content = msg.get("content", "")
             if role == "assistant" and msg.get("tool_calls"):
-                converted.append(
-                    {
-                        "role": "assistant",
-                        "content": content if isinstance(content, str) else "",
-                        "tool_calls": msg.get("tool_calls", []),
-                    }
-                )
+                entry = {
+                    "role": "assistant",
+                    "content": content if isinstance(content, str) else "",
+                    "tool_calls": msg.get("tool_calls", []),
+                }
+                reasoning_content = self._message_reasoning_content(msg)
+                if reasoning_content:
+                    entry["reasoning_content"] = reasoning_content
+                converted.append(entry)
                 continue
             if role == "tool":
                 converted.append(
@@ -174,6 +176,24 @@ class OpenAIProvider(BaseProvider):
                 converted.append({"role": role, "content": content})
         return converted
 
+    @staticmethod
+    def _message_reasoning_content(msg):
+        for key in ("reasoning_content", "reasoning", "thinking"):
+            value = msg.get(key)
+            if isinstance(value, str) and value.strip():
+                return value
+        metadata = msg.get("metadata")
+        if isinstance(metadata, dict):
+            value = metadata.get("reasoning_content")
+            if isinstance(value, str) and value.strip():
+                return value
+            thinking = metadata.get("thinking")
+            if isinstance(thinking, dict):
+                transcript = thinking.get("transcript")
+                if isinstance(transcript, str) and transcript.strip():
+                    return transcript
+        return ""
+
     def parse_response(self, raw):
         """OpenAI chat completion JSON → StandardResponse"""
         choice = raw.get("choices", [{}])[0]
@@ -187,6 +207,13 @@ class OpenAIProvider(BaseProvider):
             "total_tokens": usage_raw.get("total_tokens", 0),
         }
         content = [{"type": "text", "text": text}]
+        reasoning_content = (
+            message.get("reasoning_content")
+            or message.get("reasoning")
+            or message.get("thinking")
+            or ""
+        )
+        reasoning_content = str(reasoning_content) if reasoning_content else ""
         tool_calls = message.get("tool_calls")
         if tool_calls:
             for tc in tool_calls:
@@ -196,10 +223,16 @@ class OpenAIProvider(BaseProvider):
                     "name": tc.get("function", {}).get("name", ""),
                     "input": tc.get("function", {}).get("arguments", "{}"),
                 })
+        metadata = {}
+        if reasoning_content:
+            metadata["reasoning_content"] = reasoning_content
+            metadata["thinking"] = {"transcript": reasoning_content}
         return {
             "content": content,
             "finish_reason": finish,
             "usage": usage,
+            "metadata": metadata,
+            **({"reasoning_content": reasoning_content} if reasoning_content else {}),
             "raw_extra": {"id": raw.get("id", ""), "model": raw.get("model", "")},
         }
 
@@ -298,6 +331,9 @@ class OpenAIProvider(BaseProvider):
                     text = delta.get("content")
                     if text:
                         yield {"type": "content_delta", "delta": {"type": "text", "text": text}}
+                    reasoning_text = delta.get("reasoning_content") or delta.get("reasoning") or delta.get("thinking")
+                    if reasoning_text:
+                        yield {"type": "reasoning_delta", "delta": {"type": "text", "text": str(reasoning_text)}}
                     yield from self._stream_tool_call_events(delta, tool_call_state)
                     finish = choices[0].get("finish_reason")
                     if finish:
