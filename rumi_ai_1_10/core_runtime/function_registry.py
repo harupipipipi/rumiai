@@ -398,6 +398,20 @@ class FunctionRegistry:
                     function_dir=fdef.get("function_dir"),
                     main_py_path=fdef.get("main_py_path"),
                     manifest=fdef,
+                    runtime=fdef.get("runtime", "python"),
+                    main_binary_path=fdef.get("main_binary_path"),
+                    command=fdef.get("command", []),
+                    docker_image=fdef.get("docker_image", ""),
+                    extensions=fdef.get("extensions", {}),
+                    entrypoint=fdef.get("entrypoint"),
+                    risk=fdef.get("risk"),
+                    grant_config=fdef.get("grant_config"),
+                    vocab_aliases=fdef.get("vocab_aliases"),
+                    permission_id=fdef.get("permission_id"),
+                    handler_py_sha256=fdef.get("handler_py_sha256"),
+                    is_builtin=fdef.get("is_builtin", False),
+                    grant_config_schema=fdef.get("grant_config_schema"),
+                    calling_convention=fdef.get("calling_convention"),
                 )
                 if self.register(entry):
                     result.registered += 1
