@@ -177,8 +177,8 @@ _CURATED_PROVIDER_METADATA: Dict[str, Dict[str, Any]] = {
     "gitlawb-opengateway": {
         "display_name": "Gitlawb OpenGateway",
         "kind": "aggregator",
-        "description": "No-key Gitlawb OpenGateway allowlist for MiMo and Gemini Flash Lite.",
-        "env_vars": [],
+        "description": "Gitlawb OpenGateway allowlist for MiMo and Gemini Flash Lite. Optional token-plan API keys are supported.",
+        "env_vars": ["GITLAWB_OPENGATEWAY_API_KEY"],
         "base_url_envs": ["GITLAWB_OPENGATEWAY_BASE_URL"],
         "catalog_only": False,
         "supports_invoke": True,
@@ -1201,9 +1201,7 @@ def _credentials_ready(manifest: Dict[str, Any], provider_id: str) -> bool:
     if provider_has_api_key(provider_id):
         return True
     if not bool(manifest.get("credential_required", True)):
-        return not api_envs and (
-            not base_url_envs or bool(str(manifest.get("default_base_url", "")).strip())
-        )
+        return not base_url_envs or bool(str(manifest.get("default_base_url", "")).strip())
     return False
 
 

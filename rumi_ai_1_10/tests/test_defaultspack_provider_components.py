@@ -45,9 +45,10 @@ def test_gitlawb_provider_component_preserves_no_key_allowlist_metadata():
     omni = next(model for model in models if model["id"].endswith("mimo-v2-omni"))
 
     assert metadata["default_base_url"] == "https://opengateway.gitlawb.com/v1"
-    assert metadata["env_vars"] == []
+    assert metadata["env_vars"] == ["GITLAWB_OPENGATEWAY_API_KEY"]
     assert metadata["base_url_envs"] == ["GITLAWB_OPENGATEWAY_BASE_URL"]
     assert metadata["provider_manifest"]["credential_required"] is False
+    assert metadata["provider_manifest"]["api_key_env"] == "GITLAWB_OPENGATEWAY_API_KEY"
     assert model_ids == OPENGATEWAY_MODELS
     assert omni["metadata"]["vision_verified"] is True
 

@@ -217,6 +217,7 @@ def test_cloud_provider_keys_are_persistable_in_secret_store():
     from domain.ai_client.api_key_store import provider_secret_keys
 
     assert provider_secret_keys("groq") == ["GROQ_API_KEY"]
+    assert provider_secret_keys("gitlawb-opengateway") == ["GITLAWB_OPENGATEWAY_API_KEY"]
     assert provider_secret_keys("cerebras") == ["CEREBRAS_API_KEY"]
     assert provider_secret_keys("nvidia") == ["NVIDIA_API_KEY", "NGC_API_KEY"]
 
