@@ -6,6 +6,7 @@ import {
   apiFetch,
   bootstrapPanelSession,
   clearStartupProfileNodeOverride,
+  compileStartupProfilePreview,
   createStartupProfile,
   fetchBackgroundControlStatus,
   hasPendingPanelBootstrapCode,
@@ -411,4 +412,33 @@ test('startup profile wrappers use v3 payloads and endpoints', async () => {
   await clearStartupProfileNodeOverride('profile-1', 'agent.ai');
   assert.equal(lastFetchUrl, '/api/panel/startup/profiles/profile-1/overrides/agent.ai');
   assert.equal(lastFetchInit?.method, 'DELETE');
+
+  await compileStartupProfilePreview('profile-1', {
+    version: 3,
+    profile_id: 'profile-1',
+    name: 'Preview',
+    base_pack: 'defaultspack',
+    graph_id: 'defaultspack.startup',
+    graph_ports: [],
+    packs: ['defaultspack'],
+    node_overrides: {},
+    created_at: 1,
+    updated_at: 1,
+  });
+  assert.equal(lastFetchUrl, '/api/panel/startup/profiles/profile-1/compile-preview');
+  assert.equal(lastFetchInit?.method, 'POST');
+  assert.equal(lastFetchInit?.body, JSON.stringify({
+    profile: {
+      version: 3,
+      profile_id: 'profile-1',
+      name: 'Preview',
+      base_pack: 'defaultspack',
+      graph_id: 'defaultspack.startup',
+      graph_ports: [],
+      packs: ['defaultspack'],
+      node_overrides: {},
+      created_at: 1,
+      updated_at: 1,
+    },
+  }));
 });

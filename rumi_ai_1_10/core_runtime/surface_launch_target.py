@@ -4,6 +4,12 @@ from __future__ import annotations
 
 from typing import Any, Dict, Mapping, Optional
 
+_SURFACE_ENV_KEYS = {
+    "RUMI_PROFILE_SURFACE",
+    "RUMI_DEFAULTSPACK_OPEN_BROWSER",
+    "RUMI_DEFAULTSPACK_SURFACE",
+}
+
 
 def extract_surface_launch_target(
     runtime_profile: Optional[Dict[str, Any]],
@@ -263,7 +269,8 @@ def _target_from_node_payload(
         )
         return None
 
-    mode = _clean_string(launch.get("surface")) or resolve_surface_mode(surfaces)
+    explicit_surface = _clean_string(launch.get("surface"))
+    mode = explicit_surface or resolve_surface_mode(surfaces)
     env = surface_env(mode)
     env.update(_string_dict(launch.get("env")))
     target: Dict[str, Any] = {
@@ -275,6 +282,7 @@ def _target_from_node_payload(
         "node_id": node_id,
         "env": env,
         "source": "capability_graph",
+        "surface_source": "metadata" if explicit_surface else "profile",
     }
     component_full_id = _component_full_id(metadata, target_pack_id)
     if component_full_id:
@@ -294,9 +302,22 @@ def _normalize_target_mapping(
     if not pack_id:
         return None
     principal_id = _clean_string(target.get("principal_id")) or pack_id
-    mode = _clean_string(target.get("surface")) or resolve_surface_mode(surfaces)
+    if principal_id != pack_id:
+        return None
+    surface_source = _clean_string(target.get("surface_source"))
+    if surface_source == "profile":
+        mode = resolve_surface_mode(surfaces)
+    else:
+        mode = _clean_string(target.get("surface")) or resolve_surface_mode(surfaces)
     env = surface_env(mode)
-    env.update(_string_dict(target.get("env")))
+    target_env = _string_dict(target.get("env"))
+    if surface_source == "profile":
+        target_env = {
+            key: value
+            for key, value in target_env.items()
+            if key not in _SURFACE_ENV_KEYS
+        }
+    env.update(target_env)
     normalized: Dict[str, Any] = {
         "kind": "desktop_app",
         "pack_id": pack_id,
@@ -305,7 +326,7 @@ def _normalize_target_mapping(
         "env": env,
         "source": _clean_string(target.get("source")) or "capability_graph",
     }
-    for key in ("node_instance_id", "node_id", "component_full_id"):
+    for key in ("node_instance_id", "node_id", "component_full_id", "surface_source"):
         value = _clean_string(target.get(key))
         if value:
             normalized[key] = value

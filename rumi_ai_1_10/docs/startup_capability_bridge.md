@@ -39,8 +39,8 @@ launches the startup profile and then calls the bridge. The bridge:
 2. Registers defaultspack Capability Graph binding handlers.
 3. Loads approved Capability Profiles, Capability Graphs, and node definitions.
 4. Applies `node_overrides` to matching graph edge targets.
-5. Extends the launch-only Capability Profile copy with override nodes from
-   packs listed in the Startup Profile.
+5. Extends the launch-only Capability Profile copy with only the nodes added by
+   `node_overrides`, and only when their packs are listed in the Startup Profile.
 6. Compiles the graph with `CapabilityGraphCompiler`.
 7. Extracts the selected frontend surface launch target.
 8. Registers the compiled runtime profile in `InterfaceRegistry`.
@@ -78,3 +78,30 @@ ecosystem metadata. After restart, `startup_surface_launcher` reads that target
 and launches its `pack_id` instead of always launching the startup base pack. If
 no graph launch target exists, startup launch falls back to the previous
 `startup_base_pack` behavior.
+
+## Compile preview
+
+The control panel can preview the exact Startup Profile compile path without
+launching or saving state:
+
+```http
+POST /api/panel/startup/profiles/{id}/compile-preview
+```
+
+The optional body can include a draft profile:
+
+```json
+{
+  "profile": {
+    "profile_id": "custom",
+    "packs": ["defaultspack", "frontendpack"],
+    "node_overrides": {
+      "frontend.surface": "frontendpack.web_surface"
+    }
+  }
+}
+```
+
+The response mirrors the launch compile result and includes
+`surface_launch_target`, so the Startup Profile editor can show the frontend
+pack that will be opened after restart.

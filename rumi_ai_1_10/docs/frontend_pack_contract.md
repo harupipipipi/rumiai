@@ -11,7 +11,7 @@ Required:
 - node metadata `pack_id`
 - node metadata `launch.kind: desktop_app`
 - node metadata `launch.pack_id` matching the node pack id
-- `ecosystem.json` desktop app metadata so the Desktop App Manager can launch it
+- `ecosystem.json` `desktop_app.command` so the Desktop App Manager can launch it
 
 Example node:
 
@@ -54,7 +54,32 @@ Example node:
 }
 ```
 
+Example `ecosystem.json` desktop app section:
+
+```json
+{
+  "pack_id": "frontendpack",
+  "desktop_app": {
+    "command": "python desktop_app.py",
+    "working_dir": "",
+    "env": {
+      "FRONTENDPACK_PORT": "8770"
+    },
+    "window": {
+      "title": "Frontendpack",
+      "width": 1280,
+      "height": 800
+    }
+  }
+}
+```
+
 When a Startup Profile overrides `frontend.surface` to this node, graph compile
 stores the canonical target in `runtime_profile.launch.surface` and active
 metadata stores `startup_surface_launch_target`. After restart, the startup
 surface launcher opens `frontendpack` instead of the base pack.
+
+The launch target is intentionally pack-local. A node from `frontendpack` cannot
+claim `launch.pack_id: otherpack` or `principal_id: otherpack`; compile and
+startup launch normalization reject that target and fall back to the Startup
+Profile base pack when needed.

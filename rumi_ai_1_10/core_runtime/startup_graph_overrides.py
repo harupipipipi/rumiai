@@ -25,6 +25,7 @@ def apply_startup_node_overrides(
     instance_id_by_ref = {instance.ref: instance.id for instance in graph.nodes}
     graph_nodes = list(graph.nodes)
     graph_edges: List[GraphEdge] = []
+    override_node_refs: set[str] = set()
     changed = False
 
     for edge in graph.edges:
@@ -103,10 +104,13 @@ def apply_startup_node_overrides(
                 metadata=dict(edge.metadata),
             )
         )
+        override_node_refs.add(override_ref)
         changed = True
 
     if not changed:
         return graph, diagnostics
+    metadata = dict(graph.metadata)
+    metadata["startup_override_node_refs"] = sorted(override_node_refs)
     return (
         GraphDefinition(
             graph_id=graph.graph_id,
@@ -114,7 +118,7 @@ def apply_startup_node_overrides(
             description=dict(graph.description),
             nodes=graph_nodes,
             edges=graph_edges,
-            metadata=dict(graph.metadata),
+            metadata=metadata,
         ),
         diagnostics,
     )

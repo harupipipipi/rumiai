@@ -14,6 +14,7 @@ API 一覧:
   DELETE /api/panel/startup/profiles/{id} — 起動プロファイル削除
   POST /api/panel/startup/profiles/{id}/duplicate — 起動プロファイル複製
   POST /api/panel/startup/profiles/{id}/activate  — 起動プロファイル切り替え
+  POST /api/panel/startup/profiles/{id}/compile-preview — 起動プロファイルGraph compile preview
   POST /api/panel/startup/profiles/{id}/launch    — 起動プロファイル起動
   POST /api/panel/startup/profiles/{id}/packs     — Pack 追加
   DELETE /api/panel/startup/profiles/{id}/packs/{pack_id} — Pack 削除
@@ -320,6 +321,13 @@ class ControlPanelHandlersMixin:
             return self._panel_startup_profile_manager().launch_profile(profile_id)
         except Exception as e:
             _log_internal_error("panel_launch_startup_profile", e)
+            return {"error": _SAFE_ERROR_MSG, "status_code": 500}
+
+    def _panel_compile_startup_profile_preview(self, profile_id: str, body: Dict[str, Any]) -> Dict[str, Any]:
+        try:
+            return self._panel_startup_profile_manager().compile_profile_preview(profile_id, body)
+        except Exception as e:
+            _log_internal_error("panel_compile_startup_profile_preview", e)
             return {"error": _SAFE_ERROR_MSG, "status_code": 500}
 
     def _panel_get_startup_profile_workspace(self, profile_id: str) -> Dict[str, Any]:

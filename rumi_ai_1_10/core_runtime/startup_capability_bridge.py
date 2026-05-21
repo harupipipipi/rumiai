@@ -257,11 +257,16 @@ def extend_profile_for_startup_overrides(
         for pack_id in startup_profile.get("packs", [])
         if isinstance(pack_id, str) and pack_id
     }
+    graph_metadata = getattr(graph, "metadata", {})
+    override_refs = graph_metadata.get("startup_override_node_refs") if isinstance(graph_metadata, dict) else None
+    if not isinstance(override_refs, list):
+        override_refs = []
     extra_nodes = {
-        instance.ref
-        for instance in getattr(graph, "nodes", [])
-        if _node_pack_id(instance.ref) in allowed_packs
-        and instance.ref not in profile.enabled_nodes
+        node_ref
+        for node_ref in override_refs
+        if isinstance(node_ref, str)
+        and _node_pack_id(node_ref) in allowed_packs
+        and node_ref not in profile.enabled_nodes
     }
     if not extra_nodes:
         return profile
