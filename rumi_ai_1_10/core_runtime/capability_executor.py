@@ -430,6 +430,11 @@ class CapabilityExecutor:
                 logger.debug("Legacy handler registry lookup failed for '%s'", permission_id, exc_info=True)
                 return None
         try:
+            get_by_permission_id = getattr(fr, "get_by_permission_id", None)
+            if callable(get_by_permission_id):
+                entry = get_by_permission_id(permission_id)
+                if entry is not None and isinstance(getattr(entry, "qualified_name", None), str):
+                    return entry
             entry = fr.resolve_by_alias(permission_id)
             if entry is not None:
                 return entry

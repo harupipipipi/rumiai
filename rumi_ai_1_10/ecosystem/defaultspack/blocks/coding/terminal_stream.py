@@ -50,6 +50,12 @@ def run(input_data, context=None):
         result = terminal.stream(command, cwd=cwd, approved=approved)
         record_execution(operation, risk["risk_level"], {"command": command, "cwd": cwd})
         return ok(with_workspace(result, workspace))
+    except PermissionError as e:
+        workspace_error = workspace_error_response(e, error)
+        if workspace_error:
+            return workspace_error
+        record_failure("terminal.stream", "medium", str(e), {"command": command, "cwd": cwd})
+        return error(str(e), code="PATH_RESTRICTED")
     except Exception as e:
         workspace_error = workspace_error_response(e, error)
         if workspace_error:

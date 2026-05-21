@@ -57,6 +57,9 @@ def run(input_data, context=None):
         return ok(data)
     except FileExistsError as e:
         return error(str(e), code="FILE_EXISTS")
+    except PermissionError as e:
+        record_failure(operation, "medium", str(e), {"path": path})
+        return error(str(e), code="PATH_RESTRICTED")
     except ValueError as e:
         return error(str(e), code="PATH_TRAVERSAL")
     except Exception as e:
