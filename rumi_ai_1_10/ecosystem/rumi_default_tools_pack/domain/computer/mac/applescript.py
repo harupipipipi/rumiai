@@ -41,14 +41,42 @@ _INTENT_ALLOWLIST: dict[str, set[str]] = {
 
 
 def send_keystroke(app: str, text: str) -> bool:
-    """Send a keystroke to an app via AppleScript."""
+    """Insert text into an app via paste to avoid keyboard layout drift."""
     if sys.platform != "darwin":
         return False
     if app not in _KEYSTROKE_ALLOWLIST:
         return False
-    script = f'tell application "{app}" to activate\n'
-    script += f'tell application "System Events" to keystroke "{_escape(text)}"'
-    return _run_osascript(script)
+    script = f"""
+on run argv
+set rumiPasteText to item 1 of argv
+set rumiOriginalClipboard to missing value
+set rumiHadClipboard to false
+tell application "{_escape(app)}" to activate
+try
+  set rumiOriginalClipboard to the clipboard
+  set rumiHadClipboard to true
+end try
+try
+  set the clipboard to rumiPasteText
+  delay 0.05
+  tell application "System Events" to keystroke "v" using {{command down}}
+  delay 0.05
+on error pasteErrorMessage number pasteErrorNumber
+  if rumiHadClipboard then
+    set the clipboard to rumiOriginalClipboard
+  else
+    set the clipboard to ""
+  end if
+  error pasteErrorMessage number pasteErrorNumber
+end try
+if rumiHadClipboard then
+  set the clipboard to rumiOriginalClipboard
+else
+  set the clipboard to ""
+end if
+end run
+"""
+    return _run_osascript(script, [text])
 
 
 def send_key_combo(app: str, key_combo: str) -> bool:
@@ -171,11 +199,14 @@ def finder_reveal(path: str) -> bool:
 # --- internal helpers ---
 
 
-def _run_osascript(script: str) -> bool:
+def _run_osascript(script: str, args: list[str] | None = None) -> bool:
     """Run an osascript and return success."""
+    command = ["osascript", "-e", script]
+    if args:
+        command.extend(["--", *args])
     try:
         result = subprocess.run(
-            ["osascript", "-e", script],
+            command,
             capture_output=True,
             timeout=5,
         )
