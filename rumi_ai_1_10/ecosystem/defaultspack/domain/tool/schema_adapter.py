@@ -53,6 +53,7 @@ def filter_tool_definitions_for_runtime_profile(
     tools: Iterable[Any],
     runtime_profile: Optional[Dict[str, Any]] = None,
     agent_id: Optional[str] = None,
+    policy_context: Optional[Dict[str, Any]] = None,
 ) -> List[Any]:
     normalized = list(tools)
     enforced = runtime_profile_enforced_tool_names(
@@ -60,7 +61,10 @@ def filter_tool_definitions_for_runtime_profile(
         agent_id,
         normalized,
     )
-    policy = policy_from_context({"runtime_profile": runtime_profile} if runtime_profile else {})
+    context_for_policy = dict(policy_context or {})
+    if runtime_profile and "runtime_profile" not in context_for_policy:
+        context_for_policy["runtime_profile"] = runtime_profile
+    policy = policy_from_context(context_for_policy)
     if enforced is None:
         return [
             tool for tool in normalized

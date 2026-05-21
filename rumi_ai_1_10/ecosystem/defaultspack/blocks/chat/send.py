@@ -743,7 +743,7 @@ def _tool_arguments(block):
     return value if isinstance(value, dict) else {}
 
 
-def _append_assistant_tool_use_message(messages, tool_uses):
+def _append_assistant_tool_use_message(messages, tool_uses, *, reasoning_content=""):
     tool_calls = []
     for block in tool_uses:
         tool_name = str(block.get("name") or block.get("tool_name") or "")
@@ -763,13 +763,14 @@ def _append_assistant_tool_use_message(messages, tool_uses):
         )
     if not tool_calls:
         return
-    messages.append(
-        {
-            "role": "assistant",
-            "content": "",
-            "tool_calls": tool_calls,
-        }
-    )
+    entry = {
+        "role": "assistant",
+        "content": "",
+        "tool_calls": tool_calls,
+    }
+    if isinstance(reasoning_content, str) and reasoning_content.strip():
+        entry["reasoning_content"] = reasoning_content
+    messages.append(entry)
 
 
 def _model_supports_vision(model):
