@@ -38,9 +38,13 @@ launches the startup profile and then calls the bridge. The bridge:
 1. Resolves `default_graph` and `capability_profile_id`.
 2. Registers defaultspack Capability Graph binding handlers.
 3. Loads approved Capability Profiles, Capability Graphs, and node definitions.
-4. Compiles the graph with `CapabilityGraphCompiler`.
-5. Registers the compiled runtime profile in `InterfaceRegistry`.
-6. Returns `capability_graph` metadata in the launch result.
+4. Applies `node_overrides` to matching graph edge targets.
+5. Extends the launch-only Capability Profile copy with override nodes from
+   packs listed in the Startup Profile.
+6. Compiles the graph with `CapabilityGraphCompiler`.
+7. Extracts the selected frontend surface launch target.
+8. Registers the compiled runtime profile in `InterfaceRegistry`.
+9. Returns `capability_graph` metadata in the launch result.
 
 Compile failures are soft failures. Startup launch still succeeds, and the
 launch result includes `capability_graph.ok: false` plus diagnostics.
@@ -55,7 +59,12 @@ Successful graph compilation adds a result like:
     "ok": true,
     "graph_id": "defaultspack.startup",
     "capability_profile_id": "defaultspack.startup",
-    "runtime_profile_key": "runtime_profile.defaultspack.startup.defaultspack.startup"
+    "runtime_profile_key": "runtime_profile.defaultspack.startup.defaultspack.startup",
+    "surface_launch_target": {
+      "kind": "desktop_app",
+      "pack_id": "frontendpack",
+      "node_id": "frontendpack.web_surface"
+    }
   }
 }
 ```
@@ -63,3 +72,9 @@ Successful graph compilation adds a result like:
 Consumers should use `runtime_profile_key` to retrieve the registered runtime
 profile from `InterfaceRegistry`. Existing explicit flow steps that compile
 graphs still work as before.
+
+`StartupProfileManager` also persists `startup_surface_launch_target` in active
+ecosystem metadata. After restart, `startup_surface_launcher` reads that target
+and launches its `pack_id` instead of always launching the startup base pack. If
+no graph launch target exists, startup launch falls back to the previous
+`startup_base_pack` behavior.

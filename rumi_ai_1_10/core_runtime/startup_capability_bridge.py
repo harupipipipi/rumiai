@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Dict, List, Optional
 
 from .capability_graph_compiler import CapabilityGraphCompiler
 from .capability_graph_loader import CapabilityGraphLoader
 from .ecosystem_nodes import EcosystemNodeRegistry
 from .interface_registry import InterfaceRegistry
+from .profile_models import CapabilityProfileDefinition
 from .profile_loader import CapabilityProfileLoader
+from .startup_graph_overrides import apply_startup_node_overrides
+from .surface_launch_target import extract_surface_launch_target
 
 
 @dataclass
@@ -19,6 +22,7 @@ class StartupCapabilityCompileResult:
     capability_profile_id: Optional[str] = None
     runtime_profile_key: Optional[str] = None
     runtime_profile: Optional[Dict[str, Any]] = None
+    surface_launch_target: Optional[Dict[str, Any]] = None
     diagnostics: List[Dict[str, Any]] = field(default_factory=list)
     skipped: bool = False
     reason: Optional[str] = None
@@ -32,6 +36,7 @@ class StartupCapabilityCompileResult:
             "capability_profile_id": self.capability_profile_id,
             "runtime_profile_key": self.runtime_profile_key,
             "runtime_profile": self.runtime_profile,
+            "surface_launch_target": self.surface_launch_target,
             "diagnostics": list(self.diagnostics),
         }
 
@@ -141,6 +146,25 @@ def compile_startup_capabilities(
         nodes = node_registry.load_all_nodes(register=True)
         diagnostics.extend(node_registry.diagnostics)
 
+        graph, override_diagnostics = apply_startup_node_overrides(
+            graph,
+            startup_profile=startup_profile,
+            nodes=dict(nodes),
+        )
+        diagnostics.extend(override_diagnostics)
+        if any(item.get("level") == "error" for item in override_diagnostics):
+            return StartupCapabilityCompileResult(
+                ok=False,
+                graph_id=graph_id,
+                capability_profile_id=capability_profile_id,
+                diagnostics=diagnostics,
+            )
+
+        profile = extend_profile_for_startup_overrides(
+            profile,
+            startup_profile=startup_profile,
+            graph=graph,
+        )
         compile_result = CapabilityGraphCompiler(interface_registry=interface_registry).compile(
             graph,
             profile=profile,
@@ -152,6 +176,11 @@ def compile_startup_capabilities(
         runtime_profile_key = None
         if isinstance(runtime_profile, dict):
             runtime_profile_key = _string_or_none(runtime_profile.get("registry_key"))
+        surface_launch_target = extract_surface_launch_target(
+            runtime_profile,
+            fallback_pack_id=_string_or_none(startup_profile.get("base_pack")),
+            surfaces=_surfaces_from_startup_or_profile(startup_profile, profile),
+        )
 
         return StartupCapabilityCompileResult(
             ok=compile_result.ok,
@@ -159,6 +188,7 @@ def compile_startup_capabilities(
             capability_profile_id=capability_profile_id,
             runtime_profile_key=runtime_profile_key,
             runtime_profile=runtime_profile,
+            surface_launch_target=surface_launch_target,
             diagnostics=diagnostics,
         )
     except Exception as exc:
@@ -211,6 +241,52 @@ def _string_or_none(value: Any) -> Optional[str]:
         return None
     value = value.strip()
     return value or None
+
+
+def extend_profile_for_startup_overrides(
+    profile: CapabilityProfileDefinition,
+    *,
+    startup_profile: Dict[str, Any],
+    graph: Any,
+) -> CapabilityProfileDefinition:
+    """Allow startup-profile pack override nodes only for this launch compile."""
+    if not profile.enabled_nodes:
+        return profile
+    allowed_packs = {
+        str(pack_id)
+        for pack_id in startup_profile.get("packs", [])
+        if isinstance(pack_id, str) and pack_id
+    }
+    extra_nodes = {
+        instance.ref
+        for instance in getattr(graph, "nodes", [])
+        if _node_pack_id(instance.ref) in allowed_packs
+        and instance.ref not in profile.enabled_nodes
+    }
+    if not extra_nodes:
+        return profile
+    return replace(
+        profile,
+        enabled_nodes=sorted(set(profile.enabled_nodes) | extra_nodes),
+        metadata={
+            **dict(profile.metadata),
+            "startup_override_nodes": sorted(extra_nodes),
+        },
+    )
+
+
+def _surfaces_from_startup_or_profile(
+    startup_profile: Dict[str, Any],
+    profile: CapabilityProfileDefinition,
+) -> Dict[str, Any]:
+    startup_surfaces = startup_profile.get("surfaces")
+    if isinstance(startup_surfaces, dict):
+        return dict(startup_surfaces)
+    return dict(profile.surfaces)
+
+
+def _node_pack_id(node_ref: str) -> str:
+    return node_ref.split(".", 1)[0] if isinstance(node_ref, str) and "." in node_ref else ""
 
 
 def _diagnostic(level: str, code: str, message: str, **meta: Any) -> Dict[str, Any]:
