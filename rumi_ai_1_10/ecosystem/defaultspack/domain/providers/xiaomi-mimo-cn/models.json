@@ -25,6 +25,7 @@
       "default_thinking_level": "medium",
       "metadata": {
         "region": "cn",
+        "subscription_plan_ids": ["mimo_orbit_100t_grant_if_available"],
         "token_plan_region_scoped": true,
         "do_not_use_without_confirmed_official_api": true
       }
@@ -49,6 +50,7 @@
       },
       "metadata": {
         "region": "cn",
+        "subscription_plan_ids": ["mimo_orbit_100t_grant_if_available"],
         "token_plan_region_scoped": true,
         "do_not_use_without_confirmed_official_api": true
       }
