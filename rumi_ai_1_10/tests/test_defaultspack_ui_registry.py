@@ -442,6 +442,44 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         self.assertTrue(reloaded["preview"]["auto_open"])
         self.assertEqual(reloaded["preview"]["max_items"], 5)
 
+    def test_computer_use_haze_settings_are_exposed_and_sanitized(self):
+        from domain.frontend.registry import FrontendRegistry
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pack_root = Path(tmpdir)
+            with patch("domain.frontend.registry.AIClient") as mock_client:
+                mock_client.return_value.list_models.return_value = [{"id": "stub/default"}]
+                registry = FrontendRegistry(pack_root=pack_root)
+                settings = registry.get_settings()
+                values = registry.update_settings(
+                    {
+                        "computer_use_haze": {
+                            "enabled": True,
+                            "preset": "unknown",
+                            "start_color": "bad",
+                            "end_color": "#112233",
+                            "accent_color": "#aabbcc",
+                            "opacity": 42,
+                            "edge_width": 1,
+                            "animation_speed": "fast",
+                        }
+                    }
+                )
+
+        haze_section = next(section for section in settings["sections"] if section["id"] == "computer_use_haze")
+        field_types = {field["id"]: field["type"] for field in haze_section["fields"]}
+        self.assertEqual(field_types["start_color"], "color")
+        self.assertEqual(field_types["end_color"], "color")
+        self.assertEqual(field_types["accent_color"], "color")
+        self.assertEqual(settings["values"]["computer_use_haze"]["preset"], "aurora")
+        self.assertEqual(values["computer_use_haze"]["preset"], "aurora")
+        self.assertEqual(values["computer_use_haze"]["start_color"], "#6EE7F9")
+        self.assertEqual(values["computer_use_haze"]["end_color"], "#112233")
+        self.assertEqual(values["computer_use_haze"]["accent_color"], "#AABBCC")
+        self.assertEqual(values["computer_use_haze"]["opacity"], 0.9)
+        self.assertEqual(values["computer_use_haze"]["edge_width"], 40)
+        self.assertEqual(values["computer_use_haze"]["animation_speed"], 1)
+
     def test_keyboard_button_navigation_defaults_off(self):
         from domain.frontend.registry import FrontendRegistry
 

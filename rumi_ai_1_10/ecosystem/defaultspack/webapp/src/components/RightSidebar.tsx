@@ -386,6 +386,28 @@ function FieldControl({
     );
   }
 
+  if (field.type === "color") {
+    const rawValue = String(value ?? field.default ?? "#FFFFFF");
+    const colorValue = /^#[0-9a-fA-F]{6}$/.test(rawValue) ? rawValue : "#FFFFFF";
+    return (
+      <div className="flex min-w-0 items-center gap-2">
+        <input
+          type="color"
+          value={colorValue}
+          onChange={(event) => onChange(event.target.value.toUpperCase())}
+          className="h-8 w-9 shrink-0 cursor-pointer rounded border border-zinc-700 bg-zinc-800 p-0.5"
+          aria-label={field.label}
+        />
+        <input
+          type="text"
+          value={rawValue}
+          onChange={(event) => onChange(event.target.value)}
+          className="bg-zinc-800 border border-zinc-700 text-zinc-200 text-xs rounded px-2 py-1 outline-none min-w-0 w-24 font-mono"
+        />
+      </div>
+    );
+  }
+
   if (field.type === "readonly") {
     return <span className="text-xs text-zinc-300 font-mono">{String(value ?? field.default ?? "")}</span>;
   }
