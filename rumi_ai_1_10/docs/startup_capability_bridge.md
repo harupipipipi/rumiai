@@ -104,4 +104,6 @@ The optional body can include a draft profile:
 
 The response mirrors the launch compile result and includes
 `surface_launch_target`, so the Startup Profile editor can show the frontend
-pack that will be opened after restart.
+pack that will be opened after restart. Preview compiles do not register a
+runtime profile in `InterfaceRegistry`; launch compiles still register the
+runtime profile and persist its key.
