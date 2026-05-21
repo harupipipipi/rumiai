@@ -354,11 +354,13 @@ class CapabilityGraphHandlersMixin:
                     "register": bool(body.get("register", False)),
                 },
             )
+            runtime_profile = result.get("runtime_profile")
             return {
                 "ok": bool(result.get("ok")),
                 "graph_id": graph_id,
                 "profile_id": profile_id,
-                "runtime_profile": result.get("runtime_profile"),
+                "runtime_profile": runtime_profile,
+                "surface_launch_target": _surface_launch_target_for_runtime_profile(runtime_profile),
                 "diagnostics": list(result.get("diagnostics") or []),
             }
         except Exception as exc:
@@ -523,8 +525,10 @@ class CapabilityGraphHandlersMixin:
         )
         return {
             "ok": result.ok,
+            "graph_id": graph.graph_id,
             "profile_id": profile_id,
             "runtime_profile": result.runtime_profile,
+            "surface_launch_target": _surface_launch_target_for_runtime_profile(result.runtime_profile),
             "diagnostics": list(registration.diagnostics) + list(node_registry.diagnostics) + list(result.diagnostics),
         }
 
@@ -632,3 +636,19 @@ class CapabilityGraphHandlersMixin:
         except Exception as exc:
             _log_internal_error("capability_clone_profile", exc)
             return {"error": _SAFE_ERROR_MSG, "status_code": 500}
+
+
+def _surface_launch_target_for_runtime_profile(runtime_profile: Any) -> Optional[Dict[str, Any]]:
+    if not isinstance(runtime_profile, dict):
+        return None
+    try:
+        from ..surface_launch_target import extract_surface_launch_target
+    except Exception:
+        return None
+    profile = runtime_profile.get("profile")
+    surfaces = profile.get("surfaces") if isinstance(profile, dict) else None
+    return extract_surface_launch_target(
+        runtime_profile,
+        fallback_pack_id=None,
+        surfaces=surfaces if isinstance(surfaces, dict) else None,
+    )

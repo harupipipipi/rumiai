@@ -449,11 +449,24 @@ export interface CapabilityGraphResponseData {
   graph: ApiCapabilityGraph;
 }
 
+export interface ApiSurfaceLaunchTarget {
+  kind: string;
+  pack_id: string;
+  principal_id?: string;
+  surface?: string;
+  node_instance_id?: string;
+  node_id?: string;
+  component_full_id?: string;
+  env?: Record<string, string>;
+  source?: string;
+}
+
 export interface CapabilityGraphCompileResponseData {
   ok: boolean;
   graph_id: string;
   profile_id: string;
   runtime_profile?: Record<string, unknown> | null;
+  surface_launch_target?: ApiSurfaceLaunchTarget | null;
   diagnostics: ApiCapabilityDiagnostic[];
 }
 

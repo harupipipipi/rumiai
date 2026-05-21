@@ -202,6 +202,16 @@ export function GraphEditor() {
                 {preview.ok ? <CheckCircle2 className="w-4 h-4 text-green-600" /> : <TriangleAlert className="w-4 h-4 text-amber-600" />}
                 <span>{preview.ok ? 'Ready' : 'Needs attention'}</span>
               </div>
+              {preview.surface_launch_target && (
+                <div className="rounded-md border border-border bg-bg-main p-3">
+                  <div className="text-xs font-semibold text-text-main">Launch target</div>
+                  <div className="mt-1 text-xs text-text-muted">
+                    {preview.surface_launch_target.pack_id}
+                    {' / '}
+                    {preview.surface_launch_target.node_id ?? preview.surface_launch_target.node_instance_id ?? 'desktop_app'}
+                  </div>
+                </div>
+              )}
               {preview.diagnostics.map((item, index) => (
                 <div key={`${item.code}-${index}`} className="rounded-md border border-border p-3 text-xs">
                   <div className="font-medium text-text-main">{item.code}</div>
