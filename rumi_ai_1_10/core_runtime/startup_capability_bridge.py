@@ -47,6 +47,7 @@ def compile_startup_capabilities(
     interface_registry: InterfaceRegistry,
     approval_manager: Any = None,
     ecosystem_dir: Optional[str] = None,
+    register: bool = True,
 ) -> StartupCapabilityCompileResult:
     """Compile the startup profile's opt-in Capability Graph bridge."""
     graph_id = _string_or_none(startup_profile.get("default_graph"))
@@ -169,7 +170,7 @@ def compile_startup_capabilities(
             graph,
             profile=profile,
             nodes=dict(nodes),
-            register=True,
+            register=register,
         )
         diagnostics.extend(compile_result.diagnostics)
         runtime_profile = compile_result.runtime_profile

@@ -231,7 +231,7 @@ class StartupProfileManager:
                 ],
             }
 
-        capability_graph = self._compile_launch_capability_graph(profile)
+        capability_graph = self._compile_launch_capability_graph(profile, register=False)
         diagnostics = list(capability_graph.get("diagnostics") or [])
         surface_launch_target = capability_graph.get("surface_launch_target")
         return {
@@ -1307,7 +1307,12 @@ class StartupProfileManager:
     # Capability graph compilation
     # ------------------------------------------------------------------
 
-    def _compile_launch_capability_graph(self, profile: Dict[str, Any]) -> Dict[str, Any]:
+    def _compile_launch_capability_graph(
+        self,
+        profile: Dict[str, Any],
+        *,
+        register: bool = True,
+    ) -> Dict[str, Any]:
         if not profile.get("launch_capability_graph"):
             return {
                 "ok": True,
@@ -1351,6 +1356,7 @@ class StartupProfileManager:
             interface_registry=self.interface_registry,
             approval_manager=self.approval_manager,
             ecosystem_dir=self.ecosystem_dir,
+            register=register,
         ).to_dict()
 
     def _record_capability_graph_result(self, capability_graph: Dict[str, Any]) -> None:

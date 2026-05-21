@@ -972,6 +972,33 @@ def test_compile_profile_preview_uses_draft_node_overrides(tmp_path: Path):
     assert result["capability_graph"]["runtime_profile"]["launch"]["surface"]["pack_id"] == "frontendpack"
 
 
+def test_compile_profile_preview_does_not_register_runtime_profile(tmp_path: Path):
+    repo_defaultspack = Path(__file__).resolve().parents[1] / "ecosystem" / "defaultspack"
+    eco_root = tmp_path / "ecosystem"
+    shutil.copytree(repo_defaultspack, eco_root / "defaultspack")
+    registry = InterfaceRegistry()
+    manager = StartupProfileManager(
+        storage_path=tmp_path / "startup_profiles.json",
+        interface_registry=registry,
+        approval_manager=_FakeApprovalManager(reason_by_pack={"defaultspack": None}),
+        ecosystem_dir=str(eco_root),
+    )
+
+    created = manager.create_profile({
+        "base_pack": "defaultspack",
+        "name": "Preview Only",
+        "default_graph": "defaultspack.startup",
+        "capability_profile_id": "defaultspack.startup",
+        "launch_capability_graph": True,
+    })
+
+    result = manager.compile_profile_preview(created["profile"]["profile_id"])
+
+    assert result["ok"] is True
+    assert result["capability_graph"]["runtime_profile_key"] is None
+    assert registry.get("runtime_profile.defaultspack.startup.defaultspack.startup") is None
+
+
 def test_launch_profile_strict_compile_failure(tmp_path: Path):
     repo_defaultspack = Path(__file__).resolve().parents[1] / "ecosystem" / "defaultspack"
     eco_root = tmp_path / "ecosystem"
