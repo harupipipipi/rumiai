@@ -9,7 +9,8 @@ import sys
 import time
 import uuid
 
-from domain.coding.terminal_policy import classify_command, normalized_command
+from .terminal_policy import classify_command, normalized_command
+from .workspace_jail import WorkspaceJail
 
 SHELL_METACHARS = {";", "&&", "||", "|", ">", "<", "`", "$(", "${"}
 MAX_OUTPUT_BYTES = 128 * 1024
@@ -24,6 +25,7 @@ class Terminal:
     def __init__(self, workspace_root=None):
         self._history = []
         self._root = os.path.realpath(workspace_root or os.getcwd())
+        self._jail = WorkspaceJail(self._root)
 
     @property
     def history(self):
@@ -50,9 +52,9 @@ class Terminal:
     def _resolve_cwd(self, cwd):
         if cwd is None or cwd == "":
             return self._root
-        resolved = os.path.realpath(cwd if os.path.isabs(cwd) else os.path.join(self._root, cwd))
-        if resolved != self._root and not resolved.startswith(self._root + os.sep):
-            raise ValueError("cwd is outside workspace root: " + str(cwd))
+        resolved = str(self._jail.resolve(cwd, allow_absolute=True))
+        rel = os.path.relpath(resolved, self._root).replace(os.sep, "/")
+        self._jail.ensure_allowed(rel, operation="cwd")
         return resolved
 
     def _normalized_command(self, command):
@@ -82,9 +84,17 @@ class Terminal:
         if isinstance(env, dict):
             for key, value in env.items():
                 key_text = str(key)
-                if key_text.upper() in ENV_ALLOWLIST or key_text.startswith("RUMI_"):
+                if (
+                    key_text.upper() in ENV_ALLOWLIST
+                    or (key_text.startswith("RUMI_") and not self._env_key_looks_secret(key_text))
+                ):
                     process_env[key_text] = str(value)
         return process_env
+
+    @staticmethod
+    def _env_key_looks_secret(key):
+        lowered = str(key).lower()
+        return any(marker in lowered for marker in ("api_key", "authorization", "token", "secret", "password"))
 
     def _truncate_output(self, text):
         raw = str(text or "").encode("utf-8", errors="replace")

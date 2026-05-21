@@ -147,7 +147,7 @@ jobs:
       - name: Run security/audit regression tests
         working-directory: rumi_ai_1_10
         run: |
-          pytest tests/test_approval_security.py tests/test_security_guards.py tests/test_defaultspack_integrity_scan.py tests/test_capability_trust_store.py -v
+          pytest tests/test_approval_security.py tests/test_security_guards.py tests/test_defaultspack_integrity_scan.py tests/test_capability_trust_store.py tests/test_defaultspack_coding_hardening.py tests/test_defaultspack_terminal_policy.py -v
 
   frontend-security-audit:
     strategy:
@@ -219,8 +219,14 @@ jobs:
             --base-ref "origin/${BASE_REF}" \
             --package-dir rumi_ai_1_10 \
             --ruff-target core_runtime \
+            --ruff-target backend_core \
+            --ruff-target ecosystem/defaultspack/domain/coding \
+            --ruff-target ecosystem/defaultspack/blocks/coding \
             --ruff-target app.py \
             --mypy-target core_runtime \
+            --mypy-target backend_core \
+            --mypy-target ecosystem/defaultspack/domain/coding \
+            --mypy-target ecosystem/defaultspack/blocks/coding \
             --mypy-target app.py
 
   rumi-ai-package-pytest:

@@ -326,6 +326,17 @@ class TestDuplicateRegistration:
         assert reg.get("p:f").description == "first"
         assert reg.count() == 1
 
+    def test_duplicate_permission_id_rejected(self):
+        reg = FunctionRegistry()
+        e1 = _make_entry(function_id="read", pack_id="p1", permission_id="coding.file.read")
+        e2 = _make_entry(function_id="read", pack_id="p2", permission_id="coding.file.read")
+
+        assert reg.register(e1) is True
+        assert reg.register(e2) is False
+        assert reg.get_by_permission_id("coding.file.read") is e1
+        assert reg.get("p2:read") is None
+        assert reg.count() == 1
+
 
 # ===================================================================
 # 8. host_execution フラグ

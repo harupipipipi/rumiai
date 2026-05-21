@@ -15,6 +15,8 @@ def run(input_data, context=None):
         workspace = resolve_workspace(input_data, context, allow_cwd_fallback=True)
         diff = FileOps(workspace.root_path).diff_text(path, input_data.get("content", ""))
         return ok(with_workspace({"path": path, "diff": diff, "has_changes": bool(diff)}, workspace))
+    except PermissionError as exc:
+        return error(str(exc), code="PATH_RESTRICTED")
     except ValueError as exc:
         return error(str(exc), code="PATH_TRAVERSAL")
     except Exception as exc:

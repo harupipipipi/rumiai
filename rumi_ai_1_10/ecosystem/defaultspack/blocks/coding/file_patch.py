@@ -43,6 +43,9 @@ def run(input_data, context=None):
             result["checkpoint"] = checkpoint
         record_execution(operation, "medium", {"path": path})
         return ok(with_workspace(result, workspace))
+    except PermissionError as exc:
+        record_failure(operation, "medium", str(exc), {"path": path})
+        return error(str(exc), code="PATH_RESTRICTED")
     except ValueError as exc:
         record_failure(operation, "medium", str(exc), {"path": path})
         return error(str(exc), code="PATCH_ERROR")
