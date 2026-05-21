@@ -1432,11 +1432,10 @@ export function profileNeedsApiKey(profile: ModelProfile | null | undefined): bo
 function isUserFacingModelProfile(profile: ModelProfile, preferredModel: string): boolean {
   const providerId = String(profile.provider_id ?? "").trim();
   const modelId = String(profile.model_id ?? "").trim();
-  const type = String(profile.type ?? "chat").toLowerCase();
   const profileId = profile.profile_id || profile.qualified_model_id || `${providerId}/${modelId}`;
 
   if (profileId === preferredModel) return true;
-  if (type && type !== "chat") return false;
+  if (!profileIsChatSelectable(profile)) return false;
   if (providerId === "rumi") return false;
   if (providerId === "stub") return modelId === "default";
   if (profile.local || profile.availability?.local || profile.availability?.offline || LOCAL_MODEL_PROVIDER_IDS.has(providerId)) return true;
@@ -1513,6 +1512,24 @@ function profileDefaults(profile: ModelProfile | null | undefined): Record<strin
   return profile.defaults ?? {};
 }
 
+function profileIsChatSelectable(profile: ModelProfile | null | undefined): boolean {
+  if (!profile) return false;
+  const type = String(profile.type ?? "chat").toLowerCase();
+  if (!type || type === "chat") return true;
+  if (type !== "reasoning") return false;
+  const defaults = profileDefaults(profile);
+  const metadataCapabilities = profile.metadata?.capabilities;
+  const capabilities = metadataCapabilities && typeof metadataCapabilities === "object" && !Array.isArray(metadataCapabilities)
+    ? metadataCapabilities as Record<string, unknown>
+    : {};
+  return Boolean(
+    defaults.chat
+    || capabilities.chat
+    || capabilities.text
+    || profile.capability_tags?.includes("chat"),
+  );
+}
+
 function profilePriceTier(profile: ModelProfile | null | undefined): string {
   if (!profile) return "";
   if (profile.cost_tier) return String(profile.cost_tier);
@@ -1582,7 +1599,7 @@ function fastCandidateForProfile(activeProfile: ModelProfile | null, profiles: M
   const providerFast = profiles.filter((profile) => (
     profile.provider_id === providerId
     && profileSupportsFast(profile)
-    && String(profile.type ?? "chat").toLowerCase() === "chat"
+    && profileIsChatSelectable(profile)
   ));
   return bestConfiguredCandidate(providerFast);
 }
@@ -3553,6 +3570,7 @@ export default function App() {
 
       await api.streamMessage(conversation.id, userText, {
         thinking_level: activeProfile?.supports_thinking ? selectedThinkingLevel : null,
+        tool_choice: submittedToolIds.length > 0 ? "required" : undefined,
         tool_policy: {
           ...(yoloMode ? { yolo_mode: true, allow_shell: true, allow_file_write: true, write_actions_require_approval: false } : {}),
           ...operationsPolicy,

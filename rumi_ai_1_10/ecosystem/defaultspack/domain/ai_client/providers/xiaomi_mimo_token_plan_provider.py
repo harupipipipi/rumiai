@@ -1,0 +1,217 @@
+from __future__ import annotations
+
+from typing import Any, Dict, List
+
+from .openai_compatible_provider import OpenAICompatibleProvider
+
+
+_TOKEN_PLAN_MODELS: List[Dict[str, Any]] = [
+    {
+        "model_id": "mimo-v2.5-pro",
+        "name": "MiMo V2.5 Pro",
+        "display_name": "MiMo V2.5 Pro",
+        "type": "reasoning",
+        "defaults": {"chat": True, "coding": True, "agent": True, "reasoning": True},
+        "capabilities": {
+            "chat": True,
+            "streaming": True,
+            "reasoning": True,
+            "tool_calls": True,
+            "vision": False,
+        },
+        "supports_thinking": True,
+        "thinking_levels": ["low", "medium", "high", "xhigh"],
+        "default_thinking_level": "medium",
+        "context_window": 1048576,
+        "max_context": 1048576,
+        "max_context_tokens": 1048576,
+        "metadata": {
+            "token_plan": True,
+            "thinking_format": "deepseek",
+            "tool_call_type": "openai",
+        },
+    },
+    {
+        "model_id": "mimo-v2.5",
+        "name": "MiMo V2.5",
+        "display_name": "MiMo V2.5",
+        "type": "reasoning",
+        "defaults": {"chat": True, "reasoning": True},
+        "capabilities": {
+            "chat": True,
+            "streaming": True,
+            "reasoning": True,
+            "tool_calls": True,
+            "vision": False,
+        },
+        "supports_thinking": True,
+        "thinking_levels": ["low", "medium", "high", "xhigh"],
+        "default_thinking_level": "medium",
+        "metadata": {
+            "token_plan": True,
+            "thinking_format": "deepseek",
+            "tool_call_type": "openai",
+        },
+    },
+    {
+        "model_id": "mimo-v2-pro",
+        "name": "MiMo V2 Pro",
+        "display_name": "MiMo V2 Pro",
+        "type": "reasoning",
+        "defaults": {"reasoning": True},
+        "capabilities": {
+            "chat": True,
+            "streaming": True,
+            "reasoning": True,
+            "tool_calls": True,
+            "vision": False,
+        },
+        "supports_thinking": True,
+        "thinking_levels": ["low", "medium", "high", "xhigh"],
+        "default_thinking_level": "medium",
+        "metadata": {
+            "token_plan": True,
+            "thinking_format": "deepseek",
+            "tool_call_type": "openai",
+        },
+    },
+    {
+        "model_id": "mimo-v2-flash",
+        "name": "MiMo V2 Flash",
+        "display_name": "MiMo V2 Flash",
+        "type": "chat",
+        "defaults": {"chat": True, "fast": True},
+        "capabilities": {
+            "chat": True,
+            "streaming": True,
+            "reasoning": False,
+            "tool_calls": True,
+            "vision": False,
+        },
+        "metadata": {
+            "token_plan": True,
+            "tool_call_type": "openai",
+        },
+    },
+]
+
+
+class XiaomiMimoTokenPlanProvider(OpenAICompatibleProvider):
+    """Xiaomi MiMo Token Plan OpenAI-compatible runtime provider."""
+
+    MODEL_IDS = {str(model["model_id"]) for model in _TOKEN_PLAN_MODELS}
+
+    def __init__(
+        self,
+        *,
+        provider_id: str,
+        display_name: str,
+        api_key_env: list[str],
+        base_url_env: str,
+        default_base_url: str,
+        region: str,
+    ) -> None:
+        models: List[Dict[str, Any]] = []
+        for raw in _TOKEN_PLAN_MODELS:
+            model = dict(raw)
+            model["id"] = f"{provider_id}/{model['model_id']}"
+            model["provider"] = provider_id
+            model["provider_id"] = provider_id
+            metadata = dict(model.get("metadata", {}))
+            metadata["region"] = region
+            metadata["token_plan_region_scoped"] = True
+            model["metadata"] = metadata
+            models.append(model)
+
+        super().__init__(
+            provider_id=provider_id,
+            display_name=display_name,
+            api_key_env=api_key_env,
+            base_url_env=base_url_env,
+            default_base_url=default_base_url,
+            credential_required=True,
+            known_models=models,
+        )
+        self.region = region
+
+    def _headers(self, content_type="application/json"):
+        headers = {
+            "User-Agent": "RumiAI/1.0",
+            "Accept": "application/json",
+        }
+        if self._api_key:
+            headers["api-key"] = self._api_key
+        if content_type:
+            headers["Content-Type"] = content_type
+        return headers
+
+    @classmethod
+    def _assert_supported_model(cls, model: str) -> None:
+        model_id = str(model or "").strip()
+        if "/" in model_id:
+            model_id = model_id.split("/", 1)[1]
+        if model_id not in cls.MODEL_IDS:
+            supported = ", ".join(sorted(cls.MODEL_IDS))
+            raise RuntimeError(
+                "xiaomi-mimo-token-plan: unsupported model. "
+                f"defaultspack supports only: {supported}"
+            )
+
+    def list_models(self) -> List[Dict[str, Any]]:
+        return [dict(model) for model in self.KNOWN_MODELS]
+
+    def complete(self, model, messages, tools, params):
+        self._assert_supported_model(model)
+        return super().complete(model, messages, tools, params)
+
+    def stream(self, model, messages, tools, params):
+        self._assert_supported_model(model)
+        return super().stream(model, messages, tools, params)
+
+
+class XiaomiMimoTokenPlanAmsProvider(XiaomiMimoTokenPlanProvider):
+    def __init__(self) -> None:
+        super().__init__(
+            provider_id="xiaomi-token-plan-ams",
+            display_name="Xiaomi MiMo Token Plan AMS",
+            api_key_env=[
+                "XIAOMI_MIMO_TOKEN_PLAN_AMS_API_KEY",
+                "XIAOMI_MIMO_TOKEN_PLAN_API_KEY",
+                "MIMO_API_KEY",
+            ],
+            base_url_env="XIAOMI_MIMO_TOKEN_PLAN_AMS_BASE_URL",
+            default_base_url="https://token-plan-ams.xiaomimimo.com/v1",
+            region="ams",
+        )
+
+
+class XiaomiMimoTokenPlanCnProvider(XiaomiMimoTokenPlanProvider):
+    def __init__(self) -> None:
+        super().__init__(
+            provider_id="xiaomi-token-plan-cn",
+            display_name="Xiaomi MiMo Token Plan CN",
+            api_key_env=[
+                "XIAOMI_MIMO_TOKEN_PLAN_CN_API_KEY",
+                "XIAOMI_MIMO_TOKEN_PLAN_API_KEY",
+                "MIMO_API_KEY",
+            ],
+            base_url_env="XIAOMI_MIMO_TOKEN_PLAN_CN_BASE_URL",
+            default_base_url="https://token-plan-cn.xiaomimimo.com/v1",
+            region="cn",
+        )
+
+
+class XiaomiMimoTokenPlanSgpProvider(XiaomiMimoTokenPlanProvider):
+    def __init__(self) -> None:
+        super().__init__(
+            provider_id="xiaomi-token-plan-sgp",
+            display_name="Xiaomi MiMo Token Plan SGP",
+            api_key_env=[
+                "XIAOMI_MIMO_TOKEN_PLAN_SGP_API_KEY",
+                "XIAOMI_MIMO_TOKEN_PLAN_API_KEY",
+                "MIMO_API_KEY",
+            ],
+            base_url_env="XIAOMI_MIMO_TOKEN_PLAN_SGP_BASE_URL",
+            default_base_url="https://token-plan-sgp.xiaomimimo.com/v1",
+            region="sgp",
+        )

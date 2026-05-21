@@ -1,0 +1,132 @@
+{
+  "models": [
+    {
+      "id": "xiaomi-token-plan-cn/mimo-v2.5-pro",
+      "category": "llm_model",
+      "version": "1",
+      "provider_id": "xiaomi-token-plan-cn",
+      "model_id": "mimo-v2.5-pro",
+      "display_name": "MiMo V2.5 Pro",
+      "type": "reasoning",
+      "enabled": true,
+      "priority": 1,
+      "defaults": {
+        "chat": true,
+        "coding": true,
+        "agent": true,
+        "reasoning": true
+      },
+      "capabilities": {
+        "chat": true,
+        "streaming": true,
+        "reasoning": true,
+        "tool_calls": true,
+        "vision": false
+      },
+      "supports_thinking": true,
+      "thinking_levels": ["low", "medium", "high", "xhigh"],
+      "default_thinking_level": "medium",
+      "context_window": 1048576,
+      "max_context": 1048576,
+      "max_context_tokens": 1048576,
+      "metadata": {
+        "region": "cn",
+        "token_plan": true,
+        "thinking_format": "deepseek",
+        "tool_call_type": "openai",
+        "token_plan_region_scoped": true
+      }
+    },
+    {
+      "id": "xiaomi-token-plan-cn/mimo-v2.5",
+      "category": "llm_model",
+      "version": "1",
+      "provider_id": "xiaomi-token-plan-cn",
+      "model_id": "mimo-v2.5",
+      "display_name": "MiMo V2.5",
+      "type": "reasoning",
+      "enabled": true,
+      "priority": 2,
+      "defaults": {
+        "chat": true,
+        "reasoning": true
+      },
+      "capabilities": {
+        "chat": true,
+        "streaming": true,
+        "reasoning": true,
+        "tool_calls": true,
+        "vision": false
+      },
+      "supports_thinking": true,
+      "thinking_levels": ["low", "medium", "high", "xhigh"],
+      "default_thinking_level": "medium",
+      "metadata": {
+        "region": "cn",
+        "token_plan": true,
+        "thinking_format": "deepseek",
+        "tool_call_type": "openai",
+        "token_plan_region_scoped": true
+      }
+    },
+    {
+      "id": "xiaomi-token-plan-cn/mimo-v2-pro",
+      "category": "llm_model",
+      "version": "1",
+      "provider_id": "xiaomi-token-plan-cn",
+      "model_id": "mimo-v2-pro",
+      "display_name": "MiMo V2 Pro",
+      "type": "reasoning",
+      "enabled": true,
+      "priority": 3,
+      "defaults": {
+        "reasoning": true
+      },
+      "capabilities": {
+        "chat": true,
+        "streaming": true,
+        "reasoning": true,
+        "tool_calls": true,
+        "vision": false
+      },
+      "supports_thinking": true,
+      "thinking_levels": ["low", "medium", "high", "xhigh"],
+      "default_thinking_level": "medium",
+      "metadata": {
+        "region": "cn",
+        "token_plan": true,
+        "thinking_format": "deepseek",
+        "tool_call_type": "openai",
+        "token_plan_region_scoped": true
+      }
+    },
+    {
+      "id": "xiaomi-token-plan-cn/mimo-v2-flash",
+      "category": "llm_model",
+      "version": "1",
+      "provider_id": "xiaomi-token-plan-cn",
+      "model_id": "mimo-v2-flash",
+      "display_name": "MiMo V2 Flash",
+      "type": "chat",
+      "enabled": true,
+      "priority": 4,
+      "defaults": {
+        "chat": true,
+        "fast": true
+      },
+      "capabilities": {
+        "chat": true,
+        "streaming": true,
+        "reasoning": false,
+        "tool_calls": true,
+        "vision": false
+      },
+      "metadata": {
+        "region": "cn",
+        "token_plan": true,
+        "tool_call_type": "openai",
+        "token_plan_region_scoped": true
+      }
+    }
+  ]
+}

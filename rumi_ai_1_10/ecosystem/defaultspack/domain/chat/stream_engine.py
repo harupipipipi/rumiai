@@ -199,6 +199,36 @@ def _approval_request_from_tool_result(
     return None
 
 
+def _response_reasoning_content(response: dict[str, Any] | None) -> str:
+    if not isinstance(response, dict):
+        return ""
+    for key in ("reasoning_content", "reasoning", "thinking"):
+        value = response.get(key)
+        if isinstance(value, str) and value.strip():
+            return value
+    metadata = response.get("metadata")
+    if isinstance(metadata, dict):
+        value = metadata.get("reasoning_content")
+        if isinstance(value, str) and value.strip():
+            return value
+        thinking = metadata.get("thinking")
+        if isinstance(thinking, dict):
+            transcript = thinking.get("transcript")
+            if isinstance(transcript, str) and transcript.strip():
+                return transcript
+    return ""
+
+
+def _default_tool_limit_for_connected_tools(tool_limit: int, connected_tool_names: set[str]) -> int:
+    if tool_limit != 4:
+        return tool_limit
+    if connected_tool_names.intersection({"browser_companion", "browser_computer", "browser_use", "computer_use"}):
+        return 12
+    if any(str(name or "").startswith("coding_") for name in connected_tool_names):
+        return 12
+    return tool_limit
+
+
 def _approval_waiting_response(
     model: str,
     approval_request: dict[str, Any],
@@ -727,11 +757,7 @@ class ChatRunEngine:
         tool_limit = max_tool_calls(prepared.tool_context or {})
         if tool_limit is None:
             tool_limit = int(prepared.params.get("max_tool_calls", 4) or 4)
-        if (
-            tool_limit == 4
-            and prepared.connected_tool_names.intersection({"browser_companion", "browser_computer", "browser_use", "computer_use"})
-        ):
-            tool_limit = 12
+        tool_limit = _default_tool_limit_for_connected_tools(tool_limit, prepared.connected_tool_names)
 
         for step_index in range(max(1, tool_limit + 1)):
             self._raise_if_cancelled()
@@ -765,7 +791,11 @@ class ChatRunEngine:
             if not tool_uses:
                 break
 
-            _append_assistant_tool_use_message(working_messages, tool_uses)
+            _append_assistant_tool_use_message(
+                working_messages,
+                tool_uses,
+                reasoning_content=_response_reasoning_content(response),
+            )
             for block in tool_uses:
                 self._raise_if_cancelled()
                 tool_name = str(block.get("name") or block.get("tool_name") or "").strip()

@@ -20,8 +20,10 @@ def _profile(
     model_id: str,
     availability: dict | None = None,
     profile_type: str = "chat",
+    defaults: dict | None = None,
+    capabilities: dict | list | None = None,
 ):
-    return {
+    profile = {
         "profile_id": profile_id,
         "qualified_model_id": profile_id,
         "provider_id": provider_id,
@@ -31,6 +33,11 @@ def _profile(
         "availability": availability or {},
         "type": profile_type,
     }
+    if defaults is not None:
+        profile["defaults"] = defaults
+    if capabilities is not None:
+        profile["capabilities"] = capabilities
+    return profile
 
 
 def test_model_runtime_settings_preferred_model_and_thinking_level(tmp_path):
@@ -250,13 +257,35 @@ def test_resolve_model_candidates_limits_model_command_to_chat_profiles(tmp_path
             model_id="gpt-4o",
             availability={"configured": False, "status": "unconfigured"},
         ),
+        _profile(
+            "xiaomi-token-plan-sgp/mimo-v2.5-pro",
+            display_name="MiMo V2.5 Pro",
+            provider_id="xiaomi-token-plan-sgp",
+            model_id="mimo-v2.5-pro",
+            profile_type="reasoning",
+            defaults={"chat": True, "reasoning": True},
+            capabilities={"chat": True, "tool_calls": True},
+        ),
+        _profile(
+            "reasoning-only/deep-think",
+            display_name="Deep Think",
+            provider_id="reasoning-only",
+            model_id="deep-think",
+            profile_type="reasoning",
+            defaults={"reasoning": True},
+            capabilities={"reasoning": True},
+        ),
     ]
     monkeypatch.setattr(service, "_list_profile_catalog", lambda: profiles)
 
     embedding = service.resolve_model_candidates("text-embedding-3-small")
+    mimo = service.resolve_model_candidates("xiaomi-token-plan-sgp/mimo-v2.5-pro")
+    reasoning_only = service.resolve_model_candidates("deep-think")
     chat = service.resolve_model_candidates("openai/gpt-4o")
 
     assert embedding["candidates"] == []
+    assert mimo["exact"]["profile_id"] == "xiaomi-token-plan-sgp/mimo-v2.5-pro"
+    assert reasoning_only["candidates"] == []
     assert chat["exact"]["profile_id"] == "openai/gpt-4o"
     assert chat["exact"]["requires_api_key"] is True
     assert chat["exact"]["availability"]["status"] == "unconfigured"

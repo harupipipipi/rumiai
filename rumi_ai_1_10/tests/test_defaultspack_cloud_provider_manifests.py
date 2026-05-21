@@ -219,6 +219,43 @@ def test_cloud_provider_keys_are_persistable_in_secret_store():
     assert provider_secret_keys("groq") == ["GROQ_API_KEY"]
     assert provider_secret_keys("cerebras") == ["CEREBRAS_API_KEY"]
     assert provider_secret_keys("nvidia") == ["NVIDIA_API_KEY", "NGC_API_KEY"]
+    assert provider_secret_keys("xiaomi-token-plan-sgp") == [
+        "XIAOMI_MIMO_TOKEN_PLAN_SGP_API_KEY",
+        "XIAOMI_MIMO_TOKEN_PLAN_API_KEY",
+        "MIMO_API_KEY",
+    ]
+
+
+def test_named_token_plan_key_maps_back_to_long_provider_id(tmp_path, monkeypatch):
+    from domain.ai_client.api_key_store import (
+        load_provider_api_keys_into_env,
+        provider_has_api_key,
+        provider_named_api_keys,
+        set_provider_api_key,
+    )
+
+    for env_name in (
+        "XIAOMI_MIMO_TOKEN_PLAN_SGP_API_KEY",
+        "XIAOMI_MIMO_TOKEN_PLAN_API_KEY",
+        "MIMO_API_KEY",
+    ):
+        monkeypatch.delenv(env_name, raising=False)
+
+    set_provider_api_key(
+        "xiaomi-token-plan-sgp",
+        "test-token",
+        name="MiMo Token Plan SGP",
+        default_model="mimo-v2.5-pro",
+        pack_root=tmp_path,
+    )
+
+    assert provider_has_api_key("xiaomi-token-plan-sgp", pack_root=tmp_path) is True
+    assert provider_named_api_keys("xiaomi-token-plan-sgp", pack_root=tmp_path)[0]["provider_id"] == "xiaomi-token-plan-sgp"
+
+    loaded = load_provider_api_keys_into_env(pack_root=tmp_path)
+
+    assert loaded["xiaomi-token-plan-sgp"] is True
+    assert os.environ["XIAOMI_MIMO_TOKEN_PLAN_SGP_API_KEY"] == "test-token"
 
 
 def test_cloud_model_capability_false_values_are_preserved():
@@ -264,6 +301,9 @@ def test_xiaomi_mimo_direct_catalog_is_separate_and_not_runtime_enabled(monkeypa
     assert catalog["xiaomi-mimo"]["availability"]["supports_invoke"] is False
     assert catalog["xiaomi-mimo-global"]["availability"]["supports_invoke"] is False
     assert catalog["xiaomi-mimo-cn"]["availability"]["supports_invoke"] is False
+    assert catalog["xiaomi-token-plan-sgp"]["availability"]["supports_invoke"] is True
+    assert catalog["xiaomi-token-plan-sgp"]["metadata"]["adapter"] == "python_entrypoint"
+    assert catalog["xiaomi-token-plan-sgp"]["metadata"]["default_base_url"] == "https://token-plan-sgp.xiaomimimo.com/v1"
     assert catalog["xiaomi-mimo-global"]["metadata"]["config"]["do_not_fallback_to_other_region"] is True
     assert catalog["xiaomi-mimo-cn"]["metadata"]["config"]["do_not_reuse_credentials_across_regions"] is True
 
@@ -276,3 +316,20 @@ def test_xiaomi_mimo_direct_catalog_is_separate_and_not_runtime_enabled(monkeypa
         clear=False,
     ):
         assert "xiaomi-mimo-global" not in detect_available_providers()
+
+    monkeypatch.setenv("XIAOMI_MIMO_TOKEN_PLAN_SGP_API_KEY", "test-token-plan")
+    assert "xiaomi-token-plan-sgp" in detect_available_providers()
+
+
+def test_xiaomi_token_plan_catalog_models_are_runtime_and_tool_capable():
+    provider, models = _catalog_and_models("xiaomi-token-plan-sgp")
+
+    assert provider["availability"]["supports_invoke"] is True
+    assert provider["metadata"]["config"]["auth_header"] == "api-key"
+    assert provider["default_model_for"]["coding"] == "mimo-v2.5-pro"
+    assert "xiaomi-token-plan-sgp/mimo-v2.5-pro" in models
+
+    pro = models["xiaomi-token-plan-sgp/mimo-v2.5-pro"]
+    assert pro["type"] == "reasoning"
+    assert pro["defaults"]["chat"] is True
+    assert "tool_calls" in pro["capabilities"]

@@ -883,6 +883,8 @@ type ApiEnvelope<T> = ApiOk<T> | ApiError;
 
 type SendMessageOptions = {
   thinking_level?: string | null;
+  tool_choice?: "auto" | "none" | "required" | Record<string, unknown>;
+  parallel_tool_calls?: boolean;
   tool_policy?: Record<string, unknown>;
   attachments?: ChatAttachment[];
   tools?: string[];
@@ -1091,6 +1093,8 @@ function messageRequestBody(
     tools: Array.isArray(options?.tools) ? options.tools : undefined,
     params: {
       thinking_level: options?.thinking_level ?? undefined,
+      tool_choice: options?.tool_choice ?? undefined,
+      parallel_tool_calls: options?.parallel_tool_calls ?? undefined,
       tool_policy: options?.tool_policy ?? undefined,
     },
   };
