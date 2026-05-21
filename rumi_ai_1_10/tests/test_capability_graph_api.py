@@ -311,4 +311,5 @@ def test_core_control_panel_registers_capability_graph_api_routes() -> None:
     assert ("GET", "/api/nodes") in exact_paths
     assert ("GET", "/api/panel/profiles") in exact_paths
     assert ("GET", "/api/profiles/{id}/nodes") in pattern_paths
+    assert ("POST", "/api/panel/startup/profiles/{id}/compile-preview") in pattern_paths
     assert ("POST", "/api/graphs/{id}/compile") in pattern_paths

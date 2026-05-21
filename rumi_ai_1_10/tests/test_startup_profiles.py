@@ -12,6 +12,7 @@ import yaml
 
 from core_runtime.startup_profiles import StartupProfileManager, PROFILE_VERSION
 from core_runtime.interface_registry import InterfaceRegistry
+from core_runtime.desktop_app_manager import DesktopAppManager
 
 
 class _FakeActiveEcosystem:
@@ -159,8 +160,9 @@ def _write_frontendpack(root: Path, *, component_node: bool = True) -> Path:
         "pack_identity": "rumi:ecosystem/frontendpack",
         "enabled": True,
         "desktop_app": {
-            "module": "frontendpack.desktop_app",
-            "handler": "launch",
+            "command": "python desktop_app.py",
+            "working_dir": "",
+            "env": {"FRONTENDPACK_PORT": "8770"},
         },
         "metadata": {
             "name": "frontendpack",
@@ -371,6 +373,25 @@ def test_startup_catalog_discovers_component_node_files(tmp_path: Path):
 
     frontend_pack = next(pack for pack in payload["catalog"]["packs"] if pack["pack_id"] == "frontendpack")
     assert any(node["node_id"] == "frontendpack.web_surface" for node in frontend_pack["nodes"])
+
+
+def test_frontendpack_fixture_registers_desktop_app_command(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    eco_root = tmp_path / "ecosystem"
+    eco_path = _write_frontendpack(eco_root, component_node=True)
+    pack_shell = tmp_path / "pack-shell"
+    pack_shell.write_text("#!/bin/sh\n", encoding="utf-8")
+    pack_shell.chmod(0o755)
+
+    monkeypatch.setenv("RUMI_PACK_SHELL_PATH", str(pack_shell))
+    manager = DesktopAppManager(repo_dir=str(tmp_path / "repo"))
+    with patch.object(manager, "_create_shortcut", return_value=str(tmp_path / "Frontendpack.app")):
+        result = manager.register_from_ecosystem(str(eco_path))
+
+    assert result["success"] is True
+    meta_path = tmp_path / "repo" / "user_data" / "apps" / "frontendpack.json"
+    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    assert meta["command"] == "python desktop_app.py"
+    assert meta["env"]["FRONTENDPACK_PORT"] == "8770"
 
 
 def test_default_manager_uses_rumi_user_data_and_seeds_default_profile(
@@ -919,6 +940,36 @@ def test_launch_profile_persists_graph_surface_launch_target(tmp_path: Path):
     assert capability_graph["surface_launch_target"]["pack_id"] == "frontendpack"
     assert active.metadata["startup_surface_launch_target"]["pack_id"] == "frontendpack"
     assert active.metadata["startup_capability_graph"]["surface_launch_target"]["pack_id"] == "frontendpack"
+
+
+def test_compile_profile_preview_uses_draft_node_overrides(tmp_path: Path):
+    repo_defaultspack = Path(__file__).resolve().parents[1] / "ecosystem" / "defaultspack"
+    eco_root = tmp_path / "ecosystem"
+    shutil.copytree(repo_defaultspack, eco_root / "defaultspack")
+    _write_frontendpack(eco_root, component_node=True)
+    manager = StartupProfileManager(
+        storage_path=tmp_path / "startup_profiles.json",
+        interface_registry=InterfaceRegistry(),
+        approval_manager=_FakeApprovalManager(reason_by_pack={"defaultspack": None, "frontendpack": None}),
+        ecosystem_dir=str(eco_root),
+    )
+
+    created = manager.create_profile({
+        "base_pack": "defaultspack",
+        "name": "Frontend Preview",
+        "default_graph": "defaultspack.startup",
+        "capability_profile_id": "defaultspack.startup",
+        "launch_capability_graph": True,
+    })
+    profile = dict(created["profile"])
+    profile["packs"] = ["defaultspack", "frontendpack"]
+    profile["node_overrides"] = {"frontend.surface": "frontendpack.web_surface"}
+
+    result = manager.compile_profile_preview(profile["profile_id"], {"profile": profile})
+
+    assert result["ok"] is True
+    assert result["surface_launch_target"]["pack_id"] == "frontendpack"
+    assert result["capability_graph"]["runtime_profile"]["launch"]["surface"]["pack_id"] == "frontendpack"
 
 
 def test_launch_profile_strict_compile_failure(tmp_path: Path):

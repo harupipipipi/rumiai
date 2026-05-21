@@ -3,6 +3,8 @@ import type {
   PacksResponseData,
   PackToggleResponseData,
   StartupProfilesResponseData,
+  ApiStartupProfile,
+  StartupProfileCompilePreviewResponseData,
   StartupProfileMutationResponseData,
   StartupProfileDeleteResponseData,
   FlowsResponseData,
@@ -426,6 +428,19 @@ export function launchStartupProfile(id: string): Promise<StartupProfileMutation
   return apiFetch<StartupProfileMutationResponseData>(
     `/api/panel/startup/profiles/${encodeURIComponent(id)}/launch`,
     { method: 'POST' },
+  );
+}
+
+export function compileStartupProfilePreview(
+  id: string,
+  profile?: ApiStartupProfile,
+): Promise<StartupProfileCompilePreviewResponseData> {
+  return apiFetch<StartupProfileCompilePreviewResponseData>(
+    `/api/panel/startup/profiles/${encodeURIComponent(id)}/compile-preview`,
+    {
+      method: 'POST',
+      body: JSON.stringify(profile ? { profile } : {}),
+    },
   );
 }
 

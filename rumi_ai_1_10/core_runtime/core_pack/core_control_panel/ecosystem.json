@@ -215,6 +215,12 @@
     },
     {
       "method": "POST",
+      "path_pattern": "/api/panel/startup/profiles/{id}/compile-preview",
+      "handler": "_panel_compile_startup_profile_preview",
+      "pass_body": true
+    },
+    {
+      "method": "POST",
       "path_pattern": "/api/panel/startup/profiles/{id}/launch",
       "handler": "_panel_launch_startup_profile"
     },
