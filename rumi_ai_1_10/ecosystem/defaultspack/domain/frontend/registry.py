@@ -737,12 +737,12 @@ class FrontendRegistry:
                     },
                     {
                         "id": "model_api_routes",
-                        "label": "Model API Priority",
+                        "label": "Model API Variants",
                         "type": "model_api_routes",
                         "default": "",
                         "options": self._model_route_options(),
                         "api_keys": provider_key_status(pack_root=self._pack_root),
-                        "help": "1行に model: provider/api-name を優先順で書きます。例: google/gemini-2.5-pro: google/main, google/backup。制限時は次の API へ切り替えます。",
+                        "help": "モデルごとに使う API key を選びます。複数選んだら、各 API key ごとに別 model variant として composer に並びます。",
                     },
                     {
                         "id": "api_routes",
@@ -811,14 +811,14 @@ class FrontendRegistry:
             {
                 "id": "apis",
                 "label": "APIs",
-                "description": "名前付き API key を保存します。モデルごとの使用 API は Models で設定します。",
+                "description": "provider・名前・API key だけで保存します。LLM 以外 (search API など) も追加でき、認識用にだけ保存されます。",
                 "fields": [
                     {
                         "id": "api_keys",
                         "label": "API Keys",
                         "type": "api_keys",
                         "default": [],
-                        "help": "provider と名前を付けて複数の API key を保存できます。値は再表示されません。",
+                        "help": "provider を選び、名前と API key を貼って Save。Custom provider は + Add custom provider から追加します。",
                     },
                 ],
             },
@@ -2129,6 +2129,7 @@ class FrontendRegistry:
                         default_model=str(api_key_patch.get("default_model") or "").strip() or None,
                         notes=str(api_key_patch.get("notes") or "").strip() or None,
                         quota_label=str(api_key_patch.get("quota_label") or "").strip() or None,
+                        kind=str(api_key_patch.get("kind") or "").strip() or None,
                     )
             apis["api_keys"] = []
         external_output = sanitized.get("external_output")

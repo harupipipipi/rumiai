@@ -1344,8 +1344,9 @@ export const api = {
     defaultModel?: string;
     notes?: string;
     quotaLabel?: string;
+    kind?: string;
   }) {
-    return request<{ provider_id: string; api_id?: string; name?: string; configured: boolean }>("/api/ai/provider-key", {
+    return request<{ provider_id: string; api_id?: string; name?: string; configured: boolean; kind?: string }>("/api/ai/provider-key", {
       method: "POST",
       body: JSON.stringify({
         provider_id: providerId,
@@ -1357,6 +1358,29 @@ export const api = {
         default_model: options?.defaultModel,
         notes: options?.notes,
         quota_label: options?.quotaLabel,
+        kind: options?.kind,
+      }),
+    });
+  },
+
+  registerCustomProvider(providerId: string, options?: { label?: string; kind?: string }) {
+    return request<{ provider_id: string; label?: string; kind?: string; builtin?: boolean }>("/api/ai/provider-key", {
+      method: "POST",
+      body: JSON.stringify({
+        action: "register_provider",
+        provider_id: providerId,
+        label: options?.label,
+        kind: options?.kind,
+      }),
+    });
+  },
+
+  deleteCustomProvider(providerId: string) {
+    return request<{ provider_id: string; deleted?: boolean }>("/api/ai/provider-key", {
+      method: "POST",
+      body: JSON.stringify({
+        action: "delete_provider",
+        provider_id: providerId,
       }),
     });
   },

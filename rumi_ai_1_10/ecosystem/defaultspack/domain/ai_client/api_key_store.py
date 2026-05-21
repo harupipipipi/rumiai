@@ -34,6 +34,9 @@ PROVIDER_SECRET_KEYS: Dict[str, List[str]] = {
 
 _NAMED_API_PREFIX = "RUMIAPI"
 _SLUG_PATTERN = re.compile(r"[^A-Za-z0-9_]+")
+_KIND_LLM = "llm"
+_KIND_CUSTOM = "custom"
+_VALID_KINDS = {_KIND_LLM, _KIND_CUSTOM}
 
 
 def _pack_root() -> Path:
@@ -49,6 +52,95 @@ def _secrets_dir(pack_root: Path | None = None) -> Path:
 
 def _metadata_path(pack_root: Path | None = None) -> Path:
     return _secrets_dir(pack_root) / "provider_api_keys.json"
+
+
+def _custom_providers_path(pack_root: Path | None = None) -> Path:
+    return _secrets_dir(pack_root) / "custom_providers.json"
+
+
+def _normalize_kind(value: Any) -> str:
+    text = str(value or "").strip().lower()
+    return text if text in _VALID_KINDS else _KIND_LLM
+
+
+def _read_custom_providers(pack_root: Path | None = None) -> dict[str, dict[str, Any]]:
+    path = _custom_providers_path(pack_root)
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    cleaned: dict[str, dict[str, Any]] = {}
+    for key, value in data.items():
+        if not isinstance(value, dict):
+            continue
+        provider_id = str(value.get("provider_id") or key or "").strip()
+        if not provider_id:
+            continue
+        cleaned[provider_id] = {
+            "provider_id": provider_id,
+            "label": str(value.get("label") or provider_id).strip() or provider_id,
+            "kind": _normalize_kind(value.get("kind")),
+        }
+    return cleaned
+
+
+def _write_custom_providers(data: dict[str, dict[str, Any]], pack_root: Path | None = None) -> None:
+    path = _custom_providers_path(pack_root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+
+def list_custom_providers(*, pack_root: Path | None = None) -> list[dict[str, Any]]:
+    return sorted(
+        _read_custom_providers(pack_root).values(),
+        key=lambda item: str(item.get("provider_id") or ""),
+    )
+
+
+def register_custom_provider(
+    provider_id: str,
+    *,
+    label: str | None = None,
+    kind: str | None = None,
+    pack_root: Path | None = None,
+) -> dict[str, Any]:
+    cleaned_id = _slug(provider_id, fallback="", max_length=18).lower()
+    if not cleaned_id:
+        return {"success": False, "error": "provider_id is required"}
+    if cleaned_id in PROVIDER_SECRET_KEYS:
+        # Built-in providers do not need to be registered as custom.
+        return {
+            "success": True,
+            "provider_id": cleaned_id,
+            "label": label or cleaned_id,
+            "kind": _KIND_LLM,
+            "builtin": True,
+        }
+    providers = _read_custom_providers(pack_root)
+    providers[cleaned_id] = {
+        "provider_id": cleaned_id,
+        "label": str(label or cleaned_id).strip() or cleaned_id,
+        "kind": _normalize_kind(kind),
+    }
+    _write_custom_providers(providers, pack_root)
+    return {"success": True, **providers[cleaned_id]}
+
+
+def delete_custom_provider(provider_id: str, *, pack_root: Path | None = None) -> dict[str, Any]:
+    cleaned_id = _slug(provider_id, fallback="", max_length=18).lower()
+    if not cleaned_id:
+        return {"success": False, "error": "provider_id is required"}
+    providers = _read_custom_providers(pack_root)
+    if cleaned_id not in providers:
+        return {"success": True, "provider_id": cleaned_id, "missing": True}
+    providers.pop(cleaned_id, None)
+    _write_custom_providers(providers, pack_root)
+    return {"success": True, "provider_id": cleaned_id, "deleted": True}
 
 
 def _read_api_metadata(pack_root: Path | None = None) -> dict[str, dict[str, Any]]:
@@ -79,6 +171,7 @@ def _metadata_patch(
     default_model: str | None = None,
     notes: str | None = None,
     quota_label: str | None = None,
+    kind: str | None = None,
 ) -> dict[str, Any]:
     metadata = dict(existing or {})
     metadata.update(
@@ -109,6 +202,14 @@ def _metadata_patch(
             metadata["allowed_models"] = models
         else:
             metadata.pop("allowed_models", None)
+
+    if kind is not None:
+        normalized = _normalize_kind(kind)
+        # Persist non-default kind only; default 'llm' is implied.
+        if normalized == _KIND_LLM:
+            metadata.pop("kind", None)
+        else:
+            metadata["kind"] = normalized
     return metadata
 
 
@@ -253,11 +354,30 @@ def set_provider_api_key(
     default_model: str | None = None,
     notes: str | None = None,
     quota_label: str | None = None,
+    kind: str | None = None,
 ) -> dict[str, Any]:
     named = bool(api_id or name)
     key = named_provider_secret_key(provider_id, api_id=api_id, name=name) if named else provider_secret_key(provider_id)
     if not key:
         return {"success": False, "provider_id": provider_id, "error": "unsupported provider"}
+    normalized_provider = str(provider_id or "").strip()
+    is_builtin = normalized_provider in PROVIDER_SECRET_KEYS
+    resolved_kind = _normalize_kind(kind) if kind is not None else None
+    if resolved_kind is None:
+        # Reuse the previously stored kind if any, otherwise default by provider type.
+        existing_metadata = _read_api_metadata(pack_root).get(key, {})
+        if isinstance(existing_metadata, dict) and existing_metadata.get("kind"):
+            resolved_kind = _normalize_kind(existing_metadata.get("kind"))
+        else:
+            resolved_kind = _KIND_LLM if is_builtin else _KIND_LLM
+    if not is_builtin and named and normalized_provider:
+        # Auto-register the custom provider so it shows up in the UI dropdown.
+        register_custom_provider(
+            normalized_provider,
+            label=normalized_provider,
+            kind=resolved_kind,
+            pack_root=pack_root,
+        )
     normalized_api_id = str(api_id or _api_id_from_named_key(key, provider_id)).strip()
     display_name = str(name or normalized_api_id or provider_id).strip()
 
@@ -306,11 +426,12 @@ def set_provider_api_key(
                 default_model=default_model,
                 notes=notes,
                 quota_label=quota_label,
+                kind=resolved_kind,
             )
             _write_api_metadata(metadata, pack_root)
         if not named:
             os.environ[key] = cleaned
-        elif not os.environ.get(provider_secret_key(provider_id), "").strip():
+        elif resolved_kind == _KIND_LLM and not os.environ.get(provider_secret_key(provider_id), "").strip():
             canonical_key = provider_secret_key(provider_id)
             if canonical_key:
                 os.environ[canonical_key] = cleaned
@@ -323,6 +444,7 @@ def set_provider_api_key(
         "key": key,
         "configured": bool(result.success),
         "created": bool(result.created),
+        "kind": resolved_kind,
         "base_url": str(base_url or "").strip(),
         "allowed_models": _normalize_allowed_models(allowed_models),
         "default_model": str(default_model or "").strip(),
@@ -356,6 +478,7 @@ def rename_provider_api_key(
     default_model: str | None = None,
     notes: str | None = None,
     quota_label: str | None = None,
+    kind: str | None = None,
 ) -> dict[str, Any]:
     provider_id = str(provider_id or "").strip()
     api_id = str(api_id or "").strip()
@@ -378,6 +501,7 @@ def rename_provider_api_key(
             default_model=default_model,
             notes=notes,
             quota_label=quota_label,
+            kind=kind,
         )
         _write_api_metadata(metadata, pack_root)
         return {
@@ -412,6 +536,7 @@ def rename_provider_api_key(
         default_model=default_model,
         notes=notes,
         quota_label=quota_label,
+        kind=kind,
     )
     if not saved.get("success"):
         return saved
@@ -435,6 +560,7 @@ def rename_provider_api_key(
             default_model=default_model,
             notes=notes,
             quota_label=quota_label,
+            kind=kind,
         )
         _write_api_metadata(metadata, pack_root)
         _refresh_provider_env(provider_id, pack_root=pack_root)
@@ -509,6 +635,7 @@ def provider_named_api_keys(provider_id: str = "", *, pack_root: Path | None = N
             "configured": bool(meta.exists),
             "created_at": meta.created_at,
             "updated_at": meta.updated_at,
+            "kind": _normalize_kind(stored_meta.get("kind")),
             "base_url": str(stored_meta.get("base_url") or ""),
             "allowed_models": _normalize_allowed_models(stored_meta.get("allowed_models", [])),
             "default_model": str(stored_meta.get("default_model") or ""),
@@ -555,11 +682,14 @@ def read_provider_api_key(provider_id: str, api_id: str, *, pack_root: Path | No
 
 
 def provider_key_status(*, pack_root: Path | None = None) -> list[dict[str, Any]]:
-    return [
+    builtin_rows = [
         {
             "provider_id": provider_id,
             "key": keys[0],
             "keys": list(keys),
+            "kind": _KIND_LLM,
+            "builtin": True,
+            "label": provider_id,
             "configured": (
                 provider_has_api_key(provider_id, pack_root=pack_root)
                 or provider_has_oauth_connection(provider_id, pack_root=pack_root)
@@ -570,3 +700,45 @@ def provider_key_status(*, pack_root: Path | None = None) -> list[dict[str, Any]
         for provider_id, keys in sorted(PROVIDER_SECRET_KEYS.items())
         if keys
     ]
+
+    seen_ids = {row["provider_id"] for row in builtin_rows}
+    custom_definitions = _read_custom_providers(pack_root)
+    # Surface providers that appear via stored named keys even if no custom registration exists.
+    discovered_provider_ids: set[str] = set()
+    for api in provider_named_api_keys("", pack_root=pack_root):
+        provider_id = str(api.get("provider_id") or "").strip()
+        if provider_id and provider_id not in seen_ids:
+            discovered_provider_ids.add(provider_id)
+
+    custom_provider_ids = sorted(set(custom_definitions.keys()) | discovered_provider_ids)
+    custom_rows: list[dict[str, Any]] = []
+    for provider_id in custom_provider_ids:
+        if provider_id in seen_ids:
+            continue
+        definition = custom_definitions.get(provider_id) or {}
+        kind_value = _normalize_kind(definition.get("kind"))
+        # Prefer the kind from the most recent named key if available.
+        for api in provider_named_api_keys(provider_id, pack_root=pack_root):
+            api_kind = _normalize_kind(api.get("kind"))
+            if api_kind:
+                kind_value = api_kind
+                break
+        apis = provider_named_api_keys(provider_id, pack_root=pack_root)
+        custom_rows.append(
+            {
+                "provider_id": provider_id,
+                "key": named_provider_secret_key(provider_id, api_id="DEFAULT"),
+                "keys": [],
+                "kind": kind_value,
+                "builtin": False,
+                "label": str(definition.get("label") or provider_id),
+                "configured": any(api.get("configured") for api in apis),
+                "apis": apis,
+                "oauth": provider_oauth_status(provider_id, pack_root=pack_root),
+            }
+        )
+    return builtin_rows + custom_rows
+
+
+def builtin_provider_ids() -> list[str]:
+    return sorted(PROVIDER_SECRET_KEYS.keys())

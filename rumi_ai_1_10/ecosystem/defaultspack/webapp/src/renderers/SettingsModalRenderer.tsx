@@ -911,6 +911,349 @@ function PublicUrlField({
   );
 }
 
+const BUILTIN_API_PROVIDER_IDS: string[] = [
+  "anthropic",
+  "cerebras",
+  "deepseek",
+  "glm",
+  "google",
+  "groq",
+  "llama_cpp",
+  "lmstudio",
+  "longcat",
+  "mistral",
+  "moonshotai",
+  "nvidia",
+  "ollama",
+  "openai",
+  "openai_compatible",
+  "openrouter",
+  "perplexity",
+  "together",
+  "vllm",
+  "xai",
+];
+
+type ApiProviderOption = {
+  provider_id: string;
+  label: string;
+  kind: "llm" | "custom";
+  builtin: boolean;
+};
+
+function normalizeProviderKind(value: unknown): "llm" | "custom" {
+  return String(value ?? "").trim().toLowerCase() === "custom" ? "custom" : "llm";
+}
+
+function collectApiProviderOptions(providers: Array<Record<string, unknown>>): ApiProviderOption[] {
+  const options = new Map<string, ApiProviderOption>();
+  for (const builtinId of BUILTIN_API_PROVIDER_IDS) {
+    options.set(builtinId, { provider_id: builtinId, label: builtinId, kind: "llm", builtin: true });
+  }
+  for (const provider of providers) {
+    const providerId = String(provider.provider_id ?? "").trim();
+    if (!providerId) continue;
+    const builtin = Boolean(provider.builtin) || BUILTIN_API_PROVIDER_IDS.includes(providerId);
+    const kind = normalizeProviderKind(provider.kind);
+    const label = String(provider.label ?? providerId);
+    options.set(providerId, { provider_id: providerId, label, kind, builtin });
+  }
+  return Array.from(options.values()).sort((a, b) => {
+    if (a.builtin !== b.builtin) return a.builtin ? -1 : 1;
+    return a.provider_id.localeCompare(b.provider_id);
+  });
+}
+
+function SearchableProviderSelect({
+  value,
+  options,
+  onChange,
+  onAddCustom,
+  placeholder = "provider を検索",
+  className,
+}: {
+  value: string;
+  options: ApiProviderOption[];
+  onChange: (next: string) => void;
+  onAddCustom?: (option: { providerId: string; label: string; kind: "llm" | "custom" }) => void;
+  placeholder?: string;
+  className?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [draftId, setDraftId] = useState("");
+  const [draftKind, setDraftKind] = useState<"llm" | "custom">("custom");
+  const trimmedQuery = query.trim().toLowerCase();
+  const selected = options.find((option) => option.provider_id === value) ?? null;
+  const filtered = useMemo(() => {
+    if (!trimmedQuery) return options;
+    return options.filter((option) =>
+      option.provider_id.toLowerCase().includes(trimmedQuery)
+      || option.label.toLowerCase().includes(trimmedQuery),
+    );
+  }, [options, trimmedQuery]);
+
+  const closeAll = () => {
+    setOpen(false);
+    setCreating(false);
+    setDraftId("");
+    setQuery("");
+  };
+
+  const submitDraft = () => {
+    const cleaned = draftId.trim().toLowerCase().replace(/[^a-z0-9_]+/g, "_").replace(/^_+|_+$/g, "");
+    if (!cleaned) return;
+    if (onAddCustom) {
+      onAddCustom({ providerId: cleaned, label: cleaned, kind: draftKind });
+    }
+    onChange(cleaned);
+    closeAll();
+  };
+
+  return (
+    <div className={cn("relative", className)}>
+      <button
+        type="button"
+        onClick={() => setOpen((current) => !current)}
+        className="flex w-full items-center justify-between gap-2 rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-left text-sm text-zinc-200 outline-none transition-colors hover:border-zinc-700"
+      >
+        <span className="min-w-0 truncate">
+          {selected ? (
+            <span className="inline-flex items-center gap-1.5">
+              <span className="truncate">{selected.label}</span>
+              {!selected.builtin && (
+                <span className="rounded-full border border-zinc-700 px-1.5 text-[9px] uppercase text-zinc-400">
+                  {selected.kind === "custom" ? "non-llm" : "custom"}
+                </span>
+              )}
+            </span>
+          ) : (
+            value || "provider を選択"
+          )}
+        </span>
+        <ChevronDown size={14} className={cn("shrink-0 text-zinc-500 transition-transform", open && "rotate-180")} />
+      </button>
+      {open && (
+        <>
+          <button type="button" aria-label="close provider select" className="fixed inset-0 z-10 cursor-default" onClick={closeAll} />
+          <div className="absolute left-0 right-0 top-[calc(100%+6px)] z-20 overflow-hidden rounded-lg border border-zinc-700 bg-zinc-950 shadow-2xl">
+            <label className="m-2 flex h-9 items-center gap-2 rounded-lg border border-zinc-800 bg-black/30 px-3 text-xs text-zinc-500 focus-within:border-zinc-600 focus-within:text-zinc-300">
+              <Search size={14} />
+              <input
+                autoFocus
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder={placeholder}
+                className="min-w-0 flex-1 bg-transparent text-zinc-200 outline-none placeholder:text-zinc-600"
+              />
+              {query && (
+                <button
+                  type="button"
+                  onClick={() => setQuery("")}
+                  className="rounded p-0.5 text-zinc-600 hover:bg-zinc-800 hover:text-zinc-300"
+                  aria-label="clear provider search"
+                >
+                  <X size={13} />
+                </button>
+              )}
+            </label>
+            <div className="max-h-64 overflow-y-auto border-t border-zinc-800 p-1">
+              {filtered.length > 0 ? filtered.map((option) => {
+                const active = option.provider_id === value;
+                return (
+                  <button
+                    key={option.provider_id}
+                    type="button"
+                    onClick={() => {
+                      onChange(option.provider_id);
+                      closeAll();
+                    }}
+                    className={cn(
+                      "flex w-full items-center justify-between gap-2 rounded-md px-2.5 py-1.5 text-left text-sm transition-colors",
+                      active ? "bg-zinc-800 text-zinc-100" : "text-zinc-300 hover:bg-zinc-900",
+                    )}
+                  >
+                    <span className="min-w-0 truncate">
+                      {option.label}
+                      {!option.builtin && option.kind === "custom" && (
+                        <span className="ml-2 rounded-full border border-zinc-700 px-1.5 text-[9px] uppercase text-zinc-400">non-llm</span>
+                      )}
+                      {!option.builtin && option.kind === "llm" && (
+                        <span className="ml-2 rounded-full border border-zinc-700 px-1.5 text-[9px] uppercase text-zinc-400">custom</span>
+                      )}
+                    </span>
+                    {active && <Check size={13} className="shrink-0 text-emerald-300" />}
+                  </button>
+                );
+              }) : (
+                <div className="px-3 py-3 text-xs text-zinc-600">一致する provider がありません。</div>
+              )}
+            </div>
+            {creating ? (
+              <div className="space-y-2 border-t border-zinc-800 bg-zinc-950/80 p-3">
+                <input
+                  autoFocus
+                  value={draftId}
+                  onChange={(event) => setDraftId(event.target.value)}
+                  placeholder="provider id (例: tavily, searchapi)"
+                  className="w-full rounded-md border border-zinc-700 bg-zinc-900 px-2.5 py-1.5 text-sm text-zinc-200 outline-none"
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      submitDraft();
+                    }
+                  }}
+                />
+                <div className="flex flex-wrap items-center gap-2 text-xs">
+                  <span className="text-zinc-500">種類:</span>
+                  {(["llm", "custom"] as const).map((option) => (
+                    <button
+                      key={option}
+                      type="button"
+                      onClick={() => setDraftKind(option)}
+                      className={cn(
+                        "rounded-full border px-2.5 py-1 transition-colors",
+                        draftKind === option
+                          ? "border-emerald-500/60 bg-emerald-500/15 text-emerald-200"
+                          : "border-zinc-700 text-zinc-400 hover:text-zinc-200",
+                      )}
+                    >
+                      {option === "llm" ? "LLM" : "Non-LLM (search等)"}
+                    </button>
+                  ))}
+                </div>
+                <div className="flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCreating(false);
+                      setDraftId("");
+                    }}
+                    className="rounded-md border border-zinc-800 px-2.5 py-1 text-xs text-zinc-400 hover:text-zinc-200"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={submitDraft}
+                    disabled={!draftId.trim()}
+                    className={cn(
+                      "rounded-md border px-2.5 py-1 text-xs",
+                      draftId.trim()
+                        ? "border-zinc-100 bg-zinc-100 text-zinc-950"
+                        : "border-zinc-800 bg-zinc-900 text-zinc-600",
+                    )}
+                  >
+                    Add
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setCreating(true)}
+                className="flex w-full items-center gap-2 border-t border-zinc-800 px-3 py-2 text-left text-xs text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200"
+              >
+                <span className="text-base leading-none">+</span>
+                Add custom provider...
+              </button>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function ApiQuickAddForm({
+  providerOptions,
+  defaultProviderId,
+  onSubmit,
+  onCancel,
+  className,
+}: {
+  providerOptions: ApiProviderOption[];
+  defaultProviderId?: string;
+  onSubmit: (payload: { provider_id: string; name: string; value: string; kind: "llm" | "custom" }) => void;
+  onCancel?: () => void;
+  className?: string;
+}) {
+  const initialProvider = defaultProviderId
+    || providerOptions.find((option) => option.builtin)?.provider_id
+    || providerOptions[0]?.provider_id
+    || "";
+  const [providerId, setProviderId] = useState(initialProvider);
+  const [name, setName] = useState("main");
+  const [secret, setSecret] = useState("");
+  const selected = providerOptions.find((option) => option.provider_id === providerId);
+  const kind: "llm" | "custom" = selected?.kind ?? "llm";
+
+  const ready = providerId.trim() && name.trim() && secret.trim();
+  return (
+    <div className={cn("space-y-2", className)}>
+      <div className="grid gap-2 md:grid-cols-[180px_minmax(120px,1fr)_minmax(180px,2fr)_auto]">
+        <SearchableProviderSelect
+          value={providerId}
+          options={providerOptions}
+          onChange={setProviderId}
+          onAddCustom={(option) => {
+            // The parent will register the custom provider on save.
+            setProviderId(option.providerId);
+          }}
+        />
+        <input
+          value={name}
+          onChange={(event) => setName(event.target.value)}
+          placeholder="名前 (例: main, work)"
+          className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 outline-none"
+        />
+        <input
+          type="password"
+          autoComplete="off"
+          value={secret}
+          onChange={(event) => setSecret(event.target.value)}
+          placeholder={`${providerId || "provider"} API key`}
+          className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 outline-none"
+        />
+        <div className="flex items-center gap-1.5">
+          {onCancel && (
+            <button
+              type="button"
+              onClick={onCancel}
+              className="rounded-lg border border-zinc-800 px-2.5 py-2 text-xs text-zinc-400 hover:text-zinc-200"
+            >
+              Cancel
+            </button>
+          )}
+          <button
+            type="button"
+            disabled={!ready}
+            onClick={() => {
+              if (!ready) return;
+              onSubmit({
+                provider_id: providerId.trim(),
+                name: name.trim(),
+                value: secret,
+                kind,
+              });
+              setSecret("");
+            }}
+            className={cn(
+              "rounded-lg border px-3 py-2 text-xs",
+              ready
+                ? "border-zinc-100 bg-zinc-100 text-zinc-950"
+                : "border-zinc-800 bg-zinc-900 text-zinc-600 cursor-not-allowed",
+            )}
+          >
+            Save
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function SettingsField({
   sectionId,
   field,
@@ -942,10 +1285,12 @@ function SettingsField({
   const [tokenSaveState, setTokenSaveState] = useState<"idle" | "saved">("idle");
   const [renamingKey, setRenamingKey] = useState("");
   const [renameDraft, setRenameDraft] = useState("");
-  const [selectedApiKey, setSelectedApiKey] = useState("");
   const [openApiMenuKey, setOpenApiMenuKey] = useState("");
   const [selectedTokenKey, setSelectedTokenKey] = useState("");
   const [openTokenMenuKey, setOpenTokenMenuKey] = useState("");
+  const [routeApiSearchQuery, setRouteApiSearchQuery] = useState("");
+  const [routeShowAllProviders, setRouteShowAllProviders] = useState(false);
+  const [routeInlineAddOpen, setRouteInlineAddOpen] = useState(false);
   const routeOptions = modelRouteOptions(field);
   const routeOptionKey = routeOptions.map((option) => String(option.value ?? "")).join("|");
   const preferredRouteModel = field.type === "model_api_routes" ? String(sectionValues?.preferred_model ?? "").trim() : "";
@@ -980,9 +1325,45 @@ function SettingsField({
       const selectedProvider = routeProviderForOption(selectedOption, selectedModel);
       const isLocalModel = Boolean(selectedOption?.local) || selectedProvider === "stub";
       const providerRows = fieldApiProviderRows(field);
-      const provider = providerRows.find((row) => String(row.provider_id ?? "") === selectedProvider);
-      const providerApis = provider ? registeredApiRows([provider]) : [];
+      const providerOptionsForRoutes = collectApiProviderOptions(providerRows);
+      const allRegisteredApis = registeredApiRows(providerRows);
+      // Hide non-LLM keys from the routes UI (they're not used for chat models).
+      const llmRegisteredApis = allRegisteredApis.filter((apiRow) => normalizeProviderKind(apiRow.kind) !== "custom");
+      const currentProviderApis = llmRegisteredApis.filter((apiRow) => String(apiRow.provider_id ?? "") === selectedProvider);
+      const visibleApis = routeShowAllProviders ? llmRegisteredApis : currentProviderApis;
+      const trimmedSearch = routeApiSearchQuery.trim().toLowerCase();
+      const filteredApis = trimmedSearch
+        ? visibleApis.filter((apiRow) => {
+            const haystack = [
+              String(apiRow.name ?? ""),
+              String(apiRow.api_id ?? ""),
+              String(apiRow.provider_id ?? ""),
+            ].join(" ").toLowerCase();
+            return haystack.includes(trimmedSearch);
+          })
+        : visibleApis;
       const selectedApis = selectedApisForModel(routeText, selectedModel);
+      const hasOtherProviderApis = llmRegisteredApis.some((apiRow) => String(apiRow.provider_id ?? "") !== selectedProvider);
+      const handleQuickAddApi = (payload: { provider_id: string; name: string; value: string; kind: "llm" | "custom" }) => {
+        const providerOption = providerOptionsForRoutes.find((option) => option.provider_id === payload.provider_id);
+        if (providerOption && !providerOption.builtin) {
+          onChange(sectionId, field.id, {
+            action: "register_provider",
+            provider_id: payload.provider_id,
+            label: payload.provider_id,
+            kind: payload.kind,
+          });
+        }
+        onChange(sectionId, field.id, {
+          action: "upsert",
+          provider_id: payload.provider_id,
+          api_id: payload.name,
+          name: payload.name,
+          value: payload.value,
+          kind: payload.kind,
+        });
+        setRouteInlineAddOpen(false);
+      };
       control = (
         <div className="space-y-4">
           <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(180px,0.42fr)]">
@@ -1008,46 +1389,129 @@ function SettingsField({
             <div className="rounded-lg border border-zinc-800 bg-zinc-950/70 px-3 py-3 text-sm text-zinc-400">
               ローカル/StubモデルはAPIキーのルーティング不要です。
             </div>
-          ) : providerApis.length > 0 ? (
+          ) : (
             <div className="space-y-2">
               <div className="flex items-center justify-between gap-2">
-                <span className="text-[11px] uppercase tracking-[0.2em] text-zinc-600">Available API keys</span>
-                <span className="text-[11px] text-zinc-500">クリック順がfallback順になります</span>
+                <span className="text-[11px] uppercase tracking-[0.2em] text-zinc-600">使用する API key</span>
+                <span className="text-[11px] text-zinc-500">選んだ API key ごとに別 model 扱いになります</span>
               </div>
-              <div className="flex flex-wrap gap-2">
-                {providerApis.map((apiRow) => {
-                  const routeRef = apiRefForRoute(apiRow, selectedProvider);
-                  const active = selectedApis.includes(routeRef);
-                  const order = selectedApis.indexOf(routeRef) + 1;
-                  return (
+              <div className="flex flex-wrap items-center gap-2">
+                <label className="flex h-9 min-w-[200px] flex-1 items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-900 px-3 text-xs text-zinc-500 focus-within:border-zinc-600 focus-within:text-zinc-300">
+                  <Search size={13} />
+                  <input
+                    value={routeApiSearchQuery}
+                    onChange={(event) => setRouteApiSearchQuery(event.target.value)}
+                    placeholder="API key を検索"
+                    className="min-w-0 flex-1 bg-transparent text-zinc-200 outline-none placeholder:text-zinc-600"
+                  />
+                  {routeApiSearchQuery && (
                     <button
-                      key={routeRef}
                       type="button"
-                      onClick={() => onChange(sectionId, field.id, toggleModelApiRoute(routeText, selectedModel, routeRef))}
-                      className={cn(
-                        "inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs transition-colors",
-                        active
-                          ? "border-emerald-500/60 bg-emerald-500/15 text-emerald-200"
-                          : "border-zinc-800 bg-zinc-950 text-zinc-400 hover:border-zinc-700 hover:text-zinc-200",
-                      )}
+                      onClick={() => setRouteApiSearchQuery("")}
+                      className="rounded p-0.5 text-zinc-600 hover:bg-zinc-800 hover:text-zinc-300"
+                      aria-label="clear api search"
                     >
-                      {active && <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-emerald-400 px-1 text-[10px] font-semibold text-zinc-950">{order}</span>}
-                      <MaskedApiLabel api={apiRow} />
+                      <X size={12} />
                     </button>
-                  );
-                })}
+                  )}
+                </label>
+                {hasOtherProviderApis && (
+                  <label className="flex items-center gap-1.5 rounded-lg border border-zinc-800 bg-zinc-950/70 px-2.5 py-1.5 text-[11px] text-zinc-400">
+                    <input
+                      type="checkbox"
+                      checked={routeShowAllProviders}
+                      onChange={(event) => setRouteShowAllProviders(event.target.checked)}
+                      className="h-3.5 w-3.5 accent-emerald-400"
+                    />
+                    別 provider も表示
+                  </label>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setRouteInlineAddOpen((current) => !current)}
+                  className={cn(
+                    "rounded-lg border px-2.5 py-1.5 text-xs transition-colors",
+                    routeInlineAddOpen
+                      ? "border-emerald-500/60 bg-emerald-500/15 text-emerald-200"
+                      : "border-zinc-800 bg-zinc-950/70 text-zinc-300 hover:border-zinc-700",
+                  )}
+                  title="新しい API key を追加"
+                >
+                  + API key
+                </button>
               </div>
+              {routeInlineAddOpen && (
+                <div className="rounded-lg border border-zinc-800 bg-zinc-950/70 p-3">
+                  <ApiQuickAddForm
+                    providerOptions={providerOptionsForRoutes}
+                    defaultProviderId={selectedProvider}
+                    onSubmit={handleQuickAddApi}
+                    onCancel={() => setRouteInlineAddOpen(false)}
+                  />
+                  <p className="mt-2 text-[10px] text-zinc-600">
+                    保存後すぐにこのモデルへ割り当てられるようになります。
+                  </p>
+                </div>
+              )}
+              {filteredApis.length > 0 ? (
+                <div className="space-y-1.5 rounded-lg border border-zinc-800 bg-zinc-950/40 p-2">
+                  {filteredApis.map((apiRow) => {
+                    const apiProviderId = String(apiRow.provider_id ?? "");
+                    const routeRef = apiRefForRoute(apiRow, apiProviderId || selectedProvider);
+                    const active = selectedApis.includes(routeRef);
+                    const variantNumber = selectedApis.indexOf(routeRef) + 1;
+                    const crossProvider = apiProviderId && apiProviderId !== selectedProvider;
+                    return (
+                      <button
+                        key={routeRef}
+                        type="button"
+                        onClick={() => onChange(sectionId, field.id, toggleModelApiRoute(routeText, selectedModel, routeRef))}
+                        className={cn(
+                          "flex w-full items-center justify-between gap-3 rounded-md border px-3 py-2 text-left text-xs transition-colors",
+                          active
+                            ? "border-emerald-500/60 bg-emerald-500/10 text-emerald-100"
+                            : "border-zinc-800 bg-zinc-950/60 text-zinc-300 hover:border-zinc-700",
+                        )}
+                      >
+                        <span className="flex min-w-0 items-center gap-2">
+                          {active ? (
+                            <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-emerald-400 px-1.5 text-[10px] font-semibold text-zinc-950">
+                              v{variantNumber}
+                            </span>
+                          ) : (
+                            <span className="h-5 w-5 rounded-full border border-zinc-700" />
+                          )}
+                          <span className="min-w-0 truncate font-medium">{String(apiRow.name ?? apiRow.api_id ?? "")}</span>
+                          <MaskedApiLabel api={apiRow} />
+                        </span>
+                        {crossProvider && (
+                          <span className="rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[10px] uppercase tracking-wide text-amber-200">
+                            別 provider
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-3 text-sm text-amber-100">
+                  {trimmedSearch
+                    ? "検索条件に一致する API key がありません。"
+                    : routeShowAllProviders
+                      ? "登録済みの API key がありません。"
+                      : `${selectedProvider || "このprovider"} の API key がありません。+ API key で追加するか、APIs タブから登録してください。`}
+                </div>
+              )}
               <div className="rounded-lg border border-zinc-800 bg-zinc-950/70 px-3 py-2 text-xs text-zinc-500">
                 {selectedApis.length > 0 ? (
-                  <span>使用順: <span className="font-mono text-zinc-300">{selectedApis.join(" -> ")}</span></span>
+                  <span>
+                    変種: <span className="font-mono text-zinc-300">{selectedApis.join(" / ")}</span>
+                    {selectedApis.length >= 2 && <span className="ml-2 text-zinc-600">→ それぞれ別の model として composer に並びます</span>}
+                  </span>
                 ) : (
-                  <span>このモデルにはまだ使用APIが設定されていません。通常のprovider既定キーを使います。</span>
+                  <span>このモデルに API key を選ぶと、その key を使う model variant が composer に追加されます。未選択時は provider 既定キーを使用します。</span>
                 )}
               </div>
-            </div>
-          ) : (
-            <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-3 text-sm text-amber-100">
-              {selectedProvider || "このprovider"} のAPI keyがありません。APIs の API Keys に追加してから、ここで選んでください。
             </div>
           )}
 
@@ -1066,11 +1530,34 @@ function SettingsField({
     }
     case "api_keys": {
       const providers = apiProviderRows(value);
-      const providerOptions = providers.length
-        ? providers.map((provider) => String(provider.provider_id ?? ""))
-        : ["google", "openrouter", "openai", "anthropic"];
-      const uniqueProviderOptions = [...new Set(providerOptions.filter(Boolean))];
+      const providerOptions = collectApiProviderOptions(providers);
       const registeredApis = registeredApiRows(providers);
+      const selectedProviderOption = providerOptions.find((option) => option.provider_id === apiProvider);
+      const selectedKind: "llm" | "custom" = selectedProviderOption?.kind ?? "llm";
+      const isCustomProvider = !selectedProviderOption?.builtin;
+      const handleSubmitApi = () => {
+        if (!apiProvider.trim() || !apiName.trim() || !apiSecret.trim()) return;
+        onChange(sectionId, field.id, {
+          action: "upsert",
+          provider_id: apiProvider,
+          api_id: apiName,
+          name: apiName,
+          value: apiSecret,
+          kind: selectedKind,
+          base_url: apiBaseUrl.trim(),
+          allowed_models: apiAllowedModels.split(",").map((item) => item.trim()).filter(Boolean),
+          default_model: apiDefaultModel.trim(),
+          quota_label: apiQuotaLabel.trim(),
+          notes: apiNotes.trim(),
+        });
+        setApiSecret("");
+        setApiBaseUrl("");
+        setApiAllowedModels("");
+        setApiDefaultModel("");
+        setApiQuotaLabel("");
+        setApiNotes("");
+        setApiSaveState("saved");
+      };
       control = (
         <div className="space-y-4">
           <ProviderOAuthPanel
@@ -1080,31 +1567,19 @@ function SettingsField({
             onRefresh={onChange}
           />
           <div className="overflow-hidden rounded-lg border border-zinc-800 bg-zinc-950/70">
-            <div className="grid grid-cols-[36px_minmax(220px,1.4fr)_minmax(120px,0.8fr)_minmax(90px,0.6fr)_minmax(90px,0.6fr)_48px] items-center gap-3 border-b border-zinc-800 bg-zinc-900/70 px-3 py-2 text-[11px] font-medium text-zinc-500">
-              <span className="h-4 w-4 rounded border border-indigo-500/70" />
-              <span>Key</span>
-              <span>Guardrails</span>
-              <span>Expires</span>
-              <span>Last Used</span>
-              <span />
-            </div>
             <div className="divide-y divide-zinc-800/80">
               {registeredApis.length > 0 ? registeredApis.map((api) => {
                 const key = String(api.key ?? `${api.provider_id}:${api.api_id}`);
                 const isRenaming = renamingKey === key;
                 const isMenuOpen = openApiMenuKey === key;
-                const isSelected = selectedApiKey === key;
+                const apiProviderOption = providerOptions.find((option) => option.provider_id === String(api.provider_id ?? ""));
+                const apiKind = normalizeProviderKind(api.kind ?? apiProviderOption?.kind);
                 return (
                   <div
                     key={key}
-                    className={cn(
-                      "grid grid-cols-[36px_minmax(220px,1.4fr)_minmax(120px,0.8fr)_minmax(90px,0.6fr)_minmax(90px,0.6fr)_48px] items-center gap-3 px-3 py-3 transition-colors",
-                      isSelected ? "bg-zinc-900/85" : "bg-zinc-950/20 hover:bg-zinc-900/45",
-                    )}
-                    onClick={() => setSelectedApiKey(key)}
+                    className="flex items-center gap-3 px-3 py-2.5 transition-colors hover:bg-zinc-900/40"
                   >
-                    <span className={cn("h-4 w-4 rounded border", isSelected ? "border-indigo-400 bg-indigo-500/20" : "border-indigo-500/70")} />
-                    <div className="min-w-0">
+                    <div className="min-w-0 flex-1">
                       {isRenaming ? (
                         <div className="flex items-center gap-1.5">
                           <input
@@ -1156,17 +1631,20 @@ function SettingsField({
                           </button>
                         </div>
                       ) : (
-                        <>
-                          <div className="truncate text-sm font-medium text-zinc-200">{String(api.name ?? api.api_id ?? "")}</div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-sm font-medium text-zinc-200">{String(api.name ?? api.api_id ?? "")}</span>
+                          <span className="rounded-full border border-zinc-700 bg-zinc-900 px-2 py-0.5 text-[10px] uppercase tracking-wide text-zinc-400">
+                            {String(api.provider_id ?? "")}
+                          </span>
+                          {apiKind === "custom" && (
+                            <span className="rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[10px] uppercase tracking-wide text-amber-200">
+                              non-llm
+                            </span>
+                          )}
                           <MaskedApiLabel api={api} />
-                        </>
+                        </div>
                       )}
                     </div>
-	                    <span className="truncate text-sm text-zinc-500">
-	                      {String(api.quota_label ?? api.default_model ?? api.base_url ?? "No guardrails")}
-	                    </span>
-                    <span className="truncate text-sm text-zinc-500">Never</span>
-                    <span className="truncate text-sm text-zinc-500">Never</span>
                     <div className="relative flex justify-end">
                       <button
                         type="button"
@@ -1231,114 +1709,128 @@ function SettingsField({
               )}
             </div>
           </div>
-	          <div className="grid gap-2 md:grid-cols-[160px_1fr_1.4fr_auto]">
-	            <CustomSelect
-              value={apiProvider}
-              onChange={setApiProvider}
-              options={uniqueProviderOptions.map((providerId) => ({ value: providerId, label: providerId }))}
-            />
-            <input
-              value={apiName}
-              onChange={(event) => {
-                setApiName(event.target.value);
-                setApiSaveState("idle");
-              }}
-              placeholder="api name"
-              className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-200 outline-none"
-            />
-            <input
-              type="password"
-              autoComplete="off"
-              value={apiSecret}
-              onChange={(event) => {
-                setApiSecret(event.target.value);
-                setApiSaveState("idle");
-              }}
-              placeholder={`${apiProvider} API key`}
-              className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-200 outline-none"
-            />
-	            <button
-              type="button"
-              disabled={!apiProvider.trim() || !apiName.trim() || !apiSecret.trim()}
-              onClick={() => {
-                if (!apiProvider.trim() || !apiName.trim() || !apiSecret.trim()) return;
-                onChange(sectionId, field.id, {
-                  action: "upsert",
-                  provider_id: apiProvider,
-	                  api_id: apiName,
-	                  name: apiName,
-	                  value: apiSecret,
-	                  base_url: apiBaseUrl.trim(),
-	                  allowed_models: apiAllowedModels.split(",").map((item) => item.trim()).filter(Boolean),
-	                  default_model: apiDefaultModel.trim(),
-	                  quota_label: apiQuotaLabel.trim(),
-	                  notes: apiNotes.trim(),
-	                });
-	                setApiSecret("");
-	                setApiBaseUrl("");
-	                setApiAllowedModels("");
-	                setApiDefaultModel("");
-	                setApiQuotaLabel("");
-	                setApiNotes("");
-	                setApiSaveState("saved");
-	              }}
-              className={cn(
-                "rounded-lg border px-3 py-2 text-xs transition-colors",
-                apiProvider.trim() && apiName.trim() && apiSecret.trim()
-                  ? "bg-zinc-100 text-zinc-950 border-zinc-100"
-                  : "bg-zinc-900 text-zinc-600 border-zinc-800 cursor-not-allowed",
-              )}
-	            >
-	              Save API
-	            </button>
-	          </div>
-	          <div className="grid gap-2 md:grid-cols-2">
-	            <input
-	              value={apiBaseUrl}
-	              onChange={(event) => {
-	                setApiBaseUrl(event.target.value);
-	                setApiSaveState("idle");
-	              }}
-	              placeholder="base_url (optional)"
-	              className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-200 outline-none"
-	            />
-	            <input
-	              value={apiDefaultModel}
-	              onChange={(event) => {
-	                setApiDefaultModel(event.target.value);
-	                setApiSaveState("idle");
-	              }}
-	              placeholder="default model for this API"
-	              className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-200 outline-none"
-	            />
-	            <input
-	              value={apiAllowedModels}
-	              onChange={(event) => {
-	                setApiAllowedModels(event.target.value);
-	                setApiSaveState("idle");
-	              }}
-	              placeholder="allowed models, comma separated"
-	              className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-200 outline-none"
-	            />
-	            <input
-	              value={apiQuotaLabel}
-	              onChange={(event) => {
-	                setApiQuotaLabel(event.target.value);
-	                setApiSaveState("idle");
-	              }}
-	              placeholder="quota label"
-	              className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-200 outline-none"
-	            />
-	            <textarea
-	              value={apiNotes}
-	              onChange={(event) => {
-	                setApiNotes(event.target.value);
-	                setApiSaveState("idle");
-	              }}
-	              placeholder="notes for routing"
-	              className="min-h-20 bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-200 outline-none md:col-span-2"
-	            />
-	          </div>
+
+          <div className="space-y-2">
+            <div className="grid gap-2 md:grid-cols-[180px_minmax(120px,1fr)_minmax(180px,2fr)_auto]">
+              <SearchableProviderSelect
+                value={apiProvider}
+                options={providerOptions}
+                onChange={(next) => {
+                  setApiProvider(next);
+                  setApiSaveState("idle");
+                }}
+                onAddCustom={(option) => {
+                  onChange(sectionId, field.id, {
+                    action: "register_provider",
+                    provider_id: option.providerId,
+                    label: option.label,
+                    kind: option.kind,
+                  });
+                  setApiProvider(option.providerId);
+                  setApiSaveState("idle");
+                }}
+              />
+              <input
+                value={apiName}
+                onChange={(event) => {
+                  setApiName(event.target.value);
+                  setApiSaveState("idle");
+                }}
+                placeholder="名前 (例: main, work)"
+                className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 outline-none"
+              />
+              <input
+                type="password"
+                autoComplete="off"
+                value={apiSecret}
+                onChange={(event) => {
+                  setApiSecret(event.target.value);
+                  setApiSaveState("idle");
+                }}
+                placeholder={`${apiProvider || "provider"} API key`}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    handleSubmitApi();
+                  }
+                }}
+                className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 outline-none"
+              />
+              <button
+                type="button"
+                disabled={!apiProvider.trim() || !apiName.trim() || !apiSecret.trim()}
+                onClick={handleSubmitApi}
+                className={cn(
+                  "rounded-lg border px-3 py-2 text-xs transition-colors",
+                  apiProvider.trim() && apiName.trim() && apiSecret.trim()
+                    ? "bg-zinc-100 text-zinc-950 border-zinc-100"
+                    : "bg-zinc-900 text-zinc-600 border-zinc-800 cursor-not-allowed",
+                )}
+              >
+                Save
+              </button>
+            </div>
+            {isCustomProvider && (
+              <p className="text-[11px] text-zinc-500">
+                {selectedKind === "custom"
+                  ? "Non-LLM provider として保存されます。AI provider 自動切替には使われず、認識用にだけ保存します。"
+                  : "Custom LLM provider として保存されます。"}
+              </p>
+            )}
+            <details className="rounded-lg border border-zinc-800 bg-zinc-950/40 px-3 py-2 text-xs">
+              <summary className="cursor-pointer select-none text-zinc-400 hover:text-zinc-200">Advanced (任意): base_url / model 制限 / quota / notes</summary>
+              <div className="mt-3 grid gap-2 md:grid-cols-2">
+                <input
+                  value={apiBaseUrl}
+                  onChange={(event) => {
+                    setApiBaseUrl(event.target.value);
+                    setApiSaveState("idle");
+                  }}
+                  placeholder="base_url (optional)"
+                  className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 outline-none"
+                />
+                <input
+                  value={apiDefaultModel}
+                  onChange={(event) => {
+                    setApiDefaultModel(event.target.value);
+                    setApiSaveState("idle");
+                  }}
+                  placeholder="default model for this API"
+                  className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 outline-none"
+                />
+                <input
+                  value={apiAllowedModels}
+                  onChange={(event) => {
+                    setApiAllowedModels(event.target.value);
+                    setApiSaveState("idle");
+                  }}
+                  placeholder="allowed models, comma separated"
+                  className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 outline-none"
+                />
+                <input
+                  value={apiQuotaLabel}
+                  onChange={(event) => {
+                    setApiQuotaLabel(event.target.value);
+                    setApiSaveState("idle");
+                  }}
+                  placeholder="quota label"
+                  className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 outline-none"
+                />
+                <textarea
+                  value={apiNotes}
+                  onChange={(event) => {
+                    setApiNotes(event.target.value);
+                    setApiSaveState("idle");
+                  }}
+                  placeholder="notes for routing"
+                  className="min-h-20 rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 outline-none md:col-span-2"
+                />
+              </div>
+              <p className="mt-2 text-[10px] text-zinc-600">
+                次に保存する API key にだけ適用されます。通常はそのまま空欄で大丈夫です。
+              </p>
+            </details>
+          </div>
           {apiSaveState === "saved" && <p className="text-[11px] text-emerald-400">Saved</p>}
         </div>
       );
