@@ -1058,7 +1058,8 @@ class PackAPIHandler(
         """
         許可するオリジンリストを取得。
         環境変数 RUMI_CORS_ORIGINS (カンマ区切り) でカスタマイズ可能。
-        未設定の場合は localhost の特定ポート(3000,5173,8080,8765)のみ許可。
+        未設定の場合は localhost の特定ポート(3000,5173,8080,8765)と
+        RUMI_PORT で指定された実行時ポートのみ許可。
         ワイルドカードポート指定("http://localhost:*")は環境変数で
         明示的に指定した場合のみ有効。
         """
@@ -1080,6 +1081,16 @@ class PackAPIHandler(
                 "http://127.0.0.1:8080",
                 "http://127.0.0.1:8765",
             ]
+            runtime_port = os.environ.get("RUMI_PORT", "").strip()
+            try:
+                port = int(runtime_port) if runtime_port else 0
+            except ValueError:
+                port = 0
+            if 0 < port <= 65535:
+                cls._allowed_origins.extend([
+                    f"http://localhost:{port}",
+                    f"http://127.0.0.1:{port}",
+                ])
             cls._allowed_origins_from_env = False
         return cls._allowed_origins
 

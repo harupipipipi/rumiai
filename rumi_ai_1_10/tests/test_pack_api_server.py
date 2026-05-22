@@ -474,8 +474,16 @@ class TestCORS:
     def test_cors_disallowed_origin(self, monkeypatch) -> None:
         """デフォルト許可リストに含まれないオリジン → 空文字"""
         monkeypatch.delenv("RUMI_CORS_ORIGINS", raising=False)
+        monkeypatch.delenv("RUMI_PORT", raising=False)
         result = PackAPIHandler._get_cors_origin("http://evil.com")
         assert result == ""
+
+    def test_cors_allows_runtime_rumi_port(self, monkeypatch) -> None:
+        """RUMI_PORT の実行時ポートは panel 認証 Origin として許可"""
+        monkeypatch.delenv("RUMI_CORS_ORIGINS", raising=False)
+        monkeypatch.setenv("RUMI_PORT", "8768")
+        assert PackAPIHandler._get_cors_origin("http://127.0.0.1:8768") == "http://127.0.0.1:8768"
+        assert PackAPIHandler._get_cors_origin("http://localhost:8768") == "http://localhost:8768"
 
     def test_cors_empty_origin(self, monkeypatch) -> None:
         """オリジン空文字 → 空文字"""
@@ -498,6 +506,7 @@ class TestCORS:
     def test_cors_wildcard_not_from_env(self, monkeypatch) -> None:
         """デフォルトリストでは "http://localhost:*" は効かない"""
         monkeypatch.delenv("RUMI_CORS_ORIGINS", raising=False)
+        monkeypatch.delenv("RUMI_PORT", raising=False)
         result = PackAPIHandler._get_cors_origin("http://localhost:9999")
         assert result == ""
 

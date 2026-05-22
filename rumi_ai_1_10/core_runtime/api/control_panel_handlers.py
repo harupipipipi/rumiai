@@ -486,11 +486,37 @@ class ControlPanelHandlersMixin:
                 node_registry=self._panel_node_registry(),
                 profile=profile,
             )
-            nodes = [node.to_dict() for node in profile_nodes.list_enabled_nodes()]
+            profile_data = profile.to_dict()
+            locale = str(profile_data.get("locale") or "en")
+            states = profile_nodes.node_state()
+            state_list = states if isinstance(states, list) else []
+            state_by_id = {
+                str(item.get("node_id")): item
+                for item in state_list
+                if isinstance(item, dict)
+            }
+            nodes = [
+                self._capability_public_node(
+                    node.to_dict(),
+                    locale=locale,
+                    state_by_id=state_by_id,
+                )
+                for _, node in sorted(profile_nodes.nodes().items())
+            ]
+            palette_nodes = [
+                node for node in nodes
+                if isinstance(node.get("state"), dict)
+                and node["state"].get("enabled") is True
+                and node["state"].get("installed") is True
+            ]
             return {
+                "profile": self._capability_public_profile(profile_data, locale=locale),
                 "profile_id": profile_id,
                 "nodes": nodes,
+                "node_state": state_list,
+                "palette_nodes": palette_nodes,
                 "count": len(nodes),
+                "palette_count": len(palette_nodes),
             }
         except Exception as e:
             _log_internal_error("panel_get_profile_nodes", e)

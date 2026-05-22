@@ -9,6 +9,7 @@ DesktopAppManager に委譲する。
 from __future__ import annotations
 
 import hashlib
+import os
 import secrets
 import threading
 import time
@@ -71,7 +72,7 @@ class DesktopCapabilityHandler:
         token_lifetime = self._effective_token_lifetime(grant_config)
         token = self._generate_token()
         token_hash = self._hash_token(token)
-        port = int(grant_config.get("port", self.DEFAULT_PORT))
+        port = int(os.environ.get("RUMI_PORT") or grant_config.get("port") or self.DEFAULT_PORT)
 
         with self._lock:
             self._cleanup_expired_tokens()

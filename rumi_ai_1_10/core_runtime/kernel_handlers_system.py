@@ -28,6 +28,14 @@ from .metrics import get_metrics_collector
 
 _logger = get_structured_logger("rumi.kernel.handlers.system")
 
+
+def _resolve_api_port(args: Dict[str, Any]) -> int:
+    raw_port = os.environ.get("RUMI_PORT") or args.get("port") or 8765
+    try:
+        return int(raw_port)
+    except (TypeError, ValueError):
+        return int(args.get("port") or 8765)
+
 # ------------------------------------------------------------------
 # Wave 17-A: inject ブロックリスト — 内部サービス参照の注入を禁止
 # ------------------------------------------------------------------
@@ -963,7 +971,7 @@ class KernelSystemHandlersMixin:
             from .paths import BASE_DIR as _api_base_dir
 
             host = args.get("host", "127.0.0.1")
-            port = args.get("port", 8765)
+            port = _resolve_api_port(args)
 
             api_server = initialize_pack_api_server(
                 host=host,

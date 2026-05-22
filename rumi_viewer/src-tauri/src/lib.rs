@@ -9,6 +9,7 @@ mod python_env;
 mod tray;
 mod updater;
 
+use std::net::TcpListener;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -31,6 +32,7 @@ pub struct SetupProgress(pub Arc<Mutex<String>>);
 pub struct ShutdownState(pub Arc<AtomicBool>);
 
 const PRIMARY_WINDOW_LABELS: [&str; 2] = ["panel", "main"];
+const DEFAULTSPACK_RESERVED_PORT: u16 = 8766;
 
 #[derive(Debug, Deserialize)]
 struct PanelBootstrapPayload {
@@ -229,6 +231,68 @@ fn request_panel_bootstrap_code_with_retry(port: u16, bootstrap_secret: &str) ->
         Some(error) => Err(error),
         None => bail!("panel bootstrap retry finished without making a request"),
     }
+}
+
+fn is_loopback_port_available(port: u16) -> bool {
+    match TcpListener::bind(("127.0.0.1", port)) {
+        Ok(listener) => {
+            drop(listener);
+            true
+        }
+        Err(error) if error.kind() == io::ErrorKind::AddrInUse => false,
+        Err(error) => {
+            warn!("Could not probe loopback port {port}: {error}");
+            false
+        }
+    }
+}
+
+fn existing_kernel_accepts_bootstrap(port: u16, bootstrap_secret: &str) -> bool {
+    health_check::check_health(port).unwrap_or(false)
+        && request_panel_bootstrap_code(port, bootstrap_secret).is_ok()
+}
+
+fn resolve_available_kernel_port_with_checks<PortAvailable, ExistingKernelReusable>(
+    preferred_port: u16,
+    mut port_available: PortAvailable,
+    mut existing_kernel_reusable: ExistingKernelReusable,
+) -> u16
+where
+    PortAvailable: FnMut(u16) -> bool,
+    ExistingKernelReusable: FnMut(u16) -> bool,
+{
+    if port_available(preferred_port) || existing_kernel_reusable(preferred_port) {
+        return preferred_port;
+    }
+
+    let last_candidate = preferred_port.saturating_add(128);
+    for port in preferred_port.saturating_add(1)..=last_candidate {
+        if port == DEFAULTSPACK_RESERVED_PORT {
+            continue;
+        }
+        if port_available(port) {
+            return port;
+        }
+    }
+
+    preferred_port
+}
+
+fn resolve_available_kernel_port(config: &AppConfig, bootstrap_secret: &str) -> u16 {
+    let preferred_port = config.kernel_port;
+    let port = resolve_available_kernel_port_with_checks(
+        preferred_port,
+        is_loopback_port_available,
+        |candidate| existing_kernel_accepts_bootstrap(candidate, bootstrap_secret),
+    );
+
+    if port != preferred_port {
+        warn!(
+            "Kernel port {preferred_port} is already occupied by another local process; using {port} for this Viewer session"
+        );
+    }
+
+    port
 }
 
 fn ensure_kernel_ready_for_panel_auth(
@@ -678,7 +742,7 @@ pub fn run() {
                     let is_tauri = scheme == "tauri";
                     let is_local_http = scheme == "http"
                         && (host == "localhost" || host == "127.0.0.1")
-                        && (port == Some(8765) || cfg!(debug_assertions));
+                        && (port.is_some() || cfg!(debug_assertions));
 
                     let allowed = is_tauri || is_local_http;
 
@@ -699,7 +763,7 @@ pub fn run() {
                 .app_data_dir()
                 .context("failed to resolve app_data_dir")?;
 
-            let config = AppConfig::detect_for_tauri(resource_dir, app_data_dir)
+            let mut config = AppConfig::detect_for_tauri(resource_dir, app_data_dir)
                 .context("failed to build AppConfig")?;
 
             std::fs::create_dir_all(&config.log_dir).ok();
@@ -714,6 +778,7 @@ pub fn run() {
 
             let panel_bootstrap_secret = load_or_create_panel_bootstrap_secret(&config)
                 .context("failed to load persisted panel bootstrap secret")?;
+            config.kernel_port = resolve_available_kernel_port(&config, &panel_bootstrap_secret);
             let km = Arc::new(Mutex::new(KernelManager::new(
                 &config,
                 panel_bootstrap_secret.clone(),
@@ -931,6 +996,39 @@ mod tests {
         assert!(!status.enabled);
         assert!(status.shutdown_requested);
         assert!(!status.kernel_running);
+    }
+
+    #[test]
+    fn resolve_kernel_port_keeps_available_preferred_port() {
+        let port = resolve_available_kernel_port_with_checks(
+            8765,
+            |candidate| candidate == 8765,
+            |_| false,
+        );
+
+        assert_eq!(port, 8765);
+    }
+
+    #[test]
+    fn resolve_kernel_port_reuses_existing_kernel_when_bootstrap_matches() {
+        let port = resolve_available_kernel_port_with_checks(
+            8765,
+            |_| false,
+            |candidate| candidate == 8765,
+        );
+
+        assert_eq!(port, 8765);
+    }
+
+    #[test]
+    fn resolve_kernel_port_skips_defaultspack_port_when_falling_back() {
+        let port = resolve_available_kernel_port_with_checks(
+            8765,
+            |candidate| candidate == 8767,
+            |_| false,
+        );
+
+        assert_eq!(port, 8767);
     }
 
     #[test]

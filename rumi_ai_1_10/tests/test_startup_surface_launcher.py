@@ -99,7 +99,31 @@ def test_pending_profile_launches_graph_surface_target_pack():
     assert call["principal_id"] == "frontendpack"
     assert call["args"]["pack_id"] == "frontendpack"
     assert call["grant_config"]["allowed_packs"] == ["frontendpack"]
+    assert call["grant_config"]["port"] == 8765
     assert call["args"]["env"]["FRONTENDPACK_SURFACE"] == "web"
+
+
+def test_surface_launch_uses_runtime_port_from_env(monkeypatch):
+    monkeypatch.setenv("RUMI_PORT", "8767")
+    active = FakeActive(
+        {
+            "startup_surface_open_pending": True,
+            "startup_surface_launch_target": {
+                "kind": "desktop_app",
+                "pack_id": "frontendpack",
+                "principal_id": "frontendpack",
+                "surface": "browser",
+            },
+        }
+    )
+    handler = FakeDesktopHandler()
+
+    launch_pending_startup_profile_surface(
+        active_manager=active,
+        desktop_handler=handler,
+    )
+
+    assert handler.calls[0]["grant_config"]["port"] == 8767
 
 
 def test_non_pending_surface_launch_is_noop():

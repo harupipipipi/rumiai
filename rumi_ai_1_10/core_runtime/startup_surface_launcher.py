@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from typing import Any, Dict, Optional
 
 from .surface_launch_target import (
@@ -73,7 +74,7 @@ def launch_pending_startup_profile_surface(
             },
             grant_config={
                 "allowed_packs": [target_pack],
-                "port": 8765,
+                "port": int(os.environ.get("RUMI_PORT", "8765")),
             },
         )
         result["launch"] = launch

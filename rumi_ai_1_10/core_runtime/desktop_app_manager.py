@@ -215,7 +215,7 @@ class DesktopAppManager:
             env[_PACK_API_TOKEN_ENV] = effective_api_token
         if issued_desktop_token:
             env["RUMI_TOKEN"] = issued_desktop_token
-            env.setdefault("RUMI_PORT", "8765")
+            env.setdefault("RUMI_PORT", os.environ.get("RUMI_PORT", "8765"))
 
         working_dir = meta.get("working_dir") or meta.get("pack_dir", "")
         if issued_desktop_token:

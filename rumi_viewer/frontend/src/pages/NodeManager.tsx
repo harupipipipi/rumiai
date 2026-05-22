@@ -30,6 +30,14 @@ import type {
   CapabilityGraphCompileResponseData,
   StartupProfileRelationship,
 } from '@/src/lib/apiTypes';
+import {
+  capabilityNodeDescription,
+  capabilityNodeLabel,
+  capabilityNodePorts,
+  capabilityPortLabel,
+  capabilityPortStandards,
+  normalizeCapabilityProfileNodes,
+} from '@/src/lib/nodeCatalog';
 import { cn } from '@/src/lib/utils';
 import { useAppStore } from '@/src/store';
 
@@ -70,8 +78,8 @@ export function NodeManager() {
     return nodes.filter(node => {
       const haystack = [
         node.node_id,
-        node.label,
-        node.description_label,
+        capabilityNodeLabel(node),
+        capabilityNodeDescription(node),
         String(node.metadata?.category ?? ''),
       ].join(' ').toLowerCase();
       return haystack.includes(term);
@@ -111,15 +119,19 @@ export function NodeManager() {
     fetchCapabilityProfileNodes(selectedProfileId)
       .then(data => {
         if (cancelled) return;
-        setNodes(data.nodes);
-        setPaletteNodes(data.palette_nodes);
+        const normalized = normalizeCapabilityProfileNodes(
+          data,
+          profiles.find(profile => profile.profile_id === selectedProfileId) ?? null,
+        );
+        setNodes(normalized.nodes);
+        setPaletteNodes(normalized.paletteNodes);
         setSelectedNodeId(current => (
-          data.nodes.some(node => node.node_id === current)
+          normalized.nodes.some(node => node.node_id === current)
             ? current
-            : data.nodes[0]?.node_id ?? ''
+            : normalized.nodes[0]?.node_id ?? ''
         ));
-        if (!selectedGraphId && data.profile.default_graph) {
-          setSelectedGraphId(data.profile.default_graph);
+        if (!selectedGraphId && normalized.profile?.default_graph) {
+          setSelectedGraphId(normalized.profile.default_graph);
         }
       })
       .catch(error => {
@@ -133,7 +145,7 @@ export function NodeManager() {
     return () => {
       cancelled = true;
     };
-  }, [addToast, selectedGraphId, selectedProfileId]);
+  }, [addToast, profiles, selectedGraphId, selectedProfileId]);
 
   const runValidate = async () => {
     if (!selectedGraphId || !selectedProfileId) return;
@@ -249,7 +261,7 @@ export function NodeManager() {
             <Badge variant="secondary">{nodes.filter(node => node.state?.status === 'disabled').length} disabled</Badge>
           </div>
 
-          <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+          <div className="grid gap-2 2xl:grid-cols-2">
             {filteredNodes.map(node => (
               <button
                 key={node.node_id}
@@ -269,7 +281,7 @@ export function NodeManager() {
                   <Badge variant={statusVariant(node.state?.status)}>{node.state?.status ?? 'unknown'}</Badge>
                 </div>
                 <div className="mt-3 flex flex-wrap gap-1">
-                  {node.ports.slice(0, 4).map(port => (
+                  {capabilityNodePorts(node).slice(0, 4).map(port => (
                     <span key={port.id} className="rounded border border-border px-1.5 py-0.5 text-[11px] text-text-muted">
                       {port.direction === 'input' ? 'in' : port.direction === 'output' ? 'out' : 'bi'}:{port.id}
                     </span>
@@ -289,7 +301,7 @@ export function NodeManager() {
             {selectedNode ? (
               <div className="space-y-3">
                 <div>
-                  <div className="text-base font-semibold text-text-main">{selectedNode.label}</div>
+                  <div className="text-base font-semibold text-text-main">{capabilityNodeLabel(selectedNode)}</div>
                   <div className="break-all text-xs text-text-muted">{selectedNode.node_id}</div>
                 </div>
                 <div className="flex flex-wrap gap-2">
@@ -302,14 +314,14 @@ export function NodeManager() {
                   </div>
                 ) : null}
                 <div className="space-y-2">
-                  {selectedNode.ports.map(port => (
+                  {capabilityNodePorts(selectedNode).map(port => (
                     <div key={port.id} className="rounded-md border border-border p-2">
                       <div className="flex items-center justify-between gap-2">
-                        <span className="text-sm font-medium text-text-main">{port.label}</span>
+                        <span className="text-sm font-medium text-text-main">{capabilityPortLabel(port)}</span>
                         <span className="text-xs text-text-muted">{port.direction}</span>
                       </div>
                       <div className="mt-2 flex flex-wrap gap-1">
-                        {port.standards.map(standard => (
+                        {capabilityPortStandards(port).map(standard => (
                           <span key={standard} className="rounded bg-bg-hover px-1.5 py-0.5 text-[11px] text-text-muted">
                             {standard}
                           </span>
