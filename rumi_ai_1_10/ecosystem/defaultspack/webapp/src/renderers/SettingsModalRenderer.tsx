@@ -931,6 +931,17 @@ const BUILTIN_API_PROVIDER_IDS: string[] = [
   "xai",
 ];
 
+// Providers whose secrets are also used as external-output tokens
+// (LINE / Discord / Slack / Generic webhook). Saving an API key against
+// any of these providers automatically mirrors the value into the
+// external token store so the External Output section sees it.
+const EXTERNAL_TOKEN_PROVIDER_IDS: string[] = ["line", "discord", "slack", "generic"];
+
+const ALL_BUILTIN_PROVIDER_IDS: string[] = [
+  ...BUILTIN_API_PROVIDER_IDS,
+  ...EXTERNAL_TOKEN_PROVIDER_IDS,
+];
+
 type ApiProviderOption = {
   provider_id: string;
   label: string;
@@ -947,10 +958,13 @@ function collectApiProviderOptions(providers: Array<Record<string, unknown>>): A
   for (const builtinId of BUILTIN_API_PROVIDER_IDS) {
     options.set(builtinId, { provider_id: builtinId, label: builtinId, kind: "llm", builtin: true });
   }
+  for (const externalId of EXTERNAL_TOKEN_PROVIDER_IDS) {
+    options.set(externalId, { provider_id: externalId, label: externalId, kind: "custom", builtin: true });
+  }
   for (const provider of providers) {
     const providerId = String(provider.provider_id ?? "").trim();
     if (!providerId) continue;
-    const builtin = Boolean(provider.builtin) || BUILTIN_API_PROVIDER_IDS.includes(providerId);
+    const builtin = Boolean(provider.builtin) || ALL_BUILTIN_PROVIDER_IDS.includes(providerId);
     const kind = normalizeProviderKind(provider.kind);
     const label = String(provider.label ?? providerId);
     options.set(providerId, { provider_id: providerId, label, kind, builtin });
@@ -2058,136 +2072,58 @@ function SettingsField({
               ))}
             </div>
           )}
-          <div className="rounded-lg border border-zinc-800 bg-zinc-950/70 p-3">
-            <div className="mb-3 text-xs leading-5 text-zinc-400">{tokenHintByProvider[tokenProvider] ?? "値は保存後に再表示しません。"}</div>
-
-            {/* 登録済み API キーから選択して external token として複製する */}
-            {registeredApisAll.length > 0 && (
-              <details className="mb-3 rounded-md border border-zinc-800/60 bg-zinc-900/40 px-3 py-2">
-                <summary className="cursor-pointer select-none text-xs text-cyan-300 hover:text-cyan-200">
-                  📎 登録済み API から選択 ({registeredApisAll.length} 件)
-                </summary>
-                <div className="mt-2 space-y-1">
-                  <p className="text-[11px] text-zinc-500">
-                    APIs に登録したキーをそのまま external token として使えます。クリックで Token ID と Provider を自動入力します（値は再入力が必要）。
-                  </p>
-                  <div className="grid gap-1.5">
-                    {registeredApisAll.map((api) => {
-                      const apiKey = String(api.key ?? `${api.provider_id}:${api.api_id}`);
-                      return (
-                        <button
-                          key={apiKey}
-                          type="button"
-                          onClick={() => {
-                            const apiProviderId = String(api.provider_id ?? "");
-                            const apiName_ = String(api.name ?? api.api_id ?? "");
-                            // APIキーのproviderがexternal token providerと一致しなければ
-                            // genericにフォールバック (LINE/Slack向けのカスタムキーなど)
-                            const matchedProvider = uniqueProviderOptions.includes(apiProviderId)
-                              ? apiProviderId
-                              : "generic";
-                            setTokenProvider(matchedProvider);
-                            setTokenName(apiName_);
-                            setTokenKind(externalTokenKindOptions(matchedProvider)[0]?.value ?? "token");
-                            setTokenSaveState("idle");
-                          }}
-                          className="flex items-center gap-2 rounded-md border border-zinc-800 bg-zinc-950/50 px-2 py-1.5 text-left text-xs text-zinc-300 hover:border-zinc-600 hover:bg-zinc-900"
-                        >
-                          <span className="font-medium text-zinc-200">{String(api.name ?? api.api_id ?? "")}</span>
-                          <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] text-zinc-400">
-                            {String(api.provider_id ?? "")}
-                          </span>
-                          <span className="ml-auto text-[10px] text-zinc-600">
-                            {uniqueProviderOptions.includes(String(api.provider_id ?? "")) ? "→ 同名で使用" : "→ generic にコピー"}
-                          </span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              </details>
-            )}
-
-            <div className="grid gap-3 md:grid-cols-[150px_1fr_1fr_1.4fr_auto]">
-              <label className="space-y-1.5">
-                <span className="text-[11px] font-medium uppercase text-zinc-500">Provider</span>
-                <CustomSelect
-                  value={tokenProvider}
-                  onChange={(nextProvider) => {
-                    setTokenProvider(nextProvider);
-                    setTokenKind(externalTokenKindOptions(nextProvider)[0]?.value ?? "token");
-                    setTokenSaveState("idle");
-                  }}
-                  options={uniqueProviderOptions.map((providerId) => ({ value: providerId, label: providerId }))}
-                />
-              </label>
-              <label className="space-y-1.5">
-                <span className="text-[11px] font-medium uppercase text-zinc-500">Token ID</span>
-                <input
-                  value={tokenName}
-                  onChange={(event) => {
-                    setTokenName(event.target.value);
-                    setTokenSaveState("idle");
-                  }}
-                  placeholder="main"
-                  className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 outline-none focus:border-cyan-500"
-                />
-              </label>
-              <label className="space-y-1.5">
-                <span className="text-[11px] font-medium uppercase text-zinc-500">Paste Kind</span>
-                <CustomSelect
-                  value={tokenKind}
-                  onChange={(nextKind) => {
-                    setTokenKind(nextKind);
-                    setTokenSaveState("idle");
-                  }}
-                  options={externalTokenKindOptions(tokenProvider)}
-                />
-              </label>
-              <label className="space-y-1.5">
-                <span className="text-[11px] font-medium uppercase text-zinc-500">Secret / URL Value</span>
-                <input
-                  type="password"
-                  autoComplete="off"
-                  value={tokenSecret}
-                  onChange={(event) => {
-                    setTokenSecret(event.target.value);
-                    setTokenSaveState("idle");
-                  }}
-                  placeholder={tokenKind === "webhook_url" ? "https://discord.com/api/webhooks/..." : `${tokenProvider} ${tokenKind}`}
-                  className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 outline-none focus:border-cyan-500"
-                />
-              </label>
-              <div className="flex items-end">
-                <button
-                  type="button"
-                  disabled={!tokenProvider.trim() || !tokenName.trim() || !tokenSecret.trim()}
-                  onClick={() => {
-                    if (!tokenProvider.trim() || !tokenName.trim() || !tokenSecret.trim()) return;
-                    onChange(sectionId, field.id, {
-                      action: "upsert",
-                      provider_id: tokenProvider,
-                      token_id: tokenName,
-                      name: tokenName,
-                      kind: tokenKind,
-                      value: tokenSecret,
-                    });
-                    setTokenSecret("");
-                    setTokenSaveState("saved");
-                  }}
-                  className={cn(
-                    "w-full rounded-lg border px-3 py-2 text-sm transition-colors",
-                    tokenProvider.trim() && tokenName.trim() && tokenSecret.trim()
-                      ? "border-zinc-100 bg-zinc-100 text-zinc-950"
-                      : "cursor-not-allowed border-zinc-800 bg-zinc-900 text-zinc-600",
-                  )}
-                >
-                  Save
-                </button>
+          <div className="rounded-lg border border-cyan-700/40 bg-cyan-950/20 p-3">
+            <div className="flex items-start gap-3">
+              <div className="mt-0.5 text-base">📎</div>
+              <div className="min-w-0 flex-1 space-y-2">
+                <p className="text-xs font-medium text-cyan-200">
+                  External Tokens は「APIs / Tokens」で一元管理しています
+                </p>
+                <p className="text-[11px] leading-5 text-zinc-400">
+                  値の登録はここでは行いません。サイドバーの <span className="font-medium text-zinc-200">APIs / Tokens</span> に移動し、
+                  provider に <code className="rounded bg-zinc-900 px-1 text-zinc-300">line</code> /
+                  <code className="ml-1 rounded bg-zinc-900 px-1 text-zinc-300">discord</code> /
+                  <code className="ml-1 rounded bg-zinc-900 px-1 text-zinc-300">slack</code> /
+                  <code className="ml-1 rounded bg-zinc-900 px-1 text-zinc-300">generic</code>
+                  を選び、<span className="font-medium text-zinc-200">名前</span> を必要な kind
+                  (例: <code className="rounded bg-zinc-900 px-1 text-zinc-300">channel_access_token</code>,
+                  <code className="ml-1 rounded bg-zinc-900 px-1 text-zinc-300">bot_token</code>)
+                  にして保存すると、ここに自動で反映されます。
+                </p>
+                {registeredApisAll.length > 0 && (
+                  <details className="rounded-md border border-zinc-800/60 bg-zinc-900/40 px-3 py-2">
+                    <summary className="cursor-pointer select-none text-xs text-zinc-400 hover:text-zinc-200">
+                      APIs / Tokens に登録済み ({registeredApisAll.length} 件) を確認
+                    </summary>
+                    <div className="mt-2 grid gap-1.5">
+                      {registeredApisAll.map((api) => {
+                        const apiKey = String(api.key ?? `${api.provider_id}:${api.api_id}`);
+                        const apiProviderId = String(api.provider_id ?? "");
+                        const isExternalProvider = ["line", "discord", "slack", "generic"].includes(apiProviderId);
+                        return (
+                          <div
+                            key={apiKey}
+                            className="flex items-center gap-2 rounded-md border border-zinc-800 bg-zinc-950/50 px-2 py-1.5 text-xs"
+                          >
+                            <span className="font-medium text-zinc-200">{String(api.name ?? api.api_id ?? "")}</span>
+                            <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] text-zinc-400">
+                              {apiProviderId}
+                            </span>
+                            {isExternalProvider && (
+                              <span className="ml-auto inline-flex items-center gap-1 text-[10px] text-emerald-400">
+                                <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-400" />
+                                external token として利用可能
+                              </span>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </details>
+                )}
               </div>
             </div>
           </div>
-          {tokenSaveState === "saved" && <p className="text-[11px] text-emerald-400">Saved</p>}
         </div>
       );
       break;
