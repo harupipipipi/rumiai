@@ -1,0 +1,18 @@
+{
+  "provider_id": "openai",
+  "api_family": "openai_chat",
+  "supports_stream": true,
+  "supports_tool_calling": true,
+  "supports_parallel_tool_calls": true,
+  "supports_vision": true,
+  "supports_audio": true,
+  "supports_pdf": true,
+  "supports_file_upload": true,
+  "supports_reasoning": true,
+  "supported_roles": ["system", "developer", "user", "assistant", "tool"],
+  "supported_content_blocks": ["text", "image", "image_url", "file", "pdf", "tool_call", "tool_result", "reasoning"],
+  "tool_choice_modes": ["auto", "none", "required"],
+  "schema_support": {"json_schema": true, "strict_json_schema": true},
+  "params": {"temperature": true, "max_tokens": true, "max_completion_tokens": true, "reasoning_effort": true},
+  "quirks": {"supports_strict_json_schema": true, "supports_builtin_tools": true, "supports_mcp_tools": true}
+}
