@@ -810,15 +810,15 @@ class FrontendRegistry:
             },
             {
                 "id": "apis",
-                "label": "APIs",
-                "description": "provider・名前・API key だけで保存します。LLM 以外 (search API など) も追加でき、認識用にだけ保存されます。",
+                "label": "APIs / Tokens",
+                "description": "LLM の API キーも、LINE / Discord / Slack の token も、ここで一元管理します。値は再表示しません。",
                 "fields": [
                     {
                         "id": "api_keys",
-                        "label": "API Keys",
+                        "label": "API Keys / Tokens",
                         "type": "api_keys",
                         "default": [],
-                        "help": "provider を選び、名前と API key を貼って Save。Custom provider は + Add custom provider から追加します。",
+                        "help": "provider を選び、名前と値を貼って Save。LINE / Discord / Slack を選ぶと外部送信側の token としても自動で利用できます。",
                     },
                 ],
             },
@@ -1008,10 +1008,10 @@ class FrontendRegistry:
                     },
                     {
                         "id": "external_tokens",
-                        "label": "External Tokens",
+                        "label": "External Tokens (read-only)",
                         "type": "external_tokens",
                         "default": [],
-                        "help": "Provider と token kind を選び、値を貼り付けて保存します。値は再表示しません。",
+                        "help": "ここでは設定しません。APIs / Tokens で provider に LINE / Discord / Slack を選んで保存してください。保存済みのものはここに自動で表示されます。",
                     },
                     {
                         "id": "output_provider",
@@ -2212,6 +2212,16 @@ class FrontendRegistry:
                 name = str(api_key_patch.get("name") or api_key_patch.get("api_id") or "").strip()
                 value = str(api_key_patch.get("value") or "")
                 if provider_id and name and value.strip():
+                    budget_raw = api_key_patch.get("monthly_budget_usd")
+                    request_limit_raw = api_key_patch.get("monthly_request_limit")
+                    try:
+                        budget_value = float(budget_raw) if budget_raw not in (None, "") else None
+                    except (TypeError, ValueError):
+                        budget_value = None
+                    try:
+                        request_limit_value = int(request_limit_raw) if request_limit_raw not in (None, "") else None
+                    except (TypeError, ValueError):
+                        request_limit_value = None
                     set_provider_api_key(
                         provider_id,
                         value,
@@ -2223,8 +2233,36 @@ class FrontendRegistry:
                         default_model=str(api_key_patch.get("default_model") or "").strip() or None,
                         notes=str(api_key_patch.get("notes") or "").strip() or None,
                         quota_label=str(api_key_patch.get("quota_label") or "").strip() or None,
+                        monthly_budget_usd=budget_value,
+                        monthly_request_limit=request_limit_value,
                         kind=str(api_key_patch.get("kind") or "").strip() or None,
                     )
+                    # If the provider matches an external-output channel
+                    # (line/discord/slack/generic), mirror the secret into the
+                    # external token store. This makes "APIs / Tokens" the
+                    # single entry point for configuring secrets.
+                    _EXTERNAL_TOKEN_PROVIDERS = {"line", "discord", "slack", "generic"}
+                    if provider_id in _EXTERNAL_TOKEN_PROVIDERS:
+                        # Use api_id as token_id so users can keep multiple
+                        # tokens per provider (e.g. "channel_access_token",
+                        # "channel_secret"). The token kind defaults to the
+                        # api_id which already encodes the role.
+                        external_kind = (
+                            str(api_key_patch.get("external_token_kind") or "").strip()
+                            or name
+                            or "token"
+                        )
+                        try:
+                            set_external_token(
+                                provider_id,
+                                value,
+                                token_id=name,
+                                name=name,
+                                kind=external_kind,
+                                pack_root=self._pack_root,
+                            )
+                        except Exception:  # noqa: BLE001 - best-effort mirroring
+                            pass
             apis["api_keys"] = []
         external_output = sanitized.get("external_output")
         legacy_external_inputs = sanitized.get("external_inputs")
