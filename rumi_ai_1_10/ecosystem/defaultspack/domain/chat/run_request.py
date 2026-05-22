@@ -613,7 +613,7 @@ def _resolve_selected_tools(
         resolved = [tool for tool in tools if str(tool.get("tool_id") or "") in set(recommended_ids)]
         if isinstance(context, dict):
             context["tool_assist"] = {
-                "mode": "auto",
+                "mode": "vector",
                 "recommended_tools": recommended_ids,
                 "available_tool_count": len(tools),
             }

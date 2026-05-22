@@ -1203,13 +1203,13 @@ class FrontendRegistry:
                         "id": "tool_assist_mode",
                         "label": "Tool Assist",
                         "type": "select",
-                        "default": "auto",
+                        "default": "all",
                         "options": [
-                            {"value": "auto", "label": "Auto: recommend relevant tools"},
                             {"value": "all", "label": "All tools: expose every tool"},
+                            {"value": "vector", "label": "Vector: recommend relevant tools"},
                             {"value": "off", "label": "Off: only manually selected tools"},
                         ],
-                        "help": "Auto は入力文と tool の名前・説明・タグを照合し、関連度が高い tool だけを AI に推薦します。",
+                        "help": "既定ではすべての tool を AI に渡します。Vector は入力文と tool の名前・説明・タグを照合し、関連度が高い tool だけを推薦します。",
                     },
                     {
                         "id": "tool_assist_limit",
@@ -1218,7 +1218,7 @@ class FrontendRegistry:
                         "default": 8,
                         "min": 1,
                         "max": 24,
-                        "help": "Auto が AI に推薦する tool 数の上限です。",
+                        "help": "Vector が AI に推薦する tool 数の上限です。",
                         "advanced": True,
                     },
                 ],
@@ -1910,7 +1910,7 @@ class FrontendRegistry:
             "tools": {
                 "default_target": "",
                 "keep_selected_tools_after_send": False,
-                "tool_assist_mode": "auto",
+                "tool_assist_mode": "all",
                 "tool_assist_limit": 8,
             },
             "computer_use_haze": {
@@ -2274,8 +2274,10 @@ class FrontendRegistry:
             tools = {}
             refreshed["tools"] = tools
         tools.setdefault("keep_selected_tools_after_send", False)
-        tool_assist_mode = str(tools.get("tool_assist_mode") or "auto").strip().lower()
-        tools["tool_assist_mode"] = tool_assist_mode if tool_assist_mode in {"auto", "all", "off"} else "auto"
+        tool_assist_mode = str(tools.get("tool_assist_mode") or "all").strip().lower()
+        if tool_assist_mode == "auto":
+            tool_assist_mode = "vector"
+        tools["tool_assist_mode"] = tool_assist_mode if tool_assist_mode in {"all", "vector", "off"} else "all"
         try:
             tools["tool_assist_limit"] = max(1, min(24, int(tools.get("tool_assist_limit", 8))))
         except (TypeError, ValueError):

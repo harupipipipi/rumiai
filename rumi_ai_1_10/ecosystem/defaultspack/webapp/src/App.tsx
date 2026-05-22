@@ -3647,7 +3647,7 @@ export default function App() {
             ...(operationsToolDenylist.length ? { tool_denylist: operationsToolDenylist } : {}),
           }
         : {};
-      const shouldSendExplicitToolSelection = !isOperationsMode || submittedToolIds.length > 0;
+      const shouldSendExplicitToolSelection = submittedToolIds.length > 0;
 
       await api.streamMessage(conversation.id, userText, {
         thinking_level: activeProfile?.supports_thinking ? selectedThinkingLevel : null,
@@ -3675,7 +3675,7 @@ export default function App() {
             workspace_root: workspaceRootForSubmit,
           } : {}),
           attachments: submittedAttachments.map(({ name, size, type, truncated, source, sourcePath }) => ({ name, size, type, truncated, source, sourcePath })),
-          selected_tools: submittedToolIds,
+          ...(shouldSendExplicitToolSelection ? { selected_tools: submittedToolIds } : {}),
           dropped_widgets: droppedWidgets
             .filter((widget) => widget.widgetKind === "tool_toggle" || widget.type === "tool" ? submittedToolIdSet.has(widget.sourceItemId || widget.id) : widget.enabled !== false)
             .map(({ id, type, label, widgetKind, sourceItemId, metadata }) => ({ id, type, label, widgetKind, sourceItemId, metadata })),

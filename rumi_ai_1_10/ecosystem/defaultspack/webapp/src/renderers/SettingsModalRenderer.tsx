@@ -210,30 +210,32 @@ function CustomSelect({
       <button
         type="button"
         onClick={() => setOpen((current) => !current)}
-        className="flex w-full items-center justify-between gap-2 rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-left text-sm text-zinc-200 outline-none transition-colors hover:border-zinc-700"
+        title={selected?.label ?? value}
+        className="flex min-h-10 w-full items-center justify-between gap-2 rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-left text-sm text-zinc-200 outline-none transition-colors hover:border-zinc-700"
       >
-        <span className="truncate">{selected?.label ?? value}</span>
+        <span className="min-w-0 flex-1 truncate">{selected?.label ?? value}</span>
         <ChevronDown size={14} className={cn("shrink-0 text-zinc-500 transition-transform", open && "rotate-180")} />
       </button>
       {open && (
         <>
           <button type="button" aria-label="close select" className="fixed inset-0 z-10 cursor-default" onClick={() => setOpen(false)} />
-          <div className="absolute left-0 right-0 top-[calc(100%+6px)] z-20 max-h-56 overflow-y-auto rounded-lg border border-zinc-700 bg-zinc-950 p-1 shadow-2xl">
+          <div className="absolute left-0 top-[calc(100%+6px)] z-20 max-h-56 w-[min(360px,calc(100vw-32px))] max-w-[calc(100vw-32px)] overflow-y-auto rounded-lg border border-zinc-700 bg-zinc-950 p-1 shadow-2xl">
             {options.map((option) => (
               <button
                 key={option.value}
                 type="button"
+                title={option.label}
                 onClick={() => {
                   onChange(option.value);
                   setOpen(false);
                 }}
                 className={cn(
-                  "flex w-full items-center justify-between gap-2 rounded-md px-2.5 py-1.5 text-left text-sm transition-colors",
+                  "flex w-full items-start justify-between gap-2 rounded-md px-2.5 py-1.5 text-left text-sm transition-colors",
                   option.value === value ? "bg-zinc-800 text-zinc-100" : "text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200",
                 )}
               >
-                <span className="truncate">{option.label}</span>
-                {option.value === value && <Check size={13} className="shrink-0 text-emerald-300" />}
+                <span className="min-w-0 flex-1 whitespace-normal break-all leading-5">{option.label}</span>
+                {option.value === value && <Check size={13} className="mt-1 shrink-0 text-emerald-300" />}
               </button>
             ))}
           </div>
@@ -920,6 +922,7 @@ const BUILTIN_API_PROVIDER_IDS: string[] = [
   "anthropic",
   "cerebras",
   "deepseek",
+  "gitlawb-opengateway",
   "glm",
   "google",
   "groq",
@@ -937,6 +940,17 @@ const BUILTIN_API_PROVIDER_IDS: string[] = [
   "together",
   "vllm",
   "xai",
+  "xiaomi-token-plan-ams",
+  "xiaomi-token-plan-cn",
+  "xiaomi-token-plan-sgp",
+];
+
+const BUILTIN_EXTERNAL_PROVIDER_IDS: string[] = [
+  "discord",
+  "generic",
+  "line",
+  "slack",
+  "web",
 ];
 
 type ApiProviderOption = {
@@ -955,13 +969,37 @@ function collectApiProviderOptions(providers: Array<Record<string, unknown>>): A
   for (const builtinId of BUILTIN_API_PROVIDER_IDS) {
     options.set(builtinId, { provider_id: builtinId, label: builtinId, kind: "llm", builtin: true });
   }
+  for (const builtinId of BUILTIN_EXTERNAL_PROVIDER_IDS) {
+    options.set(builtinId, { provider_id: builtinId, label: builtinId, kind: "custom", builtin: true });
+  }
   for (const provider of providers) {
     const providerId = String(provider.provider_id ?? "").trim();
     if (!providerId) continue;
-    const builtin = Boolean(provider.builtin) || BUILTIN_API_PROVIDER_IDS.includes(providerId);
+    const builtin = Boolean(provider.builtin) || BUILTIN_API_PROVIDER_IDS.includes(providerId) || BUILTIN_EXTERNAL_PROVIDER_IDS.includes(providerId);
     const kind = normalizeProviderKind(provider.kind);
     const label = String(provider.label ?? providerId);
     options.set(providerId, { provider_id: providerId, label, kind, builtin });
+  }
+  return Array.from(options.values()).sort((a, b) => {
+    if (a.builtin !== b.builtin) return a.builtin ? -1 : 1;
+    return a.provider_id.localeCompare(b.provider_id);
+  });
+}
+
+function collectExternalProviderOptions(providers: Array<Record<string, unknown>>): ApiProviderOption[] {
+  const options = new Map<string, ApiProviderOption>();
+  for (const providerId of BUILTIN_EXTERNAL_PROVIDER_IDS) {
+    options.set(providerId, { provider_id: providerId, label: providerId, kind: "custom", builtin: true });
+  }
+  for (const provider of providers) {
+    const providerId = String(provider.provider_id ?? "").trim();
+    if (!providerId) continue;
+    options.set(providerId, {
+      provider_id: providerId,
+      label: String(provider.label ?? providerId),
+      kind: "custom",
+      builtin: BUILTIN_EXTERNAL_PROVIDER_IDS.includes(providerId),
+    });
   }
   return Array.from(options.values()).sort((a, b) => {
     if (a.builtin !== b.builtin) return a.builtin ? -1 : 1;
@@ -976,6 +1014,9 @@ function SearchableProviderSelect({
   onAddCustom,
   placeholder = "provider を検索",
   className,
+  addCustomLabel = "Add custom provider...",
+  showKindControls = true,
+  showProviderBadges = true,
 }: {
   value: string;
   options: ApiProviderOption[];
@@ -983,6 +1024,9 @@ function SearchableProviderSelect({
   onAddCustom?: (option: { providerId: string; label: string; kind: "llm" | "custom" }) => void;
   placeholder?: string;
   className?: string;
+  addCustomLabel?: string;
+  showKindControls?: boolean;
+  showProviderBadges?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -1007,7 +1051,7 @@ function SearchableProviderSelect({
   };
 
   const submitDraft = () => {
-    const cleaned = draftId.trim().toLowerCase().replace(/[^a-z0-9_]+/g, "_").replace(/^_+|_+$/g, "");
+    const cleaned = draftId.trim().toLowerCase().replace(/[^a-z0-9_.-]+/g, "_").replace(/^[-_.]+|[-_.]+$/g, "");
     if (!cleaned) return;
     if (onAddCustom) {
       onAddCustom({ providerId: cleaned, label: cleaned, kind: draftKind });
@@ -1016,18 +1060,21 @@ function SearchableProviderSelect({
     closeAll();
   };
 
+  const selectedLabel = selected?.label ?? value;
+
   return (
     <div className={cn("relative", className)}>
       <button
         type="button"
         onClick={() => setOpen((current) => !current)}
-        className="flex w-full items-center justify-between gap-2 rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-left text-sm text-zinc-200 outline-none transition-colors hover:border-zinc-700"
+        title={selectedLabel || undefined}
+        className="flex min-h-10 w-full items-center justify-between gap-2 rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-left text-sm text-zinc-200 outline-none transition-colors hover:border-zinc-700"
       >
-        <span className="min-w-0 truncate">
+        <span className="min-w-0 flex-1">
           {selected ? (
-            <span className="inline-flex items-center gap-1.5">
-              <span className="truncate">{selected.label}</span>
-              {!selected.builtin && (
+            <span className="flex min-w-0 flex-wrap items-center gap-1.5">
+              <span className="min-w-0 break-all leading-5">{selected.label}</span>
+              {showProviderBadges && !selected.builtin && (
                 <span className="rounded-full border border-zinc-700 px-1.5 text-[9px] uppercase text-zinc-400">
                   {selected.kind === "custom" ? "non-llm" : "custom"}
                 </span>
@@ -1042,7 +1089,7 @@ function SearchableProviderSelect({
       {open && (
         <>
           <button type="button" aria-label="close provider select" className="fixed inset-0 z-10 cursor-default" onClick={closeAll} />
-          <div className="absolute left-0 right-0 top-[calc(100%+6px)] z-20 overflow-hidden rounded-lg border border-zinc-700 bg-zinc-950 shadow-2xl">
+          <div className="absolute left-0 top-[calc(100%+6px)] z-20 w-[min(520px,calc(100vw-32px))] max-w-[calc(100vw-32px)] overflow-hidden rounded-lg border border-zinc-700 bg-zinc-950 shadow-2xl">
             <label className="m-2 flex h-9 items-center gap-2 rounded-lg border border-zinc-800 bg-black/30 px-3 text-xs text-zinc-500 focus-within:border-zinc-600 focus-within:text-zinc-300">
               <Search size={14} />
               <input
@@ -1070,25 +1117,29 @@ function SearchableProviderSelect({
                   <button
                     key={option.provider_id}
                     type="button"
+                    title={option.provider_id === option.label ? option.label : `${option.label} (${option.provider_id})`}
                     onClick={() => {
                       onChange(option.provider_id);
                       closeAll();
                     }}
                     className={cn(
-                      "flex w-full items-center justify-between gap-2 rounded-md px-2.5 py-1.5 text-left text-sm transition-colors",
+                      "flex w-full items-start justify-between gap-2 rounded-md px-2.5 py-2 text-left text-sm transition-colors",
                       active ? "bg-zinc-800 text-zinc-100" : "text-zinc-300 hover:bg-zinc-900",
                     )}
                   >
-                    <span className="min-w-0 truncate">
-                      {option.label}
-                      {!option.builtin && option.kind === "custom" && (
-                        <span className="ml-2 rounded-full border border-zinc-700 px-1.5 text-[9px] uppercase text-zinc-400">non-llm</span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block whitespace-normal break-all leading-5">{option.label}</span>
+                      {option.provider_id !== option.label && (
+                        <span className="block whitespace-normal break-all text-[11px] leading-4 text-zinc-500">{option.provider_id}</span>
                       )}
-                      {!option.builtin && option.kind === "llm" && (
-                        <span className="ml-2 rounded-full border border-zinc-700 px-1.5 text-[9px] uppercase text-zinc-400">custom</span>
+                      {showProviderBadges && !option.builtin && option.kind === "custom" && (
+                        <span className="mt-1 inline-flex rounded-full border border-zinc-700 px-1.5 text-[9px] uppercase text-zinc-400">non-llm</span>
+                      )}
+                      {showProviderBadges && !option.builtin && option.kind === "llm" && (
+                        <span className="mt-1 inline-flex rounded-full border border-zinc-700 px-1.5 text-[9px] uppercase text-zinc-400">custom</span>
                       )}
                     </span>
-                    {active && <Check size={13} className="shrink-0 text-emerald-300" />}
+                    {active && <Check size={13} className="mt-1 shrink-0 text-emerald-300" />}
                   </button>
                 );
               }) : (
@@ -1110,24 +1161,26 @@ function SearchableProviderSelect({
                     }
                   }}
                 />
-                <div className="flex flex-wrap items-center gap-2 text-xs">
-                  <span className="text-zinc-500">種類:</span>
-                  {(["llm", "custom"] as const).map((option) => (
-                    <button
-                      key={option}
-                      type="button"
-                      onClick={() => setDraftKind(option)}
-                      className={cn(
-                        "rounded-full border px-2.5 py-1 transition-colors",
-                        draftKind === option
-                          ? "border-emerald-500/60 bg-emerald-500/15 text-emerald-200"
-                          : "border-zinc-700 text-zinc-400 hover:text-zinc-200",
-                      )}
-                    >
-                      {option === "llm" ? "LLM" : "Non-LLM (search等)"}
-                    </button>
-                  ))}
-                </div>
+                {showKindControls && (
+                  <div className="flex flex-wrap items-center gap-2 text-xs">
+                    <span className="text-zinc-500">種類:</span>
+                    {(["llm", "custom"] as const).map((option) => (
+                      <button
+                        key={option}
+                        type="button"
+                        onClick={() => setDraftKind(option)}
+                        className={cn(
+                          "rounded-full border px-2.5 py-1 transition-colors",
+                          draftKind === option
+                            ? "border-emerald-500/60 bg-emerald-500/15 text-emerald-200"
+                            : "border-zinc-700 text-zinc-400 hover:text-zinc-200",
+                        )}
+                      >
+                        {option === "llm" ? "LLM" : "Non-LLM (search等)"}
+                      </button>
+                    ))}
+                  </div>
+                )}
                 <div className="flex justify-end gap-2">
                   <button
                     type="button"
@@ -1161,7 +1214,7 @@ function SearchableProviderSelect({
                 className="flex w-full items-center gap-2 border-t border-zinc-800 px-3 py-2 text-left text-xs text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200"
               >
                 <span className="text-base leading-none">+</span>
-                Add custom provider...
+                {addCustomLabel}
               </button>
             )}
           </div>
@@ -1843,10 +1896,7 @@ function SettingsField({
     }
     case "external_tokens": {
       const providers = externalTokenProviderRows(value);
-      const providerOptions = providers.length
-        ? providers.map((provider) => String(provider.provider_id ?? ""))
-        : ["line", "discord", "generic", "slack"];
-      const uniqueProviderOptions = [...new Set(providerOptions.filter(Boolean))];
+      const providerOptions = collectExternalProviderOptions(providers);
       const registeredTokens = registeredExternalTokenRows(providers);
       const requiredTokens = requiredExternalTokenRows(providers);
       const tokenHintByProvider: Record<string, string> = {
@@ -2026,14 +2076,22 @@ function SettingsField({
             <div className="grid gap-3 md:grid-cols-[150px_1fr_1fr_1.4fr_auto]">
               <label className="space-y-1.5">
                 <span className="text-[11px] font-medium uppercase text-zinc-500">Provider</span>
-                <CustomSelect
+                <SearchableProviderSelect
                   value={tokenProvider}
                   onChange={(nextProvider) => {
                     setTokenProvider(nextProvider);
                     setTokenKind(externalTokenKindOptions(nextProvider)[0]?.value ?? "token");
                     setTokenSaveState("idle");
                   }}
-                  options={uniqueProviderOptions.map((providerId) => ({ value: providerId, label: providerId }))}
+                  onAddCustom={(option) => {
+                    setTokenProvider(option.providerId);
+                    setTokenKind(externalTokenKindOptions(option.providerId)[0]?.value ?? "token");
+                    setTokenSaveState("idle");
+                  }}
+                  options={providerOptions}
+                  addCustomLabel="Add external provider..."
+                  showKindControls={false}
+                  showProviderBadges={false}
                 />
               </label>
               <label className="space-y-1.5">
