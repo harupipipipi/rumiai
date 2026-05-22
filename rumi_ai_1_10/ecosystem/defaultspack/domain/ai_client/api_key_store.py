@@ -24,6 +24,7 @@ PROVIDER_SECRET_KEYS: Dict[str, List[str]] = {
     "moonshotai": ["MOONSHOT_API_KEY"],
     "nvidia": ["NVIDIA_API_KEY", "NGC_API_KEY"],
     "ollama": ["OLLAMA_API_KEY"],
+    "opencode-go": ["OPENCODE_GO_API_KEY", "OPENCODE_ZEN_API_KEY"],
     "openai": ["OPENAI_API_KEY"],
     "openai_compatible": ["OPENAI_COMPATIBLE_API_KEY"],
     "openrouter": ["OPENROUTER_API_KEY"],

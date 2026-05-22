@@ -922,6 +922,7 @@ const BUILTIN_API_PROVIDER_IDS: string[] = [
   "moonshotai",
   "nvidia",
   "ollama",
+  "opencode-go",
   "openai",
   "openai_compatible",
   "openrouter",
@@ -1048,7 +1049,7 @@ function SearchableProviderSelect({
       {open && (
         <>
           <button type="button" aria-label="close provider select" className="fixed inset-0 z-10 cursor-default" onClick={closeAll} />
-          <div className="absolute left-0 right-0 top-[calc(100%+6px)] z-20 overflow-hidden rounded-lg border border-zinc-700 bg-zinc-950 shadow-2xl">
+          <div className="rumi-provider-select-popover absolute bottom-[calc(100%+8px)] left-0 z-50 w-[min(26rem,calc(100vw-2rem))] overflow-hidden rounded-lg border border-zinc-700 bg-zinc-950 shadow-2xl">
             <label className="m-2 flex h-9 items-center gap-2 rounded-lg border border-zinc-800 bg-black/30 px-3 text-xs text-zinc-500 focus-within:border-zinc-600 focus-within:text-zinc-300">
               <Search size={14} />
               <input
@@ -1069,7 +1070,7 @@ function SearchableProviderSelect({
                 </button>
               )}
             </label>
-            <div className="max-h-64 overflow-y-auto border-t border-zinc-800 p-1">
+            <div className="max-h-72 overflow-y-auto border-t border-zinc-800 p-1">
               {filtered.length > 0 ? filtered.map((option) => {
                 const active = option.provider_id === value;
                 return (
