@@ -895,6 +895,12 @@ class ChatStore:
                     "workspace_path": path.relative_to(self.conversation_dir(conversation_id)).as_posix(),
                 }
             )
+        try:
+            from domain.chat.attachments.store import upsert_attachment_records
+
+            upsert_attachment_records(self.conversation_workspace_dir(conversation_id), attachments, refs)
+        except Exception:
+            pass
         return refs
 
     def _save_conversation_files(self):
