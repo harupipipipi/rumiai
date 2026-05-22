@@ -216,3 +216,41 @@ def test_package_install_plan_never_executes_packages(tmp_path):
     assert result["is_error"] is False
     assert result["widget"]["data"]["executes"] is False
     assert result["widget"]["data"]["command"][-1] == "requests"
+
+
+def test_connector_approval_request_redacts_secret_arguments(tmp_path):
+    from domain.tool.executor import ToolExecutor
+
+    result = ToolExecutor().execute(
+        "slack_send",
+        {"text": "hello", "bot_token": "xoxb-secret", "nested": {"api_key": "secret-key"}},
+        {"workspace_root": str(tmp_path)},
+    )
+
+    assert result["is_error"] is False
+    arguments = result["widget"]["arguments"]
+    assert arguments["bot_token"] == "[redacted]"
+    assert arguments["nested"]["api_key"] == "[redacted]"
+    assert "xoxb-secret" not in result["result"]
+
+
+def test_connector_dry_run_redacts_secret_arguments_after_internal_approval(tmp_path):
+    from domain.tool.executor import ToolExecutor
+    from domain.tool_policy.internal_context import seal_tool_context
+
+    context = seal_tool_context(
+        {"workspace_root": str(tmp_path)},
+        {"action": "allow", "allowed": True},
+    )
+
+    result = ToolExecutor().execute(
+        "slack_send",
+        {"text": "hello", "bot_token": "xoxb-secret", "nested": {"api_key": "secret-key"}},
+        context,
+    )
+
+    assert result["is_error"] is False
+    message = result["widget"]["data"]["message"]
+    assert message["bot_token"] == "[redacted]"
+    assert message["nested"]["api_key"] == "[redacted]"
+    assert "xoxb-secret" not in result["result"]

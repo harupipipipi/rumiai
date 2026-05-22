@@ -1,0 +1,50 @@
+{
+  "id": "line_push",
+  "description": "Prepare LINE push request.",
+  "config": {
+    "tool_id": "line_push",
+    "name": "LINE Push",
+    "summary": "Prepare LINE push request.",
+    "tool_category": "connector",
+    "action_type": "network",
+    "write_action": true,
+    "requires_approval": true,
+    "risk": "high",
+    "tags": [
+      "connector",
+      "agent_os",
+      "artifact_workspace"
+    ],
+    "ui": {
+      "group_id": "connectors",
+      "group_label": "Connectors",
+      "group_icon": "plug",
+      "item_icon": "plug",
+      "widget_kind": "tool_toggle",
+      "composer_label": "LINE Push",
+      "composer_description": "Prepare LINE push request.",
+      "composer_icon": "plug"
+    },
+    "schema": {
+      "parameters": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "target_id": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ]
+      }
+    },
+    "execution": {
+      "type": "local",
+      "handler": "domain.tool.external_connector_tools:line_push"
+    }
+  }
+}
