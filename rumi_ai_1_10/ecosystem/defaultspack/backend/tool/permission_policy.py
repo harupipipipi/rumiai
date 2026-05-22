@@ -68,6 +68,24 @@ def _normalize_rule_map(value: Any) -> Dict[str, str]:
     return result
 
 
+def _truthy(value: Any) -> bool:
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+    return bool(value)
+
+
+def _context_yolo_mode(context: Optional[Dict[str, Any]]) -> bool:
+    if not isinstance(context, dict):
+        return False
+    try:
+        from domain.tool.schema_adapter import policy_from_context
+
+        policy = policy_from_context(context)
+    except Exception:
+        policy = context.get("profile_policy") if isinstance(context.get("profile_policy"), dict) else {}
+    return _truthy(policy.get("yolo_mode"))
+
+
 def normalize_policy(policy: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     raw = _deep_merge(_DEFAULT_POLICY, policy or {})
     raw["default_action"] = _normalize_action(raw.get("default_action"), _ACTION_ASK)
@@ -192,8 +210,16 @@ class ToolPermissionPolicyStore:
         arguments: Optional[Dict[str, Any]] = None,
         context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
-        del context
-        return self.evaluate(tool_name=tool_name, tool_def=tool_def, arguments=arguments)
+        decision = self.evaluate(tool_name=tool_name, tool_def=tool_def, arguments=arguments)
+        if decision.get("action") == _ACTION_ASK and _context_yolo_mode(context):
+            decision = copy.deepcopy(decision)
+            decision["action"] = _ACTION_ALLOW
+            decision["allowed"] = True
+            decision["requires_approval"] = False
+            decision["matched_by"] = "yolo_mode"
+            decision["matched_value"] = "true"
+            decision["reason"] = "yolo_mode"
+        return decision
 
     def check(
         self,

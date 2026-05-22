@@ -551,7 +551,7 @@ class ToolExecutor:
         policy = policy_from_context(context if isinstance(context, dict) else {})
         next_arguments = dict(arguments or {})
         next_context = dict(context or {}) if isinstance(context, dict) else {}
-        if bool(policy.get("yolo_mode")):
+        if _truthy(policy.get("yolo_mode")):
             next_context["_tool_server_approved"] = True
         elif _is_policy_allow_context(context):
             next_context["_tool_server_approved"] = True
@@ -1187,7 +1187,7 @@ def _context_has_tool_server_approval(context):
     if not isinstance(context, dict):
         return False
     policy = policy_from_context(context)
-    if bool(policy.get("yolo_mode")) or _is_policy_allow_context(context):
+    if _truthy(policy.get("yolo_mode")) or _is_policy_allow_context(context):
         return True
     return bool(context.get("_tool_server_approved"))
 
@@ -1215,7 +1215,7 @@ def _function_call_context(context, tool_def):
     if "workspace_root" not in forwarded and _needs_cwd_workspace_default(tool_def):
         forwarded["workspace_root"] = str(Path.cwd())
     policy = policy_from_context(context)
-    if bool(policy.get("yolo_mode")) or _is_policy_allow_context(context):
+    if _truthy(policy.get("yolo_mode")) or _is_policy_allow_context(context):
         forwarded["_tool_server_approved"] = True
     if _requires_approval(tool_def) and bool(context.get("_tool_server_approved")):
         forwarded["_tool_server_approved"] = True

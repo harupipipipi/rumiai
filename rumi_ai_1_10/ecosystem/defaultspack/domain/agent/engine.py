@@ -23,6 +23,12 @@ from domain.tool.schema_adapter import (
 MAX_FLOW_CALL_DEPTH = 10
 
 
+def _truthy(value):
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+    return bool(value)
+
+
 class AgentEngine:
     def __init__(self):
         self._executions = {}
@@ -338,6 +344,20 @@ class AgentEngine:
         step = execution.steps[-1]
         step.status = "pending"
 
+    def _auto_approval_enabled(self, execution):
+        context = getattr(execution, "context", {}) or {}
+        if not isinstance(context, dict):
+            return False
+        return _truthy(policy_from_context(context).get("yolo_mode"))
+
+    def _auto_approve_pending_tool_call(self, execution):
+        if not self._auto_approval_enabled(execution):
+            return None
+        if not execution.pending_tool_call:
+            return None
+        self._persist_execution(execution, "tool_auto_approved", execution.pending_tool_call)
+        return self.approve(execution.execution_id, source="agent.yolo")
+
     def _parse_ai_response(self, ai_result):
         if ai_result.get("status") != "ok":
             return {
@@ -446,6 +466,9 @@ class AgentEngine:
                 execution.context["transcript_id"],
                 execution.pending_tool_call,
             )
+            auto_result = self._auto_approve_pending_tool_call(execution)
+            if auto_result is not None:
+                return auto_result
             self._persist_execution(execution, "approval_requested", execution.pending_tool_call)
             return {
                 "execution_id": execution_id,
@@ -465,7 +488,7 @@ class AgentEngine:
             "result": execution.to_dict(),
         }
 
-    def approve(self, execution_id):
+    def approve(self, execution_id, source="agent.approve"):
         execution = self._get_execution(execution_id)
         if not execution:
             return {"execution_id": execution_id, "status": "error", "result": {"error": "execution not found"}}
@@ -489,7 +512,7 @@ class AgentEngine:
             execution.execution_id,
             str(tool_call_id),
             status="approved",
-            decision={"source": "agent.approve"},
+            decision={"source": source},
         )
         context_for_tool = dict(getattr(execution, "context", {}) or {})
         context_for_tool["agent_run_id"] = execution.execution_id
@@ -531,6 +554,9 @@ class AgentEngine:
         if self._is_cancelled(execution):
             return self._cancelled_result(execution)
         if self._promote_queued_tool_call(execution):
+            auto_result = self._auto_approve_pending_tool_call(execution)
+            if auto_result is not None:
+                return auto_result
             self._persist_execution(execution, "approval_requested", execution.pending_tool_call or {})
             return {
                 "execution_id": execution_id,
@@ -578,6 +604,9 @@ class AgentEngine:
                 execution.context["transcript_id"],
                 execution.pending_tool_call,
             )
+            auto_result = self._auto_approve_pending_tool_call(execution)
+            if auto_result is not None:
+                return auto_result
             self._persist_execution(execution, "approval_requested", execution.pending_tool_call)
             return {
                 "execution_id": execution_id,

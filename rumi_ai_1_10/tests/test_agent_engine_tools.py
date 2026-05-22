@@ -296,6 +296,39 @@ def test_agent_approve_preserves_tools_for_followup_completion() -> None:
     assert executed == {"tool_name": "search", "tool_args": {"q": "rumi"}}
 
 
+def test_agent_yolo_auto_approves_tool_call_without_waiting() -> None:
+    engine = AgentEngine()
+    tools = [_tool("search")]
+    seen_followup_tools = []
+    executed = []
+
+    def fake_ai(messages, model, context, tools=None):
+        seen_followup_tools.append(tools)
+        if len(seen_followup_tools) == 1:
+            return _tool_call_response("search")
+        return _text_response("used tool")
+
+    def fake_execute_tool(tool_name, tool_args, context):
+        executed.append((tool_name, tool_args, context["profile_policy"].get("yolo_mode")))
+        return {"status": "ok", "data": {"result": "found"}}
+
+    engine._ai_complete = fake_ai
+    engine._execute_tool = fake_execute_tool
+
+    result = engine.execute(
+        "find docs",
+        tools,
+        "stub/model",
+        None,
+        {"profile_policy": {"yolo_mode": True}},
+    )
+
+    assert result["status"] == "completed"
+    assert result["result"]["pending_tool_call"] is None
+    assert seen_followup_tools == [tools, tools]
+    assert executed == [("search", {"q": "rumi"}, True)]
+
+
 def test_agent_approve_passes_graph_profile_principal_context_to_tool() -> None:
     engine = AgentEngine()
     seen_context = {}

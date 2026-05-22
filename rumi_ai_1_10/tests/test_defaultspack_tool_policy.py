@@ -13,6 +13,7 @@ from domain.tool.registry import ToolRegistry  # noqa: E402
 from domain.tool_policy.orchestrator import ToolOrchestrator  # noqa: E402
 from domain.tool_policy.policy import decide_tool_policy  # noqa: E402
 from domain.tool_policy.risk import resolve_tool_risk  # noqa: E402
+from backend.tool.permission_policy import ToolPermissionPolicyStore  # noqa: E402
 
 
 def test_tool_policy_requires_approval_for_write_risk():
@@ -26,6 +27,20 @@ def test_tool_policy_requires_approval_for_write_risk():
     assert decision.allowed is True
     assert decision.action == "ask"
     assert decision.requires_approval is True
+    assert decision.risk == "file_write"
+
+
+def test_tool_policy_yolo_bypasses_approval_for_write_risk():
+    tool = {"tool_id": "write_file", "write_action": True}
+    decision = decide_tool_policy(
+        tool,
+        {"profile_policy": {"yolo_mode": True, "write_actions_require_approval": True}},
+        tool_name="write_file",
+    )
+
+    assert decision.allowed is True
+    assert decision.action == "allow"
+    assert decision.requires_approval is False
     assert decision.risk == "file_write"
 
 
@@ -83,6 +98,49 @@ def test_tool_orchestrator_does_not_trust_client_supplied_approval(tmp_path, mon
     assert result["status"] == "waiting_approval"
 
 
+def test_tool_orchestrator_yolo_does_not_wait_for_approval(monkeypatch):
+    seen = {}
+
+    class Registry:
+        def get(self, name):
+            return {"tool_id": name, "name": name, "requires_approval": True}
+
+        def list_tools(self):
+            return []
+
+    def fake_invoke(input_data, context):
+        seen["input_data"] = input_data
+        seen["context"] = context
+        return {"status": "ok", "data": {"result": "ran"}}
+
+    monkeypatch.setattr("blocks.tool.invoke.run", fake_invoke)
+
+    result = ToolOrchestrator(registry=Registry()).run(
+        "danger",
+        {},
+        {"profile_policy": {"yolo_mode": True}},
+    )
+
+    assert result["status"] == "ok"
+    assert seen["input_data"]["tool_name"] == "danger"
+
+
+def test_persistent_permission_policy_yolo_allows_ask_decision(tmp_path):
+    store = ToolPermissionPolicyStore(tmp_path / "permission_policy.json")
+    store.save({"default_action": "ask"})
+
+    decision = store.decide(
+        "danger",
+        tool_def={"tool_id": "danger", "name": "danger"},
+        context={"profile_policy": {"yolo_mode": True}},
+    )
+
+    assert decision["action"] == "allow"
+    assert decision["allowed"] is True
+    assert decision["requires_approval"] is False
+    assert decision["matched_by"] == "yolo_mode"
+
+
 def test_tool_risk_recognizes_git_push():
     assert resolve_tool_risk({"tool_id": "git_push"}, "git_push") == "git_push"
 
@@ -133,3 +191,20 @@ def test_tool_executor_does_not_trust_forged_internal_permission(tmp_path, monke
     assert result["is_error"] is False
     assert result["widget"]["approval_required"] is True
     assert not (tmp_path / "pwned.txt").exists()
+
+
+def test_tool_executor_yolo_string_false_does_not_bypass_approval(tmp_path, monkeypatch):
+    from domain.tool.registry import ToolRegistry
+
+    monkeypatch.chdir(tmp_path)
+    ToolRegistry._instance = None
+
+    result = ToolExecutor().execute(
+        "coding_file_write",
+        {"path": "blocked.txt", "content": "blocked"},
+        {"profile_policy": {"yolo_mode": "false"}},
+    )
+
+    assert result["is_error"] is False
+    assert result["widget"]["approval_required"] is True
+    assert not (tmp_path / "blocked.txt").exists()
