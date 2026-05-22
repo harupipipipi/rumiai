@@ -713,7 +713,7 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         self.assertTrue(values["debug"]["ai_request_logging"])
         self.assertEqual(values["debug"]["custom_debug_flag"], "keep-me")
         self.assertEqual(values["tools"]["default_target"], "current_browser")
-        self.assertFalse(values["tools"]["keep_selected_tools_after_send"])
+        self.assertTrue(values["tools"]["keep_selected_tools_after_send"])
 
     def test_settings_migrates_model_api_routes_from_apis_to_models(self):
         from domain.frontend.registry import FrontendRegistry

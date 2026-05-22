@@ -1196,7 +1196,7 @@ class FrontendRegistry:
                         "id": "keep_selected_tools_after_send",
                         "label": "Keep Selected Tools",
                         "type": "toggle",
-                        "default": False,
+                        "default": True,
                         "help": "Keep composer tool selections after a message is sent.",
                     },
                     {
@@ -1909,7 +1909,7 @@ class FrontendRegistry:
             },
             "tools": {
                 "default_target": "",
-                "keep_selected_tools_after_send": False,
+                "keep_selected_tools_after_send": True,
                 "tool_assist_mode": "all",
                 "tool_assist_limit": 8,
             },
@@ -2273,7 +2273,7 @@ class FrontendRegistry:
         if not isinstance(tools, dict):
             tools = {}
             refreshed["tools"] = tools
-        tools.setdefault("keep_selected_tools_after_send", False)
+        tools.setdefault("keep_selected_tools_after_send", True)
         tool_assist_mode = str(tools.get("tool_assist_mode") or "all").strip().lower()
         if tool_assist_mode == "auto":
             tool_assist_mode = "vector"
