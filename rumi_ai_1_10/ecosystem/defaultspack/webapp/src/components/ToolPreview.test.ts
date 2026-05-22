@@ -6,6 +6,7 @@ import {
   buildToolPreviewDisplayItems,
   buildToolPreviewTimelineItems,
   hasCanvasItems,
+  isCanvasPreviewItemRenderable,
   type ToolPreviewItem,
 } from "./ToolPreview";
 
@@ -36,6 +37,25 @@ test("tool preview items put the active item first without injecting empty memo"
 
   assert.equal(displayItems[0]?.id, "second");
   assert.equal(displayItems.some((item) => item.id === "__memo__"), false);
+});
+
+test("canvas filters planned-tool placeholders", () => {
+  const placeholder: ToolPreviewItem = {
+    id: "planned",
+    toolStepId: "coding_file_create",
+    timestamp: 3,
+    data: {
+      type: "code",
+      filename: "coding_file_create",
+      language: "text",
+      content: "Tool planned or referenced: coding_file_create",
+    },
+  };
+
+  assert.equal(isCanvasPreviewItemRenderable(placeholder), false);
+  assert.equal(hasCanvasItems([placeholder], ""), false);
+  assert.deepEqual(buildToolPreviewDisplayItems([placeholder], "", null), []);
+  assert.deepEqual(buildToolPreviewTimelineItems([placeholder]), []);
 });
 
 test("memo is shown first only when it is active or has content", () => {

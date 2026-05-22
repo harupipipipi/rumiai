@@ -11,6 +11,6 @@ test("i18n normalizes explicit and auto locales", () => {
 
 test("i18n translates frontend and tool namespaces", () => {
   assert.equal(t("ja", "spotlight.placeholder"), "会話履歴を検索");
-  assert.equal(t("en", "tools.assist.auto"), "Auto: recommend relevant tools");
+  assert.equal(t("en", "tools.assist.vector"), "Vector: recommend relevant tools");
   assert.equal(t("en", "spotlight.matches", { count: 3 }), "3 matches");
 });
