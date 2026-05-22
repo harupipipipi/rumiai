@@ -1265,6 +1265,22 @@ function optimisticAssistantMessage(conversationId: string, model: string): Chat
   };
 }
 
+function mergeChatActivityEvents(base: ChatActivityEvent[] | null | undefined, extra: ChatActivityEvent[] | null | undefined): ChatActivityEvent[] {
+  let merged = [...(base ?? [])];
+  for (const event of extra ?? []) {
+    merged = upsertStreamActivityEvent(merged, event);
+  }
+  return merged;
+}
+
+function mergeStreamingFinalMessage(existing: ChatMessage | undefined, incoming: ChatMessage): ChatMessage {
+  return {
+    ...incoming,
+    events: mergeChatActivityEvents(incoming.events, existing?.events),
+    tool_logs: incoming.tool_logs ?? existing?.tool_logs ?? null,
+  };
+}
+
 function previewFromAction(action: SidebarAction, title: string, data: unknown): ToolPreviewItem {
   const content = typeof data === "string" ? data : JSON.stringify(data, null, 2);
   return {
@@ -3480,7 +3496,10 @@ export default function App() {
       const abortController = new AbortController();
       currentAbortControllerRef.current = abortController;
       streamingConversationIdRef.current = conversation.id;
+      let finalStreamMessageId: string | null = null;
+      let finalStreamActivityEvents: ChatActivityEvent[] = [];
       const updateStreamingAssistant = (delta: string) => {
+        if (finalStreamMessageId) return;
         setActiveConversation((current) => {
           if (!current || current.id !== conversation.id) return current;
           const existing = current.messages.find((message) => message.id === assistantDraft.id);
@@ -3512,6 +3531,7 @@ export default function App() {
         });
       };
       const updateStreamingThinking = (delta: string) => {
+        if (finalStreamMessageId) return;
         setActiveConversation((current) => {
           if (!current || current.id !== conversation.id) return current;
           const existing = current.messages.find((message) => message.id === assistantDraft.id);
@@ -3541,14 +3561,20 @@ export default function App() {
         if (!isActivityStreamEvent(streamEvent)) return;
         const eventTimestamp = Date.now();
         const activityEvent: ChatActivityEvent = { timestamp: eventTimestamp, ...streamEvent };
+        const finalizedMessageIdAtEvent = finalStreamMessageId;
+        if (finalizedMessageIdAtEvent) {
+          finalStreamActivityEvents = upsertStreamActivityEvent(finalStreamActivityEvents, activityEvent);
+        }
         setActiveConversation((current) => {
           if (!current || current.id !== conversation.id) return current;
-          const existing = current.messages.find((message) => message.id === assistantDraft.id);
+          const targetMessageId = finalizedMessageIdAtEvent ?? assistantDraft.id;
+          const existing = current.messages.find((message) => message.id === targetMessageId);
           const appendEvent = (message: ChatMessage): ChatMessage => ({
             ...message,
             events: upsertStreamActivityEvent(message.events ?? [], activityEvent),
           });
           if (!existing) {
+            if (finalizedMessageIdAtEvent) return current;
             return {
               ...current,
               messages: [...current.messages, appendEvent(assistantDraft)],
@@ -3556,7 +3582,7 @@ export default function App() {
           }
           return {
             ...current,
-            messages: current.messages.map((message) => message.id === assistantDraft.id ? appendEvent(message) : message),
+            messages: current.messages.map((message) => message.id === targetMessageId ? appendEvent(message) : message),
           };
         });
 
@@ -3578,6 +3604,7 @@ export default function App() {
           ? activityEvent.message.trim()
           : pendingRequests[conversation.id]?.status ?? `${activeProfile?.display_name ?? preferredModel} が思考中`;
         const toolName = typeof activityEvent.tool_name === "string" ? activityEvent.tool_name.trim() : "";
+        if (finalizedMessageIdAtEvent) return;
         updatePendingRequests((current) => {
           const existing = current[conversation.id] ?? {
             conversationId: conversation.id,
@@ -3603,6 +3630,7 @@ export default function App() {
         });
       };
       const replaceStreamingAssistant = (message: ChatMessage) => {
+        finalStreamMessageId = message.id;
         const completedAt = Date.now();
         const enhancedMessage: ChatMessage = {
           ...message,
@@ -3620,14 +3648,22 @@ export default function App() {
         setActiveConversation((current) => {
           if (!current || current.id !== conversation.id) return current;
           const withoutDraft = current.messages.filter((candidate) => candidate.id !== assistantDraft.id);
-          const hasFinalMessage = withoutDraft.some((candidate) => candidate.id === enhancedMessage.id);
+          const existingFinalMessage = withoutDraft.find((candidate) => candidate.id === enhancedMessage.id);
+          const baseMergedMessage = mergeStreamingFinalMessage(existingFinalMessage, enhancedMessage);
+          const mergedMessage = {
+            ...baseMergedMessage,
+            events: mergeChatActivityEvents(baseMergedMessage.events, finalStreamActivityEvents),
+          };
           return {
             ...current,
-            messages: hasFinalMessage
-              ? withoutDraft.map((candidate) => candidate.id === enhancedMessage.id ? enhancedMessage : candidate)
-              : [...withoutDraft, enhancedMessage],
+            messages: existingFinalMessage
+              ? withoutDraft.map((candidate) => candidate.id === enhancedMessage.id ? mergedMessage : candidate)
+              : [...withoutDraft, mergedMessage],
           };
         });
+        forgetPendingRequest(conversation.id);
+        replaceChatIdInUrl(conversation.id, false);
+        setIsGenerating(false);
       };
 
       const operationsModelAllowlist = settingList(settingsValues.operations_company?.model_allowlist);

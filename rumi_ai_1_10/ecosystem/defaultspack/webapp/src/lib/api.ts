@@ -926,6 +926,66 @@ type ChatStreamHandlers = {
   signal?: AbortSignal;
 };
 
+function streamRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+function streamString(record: Record<string, unknown>, key: string): string {
+  const value = record[key];
+  return typeof value === "string" ? value : "";
+}
+
+function streamMessageValue(record: Record<string, unknown>, data: Record<string, unknown>): ChatMessage | undefined {
+  const value = record.message ?? data.message;
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as ChatMessage
+    : undefined;
+}
+
+function streamErrorValue(record: Record<string, unknown>, data: Record<string, unknown>): ChatStreamError | undefined {
+  const value = record.error ?? data.error;
+  if (typeof value === "string") return value;
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return value as ChatStreamError;
+  }
+  const message = record.message ?? data.message;
+  return typeof message === "string" && message.trim() ? { message } : undefined;
+}
+
+export function normalizeChatStreamEvent(value: unknown): ChatStreamEvent | null {
+  const record = streamRecord(value);
+  const rawType = streamString(record, "type").trim();
+  if (!rawType) return null;
+  const data = streamRecord(record.data);
+  const delta = streamString(data, "delta") || streamString(record, "delta") || streamString(data, "content") || streamString(record, "content");
+
+  if (rawType === "delta" || rawType === "content_delta") {
+    return { type: "delta", delta };
+  }
+  if (rawType === "thinking_delta") {
+    return { type: "thinking_delta", delta };
+  }
+  if (rawType === "user_message" || rawType === "user_message_committed") {
+    return { type: "user_message", message: streamMessageValue(record, data) };
+  }
+  if (rawType === "message" || rawType === "assistant_message_completed") {
+    return { type: "message", message: streamMessageValue(record, data) };
+  }
+  if (rawType === "done" || rawType === "stream_end") {
+    return { type: "done", message: streamMessageValue(record, data) };
+  }
+  if (rawType === "error" || rawType === "cancelled") {
+    return { type: "error", error: rawType === "cancelled" ? "cancelled" : streamErrorValue(record, data) };
+  }
+
+  const merged: Record<string, unknown> = { ...record, ...data, type: rawType };
+  delete merged.data;
+  delete merged.schema_version;
+  return merged as ChatStreamEvent;
+}
+
 const BROWSER_COMPUTER_APPROVAL_TOOLS = new Set([
   "browser_computer",
   "browser_companion",
@@ -1130,7 +1190,12 @@ async function readStreamEvents(
     if (!raw || raw === "[DONE]") return;
     let event: ChatStreamEvent;
     try {
-      event = JSON.parse(raw) as ChatStreamEvent;
+      const parsed = JSON.parse(raw) as unknown;
+      const normalized = normalizeChatStreamEvent(parsed);
+      if (!normalized) {
+        throw new Error("empty event");
+      }
+      event = normalized;
     } catch {
       throw new Error("defaultspack stream returned a malformed event");
     }

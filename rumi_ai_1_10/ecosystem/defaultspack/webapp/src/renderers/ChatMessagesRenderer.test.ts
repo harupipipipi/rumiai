@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { compactLogPreviewText, isCompactLogLikeMessageText, messageCopyText, shouldRenderImageBlockInChat, streamedBrowserScreenshots, summarizePendingToolNames } from "./ChatMessagesRenderer";
+import { compactLogPreviewText, hasRunningToolActivityGroups, isCompactLogLikeMessageText, messageCopyText, shouldRenderImageBlockInChat, shouldShowEmptyResponseWarning, streamedBrowserScreenshots, summarizePendingToolNames, summarizeToolActivityGroups } from "./ChatMessagesRenderer";
 import type { ChatUiMessage } from "./types";
 
 function message(overrides: Partial<ChatUiMessage>): ChatUiMessage {
@@ -33,6 +33,79 @@ test("pending tool summary shows two names and the remaining count", () => {
   assert.deepEqual(summary.visibleNames, ["web_search", "browser"]);
   assert.equal(summary.hiddenCount, 1);
   assert.equal(summary.summary, "web_search、browser、その他 1 個が見込まれました");
+});
+
+test("completed tool activity summary uses elapsed work span", () => {
+  const summary = summarizeToolActivityGroups([
+    {
+      id: "files",
+      label: "ファイル",
+      items: [
+        {
+          id: "item-1",
+          toolName: "coding_file_list",
+          folder: "coding/files",
+          folderLabel: "ファイル",
+          input: "src",
+          title: "ファイル / coding_file_list: src",
+          detail: "Listed 2 files",
+          durationLabel: "3s",
+          status: "completed",
+          timestamp: 10_000,
+          supported: true,
+        },
+      ],
+    },
+  ]);
+
+  assert.equal(summary.label, "3s作業しました");
+  assert.equal(summary.itemCount, 1);
+  assert.equal(summary.runningCount, 0);
+  assert.equal(summary.failedCount, 0);
+});
+
+test("running tool activity summary remains openable as active work", () => {
+  const groups = [
+    {
+      id: "browser",
+      label: "ブラウザ",
+      items: [
+        {
+          id: "item-1",
+          toolName: "browser_use",
+          folder: "browser",
+          folderLabel: "ブラウザ",
+          input: "東京 今日の天気",
+          title: "ブラウザ / browser_use: 東京 今日の天気",
+          detail: "使用中",
+          durationLabel: "7s",
+          status: "running" as const,
+          timestamp: 10_000,
+          supported: true,
+        },
+      ],
+    },
+  ];
+
+  assert.equal(hasRunningToolActivityGroups(groups), true);
+  assert.equal(summarizeToolActivityGroups(groups).label, "7s作業中");
+});
+
+test("empty response warning waits until streaming draft is finalized", () => {
+  const streaming = message({ metadata: { thinkingLabel: "streaming" } });
+  const running = message({ metadata: { thinkingLabel: "running" } });
+
+  assert.equal(shouldShowEmptyResponseWarning(streaming, false), false);
+  assert.equal(shouldShowEmptyResponseWarning(running, false), false);
+});
+
+test("empty response warning only appears for finalized agent messages without activity", () => {
+  const emptyCompleted = message({ metadata: { thinkingLabel: "completed" } });
+  const textCompleted = message({ rawText: "done", metadata: { thinkingLabel: "completed" } });
+
+  assert.equal(shouldShowEmptyResponseWarning(emptyCompleted, false), true);
+  assert.equal(shouldShowEmptyResponseWarning(textCompleted, false), false);
+  assert.equal(shouldShowEmptyResponseWarning(emptyCompleted, true), false);
 });
 
 test("long terminal-style output is detected for compact display", () => {

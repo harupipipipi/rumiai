@@ -9,6 +9,7 @@ const historyChatDropMime = "application/rumi-history-chat";
 
 type ApiMockOptions = {
   onStreamRequest?: (payload: Record<string, unknown>) => void;
+  streamEvents?: (message: Record<string, unknown>) => Record<string, unknown>[];
 };
 
 function ok(data: unknown) {
@@ -224,6 +225,14 @@ async function fulfillStream(route: Route, message: Record<string, unknown>) {
   });
 }
 
+async function fulfillStreamEvents(route: Route, events: Record<string, unknown>[]) {
+  await route.fulfill({
+    status: 200,
+    contentType: "text/event-stream",
+    body: events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(""),
+  });
+}
+
 async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions = {}) {
   await page.addInitScript(() => {
     localStorage.clear();
@@ -308,7 +317,7 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
     if (path === "/api/chat/conversations/c-smoke/stream" && method === "POST") {
       const payload = request.postDataJSON() as Record<string, unknown>;
       options.onStreamRequest?.(payload);
-      return fulfillStream(route, {
+      const message = {
         id: "m-assistant-streamed",
         role: "assistant",
         content: [{ type: "text", text: "Structured response accepted." }],
@@ -325,7 +334,11 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
         metadata: {},
         events: [],
         tool_logs: [],
-      });
+      };
+      if (options.streamEvents) {
+        return fulfillStreamEvents(route, options.streamEvents(message));
+      }
+      return fulfillStream(route, message);
     }
 
     if (path === "/api/chat/conversations/c-smoke") {
@@ -620,6 +633,32 @@ test("history card drag uses rumi history MIME and sends dropped_widgets metadat
   });
 });
 
+test("late stream activity after final message does not leave an empty draft pending", async ({ page }) => {
+  await openDefaultspack(page, "/chat", {
+    streamEvents: (message) => [
+      { type: "content_delta", data: { delta: "Structured response accepted." } },
+      { type: "assistant_message_completed", data: { message } },
+      {
+        type: "tool_call_started",
+        data: {
+          tool_name: "browser_use",
+          tool_call_id: "call-late",
+          display_text: "browser_use を使用中",
+          message: "browser_use を使用中",
+        },
+      },
+      { type: "done", data: { message } },
+    ],
+  });
+
+  await page.locator("textarea.rumi-composer-textarea").fill("Use browser after final.");
+  await page.locator(".rumi-send-button").click();
+
+  await expect(page.getByText("Structured response accepted.")).toBeVisible();
+  await expect(page.getByText("レスポンス本文が空でした。stream が途中で閉じたか、thinking のみで終了した可能性があります。")).toBeHidden();
+  await expect(page.getByText("tool 準備中")).toBeHidden();
+});
+
 test("coding slash command toggles coding mode off again", async ({ page }) => {
   await openDefaultspack(page, "/chat");
 
@@ -637,6 +676,15 @@ test("coding slash command toggles coding mode off again", async ({ page }) => {
 test("tool timeline shows streamed activity details", async ({ page }) => {
   await openDefaultspack(page);
 
+  await expect(page.locator(".rumi-tool-activity")).toHaveCount(0);
+  const toggle = page.getByRole("button", { name: /toolログを開く: .*作業しました/ });
+  await expect(toggle).toBeVisible();
+  await expect(toggle).toContainText("開く");
+
+  await toggle.click();
+  const expandedToggle = page.getByRole("button", { name: /toolログを閉じる: .*作業しました/ });
+  await expect(expandedToggle).toBeVisible();
+  await expect(expandedToggle).not.toContainText("閉じる");
   const timeline = page.locator(".rumi-tool-activity");
   await expect(timeline).toBeVisible();
   await expect(timeline).toContainText("ファイル");
@@ -646,8 +694,9 @@ test("tool timeline shows streamed activity details", async ({ page }) => {
 
 test("mocked coding cockpit renders MCP server state", async ({ page }) => {
   await openDefaultspack(page, "/coding");
+  await page.getByRole("button", { name: "Coding widget" }).click();
 
-  await expect(page.getByLabel("Coding cockpit")).toBeVisible();
+  await expect(page.locator(".coding-cockpit")).toBeVisible();
   const mcpServers = page.getByLabel("MCP servers");
   await expect(mcpServers).toContainText("Filesystem MCP");
   await expect(mcpServers).toContainText("approved");
@@ -655,6 +704,7 @@ test("mocked coding cockpit renders MCP server state", async ({ page }) => {
 
 test("mocked coding cockpit registers approves and connects an MCP server", async ({ page }) => {
   await openDefaultspack(page, "/coding");
+  await page.getByRole("button", { name: "Coding widget" }).click();
 
   await page.getByLabel("MCP server id").fill("contract_digest");
   await page.getByLabel("MCP command").fill("python");

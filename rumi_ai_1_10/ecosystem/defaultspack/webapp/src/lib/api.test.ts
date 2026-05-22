@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { api, normalizeBrowserComputerApprovalAction, usesBrowserComputerApprovalEndpoint } from "./api";
+import { api, normalizeChatStreamEvent, normalizeBrowserComputerApprovalAction, usesBrowserComputerApprovalEndpoint } from "./api";
 import { frontendCommandArgs, keepSelectedToolsAfterSend, parseCommandBoolean } from "../App";
 
 test("frontend command args prefer backend-coerced values", () => {
@@ -361,6 +361,66 @@ test("streamMessage parses SSE deltas and final message", async () => {
 
   assert.deepEqual(events, ["he", "llo"]);
   assert.equal(finalId, "m2");
+});
+
+test("streamMessage accepts canonical defaultspack stream events", async () => {
+  const originalFetch = globalThis.fetch;
+  const events: string[] = [];
+  let finalId = "";
+  globalThis.fetch = (async () => {
+    const finalMessage = {
+      id: "m2",
+      role: "assistant",
+      content: [{ type: "text", text: "hello" }],
+      raw_text: "hello",
+      created_at: 1,
+      conversation_id: "c1",
+    };
+    const body = [
+      `data: ${JSON.stringify({ type: "content_delta", data: { delta: "he" } })}\n\n`,
+      `data: ${JSON.stringify({ type: "content_delta", data: { delta: "llo" } })}\n\n`,
+      `data: ${JSON.stringify({ type: "assistant_message_completed", data: { message: finalMessage } })}\n\n`,
+      `data: ${JSON.stringify({ type: "done", data: { message: finalMessage } })}\n\n`,
+    ].join("");
+    return new Response(body, {
+      status: 200,
+      headers: { "Content-Type": "text/event-stream; charset=utf-8" },
+    });
+  }) as typeof fetch;
+
+  try {
+    const final = await api.streamMessage("c1", "hello", undefined, {
+      onDelta(delta) {
+        events.push(delta);
+      },
+      onMessage(message) {
+        finalId = message.id;
+      },
+    });
+    assert.equal(final?.id, "m2");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.deepEqual(events, ["he", "llo"]);
+  assert.equal(finalId, "m2");
+});
+
+test("normalizeChatStreamEvent lifts canonical activity data", () => {
+  assert.deepEqual(normalizeChatStreamEvent({
+    type: "tool_call_started",
+    data: {
+      tool_name: "browser_use",
+      tool_call_id: "call-1",
+      message: "browser_use を使用中",
+    },
+    message: "tool started",
+  }), {
+    type: "tool_call_started",
+    tool_name: "browser_use",
+    tool_call_id: "call-1",
+    message: "browser_use を使用中",
+  });
 });
 
 test("streamMessage forwards thinking deltas", async () => {

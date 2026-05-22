@@ -1,12 +1,12 @@
-import { AlertTriangle, Check, Clock, Copy, ExternalLink, Image as ImageIcon, Loader2 } from "lucide-react";
+import { AlertTriangle, Check, ChevronRight, Clock, Copy, ExternalLink, Image as ImageIcon, Loader2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 import { ArtifactPreviewDialog, type ArtifactPreviewDialogItem } from "../components/ArtifactPreviewDialog";
 import { cn } from "../lib/cn";
-import { elapsedDurationLabel } from "../lib/duration";
-import { buildToolActivityGroups, toolFolderFor } from "../lib/toolActivity";
+import { elapsedDurationLabel, formatCompactDuration, timestampMs } from "../lib/duration";
+import { buildToolActivityGroups, toolFolderFor, type ToolActivityGroup } from "../lib/toolActivity";
 import { api, type BrowserScreenshot, type ChatContentBlock } from "../lib/api";
 import type { ChatMessagesRendererProps } from "./types";
 
@@ -50,6 +50,19 @@ type CompactLogPreview = {
   omitted: boolean;
   omittedChars: number;
   text: string;
+};
+
+type ToolActivityTraySummary = {
+  failedCount: number;
+  itemCount: number;
+  label: string;
+  runningCount: number;
+};
+
+type MessageToolActivityState = {
+  groups: ToolActivityGroup[];
+  hasRunningItems: boolean;
+  summary: ToolActivityTraySummary;
 };
 
 function shortDetail(value: unknown, limit = 420): string {
@@ -253,6 +266,23 @@ function messageVisibleText(message: ChatMessagesRendererProps["messages"][numbe
   return blockText || String(message.rawText ?? "").trim();
 }
 
+export function isAwaitingStreamFinalMessage(message: ChatMessagesRendererProps["messages"][number]): boolean {
+  const thinkingLabel = String(message.metadata?.thinkingLabel ?? "").trim().toLowerCase();
+  return thinkingLabel === "streaming" || thinkingLabel === "running";
+}
+
+export function shouldShowEmptyResponseWarning(
+  message: ChatMessagesRendererProps["messages"][number],
+  hasToolActivity: boolean,
+): boolean {
+  return (
+    message.role === "agent"
+    && !messageVisibleText(message)
+    && !hasToolActivity
+    && !isAwaitingStreamFinalMessage(message)
+  );
+}
+
 export function messageCopyText(message: ChatMessagesRendererProps["messages"][number]): string {
   const blockText = message.content
     .map((block) => {
@@ -424,6 +454,91 @@ export function summarizePendingToolNames(toolNames: string[], visibleLimit = 2)
     totalCount: uniqueNames.length,
     visibleNames,
   };
+}
+
+function compactDurationMs(label: string | undefined): number | null {
+  const text = String(label ?? "").trim();
+  if (!text) return null;
+  const units: Record<string, number> = {
+    d: 86_400_000,
+    h: 3_600_000,
+    m: 60_000,
+    s: 1000,
+  };
+  let total = 0;
+  let matched = false;
+  for (const match of text.matchAll(/(\d+)\s*([dhms])/g)) {
+    matched = true;
+    total += Number(match[1]) * units[match[2]];
+  }
+  return matched ? total : null;
+}
+
+export function hasRunningToolActivityGroups(groups: ToolActivityGroup[]): boolean {
+  return groups.some((group) => group.items.some((item) => item.status === "running"));
+}
+
+function toolActivityDurationLabel(groups: ToolActivityGroup[]): string {
+  let firstStart: number | null = null;
+  let lastEnd: number | null = null;
+  let longestDurationMs = 0;
+
+  for (const item of groups.flatMap((group) => group.items)) {
+    const durationMs = compactDurationMs(item.durationLabel);
+    if (durationMs !== null) {
+      longestDurationMs = Math.max(longestDurationMs, durationMs);
+    }
+    const end = timestampMs(item.timestamp);
+    if (end === null) continue;
+    const start = durationMs !== null ? end - durationMs : end;
+    firstStart = firstStart === null ? start : Math.min(firstStart, start);
+    lastEnd = lastEnd === null ? end : Math.max(lastEnd, end);
+  }
+
+  if (firstStart !== null && lastEnd !== null && lastEnd >= firstStart) {
+    return formatCompactDuration(lastEnd - firstStart);
+  }
+  return longestDurationMs > 0 ? formatCompactDuration(longestDurationMs) : "";
+}
+
+export function summarizeToolActivityGroups(groups: ToolActivityGroup[]): ToolActivityTraySummary {
+  const items = groups.flatMap((group) => group.items);
+  const itemCount = items.length;
+  const failedCount = items.filter((item) => item.status === "failed").length;
+  const runningCount = items.filter((item) => item.status === "running").length;
+  const duration = toolActivityDurationLabel(groups);
+  const label = duration
+    ? `${duration}${runningCount > 0 ? "作業中" : "作業しました"}`
+    : runningCount > 0
+      ? "toolを実行中"
+      : `${itemCount}件のtoolを実行しました`;
+  return {
+    failedCount,
+    itemCount,
+    label: failedCount > 0 ? `${label}・${failedCount}件失敗` : label,
+    runningCount,
+  };
+}
+
+function toolActivityStateForMessage(
+  message: ChatMessagesRendererProps["messages"][number],
+  now?: number,
+): MessageToolActivityState | null {
+  const staticGroups = buildToolActivityGroups(message.toolLogs ?? [], message.events ?? [], { conversationId: message.conversationId });
+  const hasRunningItems = hasRunningToolActivityGroups(staticGroups);
+  const groups = hasRunningItems && now !== undefined
+    ? buildToolActivityGroups(message.toolLogs ?? [], message.events ?? [], { conversationId: message.conversationId, now })
+    : staticGroups;
+  if (groups.length === 0) return null;
+  return {
+    groups,
+    hasRunningItems: hasRunningToolActivityGroups(groups),
+    summary: summarizeToolActivityGroups(groups),
+  };
+}
+
+function hasRunningToolActivityMessage(message: ChatMessagesRendererProps["messages"][number]): boolean {
+  return hasRunningToolActivityGroups(buildToolActivityGroups(message.toolLogs ?? [], message.events ?? [], { conversationId: message.conversationId }));
 }
 
 function activityPhase(status: string | null | undefined, toolNames: string[]): { label: string; detail: string } {
@@ -774,22 +889,43 @@ function BrowserScreenshotStrip({
   );
 }
 
+function ToolActivityToggle({
+  isOpen,
+  onToggle,
+  summary,
+}: {
+  isOpen: boolean;
+  onToggle: () => void;
+  summary: ToolActivityTraySummary;
+}) {
+  return (
+    <button
+      type="button"
+      aria-expanded={isOpen}
+      aria-label={`toolログを${isOpen ? "閉じる" : "開く"}: ${summary.label}`}
+      className="inline-flex min-w-0 max-w-[min(260px,46vw)] shrink items-center gap-1.5 whitespace-nowrap text-[11px] font-medium text-zinc-500 transition-colors hover:text-zinc-300 focus-visible:text-zinc-200 focus-visible:outline-none"
+      onClick={onToggle}
+    >
+      <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", summary.failedCount > 0 ? "bg-red-400" : summary.runningCount > 0 ? "animate-pulse bg-blue-300" : "bg-zinc-600")} />
+      <span className="min-w-0 truncate">{summary.label}</span>
+      {!isOpen && <span className="shrink-0 text-zinc-500">開く</span>}
+      <ChevronRight size={13} className={cn("shrink-0 transition-transform", isOpen && "rotate-90")} />
+    </button>
+  );
+}
+
 function ToolActivityTray({
+  groups,
+  isOpen,
   message,
   onOpenToolPreview,
 }: {
+  groups: ToolActivityGroup[];
+  isOpen: boolean;
   message: ChatMessagesRendererProps["messages"][number];
   onOpenToolPreview?: (previewId: string) => void;
 }) {
-  const hasRunningActivity = (message.events ?? []).some((event) => (
-    event.type === "tool_call" ||
-    event.type === "tool_call_started" ||
-    event.phase === "tool_call" ||
-    event.phase === "tool_call_started"
-  ));
-  const now = useActivityNow(hasRunningActivity);
-  const groups = buildToolActivityGroups(message.toolLogs ?? [], message.events ?? [], { conversationId: message.conversationId, now });
-  if (groups.length === 0) return null;
+  if (!isOpen || groups.length === 0) return null;
   const previewableCallIds = new Set(
     (message.events ?? [])
       .filter((event) => (
@@ -913,6 +1049,9 @@ export function ChatMessagesRenderer({
   onOpenToolPreview,
 }: ChatMessagesRendererProps) {
   const [imagePreview, setImagePreview] = useState<ImagePreviewRequest | null>(null);
+  const [openToolActivityByMessageId, setOpenToolActivityByMessageId] = useState<Record<string, boolean | undefined>>({});
+  const hasRunningToolActivity = showActivityInMessages && messages.some((message) => message.role === "agent" && hasRunningToolActivityMessage(message));
+  const activityNow = useActivityNow(hasRunningToolActivity);
 
   return (
     <>
@@ -927,26 +1066,48 @@ export function ChatMessagesRenderer({
       ) : (
         <div className="flex-1 overflow-x-hidden overflow-y-auto px-5 py-3 md:px-8 lg:px-10 xl:px-12">
           <div className="mx-auto w-full max-w-6xl min-w-0 space-y-4">
-            {messages.map((message) => (
+            {messages.map((message) => {
+              const toolActivity = showActivityInMessages && message.role === "agent"
+                ? toolActivityStateForMessage(message, activityNow)
+                : null;
+              const isToolActivityOpen = toolActivity
+                ? openToolActivityByMessageId[message.id] ?? toolActivity.hasRunningItems
+                : false;
+              const toggleToolActivity = () => {
+                if (!toolActivity) return;
+                setOpenToolActivityByMessageId((current) => {
+                  const currentOpen = current[message.id] ?? toolActivity.hasRunningItems;
+                  return { ...current, [message.id]: !currentOpen };
+                });
+              };
+
+              return (
               <div key={message.id} className={cn("rumi-message-row group/message flex min-w-0 gap-3 select-text", message.role === "user" ? "flex-row-reverse lg:pr-6 xl:pr-8 2xl:pr-10" : "lg:pl-8 xl:pl-12 2xl:pl-16")}>
                 <div className={cn("flex min-w-0 flex-col pt-1", message.role === "user" ? "max-w-[82%] items-end lg:max-w-[70%] 2xl:max-w-[64%]" : "flex-1 items-start")}>
                   {message.role === "agent" && (
-                    <div className="flex items-center gap-2 mb-1.5">
-                      <span className="text-xs font-semibold text-zinc-300 tracking-wide">Assistant</span>
+                    <div className="mb-1.5 flex max-w-full min-w-0 flex-nowrap items-center gap-2 overflow-hidden">
+                      <span className="shrink-0 text-xs font-semibold tracking-wide text-zinc-300">Assistant</span>
                       {message.metadata?.executionTime && (
-                        <span className="text-[10px] text-zinc-500 font-mono flex items-center gap-1">
+                        <span className="flex shrink-0 items-center gap-1 font-mono text-[10px] text-zinc-500">
                           <Clock size={10} /> {message.metadata.executionTime}
                         </span>
                       )}
                       {message.metadata?.thinkingDuration && (
-                        <span className="font-mono text-[10px] text-zinc-600">thinking {message.metadata.thinkingDuration}</span>
+                        <span className="shrink-0 font-mono text-[10px] text-zinc-600">thinking {message.metadata.thinkingDuration}</span>
+                      )}
+                      {toolActivity && (
+                        <ToolActivityToggle
+                          isOpen={isToolActivityOpen}
+                          onToggle={toggleToolActivity}
+                          summary={toolActivity.summary}
+                        />
                       )}
                     </div>
                   )}
 
                   <div className={cn("flex min-w-0 max-w-full flex-col", message.role === "user" ? "items-start" : "w-full items-start")}>
                     {(() => {
-                      const hasToolActivity = buildToolActivityGroups(message.toolLogs ?? [], message.events ?? []).length > 0;
+                      const hasToolActivity = Boolean(toolActivity);
                       return (
                     <div
                       className={cn(
@@ -956,7 +1117,14 @@ export function ChatMessagesRenderer({
                           : "w-full text-zinc-200 bg-transparent",
                       )}
                     >
-                      {showActivityInMessages && message.role === "agent" && <ToolActivityTray message={message} onOpenToolPreview={onOpenToolPreview} />}
+                      {toolActivity && (
+                        <ToolActivityTray
+                          groups={toolActivity.groups}
+                          isOpen={isToolActivityOpen}
+                          message={message}
+                          onOpenToolPreview={onOpenToolPreview}
+                        />
+                      )}
 
                       {message.role === "agent" && message.metadata?.thinkingTranscript && (
                         <details className="mb-3 rounded-lg border border-zinc-800 bg-zinc-950/50 px-3 py-2 text-xs text-zinc-400">
@@ -974,7 +1142,7 @@ export function ChatMessagesRenderer({
                           ? message.content.map((block, index) => (
                               <MessageBlock key={`${message.id}-${index}`} block={block} unknownStrategy={unknownBlockStrategy} onOpenImagePreview={setImagePreview} />
                             ))
-                          : message.role === "agent" && !messageVisibleText(message) && !hasToolActivity
+                          : shouldShowEmptyResponseWarning(message, hasToolActivity)
                             ? (
                                 <div className="flex items-start gap-2 rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-[12px] leading-relaxed text-amber-100">
                                   <AlertTriangle size={14} className="mt-0.5 shrink-0 text-amber-300" />
@@ -993,7 +1161,8 @@ export function ChatMessagesRenderer({
                   </div>
                 </div>
               </div>
-            ))}
+              );
+            })}
 
             {isGenerating && (
               <div className="flex gap-3">
