@@ -126,6 +126,29 @@ def test_surface_launch_uses_runtime_port_from_env(monkeypatch):
     assert handler.calls[0]["grant_config"]["port"] == 8767
 
 
+def test_surface_launch_invalid_runtime_port_falls_back(monkeypatch):
+    monkeypatch.setenv("RUMI_PORT", "not-a-port")
+    active = FakeActive(
+        {
+            "startup_surface_open_pending": True,
+            "startup_surface_launch_target": {
+                "kind": "desktop_app",
+                "pack_id": "frontendpack",
+                "principal_id": "frontendpack",
+                "surface": "browser",
+            },
+        }
+    )
+    handler = FakeDesktopHandler()
+
+    launch_pending_startup_profile_surface(
+        active_manager=active,
+        desktop_handler=handler,
+    )
+
+    assert handler.calls[0]["grant_config"]["port"] == 8765
+
+
 def test_non_pending_surface_launch_is_noop():
     active = FakeActive({"startup_surface_open_pending": False})
 

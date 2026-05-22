@@ -114,6 +114,21 @@ def test_desktop_capability_uses_runtime_port_from_env(monkeypatch):
     assert result["port"] == 8767
 
 
+def test_desktop_capability_invalid_runtime_port_uses_grant_fallback(monkeypatch):
+    from core_runtime.desktop_capability import DesktopCapabilityHandler
+
+    monkeypatch.setenv("RUMI_PORT", "not-a-port")
+    handler = DesktopCapabilityHandler()
+
+    result = handler.handle_execute(
+        principal_id="defaultspack",
+        args={"pack_id": "defaultspack"},
+        grant_config={"allowed_packs": ["defaultspack"], "port": 8770},
+    )
+
+    assert result["port"] == 8770
+
+
 def test_desktop_capability_denies_empty_allowed_packs():
     from core_runtime.desktop_capability import DesktopCapabilityHandler
 

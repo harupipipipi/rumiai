@@ -25,16 +25,13 @@ from typing import Any, Dict, List
 
 from .logging_utils import get_structured_logger
 from .metrics import get_metrics_collector
+from .runtime_port import resolve_runtime_port
 
 _logger = get_structured_logger("rumi.kernel.handlers.system")
 
 
 def _resolve_api_port(args: Dict[str, Any]) -> int:
-    raw_port = os.environ.get("RUMI_PORT") or args.get("port") or 8765
-    try:
-        return int(raw_port)
-    except (TypeError, ValueError):
-        return int(args.get("port") or 8765)
+    return resolve_runtime_port(fallback=args.get("port"))
 
 # ------------------------------------------------------------------
 # Wave 17-A: inject ブロックリスト — 内部サービス参照の注入を禁止

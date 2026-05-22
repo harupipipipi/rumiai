@@ -25,6 +25,7 @@ from urllib.parse import urlparse, parse_qs, unquote
 
 from .hmac_key_manager import get_hmac_key_manager, HMACKeyManager
 from .panel_auth import get_panel_auth_manager, PanelAuthManager
+from .runtime_port import resolve_runtime_port
 
 from .validation import (
     validate_pack_id as _v_validate_pack_id,
@@ -187,6 +188,7 @@ class PackAPIHandler(
     internal_token: str = ""
     _allowed_origins: Optional[list[str]] = None
     _allowed_origins_from_env: bool = False
+    _allowed_origins_cache_key: Optional[tuple[str, str]] = None
     _hmac_key_manager: Optional[HMACKeyManager] = None
     _panel_auth_manager: Optional[PanelAuthManager] = None
     kernel = None  # Kernel インスタンス参照（Flow実行API用）
@@ -1063,10 +1065,12 @@ class PackAPIHandler(
         ワイルドカードポート指定("http://localhost:*")は環境変数で
         明示的に指定した場合のみ有効。
         """
-        if cls._allowed_origins is not None:
+        env_origins = os.environ.get("RUMI_CORS_ORIGINS", "")
+        runtime_port_raw = os.environ.get("RUMI_PORT", "")
+        cache_key = (env_origins, runtime_port_raw)
+        if cls._allowed_origins is not None and cls._allowed_origins_cache_key == cache_key:
             return cls._allowed_origins
 
-        env_origins = os.environ.get("RUMI_CORS_ORIGINS", "")
         if env_origins.strip():
             cls._allowed_origins = [o.strip() for o in env_origins.split(",") if o.strip()]
             cls._allowed_origins_from_env = True
@@ -1081,17 +1085,15 @@ class PackAPIHandler(
                 "http://127.0.0.1:8080",
                 "http://127.0.0.1:8765",
             ]
-            runtime_port = os.environ.get("RUMI_PORT", "").strip()
-            try:
-                port = int(runtime_port) if runtime_port else 0
-            except ValueError:
-                port = 0
-            if 0 < port <= 65535:
+            if runtime_port_raw.strip():
+                port = resolve_runtime_port()
                 cls._allowed_origins.extend([
                     f"http://localhost:{port}",
                     f"http://127.0.0.1:{port}",
                 ])
             cls._allowed_origins_from_env = False
+        cls._allowed_origins = list(dict.fromkeys(cls._allowed_origins))
+        cls._allowed_origins_cache_key = cache_key
         return cls._allowed_origins
 
     @classmethod
