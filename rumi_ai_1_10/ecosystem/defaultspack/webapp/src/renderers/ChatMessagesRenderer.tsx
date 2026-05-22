@@ -59,6 +59,12 @@ type ToolActivityTraySummary = {
   runningCount: number;
 };
 
+type MessageToolActivityState = {
+  groups: ToolActivityGroup[];
+  hasRunningItems: boolean;
+  summary: ToolActivityTraySummary;
+};
+
 function shortDetail(value: unknown, limit = 420): string {
   let text = "";
   if (typeof value === "string") {
@@ -514,6 +520,27 @@ export function summarizeToolActivityGroups(groups: ToolActivityGroup[]): ToolAc
   };
 }
 
+function toolActivityStateForMessage(
+  message: ChatMessagesRendererProps["messages"][number],
+  now?: number,
+): MessageToolActivityState | null {
+  const staticGroups = buildToolActivityGroups(message.toolLogs ?? [], message.events ?? [], { conversationId: message.conversationId });
+  const hasRunningItems = hasRunningToolActivityGroups(staticGroups);
+  const groups = hasRunningItems && now !== undefined
+    ? buildToolActivityGroups(message.toolLogs ?? [], message.events ?? [], { conversationId: message.conversationId, now })
+    : staticGroups;
+  if (groups.length === 0) return null;
+  return {
+    groups,
+    hasRunningItems: hasRunningToolActivityGroups(groups),
+    summary: summarizeToolActivityGroups(groups),
+  };
+}
+
+function hasRunningToolActivityMessage(message: ChatMessagesRendererProps["messages"][number]): boolean {
+  return hasRunningToolActivityGroups(buildToolActivityGroups(message.toolLogs ?? [], message.events ?? [], { conversationId: message.conversationId }));
+}
+
 function activityPhase(status: string | null | undefined, toolNames: string[]): { label: string; detail: string } {
   const text = String(status ?? "").toLowerCase();
   if (text.includes("scheduler") || text.includes("待機")) {
@@ -862,28 +889,43 @@ function BrowserScreenshotStrip({
   );
 }
 
+function ToolActivityToggle({
+  isOpen,
+  onToggle,
+  summary,
+}: {
+  isOpen: boolean;
+  onToggle: () => void;
+  summary: ToolActivityTraySummary;
+}) {
+  return (
+    <button
+      type="button"
+      aria-expanded={isOpen}
+      aria-label={`toolログを${isOpen ? "閉じる" : "開く"}: ${summary.label}`}
+      className="inline-flex min-w-0 max-w-[min(260px,46vw)] shrink items-center gap-1.5 whitespace-nowrap text-[11px] font-medium text-zinc-500 transition-colors hover:text-zinc-300 focus-visible:text-zinc-200 focus-visible:outline-none"
+      onClick={onToggle}
+    >
+      <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", summary.failedCount > 0 ? "bg-red-400" : summary.runningCount > 0 ? "animate-pulse bg-blue-300" : "bg-zinc-600")} />
+      <span className="min-w-0 truncate">{summary.label}</span>
+      {!isOpen && <span className="shrink-0 text-zinc-500">開く</span>}
+      <ChevronRight size={13} className={cn("shrink-0 transition-transform", isOpen && "rotate-90")} />
+    </button>
+  );
+}
+
 function ToolActivityTray({
+  groups,
+  isOpen,
   message,
   onOpenToolPreview,
 }: {
+  groups: ToolActivityGroup[];
+  isOpen: boolean;
   message: ChatMessagesRendererProps["messages"][number];
   onOpenToolPreview?: (previewId: string) => void;
 }) {
-  const staticGroups = buildToolActivityGroups(message.toolLogs ?? [], message.events ?? [], { conversationId: message.conversationId });
-  const hasRunningActivity = hasRunningToolActivityGroups(staticGroups);
-  const now = useActivityNow(hasRunningActivity);
-  const groups = hasRunningActivity
-    ? buildToolActivityGroups(message.toolLogs ?? [], message.events ?? [], { conversationId: message.conversationId, now })
-    : staticGroups;
-  const hasRunningItems = hasRunningToolActivityGroups(groups);
-  const [isOpen, setIsOpen] = useState(hasRunningItems);
-
-  useEffect(() => {
-    setIsOpen(hasRunningItems);
-  }, [hasRunningItems, message.id]);
-
-  if (groups.length === 0) return null;
-  const summary = summarizeToolActivityGroups(groups);
+  if (!isOpen || groups.length === 0) return null;
   const previewableCallIds = new Set(
     (message.events ?? [])
       .filter((event) => (
@@ -896,80 +938,64 @@ function ToolActivityTray({
       .filter(Boolean),
   );
   return (
-    <div className="rumi-tool-activity mb-4 grid w-full gap-2 text-zinc-300">
-      <button
-        type="button"
-        aria-expanded={isOpen}
-        aria-label={`toolログを${isOpen ? "閉じる" : "開く"}: ${summary.label}`}
-        className="group/tool-toggle flex w-fit max-w-full min-w-0 items-center gap-2 rounded-md px-1 py-1 text-left text-[12px] text-zinc-400 transition-colors hover:text-zinc-200 focus-visible:bg-zinc-900/70 focus-visible:text-zinc-200 focus-visible:outline-none"
-        onClick={() => setIsOpen((open) => !open)}
-      >
-        <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", summary.failedCount > 0 ? "bg-red-400" : summary.runningCount > 0 ? "animate-pulse bg-blue-300" : "bg-zinc-600")} />
-        <span className="min-w-0 truncate font-medium">{summary.label}</span>
-        <span className="shrink-0 text-[11px] text-zinc-500">{isOpen ? "閉じる" : "開く"}</span>
-        <ChevronRight size={14} className={cn("shrink-0 transition-transform", isOpen && "rotate-90")} />
-      </button>
-      {isOpen && (
-        <div className="grid w-full gap-3">
-          {groups.map((group) => (
-            <div key={group.id} className="grid min-w-0 gap-1.5">
-              <div className="flex min-w-0 items-center gap-2 text-[12px] font-medium text-zinc-400">
-                <span className="h-1.5 w-1.5 rounded-full bg-zinc-600" />
-                <span className="min-w-0 truncate">{group.label}</span>
-              </div>
-              <div className="ml-1.5 grid min-w-0 gap-1.5 border-l border-zinc-800/70 pl-4">
-                {group.items.map((item) => {
-                  const artifactPreviewId = item.artifacts?.find((artifact) => artifact.url)?.path;
-                  const previewId = item.toolCallId && previewableCallIds.has(item.toolCallId) ? item.toolCallId : artifactPreviewId;
-                  const hasPreview = Boolean(previewId);
-                  const statusLabel = item.status === "failed" ? "エラー" : "";
-                  const statusLine = [statusLabel, item.detail].filter(Boolean).join(" · ");
-                  const body = (
-                    <>
-                      <span className={cn("mt-1 h-1.5 w-1.5 shrink-0 rounded-full", item.status === "failed" ? "bg-red-400" : item.status === "running" ? "animate-pulse bg-blue-300" : "bg-zinc-700")} />
-                      <span className="min-w-0 max-w-full flex-1 overflow-hidden">
-                        <span className="flex min-w-0 max-w-full items-baseline gap-2 text-[13px] leading-5 text-zinc-300">
-                          <span className="min-w-0 flex-1 truncate">{item.input || item.detail || item.toolName}</span>
-                          {item.durationLabel && <span className="shrink-0 font-mono text-[10px] text-zinc-600">{item.durationLabel}</span>}
-                        </span>
-                        {statusLine && (
-                          <span className={cn("block max-w-full truncate text-[11px] leading-5", item.status === "failed" ? "text-red-300" : "text-zinc-500")}>
-                            {statusLine}
-                          </span>
-                        )}
-                        {item.nextStep && (
-                          <span className="block max-w-full truncate text-[11px] leading-5 text-zinc-600">{item.nextStep}</span>
-                        )}
-                        {!item.supported && item.rawJson && (
-                          <code className="mt-1 block max-h-28 max-w-full overflow-x-hidden overflow-y-auto whitespace-pre-wrap break-words rounded-md bg-zinc-950/70 px-2 py-1.5 font-mono text-[10px] leading-4 text-zinc-500">
-                            {item.rawJson}
-                          </code>
-                        )}
+    <div className="rumi-tool-activity mb-4 grid w-full gap-3 text-zinc-300">
+      {groups.map((group) => (
+        <div key={group.id} className="grid min-w-0 gap-1.5">
+          <div className="flex min-w-0 items-center gap-2 text-[12px] font-medium text-zinc-400">
+            <span className="h-1.5 w-1.5 rounded-full bg-zinc-600" />
+            <span className="min-w-0 truncate">{group.label}</span>
+          </div>
+          <div className="ml-1.5 grid min-w-0 gap-1.5 border-l border-zinc-800/70 pl-4">
+            {group.items.map((item) => {
+              const artifactPreviewId = item.artifacts?.find((artifact) => artifact.url)?.path;
+              const previewId = item.toolCallId && previewableCallIds.has(item.toolCallId) ? item.toolCallId : artifactPreviewId;
+              const hasPreview = Boolean(previewId);
+              const statusLabel = item.status === "failed" ? "エラー" : "";
+              const statusLine = [statusLabel, item.detail].filter(Boolean).join(" · ");
+              const body = (
+                <>
+                  <span className={cn("mt-1 h-1.5 w-1.5 shrink-0 rounded-full", item.status === "failed" ? "bg-red-400" : item.status === "running" ? "animate-pulse bg-blue-300" : "bg-zinc-700")} />
+                  <span className="min-w-0 max-w-full flex-1 overflow-hidden">
+                    <span className="flex min-w-0 max-w-full items-baseline gap-2 text-[13px] leading-5 text-zinc-300">
+                      <span className="min-w-0 flex-1 truncate">{item.input || item.detail || item.toolName}</span>
+                      {item.durationLabel && <span className="shrink-0 font-mono text-[10px] text-zinc-600">{item.durationLabel}</span>}
+                    </span>
+                    {statusLine && (
+                      <span className={cn("block max-w-full truncate text-[11px] leading-5", item.status === "failed" ? "text-red-300" : "text-zinc-500")}>
+                        {statusLine}
                       </span>
-                    </>
-                  );
-                  return hasPreview ? (
-                    <button
-                      key={item.id}
-                      type="button"
-                      className="group/tool -ml-[5px] flex w-full min-w-0 max-w-full items-start gap-3 overflow-hidden rounded-lg px-1 py-1.5 text-left transition-colors hover:bg-zinc-900/55 focus-visible:bg-zinc-900/55 focus-visible:outline-none"
-                      onClick={() => {
-                        if (previewId) onOpenToolPreview?.(previewId);
-                      }}
-                    >
-                      {body}
-                    </button>
-                  ) : (
-                    <div key={item.id} className="-ml-[5px] flex w-full min-w-0 max-w-full items-start gap-3 overflow-hidden px-1 py-1.5">
-                      {body}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          ))}
+                    )}
+                    {item.nextStep && (
+                      <span className="block max-w-full truncate text-[11px] leading-5 text-zinc-600">{item.nextStep}</span>
+                    )}
+                    {!item.supported && item.rawJson && (
+                      <code className="mt-1 block max-h-28 max-w-full overflow-x-hidden overflow-y-auto whitespace-pre-wrap break-words rounded-md bg-zinc-950/70 px-2 py-1.5 font-mono text-[10px] leading-4 text-zinc-500">
+                        {item.rawJson}
+                      </code>
+                    )}
+                  </span>
+                </>
+              );
+              return hasPreview ? (
+                <button
+                  key={item.id}
+                  type="button"
+                  className="group/tool -ml-[5px] flex w-full min-w-0 max-w-full items-start gap-3 overflow-hidden rounded-lg px-1 py-1.5 text-left transition-colors hover:bg-zinc-900/55 focus-visible:bg-zinc-900/55 focus-visible:outline-none"
+                  onClick={() => {
+                    if (previewId) onOpenToolPreview?.(previewId);
+                  }}
+                >
+                  {body}
+                </button>
+              ) : (
+                <div key={item.id} className="-ml-[5px] flex w-full min-w-0 max-w-full items-start gap-3 overflow-hidden px-1 py-1.5">
+                  {body}
+                </div>
+              );
+            })}
+          </div>
         </div>
-      )}
+      ))}
     </div>
   );
 }
@@ -1023,6 +1049,9 @@ export function ChatMessagesRenderer({
   onOpenToolPreview,
 }: ChatMessagesRendererProps) {
   const [imagePreview, setImagePreview] = useState<ImagePreviewRequest | null>(null);
+  const [openToolActivityByMessageId, setOpenToolActivityByMessageId] = useState<Record<string, boolean | undefined>>({});
+  const hasRunningToolActivity = showActivityInMessages && messages.some((message) => message.role === "agent" && hasRunningToolActivityMessage(message));
+  const activityNow = useActivityNow(hasRunningToolActivity);
 
   return (
     <>
@@ -1037,26 +1066,48 @@ export function ChatMessagesRenderer({
       ) : (
         <div className="flex-1 overflow-x-hidden overflow-y-auto px-5 py-3 md:px-8 lg:px-10 xl:px-12">
           <div className="mx-auto w-full max-w-6xl min-w-0 space-y-4">
-            {messages.map((message) => (
+            {messages.map((message) => {
+              const toolActivity = showActivityInMessages && message.role === "agent"
+                ? toolActivityStateForMessage(message, activityNow)
+                : null;
+              const isToolActivityOpen = toolActivity
+                ? openToolActivityByMessageId[message.id] ?? toolActivity.hasRunningItems
+                : false;
+              const toggleToolActivity = () => {
+                if (!toolActivity) return;
+                setOpenToolActivityByMessageId((current) => {
+                  const currentOpen = current[message.id] ?? toolActivity.hasRunningItems;
+                  return { ...current, [message.id]: !currentOpen };
+                });
+              };
+
+              return (
               <div key={message.id} className={cn("rumi-message-row group/message flex min-w-0 gap-3 select-text", message.role === "user" ? "flex-row-reverse lg:pr-6 xl:pr-8 2xl:pr-10" : "lg:pl-8 xl:pl-12 2xl:pl-16")}>
                 <div className={cn("flex min-w-0 flex-col pt-1", message.role === "user" ? "max-w-[82%] items-end lg:max-w-[70%] 2xl:max-w-[64%]" : "flex-1 items-start")}>
                   {message.role === "agent" && (
-                    <div className="flex items-center gap-2 mb-1.5">
-                      <span className="text-xs font-semibold text-zinc-300 tracking-wide">Assistant</span>
+                    <div className="mb-1.5 flex max-w-full min-w-0 flex-nowrap items-center gap-2 overflow-hidden">
+                      <span className="shrink-0 text-xs font-semibold tracking-wide text-zinc-300">Assistant</span>
                       {message.metadata?.executionTime && (
-                        <span className="text-[10px] text-zinc-500 font-mono flex items-center gap-1">
+                        <span className="flex shrink-0 items-center gap-1 font-mono text-[10px] text-zinc-500">
                           <Clock size={10} /> {message.metadata.executionTime}
                         </span>
                       )}
                       {message.metadata?.thinkingDuration && (
-                        <span className="font-mono text-[10px] text-zinc-600">thinking {message.metadata.thinkingDuration}</span>
+                        <span className="shrink-0 font-mono text-[10px] text-zinc-600">thinking {message.metadata.thinkingDuration}</span>
+                      )}
+                      {toolActivity && (
+                        <ToolActivityToggle
+                          isOpen={isToolActivityOpen}
+                          onToggle={toggleToolActivity}
+                          summary={toolActivity.summary}
+                        />
                       )}
                     </div>
                   )}
 
                   <div className={cn("flex min-w-0 max-w-full flex-col", message.role === "user" ? "items-start" : "w-full items-start")}>
                     {(() => {
-                      const hasToolActivity = buildToolActivityGroups(message.toolLogs ?? [], message.events ?? []).length > 0;
+                      const hasToolActivity = Boolean(toolActivity);
                       return (
                     <div
                       className={cn(
@@ -1066,7 +1117,14 @@ export function ChatMessagesRenderer({
                           : "w-full text-zinc-200 bg-transparent",
                       )}
                     >
-                      {showActivityInMessages && message.role === "agent" && <ToolActivityTray message={message} onOpenToolPreview={onOpenToolPreview} />}
+                      {toolActivity && (
+                        <ToolActivityTray
+                          groups={toolActivity.groups}
+                          isOpen={isToolActivityOpen}
+                          message={message}
+                          onOpenToolPreview={onOpenToolPreview}
+                        />
+                      )}
 
                       {message.role === "agent" && message.metadata?.thinkingTranscript && (
                         <details className="mb-3 rounded-lg border border-zinc-800 bg-zinc-950/50 px-3 py-2 text-xs text-zinc-400">
@@ -1103,7 +1161,8 @@ export function ChatMessagesRenderer({
                   </div>
                 </div>
               </div>
-            ))}
+              );
+            })}
 
             {isGenerating && (
               <div className="flex gap-3">

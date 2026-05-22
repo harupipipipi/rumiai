@@ -676,14 +676,17 @@ test("coding slash command toggles coding mode off again", async ({ page }) => {
 test("tool timeline shows streamed activity details", async ({ page }) => {
   await openDefaultspack(page);
 
-  const timeline = page.locator(".rumi-tool-activity");
-  await expect(timeline).toBeVisible();
-  const toggle = timeline.getByRole("button", { name: /toolログを開く: .*作業しました/ });
+  await expect(page.locator(".rumi-tool-activity")).toHaveCount(0);
+  const toggle = page.getByRole("button", { name: /toolログを開く: .*作業しました/ });
   await expect(toggle).toBeVisible();
-  await expect(timeline).not.toContainText("Listed 2 files");
+  await expect(toggle).toContainText("開く");
 
   await toggle.click();
-  await expect(timeline.getByRole("button", { name: /toolログを閉じる: .*作業しました/ })).toBeVisible();
+  const expandedToggle = page.getByRole("button", { name: /toolログを閉じる: .*作業しました/ });
+  await expect(expandedToggle).toBeVisible();
+  await expect(expandedToggle).not.toContainText("閉じる");
+  const timeline = page.locator(".rumi-tool-activity");
+  await expect(timeline).toBeVisible();
   await expect(timeline).toContainText("ファイル");
   await expect(timeline).toContainText("src");
   await expect(timeline).toContainText("Listed 2 files");
