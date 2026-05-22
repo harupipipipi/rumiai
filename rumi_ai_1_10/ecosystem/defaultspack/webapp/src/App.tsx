@@ -3924,7 +3924,7 @@ export default function App() {
                     onOpen={() => setShowPreview(true)}
                   />
                 )}
-                {browserApproval && !yoloMode && (
+                {browserApproval && (
                   <div className="pointer-events-auto absolute bottom-full left-1/2 z-30 mb-2 w-[min(520px,calc(100vw-32px))] -translate-x-1/2 rounded-xl border border-orange-500/30 bg-zinc-950 p-3 shadow-2xl">
                     <div className="flex items-center justify-between gap-3">
                       <div className="min-w-0">

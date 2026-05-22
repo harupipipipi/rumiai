@@ -62,6 +62,8 @@ def decide_tool_policy(
 
 
 def _requires_approval(tool_def: Any, policy: dict[str, Any], risk: str, name: str) -> bool:
+    if _truthy(policy.get("yolo_mode")):
+        return False
     if isinstance(tool_def, dict) and is_safe_first_party_memo_tool(tool_def):
         return False
     if isinstance(tool_def, dict) and tool_def.get("requires_approval") is True:
@@ -90,3 +92,9 @@ def _list(value: Any) -> set[str]:
     if not isinstance(value, list):
         return set()
     return {str(item).strip() for item in value if str(item).strip()}
+
+
+def _truthy(value: Any) -> bool:
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+    return bool(value)
