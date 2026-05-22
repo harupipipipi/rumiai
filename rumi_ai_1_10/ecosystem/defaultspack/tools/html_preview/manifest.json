@@ -1,0 +1,53 @@
+{
+  "id": "html_preview",
+  "description": "Preview an artifact HTML file and create preview metadata/screenshot artifact.",
+  "config": {
+    "tool_id": "html_preview",
+    "name": "HTML Preview",
+    "summary": "Preview an artifact HTML file and create preview metadata/screenshot artifact.",
+    "tool_category": "preview",
+    "action_type": "read",
+    "write_action": false,
+    "requires_approval": false,
+    "risk": "low",
+    "tags": [
+      "preview",
+      "agent_os",
+      "artifact_workspace"
+    ],
+    "ui": {
+      "group_id": "preview",
+      "group_label": "Preview",
+      "group_icon": "eye",
+      "item_icon": "eye",
+      "widget_kind": "tool_toggle",
+      "composer_label": "HTML Preview",
+      "composer_description": "Preview an artifact HTML file and create preview metadata/screenshot artifact.",
+      "composer_icon": "eye"
+    },
+    "schema": {
+      "parameters": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "viewport": {
+            "type": "object"
+          },
+          "full_page": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "path"
+        ]
+      }
+    },
+    "execution": {
+      "type": "local",
+      "handler": "domain.tool.preview_tools:html_preview"
+    }
+  }
+}

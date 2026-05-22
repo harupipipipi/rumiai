@@ -1,0 +1,48 @@
+{
+  "id": "artifact_zip",
+  "description": "Create a zip archive from an artifact file or folder.",
+  "config": {
+    "tool_id": "artifact_zip",
+    "name": "Artifact Zip",
+    "summary": "Create a zip archive from an artifact file or folder.",
+    "tool_category": "artifact",
+    "action_type": "write",
+    "write_action": true,
+    "requires_approval": false,
+    "risk": "medium",
+    "tags": [
+      "artifact",
+      "agent_os",
+      "artifact_workspace"
+    ],
+    "ui": {
+      "group_id": "artifact",
+      "group_label": "Artifacts",
+      "group_icon": "folder",
+      "item_icon": "folder",
+      "widget_kind": "tool_toggle",
+      "composer_label": "Artifact Zip",
+      "composer_description": "Create a zip archive from an artifact file or folder.",
+      "composer_icon": "folder"
+    },
+    "schema": {
+      "parameters": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "output_path": {
+            "type": "string"
+          }
+        },
+        "required": []
+      }
+    },
+    "execution": {
+      "type": "local",
+      "handler": "domain.tool.artifact_tools:artifact_zip"
+    }
+  }
+}
