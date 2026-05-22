@@ -2212,6 +2212,16 @@ class FrontendRegistry:
                 name = str(api_key_patch.get("name") or api_key_patch.get("api_id") or "").strip()
                 value = str(api_key_patch.get("value") or "")
                 if provider_id and name and value.strip():
+                    budget_raw = api_key_patch.get("monthly_budget_usd")
+                    request_limit_raw = api_key_patch.get("monthly_request_limit")
+                    try:
+                        budget_value = float(budget_raw) if budget_raw not in (None, "") else None
+                    except (TypeError, ValueError):
+                        budget_value = None
+                    try:
+                        request_limit_value = int(request_limit_raw) if request_limit_raw not in (None, "") else None
+                    except (TypeError, ValueError):
+                        request_limit_value = None
                     set_provider_api_key(
                         provider_id,
                         value,
@@ -2223,6 +2233,8 @@ class FrontendRegistry:
                         default_model=str(api_key_patch.get("default_model") or "").strip() or None,
                         notes=str(api_key_patch.get("notes") or "").strip() or None,
                         quota_label=str(api_key_patch.get("quota_label") or "").strip() or None,
+                        monthly_budget_usd=budget_value,
+                        monthly_request_limit=request_limit_value,
                         kind=str(api_key_patch.get("kind") or "").strip() or None,
                     )
             apis["api_keys"] = []

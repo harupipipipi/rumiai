@@ -681,7 +681,7 @@ function ProviderOAuthPanel({
                 </button>
               </div>
             </div>
-            <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1.4fr)_auto]">
+            <div className="mt-4 space-y-2">
               <textarea
                 value={draft}
                 onChange={(event) => {
@@ -695,9 +695,15 @@ function ProviderOAuthPanel({
                   });
                 }}
                 placeholder='Paste Google OAuth desktop client JSON or a client ID like "123....apps.googleusercontent.com"'
-                className="min-h-28 w-full rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 outline-none focus:border-cyan-500"
+                rows={3}
+                className="w-full resize-y rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 outline-none focus:border-cyan-500"
               />
-              <div className="flex flex-col justify-between gap-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                {scopes.length > 0 ? (
+                  <p className="text-[11px] text-zinc-500">
+                    Scopes: {scopes.join(", ")}
+                  </p>
+                ) : <span />}
                 <button
                   type="button"
                   disabled={isBusy || !draft.trim()}
@@ -724,19 +730,14 @@ function ProviderOAuthPanel({
                     }
                   }}
                   className={cn(
-                    "rounded-lg border px-3 py-2 text-sm transition-colors",
+                    "rounded-lg border px-4 py-2 text-xs font-medium transition-colors",
                     isBusy || !draft.trim()
                       ? "cursor-not-allowed border-zinc-800 bg-zinc-900 text-zinc-600"
-                      : "border-zinc-100 bg-zinc-100 text-zinc-950",
+                      : "border-zinc-100 bg-zinc-100 text-zinc-950 hover:bg-white",
                   )}
                 >
                   {isBusy && busyAction === `${providerId}:save` ? "Saving..." : "Save OAuth client"}
                 </button>
-                {scopes.length > 0 && (
-                  <div className="rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 text-[11px] text-zinc-500">
-                    Scopes: {scopes.join(", ")}
-                  </div>
-                )}
               </div>
             </div>
             {banner && (
@@ -1255,12 +1256,14 @@ function SettingsField({
   field,
   value,
   sectionValues,
+  allSettingsValues,
   onChange,
 }: {
   sectionId: string;
   field: SettingsSection["fields"][number];
   value: unknown;
   sectionValues?: Record<string, unknown>;
+  allSettingsValues?: Record<string, Record<string, unknown>>;
   onChange: (sectionId: string, fieldId: string, value: unknown) => void;
 }) {
   const [secretDraft, setSecretDraft] = useState("");
@@ -1272,6 +1275,8 @@ function SettingsField({
   const [apiAllowedModels, setApiAllowedModels] = useState("");
   const [apiDefaultModel, setApiDefaultModel] = useState("");
   const [apiQuotaLabel, setApiQuotaLabel] = useState("");
+  const [apiMonthlyBudgetUsd, setApiMonthlyBudgetUsd] = useState("");
+  const [apiMonthlyRequestLimit, setApiMonthlyRequestLimit] = useState("");
   const [apiNotes, setApiNotes] = useState("");
   const [apiSaveState, setApiSaveState] = useState<"idle" | "saved">("idle");
   const [tokenProvider, setTokenProvider] = useState("line");
@@ -1533,6 +1538,8 @@ function SettingsField({
       const isCustomProvider = !selectedProviderOption?.builtin;
       const handleSubmitApi = () => {
         if (!apiProvider.trim() || !apiName.trim() || !apiSecret.trim()) return;
+        const monthlyBudget = parseFloat(apiMonthlyBudgetUsd.trim());
+        const monthlyRequests = parseInt(apiMonthlyRequestLimit.trim(), 10);
         onChange(sectionId, field.id, {
           action: "upsert",
           provider_id: apiProvider,
@@ -1544,6 +1551,8 @@ function SettingsField({
           allowed_models: apiAllowedModels.split(",").map((item) => item.trim()).filter(Boolean),
           default_model: apiDefaultModel.trim(),
           quota_label: apiQuotaLabel.trim(),
+          monthly_budget_usd: Number.isFinite(monthlyBudget) && monthlyBudget > 0 ? monthlyBudget : null,
+          monthly_request_limit: Number.isFinite(monthlyRequests) && monthlyRequests > 0 ? monthlyRequests : null,
           notes: apiNotes.trim(),
         });
         setApiSecret("");
@@ -1551,6 +1560,8 @@ function SettingsField({
         setApiAllowedModels("");
         setApiDefaultModel("");
         setApiQuotaLabel("");
+        setApiMonthlyBudgetUsd("");
+        setApiMonthlyRequestLimit("");
         setApiNotes("");
         setApiSaveState("saved");
       };
@@ -1626,37 +1637,74 @@ function SettingsField({
               </p>
             )}
             <details className="rounded-lg border border-zinc-800 bg-zinc-950/40 px-3 py-2 text-xs">
-              <summary className="cursor-pointer select-none text-zinc-400 hover:text-zinc-200">Advanced (任意): base_url / model 制限 / quota / notes</summary>
-              <div className="mt-3 grid gap-2 md:grid-cols-2">
-                <input
-                  value={apiBaseUrl}
-                  onChange={(event) => { setApiBaseUrl(event.target.value); setApiSaveState("idle"); }}
-                  placeholder="base_url (optional)"
-                  className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 outline-none"
-                />
-                <input
-                  value={apiDefaultModel}
-                  onChange={(event) => { setApiDefaultModel(event.target.value); setApiSaveState("idle"); }}
-                  placeholder="default model for this API"
-                  className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 outline-none"
-                />
-                <input
-                  value={apiAllowedModels}
-                  onChange={(event) => { setApiAllowedModels(event.target.value); setApiSaveState("idle"); }}
-                  placeholder="allowed models, comma separated"
-                  className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 outline-none"
-                />
+              <summary className="cursor-pointer select-none text-zinc-400 hover:text-zinc-200">Advanced (任意): base_url / model 制限 / 予算・リクエスト上限 / notes</summary>
+              <div className="mt-3 space-y-3">
+                <div className="grid gap-2 md:grid-cols-2">
+                  <input
+                    value={apiBaseUrl}
+                    onChange={(event) => { setApiBaseUrl(event.target.value); setApiSaveState("idle"); }}
+                    placeholder="base_url (optional)"
+                    className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 outline-none"
+                  />
+                  <input
+                    value={apiDefaultModel}
+                    onChange={(event) => { setApiDefaultModel(event.target.value); setApiSaveState("idle"); }}
+                    placeholder="default model for this API"
+                    className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 outline-none"
+                  />
+                  <input
+                    value={apiAllowedModels}
+                    onChange={(event) => { setApiAllowedModels(event.target.value); setApiSaveState("idle"); }}
+                    placeholder="allowed models, comma separated"
+                    className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 outline-none md:col-span-2"
+                  />
+                </div>
+
+                {/* レートリミット / 予算制限 */}
+                <div className="rounded-md border border-zinc-800/60 bg-zinc-900/40 p-2.5">
+                  <p className="mb-2 text-[11px] font-medium uppercase tracking-wide text-zinc-400">利用上限 (任意)</p>
+                  <div className="grid gap-2 md:grid-cols-2">
+                    <label className="flex flex-col gap-1">
+                      <span className="text-[11px] text-zinc-500">月額予算 (USD)</span>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={apiMonthlyBudgetUsd}
+                        onChange={(event) => { setApiMonthlyBudgetUsd(event.target.value); setApiSaveState("idle"); }}
+                        placeholder="例: 20.00"
+                        className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 outline-none"
+                      />
+                    </label>
+                    <label className="flex flex-col gap-1">
+                      <span className="text-[11px] text-zinc-500">月間リクエスト数</span>
+                      <input
+                        type="number"
+                        min="0"
+                        step="1"
+                        value={apiMonthlyRequestLimit}
+                        onChange={(event) => { setApiMonthlyRequestLimit(event.target.value); setApiSaveState("idle"); }}
+                        placeholder="例: 10000"
+                        className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 outline-none"
+                      />
+                    </label>
+                  </div>
+                  <p className="mt-1.5 text-[10px] text-zinc-600">
+                    空欄なら無制限。プロバイダー側で対応がある場合のみ有効です。
+                  </p>
+                </div>
+
                 <input
                   value={apiQuotaLabel}
                   onChange={(event) => { setApiQuotaLabel(event.target.value); setApiSaveState("idle"); }}
-                  placeholder="quota label"
-                  className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 outline-none"
+                  placeholder="quota label (例: free-tier, pro)"
+                  className="w-full rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 outline-none"
                 />
                 <textarea
                   value={apiNotes}
                   onChange={(event) => { setApiNotes(event.target.value); setApiSaveState("idle"); }}
                   placeholder="notes for routing"
-                  className="min-h-20 rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 outline-none md:col-span-2"
+                  className="min-h-20 w-full rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 outline-none"
                 />
               </div>
               <p className="mt-2 text-[10px] text-zinc-600">
@@ -1740,6 +1788,11 @@ function SettingsField({
                               {apiKind === "custom" && (
                                 <span className="rounded bg-amber-500/10 px-1.5 py-0.5 text-[11px] text-amber-300">
                                   non-llm
+                                </span>
+                              )}
+                              {typeof api.monthly_budget_usd === "number" && api.monthly_budget_usd > 0 && (
+                                <span className="rounded bg-cyan-500/10 px-1.5 py-0.5 text-[11px] text-cyan-300" title="月額予算">
+                                  ${(api.monthly_budget_usd as number).toFixed(2)}/月
                                 </span>
                               )}
                               <MaskedApiLabel api={api} />
@@ -1827,6 +1880,12 @@ function SettingsField({
       const uniqueProviderOptions = [...new Set(providerOptions.filter(Boolean))];
       const registeredTokens = registeredExternalTokenRows(providers);
       const requiredTokens = requiredExternalTokenRows(providers);
+      // Pull registered API keys from the cross-section settings tree so users
+      // can reuse already-stored secrets (LLM provider keys, custom tokens, etc.)
+      // instead of re-pasting them here.
+      const apisSectionValue = allSettingsValues?.["apis"]?.["api_keys"];
+      const apiProvidersAll = apisSectionValue ? apiProviderRows(apisSectionValue) : [];
+      const registeredApisAll = apiProvidersAll.length ? registeredApiRows(apiProvidersAll) : [];
       const tokenHintByProvider: Record<string, string> = {
         line: "LINE: Messaging API Channel Secret / Access Tokenを貼ります。返信は受信元 conversation へ返り、push時だけExplicit Target IDを使います。",
         discord: "Discord Bot + Channel: Bot Tokenを貼り、Channel IDはExplicit Target ID欄へ。Webhook mode: Webhook URLを貼ります。",
@@ -2001,6 +2060,54 @@ function SettingsField({
           )}
           <div className="rounded-lg border border-zinc-800 bg-zinc-950/70 p-3">
             <div className="mb-3 text-xs leading-5 text-zinc-400">{tokenHintByProvider[tokenProvider] ?? "値は保存後に再表示しません。"}</div>
+
+            {/* 登録済み API キーから選択して external token として複製する */}
+            {registeredApisAll.length > 0 && (
+              <details className="mb-3 rounded-md border border-zinc-800/60 bg-zinc-900/40 px-3 py-2">
+                <summary className="cursor-pointer select-none text-xs text-cyan-300 hover:text-cyan-200">
+                  📎 登録済み API から選択 ({registeredApisAll.length} 件)
+                </summary>
+                <div className="mt-2 space-y-1">
+                  <p className="text-[11px] text-zinc-500">
+                    APIs に登録したキーをそのまま external token として使えます。クリックで Token ID と Provider を自動入力します（値は再入力が必要）。
+                  </p>
+                  <div className="grid gap-1.5">
+                    {registeredApisAll.map((api) => {
+                      const apiKey = String(api.key ?? `${api.provider_id}:${api.api_id}`);
+                      return (
+                        <button
+                          key={apiKey}
+                          type="button"
+                          onClick={() => {
+                            const apiProviderId = String(api.provider_id ?? "");
+                            const apiName_ = String(api.name ?? api.api_id ?? "");
+                            // APIキーのproviderがexternal token providerと一致しなければ
+                            // genericにフォールバック (LINE/Slack向けのカスタムキーなど)
+                            const matchedProvider = uniqueProviderOptions.includes(apiProviderId)
+                              ? apiProviderId
+                              : "generic";
+                            setTokenProvider(matchedProvider);
+                            setTokenName(apiName_);
+                            setTokenKind(externalTokenKindOptions(matchedProvider)[0]?.value ?? "token");
+                            setTokenSaveState("idle");
+                          }}
+                          className="flex items-center gap-2 rounded-md border border-zinc-800 bg-zinc-950/50 px-2 py-1.5 text-left text-xs text-zinc-300 hover:border-zinc-600 hover:bg-zinc-900"
+                        >
+                          <span className="font-medium text-zinc-200">{String(api.name ?? api.api_id ?? "")}</span>
+                          <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] text-zinc-400">
+                            {String(api.provider_id ?? "")}
+                          </span>
+                          <span className="ml-auto text-[10px] text-zinc-600">
+                            {uniqueProviderOptions.includes(String(api.provider_id ?? "")) ? "→ 同名で使用" : "→ generic にコピー"}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </details>
+            )}
+
             <div className="grid gap-3 md:grid-cols-[150px_1fr_1fr_1.4fr_auto]">
               <label className="space-y-1.5">
                 <span className="text-[11px] font-medium uppercase text-zinc-500">Provider</span>
@@ -2311,6 +2418,7 @@ export function SettingsModalRenderer({
             : settingsValues[activeSection?.id ?? ""]?.[field.id] ?? field.default
         }
         sectionValues={settingsValues[activeSection?.id ?? ""] ?? {}}
+        allSettingsValues={settingsValues}
         onChange={onSettingChange}
       />
     </div>

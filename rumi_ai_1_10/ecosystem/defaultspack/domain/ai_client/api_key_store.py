@@ -187,6 +187,8 @@ def _metadata_patch(
     default_model: str | None = None,
     notes: str | None = None,
     quota_label: str | None = None,
+    monthly_budget_usd: float | None = None,
+    monthly_request_limit: int | None = None,
     kind: str | None = None,
 ) -> dict[str, Any]:
     metadata = dict(existing or {})
@@ -211,6 +213,27 @@ def _metadata_patch(
             metadata[key] = cleaned
         else:
             metadata.pop(key, None)
+
+    # Numeric usage limits: positive number stored, otherwise removed.
+    if monthly_budget_usd is not None:
+        try:
+            budget = float(monthly_budget_usd)
+        except (TypeError, ValueError):
+            budget = 0.0
+        if budget > 0:
+            metadata["monthly_budget_usd"] = budget
+        else:
+            metadata.pop("monthly_budget_usd", None)
+
+    if monthly_request_limit is not None:
+        try:
+            limit = int(monthly_request_limit)
+        except (TypeError, ValueError):
+            limit = 0
+        if limit > 0:
+            metadata["monthly_request_limit"] = limit
+        else:
+            metadata.pop("monthly_request_limit", None)
 
     if allowed_models is not None:
         models = _normalize_allowed_models(allowed_models)
@@ -370,6 +393,8 @@ def set_provider_api_key(
     default_model: str | None = None,
     notes: str | None = None,
     quota_label: str | None = None,
+    monthly_budget_usd: float | None = None,
+    monthly_request_limit: int | None = None,
     kind: str | None = None,
 ) -> dict[str, Any]:
     named = bool(api_id or name)
@@ -442,6 +467,8 @@ def set_provider_api_key(
                 default_model=default_model,
                 notes=notes,
                 quota_label=quota_label,
+                monthly_budget_usd=monthly_budget_usd,
+                monthly_request_limit=monthly_request_limit,
                 kind=resolved_kind,
             )
             _write_api_metadata(metadata, pack_root)
@@ -466,6 +493,8 @@ def set_provider_api_key(
         "default_model": str(default_model or "").strip(),
         "notes": str(notes or "").strip(),
         "quota_label": str(quota_label or "").strip(),
+        "monthly_budget_usd": float(monthly_budget_usd) if monthly_budget_usd is not None and float(monthly_budget_usd) > 0 else None,
+        "monthly_request_limit": int(monthly_request_limit) if monthly_request_limit is not None and int(monthly_request_limit) > 0 else None,
         "error": result.error,
     }
 
