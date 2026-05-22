@@ -1,12 +1,12 @@
-import { AlertTriangle, Check, Clock, Copy, ExternalLink, Image as ImageIcon, Loader2 } from "lucide-react";
+import { AlertTriangle, Check, ChevronRight, Clock, Copy, ExternalLink, Image as ImageIcon, Loader2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 import { ArtifactPreviewDialog, type ArtifactPreviewDialogItem } from "../components/ArtifactPreviewDialog";
 import { cn } from "../lib/cn";
-import { elapsedDurationLabel } from "../lib/duration";
-import { buildToolActivityGroups, toolFolderFor } from "../lib/toolActivity";
+import { elapsedDurationLabel, formatCompactDuration, timestampMs } from "../lib/duration";
+import { buildToolActivityGroups, toolFolderFor, type ToolActivityGroup } from "../lib/toolActivity";
 import { api, type BrowserScreenshot, type ChatContentBlock } from "../lib/api";
 import type { ChatMessagesRendererProps } from "./types";
 
@@ -50,6 +50,13 @@ type CompactLogPreview = {
   omitted: boolean;
   omittedChars: number;
   text: string;
+};
+
+type ToolActivityTraySummary = {
+  failedCount: number;
+  itemCount: number;
+  label: string;
+  runningCount: number;
 };
 
 function shortDetail(value: unknown, limit = 420): string {
@@ -443,6 +450,70 @@ export function summarizePendingToolNames(toolNames: string[], visibleLimit = 2)
   };
 }
 
+function compactDurationMs(label: string | undefined): number | null {
+  const text = String(label ?? "").trim();
+  if (!text) return null;
+  const units: Record<string, number> = {
+    d: 86_400_000,
+    h: 3_600_000,
+    m: 60_000,
+    s: 1000,
+  };
+  let total = 0;
+  let matched = false;
+  for (const match of text.matchAll(/(\d+)\s*([dhms])/g)) {
+    matched = true;
+    total += Number(match[1]) * units[match[2]];
+  }
+  return matched ? total : null;
+}
+
+export function hasRunningToolActivityGroups(groups: ToolActivityGroup[]): boolean {
+  return groups.some((group) => group.items.some((item) => item.status === "running"));
+}
+
+function toolActivityDurationLabel(groups: ToolActivityGroup[]): string {
+  let firstStart: number | null = null;
+  let lastEnd: number | null = null;
+  let longestDurationMs = 0;
+
+  for (const item of groups.flatMap((group) => group.items)) {
+    const durationMs = compactDurationMs(item.durationLabel);
+    if (durationMs !== null) {
+      longestDurationMs = Math.max(longestDurationMs, durationMs);
+    }
+    const end = timestampMs(item.timestamp);
+    if (end === null) continue;
+    const start = durationMs !== null ? end - durationMs : end;
+    firstStart = firstStart === null ? start : Math.min(firstStart, start);
+    lastEnd = lastEnd === null ? end : Math.max(lastEnd, end);
+  }
+
+  if (firstStart !== null && lastEnd !== null && lastEnd >= firstStart) {
+    return formatCompactDuration(lastEnd - firstStart);
+  }
+  return longestDurationMs > 0 ? formatCompactDuration(longestDurationMs) : "";
+}
+
+export function summarizeToolActivityGroups(groups: ToolActivityGroup[]): ToolActivityTraySummary {
+  const items = groups.flatMap((group) => group.items);
+  const itemCount = items.length;
+  const failedCount = items.filter((item) => item.status === "failed").length;
+  const runningCount = items.filter((item) => item.status === "running").length;
+  const duration = toolActivityDurationLabel(groups);
+  const label = duration
+    ? `${duration}${runningCount > 0 ? "作業中" : "作業しました"}`
+    : runningCount > 0
+      ? "toolを実行中"
+      : `${itemCount}件のtoolを実行しました`;
+  return {
+    failedCount,
+    itemCount,
+    label: failedCount > 0 ? `${label}・${failedCount}件失敗` : label,
+    runningCount,
+  };
+}
+
 function activityPhase(status: string | null | undefined, toolNames: string[]): { label: string; detail: string } {
   const text = String(status ?? "").toLowerCase();
   if (text.includes("scheduler") || text.includes("待機")) {
@@ -798,15 +869,21 @@ function ToolActivityTray({
   message: ChatMessagesRendererProps["messages"][number];
   onOpenToolPreview?: (previewId: string) => void;
 }) {
-  const hasRunningActivity = (message.events ?? []).some((event) => (
-    event.type === "tool_call" ||
-    event.type === "tool_call_started" ||
-    event.phase === "tool_call" ||
-    event.phase === "tool_call_started"
-  ));
+  const staticGroups = buildToolActivityGroups(message.toolLogs ?? [], message.events ?? [], { conversationId: message.conversationId });
+  const hasRunningActivity = hasRunningToolActivityGroups(staticGroups);
   const now = useActivityNow(hasRunningActivity);
-  const groups = buildToolActivityGroups(message.toolLogs ?? [], message.events ?? [], { conversationId: message.conversationId, now });
+  const groups = hasRunningActivity
+    ? buildToolActivityGroups(message.toolLogs ?? [], message.events ?? [], { conversationId: message.conversationId, now })
+    : staticGroups;
+  const hasRunningItems = hasRunningToolActivityGroups(groups);
+  const [isOpen, setIsOpen] = useState(hasRunningItems);
+
+  useEffect(() => {
+    setIsOpen(hasRunningItems);
+  }, [hasRunningItems, message.id]);
+
   if (groups.length === 0) return null;
+  const summary = summarizeToolActivityGroups(groups);
   const previewableCallIds = new Set(
     (message.events ?? [])
       .filter((event) => (
@@ -819,64 +896,80 @@ function ToolActivityTray({
       .filter(Boolean),
   );
   return (
-    <div className="rumi-tool-activity mb-4 grid w-full gap-3 text-zinc-300">
-      {groups.map((group) => (
-        <div key={group.id} className="grid min-w-0 gap-1.5">
-          <div className="flex min-w-0 items-center gap-2 text-[12px] font-medium text-zinc-400">
-            <span className="h-1.5 w-1.5 rounded-full bg-zinc-600" />
-            <span className="min-w-0 truncate">{group.label}</span>
-          </div>
-          <div className="ml-1.5 grid min-w-0 gap-1.5 border-l border-zinc-800/70 pl-4">
-            {group.items.map((item) => {
-              const artifactPreviewId = item.artifacts?.find((artifact) => artifact.url)?.path;
-              const previewId = item.toolCallId && previewableCallIds.has(item.toolCallId) ? item.toolCallId : artifactPreviewId;
-              const hasPreview = Boolean(previewId);
-              const statusLabel = item.status === "failed" ? "エラー" : "";
-              const statusLine = [statusLabel, item.detail].filter(Boolean).join(" · ");
-              const body = (
-                <>
-                  <span className={cn("mt-1 h-1.5 w-1.5 shrink-0 rounded-full", item.status === "failed" ? "bg-red-400" : item.status === "running" ? "animate-pulse bg-blue-300" : "bg-zinc-700")} />
-                  <span className="min-w-0 max-w-full flex-1 overflow-hidden">
-                    <span className="flex min-w-0 max-w-full items-baseline gap-2 text-[13px] leading-5 text-zinc-300">
-                      <span className="min-w-0 flex-1 truncate">{item.input || item.detail || item.toolName}</span>
-                      {item.durationLabel && <span className="shrink-0 font-mono text-[10px] text-zinc-600">{item.durationLabel}</span>}
-                    </span>
-                    {statusLine && (
-                      <span className={cn("block max-w-full truncate text-[11px] leading-5", item.status === "failed" ? "text-red-300" : "text-zinc-500")}>
-                        {statusLine}
+    <div className="rumi-tool-activity mb-4 grid w-full gap-2 text-zinc-300">
+      <button
+        type="button"
+        aria-expanded={isOpen}
+        aria-label={`toolログを${isOpen ? "閉じる" : "開く"}: ${summary.label}`}
+        className="group/tool-toggle flex w-fit max-w-full min-w-0 items-center gap-2 rounded-md px-1 py-1 text-left text-[12px] text-zinc-400 transition-colors hover:text-zinc-200 focus-visible:bg-zinc-900/70 focus-visible:text-zinc-200 focus-visible:outline-none"
+        onClick={() => setIsOpen((open) => !open)}
+      >
+        <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", summary.failedCount > 0 ? "bg-red-400" : summary.runningCount > 0 ? "animate-pulse bg-blue-300" : "bg-zinc-600")} />
+        <span className="min-w-0 truncate font-medium">{summary.label}</span>
+        <span className="shrink-0 text-[11px] text-zinc-500">{isOpen ? "閉じる" : "開く"}</span>
+        <ChevronRight size={14} className={cn("shrink-0 transition-transform", isOpen && "rotate-90")} />
+      </button>
+      {isOpen && (
+        <div className="grid w-full gap-3">
+          {groups.map((group) => (
+            <div key={group.id} className="grid min-w-0 gap-1.5">
+              <div className="flex min-w-0 items-center gap-2 text-[12px] font-medium text-zinc-400">
+                <span className="h-1.5 w-1.5 rounded-full bg-zinc-600" />
+                <span className="min-w-0 truncate">{group.label}</span>
+              </div>
+              <div className="ml-1.5 grid min-w-0 gap-1.5 border-l border-zinc-800/70 pl-4">
+                {group.items.map((item) => {
+                  const artifactPreviewId = item.artifacts?.find((artifact) => artifact.url)?.path;
+                  const previewId = item.toolCallId && previewableCallIds.has(item.toolCallId) ? item.toolCallId : artifactPreviewId;
+                  const hasPreview = Boolean(previewId);
+                  const statusLabel = item.status === "failed" ? "エラー" : "";
+                  const statusLine = [statusLabel, item.detail].filter(Boolean).join(" · ");
+                  const body = (
+                    <>
+                      <span className={cn("mt-1 h-1.5 w-1.5 shrink-0 rounded-full", item.status === "failed" ? "bg-red-400" : item.status === "running" ? "animate-pulse bg-blue-300" : "bg-zinc-700")} />
+                      <span className="min-w-0 max-w-full flex-1 overflow-hidden">
+                        <span className="flex min-w-0 max-w-full items-baseline gap-2 text-[13px] leading-5 text-zinc-300">
+                          <span className="min-w-0 flex-1 truncate">{item.input || item.detail || item.toolName}</span>
+                          {item.durationLabel && <span className="shrink-0 font-mono text-[10px] text-zinc-600">{item.durationLabel}</span>}
+                        </span>
+                        {statusLine && (
+                          <span className={cn("block max-w-full truncate text-[11px] leading-5", item.status === "failed" ? "text-red-300" : "text-zinc-500")}>
+                            {statusLine}
+                          </span>
+                        )}
+                        {item.nextStep && (
+                          <span className="block max-w-full truncate text-[11px] leading-5 text-zinc-600">{item.nextStep}</span>
+                        )}
+                        {!item.supported && item.rawJson && (
+                          <code className="mt-1 block max-h-28 max-w-full overflow-x-hidden overflow-y-auto whitespace-pre-wrap break-words rounded-md bg-zinc-950/70 px-2 py-1.5 font-mono text-[10px] leading-4 text-zinc-500">
+                            {item.rawJson}
+                          </code>
+                        )}
                       </span>
-                    )}
-                    {item.nextStep && (
-                      <span className="block max-w-full truncate text-[11px] leading-5 text-zinc-600">{item.nextStep}</span>
-                    )}
-                    {!item.supported && item.rawJson && (
-                      <code className="mt-1 block max-h-28 max-w-full overflow-x-hidden overflow-y-auto whitespace-pre-wrap break-words rounded-md bg-zinc-950/70 px-2 py-1.5 font-mono text-[10px] leading-4 text-zinc-500">
-                        {item.rawJson}
-                      </code>
-                    )}
-                  </span>
-                </>
-              );
-              return hasPreview ? (
-                <button
-                  key={item.id}
-                  type="button"
-                  className="group/tool -ml-[5px] flex w-full min-w-0 max-w-full items-start gap-3 overflow-hidden rounded-lg px-1 py-1.5 text-left transition-colors hover:bg-zinc-900/55 focus-visible:bg-zinc-900/55 focus-visible:outline-none"
-                  onClick={() => {
-                    if (previewId) onOpenToolPreview?.(previewId);
-                  }}
-                >
-                  {body}
-                </button>
-              ) : (
-                <div key={item.id} className="-ml-[5px] flex w-full min-w-0 max-w-full items-start gap-3 overflow-hidden px-1 py-1.5">
-                  {body}
-                </div>
-              );
-            })}
-          </div>
+                    </>
+                  );
+                  return hasPreview ? (
+                    <button
+                      key={item.id}
+                      type="button"
+                      className="group/tool -ml-[5px] flex w-full min-w-0 max-w-full items-start gap-3 overflow-hidden rounded-lg px-1 py-1.5 text-left transition-colors hover:bg-zinc-900/55 focus-visible:bg-zinc-900/55 focus-visible:outline-none"
+                      onClick={() => {
+                        if (previewId) onOpenToolPreview?.(previewId);
+                      }}
+                    >
+                      {body}
+                    </button>
+                  ) : (
+                    <div key={item.id} className="-ml-[5px] flex w-full min-w-0 max-w-full items-start gap-3 overflow-hidden px-1 py-1.5">
+                      {body}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
         </div>
-      ))}
+      )}
     </div>
   );
 }
