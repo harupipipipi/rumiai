@@ -173,3 +173,46 @@ def test_tool_executor_falls_back_to_local_computer_use_with_yolo_policy(monkeyp
     assert result["is_error"] is False
     assert captured["tool_name"] == "computer_use"
     assert captured["arguments"] == {"action": "context"}
+
+
+def test_sandbox_exec_ignores_client_supplied_approval_flags(tmp_path):
+    from domain.tool.executor import ToolExecutor
+
+    result = ToolExecutor().execute(
+        "sandbox_exec",
+        {"command": "pwd", "approved": True, "_tool_server_approved": True},
+        {"workspace_root": str(tmp_path), "_tool_server_approved": True},
+    )
+
+    assert result["is_error"] is False
+    assert result["widget"]["type"] == "approval_request"
+    assert result["widget"]["approval_required"] is True
+
+
+def test_sandbox_exec_runs_only_with_internal_tool_decision(tmp_path):
+    from domain.tool.executor import ToolExecutor
+    from domain.tool_policy.internal_context import seal_tool_context
+
+    context = seal_tool_context(
+        {"workspace_root": str(tmp_path)},
+        {"action": "allow", "allowed": True},
+    )
+
+    result = ToolExecutor().execute("sandbox_exec", {"command": "pwd"}, context)
+
+    assert result["is_error"] is False
+    assert str(tmp_path) in result["widget"]["data"]["stdout"]
+
+
+def test_package_install_plan_never_executes_packages(tmp_path):
+    from domain.tool.executor import ToolExecutor
+
+    result = ToolExecutor().execute(
+        "package_install_plan",
+        {"manager": "pip", "packages": ["requests"]},
+        {"workspace_root": str(tmp_path)},
+    )
+
+    assert result["is_error"] is False
+    assert result["widget"]["data"]["executes"] is False
+    assert result["widget"]["data"]["command"][-1] == "requests"
