@@ -545,6 +545,24 @@ body {
   }
 }
 
+.rumi-provider-select-popover {
+  animation: rumi-provider-select-enter 160ms ease-out both;
+  transform-origin: left bottom;
+}
+
+@keyframes rumi-provider-select-enter {
+  from {
+    opacity: 0;
+    filter: blur(5px);
+    transform: translateY(8px) scale(0.975);
+  }
+  to {
+    opacity: 1;
+    filter: blur(0);
+    transform: translateY(0) scale(1);
+  }
+}
+
 @media (max-width: 720px) {
   .rumi-greeting {
     white-space: normal;
@@ -594,6 +612,7 @@ body {
   .rumi-image-preview-shell,
   .rumi-image-preview-media,
   .rumi-calendar-popover,
+  .rumi-provider-select-popover,
   .rumi-loading-bars span {
     animation: none;
   }
