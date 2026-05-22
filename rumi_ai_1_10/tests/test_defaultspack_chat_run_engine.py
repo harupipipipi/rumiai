@@ -198,6 +198,47 @@ def test_prepare_chat_run_allows_explicit_model_override(tmp_path, monkeypatch):
     ChatStore._instance = None
 
 
+def test_prepare_chat_run_forwards_approval_followup_token_to_tool_context(tmp_path, monkeypatch):
+    from domain.chat.run_request import prepare_chat_run
+    from domain.chat.store import ChatStore
+
+    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
+    ChatStore._instance = None
+
+    store = ChatStore()
+    conversation = store.create_conversation(model="stub/default")
+
+    prepared = prepare_chat_run(
+        {
+            "conversation_id": conversation["id"],
+            "message": {
+                "role": "user",
+                "content": "ユーザーが許可しました。承認済みの操作を続行してください。",
+                "metadata": {
+                    "approval_followup": {
+                        "approval_token": "tok_approved",
+                        "operation": "tool.coding_file_create",
+                        "request_id": "apr_1",
+                        "tool_name": "coding_file_create",
+                    },
+                },
+            },
+            "tools": [],
+        },
+        {},
+    )
+
+    expected = {
+        "coding_file_create": "tok_approved",
+        "tool.coding_file_create": "tok_approved",
+        "apr_1": "tok_approved",
+    }
+    assert prepared.request_context["tool_approval_tokens"] == expected
+    assert prepared.tool_context["tool_approval_tokens"] == expected
+    ChatStore._instance = None
+
+
 def test_prepare_chat_run_injects_matched_skill_and_chat_references(tmp_path, monkeypatch):
     import json
 

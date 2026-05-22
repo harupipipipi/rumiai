@@ -8,7 +8,7 @@ import type { ChatItem, HistoryBoardNewTaskOptions } from "./components/HistoryB
 import type { ToolPreviewItem, ToolPreviewMode } from "./components/ToolPreview";
 import { buildToolPreviewDisplayItems, hasCanvasItems } from "./components/ToolPreview";
 import { api, defaultspackApiFetch, type ChatActivityEvent, type ChatContentBlock, type ChatMessage, type ChatStreamEvent, type ChatToolStreamEvent, type CodingWorkspaceRecord, type ComposerCommandExecuteResult, type ComposerCommandItem, type ComposerCommandMode, type ComposerWidgetAction, type Conversation, type ConversationSearchResult, type ConversationSteerItem, type ModelCommandCandidate, type ModelProfile, type OperationsCompanyStatus, type SettingsSection, type SidebarAction, type SidebarItem, type UICatalog } from "./lib/api";
-import { pendingBrowserApproval, type BrowserApproval } from "./lib/browserApproval";
+import { pendingBrowserApproval, pendingCodingApproval, staleCodingApproval, type BrowserApproval, type CodingApproval, type StaleCodingApproval } from "./lib/browserApproval";
 import { reduceBrowserStateFromEvents } from "./lib/browserState";
 import { deriveConversationTitle, formatRelativeTime, messageToText, orderConversationMessages } from "./lib/chat";
 import { cn } from "./lib/cn";
@@ -1202,6 +1202,7 @@ function toUiMessage(message: ChatMessage, profile?: ModelProfile | null): ChatU
   const metadata = message.metadata ?? {};
   const thinking = metadata.thinking as Record<string, unknown> | undefined;
   const timing = metadata.timing as Record<string, unknown> | undefined;
+  const pendingApproval = metadata.pending_approval;
   const attachedToolCount = Number(metadata.attached_tool_count ?? 0);
   const thinkingDuration = String(timing?.thinking_duration_label ?? "")
     || boundedDurationLabel(timing?.thinking_started_at, timing?.completed_at);
@@ -1223,6 +1224,9 @@ function toUiMessage(message: ChatMessage, profile?: ModelProfile | null): ChatU
           thinkingDuration,
           thinkingTranscript: String(thinking?.transcript ?? ""),
           attachedToolCount,
+          pendingApproval: pendingApproval && typeof pendingApproval === "object" && !Array.isArray(pendingApproval)
+            ? pendingApproval as Record<string, unknown>
+            : undefined,
         },
   };
 }
@@ -1344,6 +1348,54 @@ function CanvasPeek({
       </span>
     </button>
   );
+}
+
+function approvalPayloadPreview(payload: Record<string, unknown>): string {
+  try {
+    return JSON.stringify(payload, null, 2);
+  } catch {
+    return String(payload);
+  }
+}
+
+function normalizedPreviewUrl(value: string): string {
+  try {
+    const url = new URL(value);
+    url.hash = "";
+    return url.href;
+  } catch {
+    return value.trim();
+  }
+}
+
+function canvasPreviewIdentity(preview: ToolPreviewItem): string {
+  const data = preview.data;
+  if (data.type === "web") return `web:${normalizedPreviewUrl(data.url)}`;
+  if (data.type === "image") return `image:${data.path || data.url || data.alt}`;
+  if (data.type === "file") return `file:${data.path || data.url || `${data.filename}:${data.content ?? ""}`}`;
+  return `code:${data.filename}:${data.diff ?? data.content ?? ""}`;
+}
+
+function codingApprovalRuntimeContent(approval: CodingApproval, token?: string): string {
+  const payload = approvalPayloadPreview({
+    ...approval.payload,
+    ...(token ? { approval_token: token } : {}),
+  });
+  return [
+    "The user approved the pending server-side coding operation.",
+    "Continue by calling the exact pending tool once with the approved arguments below.",
+    "Do not ask the user for the same approval again unless the tool returns a new approval_request_id.",
+    `Tool: ${approval.toolName}`,
+    `Operation: ${approval.operation}`,
+    `Approval request id: ${approval.requestId}`,
+    "Approved arguments JSON:",
+    payload,
+  ].join("\n");
+}
+
+function staleCodingApprovalTitle(approval: StaleCodingApproval): string {
+  const label = approval.operation || approval.toolName || "tool";
+  return `${label} は再実行が必要です`;
 }
 
 function hasOperationsProfile(catalog: UICatalog | null): boolean {
@@ -1857,6 +1909,7 @@ export default function App() {
   const [canvasMemo, setCanvasMemo] = useLocalStorage("rumi-canvas-memo", "");
   const [activePreviewId, setActivePreviewId] = useState<string | null>(null);
   const [previews, setPreviews] = useState<ToolPreviewItem[]>([]);
+  const [settledCodingApprovalIds, setSettledCodingApprovalIds] = useState<string[]>([]);
   const [health, setHealth] = useState<{ status: string; pack: string; ts: string } | null>(null);
   const [operationsStatus, setOperationsStatus] = useState<OperationsCompanyStatus | null>(null);
   const [operationsBusy, setOperationsBusy] = useState(false);
@@ -1878,6 +1931,7 @@ export default function App() {
   const isUnloadingRef = useRef(false);
   const currentAbortControllerRef = useRef<AbortController | null>(null);
   const streamingConversationIdRef = useRef<string | null>(null);
+  const activeCodingApprovalActionRef = useRef<string | null>(null);
 
   const sidebarItems: SidebarItem[] = catalog?.sidebar.items ?? [];
   const chatItems = buildChatItems(conversations);
@@ -1923,6 +1977,13 @@ export default function App() {
     pendingRequest && Date.now() - pendingRequest.startedAt < PENDING_CHAT_REQUEST_TTL_MS,
   );
   const browserApproval = pendingBrowserApproval(messages);
+  const rawCodingApproval = pendingCodingApproval(messages);
+  const settledCodingApprovalIdSet = useMemo(() => new Set(settledCodingApprovalIds), [settledCodingApprovalIds]);
+  const codingApproval = rawCodingApproval && !settledCodingApprovalIdSet.has(rawCodingApproval.requestId)
+    ? rawCodingApproval
+    : null;
+  const staleCodingApprovalNotice = !rawCodingApproval ? staleCodingApproval(messages) : null;
+  const visibleBrowserApproval = !yoloMode ? browserApproval : null;
   const messageToolPreviews = useMemo(
     () => toolPreviewsFromMessages(activeConversation?.messages ?? []),
     [activeConversation?.messages],
@@ -1932,10 +1993,17 @@ export default function App() {
     [activeConversation?.messages],
   );
   const canvasPreviews = useMemo(() => {
-    const seen = new Set(previews.map((preview) => preview.id));
+    const seenIds = new Set(previews.map((preview) => preview.id));
+    const seenIdentities = new Set(previews.map(canvasPreviewIdentity));
     return [
       ...previews,
-      ...messageToolPreviews.filter((preview) => !seen.has(preview.id)),
+      ...messageToolPreviews.filter((preview) => {
+        const identity = canvasPreviewIdentity(preview);
+        if (seenIds.has(preview.id) || seenIdentities.has(identity)) return false;
+        seenIds.add(preview.id);
+        seenIdentities.add(identity);
+        return true;
+      }),
     ].sort((a, b) => b.timestamp - a.timestamp);
   }, [messageToolPreviews, previews]);
   const canShowCanvas = hasCanvasItems(canvasPreviews, canvasMemo) || liveBrowserState.state_revision >= 0;
@@ -3225,11 +3293,7 @@ export default function App() {
         browserApproval.action,
         approvedArguments,
       );
-      pushActionPreview(
-        { id: "browser.approval", label: "Approved Browser Action", icon: "browser" },
-        "browser-approval",
-        result,
-      );
+      void result;
       await api.sendMessage(activeConversationId, "ユーザーが許可しました。承認済みの操作を踏まえて続行してください。", {
         tool_policy: {
           ...(yoloMode ? { yolo_mode: true, allow_shell: true, allow_file_write: true, write_actions_require_approval: false } : {}),
@@ -3254,6 +3318,88 @@ export default function App() {
       setError(approvalError instanceof Error ? approvalError.message : "browser/computer の承認に失敗しました。");
     } finally {
       setIsGenerating(false);
+    }
+  };
+
+  const approveCodingAction = async () => {
+    if (!codingApproval) return;
+    if (!activeConversationId) return;
+    if (activeCodingApprovalActionRef.current === codingApproval.requestId) return;
+    activeCodingApprovalActionRef.current = codingApproval.requestId;
+    setError(null);
+    setIsGenerating(true);
+    rememberPendingRequest({
+      conversationId: activeConversationId,
+      startedAt: Date.now(),
+      status: "承認済みの操作を続行しています",
+      toolNames: [codingApproval.toolName],
+      toolStartedAt: { [codingApproval.toolName]: Date.now() },
+    });
+    try {
+      const approvalWorkspace = workspaceContextFromConversation(activeConversation);
+      const decision = await api.approveCodingApproval(codingApproval.requestId);
+      if (!decision.approved) {
+        throw new Error(decision.reason || "approval failed");
+      }
+      setSettledCodingApprovalIds((ids) => (
+        ids.includes(codingApproval.requestId) ? ids : [...ids, codingApproval.requestId].slice(-50)
+      ));
+      await api.sendMessage(activeConversationId, "ユーザーが許可しました。承認済みの操作を続行してください。", {
+        tool_choice: "required",
+        tool_policy: {
+          ...(yoloMode ? { yolo_mode: true, allow_shell: true, allow_file_write: true, write_actions_require_approval: false } : {}),
+          ...(approvalWorkspace.workspaceId ? { workspace_id: approvalWorkspace.workspaceId } : {}),
+          selected_tools: [codingApproval.toolName],
+        },
+        tools: [codingApproval.toolName],
+        metadata: {
+          mode,
+          ...(approvalWorkspace.workspaceId ? {
+            workspace_id: approvalWorkspace.workspaceId,
+            workspace_label: approvalWorkspace.workspaceLabel,
+            workspace_root: approvalWorkspace.workspaceRoot,
+          } : {}),
+          approval_followup: {
+            action: codingApproval.action,
+            operation: codingApproval.operation,
+            approval_token: decision.token,
+            request_id: codingApproval.requestId,
+            tool_name: codingApproval.toolName,
+          },
+          runtime_content: codingApprovalRuntimeContent(codingApproval, decision.token),
+          selected_tools: [codingApproval.toolName],
+        },
+      });
+      forgetPendingRequest(activeConversationId);
+      replaceChatIdInUrl(activeConversationId, false);
+      await loadConversation(activeConversationId, false);
+      await refreshConversations(activeConversationId);
+    } catch (approvalError) {
+      forgetPendingRequest(activeConversationId);
+      setError(approvalError instanceof Error ? approvalError.message : "coding 承認に失敗しました。");
+    } finally {
+      activeCodingApprovalActionRef.current = null;
+      setIsGenerating(false);
+    }
+  };
+
+  const denyCodingAction = async () => {
+    if (!codingApproval) return;
+    if (!activeConversationId) return;
+    if (activeCodingApprovalActionRef.current === codingApproval.requestId) return;
+    activeCodingApprovalActionRef.current = codingApproval.requestId;
+    setError(null);
+    try {
+      await api.denyCodingApproval(codingApproval.requestId, "Denied from chat approval card");
+      setSettledCodingApprovalIds((ids) => (
+        ids.includes(codingApproval.requestId) ? ids : [...ids, codingApproval.requestId].slice(-50)
+      ));
+      await loadConversation(activeConversationId, false);
+      await refreshConversations(activeConversationId);
+    } catch (approvalError) {
+      setError(approvalError instanceof Error ? approvalError.message : "coding 承認の拒否に失敗しました。");
+    } finally {
+      activeCodingApprovalActionRef.current = null;
     }
   };
 
@@ -3420,9 +3566,6 @@ export default function App() {
     const shouldKeepSelectedToolsAfterSend = keepSelectedToolsAfterSend(settingsValues);
     const submittedToolIds = [...selectedToolIds];
     const submittedToolIdSet = new Set(submittedToolIds);
-    const selectedToolLabels = [
-      ...selectedTools.map((item) => item.label || item.id),
-    ];
     const activeContextForSubmit = workspaceContextFromConversation(activeConversation);
     const groupIdForSubmit = pendingNewTaskContext?.groupId ?? activeContextForSubmit.groupId;
     const workspaceIdForSubmit = pendingNewTaskContext?.workspaceId
@@ -3468,7 +3611,7 @@ export default function App() {
         conversationId: conversation.id,
         startedAt: requestStartedAt,
         status: `${activeProfile?.display_name ?? preferredModel} が思考中`,
-        toolNames: selectedToolLabels,
+        toolNames: [],
         toolStartedAt: {},
       });
       replaceChatIdInUrl(conversation.id, true);
@@ -3610,7 +3753,7 @@ export default function App() {
             conversationId: conversation.id,
             startedAt: requestStartedAt,
             status,
-            toolNames: selectedToolLabels,
+            toolNames: [],
             toolStartedAt: {},
           };
           const toolNames = toolName ? [...new Set([...existing.toolNames, toolName])] : existing.toolNames;
@@ -3870,7 +4013,7 @@ export default function App() {
         )}
 
         {showRegion("history") && isHistoryMinimized && (
-          <div className="rumi-history-rail w-14 flex-shrink-0 overflow-hidden border-r border-zinc-800/60 animate-in slide-in-from-left-1 fade-in duration-150 ease-out">
+          <div className="rumi-history-rail w-14 flex-shrink-0 overflow-visible border-r border-zinc-800/60 animate-in slide-in-from-left-1 fade-in duration-150 ease-out">
             <Renderers.historyBoard
               activeChatId={activeConversationId}
               chatItems={chatItems}
@@ -3960,15 +4103,15 @@ export default function App() {
                     onOpen={() => setShowPreview(true)}
                   />
                 )}
-                {browserApproval && (
+                {visibleBrowserApproval && (
                   <div className="pointer-events-auto absolute bottom-full left-1/2 z-30 mb-2 w-[min(520px,calc(100vw-32px))] -translate-x-1/2 rounded-xl border border-orange-500/30 bg-zinc-950 p-3 shadow-2xl">
                     <div className="flex items-center justify-between gap-3">
                       <div className="min-w-0">
-                        <p className="truncate text-sm font-medium text-zinc-100">{browserApproval.action} の承認が必要です</p>
+                        <p className="truncate text-sm font-medium text-zinc-100">{visibleBrowserApproval.action} の承認が必要です</p>
                         <details className="mt-1 text-[11px] text-zinc-500">
                           <summary className="cursor-pointer select-none text-zinc-500 hover:text-zinc-300">payload を表示</summary>
                           <pre className="mt-1 max-h-24 overflow-auto whitespace-pre-wrap rounded-md border border-zinc-800 bg-black/30 p-2 font-mono">
-                            {JSON.stringify(browserApproval.payload, null, 2)}
+                            {JSON.stringify(visibleBrowserApproval.payload, null, 2)}
                           </pre>
                         </details>
                       </div>
@@ -3979,6 +4122,79 @@ export default function App() {
                       >
                         許可
                       </button>
+                    </div>
+                  </div>
+                )}
+                {!visibleBrowserApproval && codingApproval && (
+                  <div className="pointer-events-auto absolute bottom-full left-1/2 z-30 mb-2 w-[min(560px,calc(100vw-32px))] -translate-x-1/2 rounded-xl border border-amber-500/30 bg-zinc-950 p-3 shadow-2xl">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="flex min-w-0 items-center gap-2">
+                          <span className={cn(
+                            "shrink-0 rounded border px-1.5 py-0.5 text-[10px]",
+                            codingApproval.riskLevel === "high"
+                              ? "border-red-500/30 bg-red-500/10 text-red-200"
+                              : "border-amber-500/30 bg-amber-500/10 text-amber-200",
+                          )}>
+                            {codingApproval.riskLevel ?? "approval"}
+                          </span>
+                          <p className="truncate text-sm font-medium text-zinc-100">{codingApproval.operation} の承認が必要です</p>
+                        </div>
+                        {codingApproval.summary && (
+                          <p className="mt-1 truncate text-[11px] text-zinc-500">{codingApproval.summary}</p>
+                        )}
+                        <details className="mt-1 text-[11px] text-zinc-500">
+                          <summary className="cursor-pointer select-none text-zinc-500 hover:text-zinc-300">payload を表示</summary>
+                          <pre className="mt-1 max-h-24 overflow-auto whitespace-pre-wrap rounded-md border border-zinc-800 bg-black/30 p-2 font-mono">
+                            {approvalPayloadPreview(codingApproval.payload)}
+                          </pre>
+                        </details>
+                      </div>
+                      <div className="flex shrink-0 items-center gap-1">
+                        <button
+                          type="button"
+                          onPointerDown={(event) => {
+                            event.preventDefault();
+                            void denyCodingAction();
+                          }}
+                          onClick={denyCodingAction}
+                          className="h-8 rounded-lg border border-zinc-800 px-3 text-xs font-semibold text-zinc-400 hover:border-red-500/40 hover:bg-red-500/10 hover:text-red-200"
+                        >
+                          拒否
+                        </button>
+                        <button
+                          type="button"
+                          onPointerDown={(event) => {
+                            event.preventDefault();
+                            void approveCodingAction();
+                          }}
+                          onClick={approveCodingAction}
+                          className="h-8 rounded-lg bg-zinc-100 px-3 text-xs font-semibold text-zinc-950 hover:bg-white"
+                        >
+                          許可
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {!visibleBrowserApproval && !codingApproval && staleCodingApprovalNotice && (
+                  <div className="pointer-events-auto absolute bottom-full left-1/2 z-30 mb-2 w-[min(560px,calc(100vw-32px))] -translate-x-1/2 rounded-xl border border-zinc-700 bg-zinc-950 p-3 shadow-2xl">
+                    <div className="min-w-0">
+                      <div className="flex min-w-0 items-center gap-2">
+                        <span className="shrink-0 rounded border border-zinc-700 bg-zinc-900 px-1.5 py-0.5 text-[10px] text-zinc-400">
+                          expired
+                        </span>
+                        <p className="truncate text-sm font-medium text-zinc-100">{staleCodingApprovalTitle(staleCodingApprovalNotice)}</p>
+                      </div>
+                      <p className="mt-1 truncate text-[11px] text-zinc-500">
+                        承認IDがない古いリクエストのため、この画面からは承認できません。もう一度 tool を実行すると新しい承認が作られます。
+                      </p>
+                      <details className="mt-1 text-[11px] text-zinc-500">
+                        <summary className="cursor-pointer select-none text-zinc-500 hover:text-zinc-300">payload を表示</summary>
+                        <pre className="mt-1 max-h-24 overflow-auto whitespace-pre-wrap rounded-md border border-zinc-800 bg-black/30 p-2 font-mono">
+                          {approvalPayloadPreview(staleCodingApprovalNotice.payload)}
+                        </pre>
+                      </details>
                     </div>
                   </div>
                 )}

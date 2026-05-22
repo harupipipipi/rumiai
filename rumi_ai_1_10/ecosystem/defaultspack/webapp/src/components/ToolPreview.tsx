@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import {
   X, Globe, FileText, Image, ExternalLink,
-  ChevronLeft, ChevronRight,
-  Eye, EyeOff, Code, NotebookPen, Maximize2
+  Eye, EyeOff, Code, NotebookPen, Maximize2,
+  Plus, Clock, Layers
 } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -46,6 +46,7 @@ export type FilePreview = {
   url?: string;
   path?: string;
   downloadName?: string;
+  mimeType?: string;
 };
 
 export type ImagePreview = {
@@ -68,10 +69,19 @@ export type ToolPreviewItem = {
 export type ToolPreviewMode = 'auto' | 'manual';
 
 export const MEMO_PREVIEW_ID = '__memo__';
+const TIMELINE_TAB_ID = '__timeline__';
 
 function matchesPreviewId(item: ToolPreviewItem, previewId?: string | null) {
   return Boolean(previewId && (item.id === previewId || item.toolStepId === previewId));
 }
+
+function isArtifactPlaceholderContent(content: string | undefined, path?: string): boolean {
+  const text = String(content ?? '').trim();
+  if (!text) return false;
+  if (path && text === `artifact: ${path}`) return true;
+  return /^artifact:\s*.+$/i.test(text);
+}
+
 export function isCanvasPreviewItemRenderable(item: ToolPreviewItem): boolean {
   const data = item.data;
   if (
@@ -80,9 +90,16 @@ export function isCanvasPreviewItemRenderable(item: ToolPreviewItem): boolean {
   ) {
     return false;
   }
+  if (
+    data.type === 'file'
+    && !data.url
+    && !data.path
+    && isArtifactPlaceholderContent(data.content)
+  ) {
+    return false;
+  }
   return true;
 }
-
 
 export function hasCanvasItems(previews: ToolPreviewItem[], memo?: string | null) {
   return previews.some(isCanvasPreviewItemRenderable) || Boolean(memo?.trim());
@@ -137,9 +154,69 @@ function previewTitle(data: ToolPreviewData): string {
   return data.alt || data.path || 'Image preview';
 }
 
+function previewTypeLabel(data: ToolPreviewData): string {
+  if (data.type === 'web') return 'Web';
+  if (data.type === 'code') return 'Code';
+  if (data.type === 'file') return 'File';
+  return 'Image';
+}
+
+function previewIcon(data: ToolPreviewData, size = 12) {
+  if (data.type === 'web') return <Globe size={size} className="text-emerald-400" />;
+  if (data.type === 'code') return <Code size={size} className="text-amber-400" />;
+  if (data.type === 'file') return <FileText size={size} className="text-violet-400" />;
+  return <Image size={size} className="text-blue-400" />;
+}
+
 function safeHref(url: string | undefined): string | undefined {
   if (!url || url.startsWith('data:')) return undefined;
   return url;
+}
+
+function localPreviewUrl(url: string | undefined): boolean {
+  if (!url) return false;
+  try {
+    const parsed = new URL(url, window.location.href);
+    const host = parsed.hostname.toLowerCase();
+    return host === 'localhost' || host === '127.0.0.1' || host === '0.0.0.0' || host === '::1' || host === '[::1]';
+  } catch {
+    return false;
+  }
+}
+
+function looksLikeHtml(data: FilePreview, content?: string): boolean {
+  const name = data.filename.toLowerCase();
+  const mime = String(data.mimeType ?? '').toLowerCase();
+  const text = String(content ?? data.content ?? '').trimStart().toLowerCase();
+  return mime.includes('html') || /\.(html?|xhtml)$/.test(name) || text.startsWith('<!doctype html') || text.startsWith('<html');
+}
+
+function looksLikeDiff(filename: string, content?: string): boolean {
+  const name = filename.toLowerCase();
+  const text = String(content ?? '').trimStart();
+  return /\.(diff|patch)$/.test(name) || text.startsWith('diff --git') || text.startsWith('--- ') || text.startsWith('+++ ');
+}
+
+function displayPreviewContent(data: FilePreview): string | undefined {
+  if (isArtifactPlaceholderContent(data.content, data.path)) return undefined;
+  return data.content;
+}
+
+function escapeHtmlAttribute(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+function htmlWithBase(content: string, url?: string): string {
+  if (!url || !content || /<base\s/i.test(content)) return content;
+  const baseTag = `<base href="${escapeHtmlAttribute(url)}">`;
+  if (/<head[^>]*>/i.test(content)) {
+    return content.replace(/<head([^>]*)>/i, `<head$1>${baseTag}`);
+  }
+  return `${baseTag}${content}`;
 }
 
 export function artifactDialogItemFromToolPreview(item: ToolPreviewItem): ArtifactPreviewDialogItem {
@@ -500,6 +577,7 @@ added 12 packages in 2.4s
 // ============================================================
 
 function WebPreviewContent({ data }: { data: WebPreview }) {
+  const canEmbed = localPreviewUrl(data.url);
   return (
     <div className="flex flex-col h-full">
       {/* Browser chrome */}
@@ -524,44 +602,39 @@ function WebPreviewContent({ data }: { data: WebPreview }) {
       </div>
 
       {/* Page content */}
-      <div className="flex-1 p-4 overflow-y-auto">
-        {data.screenshot ? (
+      <div className="flex-1 overflow-hidden">
+        {canEmbed ? (
+          <iframe
+            src={data.url}
+            title={data.title || data.url}
+            className="h-full w-full border-0 bg-white"
+            sandbox="allow-forms allow-modals allow-popups allow-scripts allow-same-origin"
+          />
+        ) : data.screenshot ? (
           <img
             src={data.screenshot}
             alt={data.title}
-            className="w-full rounded border border-zinc-800"
+            className="m-4 w-[calc(100%-2rem)] rounded border border-zinc-800"
           />
         ) : (
-          <div className="space-y-4">
-            {/* Mock page screenshot placeholder */}
-            <div className="w-full aspect-[16/10] bg-zinc-800/30 rounded-lg border border-zinc-800 flex flex-col items-center justify-center relative overflow-hidden">
-              {/* Mock browser content */}
-              <div className="absolute inset-0 p-4 space-y-3">
-                <div className="h-6 w-3/4 bg-zinc-800/60 rounded" />
-                <div className="h-3 w-full bg-zinc-800/40 rounded" />
-                <div className="h-3 w-5/6 bg-zinc-800/40 rounded" />
-                <div className="h-3 w-4/6 bg-zinc-800/40 rounded" />
-                <div className="mt-4 grid grid-cols-3 gap-2">
-                  <div className="h-16 bg-zinc-800/30 rounded" />
-                  <div className="h-16 bg-zinc-800/30 rounded" />
-                  <div className="h-16 bg-zinc-800/30 rounded" />
-                </div>
-                <div className="h-3 w-full bg-zinc-800/40 rounded" />
-                <div className="h-3 w-2/3 bg-zinc-800/40 rounded" />
-              </div>
-              <div className="relative z-10 text-center">
-                <Globe size={28} className="text-zinc-700 mx-auto mb-1" />
-                <p className="text-[10px] text-zinc-600">Preview</p>
-              </div>
-            </div>
-
-            <div>
-              <h3 className="text-sm font-medium text-zinc-200 mb-1">{data.title}</h3>
-              <p className="text-[10px] text-emerald-600 font-mono mb-2 truncate">{data.url}</p>
+          <div className="flex h-full flex-col items-center justify-center gap-3 p-4 text-center">
+            <Globe size={28} className="text-zinc-700" />
+            <div className="max-w-full">
+              <h3 className="truncate text-sm font-medium text-zinc-200">{data.title}</h3>
+              <p className="mt-1 truncate font-mono text-[10px] text-emerald-600">{data.url}</p>
               {data.snippet && (
-                <p className="text-xs text-zinc-500 leading-relaxed">{data.snippet}</p>
+                <p className="mt-2 text-xs leading-relaxed text-zinc-500">{data.snippet}</p>
               )}
             </div>
+            <a
+              href={data.url}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex h-8 items-center gap-1 rounded-md border border-zinc-800 bg-zinc-950 px-3 text-[11px] text-zinc-400 hover:border-zinc-700 hover:text-zinc-200"
+            >
+              <ExternalLink size={12} />
+              開く
+            </a>
           </div>
         )}
       </div>
@@ -618,8 +691,123 @@ function CodePreviewContent({ data }: { data: CodePreview }) {
   );
 }
 
+function useRemotePreviewText(data: FilePreview) {
+  const inlineContent = displayPreviewContent(data);
+  const [remoteText, setRemoteText] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setRemoteText(null);
+    setError(null);
+    if (inlineContent !== undefined || !data.url) {
+      setIsLoading(false);
+      return () => {
+        cancelled = true;
+      };
+    }
+    setIsLoading(true);
+    void fetch(data.url, { cache: 'no-store' })
+      .then(async (response) => {
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        return response.text();
+      })
+      .then((text) => {
+        if (!cancelled) setRemoteText(text);
+      })
+      .catch((fetchError) => {
+        if (!cancelled) setError(fetchError instanceof Error ? fetchError.message : String(fetchError));
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [data.url, inlineContent]);
+
+  return {
+    error,
+    isLoading,
+    text: inlineContent ?? remoteText ?? '',
+  };
+}
+
+function HtmlPreviewContent({
+  data,
+  content,
+  error,
+  isLoading,
+}: {
+  data: FilePreview;
+  content: string;
+  error: string | null;
+  isLoading: boolean;
+}) {
+  const srcDoc = content ? htmlWithBase(content, data.url) : undefined;
+  return (
+    <div className="flex h-full flex-col">
+      <div className="flex min-h-9 items-center justify-between gap-2 border-b border-zinc-800/60 bg-zinc-900 px-3 py-2">
+        <div className="flex min-w-0 items-center gap-2">
+          <Globe size={12} className="shrink-0 text-emerald-400" />
+          <span className="truncate font-mono text-[11px] text-zinc-300">{data.filename}</span>
+        </div>
+        {data.url && (
+          <a
+            href={data.url}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex h-6 shrink-0 items-center gap-1 rounded-md border border-zinc-800 bg-zinc-950 px-2 text-[10px] text-zinc-400 hover:border-zinc-700 hover:text-zinc-200"
+          >
+            <ExternalLink size={11} />
+            開く
+          </a>
+        )}
+      </div>
+      <div className="relative min-h-0 flex-1 bg-white">
+        {isLoading && (
+          <div className="absolute inset-0 z-10 flex items-center justify-center bg-zinc-950 text-[11px] text-zinc-500">
+            HTML を読み込んでいます
+          </div>
+        )}
+        {srcDoc ? (
+          <iframe
+            title={data.filename}
+            srcDoc={srcDoc}
+            className="h-full w-full border-0 bg-white"
+            sandbox="allow-forms allow-modals allow-popups allow-scripts"
+          />
+        ) : !isLoading ? (
+          <div className="flex h-full items-center justify-center bg-zinc-950 px-4 text-center text-[11px] text-zinc-500">
+            {error ? `HTML を読み込めませんでした: ${error}` : 'HTML preview の内容がありません。'}
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 function FilePreviewContent({ data }: { data: FilePreview }) {
-  const looksLikeJson = data.filename.toLowerCase().endsWith('.json') || String(data.content ?? '').trimStart().startsWith('{');
+  const loaded = useRemotePreviewText(data);
+  const content = loaded.text;
+  const looksLikeJson = data.filename.toLowerCase().endsWith('.json') || String(content ?? '').trimStart().startsWith('{');
+  if (looksLikeHtml(data, content) && (content || data.url)) {
+    return <HtmlPreviewContent data={data} content={content} error={loaded.error} isLoading={loaded.isLoading} />;
+  }
+  if (looksLikeDiff(data.filename, content)) {
+    if (loaded.isLoading && !content) {
+      return <div className="flex h-full items-center justify-center text-[11px] text-zinc-600">diff を読み込んでいます</div>;
+    }
+    if (loaded.error && !content) {
+      return (
+        <div className="m-3 rounded-md border border-zinc-800 bg-zinc-950/70 px-3 py-2 text-[11px] text-zinc-500">
+          diff を読み込めませんでした: {loaded.error}
+        </div>
+      );
+    }
+    return <CodePreviewContent data={{ type: 'code', filename: data.filename, language: 'diff', diff: content }} />;
+  }
   return (
     <div className="flex flex-col h-full">
       <div className="flex items-center justify-between px-3 py-2 bg-zinc-900 border-b border-zinc-800/60 flex-shrink-0">
@@ -652,16 +840,24 @@ function FilePreviewContent({ data }: { data: FilePreview }) {
         </div>
       )}
       <div className="flex-1 overflow-y-auto">
-        <pre className="text-[11px] font-mono leading-[1.6]">
-          {(data.content || '').split('\n').map((line, i) => (
-            <div key={i} className="px-3 text-zinc-400 min-h-[1.6em]">
-              <span className="inline-block w-7 text-right mr-3 text-zinc-700 select-none text-[10px]">
-                {i + 1}
-              </span>
-              {line}
-            </div>
-          ))}
-        </pre>
+        {loaded.isLoading ? (
+          <div className="flex h-full items-center justify-center text-[11px] text-zinc-600">内容を読み込んでいます</div>
+        ) : loaded.error && !content ? (
+          <div className="m-3 rounded-md border border-zinc-800 bg-zinc-950/70 px-3 py-2 text-[11px] text-zinc-500">
+            内容を読み込めませんでした: {loaded.error}
+          </div>
+        ) : (
+          <pre className="text-[11px] font-mono leading-[1.6]">
+            {(content || '').split('\n').map((line, i) => (
+              <div key={i} className="px-3 text-zinc-400 min-h-[1.6em]">
+                <span className="inline-block w-7 text-right mr-3 text-zinc-700 select-none text-[10px]">
+                  {i + 1}
+                </span>
+                {line}
+              </div>
+            ))}
+          </pre>
+        )}
       </div>
     </div>
   );
@@ -725,88 +921,51 @@ function ImagePreviewContent({ data }: { data: ImagePreview }) {
 }
 
 // ============================================================
-// Bottom tab navigation
+// Canvas timeline
 // ============================================================
 
-function PreviewTimeline({
+function CanvasTimelineContent({
   items,
-  currentIndex,
-  onSelect,
+  onOpenPreview,
 }: {
   items: ToolPreviewItem[];
-  currentIndex: number;
-  onSelect: (i: number) => void;
+  onOpenPreview: (item: ToolPreviewItem) => void;
 }) {
-  const navRef = React.useRef<HTMLDivElement>(null);
   const timelineItems = useMemo(() => buildToolPreviewTimelineItems(items), [items]);
-  const currentItem = items[Math.min(currentIndex, items.length - 1)];
-  const timelineIndex = Math.max(0, timelineItems.findIndex((item) => item.id === currentItem?.id));
-
-  const selectTimelineIndex = (index: number) => {
-    const item = timelineItems[index];
-    if (!item) return;
-    const displayIndex = items.findIndex((candidate) => candidate.id === item.id);
-    if (displayIndex >= 0) onSelect(displayIndex);
-  };
-
-  // Auto-scroll to active tab
-  useEffect(() => {
-    if (navRef.current) {
-      const activeTab = navRef.current.querySelector(`[data-preview-id="${currentItem?.id}"]`) as HTMLElement | null;
-      if (activeTab) {
-        activeTab.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
-      }
-    }
-  }, [currentItem?.id]);
 
   return (
-    <div className="border-t border-zinc-800/60 bg-zinc-900/80 px-2 py-2">
-      <div className="flex items-center gap-2">
-        <span className="shrink-0 text-[10px] font-medium uppercase tracking-wide text-zinc-600">Timeline</span>
-        <input
-          type="range"
-          min={0}
-          max={Math.max(0, timelineItems.length - 1)}
-          value={timelineIndex}
-          disabled={timelineItems.length <= 1}
-          aria-label="Tool preview chronological timeline"
-          onChange={(event) => selectTimelineIndex(Number(event.target.value))}
-          className="h-1.5 min-w-0 flex-1 accent-amber-300"
-        />
-        <span className="shrink-0 font-mono text-[10px] text-zinc-600">
-          {timelineIndex + 1}/{timelineItems.length}
+    <div className="h-full overflow-y-auto bg-[#0a0a0c] p-3">
+      <div className="mb-3 flex items-center justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-2">
+          <Clock size={13} className="shrink-0 text-amber-300" />
+          <h2 className="truncate text-[12px] font-semibold text-zinc-300">Timeline</h2>
+        </div>
+        <span className="shrink-0 rounded-md border border-zinc-800 bg-zinc-950 px-2 py-0.5 font-mono text-[10px] text-zinc-500">
+          {timelineItems.length}
         </span>
       </div>
-      <div
-        ref={navRef}
-        className="mt-2 flex items-center gap-0.5 overflow-x-auto"
-      >
-        {timelineItems.map((item, i) => {
-          const icon =
-            item.data.type === 'web' ? <Globe size={10} /> :
-            item.data.type === 'code' ? <Code size={10} /> :
-            item.data.type === 'file' ? <FileText size={10} /> :
-            <Image size={10} />;
-          const label = previewTitle(item.data);
-          const displayIndex = items.findIndex((candidate) => candidate.id === item.id);
-
-          return (
-            <button
-              key={item.id}
-              data-preview-id={item.id}
-              onClick={() => selectTimelineIndex(i)}
-              className={cn(
-                'flex flex-shrink-0 items-center gap-1 rounded px-2 py-1 text-[10px] whitespace-nowrap transition-colors',
-                displayIndex === currentIndex
-                  ? 'bg-zinc-800 text-zinc-200'
-                  : 'text-zinc-600 hover:bg-zinc-800/50 hover:text-zinc-400'
-              )}
-            >
-              {icon}
-              <span className="max-w-[80px] truncate">{label}</span>
-            </button>
-          );
-        })}
+      <div className="grid gap-2">
+        {timelineItems.map((item) => (
+          <button
+            key={item.id}
+            type="button"
+            onClick={() => onOpenPreview(item)}
+            className="group flex min-w-0 items-start gap-3 rounded-lg border border-zinc-800/80 bg-zinc-950/45 px-3 py-2 text-left transition-colors hover:border-zinc-700 hover:bg-zinc-900/70 focus-visible:border-zinc-600 focus-visible:outline-none"
+          >
+            <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-zinc-900 text-zinc-400">
+              {previewIcon(item.data, 13)}
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-[12px] font-medium text-zinc-300">{previewTitle(item.data)}</span>
+              <span className="mt-0.5 block truncate text-[10px] text-zinc-600">{previewTypeLabel(item.data)} · {item.toolStepId}</span>
+            </span>
+          </button>
+        ))}
+        {timelineItems.length === 0 && (
+          <div className="rounded-lg border border-zinc-800 bg-zinc-950/50 px-3 py-8 text-center text-[11px] text-zinc-600">
+            Canvas に表示できる成果物はまだありません。
+          </div>
+        )}
       </div>
     </div>
   );
@@ -837,38 +996,43 @@ export function ToolPreviewPanel({
   memo,
   onMemoChange,
 }: ToolPreviewPanelProps) {
-  const [currentIndex, setCurrentIndex] = useState(0);
   const [foregroundPreview, setForegroundPreview] = useState<ArtifactPreviewDialogItem | null>(null);
+  const [activeTabId, setActiveTabId] = useState(TIMELINE_TAB_ID);
+  const [openPreviewIds, setOpenPreviewIds] = useState<string[]>([]);
+  const [isPickerOpen, setIsPickerOpen] = useState(false);
   const displayItems = useMemo(
     () => buildToolPreviewDisplayItems(previews, memo, activePreviewId),
     [activePreviewId, memo, previews],
   );
+  const displayItemIdsKey = displayItems.map((item) => item.id).join('|');
 
-  // Jump to active preview when it changes (auto mode)
-  useEffect(() => {
-    if (mode === 'auto' && activePreviewId) {
-      const idx = displayItems.findIndex(
-        p => matchesPreviewId(p, activePreviewId)
-      );
-      if (idx !== -1) setCurrentIndex(idx);
-    }
-  }, [activePreviewId, mode, displayItems]);
+  const openPreviewTab = (item: ToolPreviewItem) => {
+    setOpenPreviewIds((ids) => (ids.includes(item.id) ? ids : [...ids, item.id]));
+    setActiveTabId(item.id);
+    setIsPickerOpen(false);
+  };
 
-  // Also jump when clicked in manual mode
-  useEffect(() => {
-    if (mode === 'manual' && activePreviewId) {
-      const idx = displayItems.findIndex(
-        p => matchesPreviewId(p, activePreviewId)
-      );
-      if (idx !== -1) setCurrentIndex(idx);
+  const closePreviewTab = (previewId: string) => {
+    setOpenPreviewIds((ids) => ids.filter((id) => id !== previewId));
+    if (activeTabId === previewId) {
+      setActiveTabId(TIMELINE_TAB_ID);
     }
-  }, [activePreviewId, mode, displayItems]);
+  };
 
   useEffect(() => {
-    if (currentIndex >= displayItems.length) {
-      setCurrentIndex(0);
+    setOpenPreviewIds((ids) => ids.filter((id) => displayItems.some((item) => item.id === id)));
+    if (activeTabId !== TIMELINE_TAB_ID && !displayItems.some((item) => item.id === activeTabId)) {
+      setActiveTabId(TIMELINE_TAB_ID);
     }
-  }, [currentIndex, displayItems.length]);
+  }, [activeTabId, displayItemIdsKey, displayItems]);
+
+  useEffect(() => {
+    if (!activePreviewId) return;
+    const item = displayItems.find((candidate) => matchesPreviewId(candidate, activePreviewId));
+    if (item) {
+      openPreviewTab(item);
+    }
+  }, [activePreviewId, mode, displayItemIdsKey]);
 
   useEffect(() => {
     if (!isVisible) setForegroundPreview(null);
@@ -876,10 +1040,16 @@ export function ToolPreviewPanel({
 
   if (!isVisible || displayItems.length === 0) return null;
 
-  const current = displayItems[Math.min(currentIndex, displayItems.length - 1)];
-  const isMemo = current.id === MEMO_PREVIEW_ID;
+  const openTabItems = openPreviewIds
+    .map((id) => displayItems.find((item) => item.id === id))
+    .filter((item): item is ToolPreviewItem => Boolean(item));
+  const current = activeTabId === TIMELINE_TAB_ID
+    ? null
+    : displayItems.find((item) => item.id === activeTabId) ?? null;
+  const isMemo = current?.id === MEMO_PREVIEW_ID;
 
   const renderContent = () => {
+    if (!current) return <CanvasTimelineContent items={displayItems} onOpenPreview={openPreviewTab} />;
     if (isMemo) return <MemoPreviewContent value={memo ?? ''} onChange={onMemoChange} />;
     switch (current.data.type) {
       case 'web':
@@ -893,32 +1063,94 @@ export function ToolPreviewPanel({
     }
   };
 
-  const typeLabel =
-    isMemo ? 'Memo' :
-    current.data.type === 'web' ? 'Web' :
-    current.data.type === 'code' ? 'Code' :
-    current.data.type === 'file' ? 'File' : 'Image';
-
-  const typeIcon =
-    isMemo ? <NotebookPen size={12} className="text-zinc-300" /> :
-    current.data.type === 'web' ? <Globe size={12} className="text-emerald-400" /> :
-    current.data.type === 'code' ? <Code size={12} className="text-amber-400" /> :
-    current.data.type === 'file' ? <FileText size={12} className="text-violet-400" /> :
-    <Image size={12} className="text-blue-400" />;
-
   return (
     <div className="flex flex-col h-full border-l border-zinc-800/60 bg-[#0a0a0c] w-full">
-      {/* Header */}
-      <div className="h-10 flex items-center justify-between px-3 border-b border-zinc-800/60 flex-shrink-0">
-        <div className="flex items-center gap-2">
-          {typeIcon}
-          <span className="text-[11px] font-medium text-zinc-400">{typeLabel}</span>
-          <span className="text-[10px] text-zinc-600 bg-zinc-800 px-1.5 py-0.5 rounded">
-            {currentIndex + 1}/{displayItems.length}
-          </span>
+      <div className="relative flex min-h-11 items-center gap-1.5 border-b border-zinc-800/60 bg-zinc-950/60 px-2">
+        <div className="flex shrink-0 items-center gap-1.5 px-1 text-[11px] font-semibold text-zinc-300">
+          <Layers size={13} className="text-zinc-500" />
+          <span>Canvas</span>
         </div>
-        <div className="flex items-center gap-0.5">
-          {/* Auto/Manual toggle */}
+        <div className="flex min-w-0 flex-1 items-end gap-1 overflow-x-auto pt-2">
+          <button
+            type="button"
+            onClick={() => setActiveTabId(TIMELINE_TAB_ID)}
+            className={cn(
+              'flex h-8 max-w-[132px] shrink-0 items-center gap-1.5 rounded-t-md border px-2 text-[11px] transition-colors',
+              activeTabId === TIMELINE_TAB_ID
+                ? 'border-zinc-800 border-b-[#0a0a0c] bg-[#0a0a0c] text-zinc-100'
+                : 'border-transparent bg-zinc-900/45 text-zinc-500 hover:bg-zinc-900 hover:text-zinc-300'
+            )}
+            title="Timeline"
+          >
+            <Clock size={12} />
+            <span className="truncate">Timeline</span>
+          </button>
+          {openTabItems.map((item) => (
+            <div
+              key={item.id}
+              className={cn(
+                'group flex h-8 max-w-[152px] shrink-0 items-center rounded-t-md border text-[11px] transition-colors',
+                activeTabId === item.id
+                  ? 'border-zinc-800 border-b-[#0a0a0c] bg-[#0a0a0c] text-zinc-100'
+                  : 'border-transparent bg-zinc-900/45 text-zinc-500 hover:bg-zinc-900 hover:text-zinc-300'
+              )}
+              title={previewTitle(item.data)}
+            >
+              <button
+                type="button"
+                onClick={() => setActiveTabId(item.id)}
+                className="flex h-full min-w-0 flex-1 items-center gap-1.5 px-2 text-left"
+              >
+                {item.id === MEMO_PREVIEW_ID ? <NotebookPen size={12} /> : previewIcon(item.data, 12)}
+                <span className="min-w-0 truncate">{item.id === MEMO_PREVIEW_ID ? 'memo.md' : previewTitle(item.data)}</span>
+              </button>
+              <button
+                type="button"
+                aria-label={`${previewTitle(item.data)} を閉じる`}
+                className="mr-1 flex h-4 w-4 shrink-0 items-center justify-center rounded text-zinc-600 hover:bg-zinc-800 hover:text-zinc-200"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  closePreviewTab(item.id);
+                }}
+              >
+                <X size={10} />
+              </button>
+            </div>
+          ))}
+        </div>
+        <div className="relative shrink-0">
+          <button
+            type="button"
+            onClick={() => setIsPickerOpen((value) => !value)}
+            className="mb-px flex h-7 w-7 items-center justify-center rounded-md text-zinc-500 hover:bg-zinc-900 hover:text-zinc-200"
+            title="Canvas タブを追加"
+            aria-label="Canvas タブを追加"
+          >
+            <Plus size={14} />
+          </button>
+          {isPickerOpen && (
+            <div className="absolute right-0 top-8 z-40 w-64 overflow-hidden rounded-lg border border-zinc-800 bg-zinc-950 shadow-2xl">
+              <div className="border-b border-zinc-800 px-3 py-2 text-[10px] font-medium uppercase tracking-wide text-zinc-500">
+                新規タブ
+              </div>
+              <div className="max-h-72 overflow-y-auto p-1">
+                {displayItems.map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => openPreviewTab(item)}
+                    className="flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-2 text-left text-[11px] text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100"
+                  >
+                    {item.id === MEMO_PREVIEW_ID ? <NotebookPen size={12} /> : previewIcon(item.data, 12)}
+                    <span className="min-w-0 flex-1 truncate">{item.id === MEMO_PREVIEW_ID ? 'memo.md' : previewTitle(item.data)}</span>
+                    <span className="shrink-0 text-[10px] text-zinc-600">{item.id === MEMO_PREVIEW_ID ? 'Memo' : previewTypeLabel(item.data)}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+        <div className="flex shrink-0 items-center gap-0.5">
           <button
             onClick={() => onModeChange(mode === 'auto' ? 'manual' : 'auto')}
             className={cn(
@@ -938,31 +1170,14 @@ export function ToolPreviewPanel({
           </button>
 
           <button
-            onClick={() => setForegroundPreview(artifactDialogItemFromToolPreview(current))}
-            className="p-1 text-zinc-600 hover:text-zinc-300 transition-colors"
+            onClick={() => current && setForegroundPreview(artifactDialogItemFromToolPreview(current))}
+            disabled={!current}
+            className="p-1 text-zinc-600 hover:text-zinc-300 transition-colors disabled:opacity-25"
             title="Foreground preview"
             aria-label="Open foreground preview"
           >
             <Maximize2 size={13} />
           </button>
-
-          {/* Navigation arrows */}
-          <button
-            onClick={() => setCurrentIndex(i => Math.max(0, i - 1))}
-            disabled={currentIndex === 0}
-            className="p-1 text-zinc-600 hover:text-zinc-300 disabled:opacity-20 transition-colors"
-          >
-            <ChevronLeft size={14} />
-          </button>
-          <button
-            onClick={() => setCurrentIndex(i => Math.min(displayItems.length - 1, i + 1))}
-            disabled={currentIndex === displayItems.length - 1}
-            className="p-1 text-zinc-600 hover:text-zinc-300 disabled:opacity-20 transition-colors"
-          >
-            <ChevronRight size={14} />
-          </button>
-
-          {/* Close */}
           <button
             onClick={onClose}
             className="p-1 text-zinc-600 hover:text-zinc-300 transition-colors"
@@ -974,13 +1189,6 @@ export function ToolPreviewPanel({
 
       {/* Content */}
       <div className="flex-1 overflow-hidden">{renderContent()}</div>
-
-      {/* Chronological seekbar */}
-      <PreviewTimeline
-        items={displayItems}
-        currentIndex={currentIndex}
-        onSelect={setCurrentIndex}
-      />
       <ArtifactPreviewDialog item={foregroundPreview} onClose={() => setForegroundPreview(null)} />
     </div>
   );

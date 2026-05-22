@@ -7,6 +7,27 @@ export type BrowserApproval = {
   toolName: string;
 };
 
+export type CodingApproval = {
+  action: string;
+  operation: string;
+  payload: Record<string, unknown>;
+  requestId: string;
+  riskLevel?: string;
+  summary?: string;
+  toolCallId?: string;
+  toolName: string;
+};
+
+export type StaleCodingApproval = {
+  operation: string;
+  payload: Record<string, unknown>;
+  reason: string;
+  riskLevel?: string;
+  summary?: string;
+  toolCallId?: string;
+  toolName: string;
+};
+
 const BROWSER_COMPUTER_TOOL_NAMES = new Set([
   "browser_computer",
   "browser_companion",
@@ -64,6 +85,80 @@ function approvalFromCandidate(
   };
 }
 
+function requestIdFromCandidate(candidate: Record<string, unknown> | undefined): string {
+  return String(candidate?.approval_request_id ?? candidate?.request_id ?? "").trim();
+}
+
+function codingApprovalFromCandidate(
+  candidate: Record<string, unknown> | undefined,
+  fallbackToolName = "tool",
+  fallbackToolCallId?: string,
+  fallbackPayload?: Record<string, unknown>,
+  observedAt?: unknown,
+  now = Date.now(),
+): CodingApproval | null {
+  const requestId = requestIdFromCandidate(candidate);
+  if (!candidate || !requestId) return null;
+  if (!candidate.requires_approval && !candidate.approval_required) return null;
+  if (approvalExpired(candidate, observedAt, now)) return null;
+  const toolName = String(candidate.tool_name ?? fallbackToolName).trim() || fallbackToolName;
+  const payload = isRecord(candidate.payload)
+    ? candidate.payload
+    : isRecord(candidate.arguments)
+      ? candidate.arguments
+      : fallbackPayload
+        ? fallbackPayload
+      : {};
+  return {
+    action: String(candidate.action ?? candidate.operation ?? toolName),
+    operation: String(candidate.operation ?? candidate.action ?? toolName),
+    payload,
+    requestId,
+    riskLevel: typeof candidate.risk_level === "string" ? candidate.risk_level : undefined,
+    summary: typeof candidate.display_summary === "string"
+      ? candidate.display_summary
+      : typeof candidate.message === "string"
+        ? candidate.message
+        : undefined,
+    toolCallId: typeof candidate.tool_call_id === "string" ? candidate.tool_call_id : fallbackToolCallId,
+    toolName,
+  };
+}
+
+function staleCodingApprovalFromCandidate(
+  candidate: Record<string, unknown> | undefined,
+  fallbackToolName = "tool",
+  fallbackToolCallId?: string,
+  fallbackPayload?: Record<string, unknown>,
+  observedAt?: unknown,
+  now = Date.now(),
+): StaleCodingApproval | null {
+  if (!candidate?.requires_approval && !candidate?.approval_required) return null;
+  if (requestIdFromCandidate(candidate)) return null;
+  if (approvalExpired(candidate, observedAt, now)) return null;
+  const toolName = String(candidate.tool_name ?? fallbackToolName).trim() || fallbackToolName;
+  const payload = isRecord(candidate.payload)
+    ? candidate.payload
+    : isRecord(candidate.arguments)
+      ? candidate.arguments
+      : fallbackPayload
+        ? fallbackPayload
+        : {};
+  return {
+    operation: String(candidate.operation ?? candidate.action ?? toolName),
+    payload,
+    reason: "missing_approval_request_id",
+    riskLevel: typeof candidate.risk_level === "string" ? candidate.risk_level : undefined,
+    summary: typeof candidate.display_summary === "string"
+      ? candidate.display_summary
+      : typeof candidate.message === "string"
+        ? candidate.message
+        : undefined,
+    toolCallId: typeof candidate.tool_call_id === "string" ? candidate.tool_call_id : fallbackToolCallId,
+    toolName,
+  };
+}
+
 export function pendingBrowserApproval(messages: ChatUiMessage[], now = Date.now()): BrowserApproval | null {
   for (const message of [...messages].reverse()) {
     if (message.role === "user") return null;
@@ -86,6 +181,88 @@ export function pendingBrowserApproval(messages: ChatUiMessage[], now = Date.now
       const candidate = (widget?.requires_approval || widget?.approval_required ? widget : data) as Record<string, unknown> | undefined;
       const approval = approvalFromCandidate(candidate, String(log.tool_name), log.timestamp, now);
       if (approval) return approval;
+    }
+  }
+  return null;
+}
+
+export function pendingCodingApproval(messages: ChatUiMessage[], now = Date.now()): CodingApproval | null {
+  for (const message of [...messages].reverse()) {
+    if (message.role === "user") return null;
+    if (message.role !== "agent") continue;
+    for (const event of [...(message.events ?? [])].reverse()) {
+      if (event.type !== "approval_requested" && event.phase !== "approval_requested") continue;
+      const approval = codingApprovalFromCandidate(
+        event as Record<string, unknown>,
+        String(event.tool_name ?? "tool"),
+        typeof event.tool_call_id === "string" ? event.tool_call_id : undefined,
+        undefined,
+        event.timestamp,
+        now,
+      );
+      if (approval) return approval;
+    }
+    for (const log of [...(message.toolLogs ?? [])].reverse()) {
+      const result = isRecord(log.result) ? log.result : undefined;
+      const data = isRecord(result?.data) ? result.data : result;
+      const widget = isRecord(data?.widget) ? data.widget : undefined;
+      const candidate = (widget?.requires_approval || widget?.approval_required ? widget : data) as Record<string, unknown> | undefined;
+      const fallbackPayload = isRecord(log.arguments) ? log.arguments : undefined;
+      const approval = codingApprovalFromCandidate(
+        candidate,
+        String(log.tool_name ?? "tool"),
+        typeof log.tool_call_id === "string" ? log.tool_call_id : undefined,
+        fallbackPayload,
+        log.timestamp,
+        now,
+      );
+      if (approval) return approval;
+    }
+  }
+  return null;
+}
+
+export function staleCodingApproval(messages: ChatUiMessage[], now = Date.now()): StaleCodingApproval | null {
+  for (const message of [...messages].reverse()) {
+    if (message.role === "user") return null;
+    if (message.role !== "agent") continue;
+    const metadataApproval = message.metadata?.pendingApproval;
+    const metadataStale = staleCodingApprovalFromCandidate(
+      metadataApproval,
+      String(metadataApproval?.tool_name ?? "tool"),
+      typeof metadataApproval?.tool_call_id === "string" ? metadataApproval.tool_call_id : undefined,
+      undefined,
+      metadataApproval?.timestamp,
+      now,
+    );
+    if (metadataStale) return metadataStale;
+    for (const event of [...(message.events ?? [])].reverse()) {
+      if (event.type !== "approval_requested" && event.phase !== "approval_requested") continue;
+      const stale = staleCodingApprovalFromCandidate(
+        event as Record<string, unknown>,
+        String(event.tool_name ?? "tool"),
+        typeof event.tool_call_id === "string" ? event.tool_call_id : undefined,
+        undefined,
+        event.timestamp,
+        now,
+      );
+      if (stale) return stale;
+    }
+    for (const log of [...(message.toolLogs ?? [])].reverse()) {
+      const result = isRecord(log.result) ? log.result : undefined;
+      const data = isRecord(result?.data) ? result.data : result;
+      const widget = isRecord(data?.widget) ? data.widget : undefined;
+      const candidate = (widget?.requires_approval || widget?.approval_required ? widget : data) as Record<string, unknown> | undefined;
+      const fallbackPayload = isRecord(log.arguments) ? log.arguments : undefined;
+      const stale = staleCodingApprovalFromCandidate(
+        candidate,
+        String(log.tool_name ?? "tool"),
+        typeof log.tool_call_id === "string" ? log.tool_call_id : undefined,
+        fallbackPayload,
+        log.timestamp,
+        now,
+      );
+      if (stale) return stale;
     }
   }
   return null;
