@@ -123,19 +123,10 @@ function requiredExternalTokenRows(providers: Array<Record<string, unknown>>): A
 }
 
 function MaskedApiLabel({ api }: { api: Record<string, unknown> }) {
-  const providerId = String(api.provider_id ?? "");
-  const apiId = String(api.api_id ?? "");
-  const fallback = apiRowLabel(api);
-  if (!providerId || !apiId) {
-    return <span className="truncate text-xs text-zinc-300">{fallback}</span>;
-  }
   return (
-    <span className="inline-flex max-w-full items-center overflow-hidden font-mono text-xs leading-5 text-zinc-500">
-      <span className="truncate">{providerId}</span>
-      <span className="px-0.5 text-zinc-600">:</span>
-      <span className="truncate">{apiId}</span>
-      <span className="px-0.5 text-zinc-600">:</span>
-      <span className="tracking-normal text-zinc-500">***</span>
+    <span className="inline-flex items-center gap-1.5 text-xs text-emerald-400">
+      <span className="inline-block h-2 w-2 rounded-full bg-emerald-400" />
+      設定済み
     </span>
   );
 }
@@ -1564,158 +1555,10 @@ function SettingsField({
         setApiSaveState("saved");
       };
       control = (
-        <div className="space-y-4">
-          <ProviderOAuthPanel
-            sectionId={sectionId}
-            fieldId={field.id}
-            providers={providers}
-            onRefresh={onChange}
-          />
-          <div className="overflow-hidden rounded-lg border border-zinc-800 bg-zinc-950/70">
-            <div className="divide-y divide-zinc-800/80">
-              {registeredApis.length > 0 ? registeredApis.map((api) => {
-                const key = String(api.key ?? `${api.provider_id}:${api.api_id}`);
-                const isRenaming = renamingKey === key;
-                const isMenuOpen = openApiMenuKey === key;
-                const apiProviderOption = providerOptions.find((option) => option.provider_id === String(api.provider_id ?? ""));
-                const apiKind = normalizeProviderKind(api.kind ?? apiProviderOption?.kind);
-                return (
-                  <div
-                    key={key}
-                    className="flex items-center gap-3 px-3 py-2.5 transition-colors hover:bg-zinc-900/40"
-                  >
-                    <div className="min-w-0 flex-1">
-                      {isRenaming ? (
-                        <div className="flex items-center gap-1.5">
-                          <input
-                            value={renameDraft}
-                            autoFocus
-                            onChange={(event) => setRenameDraft(event.target.value)}
-                            onKeyDown={(event) => {
-                              if (event.key !== "Enter") return;
-                              event.preventDefault();
-                              if (!renameDraft.trim()) return;
-                              onChange(sectionId, field.id, {
-                                action: "rename",
-                                provider_id: api.provider_id,
-                                api_id: api.api_id,
-                                name: renameDraft.trim(),
-                              });
-                              setRenamingKey("");
-                            }}
-                            className="min-w-0 flex-1 rounded-md border border-zinc-700 bg-zinc-900 px-2 py-1 text-xs text-zinc-200 outline-none"
-                          />
-                          <button
-                            type="button"
-                            disabled={!renameDraft.trim()}
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              if (!renameDraft.trim()) return;
-                              onChange(sectionId, field.id, {
-                                action: "rename",
-                                provider_id: api.provider_id,
-                                api_id: api.api_id,
-                                name: renameDraft.trim(),
-                              });
-                              setRenamingKey("");
-                            }}
-                            className="rounded-md border border-zinc-700 p-1 text-zinc-300 hover:bg-zinc-800 disabled:opacity-40"
-                            title="Rename"
-                          >
-                            <Check size={13} />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              setRenamingKey("");
-                            }}
-                            className="rounded-md border border-zinc-800 p-1 text-zinc-500 hover:text-zinc-300"
-                          >
-                            <X size={13} />
-                          </button>
-                        </div>
-                      ) : (
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="text-sm font-medium text-zinc-200">{String(api.name ?? api.api_id ?? "")}</span>
-                          <span className="rounded-full border border-zinc-700 bg-zinc-900 px-2 py-0.5 text-[10px] uppercase tracking-wide text-zinc-400">
-                            {String(api.provider_id ?? "")}
-                          </span>
-                          {apiKind === "custom" && (
-                            <span className="rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[10px] uppercase tracking-wide text-amber-200">
-                              non-llm
-                            </span>
-                          )}
-                          <MaskedApiLabel api={api} />
-                        </div>
-                      )}
-                    </div>
-                    <div className="relative flex justify-end">
-                      <button
-                        type="button"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          setOpenApiMenuKey(isMenuOpen ? "" : key);
-                        }}
-                        className="flex h-8 w-8 items-center justify-center rounded-lg border border-zinc-800 text-zinc-500 transition-colors hover:border-zinc-700 hover:bg-zinc-900 hover:text-zinc-200"
-                        title="Actions"
-                      >
-                        <MoreVertical size={15} />
-                      </button>
-                      {isMenuOpen && (
-                        <>
-                          <button
-                            type="button"
-                            aria-label="close api menu"
-                            className="fixed inset-0 z-10 cursor-default"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              setOpenApiMenuKey("");
-                            }}
-                          />
-                          <div className="absolute right-0 top-[calc(100%+6px)] z-20 w-32 overflow-hidden rounded-lg border border-zinc-700 bg-zinc-950 py-1 shadow-2xl">
-                            <button
-                              type="button"
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                setRenamingKey(key);
-                                setRenameDraft(String(api.name ?? api.api_id ?? ""));
-                                setOpenApiMenuKey("");
-                              }}
-                              className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-zinc-300 hover:bg-zinc-800"
-                            >
-                              <Pencil size={13} />
-                              Rename
-                            </button>
-                            <button
-                              type="button"
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                setOpenApiMenuKey("");
-                                onChange(sectionId, field.id, {
-                                  action: "delete",
-                                  provider_id: api.provider_id,
-                                  api_id: api.api_id,
-                                });
-                              }}
-                              className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-rose-300 hover:bg-rose-950/30"
-                            >
-                              <Trash2 size={13} />
-                              Delete
-                            </button>
-                          </div>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                );
-              }) : (
-                <div className="px-3 py-5 text-xs text-zinc-600">No registered API keys yet.</div>
-              )}
-            </div>
-          </div>
-
+        <div className="space-y-5">
+          {/* --- Add API Key Form (top priority) --- */}
           <div className="space-y-2">
+            <h4 className="text-xs font-medium uppercase tracking-wide text-zinc-400">API キーを追加</h4>
             <div className="grid gap-2 md:grid-cols-[180px_minmax(120px,1fr)_minmax(180px,2fr)_auto]">
               <SearchableProviderSelect
                 value={apiProvider}
@@ -1742,7 +1585,7 @@ function SettingsField({
                   setApiSaveState("idle");
                 }}
                 placeholder="名前 (例: main, work)"
-                className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 outline-none"
+                className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 outline-none focus:border-zinc-600"
               />
               <input
                 type="password"
@@ -1759,16 +1602,16 @@ function SettingsField({
                     handleSubmitApi();
                   }
                 }}
-                className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 outline-none"
+                className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 outline-none focus:border-zinc-600"
               />
               <button
                 type="button"
                 disabled={!apiProvider.trim() || !apiName.trim() || !apiSecret.trim()}
                 onClick={handleSubmitApi}
                 className={cn(
-                  "rounded-lg border px-3 py-2 text-xs transition-colors",
+                  "rounded-lg border px-4 py-2 text-xs font-medium transition-colors",
                   apiProvider.trim() && apiName.trim() && apiSecret.trim()
-                    ? "bg-zinc-100 text-zinc-950 border-zinc-100"
+                    ? "bg-zinc-100 text-zinc-950 border-zinc-100 hover:bg-white"
                     : "bg-zinc-900 text-zinc-600 border-zinc-800 cursor-not-allowed",
                 )}
               >
@@ -1787,46 +1630,31 @@ function SettingsField({
               <div className="mt-3 grid gap-2 md:grid-cols-2">
                 <input
                   value={apiBaseUrl}
-                  onChange={(event) => {
-                    setApiBaseUrl(event.target.value);
-                    setApiSaveState("idle");
-                  }}
+                  onChange={(event) => { setApiBaseUrl(event.target.value); setApiSaveState("idle"); }}
                   placeholder="base_url (optional)"
                   className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 outline-none"
                 />
                 <input
                   value={apiDefaultModel}
-                  onChange={(event) => {
-                    setApiDefaultModel(event.target.value);
-                    setApiSaveState("idle");
-                  }}
+                  onChange={(event) => { setApiDefaultModel(event.target.value); setApiSaveState("idle"); }}
                   placeholder="default model for this API"
                   className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 outline-none"
                 />
                 <input
                   value={apiAllowedModels}
-                  onChange={(event) => {
-                    setApiAllowedModels(event.target.value);
-                    setApiSaveState("idle");
-                  }}
+                  onChange={(event) => { setApiAllowedModels(event.target.value); setApiSaveState("idle"); }}
                   placeholder="allowed models, comma separated"
                   className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 outline-none"
                 />
                 <input
                   value={apiQuotaLabel}
-                  onChange={(event) => {
-                    setApiQuotaLabel(event.target.value);
-                    setApiSaveState("idle");
-                  }}
+                  onChange={(event) => { setApiQuotaLabel(event.target.value); setApiSaveState("idle"); }}
                   placeholder="quota label"
                   className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 outline-none"
                 />
                 <textarea
                   value={apiNotes}
-                  onChange={(event) => {
-                    setApiNotes(event.target.value);
-                    setApiSaveState("idle");
-                  }}
+                  onChange={(event) => { setApiNotes(event.target.value); setApiSaveState("idle"); }}
                   placeholder="notes for routing"
                   className="min-h-20 rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 outline-none md:col-span-2"
                 />
@@ -1835,8 +1663,158 @@ function SettingsField({
                 次に保存する API key にだけ適用されます。通常はそのまま空欄で大丈夫です。
               </p>
             </details>
+            {apiSaveState === "saved" && <p className="text-[11px] text-emerald-400">✓ 保存しました</p>}
           </div>
-          {apiSaveState === "saved" && <p className="text-[11px] text-emerald-400">Saved</p>}
+
+          {/* --- Registered API Keys --- */}
+          {registeredApis.length > 0 && (
+            <div className="space-y-2">
+              <h4 className="text-xs font-medium uppercase tracking-wide text-zinc-400">登録済み ({registeredApis.length})</h4>
+              <div className="overflow-hidden rounded-xl border border-zinc-800/60 bg-zinc-950/50">
+                <div className="divide-y divide-zinc-800/50">
+                  {registeredApis.map((api) => {
+                    const key = String(api.key ?? `${api.provider_id}:${api.api_id}`);
+                    const isRenaming = renamingKey === key;
+                    const isMenuOpen = openApiMenuKey === key;
+                    const apiProviderOption = providerOptions.find((option) => option.provider_id === String(api.provider_id ?? ""));
+                    const apiKind = normalizeProviderKind(api.kind ?? apiProviderOption?.kind);
+                    return (
+                      <div
+                        key={key}
+                        className="flex items-center gap-3 px-4 py-3 transition-colors hover:bg-zinc-900/30"
+                      >
+                        <div className="min-w-0 flex-1">
+                          {isRenaming ? (
+                            <div className="flex items-center gap-1.5">
+                              <input
+                                value={renameDraft}
+                                autoFocus
+                                onChange={(event) => setRenameDraft(event.target.value)}
+                                onKeyDown={(event) => {
+                                  if (event.key !== "Enter") return;
+                                  event.preventDefault();
+                                  if (!renameDraft.trim()) return;
+                                  onChange(sectionId, field.id, {
+                                    action: "rename",
+                                    provider_id: api.provider_id,
+                                    api_id: api.api_id,
+                                    name: renameDraft.trim(),
+                                  });
+                                  setRenamingKey("");
+                                }}
+                                className="min-w-0 flex-1 rounded-md border border-zinc-700 bg-zinc-900 px-2 py-1 text-xs text-zinc-200 outline-none"
+                              />
+                              <button
+                                type="button"
+                                disabled={!renameDraft.trim()}
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  if (!renameDraft.trim()) return;
+                                  onChange(sectionId, field.id, {
+                                    action: "rename",
+                                    provider_id: api.provider_id,
+                                    api_id: api.api_id,
+                                    name: renameDraft.trim(),
+                                  });
+                                  setRenamingKey("");
+                                }}
+                                className="rounded-md border border-zinc-700 p-1 text-zinc-300 hover:bg-zinc-800 disabled:opacity-40"
+                                title="Rename"
+                              >
+                                <Check size={13} />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={(event) => { event.stopPropagation(); setRenamingKey(""); }}
+                                className="rounded-md border border-zinc-800 p-1 text-zinc-500 hover:text-zinc-300"
+                              >
+                                <X size={13} />
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="flex items-center gap-2.5">
+                              <span className="text-sm font-medium text-zinc-100">{String(api.name ?? api.api_id ?? "")}</span>
+                              <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-[11px] text-zinc-300">
+                                {String(api.provider_id ?? "")}
+                              </span>
+                              {apiKind === "custom" && (
+                                <span className="rounded bg-amber-500/10 px-1.5 py-0.5 text-[11px] text-amber-300">
+                                  non-llm
+                                </span>
+                              )}
+                              <MaskedApiLabel api={api} />
+                            </div>
+                          )}
+                        </div>
+                        <div className="relative flex justify-end">
+                          <button
+                            type="button"
+                            onClick={(event) => { event.stopPropagation(); setOpenApiMenuKey(isMenuOpen ? "" : key); }}
+                            className="flex h-7 w-7 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-200"
+                            title="Actions"
+                          >
+                            <MoreVertical size={14} />
+                          </button>
+                          {isMenuOpen && (
+                            <>
+                              <button
+                                type="button"
+                                aria-label="close api menu"
+                                className="fixed inset-0 z-10 cursor-default"
+                                onClick={(event) => { event.stopPropagation(); setOpenApiMenuKey(""); }}
+                              />
+                              <div className="absolute right-0 top-[calc(100%+4px)] z-20 w-28 overflow-hidden rounded-lg border border-zinc-700 bg-zinc-950 py-1 shadow-2xl">
+                                <button
+                                  type="button"
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    setRenamingKey(key);
+                                    setRenameDraft(String(api.name ?? api.api_id ?? ""));
+                                    setOpenApiMenuKey("");
+                                  }}
+                                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-zinc-300 hover:bg-zinc-800"
+                                >
+                                  <Pencil size={12} />
+                                  Rename
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    setOpenApiMenuKey("");
+                                    onChange(sectionId, field.id, { action: "delete", provider_id: api.provider_id, api_id: api.api_id });
+                                  }}
+                                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-rose-300 hover:bg-rose-950/30"
+                                >
+                                  <Trash2 size={12} />
+                                  Delete
+                                </button>
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* --- Google OAuth (collapsed, secondary) --- */}
+          <details className="rounded-xl border border-zinc-800/60 bg-zinc-950/30">
+            <summary className="cursor-pointer select-none px-4 py-3 text-xs font-medium text-zinc-400 hover:text-zinc-200">
+              Google OAuth ブラウザログイン
+            </summary>
+            <div className="border-t border-zinc-800/50 px-4 py-3">
+              <ProviderOAuthPanel
+                sectionId={sectionId}
+                fieldId={field.id}
+                providers={providers}
+                onRefresh={onChange}
+              />
+            </div>
+          </details>
         </div>
       );
       break;
