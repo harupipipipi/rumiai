@@ -461,9 +461,11 @@ class TestCORS:
         """各テスト前後で CORS キャッシュをリセット"""
         PackAPIHandler._allowed_origins = None
         PackAPIHandler._allowed_origins_from_env = False
+        PackAPIHandler._allowed_origins_cache_key = None
         yield
         PackAPIHandler._allowed_origins = None
         PackAPIHandler._allowed_origins_from_env = False
+        PackAPIHandler._allowed_origins_cache_key = None
 
     def test_cors_allowed_default(self, monkeypatch) -> None:
         """デフォルト許可リストに含まれるオリジン → 返却"""
@@ -474,8 +476,33 @@ class TestCORS:
     def test_cors_disallowed_origin(self, monkeypatch) -> None:
         """デフォルト許可リストに含まれないオリジン → 空文字"""
         monkeypatch.delenv("RUMI_CORS_ORIGINS", raising=False)
+        monkeypatch.delenv("RUMI_PORT", raising=False)
         result = PackAPIHandler._get_cors_origin("http://evil.com")
         assert result == ""
+
+    def test_cors_allows_runtime_rumi_port(self, monkeypatch) -> None:
+        """RUMI_PORT の実行時ポートは panel 認証 Origin として許可"""
+        monkeypatch.delenv("RUMI_CORS_ORIGINS", raising=False)
+        monkeypatch.setenv("RUMI_PORT", "8768")
+        assert PackAPIHandler._get_cors_origin("http://127.0.0.1:8768") == "http://127.0.0.1:8768"
+        assert PackAPIHandler._get_cors_origin("http://localhost:8768") == "http://localhost:8768"
+
+    def test_cors_recomputes_when_runtime_port_env_changes(self, monkeypatch) -> None:
+        """同一process内で RUMI_PORT が変わったら許可originを再計算"""
+        monkeypatch.delenv("RUMI_CORS_ORIGINS", raising=False)
+        monkeypatch.setenv("RUMI_PORT", "8768")
+        assert PackAPIHandler._get_cors_origin("http://localhost:8768") == "http://localhost:8768"
+
+        monkeypatch.setenv("RUMI_PORT", "8771")
+        assert PackAPIHandler._get_cors_origin("http://localhost:8771") == "http://localhost:8771"
+        assert PackAPIHandler._get_cors_origin("http://localhost:8768") == ""
+
+    def test_cors_invalid_runtime_port_falls_back_to_default(self, monkeypatch) -> None:
+        """不正な RUMI_PORT は落とさずデフォルトoriginだけ許可"""
+        monkeypatch.delenv("RUMI_CORS_ORIGINS", raising=False)
+        monkeypatch.setenv("RUMI_PORT", "not-a-port")
+        assert PackAPIHandler._get_cors_origin("http://localhost:8765") == "http://localhost:8765"
+        assert PackAPIHandler._get_cors_origin("http://localhost:8768") == ""
 
     def test_cors_empty_origin(self, monkeypatch) -> None:
         """オリジン空文字 → 空文字"""
@@ -498,6 +525,7 @@ class TestCORS:
     def test_cors_wildcard_not_from_env(self, monkeypatch) -> None:
         """デフォルトリストでは "http://localhost:*" は効かない"""
         monkeypatch.delenv("RUMI_CORS_ORIGINS", raising=False)
+        monkeypatch.delenv("RUMI_PORT", raising=False)
         result = PackAPIHandler._get_cors_origin("http://localhost:9999")
         assert result == ""
 

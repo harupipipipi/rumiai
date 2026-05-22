@@ -9,6 +9,7 @@ mod python_env;
 mod tray;
 mod updater;
 
+use std::net::TcpListener;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -29,8 +30,10 @@ mod dock_registration;
 /// Wrapper around a shared progress string, managed as Tauri State.
 pub struct SetupProgress(pub Arc<Mutex<String>>);
 pub struct ShutdownState(pub Arc<AtomicBool>);
+pub struct AllowedNavigationPorts(pub Arc<Mutex<Vec<u16>>>);
 
 const PRIMARY_WINDOW_LABELS: [&str; 2] = ["panel", "main"];
+const DEFAULTSPACK_RESERVED_PORT: u16 = 8766;
 
 #[derive(Debug, Deserialize)]
 struct PanelBootstrapPayload {
@@ -229,6 +232,96 @@ fn request_panel_bootstrap_code_with_retry(port: u16, bootstrap_secret: &str) ->
         Some(error) => Err(error),
         None => bail!("panel bootstrap retry finished without making a request"),
     }
+}
+
+fn is_loopback_port_available(port: u16) -> bool {
+    match TcpListener::bind(("127.0.0.1", port)) {
+        Ok(listener) => {
+            drop(listener);
+            true
+        }
+        Err(error) if error.kind() == io::ErrorKind::AddrInUse => false,
+        Err(error) => {
+            warn!("Could not probe loopback port {port}: {error}");
+            false
+        }
+    }
+}
+
+fn existing_kernel_accepts_bootstrap(port: u16, bootstrap_secret: &str) -> bool {
+    health_check::check_health(port).unwrap_or(false)
+        && request_panel_bootstrap_code(port, bootstrap_secret).is_ok()
+}
+
+fn resolve_available_kernel_port_with_checks<PortAvailable, ExistingKernelReusable>(
+    preferred_port: u16,
+    mut port_available: PortAvailable,
+    mut existing_kernel_reusable: ExistingKernelReusable,
+) -> u16
+where
+    PortAvailable: FnMut(u16) -> bool,
+    ExistingKernelReusable: FnMut(u16) -> bool,
+{
+    if port_available(preferred_port) || existing_kernel_reusable(preferred_port) {
+        return preferred_port;
+    }
+
+    let last_candidate = preferred_port.saturating_add(128);
+    for port in preferred_port.saturating_add(1)..=last_candidate {
+        if port == DEFAULTSPACK_RESERVED_PORT {
+            continue;
+        }
+        if port_available(port) {
+            return port;
+        }
+    }
+
+    preferred_port
+}
+
+fn resolve_available_kernel_port(config: &AppConfig, bootstrap_secret: &str) -> u16 {
+    let preferred_port = config.kernel_port;
+    let port = resolve_available_kernel_port_with_checks(
+        preferred_port,
+        is_loopback_port_available,
+        |candidate| existing_kernel_accepts_bootstrap(candidate, bootstrap_secret),
+    );
+
+    if port != preferred_port {
+        warn!(
+            "Kernel port {preferred_port} is already occupied by another local process; using {port} for this Viewer session"
+        );
+    }
+
+    port
+}
+
+fn set_allowed_navigation_ports(state: &Arc<Mutex<Vec<u16>>>, ports: Vec<u16>) {
+    let mut deduped = ports;
+    deduped.sort_unstable();
+    deduped.dedup();
+    match state.lock() {
+        Ok(mut allowed_ports) => {
+            *allowed_ports = deduped;
+        }
+        Err(error) => {
+            error!("Allowed navigation port lock poisoned: {error}");
+        }
+    }
+}
+
+fn navigation_is_allowed(
+    scheme: &str,
+    host: &str,
+    port: Option<u16>,
+    allowed_ports: &[u16],
+) -> bool {
+    if scheme == "tauri" {
+        return true;
+    }
+    scheme == "http"
+        && (host == "localhost" || host == "127.0.0.1")
+        && port.is_some_and(|candidate| allowed_ports.contains(&candidate))
 }
 
 fn ensure_kernel_ready_for_panel_auth(
@@ -667,20 +760,22 @@ fn start_kernel_and_bootstrap(
 pub fn run() {
     env_logger::init();
 
+    let allowed_navigation_ports = Arc::new(Mutex::new(vec![8765]));
+    let allowed_navigation_ports_for_plugin = Arc::clone(&allowed_navigation_ports);
+    let allowed_navigation_ports_for_setup = Arc::clone(&allowed_navigation_ports);
+
     tauri::Builder::default()
         .plugin(
             tauri::plugin::Builder::<tauri::Wry, ()>::new("nav-guard")
-                .on_navigation(|_webview, url| {
+                .on_navigation(move |_webview, url| {
                     let scheme = url.scheme();
                     let host = url.host_str().unwrap_or("");
-                    let port = url.port();
-
-                    let is_tauri = scheme == "tauri";
-                    let is_local_http = scheme == "http"
-                        && (host == "localhost" || host == "127.0.0.1")
-                        && (port == Some(8765) || cfg!(debug_assertions));
-
-                    let allowed = is_tauri || is_local_http;
+                    let port = url.port_or_known_default();
+                    let allowed_ports = allowed_navigation_ports_for_plugin
+                        .lock()
+                        .map(|ports| ports.clone())
+                        .unwrap_or_default();
+                    let allowed = navigation_is_allowed(scheme, host, port, &allowed_ports);
 
                     if !allowed {
                         log::warn!("Blocked navigation to: {url}");
@@ -689,7 +784,7 @@ pub fn run() {
                 })
                 .build(),
         )
-        .setup(|app| {
+        .setup(move |app| {
             let resource_dir = app
                 .path()
                 .resource_dir()
@@ -699,7 +794,7 @@ pub fn run() {
                 .app_data_dir()
                 .context("failed to resolve app_data_dir")?;
 
-            let config = AppConfig::detect_for_tauri(resource_dir, app_data_dir)
+            let mut config = AppConfig::detect_for_tauri(resource_dir, app_data_dir)
                 .context("failed to build AppConfig")?;
 
             std::fs::create_dir_all(&config.log_dir).ok();
@@ -714,6 +809,14 @@ pub fn run() {
 
             let panel_bootstrap_secret = load_or_create_panel_bootstrap_secret(&config)
                 .context("failed to load persisted panel bootstrap secret")?;
+            config.kernel_port = resolve_available_kernel_port(&config, &panel_bootstrap_secret);
+            set_allowed_navigation_ports(
+                &allowed_navigation_ports_for_setup,
+                vec![config.kernel_port, DEFAULTSPACK_RESERVED_PORT],
+            );
+            app.manage(AllowedNavigationPorts(Arc::clone(
+                &allowed_navigation_ports_for_setup,
+            )));
             let km = Arc::new(Mutex::new(KernelManager::new(
                 &config,
                 panel_bootstrap_secret.clone(),
@@ -931,6 +1034,76 @@ mod tests {
         assert!(!status.enabled);
         assert!(status.shutdown_requested);
         assert!(!status.kernel_running);
+    }
+
+    #[test]
+    fn resolve_kernel_port_keeps_available_preferred_port() {
+        let port = resolve_available_kernel_port_with_checks(
+            8765,
+            |candidate| candidate == 8765,
+            |_| false,
+        );
+
+        assert_eq!(port, 8765);
+    }
+
+    #[test]
+    fn resolve_kernel_port_reuses_existing_kernel_when_bootstrap_matches() {
+        let port = resolve_available_kernel_port_with_checks(
+            8765,
+            |_| false,
+            |candidate| candidate == 8765,
+        );
+
+        assert_eq!(port, 8765);
+    }
+
+    #[test]
+    fn resolve_kernel_port_skips_defaultspack_port_when_falling_back() {
+        let port = resolve_available_kernel_port_with_checks(
+            8765,
+            |candidate| candidate == 8767,
+            |_| false,
+        );
+
+        assert_eq!(port, 8767);
+    }
+
+    #[test]
+    fn navigation_guard_allows_only_resolved_loopback_ports() {
+        let allowed_ports = vec![8767, DEFAULTSPACK_RESERVED_PORT];
+
+        assert!(navigation_is_allowed(
+            "http",
+            "localhost",
+            Some(8767),
+            &allowed_ports
+        ));
+        assert!(navigation_is_allowed(
+            "http",
+            "127.0.0.1",
+            Some(8766),
+            &allowed_ports
+        ));
+        assert!(navigation_is_allowed("tauri", "", None, &allowed_ports));
+        assert!(!navigation_is_allowed(
+            "http",
+            "localhost",
+            Some(8765),
+            &allowed_ports
+        ));
+        assert!(!navigation_is_allowed(
+            "http",
+            "127.0.0.1",
+            Some(9999),
+            &allowed_ports
+        ));
+        assert!(!navigation_is_allowed(
+            "https",
+            "localhost",
+            Some(8767),
+            &allowed_ports
+        ));
     }
 
     #[test]

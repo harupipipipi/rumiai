@@ -25,8 +25,13 @@ from typing import Any, Dict, List
 
 from .logging_utils import get_structured_logger
 from .metrics import get_metrics_collector
+from .runtime_port import resolve_runtime_port
 
 _logger = get_structured_logger("rumi.kernel.handlers.system")
+
+
+def _resolve_api_port(args: Dict[str, Any]) -> int:
+    return resolve_runtime_port(fallback=args.get("port"))
 
 # ------------------------------------------------------------------
 # Wave 17-A: inject ブロックリスト — 内部サービス参照の注入を禁止
@@ -963,7 +968,7 @@ class KernelSystemHandlersMixin:
             from .paths import BASE_DIR as _api_base_dir
 
             host = args.get("host", "127.0.0.1")
-            port = args.get("port", 8765)
+            port = _resolve_api_port(args)
 
             api_server = initialize_pack_api_server(
                 host=host,

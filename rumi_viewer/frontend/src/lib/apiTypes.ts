@@ -368,10 +368,10 @@ export interface BackgroundControlStatus {
 
 export interface ApiCapabilityPort {
   id: string;
-  label: string;
+  label?: string | null;
   direction: 'input' | 'output' | 'bidirectional';
-  standards: string[];
-  aliases: string[];
+  standards?: string[];
+  aliases?: string[];
   multiple?: boolean;
   required?: boolean;
   display_name?: Record<string, string>;
@@ -392,10 +392,12 @@ export interface ApiCapabilityNodeState {
 
 export interface ApiCapabilityNode {
   node_id: string;
-  label: string;
-  description_label: string;
+  label?: string | null;
+  description_label?: string | null;
   kind: string;
   ports: ApiCapabilityPort[];
+  display_name?: Record<string, string>;
+  description?: Record<string, string> | string;
   bindings: Record<string, unknown>;
   metadata: Record<string, unknown>;
   requirements?: Record<string, unknown>;

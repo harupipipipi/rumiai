@@ -14,6 +14,8 @@ import threading
 import time
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
+from .runtime_port import DEFAULT_RUNTIME_PORT, resolve_runtime_port
+
 if TYPE_CHECKING:
     from .desktop_app_manager import DesktopAppManager
 
@@ -23,7 +25,7 @@ class DesktopCapabilityHandler:
 
     DEFAULT_TOKEN_LIFETIME = 3600
     ABSOLUTE_MAX_TOKEN_LIFETIME = 86400
-    DEFAULT_PORT = 8765
+    DEFAULT_PORT = DEFAULT_RUNTIME_PORT
 
     def __init__(self, desktop_app_manager: Optional["DesktopAppManager"] = None) -> None:
         self._lock = threading.Lock()
@@ -71,7 +73,7 @@ class DesktopCapabilityHandler:
         token_lifetime = self._effective_token_lifetime(grant_config)
         token = self._generate_token()
         token_hash = self._hash_token(token)
-        port = int(grant_config.get("port", self.DEFAULT_PORT))
+        port = resolve_runtime_port(default=self.DEFAULT_PORT, fallback=grant_config.get("port"))
 
         with self._lock:
             self._cleanup_expired_tokens()

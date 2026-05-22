@@ -1,15 +1,31 @@
 //! Dock registration: generate a macOS .app bundle for defaultspack.
 
+use std::ffi::OsString;
 use std::fs;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
+use std::process::{Child, Command, Stdio};
+use std::thread;
+use std::time::{Duration, Instant};
 
-use anyhow::{bail, Context, Result as AnyResult};
+use anyhow::{anyhow, bail, Context, Result as AnyResult};
 use log::{error, info};
 use serde_json::Value;
 
 use crate::config::AppConfig;
+
+const DEFAULTSPACK_DEFAULT_PORT: u16 = 8766;
+const DEFAULTSPACK_READY_TIMEOUT: Duration = Duration::from_secs(60);
+const DEFAULTSPACK_READY_POLL_INTERVAL: Duration = Duration::from_millis(250);
+
+#[derive(Debug, Clone)]
+struct DefaultspackDesktopMetadata {
+    command: String,
+    app_working_dir: PathBuf,
+    env_vars: Vec<(String, String)>,
+    port: u16,
+}
 
 /// Read the HMAC key from the plaintext `hmac_keys.json` file.
 ///
@@ -128,6 +144,102 @@ fn shell_quote_path(path: &Path) -> String {
     shell_quote(&path.to_string_lossy())
 }
 
+fn venv_bin_dir(venv_dir: &Path) -> PathBuf {
+    if cfg!(target_os = "windows") {
+        venv_dir.join("Scripts")
+    } else {
+        venv_dir.join("bin")
+    }
+}
+
+fn kernel_command_for_python(python: &Path) -> String {
+    format!("{} -m app", shell_quote_path(python))
+}
+
+fn kernel_command_for_venv(venv_dir: &Path) -> String {
+    let python = if cfg!(target_os = "windows") {
+        venv_dir.join("Scripts").join("python.exe")
+    } else {
+        venv_dir.join("bin").join("python3")
+    };
+    kernel_command_for_python(&python)
+}
+
+fn defaultspack_browser_url(port: u16) -> String {
+    format!("http://localhost:{port}/chat")
+}
+
+fn defaultspack_health_url(port: u16) -> String {
+    format!("http://127.0.0.1:{port}/api/health")
+}
+
+fn read_defaultspack_port(env_vars: &[(String, String)]) -> AnyResult<u16> {
+    for key in ["RUMI_DEFAULTSPACK_PORT", "DEFAULTS_HTTP_PORT"] {
+        if let Some((_, value)) = env_vars.iter().find(|(env_key, _)| env_key == key) {
+            return value
+                .parse::<u16>()
+                .with_context(|| format!("{key} must be a TCP port, got {value:?}"));
+        }
+    }
+    Ok(DEFAULTSPACK_DEFAULT_PORT)
+}
+
+fn check_defaultspack_http_ready(client: &reqwest::blocking::Client, port: u16) -> bool {
+    client
+        .get(defaultspack_health_url(port))
+        .send()
+        .is_ok_and(|response| response.status().is_success())
+}
+
+fn defaultspack_health_client() -> AnyResult<reqwest::blocking::Client> {
+    reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(1))
+        .build()
+        .context("failed to build defaultspack health client")
+}
+
+fn is_defaultspack_http_ready(port: u16) -> bool {
+    defaultspack_health_client()
+        .map(|client| check_defaultspack_http_ready(&client, port))
+        .unwrap_or(false)
+}
+
+fn wait_for_defaultspack_http_ready(port: u16, child: &mut Child) -> AnyResult<()> {
+    let client = defaultspack_health_client()?;
+    let deadline = Instant::now() + DEFAULTSPACK_READY_TIMEOUT;
+
+    loop {
+        if check_defaultspack_http_ready(&client, port) {
+            return Ok(());
+        }
+
+        if let Some(status) = child
+            .try_wait()
+            .context("failed to inspect defaultspack launch process")?
+        {
+            bail!("Defaultspack exited before its local server was ready: {status}");
+        }
+
+        if Instant::now() >= deadline {
+            bail!(
+                "Defaultspack local server did not become ready at {} within {} seconds",
+                defaultspack_health_url(port),
+                DEFAULTSPACK_READY_TIMEOUT.as_secs()
+            );
+        }
+
+        thread::sleep(DEFAULTSPACK_READY_POLL_INTERVAL);
+    }
+}
+
+fn append_path_prefix(prefix: &Path, current_path: Option<OsString>) -> AnyResult<OsString> {
+    let mut paths = vec![prefix.to_path_buf()];
+    if let Some(current_path) = current_path {
+        paths.extend(std::env::split_paths(&current_path));
+    }
+    std::env::join_paths(paths).map_err(|error| anyhow!("failed to build PATH: {error}"))
+}
+
 fn xml_escape(value: &str) -> String {
     value
         .replace('&', "&amp;")
@@ -142,6 +254,7 @@ fn build_launch_script(
     token_file: &Path,
     rumi_home: &Path,
     venv_dir: &Path,
+    kernel_port: u16,
     app_working_dir: &Path,
     command: &str,
     env_vars: &[(String, String)],
@@ -156,6 +269,7 @@ fn build_launch_script(
     } else {
         format!("\n# Environment declared by defaultspack's desktop_app metadata.\n{env_exports}\n")
     };
+    let kernel_command = kernel_command_for_venv(venv_dir);
 
     format!(
         r#"#!/bin/bash
@@ -165,6 +279,7 @@ PACK_SHELL={pack_shell}
 TOKEN_FILE={token_file}
 APP_WORKING_DIR={app_working_dir}
 DESKTOP_COMMAND={command}
+KERNEL_COMMAND={kernel_command}
 
 export PATH="$VENV_DIR/bin:$PATH"
 export RUMI_HOME
@@ -174,7 +289,8 @@ export RUMI_API_TOKEN
 
 exec "$PACK_SHELL" run "defaultspack" \
   --command "$DESKTOP_COMMAND" \
-  --kernel-cmd "$VENV_DIR/bin/python3 -m app" \
+  --port {kernel_port} \
+  --kernel-cmd "$KERNEL_COMMAND" \
   --working-dir "$APP_WORKING_DIR" \
   --timeout 120
 "#,
@@ -184,6 +300,8 @@ exec "$PACK_SHELL" run "defaultspack" \
         token_file = shell_quote_path(token_file),
         app_working_dir = shell_quote_path(app_working_dir),
         command = shell_quote(command),
+        kernel_command = shell_quote(&kernel_command),
+        kernel_port = kernel_port,
         env_exports = env_exports,
     )
 }
@@ -195,6 +313,7 @@ fn create_macos_app_bundle(
     token_file: &Path,
     rumi_home: &Path,
     venv_dir: &Path,
+    kernel_port: u16,
     app_working_dir: &Path,
     command: &str,
     env_vars: &[(String, String)],
@@ -243,6 +362,7 @@ fn create_macos_app_bundle(
         token_file,
         rumi_home,
         venv_dir,
+        kernel_port,
         app_working_dir,
         command,
         env_vars,
@@ -295,27 +415,25 @@ pub fn launch_defaultspack_desktop(config: tauri::State<'_, AppConfig>) -> Resul
 }
 
 pub(crate) fn launch_defaultspack_desktop_impl(config: &AppConfig) -> AnyResult<String> {
-    let app_dir = ensure_defaultspack_app_bundle(config)?;
-    open::that_detached(&app_dir)
-        .with_context(|| format!("failed to launch {}", app_dir.display()))?;
-    info!("Launched defaultspack desktop app: {}", app_dir.display());
-    Ok(format!(
-        "Opening Rumi Defaultspack at http://localhost:8766/chat from {}",
-        app_dir.display()
-    ))
-}
+    let metadata = read_defaultspack_desktop_metadata(config)?;
+    let url = defaultspack_browser_url(metadata.port);
 
-fn ensure_defaultspack_app_bundle(config: &AppConfig) -> AnyResult<PathBuf> {
-    if !cfg!(target_os = "macos") {
-        bail!("Defaultspack desktop launch is only supported on macOS");
+    if !is_defaultspack_http_ready(metadata.port) {
+        let mut child = spawn_defaultspack_local_server(config, &metadata)?;
+        wait_for_defaultspack_http_ready(metadata.port, &mut child)?;
+        info!("Defaultspack local server is ready at {url}");
+    } else {
+        info!("Defaultspack local server is already ready at {url}");
     }
 
-    // 1. Resolve pack-shell
-    let pack_shell = config
-        .pack_shell_path()
-        .context("pack-shell binary not found. Build it with `cargo build` in pack-shell/")?;
+    open::that_detached(&url).with_context(|| format!("failed to open {url}"))?;
+    info!("Opened defaultspack browser URL: {url}");
+    Ok(format!("Opening Rumi Defaultspack at {url}"))
+}
 
-    // 2. Read ecosystem.json
+fn read_defaultspack_desktop_metadata(
+    config: &AppConfig,
+) -> AnyResult<DefaultspackDesktopMetadata> {
     let ecosystem_path = config.defaultspack_ecosystem_json();
     if !ecosystem_path.exists() {
         bail!(
@@ -329,8 +447,17 @@ fn ensure_defaultspack_app_bundle(config: &AppConfig) -> AnyResult<PathBuf> {
         .context("defaultspack ecosystem.json has no parent directory")?;
     let app_working_dir = resolve_desktop_app_working_dir(&desktop_app, pack_root);
     let env_vars = read_desktop_app_env(&desktop_app)?;
+    let port = read_defaultspack_port(&env_vars)?;
 
-    // 3. Read HMAC key and save as desktop API token
+    Ok(DefaultspackDesktopMetadata {
+        command,
+        app_working_dir,
+        env_vars,
+        port,
+    })
+}
+
+fn read_desktop_api_token_from_config(config: &AppConfig) -> AnyResult<String> {
     let hmac_keys_path = config.rumi_home.join("user_data").join("hmac_keys.json");
     if !hmac_keys_path.exists() {
         bail!(
@@ -338,20 +465,86 @@ fn ensure_defaultspack_app_bundle(config: &AppConfig) -> AnyResult<PathBuf> {
             hmac_keys_path.display()
         );
     }
-    let api_token = read_desktop_api_token(&hmac_keys_path)?;
+    read_desktop_api_token(&hmac_keys_path)
+}
 
+fn persist_desktop_api_token(config: &AppConfig, api_token: &str) -> AnyResult<PathBuf> {
     let token_path = config.desktop_api_token_path();
     if let Some(parent) = token_path.parent() {
         fs::create_dir_all(parent)?;
     }
-    fs::write(&token_path, &api_token)
+    fs::write(&token_path, api_token)
         .with_context(|| format!("failed to write token to {}", token_path.display()))?;
-    // chmod 600
     #[cfg(unix)]
     {
         let _ = fs::set_permissions(&token_path, fs::Permissions::from_mode(0o600));
     }
     info!("Desktop API token saved to {}", token_path.display());
+    Ok(token_path)
+}
+
+fn spawn_defaultspack_local_server(
+    config: &AppConfig,
+    metadata: &DefaultspackDesktopMetadata,
+) -> AnyResult<Child> {
+    let pack_shell = config
+        .pack_shell_path()
+        .context("pack-shell binary not found. Build it with `cargo build` in pack-shell/")?;
+    let api_token = read_desktop_api_token_from_config(config)?;
+    let kernel_command = kernel_command_for_python(&config.venv_python());
+    let path = append_path_prefix(&venv_bin_dir(&config.venv_dir), std::env::var_os("PATH"))?;
+
+    let mut command = Command::new(&pack_shell);
+    command
+        .arg("run")
+        .arg("defaultspack")
+        .arg("--command")
+        .arg(&metadata.command)
+        .arg("--port")
+        .arg(config.kernel_port.to_string())
+        .arg("--kernel-cmd")
+        .arg(kernel_command)
+        .arg("--working-dir")
+        .arg(&metadata.app_working_dir)
+        .arg("--timeout")
+        .arg("120")
+        .arg("--api-token")
+        .arg(&api_token)
+        .env("PATH", path)
+        .env("RUMI_HOME", &config.rumi_home)
+        .env("RUMI_API_TOKEN", &api_token)
+        .env("RUMI_DEFAULTSPACK_OPEN_BROWSER", "0")
+        .current_dir(&metadata.app_working_dir)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+
+    for (key, value) in &metadata.env_vars {
+        command.env(key, value);
+    }
+
+    command
+        .spawn()
+        .with_context(|| format!("failed to spawn {}", pack_shell.display()))
+}
+
+fn ensure_defaultspack_app_bundle(config: &AppConfig) -> AnyResult<PathBuf> {
+    if !cfg!(target_os = "macos") {
+        bail!("Defaultspack dock registration is only supported on macOS");
+    }
+
+    // 1. Resolve pack-shell
+    let pack_shell = config
+        .pack_shell_path()
+        .context("pack-shell binary not found. Build it with `cargo build` in pack-shell/")?;
+
+    // 2. Read ecosystem.json
+    let metadata = read_defaultspack_desktop_metadata(config)?;
+
+    // 3. Read HMAC key and save as desktop API token
+    let api_token = read_desktop_api_token_from_config(config)?;
+
+    let token_path = persist_desktop_api_token(config, &api_token)?;
 
     // 4. Generate .app bundle
     let app_name = "Rumi Defaultspack";
@@ -361,9 +554,10 @@ fn ensure_defaultspack_app_bundle(config: &AppConfig) -> AnyResult<PathBuf> {
         &token_path,
         &config.rumi_home,
         &config.venv_dir,
-        &app_working_dir,
-        &command,
-        &env_vars,
+        config.kernel_port,
+        &metadata.app_working_dir,
+        &metadata.command,
+        &metadata.env_vars,
     )?;
 
     Ok(app_dir)
@@ -426,6 +620,7 @@ mod tests {
             Path::new("/tmp/token file"),
             Path::new("/tmp/rumi home"),
             Path::new("/tmp/venv dir"),
+            8767,
             Path::new("/tmp/work $(bad)"),
             "python -c \"print('hello')\"",
             &[("RUMI_DEFAULTSPACK_SURFACE".into(), "webview".into())],
@@ -435,8 +630,11 @@ mod tests {
         assert!(script.contains("TOKEN_FILE='/tmp/token file'"));
         assert!(script.contains("APP_WORKING_DIR='/tmp/work $(bad)'"));
         assert!(script.contains("DESKTOP_COMMAND='python -c \"print('\\''hello'\\'')\"'"));
+        assert!(script.contains("KERNEL_COMMAND=''\\''/tmp/venv dir/bin/python3'\\'' -m app'"));
         assert!(script.contains("export RUMI_DEFAULTSPACK_SURFACE='webview'"));
         assert!(script.contains("--command \"$DESKTOP_COMMAND\""));
+        assert!(script.contains("--port 8767"));
+        assert!(script.contains("--kernel-cmd \"$KERNEL_COMMAND\""));
     }
 
     #[test]
@@ -484,6 +682,31 @@ mod tests {
         let desktop_app: Value = serde_json::from_str(r#"{"env":{"BAD;NAME":"oops"}}"#).unwrap();
         let err = read_desktop_app_env(&desktop_app).unwrap_err();
         assert!(err.to_string().contains("invalid shell variable name"));
+    }
+
+    #[test]
+    fn read_defaultspack_port_prefers_rumi_specific_port() {
+        let port = read_defaultspack_port(&[
+            ("DEFAULTS_HTTP_PORT".into(), "8766".into()),
+            ("RUMI_DEFAULTSPACK_PORT".into(), "9876".into()),
+        ])
+        .unwrap();
+        assert_eq!(port, 9876);
+    }
+
+    #[test]
+    fn read_defaultspack_port_defaults_when_env_is_absent() {
+        assert_eq!(
+            read_defaultspack_port(&[]).unwrap(),
+            DEFAULTSPACK_DEFAULT_PORT
+        );
+    }
+
+    #[test]
+    fn read_defaultspack_port_rejects_invalid_port() {
+        let err =
+            read_defaultspack_port(&[("DEFAULTS_HTTP_PORT".into(), "nope".into())]).unwrap_err();
+        assert!(err.to_string().contains("DEFAULTS_HTTP_PORT"));
     }
 
     #[test]
