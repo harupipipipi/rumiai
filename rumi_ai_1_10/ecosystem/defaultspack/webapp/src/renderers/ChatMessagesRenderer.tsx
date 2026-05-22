@@ -253,6 +253,23 @@ function messageVisibleText(message: ChatMessagesRendererProps["messages"][numbe
   return blockText || String(message.rawText ?? "").trim();
 }
 
+export function isAwaitingStreamFinalMessage(message: ChatMessagesRendererProps["messages"][number]): boolean {
+  const thinkingLabel = String(message.metadata?.thinkingLabel ?? "").trim().toLowerCase();
+  return thinkingLabel === "streaming" || thinkingLabel === "running";
+}
+
+export function shouldShowEmptyResponseWarning(
+  message: ChatMessagesRendererProps["messages"][number],
+  hasToolActivity: boolean,
+): boolean {
+  return (
+    message.role === "agent"
+    && !messageVisibleText(message)
+    && !hasToolActivity
+    && !isAwaitingStreamFinalMessage(message)
+  );
+}
+
 export function messageCopyText(message: ChatMessagesRendererProps["messages"][number]): string {
   const blockText = message.content
     .map((block) => {
@@ -974,7 +991,7 @@ export function ChatMessagesRenderer({
                           ? message.content.map((block, index) => (
                               <MessageBlock key={`${message.id}-${index}`} block={block} unknownStrategy={unknownBlockStrategy} onOpenImagePreview={setImagePreview} />
                             ))
-                          : message.role === "agent" && !messageVisibleText(message) && !hasToolActivity
+                          : shouldShowEmptyResponseWarning(message, hasToolActivity)
                             ? (
                                 <div className="flex items-start gap-2 rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-[12px] leading-relaxed text-amber-100">
                                   <AlertTriangle size={14} className="mt-0.5 shrink-0 text-amber-300" />

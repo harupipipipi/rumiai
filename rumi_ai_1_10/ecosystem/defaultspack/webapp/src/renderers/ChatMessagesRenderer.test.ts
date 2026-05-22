@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { compactLogPreviewText, isCompactLogLikeMessageText, messageCopyText, shouldRenderImageBlockInChat, streamedBrowserScreenshots, summarizePendingToolNames } from "./ChatMessagesRenderer";
+import { compactLogPreviewText, isCompactLogLikeMessageText, messageCopyText, shouldRenderImageBlockInChat, shouldShowEmptyResponseWarning, streamedBrowserScreenshots, summarizePendingToolNames } from "./ChatMessagesRenderer";
 import type { ChatUiMessage } from "./types";
 
 function message(overrides: Partial<ChatUiMessage>): ChatUiMessage {
@@ -33,6 +33,23 @@ test("pending tool summary shows two names and the remaining count", () => {
   assert.deepEqual(summary.visibleNames, ["web_search", "browser"]);
   assert.equal(summary.hiddenCount, 1);
   assert.equal(summary.summary, "web_search、browser、その他 1 個が見込まれました");
+});
+
+test("empty response warning waits until streaming draft is finalized", () => {
+  const streaming = message({ metadata: { thinkingLabel: "streaming" } });
+  const running = message({ metadata: { thinkingLabel: "running" } });
+
+  assert.equal(shouldShowEmptyResponseWarning(streaming, false), false);
+  assert.equal(shouldShowEmptyResponseWarning(running, false), false);
+});
+
+test("empty response warning only appears for finalized agent messages without activity", () => {
+  const emptyCompleted = message({ metadata: { thinkingLabel: "completed" } });
+  const textCompleted = message({ rawText: "done", metadata: { thinkingLabel: "completed" } });
+
+  assert.equal(shouldShowEmptyResponseWarning(emptyCompleted, false), true);
+  assert.equal(shouldShowEmptyResponseWarning(textCompleted, false), false);
+  assert.equal(shouldShowEmptyResponseWarning(emptyCompleted, true), false);
 });
 
 test("long terminal-style output is detected for compact display", () => {
