@@ -123,10 +123,19 @@ function requiredExternalTokenRows(providers: Array<Record<string, unknown>>): A
 }
 
 function MaskedApiLabel({ api }: { api: Record<string, unknown> }) {
+  const providerId = String(api.provider_id ?? "");
+  const apiId = String(api.api_id ?? "");
+  const fallback = apiRowLabel(api);
+  if (!providerId || !apiId) {
+    return <span className="truncate text-xs text-zinc-300">{fallback}</span>;
+  }
   return (
-    <span className="inline-flex items-center gap-1.5 text-xs text-emerald-400">
-      <span className="inline-block h-2 w-2 rounded-full bg-emerald-400" />
-      設定済み
+    <span className="inline-flex max-w-full items-center overflow-hidden font-mono text-xs leading-5 text-zinc-500">
+      <span className="truncate">{providerId}</span>
+      <span className="px-0.5 text-zinc-600">:</span>
+      <span className="truncate">{apiId}</span>
+      <span className="px-0.5 text-zinc-600">:</span>
+      <span className="tracking-normal text-zinc-500">***</span>
     </span>
   );
 }
@@ -201,30 +210,32 @@ function CustomSelect({
       <button
         type="button"
         onClick={() => setOpen((current) => !current)}
-        className="flex w-full items-center justify-between gap-2 rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-left text-sm text-zinc-200 outline-none transition-colors hover:border-zinc-700"
+        title={selected?.label ?? value}
+        className="flex min-h-10 w-full items-center justify-between gap-2 rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-left text-sm text-zinc-200 outline-none transition-colors hover:border-zinc-700"
       >
-        <span className="truncate">{selected?.label ?? value}</span>
+        <span className="min-w-0 flex-1 truncate">{selected?.label ?? value}</span>
         <ChevronDown size={14} className={cn("shrink-0 text-zinc-500 transition-transform", open && "rotate-180")} />
       </button>
       {open && (
         <>
           <button type="button" aria-label="close select" className="fixed inset-0 z-10 cursor-default" onClick={() => setOpen(false)} />
-          <div className="absolute left-0 right-0 top-[calc(100%+6px)] z-20 max-h-56 overflow-y-auto rounded-lg border border-zinc-700 bg-zinc-950 p-1 shadow-2xl">
+          <div className="absolute left-0 top-[calc(100%+6px)] z-20 max-h-56 w-[min(360px,calc(100vw-32px))] max-w-[calc(100vw-32px)] overflow-y-auto rounded-lg border border-zinc-700 bg-zinc-950 p-1 shadow-2xl">
             {options.map((option) => (
               <button
                 key={option.value}
                 type="button"
+                title={option.label}
                 onClick={() => {
                   onChange(option.value);
                   setOpen(false);
                 }}
                 className={cn(
-                  "flex w-full items-center justify-between gap-2 rounded-md px-2.5 py-1.5 text-left text-sm transition-colors",
+                  "flex w-full items-start justify-between gap-2 rounded-md px-2.5 py-1.5 text-left text-sm transition-colors",
                   option.value === value ? "bg-zinc-800 text-zinc-100" : "text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200",
                 )}
               >
-                <span className="truncate">{option.label}</span>
-                {option.value === value && <Check size={13} className="shrink-0 text-emerald-300" />}
+                <span className="min-w-0 flex-1 whitespace-normal break-all leading-5">{option.label}</span>
+                {option.value === value && <Check size={13} className="mt-1 shrink-0 text-emerald-300" />}
               </button>
             ))}
           </div>
@@ -681,7 +692,7 @@ function ProviderOAuthPanel({
                 </button>
               </div>
             </div>
-            <div className="mt-4 space-y-2">
+            <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1.4fr)_auto]">
               <textarea
                 value={draft}
                 onChange={(event) => {
@@ -695,15 +706,9 @@ function ProviderOAuthPanel({
                   });
                 }}
                 placeholder='Paste Google OAuth desktop client JSON or a client ID like "123....apps.googleusercontent.com"'
-                rows={3}
-                className="w-full resize-y rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 outline-none focus:border-cyan-500"
+                className="min-h-28 w-full rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 outline-none focus:border-cyan-500"
               />
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                {scopes.length > 0 ? (
-                  <p className="text-[11px] text-zinc-500">
-                    Scopes: {scopes.join(", ")}
-                  </p>
-                ) : <span />}
+              <div className="flex flex-col justify-between gap-3">
                 <button
                   type="button"
                   disabled={isBusy || !draft.trim()}
@@ -730,14 +735,19 @@ function ProviderOAuthPanel({
                     }
                   }}
                   className={cn(
-                    "rounded-lg border px-4 py-2 text-xs font-medium transition-colors",
+                    "rounded-lg border px-3 py-2 text-sm transition-colors",
                     isBusy || !draft.trim()
                       ? "cursor-not-allowed border-zinc-800 bg-zinc-900 text-zinc-600"
-                      : "border-zinc-100 bg-zinc-100 text-zinc-950 hover:bg-white",
+                      : "border-zinc-100 bg-zinc-100 text-zinc-950",
                   )}
                 >
                   {isBusy && busyAction === `${providerId}:save` ? "Saving..." : "Save OAuth client"}
                 </button>
+                {scopes.length > 0 && (
+                  <div className="rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 text-[11px] text-zinc-500">
+                    Scopes: {scopes.join(", ")}
+                  </div>
+                )}
               </div>
             </div>
             {banner && (
@@ -912,6 +922,7 @@ const BUILTIN_API_PROVIDER_IDS: string[] = [
   "anthropic",
   "cerebras",
   "deepseek",
+  "gitlawb-opengateway",
   "glm",
   "google",
   "groq",
@@ -922,7 +933,6 @@ const BUILTIN_API_PROVIDER_IDS: string[] = [
   "moonshotai",
   "nvidia",
   "ollama",
-  "opencode-go",
   "openai",
   "openai_compatible",
   "openrouter",
@@ -930,17 +940,17 @@ const BUILTIN_API_PROVIDER_IDS: string[] = [
   "together",
   "vllm",
   "xai",
+  "xiaomi-token-plan-ams",
+  "xiaomi-token-plan-cn",
+  "xiaomi-token-plan-sgp",
 ];
 
-// Providers whose secrets are also used as external-output tokens
-// (LINE / Discord / Slack / Generic webhook). Saving an API key against
-// any of these providers automatically mirrors the value into the
-// external token store so the External Output section sees it.
-const EXTERNAL_TOKEN_PROVIDER_IDS: string[] = ["line", "discord", "slack", "generic"];
-
-const ALL_BUILTIN_PROVIDER_IDS: string[] = [
-  ...BUILTIN_API_PROVIDER_IDS,
-  ...EXTERNAL_TOKEN_PROVIDER_IDS,
+const BUILTIN_EXTERNAL_PROVIDER_IDS: string[] = [
+  "discord",
+  "generic",
+  "line",
+  "slack",
+  "web",
 ];
 
 type ApiProviderOption = {
@@ -959,16 +969,37 @@ function collectApiProviderOptions(providers: Array<Record<string, unknown>>): A
   for (const builtinId of BUILTIN_API_PROVIDER_IDS) {
     options.set(builtinId, { provider_id: builtinId, label: builtinId, kind: "llm", builtin: true });
   }
-  for (const externalId of EXTERNAL_TOKEN_PROVIDER_IDS) {
-    options.set(externalId, { provider_id: externalId, label: externalId, kind: "custom", builtin: true });
+  for (const builtinId of BUILTIN_EXTERNAL_PROVIDER_IDS) {
+    options.set(builtinId, { provider_id: builtinId, label: builtinId, kind: "custom", builtin: true });
   }
   for (const provider of providers) {
     const providerId = String(provider.provider_id ?? "").trim();
     if (!providerId) continue;
-    const builtin = Boolean(provider.builtin) || ALL_BUILTIN_PROVIDER_IDS.includes(providerId);
+    const builtin = Boolean(provider.builtin) || BUILTIN_API_PROVIDER_IDS.includes(providerId) || BUILTIN_EXTERNAL_PROVIDER_IDS.includes(providerId);
     const kind = normalizeProviderKind(provider.kind);
     const label = String(provider.label ?? providerId);
     options.set(providerId, { provider_id: providerId, label, kind, builtin });
+  }
+  return Array.from(options.values()).sort((a, b) => {
+    if (a.builtin !== b.builtin) return a.builtin ? -1 : 1;
+    return a.provider_id.localeCompare(b.provider_id);
+  });
+}
+
+function collectExternalProviderOptions(providers: Array<Record<string, unknown>>): ApiProviderOption[] {
+  const options = new Map<string, ApiProviderOption>();
+  for (const providerId of BUILTIN_EXTERNAL_PROVIDER_IDS) {
+    options.set(providerId, { provider_id: providerId, label: providerId, kind: "custom", builtin: true });
+  }
+  for (const provider of providers) {
+    const providerId = String(provider.provider_id ?? "").trim();
+    if (!providerId) continue;
+    options.set(providerId, {
+      provider_id: providerId,
+      label: String(provider.label ?? providerId),
+      kind: "custom",
+      builtin: BUILTIN_EXTERNAL_PROVIDER_IDS.includes(providerId),
+    });
   }
   return Array.from(options.values()).sort((a, b) => {
     if (a.builtin !== b.builtin) return a.builtin ? -1 : 1;
@@ -983,6 +1014,9 @@ function SearchableProviderSelect({
   onAddCustom,
   placeholder = "provider を検索",
   className,
+  addCustomLabel = "Add custom provider...",
+  showKindControls = true,
+  showProviderBadges = true,
 }: {
   value: string;
   options: ApiProviderOption[];
@@ -990,6 +1024,9 @@ function SearchableProviderSelect({
   onAddCustom?: (option: { providerId: string; label: string; kind: "llm" | "custom" }) => void;
   placeholder?: string;
   className?: string;
+  addCustomLabel?: string;
+  showKindControls?: boolean;
+  showProviderBadges?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -1014,7 +1051,7 @@ function SearchableProviderSelect({
   };
 
   const submitDraft = () => {
-    const cleaned = draftId.trim().toLowerCase().replace(/[^a-z0-9_]+/g, "_").replace(/^_+|_+$/g, "");
+    const cleaned = draftId.trim().toLowerCase().replace(/[^a-z0-9_.-]+/g, "_").replace(/^[-_.]+|[-_.]+$/g, "");
     if (!cleaned) return;
     if (onAddCustom) {
       onAddCustom({ providerId: cleaned, label: cleaned, kind: draftKind });
@@ -1023,18 +1060,21 @@ function SearchableProviderSelect({
     closeAll();
   };
 
+  const selectedLabel = selected?.label ?? value;
+
   return (
     <div className={cn("relative", className)}>
       <button
         type="button"
         onClick={() => setOpen((current) => !current)}
-        className="flex w-full items-center justify-between gap-2 rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-left text-sm text-zinc-200 outline-none transition-colors hover:border-zinc-700"
+        title={selectedLabel || undefined}
+        className="flex min-h-10 w-full items-center justify-between gap-2 rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-left text-sm text-zinc-200 outline-none transition-colors hover:border-zinc-700"
       >
-        <span className="min-w-0 truncate">
+        <span className="min-w-0 flex-1">
           {selected ? (
-            <span className="inline-flex items-center gap-1.5">
-              <span className="truncate">{selected.label}</span>
-              {!selected.builtin && (
+            <span className="flex min-w-0 flex-wrap items-center gap-1.5">
+              <span className="min-w-0 break-all leading-5">{selected.label}</span>
+              {showProviderBadges && !selected.builtin && (
                 <span className="rounded-full border border-zinc-700 px-1.5 text-[9px] uppercase text-zinc-400">
                   {selected.kind === "custom" ? "non-llm" : "custom"}
                 </span>
@@ -1049,7 +1089,7 @@ function SearchableProviderSelect({
       {open && (
         <>
           <button type="button" aria-label="close provider select" className="fixed inset-0 z-10 cursor-default" onClick={closeAll} />
-          <div className="rumi-provider-select-popover absolute bottom-[calc(100%+8px)] left-0 z-50 w-[min(26rem,calc(100vw-2rem))] overflow-hidden rounded-lg border border-zinc-700 bg-zinc-950 shadow-2xl">
+          <div className="absolute left-0 top-[calc(100%+6px)] z-20 w-[min(520px,calc(100vw-32px))] max-w-[calc(100vw-32px)] overflow-hidden rounded-lg border border-zinc-700 bg-zinc-950 shadow-2xl">
             <label className="m-2 flex h-9 items-center gap-2 rounded-lg border border-zinc-800 bg-black/30 px-3 text-xs text-zinc-500 focus-within:border-zinc-600 focus-within:text-zinc-300">
               <Search size={14} />
               <input
@@ -1070,32 +1110,36 @@ function SearchableProviderSelect({
                 </button>
               )}
             </label>
-            <div className="max-h-72 overflow-y-auto border-t border-zinc-800 p-1">
+            <div className="max-h-64 overflow-y-auto border-t border-zinc-800 p-1">
               {filtered.length > 0 ? filtered.map((option) => {
                 const active = option.provider_id === value;
                 return (
                   <button
                     key={option.provider_id}
                     type="button"
+                    title={option.provider_id === option.label ? option.label : `${option.label} (${option.provider_id})`}
                     onClick={() => {
                       onChange(option.provider_id);
                       closeAll();
                     }}
                     className={cn(
-                      "flex w-full items-center justify-between gap-2 rounded-md px-2.5 py-1.5 text-left text-sm transition-colors",
+                      "flex w-full items-start justify-between gap-2 rounded-md px-2.5 py-2 text-left text-sm transition-colors",
                       active ? "bg-zinc-800 text-zinc-100" : "text-zinc-300 hover:bg-zinc-900",
                     )}
                   >
-                    <span className="min-w-0 truncate">
-                      {option.label}
-                      {!option.builtin && option.kind === "custom" && (
-                        <span className="ml-2 rounded-full border border-zinc-700 px-1.5 text-[9px] uppercase text-zinc-400">non-llm</span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block whitespace-normal break-all leading-5">{option.label}</span>
+                      {option.provider_id !== option.label && (
+                        <span className="block whitespace-normal break-all text-[11px] leading-4 text-zinc-500">{option.provider_id}</span>
                       )}
-                      {!option.builtin && option.kind === "llm" && (
-                        <span className="ml-2 rounded-full border border-zinc-700 px-1.5 text-[9px] uppercase text-zinc-400">custom</span>
+                      {showProviderBadges && !option.builtin && option.kind === "custom" && (
+                        <span className="mt-1 inline-flex rounded-full border border-zinc-700 px-1.5 text-[9px] uppercase text-zinc-400">non-llm</span>
+                      )}
+                      {showProviderBadges && !option.builtin && option.kind === "llm" && (
+                        <span className="mt-1 inline-flex rounded-full border border-zinc-700 px-1.5 text-[9px] uppercase text-zinc-400">custom</span>
                       )}
                     </span>
-                    {active && <Check size={13} className="shrink-0 text-emerald-300" />}
+                    {active && <Check size={13} className="mt-1 shrink-0 text-emerald-300" />}
                   </button>
                 );
               }) : (
@@ -1117,24 +1161,26 @@ function SearchableProviderSelect({
                     }
                   }}
                 />
-                <div className="flex flex-wrap items-center gap-2 text-xs">
-                  <span className="text-zinc-500">種類:</span>
-                  {(["llm", "custom"] as const).map((option) => (
-                    <button
-                      key={option}
-                      type="button"
-                      onClick={() => setDraftKind(option)}
-                      className={cn(
-                        "rounded-full border px-2.5 py-1 transition-colors",
-                        draftKind === option
-                          ? "border-emerald-500/60 bg-emerald-500/15 text-emerald-200"
-                          : "border-zinc-700 text-zinc-400 hover:text-zinc-200",
-                      )}
-                    >
-                      {option === "llm" ? "LLM" : "Non-LLM (search等)"}
-                    </button>
-                  ))}
-                </div>
+                {showKindControls && (
+                  <div className="flex flex-wrap items-center gap-2 text-xs">
+                    <span className="text-zinc-500">種類:</span>
+                    {(["llm", "custom"] as const).map((option) => (
+                      <button
+                        key={option}
+                        type="button"
+                        onClick={() => setDraftKind(option)}
+                        className={cn(
+                          "rounded-full border px-2.5 py-1 transition-colors",
+                          draftKind === option
+                            ? "border-emerald-500/60 bg-emerald-500/15 text-emerald-200"
+                            : "border-zinc-700 text-zinc-400 hover:text-zinc-200",
+                        )}
+                      >
+                        {option === "llm" ? "LLM" : "Non-LLM (search等)"}
+                      </button>
+                    ))}
+                  </div>
+                )}
                 <div className="flex justify-end gap-2">
                   <button
                     type="button"
@@ -1168,7 +1214,7 @@ function SearchableProviderSelect({
                 className="flex w-full items-center gap-2 border-t border-zinc-800 px-3 py-2 text-left text-xs text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200"
               >
                 <span className="text-base leading-none">+</span>
-                Add custom provider...
+                {addCustomLabel}
               </button>
             )}
           </div>
@@ -1271,14 +1317,12 @@ function SettingsField({
   field,
   value,
   sectionValues,
-  allSettingsValues,
   onChange,
 }: {
   sectionId: string;
   field: SettingsSection["fields"][number];
   value: unknown;
   sectionValues?: Record<string, unknown>;
-  allSettingsValues?: Record<string, Record<string, unknown>>;
   onChange: (sectionId: string, fieldId: string, value: unknown) => void;
 }) {
   const [secretDraft, setSecretDraft] = useState("");
@@ -1290,8 +1334,6 @@ function SettingsField({
   const [apiAllowedModels, setApiAllowedModels] = useState("");
   const [apiDefaultModel, setApiDefaultModel] = useState("");
   const [apiQuotaLabel, setApiQuotaLabel] = useState("");
-  const [apiMonthlyBudgetUsd, setApiMonthlyBudgetUsd] = useState("");
-  const [apiMonthlyRequestLimit, setApiMonthlyRequestLimit] = useState("");
   const [apiNotes, setApiNotes] = useState("");
   const [apiSaveState, setApiSaveState] = useState<"idle" | "saved">("idle");
   const [tokenProvider, setTokenProvider] = useState("line");
@@ -1553,8 +1595,6 @@ function SettingsField({
       const isCustomProvider = !selectedProviderOption?.builtin;
       const handleSubmitApi = () => {
         if (!apiProvider.trim() || !apiName.trim() || !apiSecret.trim()) return;
-        const monthlyBudget = parseFloat(apiMonthlyBudgetUsd.trim());
-        const monthlyRequests = parseInt(apiMonthlyRequestLimit.trim(), 10);
         onChange(sectionId, field.id, {
           action: "upsert",
           provider_id: apiProvider,
@@ -1566,8 +1606,6 @@ function SettingsField({
           allowed_models: apiAllowedModels.split(",").map((item) => item.trim()).filter(Boolean),
           default_model: apiDefaultModel.trim(),
           quota_label: apiQuotaLabel.trim(),
-          monthly_budget_usd: Number.isFinite(monthlyBudget) && monthlyBudget > 0 ? monthlyBudget : null,
-          monthly_request_limit: Number.isFinite(monthlyRequests) && monthlyRequests > 0 ? monthlyRequests : null,
           notes: apiNotes.trim(),
         });
         setApiSecret("");
@@ -1575,16 +1613,162 @@ function SettingsField({
         setApiAllowedModels("");
         setApiDefaultModel("");
         setApiQuotaLabel("");
-        setApiMonthlyBudgetUsd("");
-        setApiMonthlyRequestLimit("");
         setApiNotes("");
         setApiSaveState("saved");
       };
       control = (
-        <div className="space-y-5">
-          {/* --- Add API Key Form (top priority) --- */}
+        <div className="space-y-4">
+          <ProviderOAuthPanel
+            sectionId={sectionId}
+            fieldId={field.id}
+            providers={providers}
+            onRefresh={onChange}
+          />
+          <div className="overflow-hidden rounded-lg border border-zinc-800 bg-zinc-950/70">
+            <div className="divide-y divide-zinc-800/80">
+              {registeredApis.length > 0 ? registeredApis.map((api) => {
+                const key = String(api.key ?? `${api.provider_id}:${api.api_id}`);
+                const isRenaming = renamingKey === key;
+                const isMenuOpen = openApiMenuKey === key;
+                const apiProviderOption = providerOptions.find((option) => option.provider_id === String(api.provider_id ?? ""));
+                const apiKind = normalizeProviderKind(api.kind ?? apiProviderOption?.kind);
+                return (
+                  <div
+                    key={key}
+                    className="flex items-center gap-3 px-3 py-2.5 transition-colors hover:bg-zinc-900/40"
+                  >
+                    <div className="min-w-0 flex-1">
+                      {isRenaming ? (
+                        <div className="flex items-center gap-1.5">
+                          <input
+                            value={renameDraft}
+                            autoFocus
+                            onChange={(event) => setRenameDraft(event.target.value)}
+                            onKeyDown={(event) => {
+                              if (event.key !== "Enter") return;
+                              event.preventDefault();
+                              if (!renameDraft.trim()) return;
+                              onChange(sectionId, field.id, {
+                                action: "rename",
+                                provider_id: api.provider_id,
+                                api_id: api.api_id,
+                                name: renameDraft.trim(),
+                              });
+                              setRenamingKey("");
+                            }}
+                            className="min-w-0 flex-1 rounded-md border border-zinc-700 bg-zinc-900 px-2 py-1 text-xs text-zinc-200 outline-none"
+                          />
+                          <button
+                            type="button"
+                            disabled={!renameDraft.trim()}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              if (!renameDraft.trim()) return;
+                              onChange(sectionId, field.id, {
+                                action: "rename",
+                                provider_id: api.provider_id,
+                                api_id: api.api_id,
+                                name: renameDraft.trim(),
+                              });
+                              setRenamingKey("");
+                            }}
+                            className="rounded-md border border-zinc-700 p-1 text-zinc-300 hover:bg-zinc-800 disabled:opacity-40"
+                            title="Rename"
+                          >
+                            <Check size={13} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              setRenamingKey("");
+                            }}
+                            className="rounded-md border border-zinc-800 p-1 text-zinc-500 hover:text-zinc-300"
+                          >
+                            <X size={13} />
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-sm font-medium text-zinc-200">{String(api.name ?? api.api_id ?? "")}</span>
+                          <span className="rounded-full border border-zinc-700 bg-zinc-900 px-2 py-0.5 text-[10px] uppercase tracking-wide text-zinc-400">
+                            {String(api.provider_id ?? "")}
+                          </span>
+                          {apiKind === "custom" && (
+                            <span className="rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[10px] uppercase tracking-wide text-amber-200">
+                              non-llm
+                            </span>
+                          )}
+                          <MaskedApiLabel api={api} />
+                        </div>
+                      )}
+                    </div>
+                    <div className="relative flex justify-end">
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setOpenApiMenuKey(isMenuOpen ? "" : key);
+                        }}
+                        className="flex h-8 w-8 items-center justify-center rounded-lg border border-zinc-800 text-zinc-500 transition-colors hover:border-zinc-700 hover:bg-zinc-900 hover:text-zinc-200"
+                        title="Actions"
+                      >
+                        <MoreVertical size={15} />
+                      </button>
+                      {isMenuOpen && (
+                        <>
+                          <button
+                            type="button"
+                            aria-label="close api menu"
+                            className="fixed inset-0 z-10 cursor-default"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              setOpenApiMenuKey("");
+                            }}
+                          />
+                          <div className="absolute right-0 top-[calc(100%+6px)] z-20 w-32 overflow-hidden rounded-lg border border-zinc-700 bg-zinc-950 py-1 shadow-2xl">
+                            <button
+                              type="button"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                setRenamingKey(key);
+                                setRenameDraft(String(api.name ?? api.api_id ?? ""));
+                                setOpenApiMenuKey("");
+                              }}
+                              className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-zinc-300 hover:bg-zinc-800"
+                            >
+                              <Pencil size={13} />
+                              Rename
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                setOpenApiMenuKey("");
+                                onChange(sectionId, field.id, {
+                                  action: "delete",
+                                  provider_id: api.provider_id,
+                                  api_id: api.api_id,
+                                });
+                              }}
+                              className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-rose-300 hover:bg-rose-950/30"
+                            >
+                              <Trash2 size={13} />
+                              Delete
+                            </button>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                );
+              }) : (
+                <div className="px-3 py-5 text-xs text-zinc-600">No registered API keys yet.</div>
+              )}
+            </div>
+          </div>
+
           <div className="space-y-2">
-            <h4 className="text-xs font-medium uppercase tracking-wide text-zinc-400">API キーを追加</h4>
             <div className="grid gap-2 md:grid-cols-[180px_minmax(120px,1fr)_minmax(180px,2fr)_auto]">
               <SearchableProviderSelect
                 value={apiProvider}
@@ -1611,7 +1795,7 @@ function SettingsField({
                   setApiSaveState("idle");
                 }}
                 placeholder="名前 (例: main, work)"
-                className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 outline-none focus:border-zinc-600"
+                className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 outline-none"
               />
               <input
                 type="password"
@@ -1628,16 +1812,16 @@ function SettingsField({
                     handleSubmitApi();
                   }
                 }}
-                className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 outline-none focus:border-zinc-600"
+                className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 outline-none"
               />
               <button
                 type="button"
                 disabled={!apiProvider.trim() || !apiName.trim() || !apiSecret.trim()}
                 onClick={handleSubmitApi}
                 className={cn(
-                  "rounded-lg border px-4 py-2 text-xs font-medium transition-colors",
+                  "rounded-lg border px-3 py-2 text-xs transition-colors",
                   apiProvider.trim() && apiName.trim() && apiSecret.trim()
-                    ? "bg-zinc-100 text-zinc-950 border-zinc-100 hover:bg-white"
+                    ? "bg-zinc-100 text-zinc-950 border-zinc-100"
                     : "bg-zinc-900 text-zinc-600 border-zinc-800 cursor-not-allowed",
                 )}
               >
@@ -1652,255 +1836,69 @@ function SettingsField({
               </p>
             )}
             <details className="rounded-lg border border-zinc-800 bg-zinc-950/40 px-3 py-2 text-xs">
-              <summary className="cursor-pointer select-none text-zinc-400 hover:text-zinc-200">Advanced (任意): base_url / model 制限 / 予算・リクエスト上限 / notes</summary>
-              <div className="mt-3 space-y-3">
-                <div className="grid gap-2 md:grid-cols-2">
-                  <input
-                    value={apiBaseUrl}
-                    onChange={(event) => { setApiBaseUrl(event.target.value); setApiSaveState("idle"); }}
-                    placeholder="base_url (optional)"
-                    className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 outline-none"
-                  />
-                  <input
-                    value={apiDefaultModel}
-                    onChange={(event) => { setApiDefaultModel(event.target.value); setApiSaveState("idle"); }}
-                    placeholder="default model for this API"
-                    className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 outline-none"
-                  />
-                  <input
-                    value={apiAllowedModels}
-                    onChange={(event) => { setApiAllowedModels(event.target.value); setApiSaveState("idle"); }}
-                    placeholder="allowed models, comma separated"
-                    className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 outline-none md:col-span-2"
-                  />
-                </div>
-
-                {/* レートリミット / 予算制限 */}
-                <div className="rounded-md border border-zinc-800/60 bg-zinc-900/40 p-2.5">
-                  <p className="mb-2 text-[11px] font-medium uppercase tracking-wide text-zinc-400">利用上限 (任意)</p>
-                  <div className="grid gap-2 md:grid-cols-2">
-                    <label className="flex flex-col gap-1">
-                      <span className="text-[11px] text-zinc-500">月額予算 (USD)</span>
-                      <input
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        value={apiMonthlyBudgetUsd}
-                        onChange={(event) => { setApiMonthlyBudgetUsd(event.target.value); setApiSaveState("idle"); }}
-                        placeholder="例: 20.00"
-                        className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 outline-none"
-                      />
-                    </label>
-                    <label className="flex flex-col gap-1">
-                      <span className="text-[11px] text-zinc-500">月間リクエスト数</span>
-                      <input
-                        type="number"
-                        min="0"
-                        step="1"
-                        value={apiMonthlyRequestLimit}
-                        onChange={(event) => { setApiMonthlyRequestLimit(event.target.value); setApiSaveState("idle"); }}
-                        placeholder="例: 10000"
-                        className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 outline-none"
-                      />
-                    </label>
-                  </div>
-                  <p className="mt-1.5 text-[10px] text-zinc-600">
-                    空欄なら無制限。プロバイダー側で対応がある場合のみ有効です。
-                  </p>
-                </div>
-
+              <summary className="cursor-pointer select-none text-zinc-400 hover:text-zinc-200">Advanced (任意): base_url / model 制限 / quota / notes</summary>
+              <div className="mt-3 grid gap-2 md:grid-cols-2">
+                <input
+                  value={apiBaseUrl}
+                  onChange={(event) => {
+                    setApiBaseUrl(event.target.value);
+                    setApiSaveState("idle");
+                  }}
+                  placeholder="base_url (optional)"
+                  className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 outline-none"
+                />
+                <input
+                  value={apiDefaultModel}
+                  onChange={(event) => {
+                    setApiDefaultModel(event.target.value);
+                    setApiSaveState("idle");
+                  }}
+                  placeholder="default model for this API"
+                  className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 outline-none"
+                />
+                <input
+                  value={apiAllowedModels}
+                  onChange={(event) => {
+                    setApiAllowedModels(event.target.value);
+                    setApiSaveState("idle");
+                  }}
+                  placeholder="allowed models, comma separated"
+                  className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 outline-none"
+                />
                 <input
                   value={apiQuotaLabel}
-                  onChange={(event) => { setApiQuotaLabel(event.target.value); setApiSaveState("idle"); }}
-                  placeholder="quota label (例: free-tier, pro)"
-                  className="w-full rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 outline-none"
+                  onChange={(event) => {
+                    setApiQuotaLabel(event.target.value);
+                    setApiSaveState("idle");
+                  }}
+                  placeholder="quota label"
+                  className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 outline-none"
                 />
                 <textarea
                   value={apiNotes}
-                  onChange={(event) => { setApiNotes(event.target.value); setApiSaveState("idle"); }}
+                  onChange={(event) => {
+                    setApiNotes(event.target.value);
+                    setApiSaveState("idle");
+                  }}
                   placeholder="notes for routing"
-                  className="min-h-20 w-full rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 outline-none"
+                  className="min-h-20 rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 outline-none md:col-span-2"
                 />
               </div>
               <p className="mt-2 text-[10px] text-zinc-600">
                 次に保存する API key にだけ適用されます。通常はそのまま空欄で大丈夫です。
               </p>
             </details>
-            {apiSaveState === "saved" && <p className="text-[11px] text-emerald-400">✓ 保存しました</p>}
           </div>
-
-          {/* --- Registered API Keys --- */}
-          {registeredApis.length > 0 && (
-            <div className="space-y-2">
-              <h4 className="text-xs font-medium uppercase tracking-wide text-zinc-400">登録済み ({registeredApis.length})</h4>
-              <div className="overflow-hidden rounded-xl border border-zinc-800/60 bg-zinc-950/50">
-                <div className="divide-y divide-zinc-800/50">
-                  {registeredApis.map((api) => {
-                    const key = String(api.key ?? `${api.provider_id}:${api.api_id}`);
-                    const isRenaming = renamingKey === key;
-                    const isMenuOpen = openApiMenuKey === key;
-                    const apiProviderOption = providerOptions.find((option) => option.provider_id === String(api.provider_id ?? ""));
-                    const apiKind = normalizeProviderKind(api.kind ?? apiProviderOption?.kind);
-                    return (
-                      <div
-                        key={key}
-                        className="flex items-center gap-3 px-4 py-3 transition-colors hover:bg-zinc-900/30"
-                      >
-                        <div className="min-w-0 flex-1">
-                          {isRenaming ? (
-                            <div className="flex items-center gap-1.5">
-                              <input
-                                value={renameDraft}
-                                autoFocus
-                                onChange={(event) => setRenameDraft(event.target.value)}
-                                onKeyDown={(event) => {
-                                  if (event.key !== "Enter") return;
-                                  event.preventDefault();
-                                  if (!renameDraft.trim()) return;
-                                  onChange(sectionId, field.id, {
-                                    action: "rename",
-                                    provider_id: api.provider_id,
-                                    api_id: api.api_id,
-                                    name: renameDraft.trim(),
-                                  });
-                                  setRenamingKey("");
-                                }}
-                                className="min-w-0 flex-1 rounded-md border border-zinc-700 bg-zinc-900 px-2 py-1 text-xs text-zinc-200 outline-none"
-                              />
-                              <button
-                                type="button"
-                                disabled={!renameDraft.trim()}
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  if (!renameDraft.trim()) return;
-                                  onChange(sectionId, field.id, {
-                                    action: "rename",
-                                    provider_id: api.provider_id,
-                                    api_id: api.api_id,
-                                    name: renameDraft.trim(),
-                                  });
-                                  setRenamingKey("");
-                                }}
-                                className="rounded-md border border-zinc-700 p-1 text-zinc-300 hover:bg-zinc-800 disabled:opacity-40"
-                                title="Rename"
-                              >
-                                <Check size={13} />
-                              </button>
-                              <button
-                                type="button"
-                                onClick={(event) => { event.stopPropagation(); setRenamingKey(""); }}
-                                className="rounded-md border border-zinc-800 p-1 text-zinc-500 hover:text-zinc-300"
-                              >
-                                <X size={13} />
-                              </button>
-                            </div>
-                          ) : (
-                            <div className="flex items-center gap-2.5">
-                              <span className="text-sm font-medium text-zinc-100">{String(api.name ?? api.api_id ?? "")}</span>
-                              <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-[11px] text-zinc-300">
-                                {String(api.provider_id ?? "")}
-                              </span>
-                              {apiKind === "custom" && (
-                                <span className="rounded bg-amber-500/10 px-1.5 py-0.5 text-[11px] text-amber-300">
-                                  non-llm
-                                </span>
-                              )}
-                              {typeof api.monthly_budget_usd === "number" && api.monthly_budget_usd > 0 && (
-                                <span className="rounded bg-cyan-500/10 px-1.5 py-0.5 text-[11px] text-cyan-300" title="月額予算">
-                                  ${(api.monthly_budget_usd as number).toFixed(2)}/月
-                                </span>
-                              )}
-                              <MaskedApiLabel api={api} />
-                            </div>
-                          )}
-                        </div>
-                        <div className="relative flex justify-end">
-                          <button
-                            type="button"
-                            onClick={(event) => { event.stopPropagation(); setOpenApiMenuKey(isMenuOpen ? "" : key); }}
-                            className="flex h-7 w-7 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-200"
-                            title="Actions"
-                          >
-                            <MoreVertical size={14} />
-                          </button>
-                          {isMenuOpen && (
-                            <>
-                              <button
-                                type="button"
-                                aria-label="close api menu"
-                                className="fixed inset-0 z-10 cursor-default"
-                                onClick={(event) => { event.stopPropagation(); setOpenApiMenuKey(""); }}
-                              />
-                              <div className="absolute right-0 top-[calc(100%+4px)] z-20 w-28 overflow-hidden rounded-lg border border-zinc-700 bg-zinc-950 py-1 shadow-2xl">
-                                <button
-                                  type="button"
-                                  onClick={(event) => {
-                                    event.stopPropagation();
-                                    setRenamingKey(key);
-                                    setRenameDraft(String(api.name ?? api.api_id ?? ""));
-                                    setOpenApiMenuKey("");
-                                  }}
-                                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-zinc-300 hover:bg-zinc-800"
-                                >
-                                  <Pencil size={12} />
-                                  Rename
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={(event) => {
-                                    event.stopPropagation();
-                                    setOpenApiMenuKey("");
-                                    onChange(sectionId, field.id, { action: "delete", provider_id: api.provider_id, api_id: api.api_id });
-                                  }}
-                                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-rose-300 hover:bg-rose-950/30"
-                                >
-                                  <Trash2 size={12} />
-                                  Delete
-                                </button>
-                              </div>
-                            </>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* --- Google OAuth (collapsed, secondary) --- */}
-          <details className="rounded-xl border border-zinc-800/60 bg-zinc-950/30">
-            <summary className="cursor-pointer select-none px-4 py-3 text-xs font-medium text-zinc-400 hover:text-zinc-200">
-              Google OAuth ブラウザログイン
-            </summary>
-            <div className="border-t border-zinc-800/50 px-4 py-3">
-              <ProviderOAuthPanel
-                sectionId={sectionId}
-                fieldId={field.id}
-                providers={providers}
-                onRefresh={onChange}
-              />
-            </div>
-          </details>
+          {apiSaveState === "saved" && <p className="text-[11px] text-emerald-400">Saved</p>}
         </div>
       );
       break;
     }
     case "external_tokens": {
       const providers = externalTokenProviderRows(value);
-      const providerOptions = providers.length
-        ? providers.map((provider) => String(provider.provider_id ?? ""))
-        : ["line", "discord", "generic", "slack"];
-      const uniqueProviderOptions = [...new Set(providerOptions.filter(Boolean))];
+      const providerOptions = collectExternalProviderOptions(providers);
       const registeredTokens = registeredExternalTokenRows(providers);
       const requiredTokens = requiredExternalTokenRows(providers);
-      // Pull registered API keys from the cross-section settings tree so users
-      // can reuse already-stored secrets (LLM provider keys, custom tokens, etc.)
-      // instead of re-pasting them here.
-      const apisSectionValue = allSettingsValues?.["apis"]?.["api_keys"];
-      const apiProvidersAll = apisSectionValue ? apiProviderRows(apisSectionValue) : [];
-      const registeredApisAll = apiProvidersAll.length ? registeredApiRows(apiProvidersAll) : [];
       const tokenHintByProvider: Record<string, string> = {
         line: "LINE: Messaging API Channel Secret / Access Tokenを貼ります。返信は受信元 conversation へ返り、push時だけExplicit Target IDを使います。",
         discord: "Discord Bot + Channel: Bot Tokenを貼り、Channel IDはExplicit Target ID欄へ。Webhook mode: Webhook URLを貼ります。",
@@ -2073,58 +2071,96 @@ function SettingsField({
               ))}
             </div>
           )}
-          <div className="rounded-lg border border-cyan-700/40 bg-cyan-950/20 p-3">
-            <div className="flex items-start gap-3">
-              <div className="mt-0.5 text-base">📎</div>
-              <div className="min-w-0 flex-1 space-y-2">
-                <p className="text-xs font-medium text-cyan-200">
-                  External Tokens は「APIs / Tokens」で一元管理しています
-                </p>
-                <p className="text-[11px] leading-5 text-zinc-400">
-                  値の登録はここでは行いません。サイドバーの <span className="font-medium text-zinc-200">APIs / Tokens</span> に移動し、
-                  provider に <code className="rounded bg-zinc-900 px-1 text-zinc-300">line</code> /
-                  <code className="ml-1 rounded bg-zinc-900 px-1 text-zinc-300">discord</code> /
-                  <code className="ml-1 rounded bg-zinc-900 px-1 text-zinc-300">slack</code> /
-                  <code className="ml-1 rounded bg-zinc-900 px-1 text-zinc-300">generic</code>
-                  を選び、<span className="font-medium text-zinc-200">名前</span> を必要な kind
-                  (例: <code className="rounded bg-zinc-900 px-1 text-zinc-300">channel_access_token</code>,
-                  <code className="ml-1 rounded bg-zinc-900 px-1 text-zinc-300">bot_token</code>)
-                  にして保存すると、ここに自動で反映されます。
-                </p>
-                {registeredApisAll.length > 0 && (
-                  <details className="rounded-md border border-zinc-800/60 bg-zinc-900/40 px-3 py-2">
-                    <summary className="cursor-pointer select-none text-xs text-zinc-400 hover:text-zinc-200">
-                      APIs / Tokens に登録済み ({registeredApisAll.length} 件) を確認
-                    </summary>
-                    <div className="mt-2 grid gap-1.5">
-                      {registeredApisAll.map((api) => {
-                        const apiKey = String(api.key ?? `${api.provider_id}:${api.api_id}`);
-                        const apiProviderId = String(api.provider_id ?? "");
-                        const isExternalProvider = ["line", "discord", "slack", "generic"].includes(apiProviderId);
-                        return (
-                          <div
-                            key={apiKey}
-                            className="flex items-center gap-2 rounded-md border border-zinc-800 bg-zinc-950/50 px-2 py-1.5 text-xs"
-                          >
-                            <span className="font-medium text-zinc-200">{String(api.name ?? api.api_id ?? "")}</span>
-                            <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] text-zinc-400">
-                              {apiProviderId}
-                            </span>
-                            {isExternalProvider && (
-                              <span className="ml-auto inline-flex items-center gap-1 text-[10px] text-emerald-400">
-                                <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-400" />
-                                external token として利用可能
-                              </span>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </details>
-                )}
+          <div className="rounded-lg border border-zinc-800 bg-zinc-950/70 p-3">
+            <div className="mb-3 text-xs leading-5 text-zinc-400">{tokenHintByProvider[tokenProvider] ?? "値は保存後に再表示しません。"}</div>
+            <div className="grid gap-3 md:grid-cols-[150px_1fr_1fr_1.4fr_auto]">
+              <label className="space-y-1.5">
+                <span className="text-[11px] font-medium uppercase text-zinc-500">Provider</span>
+                <SearchableProviderSelect
+                  value={tokenProvider}
+                  onChange={(nextProvider) => {
+                    setTokenProvider(nextProvider);
+                    setTokenKind(externalTokenKindOptions(nextProvider)[0]?.value ?? "token");
+                    setTokenSaveState("idle");
+                  }}
+                  onAddCustom={(option) => {
+                    setTokenProvider(option.providerId);
+                    setTokenKind(externalTokenKindOptions(option.providerId)[0]?.value ?? "token");
+                    setTokenSaveState("idle");
+                  }}
+                  options={providerOptions}
+                  addCustomLabel="Add external provider..."
+                  showKindControls={false}
+                  showProviderBadges={false}
+                />
+              </label>
+              <label className="space-y-1.5">
+                <span className="text-[11px] font-medium uppercase text-zinc-500">Token ID</span>
+                <input
+                  value={tokenName}
+                  onChange={(event) => {
+                    setTokenName(event.target.value);
+                    setTokenSaveState("idle");
+                  }}
+                  placeholder="main"
+                  className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 outline-none focus:border-cyan-500"
+                />
+              </label>
+              <label className="space-y-1.5">
+                <span className="text-[11px] font-medium uppercase text-zinc-500">Paste Kind</span>
+                <CustomSelect
+                  value={tokenKind}
+                  onChange={(nextKind) => {
+                    setTokenKind(nextKind);
+                    setTokenSaveState("idle");
+                  }}
+                  options={externalTokenKindOptions(tokenProvider)}
+                />
+              </label>
+              <label className="space-y-1.5">
+                <span className="text-[11px] font-medium uppercase text-zinc-500">Secret / URL Value</span>
+                <input
+                  type="password"
+                  autoComplete="off"
+                  value={tokenSecret}
+                  onChange={(event) => {
+                    setTokenSecret(event.target.value);
+                    setTokenSaveState("idle");
+                  }}
+                  placeholder={tokenKind === "webhook_url" ? "https://discord.com/api/webhooks/..." : `${tokenProvider} ${tokenKind}`}
+                  className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 outline-none focus:border-cyan-500"
+                />
+              </label>
+              <div className="flex items-end">
+                <button
+                  type="button"
+                  disabled={!tokenProvider.trim() || !tokenName.trim() || !tokenSecret.trim()}
+                  onClick={() => {
+                    if (!tokenProvider.trim() || !tokenName.trim() || !tokenSecret.trim()) return;
+                    onChange(sectionId, field.id, {
+                      action: "upsert",
+                      provider_id: tokenProvider,
+                      token_id: tokenName,
+                      name: tokenName,
+                      kind: tokenKind,
+                      value: tokenSecret,
+                    });
+                    setTokenSecret("");
+                    setTokenSaveState("saved");
+                  }}
+                  className={cn(
+                    "w-full rounded-lg border px-3 py-2 text-sm transition-colors",
+                    tokenProvider.trim() && tokenName.trim() && tokenSecret.trim()
+                      ? "border-zinc-100 bg-zinc-100 text-zinc-950"
+                      : "cursor-not-allowed border-zinc-800 bg-zinc-900 text-zinc-600",
+                  )}
+                >
+                  Save
+                </button>
               </div>
             </div>
           </div>
+          {tokenSaveState === "saved" && <p className="text-[11px] text-emerald-400">Saved</p>}
         </div>
       );
       break;
@@ -2355,7 +2391,6 @@ export function SettingsModalRenderer({
             : settingsValues[activeSection?.id ?? ""]?.[field.id] ?? field.default
         }
         sectionValues={settingsValues[activeSection?.id ?? ""] ?? {}}
-        allSettingsValues={settingsValues}
         onChange={onSettingChange}
       />
     </div>

@@ -263,10 +263,10 @@ def external_named_tokens(provider_id: str = "", *, pack_root: Path | None = Non
         key = str(meta.key or "")
         if not key.startswith(f"{_TOKEN_PREFIX}_") or meta.deleted:
             continue
-        key_provider = _provider_from_key(key)
+        stored = metadata.get(key, {})
+        key_provider = str(stored.get("provider_id") or "").strip() or _provider_from_key(key)
         if provider_id and key_provider != provider_id:
             continue
-        stored = metadata.get(key, {})
         token_id = str(stored.get("token_id") or _token_id_from_key(key, key_provider))
         items.append(
             {
@@ -287,7 +287,12 @@ def external_named_tokens(provider_id: str = "", *, pack_root: Path | None = Non
 
 
 def external_token_status(*, pack_root: Path | None = None) -> list[dict[str, Any]]:
-    providers = sorted(EXTERNAL_REQUIRED_TOKENS.keys())
+    provider_ids = set(EXTERNAL_REQUIRED_TOKENS.keys())
+    for token in external_named_tokens("", pack_root=pack_root):
+        provider_id = str(token.get("provider_id") or "").strip()
+        if provider_id:
+            provider_ids.add(provider_id)
+    providers = sorted(provider_ids)
     result: list[dict[str, Any]] = []
     for provider_id in providers:
         required = []
