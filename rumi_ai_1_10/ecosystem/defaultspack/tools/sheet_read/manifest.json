@@ -1,0 +1,50 @@
+{
+  "id": "sheet_read",
+  "description": "Read a local CSV/XLSX spreadsheet artifact.",
+  "config": {
+    "tool_id": "sheet_read",
+    "name": "Sheet Read",
+    "summary": "Read a local CSV/XLSX spreadsheet artifact.",
+    "tool_category": "spreadsheet",
+    "action_type": "read",
+    "write_action": false,
+    "requires_approval": false,
+    "risk": "low",
+    "tags": [
+      "spreadsheet",
+      "agent_os",
+      "artifact_workspace"
+    ],
+    "ui": {
+      "group_id": "spreadsheet",
+      "group_label": "Sheets",
+      "group_icon": "table",
+      "item_icon": "table",
+      "widget_kind": "tool_toggle",
+      "composer_label": "Sheet Read",
+      "composer_description": "Read a local CSV/XLSX spreadsheet artifact.",
+      "composer_icon": "table"
+    },
+    "schema": {
+      "parameters": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "limit": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "path"
+        ]
+      }
+    },
+    "execution": {
+      "type": "local",
+      "handler": "domain.tool.spreadsheet_tools:sheet_read"
+    }
+  }
+}

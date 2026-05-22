@@ -1,0 +1,54 @@
+{
+  "id": "doc_create",
+  "description": "Create a local Markdown or DOCX document artifact.",
+  "config": {
+    "tool_id": "doc_create",
+    "name": "Doc Create",
+    "summary": "Create a local Markdown or DOCX document artifact.",
+    "tool_category": "document",
+    "action_type": "write",
+    "write_action": true,
+    "requires_approval": false,
+    "risk": "medium",
+    "tags": [
+      "document",
+      "agent_os",
+      "artifact_workspace"
+    ],
+    "ui": {
+      "group_id": "document",
+      "group_label": "Documents",
+      "group_icon": "file-text",
+      "item_icon": "file-text",
+      "widget_kind": "tool_toggle",
+      "composer_label": "Doc Create",
+      "composer_description": "Create a local Markdown or DOCX document artifact.",
+      "composer_icon": "file-text"
+    },
+    "schema": {
+      "parameters": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "title": {
+            "type": "string"
+          },
+          "content": {
+            "type": "string"
+          },
+          "markdown": {
+            "type": "string"
+          },
+          "output_path": {
+            "type": "string"
+          }
+        },
+        "required": []
+      }
+    },
+    "execution": {
+      "type": "local",
+      "handler": "domain.tool.document_tools:doc_create"
+    }
+  }
+}

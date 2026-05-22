@@ -1,0 +1,53 @@
+{
+  "id": "sheet_export",
+  "description": "Export sheet artifact.",
+  "config": {
+    "tool_id": "sheet_export",
+    "name": "Sheet Export",
+    "summary": "Export sheet artifact.",
+    "tool_category": "export",
+    "action_type": "write",
+    "write_action": true,
+    "requires_approval": false,
+    "risk": "medium",
+    "tags": [
+      "export",
+      "agent_os",
+      "artifact_workspace"
+    ],
+    "ui": {
+      "group_id": "export",
+      "group_label": "Export",
+      "group_icon": "download",
+      "item_icon": "download",
+      "widget_kind": "tool_toggle",
+      "composer_label": "Sheet Export",
+      "composer_description": "Export sheet artifact.",
+      "composer_icon": "download"
+    },
+    "schema": {
+      "parameters": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "format": {
+            "type": "string"
+          },
+          "output_path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ]
+      }
+    },
+    "execution": {
+      "type": "local",
+      "handler": "domain.tool.export_tools:sheet_export"
+    }
+  }
+}

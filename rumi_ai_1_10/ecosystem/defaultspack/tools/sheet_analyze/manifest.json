@@ -1,0 +1,47 @@
+{
+  "id": "sheet_analyze",
+  "description": "Analyze row counts, missing values, and numeric stats for a sheet artifact.",
+  "config": {
+    "tool_id": "sheet_analyze",
+    "name": "Sheet Analyze",
+    "summary": "Analyze row counts, missing values, and numeric stats for a sheet artifact.",
+    "tool_category": "spreadsheet",
+    "action_type": "read",
+    "write_action": false,
+    "requires_approval": false,
+    "risk": "low",
+    "tags": [
+      "spreadsheet",
+      "agent_os",
+      "artifact_workspace"
+    ],
+    "ui": {
+      "group_id": "spreadsheet",
+      "group_label": "Sheets",
+      "group_icon": "table",
+      "item_icon": "table",
+      "widget_kind": "tool_toggle",
+      "composer_label": "Sheet Analyze",
+      "composer_description": "Analyze row counts, missing values, and numeric stats for a sheet artifact.",
+      "composer_icon": "table"
+    },
+    "schema": {
+      "parameters": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ]
+      }
+    },
+    "execution": {
+      "type": "local",
+      "handler": "domain.tool.spreadsheet_tools:sheet_analyze"
+    }
+  }
+}

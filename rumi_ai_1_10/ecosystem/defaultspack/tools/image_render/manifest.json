@@ -1,0 +1,54 @@
+{
+  "id": "image_render",
+  "description": "Render simple local image output for previews and generated visual artifacts.",
+  "config": {
+    "tool_id": "image_render",
+    "name": "Image Render",
+    "summary": "Render simple local image output for previews and generated visual artifacts.",
+    "tool_category": "preview",
+    "action_type": "write",
+    "write_action": true,
+    "requires_approval": false,
+    "risk": "medium",
+    "tags": [
+      "preview",
+      "agent_os",
+      "artifact_workspace"
+    ],
+    "ui": {
+      "group_id": "preview",
+      "group_label": "Preview",
+      "group_icon": "eye",
+      "item_icon": "eye",
+      "widget_kind": "tool_toggle",
+      "composer_label": "Image Render",
+      "composer_description": "Render simple local image output for previews and generated visual artifacts.",
+      "composer_icon": "eye"
+    },
+    "schema": {
+      "parameters": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "text": {
+            "type": "string"
+          },
+          "output_path": {
+            "type": "string"
+          },
+          "width": {
+            "type": "integer"
+          },
+          "height": {
+            "type": "integer"
+          }
+        },
+        "required": []
+      }
+    },
+    "execution": {
+      "type": "local",
+      "handler": "domain.tool.preview_tools:image_render"
+    }
+  }
+}

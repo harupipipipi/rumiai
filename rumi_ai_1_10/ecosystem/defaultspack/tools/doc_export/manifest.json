@@ -1,0 +1,53 @@
+{
+  "id": "doc_export",
+  "description": "Export a document artifact to DOCX/PDF/HTML.",
+  "config": {
+    "tool_id": "doc_export",
+    "name": "Doc Export",
+    "summary": "Export a document artifact to DOCX/PDF/HTML.",
+    "tool_category": "document",
+    "action_type": "write",
+    "write_action": true,
+    "requires_approval": false,
+    "risk": "medium",
+    "tags": [
+      "document",
+      "agent_os",
+      "artifact_workspace"
+    ],
+    "ui": {
+      "group_id": "document",
+      "group_label": "Documents",
+      "group_icon": "file-text",
+      "item_icon": "file-text",
+      "widget_kind": "tool_toggle",
+      "composer_label": "Doc Export",
+      "composer_description": "Export a document artifact to DOCX/PDF/HTML.",
+      "composer_icon": "file-text"
+    },
+    "schema": {
+      "parameters": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "format": {
+            "type": "string"
+          },
+          "output_path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ]
+      }
+    },
+    "execution": {
+      "type": "local",
+      "handler": "domain.tool.document_tools:doc_export"
+    }
+  }
+}

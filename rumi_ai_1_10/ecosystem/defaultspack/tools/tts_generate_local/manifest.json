@@ -1,0 +1,48 @@
+{
+  "id": "tts_generate_local",
+  "description": "Generate local TTS audio artifact or fallback WAV.",
+  "config": {
+    "tool_id": "tts_generate_local",
+    "name": "TTS Generate Local",
+    "summary": "Generate local TTS audio artifact or fallback WAV.",
+    "tool_category": "media",
+    "action_type": "write",
+    "write_action": true,
+    "requires_approval": false,
+    "risk": "medium",
+    "tags": [
+      "media",
+      "agent_os",
+      "artifact_workspace"
+    ],
+    "ui": {
+      "group_id": "media",
+      "group_label": "Media",
+      "group_icon": "image",
+      "item_icon": "image",
+      "widget_kind": "tool_toggle",
+      "composer_label": "TTS Generate Local",
+      "composer_description": "Generate local TTS audio artifact or fallback WAV.",
+      "composer_icon": "image"
+    },
+    "schema": {
+      "parameters": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "text": {
+            "type": "string"
+          },
+          "output_path": {
+            "type": "string"
+          }
+        },
+        "required": []
+      }
+    },
+    "execution": {
+      "type": "local",
+      "handler": "domain.tool.media_tools:tts_generate_local"
+    }
+  }
+}

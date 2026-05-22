@@ -1,0 +1,47 @@
+{
+  "id": "pdf_extract",
+  "description": "Extract text from a PDF artifact with local fallback.",
+  "config": {
+    "tool_id": "pdf_extract",
+    "name": "PDF Extract",
+    "summary": "Extract text from a PDF artifact with local fallback.",
+    "tool_category": "media",
+    "action_type": "read",
+    "write_action": false,
+    "requires_approval": false,
+    "risk": "low",
+    "tags": [
+      "media",
+      "agent_os",
+      "artifact_workspace"
+    ],
+    "ui": {
+      "group_id": "media",
+      "group_label": "Media",
+      "group_icon": "image",
+      "item_icon": "image",
+      "widget_kind": "tool_toggle",
+      "composer_label": "PDF Extract",
+      "composer_description": "Extract text from a PDF artifact with local fallback.",
+      "composer_icon": "image"
+    },
+    "schema": {
+      "parameters": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ]
+      }
+    },
+    "execution": {
+      "type": "local",
+      "handler": "domain.tool.media_tools:pdf_extract"
+    }
+  }
+}

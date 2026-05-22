@@ -1,0 +1,54 @@
+{
+  "id": "image_generate_local_or_provider",
+  "description": "Generate a local placeholder/provider image artifact.",
+  "config": {
+    "tool_id": "image_generate_local_or_provider",
+    "name": "Image Generate Local Or Provider",
+    "summary": "Generate a local placeholder/provider image artifact.",
+    "tool_category": "media",
+    "action_type": "write",
+    "write_action": true,
+    "requires_approval": false,
+    "risk": "medium",
+    "tags": [
+      "media",
+      "agent_os",
+      "artifact_workspace"
+    ],
+    "ui": {
+      "group_id": "media",
+      "group_label": "Media",
+      "group_icon": "image",
+      "item_icon": "image",
+      "widget_kind": "tool_toggle",
+      "composer_label": "Image Generate Local Or Provider",
+      "composer_description": "Generate a local placeholder/provider image artifact.",
+      "composer_icon": "image"
+    },
+    "schema": {
+      "parameters": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "prompt": {
+            "type": "string"
+          },
+          "output_path": {
+            "type": "string"
+          },
+          "width": {
+            "type": "integer"
+          },
+          "height": {
+            "type": "integer"
+          }
+        },
+        "required": []
+      }
+    },
+    "execution": {
+      "type": "local",
+      "handler": "domain.tool.media_tools:image_generate_local_or_provider"
+    }
+  }
+}
