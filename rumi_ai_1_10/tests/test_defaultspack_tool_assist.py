@@ -85,7 +85,39 @@ def test_tool_recommender_uses_skill_metadata():
     ]
 
 
-def test_run_request_auto_tool_assist_recommends_when_tools_are_not_selected(monkeypatch):
+def test_effective_tool_assist_defaults_to_all_and_maps_legacy_auto_to_vector():
+    from domain.chat.tool_recommender import effective_tool_assist_mode
+
+    assert effective_tool_assist_mode({}) == "all"
+    assert effective_tool_assist_mode({"tools": {"tool_assist_mode": "auto"}}) == "vector"
+    assert effective_tool_assist_mode({"tools": {"tool_assist_mode": "vector"}}) == "vector"
+
+
+def test_run_request_all_tool_assist_exposes_every_tool_when_tools_are_not_selected(monkeypatch):
+    from domain.chat import run_request
+
+    fake_tools = [
+        {"tool_id": "web_search", "summary": "Search web pages."},
+        {"tool_id": "calculator", "summary": "Compute arithmetic."},
+    ]
+
+    class FakeRegistry:
+        def list_tools(self):
+            return list(fake_tools)
+
+        def get(self, tool_id):
+            return next((tool for tool in fake_tools if tool["tool_id"] == tool_id), None)
+
+    monkeypatch.setattr(run_request, "ToolRegistry", lambda: FakeRegistry())
+    monkeypatch.setattr(run_request, "effective_tool_assist_mode", lambda **_kwargs: "all")
+
+    resolved, unknown = run_request._resolve_selected_tools(None, user_text="anything", context={})
+
+    assert unknown == []
+    assert [tool["tool_id"] for tool in resolved] == ["web_search", "calculator"]
+
+
+def test_run_request_vector_tool_assist_recommends_when_tools_are_not_selected(monkeypatch):
     from domain.chat import run_request
 
     fake_tools = [
@@ -111,17 +143,19 @@ def test_run_request_auto_tool_assist_recommends_when_tools_are_not_selected(mon
             return next((tool for tool in fake_tools if tool["tool_id"] == tool_id), None)
 
     monkeypatch.setattr(run_request, "ToolRegistry", lambda: FakeRegistry())
-    monkeypatch.setattr(run_request, "effective_tool_assist_mode", lambda **_kwargs: "auto")
+    monkeypatch.setattr(run_request, "effective_tool_assist_mode", lambda **_kwargs: "vector")
     monkeypatch.setattr(run_request, "tool_assist_limit", lambda **_kwargs: 4)
 
+    context = {}
     resolved, unknown = run_request._resolve_selected_tools(
         None,
         user_text="今日のweatherをwebで検索して",
-        context={},
+        context=context,
     )
 
     assert unknown == []
     assert [tool["tool_id"] for tool in resolved] == ["web_search"]
+    assert context["tool_assist"]["mode"] == "vector"
 
 
 def test_run_request_tool_assist_off_keeps_unselected_tools_empty(monkeypatch):

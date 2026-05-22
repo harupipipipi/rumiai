@@ -8,8 +8,10 @@ from pathlib import Path
 from typing import Any
 
 
-TOOL_ASSIST_DEFAULT_MODE = "auto"
-TOOL_ASSIST_MODES = {"auto", "all", "off"}
+TOOL_ASSIST_DEFAULT_MODE = "all"
+TOOL_ASSIST_VECTOR_MODE = "vector"
+TOOL_ASSIST_MODES = {TOOL_ASSIST_DEFAULT_MODE, TOOL_ASSIST_VECTOR_MODE, "off"}
+TOOL_ASSIST_LEGACY_MODE_ALIASES = {"auto": TOOL_ASSIST_VECTOR_MODE}
 DEFAULT_TOOL_RECOMMENDATION_LIMIT = 8
 DEFAULT_TOOL_RECOMMENDATION_THRESHOLD = 0.08
 
@@ -20,8 +22,8 @@ _JAPANESE_RE = re.compile(r"[\u3040-\u30ff\u3400-\u9fff]")
 def effective_tool_assist_mode(settings: dict[str, Any] | None = None, *, pack_root: Path | None = None) -> str:
     """Return the selected tool-assist mode.
 
-    The setting intentionally defaults to auto so a blank composer does not
-    silently expose every tool to the model.
+    The setting defaults to exposing every registered tool. Vector mode keeps
+    the older metadata-matching recommendation behavior as an explicit option.
     """
 
     values = settings if isinstance(settings, dict) else _read_frontend_settings(pack_root)
@@ -30,6 +32,7 @@ def effective_tool_assist_mode(settings: dict[str, Any] | None = None, *, pack_r
     if tools.get("tool_assist_enabled") is False:
         return "off"
     mode = str(tools.get("tool_assist_mode") or TOOL_ASSIST_DEFAULT_MODE).strip().lower()
+    mode = TOOL_ASSIST_LEGACY_MODE_ALIASES.get(mode, mode)
     return mode if mode in TOOL_ASSIST_MODES else TOOL_ASSIST_DEFAULT_MODE
 
 

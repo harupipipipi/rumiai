@@ -68,8 +68,8 @@ test("executeUiCommand preserves model candidate results", async () => {
   }
 });
 
-test("selected tools are not kept after send unless settings opt in", () => {
-  assert.equal(keepSelectedToolsAfterSend({}), false);
+test("selected tools are kept after send unless settings opt out", () => {
+  assert.equal(keepSelectedToolsAfterSend({}), true);
   assert.equal(keepSelectedToolsAfterSend({ tools: { keep_selected_tools_after_send: "false" } }), false);
   assert.equal(keepSelectedToolsAfterSend({ tools: { keep_selected_tools_after_send: true } }), true);
 });

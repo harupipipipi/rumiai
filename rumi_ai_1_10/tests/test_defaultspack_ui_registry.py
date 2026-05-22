@@ -134,7 +134,9 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         tools_section = next(section for section in catalog["settings"]["sections"] if section["id"] == "tools")
         tools_field_ids = {field["id"] for field in tools_section["fields"]}
         self.assertIn("tool_assist_mode", tools_field_ids)
-        self.assertEqual(catalog["settings"]["values"]["tools"]["tool_assist_mode"], "auto")
+        tool_assist_field = next(field for field in tools_section["fields"] if field["id"] == "tool_assist_mode")
+        self.assertEqual(catalog["settings"]["values"]["tools"]["tool_assist_mode"], "all")
+        self.assertIn("vector", {option["value"] for option in tool_assist_field["options"]})
         general_section = next(section for section in catalog["settings"]["sections"] if section["id"] == "general")
         general_field_ids = {field["id"] for field in general_section["fields"]}
         self.assertIn("language", general_field_ids)
@@ -609,6 +611,29 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         self.assertEqual(updated["external_output"]["output_template_id"], "discord.output.bot_channel")
         self.assertEqual(updated["external_output"]["output_profile_id"], "discord.bot_channel")
 
+    def test_external_token_status_keeps_custom_provider_rows(self):
+        from domain.external.token_store import external_token_status, set_external_token
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pack_root = Path(tmpdir)
+            set_external_token(
+                "xiaomi-token-plan-sgp",
+                "test-token",
+                token_id="main",
+                name="main",
+                kind="token",
+                pack_root=pack_root,
+            )
+
+            rows = external_token_status(pack_root=pack_root)
+
+        provider_ids = {row["provider_id"] for row in rows}
+        self.assertIn("line", provider_ids)
+        self.assertIn("xiaomi-token-plan-sgp", provider_ids)
+        custom = next(row for row in rows if row["provider_id"] == "xiaomi-token-plan-sgp")
+        self.assertEqual(custom["tokens"][0]["provider_id"], "xiaomi-token-plan-sgp")
+        self.assertEqual(custom["tokens"][0]["token_id"], "main")
+
     def test_update_settings_persists_sidebar_user_data(self):
         from domain.frontend.registry import FrontendRegistry
 
@@ -688,7 +713,7 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         self.assertTrue(values["debug"]["ai_request_logging"])
         self.assertEqual(values["debug"]["custom_debug_flag"], "keep-me")
         self.assertEqual(values["tools"]["default_target"], "current_browser")
-        self.assertFalse(values["tools"]["keep_selected_tools_after_send"])
+        self.assertTrue(values["tools"]["keep_selected_tools_after_send"])
 
     def test_settings_migrates_model_api_routes_from_apis_to_models(self):
         from domain.frontend.registry import FrontendRegistry

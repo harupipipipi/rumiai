@@ -11,8 +11,8 @@ test("settings search indexes field id label help and options", () => {
     type: "select",
     help: "Recommend relevant tools.",
     options: [
-      { value: "auto", label: "Auto" },
       { value: "all", label: "All tools" },
+      { value: "vector", label: "Vector" },
     ],
   };
 

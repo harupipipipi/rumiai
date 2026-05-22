@@ -72,9 +72,20 @@ export const MEMO_PREVIEW_ID = '__memo__';
 function matchesPreviewId(item: ToolPreviewItem, previewId?: string | null) {
   return Boolean(previewId && (item.id === previewId || item.toolStepId === previewId));
 }
+export function isCanvasPreviewItemRenderable(item: ToolPreviewItem): boolean {
+  const data = item.data;
+  if (
+    data.type === 'code'
+    && String(data.content ?? data.diff ?? '').trim().startsWith('Tool planned or referenced:')
+  ) {
+    return false;
+  }
+  return true;
+}
+
 
 export function hasCanvasItems(previews: ToolPreviewItem[], memo?: string | null) {
-  return previews.length > 0 || Boolean(memo?.trim());
+  return previews.some(isCanvasPreviewItemRenderable) || Boolean(memo?.trim());
 }
 
 export function buildToolPreviewDisplayItems(
@@ -96,7 +107,8 @@ export function buildToolPreviewDisplayItems(
         },
       }
     : null;
-  const items = memoPreview ? [memoPreview, ...previews] : [...previews];
+  const renderablePreviews = previews.filter(isCanvasPreviewItemRenderable);
+  const items = memoPreview ? [memoPreview, ...renderablePreviews] : [...renderablePreviews];
   if (!activePreviewId) return items;
 
   const active = items.find((item) => matchesPreviewId(item, activePreviewId));
@@ -105,7 +117,7 @@ export function buildToolPreviewDisplayItems(
 }
 
 export function buildToolPreviewTimelineItems(items: ToolPreviewItem[]): ToolPreviewItem[] {
-  return [...items].sort((left, right) => {
+  return items.filter(isCanvasPreviewItemRenderable).sort((left, right) => {
     const leftTime = Number.isFinite(left.timestamp) ? left.timestamp : 0;
     const rightTime = Number.isFinite(right.timestamp) ? right.timestamp : 0;
     return leftTime - rightTime || left.id.localeCompare(right.id);
