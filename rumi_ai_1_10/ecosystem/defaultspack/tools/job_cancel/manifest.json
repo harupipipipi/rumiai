@@ -1,0 +1,47 @@
+{
+  "id": "job_cancel",
+  "description": "Cancel a local job record.",
+  "config": {
+    "tool_id": "job_cancel",
+    "name": "Job Cancel",
+    "summary": "Cancel a local job record.",
+    "tool_category": "job",
+    "action_type": "write",
+    "write_action": true,
+    "requires_approval": true,
+    "risk": "medium",
+    "tags": [
+      "job",
+      "agent_os",
+      "artifact_workspace"
+    ],
+    "ui": {
+      "group_id": "job",
+      "group_label": "Jobs",
+      "group_icon": "activity",
+      "item_icon": "activity",
+      "widget_kind": "tool_toggle",
+      "composer_label": "Job Cancel",
+      "composer_description": "Cancel a local job record.",
+      "composer_icon": "activity"
+    },
+    "schema": {
+      "parameters": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "job_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "job_id"
+        ]
+      }
+    },
+    "execution": {
+      "type": "local",
+      "handler": "domain.tool.job_tools:job_cancel"
+    }
+  }
+}

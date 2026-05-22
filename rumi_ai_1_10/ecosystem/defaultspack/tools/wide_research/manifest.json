@@ -1,0 +1,65 @@
+{
+  "id": "wide_research",
+  "description": "Create a local wide-research report artifact from local/source inputs.",
+  "config": {
+    "tool_id": "wide_research",
+    "name": "Wide Research",
+    "summary": "Create a local wide-research report artifact from local/source inputs.",
+    "tool_category": "research",
+    "action_type": "network",
+    "write_action": true,
+    "requires_approval": false,
+    "risk": "medium",
+    "tags": [
+      "research",
+      "agent_os",
+      "artifact_workspace"
+    ],
+    "ui": {
+      "group_id": "research",
+      "group_label": "Research",
+      "group_icon": "search",
+      "item_icon": "search",
+      "widget_kind": "tool_toggle",
+      "composer_label": "Wide Research",
+      "composer_description": "Create a local wide-research report artifact from local/source inputs.",
+      "composer_icon": "search"
+    },
+    "schema": {
+      "parameters": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "query": {
+            "type": "string"
+          },
+          "depth": {
+            "type": "string"
+          },
+          "source_types": {
+            "type": "array"
+          },
+          "max_sources": {
+            "type": "integer"
+          },
+          "output_path": {
+            "type": "string"
+          },
+          "export_formats": {
+            "type": "array"
+          },
+          "local_sources": {
+            "type": "array"
+          }
+        },
+        "required": [
+          "query"
+        ]
+      }
+    },
+    "execution": {
+      "type": "local",
+      "handler": "domain.tool.research_tools:wide_research"
+    }
+  }
+}

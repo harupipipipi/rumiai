@@ -1,0 +1,57 @@
+{
+  "id": "job_create",
+  "description": "Create and optionally run a local artifact-backed job record.",
+  "config": {
+    "tool_id": "job_create",
+    "name": "Job Create",
+    "summary": "Create and optionally run a local artifact-backed job record.",
+    "tool_category": "job",
+    "action_type": "write",
+    "write_action": true,
+    "requires_approval": false,
+    "risk": "medium",
+    "tags": [
+      "job",
+      "agent_os",
+      "artifact_workspace"
+    ],
+    "ui": {
+      "group_id": "job",
+      "group_label": "Jobs",
+      "group_icon": "activity",
+      "item_icon": "activity",
+      "widget_kind": "tool_toggle",
+      "composer_label": "Job Create",
+      "composer_description": "Create and optionally run a local artifact-backed job record.",
+      "composer_icon": "activity"
+    },
+    "schema": {
+      "parameters": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "kind": {
+            "type": "string"
+          },
+          "job_id": {
+            "type": "string"
+          },
+          "input": {
+            "type": "object"
+          },
+          "query": {
+            "type": "string"
+          },
+          "run_immediately": {
+            "type": "boolean"
+          }
+        },
+        "required": []
+      }
+    },
+    "execution": {
+      "type": "local",
+      "handler": "domain.tool.job_tools:job_create"
+    }
+  }
+}
