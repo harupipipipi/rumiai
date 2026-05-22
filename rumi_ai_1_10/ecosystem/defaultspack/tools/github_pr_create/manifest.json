@@ -1,0 +1,56 @@
+{
+  "id": "github_pr_create",
+  "description": "Create a GitHub pull request via gh CLI when explicitly executed.",
+  "config": {
+    "tool_id": "github_pr_create",
+    "name": "GitHub PR Create",
+    "summary": "Create a GitHub pull request via gh CLI when explicitly executed.",
+    "tool_category": "connector",
+    "action_type": "network",
+    "write_action": true,
+    "requires_approval": true,
+    "risk": "high",
+    "tags": [
+      "connector",
+      "agent_os",
+      "artifact_workspace"
+    ],
+    "ui": {
+      "group_id": "connectors",
+      "group_label": "Connectors",
+      "group_icon": "plug",
+      "item_icon": "plug",
+      "widget_kind": "tool_toggle",
+      "composer_label": "GitHub PR Create",
+      "composer_description": "Create a GitHub pull request via gh CLI when explicitly executed.",
+      "composer_icon": "plug"
+    },
+    "schema": {
+      "parameters": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "title": {
+            "type": "string"
+          },
+          "body": {
+            "type": "string"
+          },
+          "draft": {
+            "type": "boolean"
+          },
+          "execute": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "title"
+        ]
+      }
+    },
+    "execution": {
+      "type": "local",
+      "handler": "domain.tool.external_connector_tools:github_pr_create"
+    }
+  }
+}

@@ -1,0 +1,55 @@
+{
+  "id": "gmail_draft",
+  "description": "Prepare Gmail draft request.",
+  "config": {
+    "tool_id": "gmail_draft",
+    "name": "Gmail Draft",
+    "summary": "Prepare Gmail draft request.",
+    "tool_category": "connector",
+    "action_type": "network",
+    "write_action": true,
+    "requires_approval": true,
+    "risk": "high",
+    "tags": [
+      "connector",
+      "agent_os",
+      "artifact_workspace"
+    ],
+    "ui": {
+      "group_id": "connectors",
+      "group_label": "Connectors",
+      "group_icon": "plug",
+      "item_icon": "plug",
+      "widget_kind": "tool_toggle",
+      "composer_label": "Gmail Draft",
+      "composer_description": "Prepare Gmail draft request.",
+      "composer_icon": "plug"
+    },
+    "schema": {
+      "parameters": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "to": {
+            "type": "string"
+          },
+          "subject": {
+            "type": "string"
+          },
+          "body": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "to",
+          "subject",
+          "body"
+        ]
+      }
+    },
+    "execution": {
+      "type": "local",
+      "handler": "domain.tool.external_connector_tools:gmail_draft"
+    }
+  }
+}

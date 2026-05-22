@@ -564,7 +564,7 @@ class ToolExecutor:
                     "tool_name": tool_def.get("name", tool_def.get("tool_id", "tool")),
                     "approval_required": True,
                     "risk_level": "high" if _is_shell_or_git(tool_def) else "medium",
-                    "arguments": next_arguments,
+                    "arguments": _redact_sensitive_arguments(next_arguments),
                 },
             }
 
@@ -1149,9 +1149,32 @@ def _approval_required_tool_response(tool_def, arguments):
             "tool_name": tool_def.get("name", tool_def.get("tool_id", "tool")),
             "approval_required": True,
             "risk_level": "high" if _is_high_risk_approval(tool_def) else "medium",
-            "arguments": dict(arguments or {}),
+            "arguments": _redact_sensitive_arguments(arguments),
         },
     }
+
+
+def _redact_sensitive_arguments(value):
+    if isinstance(value, dict):
+        redacted = {}
+        for key, item in value.items():
+            key_text = str(key)
+            if _is_sensitive_argument_key(key_text):
+                redacted[key_text] = "[redacted]"
+            else:
+                redacted[key_text] = _redact_sensitive_arguments(item)
+        return redacted
+    if isinstance(value, list):
+        return [_redact_sensitive_arguments(item) for item in value]
+    return value
+
+
+def _is_sensitive_argument_key(key):
+    lowered = str(key or "").lower()
+    return any(
+        marker in lowered
+        for marker in ("api_key", "authorization", "bearer", "credential", "password", "secret", "token")
+    )
 
 
 def _is_high_risk_approval(tool_def):
