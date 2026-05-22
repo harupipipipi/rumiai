@@ -1,0 +1,47 @@
+{
+  "id": "artifact_preview",
+  "description": "Preview artifact text, image, pdf, html, or directory metadata.",
+  "config": {
+    "tool_id": "artifact_preview",
+    "name": "Artifact Preview",
+    "summary": "Preview artifact text, image, pdf, html, or directory metadata.",
+    "tool_category": "preview",
+    "action_type": "read",
+    "write_action": false,
+    "requires_approval": false,
+    "risk": "low",
+    "tags": [
+      "preview",
+      "agent_os",
+      "artifact_workspace"
+    ],
+    "ui": {
+      "group_id": "preview",
+      "group_label": "Preview",
+      "group_icon": "eye",
+      "item_icon": "eye",
+      "widget_kind": "tool_toggle",
+      "composer_label": "Artifact Preview",
+      "composer_description": "Preview artifact text, image, pdf, html, or directory metadata.",
+      "composer_icon": "eye"
+    },
+    "schema": {
+      "parameters": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ]
+      }
+    },
+    "execution": {
+      "type": "local",
+      "handler": "domain.tool.preview_tools:artifact_preview"
+    }
+  }
+}

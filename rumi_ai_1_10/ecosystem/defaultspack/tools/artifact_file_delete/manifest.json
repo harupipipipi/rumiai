@@ -1,0 +1,50 @@
+{
+  "id": "artifact_file_delete",
+  "description": "Delete a file inside the artifact workspace after approval.",
+  "config": {
+    "tool_id": "artifact_file_delete",
+    "name": "Artifact File Delete",
+    "summary": "Delete a file inside the artifact workspace after approval.",
+    "tool_category": "artifact",
+    "action_type": "write",
+    "write_action": true,
+    "requires_approval": true,
+    "risk": "high",
+    "tags": [
+      "artifact",
+      "agent_os",
+      "artifact_workspace"
+    ],
+    "ui": {
+      "group_id": "artifact",
+      "group_label": "Artifacts",
+      "group_icon": "folder",
+      "item_icon": "folder",
+      "widget_kind": "tool_toggle",
+      "composer_label": "Artifact File Delete",
+      "composer_description": "Delete a file inside the artifact workspace after approval.",
+      "composer_icon": "folder"
+    },
+    "schema": {
+      "parameters": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "checkpoint": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "path"
+        ]
+      }
+    },
+    "execution": {
+      "type": "local",
+      "handler": "domain.tool.artifact_tools:artifact_file_delete"
+    }
+  }
+}
