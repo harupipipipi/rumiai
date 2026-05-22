@@ -24,6 +24,11 @@
   --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
   --font-serif: 'Noto Serif JP', serif;
   --font-mono: 'SF Mono', 'Fira Code', 'Fira Mono', 'Roboto Mono', monospace;
+  --font-display: 'Cormorant Garamond', 'Noto Serif JP', 'Inter', serif;
+
+  --color-cosmos-gold: var(--cosmos-gold, #f5d27a);
+  --color-cosmos-blue: var(--cosmos-blue, #7c93ff);
+  --color-cosmos-magenta: var(--cosmos-magenta, #c66bff);
 }
 
 @layer base {
@@ -320,6 +325,130 @@
     --flow-port-border: #444746;
     --flow-port-handle: #617cf0;
     --flow-port-handle-border: #333538;
+  }
+
+  /* ----------------------------------
+     Cosmos (Galaxy / Stars) — flagship theme
+     ---------------------------------- */
+  :root.theme-cosmos {
+    /* Foundation — defaults to deep-space dark */
+    --bg-main: #04060f;
+    --bg-sidebar: #070a18;
+    --bg-header: rgba(8, 12, 28, 0.55);
+    --bg-card: rgba(20, 25, 52, 0.55);
+    --bg-hover: rgba(255, 255, 255, 0.05);
+    --text-main: #f3f1ff;
+    --text-muted: #a3a8c6;
+    --border: rgba(255, 255, 255, 0.08);
+    --accent: #f5d27a;
+    --accent-fg: #1a1230;
+    --destructive: #ff6b81;
+    --destructive-fg: #1a1230;
+    --success: #5be7c4;
+    --warning: #ffd166;
+    --radius: 0.875rem;
+
+    /* Cosmos tokens */
+    --cosmos-deep: #04060f;
+    --cosmos-mid: #0c1230;
+    --cosmos-pale: #1a1d3d;
+    --cosmos-gold: #f5d27a;
+    --cosmos-blue: #7c93ff;
+    --cosmos-magenta: #c66bff;
+    --cosmos-cyan: #4dd6f5;
+    --cosmos-glow-gold: rgba(245, 210, 122, 0.32);
+    --cosmos-glow-blue: rgba(124, 147, 255, 0.34);
+    --cosmos-glow-magenta: rgba(198, 107, 255, 0.28);
+    --cosmos-glow-cyan: rgba(77, 214, 245, 0.22);
+    --cosmos-overlay: rgba(8, 12, 28, 0.65);
+    --star-color-1: #fff8d8;
+    --star-color-2: #c8d8ff;
+    --star-color-3: #ffd9b3;
+    --star-color-4: #ffaae6;
+
+    /* Cosmic shadows replace neutral shadows */
+    --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.45);
+    --shadow-md:
+      0 4px 16px -4px rgba(124, 147, 255, 0.18),
+      0 2px 6px -2px rgba(0, 0, 0, 0.5);
+    --shadow-lg:
+      0 24px 48px -16px rgba(124, 147, 255, 0.24),
+      0 12px 22px -8px rgba(0, 0, 0, 0.55);
+    --ring-color: color-mix(in srgb, var(--cosmos-gold) 55%, transparent);
+
+    /* Flow tokens — cosmic remap */
+    --flow-canvas-top: rgba(28, 32, 80, 0.7);
+    --flow-canvas-bottom: rgba(8, 10, 28, 0.92);
+    --flow-grid-color: rgba(124, 147, 255, 0.18);
+    --flow-edge: rgba(245, 210, 122, 0.85);
+    --flow-edge-selected: #c66bff;
+    --flow-node-fill: rgba(20, 25, 52, 0.78);
+    --flow-node-border: rgba(124, 147, 255, 0.45);
+    --flow-node-shadow: rgba(0, 0, 0, 0.6);
+    --flow-node-cap: linear-gradient(120deg, #f5d27a 0%, #c66bff 100%);
+    --flow-node-cap-text: #1a1230;
+    --flow-node-text: #f3f1ff;
+    --flow-node-muted: rgba(243, 241, 255, 0.65);
+    --flow-port-fill: rgba(20, 25, 52, 0.85);
+    --flow-port-border: rgba(245, 210, 122, 0.45);
+    --flow-port-handle: #f5d27a;
+    --flow-port-handle-border: rgba(255, 248, 216, 0.85);
+    --flow-node-selected: #c66bff;
+    --flow-node-running: #4dd6f5;
+    --flow-node-success: #5be7c4;
+    --flow-node-error: #ff6b81;
+  }
+
+  /* Light variant: "Dawn Nebula" */
+  :root.theme-cosmos:not(.dark) {
+    --bg-main: #f4ecff;
+    --bg-sidebar: #ece2ff;
+    --bg-header: rgba(255, 250, 248, 0.7);
+    --bg-card: rgba(255, 252, 248, 0.78);
+    --bg-hover: rgba(63, 30, 110, 0.06);
+    --text-main: #2b1547;
+    --text-muted: #6c5b85;
+    --border: rgba(63, 30, 110, 0.14);
+    --accent: #b8862f;
+    --accent-fg: #fff8e6;
+    --destructive: #cf3a55;
+    --destructive-fg: #fff;
+    --success: #2f8a6f;
+    --warning: #b56b00;
+
+    --cosmos-deep: #f4ecff;
+    --cosmos-mid: #e6d4fa;
+    --cosmos-pale: #fff5e8;
+    --cosmos-gold: #b8862f;
+    --cosmos-blue: #5266c9;
+    --cosmos-magenta: #8e3fc1;
+    --cosmos-cyan: #2c8aab;
+    --cosmos-glow-gold: rgba(184, 134, 47, 0.16);
+    --cosmos-glow-blue: rgba(82, 102, 201, 0.18);
+    --cosmos-glow-magenta: rgba(142, 63, 193, 0.16);
+    --cosmos-glow-cyan: rgba(44, 138, 171, 0.14);
+    --cosmos-overlay: rgba(255, 250, 248, 0.55);
+    --star-color-1: #b88e3a;
+    --star-color-2: #5266c9;
+    --star-color-3: #c46aa6;
+    --star-color-4: #2c8aab;
+
+    --flow-canvas-top: rgba(220, 200, 255, 0.55);
+    --flow-canvas-bottom: rgba(255, 244, 236, 0.92);
+    --flow-grid-color: rgba(82, 102, 201, 0.2);
+    --flow-edge: #b8862f;
+    --flow-edge-selected: #8e3fc1;
+    --flow-node-fill: rgba(255, 250, 248, 0.92);
+    --flow-node-border: rgba(82, 102, 201, 0.4);
+    --flow-node-shadow: rgba(82, 102, 201, 0.18);
+    --flow-node-cap: linear-gradient(120deg, #b8862f 0%, #8e3fc1 100%);
+    --flow-node-cap-text: #fff8e6;
+    --flow-node-text: #2b1547;
+    --flow-node-muted: rgba(43, 21, 71, 0.62);
+    --flow-port-fill: rgba(255, 250, 248, 0.92);
+    --flow-port-border: rgba(184, 134, 47, 0.4);
+    --flow-port-handle: #b8862f;
+    --flow-port-handle-border: #fff5e8;
   }
 
   /* ----------------------------------
@@ -668,4 +797,305 @@
   .page-enter {
     animation: fadeInUp var(--transition-slow) ease-out;
   }
+}
+
+
+/* ============================================================
+   Cosmos visual layer — only applies when html.theme-cosmos
+   ============================================================ */
+@layer components {
+  /* Body background gradient for the cosmos theme. PNG layers are
+     painted by <CosmosBackground /> on top of this so it works even
+     when the user has not yet placed image assets. */
+  :root.theme-cosmos body {
+    background:
+      radial-gradient(ellipse at 12% 8%, var(--cosmos-glow-blue) 0%, transparent 55%),
+      radial-gradient(ellipse at 88% 18%, var(--cosmos-glow-magenta) 0%, transparent 60%),
+      radial-gradient(ellipse at 55% 95%, var(--cosmos-glow-gold) 0%, transparent 65%),
+      radial-gradient(ellipse at 30% 65%, var(--cosmos-glow-cyan) 0%, transparent 70%),
+      var(--cosmos-deep);
+    background-attachment: fixed;
+    background-repeat: no-repeat;
+  }
+
+  /* High-contrast body text in the dark cosmos theme */
+  :root.theme-cosmos.dark body {
+    background-blend-mode: screen, screen, screen, screen, normal;
+  }
+
+  /* Glass surface used on cards, headers, sidebars */
+  .cosmos-glass {
+    position: relative;
+    background:
+      linear-gradient(145deg,
+        color-mix(in srgb, var(--bg-card) 85%, transparent) 0%,
+        color-mix(in srgb, var(--bg-card) 65%, transparent) 100%);
+    backdrop-filter: blur(18px) saturate(125%);
+    -webkit-backdrop-filter: blur(18px) saturate(125%);
+    border: 1px solid color-mix(in srgb, var(--cosmos-gold, #f5d27a) 18%, var(--border));
+    box-shadow:
+      0 1px 0 rgba(255, 255, 255, 0.06) inset,
+      0 -1px 0 rgba(0, 0, 0, 0.25) inset,
+      var(--shadow-md);
+  }
+
+  .cosmos-glass-strong {
+    position: relative;
+    background:
+      linear-gradient(155deg,
+        color-mix(in srgb, var(--bg-card) 95%, transparent) 0%,
+        color-mix(in srgb, var(--bg-sidebar) 88%, transparent) 100%);
+    backdrop-filter: blur(28px) saturate(140%);
+    -webkit-backdrop-filter: blur(28px) saturate(140%);
+    border: 1px solid color-mix(in srgb, var(--cosmos-gold, #f5d27a) 22%, var(--border));
+    box-shadow:
+      0 1px 0 rgba(255, 255, 255, 0.08) inset,
+      var(--shadow-lg);
+  }
+
+  /* Outer glow halos */
+  .cosmos-halo-gold {
+    box-shadow:
+      0 0 0 1px color-mix(in srgb, var(--cosmos-gold, #f5d27a) 35%, transparent),
+      0 0 24px 0 color-mix(in srgb, var(--cosmos-gold, #f5d27a) 32%, transparent);
+  }
+  .cosmos-halo-blue {
+    box-shadow:
+      0 0 0 1px color-mix(in srgb, var(--cosmos-blue, #7c93ff) 35%, transparent),
+      0 0 24px 0 color-mix(in srgb, var(--cosmos-blue, #7c93ff) 30%, transparent);
+  }
+  .cosmos-halo-magenta {
+    box-shadow:
+      0 0 0 1px color-mix(in srgb, var(--cosmos-magenta, #c66bff) 35%, transparent),
+      0 0 28px 0 color-mix(in srgb, var(--cosmos-magenta, #c66bff) 30%, transparent);
+  }
+
+  /* Gradient text used for hero / brand */
+  .cosmos-text-gradient {
+    background: linear-gradient(135deg,
+      var(--cosmos-gold, #f5d27a) 0%,
+      var(--cosmos-magenta, #c66bff) 55%,
+      var(--cosmos-blue, #7c93ff) 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    -webkit-text-fill-color: transparent;
+  }
+
+  /* Hairline cosmic divider with twin glow points */
+  .cosmos-divider {
+    position: relative;
+    height: 1px;
+    background: linear-gradient(90deg,
+      transparent,
+      color-mix(in srgb, var(--cosmos-gold, #f5d27a) 55%, transparent) 50%,
+      transparent);
+  }
+
+  /* Star button — primary CTA in cosmos */
+  .cosmos-btn-primary {
+    position: relative;
+    isolation: isolate;
+    overflow: hidden;
+    background: linear-gradient(135deg, var(--cosmos-gold, #f5d27a) 0%, #f0b34c 100%);
+    color: var(--accent-fg);
+    border: 1px solid color-mix(in srgb, var(--cosmos-gold, #f5d27a) 45%, white);
+    box-shadow:
+      0 0 0 1px rgba(255, 230, 175, 0.3) inset,
+      0 6px 20px -6px color-mix(in srgb, var(--cosmos-gold, #f5d27a) 60%, transparent);
+    transition: transform 200ms ease, box-shadow 240ms ease;
+  }
+  .cosmos-btn-primary:hover {
+    transform: translateY(-1px);
+    box-shadow:
+      0 0 0 1px rgba(255, 230, 175, 0.45) inset,
+      0 10px 30px -8px color-mix(in srgb, var(--cosmos-gold, #f5d27a) 70%, transparent);
+  }
+  .cosmos-btn-primary:active {
+    transform: translateY(0);
+  }
+  .cosmos-btn-primary::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(120deg, transparent 35%, rgba(255, 255, 255, 0.5) 50%, transparent 65%);
+    transform: translateX(-120%);
+    transition: transform 700ms ease;
+    pointer-events: none;
+    z-index: 1;
+  }
+  .cosmos-btn-primary:hover::after { transform: translateX(120%); }
+
+  /* Active nav indicator: glowing star */
+  .cosmos-nav-star {
+    position: absolute;
+    left: 0.4rem;
+    top: 50%;
+    width: 6px;
+    height: 6px;
+    border-radius: 999px;
+    background: var(--cosmos-gold, #f5d27a);
+    box-shadow: 0 0 10px 2px var(--cosmos-glow-gold, rgba(245, 210, 122, 0.6));
+    transform: translateY(-50%);
+  }
+
+  /* Constellation map root */
+  .cosmos-canvas {
+    border-radius: var(--radius-lg);
+    background:
+      radial-gradient(ellipse at 30% 30%, var(--cosmos-glow-blue, rgba(124, 147, 255, 0.3)), transparent 65%),
+      radial-gradient(ellipse at 70% 70%, var(--cosmos-glow-magenta, rgba(198, 107, 255, 0.25)), transparent 70%),
+      color-mix(in srgb, var(--cosmos-deep, #04060f) 92%, transparent);
+    border: 1px solid color-mix(in srgb, var(--cosmos-gold, #f5d27a) 18%, var(--border));
+  }
+}
+
+/* ----------------------------------
+   Cosmos animations
+   ---------------------------------- */
+@keyframes cosmos-twinkle {
+  0%, 100% { opacity: 0.85; transform: scale(1); }
+  50%      { opacity: 0.35; transform: scale(0.85); }
+}
+
+@keyframes cosmos-twinkle-slow {
+  0%, 100% { opacity: 0.7; }
+  50%      { opacity: 0.25; }
+}
+
+@keyframes cosmos-orbit {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+@keyframes cosmos-orbit-reverse {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(-360deg); }
+}
+
+@keyframes cosmos-comet {
+  0%   { transform: translate3d(-20%, -20%, 0) rotate(20deg); opacity: 0; }
+  10%  { opacity: 1; }
+  100% { transform: translate3d(120%, 60%, 0) rotate(20deg); opacity: 0; }
+}
+
+@keyframes cosmos-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 var(--cosmos-glow-gold, rgba(245, 210, 122, 0.55)); }
+  50%      { box-shadow: 0 0 28px 12px transparent; }
+}
+
+@keyframes cosmos-breathe {
+  0%, 100% { transform: scale(1); opacity: 0.55; }
+  50%      { transform: scale(1.08); opacity: 0.85; }
+}
+
+@keyframes cosmos-fade-down {
+  from { opacity: 0; transform: translateY(-8px) scale(0.99); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes cosmos-fade-up {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes cosmos-zoom-in {
+  from { opacity: 0; transform: scale(0.94); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+@keyframes cosmos-shine {
+  0%   { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.cosmos-anim-fade-up { animation: cosmos-fade-up 480ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+.cosmos-anim-fade-down { animation: cosmos-fade-down 360ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+.cosmos-anim-zoom-in { animation: cosmos-zoom-in 360ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+.cosmos-anim-orbit { animation: cosmos-orbit 80s linear infinite; }
+.cosmos-anim-orbit-fast { animation: cosmos-orbit 22s linear infinite; }
+.cosmos-anim-orbit-reverse { animation: cosmos-orbit-reverse 50s linear infinite; }
+.cosmos-anim-twinkle { animation: cosmos-twinkle 3.4s ease-in-out infinite; }
+.cosmos-anim-pulse { animation: cosmos-pulse 2.6s ease-in-out infinite; }
+
+/* Pure-CSS star fields — used as a fallback or augmenter when PNGs aren't placed yet */
+.cosmos-stars-css {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+.cosmos-stars-css::before,
+.cosmos-stars-css::after {
+  content: "";
+  position: absolute;
+  inset: -10%;
+  background-image:
+    radial-gradient(1px 1px at 12% 8%,  var(--star-color-1, #fff8d8) 50%, transparent 51%),
+    radial-gradient(1px 1px at 22% 36%, var(--star-color-2, #c8d8ff) 50%, transparent 51%),
+    radial-gradient(1.2px 1.2px at 38% 18%, var(--star-color-3, #ffd9b3) 50%, transparent 51%),
+    radial-gradient(1px 1px at 52% 70%, var(--star-color-1, #fff8d8) 50%, transparent 51%),
+    radial-gradient(1.6px 1.6px at 64% 44%, var(--star-color-4, #ffaae6) 50%, transparent 51%),
+    radial-gradient(1px 1px at 78% 12%, var(--star-color-2, #c8d8ff) 50%, transparent 51%),
+    radial-gradient(1.2px 1.2px at 86% 56%, var(--star-color-1, #fff8d8) 50%, transparent 51%),
+    radial-gradient(1px 1px at 92% 84%, var(--star-color-3, #ffd9b3) 50%, transparent 51%),
+    radial-gradient(1px 1px at 8% 78%, var(--star-color-2, #c8d8ff) 50%, transparent 51%),
+    radial-gradient(1.4px 1.4px at 30% 90%, var(--star-color-4, #ffaae6) 50%, transparent 51%);
+  background-repeat: repeat;
+  background-size: 420px 420px;
+  animation: cosmos-twinkle-slow 5.2s ease-in-out infinite;
+  opacity: 0.7;
+}
+.cosmos-stars-css::after {
+  background-size: 720px 720px;
+  animation-duration: 8s;
+  opacity: 0.55;
+  filter: blur(0.4px);
+}
+
+/* Reduced motion — disable orbital and comet animations */
+@media (prefers-reduced-motion: reduce) {
+  .cosmos-anim-orbit,
+  .cosmos-anim-orbit-fast,
+  .cosmos-anim-orbit-reverse,
+  .cosmos-anim-twinkle,
+  .cosmos-anim-pulse,
+  .cosmos-stars-css::before,
+  .cosmos-stars-css::after {
+    animation: none !important;
+  }
+}
+
+/* When BootSequence is on screen, avoid scrollbar flicker */
+html.cosmos-boot-locked,
+html.cosmos-boot-locked body {
+  overflow: hidden !important;
+}
+
+/* Apply cosmic glass treatment to anything tagged with `.bg-bg-card`
+   when the cosmos theme is active. This is what gives every card,
+   popover, and dialog its frosted nebula look without rewriting
+   each component. */
+:root.theme-cosmos .bg-bg-card,
+:root.theme-cosmos .bg-bg-header,
+:root.theme-cosmos .bg-bg-sidebar {
+  backdrop-filter: blur(16px) saturate(125%);
+  -webkit-backdrop-filter: blur(16px) saturate(125%);
+}
+
+:root.theme-cosmos .bg-bg-card {
+  border-color: color-mix(in srgb, var(--cosmos-gold) 16%, var(--border)) !important;
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.05) inset,
+    0 -1px 0 rgba(0, 0, 0, 0.18) inset,
+    var(--shadow-md);
+}
+
+:root.theme-cosmos.dark .bg-bg-main {
+  background-color: transparent !important;
+}
+
+/* Hover-elevation across cards in cosmos */
+:root.theme-cosmos .bg-bg-card:where(:hover) {
+  border-color: color-mix(in srgb, var(--cosmos-gold) 28%, var(--border)) !important;
 }

@@ -10,6 +10,7 @@ import { Input } from '@/src/components/ui/Input';
 import { Badge } from '@/src/components/ui/Badge';
 import { Switch } from '@/src/components/ui/Switch';
 import { User, Settings as SettingsIcon, Globe, Briefcase, Palette, Moon, Sun, LogIn, Loader2, CheckCircle2, ChevronDown, RefreshCw, DownloadCloud, MonitorOff } from 'lucide-react';
+import { useCosmosSound } from '@/src/cosmos/SoundProvider';
 
 export function Settings() {
   const t = useT();
@@ -117,7 +118,7 @@ export function Settings() {
     }
   };
 
-  const themes: Theme[] = ['Rumi', 'Minimal', 'Standard', 'Rounded'];
+  const themes: Theme[] = ['Cosmos', 'Rumi', 'Minimal', 'Standard', 'Rounded'];
   const updateName = (target: UpdateTarget) => target === 'rumiai' ? 'Rumi AI' : 'defaultspack';
 
   const handleApplyUpdate = async (target: UpdateTarget) => {
@@ -365,6 +366,8 @@ export function Settings() {
                   </div>
                 </CardContent>
               </Card>
+
+              <CosmosSoundsCard />
             </div>
           </div>
         )}
@@ -504,5 +507,61 @@ export function Settings() {
         )}
       </div>
     </div>
+  );
+}
+
+
+// =====================================================================
+// Cosmos sound preferences card.
+// Lets the user opt in to ambient SFX (boot/click/nav/success/error/launch).
+// Sound files are placeholder paths under /cosmos/sfx/...; missing audio
+// files are tolerated silently.
+// =====================================================================
+function CosmosSoundsCard() {
+  const sound = useCosmosSound();
+  const theme = useAppStore(state => state.theme);
+  const isCosmos = theme === 'Cosmos';
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Cosmic Sounds</CardTitle>
+        <CardDescription>
+          Ambient SFX for navigation, alerts, and the boot sequence. Disabled by default; enable to add a soundtrack to the cosmos.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="flex items-center justify-between rounded-lg border border-border p-3">
+          <div className="flex flex-col">
+            <span className="text-sm font-medium text-text-main">Enable sound effects</span>
+            <span className="text-xs text-text-muted">
+              {sound.enabled ? 'You will hear chimes for actions and alerts.' : 'No audio will play.'}
+            </span>
+          </div>
+          <Switch checked={sound.enabled} onCheckedChange={sound.setEnabled} aria-label="Enable cosmos sounds" />
+        </div>
+
+        <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
+          {(['boot', 'click', 'nav', 'success', 'error', 'launch'] as const).map((key) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => sound.play(key)}
+              className="rounded-lg border border-border bg-bg-card px-3 py-2 text-xs font-medium uppercase tracking-wider text-text-muted transition hover:text-text-main"
+              disabled={!sound.enabled}
+              title={sound.enabled ? `Preview ${key}` : 'Enable sounds first'}
+            >
+              {key}
+            </button>
+          ))}
+        </div>
+
+        {isCosmos && (
+          <p className="text-[11px] leading-relaxed text-text-muted">
+            Drop your audio files at <code className="rounded bg-bg-hover px-1">/cosmos/sfx/&lt;key&gt;.mp3</code>. Missing files fail silently.
+          </p>
+        )}
+      </CardContent>
+    </Card>
   );
 }

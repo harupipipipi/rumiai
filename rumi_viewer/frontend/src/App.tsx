@@ -16,8 +16,21 @@ import { ToastContainer } from '@/src/components/ui/ToastContainer';
 import { DialogContainer } from '@/src/components/ui/DialogContainer';
 import { bootstrapPanelSession, hasPendingPanelBootstrapCode } from '@/src/lib/api';
 import { panelRoutes } from '@/src/lib/routes';
+import { SoundProvider, useCosmosSound } from '@/src/cosmos/SoundProvider';
+import { CosmosBackground } from '@/src/cosmos/CosmosBackground';
+import { BootSequence } from '@/src/cosmos/BootSequence';
+
+const THEME_CLASSES = ['theme-cosmos', 'theme-rumi', 'theme-minimal', 'theme-standard', 'theme-rounded'];
 
 export default function App() {
+  return (
+    <SoundProvider>
+      <AppShell />
+    </SoundProvider>
+  );
+}
+
+function AppShell() {
   const theme = useAppStore(state => state.theme);
   const colorMode = useAppStore(state => state.colorMode);
   const isSetupDone = useAppStore(state => state.isSetupDone);
@@ -25,10 +38,11 @@ export default function App() {
   const refreshRuntimeHealth = useAppStore(state => state.refreshRuntimeHealth);
   const runtimeReady = useAppStore(state => state.runtimeReady);
   const runtimeStatus = useAppStore(state => state.runtimeStatus);
+  const sound = useCosmosSound();
 
   useEffect(() => {
     const root = document.documentElement;
-    root.classList.remove('theme-rumi', 'theme-minimal', 'theme-standard', 'theme-rounded');
+    THEME_CLASSES.forEach((cls) => root.classList.remove(cls));
     root.classList.add(`theme-${theme.toLowerCase()}`);
   }, [theme]);
 
@@ -82,8 +96,23 @@ export default function App() {
     };
   }, [refreshRuntimeHealth, runtimeReady, runtimeStatus]);
 
+  // Bridge: play SFX when a new toast appears (cosmos sounds are gated by user setting)
+  useEffect(() => {
+    let lastIds: string[] = useAppStore.getState().toasts.map((t) => t.id);
+    return useAppStore.subscribe((state) => {
+      const incoming = state.toasts;
+      const newToasts = incoming.filter((t) => !lastIds.includes(t.id));
+      lastIds = incoming.map((t) => t.id);
+      newToasts.forEach((t) => {
+        sound.play(t.type === 'success' ? 'success' : 'error');
+      });
+    });
+  }, [sound]);
+
   return (
     <BrowserRouter basename="/panel">
+      <CosmosBackground />
+      <BootSequence />
       <Routes>
         <Route path={panelRoutes.setup} element={<Setup />} />
 

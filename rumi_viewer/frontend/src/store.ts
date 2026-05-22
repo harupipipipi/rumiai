@@ -28,8 +28,8 @@ import {
   transformVersion,
 } from './lib/transforms';
 
-export type Theme = 'Rumi' | 'Minimal' | 'Standard' | 'Rounded';
-const VALID_THEMES: Theme[] = ['Rumi', 'Minimal', 'Standard', 'Rounded'];
+export type Theme = 'Cosmos' | 'Rumi' | 'Minimal' | 'Standard' | 'Rounded';
+const VALID_THEMES: Theme[] = ['Cosmos', 'Rumi', 'Minimal', 'Standard', 'Rounded'];
 
 export type ColorMode = 'light' | 'dark';
 
@@ -231,7 +231,10 @@ function transformUpdateInfo(update: {
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
-  theme: (localStorage.getItem('rumi-theme') as Theme) || 'Rumi',
+  theme: ((): Theme => {
+    const stored = localStorage.getItem('rumi-theme') as Theme | null;
+    return stored && VALID_THEMES.includes(stored) ? stored : 'Cosmos';
+  })(),
   setTheme: (theme) => {
     localStorage.setItem('rumi-theme', theme);
     set({ theme });

@@ -53,6 +53,11 @@ import {
 import { Popover, PopoverTrigger, PopoverContent } from '@/src/components/ui/Popover';
 import { Button } from '@/src/components/ui/Button';
 import { Badge } from '@/src/components/ui/Badge';
+import { ConstellationMap, type ConstellationNode, type ConstellationEdge } from '@/src/cosmos/ConstellationMap';
+import { CosmosLogo } from '@/src/cosmos/CosmosLogo';
+import { COSMOS_DECOR, hideOnError } from '@/src/cosmos/assets';
+import { cn } from '@/src/lib/utils';
+import type { StartupProfileView } from '@/src/lib/startupProfiles';
 
 type ActionState = 'activate' | 'create' | 'delete' | 'duplicate' | 'launch' | 'restart' | 'save';
 
@@ -434,6 +439,11 @@ export function Dashboard() {
   return (
     <div className="flex flex-1 overflow-hidden">
       <div className="mx-auto flex w-full max-w-[1100px] flex-col gap-6 px-6 py-8 lg:px-10 scrollbar-hidden overflow-y-auto page-enter">
+        <CosmosHero
+          dashboard={dashboard}
+          profileViews={profileViews}
+          payload={payload}
+        />
         {/* Header section */}
         <section className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
@@ -978,6 +988,174 @@ function DashboardSkeleton() {
           ))}
         </section>
       </div>
+    </div>
+  );
+}
+
+
+// =====================================================================
+// Cosmos Hero — visible at the top of the Home dashboard.
+// Displays a glowing greeting, kernel status, and a small Canvas
+// constellation that maps the kernel + each saved startup profile +
+// their packs as orbiting stars.
+// =====================================================================
+interface CosmosHeroProps {
+  dashboard: DashboardData;
+  profileViews: StartupProfileView[];
+  payload: StartupProfilesResponseData | null;
+}
+
+function CosmosHero({ dashboard, profileViews, payload }: CosmosHeroProps) {
+  const theme = useAppStore((state) => state.theme);
+  const profile = useAppStore((state) => state.profile);
+  const isCosmos = theme === 'Cosmos';
+
+  // Build a compact constellation: kernel core + up to 6 profiles + a comet for flow count.
+  const nodes = useMemo<ConstellationNode[]>(() => {
+    const result: ConstellationNode[] = [
+      {
+        id: 'kernel',
+        label: 'Kernel',
+        kind: 'core',
+        angle: 0,
+        distance: 0,
+        active: dashboard.kernelStatus === 'running',
+      },
+    ];
+
+    const cap = Math.min(profileViews.length, 6);
+    profileViews.slice(0, cap).forEach((view, idx) => {
+      const angle = (idx / cap) * Math.PI * 2 - Math.PI / 2;
+      const isActive = payload?.active_profile_id === view.profile.profile_id;
+      result.push({
+        id: view.profile.profile_id,
+        label: view.profile.name.slice(0, 14),
+        kind: isActive ? 'profile' : 'pack',
+        angle,
+        distance: 0.62 + (idx % 3) * 0.08,
+        active: view.runtimeReady,
+      });
+    });
+
+    if (dashboard.registeredFlows > 0) {
+      result.push({
+        id: 'flows',
+        label: `${dashboard.registeredFlows} flows`,
+        kind: 'flow',
+        angle: Math.PI / 4,
+        distance: 0.95,
+        active: true,
+      });
+    }
+    return result;
+  }, [dashboard.kernelStatus, dashboard.registeredFlows, payload?.active_profile_id, profileViews]);
+
+  const edges = useMemo<ConstellationEdge[]>(
+    () =>
+      nodes
+        .filter((n) => n.id !== 'kernel')
+        .map((n) => ({ from: 'kernel', to: n.id, active: n.active })),
+    [nodes],
+  );
+
+  const greetingName = profile.username && profile.username !== 'User' ? profile.username : 'navigator';
+
+  if (!isCosmos) {
+    // Lighter hero for non-cosmos themes — keeps the page balanced.
+    return (
+      <section className="rounded-xl border border-border bg-bg-card p-6 sm:p-8">
+        <div className="flex flex-col gap-2">
+          <span className="text-xs font-medium uppercase tracking-[0.32em] text-text-muted">Welcome back</span>
+          <h2 className="text-2xl font-semibold tracking-tight text-text-main">
+            Hello, {greetingName}
+          </h2>
+          <p className="text-sm text-text-muted">
+            {dashboard.kernelStatus === 'running'
+              ? `Kernel is running · ${dashboard.activePacks} active pack${dashboard.activePacks === 1 ? '' : 's'} · ${dashboard.registeredFlows} flow${dashboard.registeredFlows === 1 ? '' : 's'}`
+              : 'Kernel is offline.'}
+          </p>
+        </div>
+      </section>
+    );
+  }
+
+  return (
+    <section
+      className={cn(
+        'cosmos-glass-strong relative overflow-hidden rounded-3xl px-6 py-6 sm:px-10 sm:py-8',
+      )}
+    >
+      {/* Decorative orbit ring on the right edge */}
+      <img
+        src={COSMOS_DECOR.orbitRing}
+        onError={hideOnError}
+        alt=""
+        className="pointer-events-none absolute -right-20 -top-20 hidden h-[340px] w-[340px] opacity-30 cosmos-anim-orbit md:block"
+        style={{ animationDuration: '180s' }}
+        loading="lazy"
+        decoding="async"
+      />
+
+      <div className="relative grid items-center gap-6 md:grid-cols-[1.2fr_1fr]">
+        <div className="flex flex-col gap-3">
+          <div className="flex items-center gap-3">
+            <CosmosLogo size={42} glow />
+            <span className="text-xs uppercase tracking-[0.32em] text-[color:var(--cosmos-gold)]">
+              Cosmos · v1
+            </span>
+          </div>
+          <h2 className="cosmos-text-gradient font-display text-3xl font-semibold tracking-wide sm:text-4xl">
+            Hello, {greetingName}
+          </h2>
+          <p className="max-w-prose text-sm leading-relaxed text-text-muted">
+            Your Rumi constellation is{' '}
+            <strong className="text-text-main">
+              {dashboard.kernelStatus === 'running' ? 'aligned' : dashboard.kernelStatus === 'error' ? 'misaligned' : 'awaiting boot'}
+            </strong>
+            . Tend to your stars below.
+          </p>
+          <div className="mt-1 flex flex-wrap gap-2">
+            <CosmosStat label="Kernel" value={dashboard.kernelStatus === 'running' ? 'Running' : dashboard.kernelStatus === 'error' ? 'Error' : 'Stopped'} tone={dashboard.kernelStatus === 'running' ? 'success' : dashboard.kernelStatus === 'error' ? 'error' : 'muted'} />
+            <CosmosStat label="Uptime" value={dashboard.uptime} tone="muted" />
+            <CosmosStat label="Packs" value={String(dashboard.activePacks)} tone="info" />
+            <CosmosStat label="Flows" value={String(dashboard.registeredFlows)} tone="magenta" />
+          </div>
+        </div>
+
+        <div className="hidden md:block">
+          <ConstellationMap
+            nodes={nodes}
+            edges={edges}
+            height={220}
+            caption="Constellation"
+          />
+        </div>
+      </div>
+    </section>
+  );
+}
+
+interface CosmosStatProps {
+  label: string;
+  value: string;
+  tone: 'success' | 'error' | 'info' | 'magenta' | 'muted';
+}
+
+function CosmosStat({ label, value, tone }: CosmosStatProps) {
+  const ring =
+    tone === 'success'
+      ? 'cosmos-halo-blue'
+      : tone === 'error'
+        ? 'cosmos-halo-magenta'
+        : tone === 'info'
+          ? 'cosmos-halo-blue'
+          : tone === 'magenta'
+            ? 'cosmos-halo-magenta'
+            : '';
+  return (
+    <div className={cn('flex flex-col rounded-xl border border-[color:color-mix(in_srgb,var(--cosmos-gold)_18%,var(--border))] bg-[color:color-mix(in_srgb,var(--bg-card)_60%,transparent)] px-3 py-2', ring && ring)}>
+      <span className="text-[10px] uppercase tracking-[0.28em] text-[color:var(--text-muted)]">{label}</span>
+      <span className="font-display text-base text-text-main">{value}</span>
     </div>
   );
 }

@@ -4,10 +4,12 @@ import { CheckCircle2, XCircle } from 'lucide-react';
 
 export function ToastContainer() {
   const toasts = useAppStore(state => state.toasts);
+  const theme = useAppStore(state => state.theme);
+  const isCosmos = theme === 'Cosmos';
 
   return (
     <div
-      className="fixed bottom-4 right-4 z-50 flex flex-col gap-2"
+      className="pointer-events-none fixed bottom-4 right-4 z-50 flex flex-col gap-2"
       aria-live="polite"
       aria-atomic="false"
       role="status"
@@ -16,13 +18,25 @@ export function ToastContainer() {
         <div
           key={toast.id}
           className={cn(
-            "flex items-center gap-2 rounded-md px-4 py-3 text-sm font-medium text-white shadow-lg transition-all animate-in slide-in-from-bottom-5",
-            toast.type === 'success' ? 'bg-green-600' : 'bg-red-600'
+            'pointer-events-auto cosmos-anim-fade-up flex items-center gap-2 rounded-xl px-4 py-3 text-sm font-medium shadow-lg transition-all',
+            isCosmos
+              ? toast.type === 'success'
+                ? 'cosmos-glass cosmos-halo-blue text-text-main'
+                : 'cosmos-glass cosmos-halo-magenta text-text-main'
+              : toast.type === 'success'
+                ? 'bg-green-600 text-white'
+                : 'bg-red-600 text-white',
           )}
           role="alert"
         >
-          {toast.type === 'success' ? <CheckCircle2 className="h-4 w-4" /> : <XCircle className="h-4 w-4" />}
-          {toast.message}
+          {toast.type === 'success' ? (
+            <CheckCircle2
+              className={cn('h-4 w-4', isCosmos && 'text-[color:var(--success)]')}
+            />
+          ) : (
+            <XCircle className={cn('h-4 w-4', isCosmos && 'text-[color:var(--destructive)]')} />
+          )}
+          <span>{toast.message}</span>
         </div>
       ))}
     </div>
