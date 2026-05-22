@@ -1,0 +1,47 @@
+{
+  "id": "webapp_preview",
+  "description": "Preview a local artifact webapp index.html.",
+  "config": {
+    "tool_id": "webapp_preview",
+    "name": "Webapp Preview",
+    "summary": "Preview a local artifact webapp index.html.",
+    "tool_category": "webapp",
+    "action_type": "read",
+    "write_action": false,
+    "requires_approval": false,
+    "risk": "low",
+    "tags": [
+      "webapp",
+      "agent_os",
+      "artifact_workspace"
+    ],
+    "ui": {
+      "group_id": "webapp",
+      "group_label": "Web App",
+      "group_icon": "monitor",
+      "item_icon": "monitor",
+      "widget_kind": "tool_toggle",
+      "composer_label": "Webapp Preview",
+      "composer_description": "Preview a local artifact webapp index.html.",
+      "composer_icon": "monitor"
+    },
+    "schema": {
+      "parameters": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ]
+      }
+    },
+    "execution": {
+      "type": "local",
+      "handler": "domain.tool.webapp_tools:webapp_preview"
+    }
+  }
+}

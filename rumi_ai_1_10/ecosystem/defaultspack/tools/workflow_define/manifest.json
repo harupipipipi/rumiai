@@ -1,0 +1,53 @@
+{
+  "id": "workflow_define",
+  "description": "Persist a local workflow definition.",
+  "config": {
+    "tool_id": "workflow_define",
+    "name": "Workflow Define",
+    "summary": "Persist a local workflow definition.",
+    "tool_category": "workflow",
+    "action_type": "write",
+    "write_action": true,
+    "requires_approval": false,
+    "risk": "medium",
+    "tags": [
+      "workflow",
+      "agent_os",
+      "artifact_workspace"
+    ],
+    "ui": {
+      "group_id": "workflow",
+      "group_label": "Workflows",
+      "group_icon": "route",
+      "item_icon": "route",
+      "widget_kind": "tool_toggle",
+      "composer_label": "Workflow Define",
+      "composer_description": "Persist a local workflow definition.",
+      "composer_icon": "route"
+    },
+    "schema": {
+      "parameters": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "workflow_id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "steps": {
+            "type": "array"
+          }
+        },
+        "required": [
+          "steps"
+        ]
+      }
+    },
+    "execution": {
+      "type": "local",
+      "handler": "domain.tool.workflow_tools:workflow_define"
+    }
+  }
+}

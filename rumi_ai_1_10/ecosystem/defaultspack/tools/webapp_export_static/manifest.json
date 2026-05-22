@@ -1,0 +1,50 @@
+{
+  "id": "webapp_export_static",
+  "description": "Zip a webapp artifact folder for static delivery.",
+  "config": {
+    "tool_id": "webapp_export_static",
+    "name": "Webapp Export Static",
+    "summary": "Zip a webapp artifact folder for static delivery.",
+    "tool_category": "webapp",
+    "action_type": "write",
+    "write_action": true,
+    "requires_approval": false,
+    "risk": "medium",
+    "tags": [
+      "webapp",
+      "agent_os",
+      "artifact_workspace"
+    ],
+    "ui": {
+      "group_id": "webapp",
+      "group_label": "Web App",
+      "group_icon": "monitor",
+      "item_icon": "monitor",
+      "widget_kind": "tool_toggle",
+      "composer_label": "Webapp Export Static",
+      "composer_description": "Zip a webapp artifact folder for static delivery.",
+      "composer_icon": "monitor"
+    },
+    "schema": {
+      "parameters": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "output_path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ]
+      }
+    },
+    "execution": {
+      "type": "local",
+      "handler": "domain.tool.webapp_tools:webapp_export_static"
+    }
+  }
+}

@@ -1,0 +1,54 @@
+{
+  "id": "research_report_export",
+  "description": "Export a research report artifact.",
+  "config": {
+    "tool_id": "research_report_export",
+    "name": "Research Report Export",
+    "summary": "Export a research report artifact.",
+    "tool_category": "research",
+    "action_type": "write",
+    "write_action": true,
+    "requires_approval": false,
+    "risk": "medium",
+    "tags": [
+      "research",
+      "agent_os",
+      "artifact_workspace"
+    ],
+    "ui": {
+      "group_id": "research",
+      "group_label": "Research",
+      "group_icon": "search",
+      "item_icon": "search",
+      "widget_kind": "tool_toggle",
+      "composer_label": "Research Report Export",
+      "composer_description": "Export a research report artifact.",
+      "composer_icon": "search"
+    },
+    "schema": {
+      "parameters": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "report_path": {
+            "type": "string"
+          },
+          "format": {
+            "type": "string"
+          },
+          "output_path": {
+            "type": "string"
+          }
+        },
+        "required": []
+      }
+    },
+    "execution": {
+      "type": "local",
+      "handler": "domain.tool.research_tools:research_report_export"
+    }
+  }
+}

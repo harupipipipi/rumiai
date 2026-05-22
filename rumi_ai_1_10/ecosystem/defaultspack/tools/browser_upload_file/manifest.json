@@ -1,0 +1,47 @@
+{
+  "id": "browser_upload_file",
+  "description": "Prepare an artifact workspace file for browser upload.",
+  "config": {
+    "tool_id": "browser_upload_file",
+    "name": "Browser Upload File",
+    "summary": "Prepare an artifact workspace file for browser upload.",
+    "tool_category": "browser",
+    "action_type": "write",
+    "write_action": true,
+    "requires_approval": true,
+    "risk": "high",
+    "tags": [
+      "browser",
+      "agent_os",
+      "artifact_workspace"
+    ],
+    "ui": {
+      "group_id": "browser",
+      "group_label": "Browser",
+      "group_icon": "globe",
+      "item_icon": "globe",
+      "widget_kind": "tool_toggle",
+      "composer_label": "Browser Upload File",
+      "composer_description": "Prepare an artifact workspace file for browser upload.",
+      "composer_icon": "globe"
+    },
+    "schema": {
+      "parameters": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ]
+      }
+    },
+    "execution": {
+      "type": "local",
+      "handler": "domain.tool.browser_artifact_tools:browser_upload_file"
+    }
+  }
+}

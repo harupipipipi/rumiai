@@ -1,0 +1,45 @@
+{
+  "id": "job_status",
+  "description": "Read job status or list local jobs.",
+  "config": {
+    "tool_id": "job_status",
+    "name": "Job Status",
+    "summary": "Read job status or list local jobs.",
+    "tool_category": "job",
+    "action_type": "read",
+    "write_action": false,
+    "requires_approval": false,
+    "risk": "low",
+    "tags": [
+      "job",
+      "agent_os",
+      "artifact_workspace"
+    ],
+    "ui": {
+      "group_id": "job",
+      "group_label": "Jobs",
+      "group_icon": "activity",
+      "item_icon": "activity",
+      "widget_kind": "tool_toggle",
+      "composer_label": "Job Status",
+      "composer_description": "Read job status or list local jobs.",
+      "composer_icon": "activity"
+    },
+    "schema": {
+      "parameters": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "job_id": {
+            "type": "string"
+          }
+        },
+        "required": []
+      }
+    },
+    "execution": {
+      "type": "local",
+      "handler": "domain.tool.job_tools:job_status"
+    }
+  }
+}
