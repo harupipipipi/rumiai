@@ -4,6 +4,41 @@ defaults Pack のチャット機能の全 API リファレンスです。handler
 
 ecosystem.json の chat コンポーネントは 18 個の handler を provides しています: `create_conversation`, `get_conversation`, `list_conversations`, `update_conversation`, `delete_conversation`, `export_conversation`, `send`, `stream`, `add_message`, `get_message`, `update_message`, `delete_message`, `branch`, `search`, `stop`, `regenerate`, `summarize_and_trim`, `auto_trim`。
 
+## Provider-Agnostic Chat Pipeline
+
+ChatStore remains the provider-agnostic source of truth. Stored Rumi messages are
+converted to Rumi Chat IR v2 before provider planning. The legacy
+`convert_to_standard()` API remains callable and still returns the historical
+StandardMessage list used by existing provider adapters.
+
+The runtime flow is:
+
+```text
+ChatStore messages
+  -> Rumi Chat IR v2
+  -> Provider Capability Registry
+  -> Request Planner / degradation metadata
+  -> legacy StandardMessage or Provider Compiler v2
+  -> provider response parser
+  -> assistant RumiMessage
+```
+
+`PreparedChatRun` now carries `chat_ir`, `ir_schema_version`,
+`provider_capabilities`, and `provider_planning` alongside existing
+`standard_messages`. Assistant metadata records the IR version, model routing,
+chat references, planning warnings, dropped features, and provider trace info.
+
+Rollback flags:
+
+- `RUMI_DEFAULTSPACK_PROVIDER_LEGACY_MESSAGES=1`: force the legacy
+  StandardMessage provider path.
+- `RUMI_DEFAULTSPACK_PROVIDER_COMPILER_V2=1`: opt into Provider Compiler v2 for
+  supported complete calls.
+
+Provider trace artifacts are written under
+`user_data/shared/chat/conversations/<conversation_id>/workspace/provider_traces/`.
+They include redacted capability, planning, payload, and response summaries.
+
 ## External input conversations
 
 External providers should not call chat internals with raw provider payloads.
