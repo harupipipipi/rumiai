@@ -1,0 +1,47 @@
+{
+  "id": "gmail_search",
+  "description": "Prepare Gmail connector search request.",
+  "config": {
+    "tool_id": "gmail_search",
+    "name": "Gmail Search",
+    "summary": "Prepare Gmail connector search request.",
+    "tool_category": "connector",
+    "action_type": "network",
+    "write_action": false,
+    "requires_approval": true,
+    "risk": "medium",
+    "tags": [
+      "connector",
+      "agent_os",
+      "artifact_workspace"
+    ],
+    "ui": {
+      "group_id": "connectors",
+      "group_label": "Connectors",
+      "group_icon": "plug",
+      "item_icon": "plug",
+      "widget_kind": "tool_toggle",
+      "composer_label": "Gmail Search",
+      "composer_description": "Prepare Gmail connector search request.",
+      "composer_icon": "plug"
+    },
+    "schema": {
+      "parameters": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "query": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "query"
+        ]
+      }
+    },
+    "execution": {
+      "type": "local",
+      "handler": "domain.tool.external_connector_tools:gmail_search"
+    }
+  }
+}

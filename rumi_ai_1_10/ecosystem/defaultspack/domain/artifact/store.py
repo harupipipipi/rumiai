@@ -6,6 +6,8 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from .workspace import ArtifactWorkspace
+
 
 def _ts() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
@@ -76,3 +78,63 @@ class ArtifactStore:
                 artifact["content"] = content_path.read_text(encoding="utf-8") if content_path.is_file() else ""
                 return artifact
         return None
+
+    def workspace(self, context: Optional[Dict[str, Any]] = None) -> ArtifactWorkspace:
+        return ArtifactWorkspace(context, pack_root=self.pack_root)
+
+    def read_file(self, path: str, *, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        workspace = self.workspace(context)
+        target = workspace.resolve(path, must_exist=True)
+        if not target.is_file():
+            raise IsADirectoryError(str(path))
+        content = target.read_text(encoding="utf-8")
+        return {
+            "path": workspace.relative(target),
+            "content": content,
+            "size": len(content.encode("utf-8")),
+        }
+
+    def write_file(self, path: str, content: str, *, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        workspace = self.workspace(context)
+        target = workspace.resolve(path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(str(content), encoding="utf-8")
+        return {
+            "path": workspace.relative(target),
+            "size": target.stat().st_size,
+        }
+
+    def delete_file(self, path: str, *, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        workspace = self.workspace(context)
+        target = workspace.resolve(path, must_exist=True)
+        if not target.is_file():
+            raise IsADirectoryError(str(path))
+        target.unlink()
+        return {"path": workspace.relative(target), "deleted": True}
+
+    def list_files(
+        self,
+        path: str = ".",
+        *,
+        context: Optional[Dict[str, Any]] = None,
+        recursive: bool = False,
+        include_hidden: bool = False,
+        max_entries: int = 200,
+    ) -> Dict[str, Any]:
+        workspace = self.workspace(context)
+        root = workspace.resolve(path, must_exist=True, allow_root=True)
+        iterator = root.rglob("*") if recursive else root.iterdir()
+        entries: List[Dict[str, Any]] = []
+        for item in sorted(iterator):
+            rel = workspace.relative(item)
+            if not include_hidden and any(part.startswith(".") for part in rel.split("/")):
+                continue
+            entries.append({
+                "name": item.name,
+                "path": rel,
+                "is_dir": item.is_dir(),
+                "size": 0 if item.is_dir() else item.stat().st_size,
+            })
+            if len(entries) >= max_entries:
+                break
+        return {"path": workspace.relative(root) if root != workspace.root else ".", "entries": entries}

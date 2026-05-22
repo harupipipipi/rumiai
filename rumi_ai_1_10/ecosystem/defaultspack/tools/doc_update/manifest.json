@@ -1,0 +1,56 @@
+{
+  "id": "doc_update",
+  "description": "Update a local text document artifact.",
+  "config": {
+    "tool_id": "doc_update",
+    "name": "Doc Update",
+    "summary": "Update a local text document artifact.",
+    "tool_category": "document",
+    "action_type": "write",
+    "write_action": true,
+    "requires_approval": true,
+    "risk": "medium",
+    "tags": [
+      "document",
+      "agent_os",
+      "artifact_workspace"
+    ],
+    "ui": {
+      "group_id": "document",
+      "group_label": "Documents",
+      "group_icon": "file-text",
+      "item_icon": "file-text",
+      "widget_kind": "tool_toggle",
+      "composer_label": "Doc Update",
+      "composer_description": "Update a local text document artifact.",
+      "composer_icon": "file-text"
+    },
+    "schema": {
+      "parameters": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "content": {
+            "type": "string"
+          },
+          "append": {
+            "type": "string"
+          },
+          "replace": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "path"
+        ]
+      }
+    },
+    "execution": {
+      "type": "local",
+      "handler": "domain.tool.document_tools:doc_update"
+    }
+  }
+}

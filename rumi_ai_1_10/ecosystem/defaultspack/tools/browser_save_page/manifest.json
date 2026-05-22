@@ -1,0 +1,50 @@
+{
+  "id": "browser_save_page",
+  "description": "Save browser page HTML into the artifact workspace.",
+  "config": {
+    "tool_id": "browser_save_page",
+    "name": "Browser Save Page",
+    "summary": "Save browser page HTML into the artifact workspace.",
+    "tool_category": "browser",
+    "action_type": "write",
+    "write_action": true,
+    "requires_approval": false,
+    "risk": "medium",
+    "tags": [
+      "browser",
+      "agent_os",
+      "artifact_workspace"
+    ],
+    "ui": {
+      "group_id": "browser",
+      "group_label": "Browser",
+      "group_icon": "globe",
+      "item_icon": "globe",
+      "widget_kind": "tool_toggle",
+      "composer_label": "Browser Save Page",
+      "composer_description": "Save browser page HTML into the artifact workspace.",
+      "composer_icon": "globe"
+    },
+    "schema": {
+      "parameters": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "html": {
+            "type": "string"
+          },
+          "output_path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "html"
+        ]
+      }
+    },
+    "execution": {
+      "type": "local",
+      "handler": "domain.tool.browser_artifact_tools:browser_save_page"
+    }
+  }
+}

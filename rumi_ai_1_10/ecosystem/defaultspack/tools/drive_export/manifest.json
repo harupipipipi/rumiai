@@ -1,0 +1,50 @@
+{
+  "id": "drive_export",
+  "description": "Prepare Drive export request.",
+  "config": {
+    "tool_id": "drive_export",
+    "name": "Drive Export",
+    "summary": "Prepare Drive export request.",
+    "tool_category": "connector",
+    "action_type": "network",
+    "write_action": false,
+    "requires_approval": true,
+    "risk": "medium",
+    "tags": [
+      "connector",
+      "agent_os",
+      "artifact_workspace"
+    ],
+    "ui": {
+      "group_id": "connectors",
+      "group_label": "Connectors",
+      "group_icon": "plug",
+      "item_icon": "plug",
+      "widget_kind": "tool_toggle",
+      "composer_label": "Drive Export",
+      "composer_description": "Prepare Drive export request.",
+      "composer_icon": "plug"
+    },
+    "schema": {
+      "parameters": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "file_id": {
+            "type": "string"
+          },
+          "format": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "file_id"
+        ]
+      }
+    },
+    "execution": {
+      "type": "local",
+      "handler": "domain.tool.external_connector_tools:drive_export"
+    }
+  }
+}

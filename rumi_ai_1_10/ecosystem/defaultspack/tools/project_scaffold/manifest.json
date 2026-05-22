@@ -1,0 +1,51 @@
+{
+  "id": "project_scaffold",
+  "description": "Scaffold a static HTML/plain JS/Vite React artifact project.",
+  "config": {
+    "tool_id": "project_scaffold",
+    "name": "Project Scaffold",
+    "summary": "Scaffold a static HTML/plain JS/Vite React artifact project.",
+    "tool_category": "webapp",
+    "action_type": "write",
+    "write_action": true,
+    "requires_approval": false,
+    "risk": "medium",
+    "tags": [
+      "webapp",
+      "agent_os",
+      "artifact_workspace"
+    ],
+    "ui": {
+      "group_id": "webapp",
+      "group_label": "Web App",
+      "group_icon": "monitor",
+      "item_icon": "monitor",
+      "widget_kind": "tool_toggle",
+      "composer_label": "Project Scaffold",
+      "composer_description": "Scaffold a static HTML/plain JS/Vite React artifact project.",
+      "composer_icon": "monitor"
+    },
+    "schema": {
+      "parameters": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "template": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": []
+      }
+    },
+    "execution": {
+      "type": "local",
+      "handler": "domain.tool.webapp_tools:project_scaffold"
+    }
+  }
+}

@@ -1,0 +1,47 @@
+{
+  "id": "webapp_lint",
+  "description": "Run simple structural lint checks for an artifact webapp.",
+  "config": {
+    "tool_id": "webapp_lint",
+    "name": "Webapp Lint",
+    "summary": "Run simple structural lint checks for an artifact webapp.",
+    "tool_category": "webapp",
+    "action_type": "read",
+    "write_action": false,
+    "requires_approval": false,
+    "risk": "low",
+    "tags": [
+      "webapp",
+      "agent_os",
+      "artifact_workspace"
+    ],
+    "ui": {
+      "group_id": "webapp",
+      "group_label": "Web App",
+      "group_icon": "monitor",
+      "item_icon": "monitor",
+      "widget_kind": "tool_toggle",
+      "composer_label": "Webapp Lint",
+      "composer_description": "Run simple structural lint checks for an artifact webapp.",
+      "composer_icon": "monitor"
+    },
+    "schema": {
+      "parameters": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ]
+      }
+    },
+    "execution": {
+      "type": "local",
+      "handler": "domain.tool.webapp_tools:webapp_lint"
+    }
+  }
+}

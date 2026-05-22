@@ -1,0 +1,47 @@
+{
+  "id": "job_artifacts",
+  "description": "List artifacts attached to a local job.",
+  "config": {
+    "tool_id": "job_artifacts",
+    "name": "Job Artifacts",
+    "summary": "List artifacts attached to a local job.",
+    "tool_category": "job",
+    "action_type": "read",
+    "write_action": false,
+    "requires_approval": false,
+    "risk": "low",
+    "tags": [
+      "job",
+      "agent_os",
+      "artifact_workspace"
+    ],
+    "ui": {
+      "group_id": "job",
+      "group_label": "Jobs",
+      "group_icon": "activity",
+      "item_icon": "activity",
+      "widget_kind": "tool_toggle",
+      "composer_label": "Job Artifacts",
+      "composer_description": "List artifacts attached to a local job.",
+      "composer_icon": "activity"
+    },
+    "schema": {
+      "parameters": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "job_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "job_id"
+        ]
+      }
+    },
+    "execution": {
+      "type": "local",
+      "handler": "domain.tool.job_tools:job_artifacts"
+    }
+  }
+}

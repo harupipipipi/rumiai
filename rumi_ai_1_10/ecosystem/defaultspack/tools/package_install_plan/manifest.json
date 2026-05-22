@@ -1,0 +1,46 @@
+{
+  "id": "package_install_plan",
+  "description": "Plan pip/npm/pnpm package installation commands without executing them.",
+  "config": {
+    "tool_id": "package_install_plan",
+    "name": "Package Install Plan",
+    "summary": "Plan pip/npm/pnpm package installation commands without executing them.",
+    "tool_category": "sandbox",
+    "action_type": "read",
+    "write_action": false,
+    "requires_approval": false,
+    "risk": "low",
+    "tags": [
+      "sandbox",
+      "agent_os",
+      "artifact_workspace"
+    ],
+    "ui": {
+      "group_id": "sandbox",
+      "group_label": "Sandbox",
+      "group_icon": "terminal",
+      "item_icon": "terminal",
+      "widget_kind": "tool_toggle",
+      "composer_label": "Package Install Plan",
+      "composer_description": "Plan pip/npm/pnpm package installation commands without executing them.",
+      "composer_icon": "terminal"
+    },
+    "schema": {
+      "parameters": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "manager": {
+            "type": "string"
+          },
+          "packages": {}
+        },
+        "required": []
+      }
+    },
+    "execution": {
+      "type": "local",
+      "handler": "domain.tool.sandbox_tools:package_install_plan"
+    }
+  }
+}

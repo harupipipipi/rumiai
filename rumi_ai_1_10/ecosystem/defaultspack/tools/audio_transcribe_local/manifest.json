@@ -1,0 +1,45 @@
+{
+  "id": "audio_transcribe_local",
+  "description": "Transcribe audio locally using optional dependencies.",
+  "config": {
+    "tool_id": "audio_transcribe_local",
+    "name": "Audio Transcribe Local",
+    "summary": "Transcribe audio locally using optional dependencies.",
+    "tool_category": "media",
+    "action_type": "read",
+    "write_action": false,
+    "requires_approval": false,
+    "risk": "low",
+    "tags": [
+      "media",
+      "agent_os",
+      "artifact_workspace"
+    ],
+    "ui": {
+      "group_id": "media",
+      "group_label": "Media",
+      "group_icon": "image",
+      "item_icon": "image",
+      "widget_kind": "tool_toggle",
+      "composer_label": "Audio Transcribe Local",
+      "composer_description": "Transcribe audio locally using optional dependencies.",
+      "composer_icon": "image"
+    },
+    "schema": {
+      "parameters": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": []
+      }
+    },
+    "execution": {
+      "type": "local",
+      "handler": "domain.tool.media_tools:audio_transcribe_local"
+    }
+  }
+}

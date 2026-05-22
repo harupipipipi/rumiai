@@ -1,0 +1,50 @@
+{
+  "id": "slack_send",
+  "description": "Prepare Slack send request.",
+  "config": {
+    "tool_id": "slack_send",
+    "name": "Slack Send",
+    "summary": "Prepare Slack send request.",
+    "tool_category": "connector",
+    "action_type": "network",
+    "write_action": true,
+    "requires_approval": true,
+    "risk": "high",
+    "tags": [
+      "connector",
+      "agent_os",
+      "artifact_workspace"
+    ],
+    "ui": {
+      "group_id": "connectors",
+      "group_label": "Connectors",
+      "group_icon": "plug",
+      "item_icon": "plug",
+      "widget_kind": "tool_toggle",
+      "composer_label": "Slack Send",
+      "composer_description": "Prepare Slack send request.",
+      "composer_icon": "plug"
+    },
+    "schema": {
+      "parameters": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "channel": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ]
+      }
+    },
+    "execution": {
+      "type": "local",
+      "handler": "domain.tool.external_connector_tools:slack_send"
+    }
+  }
+}

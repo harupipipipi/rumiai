@@ -1,0 +1,50 @@
+{
+  "id": "doc_to_pdf",
+  "description": "Export a document artifact to PDF.",
+  "config": {
+    "tool_id": "doc_to_pdf",
+    "name": "Doc To PDF",
+    "summary": "Export a document artifact to PDF.",
+    "tool_category": "document",
+    "action_type": "write",
+    "write_action": true,
+    "requires_approval": false,
+    "risk": "medium",
+    "tags": [
+      "document",
+      "agent_os",
+      "artifact_workspace"
+    ],
+    "ui": {
+      "group_id": "document",
+      "group_label": "Documents",
+      "group_icon": "file-text",
+      "item_icon": "file-text",
+      "widget_kind": "tool_toggle",
+      "composer_label": "Doc To PDF",
+      "composer_description": "Export a document artifact to PDF.",
+      "composer_icon": "file-text"
+    },
+    "schema": {
+      "parameters": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "output_path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ]
+      }
+    },
+    "execution": {
+      "type": "local",
+      "handler": "domain.tool.document_tools:doc_to_pdf"
+    }
+  }
+}

@@ -1,0 +1,47 @@
+{
+  "id": "artifact_file_read",
+  "description": "Read a file from the artifact workspace.",
+  "config": {
+    "tool_id": "artifact_file_read",
+    "name": "Artifact File Read",
+    "summary": "Read a file from the artifact workspace.",
+    "tool_category": "artifact",
+    "action_type": "read",
+    "write_action": false,
+    "requires_approval": false,
+    "risk": "low",
+    "tags": [
+      "artifact",
+      "agent_os",
+      "artifact_workspace"
+    ],
+    "ui": {
+      "group_id": "artifact",
+      "group_label": "Artifacts",
+      "group_icon": "folder",
+      "item_icon": "folder",
+      "widget_kind": "tool_toggle",
+      "composer_label": "Artifact File Read",
+      "composer_description": "Read a file from the artifact workspace.",
+      "composer_icon": "folder"
+    },
+    "schema": {
+      "parameters": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ]
+      }
+    },
+    "execution": {
+      "type": "local",
+      "handler": "domain.tool.artifact_tools:artifact_file_read"
+    }
+  }
+}

@@ -1,0 +1,47 @@
+{
+  "id": "pdf_preview",
+  "description": "Preview a PDF artifact with screenshot metadata fallback.",
+  "config": {
+    "tool_id": "pdf_preview",
+    "name": "PDF Preview",
+    "summary": "Preview a PDF artifact with screenshot metadata fallback.",
+    "tool_category": "preview",
+    "action_type": "read",
+    "write_action": false,
+    "requires_approval": false,
+    "risk": "low",
+    "tags": [
+      "preview",
+      "agent_os",
+      "artifact_workspace"
+    ],
+    "ui": {
+      "group_id": "preview",
+      "group_label": "Preview",
+      "group_icon": "eye",
+      "item_icon": "eye",
+      "widget_kind": "tool_toggle",
+      "composer_label": "PDF Preview",
+      "composer_description": "Preview a PDF artifact with screenshot metadata fallback.",
+      "composer_icon": "eye"
+    },
+    "schema": {
+      "parameters": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ]
+      }
+    },
+    "execution": {
+      "type": "local",
+      "handler": "domain.tool.preview_tools:pdf_preview"
+    }
+  }
+}
