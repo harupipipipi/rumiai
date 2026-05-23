@@ -5,6 +5,7 @@
 mod config;
 mod health_check;
 mod kernel_manager;
+mod process_utils;
 mod python_env;
 mod tray;
 mod updater;
@@ -940,6 +941,11 @@ pub fn run() {
                     if let Err(error) = show_primary_window(app_handle) {
                         warn!("Failed to reopen primary window: {error}");
                     }
+                }
+
+                #[cfg(not(target_os = "macos"))]
+                {
+                    let _ = (app_handle, event);
                 }
             });
         })

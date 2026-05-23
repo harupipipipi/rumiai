@@ -7,9 +7,10 @@
 //! - Auto-restart on unexpected exit (max 3 times).
 
 use std::fs;
+#[cfg(unix)]
 use std::io::ErrorKind;
 use std::path::Path;
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -17,6 +18,7 @@ use anyhow::{bail, Context, Result};
 use log::{error, info, warn};
 
 use crate::config::AppConfig;
+use crate::process_utils;
 
 /// Special exit code: the Kernel requests a restart.
 const RESTART_EXIT_CODE: i32 = 42;
@@ -130,7 +132,7 @@ impl KernelManager {
                 .map(|value| value.eq_ignore_ascii_case("true"))
                 .unwrap_or(false);
 
-        let child = Command::new(&venv_python)
+        let child = process_utils::command(&venv_python)
             .args(["-m", "app"])
             .current_dir(&self.config.rumi_home)
             .env("RUMI_HOME", &self.config.rumi_home)
@@ -305,7 +307,7 @@ impl KernelManager {
         use std::time::Duration;
 
         let pid = child.id() as i32;
-        let _ = Command::new("kill")
+        let _ = process_utils::command("kill")
             .args(["-TERM", &pid.to_string()])
             .status();
 
@@ -343,7 +345,7 @@ fn detect_port_listener(port: u16) -> Result<Option<PortListener>> {
 
 #[cfg(unix)]
 fn detect_port_listener_unix(port: u16) -> Result<Option<PortListener>> {
-    let output = match Command::new("lsof")
+    let output = match process_utils::command("lsof")
         .args(["-nP", &format!("-iTCP:{port}"), "-sTCP:LISTEN", "-Fpc"])
         .output()
     {
@@ -389,7 +391,7 @@ fn detect_port_listener_unix(port: u16) -> Result<Option<PortListener>> {
 
 #[cfg(windows)]
 fn detect_port_listener_windows(port: u16) -> Result<Option<PortListener>> {
-    let output = Command::new("netstat")
+    let output = process_utils::command("netstat")
         .args(["-ano", "-p", "tcp"])
         .output()
         .context("failed to run netstat")?;
@@ -429,7 +431,7 @@ fn detect_port_listener_windows(port: u16) -> Result<Option<PortListener>> {
 
 #[cfg(unix)]
 fn unix_process_command(pid: u32) -> Option<String> {
-    let output = Command::new("ps")
+    let output = process_utils::command("ps")
         .args(["-p", &pid.to_string(), "-o", "command="])
         .output()
         .ok()?;
@@ -442,7 +444,7 @@ fn unix_process_command(pid: u32) -> Option<String> {
 
 #[cfg(unix)]
 fn unix_process_cwd(pid: u32) -> Option<String> {
-    let output = Command::new("lsof")
+    let output = process_utils::command("lsof")
         .args(["-a", "-p", &pid.to_string(), "-d", "cwd", "-Fn"])
         .output()
         .ok()?;
@@ -464,7 +466,7 @@ fn unix_process_cwd(pid: u32) -> Option<String> {
 
 #[cfg(windows)]
 fn windows_process_command(pid: u32) -> Option<String> {
-    let output = Command::new("tasklist")
+    let output = process_utils::command("tasklist")
         .args(["/FI", &format!("PID eq {pid}"), "/FO", "CSV", "/NH"])
         .output()
         .ok()?;
@@ -541,14 +543,16 @@ fn terminate_external_listener(pid: u32, port: u16) -> Result<()> {
     #[cfg(unix)]
     {
         let pid_str = pid.to_string();
-        let _ = Command::new("kill").args(["-TERM", &pid_str]).status();
+        let _ = process_utils::command("kill")
+            .args(["-TERM", &pid_str])
+            .status();
         wait_for_port_to_clear(port, pid, Duration::from_secs(KILL_TIMEOUT_SECS))?;
         return Ok(());
     }
 
     #[cfg(windows)]
     {
-        let status = Command::new("taskkill")
+        let status = process_utils::command("taskkill")
             .args(["/PID", &pid.to_string(), "/T", "/F"])
             .status()
             .context("failed to run taskkill")?;
@@ -587,7 +591,7 @@ fn wait_for_port_to_clear(port: u16, expected_pid: u32, timeout: Duration) -> Re
     #[cfg(unix)]
     {
         warn!("Port {port} is still occupied after SIGTERM; sending SIGKILL to pid {expected_pid}");
-        let _ = Command::new("kill")
+        let _ = process_utils::command("kill")
             .args(["-KILL", &expected_pid.to_string()])
             .status();
         let kill_deadline = Instant::now() + Duration::from_secs(2);
