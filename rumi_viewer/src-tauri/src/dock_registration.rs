@@ -370,10 +370,14 @@ fn create_macos_app_bundle(
     fs::write(&launch_path, &launch_script)
         .with_context(|| format!("failed to write {}", launch_path.display()))?;
 
-    // Make executable
-    let mut perms = fs::metadata(&launch_path)?.permissions();
-    perms.set_mode(0o755);
-    fs::set_permissions(&launch_path, perms)?;
+    // Make executable on Unix platforms. Windows still compiles this module,
+    // but does not support POSIX mode bits.
+    #[cfg(unix)]
+    {
+        let mut perms = fs::metadata(&launch_path)?.permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&launch_path, perms)?;
+    }
 
     Ok(app_dir)
 }
