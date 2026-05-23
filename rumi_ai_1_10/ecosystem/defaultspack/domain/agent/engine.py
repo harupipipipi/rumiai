@@ -8,6 +8,9 @@ from domain.agent.step import AgentStep
 from domain.agent_runtime.policy import session_key_for
 from domain.agent_runtime.run_store import AgentRunStore
 from domain.agent_runtime.transcript import TranscriptStore
+from domain.ai_client.model_search import get_model_capabilities
+from domain.capabilities.runtime_snapshot import build_runtime_capability_snapshot
+from domain.tool.eligibility import filter_tool_definitions_by_eligibility
 from domain.tool.schema_adapter import (
     adapt_tool_definitions,
     build_tool_execution_context,
@@ -420,6 +423,25 @@ class AgentEngine:
             execution_context.get("runtime_profile"),
             execution_context.get("agent_id"),
         )
+        policy = policy_from_context(execution_context)
+        runtime_snapshot = build_runtime_capability_snapshot(
+            user_text=str(task or ""),
+            modalities={"has_images": False, "has_files": False},
+            model_capabilities=get_model_capabilities(model if model else "default") or {},
+            context=execution_context,
+            policy=policy,
+        )
+        eligibility = filter_tool_definitions_by_eligibility(
+            provider_tools,
+            runtime_snapshot,
+            policy=policy,
+            connected_tool_names=connected_tool_names(
+                provider_tools,
+                execution_context.get("runtime_profile"),
+                agent_id=execution_context.get("agent_id"),
+            ),
+        )
+        provider_tools = list(eligibility.get("allowed_tools") or [])
         execution = AgentExecution(
             execution_id=execution_id,
             task=task,
@@ -428,6 +450,8 @@ class AgentEngine:
             system_prompt=system_prompt,
         )
         execution.context = execution_context
+        execution.context["tool_filter_result"] = list(eligibility.get("entries") or [])
+        execution.context["runtime_capability_snapshot"] = runtime_snapshot.as_dict()
         self._create_transcript(execution_id, execution.context, {"task": task, "model": model})
         self._executions[execution_id] = execution
         execution.status = "running"

@@ -39,7 +39,18 @@ def adapt_tool_definition(tool: Any) -> Any:
             "parameters": parameters,
         },
     }
-    for key in ("metadata", "category", "action_type", "write_action"):
+    for key in (
+        "metadata",
+        "category",
+        "action_type",
+        "write_action",
+        "capability_requirements",
+        "requires_model_capabilities",
+        "requires_input_modalities",
+        "requires_runtime_capabilities",
+        "attachment_policy",
+        "supports_attachments",
+    ):
         if key in tool:
             adapted[key] = tool[key]
     return adapted

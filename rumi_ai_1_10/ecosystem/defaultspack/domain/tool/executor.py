@@ -1,6 +1,7 @@
 from .registry import ToolRegistry
 from .mcp_client import McpClient
 from .mcp_registry import McpRegistry
+from .eligibility import rejection_result
 from .schema_adapter import is_tool_rejected_by_policy, policy_from_context
 from .security import is_trusted_pack_id, requires_approval_for_security, unsupported_execution_reason
 from domain.tool_policy.internal_context import internal_tool_decision_allows
@@ -89,6 +90,14 @@ class ToolExecutor:
         """
         if _is_cancelled(context):
             return _cancelled_tool_result(tool_name)
+        filtered_rejection = _filtered_tool_rejection(tool_name, context)
+        if filtered_rejection is not None:
+            return {
+                "result": "Tool '{}' was rejected: {}".format(tool_name, filtered_rejection.get("reason") or filtered_rejection.get("code")),
+                "is_error": True,
+                "widget": {"type": "tool_rejection", **filtered_rejection},
+                **filtered_rejection,
+            }
         tool_def = self._registry.get(tool_name)
         if tool_def is None:
             return {
@@ -811,6 +820,34 @@ def _truthy(value):
     if isinstance(value, str):
         return value.strip().lower() in {"1", "true", "yes", "y", "on"}
     return bool(value)
+
+
+def _filtered_tool_rejection(tool_name, context):
+    if not isinstance(context, dict):
+        return None
+    entries = context.get("tool_filter_result")
+    if isinstance(entries, list):
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            if str(entry.get("tool_name") or "") != str(tool_name or ""):
+                continue
+            if str(entry.get("status") or "") in {"blocked", "hidden"}:
+                return rejection_result(str(tool_name or ""), entry)
+    capability_graph = context.get("capability_graph") if isinstance(context.get("capability_graph"), dict) else {}
+    connected = capability_graph.get("connected_tools") if isinstance(capability_graph.get("connected_tools"), list) else []
+    if connected and str(tool_name or "") not in {str(item) for item in connected if str(item or "").strip()}:
+        return rejection_result(
+            str(tool_name or ""),
+            {
+                "reason_code": "not_connected_to_profile",
+                "reason": "tool is not connected to the active runtime profile",
+                "required": {"runtime_capabilities": ["runtime.connected_tools"]},
+                "actual": {"runtime_capabilities": list(connected)},
+                "repair_suggestions": ["Connect the tool in the active runtime profile."],
+            },
+        )
+    return None
 
 
 def _safe_calculate(expression):
