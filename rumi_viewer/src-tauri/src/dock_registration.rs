@@ -618,6 +618,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn shell_quote_escapes_paths_and_commands_in_launch_script() {
         let script = build_launch_script(
             Path::new("/tmp/Rumi's bin/pack-shell"),
