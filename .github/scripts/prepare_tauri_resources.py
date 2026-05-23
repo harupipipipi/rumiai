@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import os
 import shutil
 import stat
@@ -48,6 +49,13 @@ GENERATED_RESOURCE_DIRS = (
     "ecosystem/defaultspack/ui",
     "bundled",
 )
+UV_PINNED_VERSION = "0.11.14"
+UV_SHA256_BY_TARGET = {
+    "aarch64-apple-darwin": "4333af5c0730d94323a7819bbdf87ce92dd07fc857d67fff0059e0fca31b5c02",
+    "x86_64-apple-darwin": "9836c1440b0bd6aa5f81793648a339bd01d593b7b8f575de3b855dae4ab64654",
+    "x86_64-pc-windows-msvc": "52ba5d19409aaa688a8a1a6ec8dfb6a4817230d20186e75f4006105c3e39a846",
+    "x86_64-unknown-linux-gnu": "f3b623eb0e6141a7053d571d59a0bdc341e0f238ea8f5f0b4815ddbec9a2a296",
+}
 
 
 def parse_args() -> argparse.Namespace:
@@ -192,6 +200,86 @@ def download_to_temp(url: str, attempts: int = 3) -> Path:
     raise last_error
 
 
+def download_text(url: str, attempts: int = 3) -> str:
+    last_error: Exception | None = None
+    for attempt in range(1, attempts + 1):
+        try:
+            with urllib.request.urlopen(url, timeout=300) as response:
+                if response.status >= 400:
+                    raise RuntimeError(f"HTTP {response.status} for {url}")
+                return response.read().decode("utf-8")
+        except Exception as exc:  # pragma: no cover - network retry path
+            last_error = exc
+            if attempt < attempts:
+                time.sleep(2 * attempt)
+    assert last_error is not None
+    raise last_error
+
+
+def compute_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def expected_uv_sha256(target: str, version: str) -> str:
+    if version != UV_PINNED_VERSION:
+        raise RuntimeError(
+            "No pinned SHA256 is configured for uv version "
+            f"{version}. Update UV_PINNED_VERSION/UV_SHA256_BY_TARGET before bundling."
+        )
+    try:
+        return UV_SHA256_BY_TARGET[target]
+    except KeyError as exc:
+        raise RuntimeError(
+            f"No pinned SHA256 is configured for uv target {target!r}. "
+            "Update UV_SHA256_BY_TARGET before bundling."
+        ) from exc
+
+
+def parse_sha256_manifest(text: str, expected_filename: str) -> str:
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        parts = line.split()
+        if not parts:
+            continue
+        checksum = parts[0].lower()
+        if len(parts) >= 2:
+            filename = parts[-1].lstrip("*")
+            if filename != expected_filename:
+                raise RuntimeError(
+                    f"Checksum manifest filename mismatch: expected {expected_filename}, got {filename}"
+                )
+        if len(checksum) != 64 or any(ch not in "0123456789abcdef" for ch in checksum):
+            raise RuntimeError(f"Checksum manifest did not contain a valid SHA256 for {expected_filename}")
+        return checksum
+    raise RuntimeError(f"Checksum manifest was empty for {expected_filename}")
+
+
+def verify_uv_archive_checksum(archive_path: Path, *, target: str, version: str, url: str) -> None:
+    expected_filename = Path(url).name
+    pinned_sha256 = expected_uv_sha256(target, version).lower()
+    upstream_sha256 = parse_sha256_manifest(
+        download_text(f"{url}.sha256"),
+        expected_filename,
+    )
+    if upstream_sha256 != pinned_sha256:
+        raise RuntimeError(
+            "Pinned uv SHA256 does not match upstream checksum manifest for "
+            f"{expected_filename}: pinned={pinned_sha256} upstream={upstream_sha256}"
+        )
+    actual_sha256 = compute_sha256(archive_path).lower()
+    if actual_sha256 != pinned_sha256:
+        raise RuntimeError(
+            "uv archive SHA256 mismatch for "
+            f"{expected_filename}: expected {pinned_sha256}, got {actual_sha256}"
+        )
+
+
 def stage_uv(source_root: Path, target: str, version: str) -> Path:
     binary_name = uv_binary_name(target)
     archive_ext = "zip" if is_windows_target(target) else "tar.gz"
@@ -202,6 +290,7 @@ def stage_uv(source_root: Path, target: str, version: str) -> Path:
     expected = f"uv-{target}/{binary_name}"
 
     try:
+        verify_uv_archive_checksum(archive_path, target=target, version=version, url=url)
         if archive_ext == "zip":
             with zipfile.ZipFile(archive_path) as archive:
                 member_name = expected

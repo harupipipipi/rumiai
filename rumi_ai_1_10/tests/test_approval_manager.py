@@ -6,9 +6,16 @@ test_approval_manager.py - P0: ApprovalManager のテスト
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 import pytest
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+for module_name in [name for name in tuple(sys.modules) if name == "core_runtime" or name.startswith("core_runtime.")]:
+    sys.modules.pop(module_name, None)
 
 from core_runtime.approval_manager import (
     ApprovalManager,
@@ -17,18 +24,24 @@ from core_runtime.approval_manager import (
     PackStatus,
 )
 
+TRUSTED_BUILTIN_PACK_IDS = ("defaultspack", "rumi_default_tools_pack")
+
 
 def test_trusted_builtin_packs_are_approved_without_user_grants(tmp_path):
+    ecosystem_dir = tmp_path / "bundle" / "app" / "ecosystem"
+    for pack_id in TRUSTED_BUILTIN_PACK_IDS:
+        _make_pack_dir(ecosystem_dir, pack_id)
     mgr = ApprovalManager(
-        packs_dir=str(tmp_path / "eco"),
+        packs_dir=str(ecosystem_dir),
         grants_dir=str(tmp_path / "grants"),
         secret_key="test-secret-key-for-hmac",
     )
 
-    assert mgr.get_status("defaultspack") == PackStatus.APPROVED
-    assert mgr.verify_hash("defaultspack") is True
-    assert mgr.verify_hash_detailed("defaultspack")["valid"] is True
-    assert "defaultspack" in mgr.get_approved_pack_ids()
+    for pack_id in TRUSTED_BUILTIN_PACK_IDS:
+        assert mgr.get_status(pack_id) == PackStatus.APPROVED
+        assert mgr.verify_hash(pack_id) is True
+        assert mgr.verify_hash_detailed(pack_id)["valid"] is True
+        assert pack_id in mgr.get_approved_pack_ids()
 
 
 # ===================================================================
@@ -322,13 +335,17 @@ class TestMiscOperations:
         assert is_valid is False
         assert reason == "not_approved"
 
-    def test_bundled_defaultspack_is_trusted_without_user_grant(self, tmp_path, monkeypatch):
-        mgr, _ = _make_manager(tmp_path, monkeypatch=monkeypatch)
+    @pytest.mark.parametrize("pack_id", TRUSTED_BUILTIN_PACK_IDS)
+    def test_non_bundled_builtin_named_pack_copy_requires_user_grant(self, tmp_path, monkeypatch, pack_id):
+        mgr, _ = _make_manager(tmp_path, pack_id=pack_id, monkeypatch=monkeypatch)
 
-        for pack_id in ("defaultspack", "rumi_default_tools_pack"):
-            is_valid, reason = mgr.is_pack_approved_and_verified(pack_id)
-            assert is_valid is True
-            assert reason is None
+        assert mgr.get_status(pack_id) == PackStatus.INSTALLED
+
+        is_valid, reason = mgr.is_pack_approved_and_verified(pack_id)
+        assert is_valid is False
+        assert reason == "not_approved"
+        assert mgr.verify_hash(pack_id) is False
+        assert pack_id not in mgr.get_approved_pack_ids()
 
     def test_is_pack_blocked(self, tmp_path, monkeypatch):
         mgr, _ = _make_manager(tmp_path, monkeypatch=monkeypatch)
