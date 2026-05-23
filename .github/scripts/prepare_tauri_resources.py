@@ -204,11 +204,35 @@ def stage_uv(source_root: Path, target: str, version: str) -> Path:
     try:
         if archive_ext == "zip":
             with zipfile.ZipFile(archive_path) as archive:
-                with archive.open(expected) as src, dest.open("wb") as out:
+                member_name = expected
+                if member_name not in archive.namelist():
+                    matches = [
+                        name
+                        for name in archive.namelist()
+                        if Path(name).name == binary_name
+                    ]
+                    if not matches:
+                        raise KeyError(
+                            f"{binary_name} was not found in {archive_path}"
+                        )
+                    member_name = matches[0]
+                with archive.open(member_name) as src, dest.open("wb") as out:
                     shutil.copyfileobj(src, out)
         else:
             with tarfile.open(archive_path, "r:gz") as archive:
-                member = archive.getmember(expected)
+                try:
+                    member = archive.getmember(expected)
+                except KeyError:
+                    matches = [
+                        member
+                        for member in archive.getmembers()
+                        if Path(member.name).name == binary_name
+                    ]
+                    if not matches:
+                        raise KeyError(
+                            f"{binary_name} was not found in {archive_path}"
+                        )
+                    member = matches[0]
                 extracted = archive.extractfile(member)
                 if extracted is None:
                     raise RuntimeError(f"{expected} is not a file in {archive_path}")
