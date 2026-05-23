@@ -267,7 +267,7 @@ test("classifies common tool families", () => {
   assert.equal(toolFolderFor("browser_companion").id, "browser");
   assert.equal(toolFolderFor("browser_computer").id, "browser");
   assert.equal(toolFolderFor("todo").id, "planning/todo");
-  assert.equal(toolFolderFor("subagent").id, "agent/subagent");
+  assert.equal(toolFolderFor("subagent").id, "agent/delegation");
   assert.equal(toolFolderFor("coding_terminal_exec").id, "coding/terminal");
   assert.equal(toolFolderFor("git_status").id, "coding/git");
 });

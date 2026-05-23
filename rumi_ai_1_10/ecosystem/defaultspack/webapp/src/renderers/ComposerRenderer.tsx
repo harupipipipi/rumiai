@@ -32,6 +32,7 @@ import type {
 import type { ModelCommandCandidate, ModelProfile } from "../lib/api";
 import { CodingWorkspaceBadge } from "../components/coding/CodingWorkspaceBadge";
 import { CodingWorkspacePicker } from "../components/coding/CodingWorkspacePicker";
+import { RuntimeCapabilityBanner } from "../components/RuntimeCapabilityBanner";
 import { WarmActionIcon } from "../components/WarmActionIcon";
 import { fileToAttachment } from "../lib/attachments";
 import { resolveComposerWidgetDrop } from "../lib/composerWidgets";
@@ -850,6 +851,9 @@ export function ComposerRenderer({
   steerBusy = false,
   steerQueuedCount = 0,
   steerPreviewItems = [],
+  onOpenModelManager,
+  onOpenToolSettings,
+  onSwitchToVisionModel,
   onExtensionSelect,
   onCommandSelect,
   onModelCommandCandidateSelect,
@@ -1588,6 +1592,12 @@ export function ComposerRenderer({
       onDragOver={handleDragOver}
     >
       <div className={`rumi-composer-shell ${isNewConversation ? "rumi-composer-shell-new mx-auto" : "mx-auto"}`}>
+        <RuntimeCapabilityBanner
+          visible={imageBridgePlanned}
+          onSwitchToVisionModel={onSwitchToVisionModel}
+          onOpenModelManager={onOpenModelManager}
+          onOpenToolSettings={onOpenToolSettings}
+        />
         <form
           onSubmit={handleSubmitWithApiKeyGuard}
           className={`rumi-composer-frame ${

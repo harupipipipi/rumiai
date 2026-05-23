@@ -40,7 +40,7 @@ const FOLDER_RULES: Array<[RegExp, string, string]> = [
   [/reddit/i, "web/reddit", "Reddit検索"],
   [/browser|computer/i, "browser", "ブラウザ"],
   [/todo|task/i, "planning/todo", "Todo"],
-  [/subagent|agent/i, "agent/subagent", "Subagent"],
+  [/delegate|subagent|agent/i, "agent/delegation", "委任"],
   [/terminal|shell|exec/i, "coding/terminal", "ターミナル"],
   [/file|read|write|list/i, "coding/files", "ファイル"],
   [/git|branch|commit|diff/i, "coding/git", "Git"],
@@ -102,7 +102,7 @@ export function summarizeToolArguments(toolName: string, args?: Record<string, u
   if (lowerName.includes("todo")) {
     return pickString(args, ["title", "task", "action", "todo_id"]);
   }
-  if (lowerName.includes("subagent") || lowerName.includes("agent")) {
+  if (lowerName.includes("subagent") || lowerName.includes("agent") || lowerName.includes("delegate")) {
     return pickString(args, ["task", "title", "prompt"]);
   }
   if (lowerName.includes("browser") || lowerName.includes("computer")) {

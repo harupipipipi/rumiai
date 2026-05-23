@@ -216,6 +216,47 @@ test("composer renders the current steer above the main input", () => {
   assert.doesNotMatch(html, /フォローアップの変更を求める/);
 });
 
+test("vision unsupported banner appears when image input exists and selected model lacks vision", () => {
+  const html = renderToStaticMarkup(
+    createElement(ComposerRenderer, {
+      input: "",
+      placeholder: "メッセージを入力...",
+      isGenerating: false,
+      selectedProfile: {
+        profile_id: "stub/default",
+        display_name: "Stub Default",
+        provider_id: "stub",
+        model_id: "default",
+        supports_vision: false,
+        supports_image_input: false,
+      },
+      favoriteProfiles: [],
+      inlineExtensions: [],
+      belowExtensions: [],
+      thinkingLevel: null,
+      contextUsage: { ratio: 0, usedTokens: 0, maxContext: 0, label: "0%" },
+      attachedFiles: [{
+        id: "img-1",
+        name: "tiny.png",
+        size: 68,
+        type: "image/png",
+        dataUrl: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMB/axR4xUAAAAASUVORK5CYII=",
+      }],
+      onInputChange: () => undefined,
+      onSubmit: () => undefined,
+      onModelProfileSelect: () => undefined,
+      onThinkingLevelChange: () => undefined,
+      onOpenModelManager: () => undefined,
+      onOpenToolSettings: () => undefined,
+      onSwitchToVisionModel: () => undefined,
+    }),
+  );
+
+  assert.match(html, /現在のモデルはVision非対応です/);
+  assert.match(html, /Visionモデルへ切替/);
+  assert.match(html, /Model設定/);
+});
+
 test("composer asks for an API key when an unconfigured Gemini model is selected", () => {
   assert.equal(profileNeedsApiKey({
     profile_id: "google/gemini-2.5-flash",

@@ -18,6 +18,7 @@ import { boundedDurationLabel } from "./lib/duration";
 import { normalizeLocale } from "./lib/i18n";
 import { PENDING_CHAT_REQUEST_TTL_MS, shouldClearPendingAfterConversationRefresh, type PendingChatRequest } from "./lib/pendingChat";
 import { isRecord, toolPreviewsFromMessages, upsertStreamActivityEvent } from "./lib/toolPreviews";
+import { extractLatestToolFilterContext } from "./lib/toolStatus";
 import { hasShellRegion } from "./lib/uiShell";
 import { hasWorkspaceAttachment, workspaceFileToAttachment } from "./lib/workspaceAttachments";
 import { resolveDefaultspackRenderers } from "./renderers/defaultspackRenderers";
@@ -1676,6 +1677,22 @@ function priceCandidateForProfile(activeProfile: ModelProfile | null, profiles: 
   return null;
 }
 
+function visionCandidateForProfile(activeProfile: ModelProfile | null, profiles: ModelProfile[]): ModelProfile | null {
+  if (activeProfile?.supports_vision || activeProfile?.supports_image_input) return activeProfile;
+  const providerId = String(activeProfile?.provider_id ?? "");
+  const sameProvider = profiles.filter((profile) => (
+    profile.provider_id === providerId
+    && (profile.supports_vision || profile.supports_image_input)
+    && profileIsChatSelectable(profile)
+  ));
+  if (sameProvider.length > 0) return bestConfiguredCandidate(sameProvider);
+  const anyVision = profiles.filter((profile) => (
+    (profile.supports_vision || profile.supports_image_input)
+    && profileIsChatSelectable(profile)
+  ));
+  return bestConfiguredCandidate(anyVision);
+}
+
 function contextUsageFor(conversation: Conversation | null, profile: ModelProfile | null): ContextUsageInfo {
   const usedTokens = (conversation?.messages ?? []).reduce((total, message) => {
     const usage = message.usage ?? {};
@@ -1879,7 +1896,7 @@ export default function App() {
   const currentAbortControllerRef = useRef<AbortController | null>(null);
   const streamingConversationIdRef = useRef<string | null>(null);
 
-  const sidebarItems: SidebarItem[] = catalog?.sidebar.items ?? [];
+  const rawSidebarItems: SidebarItem[] = catalog?.sidebar.items ?? [];
   const chatItems = buildChatItems(conversations);
   const recentSpotlightResults = useMemo(
     () => conversations
@@ -1901,6 +1918,14 @@ export default function App() {
   const placeholder = String(settingsValues.general?.composer_placeholder ?? "メッセージを入力...");
   const locale = normalizeLocale(settingsValues.general?.language);
   const keyboardButtonNavigation = parseCommandBoolean(settingsValues.general?.keyboard_button_navigation, false);
+  const disabledToolIds = settingList(settingsValues.tools?.disabled_tool_ids);
+  const hiddenToolIds = settingList(settingsValues.tools?.hidden_tool_ids);
+  const disabledToolIdSet = useMemo(() => new Set(disabledToolIds), [disabledToolIds]);
+  const hiddenToolIdSet = useMemo(() => new Set(hiddenToolIds), [hiddenToolIds]);
+  const sidebarItems: SidebarItem[] = useMemo(
+    () => rawSidebarItems.filter((item) => item.category !== "tool" || !hiddenToolIdSet.has(item.id)),
+    [hiddenToolIdSet, rawSidebarItems],
+  );
   const preferredModel = activeModelId;
   const selectableModelProfiles = userFacingModelProfiles(modelProfiles, preferredModel);
   const favoriteProfiles = favoriteModelProfiles(settingsValues.models?.favorite_profiles, selectableModelProfiles, preferredModel);
@@ -1912,7 +1937,10 @@ export default function App() {
     ?? "medium",
   );
   const contextUsage = contextUsageFor(activeConversation, activeProfile);
-  const composerExtensions = composerExtensionItems(sidebarItems);
+  const composerExtensions = useMemo(
+    () => composerExtensionItems(sidebarItems).filter((item) => !disabledToolIdSet.has(item.id)),
+    [disabledToolIdSet, sidebarItems],
+  );
   const selectedTools = useMemo(() => storedSelectedToolIds
     .map((toolId) => composerExtensions.find((tool) => tool.id === toolId))
     .filter((tool): tool is ComposerExtensionItem => Boolean(tool)), [composerExtensions, storedSelectedToolIds]);
@@ -1930,6 +1958,16 @@ export default function App() {
   const liveBrowserState = useMemo(
     () => reduceBrowserStateFromEvents((activeConversation?.messages ?? []).flatMap((message) => message.events ?? [])),
     [activeConversation?.messages],
+  );
+  const latestToolFilterContext = useMemo(
+    () => extractLatestToolFilterContext(activeConversation?.messages ?? []),
+    [activeConversation?.messages],
+  );
+  const runtimeCapabilitySnapshot = latestToolFilterContext.snapshot;
+  const toolFilterEntries = latestToolFilterContext.entries;
+  const preferredVisionCandidate = useMemo(
+    () => visionCandidateForProfile(activeProfile, selectableModelProfiles),
+    [activeProfile, selectableModelProfiles],
   );
   const canvasPreviews = useMemo(() => {
     const seen = new Set(previews.map((preview) => preview.id));
@@ -1965,6 +2003,14 @@ export default function App() {
   const showRegion = (regionId: string) => !catalog?.shell || hasShellRegion(catalog, regionId);
   const isActivityPreviewVisible = showRegion("activity_preview") && effectiveShowPreview;
   const operationsProfileAvailable = hasOperationsProfile(catalog);
+
+  useEffect(() => {
+    const validIds = new Set(composerExtensions.map((tool) => tool.id));
+    setStoredSelectedToolIds((current) => {
+      const next = current.filter((toolId) => validIds.has(toolId));
+      return next.length === current.length ? current : next;
+    });
+  }, [composerExtensions, setStoredSelectedToolIds]);
 
   const updatePendingRequests = (updater: (current: Record<string, PendingChatRequest>) => Record<string, PendingChatRequest>) => {
     setPendingRequests((current) => {
@@ -2691,6 +2737,19 @@ export default function App() {
     });
   };
 
+  const openSettingsSection = useCallback((sectionId: string) => {
+    setRequestedSettingsSectionId(sectionId);
+    setIsSettingsOpen(true);
+  }, []);
+
+  const handleSwitchToVisionModel = useCallback(() => {
+    if (preferredVisionCandidate) {
+      handleModelProfileSelect(preferredVisionCandidate.profile_id);
+      return;
+    }
+    setError("Vision対応モデルが見つかりません。Model設定から追加してください。");
+  }, [handleModelProfileSelect, preferredVisionCandidate]);
+
   const refreshSteerQueue = useCallback(async (conversationIdOverride?: string) => {
     const conversationId = conversationIdOverride ?? activeConversationId;
     if (!conversationId) {
@@ -2754,6 +2813,10 @@ export default function App() {
   };
 
   const toggleSelectedTool = (item: ComposerExtensionItem) => {
+    if (disabledToolIdSet.has(item.id)) {
+      setError(`${item.label || item.id} は Settings > Tools で OFF です。`);
+      return;
+    }
     setStoredSelectedToolIds((current) => {
       if (current.includes(item.id)) {
         return current.filter((selectedId) => selectedId !== item.id);
@@ -3233,6 +3296,7 @@ export default function App() {
       await api.sendMessage(activeConversationId, "ユーザーが許可しました。承認済みの操作を踏まえて続行してください。", {
         tool_policy: {
           ...(yoloMode ? { yolo_mode: true, allow_shell: true, allow_file_write: true, write_actions_require_approval: false } : {}),
+          ...(disabledToolIds.length ? { disabled_tools: disabledToolIds } : {}),
           ...(approvalToolIds.length ? { selected_tools: approvalToolIds } : {}),
         },
         tools: approvalToolIds.length ? approvalToolIds : undefined,
@@ -3692,6 +3756,7 @@ export default function App() {
           ...(yoloMode ? { yolo_mode: true, allow_shell: true, allow_file_write: true, write_actions_require_approval: false } : {}),
           ...operationsPolicy,
           ...(isCodingWorkspaceSubmit && workspaceIdForSubmit ? { workspace_id: workspaceIdForSubmit } : {}),
+          ...(disabledToolIds.length ? { disabled_tools: disabledToolIds } : {}),
           ...(shouldSendExplicitToolSelection ? { selected_tools: submittedToolIds } : {}),
         },
         attachments: submittedAttachments,
@@ -3812,6 +3877,9 @@ export default function App() {
       steerBusy={modelSteerBusy}
       steerQueuedCount={steerItems.filter((item) => item.status === "queued").length}
       steerPreviewItems={isCentered ? [] : activeComposerSteerItems(steerItems, isGenerating || isConversationPending)}
+      onOpenModelManager={() => openSettingsSection("models")}
+      onOpenToolSettings={() => openSettingsSection("tools")}
+      onSwitchToVisionModel={handleSwitchToVisionModel}
       onExtensionSelect={handleComposerExtensionSelect}
       onCommandSelect={handleComposerCommand}
       onModelCommandCandidateSelect={handleModelCommandCandidateSelect}
@@ -4013,8 +4081,14 @@ export default function App() {
             companyPanel={<CompanyWorkspacePanel />}
             codingPanel={codingSidebarPanel}
             keyboardButtonNavigation={keyboardButtonNavigation}
+            selectedProfile={activeProfile}
+            toolFilterEntries={toolFilterEntries}
+            runtimeCapabilitySnapshot={runtimeCapabilitySnapshot}
+            yoloMode={yoloMode}
             onSettingChange={handleSettingChange}
             onOpenSettings={() => setIsSettingsOpen(true)}
+            onOpenSettingsSection={openSettingsSection}
+            onToggleYolo={() => setYoloMode((value) => !value)}
             onToolToggle={(item) => toggleSelectedTool({
               id: item.id,
               label: item.label,
@@ -4055,6 +4129,7 @@ export default function App() {
           settingsValues={settingsValues}
           locale={locale}
           onClose={() => setIsSettingsOpen(false)}
+          onOpenSection={openSettingsSection}
           onSettingChange={handleSettingChange}
         />
       )}
