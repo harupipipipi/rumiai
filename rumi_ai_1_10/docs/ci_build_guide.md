@@ -109,10 +109,13 @@ for j in jobs:
 `bundled/uv`, `bundled/pack-shell` が入る。`.venv`, `node_modules`,
 `user_data`, `__pycache__`, `.rumi_snapshots`, `tests/` は配布物から除外する。
 
-Windows のインストーラーだけを確認したい場合は、手動実行できる
-`.github/workflows/windows-installer.yml` を使う。成果物は Actions artifact として
-`rumi_viewer/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe`
-からアップロードされる。
+PR 上で配布物を確認したい場合は、手動実行もできる
+`.github/workflows/desktop-installers.yml` を使う。Windows NSIS, macOS DMG, Linux
+DEB/AppImage を Actions artifact としてアップロードする。代表的な出力先は以下。
+
+- Windows: `rumi_viewer/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe`
+- macOS: `rumi_viewer/src-tauri/target/{target}/release/bundle/dmg/*.dmg`
+- Linux: `rumi_viewer/src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/{deb,appimage}/`
 
 ### ランナー選定の注意
 
