@@ -1,5 +1,6 @@
 import {
   ArrowUp,
+  BrainCircuit,
   ChevronDown,
   Code2,
   CornerDownRight,
@@ -25,6 +26,7 @@ import type {
   ComposerCommandItem,
   ComposerExtensionItem,
   ComposerRendererProps,
+  ComposerSkillItem,
   DroppedWidget,
   AppMode,
   ToolGroup,
@@ -34,11 +36,11 @@ import { CodingWorkspaceBadge } from "../components/coding/CodingWorkspaceBadge"
 import { CodingWorkspacePicker } from "../components/coding/CodingWorkspacePicker";
 import { WarmActionIcon } from "../components/WarmActionIcon";
 import { fileToAttachment } from "../lib/attachments";
-import { resolveComposerWidgetDrop } from "../lib/composerWidgets";
+import { composerSkillMentionWidget, composerToolMentionWidget, filterComposerSkillMentions, filterComposerToolMentions, resolveComposerWidgetDrop } from "../lib/composerWidgets";
 import { HISTORY_CHAT_DROP_MIME, parseHistoryChatDrop } from "../lib/historyComposer";
 import { sortedToolGroups, toolGroupFor } from "../lib/toolUi";
 
-export { resolveComposerWidgetDrop } from "../lib/composerWidgets";
+export { composerSkillMentionWidget, composerToolMentionWidget, filterComposerSkillMentions, filterComposerToolMentions, resolveComposerWidgetDrop, skillMentionIdsFromText, toolMentionIdsFromText } from "../lib/composerWidgets";
 
 const THINKING_LABELS: Record<string, string> = {
   none: "なし",
@@ -79,6 +81,24 @@ type ComposerChromeWidgetSpec = {
   width: ComposerChromeWidth;
   className?: string;
   render: () => ReactNode;
+};
+
+type SpeechRecognitionEventLike = {
+  resultIndex: number;
+  results: ArrayLike<{
+    isFinal?: boolean;
+    0?: { transcript?: string };
+  }>;
+};
+
+type SpeechRecognitionLike = {
+  lang: string;
+  continuous: boolean;
+  interimResults: boolean;
+  onresult: ((event: SpeechRecognitionEventLike) => void) | null;
+  onend: (() => void) | null;
+  start: () => void;
+  stop: () => void;
 };
 
 const COMPOSER_CHROME_WIDTHS = {
@@ -223,6 +243,63 @@ function modelRouteReason(profile: ModelProfile | null | undefined): string {
   if (!profile) return "";
   const knowledge = typeof profile.knowledge_level === "number" ? `KL ${profile.knowledge_level}` : "";
   return [...capabilityBadges(profile), knowledge].filter(Boolean).join(" / ");
+}
+
+function normalizeProviderSearchToken(value: string): string {
+  return value
+    .trim()
+    .replace(/^@+/, "")
+    .toLowerCase()
+    .replace(/[\s_-]+/g, "");
+}
+
+function modelProfileProviderAliases(profile: ModelProfile): string[] {
+  return [
+    profile.provider_id,
+    profile.provider_display_name,
+    profile.metadata?.provider_id,
+    profile.metadata?.provider_display_name,
+  ].map((value) => normalizeProviderSearchToken(String(value ?? ""))).filter(Boolean);
+}
+
+function modelProfileSearchText(profile: ModelProfile): string {
+  return [
+    profile.profile_id,
+    profile.qualified_model_id,
+    profile.model_id,
+    profile.provider_id,
+    profile.provider_display_name,
+    profileDisplayName(profile),
+    profile.display_name,
+    profile.disambiguated_name,
+    ...(profile.capability_tags ?? []),
+    ...(profile.recommended_roles ?? []),
+  ].filter(Boolean).join(" ").toLowerCase();
+}
+
+export function filterModelProfilesBySearch(profiles: ModelProfile[], search: string): ModelProfile[] {
+  const rawTokens = search.trim().split(/\s+/).filter(Boolean);
+  if (rawTokens.length === 0) return profiles;
+
+  const providerTokens = rawTokens
+    .filter((token) => token.startsWith("@"))
+    .map(normalizeProviderSearchToken)
+    .filter(Boolean);
+  const textTokens = rawTokens
+    .filter((token) => !token.startsWith("@"))
+    .map((token) => token.toLowerCase())
+    .filter(Boolean);
+
+  return profiles.filter((profile) => {
+    const providerAliases = modelProfileProviderAliases(profile);
+    const matchesProviders = providerTokens.every((token) => (
+      providerAliases.some((alias) => alias.includes(token))
+    ));
+    if (!matchesProviders) return false;
+
+    const searchText = modelProfileSearchText(profile);
+    return textTokens.every((token) => searchText.includes(token));
+  });
 }
 
 function groupToolItems(items: ComposerExtensionItem[]): ToolGroup[] {
@@ -475,16 +552,7 @@ function ModelDropdown({
   onClose: () => void;
 }) {
   const [search, setSearch] = useState("");
-  const filtered = useMemo(() => {
-    if (!search) return profiles;
-    const q = search.toLowerCase();
-    return profiles.filter(
-      (p) =>
-        p.display_name.toLowerCase().includes(q) ||
-        (p.provider_id ?? "").toLowerCase().includes(q) ||
-        (p.model_id ?? "").toLowerCase().includes(q),
-    );
-  }, [profiles, search]);
+  const filtered = useMemo(() => filterModelProfilesBySearch(profiles, search), [profiles, search]);
 
   const groupedByProvider = useMemo(() => {
     const map = new Map<string, ModelProfile[]>();
@@ -500,7 +568,7 @@ function ModelDropdown({
   return (
     <>
       <button type="button" aria-label="close model dropdown" className="fixed inset-0 z-20 cursor-default" onClick={onClose} />
-      <div className="absolute bottom-full left-0 mb-2 z-30 w-[min(360px,calc(100vw-32px))] overflow-hidden rounded-xl border border-zinc-700/70 bg-zinc-950 shadow-2xl">
+      <div className="absolute bottom-full left-0 mb-2 z-[70] w-[min(360px,calc(100vw-32px))] overflow-hidden rounded-xl border border-zinc-700/70 bg-zinc-950 shadow-2xl">
         <div className="border-b border-zinc-800 p-2">
           <div className="relative">
             <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-500" />
@@ -508,7 +576,7 @@ function ModelDropdown({
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="モデルを検索..."
+              placeholder="モデルを検索... @google"
               className="w-full rounded-lg bg-zinc-900 border border-zinc-800 pl-8 pr-3 py-1.5 text-sm text-zinc-200 outline-none focus:border-zinc-600 placeholder:text-zinc-600"
               autoFocus
             />
@@ -593,7 +661,7 @@ function ModeSelector({
   return (
     <>
       <button type="button" aria-label="close mode selector" className="fixed inset-0 z-20 cursor-default" onClick={onClose} />
-      <div className="absolute bottom-full left-0 mb-2 z-30 w-[220px] overflow-hidden rounded-xl border border-zinc-700/70 bg-zinc-950 shadow-2xl">
+      <div className="absolute bottom-full left-0 mb-2 z-50 w-[220px] overflow-hidden rounded-xl border border-zinc-700/70 bg-zinc-950 shadow-2xl">
         <div className="border-b border-zinc-800 px-3 py-2">
           <p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">モード選択</p>
         </div>
@@ -626,41 +694,79 @@ function ModeSelector({
   );
 }
 
-function AtFileMention({
-  query,
-  files,
+type ComposerAtMentionCandidate =
+  | { kind: "tool"; id: string; label: string; description?: string; item: ComposerExtensionItem }
+  | { kind: "skill"; id: string; label: string; description?: string; skill: ComposerSkillItem }
+  | { kind: "file"; id: string; label: string; description?: string; file: string };
+
+function AtMentionMenu({
+  candidates,
+  activeIndex,
+  onActiveIndexChange,
   onSelect,
   onClose,
+  style,
 }: {
-  query: string;
-  files: string[];
-  onSelect: (file: string) => void;
+  candidates: ComposerAtMentionCandidate[];
+  activeIndex: number;
+  onActiveIndexChange: (index: number) => void;
+  onSelect: (candidate: ComposerAtMentionCandidate) => void;
   onClose: () => void;
+  style?: CSSProperties;
 }) {
-  const filtered = useMemo(() => filterAtMentionFiles(files, query), [files, query]);
-
-  if (filtered.length === 0) return null;
+  if (candidates.length === 0) return null;
 
   return (
     <>
-      <button type="button" aria-label="close file mention" className="fixed inset-0 z-20 cursor-default" onClick={onClose} />
-      <div className="absolute bottom-full left-4 mb-2 z-30 w-[min(400px,calc(100vw-32px))] overflow-hidden rounded-xl border border-zinc-700/70 bg-zinc-950 shadow-2xl">
-        <div className="border-b border-zinc-800 px-3 py-2 flex items-center gap-2">
-          <Folder size={13} className="text-zinc-500" />
-          <p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">ファイルを選択</p>
+      <button type="button" aria-label="close mention menu" className="fixed inset-0 z-20 cursor-default" onClick={onClose} />
+      <div
+        role="listbox"
+        aria-label="Composer mentions"
+        data-testid="composer-at-mention-candidates"
+        style={style}
+        className="fixed z-50 w-[min(440px,calc(100vw-32px))] overflow-hidden rounded-xl border border-zinc-700/70 bg-zinc-950 shadow-2xl"
+      >
+        <div className="border-b border-zinc-800 px-3 py-2 flex items-center justify-between gap-2">
+          <span className="inline-flex min-w-0 items-center gap-2">
+            <Wrench size={13} className="text-zinc-500" />
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">Mentions</span>
+          </span>
+          <span className="text-[10px] text-zinc-600">{candidates.length}</span>
         </div>
         <div className="max-h-56 overflow-y-auto py-1">
-          {filtered.map((file) => (
+          {candidates.map((candidate, index) => {
+            const Icon = candidate.kind === "tool" ? Wrench : candidate.kind === "skill" ? BrainCircuit : FileText;
+            return (
             <button
-              key={file}
+              key={candidate.id}
               type="button"
-              onClick={() => onSelect(file)}
-              className="w-full flex items-center gap-2 px-3 py-1.5 text-left hover:bg-zinc-800/80 transition-colors"
+              role="option"
+              aria-selected={index === activeIndex}
+              onMouseEnter={() => onActiveIndexChange(index)}
+              onClick={() => onSelect(candidate)}
+              className={`w-full flex items-center justify-between gap-3 px-3 py-2 text-left transition-colors ${
+                index === activeIndex ? "bg-zinc-800 text-zinc-100" : "hover:bg-zinc-900"
+              }`}
             >
-              <FileText size={13} className="text-zinc-500 flex-shrink-0" />
-              <span className="truncate text-[13px] text-zinc-200">{file}</span>
+              <span className="flex min-w-0 items-center gap-2">
+                <Icon size={13} className="text-zinc-500 flex-shrink-0" />
+                <span className="min-w-0">
+                  <span className="block truncate text-[13px] text-zinc-200">@{candidate.label}</span>
+                  {candidate.description && <span className="block truncate text-[10px] text-zinc-500">{candidate.description}</span>}
+                </span>
+              </span>
+              <span className={`flex-shrink-0 rounded-full border px-1.5 py-0.5 text-[9px] leading-none ${
+                candidate.kind === "tool"
+                  ? "border-emerald-500/25 text-emerald-300"
+                  : candidate.kind === "skill"
+                    ? "border-violet-500/25 text-violet-300"
+                    : "border-sky-500/25 text-sky-300"
+              }`}>
+                {candidate.kind}
+              </span>
             </button>
-          ))}
+            );
+          })}
         </div>
       </div>
     </>
@@ -756,12 +862,14 @@ function ModelCommandCandidatePopup({
   onActiveIndexChange,
   onSelect,
   onClose,
+  style,
 }: {
   candidates: ModelCommandCandidate[];
   activeIndex: number;
   onActiveIndexChange: (index: number) => void;
   onSelect: (candidate: ModelCommandCandidate) => void;
   onClose?: () => void;
+  style?: CSSProperties;
 }) {
   if (candidates.length === 0) return null;
 
@@ -769,7 +877,8 @@ function ModelCommandCandidatePopup({
     <div
       role="listbox"
       aria-label="Model candidates"
-      className="absolute bottom-full left-4 z-40 mb-2 w-[min(460px,calc(100vw-32px))] overflow-hidden rounded-xl border border-zinc-700/70 bg-zinc-950 shadow-2xl max-[640px]:left-2"
+      style={style}
+      className="fixed z-50 w-[min(460px,calc(100vw-32px))] overflow-hidden rounded-xl border border-zinc-700/70 bg-zinc-950 shadow-2xl"
     >
       <div className="flex items-center justify-between gap-2 border-b border-zinc-800 px-3 py-2">
         <span className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Models</span>
@@ -834,10 +943,13 @@ export function ComposerRenderer({
   contextUsage,
   inlineExtensions,
   belowExtensions,
+  skillExtensions = [],
   commands = [],
   modelCommandCandidates = [],
   modelPickerRequestId = 0,
   yoloMode = false,
+  voiceInputEnabled = true,
+  voiceInputUseAi = false,
   mode = "chat",
   codingContext = null,
   codingWorkspaces = [],
@@ -850,6 +962,7 @@ export function ComposerRenderer({
   steerBusy = false,
   steerQueuedCount = 0,
   steerPreviewItems = [],
+  suppressPopovers = false,
   onExtensionSelect,
   onCommandSelect,
   onModelCommandCandidateSelect,
@@ -885,12 +998,16 @@ export function ComposerRenderer({
   const [modeSelectorOpen, setModeSelectorOpen] = useState(false);
   const [atMentionOpen, setAtMentionOpen] = useState(false);
   const [atMentionQuery, setAtMentionQuery] = useState("");
+  const [selectedAtMentionIndex, setSelectedAtMentionIndex] = useState(0);
   const [selectedCommandIndex, setSelectedCommandIndex] = useState(0);
   const [selectedModelCandidateIndex, setSelectedModelCandidateIndex] = useState(0);
+  const [composerPopoverStyle, setComposerPopoverStyle] = useState<CSSProperties | undefined>(undefined);
+  const [isVoiceListening, setIsVoiceListening] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const menuButtonRef = useRef<HTMLButtonElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const recognitionRef = useRef<{ stop: () => void } | null>(null);
   const submitPointerHandledRef = useRef(false);
   const lastModelPickerRequestIdRef = useRef(modelPickerRequestId);
   const chromeButtonTabIndex = keyboardButtonNavigation ? undefined : -1;
@@ -955,6 +1072,32 @@ export function ComposerRenderer({
   const branchOptions = codingContext?.branches?.length ? codingContext.branches : codingContext?.branch ? [codingContext.branch] : [];
   const currentDirectory = codingContext?.directory || ".";
   const selectedCodingWorkspace = codingWorkspaces.find((workspace) => workspace.workspace_id === (selectedCodingWorkspaceId || codingContext?.workspaceId)) ?? codingWorkspaces[0] ?? null;
+  const atMentionCandidates = useMemo<ComposerAtMentionCandidate[]>(() => {
+    const toolCandidates = filterComposerToolMentions(toolItems, atMentionQuery, 14).map((item) => ({
+      kind: "tool" as const,
+      id: `tool:${item.id}`,
+      label: item.id,
+      description: item.description ?? item.label,
+      item,
+    }));
+    const skillCandidates = filterComposerSkillMentions(skillExtensions, atMentionQuery, 8).map((skill) => ({
+      kind: "skill" as const,
+      id: `skill:${skill.id}`,
+      label: skill.id,
+      description: skill.description ?? skill.label,
+      skill,
+    }));
+    const fileCandidates = mode === "coding"
+      ? filterAtMentionFiles(codingContext?.files ?? [], atMentionQuery).slice(0, 8).map((file) => ({
+          kind: "file" as const,
+          id: `file:${file}`,
+          label: file,
+          description: "workspace file",
+          file,
+        }))
+      : [];
+    return [...toolCandidates, ...skillCandidates, ...fileCandidates];
+  }, [atMentionQuery, codingContext?.files, mode, skillExtensions, toolItems]);
 
   const needsApiKey = useCallback(
     (profile: ModelProfile | null | undefined) => (
@@ -962,6 +1105,21 @@ export function ComposerRenderer({
     ),
     [locallyConfiguredProviders],
   );
+
+  const updateComposerPopoverAnchor = useCallback(() => {
+    const textarea = textareaRef.current;
+    if (!textarea || typeof window === "undefined") return;
+    const rect = textarea.getBoundingClientRect();
+    const width = Math.min(460, Math.max(260, window.innerWidth - 16));
+    const left = Math.max(8, Math.min(rect.left, window.innerWidth - width - 8));
+    const top = Math.max(8, rect.top - 8);
+    setComposerPopoverStyle({
+      left,
+      top,
+      width,
+      transform: "translateY(-100%)",
+    });
+  }, []);
 
   const requestModelProfileSelect = useCallback(
     (profileId: string) => {
@@ -1028,6 +1186,13 @@ export function ComposerRenderer({
   }, [matchedCommands.length]);
 
   useEffect(() => {
+    setSelectedAtMentionIndex((current) => {
+      if (atMentionCandidates.length === 0) return 0;
+      return Math.min(current, atMentionCandidates.length - 1);
+    });
+  }, [atMentionCandidates.length]);
+
+  useEffect(() => {
     setSelectedModelCandidateIndex((current) => {
       if (modelCommandCandidates.length === 0) return 0;
       return Math.min(current, modelCommandCandidates.length - 1);
@@ -1046,6 +1211,26 @@ export function ComposerRenderer({
     setModelDropdownOpen(true);
     window.setTimeout(() => textareaRef.current?.focus({ preventScroll: true }), 0);
   }, [modelPickerRequestId]);
+
+  useEffect(() => {
+    if (!suppressPopovers) return;
+    setMenuOpen(false);
+    setAtMentionOpen(false);
+    setModelDropdownOpen(false);
+    setModeSelectorOpen(false);
+    onModelCommandCandidatesClose?.();
+  }, [onModelCommandCandidatesClose, suppressPopovers]);
+
+  useEffect(() => {
+    if (!atMentionOpen && !hasModelCommandCandidates) return;
+    updateComposerPopoverAnchor();
+    window.addEventListener("resize", updateComposerPopoverAnchor);
+    window.addEventListener("scroll", updateComposerPopoverAnchor, true);
+    return () => {
+      window.removeEventListener("resize", updateComposerPopoverAnchor);
+      window.removeEventListener("scroll", updateComposerPopoverAnchor, true);
+    };
+  }, [atMentionOpen, hasModelCommandCandidates, updateComposerPopoverAnchor]);
 
   useEffect(() => {
     textareaRef.current?.focus({ preventScroll: true });
@@ -1116,42 +1301,58 @@ export function ComposerRenderer({
     [onModelCommandCandidateSelect],
   );
 
-  const handleInputChange = useCallback(
+  const updateAtMentionStateFromInput = useCallback(
     (value: string) => {
-      onInputChange(value);
-
       const textarea = textareaRef.current;
-      if (!textarea) return;
-
-      const cursorPos = textarea.selectionStart;
+      if (!textarea || suppressPopovers) return;
+      const cursorPos = textarea.selectionStart ?? value.length;
       const textBeforeCursor = value.slice(0, cursorPos);
-      const atMatch = textBeforeCursor.match(/@(\S*)$/);
+      const atMatch = textBeforeCursor.match(/(?:^|\s)@([^\s@]*)$/);
+      const hasMentionTargets = toolItems.length > 0 || skillExtensions.length > 0 || (mode === "coding" && Boolean(codingContext?.files?.length));
 
-      if (atMatch && mode === "coding" && codingContext?.files?.length) {
+      if (atMatch && !isSteerMode && hasMentionTargets) {
         setAtMentionOpen(true);
         setAtMentionQuery(atMatch[1]);
+        updateComposerPopoverAnchor();
       } else {
         setAtMentionOpen(false);
         setAtMentionQuery("");
       }
+    },
+    [codingContext?.files?.length, isSteerMode, mode, skillExtensions.length, suppressPopovers, toolItems.length, updateComposerPopoverAnchor],
+  );
+
+  useEffect(() => {
+    updateAtMentionStateFromInput(input);
+  }, [input, updateAtMentionStateFromInput]);
+
+  const handleInputChange = useCallback(
+    (value: string) => {
+      onInputChange(value);
+      updateAtMentionStateFromInput(value);
 
       if (!value.startsWith("/") || value.startsWith("//")) {
         setSelectedCommandIndex(0);
       }
     },
-    [onInputChange, mode, codingContext],
+    [onInputChange, updateAtMentionStateFromInput],
   );
 
-  const handleAtFileSelect = useCallback(
-    (file: string) => {
+  const handleAtMentionSelect = useCallback(
+    (candidate: ComposerAtMentionCandidate) => {
       const textarea = textareaRef.current;
       if (!textarea) return;
 
       const cursorPos = textarea.selectionStart;
-      const next = insertAtMentionText(input, cursorPos, file);
+      const mentionText = candidate.kind === "tool" ? candidate.item.id : candidate.kind === "skill" ? candidate.skill.id : candidate.file;
+      const next = insertAtMentionText(input, cursorPos, mentionText);
       onInputChange(next.value);
-      if (mode === "coding") {
-        onAtFileAttach?.(file);
+      if (candidate.kind === "tool") {
+        onDropWidget?.(composerToolMentionWidget(candidate.item));
+      } else if (candidate.kind === "skill") {
+        onDropWidget?.(composerSkillMentionWidget(candidate.skill));
+      } else if (mode === "coding") {
+        onAtFileAttach?.(candidate.file);
       }
       setAtMentionOpen(false);
       setAtMentionQuery("");
@@ -1161,7 +1362,7 @@ export function ComposerRenderer({
         textarea.focus();
       }, 0);
     },
-    [input, mode, onAtFileAttach, onInputChange],
+    [input, mode, onAtFileAttach, onDropWidget, onInputChange],
   );
 
   const attachFiles = useCallback(async (files: FileList | null) => {
@@ -1264,11 +1465,71 @@ export function ComposerRenderer({
     [handleSubmitWithApiKeyGuard, input, isGenerating, onStopGenerating],
   );
 
+  const toggleVoiceInput = useCallback(() => {
+    if (!voiceInputEnabled || isGenerating) return;
+    if (isVoiceListening) {
+      recognitionRef.current?.stop();
+      setIsVoiceListening(false);
+      return;
+    }
+    const recognitionCtor = (window as unknown as {
+      SpeechRecognition?: new () => SpeechRecognitionLike;
+      webkitSpeechRecognition?: new () => SpeechRecognitionLike;
+    }).SpeechRecognition ?? (window as unknown as { webkitSpeechRecognition?: new () => SpeechRecognitionLike }).webkitSpeechRecognition;
+    if (!recognitionCtor) return;
+    const recognition = new recognitionCtor();
+    recognition.lang = "ja-JP";
+    recognition.continuous = false;
+    recognition.interimResults = true;
+    let finalTranscript = "";
+    recognition.onresult = (event: SpeechRecognitionEventLike) => {
+      let interim = "";
+      for (let index = event.resultIndex; index < event.results.length; index += 1) {
+        const result = event.results[index];
+        const text = result?.[0]?.transcript ?? "";
+        if (result?.isFinal) finalTranscript += text;
+        else interim += text;
+      }
+      const transcript = `${finalTranscript}${interim}`.trim();
+      if (!transcript) return;
+      const prefix = voiceInputUseAi ? "文字起こしして: " : "";
+      const base = input.trimEnd();
+      onInputChange(`${base}${base ? "\n" : ""}${prefix}${transcript}`);
+    };
+    recognition.onend = () => {
+      recognitionRef.current = null;
+      setIsVoiceListening(false);
+      window.setTimeout(() => textareaRef.current?.focus({ preventScroll: true }), 0);
+    };
+    recognitionRef.current = recognition;
+    setIsVoiceListening(true);
+    recognition.start();
+  }, [input, isGenerating, isVoiceListening, onInputChange, voiceInputEnabled, voiceInputUseAi]);
+
   const handleKeyDown = useCallback(
     (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "a") {
         event.stopPropagation();
         return;
+      }
+
+      if (atMentionOpen) {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          setAtMentionOpen(false);
+          return;
+        }
+        if (atMentionCandidates.length > 0 && (event.key === "ArrowDown" || event.key === "ArrowUp")) {
+          event.preventDefault();
+          const direction = event.key === "ArrowUp" ? -1 : 1;
+          setSelectedAtMentionIndex((current) => nextModelCandidateIndex(current, atMentionCandidates.length, direction));
+          return;
+        }
+        if (atMentionCandidates.length > 0 && (event.key === "Tab" || event.key === "Enter")) {
+          event.preventDefault();
+          handleAtMentionSelect(atMentionCandidates[Math.min(selectedAtMentionIndex, atMentionCandidates.length - 1)]);
+          return;
+        }
       }
 
       const modelCandidateAction = isSteerMode
@@ -1326,13 +1587,17 @@ export function ComposerRenderer({
       }
     },
     [
+      atMentionCandidates,
+      atMentionOpen,
       chooseModelCommandCandidate,
+      handleAtMentionSelect,
       handleSubmitWithApiKeyGuard,
       isSteerMode,
       matchedCommands,
       modelCommandCandidates,
       onModelCommandCandidatesClose,
       keyboardButtonNavigation,
+      selectedAtMentionIndex,
       selectedCommandIndex,
       selectedModelCandidateIndex,
     ],
@@ -1390,9 +1655,12 @@ export function ComposerRenderer({
         <button
           type="button"
           tabIndex={chromeButtonTabIndex}
-          disabled={isGenerating}
-          title="音声入力"
-          className="h-8 w-8 flex flex-shrink-0 items-center justify-center text-zinc-400 hover:text-zinc-100 hover:bg-zinc-700/60 rounded-lg transition-colors disabled:opacity-50"
+          disabled={isGenerating || !voiceInputEnabled}
+          title={isVoiceListening ? "音声入力を停止" : voiceInputUseAi ? "音声入力（AI文字起こし）" : "音声入力"}
+          onClick={toggleVoiceInput}
+          className={`h-8 w-8 flex flex-shrink-0 items-center justify-center rounded-lg transition-colors disabled:opacity-50 ${
+            isVoiceListening ? "bg-rose-500/15 text-rose-300 hover:bg-rose-500/25" : "text-zinc-400 hover:text-zinc-100 hover:bg-zinc-700/60"
+          }`}
         >
           <WarmActionIcon kind="mic" size="md" />
         </button>
@@ -1610,11 +1878,12 @@ export function ComposerRenderer({
               onActiveIndexChange={setSelectedModelCandidateIndex}
               onSelect={chooseModelCommandCandidate}
               onClose={onModelCommandCandidatesClose}
+              style={composerPopoverStyle}
             />
           )}
           {showCommandSuggestions && (
             showThinkingLevelChips ? (
-              <div className="absolute bottom-full left-4 z-30 mb-2 flex w-[min(520px,calc(100vw-32px))] flex-wrap items-center gap-2 rounded-xl border border-zinc-700/70 bg-zinc-950/95 px-3 py-2 shadow-2xl">
+              <div className="absolute bottom-full left-4 z-40 mb-2 flex w-[min(520px,calc(100vw-32px))] flex-wrap items-center gap-2 rounded-xl border border-zinc-700/70 bg-zinc-950/95 px-3 py-2 shadow-2xl">
                 <span className="mr-1 text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Thinking</span>
                 {matchedCommands.map((command, index) => {
                   const level = command.id.replace(/^think:/, "");
@@ -1637,7 +1906,7 @@ export function ComposerRenderer({
                 })}
               </div>
             ) : (
-              <div className="absolute bottom-full left-4 z-30 mb-2 w-[min(420px,calc(100vw-32px))] overflow-hidden rounded-xl border border-zinc-700/70 bg-zinc-950 shadow-2xl">
+              <div className="absolute bottom-full left-4 z-40 mb-2 w-[min(420px,calc(100vw-32px))] overflow-hidden rounded-xl border border-zinc-700/70 bg-zinc-950 shadow-2xl">
                 <div className="border-b border-zinc-800 px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-zinc-500">
                   Commands
                 </div>
@@ -1676,12 +1945,14 @@ export function ComposerRenderer({
             )
           )}
 
-          {atMentionOpen && codingContext?.files && (
-            <AtFileMention
-              query={atMentionQuery}
-              files={codingContext.files}
-              onSelect={handleAtFileSelect}
+          {atMentionOpen && (
+            <AtMentionMenu
+              candidates={atMentionCandidates}
+              activeIndex={selectedAtMentionIndex}
+              onActiveIndexChange={setSelectedAtMentionIndex}
+              onSelect={handleAtMentionSelect}
               onClose={() => setAtMentionOpen(false)}
+              style={composerPopoverStyle}
             />
           )}
 
@@ -1694,7 +1965,7 @@ export function ComposerRenderer({
                         className="fixed inset-0 z-20 cursor-default"
                         onClick={() => setMenuOpen(false)}
                       />
-              <div ref={menuRef} className="absolute bottom-[52px] left-4 z-30 grid w-[min(480px,calc(100vw-32px))] grid-cols-[120px_minmax(0,1fr)] overflow-hidden rounded-xl border border-zinc-700/70 bg-zinc-950 shadow-2xl max-[640px]:left-2 max-[640px]:grid-cols-1">
+              <div ref={menuRef} className="absolute bottom-full left-4 z-40 mb-2 grid w-[min(480px,calc(100vw-32px))] grid-cols-[120px_minmax(0,1fr)] overflow-hidden rounded-xl border border-zinc-700/70 bg-zinc-950 shadow-2xl max-[640px]:left-2 max-[640px]:grid-cols-1">
                 <div className="border-r border-zinc-800 bg-zinc-950/90 p-1.5 max-[640px]:flex max-[640px]:border-b max-[640px]:border-r-0">
                   {(
                     [
@@ -1908,7 +2179,7 @@ export function ComposerRenderer({
               isSteerMode
                 ? "実行中のAIへステアを入力..."
                 : mode === "coding"
-                ? "コーディング指示を入力... (@ でファイル添付)"
+                ? "コーディング指示を入力... (@ でtool/ファイル)"
                 : placeholder
             }
             className={`${

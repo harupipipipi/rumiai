@@ -1,0 +1,89 @@
+{
+  "id": "tool_search",
+  "description": "Search available tools by names, summaries, docs, schema keywords, and skill metadata.",
+  "config": {
+    "tool_id": "tool_search",
+    "name": "Tool Search",
+    "summary": "Find relevant tools and, when needed, inspect their JSON schema.",
+    "tool_category": "tool",
+    "action_type": "read",
+    "write_action": false,
+    "requires_approval": false,
+    "risk": "low",
+    "tags": [
+      "tool",
+      "search",
+      "schema",
+      "skill",
+      "docs"
+    ],
+    "metadata": {
+      "keywords": [
+        "tool search",
+        "tool schema",
+        "関連ツール",
+        "ツール検索",
+        "スキル",
+        "JSON schema"
+      ]
+    },
+    "ui": {
+      "group_id": "manage",
+      "group_label": "管理",
+      "group_icon": "search",
+      "item_icon": "search",
+      "widget_kind": "tool_toggle",
+      "drop_capabilities": [
+        "composer.toggle_chip"
+      ],
+      "composer_label": "Tool Search",
+      "composer_description": "関連ワードや skill/docs/schema から使うべき tool を探します。",
+      "composer_icon": "search"
+    },
+    "schema": {
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "What the user wants to do, or keywords such as coding/file/search."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 24,
+            "default": 8
+          },
+          "phase": {
+            "type": "string",
+            "enum": [
+              "overview",
+              "schema"
+            ],
+            "default": "overview",
+            "description": "Use overview to decide which tool fits; use schema after choosing a concrete tool."
+          },
+          "include_schema": {
+            "type": "boolean",
+            "default": false
+          },
+          "tool_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Optional concrete tool ids to inspect."
+          }
+        },
+        "required": [
+          "query"
+        ]
+      }
+    },
+    "execution": {
+      "type": "local",
+      "handler": "blocks.tool.search:run"
+    }
+  }
+}

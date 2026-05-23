@@ -756,7 +756,7 @@ class ChatRunEngine:
 
     def _execute(self, prepared: PreparedChatRun, draft: _AssistantDraft | None) -> Iterator[dict[str, Any]]:
         working_messages = list(prepared.standard_messages)
-        working_ir = prepared.chat_ir
+        working_ir = prepared.provider_chat_ir or prepared.chat_ir
         tool_context_message = _tool_visibility_message(prepared.provider_tools)
         if tool_context_message is not None:
             insert_at = 1 if working_messages and working_messages[0].get("role") == "system" else 0

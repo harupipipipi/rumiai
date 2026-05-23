@@ -39,6 +39,16 @@ export type ComposerExtensionItem = {
   ui?: SidebarItem["ui"];
 };
 
+export type ComposerSkillItem = {
+  id: string;
+  label: string;
+  description?: string;
+  triggers?: string[];
+  appliesToTools?: string[];
+  aliases?: string[];
+  metadata?: Record<string, unknown>;
+};
+
 export type ContextUsageInfo = {
   usedTokens: number;
   maxContext: number;
@@ -112,10 +122,13 @@ export type ComposerRendererProps = {
   contextUsage: ContextUsageInfo;
   inlineExtensions: ComposerExtensionItem[];
   belowExtensions: ComposerExtensionItem[];
+  skillExtensions?: ComposerSkillItem[];
   commands?: ComposerCommandItem[];
   modelCommandCandidates?: ModelCommandCandidate[];
   modelPickerRequestId?: number;
   yoloMode?: boolean;
+  voiceInputEnabled?: boolean;
+  voiceInputUseAi?: boolean;
   mode?: AppMode;
   codingContext?: CodingContext | null;
   codingWorkspaces?: CodingWorkspaceRecord[];
@@ -128,6 +141,7 @@ export type ComposerRendererProps = {
   steerBusy?: boolean;
   steerQueuedCount?: number;
   steerPreviewItems?: ConversationSteerItem[];
+  suppressPopovers?: boolean;
   onExtensionSelect?: (item: ComposerExtensionItem) => void;
   onCommandSelect?: (commandId: string, rawInput?: string) => void;
   onModelCommandCandidateSelect?: (candidate: ModelCommandCandidate) => void;

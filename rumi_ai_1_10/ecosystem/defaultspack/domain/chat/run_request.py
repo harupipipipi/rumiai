@@ -19,7 +19,7 @@ from domain.ai_client.model_search import get_model_capabilities
 from domain.ai_client.request_planner import plan_model_request
 from domain.chat.ir import RumiChatIR
 from domain.chat.ir_blocks import IR_SCHEMA_VERSION
-from domain.chat.ir_legacy_adapter import ir_to_legacy_standard_messages, stored_messages_to_ir
+from domain.chat.ir_legacy_adapter import ir_to_legacy_standard_messages, legacy_standard_messages_to_ir, stored_messages_to_ir
 from domain.chat.modality_detector import detect_modalities
 from domain.chat.store import ChatStore
 from domain.vision.image_bridge import (
@@ -86,6 +86,7 @@ class PreparedChatRun:
     call_handler: Any
     model_routing: dict[str, Any]
     chat_ir: RumiChatIR = field(default_factory=RumiChatIR)
+    provider_chat_ir: RumiChatIR = field(default_factory=RumiChatIR)
     ir_schema_version: str = IR_SCHEMA_VERSION
     provider_planning: dict[str, Any] = field(default_factory=dict)
     provider_capabilities: dict[str, Any] = field(default_factory=dict)
@@ -200,6 +201,12 @@ def prepare_chat_run(input_data: dict[str, Any], context: dict[str, Any] | None 
     request_context["model"] = model
     request_context["chat_params"] = params
     request_context["request_id"] = request_id
+    if isinstance(metadata, dict):
+        forced_skill_ids = metadata.get("skills") or metadata.get("skill_ids") or metadata.get("selected_skills")
+        if isinstance(forced_skill_ids, list):
+            request_context["skills"] = [str(item) for item in forced_skill_ids if str(item).strip()]
+        elif isinstance(forced_skill_ids, str) and forced_skill_ids.strip():
+            request_context["skills"] = forced_skill_ids
     request_context.update(_approval_followup_tool_context(metadata))
     tool_policy = params.get("tool_policy")
     if isinstance(tool_policy, dict):
@@ -304,8 +311,9 @@ def prepare_chat_run(input_data: dict[str, Any], context: dict[str, Any] | None 
         request_context["matched_skill_instructions"] = matched_skills
         tool_context["matched_skill_instructions"] = matched_skills
 
+    provider_input_ir = legacy_standard_messages_to_ir(standard_messages, conversation_id)
     planned_request = plan_model_request(
-        chat_ir,
+        provider_input_ir,
         model,
         provider_capabilities,
         provider_tools,
@@ -315,6 +323,8 @@ def prepare_chat_run(input_data: dict[str, Any], context: dict[str, Any] | None 
     provider_planning = planned_request.to_dict()
     provider_tools = planned_request.provider_tools
     params = planned_request.params
+    provider_chat_ir = planned_request.ir
+    standard_messages = ir_to_legacy_standard_messages(provider_chat_ir)
     request_context["chat_params"] = params
     request_context["provider_capabilities"] = provider_capabilities
     request_context["provider_planning"] = provider_planning
@@ -344,6 +354,7 @@ def prepare_chat_run(input_data: dict[str, Any], context: dict[str, Any] | None 
         call_handler=request_context.get("call_handler"),
         model_routing=routing_decision.to_dict(),
         chat_ir=chat_ir,
+        provider_chat_ir=provider_chat_ir,
         ir_schema_version=IR_SCHEMA_VERSION,
         provider_planning=provider_planning,
         provider_capabilities=provider_capabilities,

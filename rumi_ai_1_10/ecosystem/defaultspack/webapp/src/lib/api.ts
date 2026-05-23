@@ -789,6 +789,16 @@ export type ShellRenderer = {
   trust?: "local";
 };
 
+export type SkillCatalogItem = {
+  id: string;
+  label: string;
+  description?: string;
+  triggers?: string[];
+  applies_to_tools?: string[];
+  aliases?: string[];
+  metadata?: Record<string, unknown>;
+};
+
 export type UICatalog = {
   app?: {
     id: string;
@@ -853,6 +863,7 @@ export type UICatalog = {
       fallback?: string;
     }>;
   };
+  skills?: SkillCatalogItem[];
   extension_points: Array<{
     id: string;
     path: string;

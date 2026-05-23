@@ -342,7 +342,7 @@ body {
 
 .rumi-workspace-main.has-activity-preview {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, var(--rumi-activity-preview-width));
+  grid-template-columns: minmax(0, 1fr) 6px minmax(0, var(--rumi-activity-preview-width));
   overflow: hidden;
 }
 
@@ -361,6 +361,23 @@ body {
   width: 100%;
   height: 100%;
   overflow: hidden;
+}
+
+.rumi-activity-preview-resize-handle {
+  width: 6px;
+  min-width: 6px;
+  height: 100%;
+  cursor: col-resize;
+  background: transparent;
+  border-left: 1px solid rgba(39, 39, 42, 0.35);
+  border-right: 1px solid rgba(39, 39, 42, 0.35);
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+
+.rumi-activity-preview-resize-handle:hover,
+.rumi-activity-preview-resize-handle:active {
+  background: rgba(63, 63, 70, 0.55);
+  border-color: rgba(113, 113, 122, 0.65);
 }
 
 .rumi-activity-preview-pane > * {
@@ -583,6 +600,10 @@ body {
 @media (max-width: 900px) {
   .rumi-workspace-main.has-activity-preview {
     display: flex;
+  }
+
+  .rumi-activity-preview-resize-handle {
+    display: none;
   }
 
   .rumi-activity-preview-pane {

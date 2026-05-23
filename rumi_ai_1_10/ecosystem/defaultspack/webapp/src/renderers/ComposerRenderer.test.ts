@@ -12,8 +12,12 @@ import {
   nextModelCandidateIndex,
   profileNeedsApiKey,
   ComposerRenderer,
+  composerToolMentionWidget,
+  filterComposerToolMentions,
+  filterModelProfilesBySearch,
   resolveComposerWidgetDrop,
   shouldFocusComposerForSlashKey,
+  toolMentionIdsFromText,
 } from "./ComposerRenderer";
 import { COMPOSER_BUTTON_DROP, COMPOSER_PANEL_DROP, COMPOSER_SELECTOR_DROP, COMPOSER_TOGGLE_DROP } from "../lib/toolUi";
 
@@ -30,6 +34,55 @@ test("composer file mention insertion keeps @ text for workspace attachment flow
   assert.deepEqual(result, {
     value: "please @README.md  now",
     cursor: 18,
+  });
+});
+
+test("composer tool mentions resolve searchable tools and JSON metadata", () => {
+  const tools = [
+    {
+      id: "web_search",
+      label: "Web Search",
+      category: "tool",
+      description: "Search the web.",
+      tags: ["research"],
+      ui: { composer_label: "Web Search" },
+    },
+    {
+      id: "coding_file_read",
+      label: "Read File",
+      category: "tool",
+      description: "Read a workspace file.",
+      tags: ["coding", "file"],
+    },
+  ];
+
+  assert.deepEqual(filterComposerToolMentions(tools, "workspace").map((tool) => tool.id), ["coding_file_read"]);
+  assert.deepEqual(toolMentionIdsFromText("Use @web_search then @Read_File.", tools), ["web_search", "coding_file_read"]);
+  assert.deepEqual(composerToolMentionWidget(tools[0]), {
+    id: "web_search",
+    type: "tool",
+    label: "Web Search",
+    enabled: true,
+    widgetKind: "tool_toggle",
+    action: undefined,
+    sourceItemId: "web_search",
+    description: "Search the web.",
+    icon: undefined,
+    metadata: {
+      source: "composer_at_mention",
+      mention: {
+        syntax: "@web_search",
+        tool_id: "web_search",
+      },
+      tool: {
+        id: "web_search",
+        label: "Web Search",
+        category: "tool",
+        description: "Search the web.",
+        tags: ["research"],
+        ui: { composer_label: "Web Search" },
+      },
+    },
   });
 });
 
@@ -73,6 +126,39 @@ test("model candidate menu keyboard helpers cycle and select", () => {
   assert.deepEqual(modelCandidateMenuKeyAction("Tab", false, 0, 0), { handled: false });
   assert.deepEqual(modelCandidateMenuKeyAction("Enter", false, 0, 0), { handled: false });
   assert.deepEqual(modelCandidateMenuKeyAction("Escape", false, 0, 0), { handled: false });
+});
+
+test("model dropdown search supports @provider filters", () => {
+  const profiles = [
+    {
+      profile_id: "google/gemini-2.5-flash",
+      qualified_model_id: "google/gemini-2.5-flash",
+      display_name: "Gemini 2.5 Flash",
+      provider_id: "google",
+      provider_display_name: "Google",
+      model_id: "gemini-2.5-flash",
+    },
+    {
+      profile_id: "opencode-go/qwen3.5-plus",
+      qualified_model_id: "opencode-go/qwen3.5-plus",
+      display_name: "Qwen3.5 Plus via OpenCode Go",
+      provider_id: "opencode-go",
+      provider_display_name: "OpenCode Go",
+      model_id: "qwen3.5-plus",
+    },
+    {
+      profile_id: "openai/gpt-4.1",
+      qualified_model_id: "openai/gpt-4.1",
+      display_name: "GPT 4.1",
+      provider_id: "openai",
+      provider_display_name: "OpenAI",
+      model_id: "gpt-4.1",
+    },
+  ];
+
+  assert.deepEqual(filterModelProfilesBySearch(profiles, "@google").map((profile) => profile.profile_id), ["google/gemini-2.5-flash"]);
+  assert.deepEqual(filterModelProfilesBySearch(profiles, "@opencode qwen").map((profile) => profile.profile_id), ["opencode-go/qwen3.5-plus"]);
+  assert.deepEqual(filterModelProfilesBySearch(profiles, "@openai 4.1").map((profile) => profile.profile_id), ["openai/gpt-4.1"]);
 });
 
 test("slash key focuses composer only for plain document shortcuts", () => {

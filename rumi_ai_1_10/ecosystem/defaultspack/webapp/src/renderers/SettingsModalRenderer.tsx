@@ -12,7 +12,7 @@ import type { SettingsModalRendererProps } from "./types";
 
 function formatReadonlyValue(value: unknown, fallback: unknown): string {
   const resolved = value ?? fallback ?? "";
-  if (typeof resolved === "boolean") return resolved ? "Saved" : "Not set";
+  if (typeof resolved === "boolean") return resolved ? "保存済み" : "未設定";
   if (resolved && typeof resolved === "object") return JSON.stringify(resolved, null, 2);
   return String(resolved);
 }
@@ -161,33 +161,33 @@ function MaskedExternalTokenLabel({ token }: { token: Record<string, unknown> })
 function externalTokenKindOptions(providerId: string): Array<{ value: string; label: string }> {
   const common: Record<string, Array<{ value: string; label: string }>> = {
     line: [
-      { value: "channel_secret", label: "Messaging API Channel Secret" },
-      { value: "channel_access_token", label: "Messaging API Channel Access Token" },
-      { value: "reply_token", label: "Reply Token" },
+      { value: "channel_secret", label: "Messaging APIチャネルシークレット" },
+      { value: "channel_access_token", label: "Messaging APIチャネルアクセストークン" },
+      { value: "reply_token", label: "返信トークン" },
     ],
     discord: [
-      { value: "bot_token", label: "Bot Token" },
+      { value: "bot_token", label: "Botトークン" },
       { value: "webhook_url", label: "Webhook URL" },
-      { value: "application_id", label: "Application ID" },
-      { value: "public_key", label: "Public Key" },
+      { value: "application_id", label: "アプリケーションID" },
+      { value: "public_key", label: "公開鍵" },
     ],
     slack: [
-      { value: "bot_token", label: "Bot Token" },
-      { value: "signing_secret", label: "Signing Secret" },
-      { value: "app_token", label: "App Token" },
-      { value: "channel_id", label: "Channel ID" },
+      { value: "bot_token", label: "Botトークン" },
+      { value: "signing_secret", label: "署名シークレット" },
+      { value: "app_token", label: "アプリトークン" },
+      { value: "channel_id", label: "チャンネルID" },
     ],
     generic: [
-      { value: "webhook_shared_secret", label: "Webhook Shared Secret" },
+      { value: "webhook_shared_secret", label: "Webhook共有シークレット" },
       { value: "webhook_url", label: "Webhook URL" },
-      { value: "callback_url", label: "Callback URL" },
+      { value: "callback_url", label: "コールバックURL" },
     ],
     web: [
-      { value: "callback_url", label: "Callback URL" },
+      { value: "callback_url", label: "コールバックURL" },
     ],
   };
   return common[providerId] ?? [
-    { value: "token", label: "Token" },
+    { value: "token", label: "トークン" },
     { value: "webhook_url", label: "Webhook URL" },
   ];
 }
@@ -362,12 +362,12 @@ function dedupeModelOptions(options: SettingsModelOption[]): SettingsModelOption
 
 function modelOptionBadges(option: SettingsModelOption): string[] {
   const badges: string[] = [];
-  if (option.configured) badges.push("ready");
-  if (option.local) badges.push("local");
-  if (option.supports_vision || option.supports_image_input) badges.push("vision");
-  if (option.supports_tool_calling) badges.push("tools");
-  if (option.supports_thinking) badges.push("thinking");
-  if (option.supports_fast || option.speed_tier === "fast") badges.push("fast");
+  if (option.configured) badges.push("設定済み");
+  if (option.local) badges.push("ローカル");
+  if (option.supports_vision || option.supports_image_input) badges.push("画像");
+  if (option.supports_tool_calling) badges.push("ツール");
+  if (option.supports_thinking) badges.push("推論");
+  if (option.supports_fast || option.speed_tier === "fast") badges.push("高速");
   if (option.cost_tier && option.cost_tier !== "unknown") badges.push(option.cost_tier);
   return badges.slice(0, 4);
 }
@@ -404,7 +404,7 @@ function SettingsModelSearchSelect({
         })
         .catch((searchError: unknown) => {
           setRemoteResults([]);
-          setError(searchError instanceof Error ? searchError.message : "Model search failed");
+          setError(searchError instanceof Error ? searchError.message : "モデル検索に失敗しました");
         })
         .finally(() => setBusy(false));
     }, query.trim() ? 160 : 0);
@@ -431,7 +431,7 @@ function SettingsModelSearchSelect({
         className="flex w-full items-center justify-between gap-2 rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-left text-sm text-zinc-200 outline-none transition-colors hover:border-zinc-700 focus:border-emerald-500/70"
       >
         <span className="min-w-0">
-          <span className="block truncate">{selected?.label || value || "Select model"}</span>
+          <span className="block truncate">{selected?.label || value || "モデルを選択"}</span>
           {(selected?.provider_id || selected?.model_id) && (
             <span className="block truncate text-[11px] text-zinc-500">
               {[selected.provider_id, selected.model_id].filter(Boolean).join(" / ")}
@@ -442,7 +442,7 @@ function SettingsModelSearchSelect({
       </button>
       {open && (
         <>
-          <button type="button" aria-label="close model search" className="fixed inset-0 z-10 cursor-default" onClick={() => setOpen(false)} />
+          <button type="button" aria-label="モデル検索を閉じる" className="fixed inset-0 z-10 cursor-default" onClick={() => setOpen(false)} />
           <div className="absolute left-0 right-0 top-[calc(100%+6px)] z-20 overflow-hidden rounded-lg border border-zinc-700 bg-zinc-950 shadow-2xl">
             <label className="m-2 flex h-9 items-center gap-2 rounded-lg border border-zinc-800 bg-black/30 px-3 text-xs text-zinc-500 focus-within:border-zinc-600 focus-within:text-zinc-300">
               <Search size={14} />
@@ -459,7 +459,7 @@ function SettingsModelSearchSelect({
                   type="button"
                   onClick={() => setQuery("")}
                   className="rounded p-0.5 text-zinc-600 hover:bg-zinc-800 hover:text-zinc-300"
-                  aria-label="clear model search"
+                  aria-label="モデル検索をクリア"
                 >
                   <X size={13} />
                 </button>

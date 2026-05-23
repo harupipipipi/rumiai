@@ -2,6 +2,7 @@ import mimetypes
 from pathlib import Path
 
 from blocks._common import error
+from domain.coding.workspace_store import WorkspaceStore
 from domain.chat.store import ChatStore
 
 
@@ -14,15 +15,28 @@ def _allowed_roots(store, conversation_id, conversation=None):
     roots = [
         store.conversation_workspace_dir(conversation_id).resolve(),
         (pack_root / "user_data" / "artifacts").resolve(),
-        Path.cwd().resolve(),
     ]
     metadata = conversation.get("metadata") if isinstance(conversation, dict) else {}
     if isinstance(metadata, dict):
+        workspace_store = WorkspaceStore()
+        workspace_id = str(metadata.get("workspace_id") or metadata.get("workspaceId") or "").strip()
+        workspace_record = workspace_store.get(workspace_id) if workspace_id else None
+        if workspace_record and workspace_record.get("trusted") is True:
+            try:
+                roots.append(Path(str(workspace_record.get("root_path") or "")).expanduser().resolve())
+            except Exception:
+                pass
         for key in ("workspace_root", "workspaceRoot", "rootPath"):
             root = metadata.get(key)
-            if isinstance(root, str) and root.strip():
+            if not isinstance(root, str) or not root.strip():
+                continue
+            try:
+                record = workspace_store.find_by_root(root)
+            except Exception:
+                record = None
+            if record and record.get("trusted") is True:
                 try:
-                    roots.append(Path(root).expanduser().resolve())
+                    roots.append(Path(str(record.get("root_path") or root)).expanduser().resolve())
                 except Exception:
                     pass
     unique_roots = []
@@ -39,18 +53,25 @@ def _allowed_roots(store, conversation_id, conversation=None):
 def _resolve_allowed_path(raw_path, roots):
     if not isinstance(raw_path, str) or not raw_path.strip():
         return None
-    try:
-        resolved = Path(raw_path).expanduser().resolve()
-    except Exception:
-        return None
-    if not resolved.is_file():
-        return None
+    path = Path(raw_path).expanduser()
+    candidates = []
+    if path.is_absolute():
+        candidates.append(path)
+    else:
+        candidates.extend(root / path for root in roots)
     for root in roots:
-        try:
-            resolved.relative_to(root)
-            return resolved
-        except ValueError:
-            continue
+        for candidate in candidates:
+            try:
+                resolved = candidate.resolve()
+            except Exception:
+                continue
+            if not resolved.is_file():
+                continue
+            try:
+                resolved.relative_to(root)
+                return resolved
+            except ValueError:
+                continue
     return None
 
 

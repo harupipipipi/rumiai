@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
 
 import { CompanyWorkspacePanel } from "./components/company/CompanyWorkspacePanel";
 import { CodingCockpit } from "./components/coding/CodingCockpit";
@@ -12,7 +12,7 @@ import { pendingBrowserApproval, pendingCodingApproval, staleCodingApproval, typ
 import { reduceBrowserStateFromEvents } from "./lib/browserState";
 import { deriveConversationTitle, formatRelativeTime, messageToText, orderConversationMessages } from "./lib/chat";
 import { cn } from "./lib/cn";
-import { canExecuteComposerEndpointAction, isSafeLocalEndpoint } from "./lib/composerWidgets";
+import { canExecuteComposerEndpointAction, composerSkillMentionWidget, composerToolMentionWidget, isSafeLocalEndpoint, skillMentionIdsFromText, toolMentionIdsFromText } from "./lib/composerWidgets";
 import { conversationMatchesSpotlightFilter, conversationToSearchResult, type SpotlightFilter } from "./lib/conversationSpotlight";
 import { boundedDurationLabel } from "./lib/duration";
 import { normalizeLocale } from "./lib/i18n";
@@ -22,7 +22,7 @@ import { hasShellRegion } from "./lib/uiShell";
 import { hasWorkspaceAttachment, workspaceFileToAttachment } from "./lib/workspaceAttachments";
 import { resolveDefaultspackRenderers } from "./renderers/defaultspackRenderers";
 import { RendererBoundary } from "./renderers/trustedRendererLoader";
-import type { AppMode, AttachedFile, ChatUiMessage, CodingContext, ComposerExtensionItem, ContextUsageInfo, DroppedWidget } from "./renderers/types";
+import type { AppMode, AttachedFile, ChatUiMessage, CodingContext, ComposerExtensionItem, ComposerSkillItem, ContextUsageInfo, DroppedWidget } from "./renderers/types";
 
 type ComposerCandidateMenuState = {
   mode: "model";
@@ -114,127 +114,127 @@ const calendarSettingsDefaults: CalendarSettings = {
 
 const calendarSettingsSection: SettingsSection = {
   id: "calendar",
-  label: "Calendar",
+  label: "カレンダー",
   description: "カレンダー画面のクリック追加、週表示、予定色を調整します。",
   fields: [
     {
       id: "quick_add_enabled",
-      label: "Click To Add",
+      label: "クリックで追加",
       type: "toggle",
       default: calendarSettingsDefaults.quickAddEnabled,
       help: "日付セルをクリックした時に、新規追加カードを開きます。",
     },
     {
       id: "default_item_type",
-      label: "Default Item Type",
+      label: "既定の種類",
       type: "select",
       default: calendarSettingsDefaults.defaultItemType,
       options: [
-        { value: "task", label: "Task / 青" },
-        { value: "event", label: "Event / 緑" },
-        { value: "reminder", label: "Reminder / グレー" },
+        { value: "task", label: "タスク / 青" },
+        { value: "event", label: "予定 / 緑" },
+        { value: "reminder", label: "リマインダー / グレー" },
       ],
       help: "新規追加カードで最初に選ばれる種類です。",
     },
     {
       id: "default_time",
-      label: "Default Time",
+      label: "既定時刻",
       type: "text",
       default: calendarSettingsDefaults.defaultTime,
       help: "新規追加カードの初期時刻です。例: 09:00 / 午前9:00",
     },
     {
       id: "time_slot_minutes",
-      label: "Time Slot Minutes",
+      label: "時刻の刻み幅",
       type: "select",
       default: calendarSettingsDefaults.timeSlotMinutes,
       options: [
-        { value: 15, label: "15 minutes" },
-        { value: 30, label: "30 minutes" },
-        { value: 60, label: "60 minutes" },
+        { value: 15, label: "15分" },
+        { value: 30, label: "30分" },
+        { value: 60, label: "60分" },
       ],
       help: "時刻ドロップダウンの刻み幅です。",
     },
     {
       id: "show_time_picker",
-      label: "Show Time Picker",
+      label: "時刻候補を表示",
       type: "toggle",
       default: calendarSettingsDefaults.showTimePicker,
       help: "時刻入力時にスクロール式の候補を表示します。",
     },
     {
       id: "agent_task_default",
-      label: "Agent Task Default",
+      label: "Agentタスクを既定ON",
       type: "toggle",
       default: calendarSettingsDefaults.agentTaskDefault,
       help: "Task作成時に、AI agent実行の候補を初期ONにします。",
     },
     {
       id: "agent_model",
-      label: "Agent Model",
+      label: "Agentモデル",
       type: "text",
       default: calendarSettingsDefaults.agentModel,
       help: "空なら設定済みの非embeddingモデルを自動選択します。例: google/gemini-2.5-flash",
     },
     {
       id: "agent_current_chat",
-      label: "Run In Current Chat",
+      label: "現在のチャットで実行",
       type: "toggle",
       default: calendarSettingsDefaults.agentCurrentChat,
       help: "ONなら予定時刻に現在の会話へ送信します。OFFなら独立したagent実行にします。",
     },
     {
       id: "week_start",
-      label: "Week Starts On",
+      label: "週の開始曜日",
       type: "select",
       default: calendarSettingsDefaults.weekStart,
       options: [
-        { value: "sunday", label: "Sunday" },
-        { value: "monday", label: "Monday" },
+        { value: "sunday", label: "日曜日" },
+        { value: "monday", label: "月曜日" },
       ],
       help: "月表示の左端の曜日を選びます。",
     },
     {
       id: "show_outside_days",
-      label: "Show Outside Days",
+      label: "前後月の日付を表示",
       type: "toggle",
       default: calendarSettingsDefaults.showOutsideDays,
       help: "前月/翌月の日付を薄く表示します。",
     },
     {
       id: "dim_weekends",
-      label: "Dim Weekends",
+      label: "週末を薄く表示",
       type: "toggle",
       default: calendarSettingsDefaults.dimWeekends,
       help: "土日セルをほんの少し暗くします。",
     },
     {
       id: "task_color",
-      label: "Task Color",
+      label: "タスクの色",
       type: "select",
       default: calendarSettingsDefaults.taskColor,
       options: [
-        { value: "blue", label: "Blue" },
-        { value: "cyan", label: "Cyan" },
-        { value: "slate", label: "Slate" },
+        { value: "blue", label: "青" },
+        { value: "cyan", label: "シアン" },
+        { value: "slate", label: "スレート" },
       ],
       help: "Taskバーの色。既定は青です。",
     },
     {
       id: "event_color",
-      label: "Event Color",
+      label: "予定の色",
       type: "select",
       default: calendarSettingsDefaults.eventColor,
       options: [
-        { value: "green", label: "Green" },
-        { value: "blue", label: "Blue" },
-        { value: "slate", label: "Slate" },
+        { value: "green", label: "緑" },
+        { value: "blue", label: "青" },
+        { value: "slate", label: "スレート" },
       ],
       help: "Eventバーの色。休日や予定は緑寄りにできます。",
     },
     {
       id: "max_items_per_day",
-      label: "Visible Items / Day",
+      label: "1日の表示件数",
       type: "number",
       default: calendarSettingsDefaults.maxItemsPerDay,
       min: 1,
@@ -775,8 +775,8 @@ function CalendarComposerPanel({
       <div className="pointer-events-none absolute left-4 top-3 z-20 flex items-center gap-2">
         <button
           type="button"
-          aria-label="Previous month"
-          title="Previous month"
+          aria-label="前の月"
+          title="前の月"
           className="pointer-events-auto flex h-8 w-8 items-center justify-center rounded-lg border border-zinc-700/80 bg-zinc-950/82 text-lg leading-none text-zinc-300 shadow-lg backdrop-blur transition-colors hover:border-zinc-500 hover:bg-zinc-900 hover:text-zinc-50"
           onClick={() => moveVisibleMonth(-1)}
         >
@@ -784,8 +784,8 @@ function CalendarComposerPanel({
         </button>
         <button
           type="button"
-          aria-label="Today"
-          title="Today"
+          aria-label="今日"
+          title="今日"
           className="pointer-events-auto rounded-lg border border-zinc-700/80 bg-zinc-950/82 px-3 py-1.5 text-[12px] font-semibold text-zinc-200 shadow-lg backdrop-blur transition-colors hover:border-zinc-500 hover:bg-zinc-900 hover:text-zinc-50"
           onClick={returnToToday}
         >
@@ -793,8 +793,8 @@ function CalendarComposerPanel({
         </button>
         <button
           type="button"
-          aria-label="Next month"
-          title="Next month"
+          aria-label="次の月"
+          title="次の月"
           className="pointer-events-auto flex h-8 w-8 items-center justify-center rounded-lg border border-zinc-700/80 bg-zinc-950/82 text-lg leading-none text-zinc-300 shadow-lg backdrop-blur transition-colors hover:border-zinc-500 hover:bg-zinc-900 hover:text-zinc-50"
           onClick={() => moveVisibleMonth(1)}
         >
@@ -874,7 +874,7 @@ function CalendarComposerPanel({
                   </button>
                 ))}
                 {hiddenCount > 0 && (
-                  <div className="text-[10px] font-medium text-zinc-500">+{hiddenCount} more</div>
+                  <div className="text-[10px] font-medium text-zinc-500">ほか{hiddenCount}件</div>
                 )}
               </div>
             </div>
@@ -894,14 +894,14 @@ function CalendarComposerPanel({
         >
           <div className="mb-3 flex items-start justify-between gap-3">
             <div className="min-w-0">
-              <p className="text-[11px] uppercase tracking-[0.2em] text-zinc-600">{activeEditor.mode === "edit" ? "Edit item" : "New item"}</p>
+              <p className="text-[11px] uppercase tracking-[0.2em] text-zinc-600">{activeEditor.mode === "edit" ? "項目を編集" : "新規項目"}</p>
               <p className="truncate text-sm font-semibold text-zinc-100">{calendarRangeLabel(activeEditor.startKey, activeEditor.endKey)}</p>
             </div>
             <button
               type="button"
               onClick={() => setActiveEditor(null)}
               className="flex h-7 w-7 items-center justify-center rounded-lg text-zinc-500 hover:bg-zinc-900 hover:text-zinc-200"
-              aria-label="Close calendar quick add"
+              aria-label="カレンダーのクイック追加を閉じる"
             >
               ×
             </button>
@@ -923,23 +923,23 @@ function CalendarComposerPanel({
                   setDraftAgentEnabled((current) => kind === "task" ? current || settings.agentTaskDefault : false);
                 }}
                 className={cn(
-                  "rounded-lg border px-2 py-1.5 text-xs font-medium capitalize transition-colors",
+                  "rounded-lg border px-2 py-1.5 text-xs font-medium transition-colors",
                   draftKind === kind
                     ? "border-zinc-200 bg-zinc-100 text-zinc-950"
                     : "border-zinc-800 bg-zinc-950 text-zinc-400 hover:border-zinc-700 hover:text-zinc-100",
                 )}
               >
-                {kind}
+                {kind === "task" ? "タスク" : kind === "event" ? "予定" : "リマインダー"}
               </button>
             ))}
           </div>
           <div className="mt-3 flex items-end gap-2">
             <label className="relative flex-1">
-              <span className="mb-1 block text-[10px] uppercase tracking-[0.18em] text-zinc-600">Time</span>
+              <span className="mb-1 block text-[10px] uppercase tracking-[0.18em] text-zinc-600">時刻</span>
               <input
                 type="text"
                 value={draftTime}
-                aria-label="Calendar item time"
+                aria-label="カレンダー項目の時刻"
                 onClick={() => setIsTimeMenuOpen(settings.showTimePicker)}
                 onFocus={() => setIsTimeMenuOpen(settings.showTimePicker)}
                 onKeyDown={(event) => {
@@ -961,7 +961,7 @@ function CalendarComposerPanel({
               {isTimeMenuOpen && settings.showTimePicker && (
                 <div
                   role="listbox"
-                  aria-label="Calendar time options"
+                  aria-label="カレンダー時刻候補"
                   className="absolute bottom-11 left-0 z-40 max-h-[300px] w-[210px] overflow-y-auto rounded-[22px] border border-zinc-700 bg-zinc-800 p-1.5 shadow-[0_18px_60px_rgba(0,0,0,0.55)]"
                 >
                   {timeOptions.map((option) => (
@@ -990,13 +990,13 @@ function CalendarComposerPanel({
               disabled={isSavingDraft}
               className="h-9 rounded-lg bg-zinc-100 px-4 text-xs font-semibold text-zinc-950 transition-colors hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {activeEditor.mode === "edit" ? "Save" : "Add"}
+              {activeEditor.mode === "edit" ? "保存" : "追加"}
             </button>
           </div>
           {draftKind === "task" && (
             <div className="mt-3 rounded-xl border border-zinc-800 bg-zinc-900/50 p-2.5">
               <label className="flex items-center justify-between gap-3 text-xs font-medium text-zinc-200">
-                <span>Agent task</span>
+                <span>Agentタスク</span>
                 <input
                   type="checkbox"
                   checked={draftAgentEnabled}
@@ -1019,7 +1019,7 @@ function CalendarComposerPanel({
               "mt-3 rounded-lg border px-2.5 py-2 text-xs",
               draftError ? "border-red-500/40 bg-red-500/10 text-red-100" : "border-blue-500/30 bg-blue-500/10 text-blue-100",
             )}>
-              {draftError ?? lastAgentResult ?? `Agent schedule: ${activeItem?.scheduleStatus ?? "active"}`}
+              {draftError ?? lastAgentResult ?? `Agentスケジュール: ${activeItem?.scheduleStatus ?? "有効"}`}
             </div>
           )}
           {activeEditor.mode === "edit" && (
@@ -1030,7 +1030,7 @@ function CalendarComposerPanel({
                 disabled={isSavingDraft}
                 className="rounded-lg border border-red-500/30 px-3 py-1.5 text-xs font-medium text-red-200 hover:bg-red-500/10 disabled:opacity-50"
               >
-                Delete
+                削除
               </button>
               {activeItem?.scheduleId && (
                 <button
@@ -1039,7 +1039,7 @@ function CalendarComposerPanel({
                   disabled={isSavingDraft}
                   className="rounded-lg border border-blue-500/30 px-3 py-1.5 text-xs font-medium text-blue-100 hover:bg-blue-500/10 disabled:opacity-50"
                 >
-                  Run now
+                  今すぐ実行
                 </button>
               )}
             </div>
@@ -1072,6 +1072,12 @@ function useLocalStorage<T>(key: string, defaultValue: T): [T, (v: T | ((prev: T
   }, [key, value]);
 
   return [value, setValue];
+}
+
+function clampNumber(value: unknown, min: number, max: number, fallback: number): number {
+  const numeric = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(numeric)) return fallback;
+  return Math.max(min, Math.min(max, numeric));
 }
 
 function writeJsonLocalStorage<T>(key: string, value: T) {
@@ -1116,9 +1122,9 @@ function workspaceContextFromHistoryOptions(options?: HistoryBoardNewTaskOptions
 
 function formatBoardDate(updatedAt: number): string {
   const diffHours = (Date.now() - updatedAt) / 3_600_000;
-  if (diffHours < 24) return "Today";
-  if (diffHours < 48) return "Yesterday";
-  if (diffHours < 24 * 7) return "Previous 7 Days";
+  if (diffHours < 24) return "今日";
+  if (diffHours < 48) return "昨日";
+  if (diffHours < 24 * 7) return "過去7日";
   return formatRelativeTime(updatedAt);
 }
 
@@ -1906,6 +1912,7 @@ export default function App() {
   const [modelSteerBusy, setModelSteerBusy] = useState(false);
   const [steerItems, setSteerItems] = useState<ConversationSteerItem[]>([]);
   const [previewMode, setPreviewMode] = useLocalStorage<ToolPreviewMode>("rumi-preview-mode", "auto");
+  const [activityPreviewWidth, setActivityPreviewWidth] = useLocalStorage("rumi-activity-preview-width", 340);
   const [canvasMemo, setCanvasMemo] = useLocalStorage("rumi-canvas-memo", "");
   const [activePreviewId, setActivePreviewId] = useState<string | null>(null);
   const [previews, setPreviews] = useState<ToolPreviewItem[]>([]);
@@ -1916,6 +1923,7 @@ export default function App() {
   const [activeSidebarItemId, setActiveSidebarItemId] = useState<string | null>(null);
   const [sidebarSelectionTick, setSidebarSelectionTick] = useState(0);
   const [yoloMode, setYoloMode] = useLocalStorage("rumi-yolo-mode", false);
+  const [ultraYoloMode, setUltraYoloMode] = useLocalStorage("rumi-ultra-yolo-mode", false);
   const [mode, setMode] = useLocalStorage<AppMode>("rumi-app-mode", "chat");
   const [codingContext, setCodingContext] = useState<CodingContext | null>(null);
   const [codingWorkspaces, setCodingWorkspaces] = useState<CodingWorkspaceRecord[]>([]);
@@ -1967,6 +1975,17 @@ export default function App() {
   );
   const contextUsage = contextUsageFor(activeConversation, activeProfile);
   const composerExtensions = composerExtensionItems(sidebarItems);
+  const composerSkills = useMemo<ComposerSkillItem[]>(() => (
+    (catalog?.skills ?? []).map((skill) => ({
+      id: skill.id,
+      label: skill.label ?? skill.id,
+      description: skill.description,
+      triggers: skill.triggers ?? [],
+      appliesToTools: skill.applies_to_tools ?? [],
+      aliases: skill.aliases ?? [],
+      metadata: skill.metadata,
+    }))
+  ), [catalog?.skills]);
   const selectedTools = useMemo(() => storedSelectedToolIds
     .map((toolId) => composerExtensions.find((tool) => tool.id === toolId))
     .filter((tool): tool is ComposerExtensionItem => Boolean(tool)), [composerExtensions, storedSelectedToolIds]);
@@ -1979,11 +1998,11 @@ export default function App() {
   const browserApproval = pendingBrowserApproval(messages);
   const rawCodingApproval = pendingCodingApproval(messages);
   const settledCodingApprovalIdSet = useMemo(() => new Set(settledCodingApprovalIds), [settledCodingApprovalIds]);
-  const codingApproval = rawCodingApproval && !settledCodingApprovalIdSet.has(rawCodingApproval.requestId)
+  const codingApproval = !ultraYoloMode && rawCodingApproval && !settledCodingApprovalIdSet.has(rawCodingApproval.requestId)
     ? rawCodingApproval
     : null;
-  const staleCodingApprovalNotice = !rawCodingApproval ? staleCodingApproval(messages) : null;
-  const visibleBrowserApproval = !yoloMode ? browserApproval : null;
+  const staleCodingApprovalNotice = !ultraYoloMode && !rawCodingApproval ? staleCodingApproval(messages) : null;
+  const visibleBrowserApproval = !ultraYoloMode ? browserApproval : null;
   const messageToolPreviews = useMemo(
     () => toolPreviewsFromMessages(activeConversation?.messages ?? []),
     [activeConversation?.messages],
@@ -2022,17 +2041,42 @@ export default function App() {
       .filter((command) => command.id !== "think" || profileSupportsThinking(activeProfile))
       .map((command) => ({
         ...command,
-        active: command.id === "yolo" ? yoloMode : command.id === mode,
-        enabled: command.id === "yolo" ? yoloMode : command.id === mode,
+        active: command.id === "yolo" ? (yoloMode || ultraYoloMode) : command.id === "ultra_yolo" ? ultraYoloMode : command.id === mode,
+        enabled: command.id === "yolo" ? (yoloMode || ultraYoloMode) : command.id === "ultra_yolo" ? ultraYoloMode : command.id === mode,
       }));
-  }, [activeProfile, commandCatalog, mode, selectableModelProfiles, settingsValues.commands?.show_advanced_commands, yoloMode]);
+  }, [activeProfile, commandCatalog, mode, selectableModelProfiles, settingsValues.commands?.show_advanced_commands, ultraYoloMode, yoloMode]);
   const modelCommandCandidates = composerCandidateMenu?.mode === "model" ? composerCandidateMenu.candidates : [];
   const unknownBlockStrategy = String(settingsValues.chat_rendering?.unknown_block_strategy ?? "hidden");
   const showWidgets = settingsValues.chat_rendering?.show_widgets !== false;
   const showActivityInMessages = settingsValues.general?.show_activity_in_messages !== false;
   const showRegion = (regionId: string) => !catalog?.shell || hasShellRegion(catalog, regionId);
   const isActivityPreviewVisible = showRegion("activity_preview") && effectiveShowPreview;
+  const activityPreviewWidthPx = clampNumber(activityPreviewWidth, 220, 720, 340);
   const operationsProfileAvailable = hasOperationsProfile(catalog);
+
+  const startActivityPreviewResize = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>) => {
+      if (event.button !== 0) return;
+      event.preventDefault();
+      const startX = event.clientX;
+      const startWidth = activityPreviewWidthPx;
+      const handlePointerMove = (moveEvent: PointerEvent) => {
+        const nextWidth = clampNumber(startWidth + (startX - moveEvent.clientX), 220, 720, startWidth);
+        setActivityPreviewWidth(nextWidth);
+      };
+      const handlePointerUp = () => {
+        document.body.style.cursor = "";
+        document.body.style.userSelect = "";
+        window.removeEventListener("pointermove", handlePointerMove);
+        window.removeEventListener("pointerup", handlePointerUp);
+      };
+      document.body.style.cursor = "col-resize";
+      document.body.style.userSelect = "none";
+      window.addEventListener("pointermove", handlePointerMove);
+      window.addEventListener("pointerup", handlePointerUp, { once: true });
+    },
+    [activityPreviewWidthPx, setActivityPreviewWidth],
+  );
 
   const updatePendingRequests = (updater: (current: Record<string, PendingChatRequest>) => Record<string, PendingChatRequest>) => {
     setPendingRequests((current) => {
@@ -2919,6 +2963,14 @@ export default function App() {
       case "toggle_yolo":
         setYoloMode((value) => parseCommandBoolean(args.enabled, !value));
         return;
+      case "toggle_ultra_yolo": {
+        setUltraYoloMode((value) => {
+          const enabled = parseCommandBoolean(args.enabled, !value);
+          if (enabled) setYoloMode(true);
+          return enabled;
+        });
+        return;
+      }
       case "open_tool_picker": {
         const query = String(args.query ?? "").trim().toLowerCase();
         if (query) {
@@ -2935,7 +2987,7 @@ export default function App() {
       }
       case "show_status":
         setError(
-          `status: mode=${mode}, model=${activeProfile?.display_name ?? preferredModel}, thinking=${selectedThinkingLevel}, yolo=${yoloMode ? "on" : "off"}, tools=${selectedTools.length}`,
+          `status: mode=${mode}, model=${activeProfile?.display_name ?? preferredModel}, thinking=${selectedThinkingLevel}, yolo=${yoloMode ? "on" : "off"}, ultra_yolo=${ultraYoloMode ? "on" : "off"}, tools=${selectedTools.length}`,
         );
         return;
       case "open_settings":
@@ -3296,7 +3348,7 @@ export default function App() {
       void result;
       await api.sendMessage(activeConversationId, "ユーザーが許可しました。承認済みの操作を踏まえて続行してください。", {
         tool_policy: {
-          ...(yoloMode ? { yolo_mode: true, allow_shell: true, allow_file_write: true, write_actions_require_approval: false } : {}),
+          ...(ultraYoloMode ? { yolo_mode: true, allow_shell: true, allow_file_write: true, write_actions_require_approval: false } : {}),
           ...(approvalToolIds.length ? { selected_tools: approvalToolIds } : {}),
         },
         tools: approvalToolIds.length ? approvalToolIds : undefined,
@@ -3347,7 +3399,7 @@ export default function App() {
       await api.sendMessage(activeConversationId, "ユーザーが許可しました。承認済みの操作を続行してください。", {
         tool_choice: "required",
         tool_policy: {
-          ...(yoloMode ? { yolo_mode: true, allow_shell: true, allow_file_write: true, write_actions_require_approval: false } : {}),
+          ...(ultraYoloMode ? { yolo_mode: true, allow_shell: true, allow_file_write: true, write_actions_require_approval: false } : {}),
           ...(approvalWorkspace.workspaceId ? { workspace_id: approvalWorkspace.workspaceId } : {}),
           selected_tools: [codingApproval.toolName],
         },
@@ -3564,8 +3616,31 @@ export default function App() {
     setAttachedFiles([]);
     let submittedConversationId: string | null = null;
     const shouldKeepSelectedToolsAfterSend = keepSelectedToolsAfterSend(settingsValues);
-    const submittedToolIds = [...selectedToolIds];
+    const mentionedToolIds = toolMentionIdsFromText(userText, composerExtensions);
+    const mentionedSkillIdsFromText = skillMentionIdsFromText(userText, composerSkills);
+    const submittedToolIds = [...new Set([...selectedToolIds, ...mentionedToolIds])];
     const submittedToolIdSet = new Set(submittedToolIds);
+    const composerToolById = new Map(composerExtensions.map((item) => [item.id, item]));
+    const composerSkillById = new Map(composerSkills.map((item) => [item.id, item]));
+    const droppedWidgetToolIds = new Set(droppedWidgets.map((widget) => widget.sourceItemId || widget.id));
+    const droppedWidgetSkillIds = new Set(
+      droppedWidgets
+        .filter((widget) => widget.type === "skill" || widget.widgetKind === "skill_prompt")
+        .map((widget) => widget.sourceItemId || widget.id),
+    );
+    const submittedSkillIds = [...new Set([...Array.from(droppedWidgetSkillIds), ...mentionedSkillIdsFromText])];
+    const mentionedToolWidgets = mentionedToolIds
+      .map((toolId) => composerToolById.get(toolId))
+      .filter((item): item is ComposerExtensionItem => Boolean(item))
+      .filter((item) => !droppedWidgetToolIds.has(item.id))
+      .map((item) => composerToolMentionWidget(item));
+    const mentionedSkillWidgets = mentionedSkillIdsFromText
+      .map((skillId) => composerSkillById.get(skillId))
+      .filter((item): item is ComposerSkillItem => Boolean(item))
+      .filter((item) => !droppedWidgetSkillIds.has(item.id))
+      .map((item) => composerSkillMentionWidget(item));
+    const submittedDroppedWidgets = [...droppedWidgets, ...mentionedToolWidgets, ...mentionedSkillWidgets];
+    const selectedToolLabels = submittedToolIds.map((toolId) => composerToolById.get(toolId)?.label || toolId);
     const activeContextForSubmit = workspaceContextFromConversation(activeConversation);
     const groupIdForSubmit = pendingNewTaskContext?.groupId ?? activeContextForSubmit.groupId;
     const workspaceIdForSubmit = pendingNewTaskContext?.workspaceId
@@ -3832,7 +3907,7 @@ export default function App() {
         thinking_level: activeProfile?.supports_thinking ? selectedThinkingLevel : null,
         tool_choice: submittedToolIds.length > 0 ? "required" : undefined,
         tool_policy: {
-          ...(yoloMode ? { yolo_mode: true, allow_shell: true, allow_file_write: true, write_actions_require_approval: false } : {}),
+          ...(ultraYoloMode ? { yolo_mode: true, allow_shell: true, allow_file_write: true, write_actions_require_approval: false } : {}),
           ...operationsPolicy,
           ...(isCodingWorkspaceSubmit && workspaceIdForSubmit ? { workspace_id: workspaceIdForSubmit } : {}),
           ...(shouldSendExplicitToolSelection ? { selected_tools: submittedToolIds } : {}),
@@ -3855,7 +3930,8 @@ export default function App() {
           } : {}),
           attachments: submittedAttachments.map(({ name, size, type, truncated, source, sourcePath }) => ({ name, size, type, truncated, source, sourcePath })),
           ...(shouldSendExplicitToolSelection ? { selected_tools: submittedToolIds } : {}),
-          dropped_widgets: droppedWidgets
+          ...(submittedSkillIds.length ? { skills: submittedSkillIds, skill_mentions: submittedSkillIds.map((skillId) => ({ id: skillId, label: composerSkillById.get(skillId)?.label ?? skillId })) } : {}),
+          dropped_widgets: submittedDroppedWidgets
             .filter((widget) => widget.widgetKind === "tool_toggle" || widget.type === "tool" ? submittedToolIdSet.has(widget.sourceItemId || widget.id) : widget.enabled !== false)
             .map(({ id, type, label, widgetKind, sourceItemId, metadata }) => ({ id, type, label, widgetKind, sourceItemId, metadata })),
         },
@@ -3939,10 +4015,13 @@ export default function App() {
       contextUsage={contextUsage}
       inlineExtensions={composerExtensions}
       belowExtensions={[]}
+      skillExtensions={composerSkills}
       commands={composerCommands}
       modelCommandCandidates={modelCommandCandidates}
       modelPickerRequestId={modelPickerRequestId}
-      yoloMode={yoloMode}
+      yoloMode={yoloMode || ultraYoloMode}
+      voiceInputEnabled={settingsValues.general?.voice_input_enabled !== false}
+      voiceInputUseAi={settingsValues.general?.voice_input_use_ai === true}
       mode={mode}
       codingContext={codingContext}
       codingWorkspaces={codingWorkspaces}
@@ -3955,6 +4034,7 @@ export default function App() {
       steerBusy={modelSteerBusy}
       steerQueuedCount={steerItems.filter((item) => item.status === "queued").length}
       steerPreviewItems={isCentered ? [] : activeComposerSteerItems(steerItems, isGenerating || isConversationPending)}
+      suppressPopovers={Boolean(visibleBrowserApproval || codingApproval || staleCodingApprovalNotice)}
       onExtensionSelect={handleComposerExtensionSelect}
       onCommandSelect={handleComposerCommand}
       onModelCommandCandidateSelect={handleModelCommandCandidateSelect}
@@ -4036,7 +4116,10 @@ export default function App() {
           </div>
         )}
 
-        <main className={cn("rumi-workspace-main flex-1 flex min-w-0 bg-[#09090b] relative", isActivityPreviewVisible && "has-activity-preview")}>
+        <main
+          className={cn("rumi-workspace-main flex-1 flex min-w-0 bg-[#09090b] relative", isActivityPreviewVisible && "has-activity-preview")}
+          style={{ "--rumi-activity-preview-width": `${activityPreviewWidthPx}px` } as CSSProperties}
+        >
           <div className={cn("rumi-chat-pane flex-1 flex flex-col min-w-0", isActivityPreviewVisible && "border-r border-zinc-800/40")}>
             {showRegion("chat_header") && !isCalendarMode && (
               <Renderers.chatHeader
@@ -4104,7 +4187,7 @@ export default function App() {
                   />
                 )}
                 {visibleBrowserApproval && (
-                  <div className="pointer-events-auto absolute bottom-full left-1/2 z-30 mb-2 w-[min(520px,calc(100vw-32px))] -translate-x-1/2 rounded-xl border border-orange-500/30 bg-zinc-950 p-3 shadow-2xl">
+                  <div className="pointer-events-auto absolute bottom-full left-1/2 z-[60] mb-2 w-[min(520px,calc(100vw-32px))] -translate-x-1/2 rounded-xl border border-orange-500/30 bg-zinc-950 p-3 shadow-2xl">
                     <div className="flex items-center justify-between gap-3">
                       <div className="min-w-0">
                         <p className="truncate text-sm font-medium text-zinc-100">{visibleBrowserApproval.action} の承認が必要です</p>
@@ -4126,7 +4209,7 @@ export default function App() {
                   </div>
                 )}
                 {!visibleBrowserApproval && codingApproval && (
-                  <div className="pointer-events-auto absolute bottom-full left-1/2 z-30 mb-2 w-[min(560px,calc(100vw-32px))] -translate-x-1/2 rounded-xl border border-amber-500/30 bg-zinc-950 p-3 shadow-2xl">
+                  <div className="pointer-events-auto absolute bottom-full left-1/2 z-[60] mb-2 w-[min(560px,calc(100vw-32px))] -translate-x-1/2 rounded-xl border border-amber-500/30 bg-zinc-950 p-3 shadow-2xl">
                     <div className="flex items-center justify-between gap-3">
                       <div className="min-w-0">
                         <div className="flex min-w-0 items-center gap-2">
@@ -4178,7 +4261,7 @@ export default function App() {
                   </div>
                 )}
                 {!visibleBrowserApproval && !codingApproval && staleCodingApprovalNotice && (
-                  <div className="pointer-events-auto absolute bottom-full left-1/2 z-30 mb-2 w-[min(560px,calc(100vw-32px))] -translate-x-1/2 rounded-xl border border-zinc-700 bg-zinc-950 p-3 shadow-2xl">
+                  <div className="pointer-events-auto absolute bottom-full left-1/2 z-[60] mb-2 w-[min(560px,calc(100vw-32px))] -translate-x-1/2 rounded-xl border border-zinc-700 bg-zinc-950 p-3 shadow-2xl">
                     <div className="min-w-0">
                       <div className="flex min-w-0 items-center gap-2">
                         <span className="shrink-0 rounded border border-zinc-700 bg-zinc-900 px-1.5 py-0.5 text-[10px] text-zinc-400">
@@ -4187,7 +4270,7 @@ export default function App() {
                         <p className="truncate text-sm font-medium text-zinc-100">{staleCodingApprovalTitle(staleCodingApprovalNotice)}</p>
                       </div>
                       <p className="mt-1 truncate text-[11px] text-zinc-500">
-                        承認IDがない古いリクエストのため、この画面からは承認できません。もう一度 tool を実行すると新しい承認が作られます。
+                        古い承認カードを検出しました。最新の承認カードが届くと、この画面からそのまま許可できます。
                       </p>
                       <details className="mt-1 text-[11px] text-zinc-500">
                         <summary className="cursor-pointer select-none text-zinc-500 hover:text-zinc-300">payload を表示</summary>
@@ -4202,6 +4285,16 @@ export default function App() {
               </div>
             )}
           </div>
+
+          {isActivityPreviewVisible && (
+            <div
+              role="separator"
+              aria-label="Canvas幅を変更"
+              title="Canvas幅を変更"
+              className="rumi-activity-preview-resize-handle"
+              onPointerDown={startActivityPreviewResize}
+            />
+          )}
 
           {isActivityPreviewVisible && (
             <aside className="rumi-activity-preview-pane" aria-label="Activity preview">

@@ -60,6 +60,7 @@ class FrontendRegistry:
             "chat_rendering": {
                 "renderers": self._chat_renderers(ui_surfaces, extensions),
             },
+            "skills": self._skill_items(),
             "routes": self._route_metadata(),
             "extension_points": self._extension_points(),
             "diagnostics": self._diagnostics(shell, parts, component_bindings),
@@ -415,6 +416,38 @@ class FrontendRegistry:
 
         return sorted(self._dedupe_by_key(items, "id"), key=self._sidebar_item_sort_key)
 
+    def _skill_items(self) -> list[dict[str, Any]]:
+        try:
+            skills = get_extension_registry(force_reload=True).skills().list(enabled_only=True)
+        except Exception:
+            return []
+
+        items: list[dict[str, Any]] = []
+        for skill in skills:
+            skill_id = str(skill.get("id") or "").strip()
+            if not skill_id:
+                continue
+            display_name = str(skill.get("display_name") or skill.get("name") or skill_id.rsplit("/", 1)[-1]).strip()
+            triggers = skill.get("triggers") if isinstance(skill.get("triggers"), list) else []
+            applies_to = skill.get("applies_to_tools") if isinstance(skill.get("applies_to_tools"), list) else []
+            metadata = skill.get("metadata") if isinstance(skill.get("metadata"), dict) else {}
+            aliases = skill.get("aliases") if isinstance(skill.get("aliases"), list) else metadata.get("aliases", [])
+            items.append(
+                {
+                    "id": skill_id,
+                    "label": display_name,
+                    "description": str(skill.get("description") or metadata.get("feedback") or ""),
+                    "triggers": [str(item) for item in triggers if str(item).strip()],
+                    "applies_to_tools": [str(item) for item in applies_to if str(item).strip()],
+                    "aliases": [str(item) for item in aliases if str(item).strip()] if isinstance(aliases, list) else [],
+                    "metadata": {
+                        "source": metadata.get("source", "skill"),
+                        "source_path": skill.get("source_path", ""),
+                    },
+                }
+            )
+        return sorted(items, key=lambda item: (item["label"].casefold(), item["id"].casefold()))
+
     @staticmethod
     def _sidebar_item_sort_key(item: dict[str, Any]) -> tuple[Any, ...]:
         category_order = {
@@ -499,6 +532,20 @@ class FrontendRegistry:
                             {"value": "auto", "label": "Auto"},
                         ],
                         "help": "frontend の表示言語です。未翻訳の拡張項目は元の文言を表示します。",
+                    },
+                    {
+                        "id": "voice_input_enabled",
+                        "label": "音声入力",
+                        "type": "toggle",
+                        "default": True,
+                        "help": "composer のマイクボタンでブラウザ音声入力を使います。",
+                    },
+                    {
+                        "id": "voice_input_use_ai",
+                        "label": "AI文字起こしモード",
+                        "type": "toggle",
+                        "default": False,
+                        "help": "ON の時は入力文に「文字起こしして:」を付けて、モデルへ文字起こしタスクとして渡します。",
                     },
                 ],
             },
