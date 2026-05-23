@@ -25,6 +25,26 @@ def _safe_endpoint_payload(payload: dict[str, Any]) -> dict[str, Any]:
     security = safe.get("security")
     if not isinstance(security, dict) or not security:
         safe["security"] = default_security_for_kind(kind)
+    safe["target"] = dict(safe.get("target") if isinstance(safe.get("target"), dict) else {})
+    default_delivery = dict(safe.get("default_delivery") if isinstance(safe.get("default_delivery"), dict) else {})
+    default_delivery.setdefault("action_id", str(default_delivery.get("action_id") or "chat.message"))
+    safe["default_delivery"] = default_delivery
+    raw_allowed = safe.get("allowed_delivery_actions")
+    if isinstance(raw_allowed, str):
+        allowed = [part.strip() for part in raw_allowed.split(",") if part.strip()]
+    elif isinstance(raw_allowed, list):
+        allowed = [str(item).strip() for item in raw_allowed if str(item or "").strip()]
+    else:
+        allowed = []
+    safe["allowed_delivery_actions"] = allowed
+    ttl_raw = safe.get("ttl_seconds")
+    if ttl_raw in (None, "", False):
+        safe["ttl_seconds"] = None
+    else:
+        try:
+            safe["ttl_seconds"] = max(0, int(ttl_raw))
+        except (TypeError, ValueError):
+            safe["ttl_seconds"] = None
 
     return safe
 
@@ -50,9 +70,13 @@ class WebhookEndpointStore:
     def upsert(self, payload: dict[str, Any]) -> dict[str, Any]:
         payload = _safe_endpoint_payload(payload)
         endpoint_id = str(payload.get("id") or "").strip() or self._make_id(str(payload.get("kind") or "webhook"))
-        endpoint = WebhookEndpoint.from_dict({**payload, "id": endpoint_id})
         endpoints = self._endpoints()
         existed = endpoint_id in endpoints
+        existing_payload = endpoints[endpoint_id].as_dict(redact=False) if existed else {}
+        merged_payload = {**existing_payload, **payload, "id": endpoint_id}
+        if not existed and merged_payload.get("ttl_seconds") and not merged_payload.get("expires_at"):
+            merged_payload["expires_at"] = _now_ms() + int(merged_payload["ttl_seconds"]) * 1000
+        endpoint = WebhookEndpoint.from_dict(merged_payload)
         endpoints[endpoint_id] = endpoint
         self._data["endpoints"] = {key: item.as_dict(redact=False) for key, item in endpoints.items()}
         self._save()

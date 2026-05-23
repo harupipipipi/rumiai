@@ -66,6 +66,43 @@ def get_model_capabilities(profile_id: str, *, profiles: list[dict[str, Any]] | 
     needle = str(profile_id or "").strip()
     if not needle:
         return None
+    try:
+        from domain.ai_client.model_pack_store import ModelPackStore
+
+        if ModelPackStore.is_model_pack_ref(needle):
+            settings = None
+            pack = ModelPackStore(settings).get(needle)
+            if pack is not None:
+                member_caps = [
+                    get_model_capabilities(member.model, profiles=profiles)
+                    for member in pack.members
+                    if member.model and member.model != needle
+                ]
+                member_caps = [item for item in member_caps if isinstance(item, dict)]
+                return {
+                    "profile_id": needle,
+                    "qualified_model_id": needle,
+                    "provider_id": "modelpack",
+                    "model_id": pack.id,
+                    "display_name": pack.display_name or pack.id,
+                    "supports_vision": any(bool(item.get("supports_vision") or item.get("supports_image_input")) for item in member_caps),
+                    "supports_image_input": any(bool(item.get("supports_image_input") or item.get("supports_vision")) for item in member_caps),
+                    "supports_tool_calling": any(bool(item.get("supports_tool_calling")) for item in member_caps),
+                    "supports_thinking": any(bool(item.get("supports_thinking")) for item in member_caps),
+                    "supports_fast": any(bool(item.get("supports_fast")) for item in member_caps),
+                    "capability_tags": sorted(
+                        {
+                            tag
+                            for item in member_caps
+                            for tag in (item.get("capability_tags") if isinstance(item.get("capability_tags"), list) else [])
+                            if str(tag).strip()
+                        }
+                    ),
+                    "configured": any(bool(item.get("configured")) for item in member_caps) if member_caps else True,
+                    "metadata": {"model_pack": True, "mode": pack.mode},
+                }
+    except Exception:
+        pass
     for profile in profiles if profiles is not None else _profile_catalog():
         if not isinstance(profile, dict):
             continue

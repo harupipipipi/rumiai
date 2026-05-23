@@ -13,6 +13,7 @@ from domain.ai_client.api_key_store import (
     set_provider_api_key,
 )
 from domain.ai_client.model_groups import default_model_groups, normalize_model_groups
+from domain.ai_client.model_pack_store import normalize_model_packs
 from domain.ai_client.model_roles import (
     normalize_utility_model_policy,
     normalize_utility_models,
@@ -275,6 +276,7 @@ class ModelRuntimeSettingsService:
             "model_api_routes": "",
             "api_routes": [],
             "api_bound_profiles": [],
+            "model_packs": [],
             "composite_models": [],
             "model_notes": {},
             "google_api_key": "",
@@ -303,6 +305,11 @@ class ModelRuntimeSettingsService:
             sanitized["api_routes"] = self._normalize_api_routes(sanitized.get("api_routes"))
         if "api_bound_profiles" in sanitized:
             sanitized["api_bound_profiles"] = self._normalize_api_bound_profiles(sanitized.get("api_bound_profiles"))
+        if "model_packs" in sanitized:
+            sanitized["model_packs"] = normalize_model_packs(
+                sanitized.get("model_packs"),
+                composite_models=sanitized.get("composite_models"),
+            )
         if "composite_models" in sanitized:
             sanitized["composite_models"] = self._normalize_composite_models(sanitized.get("composite_models"))
         if "model_notes" in sanitized:
@@ -367,6 +374,10 @@ class ModelRuntimeSettingsService:
         models["api_routes"] = self._normalize_api_routes(models.get("api_routes"))
         models["api_bound_profiles"] = self._normalize_api_bound_profiles(models.get("api_bound_profiles"))
         models["composite_models"] = self._normalize_composite_models(models.get("composite_models"))
+        models["model_packs"] = normalize_model_packs(
+            models.get("model_packs"),
+            composite_models=models.get("composite_models"),
+        )
         models["model_notes"] = self._normalize_model_notes(models.get("model_notes"))
         models["preferred_model_group"] = str(models.get("preferred_model_group") or "default").strip() or "default"
         models["auto_route_within_group"] = bool(models.get("auto_route_within_group", True))
@@ -640,9 +651,77 @@ class ModelRuntimeSettingsService:
                     },
                 }
             )
+        for model_pack in normalize_model_packs(
+            settings.get("model_packs"),
+            composite_models=settings.get("composite_models"),
+        ):
+            profile_id = "modelpack/{}".format(str(model_pack.get("id") or "").strip())
+            if not profile_id or profile_id == "modelpack/":
+                continue
+            member_ids = [
+                str(member.get("model") or "")
+                for member in (model_pack.get("members") if isinstance(model_pack.get("members"), list) else [])
+                if isinstance(member, dict) and str(member.get("model") or "").strip()
+            ]
+            base_profiles = self._base_profile_catalog(settings)
+            member_profiles = [
+                self._public_candidate(self._candidate_from_profile(profile, set()))
+                for profile in base_profiles
+                if isinstance(profile, dict)
+                and str(profile.get("profile_id") or profile.get("qualified_model_id") or "") in set(member_ids)
+            ]
+            profiles.append(
+                {
+                    "id": profile_id,
+                    "profile_id": profile_id,
+                    "qualified_model_id": profile_id,
+                    "provider_id": "modelpack",
+                    "provider": "modelpack",
+                    "model_id": str(model_pack.get("id") or ""),
+                    "model": str(model_pack.get("id") or ""),
+                    "display_name": str(model_pack.get("display_name") or model_pack.get("id") or ""),
+                    "name": str(model_pack.get("display_name") or model_pack.get("id") or ""),
+                    "type": "chat",
+                    "configured": any(bool(member.get("configured")) for member in member_profiles) if member_profiles else True,
+                    "supports_vision": any(bool(member.get("supports_vision") or member.get("supports_image_input")) for member in member_profiles),
+                    "supports_image_input": any(bool(member.get("supports_image_input") or member.get("supports_vision")) for member in member_profiles),
+                    "supports_tool_calling": any(bool(member.get("supports_tool_calling")) for member in member_profiles),
+                    "supports_thinking": any(bool(member.get("supports_thinking")) for member in member_profiles),
+                    "supports_fast": any(bool(member.get("supports_fast")) for member in member_profiles),
+                    "capability_tags": sorted(
+                        {
+                            tag
+                            for member in member_profiles
+                            for tag in (member.get("capability_tags") if isinstance(member.get("capability_tags"), list) else [])
+                            if str(tag).strip()
+                        }
+                    ),
+                    "availability": {
+                        "configured": True,
+                        "active": True,
+                        "status": "configured",
+                        "model_pack": True,
+                    },
+                    "metadata": {
+                        "model_pack": True,
+                        "source": model_pack.get("source"),
+                        "mode": model_pack.get("mode"),
+                        "members": member_ids,
+                    },
+                }
+            )
         return profiles
 
     def _list_profile_catalog(self, settings: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+        profiles = self._base_profile_catalog(settings)
+        if profiles:
+            combined = [profile for profile in profiles if isinstance(profile, dict)]
+            combined.extend(self.runtime_defined_profiles(settings))
+            return combined
+        return [self._fallback_stub_profile(), *self.runtime_defined_profiles(settings)]
+
+    def _base_profile_catalog(self, settings: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+        del settings
         try:
             from ecosystem.defaultspack.backend.ai_client.provider_catalog import list_profile_catalog
         except ModuleNotFoundError:
@@ -650,17 +729,14 @@ class ModelRuntimeSettingsService:
                 from backend.ai_client.provider_catalog import list_profile_catalog
             except ModuleNotFoundError:
                 list_profile_catalog = None
-
         if list_profile_catalog is not None:
             try:
                 profiles = list_profile_catalog()
                 if isinstance(profiles, list) and profiles:
-                    combined = [profile for profile in profiles if isinstance(profile, dict)]
-                    combined.extend(self.runtime_defined_profiles(settings))
-                    return combined
+                    return [profile for profile in profiles if isinstance(profile, dict)]
             except Exception:
                 pass
-        return [self._fallback_stub_profile(), *self.runtime_defined_profiles(settings)]
+        return [self._fallback_stub_profile()]
 
     def _api_bound_profile_availability(self, provider_id: str, api_id: str) -> dict[str, Any]:
         named_key = next(

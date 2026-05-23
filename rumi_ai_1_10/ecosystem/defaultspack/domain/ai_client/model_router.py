@@ -18,6 +18,8 @@ from typing import Any
 from domain.ai_client.task_analyzer import analyze_fast, analyze_heavy
 from domain.ai_client.model_profiles import ModelProfileManager
 from domain.ai_client.model_groups import normalize_model_groups
+from domain.ai_client.model_pack_router import select_model_pack
+from domain.ai_client.model_pack_store import ModelPackStore
 from domain.ai_client.model_roles import normalize_utility_model_policy, normalize_utility_models
 from domain.ai_client.model_search import get_model_capabilities, models_for_group
 
@@ -63,6 +65,32 @@ def route_model_request(
     settings = routing_request.settings if isinstance(routing_request.settings, dict) else {}
     original = routing_request.preferred_model or "stub/default"
     selected_group = routing_request.preferred_group or settings.get("preferred_model_group") or "default"
+    if ModelPackStore.is_model_pack_ref(original):
+        pack_selection = select_model_pack(
+            original,
+            {
+                "user_text": routing_request.user_text,
+                "has_images": routing_request.has_images,
+                "requires_tool_calling": bool(routing_request.requires_tool_calling or routing_request.requested_tools),
+                "requested_thinking_level": routing_request.requested_thinking_level or "",
+                "task_hints": routing_request.task_hints,
+            },
+            settings=settings,
+            profiles=profiles,
+        )
+        if pack_selection is not None and pack_selection.selected_model:
+            utility_models = _resolve_utility_models(settings, models_for_group(selected_group, settings, profiles=profiles))
+            return ModelRoutingDecision(
+                selected_model=pack_selection.selected_model,
+                original_model=original,
+                selected_group=str(selected_group),
+                reason_codes=_dedupe(list(pack_selection.reason_codes) + ["model_pack_selected"]),
+                warnings=list(pack_selection.warnings),
+                bridge_required=False,
+                bridge_plan={},
+                utility_models=utility_models,
+                explanation=explain_model_choice(pack_selection.selected_model, list(pack_selection.reason_codes), list(pack_selection.warnings)),
+            )
     candidates = models_for_group(selected_group, settings, profiles=profiles)
     if not candidates:
         candidates = models_for_group("default", settings, profiles=profiles)
@@ -152,6 +180,8 @@ def explain_model_choice(selected_model: str, reason_codes: list[str] | None = N
         "requires_thinking": "thinking is requested",
         "fast_candidate": "fast reply is preferred",
         "deep_reasoning": "higher reasoning depth is useful",
+        "model_pack": "model pack routing is active",
+        "model_pack_selected": "selected a model from the requested pack",
         "vision_bridge_required": "vision bridge is needed",
         "tool_calling_unavailable": "tool calling is unavailable",
         "thinking_level_normalized": "thinking level will be normalized",

@@ -111,6 +111,7 @@ AI_FUNCTIONS: tuple[FunctionSpec, ...] = (
     _spec("ai_recommend_model", "Recommend an AI model for a request.", ("ai", "model", "routing"), block="blocks.ai.recommend_model", aliases=("defaults.ai.recommend_model", "defaultspack.ai.recommend_model")),
     _spec("ai_route_model", "Route a request to a compatible model.", ("ai", "model", "routing"), risk="medium", block="blocks.ai.route_model", aliases=("defaults.ai.route_model", "defaultspack.ai.route_model")),
     _spec("ai_explain_model_choice", "Explain a model routing decision.", ("ai", "model", "routing"), block="blocks.ai.explain_model_choice", aliases=("defaults.ai.explain_model_choice", "defaultspack.ai.explain_model_choice")),
+    _spec("ai_model_call", "Ask another model a bounded question without tool access by default.", ("ai", "model", "delegation"), risk="medium", aliases=("defaults.ai.model_call", "defaultspack.ai.model_call")),
     _spec("ai_providers", "List available AI providers.", ("ai", "provider", "catalog"), block="blocks.ai.providers"),
     _spec("ai_profiles", "List available AI model profiles.", ("ai", "profile", "catalog"), block="blocks.ai.profiles"),
     _spec("ai_embed", "Create embeddings with the configured AI provider.", ("ai", "embedding"), risk="medium", block="blocks.ai.embed"),
@@ -357,7 +358,7 @@ AGENT_FUNCTIONS: tuple[FunctionSpec, ...] = tuple(
         ("agent_queue_get", "Get the agent queue.", "low", "blocks.agent.interrupt.queue"),
         ("agent_queue_update", "Update the agent queue.", "medium", "blocks.agent.interrupt.queue"),
         ("agent_progress", "Get agent progress.", "low", "blocks.agent.interrupt.progress"),
-        ("agent_run_subagent", "Run a utility subagent.", "medium", "blocks.agent.run_subagent"),
+        ("agent_run_subagent", "Compatibility alias for utility model routing or delegated runs.", "medium", "blocks.agent.run_subagent"),
     )
 ) + tuple(
     _spec(f"agent_schedule_{name}", f"{label} an agent schedule.", ("agent", "scheduler"), risk=risk, block=f"blocks.agent.scheduler.{module}")
@@ -533,6 +534,13 @@ MANAGEMENT_FUNCTIONS: tuple[FunctionSpec, ...] = tuple(
 )
 
 
+EXTERNAL_INPUT_FUNCTIONS: tuple[FunctionSpec, ...] = (
+    _spec("input_endpoint_create", "Create a localhost-only inbound webhook endpoint.", ("external", "input", "webhook"), risk="medium", aliases=("defaults.input.endpoint.create", "defaultspack.input.endpoint.create")),
+    _spec("input_endpoint_delete", "Delete a localhost-only inbound webhook endpoint.", ("external", "input", "webhook"), risk="medium", aliases=("defaults.input.endpoint.delete", "defaultspack.input.endpoint.delete")),
+    _spec("input_endpoint_list", "List inbound webhook endpoints.", ("external", "input", "webhook"), aliases=("defaults.input.endpoint.list", "defaultspack.input.endpoint.list")),
+)
+
+
 FUNCTION_SPECS: tuple[FunctionSpec, ...] = (
     AI_FUNCTIONS
     + CHAT_FUNCTIONS
@@ -547,6 +555,7 @@ FUNCTION_SPECS: tuple[FunctionSpec, ...] = (
     + PROFILE_WORKSPACE_FUNCTIONS
     + RESEARCH_MEDIA_UI_DEV_FUNCTIONS
     + MANAGEMENT_FUNCTIONS
+    + EXTERNAL_INPUT_FUNCTIONS
 )
 
 

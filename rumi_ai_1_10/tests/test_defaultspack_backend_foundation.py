@@ -11,6 +11,7 @@ from ecosystem.defaultspack.backend.ai_client.provider_catalog import (
     list_provider_catalog,
 )
 from ecosystem.defaultspack.backend.ai_client.provider_registry import ProviderRegistry
+from ecosystem.defaultspack.domain.ai_client.api_key_store import PROVIDER_SECRET_KEYS
 
 
 class _FakeInterfaceRegistry:
@@ -37,48 +38,35 @@ def _reset_singletons(monkeypatch, tmp_path):
         "RUMI_DEFAULTSPACK_SECRETS_DIR",
         str(tmp_path / "secrets"),
     )
-    for env_name in (
-        "OPENAI_API_KEY",
-        "OPENAI_BASE_URL",
-        "ANTHROPIC_API_KEY",
-        "ANTHROPIC_BASE_URL",
-        "GOOGLE_API_KEY",
-        "GEMINI_API_KEY",
-        "GOOGLE_APPLICATION_CREDENTIALS",
-        "GOOGLE_BASE_URL",
-        "GENSPARK_API_KEY",
-        "GENSPARK_LLM_BASE_URL",
-        "OPENROUTER_API_KEY",
-        "OPENROUTER_BASE_URL",
-        "XAI_API_KEY",
-        "XAI_BASE_URL",
-        "MISTRAL_API_KEY",
-        "MISTRAL_BASE_URL",
-        "GROQ_API_KEY",
-        "GROQ_BASE_URL",
-        "DEEPSEEK_API_KEY",
-        "DEEPSEEK_BASE_URL",
-        "PERPLEXITY_API_KEY",
-        "PERPLEXITY_BASE_URL",
-        "TOGETHER_API_KEY",
-        "TOGETHER_BASE_URL",
-        "FIREWORKS_API_KEY",
-        "FIREWORKS_BASE_URL",
-        "LONGCAT_API_KEY",
-        "LONGCAT_BASE_URL",
-        "GLM_API_KEY",
-        "GLM_BASE_URL",
-        "OLLAMA_API_KEY",
-        "OLLAMA_BASE_URL",
-        "OLLAMA_HOST",
-        "LMSTUDIO_BASE_URL",
-        "VLLM_BASE_URL",
-        "LLAMACPP_BASE_URL",
-        "OPENAI_COMPATIBLE_API_KEY",
-        "OPENAI_COMPATIBLE_BASE_URL",
-        "RUMI_DEFAULTSPACK_ENABLE_CLOUD_PROVIDERS",
-        "RUMI_DEFAULTSPACK_ENABLE_LOCAL_PROVIDERS",
-    ):
+    provider_env_names = {
+        env_name
+        for provider in list_provider_catalog()
+        for env_name in (
+            list(provider.get("env_vars") or [])
+            + list(provider.get("base_url_envs") or [])
+        )
+        if str(env_name or "").strip()
+    }
+    provider_env_names.update(
+        env_name
+        for env_names in PROVIDER_SECRET_KEYS.values()
+        for env_name in env_names
+        if str(env_name or "").strip()
+    )
+    provider_env_names.update(
+        {
+            "GOOGLE_APPLICATION_CREDENTIALS",
+            "OLLAMA_HOST",
+            "LMSTUDIO_BASE_URL",
+            "VLLM_BASE_URL",
+            "LLAMACPP_BASE_URL",
+            "OPENAI_COMPATIBLE_BASE_URL",
+            "RUMI_DEFAULTSPACK_ENABLE_CLOUD_PROVIDERS",
+            "RUMI_DEFAULTSPACK_ENABLE_LOCAL_PROVIDERS",
+        }
+    )
+
+    for env_name in provider_env_names:
         monkeypatch.delenv(env_name, raising=False)
     permission_policy_module._POLICY_STORE = None
     if top_level_permission_policy_module is not None:

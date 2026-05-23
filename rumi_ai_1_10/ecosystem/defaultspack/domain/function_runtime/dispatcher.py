@@ -231,6 +231,94 @@ def _resolve_prompt_for_conversation(args: dict[str, Any], context: dict[str, An
     return ok(resolve_prompt_for_conversation(args, context))
 
 
+def _model_call(args: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
+    from domain.ai_client.model_call import call_model
+
+    result = call_model(args, context, call_handler=context.get("call_handler") if isinstance(context, dict) else None)
+    if result.get("status") == "error":
+        return error(str(result.get("error") or "model.call failed"), str(result.get("code") or "MODEL_CALL_FAILED"))
+    return ok(result)
+
+
+def _input_endpoint_create(args: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
+    del context
+    import os
+    import time
+
+    from domain.external.token_store import set_external_token
+    from domain.webhook.endpoint_store import WebhookEndpointStore
+
+    shared_secret = str(args.get("shared_secret") or args.get("secret") or "").strip()
+    if not shared_secret:
+        return error("shared_secret is required", "INVALID_INPUT")
+    ttl_seconds = args.get("ttl_seconds")
+    try:
+        ttl_value = int(ttl_seconds) if ttl_seconds not in (None, "") else 3600
+    except (TypeError, ValueError):
+        ttl_value = 3600
+    ttl_value = max(ttl_value, 1)
+    payload = {
+        "id": str(args.get("endpoint_id") or args.get("id") or "").strip(),
+        "kind": str(args.get("kind") or "generic").strip() or "generic",
+        "input_profile_id": str(args.get("input_profile_id") or "generic.webhook.default").strip() or "generic.webhook.default",
+        "enabled": args.get("enabled", True) is not False,
+        "target": dict(args.get("target") if isinstance(args.get("target"), dict) else {}),
+        "default_delivery": dict(args.get("default_delivery") if isinstance(args.get("default_delivery"), dict) else {"action_id": str(args.get("action_id") or "chat.message")}),
+        "allowed_delivery_actions": args.get("allowed_delivery_actions") if isinstance(args.get("allowed_delivery_actions"), list) else [str(args.get("action_id") or "chat.message").strip()] if str(args.get("action_id") or "").strip() else [],
+        "ttl_seconds": ttl_value,
+        "expires_at": int(time.time() * 1000) + ttl_value * 1000,
+        "security": {
+            "mode": "shared_secret",
+            "header": str(args.get("header") or "x-rumi-webhook-token").strip() or "x-rumi-webhook-token",
+        },
+        "metadata": dict(args.get("metadata") if isinstance(args.get("metadata"), dict) else {}),
+    }
+    created = WebhookEndpointStore().upsert(payload)
+    endpoint = created.get("endpoint") if isinstance(created.get("endpoint"), dict) else {}
+    endpoint_id = str(endpoint.get("id") or "")
+    if endpoint_id:
+        set_external_token("generic", shared_secret, token_id=endpoint_id, kind="webhook_shared_secret")
+    port = int(os.environ.get("DEFAULTS_HTTP_PORT", "8766"))
+    localhost_url = "http://localhost:{}/api/webhooks/inbound/{}".format(port, endpoint_id)
+    return ok(
+        {
+            "endpoint": endpoint,
+            "endpoint_id": endpoint_id,
+            "localhost_url": localhost_url,
+            "shared_secret": shared_secret,
+            "ttl_seconds": ttl_value,
+        }
+    )
+
+
+def _input_endpoint_delete(args: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
+    del context
+    from domain.external.token_store import delete_external_token
+    from domain.webhook.endpoint_store import WebhookEndpointStore
+
+    endpoint_id = str(args.get("endpoint_id") or args.get("id") or "").strip()
+    if not endpoint_id:
+        return error("endpoint_id is required", "INVALID_INPUT")
+    deleted = WebhookEndpointStore().delete(endpoint_id)
+    delete_external_token("generic", endpoint_id)
+    return ok(deleted)
+
+
+def _input_endpoint_list(args: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
+    del args, context
+    import os
+
+    from domain.webhook.endpoint_store import WebhookEndpointStore
+
+    port = int(os.environ.get("DEFAULTS_HTTP_PORT", "8766"))
+    endpoints = []
+    for endpoint in WebhookEndpointStore().list_endpoints():
+        item = dict(endpoint)
+        item["localhost_url"] = "http://localhost:{}/api/webhooks/inbound/{}".format(port, item.get("id"))
+        endpoints.append(item)
+    return ok({"endpoints": endpoints})
+
+
 _PROMPT_HANDLERS = {
     "prompt_validate_template": _validate_prompt_template,
     "prompt_resolve_for_conversation": _resolve_prompt_for_conversation,
@@ -238,6 +326,7 @@ _PROMPT_HANDLERS = {
 
 
 _MODEL_RUNTIME_HANDLERS = {
+    "ai_model_call": _model_call,
     "ai_get_preferred_model": lambda args, ctx: ok({"profile_id": _model_runtime_service().get_preferred_model()}),
     "ai_set_preferred_model": lambda args, ctx: ok(_model_runtime_service().set_preferred_model(str(args.get("profile_id") or args.get("model") or ""))),
     "ai_get_thinking_level": lambda args, ctx: ok(_model_runtime_service().get_thinking_level(args.get("scope", "global"), args.get("profile_id"), args.get("conversation_id"))),
@@ -249,4 +338,7 @@ _MODEL_RUNTIME_HANDLERS = {
     "ai_set_provider_key": _set_provider_key,
     "ai_delete_provider_key": _delete_provider_key,
     "ai_rename_provider_key": _rename_provider_key,
+    "input_endpoint_create": _input_endpoint_create,
+    "input_endpoint_delete": _input_endpoint_delete,
+    "input_endpoint_list": _input_endpoint_list,
 }
