@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from domain.ai_client.model_call import call_model
 from domain.agent.subagent_roles import get_subagent_role
 
 
@@ -23,7 +24,7 @@ class SubagentOrchestrator:
             raise ValueError("unknown subagent role: " + str(role_id))
         payload = payload if isinstance(payload, dict) else {}
         selected_model = model or _model_for_role(role_id, settings or {})
-        output = self._run_with_model(role_id, payload, selected_model, role) if selected_model else None
+        output = self._run_with_model(role_id, payload, selected_model, role) if (selected_model or self._call_handler is not None) else None
         if output is None:
             output = self._deterministic_output(role_id, payload)
         return {
@@ -42,26 +43,30 @@ class SubagentOrchestrator:
         }
 
     def _run_with_model(self, role_id: str, payload: dict[str, Any], model: str, role: dict[str, Any]) -> dict[str, Any] | None:
-        if self._call_handler is None:
-            return None
         prompt = _prompt_for_role(role_id, payload, role)
         try:
-            response = self._call_handler(
-                "defaults.ai.complete",
+            response = call_model(
                 {
-                    "model": model,
-                    "messages": [{"role": "user", "content": prompt}],
-                    "tools": [],
-                    "params": {
-                        "response_format": {"type": "json_object"},
-                        "max_tokens": role.get("max_tokens", 800),
-                        "thinking_level": "none",
-                    },
+                    "model_hint": model,
+                    "question": prompt,
+                    "output_schema": role.get("output_schema"),
+                    "max_tokens": role.get("max_tokens", 800),
+                    "thinking_level": "none",
+                    "required_capabilities": ["model.image_input"] if role_id == "vision_ocr" else [],
                 },
+                {"_model_call_depth": 0},
+                call_handler=self._call_handler,
             )
         except Exception:
             return None
-        return _parse_json_response(response)
+        if isinstance(response, dict) and response.get("status") == "ok":
+            output = response.get("output")
+            if isinstance(output, dict):
+                return output
+            parsed = _parse_json_response({"data": {"content": str(output or "")}})
+            if parsed is not None:
+                return parsed
+        return None
 
     @staticmethod
     def _deterministic_output(role_id: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -89,6 +94,33 @@ class SubagentOrchestrator:
 
 def run_subagent(role_id: str, payload: dict[str, Any] | None = None, *, model: str = "", settings: dict[str, Any] | None = None, call_handler: Any = None) -> dict[str, Any]:
     return SubagentOrchestrator(call_handler=call_handler).run(role_id, payload, model=model, settings=settings)
+
+
+def run_subagent_compat(
+    role_id: str,
+    payload: dict[str, Any] | None = None,
+    *,
+    model: str = "",
+    settings: dict[str, Any] | None = None,
+    call_handler: Any = None,
+    context: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    cleaned_role_id = str(role_id or "").strip()
+    cleaned_payload = payload if isinstance(payload, dict) else {}
+    if get_subagent_role(cleaned_role_id) is not None:
+        result = run_subagent(
+            cleaned_role_id,
+            cleaned_payload,
+            model=model,
+            settings=settings,
+            call_handler=call_handler,
+        )
+        result["compatibility_alias"] = "subagent"
+        result["route_kind"] = "utility_model_call"
+        return result
+    if cleaned_role_id in {"delegate", "agent_delegate", "task"} or str(cleaned_payload.get("task") or cleaned_payload.get("prompt") or "").strip():
+        return _delegate_via_input(cleaned_role_id, cleaned_payload, model=model, context=context)
+    raise ValueError("unknown subagent role: " + cleaned_role_id)
 
 
 def _model_for_role(role_id: str, settings: dict[str, Any]) -> str:
@@ -122,3 +154,59 @@ def _parse_json_response(response: Any) -> dict[str, Any] | None:
     except json.JSONDecodeError:
         return None
     return parsed if isinstance(parsed, dict) else None
+
+
+def _delegate_via_input(
+    role_id: str,
+    payload: dict[str, Any],
+    *,
+    model: str = "",
+    context: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    from domain.input.dispatcher import dispatch_input
+    from domain.input.envelope import RumiInputEnvelope
+
+    task = str(payload.get("task") or payload.get("prompt") or "").strip()
+    if not task:
+        raise ValueError("task is required for delegated compatibility alias")
+    result = dispatch_input(
+        RumiInputEnvelope(
+            role="user",
+            input=task,
+            chat={},
+            source={"type": "compatibility", "provider": "subagent"},
+            target=_delegate_target(payload, context or {}),
+            delivery={"action_id": "agent.delegate"},
+            attachments=list(payload.get("attachments") if isinstance(payload.get("attachments"), list) else []),
+            metadata={"compatibility_alias": "subagent", "role_id": role_id},
+            params={
+                "task": task,
+                "tools": list(payload.get("tools") if isinstance(payload.get("tools"), list) else []),
+                "model": str(payload.get("model") or model or ""),
+                "system_prompt": payload.get("system_prompt"),
+                "runtime_profile_key": payload.get("runtime_profile_key"),
+                "capability_profile": payload.get("capability_profile"),
+                "required_capabilities": payload.get("required_capabilities") or payload.get("capability"),
+                "params": dict(payload.get("params") if isinstance(payload.get("params"), dict) else {}),
+            },
+            tools=list(payload.get("tools") if isinstance(payload.get("tools"), list) else []),
+        ),
+        context or {},
+    )
+    if isinstance(result, dict):
+        result.setdefault("compatibility_alias", "subagent")
+        result.setdefault("route_kind", "agent.delegate")
+    return result
+
+
+def _delegate_target(payload: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
+    target: dict[str, Any] = {}
+    conversation_id = str(
+        payload.get("conversation_id")
+        or payload.get("target_conversation_id")
+        or context.get("conversation_id")
+        or ""
+    ).strip()
+    if conversation_id:
+        target["conversation_id"] = conversation_id
+    return target

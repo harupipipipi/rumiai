@@ -62,10 +62,10 @@ The model catalog now exposes capability metadata used by profile-aware routing:
 
 Capability fields include `supports_vision`, `supports_tool_calling`, `supports_thinking`, `supports_fast`, `speed_tier`, `quality_tier`, `knowledge_level`, `knowledge_band`, and role recommendations. `knowledge_level` is a relative rumiai routing score, not an absolute claim about intelligence.
 
-Vision fallback and utility subagents are available through:
+Vision bridge and compatibility utility routing are available through:
 
 - `defaultspack:vision_describe_images` / `defaults.vision.describe_images`
-- `defaultspack:agent_run_subagent` / `defaults.agent.run_subagent`
+- `defaultspack:agent_run_subagent` / `defaults.agent.run_subagent` (compatibility alias for utility routing or delegated runs)
 - `defaultspack:prompt_lint_prompt` / `defaults.prompt.lint_prompt`
 - `defaultspack:prompt_compact_prompt` / `defaults.prompt.compact_prompt`
 

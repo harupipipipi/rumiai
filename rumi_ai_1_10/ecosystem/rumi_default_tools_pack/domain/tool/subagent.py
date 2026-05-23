@@ -10,9 +10,8 @@ for _path in (str(_PACK_ROOT), str(_DEFAULTSPACK_ROOT)):
     if _path not in sys.path:
         sys.path.insert(0, _path)
 
-from domain.ai_client.client import AIClient
-from domain.chat.message_builder import build_assistant_message
 from domain.chat.store import ChatStore
+from domain.input import RumiInputEnvelope, dispatch_input
 
 
 class SubagentController:
@@ -76,29 +75,27 @@ class SubagentController:
         child_metadata["workspace"] = workspace_contract
         child = store.update_conversation(child["id"], {"metadata": child_metadata}) or child
         child = store.update_conversation(child["id"], {"title": title}) or child
-        user_msg = store.add_message(
-            child["id"],
-            {
-                "role": "user",
-                "content": [{"type": "text", "text": task}],
-                "metadata": {"source": "subagent_tool"},
-            },
-        )
-        if user_msg is None:
-            raise RuntimeError("failed to write subagent task")
-
-        response = self._complete(model, task)
-        assistant = store.add_message(
-            child["id"],
-            build_assistant_message(
-                conversation_id=child["id"],
-                parent_id=user_msg["id"],
-                sequence_number=user_msg.get("sequence_number", 1) + 1,
-                response=response,
-                model=model,
+        result = dispatch_input(
+            RumiInputEnvelope(
+                role="user",
+                input=task,
+                chat={"conversation_id": child["id"], "title": title, "model": model},
+                source={"kind": "internal", "provider": "subagent", "event_id": "subagent:" + child["id"]},
+                target={
+                    "conversation_id": child["id"],
+                    "direct": True,
+                    "model_route": {"preferred_model": model},
+                },
+                delivery={"action_id": "chat.message"},
+                metadata={"source": "subagent_tool"},
+                params=dict(arguments.get("params") if isinstance(arguments.get("params"), dict) else {}),
+                tools=list(arguments.get("tools") if isinstance(arguments.get("tools"), list) else []),
             ),
+            {**context, "chat_history_mode": "current_turn"},
         )
-        summary = assistant.get("raw_text") if isinstance(assistant, dict) else response["content"][0]["text"]
+        if result.get("status") != "ok":
+            raise RuntimeError(str(result.get("error") or "failed to dispatch subagent conversation"))
+        summary = str(result.get("assistant_text") or "Subagent completed.").strip()
         return {
             "action": "subagent.run",
             "parent_conversation_id": parent_id,
@@ -107,33 +104,4 @@ class SubagentController:
             "task": task,
             "summary": summary,
             "workspace": workspace_contract,
-        }
-
-    @staticmethod
-    def _complete(model: str, task: str) -> dict[str, Any]:
-        messages = [
-            {
-                "role": "system",
-                "content": (
-                    "You are a focused subagent inside Rumi. Work only on the delegated task, "
-                    "be concise, and return a directly useful result."
-                ),
-            },
-            {"role": "user", "content": task},
-        ]
-        try:
-            response = AIClient().complete(model, messages, [], {"max_tokens": 800})
-            if isinstance(response, dict):
-                return response
-        except Exception as exc:
-            return {
-                "content": [{"type": "text", "text": f"Subagent could not complete the task: {exc}"}],
-                "finish_reason": "error",
-                "usage": {},
-                "metadata": {"subagent_error": str(exc)},
-            }
-        return {
-            "content": [{"type": "text", "text": "Subagent finished without a response."}],
-            "finish_reason": "stop",
-            "usage": {},
         }
