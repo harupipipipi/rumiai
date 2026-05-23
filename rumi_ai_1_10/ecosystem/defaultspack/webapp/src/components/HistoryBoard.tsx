@@ -504,18 +504,31 @@ function getAllGroupDragIds(groups: ChatGroup[]): string[] {
   return ids;
 }
 
-function flattenChats(groups: ChatGroup[]): ChatItem[] {
-  const chats: ChatItem[] = [];
-  const visitChat = (chat: ChatItem) => {
-    chats.push(chat);
-    for (const child of chat.children ?? []) visitChat(child);
+export type CompactHistoryRailItem =
+  | { type: "group"; id: string; title: string; depth: number; isCollapsed: boolean; total: number }
+  | { type: "chat"; id: string; title: string; depth: number; chat: ChatItem };
+
+export function buildCompactHistoryRailItems(groups: ChatGroup[]): CompactHistoryRailItem[] {
+  const items: CompactHistoryRailItem[] = [];
+  const visitChat = (chat: ChatItem, depth: number) => {
+    items.push({ type: "chat", id: chat.id, title: chat.title, depth, chat });
+    for (const child of chat.children ?? []) visitChat(child, depth + 1);
   };
-  const visitGroup = (group: ChatGroup) => {
-    for (const chat of group.chats) visitChat(chat);
-    for (const subGroup of group.subGroups) visitGroup(subGroup);
+  const visitGroup = (group: ChatGroup, depth: number) => {
+    items.push({
+      type: "group",
+      id: group.id,
+      title: group.title,
+      depth,
+      isCollapsed: Boolean(group.isCollapsed),
+      total: countChats(group),
+    });
+    if (group.isCollapsed) return;
+    for (const chat of group.chats) visitChat(chat, depth + 1);
+    for (const subGroup of group.subGroups) visitGroup(subGroup, depth + 1);
   };
-  for (const group of groups) visitGroup(group);
-  return chats;
+  for (const group of groups) visitGroup(group, 0);
+  return items;
 }
 
 // ============================================================
@@ -1615,7 +1628,7 @@ export function HistoryBoard({
   const accountInitial = account?.initial || accountName.charAt(0).toUpperCase();
   const accountIcon = account?.avatar_url || '';
   const accountIconIsImage = /^(https?:|data:image|\/)/.test(accountIcon);
-  const compactChats = flattenChats(groups);
+  const compactRailItems = useMemo(() => buildCompactHistoryRailItems(groups), [groups]);
   const currentWorkspaceText = selectedCodingWorkspace
     ? workspaceSummary(selectedCodingWorkspace.workspace_id, selectedCodingWorkspace.label, selectedCodingWorkspace.root_path)
     : "";
@@ -1703,7 +1716,7 @@ export function HistoryBoard({
               title="サイドバーを開く"
               aria-label="サイドバーを開く"
             >
-              <PanelLeftOpen size={16} />
+              <PanelLeftOpen size={14} />
             </button>
           )}
           <button
@@ -1712,7 +1725,7 @@ export function HistoryBoard({
             title="New Chat"
             aria-label="New Chat"
           >
-            <WarmActionIcon kind="newChat" size="lg" />
+            <WarmActionIcon kind="newChat" size="sm" iconClassName="h-3.5 w-3.5" />
           </button>
           <button
             onClick={openCreateGroup}
@@ -1720,7 +1733,7 @@ export function HistoryBoard({
             title="New Group"
             aria-label="New Group"
           >
-            <WarmActionIcon kind="group" size="lg" />
+            <WarmActionIcon kind="group" size="sm" iconClassName="h-3.5 w-3.5" />
           </button>
           {createGroupForm}
           <button
@@ -1735,12 +1748,33 @@ export function HistoryBoard({
             title="Calendar"
             aria-label="Calendar"
           >
-            <WarmActionIcon kind="calendar" size="lg" />
+            <WarmActionIcon kind="calendar" size="sm" iconClassName="h-3.5 w-3.5" />
           </button>
         </div>
 
-        <div className="flex min-h-0 w-full flex-1 flex-col items-center gap-1.5 overflow-y-auto px-1.5 py-2">
-          {compactChats.map((chat) => {
+        <div className="flex min-h-0 w-full flex-1 flex-col items-center gap-1 overflow-y-auto px-1.5 py-2">
+          {compactRailItems.map((item) => {
+            if (item.type === "group") {
+              return (
+                <button
+                  key={`group-${item.id}`}
+                  type="button"
+                  onClick={() => handleToggleCollapse(item.id)}
+                  className={cn(
+                    "relative flex h-9 min-h-9 w-9 min-w-9 shrink-0 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-zinc-800/70 hover:text-zinc-100",
+                    item.isCollapsed && "bg-zinc-900/80 text-zinc-400"
+                  )}
+                  title={`${item.title} (${item.total})`}
+                  aria-label={`${item.title} (${item.total})`}
+                >
+                  {item.isCollapsed
+                    ? <Folder size={14} className="flex-shrink-0" />
+                    : <FolderOpen size={14} className="flex-shrink-0" />}
+                </button>
+              );
+            }
+
+            const chat = item.chat;
             const isActive = activeChatId === chat.id;
             return (
               <button
@@ -1748,7 +1782,7 @@ export function HistoryBoard({
                 type="button"
                 onClick={() => onChatSelect(chat.id)}
                 className={cn(
-                  "relative flex h-10 w-10 items-center justify-center rounded-md transition-colors",
+                  "relative flex h-9 min-h-9 w-9 min-w-9 shrink-0 items-center justify-center rounded-md transition-colors",
                   isActive ? "bg-zinc-800 text-zinc-100" : "text-zinc-500 hover:bg-zinc-800/70 hover:text-zinc-100"
                 )}
                 title={chat.title}
@@ -1756,11 +1790,13 @@ export function HistoryBoard({
               >
                 {chat.metadata?.icon_svg ? (
                   <span
-                    className="w-[17px] h-[17px] flex items-center justify-center [&>svg]:w-full [&>svg]:h-full"
+                    className="flex h-3.5 w-3.5 items-center justify-center [&>svg]:h-full [&>svg]:w-full"
                     dangerouslySetInnerHTML={{ __html: chat.metadata.icon_svg }}
                   />
                 ) : (
-                  <MessageSquare size={17} strokeWidth={1.9} />
+                  chat.type === 'research' ? <Globe size={14} className="flex-shrink-0" /> :
+                  chat.type === 'code' ? <Terminal size={14} className="flex-shrink-0" /> :
+                  <MessageSquare size={14} className="flex-shrink-0" />
                 )}
                 {isActive && <span className="absolute left-0 h-5 w-0.5 rounded-r bg-emerald-400" />}
               </button>
@@ -1776,7 +1812,7 @@ export function HistoryBoard({
             title="Settings"
             aria-label="Settings"
           >
-            <Settings size={15} />
+            <Settings size={14} />
           </button>
         </div>
       </div>

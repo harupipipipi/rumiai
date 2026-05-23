@@ -200,6 +200,7 @@ def prepare_chat_run(input_data: dict[str, Any], context: dict[str, Any] | None 
     request_context["model"] = model
     request_context["chat_params"] = params
     request_context["request_id"] = request_id
+    request_context.update(_approval_followup_tool_context(metadata))
     tool_policy = params.get("tool_policy")
     if isinstance(tool_policy, dict):
         request_context["profile_policy"] = {
@@ -522,6 +523,26 @@ def _runtime_user_content_override(metadata: dict[str, Any] | None) -> str:
     if not isinstance(value, str):
         return ""
     return value.strip()
+
+
+def _approval_followup_tool_context(metadata: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(metadata, dict):
+        return {}
+    followup = metadata.get("approval_followup")
+    if not isinstance(followup, dict):
+        return {}
+    token = str(followup.get("approval_token") or followup.get("token") or "").strip()
+    tool_name = str(followup.get("tool_name") or "").strip()
+    if not token or not tool_name:
+        return {}
+    operation = str(followup.get("operation") or followup.get("action") or "").strip()
+    request_id = str(followup.get("request_id") or followup.get("approval_request_id") or "").strip()
+    token_map = {tool_name: token}
+    if operation:
+        token_map[operation] = token
+    if request_id:
+        token_map[request_id] = token
+    return {"tool_approval_tokens": token_map}
 
 
 def _replace_current_user_content_for_model(

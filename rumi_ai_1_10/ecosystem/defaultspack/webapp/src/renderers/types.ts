@@ -23,6 +23,7 @@ export type ChatUiMessage = {
     thinkingDuration?: string;
     thinkingTranscript?: string;
     attachedToolCount?: number;
+    pendingApproval?: Record<string, unknown>;
   };
   events?: ChatActivityEvent[];
   toolLogs?: ToolLogEntry[];

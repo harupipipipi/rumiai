@@ -95,11 +95,27 @@ for j in jobs:
 - **マトリクス**: 4 つの os × target の組み合わせ
 - **主要ステップ**:
   1. Checkout
-  2. Install Linux dependencies（Linux のみ）
-  3. Install Rust toolchain
-  4. Install Tauri CLI (`cargo install tauri-cli`)
-  5. Build (`cargo tauri build --target $target`)
-  6. Upload release artifacts (`softprops/action-gh-release`)
+  2. Set up Python / Rust / Node
+  3. Build panel frontend and defaultspack frontend
+  4. Build `pack-shell` for the target platform
+  5. Prepare `rumi_viewer/src-tauri/gen/app` from `rumi_ai_1_10`
+  6. Build (`cargo tauri build --target $target`)
+  7. Upload release artifacts (`softprops/action-gh-release`)
+
+`rumi_viewer/src-tauri/gen/app` は Git 管理しない。CI では
+`.github/scripts/prepare_tauri_resources.py` が runtime tools を stage し、Tauri
+の `build.rs` も同じ除外ルールで `gen/app` を再生成する。生成対象には
+`app.py`, `core_runtime/`, `ecosystem/defaultspack/`, build 済み panel/defaultspack UI,
+`bundled/uv`, `bundled/pack-shell` が入る。`.venv`, `node_modules`,
+`user_data`, `__pycache__`, `.rumi_snapshots`, `tests/` は配布物から除外する。
+
+PR 上で配布物を確認したい場合は、手動実行もできる
+`.github/workflows/desktop-installers.yml` を使う。Windows NSIS, macOS DMG, Linux
+DEB/AppImage を Actions artifact としてアップロードする。代表的な出力先は以下。
+
+- Windows: `rumi_viewer/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe`
+- macOS: `rumi_viewer/src-tauri/target/{target}/release/bundle/dmg/*.dmg`
+- Linux: `rumi_viewer/src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/{deb,appimage}/`
 
 ### ランナー選定の注意
 

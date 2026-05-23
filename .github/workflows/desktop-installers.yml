@@ -1,32 +1,54 @@
-name: Release
+name: Desktop Installers
 
 on:
-  push:
-    tags:
-      - "v*"
+  workflow_dispatch:
+  pull_request:
+    branches: [master]
+    paths:
+      - ".github/scripts/prepare_tauri_resources.py"
+      - ".github/workflows/desktop-installers.yml"
+      - "pack-shell/**"
+      - "rumi_ai_1_10/**"
+      - "rumi_viewer/**"
 
 permissions:
-  contents: write
+  contents: read
 
 env:
   UV_VERSION: "0.11.14"
 
 jobs:
-  build:
+  build-installer:
+    name: ${{ matrix.label }}
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - os: macos-latest
+          - label: macOS Apple Silicon
+            os: macos-latest
             target: aarch64-apple-darwin
-          - os: macos-15-intel
+            bundles: dmg
+            signing_args: "--no-sign"
+            artifact_suffix: macos-arm64
+          - label: macOS Intel
+            os: macos-15-intel
             target: x86_64-apple-darwin
-          - os: windows-latest
+            bundles: dmg
+            signing_args: "--no-sign"
+            artifact_suffix: macos-x64
+          - label: Windows x64
+            os: windows-latest
             target: x86_64-pc-windows-msvc
-          - os: ubuntu-latest
+            bundles: nsis
+            signing_args: ""
+            artifact_suffix: windows-x64
+          - label: Linux x64
+            os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-
-    runs-on: ${{ matrix.os }}
+            bundles: deb,appimage
+            signing_args: ""
+            artifact_suffix: linux-x64
 
     steps:
       - name: Checkout
@@ -70,7 +92,7 @@ jobs:
             rumi_viewer/frontend/package-lock.json
             rumi_ai_1_10/ecosystem/defaultspack/webapp/package-lock.json
 
-      - name: Install frontend dependencies
+      - name: Install viewer frontend dependencies
         working-directory: rumi_viewer/frontend
         run: npm ci
 
@@ -78,12 +100,11 @@ jobs:
         working-directory: rumi_ai_1_10/ecosystem/defaultspack/webapp
         run: npm ci
 
-      - name: Run frontend release checks
+      - name: Run viewer frontend checks
         working-directory: rumi_viewer/frontend
         run: |
           npm test
           npm run lint
-          npm run audit
 
       - name: Build panel frontend
         working-directory: rumi_viewer/frontend
@@ -100,21 +121,21 @@ jobs:
       - name: Prepare bundled Rumi runtime
         run: python .github/scripts/prepare_tauri_resources.py --target ${{ matrix.target }} --uv-version ${{ env.UV_VERSION }} --require-runtime-tools
 
-      - name: Run Rust release smoke tests
+      - name: Run rumi viewer Rust tests
         working-directory: rumi_viewer/src-tauri
         run: cargo test --locked
 
-      - name: Build with cargo tauri
+      - name: Build desktop installer
         working-directory: rumi_viewer
-        run: cargo tauri build --target ${{ matrix.target }} --ci
+        run: cargo tauri build --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} --ci ${{ matrix.signing_args }}
 
-      - name: Upload release artifacts
-        uses: softprops/action-gh-release@v2
+      - name: Upload desktop installer
+        uses: actions/upload-artifact@v4
         with:
-          files: |
+          name: rumi-ai-${{ matrix.artifact_suffix }}-installer-${{ github.sha }}
+          path: |
             rumi_viewer/src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg
             rumi_viewer/src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*.exe
             rumi_viewer/src-tauri/target/${{ matrix.target }}/release/bundle/deb/*.deb
             rumi_viewer/src-tauri/target/${{ matrix.target }}/release/bundle/appimage/*.AppImage
-          draft: false
-          generate_release_notes: true
+          if-no-files-found: error

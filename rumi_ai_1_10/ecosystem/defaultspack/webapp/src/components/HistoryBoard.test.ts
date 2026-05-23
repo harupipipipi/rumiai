@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   buildCalendarMonthDays,
+  buildCompactHistoryRailItems,
   buildGroupsFromChats,
   buildHistoryCalendarSummary,
   loadCustomGroups,
@@ -172,6 +173,21 @@ test("history calendar summary counts visible chat buckets and highlights", () =
   const cells = buildCalendarMonthDays(new Date(2026, 4, 19));
   assert.equal(cells.filter(Boolean).length, 31);
   assert.equal(cells.find((cell) => cell?.day === 1)?.day, 1);
+});
+
+test("compact history rail keeps group entries and respects collapsed groups", () => {
+  const groups = buildGroupsFromChats([
+    { id: "chat-1", title: "Pinned task", date: "Today", type: "chat", isPinned: true },
+    { id: "chat-2", title: "Coding task", date: "Today", type: "chat", tags: ["coding"] },
+  ]).map((group) => group.id === "group-coding" ? { ...group, isCollapsed: true } : group);
+
+  const railItems = buildCompactHistoryRailItems(groups);
+
+  assert.deepEqual(
+    railItems.map((item) => `${item.type}:${item.id}`),
+    ["group:group-pinned", "chat:chat-1", "group:group-coding"],
+  );
+  assert.equal(railItems.find((item) => item.id === "group-coding")?.type, "group");
 });
 
 test("history chat drag payload becomes composer metadata widget", () => {

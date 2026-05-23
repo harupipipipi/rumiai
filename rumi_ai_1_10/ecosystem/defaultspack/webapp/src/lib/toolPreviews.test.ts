@@ -78,3 +78,150 @@ test("tool previews keep browser/computer visual artifacts", () => {
   assert.equal(previews.some((preview) => preview.data.type === "image" && preview.data.url === PNG_DATA_URL), true);
   assert.equal(previews.some((preview) => preview.data.type === "image" && preview.data.path === "/tmp/post-click-model.png"), true);
 });
+
+test("tool previews open html artifacts as real file previews without placeholder content", () => {
+  const message = assistantMessage({
+    tool_logs: [
+      {
+        tool_name: "coding_file_create",
+        tool_call_id: "call_html",
+        arguments: { path: "index.html" },
+        result: {
+          status: "ok",
+          data: {
+            path: "index.html",
+            created: true,
+          },
+        },
+      },
+    ],
+  });
+
+  const previews = toolPreviewsFromMessages([message]);
+  const html = previews.find((preview) => preview.data.type === "file" && preview.data.filename === "index.html");
+
+  assert.equal(html?.data.type, "file");
+  if (html?.data.type === "file") {
+    assert.equal(html.data.mimeType, "text/html");
+    assert.equal(html.data.content, undefined);
+    assert.match(html.data.url ?? "", /artifact-file/);
+  }
+});
+
+test("tool previews ignore approval-required artifacts until the tool really executes", () => {
+  const message = assistantMessage({
+    tool_logs: [
+      {
+        tool_name: "coding_file_create",
+        tool_call_id: "call_pending",
+        arguments: { path: "pending.html" },
+        result: {
+          status: "ok",
+          data: {
+            path: "pending.html",
+            result: "Tool 'coding_file_create' requires approval",
+            is_error: false,
+            widget: {
+              type: "approval_request",
+              approval_required: true,
+              requires_approval: true,
+              approval_request_id: "apr_1",
+            },
+          },
+        },
+      },
+    ],
+    events: [
+      {
+        type: "tool_call_completed",
+        tool_name: "coding_file_create",
+        tool_call_id: "call_pending_event",
+        result: {
+          status: "approval_required",
+          artifact: { path: "pending-event.html" },
+        },
+      },
+    ],
+  });
+
+  assert.deepEqual(toolPreviewsFromMessages([message]), []);
+});
+
+test("tool previews include opened localhost urls", () => {
+  const message = assistantMessage({
+    events: [
+      {
+        type: "tool_call_completed",
+        tool_name: "browser_use",
+        tool_call_id: "call_url",
+        result: {
+          status: "ok",
+          data: {
+            url: "http://127.0.0.1:5173/",
+          },
+        },
+      },
+    ],
+  });
+
+  const previews = toolPreviewsFromMessages([message]);
+
+  assert.equal(previews.some((preview) => preview.data.type === "web" && preview.data.url === "http://127.0.0.1:5173/"), true);
+});
+
+test("tool previews ignore failed tool artifacts and generic remote hrefs", () => {
+  const message = assistantMessage({
+    tool_logs: [
+      {
+        tool_name: "coding_file_create",
+        tool_call_id: "failed_call",
+        result: {
+          status: "error",
+          data: {
+            path: "broken.html",
+            url: "http://127.0.0.1:5173/broken",
+          },
+        },
+      },
+    ],
+    events: [
+      {
+        type: "browser_dom_snapshot",
+        tool_name: "browser_use",
+        dom_snapshot: {
+          href: "https://example.com/noisy-link",
+          children: [{ href: "http://127.0.0.1:5173/from-href" }],
+        },
+      },
+    ],
+  });
+
+  assert.deepEqual(toolPreviewsFromMessages([message]), []);
+});
+
+test("tool previews dedupe normalized localhost urls", () => {
+  const message = assistantMessage({
+    events: [
+      {
+        type: "tool_call_completed",
+        tool_name: "browser_use",
+        tool_call_id: "call_url_1",
+        result: { url: "http://localhost:5173/app#one" },
+      },
+      {
+        type: "tool_call_completed",
+        tool_name: "browser_use",
+        tool_call_id: "call_url_2",
+        result: { page_url: "http://localhost:5173/app#two" },
+      },
+    ],
+  });
+
+  const previews = toolPreviewsFromMessages([message]).filter((preview) => preview.data.type === "web");
+
+  assert.equal(previews.length, 1);
+  assert.equal(previews[0]?.data.type, "web");
+  if (previews[0]?.data.type === "web") {
+    assert.equal(previews[0].data.url, "http://localhost:5173/app");
+  }
+});

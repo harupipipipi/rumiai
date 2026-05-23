@@ -26,6 +26,37 @@ _PACK_API_TOKEN_ENV = "RUMI_API_TOKEN"
 _APPS_SUBDIR = "user_data/apps"
 
 
+def _subprocess_creation_kwargs() -> Dict[str, Any]:
+    if sys.platform == "win32":
+        return {"creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)}
+    return {}
+
+
+def _prepend_runtime_python_to_path(env: Dict[str, str]) -> None:
+    python_dir = str(Path(sys.executable).resolve().parent)
+    env["PATH"] = python_dir + os.pathsep + env.get("PATH", "")
+    env.setdefault("PYTHONUTF8", "1")
+    env.setdefault("PYTHONIOENCODING", "utf-8")
+    env.setdefault("PYTHONUNBUFFERED", "1")
+
+
+def _runtime_python_for_app() -> str:
+    if sys.platform == "win32":
+        pythonw = Path(sys.executable).resolve().with_name("pythonw.exe")
+        if pythonw.is_file():
+            return str(pythonw)
+    return sys.executable
+
+
+def _normalize_app_command_args(popen_args: List[str]) -> List[str]:
+    if not popen_args:
+        return popen_args
+    executable_name = Path(popen_args[0]).name.lower()
+    if executable_name in {"python", "python.exe", "python3", "python3.exe"}:
+        return [_runtime_python_for_app(), *popen_args[1:]]
+    return popen_args
+
+
 def _default_repo_dir() -> str:
     """Resolve the rumi_ai_1_10 root for viewer-launched kernel processes."""
     return str(Path(__file__).resolve().parents[1])
@@ -216,6 +247,7 @@ class DesktopAppManager:
         if issued_desktop_token:
             env["RUMI_TOKEN"] = issued_desktop_token
             env.setdefault("RUMI_PORT", os.environ.get("RUMI_PORT", "8765"))
+        _prepend_runtime_python_to_path(env)
 
         working_dir = meta.get("working_dir") or meta.get("pack_dir", "")
         if issued_desktop_token:
@@ -238,6 +270,7 @@ class DesktopAppManager:
                 env=env,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
+                **_subprocess_creation_kwargs(),
             )
             self._running[pack_id] = proc
             return {"success": True, "status": "launched", "pid": proc.pid}
@@ -258,6 +291,7 @@ class DesktopAppManager:
             return {"success": False, "error": f"Failed to parse command: {e}"}
         if not popen_args:
             return {"success": False, "error": f"No command configured for app: {pack_id}"}
+        popen_args = _normalize_app_command_args(popen_args)
 
         try:
             proc = subprocess.Popen(
@@ -266,6 +300,7 @@ class DesktopAppManager:
                 env=env,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
+                **_subprocess_creation_kwargs(),
             )
             self._running[pack_id] = proc
             return {"success": True, "status": "launched", "pid": proc.pid, "launch_mode": "direct"}

@@ -9,12 +9,31 @@ def _pack_root():
     return Path(__file__).resolve().parents[2]
 
 
-def _allowed_roots(store, conversation_id):
+def _allowed_roots(store, conversation_id, conversation=None):
     pack_root = _pack_root()
-    return [
+    roots = [
         store.conversation_workspace_dir(conversation_id).resolve(),
         (pack_root / "user_data" / "artifacts").resolve(),
+        Path.cwd().resolve(),
     ]
+    metadata = conversation.get("metadata") if isinstance(conversation, dict) else {}
+    if isinstance(metadata, dict):
+        for key in ("workspace_root", "workspaceRoot", "rootPath"):
+            root = metadata.get(key)
+            if isinstance(root, str) and root.strip():
+                try:
+                    roots.append(Path(root).expanduser().resolve())
+                except Exception:
+                    pass
+    unique_roots = []
+    seen = set()
+    for root in roots:
+        marker = str(root)
+        if marker in seen:
+            continue
+        seen.add(marker)
+        unique_roots.append(root)
+    return unique_roots
 
 
 def _resolve_allowed_path(raw_path, roots):
@@ -65,7 +84,7 @@ def run(input_data, context):
     if owner_err:
         return owner_err
 
-    resolved = _resolve_allowed_path(input_data.get("path"), _allowed_roots(store, conversation_id))
+    resolved = _resolve_allowed_path(input_data.get("path"), _allowed_roots(store, conversation_id, conversation))
     if resolved is None:
         result = error("artifact file not found or not allowed", "NOT_FOUND")
         result["_http_status"] = 404

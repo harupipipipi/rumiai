@@ -430,7 +430,7 @@ class ApprovalManager:
     def get_status(self, pack_id: str) -> Optional[PackStatus]:
         """Pack状態を取得"""
         # W22-A: core_pack は常時 APPROVED
-        if self._is_core_pack(pack_id):
+        if self._is_core_pack(pack_id) or self._is_trusted_builtin_pack(pack_id):
             return PackStatus.APPROVED
 
         with self._lock:
@@ -770,7 +770,7 @@ class ApprovalManager:
             }
         """
         # core_pack はハッシュ検証不要
-        if self._is_core_pack(pack_id):
+        if self._is_core_pack(pack_id) or self._is_trusted_builtin_pack(pack_id):
             return {
                 "valid": True,
                 "critical_changed": False,
@@ -863,7 +863,7 @@ class ApprovalManager:
     def verify_hash(self, pack_id: str, use_cache: bool = True) -> bool:
         """Packのファイルハッシュを検証"""
         # W22-A: core_pack はハッシュ検証不要
-        if self._is_core_pack(pack_id):
+        if self._is_core_pack(pack_id) or self._is_trusted_builtin_pack(pack_id):
             return True
 
         # ロック内でapprovalを取得
@@ -989,6 +989,7 @@ class ApprovalManager:
             for pack_id, approval in self._approvals.items():
                 if approval.status == PackStatus.APPROVED:
                     approved_packs.add(pack_id)
+            approved_packs.update(TRUSTED_BUILTIN_PACK_IDS)
         
         # ハッシュ検証（ロック外）
         verified_packs = set()

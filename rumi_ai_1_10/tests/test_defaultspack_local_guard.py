@@ -43,6 +43,9 @@ def test_sensitive_coding_http_path_requires_csrf_for_local_origin():
     handler.headers = {"Origin": "http://localhost:8766", "X-Rumi-CSRF": "1"}
     assert handler._sensitive_request_error("POST", "/api/coding/terminal/exec") is None
 
+    handler.headers = {"origin": "http://localhost:8766", "x-rumi-csrf": "1"}
+    assert handler._sensitive_request_error("POST", "/api/coding/terminal/exec") is None
+
 
 def test_git_branch_post_is_guarded_but_get_remains_read_only():
     from transport.http import _RequestHandler, _is_sensitive_http_path

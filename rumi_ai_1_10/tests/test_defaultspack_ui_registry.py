@@ -1022,7 +1022,51 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
                                         "model_image_path": "/tmp/result.png",
                                     },
                                 },
-                            }
+                            },
+                            {
+                                "tool_name": "writer",
+                                "arguments": {"path": "/tmp/report.md"},
+                                "result": {"data": {"path": "/tmp/report.md"}},
+                            },
+                            {
+                                "tool_name": "reader",
+                                "arguments": {"path": "/tmp/readme.md"},
+                                "result": {
+                                    "data": {
+                                        "widget": {
+                                            "path": "/tmp/readme.md",
+                                            "content": "# Readme",
+                                        }
+                                    }
+                                },
+                            },
+                            {
+                                "tool_name": "coding_file_create",
+                                "arguments": {"path": "/tmp/pending.html"},
+                                "result": {
+                                    "status": "ok",
+                                    "data": {
+                                        "path": "/tmp/pending.html",
+                                        "content": "<h1>Pending</h1>",
+                                        "widget": {
+                                            "type": "approval_request",
+                                            "approval_required": True,
+                                            "requires_approval": True,
+                                        },
+                                    },
+                                },
+                            },
+                            {
+                                "tool_name": "coding_file_create",
+                                "arguments": {"path": "/tmp/failed.html"},
+                                "result": {
+                                    "status": "error",
+                                    "data": {
+                                        "path": "/tmp/failed.html",
+                                        "content": "<h1>Failed</h1>",
+                                    },
+                                },
+                            },
                         ],
                     },
                 )
@@ -1045,9 +1089,25 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         ChatStore._instance = None
 
         preview_ids = {item["id"] for item in preview["previews"]}
-        self.assertTrue(any(item.startswith("tool-web_search") for item in preview_ids))
+        self.assertFalse(any(item.startswith("tool-web_search") for item in preview_ids))
+        self.assertTrue(any(item.startswith("knowledge-") for item in preview_ids))
+        self.assertTrue(any(item.startswith("memory-") for item in preview_ids))
         self.assertTrue(any(item.startswith("tool-log-artifact-") for item in preview_ids))
         self.assertTrue(any(item.startswith("tool-log-inline-") for item in preview_ids))
+        self.assertFalse(any(
+            (item.get("data") or {}).get("path") == "/tmp/report.md"
+            for item in preview["previews"]
+        ))
+        self.assertFalse(any(
+            (item.get("data") or {}).get("path") in {"/tmp/pending.html", "/tmp/failed.html"}
+            for item in preview["previews"]
+        ))
+        content_preview = next(
+            item
+            for item in preview["previews"]
+            if (item.get("data") or {}).get("path") == "/tmp/readme.md"
+        )
+        self.assertEqual(content_preview["data"]["content"], "# Readme")
         self.assertFalse(any(
             (item.get("data") or {}).get("filename", "").endswith(".tool")
             for item in preview["previews"]
