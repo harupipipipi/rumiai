@@ -29,6 +29,14 @@ const MAX_AUTO_RESTARTS: u32 = 3;
 /// Seconds to wait after SIGTERM before sending SIGKILL.
 const KILL_TIMEOUT_SECS: u64 = 5;
 
+fn python_runtime_env_vars() -> [(&'static str, &'static str); 3] {
+    [
+        ("PYTHONUTF8", "1"),
+        ("PYTHONIOENCODING", "utf-8"),
+        ("PYTHONUNBUFFERED", "1"),
+    ]
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct PortListener {
     pid: u32,
@@ -140,6 +148,7 @@ impl KernelManager {
             .env("RUMI_LOG_DIR", &self.config.log_dir)
             .env("RUMI_PORT", self.config.kernel_port.to_string())
             .env("RUMI_PANEL_BOOTSTRAP_SECRET", &self.panel_bootstrap_secret)
+            .envs(python_runtime_env_vars())
             .env(
                 "RUMI_ENVIRONMENT",
                 if dev_environment {
@@ -718,6 +727,15 @@ mod tests {
         assert!(development_auto_approve);
 
         std::env::remove_var("RUMI_AUTO_APPROVE_LOCAL");
+    }
+
+    #[test]
+    fn python_runtime_env_forces_utf8_output() {
+        let envs = python_runtime_env_vars();
+
+        assert!(envs.contains(&("PYTHONUTF8", "1")));
+        assert!(envs.contains(&("PYTHONIOENCODING", "utf-8")));
+        assert!(envs.contains(&("PYTHONUNBUFFERED", "1")));
     }
 
     #[test]

@@ -18,6 +18,19 @@ from core_runtime.approval_manager import (
 )
 
 
+def test_trusted_builtin_packs_are_approved_without_user_grants(tmp_path):
+    mgr = ApprovalManager(
+        packs_dir=str(tmp_path / "eco"),
+        grants_dir=str(tmp_path / "grants"),
+        secret_key="test-secret-key-for-hmac",
+    )
+
+    assert mgr.get_status("defaultspack") == PackStatus.APPROVED
+    assert mgr.verify_hash("defaultspack") is True
+    assert mgr.verify_hash_detailed("defaultspack")["valid"] is True
+    assert "defaultspack" in mgr.get_approved_pack_ids()
+
+
 # ===================================================================
 # Helper
 # ===================================================================

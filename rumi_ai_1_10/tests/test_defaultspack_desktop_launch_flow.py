@@ -222,6 +222,35 @@ def test_desktop_capability_launch_then_stop_uses_same_manager(tmp_path):
     assert stop["app"] == {"success": True, "status": "stopped"}
 
 
+def test_desktop_direct_launch_uses_current_python_and_hidden_console(tmp_path):
+    from core_runtime import desktop_app_manager as manager_module
+    from core_runtime.desktop_app_manager import DesktopAppManager
+
+    manager = DesktopAppManager(repo_dir=str(tmp_path / "repo"))
+    captured = {}
+
+    class FakeProcess:
+        pid = 123
+
+    def fake_popen(args, **kwargs):
+        captured["args"] = args
+        captured["kwargs"] = kwargs
+        return FakeProcess()
+
+    with mock.patch("core_runtime.desktop_app_manager.subprocess.Popen", side_effect=fake_popen):
+        result = manager._launch_direct(
+            "defaultspack",
+            "python defaultspack/desktop_app.py",
+            str(DEFAULTSPACK_ROOT),
+            {"PATH": ""},
+        )
+
+    assert result["success"] is True
+    assert captured["args"][0] == manager_module._runtime_python_for_app()
+    if sys.platform == "win32":
+        assert captured["kwargs"]["creationflags"] == manager_module.subprocess.CREATE_NO_WINDOW
+
+
 @pytest.mark.parametrize("action", ["stop", "status"])
 def test_desktop_capability_delegates_non_launch_actions(action):
     from core_runtime.desktop_capability import DesktopCapabilityHandler

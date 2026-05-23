@@ -4,7 +4,6 @@ from .mcp_registry import McpRegistry
 from .schema_adapter import is_tool_rejected_by_policy, policy_from_context
 from .security import is_trusted_pack_id, requires_approval_for_security, unsupported_execution_reason
 from domain.tool_policy.internal_context import internal_tool_decision_allows
-from domain.safety.approval import create_approval_request, hash_arguments, verify_execution_token
 from pathlib import Path
 import json
 
@@ -68,6 +67,12 @@ _SAFE_BUILTINS = {
 
 def json_dumps(value):
     return json.dumps(value, ensure_ascii=False)
+
+
+def _approval_module():
+    from domain.safety import approval
+
+    return approval
 
 
 class ToolExecutor:
@@ -1184,10 +1189,11 @@ def _context_with_tool_approval_token(context, tool_def, arguments):
     token = _approval_token_from_arguments(arguments) or _approval_token_from_context(context, tool_def)
     if not token:
         return next_context, None
-    verification = verify_execution_token(
+    approval = _approval_module()
+    verification = approval.verify_execution_token(
         token,
         _tool_approval_operation(tool_def),
-        hash_arguments(arguments if isinstance(arguments, dict) else {}),
+        approval.hash_arguments(arguments if isinstance(arguments, dict) else {}),
     )
     if verification.valid:
         next_context["_tool_server_approved"] = True
@@ -1205,7 +1211,7 @@ def _approval_required_tool_response(tool_def, arguments):
     operation = _tool_approval_operation(tool_def)
     risk_level = _tool_approval_risk_level(tool_def)
     args = dict(arguments or {}) if isinstance(arguments, dict) else {}
-    request = create_approval_request(
+    request = _approval_module().create_approval_request(
         operation,
         risk_level,
         args,
