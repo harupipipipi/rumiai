@@ -8,6 +8,9 @@ on:
 permissions:
   contents: write
 
+env:
+  UV_VERSION: "0.11.14"
+
 jobs:
   build:
     strategy:
@@ -28,6 +31,11 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
 
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
@@ -58,10 +66,16 @@ jobs:
         with:
           node-version: "22"
           cache: npm
-          cache-dependency-path: rumi_viewer/frontend/package-lock.json
+          cache-dependency-path: |
+            rumi_viewer/frontend/package-lock.json
+            rumi_ai_1_10/ecosystem/defaultspack/webapp/package-lock.json
 
       - name: Install frontend dependencies
         working-directory: rumi_viewer/frontend
+        run: npm ci
+
+      - name: Install defaultspack frontend dependencies
+        working-directory: rumi_ai_1_10/ecosystem/defaultspack/webapp
         run: npm ci
 
       - name: Run frontend release checks
@@ -75,13 +89,24 @@ jobs:
         working-directory: rumi_viewer/frontend
         run: npm run build
 
+      - name: Build defaultspack frontend
+        working-directory: rumi_ai_1_10/ecosystem/defaultspack/webapp
+        run: npm run build
+
+      - name: Build pack-shell runtime
+        working-directory: pack-shell
+        run: cargo build --locked --release --target ${{ matrix.target }}
+
+      - name: Prepare bundled Rumi runtime
+        run: python .github/scripts/prepare_tauri_resources.py --target ${{ matrix.target }} --uv-version ${{ env.UV_VERSION }} --require-runtime-tools
+
       - name: Run Rust release smoke tests
         working-directory: rumi_viewer/src-tauri
         run: cargo test --locked
 
       - name: Build with cargo tauri
         working-directory: rumi_viewer
-        run: cargo tauri build --target ${{ matrix.target }}
+        run: cargo tauri build --target ${{ matrix.target }} --ci
 
       - name: Upload release artifacts
         uses: softprops/action-gh-release@v2

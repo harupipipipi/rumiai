@@ -1,6 +1,14 @@
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::process::Command;
+
+const APP_SOURCE_DIR: &str = "rumi_ai_1_10";
+const GENERATED_RESOURCE_DIRS: &[&str] = &[
+    "core_runtime/core_pack/core_control_panel/web",
+    "ecosystem/defaultspack/ui",
+    "bundled",
+];
 
 fn main() {
     println!("cargo:rerun-if-changed=splash/index.html");
@@ -24,11 +32,14 @@ fn stage_runtime_bundle() -> io::Result<()> {
         .parent()
         .and_then(Path::parent)
         .expect("src-tauri should live under rumi_viewer/");
-    let runtime_root = repo_root.join("rumi_ai_1_10");
+    let runtime_root = repo_root.join(APP_SOURCE_DIR);
     let staged_root = project_dir.join("gen").join("app");
 
     reset_dir(&staged_root)?;
-    copy_runtime_tree(&runtime_root, &staged_root, &runtime_root)?;
+    if !copy_tracked_runtime_tree(repo_root, &staged_root)? {
+        copy_runtime_tree(&runtime_root, &staged_root, &runtime_root)?;
+    }
+    copy_generated_resource_dirs(&runtime_root, &staged_root)?;
 
     let bundled_src = project_dir.join("bundled");
     if bundled_src.exists() {
@@ -46,13 +57,24 @@ fn stage_pack_shell(repo_root: &Path, staged_root: &Path) -> io::Result<()> {
     };
     let bundled_dir = staged_root.join("bundled");
     fs::create_dir_all(&bundled_dir)?;
-    fs::copy(pack_shell, bundled_dir.join(pack_shell_binary_name()))?;
+    copy_file(&pack_shell, &bundled_dir.join(pack_shell_binary_name()))?;
     Ok(())
 }
 
 fn find_pack_shell_binary(repo_root: &Path) -> Option<PathBuf> {
     let binary_name = pack_shell_binary_name();
-    [
+    let mut candidates = Vec::new();
+    if let Ok(target) = std::env::var("TARGET") {
+        candidates.push(
+            repo_root
+                .join("pack-shell")
+                .join("target")
+                .join(target)
+                .join("release")
+                .join(binary_name),
+        );
+    }
+    candidates.extend([
         repo_root
             .join("pack-shell")
             .join("target")
@@ -63,9 +85,8 @@ fn find_pack_shell_binary(repo_root: &Path) -> Option<PathBuf> {
             .join("target")
             .join("debug")
             .join(binary_name),
-    ]
-    .into_iter()
-    .find(|candidate| candidate.is_file())
+    ]);
+    candidates.into_iter().find(|candidate| candidate.is_file())
 }
 
 fn pack_shell_binary_name() -> &'static str {
@@ -100,6 +121,65 @@ fn clear_dir(path: &Path) -> io::Result<()> {
     Ok(())
 }
 
+fn copy_file(src: &Path, dst: &Path) -> io::Result<u64> {
+    if let Some(parent) = dst.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let bytes = fs::copy(src, dst)?;
+    if let Ok(permissions) = fs::metadata(src).map(|metadata| metadata.permissions()) {
+        let _ = fs::set_permissions(dst, permissions);
+    }
+    Ok(bytes)
+}
+
+fn copy_tracked_runtime_tree(repo_root: &Path, staged_root: &Path) -> io::Result<bool> {
+    let output = match Command::new("git")
+        .args(["ls-files", "-z", "--", APP_SOURCE_DIR])
+        .current_dir(repo_root)
+        .output()
+    {
+        Ok(output) => output,
+        Err(_) => return Ok(false),
+    };
+
+    if !output.status.success() {
+        return Ok(false);
+    }
+
+    let source_prefix = format!("{APP_SOURCE_DIR}/");
+    for rel in output.stdout.split(|byte| *byte == 0) {
+        if rel.is_empty() {
+            continue;
+        }
+        let rel = String::from_utf8_lossy(rel);
+        let Some(rel_under_app) = rel.strip_prefix(&source_prefix) else {
+            continue;
+        };
+        let rel_path = Path::new(rel_under_app);
+        if should_skip(rel_path, false) {
+            continue;
+        }
+        let source_path = repo_root.join(rel.as_ref());
+        if !source_path.is_file() {
+            continue;
+        }
+        copy_file(&source_path, &staged_root.join(rel_path))?;
+    }
+
+    Ok(true)
+}
+
+fn copy_generated_resource_dirs(runtime_root: &Path, staged_root: &Path) -> io::Result<()> {
+    for rel_dir in GENERATED_RESOURCE_DIRS {
+        let source_dir = runtime_root.join(rel_dir);
+        if !source_dir.exists() {
+            continue;
+        }
+        copy_dir_recursive_filtered(&source_dir, &staged_root.join(rel_dir), runtime_root)?;
+    }
+    Ok(())
+}
+
 fn copy_runtime_tree(src: &Path, dst: &Path, runtime_root: &Path) -> io::Result<()> {
     for entry in fs::read_dir(src)? {
         let entry = entry?;
@@ -117,10 +197,7 @@ fn copy_runtime_tree(src: &Path, dst: &Path, runtime_root: &Path) -> io::Result<
         if file_type.is_dir() {
             copy_dir_recursive_filtered(&source_path, &target_path, runtime_root)?;
         } else if file_type.is_file() {
-            if let Some(parent) = target_path.parent() {
-                fs::create_dir_all(parent)?;
-            }
-            fs::copy(&source_path, &target_path)?;
+            copy_file(&source_path, &target_path)?;
         }
     }
 
@@ -137,7 +214,7 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> io::Result<()> {
         if file_type.is_dir() {
             copy_dir_recursive(&source_path, &target_path)?;
         } else if file_type.is_file() {
-            fs::copy(&source_path, &target_path)?;
+            copy_file(&source_path, &target_path)?;
         }
     }
     Ok(())
@@ -161,7 +238,7 @@ fn copy_dir_recursive_filtered(src: &Path, dst: &Path, runtime_root: &Path) -> i
         if file_type.is_dir() {
             copy_dir_recursive_filtered(&source_path, &target_path, runtime_root)?;
         } else if file_type.is_file() {
-            fs::copy(&source_path, &target_path)?;
+            copy_file(&source_path, &target_path)?;
         }
     }
     Ok(())
@@ -172,23 +249,32 @@ fn should_skip(relative: &Path, is_dir: bool) -> bool {
         return false;
     };
 
+    let first = first.to_str();
     if matches!(
-        first.to_str(),
+        first,
         Some(".env")
             | Some(".env.local")
             | Some(".backups")
             | Some(".backup_dead_code_removal")
-            | Some("user_data")
-            | Some("userdata")
             | Some("chats")
             | Some("tenpu")
+            | Some("tests")
+            | Some("user_data")
+            | Some("userdata")
+            | Some("venv")
     ) {
         return true;
     }
 
     if matches!(
-        first.to_str(),
-        Some(".git") | Some(".mypy_cache") | Some("docs") | Some("tests")
+        first,
+        Some(".git")
+            | Some(".mypy_cache")
+            | Some(".pytest_cache")
+            | Some(".ruff_cache")
+            | Some(".rumi_snapshots")
+            | Some(".venv")
+            | Some("docs")
     ) {
         return true;
     }
@@ -196,13 +282,33 @@ fn should_skip(relative: &Path, is_dir: bool) -> bool {
     if relative.components().any(|component| {
         matches!(
             component.as_os_str().to_str(),
-            Some("__pycache__") | Some(".pytest_cache") | Some(".ruff_cache")
+            Some("__pycache__")
+                | Some(".pytest_cache")
+                | Some(".ruff_cache")
+                | Some(".rumi_snapshots")
+                | Some(".venv")
+                | Some("node_modules")
+                | Some("target")
+                | Some("user_data")
+                | Some("userdata")
         )
     }) {
         return true;
     }
 
-    if first == "frontend" {
+    if !is_dir {
+        if relative.file_name().and_then(|name| name.to_str()) == Some(".DS_Store") {
+            return true;
+        }
+        if matches!(
+            relative.extension().and_then(|ext| ext.to_str()),
+            Some("bak") | Some("pyc") | Some("pyo") | Some("zip")
+        ) {
+            return true;
+        }
+    }
+
+    if first == Some("frontend") {
         let second = relative.components().nth(1).map(|c| c.as_os_str());
         if matches!(
             second.and_then(|part| part.to_str()),
