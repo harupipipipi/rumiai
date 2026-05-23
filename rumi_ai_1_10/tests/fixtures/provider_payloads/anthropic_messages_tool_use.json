@@ -1,0 +1,26 @@
+{
+  "model": "claude-test",
+  "messages": [
+    {
+      "role": "assistant",
+      "content": [
+        {
+          "type": "tool_use",
+          "id": "tc",
+          "name": "lookup",
+          "input": {}
+        }
+      ]
+    }
+  ],
+  "max_tokens": 1024,
+  "tools": [
+    {
+      "name": "lookup",
+      "description": "",
+      "input_schema": {
+        "type": "object"
+      }
+    }
+  ]
+}

@@ -8,6 +8,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from domain.ai_client.api_key_store import provider_api_metadata, provider_has_api_key, provider_named_api_keys, read_provider_api_key
+from domain.ai_client.capabilities.registry import get_model_provider_capabilities
 from domain.ai_client.providers import (
     _cloud_runtime_enabled,
     build_profile_catalog,
@@ -194,6 +195,19 @@ class AIClient:
             "defaults": defaults,
             "metadata": metadata,
         }
+        provider_capabilities = get_model_provider_capabilities(
+            qualified_model_id,
+            {
+                **normalized,
+                "capabilities": capabilities,
+                "metadata": metadata,
+                "context_window": context_window,
+                "max_context": max_context,
+                "supports_thinking": supports_thinking,
+                "thinking_levels": thinking_levels,
+            },
+        )
+        normalized["provider_capabilities"] = provider_capabilities
         normalized["metadata"].update(
             {
                 "provider_model_key": qualified_model_id,
@@ -203,6 +217,7 @@ class AIClient:
                 "max_context": max_context,
                 "supports_thinking": supports_thinking,
                 "thinking_levels": thinking_levels,
+                "provider_capabilities": provider_capabilities,
             }
         )
         return normalized

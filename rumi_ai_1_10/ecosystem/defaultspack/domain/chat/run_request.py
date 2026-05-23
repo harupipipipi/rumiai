@@ -1,11 +1,9 @@
 from __future__ import annotations
 
 import base64
-import json
 import os
 import re
 import sys
-import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -13,14 +11,17 @@ from typing import Any
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from blocks._common import gen_id
+from domain.ai_client.capabilities.registry import get_model_provider_capabilities
 from blocks.chat._context_helpers import enrich_messages, extract_user_text
 from domain.ai_client.model_runtime_settings import ModelRuntimeSettingsService
 from domain.ai_client.model_router import ModelRoutingRequest, route_model_request
 from domain.ai_client.model_search import get_model_capabilities
-from domain.chat.message_converter import convert_to_standard
+from domain.ai_client.request_planner import plan_model_request
+from domain.chat.ir import RumiChatIR
+from domain.chat.ir_blocks import IR_SCHEMA_VERSION
+from domain.chat.ir_legacy_adapter import ir_to_legacy_standard_messages, stored_messages_to_ir
 from domain.chat.modality_detector import detect_modalities
 from domain.chat.store import ChatStore
-from domain.chat.tool_selection_schema import COMPUTER_TOOL_IDS
 from domain.vision.image_bridge import (
     apply_vision_bridge_to_messages,
     conversation_image_context,
@@ -84,6 +85,10 @@ class PreparedChatRun:
     connected_tool_names: set[str]
     call_handler: Any
     model_routing: dict[str, Any]
+    chat_ir: RumiChatIR = field(default_factory=RumiChatIR)
+    ir_schema_version: str = IR_SCHEMA_VERSION
+    provider_planning: dict[str, Any] = field(default_factory=dict)
+    provider_capabilities: dict[str, Any] = field(default_factory=dict)
     chat_references: dict[str, Any] = field(default_factory=dict)
     matched_skills: list[dict[str, Any]] = field(default_factory=list)
 
@@ -134,7 +139,8 @@ def prepare_chat_run(input_data: dict[str, Any], context: dict[str, Any] | None 
         message_chain = [user_message]
     else:
         message_chain = store.get_message_chain(conversation_id, user_message["id"])
-    standard_messages = convert_to_standard(message_chain)
+    chat_ir = stored_messages_to_ir(conversation_id, message_chain)
+    standard_messages = ir_to_legacy_standard_messages(chat_ir)
     runtime_content = _runtime_user_content_override(metadata)
     if runtime_content:
         _replace_current_user_content_for_model(
@@ -227,6 +233,16 @@ def prepare_chat_run(input_data: dict[str, Any], context: dict[str, Any] | None 
     )
     model = routing_decision.selected_model
     selected_capabilities = get_model_capabilities(model) or {}
+    provider_capabilities = get_model_provider_capabilities(
+        model,
+        {
+            "id": model,
+            "provider_id": model.split("/", 1)[0] if "/" in model else "",
+            "capabilities": selected_capabilities,
+            "metadata": {"capabilities": selected_capabilities},
+            "supports_thinking": bool(selected_capabilities.get("supports_thinking")),
+        },
+    )
     if params.get("thinking_level") not in (None, "", "none") and not selected_capabilities.get("supports_thinking"):
         params["thinking_level"] = "none"
     if provider_tools and not selected_capabilities.get("supports_tool_calling") and not request_context.get("user_requested_computer_use"):
@@ -287,6 +303,23 @@ def prepare_chat_run(input_data: dict[str, Any], context: dict[str, Any] | None 
         request_context["matched_skill_instructions"] = matched_skills
         tool_context["matched_skill_instructions"] = matched_skills
 
+    planned_request = plan_model_request(
+        chat_ir,
+        model,
+        provider_capabilities,
+        provider_tools,
+        params,
+        request_context,
+    )
+    provider_planning = planned_request.to_dict()
+    provider_tools = planned_request.provider_tools
+    params = planned_request.params
+    request_context["chat_params"] = params
+    request_context["provider_capabilities"] = provider_capabilities
+    request_context["provider_planning"] = provider_planning
+    tool_context["provider_capabilities"] = provider_capabilities
+    tool_context["provider_planning"] = provider_planning
+
     return PreparedChatRun(
         conversation_id=conversation_id,
         conversation=conversation,
@@ -309,6 +342,10 @@ def prepare_chat_run(input_data: dict[str, Any], context: dict[str, Any] | None 
         connected_tool_names=connected_names,
         call_handler=request_context.get("call_handler"),
         model_routing=routing_decision.to_dict(),
+        chat_ir=chat_ir,
+        ir_schema_version=IR_SCHEMA_VERSION,
+        provider_planning=provider_planning,
+        provider_capabilities=provider_capabilities,
         chat_references=chat_references,
         matched_skills=matched_skills,
     )

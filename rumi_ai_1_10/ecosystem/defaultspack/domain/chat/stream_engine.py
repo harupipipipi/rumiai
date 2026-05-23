@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import threading
 import time
 from typing import Any, Iterator
@@ -27,9 +28,17 @@ from blocks.chat.send import (
     _tool_use_blocks,
     _tool_visibility_message,
 )
+from domain.ai_client.bridge_plan import PlannedProviderRequest
+from domain.ai_client.provider_compiler.registry import compile_complete, compiler_for_api_family
+from domain.ai_client.provider_trace import redact_sensitive_value, write_provider_trace
 from domain.ai_client.client import AIClient
 from domain.ai_client.gateway import LLMGateway
 from domain.chat.cancellation import get_chat_cancellation_registry
+from domain.chat.ir_legacy_adapter import (
+    append_assistant_tool_use_to_ir,
+    append_tool_result_to_ir,
+    legacy_standard_messages_to_ir,
+)
 from domain.chat.message_builder import build_assistant_message
 from domain.chat.run_request import PreparedChatRun, prepare_chat_run
 from domain.chat.tool_call_accumulator import ToolCallAccumulator
@@ -747,6 +756,7 @@ class ChatRunEngine:
 
     def _execute(self, prepared: PreparedChatRun, draft: _AssistantDraft | None) -> Iterator[dict[str, Any]]:
         working_messages = list(prepared.standard_messages)
+        working_ir = prepared.chat_ir
         tool_context_message = _tool_visibility_message(prepared.provider_tools)
         if tool_context_message is not None:
             insert_at = 1 if working_messages and working_messages[0].get("role") == "system" else 0
@@ -796,6 +806,14 @@ class ChatRunEngine:
                 tool_uses,
                 reasoning_content=_response_reasoning_content(response),
             )
+            try:
+                append_assistant_tool_use_to_ir(
+                    working_ir,
+                    tool_uses,
+                    reasoning_content=_response_reasoning_content(response),
+                )
+            except Exception:
+                pass
             for block in tool_uses:
                 self._raise_if_cancelled()
                 tool_name = str(block.get("name") or block.get("tool_name") or "").strip()
@@ -870,6 +888,10 @@ class ChatRunEngine:
                     )
                     break
                 _append_tool_result_message(working_messages, tool_name, result, tool_call_id, model=prepared.model)
+                try:
+                    append_tool_result_to_ir(working_ir, tool_name, result, tool_call_id, model=prepared.model)
+                except Exception:
+                    pass
 
                 recovery_kind = _tool_result_recovery_kind(result)
                 if recovery_kind in {"visible_window_required", "focus_required"}:
@@ -1113,14 +1135,17 @@ class ChatRunEngine:
 
     def _complete_turn(self, prepared: PreparedChatRun, messages: list[dict[str, Any]]) -> dict[str, Any]:
         try:
-            response = self._call_ai_complete_with_retry(
-                prepared.model,
-                messages,
-                prepared.provider_tools,
-                prepared.params,
-                prepared.call_handler,
-                allow_retry=True,
-            )
+            if self._use_provider_compiler(prepared):
+                response = self._complete_turn_with_compiler(prepared, messages)
+            else:
+                response = self._call_ai_complete_with_retry(
+                    prepared.model,
+                    messages,
+                    prepared.provider_tools,
+                    prepared.params,
+                    prepared.call_handler,
+                    allow_retry=True,
+                )
         except RuntimeError as exc:
             if self._tool_logs:
                 response = _ai_error_after_tool_use_response(str(exc))
@@ -1153,6 +1178,52 @@ class ChatRunEngine:
                     metadata["recovered_from_empty_response"] = True
                     retry_response["metadata"] = metadata
                     response = retry_response
+        return response
+
+    def _complete_turn_with_compiler(self, prepared: PreparedChatRun, messages: list[dict[str, Any]]) -> dict[str, Any]:
+        if prepared.call_handler is not None:
+            return self._call_ai_complete_with_retry(
+                prepared.model,
+                messages,
+                prepared.provider_tools,
+                prepared.params,
+                prepared.call_handler,
+                allow_retry=True,
+            )
+        provider, model_name = self._gateway.resolve_provider(prepared.model)
+        caps = dict(prepared.provider_capabilities or {})
+        caps.setdefault("provider_id", str(prepared.model).split("/", 1)[0] if "/" in str(prepared.model) else "")
+        if provider.__class__.__name__ == "GoogleProvider":
+            try:
+                if provider._use_native_generative_api(model_name):
+                    caps["api_family"] = "google_native"
+            except Exception:
+                pass
+        api_family = str(caps.get("api_family") or "")
+        if compiler_for_api_family(api_family) is None or not callable(getattr(provider, "_request_json", None)):
+            return self._gateway.complete(
+                {"model": prepared.model, "messages": messages, "tools": prepared.provider_tools, "params": prepared.params}
+            )
+        planned = PlannedProviderRequest(
+            ir=legacy_standard_messages_to_ir(messages, prepared.conversation_id),
+            model=model_name,
+            provider_capabilities=caps,
+            provider_tools=prepared.provider_tools,
+            params=prepared.params,
+            metadata=dict(prepared.provider_planning.get("metadata") or {}),
+        )
+        compiled = compile_complete(planned)
+        raw = provider._request_json(compiled.path, compiled.body)
+        parser = compiler_for_api_family(compiled.api_family)
+        response_ir = parser.parse_response(raw, compiled)
+        response = response_ir.to_standard_response()
+        metadata = dict(response.get("metadata") or {})
+        metadata["provider_compiler"] = {
+            "api_family": compiled.api_family,
+            "path": compiled.path,
+            "enabled": True,
+        }
+        response["metadata"] = metadata
         return response
 
     def _execute_tool(
@@ -1234,8 +1305,14 @@ class ChatRunEngine:
                 "thinking_level": prepared.params.get("thinking_level"),
                 "model_routing": dict(prepared.model_routing or {}),
                 "chat_references": dict(prepared.chat_references or {}),
+                "ir": {"schema_version": prepared.ir_schema_version},
+                "provider_planning": redact_sensitive_value(dict(prepared.provider_planning or {})),
+                "provider_capabilities": redact_sensitive_value(dict(prepared.provider_capabilities or {})),
             }
         )
+        trace_metadata = self._write_provider_trace(prepared, finalized)
+        if trace_metadata:
+            metadata["provider_trace"] = trace_metadata
         if "selected_model_does_not_support_tool_calling" in model_warnings:
             metadata["tool_calling_unverified"] = True
             metadata["tool_calling_unavailable_reason"] = "selected_model_does_not_support_tool_calling"
@@ -1245,6 +1322,46 @@ class ChatRunEngine:
         finalized["events"] = list(self._activity_events)
         finalized["tool_logs"] = list(self._tool_logs)
         return finalized
+
+    @staticmethod
+    def _use_provider_compiler(prepared: PreparedChatRun) -> bool:
+        if str(os.environ.get("RUMI_DEFAULTSPACK_PROVIDER_LEGACY_MESSAGES", "") or "").strip().lower() in {"1", "true", "yes", "on"}:
+            return False
+        if str(os.environ.get("RUMI_DEFAULTSPACK_PROVIDER_COMPILER_V2", "") or "").strip().lower() in {"1", "true", "yes", "on"}:
+            return True
+        return False
+
+    def _write_provider_trace(self, prepared: PreparedChatRun, response: dict[str, Any]) -> dict[str, Any] | None:
+        try:
+            capabilities = dict(prepared.provider_capabilities or {})
+            provider_id = str(capabilities.get("provider_id") or (prepared.model.split("/", 1)[0] if "/" in prepared.model else "unknown"))
+            planning = dict(prepared.provider_planning or {})
+            return write_provider_trace(
+                conversation_id=prepared.conversation_id,
+                request_id=prepared.request_id,
+                provider=provider_id,
+                model=prepared.model,
+                api_family=str(capabilities.get("api_family") or "legacy"),
+                ir_schema_version=prepared.ir_schema_version,
+                capability_summary=capabilities,
+                planning_metadata=planning,
+                dropped_features=list(planning.get("dropped_features") or []),
+                bridge_actions=list(planning.get("bridge_actions") or []),
+                warnings=list(planning.get("warnings") or []),
+                compiled_payload={
+                    "legacy_messages": list(prepared.standard_messages or []),
+                    "tools": list(prepared.provider_tools or []),
+                    "params": dict(prepared.params or {}),
+                },
+                response_summary={
+                    "finish_reason": response.get("finish_reason"),
+                    "usage": response.get("usage") if isinstance(response.get("usage"), dict) else {},
+                    "content_blocks": len(response.get("content", [])) if isinstance(response.get("content"), list) else 0,
+                },
+                store=self._store,
+            )
+        except Exception:
+            return None
 
     def _sync_draft(self, draft: _AssistantDraft | None, *, thinking_state: str = "running", force: bool = False) -> None:
         if draft is None:
