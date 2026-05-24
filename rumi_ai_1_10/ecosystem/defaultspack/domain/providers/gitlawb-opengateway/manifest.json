@@ -11,9 +11,9 @@
     "models": "models.json"
   },
   "security": {
-    "credential_required": false,
-    "credential_optional": true,
-    "privacy": "external_optional_token_gateway",
+    "credential_required": true,
+    "credential_optional": false,
+    "privacy": "external_api_key_gateway",
     "browser_user_agent": true,
     "fixed_model_allowlist": true
   },
@@ -27,7 +27,7 @@
   "provider_metadata": {
     "display_name": "Gitlawb OpenGateway",
     "kind": "aggregator",
-    "description": "Gitlawb OpenGateway allowlist for MiMo and Gemini Flash Lite. It can run without a key, or with an optional token-plan API key.",
+    "description": "Gitlawb OpenGateway allowlist for MiMo. API keys are required for all OpenGateway models.",
     "env_vars": ["GITLAWB_OPENGATEWAY_API_KEY"],
     "base_url_envs": ["GITLAWB_OPENGATEWAY_BASE_URL"],
     "catalog_only": false,
@@ -53,7 +53,7 @@
     "entrypoint": "domain.ai_client.providers.gitlawb_opengateway_provider:GitlawbOpengatewayProvider",
     "api_key_env": "GITLAWB_OPENGATEWAY_API_KEY",
     "base_url_env": "GITLAWB_OPENGATEWAY_BASE_URL",
-    "credential_required": false,
+    "credential_required": true,
     "default_base_url": "https://opengateway.gitlawb.com/v1",
     "default_model": "mimo-v2.5-pro",
     "default_model_for": {
@@ -61,9 +61,6 @@
       "reasoning": "mimo-v2.5-pro",
       "fast": "mimo-v2-flash",
       "vision": "mimo-v2-omni"
-    },
-    "headers": {
-      "Authorization": "Bearer anything"
     },
     "capabilities": {
       "native_tool_calling": false,
@@ -73,8 +70,8 @@
     },
     "config": {
       "model_sync": "fixed_allowlist",
-      "privacy": "external_optional_token_gateway",
-      "optional_api_key": true
+      "privacy": "external_api_key_gateway",
+      "optional_api_key": false
     }
   },
   "aliases": {

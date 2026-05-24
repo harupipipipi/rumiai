@@ -20,7 +20,10 @@
       "default_thinking_level": "medium",
       "metadata": {
         "source": "gitlawb-opengateway",
-        "privacy": "external_no_key_gateway"
+        "privacy": "external_api_key_gateway",
+        "api_key_required": true,
+        "openai_base_url": "https://opengateway.gitlawb.com/v1",
+        "openai_model": "mimo-v2.5-pro"
       }
     },
     {
@@ -40,7 +43,10 @@
       "capabilities": ["streaming"],
       "metadata": {
         "source": "gitlawb-opengateway",
-        "privacy": "external_no_key_gateway"
+        "privacy": "external_api_key_gateway",
+        "api_key_required": true,
+        "openai_base_url": "https://opengateway.gitlawb.com/v1",
+        "openai_model": "mimo-v2-flash"
       }
     },
     {
@@ -60,7 +66,8 @@
       "capabilities": ["streaming", "vision"],
       "metadata": {
         "source": "gitlawb-opengateway",
-        "privacy": "external_no_key_gateway",
+        "privacy": "external_api_key_gateway",
+        "api_key_required": true,
         "vision_verified": true,
         "openai_base_url": "https://opengateway.gitlawb.com/v1",
         "openai_model": "mimo-v2-omni"
@@ -85,7 +92,8 @@
       "default_thinking_level": "medium",
       "metadata": {
         "source": "gitlawb-opengateway",
-        "privacy": "external_no_key_gateway",
+        "privacy": "external_api_key_gateway",
+        "api_key_required": true,
         "openai_base_url": "https://opengateway.gitlawb.com/v1",
         "openai_model": "mimo-v2-pro"
       }
@@ -110,7 +118,8 @@
       "default_thinking_level": "medium",
       "metadata": {
         "source": "gitlawb-opengateway",
-        "privacy": "external_no_key_gateway",
+        "privacy": "external_api_key_gateway",
+        "api_key_required": true,
         "openai_base_url": "https://opengateway.gitlawb.com/v1",
         "openai_model": "mimo-v2.5"
       }

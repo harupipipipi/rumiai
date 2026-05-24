@@ -18,5 +18,12 @@
   },
   "supports_thinking": true,
   "thinking_levels": ["low", "medium", "high", "xhigh"],
-  "default_thinking_level": "medium"
+  "default_thinking_level": "medium",
+  "metadata": {
+    "source": "gitlawb-opengateway",
+    "privacy": "external_api_key_gateway",
+    "api_key_required": true,
+    "openai_base_url": "https://opengateway.gitlawb.com/v1",
+    "openai_model": "mimo-v2.5-pro"
+  }
 }
