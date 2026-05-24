@@ -35,7 +35,10 @@ class GitlawbOpengatewayProvider(OpenAICompatibleProvider):
             "default_thinking_level": "medium",
             "metadata": {
                 "source": "gitlawb-opengateway",
-                "privacy": "external_no_key_gateway",
+                "privacy": "external_api_key_gateway",
+                "api_key_required": True,
+                "openai_base_url": "https://opengateway.gitlawb.com/v1",
+                "openai_model": "mimo-v2.5-pro",
             },
         },
         {
@@ -50,7 +53,10 @@ class GitlawbOpengatewayProvider(OpenAICompatibleProvider):
             "capabilities": ["chat", "streaming"],
             "metadata": {
                 "source": "gitlawb-opengateway",
-                "privacy": "external_no_key_gateway",
+                "privacy": "external_api_key_gateway",
+                "api_key_required": True,
+                "openai_base_url": "https://opengateway.gitlawb.com/v1",
+                "openai_model": "mimo-v2-flash",
             },
         },
         {
@@ -65,7 +71,8 @@ class GitlawbOpengatewayProvider(OpenAICompatibleProvider):
             "capabilities": ["chat", "streaming", "vision"],
             "metadata": {
                 "source": "gitlawb-opengateway",
-                "privacy": "external_no_key_gateway",
+                "privacy": "external_api_key_gateway",
+                "api_key_required": True,
                 "vision_verified": True,
                 "openai_base_url": "https://opengateway.gitlawb.com/v1",
                 "openai_model": "mimo-v2-omni",
@@ -86,7 +93,8 @@ class GitlawbOpengatewayProvider(OpenAICompatibleProvider):
             "default_thinking_level": "medium",
             "metadata": {
                 "source": "gitlawb-opengateway",
-                "privacy": "external_no_key_gateway",
+                "privacy": "external_api_key_gateway",
+                "api_key_required": True,
                 "openai_base_url": "https://opengateway.gitlawb.com/v1",
                 "openai_model": "mimo-v2-pro",
             },
@@ -106,7 +114,8 @@ class GitlawbOpengatewayProvider(OpenAICompatibleProvider):
             "default_thinking_level": "medium",
             "metadata": {
                 "source": "gitlawb-opengateway",
-                "privacy": "external_no_key_gateway",
+                "privacy": "external_api_key_gateway",
+                "api_key_required": True,
                 "openai_base_url": "https://opengateway.gitlawb.com/v1",
                 "openai_model": "mimo-v2.5",
             },
@@ -120,10 +129,9 @@ class GitlawbOpengatewayProvider(OpenAICompatibleProvider):
             api_key_env="GITLAWB_OPENGATEWAY_API_KEY",
             base_url_env="GITLAWB_OPENGATEWAY_BASE_URL",
             default_base_url="https://opengateway.gitlawb.com/v1",
-            credential_required=False,
+            credential_required=True,
             known_models=self.KNOWN_MODELS,
             extra_headers={
-                "Authorization": "Bearer anything",
                 "User-Agent": self.DEFAULT_USER_AGENT,
             },
         )
