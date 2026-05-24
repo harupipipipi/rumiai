@@ -49,3 +49,10 @@ def test_action_map_doctor_maps_correctly():
     source = main_path.read_text()
     assert '"doctor": "computer.doctor"' in source
     assert '"diagnose": "computer.doctor"' in source
+
+
+def test_pid_event_target_fields_pass_through():
+    main_path = Path(_funcs_dir) / "computer_use" / "main.py"
+    source = main_path.read_text()
+    for field in ('"pid"', '"window_id"', '"window_title"', '"hwnd"', '"sub_action"', '"key_combo"'):
+        assert field in source

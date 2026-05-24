@@ -1193,6 +1193,7 @@ class BrowserComputerController:
             "pid": payload.get("pid"),
             "window_id": payload.get("window_id"),
             "window_title": payload.get("title") or payload.get("window_title"),
+            "hwnd": payload.get("hwnd"),
         }
 
     def _computer_seat_metadata_for_target(self, target_record: dict[str, Any] | None) -> dict[str, Any]:
@@ -1251,7 +1252,7 @@ class BrowserComputerController:
             return self._approval_required("computer.pid_event", self._safe_payload(payload))
         try:
             svc = self._get_computer_seat()
-            target = {"app": None, "pid": payload.get("pid"), "window_id": None, "window_title": None}
+            target = self._computer_seat_target(payload)
             action = payload.get("sub_action") or payload.get("action_type") or payload.get("action") or "click"
             with self._edge_haze("computer.pid_event", payload):
                 if action == "click":

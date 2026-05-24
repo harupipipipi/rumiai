@@ -166,6 +166,33 @@ def test_pid_event_sub_action_takes_priority(tmp_path):
     svc.type_text.assert_called_once()
 
 
+def test_pid_event_passes_window_target_fields(tmp_path):
+    """pid_event should preserve explicit window targeting for browser popups."""
+    ctrl = BrowserComputerController(artifact_root=tmp_path)
+    svc = MagicMock()
+    svc.click.return_value = asdict(ActionResult(action="click", driver="mock", executed=True))
+    ctrl._computer_seat = svc
+
+    ctrl._computer_seat_pid_event(
+        {
+            "window_id": 68926,
+            "hwnd": 68926,
+            "app": "chrome",
+            "title": "Google Gemini",
+            "sub_action": "click",
+            "x": 10,
+            "y": 20,
+        },
+        yolo_mode=True,
+    )
+
+    target = svc.click.call_args.args[0]
+    assert target["window_id"] == 68926
+    assert target["hwnd"] == 68926
+    assert target["app"] == "chrome"
+    assert target["window_title"] == "Google Gemini"
+
+
 # ---------------------------------------------------------------------------
 # Test 4: high-risk manifests declare approval/risk metadata
 # ---------------------------------------------------------------------------
