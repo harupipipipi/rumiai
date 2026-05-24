@@ -14,8 +14,6 @@ import pytest
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
-for module_name in [name for name in tuple(sys.modules) if name == "core_runtime" or name.startswith("core_runtime.")]:
-    sys.modules.pop(module_name, None)
 
 from core_runtime.approval_manager import (
     ApprovalManager,

@@ -294,6 +294,7 @@ class ToolExecutor:
         if getattr(response, "error_type", "") not in {
             "function_not_found",
             "function_registry_unavailable",
+            "pack_not_approved",
         }:
             return None
         qualified_name = str(request.get("qualified_name") or "")
@@ -338,6 +339,8 @@ class ToolExecutor:
     def _allows_direct_first_party_function_fallback(pack_id, function_id):
         return (pack_id, function_id) in {
             ("defaultspack", "tool_calculator"),
+            ("defaultspack", "coding_file_create"),
+            ("defaultspack", "coding_file_write"),
             ("rumi_default_tools_pack", "calculator"),
         }
 
@@ -460,7 +463,7 @@ class ToolExecutor:
         error = getattr(response, "error", None)
         if not success:
             if (
-                getattr(response, "error_type", None) == "caller_requires_denied"
+                getattr(response, "error_type", None) in {"caller_requires_denied", "pack_not_approved"}
                 and isinstance(tool_def, dict)
                 and _requires_approval(tool_def)
             ):

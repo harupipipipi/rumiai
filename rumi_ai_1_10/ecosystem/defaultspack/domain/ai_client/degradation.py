@@ -9,6 +9,12 @@ from domain.chat.ir_blocks import BridgeAction, DroppedFeature, ProviderWarning,
 from domain.tool.provider_adapter import adapt_rumi_tools_to_provider_tools
 
 
+NON_VISION_IMAGE_PLACEHOLDER = (
+    "[Image omitted: the selected provider does not support vision input. "
+    "Use a vision-capable model or bridge result for image details.]"
+)
+
+
 def degrade_request(
     ir: RumiChatIR,
     *,
@@ -142,12 +148,29 @@ def _degrade_modalities(
     bridges: list[BridgeAction],
 ) -> None:
     supported_blocks = {str(block) for block in caps.get("supported_content_blocks", [])}
+    supports_vision = bool(caps.get("supports_vision") or caps.get("supports_image_input"))
+    vision_bridge_added = False
+    image_warning_added = False
     for message in ir.messages:
+        degraded_content: list[RumiIRBlock] = []
         for block in message.content:
             block_type = block.type
-            if block_type in {"image", "image_url"} and not caps.get("supports_vision"):
-                bridges.append(BridgeAction(action="vision_bridge_required", reason="Provider does not support images."))
-                warnings.append(ProviderWarning(code="image_bridge_required", message="Image content requires a vision bridge for this provider."))
+            if block_type in {"image", "image_url"} and not supports_vision:
+                if not vision_bridge_added:
+                    bridges.append(BridgeAction(action="vision_bridge_required", reason="Provider does not support images."))
+                    vision_bridge_added = True
+                if not image_warning_added:
+                    warnings.append(ProviderWarning(code="image_bridge_required", message="Image content requires a vision bridge for this provider."))
+                    image_warning_added = True
+                dropped.append(
+                    DroppedFeature(
+                        feature=block_type,
+                        reason="Provider does not support image input; image content was removed from the provider payload.",
+                        source="request_planner",
+                    )
+                )
+                degraded_content.append(RumiIRBlock(type="text", text=NON_VISION_IMAGE_PLACEHOLDER))
+                continue
             elif block_type == "pdf" and not caps.get("supports_pdf"):
                 bridges.append(BridgeAction(action="extract_pdf_text_and_page_images", reason="Provider does not support native PDF."))
             elif block_type == "audio" and not caps.get("supports_audio"):
@@ -159,6 +182,8 @@ def _degrade_modalities(
                     warnings.append(ProviderWarning(code="file_upload_unavailable", message="File upload is unsupported; passing workspace reference only."))
             elif supported_blocks and block_type not in supported_blocks and block_type not in {"unknown", "event", "citation", "refusal"}:
                 dropped.append(DroppedFeature(feature=block_type, reason="Provider does not support this content block.", source="request_planner"))
+            degraded_content.append(block)
+        message.content = degraded_content
 
 
 def _degrade_reasoning(

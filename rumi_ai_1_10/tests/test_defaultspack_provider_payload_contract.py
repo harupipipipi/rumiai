@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -41,6 +42,47 @@ def test_openai_provider_build_request_and_parse_tool_calls_contract():
     assert request[1]["role"] == "tool"
     assert request[2]["content"][0]["type"] == "image_url"
     assert parsed["content"][1] == {"type": "tool_use", "id": "tc2", "name": "lookup", "input": "{}"}
+
+
+def test_non_vision_provider_payload_contains_no_image_blocks():
+    from domain.ai_client.provider_compiler.registry import compile_complete
+    from domain.ai_client.request_planner import plan_model_request
+    from domain.chat.ir_legacy_adapter import legacy_standard_messages_to_ir
+
+    ir = legacy_standard_messages_to_ir(
+        [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "read it"},
+                    {"type": "image_url", "image_url": {"url": "data:image/png;base64,aaa"}},
+                ],
+            }
+        ],
+        "c",
+    )
+
+    planned = plan_model_request(
+        ir,
+        "text-only-model",
+        {
+            "provider_id": "local",
+            "api_family": "openai_chat",
+            "supports_vision": False,
+            "supported_content_blocks": ["text"],
+        },
+        [],
+        {},
+        {},
+    )
+    compiled = compile_complete(planned)
+
+    dumped = json.dumps(compiled.body)
+    assert "image_url" not in dumped
+    assert "data:image/" not in dumped
+    assert all(block.type not in {"image", "image_url"} for message in planned.ir.messages for block in message.content)
+    assert any(action.action == "vision_bridge_required" for action in planned.bridge_actions)
+    assert any(item.feature == "image_url" for item in planned.dropped_features)
 
 
 def test_google_provider_tool_name_mapping_and_native_body_contract():
