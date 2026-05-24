@@ -60,14 +60,94 @@ def test_key_delegates_to_seat(controller):
     result = controller.run("computer.key", {"key": "enter"}, yolo_mode=True)
     assert result["executed"] is True
     svc.key.assert_called_once()
+    assert svc.key.call_args.kwargs["key_combo"] == "enter"
+
+
+def test_key_delegation_preserves_explicit_combo_and_modifiers(controller):
+    svc = _mock_service()
+    controller._computer_seat = svc
+
+    controller.run("computer.key", {"key": "a", "modifiers": ["command"]}, yolo_mode=True)
+    assert svc.key.call_args.kwargs["key_combo"] == "command+a"
+
+    svc.key.reset_mock()
+    controller._try_computer_seat_action("computer.key", {"key": "ignored", "key_combo": "cmd+l"})
+    assert svc.key.call_args.kwargs["key_combo"] == "cmd+l"
+
+    svc.key.reset_mock()
+    controller._try_computer_seat_action("computer.key", {"key_combo": "retrun"})
+    assert svc.key.call_args.kwargs["key_combo"] == "return"
 
 
 def test_scroll_delegates_to_seat(controller):
     svc = _mock_service()
     controller._computer_seat = svc
-    result = controller.run("computer.scroll", {"direction": "down"}, yolo_mode=True)
+    result = controller.run("computer.scroll", {"direction": "up", "clicks": 7}, yolo_mode=True)
     assert result["executed"] is True
     svc.scroll.assert_called_once()
+    assert svc.scroll.call_args.kwargs["direction"] == "up"
+    assert svc.scroll.call_args.kwargs["clicks"] == 7
+
+
+def test_pid_event_key_uses_normalized_key_combo(controller):
+    svc = _mock_service()
+    controller._computer_seat = svc
+
+    controller._computer_seat_pid_event(
+        {"pid": 123, "action": "key", "key": "a", "modifiers": ["command"]},
+        yolo_mode=True,
+    )
+
+    assert svc.key.call_args.kwargs["key_combo"] == "command+a"
+
+
+def test_key_delegation_repeats_backspace_count(controller):
+    svc = _mock_service()
+    controller._computer_seat = svc
+
+    result = controller.run("computer.backspace", {"count": 4, "include_screenshot": False}, yolo_mode=True)
+
+    assert result["executed"] is True
+    assert result["count"] == 4
+    assert svc.key.call_count == 4
+    assert all(call.kwargs["key_combo"] == "backspace" for call in svc.key.call_args_list)
+
+
+def test_key_repeat_reports_executed_count_when_interrupted(controller):
+    svc = _mock_service()
+    svc.key.side_effect = [
+        asdict(ActionResult(action="key", driver="mac_accessibility", executed=True)),
+        asdict(ActionResult(action="key", driver="mac_accessibility", executed=False)),
+    ]
+    controller._computer_seat = svc
+
+    result = controller.run("computer.key", {"key": "backspace", "count": 4, "include_screenshot": False}, yolo_mode=True)
+
+    assert result["executed"] is True
+    assert result["count"] == 1
+    assert result["requested_count"] == 4
+    assert svc.key.call_count == 2
+
+
+def test_direct_browser_computer_aliases_are_normalized(controller, monkeypatch):
+    clipboard = {"value": ""}
+    monkeypatch.setattr(controller, "_system_clipboard_write", lambda value: clipboard.update(value=value))
+    monkeypatch.setattr(controller, "_system_clipboard_read", lambda: clipboard["value"])
+
+    write = controller.run("clipboard_set", {"value": "hello"}, yolo_mode=True)
+    read = controller.run("clipboard_get", {}, yolo_mode=True)
+
+    assert write["action"] == "computer.clipboard.write"
+    assert read["action"] == "computer.clipboard.read"
+    assert read["content"] == "hello"
+
+
+def test_apple_script_key_combo_alias_and_repeat(controller):
+    script = controller._apple_script("computer.key", {"key_combo": "retrun", "count": 2})
+
+    assert "repeat 2 times" in script
+    assert "key code 36" in script
+    assert 'keystroke "retrun"' not in script
 
 
 def test_observe_delegates_to_seat(controller):
@@ -121,3 +201,20 @@ def test_move_dry_run_does_not_return_visual_feedback(controller):
 
     assert result["dry_run"] is True
     assert "visual_feedback" not in result
+
+
+def test_computer_clipboard_read_and_write_actions(controller, monkeypatch):
+    clipboard = {"value": "initial"}
+
+    monkeypatch.setattr(controller, "_system_clipboard_read", lambda: clipboard["value"])
+    monkeypatch.setattr(controller, "_system_clipboard_write", lambda value: clipboard.update(value=value))
+
+    write = controller.run("computer.clipboard.write", {"value": "hello"}, yolo_mode=True)
+    read = controller.run("computer.clipboard.read", {}, yolo_mode=True)
+    clear = controller.run("computer.clipboard.clear", {}, yolo_mode=True)
+
+    assert write["written"] is True
+    assert write["length"] == 5
+    assert read["content"] == "hello"
+    assert clear["cleared"] is True
+    assert clipboard["value"] == ""

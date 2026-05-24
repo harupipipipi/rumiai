@@ -109,6 +109,13 @@ for j in jobs:
 `bundled/uv`, `bundled/pack-shell` が入る。`.venv`, `node_modules`,
 `user_data`, `__pycache__`, `.rumi_snapshots`, `tests/` は配布物から除外する。
 
+公式 update artifact を生成する release workflow では、source checkout に入っている
+`core_runtime/update/official_trust_roots.json` が空である前提で、CI secrets から公開鍵を
+注入する必要がある。少なくとも `RUMI_UPDATE_ED25519_KEY_ID`,
+`RUMI_UPDATE_ED25519_PUBLIC_KEY_B64`, `RUMI_UPDATE_ED25519_PRIVATE_KEY_B64`,
+`RUMI_VIEWER_UPDATER_PUBKEY`, `TAURI_SIGNING_PRIVATE_KEY` を設定する。これらが無い
+dev build では official pack/core update verification が失敗し得る。
+
 PR 上で配布物を確認したい場合は、手動実行もできる
 `.github/workflows/desktop-installers.yml` を使う。Windows NSIS, macOS DMG, Linux
 DEB/AppImage を Actions artifact としてアップロードする。代表的な出力先は以下。

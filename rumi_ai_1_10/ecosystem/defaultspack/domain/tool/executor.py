@@ -928,7 +928,15 @@ def _browser_computer_action_payload(tool_name, arguments):
             "mouse_drag": "computer.drag",
             "type": "computer.type",
             "key": "computer.key",
+            "backspace": "computer.backspace",
+            "delete_back": "computer.backspace",
             "scroll": "computer.scroll",
+            "clipboard": "computer.clipboard.read",
+            "clipboard_read": "computer.clipboard.read",
+            "clipboard_get": "computer.clipboard.read",
+            "clipboard_write": "computer.clipboard.write",
+            "clipboard_set": "computer.clipboard.write",
+            "clipboard_clear": "computer.clipboard.clear",
             "apps": "computer.apps",
             "applications": "computer.apps",
             "open_apps": "computer.apps",
@@ -971,7 +979,12 @@ def _browser_computer_action_payload(tool_name, arguments):
             "key",
             "modifier",
             "modifiers",
+            "count",
+            "times",
+            "repeat",
             "amount",
+            "content",
+            "value",
             "target",
             "scope",
             "app",
@@ -981,8 +994,14 @@ def _browser_computer_action_payload(tool_name, arguments):
             "title_contains",
             "window",
             "window_index",
+            "window_id",
+            "window_title",
+            "hwnd",
+            "pid",
             "tab_index",
             "button",
+            "direction",
+            "clicks",
             "include_screenshot",
             "coordinate_space",
             "physical",
@@ -1013,6 +1032,9 @@ def _browser_computer_action_payload(tool_name, arguments):
             "mode",
             "method",
             "driver",
+            "sub_action",
+            "action_type",
+            "key_combo",
         ):
             if key in arguments:
                 raw_payload[key] = arguments.get(key)
@@ -1031,7 +1053,15 @@ def _browser_computer_action_payload(tool_name, arguments):
             "mouse_drag": "computer.drag",
             "type": "computer.type",
             "key": "computer.key",
+            "backspace": "computer.backspace",
+            "delete_back": "computer.backspace",
             "scroll": "computer.scroll",
+            "clipboard": "computer.clipboard.read",
+            "clipboard_read": "computer.clipboard.read",
+            "clipboard_get": "computer.clipboard.read",
+            "clipboard_write": "computer.clipboard.write",
+            "clipboard_set": "computer.clipboard.write",
+            "clipboard_clear": "computer.clipboard.clear",
             "apps": "computer.apps",
             "applications": "computer.apps",
             "open_apps": "computer.apps",
@@ -1074,7 +1104,12 @@ def _browser_computer_action_payload(tool_name, arguments):
             "key",
             "modifier",
             "modifiers",
+            "count",
+            "times",
+            "repeat",
             "amount",
+            "content",
+            "value",
             "target",
             "scope",
             "app",
@@ -1084,8 +1119,14 @@ def _browser_computer_action_payload(tool_name, arguments):
             "title_contains",
             "window",
             "window_index",
+            "window_id",
+            "window_title",
+            "hwnd",
+            "pid",
             "tab_index",
             "button",
+            "direction",
+            "clicks",
             "include_screenshot",
             "coordinate_space",
             "physical",
@@ -1116,6 +1157,9 @@ def _browser_computer_action_payload(tool_name, arguments):
             "mode",
             "method",
             "driver",
+            "sub_action",
+            "action_type",
+            "key_combo",
         ):
             if key in arguments:
                 raw_payload[key] = arguments.get(key)
@@ -1130,6 +1174,14 @@ def _computer_use_payload_with_context_defaults(action, payload, context):
     payload = dict(payload or {})
     if not isinstance(context, dict):
         return payload
+    sequence_id = str(
+        context.get("computer_use_haze_sequence_id")
+        or context.get("run_id")
+        or context.get("request_id")
+        or ""
+    ).strip()
+    if sequence_id and (action.startswith("computer.") or action.startswith("browser.")):
+        payload.setdefault("computer_use_haze_sequence_id", sequence_id)
     target_app = context.get("computer_use_target_app")
     target_title = context.get("computer_use_target_title")
     physical_clicks = _truthy(context.get("computer_use_physical_clicks"))
@@ -1231,7 +1283,9 @@ def _context_with_tool_approval_token(context, tool_def, arguments):
         return next_context, None
     if _context_has_tool_server_approval(next_context):
         return next_context, None
-    token = _approval_token_from_arguments(arguments) or _approval_token_from_context(context, tool_def)
+    argument_token = _approval_token_from_arguments(arguments)
+    context_token = _approval_token_from_context(context, tool_def)
+    token = argument_token or context_token
     if not token:
         return next_context, None
     approval = _approval_module()
@@ -1243,6 +1297,8 @@ def _context_with_tool_approval_token(context, tool_def, arguments):
     if verification.valid:
         next_context["_tool_server_approved"] = True
         next_context["_tool_server_approval_token_valid"] = True
+        return next_context, None
+    if not argument_token and context_token:
         return next_context, None
     return next_context, {
         "result": verification.message or "approval token is invalid",

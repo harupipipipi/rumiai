@@ -11,6 +11,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from core_runtime.update.download import sha256_file
 from core_runtime.update.pack_update_manager import PackUpdateManager
+from core_runtime.update.models import PackUpdateCheck, PackUpdateResult
 from core_runtime.update.trust import (
     index_signature_payload,
     pack_bundle_signature_payload,
@@ -206,3 +207,72 @@ def test_rollback_uses_semver_order_for_previous_version(tmp_path):
     result = manager.rollback_pack("defaultspack")
 
     assert result.active_version == "2.9.0"
+
+
+def test_pack_auto_update_applies_only_official_packs(tmp_path):
+    class FakePackUpdateManager(PackUpdateManager):
+        def __init__(self, *, third_party_enabled: bool):
+            super().__init__(managed_dir=tmp_path / "packs", pack_state_dir=tmp_path / "pack_state")
+            self.third_party_enabled = third_party_enabled
+            self.applied: list[str] = []
+            self.written = None
+
+        def read_update_preferences(self):
+            return {
+                "auto_update": {
+                    "viewer": False,
+                    "core": False,
+                    "official_packs": True,
+                    "third_party_packs": self.third_party_enabled,
+                },
+                "channels": {"viewer": "stable", "core": "stable", "packs": "stable"},
+                "check_interval_hours": 24,
+                "last_checked_at": None,
+                "last_results": [],
+                "updated_at": None,
+            }
+
+        def write_update_preferences(self, settings):
+            self.written = settings
+            return settings
+
+        def _auto_update_due(self, settings):
+            return True
+
+        def check_all(self, channel="stable"):
+            return [
+                PackUpdateCheck(
+                    target="pack:defaultspack",
+                    pack_id="defaultspack",
+                    current_version="2.4.1",
+                    latest_version="2.5.0",
+                    update_available=True,
+                ),
+                PackUpdateCheck(
+                    target="pack:custompack",
+                    pack_id="custompack",
+                    current_version="0.1.0",
+                    latest_version="0.2.0",
+                    update_available=True,
+                ),
+            ]
+
+        def apply_pack(self, pack_id, version=None, channel="stable", force=False):
+            self.applied.append(pack_id)
+            return PackUpdateResult(
+                target=f"pack:{pack_id}",
+                pack_id=pack_id,
+                current_version="old",
+                latest_version="new",
+                applied=True,
+                staged=True,
+            )
+
+    for third_party_enabled in (False, True):
+        manager = FakePackUpdateManager(third_party_enabled=third_party_enabled)
+        result = manager.run_auto_updates_once(force=True)
+        statuses = {item["target"]: item["status"] for item in result.results}
+
+        assert manager.applied == ["defaultspack"]
+        assert statuses["pack:defaultspack"] == "applied"
+        assert statuses["pack:custompack"] == "manual_required"

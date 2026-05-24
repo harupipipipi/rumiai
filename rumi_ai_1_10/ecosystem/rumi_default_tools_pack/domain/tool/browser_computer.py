@@ -18,6 +18,81 @@ from pathlib import Path
 from typing import Any
 
 
+def _scroll_clicks(payload: dict[str, Any], default: int = 3) -> int:
+    try:
+        return int(payload.get("clicks", payload.get("amount", default)))
+    except (TypeError, ValueError):
+        return default
+
+
+def _apple_scroll_amount(payload: dict[str, Any], default: int = 1) -> int:
+    amount = _scroll_clicks(payload, default)
+    direction = str(payload.get("direction") or "").strip().lower()
+    if direction in {"up", "north", "back", "backward"}:
+        return -abs(amount)
+    if direction in {"down", "south", "forward"}:
+        return abs(amount)
+    return amount
+
+
+def _windows_scroll_delta(payload: dict[str, Any], default: int = 1) -> int:
+    amount = _scroll_clicks(payload, default)
+    direction = str(payload.get("direction") or "").strip().lower()
+    if direction in {"up", "north", "back", "backward"}:
+        return abs(amount) * 120
+    if direction in {"down", "south", "forward"}:
+        return -abs(amount) * 120
+    return amount * 120
+
+
+def _key_combo_from_payload(payload: dict[str, Any]) -> str:
+    explicit = str(payload.get("key_combo") or "").strip()
+    if explicit:
+        parts = [part.strip() for part in explicit.split("+") if part.strip()]
+        if not parts:
+            return ""
+        parts[-1] = _normalize_key_name(parts[-1])
+        return "+".join(parts)
+    key = payload.get("key")
+    if key is None:
+        return ""
+    key_text = str(key).strip()
+    if not key_text:
+        return ""
+    modifiers = payload.get("modifiers")
+    if not isinstance(modifiers, list):
+        modifier = payload.get("modifier")
+        modifiers = [modifier] if modifier else []
+    parts = [str(item).strip() for item in modifiers if str(item or "").strip()]
+    parts.append(_normalize_key_name(key_text))
+    return "+".join(parts)
+
+
+def _key_press_count(payload: dict[str, Any]) -> int:
+    for key in ("count", "times", "repeat"):
+        if key not in payload:
+            continue
+        try:
+            return max(1, min(200, int(payload.get(key))))
+        except (TypeError, ValueError):
+            return 1
+    return 1
+
+
+def _normalize_key_name(key: Any) -> str:
+    value = str(key or "").strip()
+    aliases = {
+        "retrun": "return",
+        "retun": "return",
+        "newline": "return",
+        "new_line": "return",
+        "bksp": "backspace",
+        "bs": "backspace",
+        "back": "backspace",
+    }
+    return aliases.get(value.lower(), value)
+
+
 def _current_python_snippet_command(code: str) -> list[str]:
     return [sys.executable, "-c", code]
 
@@ -44,6 +119,7 @@ class BrowserComputerController:
         return self._computer_seat
 
     def run(self, action: str, payload: dict[str, Any] | None = None, *, yolo_mode: bool = False) -> dict[str, Any]:
+        action = self._normalize_action(action)
         payload = payload or {}
         yolo_mode = self._truthy(yolo_mode)
         if action == "browser.open_url":
@@ -82,6 +158,17 @@ class BrowserComputerController:
             return self._select_window(payload)
         if action == "computer.screenshot":
             return self._screenshot(payload=payload, dry_run=self._truthy(payload.get("dry_run")), yolo_mode=yolo_mode)
+        if action in {"computer.clipboard", "computer.clipboard.get", "computer.clipboard.read"}:
+            return self._clipboard_read(payload, yolo_mode=yolo_mode)
+        if action in {"computer.clipboard.set", "computer.clipboard.write", "computer.clipboard.clear"}:
+            return self._clipboard_write(action, payload, yolo_mode=yolo_mode)
+        if action in {"computer.backspace", "computer.delete_back"}:
+            payload = dict(payload)
+            payload.setdefault("key", "backspace")
+            result = self._desktop_action("computer.key", payload, yolo_mode=yolo_mode)
+            result["action"] = "computer.backspace"
+            result.setdefault("underlying_action", "computer.key")
+            return result
         if action in {"computer.move", "computer.click", "computer.drag", "computer.type", "computer.key", "computer.scroll"}:
             return self._desktop_action(action, payload, yolo_mode=yolo_mode)
         if action == "computer.observe":
@@ -93,6 +180,59 @@ class BrowserComputerController:
         if action in {"computer.doctor", "computer.diagnose"}:
             return self._computer_seat_doctor()
         raise ValueError(f"Unsupported browser/computer action: {action}")
+
+    @staticmethod
+    def _normalize_action(action: str) -> str:
+        raw = str(action or "").strip()
+        action_map = {
+            "": "browser.session",
+            "session": "browser.session",
+            "open_url": "browser.open_url",
+            "open": "browser.open_url",
+            "context": "computer.context",
+            "app_context": "computer.context",
+            "state": "computer.context",
+            "screenshot": "computer.screenshot",
+            "move": "computer.move",
+            "cursor_move": "computer.move",
+            "mouse_move": "computer.move",
+            "click": "computer.click",
+            "drag": "computer.drag",
+            "mouse_drag": "computer.drag",
+            "type": "computer.type",
+            "key": "computer.key",
+            "backspace": "computer.backspace",
+            "delete_back": "computer.backspace",
+            "scroll": "computer.scroll",
+            "clipboard": "computer.clipboard.read",
+            "clipboard_read": "computer.clipboard.read",
+            "clipboard_get": "computer.clipboard.read",
+            "clipboard_write": "computer.clipboard.write",
+            "clipboard_set": "computer.clipboard.write",
+            "clipboard_clear": "computer.clipboard.clear",
+            "apps": "computer.apps",
+            "applications": "computer.apps",
+            "open_apps": "computer.apps",
+            "list_apps": "computer.apps",
+            "select_app": "computer.select_app",
+            "app": "computer.select_app",
+            "show_app": "computer.show_app",
+            "focus_app": "computer.show_app",
+            "activate_app": "computer.show_app",
+            "main_app": "computer.show_app",
+            "show": "computer.show_app",
+            "select_window": "computer.select_window",
+            "window": "computer.select_window",
+            "windows": "computer.windows",
+            "list_windows": "computer.windows",
+            "observe": "computer.observe",
+            "semantic_action": "computer.semantic_action",
+            "press": "computer.semantic_action",
+            "pid_event": "computer.pid_event",
+            "doctor": "computer.doctor",
+            "diagnose": "computer.doctor",
+        }
+        return action_map.get(raw, raw)
 
     def _edge_haze(self, action: str, payload: dict[str, Any]):
         try:
@@ -1260,9 +1400,15 @@ class BrowserComputerController:
                 elif action == "type_text":
                     result = svc.type_text(target, text=payload.get("text", ""))
                 elif action == "key":
-                    result = svc.key(target, key_combo=payload.get("key_combo", ""))
+                    result = self._seat_key_repeat(svc, target, payload)
                 elif action == "scroll":
-                    result = svc.scroll(target, x=payload.get("x", 0), y=payload.get("y", 0), direction=payload.get("direction", "down"), clicks=payload.get("clicks", 3))
+                    result = svc.scroll(
+                        target,
+                        x=payload.get("x", 0),
+                        y=payload.get("y", 0),
+                        direction=payload.get("direction", "down"),
+                        clicks=_scroll_clicks(payload),
+                    )
                 else:
                     return {"action": "computer.pid_event", "error": f"Unknown sub-action: {action}"}
             result["action"] = "computer.pid_event"
@@ -1313,10 +1459,16 @@ class BrowserComputerController:
             elif action == "computer.type":
                 result = svc.type_text(target, text=action_payload.get("text", ""))
             elif action == "computer.key":
-                result = svc.key(target, key_combo=action_payload.get("key", "") or action_payload.get("key_combo", ""))
+                result = self._seat_key_repeat(svc, target, action_payload)
             elif action == "computer.scroll":
                 direction = action_payload.get("direction", "down")
-                result = svc.scroll(target, x=int(action_payload.get("x", 0)), y=int(action_payload.get("y", 0)), direction=direction, clicks=int(action_payload.get("amount", 3)))
+                result = svc.scroll(
+                    target,
+                    x=int(action_payload.get("x", 0)),
+                    y=int(action_payload.get("y", 0)),
+                    direction=direction,
+                    clicks=_scroll_clicks(action_payload),
+                )
             elif action == "computer.move":
                 result = svc.move(target, x=int(action_payload.get("x", 0)), y=int(action_payload.get("y", 0)))
             elif action == "computer.drag":
@@ -1431,7 +1583,14 @@ class BrowserComputerController:
                 if drag_marker:
                     result["drag_marker"] = drag_marker
             if action == "computer.scroll":
-                result["amount"] = int(action_payload.get("amount", 1))
+                result["amount"] = _scroll_clicks(action_payload, default=1)
+            if action == "computer.key":
+                result["count"] = int(seat_result.get("count", _key_press_count(action_payload)) or 0)
+                result["requested_count"] = int(
+                    seat_result.get("requested_count", _key_press_count(action_payload)) or 0
+                )
+                if seat_result.get("partial"):
+                    result["partial"] = True
             if self._should_capture_after_action(action, payload):
                 screenshot = self._capture_action_result_screenshot(
                     action_payload,
@@ -1466,6 +1625,8 @@ class BrowserComputerController:
         result: dict[str, Any] = {"action": action, "executed": True, "platform": system}
         if action in {"computer.type", "computer.key", "computer.scroll"}:
             result["driver"] = "foreground_input"
+        if action == "computer.key":
+            result["count"] = _key_press_count(action_payload)
         if action in {"computer.move", "computer.click"}:
             result["target"] = {"x": int(action_payload.get("x", 0)), "y": int(action_payload.get("y", 0))}
             if click_marker:
@@ -1480,7 +1641,7 @@ class BrowserComputerController:
             if drag_marker:
                 result["drag_marker"] = drag_marker
         if action == "computer.scroll":
-            result["amount"] = int(action_payload.get("amount", 1))
+            result["amount"] = _scroll_clicks(action_payload, default=1)
         if self._should_capture_after_action(action, payload):
             screenshot = self._capture_action_result_screenshot(
                 action_payload,
@@ -1490,6 +1651,104 @@ class BrowserComputerController:
             )
             result.update(screenshot)
         return result
+
+    def _seat_key_repeat(self, svc: Any, target: Any, payload: dict[str, Any]) -> dict[str, Any]:
+        key_combo = _key_combo_from_payload({**payload, "key": _normalize_key_name(payload.get("key"))})
+        count = _key_press_count(payload)
+        result: dict[str, Any] = {}
+        last_success: dict[str, Any] = {}
+        executed_count = 0
+        for _ in range(count):
+            result = svc.key(target, key_combo=key_combo)
+            if not isinstance(result, dict):
+                result = {}
+                break
+            if not result.get("executed"):
+                break
+            last_success = dict(result)
+            executed_count += 1
+        if executed_count and (not result.get("executed")):
+            result = last_success
+        if isinstance(result, dict):
+            result["count"] = executed_count
+            result["requested_count"] = count
+            if executed_count and executed_count < count:
+                result["partial"] = True
+        return result
+
+    def _clipboard_read(self, payload: dict[str, Any], *, yolo_mode: bool) -> dict[str, Any]:
+        if not (yolo_mode or self._consume_approval(payload, "computer.clipboard.read", self._safe_payload(payload))):
+            return self._approval_required("computer.clipboard.read", self._safe_payload(payload))
+        content = self._system_clipboard_read()
+        return {
+            "action": "computer.clipboard.read",
+            "format": "text/plain",
+            "content": content,
+            "length": len(content),
+        }
+
+    def _clipboard_write(self, action: str, payload: dict[str, Any], *, yolo_mode: bool) -> dict[str, Any]:
+        content = "" if action == "computer.clipboard.clear" else str(
+            payload.get("content", payload.get("text", payload.get("value", ""))) or ""
+        )
+        approval_payload = self._safe_payload({**payload, "content": content})
+        if not (yolo_mode or self._consume_approval(payload, action, approval_payload)):
+            return self._approval_required(action, approval_payload)
+        self._system_clipboard_write(content)
+        return {
+            "action": action,
+            "written": True,
+            "format": "text/plain",
+            "length": len(content),
+            "cleared": action == "computer.clipboard.clear",
+        }
+
+    @staticmethod
+    def _system_clipboard_read() -> str:
+        system = platform.system()
+        if system == "Darwin":
+            completed = subprocess.run(["pbpaste"], capture_output=True, text=True, check=True)
+            return completed.stdout
+        if system == "Windows":
+            completed = subprocess.run(
+                ["powershell", "-NoProfile", "-Command", "Get-Clipboard -Raw"],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            return completed.stdout
+        for command in ("wl-paste", "xclip", "xsel"):
+            if not shutil.which(command):
+                continue
+            args = [command]
+            if command == "xclip":
+                args.extend(["-selection", "clipboard", "-out"])
+            elif command == "xsel":
+                args.extend(["--clipboard", "--output"])
+            completed = subprocess.run(args, capture_output=True, text=True, check=True)
+            return completed.stdout
+        raise RuntimeError("system clipboard reader is not available")
+
+    @staticmethod
+    def _system_clipboard_write(content: str) -> None:
+        system = platform.system()
+        if system == "Darwin":
+            subprocess.run(["pbcopy"], input=content, text=True, check=True)
+            return
+        if system == "Windows":
+            subprocess.run(["clip"], input=content, text=True, check=True)
+            return
+        for command in ("wl-copy", "xclip", "xsel"):
+            if not shutil.which(command):
+                continue
+            args = [command]
+            if command == "xclip":
+                args.extend(["-selection", "clipboard"])
+            elif command == "xsel":
+                args.extend(["--clipboard", "--input"])
+            subprocess.run(args, input=content, text=True, check=True)
+            return
+        raise RuntimeError("system clipboard writer is not available")
 
     @staticmethod
     def _should_capture_after_action(action: str, payload: dict[str, Any]) -> bool:
@@ -3195,17 +3454,33 @@ end run
             if not isinstance(modifiers, list):
                 modifier = payload.get("modifier")
                 modifiers = [modifier] if modifier else []
+            key_combo = str(payload.get("key_combo") or "").strip()
+            if key_combo:
+                combo_parts = [part.strip() for part in key_combo.split("+") if part.strip()]
+                if combo_parts:
+                    modifiers = combo_parts[:-1] + modifiers
+                    key = combo_parts[-1]
+            key = _normalize_key_name(key)
             using = self._apple_script_modifiers(modifiers)
             if isinstance(key, int):
-                return f'tell application "System Events" to key code {key}{using}'
+                return self._repeat_apple_script(
+                    f'tell application "System Events" to key code {key}{using}',
+                    _key_press_count(payload),
+                )
             normalized = str(key).strip().lower()
             key_codes = {
                 "return": 36,
                 "enter": 36,
+                "retrun": 36,
+                "retun": 36,
+                "newline": 36,
                 "tab": 48,
                 "escape": 53,
                 "esc": 53,
                 "backspace": 51,
+                "back": 51,
+                "bksp": 51,
+                "bs": 51,
                 "delete": 51,
                 "del": 51,
                 "forward_delete": 117,
@@ -3216,12 +3491,21 @@ end run
                 "space": 49,
             }
             if normalized in key_codes:
-                return f'tell application "System Events" to key code {key_codes[normalized]}{using}'
-            return f'tell application "System Events" to keystroke {json.dumps(str(key), ensure_ascii=False)}{using}'
+                command = f'tell application "System Events" to key code {key_codes[normalized]}{using}'
+            else:
+                command = f'tell application "System Events" to keystroke {json.dumps(str(key), ensure_ascii=False)}{using}'
+            return self._repeat_apple_script(command, _key_press_count(payload))
         if action == "computer.scroll":
-            amount = int(payload.get("amount", 1))
+            amount = _apple_scroll_amount(payload, default=1)
             return f'tell application "System Events" to scroll wheel {amount}'
         raise ValueError(action)
+
+    @staticmethod
+    def _repeat_apple_script(command: str, count: int) -> str:
+        count = max(1, min(200, int(count or 1)))
+        if count <= 1:
+            return command
+        return "repeat {} times\n  {}\nend repeat".format(count, command)
 
     @staticmethod
     def _apple_script_modifiers(modifiers: list[Any]) -> str:
@@ -3477,12 +3761,22 @@ public class RumiDpi {
             self._run_powershell("\n".join(prelude + [f"[System.Windows.Forms.SendKeys]::SendWait('{text}')"]))
             return
         if action == "computer.key":
-            key = self._windows_send_key(str(payload.get("key", "ENTER")), payload.get("modifiers") or payload.get("modifier"))
-            self._run_powershell("\n".join(prelude + [f"[System.Windows.Forms.SendKeys]::SendWait('{key}')"]))
+            key = self._windows_send_key(
+                str(payload.get("key_combo") or payload.get("key", "ENTER")),
+                payload.get("modifiers") or payload.get("modifier"),
+            )
+            count = _key_press_count(payload)
+            self._run_powershell(
+                "\n".join(
+                    prelude
+                    + [
+                        f"for ($i = 0; $i -lt {count}; $i++) {{ [System.Windows.Forms.SendKeys]::SendWait('{key}') }}"
+                    ]
+                )
+            )
             return
         if action == "computer.scroll":
-            amount = int(payload.get("amount", 1))
-            wheel_delta = amount * 120
+            wheel_delta = _windows_scroll_delta(payload, default=1)
             has_point = any(key in payload for key in ("x", "y", "point", "coordinate", "coordinates"))
             point_payload = payload
             if has_point:
@@ -3632,6 +3926,9 @@ $proc = Get-Process -Id $procId -ErrorAction SilentlyContinue
         key_map = {
             "enter": "{ENTER}",
             "return": "{ENTER}",
+            "retrun": "{ENTER}",
+            "retun": "{ENTER}",
+            "newline": "{ENTER}",
             "escape": "{ESC}",
             "esc": "{ESC}",
             "tab": "{TAB}",

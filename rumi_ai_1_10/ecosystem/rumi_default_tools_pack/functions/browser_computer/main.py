@@ -42,6 +42,14 @@ def _payload_with_context_defaults(action, payload, context):
     payload = dict(payload or {})
     if not isinstance(context, dict):
         return payload
+    sequence_id = str(
+        context.get("computer_use_haze_sequence_id")
+        or context.get("run_id")
+        or context.get("request_id")
+        or ""
+    ).strip()
+    if sequence_id and (action.startswith("computer.") or action.startswith("browser.")):
+        payload.setdefault("computer_use_haze_sequence_id", sequence_id)
     if action == "browser.open_url":
         target_app = context.get("computer_use_target_app")
         if isinstance(target_app, str) and target_app.strip() and not any(

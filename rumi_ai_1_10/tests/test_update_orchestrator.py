@@ -144,6 +144,34 @@ def test_core_update_rejects_index_bundle_version_mismatch(tmp_path):
         raise AssertionError("core update accepted mismatched bundle version")
 
 
+def test_core_apply_overlays_and_backs_up_backend_core(tmp_path):
+    base = tmp_path / "runtime"
+    (base / "backend_core" / "ecosystem").mkdir(parents=True)
+    (base / "core_runtime").mkdir()
+    (base / "pyproject.toml").write_text('[project]\nversion = "1.10.0"\n', encoding="utf-8")
+    (base / "backend_core" / "ecosystem" / "registry.py").write_text("VALUE = 'old'\n", encoding="utf-8")
+    manager = CoreUpdateManager(base_dir=base, user_data_dir=tmp_path / "user_data")
+    stage_id = "1234567890-abcdef1234"
+    stage_dir = manager.update_state_dir / "staging" / stage_id
+    extracted = stage_dir / "extracted"
+    (extracted / "backend_core" / "ecosystem").mkdir(parents=True)
+    (extracted / "pyproject.toml").write_text('[project]\nversion = "1.11.0"\n', encoding="utf-8")
+    (extracted / "backend_core" / "ecosystem" / "registry.py").write_text("VALUE = 'new'\n", encoding="utf-8")
+    stage_dir.mkdir(parents=True, exist_ok=True)
+    (stage_dir / "stage.json").write_text(
+        json.dumps({"schema": "rumi.staged_core_update.v1", "stage_id": stage_id, "version": "1.11.0"}),
+        encoding="utf-8",
+    )
+
+    result = manager.apply_staged_core(stage_id)
+
+    assert result.applied is True
+    assert (base / "backend_core" / "ecosystem" / "registry.py").read_text(encoding="utf-8") == "VALUE = 'new'\n"
+    assert result.backup_dir is not None
+    backup = Path(result.backup_dir)
+    assert (backup / "backend_core" / "ecosystem" / "registry.py").read_text(encoding="utf-8") == "VALUE = 'old'\n"
+
+
 def test_core_stage_rejects_unsigned_core_index(tmp_path):
     base = tmp_path / "runtime"
     base.mkdir()
@@ -235,6 +263,7 @@ def test_layered_auto_update_runner_uses_pack_state_settings():
     class FakePackManager:
         def __init__(self):
             self.written = None
+            self.applied = []
 
         def read_update_preferences(self):
             return {
@@ -266,10 +295,18 @@ def test_layered_auto_update_runner_uses_pack_state_settings():
                     current_version="2.4.1",
                     latest_version="2.5.0",
                     update_available=True,
-                )
+                ),
+                PackUpdateCheck(
+                    target="pack:custompack",
+                    pack_id="custompack",
+                    current_version="0.1.0",
+                    latest_version="0.2.0",
+                    update_available=True,
+                ),
             ]
 
         def apply_pack(self, pack_id, version=None, channel="stable", force=False):
+            self.applied.append(pack_id)
             return PackUpdateResult(
                 target=f"pack:{pack_id}",
                 pack_id=pack_id,
@@ -308,5 +345,6 @@ def test_layered_auto_update_runner_uses_pack_state_settings():
     assert statuses["viewer"] == "handled_by_tauri"
     assert statuses["core"] == "applied"
     assert statuses["pack:defaultspack"] == "applied"
-    assert statuses["third_party_packs"] == "manual_required"
+    assert statuses["pack:custompack"] == "manual_required"
+    assert pack_manager.applied == ["defaultspack"]
     assert pack_manager.written["last_checked_at"] == result.checked_at

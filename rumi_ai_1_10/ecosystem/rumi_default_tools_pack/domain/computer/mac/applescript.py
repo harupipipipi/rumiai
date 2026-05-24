@@ -101,6 +101,8 @@ def send_key_combo(app: str, key_combo: str) -> bool:
     script = f'tell application "{app}" to activate\n'
     if using:
         script += f'tell application "System Events" to key code {_key_code(key)} using {{{using}}}'
+    elif _is_special_key(key):
+        script += f'tell application "System Events" to key code {_key_code(key)}'
     else:
         script += f'tell application "System Events" to keystroke "{_escape(key)}"'
     return _run_osascript(script)
@@ -223,8 +225,10 @@ def _escape(s: str) -> str:
 def _key_code(key: str) -> str:
     """Map a key name to an AppleScript key code number."""
     codes: dict[str, int] = {
-        "return": 36, "enter": 36, "tab": 48, "space": 49,
-        "delete": 51, "escape": 53, "esc": 53,
+        "return": 36, "enter": 36, "retrun": 36, "retun": 36, "newline": 36,
+        "tab": 48, "space": 49,
+        "delete": 51, "del": 51, "backspace": 51, "forward_delete": 117,
+        "escape": 53, "esc": 53,
         "left": 123, "right": 124, "down": 125, "up": 126,
         "a": 0, "b": 11, "c": 8, "d": 2, "e": 14, "f": 3,
         "g": 5, "h": 4, "i": 34, "j": 38, "k": 40, "l": 37,
@@ -233,3 +237,25 @@ def _key_code(key: str) -> str:
         "y": 16, "z": 6,
     }
     return str(codes.get(key.lower(), 0))
+
+
+def _is_special_key(key: str) -> bool:
+    return key.strip().lower() in {
+        "return",
+        "enter",
+        "retrun",
+        "retun",
+        "newline",
+        "tab",
+        "space",
+        "delete",
+        "del",
+        "backspace",
+        "forward_delete",
+        "escape",
+        "esc",
+        "left",
+        "right",
+        "down",
+        "up",
+    }

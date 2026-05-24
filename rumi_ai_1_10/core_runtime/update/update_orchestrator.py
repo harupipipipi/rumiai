@@ -7,7 +7,7 @@ from typing import Any, Mapping
 from ..pack_seed import utc_now_iso
 from .core_update_manager import CoreUpdateError, CoreUpdateManager
 from .models import AutoUpdateRunResult, CoreUpdateResult
-from .pack_update_manager import PackUpdateError, PackUpdateManager, normalize_update_preferences
+from .pack_update_manager import OFFICIAL_PACK_IDS, PackUpdateError, PackUpdateManager, normalize_update_preferences
 
 
 class UpdateOrchestrator:
@@ -173,28 +173,42 @@ class UpdateOrchestrator:
 
         if auto_update.get("core") is True:
             try:
-                check = self.core_manager.check_core(channel=str(channels.get("core", "stable")))
-                if not check.update_available:
-                    results.append({**check.to_dict(), "status": "up_to_date"})
+                core_check = self.core_manager.check_core(channel=str(channels.get("core", "stable")))
+                if not core_check.update_available:
+                    results.append({**core_check.to_dict(), "status": "up_to_date"})
                 else:
-                    applied = self.core_manager.apply_core(channel=str(channels.get("core", "stable")))
-                    results.append({**applied.to_dict(), "status": "applied"})
+                    core_result = self.core_manager.apply_core(channel=str(channels.get("core", "stable")))
+                    results.append({**core_result.to_dict(), "status": "applied"})
             except Exception as exc:
                 results.append({"target": "core", "status": "error", "error": str(exc), "restart_required": True})
 
-        if auto_update.get("official_packs") is True:
+        if auto_update.get("official_packs") is True or auto_update.get("third_party_packs") is True:
             pack_channel = str(channels.get("packs", "stable"))
-            for check in self.pack_manager.check_all(channel=pack_channel):
-                if not check.update_available:
-                    results.append({**check.to_dict(), "status": "up_to_date"})
+            for pack_check in self.pack_manager.check_all(channel=pack_channel):
+                if pack_check.pack_id not in OFFICIAL_PACK_IDS:
+                    results.append({
+                        **pack_check.to_dict(),
+                        "status": "manual_required" if pack_check.update_available or auto_update.get("third_party_packs") is True else "skipped",
+                        "error": "Third-party pack auto-updates are not supported.",
+                    })
+                    continue
+                if auto_update.get("official_packs") is not True:
+                    results.append({**pack_check.to_dict(), "status": "skipped"})
+                    continue
+                if not pack_check.update_available:
+                    results.append({**pack_check.to_dict(), "status": "up_to_date"})
                     continue
                 try:
-                    applied = self.pack_manager.apply_pack(check.pack_id, channel=pack_channel)
-                    results.append({**applied.to_dict(), "status": "applied"})
+                    pack_result = self.pack_manager.apply_pack(pack_check.pack_id, channel=pack_channel)
+                    results.append({**pack_result.to_dict(), "status": "applied"})
                 except Exception as exc:
-                    results.append({**check.to_dict(), "status": "error", "error": str(exc)})
+                    results.append({**pack_check.to_dict(), "status": "error", "error": str(exc)})
 
-        if auto_update.get("third_party_packs") is True:
+        if auto_update.get("third_party_packs") is True and not any(
+            isinstance(item, dict) and str(item.get("target") or "").startswith("pack:")
+            and str(item.get("pack_id") or "").strip() not in OFFICIAL_PACK_IDS
+            for item in results
+        ):
             results.append({
                 "target": "third_party_packs",
                 "status": "manual_required",

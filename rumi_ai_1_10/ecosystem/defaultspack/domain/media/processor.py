@@ -69,12 +69,32 @@ def parse_document(path):
 
 
 def read_clipboard():
-    """クリップボードを読み取る（スタブ実装）。
+    """クリップボードを読み取る。
 
     Returns:
-        str: クリップボードの内容（スタブでは空文字列）
+        str: クリップボードの内容
     """
-    return ""
+    if sys.platform == "darwin":
+        completed = subprocess.run(["pbpaste"], capture_output=True, text=True, check=True)
+        return completed.stdout
+    if os.name == "nt":
+        completed = subprocess.run(
+            ["powershell", "-NoProfile", "-Command", "Get-Clipboard -Raw"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return completed.stdout
+    for command in ("wl-paste", "xclip", "xsel"):
+        if shutil.which(command):
+            args = [command]
+            if command == "xclip":
+                args.extend(["-selection", "clipboard", "-out"])
+            elif command == "xsel":
+                args.extend(["--clipboard", "--output"])
+            completed = subprocess.run(args, capture_output=True, text=True, check=True)
+            return completed.stdout
+    raise RuntimeError("system clipboard reader is not available")
 
 
 def write_clipboard(content):

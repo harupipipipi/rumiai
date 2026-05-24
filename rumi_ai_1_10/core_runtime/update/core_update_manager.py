@@ -46,14 +46,17 @@ CORE_PROTECTED_PATTERNS = (
     "settings/**",
     "update_state",
     "update_state/**",
-    "ecosystem",
-    "ecosystem/**",
+    "ecosystem/defaultspack",
+    "ecosystem/defaultspack/**",
     "pack_seeds",
     "pack_seeds/**",
+    "secrets",
+    "secrets/**",
     ".env",
     ".env.*",
     "*.local.*",
 )
+CORE_BACKUP_PATHS = ("app.py", "backend_core", "core_runtime", "pyproject.toml", "requirements.txt")
 
 
 class CoreUpdateError(RuntimeError):
@@ -237,7 +240,7 @@ class CoreUpdateManager:
             if not path.is_file():
                 continue
             rel = path.relative_to(root).as_posix()
-            if _path_matches_any(rel, CORE_PROTECTED_PATTERNS):
+            if _core_path_protected(rel):
                 raise CoreUpdateError(f"core update contains protected path: {rel}")
 
     def _copy_core_overlay(self, src: Path) -> list[str]:
@@ -246,7 +249,7 @@ class CoreUpdateManager:
             if not path.is_file():
                 continue
             rel = path.relative_to(src).as_posix()
-            if _path_matches_any(rel, CORE_PROTECTED_PATTERNS):
+            if _core_path_protected(rel):
                 continue
             dest = self.base_dir / rel
             dest.parent.mkdir(parents=True, exist_ok=True)
@@ -259,7 +262,7 @@ class CoreUpdateManager:
         backup_dir = self.update_state_dir / "backups" / ts
         backup_dir.parent.mkdir(parents=True, exist_ok=True)
         backup_dir.mkdir(exist_ok=False)
-        for rel_name in ("app.py", "core_runtime", "pyproject.toml", "requirements.txt"):
+        for rel_name in CORE_BACKUP_PATHS:
             src = self.base_dir / rel_name
             if src.is_dir():
                 shutil.copytree(src, backup_dir / rel_name, symlinks=False)
@@ -303,3 +306,12 @@ def _path_matches_any(rel: str, patterns: tuple[str, ...]) -> bool:
         if pattern.endswith("/**") and rel == pattern[:-3]:
             return True
     return False
+
+
+def _core_path_protected(rel: str) -> bool:
+    parts = Path(rel).parts
+    if any(part == "secrets" for part in parts):
+        return True
+    if parts and (parts[-1] == ".env" or parts[-1].startswith(".env.")):
+        return True
+    return _path_matches_any(rel, CORE_PROTECTED_PATTERNS)

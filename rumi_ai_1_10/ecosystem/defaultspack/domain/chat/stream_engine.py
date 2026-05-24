@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import threading
 import time
+from pathlib import Path
 from typing import Any, Iterator
 
 from blocks._common import gen_id, timestamp
@@ -54,6 +55,19 @@ class _ChatCancelled(Exception):
 
 
 _APPROVAL_WAITING_TEXT = "許可が必要なため、ユーザーが承認するまで待機します。承認後に続行します。"
+
+
+def _end_computer_use_haze_sequence(run_id: str) -> None:
+    run_id = str(run_id or "").strip()
+    if not run_id:
+        return
+    try:
+        from ecosystem.rumi_default_tools_pack.domain.computer.mac.edge_haze import ComputerUseEdgeHazeManager
+
+        pack_root = Path(__file__).resolve().parents[3] / "rumi_default_tools_pack"
+        ComputerUseEdgeHazeManager.from_pack_root(pack_root).end_sequence(run_id)
+    except Exception:
+        pass
 
 
 def _tool_display_group(tool_name: str) -> dict[str, str]:
@@ -735,7 +749,10 @@ class ChatRunEngine:
             )
         finally:
             self._cancel_event.set()
-            cancellation_registry.unregister(prepared.conversation_id, request_cancel)
+            try:
+                _end_computer_use_haze_sequence(self._run_id)
+            finally:
+                cancellation_registry.unregister(prepared.conversation_id, request_cancel)
 
     def _process_conversation_steer(self, conversation_id: str, context: dict[str, Any]) -> list[dict[str, Any]]:
         try:

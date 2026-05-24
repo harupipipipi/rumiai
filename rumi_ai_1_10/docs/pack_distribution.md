@@ -50,3 +50,15 @@ Release scripts:
 - `scripts/generate_pack_index.py`
 
 Signatures use Ed25519. Clients receive only public keys through the bundled `core_runtime/update/official_trust_roots.json`; release CI uses `RUMI_UPDATE_ED25519_PRIVATE_KEY_B64` to sign bundles and indexes. Core updates and official packs such as `defaultspack` verify only against bundled official keys. User-data `pack_state/trust_roots.json` may add third-party pack keys for manually configured pack sources, but those keys cannot authorize core updates or replace bundled official key ids.
+
+## Official Trust Roots In Source Checkouts
+
+The repository version of `core_runtime/update/official_trust_roots.json` is intentionally empty. Source checkouts and unsigned development builds may therefore fail official pack/core update verification with `unknown trust root`. Release builds must inject the official Ed25519 public key before packaging, and release artifact generation must sign indexes and bundles with the matching private key.
+
+Required release secrets:
+
+- `RUMI_UPDATE_ED25519_KEY_ID`
+- `RUMI_UPDATE_ED25519_PUBLIC_KEY_B64`
+- `RUMI_UPDATE_ED25519_PRIVATE_KEY_B64`
+- `RUMI_VIEWER_UPDATER_PUBKEY`
+- `TAURI_SIGNING_PRIVATE_KEY`

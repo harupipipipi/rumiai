@@ -16,6 +16,7 @@ Rumi uses three update layers with separate ownership and rollback boundaries.
 - Pack activation is atomic: `current.json` is updated only after signed index verification, download, checksum, Ed25519 bundle signature verification, extraction, manifest validation, compatibility checks, and copy into `versions/<version>` succeed.
 - Core updates also require signed indexes and signed bundles before extraction. Clients only ship public keys; release CI holds the private signing key.
 - Broken pack updates leave the active `current.json` unchanged.
+- The source-tree `core_runtime/update/official_trust_roots.json` is empty by design. Official update verification in dev/source builds can fail until release CI injects `RUMI_UPDATE_ED25519_PUBLIC_KEY_B64`; the matching private key must remain only in release secrets.
 
 ## Runtime Defaultspack
 

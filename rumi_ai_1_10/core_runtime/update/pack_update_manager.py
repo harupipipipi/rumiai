@@ -252,14 +252,26 @@ class PackUpdateManager:
     def run_auto_updates_once(self, force: bool = False) -> AutoUpdateRunResult:
         settings = self.read_update_preferences()
         official_enabled = settings["auto_update"].get("official_packs") is True
-        if not official_enabled:
+        third_party_enabled = settings["auto_update"].get("third_party_packs") is True
+        if not official_enabled and not third_party_enabled:
             return AutoUpdateRunResult([], False, settings.get("last_checked_at"), list(settings.get("last_results") or []), "disabled")
         if not force and not self._auto_update_due(settings):
-            return AutoUpdateRunResult(["official_packs"], False, settings.get("last_checked_at"), list(settings.get("last_results") or []), "interval")
+            enabled = [name for name, enabled in (("official_packs", official_enabled), ("third_party_packs", third_party_enabled)) if enabled]
+            return AutoUpdateRunResult(enabled, False, settings.get("last_checked_at"), list(settings.get("last_results") or []), "interval")
 
         results: list[dict[str, Any]] = []
         checked_at = utc_now_iso()
         for check in self.check_all(channel=str(settings["channels"].get("packs", "stable"))):
+            if check.pack_id not in OFFICIAL_PACK_IDS:
+                results.append({
+                    **check.to_dict(),
+                    "status": "manual_required" if check.update_available or third_party_enabled else "skipped",
+                    "error": "Third-party pack auto-updates are not supported.",
+                })
+                continue
+            if not official_enabled:
+                results.append({**check.to_dict(), "status": "skipped"})
+                continue
             if not check.update_available:
                 results.append({**check.to_dict(), "status": "up_to_date"})
                 continue
@@ -270,7 +282,8 @@ class PackUpdateManager:
                 results.append({**check.to_dict(), "status": "error", "error": str(exc)})
         updated = {**settings, "last_checked_at": checked_at, "last_results": results}
         self.write_update_preferences(updated)
-        return AutoUpdateRunResult(["official_packs"], True, checked_at, results)
+        enabled = [name for name, enabled in (("official_packs", official_enabled), ("third_party_packs", third_party_enabled)) if enabled]
+        return AutoUpdateRunResult(enabled, True, checked_at, results)
 
     def install_extracted_pack(
         self,
@@ -437,7 +450,7 @@ class PackUpdateManager:
         source_metadata: Mapping[str, Any] | None = None,
     ) -> None:
         pack_id = validate_pack_id(pack_id)
-        record = {
+        record: dict[str, Any] = {
             "schema": "rumi.pack_install_record.v1",
             "pack_id": pack_id,
             "version": version,

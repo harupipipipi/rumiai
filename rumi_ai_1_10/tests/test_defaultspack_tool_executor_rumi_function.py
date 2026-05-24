@@ -220,6 +220,37 @@ def test_tool_executor_approval_token_can_come_from_execution_context():
     assert request["context"]["_tool_server_approved"] is True
 
 
+def test_context_approval_token_mismatch_requests_fresh_computer_use_approval():
+    from domain.safety import approval
+    from domain.tool.executor import ToolExecutor
+
+    approval.reset_approval_state_for_tests()
+    original_args = {"action": "context"}
+    first = ToolExecutor()._execute_rumi_function(
+        _computer_control_tool_def("computer_use"),
+        original_args,
+        {"principal_id": "defaultspack", "capability_executor": _caller_requires_denied_executor()},
+    )
+    decision = approval.approve(first["widget"]["approval_request_id"])
+    assert decision["approved"] is True
+
+    result = ToolExecutor()._execute_rumi_function(
+        _computer_control_tool_def("computer_use"),
+        {"action": "show_app", "app": "Google Chrome"},
+        {
+            "principal_id": "defaultspack",
+            "capability_executor": _caller_requires_denied_executor(),
+            "tool_approval_tokens": {"computer_use": decision["token"]},
+        },
+    )
+
+    assert result["is_error"] is False
+    assert result["widget"]["type"] == "approval_request"
+    assert result["widget"]["tool_name"] == "computer_use"
+    assert result["widget"]["payload"] == {"action": "show_app", "app": "Google Chrome"}
+    assert result["widget"]["approval_request_id"] != first["widget"]["approval_request_id"]
+
+
 def test_tool_executor_falls_back_to_local_browser_computer_with_server_approval(monkeypatch):
     from domain.tool.executor import ToolExecutor
 
@@ -276,6 +307,19 @@ def test_tool_executor_falls_back_to_local_computer_use_with_yolo_policy(monkeyp
     assert result["is_error"] is False
     assert captured["tool_name"] == "computer_use"
     assert captured["arguments"] == {"action": "context"}
+
+
+def test_computer_use_context_adds_haze_sequence_id():
+    from domain.tool.executor import _computer_use_payload_with_context_defaults
+
+    payload = _computer_use_payload_with_context_defaults(
+        "computer.key",
+        {"key": "return"},
+        {"run_id": "run_abc", "computer_use_target_app": "Google Chrome"},
+    )
+
+    assert payload["computer_use_haze_sequence_id"] == "run_abc"
+    assert payload["app"] == "Google Chrome"
 
 
 def test_sandbox_exec_ignores_client_supplied_approval_flags(tmp_path):
