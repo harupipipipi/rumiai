@@ -446,6 +446,32 @@ def test_model_pack_does_not_silently_pick_text_model_for_images():
     assert "no_model_pack_member_satisfied_capabilities" in result.warnings
 
 
+def test_model_pack_explicit_image_condition_allows_unknown_capability_member():
+    settings = {
+        "model_packs": [
+            {
+                "id": "conditional",
+                "members": [
+                    {"model": "plain/text", "conditions": {"has_images": False}},
+                    {"model": "vision/omni", "conditions": {"has_images": True}},
+                ],
+            }
+        ],
+        "preferred_model_group": "default",
+        "model_groups": {"default": {"allowed_models": []}},
+    }
+
+    selection = ModelPackStore(settings).get("modelpack/conditional")
+    assert selection is not None
+    from domain.ai_client.model_pack_router import select_model_pack
+
+    result = select_model_pack(selection, {"has_images": True}, settings=settings, profiles=[])
+
+    assert result is not None
+    assert result.selected_model == "vision/omni"
+    assert [member["model"] for member in result.ordered_members] == ["vision/omni"]
+
+
 def test_model_pack_fallback_chain(monkeypatch, tmp_path):
     settings_path = tmp_path / "frontend_settings.json"
     settings_path.write_text(

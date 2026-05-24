@@ -108,16 +108,20 @@ def _member_matches(
     *,
     profiles: list[dict[str, Any]] | None = None,
 ) -> bool:
-    capabilities = get_model_capabilities(member.model, profiles=profiles) or {}
+    raw_capabilities = get_model_capabilities(member.model, profiles=profiles)
+    capabilities = raw_capabilities if isinstance(raw_capabilities, dict) else {}
+    capabilities_known = _capabilities_known(capabilities)
+    conditions = member.conditions if isinstance(member.conditions, dict) else {}
     if request.has_images and not bool(capabilities.get("supports_image_input") or capabilities.get("supports_vision")):
-        return False
+        if capabilities_known or not _condition_declares(conditions, "has_images", "requires_vision"):
+            return False
     if request.requires_tool_calling and not bool(capabilities.get("supports_tool_calling")):
-        return False
+        if capabilities_known or not _condition_declares(conditions, "has_tools", "requires_tools"):
+            return False
     if request.requires_fast and not bool(capabilities.get("supports_fast")):
         return False
     if str(request.requested_thinking_level or "").strip() not in {"", "none"} and not bool(capabilities.get("supports_thinking")):
         return False
-    conditions = member.conditions if isinstance(member.conditions, dict) else {}
     if "has_images" in conditions and bool(conditions.get("has_images")) != bool(request.has_images):
         return False
     if "requires_vision" in conditions and bool(conditions.get("requires_vision")) != bool(request.has_images):
@@ -142,6 +146,25 @@ def _member_matches(
         if options and actual_type not in options:
             return False
     return True
+
+
+def _capabilities_known(capabilities: dict[str, Any]) -> bool:
+    if not isinstance(capabilities, dict) or not capabilities:
+        return False
+    return any(
+        key in capabilities
+        for key in {
+            "supports_image_input",
+            "supports_vision",
+            "supports_tool_calling",
+            "supports_fast",
+            "supports_thinking",
+        }
+    )
+
+
+def _condition_declares(conditions: dict[str, Any], *keys: str) -> bool:
+    return any(key in conditions and bool(conditions.get(key)) for key in keys)
 
 
 def _model_matches(
