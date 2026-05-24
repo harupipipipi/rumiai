@@ -5,11 +5,13 @@ import {
   addPackToStartupProfile,
   apiFetch,
   bootstrapPanelSession,
+  checkViewerUpdate,
   clearStartupProfileNodeOverride,
   compileStartupProfilePreview,
   createStartupProfile,
   fetchBackgroundControlStatus,
   hasPendingPanelBootstrapCode,
+  installViewerUpdate,
   isDesktopShellAvailable,
   openExternalUrl,
   sendToBackground,
@@ -93,6 +95,17 @@ function installBrowser(href: string): MemoryStorage {
                   visible: false,
                 },
               ],
+            };
+          }
+          if (command === 'check_viewer_update' || command === 'install_viewer_update') {
+            return {
+              current_version: '0.1.0',
+              latest_version: '0.2.0',
+              notes: 'notes',
+              pub_date: '2026-05-24T00:00:00Z',
+              available: true,
+              error: null,
+              progress: command === 'install_viewer_update' ? 1 : null,
             };
           }
           throw new Error(`Unknown command: ${command}`);
@@ -391,6 +404,15 @@ test('desktop shell helpers expose background control commands', async () => {
   assert.equal(status?.windows[0]?.label, 'main');
   assert.equal(tauriSendToBackgroundCount, 1);
   assert.equal(tauriShowAppWindowCount, 1);
+});
+
+test('viewer update helpers call Tauri commands', async () => {
+  const check = await checkViewerUpdate();
+  const install = await installViewerUpdate();
+
+  assert.equal(check?.available, true);
+  assert.equal(check?.latest_version, '0.2.0');
+  assert.equal(install.progress, 1);
 });
 
 test('startup profile wrappers use v3 payloads and endpoints', async () => {

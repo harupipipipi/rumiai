@@ -17,6 +17,8 @@ import {
   fetchUpdateSettings,
   updateUpdateSettings,
   applyUpdate as apiApplyUpdate,
+  rollbackPackUpdate as apiRollbackPackUpdate,
+  checkViewerUpdate,
   openExternalUrl,
   startOAuth,
 } from './lib/api';
@@ -108,7 +110,8 @@ export interface VersionInfo {
   };
 }
 
-export type UpdateTarget = 'rumiai' | 'defaultspack';
+export type UpdateTarget = 'viewer' | 'core' | `pack:${string}` | 'rumiai' | 'defaultspack';
+export type AutoUpdateTarget = 'viewer' | 'core' | 'official_packs' | 'third_party_packs';
 
 export interface UpdateInfo {
   target: UpdateTarget;
@@ -117,6 +120,11 @@ export interface UpdateInfo {
   updateAvailable: boolean;
   releaseUrl: string;
   repo: string;
+  staged: boolean;
+  restartRequired: boolean;
+  routesReloadRecommended: boolean;
+  rollbackAvailable: boolean;
+  errors: string[];
 }
 
 export type RuntimeStatus = 'starting' | 'panel_ready' | 'runtime_ready' | 'error';
@@ -174,14 +182,15 @@ interface AppState {
   version: VersionInfo;
   loadVersion: () => Promise<void>;
   updates: UpdateInfo[];
-  autoUpdate: Record<UpdateTarget, boolean>;
+  autoUpdate: Record<AutoUpdateTarget, boolean>;
   updatesLoading: boolean;
   updateSettingsLoading: boolean;
   updateApplyingTarget: UpdateTarget | null;
   loadUpdates: () => Promise<void>;
   loadUpdateSettings: () => Promise<void>;
-  setAutoUpdate: (target: UpdateTarget, enabled: boolean) => Promise<void>;
+  setAutoUpdate: (target: AutoUpdateTarget, enabled: boolean) => Promise<void>;
   applyUpdate: (target: UpdateTarget) => Promise<void>;
+  rollbackUpdate: (target: UpdateTarget) => Promise<void>;
 }
 
 const defaultDashboard: DashboardData = {
@@ -214,19 +223,29 @@ const defaultVersion: VersionInfo = {
 
 function transformUpdateInfo(update: {
   target: UpdateTarget;
-  current_version: string;
-  latest_version: string;
-  update_available: boolean;
-  release_url: string;
-  repo: string;
+  current_version?: string | null;
+  latest_version?: string | null;
+  update_available?: boolean;
+  release_url?: string;
+  repo?: string;
+  staged?: boolean;
+  restart_required?: boolean;
+  routes_reload_recommended?: boolean;
+  rollback_available?: boolean;
+  errors?: string[];
 }): UpdateInfo {
   return {
     target: update.target,
-    currentVersion: update.current_version,
-    latestVersion: update.latest_version,
-    updateAvailable: update.update_available,
-    releaseUrl: update.release_url,
-    repo: update.repo,
+    currentVersion: update.current_version ?? '--',
+    latestVersion: update.latest_version ?? '--',
+    updateAvailable: update.update_available ?? false,
+    releaseUrl: update.release_url ?? '',
+    repo: update.repo ?? '',
+    staged: update.staged ?? false,
+    restartRequired: update.restart_required ?? false,
+    routesReloadRecommended: update.routes_reload_recommended ?? false,
+    rollbackAvailable: update.rollback_available ?? false,
+    errors: update.errors ?? [],
   };
 }
 
@@ -487,7 +506,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   updates: [],
-  autoUpdate: { rumiai: false, defaultspack: false },
+  autoUpdate: { viewer: false, core: false, official_packs: false, third_party_packs: false },
   updatesLoading: false,
   updateSettingsLoading: false,
   updateApplyingTarget: null,
@@ -496,7 +515,19 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ updatesLoading: true });
     try {
       const data = await fetchUpdates();
-      set({ updates: data.updates.map(transformUpdateInfo), updatesLoading: false });
+      const updates = data.updates.map(transformUpdateInfo);
+      const viewer = await checkViewerUpdate();
+      if (viewer) {
+        updates.unshift(transformUpdateInfo({
+          target: 'viewer',
+          current_version: viewer.current_version,
+          latest_version: viewer.latest_version,
+          update_available: viewer.available,
+          restart_required: viewer.available,
+          errors: viewer.error ? [viewer.error] : [],
+        }));
+      }
+      set({ updates, updatesLoading: false });
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Failed to check updates';
       set({ updatesLoading: false });
@@ -543,6 +574,20 @@ export const useAppStore = create<AppState>((set, get) => ({
       get().addToast(`Update applied: ${target}.${suffix}`, 'success');
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Failed to apply update';
+      get().addToast(msg, 'error');
+    } finally {
+      set({ updateApplyingTarget: null });
+    }
+  },
+
+  rollbackUpdate: async (target) => {
+    set({ updateApplyingTarget: target });
+    try {
+      await apiRollbackPackUpdate(target);
+      await get().loadUpdates();
+      get().addToast(`Rollback applied: ${target}. Restart the Kernel to reload routes.`, 'success');
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Failed to rollback update';
       get().addToast(msg, 'error');
     } finally {
       set({ updateApplyingTarget: null });

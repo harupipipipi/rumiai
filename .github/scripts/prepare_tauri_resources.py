@@ -152,6 +152,26 @@ def copy_generated_resource_dirs(source_root: Path, dest_root: Path) -> int:
     return copied
 
 
+def stage_defaultspack_seed(source_root: Path, dest_root: Path) -> int:
+    src_dir = source_root / "ecosystem" / "defaultspack"
+    if not src_dir.exists():
+        return 0
+    dest_seed = dest_root / "pack_seeds" / "defaultspack"
+    if dest_seed.exists():
+        shutil.rmtree(dest_seed)
+    copied = 0
+    for src in src_dir.rglob("*"):
+        if not src.is_file():
+            continue
+        rel_under_app = src.relative_to(source_root).as_posix()
+        if should_skip_source_rel(rel_under_app):
+            continue
+        rel_under_seed = src.relative_to(src_dir)
+        copy_file(src, dest_seed / rel_under_seed)
+        copied += 1
+    return copied
+
+
 def is_windows_target(target: str) -> bool:
     return "windows" in target or target.endswith("-msvc")
 
@@ -340,6 +360,7 @@ def validate_bundle(dest_root: Path, require_runtime_tools: bool, target: str | 
         Path("app.py"),
         Path("requirements.txt"),
         Path("core_runtime/core_pack/core_control_panel/web/index.html"),
+        Path("pack_seeds/defaultspack/ecosystem.json"),
         Path("ecosystem/defaultspack/ecosystem.json"),
         Path("ecosystem/defaultspack/ui/shell.html"),
         Path("ecosystem/defaultspack/ui/shell-app.js"),
@@ -410,12 +431,14 @@ def main() -> int:
 
     tracked_count = copy_tracked_runtime_files(repo_root, source_root, dest_root)
     generated_count = copy_generated_resource_dirs(source_root, dest_root)
+    seed_count = stage_defaultspack_seed(source_root, dest_root)
 
     validate_bundle(dest_root, args.require_runtime_tools, args.target)
     print(
         "Prepared "
         f"{APP_RESOURCE_DIR} "
         f"({tracked_count} tracked files, {generated_count} generated files, "
+        f"{seed_count} seed files, "
         f"{format_size(directory_size(dest_root))})"
     )
     return 0

@@ -48,6 +48,12 @@ _PROTECTED_BY_TARGET: dict[UpdateTarget, tuple[str, ...]] = {
         "user_data/**",
         "ecosystem",
         "ecosystem/**",
+        "pack_seeds",
+        "pack_seeds/**",
+        "packs",
+        "packs/**",
+        "pack_state",
+        "pack_state/**",
         "bundled",
         "bundled/**",
     ),
@@ -207,6 +213,9 @@ class GitHubUpdateManager:
         force: bool = False,
         release: GitHubRelease | None = None,
     ) -> UpdateApplyResult:
+        if target == "defaultspack" and os.environ.get("RUMI_PACK_INDEX_URL"):
+            return self._apply_defaultspack_pack_manager(force=force)
+
         release = release or self.fetch_latest_release()
         current_version = self.current_version(target)
         with tempfile.TemporaryDirectory(prefix=f"rumi-{target}-update-") as tmp:
@@ -223,8 +232,32 @@ class GitHubUpdateManager:
                     f"{target} is already up to date ({current_version} >= {latest_version})"
                 )
             dest_dir = self._dest_dir_for_target(target)
-            if not dest_dir.exists():
+            if target != "defaultspack" and not dest_dir.exists():
                 raise GitHubUpdateError(f"Update target is missing: {dest_dir}")
+
+            if target == "defaultspack":
+                applied_result = self._install_defaultspack_source(
+                    source_dir,
+                    latest_version=latest_version,
+                    current_version=current_version,
+                    force=force,
+                    release_url=release.html_url,
+                )
+                self._audit(
+                    "github_update_applied",
+                    True,
+                    {
+                        "target": target,
+                        "repo": self.repo,
+                        "current_version": current_version,
+                        "latest_version": latest_version,
+                        "release_url": release.html_url,
+                        "backup_dir": applied_result.backup_dir,
+                        "applied_count": len(applied_result.applied_files),
+                        "skipped_count": len(applied_result.skipped_files),
+                    },
+                )
+                return applied_result
 
             plan = self.plan_overlay(target, source_dir, dest_dir)
             backup_dir = self._backup_target(target, dest_dir)
@@ -389,6 +422,14 @@ class GitHubUpdateManager:
         if target == "rumiai":
             return _read_pyproject_version(self.base_dir / "pyproject.toml") or "0.0.0"
         if target == "defaultspack":
+            try:
+                from .update.pack_update_manager import PackUpdateManager
+
+                managed_version = PackUpdateManager(managed_dir=self.user_data_dir / "packs").current_version("defaultspack")
+                if managed_version != "0.0.0":
+                    return managed_version
+            except Exception:
+                pass
             return _read_ecosystem_version(self.base_dir / "ecosystem" / "defaultspack" / "ecosystem.json") or "0.0.0"
         raise GitHubUpdateError(f"unsupported update target: {target}")
 
@@ -485,8 +526,63 @@ class GitHubUpdateManager:
         if target == "rumiai":
             return self.base_dir
         if target == "defaultspack":
-            return self.base_dir / "ecosystem" / "defaultspack"
+            return self.user_data_dir / "packs" / "defaultspack"
         raise GitHubUpdateError(f"unsupported update target: {target}")
+
+    def _apply_defaultspack_pack_manager(self, *, force: bool) -> UpdateApplyResult:
+        try:
+            from .update.pack_update_manager import PackUpdateManager
+
+            result = PackUpdateManager(managed_dir=self.user_data_dir / "packs").apply_pack(
+                "defaultspack",
+                force=force,
+            )
+        except Exception as exc:
+            raise GitHubUpdateError(str(exc)) from exc
+        return UpdateApplyResult(
+            target="defaultspack",
+            current_version=result.current_version,
+            latest_version=result.latest_version,
+            release_url=self.repo,
+            backup_dir=result.backup_dir or "",
+            applied_files=result.applied_files,
+            skipped_files=result.skipped_files,
+        )
+
+    def _install_defaultspack_source(
+        self,
+        source_dir: Path,
+        *,
+        latest_version: str,
+        current_version: str,
+        force: bool,
+        release_url: str,
+    ) -> UpdateApplyResult:
+        try:
+            from .update.pack_update_manager import PackUpdateManager
+
+            result = PackUpdateManager(managed_dir=self.user_data_dir / "packs").install_extracted_pack(
+                "defaultspack",
+                source_dir,
+                version=latest_version,
+                source_label="github-source-archive",
+                source_metadata={
+                    "source_repo": self.repo,
+                    "source_release_url": release_url,
+                },
+                force=force,
+            )
+        except Exception as exc:
+            raise GitHubUpdateError(str(exc)) from exc
+        return UpdateApplyResult(
+            target="defaultspack",
+            current_version=current_version,
+            latest_version=result.latest_version,
+            release_url=release_url,
+            backup_dir=result.backup_dir or "",
+            applied_files=result.applied_files,
+            skipped_files=result.skipped_files,
+        )
 
     @staticmethod
     def _source_version(target: UpdateTarget, source_dir: Path) -> str | None:

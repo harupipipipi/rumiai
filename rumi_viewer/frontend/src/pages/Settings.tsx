@@ -28,6 +28,7 @@ export function Settings() {
   const loadUpdateSettings = useAppStore(state => state.loadUpdateSettings);
   const setAutoUpdate = useAppStore(state => state.setAutoUpdate);
   const applyUpdate = useAppStore(state => state.applyUpdate);
+  const rollbackUpdate = useAppStore(state => state.rollbackUpdate);
   const theme = useAppStore(state => state.theme);
   const setTheme = useAppStore(state => state.setTheme);
   const colorMode = useAppStore(state => state.colorMode);
@@ -118,10 +119,84 @@ export function Settings() {
   };
 
   const themes: Theme[] = ['Rumi', 'Minimal', 'Standard', 'Rounded'];
-  const updateName = (target: UpdateTarget) => target === 'rumiai' ? 'Rumi AI' : 'defaultspack';
+  const updateName = (target: UpdateTarget) => {
+    if (target === 'viewer') return 'Viewer';
+    if (target === 'core' || target === 'rumiai') return 'Core';
+    if (target === 'defaultspack') return 'defaultspack';
+    if (target.startsWith('pack:')) return target.slice('pack:'.length);
+    return target;
+  };
+
+  const autoUpdateKey = (target: UpdateTarget) => {
+    if (target === 'viewer') return 'viewer' as const;
+    if (target === 'core' || target === 'rumiai') return 'core' as const;
+    return 'official_packs' as const;
+  };
+
+  const updateGroup = (target: UpdateTarget) => {
+    if (target === 'viewer') return 'viewer';
+    if (target === 'core' || target === 'rumiai') return 'core';
+    return 'packs';
+  };
 
   const handleApplyUpdate = async (target: UpdateTarget) => {
     await applyUpdate(target);
+  };
+
+  const renderUpdateRow = (update: typeof updates[number]) => {
+    const autoKey = autoUpdateKey(update.target);
+    const canRollback = update.target.startsWith('pack:') && update.rollbackAvailable;
+    return (
+      <div key={update.target} className="flex flex-col gap-4 rounded-lg border border-border p-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex min-w-0 flex-col gap-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-sm font-medium text-text-main">{updateName(update.target)}</span>
+            <Badge variant={update.updateAvailable ? 'default' : 'secondary'}>
+              {update.updateAvailable ? t('settings.update_available') : t('settings.up_to_date')}
+            </Badge>
+            {update.staged && <Badge variant="secondary">Staged</Badge>}
+          </div>
+          <span className="text-xs text-text-muted">
+            {update.currentVersion} → {update.latestVersion}
+          </span>
+          {update.errors.length > 0 && (
+            <span className="text-xs text-red-400">{update.errors[0]}</span>
+          )}
+        </div>
+        <div className="flex flex-wrap items-center gap-3">
+          <label className="flex items-center gap-2 text-xs text-text-muted cursor-pointer">
+            <Switch
+              checked={autoUpdate[autoKey]}
+              disabled={updateSettingsLoading || autoKey === 'viewer'}
+              onCheckedChange={(checked) => setAutoUpdate(autoKey, checked)}
+            />
+            {t('settings.auto_update')}
+          </label>
+          {canRollback && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => rollbackUpdate(update.target)}
+              disabled={updateApplyingTarget !== null || updatesLoading}
+              loading={updateApplyingTarget === update.target}
+            >
+              <RefreshCw className="h-3.5 w-3.5" />
+              {t('settings.rollback_update')}
+            </Button>
+          )}
+          <Button
+            variant={update.updateAvailable ? 'default' : 'outline'}
+            size="sm"
+            onClick={() => handleApplyUpdate(update.target)}
+            disabled={!update.updateAvailable || updateApplyingTarget !== null || updatesLoading}
+            loading={updateApplyingTarget === update.target}
+          >
+            <DownloadCloud className="h-3.5 w-3.5" />
+            {t('settings.apply_update')}
+          </Button>
+        </div>
+      </div>
+    );
   };
 
   return (
@@ -451,53 +526,47 @@ export function Settings() {
             )}
 
             {/* Updates */}
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <h2 className="text-lg font-semibold text-text-main">{t('settings.updates')}</h2>
+                <p className="mt-1 text-sm text-text-muted">{t('settings.updates_desc')}</p>
+              </div>
+              <Button variant="outline" size="sm" onClick={() => loadUpdates()} disabled={updatesLoading} loading={updatesLoading}>
+                <RefreshCw className="h-3.5 w-3.5" />
+                {t('settings.check_updates')}
+              </Button>
+            </div>
+
             <Card>
-              <CardHeader className="flex-row items-center justify-between space-y-0">
-                <div>
-                  <CardTitle>{t('settings.updates')}</CardTitle>
-                  <CardDescription>{t('settings.updates_desc')}</CardDescription>
-                </div>
-                <Button variant="outline" size="sm" onClick={() => loadUpdates()} disabled={updatesLoading} loading={updatesLoading}>
-                  <RefreshCw className="h-3.5 w-3.5" />
-                  {t('settings.check_updates')}
-                </Button>
+              <CardHeader>
+                <CardTitle>{t('settings.viewer_update')}</CardTitle>
+                <CardDescription>{t('settings.viewer_update_desc')}</CardDescription>
               </CardHeader>
               <CardContent className="space-y-3">
-                {updates.map((update) => (
-                  <div key={update.target} className="flex flex-col gap-4 rounded-lg border border-border p-4 sm:flex-row sm:items-center sm:justify-between">
-                    <div className="flex min-w-0 flex-col gap-1">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="text-sm font-medium text-text-main">{updateName(update.target)}</span>
-                        <Badge variant={update.updateAvailable ? 'default' : 'secondary'}>
-                          {update.updateAvailable ? t('settings.update_available') : t('settings.up_to_date')}
-                        </Badge>
-                      </div>
-                      <span className="text-xs text-text-muted">
-                        {update.currentVersion} → {update.latestVersion}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-4">
-                      <label className="flex items-center gap-2 text-xs text-text-muted cursor-pointer">
-                        <Switch
-                          checked={autoUpdate[update.target]}
-                          disabled={updateSettingsLoading}
-                          onCheckedChange={(checked) => setAutoUpdate(update.target, checked)}
-                        />
-                        {t('settings.auto_update')}
-                      </label>
-                      <Button
-                        variant={update.updateAvailable ? 'default' : 'outline'}
-                        size="sm"
-                        onClick={() => handleApplyUpdate(update.target)}
-                        disabled={!update.updateAvailable || updateApplyingTarget !== null || updatesLoading}
-                        loading={updateApplyingTarget === update.target}
-                      >
-                        <DownloadCloud className="h-3.5 w-3.5" />
-                        {t('settings.apply_update')}
-                      </Button>
-                    </div>
-                  </div>
-                ))}
+                {updates.filter((update) => updateGroup(update.target) === 'viewer').map(renderUpdateRow)}
+                {updates.filter((update) => updateGroup(update.target) === 'viewer').length === 0 && (
+                  <span className="text-sm text-text-muted">{t('settings.not_installed')}</span>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>{t('settings.core_update')}</CardTitle>
+                <CardDescription>{t('settings.core_update_desc')}</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {updates.filter((update) => updateGroup(update.target) === 'core').map(renderUpdateRow)}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>{t('settings.pack_updates')}</CardTitle>
+                <CardDescription>{t('settings.pack_updates_desc')}</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {updates.filter((update) => updateGroup(update.target) === 'packs').map(renderUpdateRow)}
               </CardContent>
             </Card>
           </div>

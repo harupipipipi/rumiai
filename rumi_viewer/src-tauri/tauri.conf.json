@@ -31,6 +31,7 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "createUpdaterArtifacts": true,
     "resources": {
       "./gen/app": "app"
     },
@@ -49,5 +50,16 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ]
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "RUMI_VIEWER_UPDATER_PUBKEY_NOT_CONFIGURED",
+      "endpoints": [
+        "https://github.com/harupipipipi/rumiai/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }

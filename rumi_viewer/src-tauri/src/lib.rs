@@ -785,6 +785,12 @@ pub fn run() {
                 })
                 .build(),
         )
+        .plugin(tauri_plugin_process::init())
+        .plugin(
+            tauri_plugin_updater::Builder::new()
+                .pubkey(updater::configured_updater_pubkey())
+                .build(),
+        )
         .setup(move |app| {
             let resource_dir = app
                 .path()
@@ -926,6 +932,8 @@ pub fn run() {
             send_to_background,
             show_app_window,
             get_background_control_status,
+            updater::check_viewer_update,
+            updater::install_viewer_update,
             dock_registration::register_defaultspack_dock,
             dock_registration::launch_defaultspack_desktop
         ])

@@ -301,6 +301,15 @@ class PipInstaller:
             ts_str = ts_str[:-1] + "+00:00"
         return datetime.fromisoformat(ts_str)
 
+    def _discover_pack_locations(self, ecosystem_dir: Optional[str] = None) -> List[PackLocation]:
+        eco_dir = ecosystem_dir or self._ecosystem_dir
+        include_managed = True
+        try:
+            include_managed = Path(eco_dir).resolve() == Path(ECOSYSTEM_DIR).resolve()
+        except OSError:
+            include_managed = False
+        return discover_pack_locations(eco_dir, include_managed=include_managed)
+
     # ------------------------------------------------------------------
     # ファイル I/O
     # ------------------------------------------------------------------
@@ -420,7 +429,7 @@ class PipInstaller:
         eco_dir = ecosystem_dir or self._ecosystem_dir
 
         try:
-            locations = discover_pack_locations(eco_dir)
+            locations = self._discover_pack_locations(eco_dir)
         except Exception as e:
             result.errors.append(f"discover_pack_locations failed: {e}")
             return result
@@ -987,7 +996,7 @@ class PipInstaller:
 
     def _resolve_pack_subdir(self, pack_id: str) -> Optional[Path]:
         """pack_id から pack_subdir を解決"""
-        locations = discover_pack_locations(self._ecosystem_dir)
+        locations = self._discover_pack_locations(self._ecosystem_dir)
         for loc in locations:
             if loc.pack_id == pack_id:
                 return loc.pack_subdir

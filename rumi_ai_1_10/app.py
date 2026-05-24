@@ -192,6 +192,16 @@ def main():
         # 明示的に strict を設定（外部環境変数による意図しない permissive 化を防止）
         os.environ.setdefault("RUMI_SECURITY_MODE", "strict")
 
+    # Runtime packs must load from the managed user-data store.  The bundled
+    # defaultspack is only a seed/fallback and is copied before discovery.
+    try:
+        from core_runtime.pack_seed import ensure_managed_defaultspack_installed
+
+        ensure_managed_defaultspack_installed()
+    except Exception:
+        _logger.error("Failed to install managed defaultspack seed", exc_info=True)
+        raise
+
     # --- host_execution ガード (W19-A) ---
     try:
         from core_runtime.pack_validator import validate_host_execution
@@ -221,7 +231,8 @@ def main():
             global L
             L = _L
         except ImportError:
-            load_system_lang = lambda: None
+            def load_system_lang() -> None:
+                return None
 
         # Langシステム初期化
         load_system_lang()
@@ -264,9 +275,9 @@ def main():
         def _start_auto_update_thread():
             def _run_auto_updates():
                 try:
-                    from core_runtime.github_update_manager import get_github_update_manager
+                    from core_runtime.update.update_orchestrator import get_update_orchestrator
 
-                    result = get_github_update_manager().run_auto_updates_once()
+                    result = get_update_orchestrator().run_auto_updates_once()
                     if result.due:
                         _logger.info("Auto update check finished: %s", result.to_dict())
                 except Exception:
