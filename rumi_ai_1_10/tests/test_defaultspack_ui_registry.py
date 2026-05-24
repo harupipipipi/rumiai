@@ -104,6 +104,9 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         self.assertIn("operations-company", sidebar_ids)
         self.assertIn("collaboration", sidebar_ids)
         self.assertIn("share-export", sidebar_ids)
+        computer_use_item = next(item for item in catalog["sidebar"]["items"] if item["id"] == "computer_use")
+        self.assertEqual(computer_use_item["label"], "Computer Use")
+        self.assertEqual(computer_use_item["panel"]["title"], "Computer Use")
         provider_item = next(item for item in catalog["sidebar"]["items"] if item["id"] == "provider-catalog")
         self.assertEqual(provider_item["ui"]["widget_kind"], "panel")
         self.assertEqual(provider_item["ui"]["composer_action"]["type"], "open_panel")
@@ -1464,6 +1467,7 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
             {
                 "id": "oddly_named_manifest",
                 "category": "tool",
+                "display_name": "Oddly Named Display",
                 "description": "declared UI metadata",
                 "config": {
                     "name": "oddly_named_tool",
@@ -1480,6 +1484,7 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         )
 
         self.assertIsNotNone(tool)
+        self.assertEqual(tool["display_name"], "Oddly Named Display")
         self.assertEqual(
             tool["ui"],
             {
@@ -1500,6 +1505,7 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
                     {
                         "tool_id": "oddly_named_tool",
                         "name": "Oddly Named",
+                        "display_name": "Oddly Named Display",
                         "summary": "No legacy grouping keywords",
                         "tags": [],
                         "schema": {"parameters": {"type": "object", "properties": {}, "required": []}},
@@ -1520,6 +1526,8 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
 
         item = next(candidate for candidate in items if candidate["id"] == "oddly_named_tool")
 
+        self.assertEqual(item["label"], "Oddly Named Display")
+        self.assertEqual(item["panel"]["title"], "Oddly Named Display")
         self.assertEqual(item["ui"]["group_id"], "declared_group")
         self.assertEqual(item["ui"]["group_label"], "Declared Group")
         self.assertEqual(item["ui"]["drop_capabilities"], ["composer.toggle_chip"])

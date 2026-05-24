@@ -294,6 +294,7 @@ class ToolRegistry:
         tool_id = str(config.get("tool_id", manifest.get("id", ""))).strip()
         if not tool_id:
             return None
+        display_name = str(config.get("display_name", manifest.get("display_name", ""))).strip()
         ui = config.get("ui")
         if not isinstance(ui, dict):
             ui = manifest.get("ui")
@@ -350,6 +351,7 @@ class ToolRegistry:
         provisional = {
             "tool_id": tool_id,
             "name": str(config.get("name", tool_id)),
+            "display_name": display_name,
             "summary": str(config.get("summary", manifest.get("description", ""))),
             "description": str(manifest.get("description", "")),
             "tags": tags,
@@ -436,6 +438,7 @@ class ToolRegistry:
         return {
             "tool_id": tool_id,
             "name": str(config.get("name", tool_id)),
+            "display_name": display_name,
             "summary": str(config.get("summary", manifest.get("description", ""))),
             "description": str(manifest.get("description", "")),
             "tags": tags,
