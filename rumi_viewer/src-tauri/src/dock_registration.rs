@@ -5,7 +5,7 @@ use std::fs;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -14,6 +14,7 @@ use log::{error, info};
 use serde_json::Value;
 
 use crate::config::AppConfig;
+use crate::process_utils;
 
 const DEFAULTSPACK_DEFAULT_PORT: u16 = 8766;
 const DEFAULTSPACK_READY_TIMEOUT: Duration = Duration::from_secs(60);
@@ -370,10 +371,14 @@ fn create_macos_app_bundle(
     fs::write(&launch_path, &launch_script)
         .with_context(|| format!("failed to write {}", launch_path.display()))?;
 
-    // Make executable
-    let mut perms = fs::metadata(&launch_path)?.permissions();
-    perms.set_mode(0o755);
-    fs::set_permissions(&launch_path, perms)?;
+    // Make executable on Unix platforms. Windows still compiles this module,
+    // but does not support POSIX mode bits.
+    #[cfg(unix)]
+    {
+        let mut perms = fs::metadata(&launch_path)?.permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&launch_path, perms)?;
+    }
 
     Ok(app_dir)
 }
@@ -494,7 +499,7 @@ fn spawn_defaultspack_local_server(
     let kernel_command = kernel_command_for_python(&config.venv_python());
     let path = append_path_prefix(&venv_bin_dir(&config.venv_dir), std::env::var_os("PATH"))?;
 
-    let mut command = Command::new(&pack_shell);
+    let mut command = process_utils::command(&pack_shell);
     command
         .arg("run")
         .arg("defaultspack")
@@ -614,6 +619,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn shell_quote_escapes_paths_and_commands_in_launch_script() {
         let script = build_launch_script(
             Path::new("/tmp/Rumi's bin/pack-shell"),

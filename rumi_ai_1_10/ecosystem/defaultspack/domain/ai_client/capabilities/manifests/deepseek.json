@@ -1,0 +1,18 @@
+{
+  "provider_id": "deepseek",
+  "api_family": "openai_compatible",
+  "supports_stream": true,
+  "supports_tool_calling": true,
+  "supports_parallel_tool_calls": false,
+  "supports_vision": false,
+  "supports_audio": false,
+  "supports_pdf": false,
+  "supports_file_upload": false,
+  "supports_reasoning": true,
+  "supported_roles": ["system", "user", "assistant", "tool"],
+  "supported_content_blocks": ["text", "tool_call", "tool_result", "reasoning"],
+  "tool_choice_modes": ["auto", "none"],
+  "schema_support": {"json_schema": true},
+  "params": {"temperature": true, "max_tokens": true, "top_p": true},
+  "quirks": {"drop_reasoning_when_none": true, "supports_stream_usage": false}
+}

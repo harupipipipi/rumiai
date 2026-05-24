@@ -158,6 +158,26 @@ def _is_workspace_member_mutation_path(path: str, method: str | None) -> bool:
     return False
 
 
+def _header_value(headers: Any, name: str) -> str:
+    if not headers:
+        return ""
+    try:
+        value = headers.get(name, "")
+    except AttributeError:
+        value = ""
+    if value:
+        return str(value)
+    lowered = name.lower()
+    try:
+        items = headers.items()
+    except AttributeError:
+        return ""
+    for key, value in items:
+        if str(key).lower() == lowered:
+            return str(value)
+    return ""
+
+
 def require_local_guard(
     path: str,
     method: str,
@@ -169,9 +189,9 @@ def require_local_guard(
     headers = headers or {}
     if not is_loopback_request(headers, client_address):
         return (403, "sensitive local route requires a loopback client", "LOCAL_ONLY_REQUIRED")
-    origin = str(headers.get("Origin", "") or "")
+    origin = _header_value(headers, "Origin")
     if not origin_allowed(origin):
         return (403, "origin not allowed for sensitive local route", "ORIGIN_DENIED")
-    if csrf_required(method, origin) and not str(headers.get("X-Rumi-CSRF", "") or "").strip():
+    if csrf_required(method, origin) and not _header_value(headers, "X-Rumi-CSRF").strip():
         return (403, "CSRF header required for sensitive local mutation", "CSRF_REQUIRED")
     return None

@@ -226,9 +226,9 @@ class Registry:
                             )
                         else:
                             self.packs[pack_info.pack_id] = pack_info
-                            print(f"  ✓ Pack読み込み成功: {pack_info.pack_id}")
+                            print(f"  [OK] Pack読み込み成功: {pack_info.pack_id}")
                 except Exception as e:
-                    print(f"  ✗ Pack読み込みエラー ({pack_dir.name}): {e}")
+                    print(f"  [ERROR] Pack読み込みエラー ({pack_dir.name}): {e}")
         
         print(f"=== 読み込み完了: {len(self.packs)}個のPack ===\n")
         
@@ -432,12 +432,12 @@ class Registry:
                         self._type_index[component_type] = []
                     self._type_index[component_type].append(component_info)
                     
-                    print(f"      ✓ Component: {manifest['type']}:{manifest['id']}")
+                    print(f"      [OK] Component: {manifest['type']}:{manifest['id']}")
                     
                 except SchemaValidationError as e:
-                    print(f"      ✗ Component検証エラー ({component_dir.name}): {e}")
+                    print(f"      [ERROR] Component検証エラー ({component_dir.name}): {e}")
                 except Exception as e:
-                    print(f"      ✗ Component読み込みエラー ({component_dir.name}): {e}")
+                    print(f"      [ERROR] Component読み込みエラー ({component_dir.name}): {e}")
     
     def _load_addons(self, pack_info: PackInfo, addons_dir: Path):
         """
@@ -454,12 +454,12 @@ class Registry:
                 validate_addon(addon_data)
                 
                 pack_info.addons.append(addon_data)
-                print(f"      ✓ Addon: {addon_data['addon_id']}")
+                print(f"      [OK] Addon: {addon_data['addon_id']}")
                 
             except SchemaValidationError as e:
-                print(f"      ✗ Addon検証エラー ({addon_file.name}): {e}")
+                print(f"      [ERROR] Addon検証エラー ({addon_file.name}): {e}")
             except Exception as e:
-                print(f"      ✗ Addon読み込みエラー ({addon_file.name}): {e}")
+                print(f"      [ERROR] Addon読み込みエラー ({addon_file.name}): {e}")
     
 
     def _load_routes(self, pack_info: PackInfo, routes_file: Path):
@@ -524,12 +524,12 @@ class Registry:
             self._pack_routes[pack_info.pack_id] = valid_routes
             
             if valid_routes:
-                print(f"      ✓ Routes: {len(valid_routes)}個のエンドポイント")
+                print(f"      [OK] Routes: {len(valid_routes)}個のエンドポイント")
         
         except json.JSONDecodeError as e:
-            print(f"      ✗ routes.json パースエラー ({routes_file}): {e}")
+            print(f"      [ERROR] routes.json パースエラー ({routes_file}): {e}")
         except Exception as e:
-            print(f"      ✗ routes.json 読み込みエラー ({routes_file}): {e}")
+            print(f"      [ERROR] routes.json 読み込みエラー ({routes_file}): {e}")
     
     def _load_functions(self, pack_info: "PackInfo", pack_subdir: Path):
         """
@@ -662,7 +662,7 @@ class Registry:
                     manifest=manifest,
                     function_dir=func_subdir,
                 )
-                print(f"      \u2713 Function: {function_id}")
+                print(f"      [OK] Function: {function_id}")
             except Exception as exc:
                 logger.warning(
                     "[Registry] Failed to register function: pack_id=%s function_id=%s function_dir=%s error=%s",

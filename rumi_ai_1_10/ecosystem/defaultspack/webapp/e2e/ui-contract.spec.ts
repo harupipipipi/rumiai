@@ -113,6 +113,38 @@ const smokeProfile = {
   availability: { local: true, configured: true },
 };
 
+const googleProfile = {
+  profile_id: "google/gemini-2.5-flash",
+  qualified_model_id: "google/gemini-2.5-flash",
+  provider_id: "google",
+  provider_display_name: "Google",
+  model_id: "gemini-2.5-flash",
+  display_name: "Gemini 2.5 Flash",
+  max_context: 1_000_000,
+  max_context_tokens: 1_000_000,
+  supports_thinking: true,
+  supports_tool_calling: true,
+  supports_vision: true,
+  local: false,
+  availability: { configured: true },
+};
+
+const opencodeProfile = {
+  profile_id: "opencode-go/qwen3.5-plus",
+  qualified_model_id: "opencode-go/qwen3.5-plus",
+  provider_id: "opencode-go",
+  provider_display_name: "OpenCode Go",
+  model_id: "qwen3.5-plus",
+  display_name: "Qwen3.5 Plus via OpenCode Go",
+  max_context: 128_000,
+  max_context_tokens: 128_000,
+  supports_thinking: false,
+  supports_tool_calling: true,
+  supports_vision: false,
+  local: false,
+  availability: { configured: true },
+};
+
 const sidebarItems = [
   {
     id: "web_search",
@@ -156,6 +188,17 @@ const sidebarItems = [
         },
       ],
     },
+  },
+];
+
+const catalogSkills = [
+  {
+    id: "feedback/live-review",
+    label: "Live Review",
+    description: "Require evidence-backed verification.",
+    triggers: ["PR97_LIVE_REALITY_REVIEW"],
+    applies_to_tools: ["web_search"],
+    aliases: ["reality", "live-review"],
   },
 ];
 
@@ -268,6 +311,7 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
         },
         settings: { sections: [], values: settingsValues },
         chat_rendering: { renderers: [] },
+        skills: catalogSkills,
         extension_points: [],
       });
     }
@@ -303,7 +347,7 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
     }
 
     if (path === "/api/ai/profiles") {
-      return fulfill(route, { profiles: [smokeProfile], count: 1 });
+      return fulfill(route, { profiles: [smokeProfile, googleProfile, opencodeProfile], count: 3 });
     }
 
     if (path === "/api/chat/conversations" && method === "GET") {
@@ -492,6 +536,141 @@ async function openDefaultspack(page: Page, path = "/chat", options: ApiMockOpti
   await expect(page.getByText("Preview Calendar Chat").first()).toBeVisible();
 }
 
+test("tool manager search suggestions close on outside click while keeping filtered actions usable", async ({ page }) => {
+  await openDefaultspack(page);
+
+  await page.locator('button[title="Tool manager"]').click();
+  const search = page.getByPlaceholder("Tool managerで検索");
+  await search.fill("web");
+  await expect(page.getByTestId("tool-manager-candidates")).toBeVisible();
+  await expect(page.getByTestId("tool-manager-candidates")).toContainText("Web Search");
+
+  await page.getByRole("heading", { name: "Tool manager" }).click();
+  await expect(page.getByTestId("tool-manager-candidates")).toBeHidden();
+  await expect(search).toHaveValue("web");
+
+  await page.getByRole("button", { name: "表示中をON" }).click();
+  await expect(page.getByText("On", { exact: true }).locator("..")).toContainText("1");
+});
+
+test("composer at mention selects tools and skills and sends mention metadata", async ({ page }) => {
+  const streamRequests: Record<string, unknown>[] = [];
+  await openDefaultspack(page, "/chat", {
+    onStreamRequest: (payload) => streamRequests.push(payload),
+  });
+
+  const composer = page.locator("textarea.rumi-composer-textarea");
+  await composer.fill("Use @web");
+  const mentions = page.getByTestId("composer-at-mention-candidates");
+  await expect(mentions).toBeVisible();
+  await expect(mentions).toContainText("@web_search");
+
+  await page.getByRole("option", { name: /@web_search/ }).click();
+  await expect(composer).toHaveValue("Use @web_search ");
+  await expect(page.locator(".rumi-composer-frame")).toContainText("Web Search");
+
+  await composer.pressSequentially("@live");
+  await expect(mentions).toBeVisible();
+  await expect(mentions).toContainText("@feedback/live-review");
+  await page.getByRole("option", { name: /@feedback\/live-review/ }).click();
+  await expect(composer).toHaveValue("Use @web_search @feedback/live-review ");
+  await expect(page.locator(".rumi-composer-frame")).toContainText("Live Review");
+
+  await page.locator(".rumi-send-button").click();
+  await expect.poll(() => streamRequests.length).toBe(1);
+
+  const request = streamRequests[0];
+  expect(request.tools).toEqual(["web_search"]);
+  expect((request.params as Record<string, unknown>).tool_choice).toBe("required");
+
+  const message = request.message as Record<string, unknown>;
+  const metadata = message.metadata as Record<string, unknown>;
+  expect(metadata.selected_tools).toEqual(["web_search"]);
+  expect(metadata.skills).toEqual(["feedback/live-review"]);
+  expect(metadata.skill_mentions).toEqual([{ id: "feedback/live-review", label: "Live Review" }]);
+  expect(metadata.dropped_widgets).toEqual([
+    expect.objectContaining({
+      id: "web_search",
+      type: "tool",
+      label: "Web Search",
+      widgetKind: "tool_toggle",
+      sourceItemId: "web_search",
+      metadata: expect.objectContaining({
+        source: "composer_at_mention",
+        mention: { syntax: "@web_search", tool_id: "web_search" },
+        tool: expect.objectContaining({
+          id: "web_search",
+          label: "Web Search",
+          tags: ["research"],
+        }),
+      }),
+    }),
+    expect.objectContaining({
+      id: "feedback/live-review",
+      type: "skill",
+      label: "Live Review",
+      widgetKind: "skill_prompt",
+      sourceItemId: "feedback/live-review",
+      metadata: expect.objectContaining({
+        source: "composer_at_mention",
+        mention: { syntax: "@feedback/live-review", skill_id: "feedback/live-review" },
+        skill: expect.objectContaining({
+          id: "feedback/live-review",
+          label: "Live Review",
+          aliases: ["reality", "live-review"],
+        }),
+      }),
+    }),
+  ]);
+});
+
+test("resizable canvas and tool widgets persist width choices", async ({ page }) => {
+  await openDefaultspack(page);
+
+  await page.getByTitle("Canvas を開く").click();
+  const preview = page.getByLabel("Activity preview");
+  await expect(preview).toBeVisible();
+  const canvasHandle = page.getByLabel("Canvas幅を変更");
+  await expect(canvasHandle).toBeVisible();
+  const canvasBox = await canvasHandle.boundingBox();
+  expect(canvasBox).not.toBeNull();
+  await page.mouse.move(canvasBox!.x + canvasBox!.width / 2, canvasBox!.y + canvasBox!.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(canvasBox!.x - 80, canvasBox!.y + canvasBox!.height / 2, { steps: 5 });
+  await page.mouse.up();
+  await expect.poll(() => page.evaluate(() => localStorage.getItem("rumi-activity-preview-width"))).not.toBeNull();
+  const storedCanvasWidth = await page.evaluate(() => Number(localStorage.getItem("rumi-activity-preview-width")));
+  expect(storedCanvasWidth).toBeGreaterThanOrEqual(300);
+
+  await page.locator('button[title="Tool manager"]').click();
+  await expect(page.getByRole("heading", { name: "Tool manager" })).toBeVisible();
+  const toolHandle = page.getByLabel("Tool panel幅を変更");
+  await expect(toolHandle).toBeVisible();
+  const toolBox = await toolHandle.boundingBox();
+  expect(toolBox).not.toBeNull();
+  await page.mouse.move(toolBox!.x + toolBox!.width / 2, toolBox!.y + toolBox!.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(toolBox!.x - 90, toolBox!.y + toolBox!.height / 2, { steps: 5 });
+  await page.mouse.up();
+  await expect.poll(() => page.evaluate(() => localStorage.getItem("rumi-right-sidebar-panel-width"))).not.toBeNull();
+  const storedToolWidth = await page.evaluate(() => Number(localStorage.getItem("rumi-right-sidebar-panel-width")));
+  expect(storedToolWidth).toBeGreaterThanOrEqual(320);
+});
+
+test("model picker search supports @provider filters", async ({ page }) => {
+  await openDefaultspack(page);
+
+  await page.getByRole("button", { name: /Stub Default/ }).click();
+  const search = page.getByPlaceholder("モデルを検索... @google");
+  await search.fill("@opencode");
+  await expect(page.getByText("Qwen3.5 Plus via OpenCode Go")).toBeVisible();
+  await expect(page.getByText("Gemini 2.5 Flash")).toBeHidden();
+
+  await search.fill("@google flash");
+  await expect(page.getByText("Gemini 2.5 Flash")).toBeVisible();
+  await expect(page.getByText("Qwen3.5 Plus via OpenCode Go")).toBeHidden();
+});
+
 test("preview pane opens from the chat canvas peek", async ({ page }) => {
   await openDefaultspack(page);
 
@@ -527,9 +706,9 @@ test("calendar mode opens quick add and renders new tasks in blue", async ({ pag
   const nextMonthKey = `${nextMonth.getFullYear()}-${String(nextMonth.getMonth() + 1).padStart(2, "0")}-01`;
   const dayLabel = `${now.getFullYear()}年${now.getMonth() + 1}月9日`;
   const nextDayLabel = `${now.getFullYear()}年${now.getMonth() + 1}月10日`;
-  await page.getByLabel("Next month").click();
+  await page.getByLabel("次の月").click();
   await expect(page.getByTestId(`calendar-day-${nextMonthKey}`)).toBeVisible();
-  await page.getByLabel("Today").click();
+  await page.getByLabel("今日").click();
   await page.getByTestId(`calendar-day-${dayKey}`).click();
   await expect(page.getByRole("dialog", { name: `${dayLabel}に追加` })).toBeVisible();
   await page.getByTestId(`calendar-day-${nextDayKey}`).click();
@@ -542,17 +721,17 @@ test("calendar mode opens quick add and renders new tasks in blue", async ({ pag
   await expect(page.getByRole("dialog", { name: `${dayLabel}に追加` })).toBeVisible();
 
   await page.getByPlaceholder("何を追加しますか？").fill("Design review");
-  await page.getByRole("button", { name: "Add", exact: true }).click();
+  await page.getByRole("button", { name: "追加", exact: true }).click();
 
   const task = page.getByText("Design review");
   await expect(task).toBeVisible();
   await expect(task).toHaveClass(/bg-blue-500\/90/);
   await task.click();
-  await expect(page.getByRole("dialog", { name: `${dayLabel}に追加` })).toContainText("Edit item");
-  await page.getByLabel("Calendar item time").click();
-  await expect(page.getByRole("listbox", { name: "Calendar time options" })).toContainText("午前12:30");
+  await expect(page.getByRole("dialog", { name: `${dayLabel}に追加` })).toContainText("項目を編集");
+  await page.getByLabel("カレンダー項目の時刻").click();
+  await expect(page.getByRole("listbox", { name: "カレンダー時刻候補" })).toContainText("午前12:30");
   await page.getByPlaceholder("何を追加しますか？").fill("Design review edited");
-  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await page.getByRole("button", { name: "保存", exact: true }).click();
   await expect(page.getByText("Design review edited")).toBeVisible();
 
   const rangeStart = page.getByTestId(`${"calendar-day"}-${dayKey.replace("-09", "-12")}`);
@@ -567,15 +746,15 @@ test("calendar mode opens quick add and renders new tasks in blue", async ({ pag
   await page.mouse.up();
   await expect(page.getByRole("dialog", { name: `${dayLabel.replace("9日", "12日")} - ${dayLabel.replace("9日", "14日")}に追加` })).toBeVisible();
   await page.getByPlaceholder("何を追加しますか？").fill("Range task");
-  await page.getByRole("button", { name: "Add", exact: true }).click();
+  await page.getByRole("button", { name: "追加", exact: true }).click();
   await expect(page.getByText("Range task")).toHaveCount(3);
 
   await page.getByText("Range task").first().click();
-  await page.getByRole("button", { name: "Delete", exact: true }).click();
+  await page.getByRole("button", { name: "削除", exact: true }).click();
   await expect(page.getByText("Range task")).toHaveCount(0);
 
   await page.getByTitle("Settings").last().click();
-  await expect(page.getByRole("button", { name: "Calendar 14 controls" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "カレンダー 14 controls" })).toBeVisible();
 });
 
 test("history card drag uses rumi history MIME and sends dropped_widgets metadata", async ({ page }) => {

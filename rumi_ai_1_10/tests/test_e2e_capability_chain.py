@@ -40,7 +40,7 @@ from core_runtime.capability_grant_manager import (
     CapabilityGrantManager,
     GrantCheckResult,
 )
-from core_runtime.capability_handler_registry import CapabilityHandlerRegistry
+from core_runtime.function_registry import FunctionEntry, FunctionRegistry
 
 
 def _compute_sha256(file_path: Path) -> str:
@@ -106,29 +106,43 @@ class TestCapabilityChainE2E(unittest.TestCase):
 
         # secret key（Grant の HMAC 署名に必要）
         self.secret_key = hashlib.sha256(b"test_secret_e2e").hexdigest()
+        self.function_entries: list[FunctionEntry] = []
 
     def tearDown(self):
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
-    def _create_handler(self, slug, handler_id, permission_id, code=None):
-        """テスト用ハンドラを作成し、(dir_path, sha256) を返す"""
+    def _create_function(
+        self,
+        slug,
+        function_id,
+        permission_id,
+        code=None,
+        *,
+        pack_id="test_pack",
+        grant_config=None,
+    ):
+        """テスト用 function を作成し、FunctionRegistry 登録用 entry と sha256 を返す。"""
         d = self.handlers_dir / slug
         d.mkdir(parents=True, exist_ok=True)
-        (d / "handler.json").write_text(
-            json.dumps({
-                "handler_id": handler_id,
-                "permission_id": permission_id,
-                "entrypoint": "handler.py:execute",
-                "description": f"Test handler for {permission_id}",
-            }),
-            encoding="utf-8",
-        )
         if code is None:
             code = 'def execute(context, args): return {"echo": args}\n'
         handler_py = d / "handler.py"
         handler_py.write_text(code, encoding="utf-8")
         sha = _compute_sha256(handler_py)
-        return d, sha
+        entry = FunctionEntry(
+            function_id=function_id,
+            pack_id=pack_id,
+            description=f"Test function for {permission_id}",
+            function_dir=d,
+            main_py_path=handler_py,
+            entrypoint="handler.py:execute",
+            grant_config={} if grant_config is None else grant_config,
+            vocab_aliases=[permission_id],
+            permission_id=permission_id,
+            calling_convention="subprocess",
+        )
+        self.function_entries.append(entry)
+        return entry, sha
 
     def _setup_trust(self, handler_id, sha256):
         """Trust ストアにハンドラを信頼として追加"""
@@ -174,8 +188,9 @@ class TestCapabilityChainE2E(unittest.TestCase):
 
     def _build_executor(self):
         """テスト用 CapabilityExecutor を構築"""
-        registry = CapabilityHandlerRegistry(str(self.handlers_dir))
-        registry.load_all()
+        registry = FunctionRegistry()
+        for entry in self.function_entries:
+            registry.register(entry)
 
         trust_store = CapabilityTrustStore(str(self.trust_dir))
         trust_store.load()
@@ -187,7 +202,8 @@ class TestCapabilityChainE2E(unittest.TestCase):
 
         executor = CapabilityExecutor()
         executor._initialized = True
-        executor._handler_registry = registry
+        executor._function_registry = registry
+        executor._handler_registry = None
         executor._trust_store = trust_store
         executor._grant_manager = grant_manager
         return executor, registry, trust_store, grant_manager
@@ -202,8 +218,8 @@ class TestCapabilityChainE2E(unittest.TestCase):
         permission_id = "test.echo"
         principal_id = "pack_alpha"
 
-        _, sha = self._create_handler("echo", handler_id, permission_id)
-        self._setup_trust(handler_id, sha)
+        entry, sha = self._create_function("echo", handler_id, permission_id)
+        self._setup_trust(entry.qualified_name, sha)
         self._setup_grant(principal_id, permission_id)
 
         executor, *_ = self._build_executor()
@@ -228,7 +244,7 @@ class TestCapabilityChainE2E(unittest.TestCase):
         principal_id = "pack_beta"
 
         # Trust は付与しない
-        self._create_handler("untrusted", handler_id, permission_id)
+        self._create_function("untrusted", handler_id, permission_id)
         self._setup_grant(principal_id, permission_id)
 
         executor, *_ = self._build_executor()
@@ -248,8 +264,8 @@ class TestCapabilityChainE2E(unittest.TestCase):
         permission_id = "granted.action"
         principal_id = "pack_gamma"
 
-        _, sha = self._create_handler("no_grant", handler_id, permission_id)
-        self._setup_trust(handler_id, sha)
+        entry, sha = self._create_function("no_grant", handler_id, permission_id)
+        self._setup_trust(entry.qualified_name, sha)
         # Grant は付与しない
 
         executor, *_ = self._build_executor()
@@ -274,8 +290,8 @@ class TestCapabilityChainE2E(unittest.TestCase):
         permission_id = "net.request"
         principal_id = "pack_delta"
 
-        _, sha = self._create_handler("net_handler", handler_id, permission_id)
-        self._setup_trust(handler_id, sha)
+        entry, sha = self._create_function("net_handler", handler_id, permission_id)
+        self._setup_trust(entry.qualified_name, sha)
         self._setup_grant(
             principal_id,
             permission_id,
@@ -341,15 +357,19 @@ class TestCapabilityChainE2E(unittest.TestCase):
         principal_id = "pack_epsilon"
 
         # Trust は付与しない（built-in はバイパスするため不要）
-        self._create_handler("builtin_echo", handler_id, permission_id)
+        self._create_function(
+            "builtin_echo",
+            handler_id,
+            permission_id,
+            pack_id="core_legacy",
+        )
         self._setup_grant(principal_id, permission_id)
 
         executor, registry, _, _ = self._build_executor()
 
-        # ハンドラ定義に is_builtin=True を設定
-        handler_def = registry.get_by_permission_id(permission_id)
-        self.assertIsNotNone(handler_def)
-        handler_def.is_builtin = True
+        entry = registry.get_by_permission_id(permission_id)
+        self.assertIsNotNone(entry)
+        self.assertTrue(entry.pack_id.startswith("core_"))
 
         mock_resp = CapabilityResponse(
             success=True,
@@ -370,8 +390,8 @@ class TestCapabilityChainE2E(unittest.TestCase):
         permission_id = "tamper.action"
         principal_id = "pack_zeta"
 
-        _, sha = self._create_handler("tamper", handler_id, permission_id)
-        self._setup_trust(handler_id, sha)
+        entry, sha = self._create_function("tamper", handler_id, permission_id)
+        self._setup_trust(entry.qualified_name, sha)
         self._setup_grant(principal_id, permission_id)
 
         # Grant ファイルを改ざん（ペイロードを変えて HMAC を壊す）
@@ -400,8 +420,8 @@ class TestCapabilityChainE2E(unittest.TestCase):
         permission_id = "disabled.action"
         principal_id = "pack_eta"
 
-        _, sha = self._create_handler("disabled", handler_id, permission_id)
-        self._setup_trust(handler_id, sha)
+        entry, sha = self._create_function("disabled", handler_id, permission_id)
+        self._setup_trust(entry.qualified_name, sha)
         self._setup_grant(principal_id, permission_id, enabled=False)
 
         executor, *_ = self._build_executor()

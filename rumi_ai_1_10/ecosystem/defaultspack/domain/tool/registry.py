@@ -13,6 +13,34 @@ from .security import (
     unsupported_execution_reason,
 )
 
+_TOOL_SEARCH_METADATA_KEYS = {
+    "aliases",
+    "docs",
+    "documentation",
+    "help",
+    "keywords",
+    "skill_ids",
+    "skills",
+    "triggers",
+}
+
+
+def _search_metadata_from_manifest(manifest: dict, config: dict) -> dict:
+    metadata = {}
+    for container in (
+        manifest.get("metadata") if isinstance(manifest.get("metadata"), dict) else {},
+        config.get("metadata") if isinstance(config.get("metadata"), dict) else {},
+    ):
+        for key in _TOOL_SEARCH_METADATA_KEYS:
+            if key in container:
+                metadata[key] = container[key]
+    for key in _TOOL_SEARCH_METADATA_KEYS:
+        if key in manifest:
+            metadata[key] = manifest[key]
+        if key in config:
+            metadata[key] = config[key]
+    return metadata
+
 
 class ToolRegistry:
     """ツール定義の登録・管理（シングルトン・インメモリ + 永続化）"""
@@ -307,6 +335,7 @@ class ToolRegistry:
         attachment_policy = str(config.get("attachment_policy") or "").strip()
         supports_attachments = config.get("supports_attachments") if isinstance(config.get("supports_attachments"), bool) else None
         tags = list(config.get("tags", manifest.get("tags", [])) or [])
+        extra_metadata = _search_metadata_from_manifest(manifest, config)
         if not execution:
             execution = {"type": "local"}
         if handler and "handler" not in execution:
@@ -408,6 +437,7 @@ class ToolRegistry:
             "tool_id": tool_id,
             "name": str(config.get("name", tool_id)),
             "summary": str(config.get("summary", manifest.get("description", ""))),
+            "description": str(manifest.get("description", "")),
             "tags": tags,
             "risk": risk,
             "schema": dict(
@@ -458,6 +488,7 @@ class ToolRegistry:
                 "risk": risk,
                 **({"risk_defaulted": True} if risk_was_unknown else {}),
                 **legacy_compat_metadata,
+                **extra_metadata,
             },
         }
 

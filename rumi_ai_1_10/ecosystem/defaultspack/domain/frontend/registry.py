@@ -60,6 +60,7 @@ class FrontendRegistry:
             "chat_rendering": {
                 "renderers": self._chat_renderers(ui_surfaces, extensions),
             },
+            "skills": self._skill_items(),
             "routes": self._route_metadata(),
             "extension_points": self._extension_points(),
             "diagnostics": self._diagnostics(shell, parts, component_bindings),
@@ -445,6 +446,38 @@ class FrontendRegistry:
 
         return sorted(self._dedupe_by_key(items, "id"), key=self._sidebar_item_sort_key)
 
+    def _skill_items(self) -> list[dict[str, Any]]:
+        try:
+            skills = get_extension_registry(force_reload=True).skills().list(enabled_only=True)
+        except Exception:
+            return []
+
+        items: list[dict[str, Any]] = []
+        for skill in skills:
+            skill_id = str(skill.get("id") or "").strip()
+            if not skill_id:
+                continue
+            display_name = str(skill.get("display_name") or skill.get("name") or skill_id.rsplit("/", 1)[-1]).strip()
+            triggers = skill.get("triggers") if isinstance(skill.get("triggers"), list) else []
+            applies_to = skill.get("applies_to_tools") if isinstance(skill.get("applies_to_tools"), list) else []
+            metadata = skill.get("metadata") if isinstance(skill.get("metadata"), dict) else {}
+            aliases = skill.get("aliases") if isinstance(skill.get("aliases"), list) else metadata.get("aliases", [])
+            items.append(
+                {
+                    "id": skill_id,
+                    "label": display_name,
+                    "description": str(skill.get("description") or metadata.get("feedback") or ""),
+                    "triggers": [str(item) for item in triggers if str(item).strip()],
+                    "applies_to_tools": [str(item) for item in applies_to if str(item).strip()],
+                    "aliases": [str(item) for item in aliases if str(item).strip()] if isinstance(aliases, list) else [],
+                    "metadata": {
+                        "source": metadata.get("source", "skill"),
+                        "source_path": skill.get("source_path", ""),
+                    },
+                }
+            )
+        return sorted(items, key=lambda item: (item["label"].casefold(), item["id"].casefold()))
+
     @staticmethod
     def _sidebar_item_sort_key(item: dict[str, Any]) -> tuple[Any, ...]:
         category_order = {
@@ -529,6 +562,20 @@ class FrontendRegistry:
                             {"value": "auto", "label": "Auto"},
                         ],
                         "help": "frontend の表示言語です。未翻訳の拡張項目は元の文言を表示します。",
+                    },
+                    {
+                        "id": "voice_input_enabled",
+                        "label": "音声入力",
+                        "type": "toggle",
+                        "default": True,
+                        "help": "composer のマイクボタンでブラウザ音声入力を使います。",
+                    },
+                    {
+                        "id": "voice_input_use_ai",
+                        "label": "AI文字起こしモード",
+                        "type": "toggle",
+                        "default": False,
+                        "help": "ON の時は入力文に「文字起こしして:」を付けて、モデルへ文字起こしタスクとして渡します。",
                     },
                 ],
             },
@@ -1418,21 +1465,6 @@ class FrontendRegistry:
     def _preview_from_log(self, log: dict[str, Any]) -> list[dict[str, Any]]:
         timestamp = self._iso_to_ms(log.get("timestamp"))
         items: list[dict[str, Any]] = []
-        for tool_name in log.get("tools_called", []):
-            items.append(
-                {
-                    "id": f"tool-{tool_name}-{timestamp}",
-                    "toolStepId": tool_name,
-                    "timestamp": timestamp,
-                    "data": {
-                        "type": "code",
-                        "filename": tool_name,
-                        "language": "text",
-                        "content": f"Tool planned or referenced: {tool_name}",
-                    },
-                }
-            )
-
         context_info = log.get("context_info", {})
         for index, item in enumerate(context_info.get("knowledge_results", []), start=1):
             items.append(
@@ -1528,6 +1560,8 @@ class FrontendRegistry:
         timestamp = int(message.get("created_at", 0)) - 200 - index
         tool_name = str(log.get("tool_name") or "tool")
         result = log.get("result")
+        if self._tool_result_failed(result) or self._tool_result_pending_approval(result):
+            return []
         previews: list[dict[str, Any]] = []
         conversation_id = str(message.get("conversation_id") or "")
         for artifact_index, path in enumerate(self._artifact_paths_from_value(result)):
@@ -1551,6 +1585,9 @@ class FrontendRegistry:
                     }
                 )
             else:
+                content = self._artifact_content_from_value(result, path)
+                if content is None:
+                    continue
                 previews.append(
                     {
                         "id": f"tool-log-artifact-{message.get('id')}-{index}-{artifact_index}",
@@ -1563,7 +1600,7 @@ class FrontendRegistry:
                             "path": path,
                             "url": url,
                             "downloadName": name,
-                            "content": f"artifact: {path}",
+                            "content": content,
                         },
                     }
                 )
@@ -1581,6 +1618,100 @@ class FrontendRegistry:
                 }
             )
         return previews
+
+    def _tool_result_failed(self, value: Any) -> bool:
+        if isinstance(value, list):
+            return any(self._tool_result_failed(item) for item in value)
+        if not isinstance(value, dict):
+            return False
+        if value.get("is_error") is True or value.get("ok") is False or value.get("success") is False:
+            return True
+        for key in ("status", "phase", "outcome"):
+            status = str(value.get(key) or "").strip().lower()
+            if status in {"error", "failed", "failure", "denied", "rejected", "cancelled", "canceled"}:
+                return True
+        return any(
+            self._tool_result_failed(value.get(key))
+            for key in ("data", "result", "output")
+            if isinstance(value.get(key), dict)
+        )
+
+    def _tool_result_pending_approval(self, value: Any) -> bool:
+        if isinstance(value, list):
+            return any(self._tool_result_pending_approval(item) for item in value)
+        if not isinstance(value, dict):
+            return False
+        if value.get("approval_required") is True or value.get("requires_approval") is True:
+            return True
+        status = str(value.get("status") or value.get("phase") or value.get("outcome") or "").strip().lower()
+        if status in {"approval_required", "requires_approval", "pending_approval"}:
+            return True
+        return any(
+            self._tool_result_pending_approval(value.get(key))
+            for key in ("widget", "data", "result", "output")
+            if isinstance(value.get(key), dict)
+        )
+
+    def _artifact_content_from_value(self, value: Any, path: str) -> str | None:
+        target_path = str(path or "").strip()
+        if not target_path:
+            return None
+        return self._artifact_content_from_node(value, target_path, set())
+
+    def _artifact_content_from_node(self, value: Any, path: str, seen: set[int]) -> str | None:
+        if isinstance(value, dict):
+            value_id = id(value)
+            if value_id in seen:
+                return None
+            seen.add(value_id)
+            if self._mapping_references_artifact_path(value, path):
+                content = self._content_from_artifact_mapping(value, path)
+                if content is not None:
+                    return content
+            for key, item in value.items():
+                if key in {"data_url", "dataUrl"}:
+                    continue
+                content = self._artifact_content_from_node(item, path, seen)
+                if content is not None:
+                    return content
+        elif isinstance(value, list):
+            value_id = id(value)
+            if value_id in seen:
+                return None
+            seen.add(value_id)
+            for item in value:
+                content = self._artifact_content_from_node(item, path, seen)
+                if content is not None:
+                    return content
+        return None
+
+    @staticmethod
+    def _mapping_references_artifact_path(value: dict[str, Any], path: str) -> bool:
+        for key in ("model_image_path", "screenshot_path", "path"):
+            item = value.get(key)
+            if isinstance(item, str) and item.strip() == path:
+                return True
+        return False
+
+    def _content_from_artifact_mapping(self, value: dict[str, Any], path: str) -> str | None:
+        for key in ("content", "text", "markdown", "body", "html"):
+            content = self._coerce_artifact_content(value.get(key), path)
+            if content is not None:
+                return content
+        return None
+
+    @staticmethod
+    def _coerce_artifact_content(value: Any, path: str) -> str | None:
+        if isinstance(value, str):
+            content = value
+        elif isinstance(value, (dict, list)):
+            content = json.dumps(value, ensure_ascii=False, indent=2)
+        else:
+            return None
+        normalized = " ".join(content.split()).strip()
+        if not normalized or normalized == path or normalized.lower().startswith("artifact:"):
+            return None
+        return content
 
     def _artifact_paths_from_value(self, value: Any, seen: set[str] | None = None) -> list[str]:
         seen = seen or set()

@@ -1,0 +1,32 @@
+{
+  "modelId": "anthropic.claude-test",
+  "messages": [
+    {
+      "role": "assistant",
+      "content": [
+        {
+          "toolUse": {
+            "toolUseId": "tc",
+            "name": "lookup",
+            "input": {}
+          }
+        }
+      ]
+    }
+  ],
+  "toolConfig": {
+    "tools": [
+      {
+        "toolSpec": {
+          "name": "lookup",
+          "description": "",
+          "inputSchema": {
+            "json": {
+              "type": "object"
+            }
+          }
+        }
+      }
+    ]
+  }
+}

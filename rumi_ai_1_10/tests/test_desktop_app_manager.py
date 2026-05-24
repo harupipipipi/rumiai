@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import os
 import json
+import sys
+from pathlib import Path
 from unittest import mock
 
 import pytest
@@ -217,11 +219,12 @@ class TestLaunchAppArguments:
         assert meta["pack_dir"] == str(pack_dir)
 
         cmd_list = mock_popen.call_args[0][0]
-        assert cmd_list == ["python", "app.py"]
+        assert cmd_list == [desktop_app_manager._runtime_python_for_app(), "app.py"]
         env = mock_popen.call_args.kwargs["env"]
         assert env["RUMI_API_TOKEN"] == "issued-token"
         assert env["RUMI_TOKEN"] == "issued-token"
         assert env["AUTOPACK_PORT"] == "9999"
+        assert str(Path(sys.executable).resolve().parent) in env["PATH"]
 
     @mock.patch("subprocess.Popen")
     @mock.patch("os.path.isfile", return_value=True)

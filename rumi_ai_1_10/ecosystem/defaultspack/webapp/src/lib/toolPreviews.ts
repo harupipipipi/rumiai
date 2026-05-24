@@ -18,6 +18,14 @@ function isImagePath(path: string): boolean {
   return /\.(png|jpe?g|gif|webp|svg)$/i.test(path);
 }
 
+function isHtmlPath(path: string): boolean {
+  return /\.(html?|xhtml)$/i.test(path);
+}
+
+function isDiffPath(path: string): boolean {
+  return /\.(diff|patch)$/i.test(path);
+}
+
 function isImageDataUrl(value: string): boolean {
   return /^data:image\/[a-z0-9.+-]+;base64,/i.test(value);
 }
@@ -31,6 +39,18 @@ function dataUrlName(value: string): string {
 function uniqueStrings(values: string[]): string[] {
   return [...new Set(values.filter(Boolean))];
 }
+
+const PREVIEW_URL_KEYS = new Set([
+  "url",
+  "page_url",
+  "pageUrl",
+  "preview_url",
+  "previewUrl",
+  "local_url",
+  "localUrl",
+  "current_url",
+  "currentUrl",
+]);
 
 export function collectArtifactPaths(value: unknown, paths: string[] = [], seen = new Set<string>()): string[] {
   if (Array.isArray(value)) {
@@ -68,6 +88,87 @@ export function collectInlineImageUrls(value: unknown, urls: string[] = [], seen
     collectInlineImageUrls(entry, urls, seen);
   });
   return urls;
+}
+
+function isPreviewableUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+function isLocalPreviewUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    const host = url.hostname.toLowerCase();
+    return host === "localhost" || host === "127.0.0.1" || host === "0.0.0.0" || host === "::1" || host === "[::1]";
+  } catch {
+    return false;
+  }
+}
+
+function normalizePreviewUrl(value: string): string {
+  try {
+    const url = new URL(value);
+    url.hash = "";
+    return url.href;
+  } catch {
+    return value.trim();
+  }
+}
+
+export function collectPreviewUrls(value: unknown, urls: string[] = [], seen = new Set<string>()): string[] {
+  if (Array.isArray(value)) {
+    value.forEach((item) => collectPreviewUrls(item, urls, seen));
+    return urls;
+  }
+  if (!isRecord(value)) return urls;
+
+  for (const key of PREVIEW_URL_KEYS) {
+    const url = stringValue(value[key]);
+    if (url && isPreviewableUrl(url) && isLocalPreviewUrl(url)) {
+      const normalized = normalizePreviewUrl(url);
+      if (!seen.has(normalized)) {
+        seen.add(normalized);
+        urls.push(normalized);
+      }
+    }
+  }
+  Object.entries(value).forEach(([key, entry]) => {
+    if (PREVIEW_URL_KEYS.has(key) || key === "href" || key === "dom_snapshot" || key === "domSnapshot") return;
+    collectPreviewUrls(entry, urls, seen);
+  });
+  return urls;
+}
+
+function failedStatus(value: unknown): boolean {
+  const status = String(value ?? "").trim().toLowerCase();
+  return status === "error" || status === "failed" || status === "failure" || status === "denied" || status === "rejected" || status === "cancelled" || status === "canceled";
+}
+
+function toolResultFailed(value: unknown): boolean {
+  if (Array.isArray(value)) return value.some(toolResultFailed);
+  if (!isRecord(value)) return false;
+  if (value.is_error === true || value.ok === false || value.success === false) return true;
+  if (failedStatus(value.status) || failedStatus(value.phase) || failedStatus(value.outcome)) return true;
+  if (isRecord(value.data) && toolResultFailed(value.data)) return true;
+  if (isRecord(value.result) && toolResultFailed(value.result)) return true;
+  return false;
+}
+
+function toolResultPendingApproval(value: unknown): boolean {
+  if (Array.isArray(value)) return value.some(toolResultPendingApproval);
+  if (!isRecord(value)) return false;
+  if (value.approval_required === true || value.requires_approval === true) return true;
+  const status = String(value.status ?? value.phase ?? value.outcome ?? "").trim().toLowerCase();
+  if (status === "approval_required" || status === "requires_approval" || status === "pending_approval") return true;
+  if (isRecord(value.widget) && toolResultPendingApproval(value.widget)) return true;
+  if (isRecord(value.data) && toolResultPendingApproval(value.data)) return true;
+  if (isRecord(value.result) && toolResultPendingApproval(value.result)) return true;
+  if (isRecord(value.output) && toolResultPendingApproval(value.output)) return true;
+  return false;
 }
 
 export function streamActivityEventKey(event: ChatActivityEvent): string {
@@ -162,9 +263,8 @@ function resultValuesForToolEvent(event: ChatActivityEvent): unknown[] {
     event.output,
     event.invalidated,
     event.snapshot,
-    event.dom_snapshot,
     event.screenshot,
-  ].filter((value) => value !== undefined);
+  ].filter((value) => value !== undefined && !toolResultFailed(value) && !toolResultPendingApproval(value));
 }
 
 function artifactPreview(
@@ -183,6 +283,38 @@ function artifactPreview(
 }): ToolPreviewItem {
   const name = basename(path);
   const url = conversationArtifactFileUrl(conversationId, path);
+  if (isHtmlPath(path)) {
+    return {
+      id,
+      toolStepId,
+      timestamp,
+      data: {
+        type: "file" as const,
+        filename: name,
+        size: "HTML preview",
+        path,
+        url,
+        downloadName: name,
+        mimeType: "text/html",
+      },
+    };
+  }
+  if (isDiffPath(path)) {
+    return {
+      id,
+      toolStepId,
+      timestamp,
+      data: {
+        type: "file" as const,
+        filename: name,
+        size: "diff",
+        path,
+        url,
+        downloadName: name,
+        mimeType: "text/x-diff",
+      },
+    };
+  }
   return {
     id,
     toolStepId,
@@ -201,8 +333,30 @@ function artifactPreview(
           path,
           url,
           downloadName: name,
-          content: `artifact: ${path}`,
         },
+  };
+}
+
+function webPreview({
+  id,
+  toolStepId,
+  timestamp,
+  url,
+}: {
+  id: string;
+  toolStepId: string;
+  timestamp: number;
+  url: string;
+}): ToolPreviewItem {
+  return {
+    id,
+    toolStepId,
+    timestamp,
+    data: {
+      type: "web" as const,
+      url,
+      title: url,
+    },
   };
 }
 
@@ -230,9 +384,30 @@ function inlineImagePreview(
   };
 }
 
+function previewIdentity(preview: ToolPreviewItem): string {
+  const data = preview.data;
+  if (data.type === "web") return `web:${normalizePreviewUrl(data.url)}`;
+  if (data.type === "image") return `image:${data.path || data.url || data.alt}`;
+  if (data.type === "file") return `file:${data.path || data.url || `${data.filename}:${data.content ?? ""}`}`;
+  return `code:${data.filename}:${data.diff ?? data.content ?? ""}`;
+}
+
+function dedupePreviewItems(items: ToolPreviewItem[]): ToolPreviewItem[] {
+  const seen = new Set<string>();
+  const deduped: ToolPreviewItem[] = [];
+  for (const item of items) {
+    const identity = previewIdentity(item);
+    if (seen.has(identity)) continue;
+    seen.add(identity);
+    deduped.push(item);
+  }
+  return deduped;
+}
+
 export function toolPreviewsFromMessages(messages: ChatMessage[]): ToolPreviewItem[] {
-  return messages.flatMap((message) => {
+  const previews = messages.flatMap((message) => {
     const logPreviews = (message.tool_logs ?? []).flatMap((log, index) => {
+      if (toolResultFailed(log.result) || toolResultPendingApproval(log.result)) return [];
       const toolName = String(log.tool_name ?? "tool");
       const toolStepId = typeof log.tool_call_id === "string" && log.tool_call_id.trim()
         ? log.tool_call_id.trim()
@@ -251,7 +426,13 @@ export function toolPreviewsFromMessages(messages: ChatMessage[]): ToolPreviewIt
         timestamp: timestamp + artifactPreviews.length + imageIndex + 0.1,
         url,
       }));
-      return [...artifactPreviews, ...inlinePreviews];
+      const webPreviews = uniqueStrings(collectPreviewUrls(log.result)).map((url, urlIndex) => webPreview({
+        id: `message-tool-url-${message.id}-${index}-${urlIndex}`,
+        toolStepId,
+        timestamp: timestamp + artifactPreviews.length + inlinePreviews.length + urlIndex + 0.1,
+        url,
+      }));
+      return [...artifactPreviews, ...inlinePreviews, ...webPreviews];
     });
 
     const logKeys = new Set((message.tool_logs ?? []).map((log) => {
@@ -268,6 +449,7 @@ export function toolPreviewsFromMessages(messages: ChatMessage[]): ToolPreviewIt
       eventMap.set(key, existing ? mergeStreamActivityEvent(existing, event) : event);
     }
     const eventPreviews = [...eventMap.values()].flatMap((event, index) => {
+      if (toolResultFailed(event) || toolResultPendingApproval(event)) return [];
       const values = resultValuesForToolEvent(event);
       if (values.length === 0) return [];
       const toolName = String(event.tool_name ?? "tool");
@@ -288,9 +470,16 @@ export function toolPreviewsFromMessages(messages: ChatMessage[]): ToolPreviewIt
         timestamp: timestamp + fileArtifacts.length + imageIndex + 0.1,
         url,
       }));
-      return [...pathPreviews, ...inlinePreviews];
+      const urlPreviews = uniqueStrings(values.flatMap((value) => collectPreviewUrls(value))).map((url, urlIndex) => webPreview({
+        id: `message-tool-event-url-${message.id}-${eventKey}-${urlIndex}`,
+        toolStepId,
+        timestamp: timestamp + fileArtifacts.length + inlinePreviews.length + urlIndex + 0.1,
+        url,
+      }));
+      return [...pathPreviews, ...inlinePreviews, ...urlPreviews];
     });
 
     return [...logPreviews, ...eventPreviews];
   }).sort((a, b) => b.timestamp - a.timestamp);
+  return dedupePreviewItems(previews);
 }

@@ -17,6 +17,44 @@ DEFAULT_TOOL_RECOMMENDATION_THRESHOLD = 0.08
 
 _WORD_RE = re.compile(r"[A-Za-z0-9_./:-]+|[\u3040-\u30ff\u3400-\u9fff]+")
 _JAPANESE_RE = re.compile(r"[\u3040-\u30ff\u3400-\u9fff]")
+_SIDECAR_DOC_NAMES = ("README.md", "README.ja.md", "SKILL.md", "docs.md", "DOCUMENTATION.md")
+_MAX_DOC_CHARS = 20_000
+
+_SYNONYM_GROUPS: tuple[tuple[str, ...], ...] = (
+    ("coding", "code", "source", "repo", "repository", "workspace", "コード", "コーディング"),
+    ("file", "files", "path", "workspace", "document", "ファイル", "パス"),
+    ("read", "reader", "open", "cat", "view", "読む", "読んで", "読み取り", "表示"),
+    ("write", "create", "edit", "update", "patch", "modify", "save", "書く", "作成", "編集", "更新", "修正"),
+    ("search", "find", "lookup", "query", "grep", "ripgrep", "検索", "探す", "調べる"),
+    ("web", "internet", "browser", "online", "ウェブ", "ネット"),
+    ("tool", "tools", "schema", "json", "ツール"),
+    ("skill", "prompt", "instructions", "system", "スキル", "プロンプト"),
+)
+
+_PHRASE_EXPANSIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("コード", ("coding", "code", "workspace", "file", "edit", "patch", "read", "search")),
+    ("コーディング", ("coding", "code", "workspace", "file", "edit", "patch")),
+    ("ファイル", ("file", "workspace", "path", "read", "write", "create", "search")),
+    ("読む", ("read", "file", "workspace")),
+    ("読ん", ("read", "file", "workspace")),
+    ("書", ("write", "create", "edit", "file")),
+    ("編集", ("edit", "patch", "modify", "write", "file")),
+    ("修正", ("patch", "modify", "edit", "file")),
+    ("検索", ("search", "find", "query")),
+    ("探", ("search", "find")),
+    ("調べ", ("search", "web", "query")),
+    ("ウェブ", ("web", "search", "internet")),
+    ("ネット", ("web", "search", "internet")),
+    ("ツール", ("tool", "tools", "schema", "json")),
+    ("スキル", ("skill", "prompt", "instructions")),
+    ("プロンプト", ("skill", "prompt", "instructions")),
+)
+
+_SYNONYM_INDEX: dict[str, tuple[str, ...]] = {}
+for group in _SYNONYM_GROUPS:
+    normalized_group = tuple(item.casefold() for item in group)
+    for token in normalized_group:
+        _SYNONYM_INDEX[token] = normalized_group
 
 
 def effective_tool_assist_mode(settings: dict[str, Any] | None = None, *, pack_root: Path | None = None) -> str:
@@ -54,20 +92,35 @@ def recommend_tool_ids(
     limit: int = DEFAULT_TOOL_RECOMMENDATION_LIMIT,
     threshold: float = DEFAULT_TOOL_RECOMMENDATION_THRESHOLD,
 ) -> list[str]:
+    return [item["tool_id"] for item in search_tools(user_text, tools, limit=limit, threshold=threshold)]
+
+
+def search_tools(
+    user_text: str,
+    tools: list[dict[str, Any]],
+    *,
+    limit: int = DEFAULT_TOOL_RECOMMENDATION_LIMIT,
+    threshold: float = DEFAULT_TOOL_RECOMMENDATION_THRESHOLD,
+    include_schema: bool = False,
+) -> list[dict[str, Any]]:
     query_vector = _text_vector(user_text)
     if not query_vector:
         return []
-    scored: list[tuple[float, str]] = []
+    scored: list[tuple[float, str, dict[str, Any], Counter[str]]] = []
     for tool in tools:
         tool_id = str(tool.get("tool_id") or tool.get("name") or "").strip()
         if not tool_id:
             continue
-        score = _cosine_similarity(query_vector, _tool_vector(tool))
+        tool_vector = _tool_vector(tool)
+        score = _cosine_similarity(query_vector, tool_vector)
         score += _exact_boost(user_text, tool)
         if score >= threshold:
-            scored.append((score, tool_id))
+            scored.append((score, tool_id, tool, tool_vector))
     scored.sort(key=lambda item: (-item[0], item[1]))
-    return [tool_id for _, tool_id in scored[: max(1, limit)]]
+    return [
+        _tool_search_result(tool, tool_id=tool_id, score=score, query_vector=query_vector, tool_vector=tool_vector, include_schema=include_schema)
+        for score, tool_id, tool, tool_vector in scored[: max(1, limit)]
+    ]
 
 
 def _read_frontend_settings(pack_root: Path | None = None) -> dict[str, Any]:
@@ -81,11 +134,18 @@ def _read_frontend_settings(pack_root: Path | None = None) -> dict[str, Any]:
 
 
 def _tool_vector(tool: dict[str, Any]) -> Counter[str]:
+    return _text_vector(" ".join(_tool_text_parts(tool)))
+
+
+def _tool_text_parts(tool: dict[str, Any]) -> list[str]:
     parts: list[str] = [
         str(tool.get("tool_id") or ""),
         str(tool.get("name") or ""),
         str(tool.get("summary") or ""),
+        str(tool.get("description") or ""),
         str(tool.get("category") or ""),
+        str(tool.get("action_type") or ""),
+        str(tool.get("approval_policy") or ""),
         " ".join(str(tag) for tag in tool.get("tags", []) if tag),
         " ".join(str(skill) for skill in tool.get("skills", []) if skill),
     ]
@@ -104,14 +164,22 @@ def _tool_vector(tool: dict[str, Any]) -> Counter[str]:
                 "server_id",
                 "server_name",
                 "mcp_tool_name",
+                "docs",
+                "documentation",
+                "help",
+                "skill_triggers",
+                "skill_instructions",
             )
         )
-        for key in ("skills", "required_skills", "skill_ids"):
+        for key in ("skills", "required_skills", "skill_ids", "keywords", "aliases", "triggers", "docs"):
             value = container.get(key)
             if isinstance(value, list):
                 parts.append(" ".join(str(item) for item in value if item))
+            elif isinstance(value, dict):
+                parts.append(_flatten_text(value))
             elif value:
                 parts.append(str(value))
+    parts.extend(_manifest_sidecar_texts(metadata))
     schema = tool.get("schema") if isinstance(tool.get("schema"), dict) else {}
     parameters = schema.get("parameters") if isinstance(schema.get("parameters"), dict) else schema
     if isinstance(parameters, dict) and isinstance(parameters.get("inputSchema"), dict):
@@ -122,25 +190,100 @@ def _tool_vector(tool: dict[str, Any]) -> Counter[str]:
         for value in properties.values():
             if isinstance(value, dict):
                 parts.append(" ".join(str(value.get(key) or "") for key in ("title", "description")))
-    return _text_vector(" ".join(parts))
+    return parts
+
+
+def _tool_search_result(
+    tool: dict[str, Any],
+    *,
+    tool_id: str,
+    score: float,
+    query_vector: Counter[str],
+    tool_vector: Counter[str],
+    include_schema: bool,
+) -> dict[str, Any]:
+    overlap = sorted((set(query_vector) & set(tool_vector)), key=lambda token: (-(query_vector[token] * tool_vector[token]), token))
+    result = {
+        "tool_id": tool_id,
+        "name": str(tool.get("name") or tool_id),
+        "summary": str(tool.get("summary") or tool.get("description") or ""),
+        "category": str(tool.get("category") or ""),
+        "tags": [str(tag) for tag in (tool.get("tags") or []) if str(tag).strip()],
+        "skills": [str(skill) for skill in (tool.get("skills") or []) if str(skill).strip()],
+        "risk": str(tool.get("risk") or ((tool.get("metadata") if isinstance(tool.get("metadata"), dict) else {}).get("risk")) or ""),
+        "score": round(float(score), 4),
+        "why": overlap[:8],
+    }
+    if include_schema:
+        result["schema"] = tool.get("schema") or {}
+        result["usage"] = {
+            "phase": "schema",
+            "rule": "Use this schema only after choosing the tool by capability; fill JSON arguments according to the tool's parameter contract.",
+        }
+    else:
+        result["usage"] = {
+            "phase": "overview",
+            "rule": "Use this result to decide whether the tool is relevant; request schema details only for tools you intend to call.",
+        }
+    return result
 
 
 def _text_vector(text: str) -> Counter[str]:
     normalized = str(text or "").casefold()
+    expansions = _phrase_expansion_terms(normalized)
+    if expansions:
+        normalized = "{} {}".format(normalized, " ".join(expansions))
     vector: Counter[str] = Counter()
     for token in _WORD_RE.findall(normalized):
         token = token.strip(" \t\r\n.,!?()[]{}")
         if not token:
             continue
         vector[token] += 2
+        for synonym in _SYNONYM_INDEX.get(token, ()):
+            if synonym != token:
+                vector[synonym] += 1
         if "_" in token:
             for part in token.split("_"):
                 if part:
                     vector[part] += 1
+                    for synonym in _SYNONYM_INDEX.get(part, ()):
+                        if synonym != part:
+                            vector[synonym] += 1
         if _JAPANESE_RE.search(token):
             for gram in _char_ngrams(token):
                 vector[gram] += 1
     return vector
+
+
+def _phrase_expansion_terms(normalized_text: str) -> list[str]:
+    terms: list[str] = []
+    for phrase, expansion in _PHRASE_EXPANSIONS:
+        if phrase.casefold() in normalized_text:
+            terms.extend(expansion)
+    return terms
+
+
+def _flatten_text(value: Any) -> str:
+    if isinstance(value, dict):
+        return " ".join(_flatten_text(item) for item in value.values())
+    if isinstance(value, list):
+        return " ".join(_flatten_text(item) for item in value)
+    return str(value or "")
+
+
+def _manifest_sidecar_texts(metadata: dict[str, Any]) -> list[str]:
+    manifest_path = metadata.get("manifest_path") or metadata.get("component_manifest_path")
+    if not isinstance(manifest_path, str) or not manifest_path.strip():
+        return []
+    path = Path(manifest_path).expanduser()
+    texts: list[str] = []
+    for candidate in [path, *(path.parent / name for name in _SIDECAR_DOC_NAMES)]:
+        try:
+            if candidate.is_file():
+                texts.append(candidate.read_text(encoding="utf-8", errors="ignore")[:_MAX_DOC_CHARS])
+        except OSError:
+            continue
+    return texts
 
 
 def _char_ngrams(token: str, size: int = 2) -> list[str]:

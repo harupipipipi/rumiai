@@ -13,6 +13,14 @@
       "group_id": "research",
       "group_label": "Research",
       "group_icon": "search",
+      "item_icon": "search",
+      "widget_kind": "tool_toggle",
+      "drop_capabilities": [
+        "composer.toggle_chip"
+      ],
+      "composer_label": "Web Search",
+      "composer_description": "現在のWeb情報を検索します。",
+      "composer_icon": "search",
       "settings_fields": [
         {
           "id": "default_result_limit",

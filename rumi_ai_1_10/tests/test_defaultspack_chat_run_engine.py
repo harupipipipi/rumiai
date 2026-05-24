@@ -198,6 +198,47 @@ def test_prepare_chat_run_allows_explicit_model_override(tmp_path, monkeypatch):
     ChatStore._instance = None
 
 
+def test_prepare_chat_run_forwards_approval_followup_token_to_tool_context(tmp_path, monkeypatch):
+    from domain.chat.run_request import prepare_chat_run
+    from domain.chat.store import ChatStore
+
+    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
+    ChatStore._instance = None
+
+    store = ChatStore()
+    conversation = store.create_conversation(model="stub/default")
+
+    prepared = prepare_chat_run(
+        {
+            "conversation_id": conversation["id"],
+            "message": {
+                "role": "user",
+                "content": "ユーザーが許可しました。承認済みの操作を続行してください。",
+                "metadata": {
+                    "approval_followup": {
+                        "approval_token": "tok_approved",
+                        "operation": "tool.coding_file_create",
+                        "request_id": "apr_1",
+                        "tool_name": "coding_file_create",
+                    },
+                },
+            },
+            "tools": [],
+        },
+        {},
+    )
+
+    expected = {
+        "coding_file_create": "tok_approved",
+        "tool.coding_file_create": "tok_approved",
+        "apr_1": "tok_approved",
+    }
+    assert prepared.request_context["tool_approval_tokens"] == expected
+    assert prepared.tool_context["tool_approval_tokens"] == expected
+    ChatStore._instance = None
+
+
 def test_prepare_chat_run_injects_matched_skill_and_chat_references(tmp_path, monkeypatch):
     import json
 
@@ -542,3 +583,159 @@ def test_legacy_complete_with_tools_retries_transient_ai_error_after_tool_use():
     assert tool_calls == 1
     assert response["content"] == [{"type": "text", "text": "continued after retry"}]
     assert any(event.get("type") == "ai_retry_scheduled" for event in response["events"])
+
+
+class _IRFakeGateway:
+    def __init__(self):
+        self.complete_requests = []
+        self.calls = 0
+
+    def complete(self, request):
+        self.complete_requests.append(request)
+        self.calls += 1
+        if self.calls == 1:
+            return {
+                "content": [{"type": "tool_use", "id": "call-ir-1", "name": "lookup", "input": {"q": "x"}}],
+                "finish_reason": "tool_calls",
+            }
+        return {"content": [{"type": "text", "text": "done"}], "finish_reason": "stop", "usage": {}}
+
+    def stream(self, request):
+        return iter([])
+
+    def supports_stream(self, model):
+        return False
+
+    def resolve_provider(self, model):
+        class Provider:
+            pass
+
+        return Provider(), model.split("/", 1)[1] if "/" in model else model
+
+
+def _run_ir_tool_loop(tmp_path, monkeypatch):
+    from domain.chat.store import ChatStore
+    from domain.chat.stream_engine import ChatRunEngine
+    from domain.tool.executor import ToolExecutor
+
+    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
+    ChatStore._instance = None
+    store = ChatStore()
+    conversation = store.create_conversation(model="openai/gpt-5.4")
+    monkeypatch.setattr(ToolExecutor, "execute", lambda self, name, arguments, context: {"result": "tool ok", "is_error": False})
+    gateway = _IRFakeGateway()
+    engine = ChatRunEngine(store=store, gateway=gateway)
+    events = list(
+        engine.stream(
+            {
+                "conversation_id": conversation["id"],
+                "message": {"role": "user", "content": "use tool"},
+                "tools": [{"tool_id": "lookup", "name": "lookup", "summary": "lookup", "schema": {"parameters": {"type": "object"}}}],
+            },
+            {},
+            stream_mode=False,
+        )
+    )
+    stored = store.get_conversation(conversation["id"])["messages"][-1]
+    return gateway, events, stored, store
+
+
+def test_stream_engine_ir_tool_loop_matches_legacy(tmp_path, monkeypatch):
+    from domain.chat.store import ChatStore
+
+    gateway, events, stored, store = _run_ir_tool_loop(tmp_path, monkeypatch)
+
+    assert any(message.get("content") == "use tool" for message in gateway.complete_requests[0]["messages"])
+    assert gateway.complete_requests[1]["messages"][-2]["tool_calls"][0]["id"] == "call-ir-1"
+    assert stored["raw_text"] == "done"
+    assert any(event.get("type") == "tool_call_completed" for event in events)
+    ChatStore._instance = None
+
+
+def test_stream_engine_ir_preserves_tool_call_ids(tmp_path, monkeypatch):
+    from domain.chat.store import ChatStore
+
+    gateway, events, stored, store = _run_ir_tool_loop(tmp_path, monkeypatch)
+
+    assert any(event.get("data", {}).get("tool_call_id") == "call-ir-1" for event in events)
+    assert stored["tool_logs"][0]["tool_call_id"] == "call-ir-1"
+    ChatStore._instance = None
+
+
+def test_stream_engine_provider_trace_metadata(tmp_path, monkeypatch):
+    from domain.chat.store import ChatStore
+    from pathlib import Path
+
+    gateway, events, stored, store = _run_ir_tool_loop(tmp_path, monkeypatch)
+
+    trace = stored["metadata"]["provider_trace"]
+    assert trace["request_id"]
+    assert Path(trace["trace_path"]).exists()
+    assert stored["metadata"]["ir"]["schema_version"] == "rumi.chat.ir.v2"
+    assert "provider_planning" in stored["metadata"]
+    ChatStore._instance = None
+
+
+def test_stream_engine_legacy_flag_uses_legacy_messages(monkeypatch):
+    from domain.chat.stream_engine import ChatRunEngine
+    from domain.chat.run_request import PreparedChatRun
+
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_PROVIDER_COMPILER_V2", "1")
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_PROVIDER_LEGACY_MESSAGES", "1")
+
+    assert ChatRunEngine._use_provider_compiler(PreparedChatRun(conversation_id="c", conversation={}, input_data={}, request_id="r", content=[], metadata={}, user_message={}, model="m", params={}, request_context={}, tool_context={}, standard_messages=[], user_text="", system_prompt="", enrich_info={}, raw_tools=[], provider_tools=[], tools_called=[], connected_tool_names=set(), call_handler=None, model_routing={})) is False
+
+
+def test_stream_engine_ir_handles_streaming_tool_delta():
+    from domain.chat.stream_engine import ChatRunEngine
+    from domain.chat.run_request import PreparedChatRun
+
+    class Gateway:
+        def supports_stream(self, model):
+            return True
+
+        def stream(self, request):
+            return iter(
+                [
+                    {"type": "tool_call_start", "id": "tc", "name": "lookup"},
+                    {"type": "tool_call_delta", "id": "tc", "name": "lookup", "arguments_chunk": "{\"q\""},
+                    {"type": "tool_call_delta", "id": "tc", "name": "lookup", "arguments_chunk": ":\"x\"}"},
+                    {"type": "tool_call_end", "id": "tc", "name": "lookup"},
+                    {"type": "stream_end", "finish_reason": "tool_calls", "usage": {}},
+                ]
+            )
+
+        def complete(self, request):
+            raise AssertionError("complete should not be called")
+
+        def resolve_provider(self, model):
+            class OpenAIProvider:
+                pass
+
+            return OpenAIProvider(), model
+
+    engine = ChatRunEngine(gateway=Gateway())
+    prepared = PreparedChatRun(conversation_id="c", conversation={}, input_data={}, request_id="r", content=[], metadata={}, user_message={"id": "u"}, model="openai/gpt", params={}, request_context={}, tool_context={}, standard_messages=[], user_text="", system_prompt="", enrich_info={}, raw_tools=[], provider_tools=[{"type": "function", "function": {"name": "lookup"}}], tools_called=["lookup"], connected_tool_names={"lookup"}, call_handler=None, model_routing={})
+    generator = engine._model_turn(prepared, [{"role": "user", "content": "hi"}], None)
+    events = []
+    try:
+        while True:
+            events.append(next(generator))
+    except StopIteration as exc:
+        response, tool_uses = exc.value
+
+    assert tool_uses[0]["id"] == "tc"
+    assert tool_uses[0]["input"] == {"q": "x"}
+    assert any(event.get("type") == "tool_call_delta" for event in events)
+
+
+def test_stream_engine_ir_finalizes_assistant_message(tmp_path, monkeypatch):
+    from domain.chat.store import ChatStore
+
+    gateway, events, stored, store = _run_ir_tool_loop(tmp_path, monkeypatch)
+
+    assert stored["role"] == "assistant"
+    assert stored["finish_reason"] == "stop"
+    assert stored["metadata"]["provider_capabilities"]["provider_id"] == "openai"
+    ChatStore._instance = None

@@ -75,6 +75,20 @@ def _computer_control_tool_def(tool_name):
     }
 
 
+def _coding_write_tool_def(tool_name="coding_file_create"):
+    return {
+        "tool_id": tool_name,
+        "name": tool_name,
+        "risk": "high",
+        "requires_approval": True,
+        "capability_grants": ["file.write"],
+        "execution": {
+            "type": "rumi_function",
+            "qualified_name": f"defaultspack:{tool_name}",
+        },
+    }
+
+
 def test_tool_executor_denied_browser_computer_without_approval_returns_approval_request(monkeypatch):
     from domain.tool.executor import ToolExecutor
 
@@ -94,6 +108,7 @@ def test_tool_executor_denied_browser_computer_without_approval_returns_approval
     assert result["is_error"] is False
     assert result["widget"]["type"] == "approval_request"
     assert result["widget"]["tool_name"] == "browser_computer"
+    assert str(result["widget"]["approval_request_id"]).startswith("apr_")
 
 
 def test_tool_executor_denied_computer_use_without_user_request_still_requires_approval(monkeypatch):
@@ -115,6 +130,94 @@ def test_tool_executor_denied_computer_use_without_user_request_still_requires_a
     assert result["is_error"] is False
     assert result["widget"]["type"] == "approval_request"
     assert result["widget"]["tool_name"] == "computer_use"
+    assert str(result["widget"]["approval_request_id"]).startswith("apr_")
+
+
+def test_tool_executor_denied_coding_function_returns_actionable_approval_request():
+    from domain.safety import approval
+    from domain.tool.executor import ToolExecutor
+
+    approval.reset_approval_state_for_tests()
+    capability_executor = _caller_requires_denied_executor()
+
+    result = ToolExecutor()._execute_rumi_function(
+        _coding_write_tool_def(),
+        {"path": "index.html", "content": "<html></html>"},
+        {"principal_id": "defaultspack", "capability_executor": capability_executor},
+    )
+
+    assert result["is_error"] is False
+    assert result["widget"]["type"] == "approval_request"
+    assert result["widget"]["tool_name"] == "coding_file_create"
+    assert result["widget"]["operation"] == "tool.coding_file_create"
+    assert result["widget"]["payload"] == {"path": "index.html", "content": "<html></html>"}
+    assert str(result["widget"]["approval_request_id"]).startswith("apr_")
+
+
+def test_tool_executor_approval_token_marks_rumi_function_context_server_approved():
+    from domain.safety import approval
+    from domain.tool.executor import ToolExecutor
+
+    approval.reset_approval_state_for_tests()
+    args = {"path": "index.html", "content": "<html></html>"}
+    first = ToolExecutor()._execute_rumi_function(
+        _coding_write_tool_def(),
+        args,
+        {"principal_id": "defaultspack", "capability_executor": _caller_requires_denied_executor()},
+    )
+    decision = approval.approve(first["widget"]["approval_request_id"])
+    assert decision["approved"] is True
+
+    capability_executor = MagicMock()
+    capability_executor.execute.return_value = SimpleNamespace(
+        success=True,
+        output={"result": "done", "is_error": False, "widget": None},
+        error=None,
+    )
+    result = ToolExecutor()._execute_rumi_function(
+        _coding_write_tool_def(),
+        {**args, "approval_token": decision["token"]},
+        {"principal_id": "defaultspack", "capability_executor": capability_executor},
+    )
+
+    assert result["result"] == "done"
+    _, request = capability_executor.execute.call_args.args
+    assert request["context"]["_tool_server_approved"] is True
+
+
+def test_tool_executor_approval_token_can_come_from_execution_context():
+    from domain.safety import approval
+    from domain.tool.executor import ToolExecutor
+
+    approval.reset_approval_state_for_tests()
+    args = {"path": "index.html", "content": "<html></html>"}
+    first = ToolExecutor()._execute_rumi_function(
+        _coding_write_tool_def(),
+        args,
+        {"principal_id": "defaultspack", "capability_executor": _caller_requires_denied_executor()},
+    )
+    decision = approval.approve(first["widget"]["approval_request_id"])
+    assert decision["approved"] is True
+
+    capability_executor = MagicMock()
+    capability_executor.execute.return_value = SimpleNamespace(
+        success=True,
+        output={"result": "done", "is_error": False, "widget": None},
+        error=None,
+    )
+    result = ToolExecutor()._execute_rumi_function(
+        _coding_write_tool_def(),
+        args,
+        {
+            "principal_id": "defaultspack",
+            "capability_executor": capability_executor,
+            "tool_approval_tokens": {"coding_file_create": decision["token"]},
+        },
+    )
+
+    assert result["result"] == "done"
+    _, request = capability_executor.execute.call_args.args
+    assert request["context"]["_tool_server_approved"] is True
 
 
 def test_tool_executor_falls_back_to_local_browser_computer_with_server_approval(monkeypatch):

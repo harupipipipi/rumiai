@@ -70,6 +70,12 @@ def json_dumps(value):
     return json.dumps(value, ensure_ascii=False)
 
 
+def _approval_module():
+    from domain.safety import approval
+
+    return approval
+
+
 class ToolExecutor:
     """ツール実行エンジン"""
 
@@ -184,11 +190,14 @@ class ToolExecutor:
         }
         if isinstance(context, dict) and context.get("request_id"):
             request["request_id"] = context.get("request_id")
-        forwarded_context = _function_call_context(context, tool_def)
+        approved_context, approval_error = _context_with_tool_approval_token(context, tool_def, arguments)
+        if approval_error is not None:
+            return approval_error
+        forwarded_context = _function_call_context(approved_context, tool_def)
         if forwarded_context:
             request["context"] = forwarded_context
         self._ensure_shared_function_registered(qualified_name)
-        return self._execute_capability_request(tool_def, request, context)
+        return self._execute_capability_request(tool_def, request, approved_context)
 
     def _execute_capability(self, tool_def, arguments, context):
         execution = tool_def.get("execution", {}) if isinstance(tool_def, dict) else {}
@@ -208,7 +217,10 @@ class ToolExecutor:
         qualified_name = str(execution.get("qualified_name") or "").strip()
         if qualified_name:
             request["qualified_name"] = qualified_name
-        return self._execute_capability_request(tool_def, request, context)
+        approved_context, approval_error = _context_with_tool_approval_token(context, tool_def, arguments)
+        if approval_error is not None:
+            return approval_error
+        return self._execute_capability_request(tool_def, request, approved_context)
 
     def _execute_capability_request(self, tool_def, request, context):
         principal_id = self._principal_id(tool_def, context)
@@ -291,6 +303,7 @@ class ToolExecutor:
         if getattr(response, "error_type", "") not in {
             "function_not_found",
             "function_registry_unavailable",
+            "pack_not_approved",
         }:
             return None
         qualified_name = str(request.get("qualified_name") or "")
@@ -335,6 +348,8 @@ class ToolExecutor:
     def _allows_direct_first_party_function_fallback(pack_id, function_id):
         return (pack_id, function_id) in {
             ("defaultspack", "tool_calculator"),
+            ("defaultspack", "coding_file_create"),
+            ("defaultspack", "coding_file_write"),
             ("rumi_default_tools_pack", "calculator"),
         }
 
@@ -457,7 +472,7 @@ class ToolExecutor:
         error = getattr(response, "error", None)
         if not success:
             if (
-                getattr(response, "error_type", None) == "caller_requires_denied"
+                getattr(response, "error_type", None) in {"caller_requires_denied", "pack_not_approved"}
                 and isinstance(tool_def, dict)
                 and _requires_approval(tool_def)
             ):
@@ -559,23 +574,17 @@ class ToolExecutor:
 
         policy = policy_from_context(context if isinstance(context, dict) else {})
         next_arguments = dict(arguments or {})
-        next_context = dict(context or {}) if isinstance(context, dict) else {}
+        next_context, approval_error = _context_with_tool_approval_token(context, tool_def, next_arguments)
+        if approval_error is not None:
+            return approval_error
         if _truthy(policy.get("yolo_mode")):
             next_context["_tool_server_approved"] = True
         elif _is_policy_allow_context(context):
             next_context["_tool_server_approved"] = True
+        elif _context_has_tool_server_approval(next_context):
+            pass
         elif _requires_approval(tool_def):
-            return {
-                "result": "Tool '{}' requires approval".format(tool_def.get("name", tool_def.get("tool_id", "tool"))),
-                "is_error": False,
-                "widget": {
-                    "type": "approval_request",
-                    "tool_name": tool_def.get("name", tool_def.get("tool_id", "tool")),
-                    "approval_required": True,
-                    "risk_level": "high" if _is_shell_or_git(tool_def) else "medium",
-                    "arguments": _redact_sensitive_arguments(next_arguments),
-                },
-            }
+            return _approval_required_tool_response(tool_def, next_arguments)
 
         module_name, attr_name = handler.split(":", 1)
         try:
@@ -1177,16 +1186,94 @@ def _requires_approval(tool_def):
     return requires_approval_for_security(tool_def)
 
 
+def _tool_approval_tool_name(tool_def):
+    return str(tool_def.get("name") or tool_def.get("tool_id") or "tool").strip() or "tool"
+
+
+def _tool_approval_operation(tool_def):
+    return "tool.{}".format(_tool_approval_tool_name(tool_def))
+
+
+def _tool_approval_risk_level(tool_def):
+    return "high" if _is_high_risk_approval(tool_def) else "medium"
+
+
+def _approval_token_from_arguments(arguments):
+    if not isinstance(arguments, dict):
+        return ""
+    return str(arguments.get("approval_token") or "").strip()
+
+
+def _approval_token_from_context(context, tool_def):
+    if not isinstance(context, dict):
+        return ""
+    tokens = context.get("tool_approval_tokens")
+    if not isinstance(tokens, dict):
+        return ""
+    for key in (
+        _tool_approval_tool_name(tool_def),
+        _tool_approval_operation(tool_def),
+    ):
+        token = str(tokens.get(key) or "").strip()
+        if token:
+            return token
+    return ""
+
+
+def _context_with_tool_approval_token(context, tool_def, arguments):
+    next_context = dict(context or {}) if isinstance(context, dict) else {}
+    if not isinstance(tool_def, dict) or not _requires_approval(tool_def):
+        return next_context, None
+    if _context_has_tool_server_approval(next_context):
+        return next_context, None
+    token = _approval_token_from_arguments(arguments) or _approval_token_from_context(context, tool_def)
+    if not token:
+        return next_context, None
+    approval = _approval_module()
+    verification = approval.verify_execution_token(
+        token,
+        _tool_approval_operation(tool_def),
+        approval.hash_arguments(arguments if isinstance(arguments, dict) else {}),
+    )
+    if verification.valid:
+        next_context["_tool_server_approved"] = True
+        next_context["_tool_server_approval_token_valid"] = True
+        return next_context, None
+    return next_context, {
+        "result": verification.message or "approval token is invalid",
+        "is_error": True,
+        "widget": None,
+    }
+
+
 def _approval_required_tool_response(tool_def, arguments):
+    tool_name = _tool_approval_tool_name(tool_def)
+    operation = _tool_approval_operation(tool_def)
+    risk_level = _tool_approval_risk_level(tool_def)
+    args = dict(arguments or {}) if isinstance(arguments, dict) else {}
+    request = _approval_module().create_approval_request(
+        operation,
+        risk_level,
+        args,
+        details={"tool_name": tool_name},
+    )
     return {
-        "result": "Tool '{}' requires approval".format(tool_def.get("name", tool_def.get("tool_id", "tool"))),
+        "result": "Tool '{}' requires approval".format(tool_name),
         "is_error": False,
         "widget": {
             "type": "approval_request",
-            "tool_name": tool_def.get("name", tool_def.get("tool_id", "tool")),
+            "tool_name": tool_name,
             "approval_required": True,
-            "risk_level": "high" if _is_high_risk_approval(tool_def) else "medium",
-            "arguments": _redact_sensitive_arguments(arguments),
+            "requires_approval": True,
+            "risk_level": risk_level,
+            "operation": operation,
+            "action": operation,
+            "arguments": _redact_sensitive_arguments(args),
+            "payload": args,
+            "approval_request_id": request["request_id"],
+            "args_hash": request["args_hash"],
+            "expires_at": request["expires_at"],
+            "display_summary": request["display_summary"],
         },
     }
 
@@ -1249,7 +1336,12 @@ def _context_has_tool_server_approval(context):
     policy = policy_from_context(context)
     if _truthy(policy.get("yolo_mode")) or _is_policy_allow_context(context):
         return True
-    return bool(context.get("_tool_server_approved"))
+    if context.get("_tool_server_approval_token_valid") is True:
+        return True
+    return bool(
+        context.get("_tool_server_approved")
+        and any(str(context.get(key) or "").strip() for key in ("principal_id", "pack_id", "_source_pack_id"))
+    )
 
 
 def _function_call_context(context, tool_def):

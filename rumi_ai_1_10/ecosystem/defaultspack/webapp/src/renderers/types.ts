@@ -24,6 +24,7 @@ export type ChatUiMessage = {
     thinkingDuration?: string;
     thinkingTranscript?: string;
     attachedToolCount?: number;
+    pendingApproval?: Record<string, unknown>;
   };
   events?: ChatActivityEvent[];
   toolLogs?: ToolLogEntry[];
@@ -37,6 +38,16 @@ export type ComposerExtensionItem = {
   tags?: string[];
   disabled?: boolean;
   ui?: SidebarItem["ui"];
+};
+
+export type ComposerSkillItem = {
+  id: string;
+  label: string;
+  description?: string;
+  triggers?: string[];
+  appliesToTools?: string[];
+  aliases?: string[];
+  metadata?: Record<string, unknown>;
 };
 
 export type ContextUsageInfo = {
@@ -112,10 +123,13 @@ export type ComposerRendererProps = {
   contextUsage: ContextUsageInfo;
   inlineExtensions: ComposerExtensionItem[];
   belowExtensions: ComposerExtensionItem[];
+  skillExtensions?: ComposerSkillItem[];
   commands?: ComposerCommandItem[];
   modelCommandCandidates?: ModelCommandCandidate[];
   modelPickerRequestId?: number;
   yoloMode?: boolean;
+  voiceInputEnabled?: boolean;
+  voiceInputUseAi?: boolean;
   mode?: AppMode;
   codingContext?: CodingContext | null;
   codingWorkspaces?: CodingWorkspaceRecord[];
@@ -128,6 +142,7 @@ export type ComposerRendererProps = {
   steerBusy?: boolean;
   steerQueuedCount?: number;
   steerPreviewItems?: ConversationSteerItem[];
+  suppressPopovers?: boolean;
   onOpenModelManager?: () => void;
   onOpenToolSettings?: () => void;
   onSwitchToVisionModel?: () => void;

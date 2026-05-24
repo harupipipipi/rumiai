@@ -11,9 +11,10 @@ import threading
 import time
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch, MagicMock, PropertyMock
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import pytest
 
@@ -35,6 +36,9 @@ def _make_executor(
     handler_registry=None,
     trust_store=None,
     grant_manager=None,
+    function_registry=None,
+    approval_manager=None,
+    permission_manager=None,
     rate_limit: int = 60,
 ) -> CapabilityExecutor:
     """テスト用 CapabilityExecutor を生成し内部状態を mock 注入"""
@@ -43,6 +47,9 @@ def _make_executor(
     executor._handler_registry = handler_registry or MagicMock()
     executor._trust_store = trust_store or MagicMock()
     executor._grant_manager = grant_manager or MagicMock()
+    executor._function_registry = function_registry
+    executor._approval_manager = approval_manager
+    executor._permission_manager = permission_manager
     executor._secret_get_rate_limit = rate_limit
     return executor
 
@@ -72,6 +79,30 @@ class _MockGrantResult:
     def __post_init__(self):
         if self.config is None:
             self.config = {}
+
+
+def _make_function_entry(
+    pack_id: str,
+    *,
+    function_id: str = "test_func",
+    requires: Optional[List[str]] = None,
+    caller_requires: Optional[List[str]] = None,
+):
+    return SimpleNamespace(
+        pack_id=pack_id,
+        function_id=function_id,
+        qualified_name=f"{pack_id}:{function_id}",
+        requires=list(requires or []),
+        caller_requires=list(caller_requires or []),
+        host_execution=False,
+        calling_convention=None,
+        function_dir="/fake/function_dir",
+        main_py_path="/fake/function_dir/main.py",
+        entrypoint="main.py:run",
+        grant_config={},
+        manifest={},
+        vocab_aliases=[],
+    )
 
 
 class TestExecuteMissingPermissionId(unittest.TestCase):
@@ -275,6 +306,99 @@ class TestFlowRunDepthExceeded(unittest.TestCase):
             self.assertEqual(resp.error_type, "flow_depth_exceeded")
         finally:
             _flow_call_stack_local.stack = []
+
+
+class TestFunctionCallBuiltinTrustScope(unittest.TestCase):
+    """builtin pack bypass is limited to the bundled runtime copy"""
+
+    @patch("core_runtime.capability_executor.get_audit_logger", new_callable=MagicMock)
+    def test_function_call_bundled_defaultspack_bypasses_builtin_checks(self, mock_audit_module):
+        mock_audit_module.return_value = MagicMock()
+        entry = _make_function_entry("defaultspack", requires=["tool.write"])
+        function_registry = MagicMock()
+        function_registry.get.return_value = entry
+
+        approval_manager = MagicMock()
+        approval_manager.is_pack_approved_and_verified.return_value = (True, None)
+        approval_manager._is_trusted_builtin_pack.return_value = True
+
+        permission_manager = MagicMock()
+        permission_manager.has_permission.return_value = False
+
+        executor = _make_executor(
+            function_registry=function_registry,
+            approval_manager=approval_manager,
+            permission_manager=permission_manager,
+        )
+
+        success_response = CapabilityResponse(success=True, output={"ok": True})
+        with patch.object(executor, "_execute_user_function", return_value=success_response) as mock_exec:
+            resp = executor.execute(
+                "defaultspack",
+                {"type": "function.call", "qualified_name": "defaultspack:test_func"},
+            )
+
+        self.assertTrue(resp.success)
+        permission_manager.has_permission.assert_not_called()
+        mock_exec.assert_called_once()
+
+    @patch("core_runtime.capability_executor.get_audit_logger", new_callable=MagicMock)
+    def test_function_call_nonbundled_defaultspack_checks_pack_requires(self, mock_audit_module):
+        mock_audit_module.return_value = MagicMock()
+        entry = _make_function_entry("defaultspack", requires=["tool.write"])
+        function_registry = MagicMock()
+        function_registry.get.return_value = entry
+
+        approval_manager = MagicMock()
+        approval_manager.is_pack_approved_and_verified.return_value = (True, None)
+        approval_manager._is_trusted_builtin_pack.return_value = False
+
+        permission_manager = MagicMock()
+        permission_manager.has_permission.return_value = False
+
+        executor = _make_executor(
+            function_registry=function_registry,
+            approval_manager=approval_manager,
+            permission_manager=permission_manager,
+        )
+
+        resp = executor.execute(
+            "principal_a",
+            {"type": "function.call", "qualified_name": "defaultspack:test_func"},
+        )
+
+        self.assertFalse(resp.success)
+        self.assertEqual(resp.error_type, "requires_denied")
+        permission_manager.has_permission.assert_called_once_with("defaultspack", "tool.write")
+
+    @patch("core_runtime.capability_executor.get_audit_logger", new_callable=MagicMock)
+    def test_function_call_nonbundled_defaultspack_checks_caller_permission(self, mock_audit_module):
+        mock_audit_module.return_value = MagicMock()
+        entry = _make_function_entry("custom_pack")
+        function_registry = MagicMock()
+        function_registry.get.return_value = entry
+
+        approval_manager = MagicMock()
+        approval_manager.is_pack_approved_and_verified.return_value = (True, None)
+        approval_manager._is_trusted_builtin_pack.return_value = False
+
+        permission_manager = MagicMock()
+        permission_manager.has_permission.return_value = False
+
+        executor = _make_executor(
+            function_registry=function_registry,
+            approval_manager=approval_manager,
+            permission_manager=permission_manager,
+        )
+
+        resp = executor.execute(
+            "defaultspack",
+            {"type": "function.call", "qualified_name": "custom_pack:test_func"},
+        )
+
+        self.assertFalse(resp.success)
+        self.assertEqual(resp.error_type, "permission_denied")
+        permission_manager.has_permission.assert_called_once_with("defaultspack", "function.call")
 
 
 if __name__ == "__main__":

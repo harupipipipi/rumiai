@@ -52,6 +52,37 @@ defaults Pack は4つのレイヤーで構成されています。
 
 **外部 API 層** は `domain/ai_client/` を通じて AI プロバイダー（OpenAI、Anthropic 等）と通信します。
 
+## Provider-Agnostic Chat IR
+
+The defaultspack chat stack uses Rumi Chat IR v2 as the internal representation
+between provider-neutral ChatStore records and provider-specific API payloads.
+ChatStore continues to store Rumi messages without provider-specific request
+state. The IR layer preserves message IDs, parent/child links, sequence numbers,
+metadata, multimodal blocks, tool calls/results, reasoning blocks, and unknown
+blocks.
+
+Provider execution is split into small stages:
+
+- `domain/chat/ir*.py`: Rumi Chat IR v2 dataclasses, serialization,
+  validation, and legacy adapters.
+- `domain/ai_client/capabilities/`: provider capability manifests and quirks.
+- `domain/ai_client/request_planner.py`: degradation planning, warnings,
+  dropped features, bridge actions, and tool name aliases.
+- `domain/ai_client/provider_compiler/`: OpenAI Chat, OpenAI Responses,
+  OpenAI-compatible, Google OpenAI, Google native, Anthropic Messages, Bedrock
+  Converse, and local OpenAI-compatible payload compilers/parsers.
+- `domain/tool/protocol.py`: provider-independent tool definitions, provider
+  aliases, calls, and results.
+- `domain/chat/attachments/`: attachment records and representations for text,
+  inline data URLs, image pages, PDF text, transcripts, and provider file IDs.
+- `domain/ai_client/provider_trace.py`: redacted trace artifacts for debugging
+  provider planning and payloads.
+
+The legacy StandardMessage path remains the default runtime path unless
+`RUMI_DEFAULTSPACK_PROVIDER_COMPILER_V2=1` is set. Setting
+`RUMI_DEFAULTSPACK_PROVIDER_LEGACY_MESSAGES=1` forces the old path even when the
+compiler flag is enabled.
+
 ## データフロー
 
 典型的なリクエストの処理フローは以下の通りです。

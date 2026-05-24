@@ -35,9 +35,13 @@ from pathlib import Path
 
 # function.call: core_pack 判定用
 try:
-    from .paths import CORE_PACK_ID_PREFIX as _CORE_PACK_ID_PREFIX
+    from .paths import (
+        CORE_PACK_ID_PREFIX as _CORE_PACK_ID_PREFIX,
+        ECOSYSTEM_DIR as _ECOSYSTEM_DIR,
+    )
 except ImportError:
     _CORE_PACK_ID_PREFIX = None  # resolved after _load_permissions_config()
+    _ECOSYSTEM_DIR = str(Path(__file__).resolve().parent.parent / "ecosystem")
 
 # core_pack ディレクトリパス
 try:
@@ -492,6 +496,47 @@ class CapabilityExecutor:
                 grant_config = manifest.get("grant_config")
         return grant_config
 
+    @staticmethod
+    def _is_bundled_builtin_pack_dir(pack_dir: Path, pack_id: str | None = None) -> bool:
+        try:
+            resolved = pack_dir.resolve()
+        except OSError:
+            resolved = pack_dir
+        if pack_id and resolved.name != pack_id:
+            return False
+        if resolved.parent.name != "ecosystem":
+            return False
+        runtime_root = resolved.parent.parent
+        return runtime_root.name == "app"
+
+    def _is_trusted_builtin_pack(self, pack_id: str, pack_root_hint=None) -> bool:
+        normalized_pack_id = str(pack_id or "").strip()
+        if normalized_pack_id not in TRUSTED_BUILTIN_PACK_IDS:
+            return False
+
+        approval_manager = getattr(self, "_approval_manager", None)
+        helper = getattr(approval_manager, "_is_trusted_builtin_pack", None)
+        if callable(helper):
+            try:
+                return bool(helper(normalized_pack_id))
+            except Exception:
+                logger.debug(
+                    "approval_manager trusted builtin lookup failed for '%s'",
+                    normalized_pack_id,
+                    exc_info=True,
+                )
+
+        if pack_root_hint is None:
+            return False
+
+        try:
+            candidate_path = Path(pack_root_hint).resolve()
+            if candidate_path.is_file():
+                candidate_path = candidate_path.parent
+            return self._is_bundled_builtin_pack_dir(candidate_path, normalized_pack_id)
+        except (OSError, TypeError):
+            return False
+
     # ------------------------------------------------------------------
     # _unified_execute
     # ------------------------------------------------------------------
@@ -712,7 +757,11 @@ class CapabilityExecutor:
             return resp
         pack_id = entry.pack_id
         is_core = pack_id.startswith(_CORE_PACK_ID_PREFIX)
-        is_trusted_builtin = pack_id in TRUSTED_BUILTIN_PACK_IDS
+        pack_root_hint = getattr(entry, "function_dir", None) or getattr(entry, "main_py_path", None)
+        is_trusted_builtin = self._is_trusted_builtin_pack(pack_id, pack_root_hint=pack_root_hint)
+        principal_is_trusted_builtin = self._is_trusted_builtin_pack(principal_id)
+        if not principal_is_trusted_builtin and principal_id == pack_id:
+            principal_is_trusted_builtin = is_trusted_builtin
         if self._approval_manager is not None:
             try:
                 approved_result = self._approval_manager.is_pack_approved_and_verified(pack_id)
@@ -746,7 +795,7 @@ class CapabilityExecutor:
                     self._audit(principal_id, "function.call", None, resp, args, request_id,
                                 detail_reason=f"Pack '{pack_id}' lacks required permission '{req_perm}'")
                     return resp
-        if self._permission_manager is not None and principal_id not in TRUSTED_BUILTIN_PACK_IDS:
+        if self._permission_manager is not None and not principal_is_trusted_builtin:
             if not self._permission_manager.has_permission(principal_id, "function.call"):
                 resp = CapabilityResponse(success=False, error="Permission denied: function.call",
                                           error_type="permission_denied", latency_ms=(time.time() - start_time) * 1000)
@@ -766,6 +815,7 @@ class CapabilityExecutor:
                 principal_id,
                 entry.caller_requires,
                 request_context,
+                principal_is_trusted_builtin=principal_is_trusted_builtin,
             ):
                 caller_ok = True
             if not caller_ok:
@@ -805,9 +855,17 @@ class CapabilityExecutor:
                     extra_details={"qualified_name": qualified_name, "pack_id": pack_id, "is_core": is_core, "calling_convention": calling_convention})
         return resp
 
-    @staticmethod
-    def _request_context_satisfies_caller_requires(principal_id, caller_requires, request_context):
-        if principal_id not in TRUSTED_BUILTIN_PACK_IDS:
+    def _request_context_satisfies_caller_requires(
+        self,
+        principal_id,
+        caller_requires,
+        request_context,
+        *,
+        principal_is_trusted_builtin=None,
+    ):
+        if principal_is_trusted_builtin is None:
+            principal_is_trusted_builtin = self._is_trusted_builtin_pack(principal_id)
+        if not principal_is_trusted_builtin:
             return False
         if not isinstance(request_context, dict):
             return False

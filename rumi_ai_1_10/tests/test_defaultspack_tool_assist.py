@@ -85,6 +85,48 @@ def test_tool_recommender_uses_skill_metadata():
     ]
 
 
+def test_tool_recommender_expands_japanese_coding_file_terms():
+    from domain.chat.tool_recommender import recommend_tool_ids
+
+    tools = [
+        {
+            "tool_id": "coding_file_patch",
+            "name": "Patch File",
+            "summary": "Patch and edit a workspace source file.",
+            "tags": ["coding", "file", "patch"],
+        },
+        {"tool_id": "web_search", "summary": "Search web pages.", "tags": ["web"]},
+    ]
+
+    assert recommend_tool_ids("コードを編集してファイルを修正", tools, limit=2)[0] == "coding_file_patch"
+
+
+def test_tool_search_returns_overview_and_schema_from_docs(tmp_path):
+    from domain.chat.tool_recommender import search_tools
+
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text("{}", encoding="utf-8")
+    (tmp_path / "SKILL.md").write_text("Use this tool for parquet schema extraction and dataset docs.", encoding="utf-8")
+    tools = [
+        {
+            "tool_id": "dataset_schema",
+            "name": "Dataset Schema",
+            "summary": "",
+            "tags": [],
+            "schema": {"parameters": {"type": "object", "properties": {"path": {"description": "dataset path"}}}},
+            "metadata": {"manifest_path": str(manifest)},
+        }
+    ]
+
+    overview = search_tools("parquet docs", tools, include_schema=False)
+    schema = search_tools("parquet docs", tools, include_schema=True)
+
+    assert overview[0]["tool_id"] == "dataset_schema"
+    assert overview[0]["usage"]["phase"] == "overview"
+    assert "schema" not in overview[0]
+    assert schema[0]["schema"]["parameters"]["properties"]["path"]["description"] == "dataset path"
+
+
 def test_effective_tool_assist_defaults_to_all_and_maps_legacy_auto_to_vector():
     from domain.chat.tool_recommender import effective_tool_assist_mode
 

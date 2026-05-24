@@ -1,4 +1,4 @@
-import { cloneElement, useEffect, useMemo, useRef, useState, type DragEvent, type MouseEvent, type ReactElement, type ReactNode } from "react";
+import { cloneElement, useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type MouseEvent, type PointerEvent as ReactPointerEvent, type ReactElement, type ReactNode } from "react";
 import {
   Blocks,
   BrainCircuit,
@@ -79,7 +79,23 @@ function cn(...inputs: ClassValue[]) {
 }
 
 const RAIL_BUTTON_CLASS = "relative flex h-9 min-h-9 w-9 min-w-9 shrink-0 items-center justify-center overflow-visible rounded-md transition-colors";
+const PANEL_WIDTH_STORAGE_KEY = "rumi-right-sidebar-panel-width";
 const PLACEMENT_PANEL_PREFIX = "__placement__:";
+
+function clampPanelWidth(value: unknown): number {
+  const numeric = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(numeric)) return 270;
+  return Math.max(220, Math.min(520, numeric));
+}
+
+function readStoredPanelWidth(): number {
+  try {
+    const raw = localStorage.getItem(PANEL_WIDTH_STORAGE_KEY);
+    return raw ? clampPanelWidth(JSON.parse(raw)) : 270;
+  } catch {
+    return 270;
+  }
+}
 
 function readStoredStringArray(key: string): string[] {
   try {
@@ -796,8 +812,10 @@ export function RightSidebar({
   const [categoryFilter, setCategoryFilter] = useState<"all" | SidebarCategory>("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [toolManagerSearchQuery, setToolManagerSearchQuery] = useState("");
+  const [isToolManagerSearchOpen, setIsToolManagerSearchOpen] = useState(false);
   const [openToolGroupMenu, setOpenToolGroupMenu] = useState<string | null>(null);
   const [toolGroupMenuPosition, setToolGroupMenuPosition] = useState<{ top: number; right: number } | null>(null);
+  const [panelWidth, setPanelWidth] = useState(readStoredPanelWidth);
   const [placementMenuOpen, setPlacementMenuOpen] = useState(false);
   const sidebarSettings = settingsValues.sidebar ?? {};
   const toolsSettings = settingsValues.tools ?? {};
@@ -829,11 +847,13 @@ export function RightSidebar({
   const [activeTagFilter, setActiveTagFilter] = useState<string | null>(null);
   const [tagDraftByItemId, setTagDraftByItemId] = useState<Record<string, string>>({});
   const [contextMenu, setContextMenu] = useState<{ itemId: string; x: number; y: number } | null>(null);
+  const toolManagerSearchRef = useRef<HTMLDivElement | null>(null);
   const toolGroupMenuRef = useRef<HTMLDivElement | null>(null);
   const buttonTabIndex = keyboardButtonNavigation ? undefined : -1;
   const selectedToolIdSet = useMemo(() => new Set(selectedToolIds), [selectedToolIds]);
   const pinnedItemIdSet = useMemo(() => new Set(pinnedItemIds), [pinnedItemIds]);
   const starredItemIdSet = useMemo(() => new Set(starredItemIds), [starredItemIds]);
+  const panelWidthPx = clampPanelWidth(panelWidth);
   const disabledToolIdSet = useMemo(() => new Set(disabledToolIds), [disabledToolIds]);
   const hiddenToolIdSet = useMemo(() => new Set(hiddenToolIds), [hiddenToolIds]);
   const placementManifestMap = useMemo(
@@ -849,6 +869,37 @@ export function RightSidebar({
       placement.id === manifest.id && placement.surface === "right_sidebar"
     )))
   ), [pinnedPlacements, placementManifestMap]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(PANEL_WIDTH_STORAGE_KEY, JSON.stringify(panelWidthPx));
+    } catch {
+      // Storage may be unavailable in restricted browser contexts.
+    }
+  }, [panelWidthPx]);
+
+  const startPanelResize = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>) => {
+      if (event.button !== 0) return;
+      event.preventDefault();
+      const startX = event.clientX;
+      const startWidth = panelWidthPx;
+      const handlePointerMove = (moveEvent: PointerEvent) => {
+        setPanelWidth(clampPanelWidth(startWidth + (startX - moveEvent.clientX)));
+      };
+      const handlePointerUp = () => {
+        document.body.style.cursor = "";
+        document.body.style.userSelect = "";
+        window.removeEventListener("pointermove", handlePointerMove);
+        window.removeEventListener("pointerup", handlePointerUp);
+      };
+      document.body.style.cursor = "col-resize";
+      document.body.style.userSelect = "none";
+      window.addEventListener("pointermove", handlePointerMove);
+      window.addEventListener("pointerup", handlePointerUp, { once: true });
+    },
+    [panelWidthPx],
+  );
 
   useEffect(() => {
     const requestedId = activeItemId?.split(":").slice(0, -1).join(":") || activeItemId;
@@ -934,6 +985,42 @@ export function RightSidebar({
       document.removeEventListener("keydown", handleKeyDown);
     };
   }, [contextMenu]);
+
+  useEffect(() => {
+    if (!toolManagerSearchQuery.trim()) {
+      setIsToolManagerSearchOpen(false);
+    }
+  }, [toolManagerSearchQuery]);
+
+  useEffect(() => {
+    if (activePanel !== "__tool_manager__") {
+      setIsToolManagerSearchOpen(false);
+    }
+  }, [activePanel]);
+
+  useEffect(() => {
+    if (!isToolManagerSearchOpen) return;
+
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      if (toolManagerSearchRef.current?.contains(target)) return;
+      setIsToolManagerSearchOpen(false);
+    };
+
+    const handleDocumentKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setIsToolManagerSearchOpen(false);
+      }
+    };
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleDocumentKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleDocumentKeyDown);
+    };
+  }, [isToolManagerSearchOpen]);
 
   const tagMap = useMemo(() => {
     const next = new Map<string, string[]>();
@@ -1370,7 +1457,17 @@ export function RightSidebar({
   return (
     <aside className="flex-shrink-0 border-l border-zinc-800/60 bg-[#09090b] hidden md:flex h-full transition-[width,opacity] duration-200 ease-out">
       {(activeItem || isPlacementPanelActive || isToolManagerActive || isToolFilterLogActive || isRuntimeStatusActive || isCompanyPanelActive || isCodingPanelActive) && (
-        <div className="w-[250px] xl:w-[270px] flex flex-col border-r border-zinc-800/40 bg-[#0a0a0c] animate-in slide-in-from-right-2 duration-200">
+        <div
+          className="relative flex flex-col border-r border-zinc-800/40 bg-[#0a0a0c] animate-in slide-in-from-right-2 duration-200"
+          style={{ width: panelWidthPx }}
+        >
+          <div
+            role="separator"
+            aria-label="Tool panel幅を変更"
+            title="Tool panel幅を変更"
+            className="absolute left-0 top-0 z-20 h-full w-1.5 cursor-col-resize bg-transparent transition-colors hover:bg-zinc-700/60"
+            onPointerDown={startPanelResize}
+          />
           <div className="h-10 flex items-center justify-between px-2.5 border-b border-zinc-800/60 flex-shrink-0">
             <div className="flex items-center gap-2 min-w-0 overflow-hidden">
               <div className={cn("w-1.5 h-1.5 rounded-full flex-shrink-0", activeItem ? categoryColor(activeItem.category, "bg") : isPlacementPanelActive ? "bg-violet-300" : isCompanyPanelActive ? "bg-sky-400" : isCodingPanelActive ? "bg-zinc-300" : isToolFilterLogActive ? "bg-amber-300" : isRuntimeStatusActive ? "bg-sky-300" : "bg-emerald-500")} />
@@ -1505,20 +1602,33 @@ export function RightSidebar({
                               hiddenToolIds={hiddenToolIds}
                               filterEntries={toolFilterEntries}
                             />
-                            <div className="relative">
+                            <div ref={toolManagerSearchRef} className="relative">
                               <label className="relative block">
                                 <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-600" />
                                 <input
                                   type="text"
                                   value={toolManagerSearchQuery}
-                                  onChange={(event) => setToolManagerSearchQuery(event.target.value)}
+                                  onChange={(event) => {
+                                    const nextQuery = event.target.value;
+                                    setToolManagerSearchQuery(nextQuery);
+                                    setIsToolManagerSearchOpen(Boolean(nextQuery.trim()));
+                                  }}
+                                  onFocus={() => {
+                                    if (toolManagerSearchQuery.trim()) {
+                                      setIsToolManagerSearchOpen(true);
+                                    }
+                                  }}
                                   placeholder="Tool managerで検索"
+                                  aria-expanded={Boolean(toolManagerSearchQuery.trim() && isToolManagerSearchOpen)}
                                   className="h-9 w-full rounded-lg border border-zinc-800 bg-zinc-950 pl-8 pr-8 text-[12px] text-zinc-200 outline-none placeholder:text-zinc-600 focus:border-zinc-600"
                                 />
                                 {toolManagerSearchQuery.trim() && (
                                   <button
                                     type="button"
-                                    onClick={() => setToolManagerSearchQuery("")}
+                                    onClick={() => {
+                                      setToolManagerSearchQuery("");
+                                      setIsToolManagerSearchOpen(false);
+                                    }}
                                     className="absolute right-1.5 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200"
                                     title="検索をクリア"
                                   >
@@ -1526,8 +1636,8 @@ export function RightSidebar({
                                   </button>
                                 )}
                               </label>
-                              {toolManagerSearchQuery.trim() && (
-                                <div className="absolute left-0 right-0 top-[calc(100%+6px)] z-30 overflow-hidden rounded-xl border border-zinc-700/70 bg-zinc-950 py-1 shadow-2xl">
+                              {toolManagerSearchQuery.trim() && isToolManagerSearchOpen && (
+                                <div data-testid="tool-manager-candidates" className="absolute left-0 right-0 top-[calc(100%+6px)] z-30 overflow-hidden rounded-xl border border-zinc-700/70 bg-zinc-950 py-1 shadow-2xl">
                                   <div className="flex items-center justify-between border-b border-zinc-800 px-3 py-2 text-[10px] text-zinc-600">
                                     <span>候補</span>
                                     <span>{toolManagerSearchItems.length} / {toolManagerBaseItems.length}</span>
@@ -1541,6 +1651,7 @@ export function RightSidebar({
                                           onClick={() => {
                                             setActivePanel(item.id);
                                             setToolManagerSearchQuery("");
+                                            setIsToolManagerSearchOpen(false);
                                           }}
                                           className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-zinc-300 transition-colors hover:bg-zinc-800/80 hover:text-zinc-100"
                                         >

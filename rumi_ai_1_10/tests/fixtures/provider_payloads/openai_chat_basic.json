@@ -1,0 +1,10 @@
+{
+  "model": "gpt-test",
+  "messages": [
+    {
+      "role": "user",
+      "content": "hello"
+    }
+  ],
+  "temperature": 0.2
+}

@@ -33,7 +33,6 @@ def _ensure_stub(mod_name: str):
     return sys.modules[mod_name]
 
 _ensure_stub("core_runtime")
-_ensure_stub("core_runtime.capability_handler_registry")
 _ensure_stub("core_runtime.capability_trust_store")
 _ensure_stub("core_runtime.capability_grant_manager")
 _ensure_stub("core_runtime.audit_logger")
@@ -79,7 +78,6 @@ class FunctionEntry:
 from core_runtime.capability_executor import CapabilityExecutor, CapabilityResponse
 
 for _stub_name in (
-    "core_runtime.capability_handler_registry",
     "core_runtime.capability_trust_store",
     "core_runtime.capability_grant_manager",
     "core_runtime.audit_logger",
