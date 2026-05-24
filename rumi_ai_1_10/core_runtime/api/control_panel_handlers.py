@@ -901,13 +901,14 @@ class ControlPanelHandlersMixin:
     # ------------------------------------------------------------------
 
     def _panel_check_updates(self) -> Dict[str, Any]:
-        """GET /api/panel/updates — rumiai/defaultspack の更新確認"""
+        """GET /api/panel/updates — viewer/core/packs の更新確認"""
         try:
-            from ..github_update_manager import get_github_update_manager
+            from ..update.update_orchestrator import get_update_orchestrator
 
-            manager = get_github_update_manager()
-            checks = manager.check_many(["rumiai", "defaultspack"])
-            return {"updates": [check.to_dict() for check in checks]}
+            orchestrator = get_update_orchestrator()
+            core = orchestrator.core_status()
+            packs = orchestrator.packs_status().get("packs", [])
+            return {"updates": [core, *packs], "core": core, "packs": packs}
         except Exception as e:
             _log_internal_error("panel_check_updates", e)
             return {"error": _SAFE_ERROR_MSG, "status_code": 500}
@@ -915,10 +916,9 @@ class ControlPanelHandlersMixin:
     def _panel_get_update_settings(self) -> Dict[str, Any]:
         """GET /api/panel/updates/settings — 自動アップデート設定取得"""
         try:
-            from ..github_update_manager import get_github_update_manager
+            from ..update.update_orchestrator import get_update_orchestrator
 
-            manager = get_github_update_manager()
-            return manager.read_auto_update_settings()
+            return get_update_orchestrator().read_settings()
         except Exception as e:
             _log_internal_error("panel_get_update_settings", e)
             return {"error": _SAFE_ERROR_MSG, "status_code": 500}
@@ -928,41 +928,164 @@ class ControlPanelHandlersMixin:
         auto_update = body.get("auto_update")
         if not isinstance(auto_update, dict):
             return {"error": "auto_update must be an object", "status_code": 400}
-        unknown = set(auto_update.keys()) - {"rumiai", "defaultspack"}
+        allowed = {"viewer", "core", "official_packs", "third_party_packs", "rumiai", "defaultspack"}
+        unknown = set(auto_update.keys()) - allowed
         if unknown:
             return {"error": f"Unknown update target: {sorted(unknown)[0]}", "status_code": 400}
 
         try:
-            from ..github_update_manager import get_github_update_manager
+            from ..update.update_orchestrator import get_update_orchestrator
 
-            manager = get_github_update_manager()
-            return manager.set_auto_update_settings(auto_update)
+            translated = dict(body)
+            next_auto = dict(auto_update)
+            if "rumiai" in next_auto:
+                next_auto["core"] = next_auto.pop("rumiai")
+            if "defaultspack" in next_auto:
+                next_auto["official_packs"] = next_auto.pop("defaultspack")
+            translated["auto_update"] = next_auto
+            return get_update_orchestrator().write_settings(translated)
         except Exception as e:
             _log_internal_error("panel_update_update_settings", e)
             return {"error": _SAFE_ERROR_MSG, "status_code": 500}
 
     def _panel_apply_update(self, target: str, body: Dict[str, Any]) -> Dict[str, Any]:
-        """POST /api/panel/updates/{target}/apply — GitHub Release 更新適用"""
-        if target not in {"rumiai", "defaultspack"}:
+        """POST /api/panel/updates/{target}/apply — backward compatible update apply"""
+        pack_id: str | None = None
+        if target == "defaultspack":
+            pack_id = "defaultspack"
+        elif target.startswith("pack:"):
+            pack_id = target.split(":", 1)[1].strip()
+            if (
+                not pack_id
+                or "\x00" in pack_id
+                or "/" in pack_id
+                or "\\" in pack_id
+                or pack_id in {".", ".."}
+                or ".." in Path(pack_id).parts
+            ):
+                return {"error": "Unknown update target", "status_code": 400}
+        elif target not in {"rumiai", "core", "rumiai-core"}:
             return {"error": "Unknown update target", "status_code": 400}
 
         try:
-            from ..github_update_manager import GitHubUpdateError, get_github_update_manager
+            from ..update.update_orchestrator import get_update_orchestrator
 
-            force = bool(body.get("force", False))
-            manager = get_github_update_manager()
-            result = manager.apply(target, force=force)  # type: ignore[arg-type]
-            payload = result.to_dict()
-            if target == "rumiai":
-                payload["restart_required"] = True
-            else:
-                payload["routes_reload_recommended"] = True
-            return payload
-        except GitHubUpdateError as e:
-            return {"error": str(e), "status_code": 400}
+            orchestrator = get_update_orchestrator()
+            if pack_id is not None:
+                return orchestrator.pack_apply(pack_id, body)
+            return orchestrator.core_apply(body)
         except Exception as e:
             _log_internal_error("panel_apply_update", e)
             return {"error": _SAFE_ERROR_MSG, "status_code": 500}
+
+    def _panel_get_viewer_update(self) -> Dict[str, Any]:
+        try:
+            from ..update.update_orchestrator import get_update_orchestrator
+
+            return get_update_orchestrator().viewer_status()
+        except Exception as e:
+            _log_internal_error("panel_get_viewer_update", e)
+            return {"error": _SAFE_ERROR_MSG, "status_code": 500}
+
+    def _panel_install_viewer_update(self) -> Dict[str, Any]:
+        try:
+            from ..update.update_orchestrator import get_update_orchestrator
+
+            return get_update_orchestrator().viewer_install()
+        except Exception as e:
+            _log_internal_error("panel_install_viewer_update", e)
+            return {"error": _SAFE_ERROR_MSG, "status_code": 500}
+
+    def _panel_get_core_update(self) -> Dict[str, Any]:
+        try:
+            from ..update.update_orchestrator import get_update_orchestrator
+
+            return get_update_orchestrator().core_status()
+        except Exception as e:
+            _log_internal_error("panel_get_core_update", e)
+            return {"error": _SAFE_ERROR_MSG, "status_code": 500}
+
+    def _panel_stage_core_update(self, body: Dict[str, Any]) -> Dict[str, Any]:
+        try:
+            from ..update.update_orchestrator import get_update_orchestrator
+
+            return get_update_orchestrator().core_stage(body)
+        except Exception as e:
+            _log_internal_error("panel_stage_core_update", e)
+            return {"error": _SAFE_ERROR_MSG, "status_code": 500}
+
+    def _panel_apply_core_update(self, body: Dict[str, Any]) -> Dict[str, Any]:
+        try:
+            from ..update.update_orchestrator import get_update_orchestrator
+
+            return get_update_orchestrator().core_apply(body)
+        except Exception as e:
+            _log_internal_error("panel_apply_core_update", e)
+            return {"error": _SAFE_ERROR_MSG, "status_code": 500}
+
+    def _panel_get_pack_updates(self) -> Dict[str, Any]:
+        try:
+            from ..update.update_orchestrator import get_update_orchestrator
+
+            return get_update_orchestrator().packs_status()
+        except Exception as e:
+            _log_internal_error("panel_get_pack_updates", e)
+            return {"error": _SAFE_ERROR_MSG, "status_code": 500}
+
+    def _panel_get_pack_update(self, pack_id: str) -> Dict[str, Any]:
+        try:
+            from ..update.update_orchestrator import get_update_orchestrator
+
+            return get_update_orchestrator().pack_status(pack_id)
+        except Exception as e:
+            _log_internal_error("panel_get_pack_update", e)
+            return {"error": _SAFE_ERROR_MSG, "status_code": 500}
+
+    def _panel_stage_pack_update(self, pack_id: str, body: Dict[str, Any]) -> Dict[str, Any]:
+        try:
+            from ..update.update_orchestrator import get_update_orchestrator
+
+            return get_update_orchestrator().pack_stage(pack_id, body)
+        except Exception as e:
+            _log_internal_error("panel_stage_pack_update", e)
+            return {"error": _SAFE_ERROR_MSG, "status_code": 500}
+
+    def _panel_apply_pack_update(self, pack_id: str, body: Dict[str, Any]) -> Dict[str, Any]:
+        try:
+            from ..update.update_orchestrator import get_update_orchestrator
+
+            return get_update_orchestrator().pack_apply(pack_id, body)
+        except Exception as e:
+            _log_internal_error("panel_apply_pack_update", e)
+            return {"error": _SAFE_ERROR_MSG, "status_code": 500}
+
+    def _panel_rollback_pack_update(self, pack_id: str, body: Dict[str, Any]) -> Dict[str, Any]:
+        try:
+            from ..update.update_orchestrator import get_update_orchestrator
+
+            return get_update_orchestrator().pack_rollback(pack_id, body)
+        except Exception as e:
+            _log_internal_error("panel_rollback_pack_update", e)
+            return {"error": _SAFE_ERROR_MSG, "status_code": 500}
+
+    def _panel_reload_routes(self) -> Dict[str, Any]:
+        """POST /api/panel/routes/reload — route reload if available."""
+        try:
+            from backend_core.ecosystem.registry import get_registry
+
+            registry = get_registry()
+            route_count = 0
+            load_pack_routes = getattr(self.__class__, "load_pack_routes", None)
+            load_api_routes = getattr(self.__class__, "load_api_routes", None)
+            if callable(load_pack_routes):
+                route_count += int(load_pack_routes(registry) or 0)
+            if callable(load_api_routes):
+                route_count += int(load_api_routes(registry) or 0)
+            if callable(load_pack_routes) or callable(load_api_routes):
+                return {"reloaded": True, "restart_required": False, "route_count": route_count}
+        except Exception as e:
+            _log_internal_error("panel_reload_routes", e)
+        return {"reloaded": False, "restart_required": True}
 
     # ------------------------------------------------------------------
     # Kernel Restart

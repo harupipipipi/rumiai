@@ -33,12 +33,14 @@ from .spec.schema.validator import (
 try:
     from core_runtime.paths import (
         ECOSYSTEM_DIR as _ECOSYSTEM_DIR,
+        discover_pack_locations as _discover_pack_locations,
         find_ecosystem_json as _find_ecosystem_json_paths,
         CORE_PACK_DIR as _CORE_PACK_DIR_PATHS,
     )
 except ImportError:
     from pathlib import Path as _FallbackPath
     _ECOSYSTEM_DIR = str(_FallbackPath(__file__).resolve().parent.parent.parent / "ecosystem")
+    _discover_pack_locations = None
     _find_ecosystem_json_paths = None
     _CORE_PACK_DIR_PATHS = str(_FallbackPath(__file__).resolve().parent.parent.parent / "core_runtime" / "core_pack")
 
@@ -106,6 +108,13 @@ def _should_include_core_packs(ecosystem_dir: Path) -> bool:
     except OSError:
         return False
 
+
+def _should_use_managed_pack_discovery(ecosystem_dir: Path) -> bool:
+    try:
+        return ecosystem_dir.resolve() == Path(_ECOSYSTEM_DIR).resolve()
+    except OSError:
+        return False
+
 @dataclass
 class ComponentInfo:
     """コンポーネント情報"""
@@ -152,6 +161,7 @@ class Registry:
         """
         self.ecosystem_dir = Path(ecosystem_dir)
         self._include_core_packs = _should_include_core_packs(self.ecosystem_dir)
+        self._use_managed_pack_discovery = _should_use_managed_pack_discovery(self.ecosystem_dir)
         self.packs: Dict[str, PackInfo] = {}
         self._component_index: Dict[str, ComponentInfo] = {}  # uuid -> ComponentInfo
         self._type_index: Dict[str, List[ComponentInfo]] = {}  # type -> [ComponentInfo]
@@ -165,14 +175,10 @@ class Registry:
         Returns:
             読み込まれたPackの辞書
         """
-        if not self.ecosystem_dir.exists():
-            print(f"[Registry] エコシステムディレクトリが存在しません: {self.ecosystem_dir}")
-            return {}
-
         global _global_registry
         _global_registry = self
         
-        print(f"\n=== Registry: Packの読み込みを開始 ===")
+        print("\n=== Registry: Packの読み込みを開始 ===")
         
         # ecosystem/* を走査（特殊ディレクトリは除外）
         _excluded = {".git", "__pycache__", "node_modules", ".venv", "packs", "flows", "setup_pack"}
@@ -197,19 +203,28 @@ class Registry:
             )
         # --- END W22-A ---
 
-        if self.ecosystem_dir.exists():
-            candidates.extend(
-                d for d in sorted(self.ecosystem_dir.iterdir())
-                if d.is_dir() and d.name not in _excluded and not d.name.startswith(".")
-            )
-        
-        # ecosystem/packs/* 互換ルートも走査
-        legacy_root = self.ecosystem_dir / "packs"
-        if legacy_root.is_dir():
-            for d in sorted(legacy_root.iterdir()):
-                if d.is_dir() and d.name not in _excluded and not d.name.startswith("."):
-                    if d.name not in {c.name for c in candidates}:
-                        candidates.append(d)
+        if self._use_managed_pack_discovery and _discover_pack_locations is not None:
+            try:
+                candidates.extend(loc.pack_dir for loc in _discover_pack_locations(str(self.ecosystem_dir)))
+            except Exception:
+                logger.warning("[Registry] Managed pack discovery failed; falling back to legacy scan", exc_info=True)
+
+        if not self._use_managed_pack_discovery or _discover_pack_locations is None:
+            if not self.ecosystem_dir.exists():
+                print(f"[Registry] エコシステムディレクトリが存在しません: {self.ecosystem_dir}")
+            else:
+                candidates.extend(
+                    d for d in sorted(self.ecosystem_dir.iterdir())
+                    if d.is_dir() and d.name not in _excluded and not d.name.startswith(".")
+                )
+
+            # ecosystem/packs/* 互換ルートも走査
+            legacy_root = self.ecosystem_dir / "packs"
+            if legacy_root.is_dir():
+                for d in sorted(legacy_root.iterdir()):
+                    if d.is_dir() and d.name not in _excluded and not d.name.startswith("."):
+                        if d.name not in {c.name for c in candidates}:
+                            candidates.append(d)
         
         for pack_dir in candidates:
             if pack_dir.is_dir():

@@ -42,6 +42,85 @@ def test_trusted_builtin_packs_are_approved_without_user_grants(tmp_path):
         assert pack_id in mgr.get_approved_pack_ids()
 
 
+def test_managed_seeded_defaultspack_is_approved_without_user_grants(tmp_path, monkeypatch):
+    import core_runtime.approval_manager as approval_module
+    from core_runtime import paths
+    from core_runtime.pack_seed import write_current_pointer_atomic
+
+    managed = tmp_path / "user_data" / "packs"
+    ecosystem_dir = tmp_path / "bundle" / "app" / "ecosystem"
+    version_dir = managed / "defaultspack" / "versions" / "2.0.0"
+    version_dir.mkdir(parents=True)
+    (version_dir / "ecosystem.json").write_text(
+        json.dumps({"pack_id": "defaultspack", "version": "2.0.0"}),
+        encoding="utf-8",
+    )
+    (version_dir / "handler.py").write_text("def run(): pass\n", encoding="utf-8")
+    write_current_pointer_atomic("defaultspack", "2.0.0", Path("versions") / "2.0.0", managed)
+    (managed / "defaultspack" / "install_record.json").write_text(
+        json.dumps(
+            {
+                "schema": "rumi.pack_install_record.v1",
+                "pack_id": "defaultspack",
+                "version": "2.0.0",
+                "source": "seed",
+            }
+        ),
+        encoding="utf-8",
+    )
+    ecosystem_dir.mkdir(parents=True)
+    monkeypatch.setattr(paths, "MANAGED_PACKS_DIR", managed)
+    monkeypatch.setattr(approval_module, "ECOSYSTEM_DIR", str(ecosystem_dir))
+    mgr = ApprovalManager(
+        packs_dir=str(ecosystem_dir),
+        grants_dir=str(tmp_path / "grants"),
+        secret_key="test-secret-key-for-hmac",
+    )
+
+    assert mgr.get_status("defaultspack") == PackStatus.APPROVED
+    assert mgr.is_pack_approved_and_verified("defaultspack") == (True, None)
+
+
+def test_managed_official_github_source_defaultspack_is_approved(tmp_path, monkeypatch):
+    import core_runtime.approval_manager as approval_module
+    from core_runtime import paths
+    from core_runtime.pack_seed import write_current_pointer_atomic
+
+    managed = tmp_path / "user_data" / "packs"
+    ecosystem_dir = tmp_path / "bundle" / "app" / "ecosystem"
+    version_dir = managed / "defaultspack" / "versions" / "2.1.0"
+    version_dir.mkdir(parents=True)
+    (version_dir / "ecosystem.json").write_text(
+        json.dumps({"pack_id": "defaultspack", "version": "2.1.0"}),
+        encoding="utf-8",
+    )
+    (version_dir / "handler.py").write_text("def run(): pass\n", encoding="utf-8")
+    write_current_pointer_atomic("defaultspack", "2.1.0", Path("versions") / "2.1.0", managed)
+    (managed / "defaultspack" / "install_record.json").write_text(
+        json.dumps(
+            {
+                "schema": "rumi.pack_install_record.v1",
+                "pack_id": "defaultspack",
+                "version": "2.1.0",
+                "source": "github-source-archive",
+                "source_repo": "harupipipipi/rumiai",
+            }
+        ),
+        encoding="utf-8",
+    )
+    ecosystem_dir.mkdir(parents=True)
+    monkeypatch.setattr(paths, "MANAGED_PACKS_DIR", managed)
+    monkeypatch.setattr(approval_module, "ECOSYSTEM_DIR", str(ecosystem_dir))
+    mgr = ApprovalManager(
+        packs_dir=str(ecosystem_dir),
+        grants_dir=str(tmp_path / "grants"),
+        secret_key="test-secret-key-for-hmac",
+    )
+
+    assert mgr.get_status("defaultspack") == PackStatus.APPROVED
+    assert mgr.is_pack_approved_and_verified("defaultspack") == (True, None)
+
+
 # ===================================================================
 # Helper
 # ===================================================================

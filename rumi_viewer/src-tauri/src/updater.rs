@@ -1,12 +1,211 @@
-//! Application update checker — V1 implementation.
+//! Application update support.
 //!
-//! Checks the GitHub Releases API for a newer version and, if found,
-//! offers to open the release page in the user's browser.
+//! The primary path uses Tauri's signed updater plugin. The older GitHub
+//! Releases checker is kept as a manual-download fallback.
 
 use std::time::Duration;
 
 use anyhow::{bail, Context, Result};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
+use tauri::{AppHandle, Emitter};
+use tauri_plugin_updater::{Update, UpdaterExt};
+
+const VIEWER_UPDATE_PROGRESS_EVENT: &str = "viewer-update-progress";
+
+/// Build-time placeholder used until release signing is configured.
+const PLACEHOLDER_UPDATER_PUBKEY: &str = "RUMI_VIEWER_UPDATER_PUBKEY_NOT_CONFIGURED";
+
+/// Public status shape returned by update commands.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ViewerUpdateStatus {
+    pub current_version: String,
+    pub latest_version: Option<String>,
+    pub notes: Option<String>,
+    pub pub_date: Option<String>,
+    pub available: bool,
+    pub error: Option<String>,
+    pub progress: Option<f64>,
+}
+
+impl ViewerUpdateStatus {
+    fn current() -> Self {
+        Self {
+            current_version: env!("CARGO_PKG_VERSION").to_string(),
+            latest_version: None,
+            notes: None,
+            pub_date: None,
+            available: false,
+            error: None,
+            progress: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct ViewerUpdateMetadata {
+    current_version: String,
+    latest_version: String,
+    notes: Option<String>,
+    pub_date: Option<String>,
+}
+
+impl ViewerUpdateMetadata {
+    fn into_status(self, progress: Option<f64>) -> ViewerUpdateStatus {
+        ViewerUpdateStatus {
+            current_version: self.current_version,
+            latest_version: Some(self.latest_version),
+            notes: self.notes,
+            pub_date: self.pub_date,
+            available: true,
+            error: None,
+            progress,
+        }
+    }
+}
+
+/// Check Tauri's signed updater endpoint for a Viewer update.
+#[tauri::command]
+pub async fn check_viewer_update(app: AppHandle) -> ViewerUpdateStatus {
+    match check_signed_update(&app).await {
+        Ok(Some(update)) => update_metadata(&update).into_status(None),
+        Ok(None) => ViewerUpdateStatus::current(),
+        Err(error) => fallback_github_status(error),
+    }
+}
+
+/// Download and install the latest signed Viewer update.
+#[tauri::command]
+pub async fn install_viewer_update(app: AppHandle) -> ViewerUpdateStatus {
+    if !compiled_updater_pubkey_configured() {
+        let mut status = fallback_github_status(
+            "automatic updater signing key is not configured for this build".to_string(),
+        );
+        status.progress = Some(0.0);
+        return status;
+    }
+
+    let update = match check_signed_update(&app).await {
+        Ok(Some(update)) => update,
+        Ok(None) => {
+            let mut status = ViewerUpdateStatus::current();
+            status.progress = Some(1.0);
+            return status;
+        }
+        Err(error) => {
+            let mut status = fallback_github_status(error);
+            status.progress = Some(0.0);
+            return status;
+        }
+    };
+
+    let metadata = update_metadata(&update);
+    let mut downloaded = 0_u64;
+    let progress_app = app.clone();
+    let finish_app = app.clone();
+    let progress_metadata = metadata.clone();
+    let finish_metadata = metadata.clone();
+
+    match update
+        .download_and_install(
+            move |chunk_length, content_length| {
+                downloaded = downloaded.saturating_add(chunk_length as u64);
+                let progress =
+                    content_length.and_then(|total| calculate_progress(downloaded, total));
+                let _ = progress_app.emit(
+                    VIEWER_UPDATE_PROGRESS_EVENT,
+                    progress_metadata.clone().into_status(progress),
+                );
+            },
+            move || {
+                let _ = finish_app.emit(
+                    VIEWER_UPDATE_PROGRESS_EVENT,
+                    finish_metadata.clone().into_status(Some(1.0)),
+                );
+            },
+        )
+        .await
+    {
+        Ok(()) => {
+            app.request_restart();
+            metadata.into_status(Some(1.0))
+        }
+        Err(error) => {
+            let mut status = metadata.into_status(Some(0.0));
+            status.error = Some(format!("failed to install signed update: {error}"));
+            status
+        }
+    }
+}
+
+pub fn configured_updater_pubkey() -> &'static str {
+    option_env!("RUMI_VIEWER_UPDATER_PUBKEY").unwrap_or(PLACEHOLDER_UPDATER_PUBKEY)
+}
+
+fn compiled_updater_pubkey_configured() -> bool {
+    configured_updater_pubkey() != PLACEHOLDER_UPDATER_PUBKEY
+}
+
+async fn check_signed_update(app: &AppHandle) -> std::result::Result<Option<Update>, String> {
+    let updater = app
+        .updater()
+        .map_err(|error| format!("failed to build signed updater: {error}"))?;
+    updater
+        .check()
+        .await
+        .map_err(|error| format!("signed updater check failed: {error}"))
+}
+
+fn update_metadata(update: &Update) -> ViewerUpdateMetadata {
+    ViewerUpdateMetadata {
+        current_version: update.current_version.clone(),
+        latest_version: update.version.clone(),
+        notes: update.body.clone(),
+        pub_date: update_pub_date(update),
+    }
+}
+
+fn update_pub_date(update: &Update) -> Option<String> {
+    update
+        .raw_json
+        .get("pub_date")
+        .and_then(|date| date.as_str())
+        .map(ToOwned::to_owned)
+        .or_else(|| update.date.map(|date| date.to_string()))
+}
+
+fn fallback_github_status(primary_error: String) -> ViewerUpdateStatus {
+    let mut status = match check_for_update() {
+        Ok(Some(info)) => ViewerUpdateStatus {
+            current_version: info.current_version,
+            latest_version: Some(info.latest_version),
+            notes: info.notes,
+            pub_date: info.pub_date,
+            available: true,
+            error: None,
+            progress: None,
+        },
+        Ok(None) => ViewerUpdateStatus::current(),
+        Err(fallback_error) => {
+            let mut status = ViewerUpdateStatus::current();
+            status.error = Some(format!(
+                "{primary_error}; GitHub release fallback failed: {fallback_error}"
+            ));
+            return status;
+        }
+    };
+
+    status.error = Some(format!(
+        "{primary_error}; falling back to GitHub Releases for manual download"
+    ));
+    status
+}
+
+fn calculate_progress(downloaded: u64, total: u64) -> Option<f64> {
+    if total == 0 {
+        return None;
+    }
+    Some((downloaded as f64 / total as f64).clamp(0.0, 1.0))
+}
 
 /// Information about an available update.
 #[derive(Debug, Clone)]
@@ -17,6 +216,10 @@ pub struct UpdateInfo {
     pub release_url: String,
     /// The currently running version, e.g. "0.1.0".
     pub current_version: String,
+    /// Release notes from GitHub, if present.
+    pub notes: Option<String>,
+    /// GitHub release publish timestamp, if present.
+    pub pub_date: Option<String>,
 }
 
 /// Partial GitHub Releases API response.
@@ -24,6 +227,8 @@ pub struct UpdateInfo {
 struct GitHubRelease {
     tag_name: String,
     html_url: String,
+    body: Option<String>,
+    published_at: Option<String>,
 }
 
 /// The GitHub API endpoint for the latest release.
@@ -52,6 +257,8 @@ pub fn check_for_update() -> Result<Option<UpdateInfo>> {
             latest_version: latest.to_string(),
             release_url: release.html_url,
             current_version: current.to_string(),
+            notes: release.body,
+            pub_date: release.published_at,
         }))
     } else {
         Ok(None)
@@ -135,5 +342,38 @@ mod tests {
         let current = parse_version("1.0.0").unwrap();
         let latest = parse_version("1.0.0").unwrap();
         assert!(!(latest > current));
+    }
+
+    #[test]
+    fn progress_is_none_when_total_is_unknown() {
+        assert_eq!(calculate_progress(42, 0), None);
+    }
+
+    #[test]
+    fn progress_is_clamped_to_complete() {
+        assert_eq!(calculate_progress(150, 100), Some(1.0));
+    }
+
+    #[test]
+    fn metadata_status_exposes_expected_fields() {
+        let metadata = ViewerUpdateMetadata {
+            current_version: "0.1.0".into(),
+            latest_version: "0.2.0".into(),
+            notes: Some("notes".into()),
+            pub_date: Some("2026-05-24T00:00:00Z".into()),
+        };
+
+        assert_eq!(
+            metadata.into_status(Some(0.5)),
+            ViewerUpdateStatus {
+                current_version: "0.1.0".into(),
+                latest_version: Some("0.2.0".into()),
+                notes: Some("notes".into()),
+                pub_date: Some("2026-05-24T00:00:00Z".into()),
+                available: true,
+                error: None,
+                progress: Some(0.5),
+            }
+        );
     }
 }

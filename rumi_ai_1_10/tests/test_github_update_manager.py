@@ -122,15 +122,39 @@ def test_defaultspack_update_is_separate_and_preserves_pack_user_data(tmp_path: 
     manager = LocalArchiveUpdateManager(base_dir=base, archive_path=archive)
 
     result = manager.apply("defaultspack")
-    pack_dir = base / "ecosystem" / "defaultspack"
+    pack_dir = base / "user_data" / "packs" / "defaultspack" / "versions" / "2.1.0"
 
     updated_manifest = json.loads((pack_dir / "ecosystem.json").read_text(encoding="utf-8"))
     assert updated_manifest["version"] == "2.1.0"
     assert (pack_dir / "new_module.py").read_text(encoding="utf-8") == "new"
-    assert (pack_dir / "local_only.py").read_text(encoding="utf-8") == "local"
-    assert (pack_dir / "user_data" / "chat.json").read_text(encoding="utf-8") == "keep pack data"
-    assert not (Path(result.backup_dir) / "user_data").exists()
-    assert "user_data/chat.json" in result.skipped_files
+    assert (base / "ecosystem" / "defaultspack" / "local_only.py").read_text(encoding="utf-8") == "local"
+    assert not (pack_dir / "user_data" / "chat.json").exists()
+    assert (base / "ecosystem" / "defaultspack" / "user_data" / "chat.json").read_text(encoding="utf-8") == "keep pack data"
+    current = json.loads(
+        (base / "user_data" / "packs" / "defaultspack" / "current.json").read_text(encoding="utf-8")
+    )
+    assert current["version"] == "2.1.0"
+    assert current["path"] == "versions/2.1.0"
+    install_record = json.loads(
+        (base / "user_data" / "packs" / "defaultspack" / "install_record.json").read_text(encoding="utf-8")
+    )
+    assert install_record["source"] == "github-source-archive"
+    assert install_record["source_repo"] == "local/rumiai"
+    assert result.backup_dir == ""
+
+
+def test_defaultspack_update_leaves_legacy_bundled_pack_untouched(tmp_path: Path) -> None:
+    base = _make_local_install(tmp_path)
+    archive = _make_source_archive(tmp_path)
+    manager = LocalArchiveUpdateManager(base_dir=base, archive_path=archive)
+
+    manager.apply("defaultspack")
+
+    legacy_manifest = json.loads(
+        (base / "ecosystem" / "defaultspack" / "ecosystem.json").read_text(encoding="utf-8")
+    )
+    assert legacy_manifest["version"] == "2.0.0"
+    assert not (base / "ecosystem" / "defaultspack" / "new_module.py").exists()
 
 
 def test_auto_update_settings_are_off_by_default_and_persist(tmp_path: Path) -> None:
@@ -162,7 +186,13 @@ def test_auto_update_applies_only_enabled_target(tmp_path: Path) -> None:
     assert result.results[0]["status"] == "applied"
     assert (base / "app.py").read_text(encoding="utf-8") == "old app"
     updated_manifest = json.loads(
-        (base / "ecosystem" / "defaultspack" / "ecosystem.json").read_text(encoding="utf-8")
+        (
+            base / "user_data" / "packs" / "defaultspack" / "versions" / "2.1.0" / "ecosystem.json"
+        ).read_text(encoding="utf-8")
     )
     assert updated_manifest["version"] == "2.1.0"
+    legacy_manifest = json.loads(
+        (base / "ecosystem" / "defaultspack" / "ecosystem.json").read_text(encoding="utf-8")
+    )
+    assert legacy_manifest["version"] == "2.0.0"
     assert (base / "user_data" / "secret.txt").read_text(encoding="utf-8") == "keep me"

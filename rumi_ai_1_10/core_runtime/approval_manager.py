@@ -156,7 +156,10 @@ class ApprovalManager:
         if pack_dir is None or not pack_dir.exists():
             return False
 
-        return self._is_bundled_builtin_pack_dir(pack_dir, normalized_pack_id)
+        return (
+            self._is_bundled_builtin_pack_dir(pack_dir, normalized_pack_id)
+            or self._is_managed_official_pack(normalized_pack_id)
+        )
 
     @staticmethod
     def _is_bundled_builtin_pack_dir(pack_dir: Path, pack_id: str | None = None) -> bool:
@@ -170,6 +173,45 @@ class ApprovalManager:
             return False
         runtime_root = resolved.parent.parent
         return runtime_root.name == "app"
+
+    def _is_managed_official_pack(self, pack_id: str) -> bool:
+        loc = self._pack_locations.get(pack_id)
+        if loc is None:
+            for discovered in self._discover_pack_locations():
+                self._pack_locations[discovered.pack_id] = discovered
+            loc = self._pack_locations.get(pack_id)
+        if loc is None or loc.source != "managed" or loc.current_pointer_path is None:
+            return False
+        pack_root = loc.current_pointer_path.parent
+        try:
+            loc.pack_dir.resolve().relative_to(pack_root.resolve())
+        except (OSError, ValueError):
+            return False
+        record_path = pack_root / "install_record.json"
+        try:
+            record = json.loads(record_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+            return False
+        if not isinstance(record, dict):
+            return False
+        if record.get("schema") != "rumi.pack_install_record.v1":
+            return False
+        if record.get("pack_id") != pack_id:
+            return False
+        if str(record.get("version") or "") != str(loc.version or ""):
+            return False
+        source = record.get("source")
+        if source in {"seed", "legacy_seed_migration", "rumi-pack"}:
+            return True
+        return source == "github-source-archive" and record.get("source_repo") == "harupipipipi/rumiai"
+
+    def _discover_pack_locations(self) -> List[PackLocation]:
+        include_managed = True
+        try:
+            include_managed = self.packs_dir.resolve() == Path(ECOSYSTEM_DIR).resolve()
+        except OSError:
+            include_managed = False
+        return discover_pack_locations(str(self.packs_dir), include_managed=include_managed)
     
     def _invalidate_hash_cache(self, pack_id: str) -> None:
         """指定 pack のハッシュキャッシュを無効化する"""
@@ -341,7 +383,7 @@ class ApprovalManager:
         """
         packs = []
         
-        locations = discover_pack_locations(str(self.packs_dir))
+        locations = self._discover_pack_locations()
 
         pending_saves = []  # M-12: ロック外でバッチI/O
         for loc in locations:
@@ -415,7 +457,7 @@ class ApprovalManager:
             return self._pack_locations[pack_id].pack_dir
         
         # キャッシュにない場合は再探索
-        locations = discover_pack_locations(str(self.packs_dir))
+        locations = self._discover_pack_locations()
         for loc in locations:
             self._pack_locations[loc.pack_id] = loc
         

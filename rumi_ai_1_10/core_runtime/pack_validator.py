@@ -21,8 +21,12 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from .paths import (
+    ECOSYSTEM_DIR,
+    EXCLUDED_DIRS,
+    LEGACY_PACKS_SUBDIR,
     PackLocation,
     discover_pack_locations,
+    find_ecosystem_json,
     get_pack_flow_dirs,
 )
 
@@ -82,7 +86,7 @@ def validate_packs(ecosystem_dir: Optional[str] = None) -> ValidationReport:
 
     # --- Pack 一覧を取得 ---
     try:
-        locations = discover_pack_locations(ecosystem_dir)
+        locations = _discover_validation_locations(ecosystem_dir)
     except Exception as exc:
         msg = f"Failed to discover packs: {exc}"
         logger.error(msg)
@@ -126,7 +130,7 @@ def validate_host_execution(ecosystem_dir: Optional[str] = None) -> List[str]:
     """
     # --- Pack 一覧を取得 ---
     try:
-        locations = discover_pack_locations(ecosystem_dir)
+        locations = _discover_validation_locations(ecosystem_dir)
     except Exception as exc:
         logger.warning("Failed to discover packs for host_execution check: %s", exc)
         return []
@@ -176,6 +180,61 @@ def validate_host_execution(ecosystem_dir: Optional[str] = None) -> List[str]:
 # ======================================================================
 # 内部関数
 # ======================================================================
+
+def _discover_validation_locations(ecosystem_dir: Optional[str]) -> List[PackLocation]:
+    """Return managed runtime discovery for the default root, local-only scan for explicit roots."""
+    if ecosystem_dir is None:
+        return discover_pack_locations(None)
+
+    root = Path(ecosystem_dir)
+    try:
+        if root.resolve() == Path(ECOSYSTEM_DIR).resolve():
+            return discover_pack_locations(ecosystem_dir)
+    except OSError:
+        pass
+
+    locations: List[PackLocation] = []
+    seen: Set[str] = set()
+    for pack_dir, is_legacy in (
+        [(path, False) for path in _iter_explicit_pack_dirs(root)]
+        + [(path, True) for path in _iter_explicit_pack_dirs(root / LEGACY_PACKS_SUBDIR)]
+    ):
+        if pack_dir.name in seen:
+            continue
+        eco_json, pack_subdir = find_ecosystem_json(pack_dir)
+        if eco_json is None or pack_subdir is None:
+            continue
+        seen.add(pack_dir.name)
+        locations.append(
+            PackLocation(
+                pack_dir=pack_dir,
+                pack_id=pack_dir.name,
+                ecosystem_json_path=eco_json,
+                pack_subdir=pack_subdir,
+                is_legacy=is_legacy,
+                source="legacy" if is_legacy else "bundled_legacy",
+                mutable=False,
+            )
+        )
+    return sorted(locations, key=lambda loc: loc.pack_id)
+
+
+def _iter_explicit_pack_dirs(root: Path):
+    if not root.is_dir():
+        return []
+    try:
+        return sorted(
+            (
+                d
+                for d in root.iterdir()
+                if d.is_dir()
+                and d.name not in EXCLUDED_DIRS
+                and not d.name.startswith(".")
+            ),
+            key=lambda d: d.name,
+        )
+    except OSError:
+        return []
 
 def _count_packs_with_issues(
     locations: List[PackLocation],
@@ -627,4 +686,3 @@ def validate_host_execution_single(pack_config: dict) -> Tuple[bool, str]:
         return (True, "WARNING: host_execution enabled")
 
     return (False, "host_execution requires RUMI_ALLOW_HOST_EXECUTION=true")
-

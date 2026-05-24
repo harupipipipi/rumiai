@@ -10,7 +10,7 @@ from typing import Any
 
 import yaml  # type: ignore[import-untyped]
 
-from .paths import discover_pack_locations
+from .paths import ECOSYSTEM_DIR, discover_pack_locations
 from .profile_workspace import ProfileWorkspaceManager
 
 
@@ -101,7 +101,13 @@ class ProfileResourceSnapshotManager:
         return manifest
 
     def _pack_path(self, base_pack: str) -> Path:
-        for location in discover_pack_locations(self.ecosystem_dir):
+        include_managed = True
+        if self.ecosystem_dir is not None:
+            try:
+                include_managed = Path(self.ecosystem_dir).resolve() == Path(ECOSYSTEM_DIR).resolve()
+            except OSError:
+                include_managed = False
+        for location in discover_pack_locations(self.ecosystem_dir, include_managed=include_managed):
             if location.pack_id == base_pack:
                 return location.pack_subdir
         root = Path(self.ecosystem_dir) if self.ecosystem_dir else Path(__file__).resolve().parent.parent / "ecosystem"

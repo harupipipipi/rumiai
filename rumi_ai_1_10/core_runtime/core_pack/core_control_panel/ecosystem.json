@@ -103,6 +103,26 @@
     },
     {
       "method": "GET",
+      "path": "/api/panel/updates/viewer",
+      "handler": "_panel_get_viewer_update"
+    },
+    {
+      "method": "GET",
+      "path": "/api/panel/updates/core",
+      "handler": "_panel_get_core_update"
+    },
+    {
+      "method": "GET",
+      "path": "/api/panel/updates/packs",
+      "handler": "_panel_get_pack_updates"
+    },
+    {
+      "method": "GET",
+      "path_pattern": "/api/panel/updates/packs/{pack_id}",
+      "handler": "_panel_get_pack_update"
+    },
+    {
+      "method": "GET",
       "path": "/api/nodes",
       "handler": "_capability_get_nodes"
     },
@@ -245,6 +265,46 @@
       "path_pattern": "/api/panel/updates/{target}/apply",
       "handler": "_panel_apply_update",
       "pass_body": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/panel/updates/viewer/install",
+      "handler": "_panel_install_viewer_update"
+    },
+    {
+      "method": "POST",
+      "path": "/api/panel/updates/core/stage",
+      "handler": "_panel_stage_core_update",
+      "pass_body": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/panel/updates/core/apply",
+      "handler": "_panel_apply_core_update",
+      "pass_body": true
+    },
+    {
+      "method": "POST",
+      "path_pattern": "/api/panel/updates/packs/{pack_id}/stage",
+      "handler": "_panel_stage_pack_update",
+      "pass_body": true
+    },
+    {
+      "method": "POST",
+      "path_pattern": "/api/panel/updates/packs/{pack_id}/apply",
+      "handler": "_panel_apply_pack_update",
+      "pass_body": true
+    },
+    {
+      "method": "POST",
+      "path_pattern": "/api/panel/updates/packs/{pack_id}/rollback",
+      "handler": "_panel_rollback_pack_update",
+      "pass_body": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/panel/routes/reload",
+      "handler": "_panel_reload_routes"
     },
     {
       "method": "POST",

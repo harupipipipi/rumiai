@@ -40,6 +40,7 @@ fn stage_runtime_bundle() -> io::Result<()> {
         copy_runtime_tree(&runtime_root, &staged_root, &runtime_root)?;
     }
     copy_generated_resource_dirs(&runtime_root, &staged_root)?;
+    stage_defaultspack_seed(&runtime_root, &staged_root)?;
 
     let bundled_src = project_dir.join("bundled");
     if bundled_src.exists() {
@@ -178,6 +179,18 @@ fn copy_generated_resource_dirs(runtime_root: &Path, staged_root: &Path) -> io::
         copy_dir_recursive_filtered(&source_dir, &staged_root.join(rel_dir), runtime_root)?;
     }
     Ok(())
+}
+
+fn stage_defaultspack_seed(runtime_root: &Path, staged_root: &Path) -> io::Result<()> {
+    let source_dir = runtime_root.join("ecosystem").join("defaultspack");
+    if !source_dir.exists() {
+        return Ok(());
+    }
+    let seed_dir = staged_root.join("pack_seeds").join("defaultspack");
+    if seed_dir.exists() {
+        clear_dir(&seed_dir)?;
+    }
+    copy_dir_recursive_filtered(&source_dir, &seed_dir, runtime_root)
 }
 
 fn copy_runtime_tree(src: &Path, dst: &Path, runtime_root: &Path) -> io::Result<()> {

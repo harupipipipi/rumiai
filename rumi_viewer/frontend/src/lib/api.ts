@@ -16,9 +16,11 @@ import type {
   ProfileResponseData,
   ApiVersion,
   ApiUpdateTarget,
+  ApiAutoUpdateTarget,
   ApiUpdateSettings,
   UpdatesResponseData,
   UpdateApplyResponseData,
+  ViewerUpdateStatus,
   KernelRestartResponseData,
   OAuthStartResponseData,
   SetupStatusResponseData,
@@ -559,7 +561,7 @@ export function fetchUpdateSettings(): Promise<ApiUpdateSettings> {
 }
 
 export function updateUpdateSettings(
-  autoUpdate: Partial<Record<ApiUpdateTarget, boolean>>,
+  autoUpdate: Partial<Record<ApiAutoUpdateTarget, boolean>>,
 ): Promise<ApiUpdateSettings> {
   return apiFetch<ApiUpdateSettings>('/api/panel/updates/settings', {
     method: 'PUT',
@@ -568,6 +570,34 @@ export function updateUpdateSettings(
 }
 
 export function applyUpdate(target: ApiUpdateTarget): Promise<UpdateApplyResponseData> {
+  if (target === 'viewer') {
+    return installViewerUpdate().then(status => ({
+      target: 'viewer',
+      current_version: status.current_version,
+      latest_version: status.latest_version,
+      update_available: status.available,
+      applied: status.error === null,
+      restart_required: status.error === null && status.available,
+      routes_reload_recommended: false,
+      errors: status.error ? [status.error] : [],
+    }));
+  }
+  if (target === 'core') {
+    return apiFetch<UpdateApplyResponseData>('/api/panel/updates/core/apply', {
+      method: 'POST',
+      body: JSON.stringify({}),
+    });
+  }
+  if (target.startsWith('pack:')) {
+    const packId = target.slice('pack:'.length);
+    return apiFetch<UpdateApplyResponseData>(
+      `/api/panel/updates/packs/${encodeURIComponent(packId)}/apply`,
+      {
+        method: 'POST',
+        body: JSON.stringify({}),
+      },
+    );
+  }
   return apiFetch<UpdateApplyResponseData>(
     `/api/panel/updates/${encodeURIComponent(target)}/apply`,
     {
@@ -575,6 +605,36 @@ export function applyUpdate(target: ApiUpdateTarget): Promise<UpdateApplyRespons
       body: JSON.stringify({}),
     },
   );
+}
+
+export function rollbackPackUpdate(target: ApiUpdateTarget): Promise<UpdateApplyResponseData> {
+  if (!target.startsWith('pack:')) {
+    return Promise.reject(new Error('Rollback is only available for packs.'));
+  }
+  const packId = target.slice('pack:'.length);
+  return apiFetch<UpdateApplyResponseData>(
+    `/api/panel/updates/packs/${encodeURIComponent(packId)}/rollback`,
+    {
+      method: 'POST',
+      body: JSON.stringify({}),
+    },
+  );
+}
+
+export async function checkViewerUpdate(): Promise<ViewerUpdateStatus | null> {
+  const invoke = getTauriInvoke();
+  if (!invoke) {
+    return null;
+  }
+  return invoke<ViewerUpdateStatus>('check_viewer_update');
+}
+
+export async function installViewerUpdate(): Promise<ViewerUpdateStatus> {
+  const invoke = getTauriInvoke();
+  if (!invoke) {
+    throw new Error('Viewer updates are only available in Rumi Viewer.');
+  }
+  return invoke<ViewerUpdateStatus>('install_viewer_update');
 }
 
 export function restartKernel(): Promise<KernelRestartResponseData> {

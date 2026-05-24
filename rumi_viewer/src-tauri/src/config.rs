@@ -205,6 +205,28 @@ impl AppConfig {
 
     /// Return the path to the defaultspack ecosystem.json.
     pub fn defaultspack_ecosystem_json(&self) -> PathBuf {
+        let managed_root = self.user_data_dir.join("packs").join("defaultspack");
+        let current_json = managed_root.join("current.json");
+        if let Ok(raw) = std::fs::read_to_string(&current_json) {
+            if let Ok(data) = serde_json::from_str::<serde_json::Value>(&raw) {
+                if data.get("pack_id").and_then(|value| value.as_str()) == Some("defaultspack") {
+                    if let Some(rel) = data.get("path").and_then(|value| value.as_str()) {
+                        let rel_path = PathBuf::from(rel);
+                        if !rel_path.is_absolute()
+                            && !rel_path
+                                .components()
+                                .any(|part| matches!(part, std::path::Component::ParentDir))
+                        {
+                            let ecosystem = managed_root.join(rel_path).join("ecosystem.json");
+                            if ecosystem.exists() {
+                                return ecosystem;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         self.app_dir
             .join("ecosystem")
             .join("defaultspack")
@@ -430,5 +452,44 @@ mod tests {
 
         assert_eq!(config.resolved_uv_path(), config.uv_path);
         assert_eq!(config.uv_path, appdata.join(uv_binary_name()));
+    }
+
+    #[test]
+    fn defaultspack_ecosystem_prefers_managed_current_pointer() {
+        use std::fs;
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("rumi_viewer_defaultspack_{unique}"));
+        let resource = root.join("resources");
+        let appdata = root.join("appdata");
+        let managed = appdata
+            .join("user_data")
+            .join("packs")
+            .join("defaultspack")
+            .join("versions")
+            .join("2.5.0");
+        fs::create_dir_all(&managed).unwrap();
+        fs::write(managed.join("ecosystem.json"), "{}").unwrap();
+        fs::write(
+            appdata
+                .join("user_data")
+                .join("packs")
+                .join("defaultspack")
+                .join("current.json"),
+            r#"{"schema":"rumi.pack_current.v1","pack_id":"defaultspack","version":"2.5.0","path":"versions/2.5.0"}"#,
+        )
+        .unwrap();
+
+        let config = AppConfig::detect_for_tauri(resource, appdata).unwrap();
+
+        assert_eq!(
+            config.defaultspack_ecosystem_json(),
+            managed.join("ecosystem.json")
+        );
+        fs::remove_dir_all(&root).ok();
     }
 }

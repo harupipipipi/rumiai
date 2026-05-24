@@ -300,11 +300,16 @@ class ToolExecutor:
             return None
         if bool(getattr(response, "success", False)):
             return None
-        if getattr(response, "error_type", "") not in {
+        error_type = getattr(response, "error_type", "")
+        if error_type not in {
+            "caller_requires_denied",
             "function_not_found",
             "function_registry_unavailable",
             "pack_not_approved",
+            "permission_denied",
         }:
+            return None
+        if error_type == "caller_requires_denied" and not _context_has_tool_server_approval(context):
             return None
         qualified_name = str(request.get("qualified_name") or "")
         pack_id, _, function_id = qualified_name.partition(":")

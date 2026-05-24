@@ -1,0 +1,25 @@
+{
+  "schema": "rumi.pack.v1",
+  "pack_id": "defaultspack",
+  "version": "2.0.0",
+  "channel": "stable",
+  "compatibility": {
+    "min_core_version": "1.10.0",
+    "max_core_version": "<2.0.0",
+    "min_viewer_version": "0.1.0"
+  },
+  "entrypoints": {
+    "ecosystem": "ecosystem.json"
+  },
+  "protected_paths": [
+    "user_data/**",
+    "state/**",
+    "secrets/**",
+    ".env",
+    "*.local.*"
+  ],
+  "requires": {
+    "kernel_restart": false,
+    "routes_reload": true
+  }
+}

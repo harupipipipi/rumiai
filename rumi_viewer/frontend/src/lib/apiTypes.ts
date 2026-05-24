@@ -70,19 +70,33 @@ export interface ApiVersion {
   platform_release: string;
 }
 
-export type ApiUpdateTarget = 'rumiai' | 'defaultspack';
+export type ApiUpdateTarget = 'viewer' | 'core' | `pack:${string}` | 'rumiai' | 'defaultspack';
+export type ApiAutoUpdateTarget = 'viewer' | 'core' | 'official_packs' | 'third_party_packs';
 
 export interface ApiUpdateInfo {
   target: ApiUpdateTarget;
-  current_version: string;
-  latest_version: string;
+  pack_id?: string;
+  current_version: string | null;
+  latest_version: string | null;
   update_available: boolean;
-  release_url: string;
-  repo: string;
+  release_url?: string;
+  repo?: string;
+  staged?: boolean;
+  applied?: boolean;
+  restart_required?: boolean;
+  routes_reload_recommended?: boolean;
+  rollback_available?: boolean;
+  backup_dir?: string | null;
+  errors?: string[];
 }
 
 export interface ApiUpdateSettings {
-  auto_update: Record<ApiUpdateTarget, boolean>;
+  auto_update: Record<ApiAutoUpdateTarget, boolean>;
+  channels: {
+    viewer: string;
+    core: string;
+    packs: string;
+  };
   check_interval_hours: number;
   last_checked_at: string | null;
   last_results: Array<Record<string, unknown>>;
@@ -109,16 +123,30 @@ export interface UpdatesResponseData {
 
 export interface UpdateApplyResponseData {
   target: ApiUpdateTarget;
-  current_version: string;
-  latest_version: string;
-  release_url: string;
-  backup_dir: string;
-  applied_files: string[];
-  skipped_files: string[];
-  applied_count: number;
-  skipped_count: number;
+  current_version?: string | null;
+  latest_version?: string | null;
+  release_url?: string;
+  backup_dir?: string | null;
+  applied_files?: string[];
+  skipped_files?: string[];
+  applied_count?: number;
+  skipped_count?: number;
+  applied?: boolean;
+  staged?: boolean;
   restart_required?: boolean;
   routes_reload_recommended?: boolean;
+  rollback_available?: boolean;
+  errors?: string[];
+}
+
+export interface ViewerUpdateStatus {
+  current_version: string;
+  latest_version: string | null;
+  notes: string | null;
+  pub_date: string | null;
+  available: boolean;
+  error: string | null;
+  progress: number | null;
 }
 
 export interface ApiStartupNodePort {

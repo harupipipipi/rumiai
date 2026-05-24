@@ -14,10 +14,11 @@ paths.py - パス定義とPack探索の集約モジュール
 
 from __future__ import annotations
 
+import json
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, Iterable, List, Literal, Optional, Tuple
 
 
 # ======================================================================
@@ -36,8 +37,15 @@ def _resolve_user_data_dir() -> Path:
 
 USER_DATA_DIR = _resolve_user_data_dir()
 
-# Pack供給元のルートディレクトリ
-ECOSYSTEM_DIR = str(BASE_DIR / "ecosystem")
+# Pack supply roots.  Runtime packs are resolved from MANAGED_PACKS_DIR first;
+# bundled directories are seed/fallback locations only.
+BUNDLED_LEGACY_ECOSYSTEM_DIR = BASE_DIR / "ecosystem"
+PACK_SEEDS_DIR = BASE_DIR / "pack_seeds"
+MANAGED_PACKS_DIR = USER_DATA_DIR / "packs"
+PACK_STATE_DIR = USER_DATA_DIR / "pack_state"
+
+# Backward-compatible string constants used by existing modules.
+ECOSYSTEM_DIR = str(BUNDLED_LEGACY_ECOSYSTEM_DIR)
 
 # core_pack 配置ディレクトリ（Layer 1: OS カーネルモジュール相当）
 CORE_PACK_DIR = str(BASE_DIR / "core_runtime" / "core_pack")
@@ -66,7 +74,7 @@ LOCAL_PACK_MODIFIERS_DIR = str(BASE_DIR / "ecosystem" / "flows" / "modifiers")
 GRANTS_DIR = str(USER_DATA_DIR / "permissions")
 
 # Pack data 保存先
-PACK_DATA_BASE_DIR = str(USER_DATA_DIR / "packs")
+PACK_DATA_BASE_DIR = str(MANAGED_PACKS_DIR)
 
 # Pack discovery 時に除外するディレクトリ名
 EXCLUDED_DIRS = frozenset({
@@ -99,12 +107,20 @@ class PackLocation:
         ecosystem_json_path: ecosystem.json の絶対パス
         pack_subdir:         ecosystem.json が見つかったディレクトリ（= Packの実体基点）
         is_legacy:           ecosystem/packs/ 互換ルート由来か
+        source:              managed/seed/bundled_legacy/legacy
+        mutable:             runtime may write into this source
+        version:             discovered managed current version, when known
+        current_pointer_path: managed current.json path, when applicable
     """
     pack_dir: Path
     pack_id: str
     ecosystem_json_path: Path
     pack_subdir: Path
     is_legacy: bool = False
+    source: Literal["managed", "seed", "bundled_legacy", "legacy"] = "bundled_legacy"
+    mutable: bool = False
+    version: Optional[str] = None
+    current_pointer_path: Optional[Path] = None
 
 
 # ======================================================================
@@ -154,15 +170,111 @@ def find_ecosystem_json(pack_dir: Path) -> Tuple[Optional[Path], Optional[Path]]
 # Pack Discovery
 # ======================================================================
 
+def _read_json_file(path: Path) -> Optional[dict]:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _declared_pack_id_from_manifest(pack_subdir: Path) -> Optional[str]:
+    pack_manifest = _read_json_file(pack_subdir / "rumi-pack.json")
+    if pack_manifest:
+        pack_id = pack_manifest.get("pack_id")
+        if pack_id:
+            return str(pack_id)
+    ecosystem = _read_json_file(pack_subdir / "ecosystem.json")
+    if ecosystem:
+        pack_id = ecosystem.get("pack_id")
+        if pack_id:
+            return str(pack_id)
+    return None
+
+
+def _declared_version(pack_subdir: Path) -> Optional[str]:
+    pack_manifest = _read_json_file(pack_subdir / "rumi-pack.json")
+    if pack_manifest and pack_manifest.get("version"):
+        return str(pack_manifest["version"])
+    ecosystem = _read_json_file(pack_subdir / "ecosystem.json")
+    if ecosystem and ecosystem.get("version"):
+        return str(ecosystem["version"])
+    return None
+
+
+def _safe_relative_target(base: Path, relative: str) -> Optional[Path]:
+    rel_path = Path(relative)
+    if rel_path.is_absolute() or "\x00" in relative or ".." in rel_path.parts:
+        return None
+    target = base / rel_path
+    try:
+        target.resolve().relative_to(base.resolve())
+    except (OSError, ValueError):
+        return None
+    return target
+
+
+def _iter_pack_dirs(root: Path) -> Iterable[Path]:
+    if not root.is_dir():
+        return []
+    try:
+        return sorted(
+            (
+                d for d in root.iterdir()
+                if d.is_dir() and d.name not in EXCLUDED_DIRS and not d.name.startswith(".")
+            ),
+            key=lambda d: d.name,
+        )
+    except OSError:
+        return []
+
+
+def _add_location_if_valid(
+    found: Dict[str, PackLocation],
+    *,
+    canonical_pack_id: str,
+    pack_dir: Path,
+    source: Literal["managed", "seed", "bundled_legacy", "legacy"],
+    mutable: bool,
+    is_legacy: bool = False,
+    version: Optional[str] = None,
+    current_pointer_path: Optional[Path] = None,
+) -> None:
+    if canonical_pack_id in found:
+        return
+    eco_json, pack_subdir = find_ecosystem_json(pack_dir)
+    if eco_json is None or pack_subdir is None:
+        return
+    declared_id = _declared_pack_id_from_manifest(pack_subdir)
+    if declared_id and declared_id != canonical_pack_id and source == "managed":
+        return
+    found[canonical_pack_id] = PackLocation(
+        pack_dir=pack_dir,
+        pack_id=canonical_pack_id,
+        ecosystem_json_path=eco_json,
+        pack_subdir=pack_subdir,
+        is_legacy=is_legacy,
+        source=source,
+        mutable=mutable,
+        version=version or _declared_version(pack_subdir),
+        current_pointer_path=current_pointer_path,
+    )
+
+
 def discover_pack_locations(
     ecosystem_dir: Optional[str] = None,
+    *,
+    include_managed: bool = True,
 ) -> List[PackLocation]:
     """
     Packの物理位置を全探索する。
 
     走査順:
-      1. ecosystem/* (EXCLUDED_DIRS はスキップ、"packs" 含む)
-      2. ecosystem/packs/* (互換ルート、is_legacy=True)
+      1. user_data/packs/*/current.json の解決先
+      2. user_data/packs/* 直下 ecosystem.json fallback
+      3. BASE_DIR/pack_seeds/* fallback
+      4. BASE_DIR/ecosystem/* legacy read-only fallback
+      5. BASE_DIR/ecosystem/packs/* legacy read-only fallback
 
     重複 pack_id が出た場合:
       - ecosystem/* 由来が優先（互換ルートは無視）
@@ -170,6 +282,7 @@ def discover_pack_locations(
 
     Args:
         ecosystem_dir: エコシステムルート（デフォルト ECOSYSTEM_DIR）
+        include_managed: Trueならuser_data/pack_seedsを含める。Falseなら指定rootだけを検証する。
 
     Returns:
         PackLocation のリスト（pack_id 昇順）
@@ -177,61 +290,75 @@ def discover_pack_locations(
     root = Path(ecosystem_dir or ECOSYSTEM_DIR)
     found: Dict[str, PackLocation] = {}  # pack_id -> PackLocation
 
-    # --- Pass 1: ecosystem/* ---
+    if include_managed:
+        # --- Pass 1: managed current pointers ---
+        for pack_root in _iter_pack_dirs(MANAGED_PACKS_DIR):
+            pointer_path = pack_root / "current.json"
+            current = _read_json_file(pointer_path)
+            if not current:
+                continue
+            pointer_pack_id = str(current.get("pack_id") or pack_root.name)
+            if pointer_pack_id != pack_root.name:
+                continue
+            rel = current.get("path")
+            if not isinstance(rel, str) or not rel:
+                continue
+            target = _safe_relative_target(pack_root, rel)
+            if target is None:
+                continue
+            _add_location_if_valid(
+                found,
+                canonical_pack_id=pointer_pack_id,
+                pack_dir=target,
+                source="managed",
+                mutable=True,
+                version=str(current.get("version") or "") or None,
+                current_pointer_path=pointer_path,
+            )
+
+        # --- Pass 2: managed direct ecosystem.json fallback ---
+        for pack_root in _iter_pack_dirs(MANAGED_PACKS_DIR):
+            _add_location_if_valid(
+                found,
+                canonical_pack_id=pack_root.name,
+                pack_dir=pack_root,
+                source="managed",
+                mutable=True,
+            )
+
+        # --- Pass 3: bundled seed fallback ---
+        for pack_dir in _iter_pack_dirs(PACK_SEEDS_DIR):
+            _add_location_if_valid(
+                found,
+                canonical_pack_id=pack_dir.name,
+                pack_dir=pack_dir,
+                source="seed",
+                mutable=False,
+            )
+
+    # --- Pass 4: BASE_DIR/ecosystem/* read-only legacy fallback ---
     if root.is_dir():
-        try:
-            candidates = sorted(
-                (d for d in root.iterdir()
-                 if d.is_dir()
-                 and d.name not in EXCLUDED_DIRS
-                 and not d.name.startswith(".")),
-                key=lambda d: d.name,
+        for pack_dir in _iter_pack_dirs(root):
+            _add_location_if_valid(
+                found,
+                canonical_pack_id=pack_dir.name,
+                pack_dir=pack_dir,
+                source="bundled_legacy",
+                mutable=False,
+                is_legacy=False,
             )
-        except OSError:
-            candidates = []
 
-        for pack_dir in candidates:
-            eco_json, pack_subdir = find_ecosystem_json(pack_dir)
-            if eco_json is None:
-                continue
-            pack_id = pack_dir.name  # canonical = ディレクトリ名
-            if pack_id not in found:
-                found[pack_id] = PackLocation(
-                    pack_dir=pack_dir,
-                    pack_id=pack_id,
-                    ecosystem_json_path=eco_json,
-                    pack_subdir=pack_subdir,
-                    is_legacy=False,
-                )
-
-    # --- Pass 2: ecosystem/packs/* (互換ルート) ---
+    # --- Pass 5: BASE_DIR/ecosystem/packs/* read-only legacy fallback ---
     legacy_root = root / LEGACY_PACKS_SUBDIR
-    if legacy_root.is_dir():
-        try:
-            legacy_candidates = sorted(
-                (d for d in legacy_root.iterdir()
-                 if d.is_dir()
-                 and d.name not in EXCLUDED_DIRS
-                 and not d.name.startswith(".")),
-                key=lambda d: d.name,
-            )
-        except OSError:
-            legacy_candidates = []
-
-        for pack_dir in legacy_candidates:
-            eco_json, pack_subdir = find_ecosystem_json(pack_dir)
-            if eco_json is None:
-                continue
-            pack_id = pack_dir.name
-            if pack_id not in found:
-                found[pack_id] = PackLocation(
-                    pack_dir=pack_dir,
-                    pack_id=pack_id,
-                    ecosystem_json_path=eco_json,
-                    pack_subdir=pack_subdir,
-                    is_legacy=True,
-                )
-            # ecosystem/* 由来が既にあれば互換ルートは無視（優先）
+    for pack_dir in _iter_pack_dirs(legacy_root):
+        _add_location_if_valid(
+            found,
+            canonical_pack_id=pack_dir.name,
+            pack_dir=pack_dir,
+            source="legacy",
+            mutable=False,
+            is_legacy=True,
+        )
 
     # pack_id 昇順で返す
     return sorted(found.values(), key=lambda loc: loc.pack_id)
