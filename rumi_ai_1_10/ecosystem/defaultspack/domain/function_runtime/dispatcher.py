@@ -83,7 +83,7 @@ def _run_tool_function(
     args: dict[str, Any],
     context: dict[str, Any],
 ) -> dict[str, Any]:
-    from domain.tool.executor import ToolExecutor
+    from domain.tool.executor import ToolExecutor, _filtered_tool_rejection
 
     tool_name, defaults = TOOL_FUNCTION_ACTIONS[function_id]
     arguments = dict(defaults)
@@ -98,6 +98,16 @@ def _run_tool_function(
             arguments["action"] = args["action"]
     else:
         arguments.update(args)
+    filtered_rejection = _filtered_tool_rejection(tool_name, context)
+    if filtered_rejection is not None:
+        return error(
+            "Tool '{}' was rejected: {}".format(
+                tool_name,
+                filtered_rejection.get("reason") or filtered_rejection.get("code"),
+            ),
+            str(filtered_rejection.get("code") or "TOOL_REJECTED"),
+            details=filtered_rejection,
+        )
     # The public function is the safety boundary; call the local implementation
     # directly here to avoid recursing through the AI tool facade.
     result = ToolExecutor()._execute_local(tool_name, arguments, context)
@@ -257,14 +267,20 @@ def _input_endpoint_create(args: dict[str, Any], context: dict[str, Any]) -> dic
     except (TypeError, ValueError):
         ttl_value = 3600
     ttl_value = max(ttl_value, 1)
+    default_delivery = dict(args.get("default_delivery") if isinstance(args.get("default_delivery"), dict) else {})
+    default_delivery.setdefault("action_id", str(args.get("action_id") or default_delivery.get("action_id") or "chat.message").strip() or "chat.message")
+    allowed_delivery_actions = _normalize_delivery_actions(
+        args.get("allowed_delivery_actions"),
+        default_action=str(default_delivery.get("action_id") or "chat.message"),
+    )
     payload = {
         "id": str(args.get("endpoint_id") or args.get("id") or "").strip(),
         "kind": str(args.get("kind") or "generic").strip() or "generic",
         "input_profile_id": str(args.get("input_profile_id") or "generic.webhook.default").strip() or "generic.webhook.default",
         "enabled": args.get("enabled", True) is not False,
         "target": dict(args.get("target") if isinstance(args.get("target"), dict) else {}),
-        "default_delivery": dict(args.get("default_delivery") if isinstance(args.get("default_delivery"), dict) else {"action_id": str(args.get("action_id") or "chat.message")}),
-        "allowed_delivery_actions": args.get("allowed_delivery_actions") if isinstance(args.get("allowed_delivery_actions"), list) else [str(args.get("action_id") or "chat.message").strip()] if str(args.get("action_id") or "").strip() else [],
+        "default_delivery": default_delivery,
+        "allowed_delivery_actions": allowed_delivery_actions,
         "ttl_seconds": ttl_value,
         "expires_at": int(time.time() * 1000) + ttl_value * 1000,
         "security": {
@@ -277,7 +293,7 @@ def _input_endpoint_create(args: dict[str, Any], context: dict[str, Any]) -> dic
     endpoint = created.get("endpoint") if isinstance(created.get("endpoint"), dict) else {}
     endpoint_id = str(endpoint.get("id") or "")
     if endpoint_id:
-        set_external_token("generic", shared_secret, token_id=endpoint_id, kind="webhook_shared_secret")
+        set_external_token(str(endpoint.get("kind") or payload.get("kind") or "generic"), shared_secret, token_id=endpoint_id, kind="webhook_shared_secret")
     port = int(os.environ.get("DEFAULTS_HTTP_PORT", "8766"))
     localhost_url = "http://localhost:{}/api/webhooks/inbound/{}".format(port, endpoint_id)
     return ok(
@@ -299,7 +315,11 @@ def _input_endpoint_delete(args: dict[str, Any], context: dict[str, Any]) -> dic
     endpoint_id = str(args.get("endpoint_id") or args.get("id") or "").strip()
     if not endpoint_id:
         return error("endpoint_id is required", "INVALID_INPUT")
-    deleted = WebhookEndpointStore().delete(endpoint_id)
+    store = WebhookEndpointStore()
+    existing = store.get(endpoint_id)
+    token_provider = str(existing.kind if existing is not None else args.get("kind") or "generic").strip() or "generic"
+    deleted = store.delete(endpoint_id)
+    delete_external_token(token_provider, endpoint_id)
     delete_external_token("generic", endpoint_id)
     return ok(deleted)
 
@@ -317,6 +337,22 @@ def _input_endpoint_list(args: dict[str, Any], context: dict[str, Any]) -> dict[
         item["localhost_url"] = "http://localhost:{}/api/webhooks/inbound/{}".format(port, item.get("id"))
         endpoints.append(item)
     return ok({"endpoints": endpoints})
+
+
+def _normalize_delivery_actions(value: Any, *, default_action: str) -> list[str]:
+    if isinstance(value, str):
+        actions = [part.strip() for part in value.split(",") if part.strip()]
+    elif isinstance(value, list):
+        actions = [str(item).strip() for item in value if str(item or "").strip()]
+    else:
+        actions = [str(default_action or "chat.message").strip() or "chat.message"]
+    output: list[str] = []
+    for action in actions:
+        if action and action not in output:
+            output.append(action)
+    if not output:
+        output.append(str(default_action or "chat.message").strip() or "chat.message")
+    return output
 
 
 _PROMPT_HANDLERS = {

@@ -26,7 +26,7 @@ def _conversation() -> dict:
     return ChatStore().create_conversation(model="stub/default")
 
 
-def _patch_routing(monkeypatch, *, selected_model: str, supports_image_input: bool):
+def _patch_routing(monkeypatch, *, selected_model: str, supports_image_input: bool, supports_tool_calling: bool = True):
     class Decision:
         def __init__(self, model: str) -> None:
             self.selected_model = model
@@ -46,7 +46,7 @@ def _patch_routing(monkeypatch, *, selected_model: str, supports_image_input: bo
         lambda model: {
             "supports_image_input": supports_image_input,
             "supports_vision": supports_image_input,
-            "supports_tool_calling": True,
+            "supports_tool_calling": supports_tool_calling,
             "supports_thinking": True,
         },
     )
@@ -60,6 +60,15 @@ def _image_tool() -> dict:
         "schema": {"parameters": {"type": "object", "properties": {}}},
         "requires_model_capabilities": ["model.image_input"],
         "supports_attachments": True,
+    }
+
+
+def _basic_tool() -> dict:
+    return {
+        "tool_id": "basic_tool",
+        "name": "basic_tool",
+        "summary": "Basic tool",
+        "schema": {"parameters": {"type": "object", "properties": {}}},
     }
 
 
@@ -125,6 +134,33 @@ def test_blocked_tool_not_sent_to_provider(monkeypatch, tmp_path):
     )
 
     assert prepared.provider_tools == []
+
+
+def test_non_tool_calling_model_marks_tools_blocked_or_detached(monkeypatch, tmp_path):
+    _configure_paths(monkeypatch, tmp_path)
+    conversation = _conversation()
+    _patch_routing(
+        monkeypatch,
+        selected_model="demo/no-tools",
+        supports_image_input=True,
+        supports_tool_calling=False,
+    )
+
+    prepared = prepare_chat_run(
+        {
+            "conversation_id": conversation["id"],
+            "message": {"role": "user", "content": "use a tool"},
+            "tools": [_basic_tool()],
+        },
+        {},
+    )
+
+    assert prepared.provider_tools == []
+    entry = prepared.metadata["tool_filter_result"][0]
+    assert entry["tool_name"] == "basic_tool"
+    assert entry["status"] == "blocked"
+    assert entry["reason_code"] == "model_unsupported"
+    assert "model.tool_calling" in entry["required"]["model_capabilities"]
 
 
 def test_ai_calling_filtered_tool_rejected_at_execution():

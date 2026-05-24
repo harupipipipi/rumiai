@@ -13,6 +13,7 @@ class ModelPackRoutingRequest:
     user_text: str = ""
     has_images: bool = False
     requires_tool_calling: bool = False
+    requires_fast: bool = False
     requested_thinking_level: str = ""
     task_hints: dict[str, Any] = field(default_factory=dict)
 
@@ -50,26 +51,40 @@ def select_model_pack(
         return None
     routing_request = _coerce_request(request)
     matching_members = [member for member in pack.members if _member_matches(member, routing_request, profiles=profiles)]
-    selected_members = matching_members or list(pack.members)
+    has_hard_requirements = _has_hard_requirements(routing_request)
+    selected_members = matching_members or ([] if has_hard_requirements else list(pack.members))
     ordered_members = [_member_payload(member) for member in selected_members if member.model]
-    if not ordered_members:
-        return None
     for fallback_model in pack.fallback:
         if fallback_model and fallback_model not in {item.get("model") for item in ordered_members}:
+            if has_hard_requirements and not _model_matches(fallback_model, routing_request, profiles=profiles):
+                continue
             ordered_members.append({"model": fallback_model, "conditions": {}, "fallback_on": ["any"], "metadata": {"source": "pack_fallback"}})
     reason_codes = ["model_pack", pack.mode]
     if routing_request.has_images:
         reason_codes.append("requires_vision")
     if routing_request.requires_tool_calling:
         reason_codes.append("requires_tool_calling")
+    if routing_request.requires_fast:
+        reason_codes.append("requires_fast")
     if str(routing_request.requested_thinking_level or "").strip() not in {"", "none"}:
         reason_codes.append("requires_thinking")
+    warnings = []
+    if has_hard_requirements and not ordered_members:
+        warnings.append("no_model_pack_member_satisfied_capabilities")
+    if not ordered_members:
+        return ModelPackSelection(
+            pack_id=pack.id,
+            selected_model="",
+            ordered_members=[],
+            reason_codes=_dedupe(reason_codes),
+            warnings=warnings,
+        )
     return ModelPackSelection(
         pack_id=pack.id,
         selected_model=str(ordered_members[0].get("model") or ""),
         ordered_members=ordered_members,
         reason_codes=_dedupe(reason_codes),
-        warnings=[],
+        warnings=warnings,
     )
 
 
@@ -81,6 +96,7 @@ def _coerce_request(value: ModelPackRoutingRequest | dict[str, Any] | None) -> M
         user_text=str(raw.get("user_text") or ""),
         has_images=bool(raw.get("has_images")),
         requires_tool_calling=bool(raw.get("requires_tool_calling")),
+        requires_fast=bool(raw.get("requires_fast")),
         requested_thinking_level=str(raw.get("requested_thinking_level") or ""),
         task_hints=dict(raw.get("task_hints") if isinstance(raw.get("task_hints"), dict) else {}),
     )
@@ -96,6 +112,8 @@ def _member_matches(
     if request.has_images and not bool(capabilities.get("supports_image_input") or capabilities.get("supports_vision")):
         return False
     if request.requires_tool_calling and not bool(capabilities.get("supports_tool_calling")):
+        return False
+    if request.requires_fast and not bool(capabilities.get("supports_fast")):
         return False
     if str(request.requested_thinking_level or "").strip() not in {"", "none"} and not bool(capabilities.get("supports_thinking")):
         return False
@@ -124,6 +142,24 @@ def _member_matches(
         if options and actual_type not in options:
             return False
     return True
+
+
+def _model_matches(
+    model: str,
+    request: ModelPackRoutingRequest,
+    *,
+    profiles: list[dict[str, Any]] | None = None,
+) -> bool:
+    return _member_matches(ModelPackMember(model=model), request, profiles=profiles)
+
+
+def _has_hard_requirements(request: ModelPackRoutingRequest) -> bool:
+    return bool(
+        request.has_images
+        or request.requires_tool_calling
+        or request.requires_fast
+        or str(request.requested_thinking_level or "").strip() not in {"", "none"}
+    )
 
 
 def _member_payload(member: ModelPackMember) -> dict[str, Any]:

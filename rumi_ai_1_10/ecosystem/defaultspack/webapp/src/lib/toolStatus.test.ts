@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { extractLatestToolFilterContext, summarizeToolManager, toolFilterReasonDetail } from "./toolStatus";
+import { extractLatestToolFilterContext, summarizeToolManager, toolFilterBlockedSummary, toolFilterReasonDetail } from "./toolStatus";
 
 test("extractLatestToolFilterContext reads the newest metadata payload", () => {
   const context = extractLatestToolFilterContext([
@@ -41,6 +41,18 @@ test("toolFilterReasonDetail explains vision blocks in friendly text", () => {
       required: { model_capabilities: ["model.image_input"] },
     }),
     "Vision対応モデルに切り替えると使えます。",
+  );
+});
+
+test("toolFilterBlockedSummary names the required model capability", () => {
+  assert.equal(
+    toolFilterBlockedSummary({
+      tool_name: "browser",
+      status: "blocked",
+      reason_code: "model_unsupported",
+      required: { model_capabilities: ["model.tool_calling"] },
+    }),
+    "Blocked: model.tool_calling",
   );
 });
 

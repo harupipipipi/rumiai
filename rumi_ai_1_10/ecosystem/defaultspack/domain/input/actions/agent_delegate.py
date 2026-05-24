@@ -22,6 +22,9 @@ def handle(envelope: RumiInputEnvelope, context: dict[str, Any] | None = None) -
             "capability_profile": payload.get("capability_profile"),
             "required_capabilities": payload.get("required_capabilities") or payload.get("capability"),
             "params": dict(payload.get("params") if isinstance(payload.get("params"), dict) else {}),
+            "attachments": list(payload.get("attachments") if isinstance(payload.get("attachments"), list) else envelope.attachments),
+            "target": dict(envelope.target if isinstance(envelope.target, dict) else {}),
+            "delivery": dict(envelope.delivery if isinstance(envelope.delivery, dict) else {}),
         },
         _delegate_context(envelope, context or {}),
     )
@@ -61,7 +64,22 @@ def _delegate_context(envelope: RumiInputEnvelope, context: dict[str, Any]) -> d
         updated.setdefault("conversation_id", str(target.get("conversation_id")))
     if isinstance(envelope.metadata, dict) and envelope.metadata:
         updated.setdefault("delegate_metadata", dict(envelope.metadata))
-    required_capabilities = envelope.params.get("required_capabilities") or envelope.params.get("capability")
+    payload = _delegate_payload(envelope)
+    if target:
+        updated.setdefault("target", dict(target))
+    if isinstance(envelope.delivery, dict) and envelope.delivery:
+        updated.setdefault("delivery", dict(envelope.delivery))
+    if isinstance(envelope.attachments, list) and envelope.attachments:
+        updated.setdefault("attachments", list(envelope.attachments))
+    required_capabilities = (
+        payload.get("required_capabilities")
+        or payload.get("capability")
+        or envelope.params.get("required_capabilities")
+        or envelope.params.get("capability")
+    )
     if required_capabilities:
         updated.setdefault("required_capabilities", required_capabilities)
+    params = payload.get("params") if isinstance(payload.get("params"), dict) else {}
+    if params:
+        updated.setdefault("params", dict(params))
     return updated

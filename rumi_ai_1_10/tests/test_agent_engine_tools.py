@@ -90,6 +90,16 @@ def _tool_call_response(name: str, arguments: str = '{"q": "rumi"}') -> dict:
     }
 
 
+def _image_attachment() -> dict:
+    return {
+        "id": "img-1",
+        "name": "tiny.png",
+        "type": "image/png",
+        "dataUrl": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMB/axR4xUAAAAASUVORK5CYII=",
+        "size": 68,
+    }
+
+
 def test_agent_execute_passes_tools_to_ai_completion() -> None:
     engine = AgentEngine()
     tools = [_tool("search")]
@@ -105,6 +115,97 @@ def test_agent_execute_passes_tools_to_ai_completion() -> None:
 
     assert result["status"] == "completed"
     assert seen["tools"] == tools
+
+
+def test_agent_delegate_with_image_requires_vision_model_or_bridge(monkeypatch) -> None:
+    from domain.ai_client.model_router import ModelRoutingDecision
+
+    engine = AgentEngine()
+    seen = {}
+
+    def fake_route(request):
+        seen["routing_request"] = request
+        return ModelRoutingDecision(
+            selected_model="demo/vision",
+            original_model=request.preferred_model,
+            selected_group="default",
+            reason_codes=["requires_vision"],
+            warnings=[],
+        )
+
+    def fake_caps(model):
+        return {
+            "supports_vision": model == "demo/vision",
+            "supports_image_input": model == "demo/vision",
+            "supports_tool_calling": True,
+            "supports_thinking": True,
+        }
+
+    def fake_ai(messages, model, context, tools=None):
+        seen["messages"] = messages
+        seen["model"] = model
+        seen["context"] = context
+        return _text_response()
+
+    monkeypatch.setattr("domain.agent.engine.route_model_request", fake_route)
+    monkeypatch.setattr("domain.agent.engine.get_model_capabilities", fake_caps)
+    engine._ai_complete = fake_ai
+
+    result = engine.execute(
+        "inspect this image",
+        [],
+        "stub/default",
+        None,
+        {
+            "required_capabilities": ["model.image_input"],
+            "attachments": [_image_attachment()],
+        },
+    )
+
+    assert result["status"] == "completed"
+    assert seen["routing_request"].has_images is True
+    assert seen["model"] == "demo/vision"
+    assert result["result"]["context"]["required_capabilities"] == ["model.image_input"]
+    user_message = next(message for message in seen["messages"] if message["role"] == "user")
+    assert user_message["content"][1]["type"] == "image_url"
+
+
+def test_agent_delegate_attachments_reach_agent_context(monkeypatch) -> None:
+    from domain.ai_client.model_router import ModelRoutingDecision
+
+    engine = AgentEngine()
+    seen = {}
+
+    def fake_route(request):
+        return ModelRoutingDecision(
+            selected_model=request.preferred_model,
+            original_model=request.preferred_model,
+            selected_group="default",
+            reason_codes=["test"],
+            warnings=[],
+        )
+
+    def fake_ai(messages, model, context, tools=None):
+        seen["messages"] = messages
+        seen["context"] = context
+        return _text_response()
+
+    monkeypatch.setattr("domain.agent.engine.route_model_request", fake_route)
+    monkeypatch.setattr("domain.agent.engine.get_model_capabilities", lambda model: {"supports_tool_calling": True})
+    engine._ai_complete = fake_ai
+
+    result = engine.execute(
+        "read attachment",
+        [],
+        "stub/default",
+        None,
+        {"attachments": [{"id": "file-1", "name": "notes.md", "type": "text/markdown"}]},
+    )
+
+    assert result["status"] == "completed"
+    assert result["result"]["context"]["attachments"][0]["name"] == "notes.md"
+    user_message = next(message for message in seen["messages"] if message["role"] == "user")
+    assert user_message["content"][1]["text"] == "[attachment] notes.md"
 
 
 def test_agent_plan_does_not_expose_tools_to_ai_completion() -> None:

@@ -270,6 +270,16 @@ def prepare_chat_run(input_data: dict[str, Any], context: dict[str, Any] | None 
         store.update_message(conversation_id, user_message["id"], {"metadata": metadata})
     if provider_tools and not selected_capabilities.get("supports_tool_calling") and not request_context.get("user_requested_computer_use"):
         unavailable_tools = [tool_name_from_definition(tool) for tool in raw_tools if tool_name_from_definition(tool)]
+        marked_entries = _mark_tool_calling_unavailable(
+            request_context.get("tool_filter_result"),
+            unavailable_tools,
+            runtime_snapshot.as_dict(),
+        )
+        tool_context["tool_filter_result"] = marked_entries
+        request_context["tool_filter_result"] = marked_entries
+        if isinstance(metadata, dict):
+            metadata["tool_filter_result"] = marked_entries
+            store.update_message(conversation_id, user_message["id"], {"metadata": metadata})
         tool_context["tool_suggestion_context"] = {
             "message": "Selected model does not support provider tool calling; tools were not attached.",
             "suggested_tools": unavailable_tools,
@@ -351,6 +361,39 @@ def prepare_chat_run(input_data: dict[str, Any], context: dict[str, Any] | None 
         chat_references=chat_references,
         matched_skills=matched_skills,
     )
+
+
+def _mark_tool_calling_unavailable(entries: Any, tool_names: list[str], actual: dict[str, Any]) -> list[dict[str, Any]]:
+    blocked_names = {str(name) for name in tool_names if str(name or "").strip()}
+    output: list[dict[str, Any]] = []
+    for entry in (entries if isinstance(entries, list) else []):
+        if not isinstance(entry, dict):
+            continue
+        tool_name = str(entry.get("tool_name") or "")
+        if tool_name not in blocked_names:
+            output.append(dict(entry))
+            continue
+        required = dict(entry.get("required") if isinstance(entry.get("required"), dict) else {})
+        model_caps = [
+            str(item).strip()
+            for item in (required.get("model_capabilities") if isinstance(required.get("model_capabilities"), list) else [])
+            if str(item or "").strip()
+        ]
+        if "model.tool_calling" not in model_caps:
+            model_caps.append("model.tool_calling")
+        required["model_capabilities"] = model_caps
+        output.append(
+            {
+                **entry,
+                "status": "blocked",
+                "reason_code": "model_unsupported",
+                "reason": "selected model does not support provider tool calling",
+                "required": required,
+                "actual": actual,
+                "repair_suggestions": ["Switch to a tool-calling model or disable tools for this turn."],
+            }
+        )
+    return output
 
 
 def _current_turn_history_only(context: dict[str, Any] | None) -> bool:

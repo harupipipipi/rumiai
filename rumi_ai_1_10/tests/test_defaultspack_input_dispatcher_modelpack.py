@@ -206,6 +206,89 @@ def test_input_endpoint_create_returns_localhost_url_with_secret(monkeypatch, tm
     assert read_external_token("generic", token_id=data["endpoint_id"], kind="webhook_shared_secret") == "super-secret"
 
 
+def test_input_endpoint_default_allowed_actions_only_allows_default(monkeypatch, tmp_path):
+    _configure_paths(monkeypatch, tmp_path)
+
+    result = run_defaultspack_function(
+        "input_endpoint_create",
+        {"shared_secret": "secret", "ttl_seconds": 120},
+        {},
+    )
+
+    endpoint = result["data"]["endpoint"]
+    assert endpoint["default_delivery"]["action_id"] == "chat.message"
+    assert endpoint["allowed_delivery_actions"] == ["chat.message"]
+
+
+def test_input_endpoint_rejects_agent_delegate_override_when_not_allowed(monkeypatch, tmp_path):
+    _configure_paths(monkeypatch, tmp_path)
+
+    created = run_defaultspack_function(
+        "input_endpoint_create",
+        {"shared_secret": "secret", "ttl_seconds": 120},
+        {},
+    )
+
+    result = handle_inbound_webhook(
+        created["data"]["endpoint_id"],
+        {"text": "delegate this", "_headers": {"x-rumi-webhook-token": "secret"}, "action_id": "agent.delegate"},
+        {},
+    )
+
+    assert result["status"] == "error"
+    assert result["code"] == "WEBHOOK_DELIVERY_ACTION_NOT_ALLOWED"
+
+
+def test_input_endpoint_non_generic_kind_secret_verifies(monkeypatch, tmp_path):
+    _configure_paths(monkeypatch, tmp_path)
+    conversation = _conversation(tmp_path)
+    monkeypatch.setattr(
+        "blocks.chat.send.run",
+        lambda request, context: {
+            "status": "ok",
+            "data": {"id": "assistant-kind", "content": [{"type": "text", "text": "sent"}]},
+        },
+    )
+
+    created = run_defaultspack_function(
+        "input_endpoint_create",
+        {
+            "kind": "local_agent_input",
+            "shared_secret": "kind-secret",
+            "target": {"conversation_id": conversation["id"], "direct": True},
+        },
+        {},
+    )
+    endpoint_id = created["data"]["endpoint_id"]
+
+    assert read_external_token("local_agent_input", token_id=endpoint_id, kind="webhook_shared_secret") == "kind-secret"
+    assert read_external_token("generic", token_id=endpoint_id, kind="webhook_shared_secret") == ""
+
+    result = handle_inbound_webhook(
+        endpoint_id,
+        {"text": "hello", "_headers": {"x-rumi-webhook-token": "kind-secret"}},
+        {},
+    )
+
+    assert result["status"] == "ok"
+    assert result["result"]["action_id"] == "chat.message"
+
+
+def test_input_endpoint_delete_removes_secret_for_endpoint_kind(monkeypatch, tmp_path):
+    _configure_paths(monkeypatch, tmp_path)
+    created = run_defaultspack_function(
+        "input_endpoint_create",
+        {"kind": "local_agent_input", "shared_secret": "kind-secret"},
+        {},
+    )
+    endpoint_id = created["data"]["endpoint_id"]
+
+    result = run_defaultspack_function("input_endpoint_delete", {"endpoint_id": endpoint_id}, {})
+
+    assert result["status"] == "ok"
+    assert read_external_token("local_agent_input", token_id=endpoint_id, kind="webhook_shared_secret") == ""
+
+
 def test_input_endpoint_ttl_expired_rejected(monkeypatch, tmp_path):
     _configure_paths(monkeypatch, tmp_path)
     WebhookEndpointStore().upsert(
@@ -264,6 +347,40 @@ def test_agent_delegate_action_starts_agent_with_tools_params_capabilities(monke
     assert seen["input_data"]["params"] == {"mode": "review"}
 
 
+def test_agent_delegate_real_execute_receives_required_capabilities_and_context(monkeypatch, tmp_path):
+    _configure_paths(monkeypatch, tmp_path)
+
+    def fake_ai(self, messages, model, context, tools=None):
+        return {"status": "ok", "data": {"content": "delegated"}}
+
+    monkeypatch.setattr("domain.agent.engine.AgentEngine._ai_complete", fake_ai)
+
+    result = dispatch_input(
+        {
+            "input": "",
+            "target": {"conversation_id": "conv-1", "direct": True},
+            "delivery": {"action_id": "agent.delegate"},
+            "attachments": [{"id": "att-1", "name": "notes.md", "type": "text/markdown"}],
+            "params": {
+                "delegate": {
+                    "task": "check the docs",
+                    "required_capabilities": ["runtime.workspace"],
+                    "params": {"mode": "review"},
+                }
+            },
+        },
+        {"conversation_workspace_dir": str(tmp_path)},
+    )
+
+    context = result["result"]["result"]["context"]
+    assert result["status"] == "ok"
+    assert context["required_capabilities"] == ["runtime.workspace"]
+    assert context["params"] == {"mode": "review"}
+    assert context["attachments"][0]["name"] == "notes.md"
+    assert context["target"] == {"conversation_id": "conv-1", "direct": True}
+    assert context["delivery"]["action_id"] == "agent.delegate"
+
+
 def test_model_pack_selects_vision_member_for_images():
     profiles = [
         {"profile_id": "demo/text", "qualified_model_id": "demo/text", "provider_id": "demo", "model_id": "text", "type": "chat", "configured": True, "supports_vision": False, "supports_tool_calling": False, "supports_thinking": False},
@@ -293,6 +410,40 @@ def test_model_pack_selects_tool_member_for_tool_calling():
     )
 
     assert decision.selected_model == "demo/tool"
+
+
+def test_model_pack_no_compatible_member_warns_or_errors():
+    profiles = [
+        {"profile_id": "demo/text", "qualified_model_id": "demo/text", "provider_id": "demo", "model_id": "text", "type": "chat", "configured": True, "supports_vision": False, "supports_tool_calling": False, "supports_thinking": False},
+    ]
+    settings = {"model_packs": [{"id": "triage", "members": [{"model": "demo/text"}]}], "preferred_model_group": "default", "model_groups": {"default": {"allowed_models": []}}}
+
+    decision = route_model_request(
+        ModelRoutingRequest(has_images=True, preferred_model="modelpack/triage", settings=settings),
+        profiles=profiles,
+    )
+
+    assert decision.selected_model == "modelpack/triage"
+    assert "no_model_pack_member_satisfied_capabilities" in decision.warnings
+    assert "model_pack_no_compatible_member" in decision.reason_codes
+
+
+def test_model_pack_does_not_silently_pick_text_model_for_images():
+    profiles = [
+        {"profile_id": "demo/text", "qualified_model_id": "demo/text", "provider_id": "demo", "model_id": "text", "type": "chat", "configured": True, "supports_vision": False, "supports_tool_calling": False, "supports_thinking": False},
+    ]
+    settings = {"model_packs": [{"id": "triage", "members": [{"model": "demo/text"}]}], "preferred_model_group": "default", "model_groups": {"default": {"allowed_models": []}}}
+
+    selection = ModelPackStore(settings).get("modelpack/triage")
+    assert selection is not None
+    from domain.ai_client.model_pack_router import select_model_pack
+
+    result = select_model_pack(selection, {"has_images": True}, settings=settings, profiles=profiles)
+
+    assert result is not None
+    assert result.selected_model == ""
+    assert result.ordered_members == []
+    assert "no_model_pack_member_satisfied_capabilities" in result.warnings
 
 
 def test_model_pack_fallback_chain(monkeypatch, tmp_path):
@@ -349,6 +500,7 @@ def test_model_call_uses_required_capabilities(monkeypatch):
         return _fake_route_decision("demo/tool")
 
     monkeypatch.setattr("domain.ai_client.model_call.route_model_request", fake_route)
+    monkeypatch.setattr("domain.ai_client.model_call.get_model_capabilities", lambda model: {"supports_tool_calling": True})
     monkeypatch.setattr("domain.ai_client.model_call.LLMGateway.complete", lambda self, request: {"content": [{"type": "text", "text": "ok"}]})
 
     result = call_model({"question": "hello", "required_capabilities": ["model.tool_calling"]})
@@ -356,6 +508,62 @@ def test_model_call_uses_required_capabilities(monkeypatch):
     assert result["status"] == "ok"
     assert result["model"] == "demo/tool"
     assert seen["requires_tool_calling"] is True
+
+
+def test_model_call_requires_image_input_routes_to_vision_model(monkeypatch):
+    seen: dict[str, object] = {}
+
+    def fake_route(request, profiles=None):
+        del profiles
+        seen["has_images"] = request.has_images
+        return _fake_route_decision("demo/vision")
+
+    monkeypatch.setattr("domain.ai_client.model_call.route_model_request", fake_route)
+    monkeypatch.setattr("domain.ai_client.model_call.get_model_capabilities", lambda model: {"supports_vision": True, "supports_image_input": True})
+    monkeypatch.setattr("domain.ai_client.model_call.LLMGateway.complete", lambda self, request: {"content": [{"type": "text", "text": "ok"}]})
+
+    result = call_model({"question": "hello", "required_capabilities": ["model.image_input"]})
+
+    assert result["status"] == "ok"
+    assert result["model"] == "demo/vision"
+    assert seen["has_images"] is True
+
+
+def test_model_call_uses_fast_required_capability(monkeypatch):
+    seen: dict[str, object] = {}
+
+    def fake_route(request, profiles=None):
+        del profiles
+        seen["requires_fast"] = request.requires_fast
+        return _fake_route_decision("demo/fast")
+
+    monkeypatch.setattr("domain.ai_client.model_call.route_model_request", fake_route)
+    monkeypatch.setattr("domain.ai_client.model_call.get_model_capabilities", lambda model: {"supports_fast": True})
+    monkeypatch.setattr("domain.ai_client.model_call.LLMGateway.complete", lambda self, request: {"content": [{"type": "text", "text": "ok"}]})
+
+    result = call_model({"question": "hello", "required_capabilities": ["model.fast"]})
+
+    assert result["status"] == "ok"
+    assert seen["requires_fast"] is True
+
+
+def test_model_call_errors_when_required_capability_unavailable(monkeypatch):
+    def fake_route(request, profiles=None):
+        del request, profiles
+        return _fake_route_decision("demo/text")
+
+    def fail_complete(self, request):
+        raise AssertionError("LLM should not be called when capabilities are unsatisfied")
+
+    monkeypatch.setattr("domain.ai_client.model_call.route_model_request", fake_route)
+    monkeypatch.setattr("domain.ai_client.model_call.get_model_capabilities", lambda model: {"supports_vision": False, "supports_image_input": False})
+    monkeypatch.setattr("domain.ai_client.model_call.LLMGateway.complete", fail_complete)
+
+    result = call_model({"question": "hello", "required_capabilities": ["model.image_input"]})
+
+    assert result["status"] == "error"
+    assert result["code"] == "MODEL_CAPABILITY_UNSATISFIED"
+    assert result["missing_capabilities"] == ["model.image_input"]
 
 
 def test_model_call_does_not_forward_secrets(monkeypatch):

@@ -4,9 +4,15 @@ import json
 import re
 from typing import Any
 
+from domain.ai_client.capability_tokens import (
+    missing_model_capabilities,
+    model_requirements_from_tokens,
+    normalize_capability_tokens,
+)
 from domain.ai_client.gateway import LLMGateway
 from domain.ai_client.model_router import ModelRoutingRequest, route_model_request
 from domain.ai_client.model_runtime_settings import ModelRuntimeSettingsService
+from domain.ai_client.model_search import get_model_capabilities
 
 
 _SECRET_KEY_RE = re.compile(
@@ -34,10 +40,11 @@ def call_model(
     if not messages:
         return {"status": "error", "code": "MISSING_INPUT", "error": "question or messages is required"}
 
-    required_capabilities = _normalize_capabilities(
+    required_capabilities = normalize_capability_tokens(
         payload.get("required_capabilities")
         or payload.get("capability")
     )
+    model_requirements = model_requirements_from_tokens(required_capabilities)
     model_settings = ModelRuntimeSettingsService().get_settings()
     preferred_model = str(
         payload.get("model_hint")
@@ -45,12 +52,13 @@ def call_model(
         or model_settings.get("preferred_model")
         or "stub/default"
     ).strip() or "stub/default"
-    has_images = _messages_have_images(messages)
+    has_images = _messages_have_images(messages) or model_requirements["image_input"]
     decision = route_model_request(
         ModelRoutingRequest(
             user_text=_messages_text(messages),
             has_images=has_images,
-            requires_tool_calling="model.tool_calling" in required_capabilities,
+            requires_tool_calling=model_requirements["tool_calling"],
+            requires_fast=model_requirements["fast"],
             requested_thinking_level=_requested_thinking_level(payload, required_capabilities),
             preferred_model=preferred_model,
             preferred_group=str(model_settings.get("preferred_model_group") or "default"),
@@ -60,6 +68,18 @@ def call_model(
         )
     )
     model = decision.selected_model
+    selected_capabilities = get_model_capabilities(model) or {}
+    missing_capabilities = missing_model_capabilities(required_capabilities, selected_capabilities)
+    if missing_capabilities:
+        return {
+            "status": "error",
+            "code": "MODEL_CAPABILITY_UNSATISFIED",
+            "error": "selected model does not satisfy required capabilities: {}".format(", ".join(missing_capabilities)),
+            "model": model,
+            "required_capabilities": required_capabilities,
+            "missing_capabilities": missing_capabilities,
+            "routing": decision.to_dict(),
+        }
     params = {
         "max_tokens": _max_tokens(payload),
         "thinking_level": _requested_thinking_level(payload, required_capabilities),
@@ -132,16 +152,6 @@ def _normalized_messages(payload: dict[str, Any]) -> list[dict[str, Any]]:
         last["content"] = blocks
         messages[-1] = last
     return messages
-
-
-def _normalize_capabilities(value: Any) -> list[str]:
-    if isinstance(value, str):
-        values = [part.strip() for part in value.split(",") if part.strip()]
-    elif isinstance(value, list):
-        values = [str(item).strip() for item in value if str(item or "").strip()]
-    else:
-        values = []
-    return values
 
 
 def _requested_thinking_level(payload: dict[str, Any], required_capabilities: list[str]) -> str:

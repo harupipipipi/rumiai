@@ -13,12 +13,16 @@ def run(input_data, context):
     tools = input_data.get("tools", [])
     model = input_data.get("model", "default")
     system_prompt = input_data.get("system_prompt", None)
+    context = dict(context or {})
     if isinstance(input_data.get("runtime_profile_key"), str):
-        context = dict(context or {})
         context["runtime_profile_key"] = input_data["runtime_profile_key"]
     if isinstance(input_data.get("capability_profile"), dict):
-        context = dict(context or {})
         context["capability_profile"] = input_data["capability_profile"]
+    for key in ("required_capabilities", "attachments", "target", "delivery"):
+        if key in input_data and input_data.get(key) not in (None, "", []):
+            context[key] = input_data.get(key)
+    if isinstance(input_data.get("params"), dict):
+        context["params"] = dict(input_data["params"])
     engine = AgentEngine()
     result = engine.execute(task, tools, model, system_prompt, context)
     execution_id = result.get("execution_id", "")

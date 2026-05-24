@@ -68,6 +68,7 @@ import type {
   SidebarItem,
 } from "../lib/api";
 import type { RuntimeCapabilitySnapshot, ToolFilterEntry } from "../lib/toolStatus";
+import { toolFilterBlockedSummary } from "../lib/toolStatus";
 import { buildBuiltinPlacementManifests, filterPlacementCandidates, normalizePinnedPlacements, togglePinnedPlacement } from "../lib/placement";
 import { compareToolUiItems, sortedToolGroups, sortedToolUiItems, supportedComposerDropKind, supportsComposerDrop, toolGroupFor } from "../lib/toolUi";
 import { PlacementHtmlRenderer } from "./PlacementHtmlRenderer";
@@ -1751,7 +1752,7 @@ export function RightSidebar({
                           )}
                           {blockedEntry && (
                             <span className="rounded px-1.5 py-0.5 text-[9px] bg-amber-500/10 text-amber-200">
-                              {blockedEntry.reason_code === "model_unsupported" ? "Blocked: model.image_input" : `Blocked: ${blockedEntry.reason_code ?? blockedEntry.status}`}
+                              {toolFilterBlockedSummary(blockedEntry)}
                             </span>
                           )}
                         </div>

@@ -95,7 +95,11 @@ def _delivery_override_allowed(endpoint, delivery_override: dict[str, Any]) -> b
         for item in (endpoint.allowed_delivery_actions if isinstance(endpoint.allowed_delivery_actions, list) else [])
         if str(item or "").strip()
     ]
-    return not allowed or action_id in set(allowed)
+    if allowed:
+        return action_id in set(allowed)
+    default_delivery = endpoint.default_delivery if isinstance(endpoint.default_delivery, dict) else {}
+    default_action = str(default_delivery.get("action_id") or "chat.message").strip() or "chat.message"
+    return action_id == default_action
 
 
 def _is_endpoint_expired(endpoint) -> bool:

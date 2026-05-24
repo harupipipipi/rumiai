@@ -127,6 +127,14 @@ export function toolFilterReasonDetail(entry: ToolFilterEntry): string {
   return toolFilterReasonLabel(entry.reason_code);
 }
 
+export function toolFilterBlockedSummary(entry: ToolFilterEntry): string {
+  if (entry.reason_code === "model_unsupported") {
+    const required = requiredModelCapabilities(entry);
+    return `Blocked: ${required.length ? required.join(", ") : "model_unsupported"}`;
+  }
+  return `Blocked: ${entry.reason_code ?? entry.status}`;
+}
+
 export function toolFilterStatusLabel(entry: ToolFilterEntry): string {
   if (entry.status === "hidden") return "現在は非表示です";
   if (entry.status === "approval_required") return "承認が必要です";
