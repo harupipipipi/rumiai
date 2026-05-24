@@ -14,7 +14,7 @@ The seed copy never deletes `state`, `staging`, `backups`, `secrets`, or other u
 
 ## Update
 
-`PackUpdateManager` downloads a `.rumi-pack`, verifies checksum and signature, extracts into staging, validates metadata, copies into `versions/<version>`, writes an install record, and only then swaps `current.json`.
+`PackUpdateManager` verifies the signed pack index, downloads a `.rumi-pack`, checks its sha256, verifies the Ed25519 bundle signature, extracts into staging, validates metadata, copies into `versions/<version>`, writes an install record, and only then swaps `current.json`.
 
 ## Rollback
 

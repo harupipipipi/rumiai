@@ -33,6 +33,9 @@ include-package-data = true
 where = ["."]
 include = ["core_runtime*", "backend_core*", "rumi_setup*"]
 
+[tool.setuptools.package-data]
+"core_runtime.update" = ["official_trust_roots.json"]
+
 [tool.ruff]
 line-length = 100
 target-version = "py310"

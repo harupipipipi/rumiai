@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from core_runtime.api.control_panel_handlers import ControlPanelHandlersMixin
+from core_runtime.update.pack_update_manager import PackUpdateManager
+from core_runtime.update.update_orchestrator import UpdateOrchestrator
 
 
 class DummyPanel(ControlPanelHandlersMixin):
@@ -94,3 +96,17 @@ def test_auto_update_settings_default_to_false_and_accept_legacy_keys(monkeypatc
 
     updated = DummyPanel()._panel_update_update_settings({"auto_update": {"defaultspack": True}})
     assert updated["auto_update"]["official_packs"] is True
+
+
+def test_pack_apply_invalid_stage_id_returns_error_payload(tmp_path):
+    orchestrator = UpdateOrchestrator(
+        pack_manager=PackUpdateManager(
+            managed_dir=tmp_path / "packs",
+            pack_state_dir=tmp_path / "pack_state",
+        )
+    )
+
+    result = orchestrator.pack_apply("defaultspack", {"stage_id": "../evil"})
+
+    assert result["status_code"] == 400
+    assert "invalid stage_id" in result["error"]

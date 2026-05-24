@@ -25,13 +25,22 @@ from .manifest import (
 )
 from .models import AutoUpdateRunResult, PackUpdateCheck, PackUpdateResult, StagedPackUpdate
 from .rollback import rollback_available, rollback_pack_version
-from .trust import load_trust_roots, verify_signature
+from .stage_ids import make_stage_id, resolve_stage_dir, validate_stage_id
+from .trust import (
+    load_trust_roots,
+    load_official_trust_roots,
+    pack_bundle_signature_payload,
+    signature_string_from_entry,
+    verify_index_signatures,
+    verify_signature,
+)
 from .versioning import read_pyproject_version, sort_versions, version_newer
 
 DEFAULT_PACK_INDEX_URL = (
     "https://github.com/harupipipipi/rumiai/releases/latest/download/pack-index.stable.json"
 )
 AUTO_UPDATE_INTERVAL_HOURS = 24
+OFFICIAL_PACK_IDS = frozenset({"defaultspack"})
 
 
 class PackUpdateError(RuntimeError):
@@ -97,6 +106,7 @@ class PackUpdateManager:
         current = self.current_version(pack_id)
         try:
             index = self.fetch_pack_index(channel)
+            self._verify_pack_index_signature(index, pack_id, channel)
             version, _entry = self._select_latest(index, pack_id)
             latest = version or current
             errors: list[str] = []
@@ -137,16 +147,17 @@ class PackUpdateManager:
         pack_id = validate_pack_id(pack_id)
         with self._pack_lock(pack_id):
             index = self.fetch_pack_index(channel)
+            self._verify_pack_index_signature(index, pack_id, channel)
             selected_version, entry = self._select_latest(index, pack_id, version)
             if not selected_version or not entry:
                 raise PackUpdateError(f"no update found for {pack_id}")
             url = str(entry.get("url") or "")
             expected_sha = str(entry.get("sha256") or "")
-            signature = str(entry.get("signature") or "") or None
+            signature = signature_string_from_entry(entry)
             if not url or not expected_sha:
                 raise PackUpdateError("pack index entry requires url and sha256")
 
-            stage_id = f"{int(time.time())}-{uuid.uuid4().hex[:10]}"
+            stage_id = make_stage_id()
             stage_dir = self._staging_root(pack_id) / stage_id
             bundle_path = stage_dir / f"{pack_id}-{selected_version}.rumi-pack"
             extracted = stage_dir / "extracted"
@@ -183,12 +194,35 @@ class PackUpdateManager:
                 sha256=actual_sha,
             )
 
-    def apply_staged_pack(self, stage_id: str) -> PackUpdateResult:
+    def apply_staged_pack(self, stage_id: str, *, expected_pack_id: str | None = None) -> PackUpdateResult:
+        try:
+            stage_id = validate_stage_id(stage_id)
+        except ValueError as exc:
+            raise PackUpdateError(str(exc)) from exc
+        expected_pack_id = validate_pack_id(expected_pack_id) if expected_pack_id is not None else None
         for pack_root in self.managed_dir.iterdir() if self.managed_dir.is_dir() else []:
-            stage_dir = pack_root / "staging" / stage_id
+            if not pack_root.is_dir() or pack_root.is_symlink():
+                continue
+            if expected_pack_id is not None and pack_root.name != expected_pack_id:
+                continue
+            try:
+                stage_dir = resolve_stage_dir(
+                    pack_root / "staging",
+                    stage_id,
+                    allowed_root=self.managed_dir / pack_root.name,
+                )
+            except ValueError as exc:
+                raise PackUpdateError(str(exc)) from exc
             if (stage_dir / "stage.json").is_file():
                 data = read_json_object(stage_dir / "stage.json")
-                return self._activate_stage(str(data["pack_id"]), stage_dir)
+                pack_id = validate_pack_id(str(data.get("pack_id") or ""))
+                if data.get("stage_id") != stage_id:
+                    raise PackUpdateError("staged update metadata stage_id mismatch")
+                if pack_id != pack_root.name:
+                    raise PackUpdateError("staged update metadata pack_id mismatch")
+                if expected_pack_id is not None and pack_id != expected_pack_id:
+                    raise PackUpdateError("staged update target pack_id mismatch")
+                return self._activate_stage(pack_id, stage_dir)
         raise PackUpdateError(f"unknown staged update: {stage_id}")
 
     def apply_pack(
@@ -425,8 +459,23 @@ class PackUpdateManager:
     def _verify_bundle_signature(self, bundle_path: Path, bundle_sha: str, signature: str | None, pack_id: str) -> None:
         if signature is None:
             signature = _signature_from_bundle(bundle_path)
-        roots = load_trust_roots(self.trust_roots_path)
-        verify_signature(bundle_sha256=bundle_sha, signature=signature, pack_id=pack_id, trust_roots=roots)
+        roots = self._pack_trust_roots(pack_id)
+        verify_signature(
+            payload=pack_bundle_signature_payload(bundle_sha),
+            signature=signature,
+            subject=f"pack {pack_id}",
+            trust_roots=roots,
+        )
+
+    def _verify_pack_index_signature(self, index: Mapping[str, Any], pack_id: str, channel: str) -> None:
+        try:
+            verify_index_signatures(
+                index,
+                subject=f"pack index {channel} for {pack_id}",
+                trust_roots=self._pack_trust_roots(pack_id),
+            )
+        except Exception as exc:
+            raise PackUpdateError(str(exc)) from exc
 
     def _select_latest(
         self,
@@ -459,6 +508,21 @@ class PackUpdateManager:
         if max_core and not satisfies_constraint(self.core_version, str(max_core)):
             return None, None
         return selected, entry
+
+    def _pack_trust_roots(self, pack_id: str) -> dict[str, Any]:
+        if pack_id in OFFICIAL_PACK_IDS:
+            return load_official_trust_roots()
+        roots = load_trust_roots(self.trust_roots_path)
+        pack_scopes = roots.get("pack_keys")
+        if isinstance(pack_scopes, Mapping):
+            scoped_keys = pack_scopes.get(pack_id)
+            if isinstance(scoped_keys, Mapping):
+                public_keys = roots.setdefault("ed25519_public_keys", {})
+                if isinstance(public_keys, dict):
+                    for key_id, value in scoped_keys.items():
+                        if isinstance(key_id, str) and isinstance(value, str):
+                            public_keys[key_id] = value
+        return roots
 
     def _staging_root(self, pack_id: str) -> Path:
         pack_id = validate_pack_id(pack_id)
@@ -506,7 +570,8 @@ class PackUpdateManager:
             dt = datetime.fromisoformat(last_checked.replace("Z", "+00:00"))
         except ValueError:
             return True
-        return (datetime.now(timezone.utc) - dt).total_seconds() >= AUTO_UPDATE_INTERVAL_HOURS * 3600
+        interval = _normalize_check_interval_hours(settings.get("check_interval_hours"))
+        return (datetime.now(timezone.utc) - dt).total_seconds() >= interval * 3600
 
 
 def normalize_update_preferences(data: Mapping[str, Any]) -> dict[str, Any]:
@@ -531,7 +596,7 @@ def normalize_update_preferences(data: Mapping[str, Any]) -> dict[str, Any]:
             "core": str(raw_channels.get("core", "stable")),
             "packs": str(raw_channels.get("packs", "stable")),
         },
-        "check_interval_hours": int(data.get("check_interval_hours") or AUTO_UPDATE_INTERVAL_HOURS),
+        "check_interval_hours": _normalize_check_interval_hours(data.get("check_interval_hours")),
         "last_checked_at": data.get("last_checked_at") if isinstance(data.get("last_checked_at"), str) else None,
         "last_results": last_results,
         "updated_at": data.get("updated_at") if isinstance(data.get("updated_at"), str) else None,
@@ -549,6 +614,14 @@ def _signature_from_bundle(bundle_path: Path) -> str | None:
     except zipfile.BadZipFile:
         return None
     return None
+
+
+def _normalize_check_interval_hours(value: Any) -> int:
+    try:
+        interval = int(value)
+    except (TypeError, ValueError):
+        interval = AUTO_UPDATE_INTERVAL_HOURS
+    return max(1, min(interval, 24 * 30))
 
 
 def _copy_pack_tree_for_install(src: Path, dst: Path) -> list[str]:

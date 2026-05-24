@@ -1,12 +1,46 @@
 from __future__ import annotations
 
+import base64
 import json
 import zipfile
 from pathlib import Path
 
+import pytest
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
 from core_runtime.update.download import sha256_file
 from core_runtime.update.pack_update_manager import PackUpdateManager
-from core_runtime.update.trust import sign_hmac
+from core_runtime.update.trust import (
+    index_signature_payload,
+    pack_bundle_signature_payload,
+    public_key_to_b64,
+    sign_ed25519,
+    signature_entry,
+)
+
+
+def _signing_key() -> tuple[str, str, str]:
+    private_key = Ed25519PrivateKey.generate()
+    private_raw = private_key.private_bytes(
+        encoding=serialization.Encoding.Raw,
+        format=serialization.PrivateFormat.Raw,
+        encryption_algorithm=serialization.NoEncryption(),
+    )
+    return "test", base64.b64encode(private_raw).decode("ascii"), public_key_to_b64(private_key.public_key())
+
+
+_TEST_KEY_ID, _TEST_PRIVATE_KEY, _TEST_PUBLIC_KEY = _signing_key()
+
+
+@pytest.fixture(autouse=True)
+def _official_update_trust_root(tmp_path, monkeypatch):
+    path = tmp_path / "official_trust_roots.json"
+    path.write_text(
+        json.dumps({"schema": "rumi.trust_roots.v1", "ed25519_public_keys": {_TEST_KEY_ID: _TEST_PUBLIC_KEY}}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("core_runtime.update.trust.OFFICIAL_TRUST_ROOTS_PATH", path)
 
 
 def _write_pack_dir(root: Path, pack_id: str = "defaultspack", version: str = "2.5.0") -> Path:
@@ -57,7 +91,13 @@ def _index(tmp_path: Path, bundle: Path, version: str = "2.5.0", signature: str 
                     version: {
                         "url": f"file://{bundle}",
                         "sha256": digest,
-                        "signature": signature or sign_hmac(digest, "test", "secret"),
+                        "signature": signature or sign_ed25519(
+                            pack_bundle_signature_payload(digest),
+                            _TEST_KEY_ID,
+                            _TEST_PRIVATE_KEY,
+                        ),
+                        "signature_scheme": "ed25519",
+                        "key_id": _TEST_KEY_ID,
                         "min_core_version": "1.10.0",
                         "max_core_version": "<2.0.0",
                     }
@@ -65,6 +105,9 @@ def _index(tmp_path: Path, bundle: Path, version: str = "2.5.0", signature: str 
             }
         },
     }
+    payload["signatures"] = [
+        signature_entry(sign_ed25519(index_signature_payload(payload), _TEST_KEY_ID, _TEST_PRIVATE_KEY))
+    ]
     path = tmp_path / "pack-index.stable.json"
     path.write_text(json.dumps(payload), encoding="utf-8")
     return path
@@ -72,7 +115,10 @@ def _index(tmp_path: Path, bundle: Path, version: str = "2.5.0", signature: str 
 
 def _trust(tmp_path: Path) -> Path:
     path = tmp_path / "trust_roots.json"
-    path.write_text(json.dumps({"schema": "rumi.trust_roots.v1", "hmac_keys": {"test": "secret"}}), encoding="utf-8")
+    path.write_text(
+        json.dumps({"schema": "rumi.trust_roots.v1", "ed25519_public_keys": {_TEST_KEY_ID: _TEST_PUBLIC_KEY}}),
+        encoding="utf-8",
+    )
     return path
 
 

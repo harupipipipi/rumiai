@@ -13,7 +13,8 @@ Rumi uses three update layers with separate ownership and rollback boundaries.
 - Viewer updates never modify packs or core runtime files.
 - Pack updates never modify Viewer or core runtime files.
 - Core updates never write `user_data/packs`, `pack_state`, settings, logs, or secrets.
-- Pack activation is atomic: `current.json` is updated only after download, checksum, signature, extraction, manifest validation, compatibility checks, and copy into `versions/<version>` succeed.
+- Pack activation is atomic: `current.json` is updated only after signed index verification, download, checksum, Ed25519 bundle signature verification, extraction, manifest validation, compatibility checks, and copy into `versions/<version>` succeed.
+- Core updates also require signed indexes and signed bundles before extraction. Clients only ship public keys; release CI holds the private signing key.
 - Broken pack updates leave the active `current.json` unchanged.
 
 ## Runtime Defaultspack

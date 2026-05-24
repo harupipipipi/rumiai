@@ -31,6 +31,14 @@ MAX_ARCHIVE_BYTES = 250 * 1024 * 1024
 AUTO_UPDATE_INTERVAL_HOURS = 24
 UPDATE_TARGETS: tuple[UpdateTarget, ...] = ("rumiai", "defaultspack")
 
+
+def _normalize_check_interval_hours(value: Any) -> int:
+    try:
+        interval = int(value)
+    except (TypeError, ValueError):
+        interval = AUTO_UPDATE_INTERVAL_HOURS
+    return max(1, min(interval, 24 * 30))
+
 _COMMON_EXCLUDES = (
     ".git/**",
     "**/.git/**",
@@ -480,7 +488,7 @@ class GitHubUpdateManager:
             last_results = []
         return {
             "auto_update": auto_update,
-            "check_interval_hours": AUTO_UPDATE_INTERVAL_HOURS,
+            "check_interval_hours": _normalize_check_interval_hours(data.get("check_interval_hours")),
             "last_checked_at": data.get("last_checked_at") if isinstance(data.get("last_checked_at"), str) else None,
             "last_results": last_results,
             "updated_at": data.get("updated_at") if isinstance(data.get("updated_at"), str) else None,
@@ -506,7 +514,8 @@ class GitHubUpdateManager:
         except ValueError:
             return True
         elapsed = datetime.now(timezone.utc) - last_checked
-        return elapsed.total_seconds() >= AUTO_UPDATE_INTERVAL_HOURS * 60 * 60
+        interval = _normalize_check_interval_hours(settings.get("check_interval_hours"))
+        return elapsed.total_seconds() >= interval * 60 * 60
 
     def _source_dir_for_target(self, target: UpdateTarget, extracted_root: Path) -> Path:
         if target == "rumiai":

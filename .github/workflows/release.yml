@@ -113,6 +113,25 @@ jobs:
         working-directory: pack-shell
         run: cargo build --locked --release --target ${{ matrix.target }}
 
+      - name: Inject official update trust root
+        shell: bash
+        env:
+          RUMI_UPDATE_ED25519_KEY_ID: ${{ secrets.RUMI_UPDATE_ED25519_KEY_ID }}
+          RUMI_UPDATE_ED25519_PUBLIC_KEY_B64: ${{ secrets.RUMI_UPDATE_ED25519_PUBLIC_KEY_B64 }}
+        run: |
+          python - <<'PY'
+          import json, os, pathlib
+          key_id = os.environ.get("RUMI_UPDATE_ED25519_KEY_ID")
+          public_key = os.environ.get("RUMI_UPDATE_ED25519_PUBLIC_KEY_B64")
+          if not key_id or not public_key:
+              raise SystemExit("RUMI_UPDATE_ED25519_KEY_ID and RUMI_UPDATE_ED25519_PUBLIC_KEY_B64 are required")
+          path = pathlib.Path("rumi_ai_1_10/core_runtime/update/official_trust_roots.json")
+          path.write_text(json.dumps({
+              "schema": "rumi.trust_roots.v1",
+              "ed25519_public_keys": {key_id: public_key},
+          }, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+          PY
+
       - name: Prepare bundled Rumi runtime
         run: python .github/scripts/prepare_tauri_resources.py --target ${{ matrix.target }} --uv-version ${{ env.UV_VERSION }} --require-runtime-tools
 
@@ -158,8 +177,8 @@ jobs:
         if: matrix.target == 'x86_64-unknown-linux-gnu'
         env:
           RELEASE_BASE_URL: https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}
-          RUMI_PACK_HMAC_KEY_ID: ${{ secrets.RUMI_PACK_HMAC_KEY_ID }}
-          RUMI_PACK_HMAC_SECRET: ${{ secrets.RUMI_PACK_HMAC_SECRET }}
+          RUMI_UPDATE_ED25519_KEY_ID: ${{ secrets.RUMI_UPDATE_ED25519_KEY_ID }}
+          RUMI_UPDATE_ED25519_PRIVATE_KEY_B64: ${{ secrets.RUMI_UPDATE_ED25519_PRIVATE_KEY_B64 }}
         run: |
           mkdir -p dist/update
           PACK_VERSION="$(python - <<'PY'
@@ -200,18 +219,59 @@ jobs:
             --output dist/update/core-index.stable.json
           python - <<'PY'
           import json, pathlib, sys
+          import tempfile
+          sys.path.insert(0, "rumi_ai_1_10")
           root = pathlib.Path("dist/update")
+          from core_runtime.update.core_update_manager import CoreUpdateManager
+          from core_runtime.update.download import safe_extract_zip, sha256_file
+          from core_runtime.update.manifest import validate_extracted_pack
+          from core_runtime.update.pack_update_manager import PackUpdateManager
+
           index = json.loads((root / "pack-index.stable.json").read_text())
+          if not index.get("signatures"):
+              raise SystemExit("pack index is missing signatures")
           for pack in index["packs"].values():
               for item in pack["versions"].values():
+                  if not item.get("signature"):
+                      raise SystemExit("pack index entry is missing bundle signature")
                   name = item["url"].rsplit("/", 1)[-1]
                   if not (root / name).exists():
                       raise SystemExit(f"pack index references missing artifact: {name}")
+                  if sha256_file(root / name) != item["sha256"]:
+                      raise SystemExit(f"pack artifact checksum mismatch: {name}")
           core = json.loads((root / "core-index.stable.json").read_text())
+          if not core.get("signatures"):
+              raise SystemExit("core index is missing signatures")
           for item in core["versions"].values():
+              if not item.get("signature"):
+                  raise SystemExit("core index entry is missing bundle signature")
               name = item["url"].rsplit("/", 1)[-1]
               if not (root / name).exists():
                   raise SystemExit(f"core index references missing artifact: {name}")
+              if sha256_file(root / name) != item["sha256"]:
+                  raise SystemExit(f"core artifact checksum mismatch: {name}")
+
+          pack_manager = PackUpdateManager(index_url=f"file://{(root / 'pack-index.stable.json').resolve()}")
+          pack_index = pack_manager.fetch_pack_index()
+          pack_manager._verify_pack_index_signature(pack_index, "defaultspack", "stable")
+          pack_version = pack_index["packs"]["defaultspack"]["latest"]
+          pack_entry = pack_index["packs"]["defaultspack"]["versions"][pack_version]
+          pack_manager._verify_bundle_signature(root / pack_entry["url"].rsplit("/", 1)[-1], pack_entry["sha256"], pack_entry["signature"], "defaultspack")
+
+          with tempfile.TemporaryDirectory(prefix="release-pack-verify-") as tmp:
+              extracted = pathlib.Path(tmp) / "pack"
+              safe_extract_zip(root / pack_entry["url"].rsplit("/", 1)[-1], extracted)
+              validate_extracted_pack(
+                  extracted,
+                  target_pack_id="defaultspack",
+                  core_version="$CORE_VERSION",
+                  viewer_version="$VIEWER_VERSION",
+              )
+
+          core_manager = CoreUpdateManager(index_url=f"file://{(root / 'core-index.stable.json').resolve()}")
+          core_index = core_manager.fetch_core_index()
+          core_entry = core_index["versions"][core_index["latest"]]
+          core_manager._verify_bundle_signature(core_index["latest"], core_entry["sha256"], core_entry["signature"])
           PY
 
       - name: Upload release artifacts

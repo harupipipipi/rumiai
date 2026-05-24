@@ -18,6 +18,8 @@ pack_state/
   update_preferences.json
 ```
 
+`trust_roots.json` stores optional third-party Ed25519 public keys for manually configured pack sources. Official core and defaultspack update keys are bundled in `core_runtime/update/official_trust_roots.json`, so clients never need a signing secret and user-added pack keys cannot authorize core updates.
+
 `current.json` is the only active-version pointer. Rumi does not use symlinks, so activation works reliably on Windows.
 
 ```json

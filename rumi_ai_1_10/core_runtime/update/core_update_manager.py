@@ -12,7 +12,6 @@ import json
 import os
 import shutil
 import time
-import uuid
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator, Mapping
@@ -21,6 +20,14 @@ from ..pack_seed import utc_now_iso
 from ..paths import BASE_DIR, USER_DATA_DIR
 from .download import download_to_file, safe_extract_zip, verify_sha256
 from .models import CoreUpdateResult
+from .stage_ids import make_stage_id, resolve_stage_dir
+from .trust import (
+    core_bundle_signature_payload,
+    load_official_trust_roots,
+    signature_string_from_entry,
+    verify_index_signatures,
+    verify_signature,
+)
 from .versioning import read_pyproject_version, version_newer
 
 DEFAULT_CORE_INDEX_URL = (
@@ -61,11 +68,13 @@ class CoreUpdateManager:
         user_data_dir: Path | str | None = None,
         index_url: str | None = None,
         timeout: int = 30,
+        trust_roots_path: Path | None = None,
     ) -> None:
         self.base_dir = Path(base_dir) if base_dir is not None else BASE_DIR
         self.user_data_dir = Path(user_data_dir) if user_data_dir is not None else USER_DATA_DIR
         self.index_url = index_url or os.environ.get("RUMI_CORE_INDEX_URL") or DEFAULT_CORE_INDEX_URL
         self.timeout = timeout
+        self.trust_roots_path = trust_roots_path
         self.update_state_dir = self.user_data_dir / "update_state" / "core"
 
     def check_core(self, channel: str = "stable") -> CoreUpdateResult:
@@ -100,13 +109,17 @@ class CoreUpdateManager:
             expected_sha = str(entry.get("sha256") or "")
             if not url or not expected_sha:
                 raise CoreUpdateError("core index entry requires url and sha256")
-            stage_id = f"{int(time.time())}-{uuid.uuid4().hex[:10]}"
+            signature = signature_string_from_entry(entry)
+            if not signature:
+                raise CoreUpdateError("core index entry requires signature")
+            stage_id = make_stage_id()
             stage_dir = self.update_state_dir / "staging" / stage_id
             bundle_path = stage_dir / f"rumiai-core-{selected}.zip"
             extracted = stage_dir / "extracted"
             stage_dir.mkdir(parents=True, exist_ok=False)
             download_to_file(url, bundle_path, timeout=self.timeout)
             actual_sha = verify_sha256(bundle_path, expected_sha)
+            self._verify_bundle_signature(selected, actual_sha, signature)
             safe_extract_zip(bundle_path, extracted)
             self._validate_extracted_core(extracted, expected_version=selected)
             metadata = {
@@ -114,6 +127,7 @@ class CoreUpdateManager:
                 "stage_id": stage_id,
                 "version": selected,
                 "sha256": actual_sha,
+                "signature": signature,
                 "bundle_path": str(bundle_path),
                 "staged_at": utc_now_iso(),
             }
@@ -121,11 +135,21 @@ class CoreUpdateManager:
             return metadata
 
     def apply_staged_core(self, stage_id: str) -> CoreUpdateResult:
-        stage_dir = self.update_state_dir / "staging" / stage_id
+        try:
+            stage_dir = resolve_stage_dir(
+                self.update_state_dir / "staging",
+                stage_id,
+                allowed_root=self.update_state_dir,
+            )
+        except ValueError as exc:
+            raise CoreUpdateError(str(exc)) from exc
+        stage_id = stage_dir.name
         if not (stage_dir / "stage.json").is_file():
             raise CoreUpdateError(f"unknown staged core update: {stage_id}")
         with self._core_lock():
             stage = json.loads((stage_dir / "stage.json").read_text(encoding="utf-8"))
+            if stage.get("stage_id") != str(stage_id):
+                raise CoreUpdateError("staged core metadata stage_id mismatch")
             extracted = stage_dir / "extracted"
             self._validate_extracted_core(extracted, expected_version=str(stage.get("version") or ""))
             current = self.current_version()
@@ -177,7 +201,26 @@ class CoreUpdateManager:
                 data = json.loads(response.read().decode("utf-8"))
         if not isinstance(data, dict) or data.get("schema") != "rumi.core_index.v1":
             raise CoreUpdateError("invalid core index")
+        try:
+            verify_index_signatures(
+                data,
+                subject=f"core index {channel}",
+                trust_roots=load_official_trust_roots(),
+            )
+        except Exception as exc:
+            raise CoreUpdateError(str(exc)) from exc
         return data
+
+    def _verify_bundle_signature(self, version: str, bundle_sha: str, signature: str) -> None:
+        try:
+            verify_signature(
+                payload=core_bundle_signature_payload(version, bundle_sha),
+                signature=signature,
+                subject=f"core bundle {version}",
+                trust_roots=load_official_trust_roots(),
+            )
+        except Exception as exc:
+            raise CoreUpdateError(str(exc)) from exc
 
     def _validate_extracted_core(self, root: Path, *, expected_version: str | None = None) -> None:
         marker = root / "pyproject.toml"

@@ -101,7 +101,7 @@ class UpdateOrchestrator:
         try:
             stage_id = body.get("stage_id")
             if stage_id:
-                return self.pack_manager.apply_staged_pack(str(stage_id)).to_dict()
+                return self.pack_manager.apply_staged_pack(str(stage_id), expected_pack_id=pack_id).to_dict()
             return self.pack_manager.apply_pack(
                 pack_id,
                 version=str(body["version"]) if body.get("version") else None,
