@@ -86,8 +86,13 @@ def _route_agent_model(
 ):
     model_requirements = model_requirements_from_tokens(required_capabilities)
     thinking_level = str((params or {}).get("thinking_level") or (params or {}).get("requested_thinking_level") or "").strip()
+    requested_tool_names = [
+        name for name in (tool_name_from_definition(tool) for tool in tools or []) if name
+    ]
+    has_tools = bool(requested_tool_names)
     route_needed = bool(
         any(model_requirements.values())
+        or has_tools
         or modalities.get("has_images")
         or modalities.get("has_files")
         or thinking_level not in {"", "none"}
@@ -105,8 +110,8 @@ def _route_agent_model(
             user_text=str(task or ""),
             has_images=bool(modalities.get("has_images") or model_requirements["image_input"]),
             has_files=bool(modalities.get("has_files")),
-            requested_tools=[tool_name_from_definition(tool) for tool in tools if tool_name_from_definition(tool)],
-            requires_tool_calling=bool(model_requirements["tool_calling"]),
+            requested_tools=requested_tool_names,
+            requires_tool_calling=bool(model_requirements["tool_calling"] or has_tools),
             requires_fast=bool(model_requirements["fast"]),
             requested_thinking_level=thinking_level or ("medium" if model_requirements["thinking"] else "none"),
             preferred_model=preferred_model,

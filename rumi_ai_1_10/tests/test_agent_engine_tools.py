@@ -170,6 +170,54 @@ def test_agent_delegate_with_image_requires_vision_model_or_bridge(monkeypatch) 
     assert user_message["content"][1]["type"] == "image_url"
 
 
+def test_agent_delegate_tools_imply_tool_calling_route(monkeypatch) -> None:
+    from domain.ai_client.model_router import ModelRoutingDecision
+
+    engine = AgentEngine()
+    seen = {}
+
+    def fake_route(request):
+        seen["routing_request"] = request
+        return ModelRoutingDecision(
+            selected_model="demo/tools",
+            original_model=request.preferred_model,
+            selected_group="default",
+            reason_codes=["requires_tool_calling"],
+            warnings=[],
+        )
+
+    def fake_caps(model):
+        return {
+            "supports_tool_calling": model == "demo/tools",
+            "supports_vision": False,
+            "supports_image_input": False,
+            "supports_thinking": False,
+        }
+
+    def fake_ai(messages, model, context, tools=None):
+        seen["model"] = model
+        seen["tools"] = tools
+        return _text_response()
+
+    monkeypatch.setattr("domain.agent.engine.route_model_request", fake_route)
+    monkeypatch.setattr("domain.agent.engine.get_model_capabilities", fake_caps)
+    engine._ai_complete = fake_ai
+
+    result = engine.execute(
+        "search docs",
+        [_tool("web_search")],
+        "stub/default",
+        None,
+        {},
+    )
+
+    assert result["status"] == "completed"
+    assert seen["routing_request"].requested_tools == ["web_search"]
+    assert seen["routing_request"].requires_tool_calling is True
+    assert seen["model"] == "demo/tools"
+    assert seen["tools"][0]["function"]["name"] == "web_search"
+
+
 def test_agent_delegate_attachments_reach_agent_context(monkeypatch) -> None:
     from domain.ai_client.model_router import ModelRoutingDecision
 
