@@ -1,0 +1,252 @@
+import type { SettingsSection } from "./api";
+
+export type PlacementSurface =
+  | "left_sidebar"
+  | "right_sidebar"
+  | "top_bar"
+  | "bottom_bar"
+  | "composer"
+  | "settings"
+  | "floating_panel";
+
+export type PlacementOrientation = "horizontal" | "vertical" | "both";
+
+export type PlaceableSourceType =
+  | "tool"
+  | "setting"
+  | "settings_section"
+  | "command"
+  | "runtime_status"
+  | "runtime_toggle"
+  | "model"
+  | "widget"
+  | "integration"
+  | "custom";
+
+export type PlacementRendererKind = "component" | "template" | "html";
+
+export type PlacementManifest = {
+  id: string;
+  label: string;
+  description?: string;
+  icon?: string;
+  source: {
+    type: PlaceableSourceType;
+    sourceId?: string;
+  };
+  renderer: {
+    kind: PlacementRendererKind;
+    trusted?: boolean;
+    componentId?: string;
+    templateId?: string;
+    html?: string;
+    action?: {
+      type: "open_panel" | "open_settings_section" | "toggle_yolo";
+      target?: string;
+    };
+  };
+  placements: Array<{
+    surface: PlacementSurface;
+    orientation: PlacementOrientation;
+  }>;
+  constraints?: {
+    configurable?: boolean;
+    settings_only?: boolean;
+    requires_capabilities?: string[];
+    requires_context?: string[];
+    requires_settings?: string[];
+  };
+};
+
+export type PinnedPlacement = {
+  id: string;
+  surface: PlacementSurface;
+};
+
+export type PlacementFilterOptions = {
+  surface: PlacementSurface;
+  orientation: Exclude<PlacementOrientation, "both">;
+  configurableOnly?: boolean;
+  availableCapabilities?: string[];
+  availableContext?: string[];
+  availableSettings?: string[];
+};
+
+export const PINNED_PLACEMENTS_STORAGE_KEY = "rumi-ui-placements";
+
+export function normalizePinnedPlacements(value: unknown): PinnedPlacement[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((entry) => (entry && typeof entry === "object" ? entry as Record<string, unknown> : {}))
+    .map((entry) => ({
+      id: String(entry.id ?? "").trim(),
+      surface: String(entry.surface ?? "").trim() as PlacementSurface,
+    }))
+    .filter((entry) => entry.id && entry.surface);
+}
+
+function supportsOrientation(actual: PlacementOrientation, requested: Exclude<PlacementOrientation, "both">): boolean {
+  return actual === "both" || actual === requested;
+}
+
+function includesAll(required: string[] | undefined, actual: string[]): boolean {
+  return !required?.length || required.every((value) => actual.includes(value));
+}
+
+export function filterPlacementCandidates(
+  manifests: PlacementManifest[],
+  options: PlacementFilterOptions,
+): PlacementManifest[] {
+  const capabilities = options.availableCapabilities ?? [];
+  const context = options.availableContext ?? [];
+  const settings = options.availableSettings ?? [];
+  return manifests.filter((manifest) => {
+    const placement = manifest.placements.find((candidate) => (
+      candidate.surface === options.surface
+      && supportsOrientation(candidate.orientation, options.orientation)
+    ));
+    if (!placement) return false;
+    const constraints = manifest.constraints ?? {};
+    if (constraints.settings_only && options.surface !== "settings") return false;
+    if (options.configurableOnly && constraints.configurable === false) return false;
+    if (!includesAll(constraints.requires_capabilities, capabilities)) return false;
+    if (!includesAll(constraints.requires_context, context)) return false;
+    if (!includesAll(constraints.requires_settings, settings)) return false;
+    return true;
+  });
+}
+
+export function readPinnedPlacements(storage: Pick<Storage, "getItem"> | null | undefined): PinnedPlacement[] {
+  try {
+    return normalizePinnedPlacements(storage?.getItem(PINNED_PLACEMENTS_STORAGE_KEY)
+      ? JSON.parse(storage?.getItem(PINNED_PLACEMENTS_STORAGE_KEY) ?? "[]")
+      : []);
+  } catch {
+    return [];
+  }
+}
+
+export function writePinnedPlacements(
+  storage: Pick<Storage, "setItem"> | null | undefined,
+  placements: PinnedPlacement[],
+): PinnedPlacement[] {
+  const normalized = normalizePinnedPlacements(placements);
+  try {
+    storage?.setItem(PINNED_PLACEMENTS_STORAGE_KEY, JSON.stringify(normalized));
+  } catch {
+    // Storage may be unavailable. Caller still receives normalized data.
+  }
+  return normalized;
+}
+
+export function togglePinnedPlacement(
+  placements: PinnedPlacement[],
+  nextPlacement: PinnedPlacement,
+): PinnedPlacement[] {
+  const exists = placements.some((placement) => (
+    placement.id === nextPlacement.id && placement.surface === nextPlacement.surface
+  ));
+  if (exists) {
+    return placements.filter((placement) => !(
+      placement.id === nextPlacement.id && placement.surface === nextPlacement.surface
+    ));
+  }
+  return [...placements, nextPlacement];
+}
+
+export function resolvePlacementHtmlRendering(manifest: PlacementManifest): {
+  kind: "component" | "template" | "html_iframe" | "unsupported";
+  html?: string;
+  sandbox?: string;
+} {
+  if (manifest.renderer.kind === "component") return { kind: "component" };
+  if (manifest.renderer.kind === "template") return { kind: "template" };
+  if (manifest.renderer.kind === "html") {
+    return {
+      kind: "html_iframe",
+      html: String(manifest.renderer.html ?? ""),
+      sandbox: "allow-same-origin",
+    };
+  }
+  return { kind: "unsupported" };
+}
+
+export function buildBuiltinPlacementManifests(settingsSections: SettingsSection[]): PlacementManifest[] {
+  const sectionCandidates = settingsSections.map<PlacementManifest>((section) => ({
+    id: `settings-section:${section.id}`,
+    label: section.label,
+    description: section.description,
+    source: { type: "settings_section", sourceId: section.id },
+    renderer: {
+      kind: "component",
+      action: { type: "open_settings_section", target: section.id },
+    },
+    placements: [
+      { surface: "settings", orientation: "vertical" },
+      { surface: "right_sidebar", orientation: "vertical" },
+    ],
+    constraints: {
+      configurable: true,
+    },
+  }));
+  return [
+    {
+      id: "tool-filter-log",
+      label: "Tool Filter Log",
+      source: { type: "widget", sourceId: "tool-filter-log" },
+      renderer: { kind: "component", action: { type: "open_panel", target: "__tool_filter_log__" } },
+      placements: [{ surface: "right_sidebar", orientation: "vertical" }],
+      constraints: { configurable: true },
+    },
+    {
+      id: "runtime-status",
+      label: "Runtime Status",
+      source: { type: "runtime_status", sourceId: "runtime-status" },
+      renderer: { kind: "component", action: { type: "open_panel", target: "__runtime_status__" } },
+      placements: [{ surface: "right_sidebar", orientation: "vertical" }],
+      constraints: { configurable: true },
+    },
+    {
+      id: "yolo-switch",
+      label: "YOLO Switch",
+      source: { type: "runtime_toggle", sourceId: "yolo" },
+      renderer: { kind: "component", action: { type: "toggle_yolo" } },
+      placements: [
+        { surface: "right_sidebar", orientation: "vertical" },
+        { surface: "top_bar", orientation: "horizontal" },
+      ],
+      constraints: { configurable: true },
+    },
+    {
+      id: "model-manager",
+      label: "Model Manager",
+      source: { type: "model", sourceId: "models" },
+      renderer: { kind: "component", action: { type: "open_settings_section", target: "models" } },
+      placements: [
+        { surface: "right_sidebar", orientation: "vertical" },
+        { surface: "top_bar", orientation: "horizontal" },
+      ],
+      constraints: { configurable: true },
+    },
+    {
+      id: "model-pack-switcher",
+      label: "Model Pack Switcher",
+      source: { type: "model", sourceId: "model-packs" },
+      renderer: { kind: "component", action: { type: "open_settings_section", target: "models" } },
+      placements: [
+        { surface: "right_sidebar", orientation: "vertical" },
+        { surface: "composer", orientation: "horizontal" },
+      ],
+      constraints: { configurable: true },
+    },
+    {
+      id: "webhook-endpoints",
+      label: "Webhook Endpoints",
+      source: { type: "integration", sourceId: "external_input" },
+      renderer: { kind: "component", action: { type: "open_settings_section", target: "external_input" } },
+      placements: [{ surface: "right_sidebar", orientation: "vertical" }],
+      constraints: { configurable: true },
+    },
+    ...sectionCandidates,
+  ];
+}

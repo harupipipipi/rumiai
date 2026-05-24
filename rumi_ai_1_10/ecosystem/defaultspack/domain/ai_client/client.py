@@ -7,6 +7,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
+from domain.ai_client.model_pack_router import select_model_pack
+from domain.ai_client.model_pack_store import ModelPackStore
 from domain.ai_client.api_key_store import provider_api_metadata, provider_has_api_key, provider_named_api_keys, read_provider_api_key
 from domain.ai_client.providers import (
     _cloud_runtime_enabled,
@@ -591,6 +593,42 @@ class AIClient:
             return composites.get(tail)
         return None
 
+    def _model_pack_for_model(self, model):
+        if not isinstance(model, str):
+            return None
+        store = ModelPackStore(self._settings_data().get("models") if isinstance(self._settings_data().get("models"), dict) else {})
+        return store.get(model)
+
+    def _complete_model_pack(self, model_pack, messages, tools=None, params=None):
+        selection = select_model_pack(
+            model_pack,
+            {
+                "user_text": self._messages_text(messages),
+                "has_images": self._messages_have_images(messages),
+                "requires_tool_calling": bool(tools),
+                "requested_thinking_level": str((params or {}).get("thinking_level") or ""),
+                "task_hints": (params or {}).get("task_hints") if isinstance((params or {}).get("task_hints"), dict) else {},
+            },
+            settings=self._settings_data().get("models") if isinstance(self._settings_data().get("models"), dict) else {},
+        )
+        if selection is None or not selection.ordered_members:
+            raise RuntimeError("model pack has no runnable members")
+        composite = {
+            "id": selection.pack_id,
+            "mode": "ensemble" if getattr(model_pack, "mode", "fallback_chain") == "ensemble" else "fallback_chain",
+            "members": selection.ordered_members,
+        }
+        metadata = getattr(model_pack, "metadata", {}) if model_pack is not None else {}
+        merge_model = str(metadata.get("merge_model") or "").strip() if isinstance(metadata, dict) else ""
+        if merge_model:
+            composite["merge_model"] = merge_model
+        response = self._complete_composite(composite, messages, tools, params)
+        if isinstance(response, dict):
+            response_metadata = dict(response.get("metadata") or {})
+            response_metadata["model_pack"] = selection.to_dict()
+            response["metadata"] = response_metadata
+        return response
+
     def _complete_composite(self, composite, messages, tools=None, params=None):
         mode = str(composite.get("mode") or composite.get("type") or "fallback_chain")
         members = composite.get("members", composite.get("models", composite.get("chain", [])))
@@ -843,6 +881,9 @@ class AIClient:
 
     def complete(self, model, messages, tools=None, params=None):
         params = dict(params or {})
+        model_pack = self._model_pack_for_model(model) if int(params.get("_composite_depth", 0) or 0) < 3 else None
+        if model_pack is not None:
+            return self._complete_model_pack(model_pack, messages, tools, params)
         composite = self._composite_for_model(model) if int(params.get("_composite_depth", 0) or 0) < 3 else None
         if composite is not None:
             return self._complete_composite(composite, messages, tools, params)
@@ -859,6 +900,11 @@ class AIClient:
 
     def stream(self, model, messages, tools=None, params=None):
         params = dict(params or {})
+        model_pack = self._model_pack_for_model(model) if int(params.get("_composite_depth", 0) or 0) < 3 else None
+        if model_pack is not None:
+            response = self._complete_model_pack(model_pack, messages, tools, params)
+            text = self._response_text(response)
+            return iter([{"type": "text_delta", "text": text}, {"finish_reason": response.get("finish_reason", "stop") if isinstance(response, dict) else "stop"}])
         composite = self._composite_for_model(model) if int(params.get("_composite_depth", 0) or 0) < 3 else None
         if composite is not None:
             response = self._complete_composite(composite, messages, tools, params)

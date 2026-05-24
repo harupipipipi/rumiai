@@ -8,6 +8,16 @@ from domain.agent.step import AgentStep
 from domain.agent_runtime.policy import session_key_for
 from domain.agent_runtime.run_store import AgentRunStore
 from domain.agent_runtime.transcript import TranscriptStore
+from domain.ai_client.capability_tokens import (
+    missing_model_capabilities,
+    model_requirements_from_tokens,
+    normalize_capability_tokens,
+)
+from domain.ai_client.model_router import ModelRoutingRequest, route_model_request
+from domain.ai_client.model_runtime_settings import ModelRuntimeSettingsService
+from domain.ai_client.model_search import get_model_capabilities
+from domain.capabilities.runtime_snapshot import build_runtime_capability_snapshot
+from domain.tool.eligibility import filter_tool_definitions_by_eligibility
 from domain.tool.schema_adapter import (
     adapt_tool_definitions,
     build_tool_execution_context,
@@ -27,6 +37,97 @@ def _truthy(value):
     if isinstance(value, str):
         return value.strip().lower() in {"1", "true", "yes", "y", "on"}
     return bool(value)
+
+
+def _attachment_modalities(attachments):
+    items = attachments if isinstance(attachments, list) else []
+    has_images = False
+    has_files = False
+    for attachment in items:
+        if not isinstance(attachment, dict):
+            continue
+        mime = str(attachment.get("type") or attachment.get("mime_type") or "").lower()
+        if mime.startswith("image/") or str(attachment.get("dataUrl") or attachment.get("data_url") or "").startswith("data:image/"):
+            has_images = True
+        else:
+            has_files = True
+    return {"has_images": has_images, "has_files": has_files}
+
+
+def _message_content_with_attachments(task, attachments):
+    items = attachments if isinstance(attachments, list) else []
+    if not items:
+        return task
+    content = []
+    if str(task or ""):
+        content.append({"type": "text", "text": str(task or "")})
+    for attachment in items:
+        if not isinstance(attachment, dict):
+            continue
+        mime = str(attachment.get("type") or attachment.get("mime_type") or "").lower()
+        data_url = attachment.get("dataUrl") or attachment.get("data_url")
+        if mime.startswith("image/") and isinstance(data_url, str) and data_url.startswith("data:image/"):
+            content.append({"type": "image_url", "image_url": {"url": data_url}})
+            continue
+        label = str(attachment.get("name") or mime or "file")
+        content.append({"type": "text", "text": "[attachment] " + label})
+    return content or str(task or "")
+
+
+def _route_agent_model(
+    *,
+    task,
+    model,
+    tools,
+    params,
+    required_capabilities,
+    modalities,
+    context,
+):
+    model_requirements = model_requirements_from_tokens(required_capabilities)
+    thinking_level = str((params or {}).get("thinking_level") or (params or {}).get("requested_thinking_level") or "").strip()
+    requested_tool_names = [
+        name for name in (tool_name_from_definition(tool) for tool in tools or []) if name
+    ]
+    has_tools = bool(requested_tool_names)
+    route_needed = bool(
+        any(model_requirements.values())
+        or has_tools
+        or modalities.get("has_images")
+        or modalities.get("has_files")
+        or thinking_level not in {"", "none"}
+    )
+    if not route_needed:
+        return model if model else "default"
+    settings = ModelRuntimeSettingsService().get_settings()
+    preferred_model = str(
+        model
+        if model and model != "default"
+        else settings.get("preferred_model") or model or "stub/default"
+    ).strip() or "stub/default"
+    decision = route_model_request(
+        ModelRoutingRequest(
+            user_text=str(task or ""),
+            has_images=bool(modalities.get("has_images") or model_requirements["image_input"]),
+            has_files=bool(modalities.get("has_files")),
+            requested_tools=requested_tool_names,
+            requires_tool_calling=bool(model_requirements["tool_calling"] or has_tools),
+            requires_fast=bool(model_requirements["fast"]),
+            requested_thinking_level=thinking_level or ("medium" if model_requirements["thinking"] else "none"),
+            preferred_model=preferred_model,
+            preferred_group=str(settings.get("preferred_model_group") or "default"),
+            auto_route_within_group=bool(settings.get("auto_route_within_group", True)),
+            task_hints={
+                **((params or {}).get("task_hints") if isinstance((params or {}).get("task_hints"), dict) else {}),
+                "modalities": modalities,
+                "required_capabilities": list(required_capabilities or []),
+            },
+            settings=settings,
+        )
+    )
+    if isinstance(context, dict):
+        context["model_routing"] = decision.to_dict()
+    return decision.selected_model or preferred_model
 
 
 class AgentEngine:
@@ -227,7 +328,8 @@ class AgentEngine:
 
     def _ai_complete(self, messages, model, context, tools=None):
         from blocks.ai.complete import run as ai_complete_run
-        result = ai_complete_run({"messages": messages, "model": model, "tools": tools or []}, context)
+        params = context.get("params") if isinstance(context, dict) and isinstance(context.get("params"), dict) else {}
+        result = ai_complete_run({"messages": messages, "model": model, "tools": tools or [], "params": params}, context)
         return result
 
     def _execute_tool(self, tool_name, tool_args, context):
@@ -407,19 +509,83 @@ class AgentEngine:
         messages = []
         if execution.system_prompt:
             messages.append({"role": "system", "content": execution.system_prompt})
-        messages.append({"role": "user", "content": execution.task})
+        attachments = execution.context.get("attachments") if isinstance(getattr(execution, "context", None), dict) else []
+        messages.append({"role": "user", "content": _message_content_with_attachments(execution.task, attachments)})
         return messages
 
     def execute(self, task, tools, model, system_prompt, context):
         execution_id = gen_id("agent_")
         execution_context = dict(context or {}) if isinstance(context, dict) else {}
         execution_context = resolve_runtime_profile_context(execution_context)
+        required_capabilities = normalize_capability_tokens(execution_context.get("required_capabilities"))
+        if required_capabilities:
+            execution_context["required_capabilities"] = required_capabilities
+        params = dict(execution_context.get("params") if isinstance(execution_context.get("params"), dict) else {})
+        execution_context["params"] = params
+        attachments = list(execution_context.get("attachments") if isinstance(execution_context.get("attachments"), list) else [])
+        modalities = _attachment_modalities(attachments)
         normalized_tools = adapt_tool_definitions(tools if tools else [])
         provider_tools = filter_tool_definitions_for_runtime_profile(
             normalized_tools,
             execution_context.get("runtime_profile"),
             execution_context.get("agent_id"),
         )
+        policy = policy_from_context(execution_context)
+        model = _route_agent_model(
+            task=task,
+            model=model,
+            tools=provider_tools,
+            params=params,
+            required_capabilities=required_capabilities,
+            modalities=modalities,
+            context=execution_context,
+        )
+        selected_capabilities = get_model_capabilities(model if model else "default") or {}
+        missing_capabilities = missing_model_capabilities(required_capabilities, selected_capabilities)
+        if missing_capabilities:
+            execution = AgentExecution(
+                execution_id=execution_id,
+                task=task,
+                tools=provider_tools,
+                model=model if model else "default",
+                system_prompt=system_prompt,
+            )
+            execution.context = execution_context
+            execution.status = "error"
+            execution.error = "selected model does not satisfy required capabilities: " + ", ".join(missing_capabilities)
+            execution.add_step(
+                "error",
+                {
+                    "code": "MODEL_CAPABILITY_UNSATISFIED",
+                    "missing_capabilities": missing_capabilities,
+                    "required_capabilities": required_capabilities,
+                    "model": model,
+                },
+            )
+            self._persist_execution(execution, "run_failed", {"error": execution.error})
+            return {
+                "execution_id": execution_id,
+                "status": "error",
+                "result": execution.to_dict(),
+            }
+        runtime_snapshot = build_runtime_capability_snapshot(
+            user_text=str(task or ""),
+            modalities=modalities,
+            model_capabilities=selected_capabilities,
+            context=execution_context,
+            policy=policy,
+        )
+        eligibility = filter_tool_definitions_by_eligibility(
+            provider_tools,
+            runtime_snapshot,
+            policy=policy,
+            connected_tool_names=connected_tool_names(
+                provider_tools,
+                execution_context.get("runtime_profile"),
+                agent_id=execution_context.get("agent_id"),
+            ),
+        )
+        provider_tools = list(eligibility.get("allowed_tools") or [])
         execution = AgentExecution(
             execution_id=execution_id,
             task=task,
@@ -428,6 +594,8 @@ class AgentEngine:
             system_prompt=system_prompt,
         )
         execution.context = execution_context
+        execution.context["tool_filter_result"] = list(eligibility.get("entries") or [])
+        execution.context["runtime_capability_snapshot"] = runtime_snapshot.as_dict()
         self._create_transcript(execution_id, execution.context, {"task": task, "model": model})
         self._executions[execution_id] = execution
         execution.status = "running"

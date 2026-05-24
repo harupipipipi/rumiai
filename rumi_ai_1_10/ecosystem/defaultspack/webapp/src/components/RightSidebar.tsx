@@ -53,25 +53,33 @@ import {
   PinOff,
   FolderCheck,
   FolderX,
+  Plus,
   X,
 } from "lucide-react";
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
 
 import type {
+  ModelProfile,
   SettingsSection,
   SidebarAction,
   SidebarCategory,
   SidebarField,
   SidebarItem,
 } from "../lib/api";
+import type { RuntimeCapabilitySnapshot, ToolFilterEntry } from "../lib/toolStatus";
+import { toolFilterBlockedSummary } from "../lib/toolStatus";
+import { buildBuiltinPlacementManifests, filterPlacementCandidates, normalizePinnedPlacements, togglePinnedPlacement } from "../lib/placement";
 import { compareToolUiItems, sortedToolGroups, sortedToolUiItems, supportedComposerDropKind, supportsComposerDrop, toolGroupFor } from "../lib/toolUi";
+import { PlacementHtmlRenderer } from "./PlacementHtmlRenderer";
+import { ToolFilterLogWidget, ToolManagerWidget } from "./ToolStatusWidgets";
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
 const RAIL_BUTTON_CLASS = "relative flex h-9 min-h-9 w-9 min-w-9 shrink-0 items-center justify-center overflow-visible rounded-md transition-colors";
+const PLACEMENT_PANEL_PREFIX = "__placement__:";
 
 function readStoredStringArray(key: string): string[] {
   try {
@@ -752,8 +760,14 @@ export function RightSidebar({
   companyPanel,
   codingPanel,
   keyboardButtonNavigation = false,
+  selectedProfile = null,
+  toolFilterEntries = [],
+  runtimeCapabilitySnapshot = null,
+  yoloMode = false,
   onSettingChange,
   onOpenSettings,
+  onOpenSettingsSection,
+  onToggleYolo,
   onToolToggle,
   onToolBatchSet,
   onPanelAction,
@@ -766,8 +780,14 @@ export function RightSidebar({
   companyPanel?: ReactNode;
   codingPanel?: ReactNode;
   keyboardButtonNavigation?: boolean;
+  selectedProfile?: ModelProfile | null;
+  toolFilterEntries?: ToolFilterEntry[];
+  runtimeCapabilitySnapshot?: RuntimeCapabilitySnapshot | null;
+  yoloMode?: boolean;
   onSettingChange: (sectionId: string, fieldId: string, value: unknown) => void;
   onOpenSettings: () => void;
+  onOpenSettingsSection?: (sectionId: string) => void;
+  onToggleYolo?: () => void;
   onToolToggle?: (item: SidebarItem) => void;
   onToolBatchSet?: (toolIds: string[], enabled: boolean) => void;
   onPanelAction?: (item: SidebarItem, action: SidebarAction) => void;
@@ -778,14 +798,28 @@ export function RightSidebar({
   const [toolManagerSearchQuery, setToolManagerSearchQuery] = useState("");
   const [openToolGroupMenu, setOpenToolGroupMenu] = useState<string | null>(null);
   const [toolGroupMenuPosition, setToolGroupMenuPosition] = useState<{ top: number; right: number } | null>(null);
+  const [placementMenuOpen, setPlacementMenuOpen] = useState(false);
   const sidebarSettings = settingsValues.sidebar ?? {};
+  const toolsSettings = settingsValues.tools ?? {};
   const pinnedItemIds = useMemo(
     () => settingStringArray(sidebarSettings.pinned_item_ids, "rumi-sidebar-pinned-item-ids"),
     [sidebarSettings.pinned_item_ids],
   );
+  const pinnedPlacements = useMemo(
+    () => normalizePinnedPlacements(sidebarSettings.ui_placements),
+    [sidebarSettings.ui_placements],
+  );
   const starredItemIds = useMemo(
     () => settingStringArray(sidebarSettings.starred_item_ids, "rumi-sidebar-starred-item-ids"),
     [sidebarSettings.starred_item_ids],
+  );
+  const disabledToolIds = useMemo(
+    () => settingStringArray(toolsSettings.disabled_tool_ids),
+    [toolsSettings.disabled_tool_ids],
+  );
+  const hiddenToolIds = useMemo(
+    () => settingStringArray(toolsSettings.hidden_tool_ids),
+    [toolsSettings.hidden_tool_ids],
   );
   const customTagMap = useMemo(
     () => settingStringArrayRecord(sidebarSettings.custom_tool_tags, "rumi-tool-custom-tags"),
@@ -800,6 +834,21 @@ export function RightSidebar({
   const selectedToolIdSet = useMemo(() => new Set(selectedToolIds), [selectedToolIds]);
   const pinnedItemIdSet = useMemo(() => new Set(pinnedItemIds), [pinnedItemIds]);
   const starredItemIdSet = useMemo(() => new Set(starredItemIds), [starredItemIds]);
+  const disabledToolIdSet = useMemo(() => new Set(disabledToolIds), [disabledToolIds]);
+  const hiddenToolIdSet = useMemo(() => new Set(hiddenToolIds), [hiddenToolIds]);
+  const placementManifestMap = useMemo(
+    () => new Map(buildBuiltinPlacementManifests(settingsSections).map((manifest) => [manifest.id, manifest])),
+    [settingsSections],
+  );
+  const rightSidebarPlacementCandidates = useMemo(() => (
+    filterPlacementCandidates([...placementManifestMap.values()], {
+      surface: "right_sidebar",
+      orientation: "vertical",
+      configurableOnly: true,
+    }).filter((manifest) => !pinnedPlacements.some((placement) => (
+      placement.id === manifest.id && placement.surface === "right_sidebar"
+    )))
+  ), [pinnedPlacements, placementManifestMap]);
 
   useEffect(() => {
     const requestedId = activeItemId?.split(":").slice(0, -1).join(":") || activeItemId;
@@ -811,12 +860,17 @@ export function RightSidebar({
   useEffect(() => {
     if (!activePanel) return;
     if (activePanel === "__tool_manager__") return;
+    if (activePanel === "__tool_filter_log__") return;
+    if (activePanel === "__runtime_status__") return;
     if (activePanel === "__company_workspace__" && companyPanel) return;
     if (activePanel === "__coding_widget__" && codingPanel) return;
+    if (activePanel.startsWith(PLACEMENT_PANEL_PREFIX) && placementManifestMap.has(activePanel.slice(PLACEMENT_PANEL_PREFIX.length))) {
+      return;
+    }
     if (!items.some((item) => item.id === activePanel)) {
       setActivePanel(null);
     }
-  }, [activePanel, codingPanel, companyPanel, items]);
+  }, [activePanel, codingPanel, companyPanel, items, placementManifestMap]);
 
   useEffect(() => {
     if (!activePanel || categoryFilter === "all") return;
@@ -853,6 +907,20 @@ export function RightSidebar({
   }, [openToolGroupMenu]);
 
   useEffect(() => {
+    if (!placementMenuOpen) return;
+    const handlePointerDown = () => setPlacementMenuOpen(false);
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setPlacementMenuOpen(false);
+    };
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [placementMenuOpen]);
+
+  useEffect(() => {
     if (!contextMenu) return;
 
     const close = () => setContextMenu(null);
@@ -875,11 +943,13 @@ export function RightSidebar({
     return next;
   }, [customTagMap, items]);
   const searchFilteredItems = useMemo(
-    () => items.filter((item) => sidebarItemMatchesSearch(item, tagMap.get(item.id) ?? [], searchQuery)),
-    [items, searchQuery, tagMap],
+    () => items
+      .filter((item) => item.category !== "tool" || !hiddenToolIdSet.has(item.id))
+      .filter((item) => sidebarItemMatchesSearch(item, tagMap.get(item.id) ?? [], searchQuery)),
+    [hiddenToolIdSet, items, searchQuery, tagMap],
   );
   useEffect(() => {
-    if (!activePanel || activePanel === "__tool_manager__" || activePanel === "__company_workspace__" || activePanel === "__coding_widget__" || !searchQuery.trim()) return;
+    if (!activePanel || activePanel === "__tool_manager__" || activePanel === "__tool_filter_log__" || activePanel === "__runtime_status__" || activePanel === "__company_workspace__" || activePanel === "__coding_widget__" || !searchQuery.trim()) return;
     if (!searchFilteredItems.some((item) => item.id === activePanel)) {
       setActivePanel(null);
     }
@@ -954,10 +1024,112 @@ export function RightSidebar({
   );
 
   const activeItem = items.find((item) => item.id === activePanel) ?? null;
+  const activePlacementManifest = activePanel?.startsWith(PLACEMENT_PANEL_PREFIX)
+    ? placementManifestMap.get(activePanel.slice(PLACEMENT_PANEL_PREFIX.length)) ?? null
+    : null;
   const isToolManagerActive = activePanel === "__tool_manager__";
+  const isToolFilterLogActive = activePanel === "__tool_filter_log__";
+  const isRuntimeStatusActive = activePanel === "__runtime_status__";
   const isCompanyPanelActive = activePanel === "__company_workspace__" && Boolean(companyPanel);
   const isCodingPanelActive = activePanel === "__coding_widget__" && Boolean(codingPanel);
+  const isPlacementPanelActive = Boolean(activePlacementManifest);
   const activeToolGroupId = activeItem?.category === "tool" ? toolGroupFor(activeItem).id : null;
+  const pinnedRightSidebarPlacements = useMemo(
+    () => pinnedPlacements
+      .filter((placement) => placement.surface === "right_sidebar")
+      .map((placement) => placementManifestMap.get(placement.id))
+      .filter((manifest): manifest is NonNullable<typeof manifest> => Boolean(manifest)),
+    [pinnedPlacements, placementManifestMap],
+  );
+
+  const updatePinnedPlacements = (updater: (current: ReturnType<typeof normalizePinnedPlacements>) => ReturnType<typeof normalizePinnedPlacements>) => {
+    onSettingChange("sidebar", "ui_placements", updater(pinnedPlacements));
+  };
+
+  const triggerPlacement = (placementId: string) => {
+    const manifest = placementManifestMap.get(placementId);
+    const action = manifest?.renderer.action;
+    if (!manifest) return;
+    if (!action) {
+      setActivePanel(`${PLACEMENT_PANEL_PREFIX}${placementId}`);
+      setPlacementMenuOpen(false);
+      return;
+    }
+    if (action.type === "open_panel" && action.target) {
+      const target = action.target;
+      setActivePanel((current) => current === target ? null : target);
+      setPlacementMenuOpen(false);
+      return;
+    }
+    if (action.type === "open_settings_section" && action.target) {
+      setPlacementMenuOpen(false);
+      onOpenSettingsSection?.(action.target);
+      return;
+    }
+    if (action.type === "toggle_yolo") {
+      setPlacementMenuOpen(false);
+      onToggleYolo?.();
+      return;
+    }
+    setActivePanel(`${PLACEMENT_PANEL_PREFIX}${placementId}`);
+    setPlacementMenuOpen(false);
+  };
+
+  const renderPlacementPanel = (placementId: string) => {
+    const manifest = placementManifestMap.get(placementId);
+    if (!manifest) return null;
+    const action = manifest.renderer.action;
+    const settingsTarget = action?.type === "open_settings_section" ? action.target ?? "" : "";
+    return (
+      <section className="space-y-3">
+        <div className="rounded-lg border border-zinc-800 bg-zinc-950/45 p-3">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <h4 className="text-sm font-medium text-zinc-100">{manifest.label}</h4>
+              {manifest.description && (
+                <p className="mt-1 text-xs leading-5 text-zinc-400">{manifest.description}</p>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={() => updatePinnedPlacements((current) => togglePinnedPlacement(current, { id: placementId, surface: "right_sidebar" }))}
+              className="rounded-md border border-zinc-800 px-2 py-1 text-[11px] text-zinc-400 hover:border-zinc-600 hover:text-zinc-200"
+            >
+              Unpin
+            </button>
+          </div>
+          {manifest.renderer.kind === "html" && (
+            <div className="mt-3 h-48 overflow-hidden">
+              <PlacementHtmlRenderer manifest={manifest} />
+            </div>
+          )}
+          {manifest.renderer.kind !== "html" && action?.type === "open_settings_section" && settingsTarget && (
+            <button
+              type="button"
+              onClick={() => onOpenSettingsSection?.(settingsTarget)}
+              className="mt-3 rounded-lg border border-zinc-700 bg-zinc-950/35 px-3 py-2 text-xs text-zinc-200 hover:border-zinc-500"
+            >
+              設定セクションを開く
+            </button>
+          )}
+          {manifest.renderer.kind !== "html" && action?.type === "toggle_yolo" && (
+            <button
+              type="button"
+              onClick={onToggleYolo}
+              className="mt-3 rounded-lg border border-zinc-700 bg-zinc-950/35 px-3 py-2 text-xs text-zinc-200 hover:border-zinc-500"
+            >
+              YOLO を切り替える
+            </button>
+          )}
+          {manifest.renderer.kind !== "html" && !action && (
+            <p className="mt-3 text-xs text-zinc-500">
+              この配置は現在の surface で追加表示できます。
+            </p>
+          )}
+        </div>
+      </section>
+    );
+  };
 
   const handleDragStart = (event: DragEvent, item: SidebarItem) => {
     const kind = supportedComposerDropKind(item);
@@ -1146,14 +1318,63 @@ export function RightSidebar({
     </button>
   );
 
+  const placementIcon = (placementId: string) => {
+    switch (placementId) {
+      case "tool-filter-log":
+        return <ListTodo size={18} />;
+      case "runtime-status":
+        return <ShieldCheck size={18} />;
+      case "yolo-switch":
+        return <Power size={18} />;
+      case "model-manager":
+      case "model-pack-switcher":
+        return <Cpu size={18} />;
+      case "webhook-endpoints":
+        return <Globe size={18} />;
+      default:
+        return <Settings size={18} />;
+    }
+  };
+
+  const renderPinnedPlacementButton = (placementId: string) => {
+    const manifest = placementManifestMap.get(placementId);
+    if (!manifest) return null;
+    const isActive = (
+      (manifest.renderer.action?.type === "open_panel" && activePanel === manifest.renderer.action.target)
+      || activePanel === `${PLACEMENT_PANEL_PREFIX}${placementId}`
+    );
+    const toggled = placementId === "yolo-switch" && yoloMode;
+    return (
+      <button
+        key={placementId}
+        type="button"
+        tabIndex={buttonTabIndex}
+        onClick={() => triggerPlacement(placementId)}
+        onContextMenu={(event) => {
+          event.preventDefault();
+          updatePinnedPlacements((current) => togglePinnedPlacement(current, { id: placementId, surface: "right_sidebar" }));
+        }}
+        className={cn(
+          RAIL_BUTTON_CLASS,
+          isActive || toggled
+            ? "bg-zinc-800 text-zinc-100 ring-1 ring-zinc-600/70"
+            : "text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50",
+        )}
+        title={manifest.label}
+      >
+        {railIcon(placementIcon(placementId), 20)}
+      </button>
+    );
+  };
+
   return (
     <aside className="flex-shrink-0 border-l border-zinc-800/60 bg-[#09090b] hidden md:flex h-full transition-[width,opacity] duration-200 ease-out">
-      {(activeItem || isToolManagerActive || isCompanyPanelActive || isCodingPanelActive) && (
+      {(activeItem || isPlacementPanelActive || isToolManagerActive || isToolFilterLogActive || isRuntimeStatusActive || isCompanyPanelActive || isCodingPanelActive) && (
         <div className="w-[250px] xl:w-[270px] flex flex-col border-r border-zinc-800/40 bg-[#0a0a0c] animate-in slide-in-from-right-2 duration-200">
           <div className="h-10 flex items-center justify-between px-2.5 border-b border-zinc-800/60 flex-shrink-0">
             <div className="flex items-center gap-2 min-w-0 overflow-hidden">
-              <div className={cn("w-1.5 h-1.5 rounded-full flex-shrink-0", activeItem ? categoryColor(activeItem.category, "bg") : isCompanyPanelActive ? "bg-sky-400" : isCodingPanelActive ? "bg-zinc-300" : "bg-emerald-500")} />
-              <h3 className="text-[13px] font-medium text-zinc-100 truncate">{activeItem?.label ?? (isCompanyPanelActive ? "Company Workspace" : isCodingPanelActive ? "Coding widget" : "Tool manager")}</h3>
+              <div className={cn("w-1.5 h-1.5 rounded-full flex-shrink-0", activeItem ? categoryColor(activeItem.category, "bg") : isPlacementPanelActive ? "bg-violet-300" : isCompanyPanelActive ? "bg-sky-400" : isCodingPanelActive ? "bg-zinc-300" : isToolFilterLogActive ? "bg-amber-300" : isRuntimeStatusActive ? "bg-sky-300" : "bg-emerald-500")} />
+              <h3 className="text-[13px] font-medium text-zinc-100 truncate">{activeItem?.label ?? activePlacementManifest?.label ?? (isCompanyPanelActive ? "Company Workspace" : isCodingPanelActive ? "Coding widget" : isToolFilterLogActive ? "Tool filter log" : isRuntimeStatusActive ? "Runtime status" : "Tool manager")}</h3>
               {activeItem?.badge && (
                 <span className="text-[8px] bg-emerald-500/20 text-emerald-400 px-1 py-0.5 rounded-full font-bold flex-shrink-0">
                   {activeItem.badge}
@@ -1253,10 +1474,37 @@ export function RightSidebar({
               companyPanel
             ) : isCodingPanelActive ? (
               codingPanel
+            ) : isPlacementPanelActive && activePlacementManifest ? (
+              renderPlacementPanel(activePlacementManifest.id)
+            ) : isToolFilterLogActive ? (
+              <ToolFilterLogWidget entries={toolFilterEntries} />
+            ) : isRuntimeStatusActive ? (
+              <div className="space-y-3">
+                <div className="rounded-lg border border-zinc-800 bg-zinc-950/45 px-3 py-2.5">
+                  <p className="text-[11px] uppercase tracking-wide text-zinc-600">Model</p>
+                  <p className="mt-1 text-sm text-zinc-100">{selectedProfile?.display_name ?? "Unknown"}</p>
+                </div>
+                <div className="rounded-lg border border-zinc-800 bg-zinc-950/45 px-3 py-2.5">
+                  <p className="text-[11px] uppercase tracking-wide text-zinc-600">Capabilities</p>
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {(runtimeCapabilitySnapshot?.model_capabilities ?? []).map((capability) => (
+                      <span key={capability} className="rounded-full border border-zinc-700 px-2 py-0.5 text-[10px] text-zinc-300">
+                        {capability}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              </div>
             ) : activeItem ? (
               <SidebarPanel item={activeItem} settingsValues={settingsValues} onSettingChange={onSettingChange} onPanelAction={onPanelAction} />
                         ) : (
                           <div className="space-y-3">
+                            <ToolManagerWidget
+                              tools={toolManagerBaseItems}
+                              disabledToolIds={disabledToolIds}
+                              hiddenToolIds={hiddenToolIds}
+                              filterEntries={toolFilterEntries}
+                            />
                             <div className="relative">
                               <label className="relative block">
                                 <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-600" />
@@ -1405,11 +1653,27 @@ export function RightSidebar({
                     )}
                   </div>
                 )}
+                <div className="rounded-lg border border-zinc-800/70 bg-zinc-950/45 p-2">
+                  <div className="mb-2 flex items-center justify-between gap-2">
+                    <p className="text-[10px] font-medium uppercase tracking-wider text-zinc-600">Tool Filter Log</p>
+                    <button
+                      type="button"
+                      onClick={() => setActivePanel("__tool_filter_log__")}
+                      className="text-[10px] text-zinc-500 hover:text-zinc-200"
+                    >
+                      open
+                    </button>
+                  </div>
+                  <ToolFilterLogWidget entries={toolFilterEntries.slice(0, 4)} />
+                </div>
                 <div className="space-y-1">
                   {toolManagerItems.map((item) => {
                     const enabled = selectedToolIdSet.has(item.id);
                     const pinned = pinnedItemIdSet.has(item.id);
                     const starred = starredItemIdSet.has(item.id);
+                    const globallyDisabled = disabledToolIdSet.has(item.id);
+                    const hidden = hiddenToolIdSet.has(item.id);
+                    const blockedEntry = toolFilterEntries.find((entry) => entry.tool_name === item.id && (entry.status === "blocked" || entry.status === "rejected"));
                     const itemTags = tagMap.get(item.id) ?? [];
                     return (
                       <div key={item.id} className="rounded-lg border border-zinc-800/70 bg-zinc-950/45 p-2">
@@ -1476,6 +1740,22 @@ export function RightSidebar({
                             ))}
                           </div>
                         )}
+                        <div className="mt-2 flex flex-wrap gap-1 pl-9">
+                          {globallyDisabled && (
+                            <span className="rounded px-1.5 py-0.5 text-[9px] bg-zinc-900 text-zinc-400">OFF by user</span>
+                          )}
+                          {hidden && (
+                            <span className="rounded px-1.5 py-0.5 text-[9px] bg-zinc-900 text-zinc-400">Hidden</span>
+                          )}
+                          {item.tool_info?.requires_approval && (
+                            <span className="rounded px-1.5 py-0.5 text-[9px] bg-sky-500/10 text-sky-200">Needs approval</span>
+                          )}
+                          {blockedEntry && (
+                            <span className="rounded px-1.5 py-0.5 text-[9px] bg-amber-500/10 text-amber-200">
+                              {toolFilterBlockedSummary(blockedEntry)}
+                            </span>
+                          )}
+                        </div>
                       </div>
                     );
                   })}
@@ -1497,9 +1777,10 @@ export function RightSidebar({
                   }}
                   onDrop={handleShortcutDrop}
                 >
-          {pinnedRailItems.length > 0 && (
+          {(pinnedRailItems.length > 0 || pinnedRightSidebarPlacements.length > 0) && (
             <div className="flex w-full flex-col items-center gap-1">
               {pinnedRailItems.map((item) => renderRailItemButton(item, true))}
+              {pinnedRightSidebarPlacements.map((placement) => renderPinnedPlacementButton(placement.id))}
               <div className="w-5 h-px bg-sky-500/20 my-0.5" />
             </div>
           )}
@@ -1538,10 +1819,10 @@ export function RightSidebar({
               </span>
             )}
           </button>
-                  <button
-                    type="button"
-                    tabIndex={buttonTabIndex}
-                    onClick={() => setActivePanel((current) => (current === "__tool_manager__" ? null : "__tool_manager__"))}
+          <button
+            type="button"
+            tabIndex={buttonTabIndex}
+            onClick={() => setActivePanel((current) => (current === "__tool_manager__" ? null : "__tool_manager__"))}
                     className={cn(
                       RAIL_BUTTON_CLASS,
                       activePanel === "__tool_manager__"
@@ -1549,7 +1830,7 @@ export function RightSidebar({
                         : "text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50",
                     )}
                     title="Tool manager"
-                  >
+          >
             <SlidersHorizontal size={16} className="h-4 w-4 shrink-0" />
             {selectedToolIds.length > 0 && (
               <span className="absolute -top-0.5 -right-0.5 rounded-full bg-emerald-500 px-0.5 text-[7px] font-bold leading-tight text-black">
@@ -1557,6 +1838,60 @@ export function RightSidebar({
               </span>
             )}
           </button>
+          <div className="relative">
+            <button
+              type="button"
+              tabIndex={buttonTabIndex}
+              onClick={(event) => {
+                event.stopPropagation();
+                setPlacementMenuOpen((current) => !current);
+              }}
+              className={cn(
+                RAIL_BUTTON_CLASS,
+                placementMenuOpen
+                  ? "bg-zinc-800 text-zinc-100 ring-1 ring-zinc-600/70"
+                  : "text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50",
+              )}
+              title="Pin widget"
+            >
+              <Plus size={16} className="h-4 w-4 shrink-0" />
+            </button>
+            {placementMenuOpen && (
+              <div
+                className="absolute left-full top-0 z-50 ml-2 w-56 overflow-hidden rounded-xl border border-zinc-700/70 bg-zinc-950 py-1 shadow-2xl"
+                onPointerDown={(event) => event.stopPropagation()}
+              >
+                <div className="border-b border-zinc-800 px-3 py-2">
+                  <p className="text-[11px] font-semibold text-zinc-200">Pin to sidebar</p>
+                  <p className="text-[10px] text-zinc-500">vertical / configurable</p>
+                </div>
+                <div className="max-h-64 overflow-y-auto py-1">
+                  {rightSidebarPlacementCandidates.map((manifest) => (
+                    <button
+                      key={manifest.id}
+                      type="button"
+                      onClick={() => {
+                        updatePinnedPlacements((current) => togglePinnedPlacement(current, { id: manifest.id, surface: "right_sidebar" }));
+                        setPlacementMenuOpen(false);
+                      }}
+                      className="flex w-full items-center gap-2 px-3 py-2 text-left text-zinc-300 transition-colors hover:bg-zinc-800/80 hover:text-zinc-100"
+                    >
+                      <span className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md bg-zinc-900 text-zinc-400">
+                        {placementIcon(manifest.id)}
+                      </span>
+                      <span className="min-w-0">
+                        <span className="block truncate text-[12px]">{manifest.label}</span>
+                        {manifest.description && <span className="block truncate text-[10px] text-zinc-500">{manifest.description}</span>}
+                      </span>
+                    </button>
+                  ))}
+                  {rightSidebarPlacementCandidates.length === 0 && (
+                    <p className="px-3 py-3 text-[11px] text-zinc-500">追加できる candidate はありません。</p>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
           {companyPanel && (
             <button
               type="button"

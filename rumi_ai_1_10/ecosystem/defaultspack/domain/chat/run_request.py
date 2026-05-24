@@ -14,6 +14,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from blocks._common import gen_id
 from blocks.chat._context_helpers import enrich_messages, extract_user_text
+from domain.capabilities.runtime_snapshot import build_runtime_capability_snapshot
 from domain.ai_client.model_runtime_settings import ModelRuntimeSettingsService
 from domain.ai_client.model_router import ModelRoutingRequest, route_model_request
 from domain.ai_client.model_search import get_model_capabilities
@@ -30,11 +31,13 @@ from domain.chat.tool_recommender import effective_tool_assist_mode, recommend_t
 from domain.prompt.manager import get_manager
 from domain.skill_trigger import RuntimeSkillTriggerService
 from domain.tool.registry import ToolRegistry
+from domain.tool.eligibility import filter_tool_definitions_by_eligibility
 from domain.tool.schema_adapter import (
     adapt_tool_definitions,
     build_tool_execution_context,
     connected_tool_names,
     filter_tool_definitions_for_runtime_profile,
+    policy_from_context,
     resolve_runtime_profile_context,
     tool_name_from_definition,
 )
@@ -177,8 +180,13 @@ def prepare_chat_run(input_data: dict[str, Any], context: dict[str, Any] | None 
         model = requested_model
     model_settings_service = ModelRuntimeSettingsService()
     model_settings = model_settings_service.get_settings()
+    route_override = _consume_turn_model_route_override(store, conversation_id, conversation, metadata)
+    preferred_group_override = str(route_override.get("preferred_group") or "").strip() if isinstance(route_override, dict) else ""
+    requested_route_model = str(route_override.get("preferred_model") or "").strip() if isinstance(route_override, dict) else ""
+    if requested_route_model and not requested_model:
+        model = requested_route_model
     if "thinking_level" not in params:
-        params["thinking_level"] = model_settings_service.get_effective_thinking_level(
+        params["thinking_level"] = str(route_override.get("requested_thinking_level") or "").strip() if isinstance(route_override, dict) and str(route_override.get("requested_thinking_level") or "").strip() else model_settings_service.get_effective_thinking_level(
             profile_id=model,
             conversation_id=conversation_id,
         )["level"]
@@ -219,9 +227,12 @@ def prepare_chat_run(input_data: dict[str, Any], context: dict[str, Any] | None 
             requires_tool_calling=bool(provider_tools),
             requested_thinking_level=params.get("thinking_level"),
             preferred_model=model,
-            preferred_group=str(model_settings.get("preferred_model_group") or "default"),
+            preferred_group=preferred_group_override or str(model_settings.get("preferred_model_group") or "default"),
             auto_route_within_group=bool(model_settings.get("auto_route_within_group", True)),
-            task_hints={"modalities": modalities},
+            task_hints={
+                **(route_override.get("task_hints") if isinstance(route_override, dict) and isinstance(route_override.get("task_hints"), dict) else {}),
+                "modalities": modalities,
+            },
             settings=model_settings,
         )
     )
@@ -229,8 +240,46 @@ def prepare_chat_run(input_data: dict[str, Any], context: dict[str, Any] | None 
     selected_capabilities = get_model_capabilities(model) or {}
     if params.get("thinking_level") not in (None, "", "none") and not selected_capabilities.get("supports_thinking"):
         params["thinking_level"] = "none"
+    policy = policy_from_context(request_context)
+    runtime_snapshot = build_runtime_capability_snapshot(
+        user_text=user_text,
+        modalities=modalities,
+        model_capabilities=selected_capabilities,
+        context=request_context,
+        policy=policy,
+    )
+    eligibility_result = filter_tool_definitions_by_eligibility(
+        raw_tools,
+        runtime_snapshot,
+        policy=policy,
+        connected_tool_names=connected_tool_names(
+            provider_tools,
+            tool_context.get("runtime_profile") if isinstance(tool_context, dict) else None,
+            agent_id=tool_context.get("agent_id") if isinstance(tool_context, dict) else None,
+        ),
+    )
+    raw_tools = list(eligibility_result.get("allowed_tools") or [])
+    provider_tools = adapt_tool_definitions(raw_tools)
+    tool_context["tool_filter_result"] = list(eligibility_result.get("entries") or [])
+    tool_context["runtime_capability_snapshot"] = runtime_snapshot.as_dict()
+    request_context["tool_filter_result"] = list(eligibility_result.get("entries") or [])
+    request_context["runtime_capability_snapshot"] = runtime_snapshot.as_dict()
+    if isinstance(metadata, dict):
+        metadata["tool_filter_result"] = list(eligibility_result.get("entries") or [])
+        metadata["runtime_capability_snapshot"] = runtime_snapshot.as_dict()
+        store.update_message(conversation_id, user_message["id"], {"metadata": metadata})
     if provider_tools and not selected_capabilities.get("supports_tool_calling") and not request_context.get("user_requested_computer_use"):
         unavailable_tools = [tool_name_from_definition(tool) for tool in raw_tools if tool_name_from_definition(tool)]
+        marked_entries = _mark_tool_calling_unavailable(
+            request_context.get("tool_filter_result"),
+            unavailable_tools,
+            runtime_snapshot.as_dict(),
+        )
+        tool_context["tool_filter_result"] = marked_entries
+        request_context["tool_filter_result"] = marked_entries
+        if isinstance(metadata, dict):
+            metadata["tool_filter_result"] = marked_entries
+            store.update_message(conversation_id, user_message["id"], {"metadata": metadata})
         tool_context["tool_suggestion_context"] = {
             "message": "Selected model does not support provider tool calling; tools were not attached.",
             "suggested_tools": unavailable_tools,
@@ -312,6 +361,39 @@ def prepare_chat_run(input_data: dict[str, Any], context: dict[str, Any] | None 
         chat_references=chat_references,
         matched_skills=matched_skills,
     )
+
+
+def _mark_tool_calling_unavailable(entries: Any, tool_names: list[str], actual: dict[str, Any]) -> list[dict[str, Any]]:
+    blocked_names = {str(name) for name in tool_names if str(name or "").strip()}
+    output: list[dict[str, Any]] = []
+    for entry in (entries if isinstance(entries, list) else []):
+        if not isinstance(entry, dict):
+            continue
+        tool_name = str(entry.get("tool_name") or "")
+        if tool_name not in blocked_names:
+            output.append(dict(entry))
+            continue
+        required = dict(entry.get("required") if isinstance(entry.get("required"), dict) else {})
+        model_caps = [
+            str(item).strip()
+            for item in (required.get("model_capabilities") if isinstance(required.get("model_capabilities"), list) else [])
+            if str(item or "").strip()
+        ]
+        if "model.tool_calling" not in model_caps:
+            model_caps.append("model.tool_calling")
+        required["model_capabilities"] = model_caps
+        output.append(
+            {
+                **entry,
+                "status": "blocked",
+                "reason_code": "model_unsupported",
+                "reason": "selected model does not support provider tool calling",
+                "required": required,
+                "actual": actual,
+                "repair_suggestions": ["Switch to a tool-calling model or disable tools for this turn."],
+            }
+        )
+    return output
 
 
 def _current_turn_history_only(context: dict[str, Any] | None) -> bool:
@@ -485,6 +567,25 @@ def _runtime_user_content_override(metadata: dict[str, Any] | None) -> str:
     if not isinstance(value, str):
         return ""
     return value.strip()
+
+
+def _consume_turn_model_route_override(
+    store: ChatStore,
+    conversation_id: str,
+    conversation: dict[str, Any],
+    metadata: dict[str, Any] | None,
+) -> dict[str, Any]:
+    message_override = metadata.get("model_route_override") if isinstance(metadata, dict) and isinstance(metadata.get("model_route_override"), dict) else {}
+    conversation_metadata = conversation.get("metadata") if isinstance(conversation.get("metadata"), dict) else {}
+    conversation_override = conversation_metadata.get("turn_model_route_override") if isinstance(conversation_metadata.get("turn_model_route_override"), dict) else {}
+    if conversation_override:
+        updated_metadata = dict(conversation_metadata)
+        updated_metadata.pop("turn_model_route_override", None)
+        store.update_conversation(conversation_id, {"metadata": updated_metadata})
+    return {
+        **conversation_override,
+        **message_override,
+    }
 
 
 def _replace_current_user_content_for_model(

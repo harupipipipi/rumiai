@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from domain.agent.subagent_orchestrator import run_subagent
+from domain.ai_client.model_call import call_model
 from domain.chat.tool_recommender import recommend_tool_ids
 from domain.chat.tool_selection_schema import COMPUTER_TOOL_IDS, ToolRecommendation, ToolSelectionResult
 
@@ -25,13 +25,25 @@ class ToolSelectionOrchestrator:
         candidates = [tool for tool in allowed_tools if _tool_id(tool) in set(candidate_ids)]
         if not candidates:
             return ToolSelectionResult(candidate_count=0).to_dict()
-        subagent = run_subagent(
-            "tool_selector",
-            {"user_text": user_text, "candidate_tools": [_compact_tool(tool) for tool in candidates]},
-            settings=settings,
+        model_call = call_model(
+            {
+                "model_hint": (settings or {}).get("utility_models", {}).get("tool_selector") if isinstance((settings or {}).get("utility_models"), dict) else "",
+                "question": (
+                    "Select the most relevant tools for the user message. "
+                    "Return JSON with recommended_tools as an array of {{tool_id, confidence, reason}}.\n\n"
+                    "User message:\n{}\n\nCandidate tools:\n{}"
+                ).format(
+                    user_text,
+                    str([_compact_tool(tool) for tool in candidates]),
+                ),
+                "output_schema": "tool_recommendation",
+                "max_tokens": 800,
+                "required_capabilities": ["model.fast"],
+            },
+            {"_model_call_depth": 0},
             call_handler=self._call_handler,
         )
-        output = subagent.get("output") if isinstance(subagent, dict) else {}
+        output = model_call.get("output") if isinstance(model_call, dict) and isinstance(model_call.get("output"), dict) else {}
         selected_ids = _selected_ids(output, candidate_ids[:limit])
         recommendations = [
             ToolRecommendation(tool_id=tool_id, confidence=_confidence(output, tool_id), reason=_reason(output, tool_id))
@@ -45,7 +57,7 @@ class ToolSelectionOrchestrator:
             not_selected=[],
             requires_tool_calling_model=bool(recommendations and supports_tools),
             candidate_count=len(candidates),
-            stage="utility_model" if subagent.get("model") else "keyword",
+            stage="utility_model" if isinstance(model_call, dict) and model_call.get("status") == "ok" else "keyword",
         ).to_dict()
 
 

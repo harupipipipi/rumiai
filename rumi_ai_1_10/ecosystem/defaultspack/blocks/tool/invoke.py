@@ -83,6 +83,19 @@ def run(input_data, context):
         "is_error": result.get("is_error", False),
         "widget": result.get("widget"),
         "tool_name": tool_name,
+        **(
+            {
+                "status": result.get("status"),
+                "code": result.get("code"),
+                "reason_code": result.get("reason_code"),
+                "reason": result.get("reason"),
+                "required": result.get("required"),
+                "actual": result.get("actual"),
+                "repair_suggestions": result.get("repair_suggestions"),
+            }
+            if result.get("status") == "rejected"
+            else {}
+        ),
         "permission": {
             "action": decision.get("action", "allow"),
             "allowed": decision.get("allowed", False),

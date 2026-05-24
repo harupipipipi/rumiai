@@ -20,6 +20,7 @@ class AgentExecution:
         self.messages = []
         self.pending_tool_call = None
         self.queued_tool_calls = []
+        self.context = {}
         self.created_at = timestamp()
         self.updated_at = timestamp()
 
@@ -50,6 +51,7 @@ class AgentExecution:
             "error": self.error,
             "pending_tool_call": self.pending_tool_call,
             "queued_tool_calls": self.queued_tool_calls,
+            "context": self.context,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }

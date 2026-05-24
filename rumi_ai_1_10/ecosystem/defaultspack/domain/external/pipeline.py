@@ -23,6 +23,7 @@ def dispatch_external_event(
     context: dict[str, Any] | None = None,
     send_response: bool = False,
     mentioned: bool = False,
+    envelope_overrides: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     policy = AudiencePolicy(audience_policy or {"default": "allow"})
     decision = _coerce_audience_decision(audience_decision) or policy.evaluate(event, mentioned=mentioned)
@@ -78,6 +79,7 @@ def dispatch_external_event(
         if send_response:
             ignored["response_plan"] = _suppressed_response_plan(event.provider, trigger_decision)
         return ignored
+    envelope = _apply_envelope_overrides(envelope, envelope_overrides)
     result = submit_input(envelope, runtime_context)
     result["external_event"] = event.as_dict()
     result["policy"] = decision.as_dict()
@@ -187,3 +189,19 @@ def decide_response_prompt_policy(
     if not policy.enabled:
         return None
     return policy.decide(event=event, envelope=envelope, response=response, context=context or {})
+
+
+def _apply_envelope_overrides(envelope, overrides: dict[str, Any] | None):
+    if not isinstance(overrides, dict) or not overrides:
+        return envelope
+    for key in ("target", "delivery", "metadata", "params"):
+        override = overrides.get(key)
+        if isinstance(override, dict):
+            current = getattr(envelope, key, {}) if isinstance(getattr(envelope, key, {}), dict) else {}
+            setattr(envelope, key, {**current, **override})
+    attachments = overrides.get("attachments")
+    if isinstance(attachments, list) and attachments:
+        envelope.attachments = list(envelope.attachments) + [item for item in attachments if item not in envelope.attachments]
+    if "input" in overrides and isinstance(overrides.get("input"), str):
+        envelope.input = str(overrides.get("input") or envelope.input)
+    return envelope

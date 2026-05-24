@@ -13,7 +13,8 @@ HTTP request
   -> ExternalEvent
   -> AudiencePolicy
   -> InputProfile
-  -> submit_input
+  -> RumiInputEnvelope
+  -> dispatch_input / submit_input
   -> ResponsePlanner
   -> ResponseAdapter
 ```
@@ -97,10 +98,19 @@ A generic webhook should use the same external input path:
 The profile decides whether this becomes a chat message, an agent task, a flow
 trigger, or an ignored event.
 
+Webhook endpoints can now define:
+
+- `target`
+- `default_delivery`
+- `allowed_delivery_actions`
+- `ttl_seconds` or `expires_at`
+
+Inbound generic webhooks apply endpoint defaults first, then only allow request
+delivery overrides that were explicitly whitelisted.
+
 ## Public URLs
 
 A webhook needs a reachable URL, but the URL provider is outside the framework.
 Cloudflare Quick Tunnel may provide a temporary development URL, yet the
 runtime should treat it as a swappable provider. The same webhook contract must
 work behind localhost, a reverse proxy, a platform route, or any other tunnel.
-

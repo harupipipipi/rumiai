@@ -693,6 +693,31 @@ export type ToolUiMetadata = {
   composer_action?: ComposerWidgetAction;
 };
 
+export type ToolCapabilityRequirements = {
+  requires_all?: string[];
+  requires_any?: string[];
+  forbids?: string[];
+};
+
+export type ToolSetupState = {
+  status?: "ok" | "missing" | string;
+  missing?: string[];
+};
+
+export type ToolInfo = {
+  requires_approval?: boolean;
+  approval_policy?: string;
+  attachment_policy?: string;
+  supports_attachments?: boolean | null;
+  capability_requirements?: ToolCapabilityRequirements;
+  requires_model_capabilities?: string[];
+  requires_input_modalities?: string[];
+  requires_runtime_capabilities?: string[];
+  setup_state?: ToolSetupState;
+  trusted?: boolean;
+  source_pack_id?: string;
+};
+
 export type SidebarItem = {
   id: string;
   label: string;
@@ -702,6 +727,7 @@ export type SidebarItem = {
   tags?: string[];
   risk?: "low" | "medium" | "high" | string | null;
   ui?: ToolUiMetadata;
+  tool_info?: ToolInfo;
   origin?: {
     kind: string;
     path?: string;

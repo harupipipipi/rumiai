@@ -624,7 +624,7 @@ function SortableChatItem({ chat, activeChatId, onChatSelect, onRename, onToggle
               onToggleChildren(chat.id);
             }}
             className="flex h-4 w-4 flex-shrink-0 items-center justify-center rounded text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-100"
-            title={expanded ? "Subagents を閉じる" : "Subagents を開く"}
+            title={expanded ? "子スレッドを閉じる" : "子スレッドを開く"}
           >
             <ChevronRight size={13} className={cn("transition-transform", expanded && "rotate-90")} />
           </button>

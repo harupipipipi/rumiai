@@ -284,6 +284,28 @@ class ToolRegistry:
             capability_grants = [raw_capability_grants.strip()]
         else:
             capability_grants = []
+        capability_requirements = (
+            dict(config.get("capability_requirements"))
+            if isinstance(config.get("capability_requirements"), dict)
+            else {}
+        )
+        requires_model_capabilities = [
+            str(item).strip()
+            for item in (config.get("requires_model_capabilities") if isinstance(config.get("requires_model_capabilities"), list) else [])
+            if str(item or "").strip()
+        ]
+        requires_input_modalities = [
+            str(item).strip()
+            for item in (config.get("requires_input_modalities") if isinstance(config.get("requires_input_modalities"), list) else [])
+            if str(item or "").strip()
+        ]
+        requires_runtime_capabilities = [
+            str(item).strip()
+            for item in (config.get("requires_runtime_capabilities") if isinstance(config.get("requires_runtime_capabilities"), list) else [])
+            if str(item or "").strip()
+        ]
+        attachment_policy = str(config.get("attachment_policy") or "").strip()
+        supports_attachments = config.get("supports_attachments") if isinstance(config.get("supports_attachments"), bool) else None
         tags = list(config.get("tags", manifest.get("tags", [])) or [])
         if not execution:
             execution = {"type": "local"}
@@ -319,6 +341,12 @@ class ToolRegistry:
             "action_type": action_type,
             "approval_policy": approval_policy,
             "capability_grants": capability_grants,
+            "capability_requirements": capability_requirements,
+            "requires_model_capabilities": requires_model_capabilities,
+            "requires_input_modalities": requires_input_modalities,
+            "requires_runtime_capabilities": requires_runtime_capabilities,
+            "attachment_policy": attachment_policy,
+            "supports_attachments": supports_attachments,
             "write_action": write_action,
             "requires_approval": requires_approval,
             "metadata": {
@@ -328,6 +356,12 @@ class ToolRegistry:
                 "action_type": action_type,
                 "approval_policy": approval_policy,
                 "capability_grants": capability_grants,
+                "capability_requirements": capability_requirements,
+                "requires_model_capabilities": requires_model_capabilities,
+                "requires_input_modalities": requires_input_modalities,
+                "requires_runtime_capabilities": requires_runtime_capabilities,
+                "attachment_policy": attachment_policy,
+                "supports_attachments": supports_attachments,
                 "write_action": write_action,
                 "requires_approval": requires_approval,
             },
@@ -393,6 +427,12 @@ class ToolRegistry:
             "action_type": action_type,
             "approval_policy": approval_policy,
             "capability_grants": capability_grants,
+            "capability_requirements": capability_requirements,
+            "requires_model_capabilities": requires_model_capabilities,
+            "requires_input_modalities": requires_input_modalities,
+            "requires_runtime_capabilities": requires_runtime_capabilities,
+            "attachment_policy": attachment_policy,
+            "supports_attachments": supports_attachments,
             "write_action": write_action,
             "requires_approval": requires_approval,
             "ui": dict(ui),
@@ -407,6 +447,12 @@ class ToolRegistry:
                 "action_type": action_type,
                 "approval_policy": approval_policy,
                 "capability_grants": capability_grants,
+                "capability_requirements": capability_requirements,
+                "requires_model_capabilities": requires_model_capabilities,
+                "requires_input_modalities": requires_input_modalities,
+                "requires_runtime_capabilities": requires_runtime_capabilities,
+                "attachment_policy": attachment_policy,
+                "supports_attachments": supports_attachments,
                 "write_action": write_action,
                 "requires_approval": requires_approval,
                 "risk": risk,

@@ -1,0 +1,43 @@
+{
+  "function_id": "ai_model_call",
+  "description": "Ask another model a bounded question without tool access by default.",
+  "tags": [
+    "ai",
+    "model",
+    "delegation"
+  ],
+  "risk": "medium",
+  "requires": [],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.ai.model_call",
+    "defaultspack.ai.model_call",
+    "defaults.ai.model.call",
+    "defaultspack.ai.model.call"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": null,
+      "default_args": {}
+    }
+  }
+}
