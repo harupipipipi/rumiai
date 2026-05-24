@@ -1,0 +1,41 @@
+{
+  "function_id": "input_endpoint_create",
+  "description": "Create a localhost-only inbound webhook endpoint.",
+  "tags": [
+    "external",
+    "input",
+    "webhook"
+  ],
+  "risk": "medium",
+  "requires": [],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.input.endpoint.create",
+    "defaultspack.input.endpoint.create"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": null,
+      "default_args": {}
+    }
+  }
+}

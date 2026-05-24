@@ -1,6 +1,6 @@
 {
   "function_id": "agent_run_subagent",
-  "description": "Run a utility subagent.",
+  "description": "Compatibility alias for utility model routing or delegated runs.",
   "tags": [
     "agent"
   ],

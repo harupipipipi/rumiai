@@ -117,6 +117,7 @@ class TestDefaultspackProviderExpansion(unittest.TestCase):
                 {
                     "RUMI_DEFAULTSPACK_ENABLE_CLOUD_PROVIDERS": "1",
                     "RUMI_DEFAULTSPACK_SECRETS_DIR": str(Path(tmpdir) / "secrets"),
+                    "GITLAWB_OPENGATEWAY_API_KEY": "test-ogw-token",
                 },
                 clear=True,
             ):
@@ -133,7 +134,7 @@ class TestDefaultspackProviderExpansion(unittest.TestCase):
         self.assertEqual(getattr(provider, "provider_id", ""), "gitlawb-opengateway")
         self.assertIn("vision", model.get("capabilities", []))
         with patch.dict(os.environ, {}, clear=True):
-            self.assertEqual(GitlawbOpengatewayProvider()._headers()["Authorization"], "Bearer anything")
+            self.assertNotIn("Authorization", GitlawbOpengatewayProvider()._headers())
 
     def test_ai_client_does_not_stub_unconfigured_openrouter_completion(self):
         from domain.ai_client.client import AIClient

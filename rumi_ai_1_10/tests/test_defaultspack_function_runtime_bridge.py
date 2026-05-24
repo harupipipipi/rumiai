@@ -188,3 +188,28 @@ def test_dispatcher_routes_computer_drag_to_browser_computer_tool():
         },
         {"request_id": "req-drag"},
     )
+
+
+def test_dispatcher_tool_function_honors_tool_filter_rejection():
+    import domain.function_runtime.dispatcher as dispatcher
+
+    result = dispatcher.run_defaultspack_function(
+        "computer_drag",
+        {"x1": 10, "y1": 20, "x2": 30, "y2": 40, "button": "left"},
+        {
+            "tool_filter_result": [
+                {
+                    "tool_name": "browser_computer",
+                    "status": "blocked",
+                    "reason_code": "model_unsupported",
+                    "reason": "selected model does not support provider tool calling",
+                    "required": {"model_capabilities": ["model.tool_calling"]},
+                    "actual": {"model_capabilities": ["model.text"]},
+                }
+            ]
+        },
+    )
+
+    assert result["status"] == "error"
+    assert result["error"]["code"] == "MODEL_UNSUPPORTED"
+    assert result["error"]["details"]["tool_name"] == "browser_computer"

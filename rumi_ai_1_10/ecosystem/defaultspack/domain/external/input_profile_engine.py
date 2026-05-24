@@ -44,11 +44,20 @@ class InputProfileEngine:
             "title": self._resolve(chat_spec.get("title"), event.payload) if chat_spec.get("title") else f"{event.provider} {event.scope.id}",
             "model": self._resolve(chat_spec.get("model"), event.payload) if chat_spec.get("model") else event.metadata.get("model"),
         }
+        target_spec = spec.get("target") if isinstance(spec.get("target"), dict) else {}
+        delivery_spec = spec.get("delivery") if isinstance(spec.get("delivery"), dict) else {}
+        attachments_spec = spec.get("attachments")
+        attachments = self._resolve(attachments_spec, event.payload) if attachments_spec is not None else event.metadata.get("attachments", [])
+        if not isinstance(attachments, list):
+            attachments = []
         return RumiInputEnvelope(
             role=role,
             input=content,
             chat=chat,
             source=source,
+            target=self._resolve(target_spec, event.payload) if target_spec else {},
+            delivery=self._resolve(delivery_spec, event.payload) if delivery_spec else {},
+            attachments=attachments,
             metadata={
                 **metadata,
                 "external_event": event.as_dict(),

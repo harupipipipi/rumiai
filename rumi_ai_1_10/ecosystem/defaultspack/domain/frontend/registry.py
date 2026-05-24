@@ -377,6 +377,35 @@ class FrontendRegistry:
                     "tags": tags,
                     "risk": risk,
                     "ui": ui,
+                    "tool_info": {
+                        "requires_approval": bool(tool.get("requires_approval")),
+                        "approval_policy": str(tool.get("approval_policy") or ""),
+                        "attachment_policy": str(tool.get("attachment_policy") or ""),
+                        "supports_attachments": tool.get("supports_attachments"),
+                        "capability_requirements": (
+                            dict(tool.get("capability_requirements"))
+                            if isinstance(tool.get("capability_requirements"), dict)
+                            else {}
+                        ),
+                        "requires_model_capabilities": [
+                            str(item)
+                            for item in (tool.get("requires_model_capabilities") or [])
+                            if str(item or "").strip()
+                        ],
+                        "requires_input_modalities": [
+                            str(item)
+                            for item in (tool.get("requires_input_modalities") or [])
+                            if str(item or "").strip()
+                        ],
+                        "requires_runtime_capabilities": [
+                            str(item)
+                            for item in (tool.get("requires_runtime_capabilities") or [])
+                            if str(item or "").strip()
+                        ],
+                        "setup_state": {"status": "ok", "missing": []},
+                        "trusted": bool(tool.get("trusted", False)),
+                        "source_pack_id": str(tool.get("source_pack_id") or ""),
+                    },
                     "origin": {"kind": "tool_registry", "path": "domain/tool/registry.py"},
                     "panel": {
                         "kind": "tool_settings",
@@ -385,6 +414,7 @@ class FrontendRegistry:
                         "notes": [
                             "Tool call arguments stay in ToolRegistry schema and are not shown as settings.",
                             self._tool_schema_summary(schema),
+                            self._tool_capability_summary(tool),
                         ],
                     },
                 }
@@ -2043,6 +2073,8 @@ class FrontendRegistry:
                 "keep_selected_tools_after_send": True,
                 "tool_assist_mode": "all",
                 "tool_assist_limit": 8,
+                "disabled_tool_ids": [],
+                "hidden_tool_ids": [],
             },
             "computer_use_haze": {
                 "enabled": True,
@@ -2061,6 +2093,7 @@ class FrontendRegistry:
                 "pinned_item_ids": [],
                 "starred_item_ids": [],
                 "custom_tool_tags": {},
+                "ui_placements": [],
             },
             "apis": {
                 "api_keys": [],
@@ -2287,6 +2320,69 @@ class FrontendRegistry:
             return []
         return [field for field in fields if isinstance(field, dict)]
 
+    def _tool_capability_summary(self, tool: dict[str, Any]) -> str:
+        parts: list[str] = []
+        if tool.get("requires_approval"):
+            approval_policy = str(tool.get("approval_policy") or "").strip()
+            parts.append(
+                f"Requires approval ({approval_policy})."
+                if approval_policy
+                else "Requires approval."
+            )
+        requires_model = [
+            str(item).strip()
+            for item in (tool.get("requires_model_capabilities") or [])
+            if str(item or "").strip()
+        ]
+        if requires_model:
+            parts.append(f"Model capabilities: {', '.join(requires_model)}.")
+        requires_input = [
+            str(item).strip()
+            for item in (tool.get("requires_input_modalities") or [])
+            if str(item or "").strip()
+        ]
+        if requires_input:
+            parts.append(f"Input modalities: {', '.join(requires_input)}.")
+        requires_runtime = [
+            str(item).strip()
+            for item in (tool.get("requires_runtime_capabilities") or [])
+            if str(item or "").strip()
+        ]
+        if requires_runtime:
+            parts.append(f"Runtime capabilities: {', '.join(requires_runtime)}.")
+        capability_requirements = tool.get("capability_requirements")
+        if isinstance(capability_requirements, dict):
+            requires_all = [
+                str(item).strip()
+                for item in (capability_requirements.get("requires_all") or [])
+                if str(item or "").strip()
+            ]
+            requires_any = [
+                str(item).strip()
+                for item in (capability_requirements.get("requires_any") or [])
+                if str(item or "").strip()
+            ]
+            forbids = [
+                str(item).strip()
+                for item in (capability_requirements.get("forbids") or [])
+                if str(item or "").strip()
+            ]
+            if requires_all:
+                parts.append(f"Requires all: {', '.join(requires_all)}.")
+            if requires_any:
+                parts.append(f"Requires any: {', '.join(requires_any)}.")
+            if forbids:
+                parts.append(f"Forbids: {', '.join(forbids)}.")
+        attachment_policy = str(tool.get("attachment_policy") or "").strip()
+        if attachment_policy:
+            parts.append(f"Attachment policy: {attachment_policy}.")
+        supports_attachments = tool.get("supports_attachments")
+        if isinstance(supports_attachments, bool):
+            parts.append("Supports attachments." if supports_attachments else "Attachments disabled.")
+        if not parts:
+            return "No additional capability requirements."
+        return " ".join(parts)
+
     def _tool_schema_summary(self, schema: dict[str, Any]) -> str:
         properties = schema.get("properties", {}) if isinstance(schema, dict) else {}
         if not isinstance(properties, dict) or not properties:
@@ -2443,6 +2539,22 @@ class FrontendRegistry:
             tools = {}
             refreshed["tools"] = tools
         tools.setdefault("keep_selected_tools_after_send", True)
+        disabled_tool_ids = tools.get("disabled_tool_ids")
+        hidden_tool_ids = tools.get("hidden_tool_ids")
+        tools["disabled_tool_ids"] = list(
+            dict.fromkeys(
+                str(item).strip()
+                for item in (disabled_tool_ids if isinstance(disabled_tool_ids, list) else [])
+                if str(item or "").strip()
+            )
+        )
+        tools["hidden_tool_ids"] = list(
+            dict.fromkeys(
+                str(item).strip()
+                for item in (hidden_tool_ids if isinstance(hidden_tool_ids, list) else [])
+                if str(item or "").strip()
+            )
+        )
         tool_assist_mode = str(tools.get("tool_assist_mode") or "all").strip().lower()
         if tool_assist_mode == "auto":
             tool_assist_mode = "vector"
@@ -2517,6 +2629,12 @@ class FrontendRegistry:
         if not isinstance(models, dict):
             models = {}
             refreshed["models"] = models
+
+        sidebar = refreshed.setdefault("sidebar", {})
+        if not isinstance(sidebar, dict):
+            sidebar = {}
+            refreshed["sidebar"] = sidebar
+        sidebar["ui_placements"] = sidebar.get("ui_placements") if isinstance(sidebar.get("ui_placements"), list) else []
 
         apis = refreshed.setdefault("apis", {})
         if isinstance(apis, dict):

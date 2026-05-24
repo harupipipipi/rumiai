@@ -177,7 +177,7 @@ _CURATED_PROVIDER_METADATA: Dict[str, Dict[str, Any]] = {
     "gitlawb-opengateway": {
         "display_name": "Gitlawb OpenGateway",
         "kind": "aggregator",
-        "description": "Gitlawb OpenGateway allowlist for MiMo and Gemini Flash Lite. Optional token-plan API keys are supported.",
+        "description": "Gitlawb OpenGateway allowlist for MiMo. API keys are required for all OpenGateway models.",
         "env_vars": ["GITLAWB_OPENGATEWAY_API_KEY"],
         "base_url_envs": ["GITLAWB_OPENGATEWAY_BASE_URL"],
         "catalog_only": False,
@@ -795,6 +795,7 @@ def _merge_provider_entry(provider_id: str, manifest: Optional[Dict[str, Any]] =
 
 def _provider_is_configured(entry: Dict[str, Any]) -> tuple[bool, Optional[str]]:
     provider_id = str(entry.get("provider_id", "")).strip()
+    credential_required = bool(entry.get("credential_required", True))
     if provider_id and provider_has_oauth_connection(provider_id):
         return True, "browser_oauth"
     if provider_id and provider_has_api_key(provider_id):
@@ -802,12 +803,13 @@ def _provider_is_configured(entry: Dict[str, Any]) -> tuple[bool, Optional[str]]
     for env_name in entry.get("env_vars", []):
         if _truthy_env(env_name):
             return True, env_name
-    for env_name in entry.get("base_url_envs", []):
-        if _truthy_env(env_name):
-            return True, env_name
+    if not credential_required:
+        for env_name in entry.get("base_url_envs", []):
+            if _truthy_env(env_name):
+                return True, env_name
     if entry.get("kind") == "local" and entry.get("default_base_url"):
         return True, "default_local_endpoint"
-    if not bool(entry.get("credential_required", True)) and entry.get("default_base_url"):
+    if not credential_required and entry.get("default_base_url"):
         return True, "no_key_gateway"
     if entry["provider_id"] == "stub":
         return True, "builtin"
@@ -1187,6 +1189,7 @@ def _credentials_ready(manifest: Dict[str, Any], provider_id: str) -> bool:
         return True
     if provider_id == "rumi":
         return False
+    credential_required = bool(manifest.get("credential_required", True))
     api_envs = _manifest_env_list(
         manifest.get("api_key_env"),
         _CURATED_PROVIDER_METADATA.get(provider_id, {}).get("env_vars", []),
@@ -1195,13 +1198,15 @@ def _credentials_ready(manifest: Dict[str, Any], provider_id: str) -> bool:
         manifest.get("base_url_env"),
         _CURATED_PROVIDER_METADATA.get(provider_id, {}).get("base_url_envs", []),
     )
-    if any(_truthy_env(name) for name in api_envs + base_url_envs):
+    if any(_truthy_env(name) for name in api_envs):
         return True
     if provider_has_oauth_connection(provider_id):
         return True
     if provider_has_api_key(provider_id):
         return True
-    if not bool(manifest.get("credential_required", True)):
+    if not credential_required:
+        if any(_truthy_env(name) for name in base_url_envs):
+            return True
         return not base_url_envs or bool(str(manifest.get("default_base_url", "")).strip())
     return False
 

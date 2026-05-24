@@ -18,6 +18,8 @@ from typing import Any
 from domain.ai_client.task_analyzer import analyze_fast, analyze_heavy
 from domain.ai_client.model_profiles import ModelProfileManager
 from domain.ai_client.model_groups import normalize_model_groups
+from domain.ai_client.model_pack_router import select_model_pack
+from domain.ai_client.model_pack_store import ModelPackStore
 from domain.ai_client.model_roles import normalize_utility_model_policy, normalize_utility_models
 from domain.ai_client.model_search import get_model_capabilities, models_for_group
 
@@ -30,6 +32,7 @@ class ModelRoutingRequest:
     has_files: bool = False
     requested_tools: list[str] = field(default_factory=list)
     requires_tool_calling: bool = False
+    requires_fast: bool = False
     requested_thinking_level: str | None = None
     preferred_model: str = "stub/default"
     preferred_group: str = "default"
@@ -63,6 +66,47 @@ def route_model_request(
     settings = routing_request.settings if isinstance(routing_request.settings, dict) else {}
     original = routing_request.preferred_model or "stub/default"
     selected_group = routing_request.preferred_group or settings.get("preferred_model_group") or "default"
+    if ModelPackStore.is_model_pack_ref(original):
+        pack_selection = select_model_pack(
+            original,
+            {
+                "user_text": routing_request.user_text,
+                "has_images": routing_request.has_images,
+                "requires_tool_calling": bool(routing_request.requires_tool_calling or routing_request.requested_tools),
+                "requires_fast": bool(routing_request.requires_fast),
+                "requested_thinking_level": routing_request.requested_thinking_level or "",
+                "task_hints": routing_request.task_hints,
+            },
+            settings=settings,
+            profiles=profiles,
+        )
+        if pack_selection is not None and not pack_selection.selected_model:
+            utility_models = _resolve_utility_models(settings, models_for_group(selected_group, settings, profiles=profiles))
+            warnings = list(pack_selection.warnings)
+            return ModelRoutingDecision(
+                selected_model=original,
+                original_model=original,
+                selected_group=str(selected_group),
+                reason_codes=_dedupe(list(pack_selection.reason_codes) + ["model_pack_no_compatible_member"]),
+                warnings=warnings,
+                bridge_required=False,
+                bridge_plan={},
+                utility_models=utility_models,
+                explanation=explain_model_choice(original, list(pack_selection.reason_codes), warnings),
+            )
+        if pack_selection is not None and pack_selection.selected_model:
+            utility_models = _resolve_utility_models(settings, models_for_group(selected_group, settings, profiles=profiles))
+            return ModelRoutingDecision(
+                selected_model=pack_selection.selected_model,
+                original_model=original,
+                selected_group=str(selected_group),
+                reason_codes=_dedupe(list(pack_selection.reason_codes) + ["model_pack_selected"]),
+                warnings=list(pack_selection.warnings),
+                bridge_required=False,
+                bridge_plan={},
+                utility_models=utility_models,
+                explanation=explain_model_choice(pack_selection.selected_model, list(pack_selection.reason_codes), list(pack_selection.warnings)),
+            )
     candidates = models_for_group(selected_group, settings, profiles=profiles)
     if not candidates:
         candidates = models_for_group("default", settings, profiles=profiles)
@@ -73,6 +117,7 @@ def route_model_request(
 
     needs_vision = bool(routing_request.has_images)
     needs_tools = bool(routing_request.requires_tool_calling or routing_request.requested_tools)
+    needs_fast = bool(routing_request.requires_fast)
     needs_thinking = str(routing_request.requested_thinking_level or "").strip() not in {"", "none"}
     original_in_group = any(_same_model(item, original) for item in candidates)
     explicit_model_outside_group = bool(original_caps and not original_in_group)
@@ -85,6 +130,7 @@ def route_model_request(
                 original_caps,
                 needs_vision=needs_vision,
                 needs_tools=needs_tools and route_from_preferred_for_tools,
+                needs_fast=needs_fast,
                 needs_thinking=False,
             )
         )
@@ -93,7 +139,7 @@ def route_model_request(
     if routing_request.auto_route_within_group and not keep_original:
         compatible = [
             item for item in candidates
-            if _compatible(item, needs_vision=needs_vision, needs_tools=needs_tools, needs_thinking=needs_thinking)
+            if _compatible(item, needs_vision=needs_vision, needs_tools=needs_tools, needs_fast=needs_fast, needs_thinking=needs_thinking)
         ]
         if compatible:
             selected = _best_candidate(compatible, routing_request)
@@ -118,6 +164,8 @@ def route_model_request(
     if needs_thinking and not selected.get("supports_thinking"):
         warnings.append("selected_model_does_not_support_thinking")
         reason_codes.append("thinking_level_normalized")
+    if needs_fast and not selected.get("supports_fast"):
+        warnings.append("selected_model_does_not_support_fast")
 
     bridge_required = bool(needs_vision and not selected.get("supports_vision") and str(settings.get("on_switch_to_non_vision_with_images") or "auto_bridge") != "ignore")
     utility_models = _resolve_utility_models(settings, candidates)
@@ -149,9 +197,12 @@ def explain_model_choice(selected_model: str, reason_codes: list[str] | None = N
         "same_model": "kept the current model",
         "requires_vision": "image input is present",
         "requires_tool_calling": "tools are requested",
+        "requires_fast": "a fast model is requested",
         "requires_thinking": "thinking is requested",
         "fast_candidate": "fast reply is preferred",
         "deep_reasoning": "higher reasoning depth is useful",
+        "model_pack": "model pack routing is active",
+        "model_pack_selected": "selected a model from the requested pack",
         "vision_bridge_required": "vision bridge is needed",
         "tool_calling_unavailable": "tool calling is unavailable",
         "thinking_level_normalized": "thinking level will be normalized",
@@ -173,6 +224,7 @@ def _coerce_routing_request(value: ModelRoutingRequest | dict[str, Any]) -> Mode
         has_files=bool(raw.get("has_files")),
         requested_tools=[str(item) for item in raw.get("requested_tools", [])] if isinstance(raw.get("requested_tools"), list) else [],
         requires_tool_calling=bool(raw.get("requires_tool_calling")),
+        requires_fast=bool(raw.get("requires_fast")),
         requested_thinking_level=raw.get("requested_thinking_level"),
         preferred_model=str(raw.get("preferred_model") or "stub/default"),
         preferred_group=str(raw.get("preferred_group") or "default"),
@@ -182,10 +234,12 @@ def _coerce_routing_request(value: ModelRoutingRequest | dict[str, Any]) -> Mode
     )
 
 
-def _compatible(model: dict[str, Any], *, needs_vision: bool, needs_tools: bool, needs_thinking: bool) -> bool:
+def _compatible(model: dict[str, Any], *, needs_vision: bool, needs_tools: bool, needs_fast: bool = False, needs_thinking: bool) -> bool:
     if needs_vision and not model.get("supports_vision"):
         return False
     if needs_tools and not model.get("supports_tool_calling"):
+        return False
+    if needs_fast and not model.get("supports_fast"):
         return False
     if needs_thinking and not model.get("supports_thinking"):
         return False
@@ -202,6 +256,7 @@ def _best_candidate(candidates: list[dict[str, Any]], request: ModelRoutingReque
         value += 30 if model.get("configured") else 0
         value += 20 if request.has_images and model.get("supports_vision") else 0
         value += 18 if request.requires_tool_calling and model.get("supports_tool_calling") else 0
+        value += 16 if request.requires_fast and model.get("supports_fast") else 0
         value += 12 if request.requested_thinking_level and model.get("supports_thinking") else 0
         value += 16 if is_short and model.get("speed_tier") == "fast" else 0
         value += 8 if model.get("local") and request.preferred_group == "local" else 0
@@ -225,6 +280,8 @@ def _selection_reasons(selected: dict[str, Any], request: ModelRoutingRequest, o
         reasons.append("requires_vision")
     if request.requires_tool_calling and selected.get("supports_tool_calling"):
         reasons.append("requires_tool_calling")
+    if request.requires_fast and selected.get("supports_fast"):
+        reasons.append("requires_fast")
     if request.requested_thinking_level and selected.get("supports_thinking"):
         reasons.append("requires_thinking")
     if selected.get("speed_tier") == "fast":

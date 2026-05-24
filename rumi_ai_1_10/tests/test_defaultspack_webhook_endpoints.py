@@ -55,6 +55,29 @@ def test_endpoint_store_new_endpoint_defaults_disabled_and_secured():
         assert endpoint["security"]["header"] == "x-rumi-webhook-token"
 
 
+def test_endpoint_store_partial_update_preserves_delivery_fields():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        endpoint_path = Path(tmpdir) / "endpoints.json"
+        store = WebhookEndpointStore(endpoint_path)
+        store.upsert(
+            {
+                "id": "partial-webhook",
+                "kind": "generic",
+                "default_delivery": {"action_id": "run.instruction"},
+                "allowed_delivery_actions": ["run.instruction"],
+                "target": {"conversation_id": "conv-1"},
+                "enabled": True,
+            }
+        )
+
+        endpoint = store.upsert({"id": "partial-webhook", "metadata": {"updated": True}})["endpoint"]
+
+        assert endpoint["default_delivery"] == {"action_id": "run.instruction"}
+        assert endpoint["allowed_delivery_actions"] == ["run.instruction"]
+        assert endpoint["target"] == {"conversation_id": "conv-1"}
+        assert endpoint["metadata"] == {"updated": True}
+
+
 def test_default_webhook_endpoints_load_from_component_manifests():
     with tempfile.TemporaryDirectory() as tmpdir:
         endpoint_path = Path(tmpdir) / "endpoints.json"

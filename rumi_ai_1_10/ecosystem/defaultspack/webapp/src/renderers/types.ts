@@ -5,6 +5,7 @@ import type { ComposerCommandItem } from "../lib/api";
 import type { ChatItem, HistoryBoardNewTaskOptions } from "../components/HistoryBoard";
 import type { ToolPreviewItem, ToolPreviewMode } from "../components/ToolPreview";
 import type { LocaleSetting } from "../lib/i18n";
+import type { RuntimeCapabilitySnapshot, ToolFilterEntry } from "../lib/toolStatus";
 
 export type { ComposerCommandItem } from "../lib/api";
 
@@ -142,6 +143,9 @@ export type ComposerRendererProps = {
   steerQueuedCount?: number;
   steerPreviewItems?: ConversationSteerItem[];
   suppressPopovers?: boolean;
+  onOpenModelManager?: () => void;
+  onOpenToolSettings?: () => void;
+  onSwitchToVisionModel?: () => void;
   onExtensionSelect?: (item: ComposerExtensionItem) => void;
   onCommandSelect?: (commandId: string, rawInput?: string) => void;
   onModelCommandCandidateSelect?: (candidate: ModelCommandCandidate) => void;
@@ -189,8 +193,15 @@ export type RightSidebarRendererProps = {
   companyPanel?: ReactNode;
   codingPanel?: ReactNode;
   keyboardButtonNavigation?: boolean;
+  attachedFiles?: AttachedFile[];
+  selectedProfile?: ModelProfile | null;
+  toolFilterEntries?: ToolFilterEntry[];
+  runtimeCapabilitySnapshot?: RuntimeCapabilitySnapshot | null;
+  yoloMode?: boolean;
   onSettingChange: SettingChangeHandler;
   onOpenSettings: () => void;
+  onOpenSettingsSection?: (sectionId: string) => void;
+  onToggleYolo?: () => void;
   onToolToggle?: (item: SidebarItem) => void;
   onToolBatchSet?: (toolIds: string[], enabled: boolean) => void;
   onPanelAction?: (item: SidebarItem, action: SidebarAction) => void;
@@ -206,6 +217,7 @@ export type SettingsModalRendererProps = {
   settingsValues: Record<string, Record<string, unknown>>;
   locale?: LocaleSetting;
   onClose: () => void;
+  onOpenSection?: (sectionId: string) => void;
   onSettingChange: SettingChangeHandler;
 };
 

@@ -63,7 +63,7 @@ def _tool_display_group(tool_name: str) -> dict[str, str]:
         (("web", "search", "reddit"), "web/search", "Web検索"),
         (("browser", "computer"), "browser", "ブラウザ"),
         (("todo", "task"), "planning/todo", "Todo"),
-        (("subagent", "agent"), "agent/subagent", "Subagent"),
+        (("delegate", "subagent", "agent"), "agent/delegation", "Delegation"),
         (("terminal", "shell", "exec"), "coding/terminal", "ターミナル"),
         (("file", "read", "write", "list"), "coding/files", "ファイル"),
         (("git", "branch", "commit", "diff"), "coding/git", "Git"),
@@ -106,8 +106,8 @@ def _tool_display_action(tool_name: str, arguments: dict[str, Any]) -> str:
         return "コマンド実行: {}".format(command) if command else "コマンド実行"
     if "todo" in lowered:
         return _display_arg(arguments, ("title", "task", "action", "todo_id")) or "Todo更新"
-    if "subagent" in lowered or "agent" in lowered:
-        return _display_arg(arguments, ("task", "title", "prompt")) or "Subagent実行"
+    if "delegate" in lowered or "subagent" in lowered or "agent" in lowered:
+        return _display_arg(arguments, ("task", "title", "prompt")) or "委任実行"
     return ""
 
 

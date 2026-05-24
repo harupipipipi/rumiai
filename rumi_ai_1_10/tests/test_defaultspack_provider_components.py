@@ -38,7 +38,7 @@ def test_provider_components_include_gitlawb_and_common_provider_aliases():
     assert registry.get("providers", "deepseek").id == "deepseek"
 
 
-def test_gitlawb_provider_component_preserves_no_key_allowlist_metadata():
+def test_gitlawb_provider_component_preserves_api_key_required_allowlist_metadata():
     metadata = provider_component_metadata_map()["gitlawb-opengateway"]
     models = model_manifests_from_provider_components("gitlawb-opengateway")
     model_ids = {model["id"] for model in models}
@@ -47,9 +47,10 @@ def test_gitlawb_provider_component_preserves_no_key_allowlist_metadata():
     assert metadata["default_base_url"] == "https://opengateway.gitlawb.com/v1"
     assert metadata["env_vars"] == ["GITLAWB_OPENGATEWAY_API_KEY"]
     assert metadata["base_url_envs"] == ["GITLAWB_OPENGATEWAY_BASE_URL"]
-    assert metadata["provider_manifest"]["credential_required"] is False
+    assert metadata["provider_manifest"]["credential_required"] is True
     assert metadata["provider_manifest"]["api_key_env"] == "GITLAWB_OPENGATEWAY_API_KEY"
     assert model_ids == OPENGATEWAY_MODELS
+    assert all(model["metadata"]["api_key_required"] is True for model in models)
     assert omni["metadata"]["vision_verified"] is True
 
 
@@ -64,7 +65,7 @@ def test_provider_catalog_interops_with_model_catalog_pack_manifests():
     provider_manifest_path = MODEL_CATALOG_ROOT / "extensions" / "llm" / "providers" / "gitlawb-opengateway" / "manifest.json"
     provider_manifest = json.loads(provider_manifest_path.read_text(encoding="utf-8"))
     assert provider_manifest["id"] == "gitlawb-opengateway"
-    assert provider_manifest["credential_required"] is False
+    assert provider_manifest["credential_required"] is True
 
     model_manifest_ids = {
         json.loads(path.read_text(encoding="utf-8"))["id"]

@@ -9,7 +9,7 @@ provider payload
   -> ExternalEvent
   -> AudiencePolicy
   -> InputProfile
-  -> submit_input
+  -> dispatch_input / submit_input
   -> ResponsePromptPolicy
   -> ResponsePlanner
   -> ResponseAdapter
@@ -51,9 +51,9 @@ Quick Tunnel button creates a temporary public URL for the selected route path,
 for example `/api/integrations/line/webhook`, so the user can paste the full URL
 into the provider dashboard.
 
-`submit_input` is the framework entrypoint after profile transformation. It
-accepts a `RumiInputEnvelope`, persists the user message, and invokes the
-chat-compatible turn runner.
+`submit_input` is the compatibility entrypoint after profile transformation.
+Internally it now forwards to `dispatch_input`, which routes a
+`RumiInputEnvelope` by `delivery.action_id`.
 
 `ResponsePlanner` converts the runtime result into a provider-neutral response
 plan. It decides whether to reply, acknowledge only, defer, split, truncate, or
@@ -203,3 +203,15 @@ on the framework boundary above:
 | `POST /api/external/templates` | Register a custom input or output template |
 | `POST /api/webhooks/inbound/{webhook_id}` | Generic webhook intake |
 | `GET /api/webhooks/endpoints` | List webhook endpoint configs |
+
+## Localhost Input Endpoints
+
+AI-created inbound endpoints use `input_endpoint_create` and return only
+localhost URLs:
+
+```text
+http://localhost:{port}/api/webhooks/inbound/{endpoint_id}
+```
+
+These endpoints require a shared secret and default TTL protection. Public
+Cloudflare or tunnel URLs remain a separate concern.

@@ -12,6 +12,12 @@ rumiai 本体がドメイン知識を持たない汎用カーネルであるの�
 
 具体的な UI（チャット画面、エージェント画面、コーディング画面等）は全て user_data 側のパックが Asset として登録する。defaults 自身は一切の具体的 UI を持たない。
 
+現在の defaultspack 実装では、この一般論に加えて `PlacementManifest`
+ベースの配置候補と pin 永続化を段階的に導入している。最初の適用先は
+right sidebar / settings / composer 周辺で、Tool Manager, Tool Filter Log,
+YOLO toggle, Model Manager, Webhook Endpoints などを surface-aware に配置
+できる。
+
 
 ## 2. アーキテクチャ
 
@@ -989,4 +995,3 @@ Asset の HTML ファイルを WebView に読み込ませる方法は Tauri の�
 
 同じバックエンド（rumiai + handlers）に対して、Tauri フロントエンドと CLI の両方からアクセスできる。CLI の場合は transport が stdio になり、Widget JSON はテキストにフォールバック表示される。フロントエンドの有無はバックエンドの動作に影響しない。
 ```
-
