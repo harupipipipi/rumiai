@@ -369,6 +369,8 @@ _CURATED_PROVIDER_MODELS: Dict[str, List[Dict[str, Any]]] = {
             "name": "MiMo V2 Omni via Gitlawb OpenGateway",
             "type": "chat",
             "capabilities": ["chat", "streaming", "vision"],
+            "supports_vision": True,
+            "supports_image_input": True,
         },
         {
             "model_id": "mimo-v2-pro",
@@ -1024,6 +1026,13 @@ def get_all_known_models(provider_id=None, active_provider_ids=None):
             capabilities, capability_map = _capability_fields(raw.get("capabilities", []))
             if capability_map and "capabilities" not in metadata:
                 metadata["capabilities"] = capability_map
+            supports_vision = bool(
+                raw.get("supports_vision")
+                or raw.get("supports_image_input")
+                or capability_map.get("vision")
+                or capability_map.get("image_input")
+                or "vision" in capabilities
+            )
             metadata.update(
                 {
                     "provider_model_key": qualified_model_id,
@@ -1049,6 +1058,8 @@ def get_all_known_models(provider_id=None, active_provider_ids=None):
                 "capabilities": capabilities,
                 "availability": dict(provider_entry["availability"]),
                 "supports_invoke": bool(provider_entry["availability"].get("supports_invoke", False)),
+                "supports_vision": supports_vision,
+                "supports_image_input": bool(raw.get("supports_image_input") or supports_vision),
                 "defaults": defaults,
                 "pricing": pricing,
                 "metadata": metadata,
@@ -1116,6 +1127,8 @@ def build_profile_catalog(active_provider_ids=None, custom_profiles=None):
         }
         if "supports_thinking" in model:
             profile["supports_thinking"] = bool(model.get("supports_thinking"))
+        profile["supports_vision"] = bool(model.get("supports_vision"))
+        profile["supports_image_input"] = bool(model.get("supports_image_input") or model.get("supports_vision"))
         if isinstance(model.get("thinking_levels"), list):
             profile["thinking_levels"] = list(model.get("thinking_levels", []))
         if "default_thinking_level" in model:

@@ -190,6 +190,8 @@ def test_opengateway_omni_declares_verified_vision():
     omni = profiles["gitlawb-opengateway/mimo-v2-omni"]
 
     assert "vision" in omni["capabilities"]
+    assert omni["supports_vision"] is True
+    assert omni["supports_image_input"] is True
     assert omni["metadata"]["vision_verified"] is True
 
 

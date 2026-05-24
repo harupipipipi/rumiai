@@ -64,6 +64,8 @@
         "vision": true
       },
       "capabilities": ["streaming", "vision"],
+      "supports_vision": true,
+      "supports_image_input": true,
       "metadata": {
         "source": "gitlawb-opengateway",
         "privacy": "external_api_key_gateway",

@@ -334,6 +334,24 @@ def test_top_level_protected_path_rejected(tmp_path):
     assert _current_version(managed) == "2.4.1"
 
 
+def test_manifest_cannot_disable_builtin_protected_paths(tmp_path):
+    managed = tmp_path / "packs"
+    _set_current(managed)
+    source = _write_pack_dir(tmp_path / "src")
+    manifest = json.loads((source / "rumi-pack.json").read_text(encoding="utf-8"))
+    manifest["protected_paths"] = []
+    (source / "rumi-pack.json").write_text(json.dumps(manifest), encoding="utf-8")
+    (source / "state").mkdir()
+    (source / "state" / "user.json").write_text("do not install", encoding="utf-8")
+    bundle = _bundle_from_dir(source, tmp_path / "protected-empty-list.rumi-pack")
+    manager = _manager_for_bundle(tmp_path, managed, bundle)
+
+    with pytest.raises(Exception):
+        manager.apply_pack("defaultspack")
+
+    assert _current_version(managed) == "2.4.1"
+
+
 def test_incompatible_core_version_rejected(tmp_path):
     managed = tmp_path / "packs"
     _set_current(managed)

@@ -69,6 +69,8 @@ class GitlawbOpengatewayProvider(OpenAICompatibleProvider):
             "type": "chat",
             "defaults": {"chat": True, "vision": True},
             "capabilities": ["chat", "streaming", "vision"],
+            "supports_vision": True,
+            "supports_image_input": True,
             "metadata": {
                 "source": "gitlawb-opengateway",
                 "privacy": "external_api_key_gateway",

@@ -51,6 +51,7 @@ logger = logging.getLogger(__name__)
 
 
 TRUSTED_BUILTIN_PACK_IDS = {"defaultspack", "rumi_default_tools_pack"}
+MANAGED_OFFICIAL_PACK_IDS = {"defaultspack"}
 
 
 from .hmac_key_manager import (
@@ -158,7 +159,10 @@ class ApprovalManager:
 
         return (
             self._is_bundled_builtin_pack_dir(pack_dir, normalized_pack_id)
-            or self._is_managed_official_pack(normalized_pack_id)
+            or (
+                normalized_pack_id in MANAGED_OFFICIAL_PACK_IDS
+                and self._is_managed_official_pack(normalized_pack_id)
+            )
         )
 
     @staticmethod
@@ -175,6 +179,8 @@ class ApprovalManager:
         return runtime_root.name == "app"
 
     def _is_managed_official_pack(self, pack_id: str) -> bool:
+        if pack_id not in MANAGED_OFFICIAL_PACK_IDS:
+            return False
         loc = self._pack_locations.get(pack_id)
         if loc is None:
             for discovered in self._discover_pack_locations():
@@ -201,9 +207,26 @@ class ApprovalManager:
         if str(record.get("version") or "") != str(loc.version or ""):
             return False
         source = record.get("source")
-        if source in {"seed", "legacy_seed_migration", "rumi-pack"}:
+        if source in {"seed", "legacy_seed_migration"}:
             return True
+        if source == "rumi-pack":
+            return self._install_record_has_official_signature(record)
         return source == "github-source-archive" and record.get("source_repo") == "harupipipipi/rumiai"
+
+    @staticmethod
+    def _install_record_has_official_signature(record: Dict[str, Any]) -> bool:
+        if record.get("signature_scheme") != "ed25519":
+            return False
+        key_id = str(record.get("key_id") or "").strip()
+        if not key_id or not str(record.get("signature") or "").strip():
+            return False
+        try:
+            from .update.trust import load_official_trust_roots
+
+            keys = load_official_trust_roots().get("ed25519_public_keys")
+        except Exception:
+            return False
+        return isinstance(keys, dict) and key_id in keys
 
     def _discover_pack_locations(self) -> List[PackLocation]:
         include_managed = True

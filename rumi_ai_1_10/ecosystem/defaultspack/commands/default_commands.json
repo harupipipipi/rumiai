@@ -34,6 +34,13 @@
     "risk": "low",
     "modes": ["chat", "coding", "agent"],
     "args": [{ "name": "level", "type": "enum", "required": false, "values": ["none", "low", "medium", "high", "xhigh"] }],
+    "template": {
+      "kind": "select",
+      "argument": "level",
+      "values_source": "selected_model.thinking_levels",
+      "fallback_values": ["none", "low", "medium", "high", "xhigh"],
+      "labels": {"none": "なし", "low": "低", "medium": "中", "high": "高", "xhigh": "最高"}
+    },
     "execution": { "type": "rumi_function", "qualified_name": "defaultspack:ai_set_thinking_level" }
   },
   {
@@ -58,6 +65,12 @@
     "risk": "low",
     "modes": ["chat", "coding", "agent"],
     "args": [{ "name": "tier", "type": "enum", "required": false, "values": ["low", "high"] }],
+    "template": {
+      "kind": "select",
+      "argument": "tier",
+      "values": ["low", "high"],
+      "labels": {"low": "Low", "high": "High"}
+    },
     "execution": { "type": "frontend", "action": "set_price_mode" }
   },
   {
@@ -138,6 +151,14 @@
     "risk": "medium",
     "modes": ["chat", "coding", "agent"],
     "args": [{ "name": "enabled", "type": "boolean", "required": false }],
+    "template": {
+      "kind": "switch",
+      "argument": "enabled",
+      "values": ["on", "off"],
+      "labels": {"on": "On", "off": "Off"},
+      "true_value": "on",
+      "false_value": "off"
+    },
     "execution": { "type": "frontend", "action": "toggle_yolo" }
   },
   {
@@ -151,6 +172,14 @@
     "risk": "medium",
     "modes": ["chat", "coding", "agent"],
     "args": [{ "name": "enabled", "type": "boolean", "required": false }],
+    "template": {
+      "kind": "switch",
+      "argument": "enabled",
+      "values": ["on", "off"],
+      "labels": {"on": "On", "off": "Off"},
+      "true_value": "on",
+      "false_value": "off"
+    },
     "execution": { "type": "frontend", "action": "toggle_ultra_yolo" }
   },
   {

@@ -26,6 +26,12 @@ class ComputerTarget:
     # Windows.
     hwnd: int | None = None
 
+    # Multi-display targeting.
+    monitor_id: str | None = None
+    display_id: str | int | None = None
+    monitor_index: int | None = None
+    monitor_bounds: dict[str, int] | None = None
+
     # macOS.
     bundle_id: str | None = None
 

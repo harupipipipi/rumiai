@@ -16,6 +16,8 @@ if _funcs_dir not in sys.path:
 EXPECTED_ACTIONS = [
     "screenshot", "click", "type", "key", "scroll", "context",
     "apps", "windows", "select_app", "select_window", "show_app", "move", "drag",
+    "monitors", "list_monitors", "displays", "list_displays", "select_monitor",
+    "set_monitor", "switch_monitor", "window_monitor",
     "observe", "semantic_action", "press", "pid_event", "doctor", "diagnose",
     "backspace", "delete_back", "clipboard", "clipboard_read", "clipboard_get",
     "clipboard_write", "clipboard_set", "clipboard_clear",
@@ -61,6 +63,13 @@ def test_pid_event_target_fields_pass_through():
         assert field in source
 
 
+def test_monitor_target_fields_pass_through():
+    main_path = Path(_funcs_dir) / "computer_use" / "main.py"
+    source = main_path.read_text()
+    for field in ('"monitor"', '"monitor_id"', '"monitor_index"', '"display_id"', '"display_index"', '"screen_id"'):
+        assert field in source
+
+
 def test_computer_use_clipboard_and_repeat_fields_pass_through():
     main_path = Path(_funcs_dir) / "computer_use" / "main.py"
     source = main_path.read_text()
@@ -93,6 +102,9 @@ def test_computer_use_run_preserves_window_and_scroll_payload(monkeypatch):
             "window_id": 456,
             "hwnd": 789,
             "window_title": "Google Gemini",
+            "monitor_id": "darwin:2",
+            "monitor_index": 1,
+            "display_id": "2",
             "sub_action": "scroll",
             "action_type": "scroll",
             "key_combo": "cmd+l",
@@ -111,6 +123,9 @@ def test_computer_use_run_preserves_window_and_scroll_payload(monkeypatch):
     assert payload["window_id"] == 456
     assert payload["hwnd"] == 789
     assert payload["window_title"] == "Google Gemini"
+    assert payload["monitor_id"] == "darwin:2"
+    assert payload["monitor_index"] == 1
+    assert payload["display_id"] == "2"
     assert payload["sub_action"] == "scroll"
     assert payload["action_type"] == "scroll"
     assert payload["key_combo"] == "cmd+l"

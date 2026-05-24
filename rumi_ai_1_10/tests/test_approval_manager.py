@@ -70,6 +70,7 @@ def test_managed_seeded_defaultspack_is_approved_without_user_grants(tmp_path, m
     )
     ecosystem_dir.mkdir(parents=True)
     monkeypatch.setattr(paths, "MANAGED_PACKS_DIR", managed)
+    monkeypatch.setitem(approval_module.discover_pack_locations.__globals__, "MANAGED_PACKS_DIR", managed)
     monkeypatch.setattr(approval_module, "ECOSYSTEM_DIR", str(ecosystem_dir))
     mgr = ApprovalManager(
         packs_dir=str(ecosystem_dir),
@@ -121,6 +122,79 @@ def test_managed_official_github_source_defaultspack_is_approved(tmp_path, monke
     assert mgr.is_pack_approved_and_verified("defaultspack") == (True, None)
 
 
+def test_managed_manual_defaultspack_is_not_builtin_approved(tmp_path, monkeypatch):
+    mgr = _make_managed_builtin_manager(
+        tmp_path,
+        monkeypatch,
+        pack_id="defaultspack",
+        version="2.2.0",
+        record={"source": "manual"},
+    )
+
+    assert mgr._is_managed_official_pack("defaultspack") is False, mgr._pack_locations
+    assert mgr.get_status("defaultspack") is None
+    assert mgr.is_pack_approved_and_verified("defaultspack") == (False, "not_found")
+
+
+def test_managed_rumi_pack_requires_official_signature_for_builtin_approval(tmp_path, monkeypatch):
+    mgr = _make_managed_builtin_manager(
+        tmp_path,
+        monkeypatch,
+        pack_id="defaultspack",
+        version="2.3.0",
+        record={
+            "source": "rumi-pack",
+            "signature_scheme": "ed25519",
+            "key_id": "untrusted",
+            "signature": "ed25519:untrusted:abc",
+        },
+    )
+
+    assert mgr._is_managed_official_pack("defaultspack") is False
+    assert mgr.get_status("defaultspack") is None
+
+
+def test_managed_rumi_pack_with_official_signature_is_builtin_approved(tmp_path, monkeypatch):
+    from core_runtime.update import trust
+
+    monkeypatch.setattr(
+        trust,
+        "load_official_trust_roots",
+        lambda: {"schema": "rumi.trust_roots.v1", "ed25519_public_keys": {"official": "public-key"}},
+    )
+    mgr = _make_managed_builtin_manager(
+        tmp_path,
+        monkeypatch,
+        pack_id="defaultspack",
+        version="2.4.0",
+        record={
+            "source": "rumi-pack",
+            "signature_scheme": "ed25519",
+            "key_id": "official",
+            "signature": "ed25519:official:abc",
+        },
+    )
+
+    assert mgr.get_status("defaultspack") == PackStatus.APPROVED
+
+
+def test_managed_rumi_default_tools_pack_is_not_auto_approved(tmp_path, monkeypatch):
+    mgr = _make_managed_builtin_manager(
+        tmp_path,
+        monkeypatch,
+        pack_id="rumi_default_tools_pack",
+        version="1.0.0",
+        record={
+            "source": "rumi-pack",
+            "signature_scheme": "ed25519",
+            "key_id": "official",
+            "signature": "ed25519:official:abc",
+        },
+    )
+
+    assert mgr.get_status("rumi_default_tools_pack") is None
+
+
 # ===================================================================
 # Helper
 # ===================================================================
@@ -137,6 +211,59 @@ def _make_pack_dir(base: Path, pack_id: str = "testpack") -> Path:
         "def run(): pass\n", encoding="utf-8"
     )
     return pack_dir
+
+
+def _make_managed_builtin_manager(
+    tmp_path: Path,
+    monkeypatch,
+    *,
+    pack_id: str,
+    version: str,
+    record: dict[str, object],
+) -> ApprovalManager:
+    import core_runtime.approval_manager as approval_module
+    from core_runtime import paths
+    from core_runtime.pack_seed import write_current_pointer_atomic
+
+    managed = tmp_path / "user_data" / "packs"
+    ecosystem_dir = tmp_path / "bundle" / "app" / "ecosystem"
+    version_dir = managed / pack_id / "versions" / version
+    version_dir.mkdir(parents=True)
+    (version_dir / "ecosystem.json").write_text(
+        json.dumps({"pack_id": pack_id, "version": version}),
+        encoding="utf-8",
+    )
+    (version_dir / "handler.py").write_text("def run(): pass\n", encoding="utf-8")
+    write_current_pointer_atomic(pack_id, version, Path("versions") / version, managed)
+    install_record = {
+        "schema": "rumi.pack_install_record.v1",
+        "pack_id": pack_id,
+        "version": version,
+        **record,
+    }
+    (managed / pack_id / "install_record.json").write_text(
+        json.dumps(install_record),
+        encoding="utf-8",
+    )
+    ecosystem_dir.mkdir(parents=True)
+    monkeypatch.setattr(paths, "MANAGED_PACKS_DIR", managed)
+    monkeypatch.setattr(approval_module, "ECOSYSTEM_DIR", str(ecosystem_dir))
+    mgr = ApprovalManager(
+        packs_dir=str(ecosystem_dir),
+        grants_dir=str(tmp_path / "grants"),
+        secret_key="test-secret-key-for-hmac",
+    )
+    mgr._pack_locations[pack_id] = approval_module.PackLocation(
+        pack_dir=version_dir,
+        pack_id=pack_id,
+        ecosystem_json_path=version_dir / "ecosystem.json",
+        pack_subdir=version_dir,
+        source="managed",
+        mutable=True,
+        version=version,
+        current_pointer_path=managed / pack_id / "current.json",
+    )
+    return mgr
 
 
 def _make_manager(

@@ -150,6 +150,12 @@ class BrowserComputerController:
             return self._apps(payload)
         if action in {"computer.windows", "computer.list_windows"}:
             return {"action": "computer.windows", "platform": platform.system(), "windows": self._list_windows()}
+        if action in {"computer.monitors", "computer.list_monitors", "computer.displays", "computer.list_displays"}:
+            return self._monitors(payload)
+        if action in {"computer.select_monitor", "computer.set_monitor", "computer.switch_monitor", "computer.set_target_monitor"}:
+            return self._select_monitor(payload)
+        if action in {"computer.window_monitor", "computer.locate_window"}:
+            return self._window_monitor(payload)
         if action == "computer.select_app":
             return self._select_app(payload)
         if action in {"computer.show_app", "computer.focus_app", "computer.activate_app"}:
@@ -225,6 +231,16 @@ class BrowserComputerController:
             "window": "computer.select_window",
             "windows": "computer.windows",
             "list_windows": "computer.windows",
+            "monitors": "computer.monitors",
+            "list_monitors": "computer.monitors",
+            "displays": "computer.monitors",
+            "list_displays": "computer.monitors",
+            "select_monitor": "computer.select_monitor",
+            "set_monitor": "computer.select_monitor",
+            "switch_monitor": "computer.select_monitor",
+            "set_target_monitor": "computer.select_monitor",
+            "window_monitor": "computer.window_monitor",
+            "locate_window": "computer.window_monitor",
             "observe": "computer.observe",
             "semantic_action": "computer.semantic_action",
             "press": "computer.semantic_action",
@@ -622,16 +638,21 @@ class BrowserComputerController:
         system = platform.system()
         selected_window = state.get("target_window") if isinstance(state.get("target_window"), dict) else None
         selected_app = state.get("target_app") if isinstance(state.get("target_app"), dict) else None
+        selected_monitor = self._target_monitor(payload)
+        active_window = self._active_window()
         if selected_window and not self._is_usable_target_window(selected_window):
             self._clear_target_window()
             selected_window = None
+        active_window_monitor = self._monitor_for_rect(active_window, self._list_monitors()) if active_window else None
         running_apps = self._running_apps()
         result: dict[str, Any] = {
             "action": "computer.context",
             "platform": system,
-            "active_window": self._active_window(),
+            "active_window": active_window,
             "selected_window": selected_window,
             "selected_app": selected_app,
+            "selected_monitor": selected_monitor,
+            "active_window_monitor": active_window_monitor.get("monitor") if active_window_monitor else None,
             "open_apps": running_apps,
             "ai_cursor": state.get("ai_cursor") if isinstance(state.get("ai_cursor"), dict) else None,
             "cursor": self._cursor_position(),
@@ -641,11 +662,14 @@ class BrowserComputerController:
             },
             "notes": [
                 "Computer-use is app-generic and visible-screen only: use computer.apps for open/installed apps and computer.windows for visible windows.",
+                "Use computer.monitors to inspect displays and computer.select_monitor to aim desktop screenshots/actions at a specific monitor.",
                 "Use select_app/select_window for visible targets, then screenshot/click/type/key against the currently visible UI.",
                 "computer.move, computer.click, and computer.drag use the virtual AI cursor by default; set physical=true only after explicit approval to operate the visible UI.",
                 "Hidden tabs and DOM/Apple Events background input are disabled; if a requested app/window is not visible, ask the user to show it or open it visibly first.",
             ],
         }
+        if payload.get("include_monitors", True) is not False:
+            result["monitors"] = self._list_monitors()
         if payload.get("include_windows", True) is not False:
             result["windows"] = self._list_windows()
         if payload.get("include_installed_apps") is True:
@@ -680,6 +704,58 @@ class BrowserComputerController:
             result["installed_apps"] = installed
             result["apps"] = installed if scope in {"installed", "applications"} else self._merge_apps(running_apps, installed)
         return result
+
+    def _monitors(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        monitors = self._list_monitors()
+        active_window = self._active_window()
+        active_match = self._monitor_for_rect(active_window, monitors) if active_window else None
+        return {
+            "action": "computer.monitors",
+            "platform": platform.system(),
+            "monitors": monitors,
+            "selected_monitor": self._target_monitor(payload or {}),
+            "active_window_monitor": active_match.get("monitor") if active_match else None,
+        }
+
+    def _select_monitor(self, payload: dict[str, Any]) -> dict[str, Any]:
+        monitor = self._resolve_monitor(payload)
+        monitors = self._list_monitors()
+        if monitor is None:
+            return {
+                "action": "computer.select_monitor",
+                "selected": False,
+                "platform": platform.system(),
+                "monitors": monitors,
+                "reason": "No monitor matched the request.",
+            }
+        state = self._computer_state()
+        state["target_monitor"] = monitor
+        if self._custom_artifact_root:
+            state["target_monitor_artifact_root"] = str(self._artifact_root.resolve())
+        else:
+            state.pop("target_monitor_artifact_root", None)
+        state.pop("target_window", None)
+        self._write_computer_state(state)
+        return {
+            "action": "computer.select_monitor",
+            "selected": True,
+            "platform": platform.system(),
+            "target_monitor": monitor,
+            "monitors": monitors,
+        }
+
+    def _window_monitor(self, payload: dict[str, Any]) -> dict[str, Any]:
+        window = self._capture_target({**payload, "target": payload.get("target") or "selected_window"})
+        if window is None or window.get("screen") == "selected_monitor":
+            window = self._matching_window(payload) if self._has_window_filter(payload) else self._active_window()
+        match = self._monitor_for_rect(window, self._list_monitors()) if window else None
+        return {
+            "action": "computer.window_monitor",
+            "platform": platform.system(),
+            "window": window,
+            "monitor": match.get("monitor") if match else None,
+            "overlap_area": match.get("overlap_area") if match else 0,
+        }
 
     @staticmethod
     def _merge_apps(primary: list[dict[str, Any]], secondary: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -1328,12 +1404,17 @@ class BrowserComputerController:
 
     def _computer_seat_target(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Build a ComputerTarget dict from payload."""
+        monitor = self._target_monitor(payload)
         return {
             "app": payload.get("app") or payload.get("application"),
             "pid": payload.get("pid"),
             "window_id": payload.get("window_id"),
             "window_title": payload.get("title") or payload.get("window_title"),
             "hwnd": payload.get("hwnd"),
+            "monitor_id": payload.get("monitor_id") or (monitor or {}).get("monitor_id"),
+            "display_id": payload.get("display_id") or (monitor or {}).get("display_id"),
+            "monitor_index": payload.get("monitor_index") if payload.get("monitor_index") is not None else (monitor or {}).get("index"),
+            "monitor_bounds": (monitor or {}).get("bounds"),
         }
 
     def _computer_seat_metadata_for_target(self, target_record: dict[str, Any] | None) -> dict[str, Any]:
@@ -1352,6 +1433,9 @@ class BrowserComputerController:
                 "pid": target_record.get("pid"),
                 "window_id": target_record.get("window_id") or target_record.get("id"),
                 "window_title": target_record.get("title"),
+                "monitor_id": target_record.get("monitor_id"),
+                "display_id": target_record.get("display_id"),
+                "monitor_index": target_record.get("monitor_index"),
             }
             meta["recommended_next_actions"] = ["computer.screenshot", "computer.click", "computer.observe"]
         return meta
@@ -1559,9 +1643,6 @@ class BrowserComputerController:
             self._focus_action_target(action_payload)
         if action == "computer.drag" and payload.get("physical") is True:
             self._focus_action_target(action_payload)
-        foreground_error = self._foreground_action_focus_error(action, action_payload)
-        if foreground_error is not None:
-            return foreground_error
         # --- Attempt ComputerSeatService delegation ---
         with self._edge_haze(action, action_payload):
             seat_result = self._try_computer_seat_action(action, action_payload)
@@ -1600,6 +1681,9 @@ class BrowserComputerController:
                 )
                 result.update(screenshot)
             return result
+        foreground_error = self._foreground_action_focus_error(action, action_payload)
+        if foreground_error is not None:
+            return foreground_error
         # --- Legacy platform-specific fallback ---
         with self._edge_haze(action, action_payload):
             if system == "Darwin" and action == "computer.move":
@@ -2307,8 +2391,19 @@ class BrowserComputerController:
     def _capture_target(self, payload: dict[str, Any] | None = None) -> dict[str, Any] | None:
         payload = payload or {}
         target = str(payload.get("target") or payload.get("capture_target") or "").strip().lower()
-        if target in {"primary_display", "all_displays", "screen", "display", "desktop"}:
+        if target in {"all_displays", "all_screens", "full_desktop"}:
             return None
+        if target in {"primary_display", "primary_monitor", "main_display", "main_monitor"}:
+            return self._resolve_monitor({"target": "primary_display"})
+        if (
+            target in {"screen", "display", "desktop", "monitor", "selected_monitor"}
+            or any(key in payload for key in ("monitor", "monitor_id", "monitor_index", "display_id", "display_index", "screen_id"))
+        ):
+            monitor = self._target_monitor(payload)
+            if monitor is not None:
+                return monitor
+            if target in {"monitor", "selected_monitor"}:
+                return None
         if target in {"active_window", "front_window"}:
             active = self._active_window()
             if active and self._is_usable_target_window(active):
@@ -2334,6 +2429,10 @@ class BrowserComputerController:
             if self._is_usable_target_window(selected):
                 return selected
             self._clear_target_window()
+        if not target:
+            monitor = self._target_monitor(payload)
+            if monitor is not None:
+                return monitor
         return None
 
     @staticmethod
@@ -2672,6 +2771,17 @@ class BrowserComputerController:
                 return False
         return True
 
+    def _state_monitor_matches_artifact_root(self, state: dict[str, Any]) -> bool:
+        if not self._custom_artifact_root:
+            return True
+        marker = state.get("target_monitor_artifact_root")
+        if not isinstance(marker, str) or not marker:
+            return False
+        try:
+            return Path(marker).resolve() == self._artifact_root.resolve()
+        except Exception:
+            return False
+
     def _clear_target_window(self) -> None:
         state = self._computer_state()
         if "target_window" in state:
@@ -2781,6 +2891,13 @@ class BrowserComputerController:
             return {"action": "computer.select_window", "selected": False, "windows": windows}
         state = self._computer_state()
         state["target_window"] = selected
+        match = self._monitor_for_rect(selected, self._list_monitors())
+        if match:
+            state["target_monitor"] = match["monitor"]
+            if self._custom_artifact_root:
+                state["target_monitor_artifact_root"] = str(self._artifact_root.resolve())
+            else:
+                state.pop("target_monitor_artifact_root", None)
         self._write_computer_state(state)
         if payload.get("focus", True) is not False:
             self._focus_window(selected)
@@ -2793,26 +2910,288 @@ class BrowserComputerController:
             "computer_seat": self._computer_seat_metadata_for_target(selected),
         }
 
+    def _list_monitors(self) -> list[dict[str, Any]]:
+        system = platform.system()
+        if system == "Darwin":
+            raw = self._darwin_monitors()
+        elif system == "Windows":
+            raw = self._windows_monitors()
+        else:
+            raw = []
+        monitors = [item for item in (self._normalize_monitor_record(value, system=system, index=index) for index, value in enumerate(raw)) if item]
+        monitors.sort(key=lambda item: (0 if item.get("primary") else 1, int(item.get("index", 0))))
+        return monitors
+
+    def _darwin_monitors(self) -> list[dict[str, Any]]:
+        code = (
+            "import json, Quartz\n"
+            "err, displays, count = Quartz.CGGetActiveDisplayList(32, None, None)\n"
+            "main = Quartz.CGMainDisplayID()\n"
+            "items = []\n"
+            "for idx, display in enumerate(list(displays or [])[:int(count or 0)]):\n"
+            "    bounds = Quartz.CGDisplayBounds(display)\n"
+            "    width = int(round(bounds.size.width))\n"
+            "    height = int(round(bounds.size.height))\n"
+            "    pixel_width = int(Quartz.CGDisplayPixelsWide(display) or 0)\n"
+            "    pixel_height = int(Quartz.CGDisplayPixelsHigh(display) or 0)\n"
+            "    items.append({\n"
+            "        'platform': 'Darwin',\n"
+            "        'index': idx,\n"
+            "        'display_id': int(display),\n"
+            "        'monitor_id': 'darwin:' + str(int(display)),\n"
+            "        'name': 'Display ' + str(idx + 1),\n"
+            "        'x': int(round(bounds.origin.x)),\n"
+            "        'y': int(round(bounds.origin.y)),\n"
+            "        'width': width,\n"
+            "        'height': height,\n"
+            "        'pixel_width': pixel_width,\n"
+            "        'pixel_height': pixel_height,\n"
+            "        'primary': int(display) == int(main),\n"
+            "    })\n"
+            "print(json.dumps(items))\n"
+        )
+        try:
+            completed = subprocess.run(_current_python_snippet_command(code), check=True, capture_output=True, text=True)
+            data = json.loads(completed.stdout or "[]")
+            return data if isinstance(data, list) else []
+        except Exception:
+            return []
+
+    def _windows_monitors(self) -> list[dict[str, Any]]:
+        script = r'''
+Add-Type -AssemblyName System.Windows.Forms
+$items = @()
+$i = 0
+foreach ($screen in [System.Windows.Forms.Screen]::AllScreens) {
+  $bounds = $screen.Bounds
+  $items += [pscustomobject]@{
+    platform = "Windows"
+    index = $i
+    monitor_id = "windows:" + $screen.DeviceName
+    display_id = $screen.DeviceName
+    name = $screen.DeviceName
+    x = [int]$bounds.X
+    y = [int]$bounds.Y
+    width = [int]$bounds.Width
+    height = [int]$bounds.Height
+    primary = [bool]$screen.Primary
+  }
+  $i += 1
+}
+$items | ConvertTo-Json -Depth 4
+'''
+        try:
+            executable = "powershell" if shutil.which("powershell") else "pwsh"
+            completed = subprocess.run([executable, "-NoProfile", "-Command", script], check=True, capture_output=True, text=True)
+            data = json.loads(completed.stdout or "[]")
+            if isinstance(data, dict):
+                return [data]
+            return data if isinstance(data, list) else []
+        except Exception:
+            return []
+
+    @staticmethod
+    def _normalize_monitor_record(value: Any, *, system: str = "", index: int = 0) -> dict[str, Any] | None:
+        if not isinstance(value, dict):
+            return None
+        rect = BrowserComputerController._normalize_rect(value)
+        if rect is None:
+            return None
+        display_id = value.get("display_id") or value.get("device_name") or value.get("name") or index
+        monitor_id = str(value.get("monitor_id") or value.get("id") or f"{str(system or value.get('platform') or 'display').lower()}:{display_id}")
+        normalized = {
+            "id": monitor_id,
+            "monitor_id": monitor_id,
+            "platform": str(value.get("platform") or system or platform.system()),
+            "index": int(value.get("index", index) or 0),
+            "name": str(value.get("name") or value.get("device_name") or f"Display {index + 1}"),
+            "x": rect["x"],
+            "y": rect["y"],
+            "width": rect["width"],
+            "height": rect["height"],
+            "bounds": rect,
+            "primary": bool(value.get("primary") or value.get("is_primary")),
+            "is_primary": bool(value.get("primary") or value.get("is_primary")),
+            "unit": "display_coordinate",
+            "origin": "top_left",
+            "screen": "selected_monitor",
+        }
+        if display_id is not None:
+            normalized["display_id"] = display_id
+        for key in ("pixel_width", "pixel_height", "scale_factor"):
+            if value.get(key) is not None:
+                normalized[key] = value.get(key)
+        if normalized.get("pixel_width") and normalized["width"]:
+            try:
+                normalized.setdefault("scale_factor", round(float(normalized["pixel_width"]) / float(normalized["width"]), 4))
+            except Exception:
+                pass
+        return normalized
+
+    def _resolve_monitor(self, payload: dict[str, Any] | None = None) -> dict[str, Any] | None:
+        payload = payload or {}
+        if isinstance(payload.get("monitor"), dict):
+            return self._normalize_monitor_record(payload["monitor"], system=platform.system(), index=0)
+        target = str(payload.get("target") or payload.get("capture_target") or "").strip().lower()
+        monitor_id = str(
+            payload.get("monitor_id")
+            or payload.get("display_id")
+            or payload.get("screen_id")
+            or payload.get("display")
+            or ""
+        ).strip()
+        has_monitor_index = any(key in payload for key in ("monitor_index", "display_index", "screen_index", "index"))
+        state = self._computer_state()
+        saved = (
+            state.get("target_monitor")
+            if self._state_monitor_matches_artifact_root(state) and isinstance(state.get("target_monitor"), dict)
+            else None
+        )
+        normalized_saved = (
+            self._normalize_monitor_record(saved, system=platform.system(), index=int(saved.get("index", 0) or 0))
+            if saved
+            else None
+        )
+        monitor_targets = {
+            "screen",
+            "display",
+            "desktop",
+            "monitor",
+            "selected_monitor",
+            "primary_display",
+            "primary_monitor",
+            "primary",
+            "main_display",
+            "main_monitor",
+            "active_window_monitor",
+            "active_monitor",
+            "front_window_monitor",
+        }
+        has_monitor_intent = bool(
+            monitor_id
+            or has_monitor_index
+            or target in monitor_targets
+            or any(key in payload for key in ("monitor", "screen_id"))
+        )
+        if not has_monitor_intent:
+            return normalized_saved
+        if normalized_saved and target in {"screen", "display", "desktop", "monitor", "selected_monitor", ""} and not monitor_id and not has_monitor_index:
+            return normalized_saved
+        monitors = self._list_monitors()
+        if not monitors:
+            return normalized_saved if not monitor_id and not has_monitor_index else None
+        if monitor_id:
+            for monitor in monitors:
+                if monitor_id in {
+                    str(monitor.get("monitor_id") or ""),
+                    str(monitor.get("id") or ""),
+                    str(monitor.get("display_id") or ""),
+                    str(monitor.get("name") or ""),
+                }:
+                    return monitor
+        if has_monitor_index:
+            try:
+                wanted_index = int(payload.get("monitor_index", payload.get("display_index", payload.get("screen_index", payload.get("index")))))
+            except Exception:
+                wanted_index = -1
+            for monitor in monitors:
+                if int(monitor.get("index", -1)) == wanted_index:
+                    return monitor
+        if target in {"primary_display", "primary_monitor", "primary", "main_display", "main_monitor"}:
+            return next((item for item in monitors if item.get("primary")), monitors[0])
+        if target in {"active_window_monitor", "active_monitor", "front_window_monitor"}:
+            active = self._active_window()
+            match = self._monitor_for_rect(active, monitors) if active else None
+            if match:
+                return match["monitor"]
+        if normalized_saved:
+            saved_id = str(saved.get("monitor_id") or saved.get("id") or "")
+            for monitor in monitors:
+                if saved_id and saved_id == str(monitor.get("monitor_id") or monitor.get("id") or ""):
+                    return monitor
+            return normalized_saved
+        return None
+
+    def _target_monitor(self, payload: dict[str, Any] | None = None) -> dict[str, Any] | None:
+        return self._resolve_monitor(payload or {})
+
+    @classmethod
+    def _monitor_for_rect(
+        cls,
+        rect_like: dict[str, Any] | None,
+        monitors: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any] | None:
+        rect = cls._normalize_rect(rect_like)
+        if rect is None:
+            return None
+        normalized_monitors = monitors or []
+        if not normalized_monitors:
+            return None
+        best: tuple[int, float, dict[str, Any]] | None = None
+        center_x = rect["x"] + rect["width"] / 2
+        center_y = rect["y"] + rect["height"] / 2
+        for monitor in normalized_monitors:
+            monitor_rect = cls._normalize_rect(monitor)
+            if monitor_rect is None:
+                continue
+            overlap = cls._rect_overlap_area(rect, monitor_rect)
+            monitor_center_x = monitor_rect["x"] + monitor_rect["width"] / 2
+            monitor_center_y = monitor_rect["y"] + monitor_rect["height"] / 2
+            distance = ((center_x - monitor_center_x) ** 2 + (center_y - monitor_center_y) ** 2) ** 0.5
+            score = (overlap, -distance, monitor)
+            if best is None or score[:2] > best[:2]:
+                best = score
+        if best is None:
+            return None
+        monitor = dict(best[2])
+        return {"monitor": monitor, "overlap_area": int(best[0])}
+
+    @staticmethod
+    def _rect_overlap_area(left: dict[str, int], right: dict[str, int]) -> int:
+        x1 = max(int(left["x"]), int(right["x"]))
+        y1 = max(int(left["y"]), int(right["y"]))
+        x2 = min(int(left["x"]) + int(left["width"]), int(right["x"]) + int(right["width"]))
+        y2 = min(int(left["y"]) + int(left["height"]), int(right["y"]) + int(right["height"]))
+        if x2 <= x1 or y2 <= y1:
+            return 0
+        return int((x2 - x1) * (y2 - y1))
+
+    def _annotate_window_with_monitor(self, window: dict[str, Any]) -> dict[str, Any]:
+        match = self._monitor_for_rect(window, self._list_monitors())
+        if not match:
+            return window
+        monitor = match["monitor"]
+        window = dict(window)
+        window["monitor_id"] = monitor.get("monitor_id") or monitor.get("id")
+        window["monitor_index"] = monitor.get("index")
+        window["display_id"] = monitor.get("display_id")
+        window["monitor_name"] = monitor.get("name")
+        window["monitor"] = {
+            "id": monitor.get("id"),
+            "monitor_id": monitor.get("monitor_id"),
+            "index": monitor.get("index"),
+            "name": monitor.get("name"),
+            "bounds": monitor.get("bounds"),
+            "primary": monitor.get("primary"),
+        }
+        window["monitor_overlap_area"] = match.get("overlap_area", 0)
+        return window
+
     def _list_windows(self) -> list[dict[str, Any]]:
         system = platform.system()
         if system == "Darwin":
-            return self._darwin_windows()
+            windows = self._darwin_windows()
+            return [self._annotate_window_with_monitor(window) for window in windows]
         if system == "Windows":
             windows = self._windows_windows()
             if windows:
-                return windows
+                return [self._annotate_window_with_monitor(window) for window in windows]
             active = self._windows_active_window()
-            return [active] if active else []
+            return [self._annotate_window_with_monitor(active)] if active else []
         return []
 
     def _active_window(self) -> dict[str, Any] | None:
-        system = platform.system()
-        if system == "Darwin":
-            windows = self._darwin_windows()
-            return next((item for item in windows if item.get("active")), None)
-        if system == "Windows":
-            return self._windows_active_window()
-        return None
+        return next((item for item in self._list_windows() if item.get("active")), None)
 
     def _active_window_for_app(self, app_name: str) -> dict[str, Any] | None:
         app_name = app_name.strip().lower()
@@ -2876,6 +3255,12 @@ class BrowserComputerController:
         capture_method = str(value.get("capture_method") or "").strip()
         if capture_method:
             normalized["capture_method"] = capture_method
+        for key in ("monitor_id", "monitor_index", "monitor_name", "display_id", "monitor_overlap_area"):
+            if value.get(key) is not None:
+                normalized[key] = value.get(key)
+        monitor = value.get("monitor")
+        if isinstance(monitor, dict):
+            normalized["monitor"] = monitor
         return normalized
 
     @staticmethod

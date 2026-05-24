@@ -1176,6 +1176,9 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         self.assertIn("think", ids)
         self.assertIn("compact", ids)
         self.assertIn("commit", ids)
+        think = next(command for command in commands if command["id"] == "think")
+        self.assertEqual(think["template"]["kind"], "select")
+        self.assertEqual(think["template"]["values_source"], "selected_model.thinking_levels")
         self.assertEqual(next(command for command in commands if command["id"] == "commit")["risk"], "high")
 
         with patch("domain.ai_client.model_runtime_settings.ModelRuntimeSettingsService") as service_cls:

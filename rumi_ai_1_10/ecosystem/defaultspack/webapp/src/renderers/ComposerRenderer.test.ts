@@ -7,7 +7,9 @@ import { CodingWorkspacePicker } from "../components/coding/CodingWorkspacePicke
 import {
   filterAtMentionFiles,
   insertAtMentionText,
+  commandTemplateSuggestions,
   composerChromeWidgetStyle,
+  computeComposerPopoverStyle,
   modelCandidateMenuKeyAction,
   nextModelCandidateIndex,
   profileNeedsApiKey,
@@ -19,6 +21,7 @@ import {
   shouldFocusComposerForSlashKey,
   toolMentionIdsFromText,
 } from "./ComposerRenderer";
+import type { ComposerCommandItem } from "../lib/api";
 import { COMPOSER_BUTTON_DROP, COMPOSER_PANEL_DROP, COMPOSER_SELECTOR_DROP, COMPOSER_TOGGLE_DROP } from "../lib/toolUi";
 
 test("composer file mention filters string context files", () => {
@@ -126,6 +129,112 @@ test("model candidate menu keyboard helpers cycle and select", () => {
   assert.deepEqual(modelCandidateMenuKeyAction("Tab", false, 0, 0), { handled: false });
   assert.deepEqual(modelCandidateMenuKeyAction("Enter", false, 0, 0), { handled: false });
   assert.deepEqual(modelCandidateMenuKeyAction("Escape", false, 0, 0), { handled: false });
+});
+
+test("composer popover style clamps caret anchors to viewport", () => {
+  assert.deepEqual(
+    computeComposerPopoverStyle({ left: 900, top: 700 }, { width: 960, height: 720 }, 460),
+    { left: 492, top: 692, width: 460, transform: "translateY(-100%)" },
+  );
+  assert.deepEqual(
+    computeComposerPopoverStyle({ left: -10, top: 4 }, { width: 320, height: 480 }, 460),
+    { left: 8, top: 8, width: 304, transform: "translateY(-100%)" },
+  );
+});
+
+test("slash command templates derive thinking options from selected model", () => {
+  const command: ComposerCommandItem = {
+    id: "think",
+    name: "think",
+    label: "Thinking Level",
+    category: "model",
+    visibility: "default",
+    risk: "low",
+    args: [{ name: "level", type: "enum", values: ["low", "high", "xhigh"] }],
+    template: {
+      kind: "select",
+      argument: "level",
+      values_source: "selected_model.thinking_levels",
+      fallback_values: ["low", "medium", "high"],
+      labels: { low: "低", high: "高", xhigh: "最高" },
+    },
+    execution: { type: "rumi_function", qualified_name: "defaultspack:ai_set_thinking_level" },
+  };
+
+  const suggestions = commandTemplateSuggestions(command, {
+    profile_id: "google/gemini",
+    display_name: "Gemini",
+    provider_id: "google",
+    model_id: "gemini",
+    supports_thinking: true,
+    thinking_levels: ["low", "high", "xhigh"],
+  }, "x");
+
+  assert.deepEqual(suggestions.map((item) => item.commandText), ["/think xhigh"]);
+  assert.equal(suggestions[0].templateControl, "select");
+  assert.equal(suggestions[0].templateLabel, "最高");
+});
+
+test("composer renders cli-style slash template suggestions", () => {
+  const commands: ComposerCommandItem[] = [
+    {
+      id: "think",
+      name: "think",
+      label: "Thinking Level",
+      category: "model",
+      visibility: "default",
+      risk: "low",
+      args: [{ name: "level", type: "enum", values: ["low", "high", "xhigh"] }],
+      template: {
+        kind: "select",
+        argument: "level",
+        values_source: "selected_model.thinking_levels",
+        labels: { low: "Low", high: "High", xhigh: "XHigh" },
+      },
+      execution: { type: "rumi_function", qualified_name: "defaultspack:ai_set_thinking_level" },
+    },
+    {
+      id: "yolo",
+      name: "yolo",
+      label: "Yolo",
+      category: "mode",
+      visibility: "default",
+      risk: "medium",
+      args: [{ name: "enabled", type: "boolean" }],
+      template: { kind: "switch", argument: "enabled", values: ["on", "off"] },
+      execution: { type: "frontend", action: "toggle_yolo" },
+    },
+  ];
+
+  const html = renderToStaticMarkup(
+    createElement(ComposerRenderer, {
+      input: "/think ",
+      placeholder: "メッセージを入力...",
+      isGenerating: false,
+      selectedProfile: {
+        profile_id: "google/gemini",
+        display_name: "Gemini",
+        provider_id: "google",
+        model_id: "gemini",
+        supports_thinking: true,
+        thinking_levels: ["low", "high", "xhigh"],
+      },
+      favoriteProfiles: [],
+      inlineExtensions: [],
+      belowExtensions: [],
+      commands,
+      thinkingLevel: "high",
+      contextUsage: { ratio: 0, usedTokens: 0, maxContext: 0, label: "0%" },
+      onInputChange: () => undefined,
+      onSubmit: () => undefined,
+      onModelProfileSelect: () => undefined,
+      onThinkingLevelChange: () => undefined,
+    }),
+  );
+
+  assert.match(html, /data-command-menu="cli"/);
+  assert.match(html, /data-command-control="select"/);
+  assert.match(html, /\/think xhigh/);
 });
 
 test("model dropdown search supports @provider filters", () => {

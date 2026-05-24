@@ -200,10 +200,154 @@ export function profileNeedsApiKey(profile: ModelProfile | null | undefined): bo
   return API_KEY_PROVIDER_IDS.has(providerId);
 }
 
-function thinkingCommandMatch(input: string): { query: string } | null {
-  const match = input.trimStart().match(/^\/(?:think|thinking|t)(?:\s+(\S*))?$/i);
-  if (!match) return null;
-  return { query: String(match[1] ?? "").toLowerCase() };
+type ComposerCommandSuggestion = ComposerCommandItem & {
+  baseCommandId?: string;
+  commandText?: string;
+  templateControl?: "select" | "switch";
+  templateValue?: string;
+  templateLabel?: string;
+  syntax?: string;
+};
+
+type ComposerPopoverAnchor = {
+  left: number;
+  top: number;
+};
+
+export function computeComposerPopoverStyle(
+  anchor: ComposerPopoverAnchor,
+  viewport: { width: number; height: number },
+  preferredWidth = 460,
+): CSSProperties {
+  const width = Math.min(preferredWidth, Math.max(260, viewport.width - 16));
+  const left = Math.max(8, Math.min(anchor.left, viewport.width - width - 8));
+  const top = Math.max(8, Math.min(anchor.top - 8, viewport.height - 8));
+  return { left, top, width, transform: "translateY(-100%)" };
+}
+
+export function textareaCaretAnchor(textarea: HTMLTextAreaElement): ComposerPopoverAnchor | null {
+  if (typeof window === "undefined" || typeof document === "undefined") return null;
+  const rect = textarea.getBoundingClientRect();
+  if (!rect.width || !rect.height) return { left: rect.left, top: rect.top };
+  const style = window.getComputedStyle(textarea);
+  const mirror = document.createElement("div");
+  const marker = document.createElement("span");
+  const copiedProperties = [
+    "boxSizing",
+    "width",
+    "fontFamily",
+    "fontSize",
+    "fontWeight",
+    "fontStyle",
+    "letterSpacing",
+    "lineHeight",
+    "paddingTop",
+    "paddingRight",
+    "paddingBottom",
+    "paddingLeft",
+    "borderTopWidth",
+    "borderRightWidth",
+    "borderBottomWidth",
+    "borderLeftWidth",
+    "whiteSpace",
+    "wordBreak",
+    "overflowWrap",
+    "textTransform",
+  ] as const;
+  mirror.style.position = "fixed";
+  mirror.style.visibility = "hidden";
+  mirror.style.pointerEvents = "none";
+  mirror.style.left = `${rect.left}px`;
+  mirror.style.top = `${rect.top}px`;
+  mirror.style.width = `${rect.width}px`;
+  mirror.style.minHeight = `${rect.height}px`;
+  mirror.style.whiteSpace = "pre-wrap";
+  mirror.style.overflowWrap = "break-word";
+  mirror.style.letterSpacing = "0";
+  copiedProperties.forEach((property) => {
+    (mirror.style as unknown as Record<string, string>)[property] = style[property];
+  });
+  const selectionStart = textarea.selectionStart ?? textarea.value.length;
+  const before = textarea.value.slice(0, selectionStart);
+  mirror.textContent = before.length ? before : "\u200b";
+  marker.textContent = "\u200b";
+  mirror.appendChild(marker);
+  document.body.appendChild(mirror);
+  const markerRect = marker.getBoundingClientRect();
+  document.body.removeChild(mirror);
+  if (!Number.isFinite(markerRect.left) || !Number.isFinite(markerRect.top)) {
+    return { left: rect.left, top: rect.top };
+  }
+  return {
+    left: markerRect.left - textarea.scrollLeft,
+    top: markerRect.top - textarea.scrollTop,
+  };
+}
+
+function slashCommandContext(input: string): { token: string; args: string; hasArgs: boolean } | null {
+  if (!input.startsWith("/") || input.startsWith("//")) return null;
+  const text = input.slice(1);
+  const trimmedStart = text.trimStart();
+  const token = trimmedStart.split(/\s+/, 1)[0]?.toLowerCase() ?? "";
+  const rest = trimmedStart.slice(token.length);
+  return { token, args: rest.trimStart(), hasArgs: /\s/.test(rest) || text.endsWith(" ") };
+}
+
+function commandTokens(command: ComposerCommandItem): string[] {
+  return [command.id, command.name, ...(command.aliases ?? [])]
+    .map((value) => String(value ?? "").trim().toLowerCase().replace(/^\//, ""))
+    .filter(Boolean);
+}
+
+function commandMatchesToken(command: ComposerCommandItem, token: string): boolean {
+  return commandTokens(command).includes(token.toLowerCase());
+}
+
+function commandSyntax(command: ComposerCommandItem): string {
+  const args = (command.args ?? []).map((arg) => (arg.required ? `<${arg.name}>` : `[${arg.name}]`)).join(" ");
+  return `/${command.name ?? command.id}${args ? ` ${args}` : ""}`;
+}
+
+export function commandTemplateSuggestions(
+  command: ComposerCommandItem,
+  selectedProfile: ModelProfile | null | undefined,
+  query = "",
+): ComposerCommandSuggestion[] {
+  const template = command.template;
+  if (!template) return [];
+  const labels = template.labels ?? {};
+  let values: string[] = [];
+  const valuesSource = String(template.values_source ?? "");
+  if (valuesSource === "selected_model.thinking_levels" || valuesSource === "model.thinking_levels") {
+    if (!selectedProfile?.supports_thinking) return [];
+    values = selectedProfile.thinking_levels?.length ? selectedProfile.thinking_levels : (template.fallback_values ?? ["low", "medium", "high"]);
+  } else if (template.values?.length) {
+    values = template.values;
+  } else if (template.fallback_values?.length) {
+    values = template.fallback_values;
+  }
+  const needle = query.trim().toLowerCase();
+  return values
+    .filter((value) => {
+      const label = labels[value] ?? THINKING_LABELS[value] ?? value;
+      return !needle || value.toLowerCase().includes(needle) || String(label).toLowerCase().includes(needle);
+    })
+    .map((value) => {
+      const label = labels[value] ?? THINKING_LABELS[value] ?? value;
+      return {
+        ...command,
+        id: `${command.id}:${value}`,
+        baseCommandId: command.id,
+        name: `${command.name ?? command.id} ${value}`,
+        label: `${command.label}: ${label}`,
+        description: `${commandSyntax(command)} -> ${value}`,
+        commandText: `/${command.name ?? command.id} ${value}`,
+        templateControl: template.kind,
+        templateValue: value,
+        templateLabel: String(label),
+        syntax: commandSyntax(command),
+      };
+    });
 }
 
 function compactProfileName(name: string): string {
@@ -1043,28 +1187,25 @@ export function ComposerRenderer({
   const showToolGroups = toolItems.length > 4;
   const isEscapedSlash = input.startsWith("//");
   const isSteerMode = isGenerating && !isNewConversation;
-  const slashText = !isSteerMode && input.startsWith("/") && !isEscapedSlash ? input.slice(1) : "";
-  const slashCommandName = slashText.trimStart().split(/\s+/, 1)[0] ?? "";
-  const slashQuery = slashCommandName.toLowerCase();
-  const thinkingCommand = commands.find((command) => command.id === "think");
-  const thinkingMatch = !isSteerMode && input.startsWith("/") && !isEscapedSlash ? thinkingCommandMatch(input) : null;
-  const matchedCommands = !isSteerMode && input.startsWith("/") && !isEscapedSlash
-    ? thinkingMatch && thinkingCommand && levels.length > 0
-      ? levels
-          .filter((level) => !thinkingMatch.query || level.toLowerCase().includes(thinkingMatch.query))
-          .map((level) => ({
-            ...thinkingCommand,
-            id: `think:${level}`,
-            name: `think ${level}`,
-            label: `Thinking ${THINKING_LABELS[level] ?? level}`,
-            description: `思考レベルを ${THINKING_LABELS[level] ?? level} に変更`,
-          }))
-      : commands.filter((command) => {
-          const haystack = `${command.id} ${command.name} ${(command.aliases ?? []).join(" ")} ${command.label} ${command.description ?? ""}`.toLowerCase();
-          return !slashQuery || haystack.includes(slashQuery);
-        })
+  const slashContext = !isSteerMode ? slashCommandContext(input) : null;
+  const slashQuery = slashContext?.token ?? "";
+  const matchedCommands: ComposerCommandSuggestion[] = slashContext
+    ? (() => {
+        const templateCommand = slashContext.hasArgs
+          ? commands.find((command) => command.template && commandMatchesToken(command, slashContext.token))
+          : null;
+        if (templateCommand) {
+          const suggestions = commandTemplateSuggestions(templateCommand, selectedProfile, slashContext.args);
+          if (suggestions.length > 0) return suggestions;
+        }
+        return commands
+          .filter((command) => {
+            const haystack = `${command.id} ${command.name} ${(command.aliases ?? []).join(" ")} ${command.label} ${command.description ?? ""}`.toLowerCase();
+            return !slashQuery || haystack.includes(slashQuery);
+          })
+          .map((command) => ({ ...command, syntax: commandSyntax(command), commandText: `/${command.name ?? command.id}` }));
+      })()
     : [];
-  const showThinkingLevelChips = Boolean(thinkingMatch && thinkingCommand && levels.length > 0);
   const hasModelCommandCandidates = !isSteerMode && modelCommandCandidates.length > 0;
   const showCommandSuggestions = !hasModelCommandCandidates && matchedCommands.length > 0;
   const visibleSteerPreviewItems = steerPreviewItems.filter((item) => (
@@ -1114,15 +1255,8 @@ export function ComposerRenderer({
     const textarea = textareaRef.current;
     if (!textarea || typeof window === "undefined") return;
     const rect = textarea.getBoundingClientRect();
-    const width = Math.min(460, Math.max(260, window.innerWidth - 16));
-    const left = Math.max(8, Math.min(rect.left, window.innerWidth - width - 8));
-    const top = Math.max(8, rect.top - 8);
-    setComposerPopoverStyle({
-      left,
-      top,
-      width,
-      transform: "translateY(-100%)",
-    });
+    const anchor = textareaCaretAnchor(textarea) ?? { left: rect.left, top: rect.top };
+    setComposerPopoverStyle(computeComposerPopoverStyle(anchor, { width: window.innerWidth, height: window.innerHeight }));
   }, []);
 
   const requestModelProfileSelect = useCallback(
@@ -1266,6 +1400,16 @@ export function ComposerRenderer({
   }, [input, isGenerating, onInputChange]);
 
   const chooseCommand = (commandId: string, rawInput = input) => {
+    const templateValueMatch = commandId.match(/^([^:]+):(.+)$/);
+    if (templateValueMatch) {
+      const [, baseCommandId, value] = templateValueMatch;
+      const baseCommand = commands.find((item) => item.id === baseCommandId);
+      if (baseCommand?.template) {
+        onCommandSelect?.(baseCommand.id, `/${baseCommand.name ?? baseCommand.id} ${value}`);
+        onInputChange("");
+        return;
+      }
+    }
     const thinkingLevelMatch = commandId.match(/^think:(.+)$/);
     if (thinkingLevelMatch) {
       onCommandSelect?.("think", `/think ${thinkingLevelMatch[1]}`);
@@ -1892,67 +2036,52 @@ export function ComposerRenderer({
             />
           )}
           {showCommandSuggestions && (
-            showThinkingLevelChips ? (
-              <div className="absolute bottom-full left-4 z-40 mb-2 flex w-[min(520px,calc(100vw-32px))] flex-wrap items-center gap-2 rounded-xl border border-zinc-700/70 bg-zinc-950/95 px-3 py-2 shadow-2xl">
-                <span className="mr-1 text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Thinking</span>
-                {matchedCommands.map((command, index) => {
-                  const level = command.id.replace(/^think:/, "");
-                          return (
-                            <button
-                              key={command.id}
-                              type="button"
-                              tabIndex={chromeButtonTabIndex}
-                              onMouseEnter={() => setSelectedCommandIndex(index)}
-                              onClick={() => chooseCommand(command.id)}
-                      className={`h-8 rounded-lg border px-3 text-xs font-medium transition-colors ${
-                        index === selectedCommandIndex
-                          ? "border-zinc-400 bg-zinc-100 text-zinc-950"
-                          : "border-zinc-700 bg-zinc-900 text-zinc-300 hover:border-zinc-500 hover:text-zinc-100"
-                      }`}
-                    >
-                      {THINKING_LABELS[level] ?? level}
-                    </button>
-                  );
-                })}
+            <div
+              data-command-menu="cli"
+              className="absolute bottom-full left-4 z-40 mb-2 w-[min(520px,calc(100vw-32px))] overflow-hidden rounded-lg border border-zinc-700/70 bg-[#09090b] font-mono shadow-2xl"
+            >
+              <div className="flex items-center gap-2 border-b border-zinc-800 px-3 py-2 text-[11px] text-zinc-500">
+                <span className="text-zinc-300">$</span>
+                <span className="truncate">commands</span>
               </div>
-            ) : (
-              <div className="absolute bottom-full left-4 z-40 mb-2 w-[min(420px,calc(100vw-32px))] overflow-hidden rounded-xl border border-zinc-700/70 bg-zinc-950 shadow-2xl">
-                <div className="border-b border-zinc-800 px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-zinc-500">
-                  Commands
-                </div>
-                <div className="max-h-56 overflow-y-auto py-1">
-                          {matchedCommands.map((command, index) => (
-                            <button
-                              key={command.id}
-                              type="button"
-                              tabIndex={chromeButtonTabIndex}
-                              onMouseEnter={() => setSelectedCommandIndex(index)}
-                              onClick={() => chooseCommand(command.id)}
-                      className={`flex w-full items-center justify-between gap-3 px-3 py-2 text-left ${
-                        index === selectedCommandIndex ? "bg-zinc-800 text-zinc-100" : "hover:bg-zinc-900"
-                      }`}
-                    >
-                      <span className="min-w-0">
-                        <span className="block truncate text-sm text-zinc-100">/{command.name ?? command.id}</span>
-                        {command.description && (
-                          <span className="block truncate text-[11px] text-zinc-500">{command.description}</span>
-                        )}
+              <div className="max-h-64 overflow-y-auto py-1">
+                {matchedCommands.map((command, index) => (
+                  <button
+                    key={command.id}
+                    type="button"
+                    tabIndex={chromeButtonTabIndex}
+                    data-command-control={command.templateControl ?? "command"}
+                    onMouseEnter={() => setSelectedCommandIndex(index)}
+                    onClick={() => chooseCommand(command.id)}
+                    className={`flex w-full items-center justify-between gap-3 px-3 py-2 text-left transition-colors ${
+                      index === selectedCommandIndex ? "bg-zinc-800 text-zinc-100" : "text-zinc-300 hover:bg-zinc-900"
+                    }`}
+                  >
+                    <span className="min-w-0">
+                      <span className="block truncate text-[13px] text-zinc-100">{command.commandText ?? `/${command.name ?? command.id}`}</span>
+                      <span className="block truncate text-[11px] text-zinc-500">
+                        {command.templateLabel ? `${command.label} · ${profileName}` : command.syntax ?? command.description ?? command.category}
                       </span>
-                      <span className="flex flex-shrink-0 items-center gap-1">
-                        {command.risk && (
-                          <span className={`rounded-full border px-2 py-0.5 text-[10px] ${RISK_BADGE_STYLES[command.risk] ?? "border-zinc-700 text-zinc-400"}`}>
-                            {command.risk}
-                          </span>
-                        )}
-                        {(command.enabled || command.active) && (
-                          <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] text-emerald-300">on</span>
-                        )}
-                      </span>
-                    </button>
-                  ))}
-                </div>
+                    </span>
+                    <span className="flex flex-shrink-0 items-center gap-1">
+                      {command.templateControl && (
+                        <span className="rounded border border-cyan-500/25 px-1.5 py-0.5 text-[10px] text-cyan-300">
+                          {command.templateControl}
+                        </span>
+                      )}
+                      {command.risk && (
+                        <span className={`rounded border px-1.5 py-0.5 text-[10px] ${RISK_BADGE_STYLES[command.risk] ?? "border-zinc-700 text-zinc-400"}`}>
+                          {command.risk}
+                        </span>
+                      )}
+                      {(command.enabled || command.active) && (
+                        <span className="rounded border border-emerald-500/20 px-1.5 py-0.5 text-[10px] text-emerald-300">on</span>
+                      )}
+                    </span>
+                  </button>
+                ))}
               </div>
-            )
+            </div>
           )}
 
           {atMentionOpen && (

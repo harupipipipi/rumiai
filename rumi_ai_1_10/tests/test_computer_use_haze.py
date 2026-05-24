@@ -170,6 +170,24 @@ def test_edge_haze_reuses_process_for_same_sequence_until_sequence_ends(tmp_path
     assert "terminate_pid:2468" in events
 
 
+def test_edge_haze_sequence_inactive_deadline_uses_linger(tmp_path):
+    from ecosystem.rumi_default_tools_pack.domain.computer.mac.edge_haze import (
+        ComputerUseEdgeHazeManager,
+        EdgeHazeSettings,
+    )
+
+    manager = ComputerUseEdgeHazeManager(
+        pack_root=tmp_path,
+        source_path=tmp_path / "EdgeHaze.swift",
+        binary_path=tmp_path / "edge_haze",
+        settings=EdgeHazeSettings(enabled=True, linger_seconds=4),
+    )
+    manager._sequence_id = "run_123"
+
+    assert manager._deadline_seconds(active=True) > 60
+    assert manager._deadline_seconds(active=False) == 4
+
+
 def test_browser_computer_wraps_visible_desktop_actions_with_haze(tmp_path, monkeypatch):
     from ecosystem.rumi_default_tools_pack.domain.tool import browser_computer
     from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController

@@ -161,9 +161,8 @@ def _validate_no_symlinks(root: Path) -> None:
 
 def _validate_protected_paths(root: Path, manifest: Mapping[str, Any]) -> None:
     protected = manifest.get("protected_paths")
-    if not isinstance(protected, list):
-        protected = list(DEFAULT_PROTECTED_PATTERNS)
-    patterns = [str(item) for item in protected]
+    additions = protected if isinstance(protected, list) else []
+    patterns = list(dict.fromkeys([*DEFAULT_PROTECTED_PATTERNS, *(str(item) for item in additions)]))
     for path in root.rglob("*"):
         if not path.is_file():
             continue

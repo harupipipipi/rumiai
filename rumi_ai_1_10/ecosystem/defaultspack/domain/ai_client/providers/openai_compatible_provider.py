@@ -224,7 +224,16 @@ class OpenAICompatibleProvider(OpenAIProvider):
             normalized["metadata"] = metadata
         if capabilities:
             normalized["capabilities"] = capabilities
-        for key in ("context_window", "max_context", "max_context_tokens", "supports_thinking", "thinking_levels", "default_thinking_level"):
+        for key in (
+            "context_window",
+            "max_context",
+            "max_context_tokens",
+            "supports_thinking",
+            "supports_vision",
+            "supports_image_input",
+            "thinking_levels",
+            "default_thinking_level",
+        ):
             if key in raw:
                 normalized[key] = raw[key]
         return normalized

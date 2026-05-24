@@ -387,7 +387,19 @@ class PackUpdateManager:
             tmp_dir, version_dir = self._prepare_version_dir(pack_id, version, replace_existing=replace_existing)
             applied = copy_validated_tree(extracted, tmp_dir)
             backup_dir = self._commit_version_dir(pack_id, version, tmp_dir, version_dir, replace_existing=replace_existing)
-            self._record_install(pack_id, version, "rumi-pack", current)
+            signature = str(stage.get("signature") or "")
+            self._record_install(
+                pack_id,
+                version,
+                "rumi-pack",
+                current,
+                source_metadata={
+                    "sha256": stage.get("sha256"),
+                    "signature": signature,
+                    "signature_scheme": _signature_scheme(signature),
+                    "key_id": _signature_key_id(signature),
+                },
+            )
             write_current_pointer_atomic(pack_id, version, Path("versions") / version, self.managed_dir)
             return PackUpdateResult(
                 target=f"pack:{pack_id}",
@@ -627,6 +639,16 @@ def _signature_from_bundle(bundle_path: Path) -> str | None:
     except zipfile.BadZipFile:
         return None
     return None
+
+
+def _signature_scheme(signature: str) -> str:
+    parts = str(signature or "").split(":", 2)
+    return parts[0] if len(parts) == 3 else ""
+
+
+def _signature_key_id(signature: str) -> str:
+    parts = str(signature or "").split(":", 2)
+    return parts[1] if len(parts) == 3 else ""
 
 
 def _normalize_check_interval_hours(value: Any) -> int:

@@ -61,6 +61,8 @@ def test_provider_catalog_interops_with_model_catalog_pack_manifests():
     assert catalog["gitlawb-opengateway"]["metadata"]["default_base_url"] == "https://opengateway.gitlawb.com/v1"
     assert set(models) == OPENGATEWAY_MODELS
     assert models["gitlawb-opengateway/mimo-v2-omni"]["metadata"]["vision_verified"] is True
+    assert models["gitlawb-opengateway/mimo-v2-omni"]["supports_vision"] is True
+    assert models["gitlawb-opengateway/mimo-v2-omni"]["supports_image_input"] is True
 
     provider_manifest_path = MODEL_CATALOG_ROOT / "extensions" / "llm" / "providers" / "gitlawb-opengateway" / "manifest.json"
     provider_manifest = json.loads(provider_manifest_path.read_text(encoding="utf-8"))

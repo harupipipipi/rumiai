@@ -15,8 +15,8 @@
         "properties": {
           "action": {
             "type": "string",
-            "enum": ["context", "apps", "screenshot", "move", "click", "drag", "select_app", "show_app", "select_window", "windows", "type", "key", "scroll"],
-            "description": "Use context/apps/windows to inspect open apps, show_app with app/name to bring an app to the main visible screen, select_window with app/title to target a visible window, and screenshot before actions. For small or ambiguous image targets, do not click from the full screenshot; request screenshot crop/zoom/detail first, usually with source=latest, then click using normalized_x and normalized_y relative to the attached crop. source=latest crops from the last full/selected-window screenshot; use source=current_crop only for an intentional crop-of-crop. After a zoomed/cropped view, request a fresh screenshot before unrelated actions. point:[y,x] is legacy compatibility only. click/move/drag default to the virtual AI cursor and return marked previews without operating the real UI; set physical=true only after explicit approval to operate the visible UI. type/key/scroll return a post-action screenshot unless include_screenshot=false.",
+            "enum": ["context", "apps", "monitors", "select_monitor", "window_monitor", "screenshot", "move", "click", "drag", "select_app", "show_app", "select_window", "windows", "type", "key", "scroll", "clipboard", "backspace"],
+            "description": "Use context/apps/windows/monitors to inspect open apps, visible windows, and displays. Use select_monitor with monitor_id/display_id/monitor_index to aim desktop screenshots/actions at a specific screen, show_app with app/name to bring an app to the visible screen, select_window with app/title to target a visible window, and screenshot before actions. For small or ambiguous image targets, do not click from the full screenshot; request screenshot crop/zoom/detail first, usually with source=latest, then click using normalized_x and normalized_y relative to the attached crop. source=latest crops from the last full/selected-window screenshot; use source=current_crop only for an intentional crop-of-crop. After a zoomed/cropped view, request a fresh screenshot before unrelated actions. point:[y,x] is legacy compatibility only. click/move/drag default to the virtual AI cursor and return marked previews without operating the real UI; set physical=true only after explicit approval to operate the visible UI. type/key/scroll return a post-action screenshot unless include_screenshot=false.",
             "default": "screenshot"
           },
           "x": {"type": "integer"},
@@ -54,6 +54,16 @@
           "name": {"type": "string"},
           "title": {"type": "string"},
           "title_contains": {"type": "string"},
+          "window": {"type": "object"},
+          "window_index": {"type": "integer"},
+          "window_id": {"type": "integer"},
+          "window_title": {"type": "string"},
+          "monitor": {"type": "object", "description": "Monitor object returned by action=monitors or context."},
+          "monitor_id": {"type": "string", "description": "Monitor id returned by action=monitors, for example darwin:69733248 or windows:\\\\.\\DISPLAY1."},
+          "monitor_index": {"type": "integer", "description": "Monitor index returned by action=monitors."},
+          "display_id": {"type": "string", "description": "Platform display id returned by action=monitors."},
+          "display_index": {"type": "integer", "description": "Alias for monitor_index."},
+          "screen_id": {"type": "string", "description": "Alias for monitor_id/display_id."},
           "coordinate_space": {"type": "string", "description": "Use normalized_1000 with normalized_x and normalized_y for preferred visual coordinates. Also supports screen for absolute display pixels, window/screenshot for selected-window pixels, and model_image for returned model preview pixels. point:[y,x] normalized_1000 coordinates are legacy compatibility only."},
           "physical": {"type": "boolean", "description": "Set true, after explicit approval, to operate the visible UI. Omit or set false to keep click/move/drag virtual-only."},
           "virtual_only": {"type": "boolean", "description": "For click/move/drag, keep the action as a marker and AI cursor preview without operating the real UI. This is the default unless physical=true is set."},

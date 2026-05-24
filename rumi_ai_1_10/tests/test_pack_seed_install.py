@@ -39,7 +39,7 @@ def test_missing_managed_defaultspack_gets_seeded(tmp_path, monkeypatch):
     assert not (managed / "defaultspack" / "versions" / "2.5.0" / "state").exists()
 
 
-def test_existing_valid_current_pointer_is_not_overwritten(tmp_path, monkeypatch):
+def test_existing_valid_current_pointer_without_seed_record_is_not_overwritten(tmp_path, monkeypatch):
     seed_root = tmp_path / "pack_seeds"
     managed = tmp_path / "user_data" / "packs"
     _write_pack(seed_root, version="9.9.9")
@@ -58,6 +58,88 @@ def test_existing_valid_current_pointer_is_not_overwritten(tmp_path, monkeypatch
     assert result["installed"] is False
     current = json.loads((managed / "defaultspack" / "current.json").read_text(encoding="utf-8"))
     assert current["version"] == "1.0.0"
+
+
+def test_existing_manual_current_pointer_is_not_overwritten_by_newer_seed(tmp_path, monkeypatch):
+    seed_root = tmp_path / "pack_seeds"
+    managed = tmp_path / "user_data" / "packs"
+    _write_pack(seed_root, version="9.9.9")
+    target = managed / "defaultspack" / "versions" / "1.0.0"
+    target.mkdir(parents=True)
+    (target / "ecosystem.json").write_text(
+        json.dumps({"pack_id": "defaultspack", "pack_identity": "local:defaultspack", "version": "1.0.0"}),
+        encoding="utf-8",
+    )
+    pack_seed.write_current_pointer_atomic("defaultspack", "1.0.0", Path("versions") / "1.0.0", managed)
+    (managed / "defaultspack" / "install_record.json").write_text(
+        json.dumps({"schema": "rumi.pack_install_record.v1", "pack_id": "defaultspack", "version": "1.0.0", "source": "rumi-pack"}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(pack_seed, "PACK_SEEDS_DIR", seed_root)
+    monkeypatch.setattr(pack_seed, "MANAGED_PACKS_DIR", managed)
+
+    result = pack_seed.ensure_managed_defaultspack_installed()
+
+    assert result["installed"] is False
+    current = json.loads((managed / "defaultspack" / "current.json").read_text(encoding="utf-8"))
+    assert current["version"] == "1.0.0"
+
+
+def test_seed_managed_current_upgrades_to_newer_bundled_seed(tmp_path, monkeypatch):
+    seed_root = tmp_path / "pack_seeds"
+    managed = tmp_path / "user_data" / "packs"
+    _write_pack(seed_root, version="9.9.9")
+    target = managed / "defaultspack" / "versions" / "1.0.0"
+    target.mkdir(parents=True)
+    (target / "ecosystem.json").write_text(
+        json.dumps({"pack_id": "defaultspack", "pack_identity": "local:defaultspack", "version": "1.0.0"}),
+        encoding="utf-8",
+    )
+    pack_state = managed / "defaultspack" / "state"
+    pack_state.mkdir(parents=True)
+    (pack_state / "user.json").write_text("{}", encoding="utf-8")
+    pack_seed.write_current_pointer_atomic("defaultspack", "1.0.0", Path("versions") / "1.0.0", managed)
+    (managed / "defaultspack" / "install_record.json").write_text(
+        json.dumps({"schema": "rumi.pack_install_record.v1", "pack_id": "defaultspack", "version": "1.0.0", "source": "seed"}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(pack_seed, "PACK_SEEDS_DIR", seed_root)
+    monkeypatch.setattr(pack_seed, "MANAGED_PACKS_DIR", managed)
+
+    result = pack_seed.ensure_managed_defaultspack_installed()
+
+    assert result["installed"] is True
+    assert result["version"] == "9.9.9"
+    current = json.loads((managed / "defaultspack" / "current.json").read_text(encoding="utf-8"))
+    assert current["version"] == "9.9.9"
+    assert (managed / "defaultspack" / "versions" / "9.9.9" / "ecosystem.json").is_file()
+    assert (pack_state / "user.json").is_file()
+
+
+def test_legacy_seed_migration_current_upgrades_to_newer_bundled_seed(tmp_path, monkeypatch):
+    seed_root = tmp_path / "pack_seeds"
+    managed = tmp_path / "user_data" / "packs"
+    _write_pack(seed_root, version="2.5.0")
+    target = managed / "defaultspack" / "versions" / "2.0.0"
+    target.mkdir(parents=True)
+    (target / "ecosystem.json").write_text(
+        json.dumps({"pack_id": "defaultspack", "pack_identity": "local:defaultspack", "version": "2.0.0"}),
+        encoding="utf-8",
+    )
+    pack_seed.write_current_pointer_atomic("defaultspack", "2.0.0", Path("versions") / "2.0.0", managed)
+    (managed / "defaultspack" / "install_record.json").write_text(
+        json.dumps({"schema": "rumi.pack_install_record.v1", "pack_id": "defaultspack", "version": "2.0.0", "source": "legacy_seed_migration"}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(pack_seed, "PACK_SEEDS_DIR", seed_root)
+    monkeypatch.setattr(pack_seed, "MANAGED_PACKS_DIR", managed)
+
+    result = pack_seed.ensure_managed_defaultspack_installed()
+
+    assert result["installed"] is True
+    assert result["version"] == "2.5.0"
+    current = json.loads((managed / "defaultspack" / "current.json").read_text(encoding="utf-8"))
+    assert current["version"] == "2.5.0"
 
 
 def test_legacy_seed_migration_copies_bundled_defaultspack(tmp_path, monkeypatch):

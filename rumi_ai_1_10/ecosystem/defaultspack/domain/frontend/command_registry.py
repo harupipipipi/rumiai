@@ -304,8 +304,37 @@ class SlashCommandRegistry:
             normalized["modes"] = [mode for mode in (str(item) for item in modes) if mode in MODES] or ["chat", "coding", "agent"]
         if not isinstance(normalized.get("args"), list):
             normalized["args"] = []
+        if isinstance(normalized.get("template"), dict):
+            normalized["template"] = SlashCommandRegistry._normalize_template(normalized["template"])
+        else:
+            normalized.pop("template", None)
         if not isinstance(normalized.get("execution"), dict):
             normalized["execution"] = {"type": "frontend", "action": normalized["id"]}
+        return normalized
+
+    @staticmethod
+    def _normalize_template(template: dict[str, Any]) -> dict[str, Any]:
+        normalized = deepcopy(template)
+        kind = str(normalized.get("kind") or "").strip().lower()
+        if kind not in {"select", "switch"}:
+            normalized["kind"] = "select"
+        else:
+            normalized["kind"] = kind
+        normalized["argument"] = str(normalized.get("argument") or "").strip()
+        for key in ("values", "fallback_values"):
+            values = normalized.get(key)
+            if isinstance(values, list):
+                normalized[key] = [str(item) for item in values if str(item or "").strip()]
+            else:
+                normalized.pop(key, None)
+        labels = normalized.get("labels")
+        if isinstance(labels, dict):
+            normalized["labels"] = {str(key): str(value) for key, value in labels.items()}
+        else:
+            normalized.pop("labels", None)
+        for key in ("values_source", "true_value", "false_value"):
+            if key in normalized:
+                normalized[key] = str(normalized.get(key) or "").strip()
         return normalized
 
     def _dedupe_by_id(self, commands: list[dict[str, Any]], manifest_errors: list[dict[str, Any]]) -> list[dict[str, Any]]:

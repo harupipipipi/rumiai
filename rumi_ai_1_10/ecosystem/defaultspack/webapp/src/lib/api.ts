@@ -761,6 +761,17 @@ export type ComposerCommandArg = {
   values?: string[];
 };
 
+export type ComposerCommandTemplate = {
+  kind: "select" | "switch";
+  argument?: string;
+  values?: string[];
+  fallback_values?: string[];
+  values_source?: "selected_model.thinking_levels" | "model.thinking_levels" | string;
+  labels?: Record<string, string>;
+  true_value?: string;
+  false_value?: string;
+};
+
 export type ComposerCommandExecution =
   | { type: "frontend"; action: string }
   | { type: "model_command"; action: string }
@@ -781,6 +792,7 @@ export type ComposerCommandItem = {
   enabled?: boolean;
   active?: boolean;
   args?: ComposerCommandArg[];
+  template?: ComposerCommandTemplate;
   execution: ComposerCommandExecution;
 };
 

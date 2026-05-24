@@ -30,7 +30,7 @@ class EdgeHazeSettings:
     opacity: float = 0.36
     edge_width: int = 150
     animation_speed: float = 1.0
-    linger_seconds: float = 3.0
+    linger_seconds: float = 6.0
 
 
 class ComputerUseEdgeHazeManager:
@@ -255,7 +255,9 @@ class ComputerUseEdgeHazeManager:
 
     def _deadline_seconds(self, *, active: bool) -> float:
         if self._sequence_id != _STANDALONE_SEQUENCE_ID:
-            return _SEQUENCE_IDLE_SECONDS
+            if active:
+                return _SEQUENCE_IDLE_SECONDS
+            return max(0.0, float(self.settings().linger_seconds))
         if active:
             return max(1.0, float(self.settings().linger_seconds))
         return max(0.0, float(self.settings().linger_seconds))

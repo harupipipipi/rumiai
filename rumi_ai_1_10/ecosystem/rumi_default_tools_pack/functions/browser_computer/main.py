@@ -60,10 +60,16 @@ def _payload_with_context_defaults(action, payload, context):
     if action.startswith("computer.") and action not in {"computer.windows", "computer.apps"}:
         target_app = context.get("computer_use_target_app")
         target_title = context.get("computer_use_target_title")
+        target_monitor = context.get("computer_use_target_monitor")
+        target_display = context.get("computer_use_target_display")
         if isinstance(target_app, str) and target_app.strip():
             payload.setdefault("app", target_app.strip())
         if isinstance(target_title, str) and target_title.strip():
             payload.setdefault("title", target_title.strip())
+        if isinstance(target_monitor, (str, int)) and str(target_monitor).strip():
+            payload.setdefault("monitor_id", str(target_monitor).strip())
+        if isinstance(target_display, (str, int)) and str(target_display).strip():
+            payload.setdefault("display_id", str(target_display).strip())
     return payload
 
 

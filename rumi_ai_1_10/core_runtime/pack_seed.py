@@ -93,9 +93,13 @@ def ensure_managed_defaultspack_installed() -> dict[str, Any]:
 
 
 def ensure_seed_pack_installed(pack_id: str) -> dict[str, Any]:
+    seed_dir, source = _seed_source_for_pack(pack_id)
     existing = current_pointer_target(pack_id)
     if existing is not None:
         current = read_current_pointer(pack_id) or {}
+        seed_upgrade = _seed_upgrade_candidate(pack_id, current, seed_dir, managed_dir=MANAGED_PACKS_DIR)
+        if seed_upgrade is not None:
+            return install_seed_pack(pack_id, seed_upgrade, MANAGED_PACKS_DIR, source=source)
         return {
             "installed": False,
             "pack_id": pack_id,
@@ -104,14 +108,55 @@ def ensure_seed_pack_installed(pack_id: str) -> dict[str, Any]:
             "reason": "current_valid",
         }
 
-    seed_dir = PACK_SEEDS_DIR / pack_id
-    source = "seed"
-    if not seed_dir.is_dir():
-        seed_dir = BUNDLED_LEGACY_ECOSYSTEM_DIR / pack_id
-        source = "legacy_seed_migration"
     if not seed_dir.is_dir():
         raise PackSeedError(f"Seed pack not found for {pack_id}")
     return install_seed_pack(pack_id, seed_dir, MANAGED_PACKS_DIR, source=source)
+
+
+def _seed_source_for_pack(pack_id: str) -> tuple[Path, str]:
+    seed_dir = PACK_SEEDS_DIR / pack_id
+    if seed_dir.is_dir():
+        return seed_dir, "seed"
+    return BUNDLED_LEGACY_ECOSYSTEM_DIR / pack_id, "legacy_seed_migration"
+
+
+def _seed_upgrade_candidate(
+    pack_id: str,
+    current: Mapping[str, Any],
+    seed_dir: Path,
+    *,
+    managed_dir: Path,
+) -> Path | None:
+    if not seed_dir.is_dir():
+        return None
+    current_version = str(current.get("version") or "")
+    if not current_version:
+        return None
+    record = _read_install_record(pack_id, managed_dir)
+    if record.get("source") not in {"seed", "legacy_seed_migration"}:
+        return None
+    if record.get("pack_id") != pack_id or str(record.get("version") or "") != current_version:
+        return None
+    eco_json, pack_subdir = find_ecosystem_json(seed_dir)
+    if eco_json is None or pack_subdir is None:
+        return None
+    manifest = _read_json(pack_subdir / "rumi-pack.json")
+    ecosystem = _read_json(eco_json)
+    declared_id = str((manifest or {}).get("pack_id") or ecosystem.get("pack_id") or pack_id)
+    if declared_id != pack_id:
+        raise PackSeedError(f"Seed pack id mismatch: expected {pack_id}, got {declared_id}")
+    seed_version = _seed_version(manifest, ecosystem)
+    _validate_version_path(seed_version)
+    return seed_dir if _version_newer(seed_version, current_version) else None
+
+
+def _read_install_record(pack_id: str, managed_dir: Path) -> dict[str, Any]:
+    record_path = managed_dir / pack_id / "install_record.json"
+    try:
+        data = json.loads(record_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+        return {}
+    return data if isinstance(data, dict) else {}
 
 
 def install_seed_pack(
@@ -180,6 +225,24 @@ def _validate_version_path(version: str) -> None:
     rel = Path(version)
     if rel.is_absolute() or ".." in rel.parts or "/" in version or "\\" in version or "\x00" in version:
         raise PackSeedError(f"Unsafe pack version: {version}")
+
+
+def _version_newer(latest: str, current: str) -> bool:
+    return _version_tuple(latest) > _version_tuple(current)
+
+
+def _version_tuple(version: str) -> tuple[int, int, int]:
+    clean = str(version or "").strip().removeprefix("v").split("-", 1)[0].split("+", 1)[0]
+    parts = clean.split(".")
+    if len(parts) != 3:
+        return (0, 0, 0)
+    parsed: list[int] = []
+    for part in parts:
+        try:
+            parsed.append(int(part))
+        except ValueError:
+            parsed.append(0)
+    return (parsed[0], parsed[1], parsed[2])
 
 
 def _copy_seed_tree(src: Path, dst: Path) -> None:
