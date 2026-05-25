@@ -17,6 +17,7 @@ import {
   setStartupProfileNodeOverride,
   showAppWindow,
 } from './api.ts';
+import { RUMI_DISPLAY_VERSION } from './version.ts';
 
 class MemoryStorage {
   private readonly values = new Map<string, string>();
@@ -101,7 +102,7 @@ function installBrowser(href: string): MemoryStorage {
             tauriDesktopInfoCount += 1;
             return {
               app_name: 'Rumi AI',
-              display_version: 'beta 1.0.0',
+              display_version: RUMI_DISPLAY_VERSION,
               viewer_version: '1.0.0-beta.1',
               build_channel: 'beta',
               platform: 'macos',
@@ -421,7 +422,7 @@ test('fetchDesktopSystemInfo reads viewer version and macOS permissions from Tau
   const info = await fetchDesktopSystemInfo();
 
   assert.equal(tauriDesktopInfoCount, 1);
-  assert.equal(info?.display_version, 'beta 1.0.0');
+  assert.equal(info?.display_version, RUMI_DISPLAY_VERSION);
   assert.equal(info?.viewer_version, '1.0.0-beta.1');
   assert.equal(info?.permissions[0]?.id, 'accessibility');
   assert.equal(info?.permissions[0]?.granted, true);

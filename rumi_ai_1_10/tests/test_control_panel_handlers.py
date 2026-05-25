@@ -14,6 +14,7 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_REPO_ROOT))
 
 from core_runtime.api.control_panel_handlers import ControlPanelHandlersMixin
+from core_runtime.app_version import APP_DISPLAY_VERSION
 import core_runtime.api.control_panel_handlers as control_panel_handlers
 
 
@@ -119,8 +120,8 @@ class TestPanelGetVersion(unittest.TestCase):
     def test_version_returns_required_keys(self):
         handler = _FakeHandler()
         result = handler._panel_get_version()
-        self.assertEqual(result["display_version"], "beta 1.0.0")
-        self.assertEqual(result["app_version"], "beta 1.0.0")
+        self.assertEqual(result["display_version"], APP_DISPLAY_VERSION)
+        self.assertEqual(result["app_version"], APP_DISPLAY_VERSION)
         self.assertIn("kernel_version", result)
         self.assertIn("python_version", result)
         self.assertIn("platform", result)

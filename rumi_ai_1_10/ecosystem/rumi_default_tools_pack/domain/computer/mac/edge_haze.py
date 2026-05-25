@@ -18,6 +18,7 @@ _HEX_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
 _LEASE_SCHEMA = "rumi.edge_haze_lease.v1"
 _STANDALONE_SEQUENCE_ID = "standalone"
 _SEQUENCE_IDLE_SECONDS = 120.0
+_STANDALONE_ACTIVE_SECONDS = 30.0
 _EDGE_HAZE_BINARY_NAME = "edge_haze"
 _EDGE_HAZE_BUNDLED_REL = Path("bundled") / "helpers" / "edge_haze" / _EDGE_HAZE_BINARY_NAME
 
@@ -310,6 +311,8 @@ class ComputerUseEdgeHazeManager:
             if active:
                 return _SEQUENCE_IDLE_SECONDS
             return max(0.0, float(self.settings().linger_seconds))
+        if active:
+            return max(_STANDALONE_ACTIVE_SECONDS, float(self.settings().linger_seconds))
         return max(0.0, float(self.settings().linger_seconds))
 
     def _write_lease_for_pid(self, pid: int, *, action: str, active: bool) -> None:

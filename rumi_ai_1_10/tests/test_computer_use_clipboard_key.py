@@ -41,10 +41,32 @@ def test_computer_clipboard_read_write_and_clear(tmp_path, monkeypatch):
     controller = BrowserComputerController(artifact_root=tmp_path)
 
     read = controller.run("clipboard", {}, yolo_mode=True)
+    full_read = controller.run("clipboard", {"include_content": True}, yolo_mode=True)
     write = controller.run("clipboard_write", {"content": "new text"}, yolo_mode=True)
     clear = controller.run("clipboard_clear", {}, yolo_mode=True)
 
-    assert read["content"] == "clip text"
+    assert read["content_preview"] == "clip text"
+    assert read["content_included"] is False
+    assert "content" not in read
+    assert full_read["content"] == "clip text"
+    assert full_read["content_included"] is True
     assert write["written"] is True
     assert clear["cleared"] is True
     assert writes == ["new text", ""]
+
+
+def test_computer_clipboard_read_requires_explicit_full_content_approval(tmp_path, monkeypatch):
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+
+    monkeypatch.setattr(BrowserComputerController, "_system_clipboard_read", staticmethod(lambda: "secret-token-value"))
+
+    controller = BrowserComputerController(artifact_root=tmp_path)
+
+    preview_approval = controller.run("clipboard", {}, yolo_mode=False)
+    full_approval = controller.run("clipboard", {"include_content": True}, yolo_mode=False)
+
+    assert preview_approval["requires_approval"] is True
+    assert preview_approval["payload"]["clipboard_access"] == "preview_only"
+    assert "short preview" in preview_approval["approval_warning"]
+    assert full_approval["payload"]["clipboard_access"] == "full_content"
+    assert "full system clipboard text" in full_approval["approval_warning"]

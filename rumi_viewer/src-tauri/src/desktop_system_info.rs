@@ -1,7 +1,5 @@
 use serde::Serialize;
 
-pub const RUMI_DISPLAY_VERSION: &str = "beta 1.0.0";
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct DesktopPermissionStatus {
     pub id: String,
@@ -29,15 +27,25 @@ pub fn get_desktop_system_info() -> DesktopSystemInfo {
 }
 
 pub fn collect_desktop_system_info() -> DesktopSystemInfo {
+    let viewer_version = env!("CARGO_PKG_VERSION").to_string();
     DesktopSystemInfo {
         app_name: "Rumi AI".to_string(),
-        display_version: RUMI_DISPLAY_VERSION.to_string(),
-        viewer_version: env!("CARGO_PKG_VERSION").to_string(),
+        display_version: display_version_from_package_version(&viewer_version),
+        viewer_version,
         build_channel: "beta".to_string(),
         platform: std::env::consts::OS.to_string(),
         platform_release: platform_release(),
         permissions: collect_permissions(),
     }
+}
+
+fn display_version_from_package_version(version: &str) -> String {
+    if let Some((base, pre_release)) = version.split_once('-') {
+        if let Some(label) = pre_release.split('.').next().filter(|value| !value.is_empty()) {
+            return format!("{label} {base}");
+        }
+    }
+    version.to_string()
 }
 
 fn platform_release() -> String {
@@ -159,7 +167,8 @@ mod tests {
     #[test]
     fn reports_beta_display_version() {
         let info = collect_desktop_system_info();
-        assert_eq!(info.display_version, "beta 1.0.0");
+        assert_eq!(info.display_version, display_version_from_package_version(&info.viewer_version));
+        assert_eq!(display_version_from_package_version("1.2.3-beta.4"), "beta 1.2.3");
         assert!(!info.viewer_version.is_empty());
     }
 

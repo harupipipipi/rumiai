@@ -17,6 +17,8 @@ import base64
 from pathlib import Path
 from typing import Any
 
+_CLIPBOARD_PREVIEW_CHARS = 500
+
 
 def _key_press_count(payload: dict[str, Any]) -> int:
     for key in ("count", "times", "repeat"):
@@ -1612,15 +1614,33 @@ class BrowserComputerController:
         return result
 
     def _clipboard_read(self, payload: dict[str, Any], *, yolo_mode: bool) -> dict[str, Any]:
-        if not (yolo_mode or self._consume_approval(payload, "computer.clipboard.read", self._safe_payload(payload))):
-            return self._approval_required("computer.clipboard.read", self._safe_payload(payload))
+        include_content = self._truthy(payload.get("include_content")) or self._truthy(payload.get("full_content"))
+        approval_payload = self._safe_payload(
+            {
+                **payload,
+                "include_content": include_content,
+                "clipboard_access": "full_content" if include_content else "preview_only",
+            }
+        )
+        if not (yolo_mode or self._consume_approval(payload, "computer.clipboard.read", approval_payload)):
+            return self._approval_required("computer.clipboard.read", approval_payload)
         content = self._system_clipboard_read()
-        return {
+        result: dict[str, Any] = {
             "action": "computer.clipboard.read",
             "format": "text/plain",
-            "content": content,
+            "content_preview": self._clipboard_preview(content),
+            "content_included": include_content,
             "length": len(content),
+            "truncated": len(content) > _CLIPBOARD_PREVIEW_CHARS,
         }
+        if include_content:
+            result["content"] = content
+        else:
+            result["content_note"] = (
+                "Full clipboard content is omitted by default; retry with include_content=true "
+                "after explicit approval when the model needs the exact text."
+            )
+        return result
 
     def _clipboard_write(self, action: str, payload: dict[str, Any], *, yolo_mode: bool) -> dict[str, Any]:
         content = "" if action == "computer.clipboard.clear" else str(
@@ -1669,6 +1689,12 @@ class BrowserComputerController:
             )
             return
         raise RuntimeError("Clipboard is supported on macOS and Windows.")
+
+    @staticmethod
+    def _clipboard_preview(content: str) -> str:
+        if len(content) <= _CLIPBOARD_PREVIEW_CHARS:
+            return content
+        return content[:_CLIPBOARD_PREVIEW_CHARS] + "..."
 
     @staticmethod
     def _should_capture_after_action(action: str, payload: dict[str, Any]) -> bool:
@@ -4216,7 +4242,7 @@ $proc = Get-Process -Id $procId -ErrorAction SilentlyContinue
 
     def _approval_required(self, action: str, payload: dict[str, Any]) -> dict[str, Any]:
         token = self._issue_approval(action, payload)
-        return {
+        response = {
             "action": action,
             "requires_approval": True,
             "approval_token": token,
@@ -4224,6 +4250,24 @@ $proc = Get-Process -Id $procId -ErrorAction SilentlyContinue
             "approval_hint": "Repeat the same action with payload.approval_token after an explicit user confirmation.",
             "payload": payload,
         }
+        warning = self._approval_warning(action, payload)
+        if warning:
+            response["approval_warning"] = warning
+        return response
+
+    @staticmethod
+    def _approval_warning(action: str, payload: dict[str, Any]) -> str:
+        if action == "computer.clipboard.read":
+            if payload.get("include_content") is True:
+                return (
+                    "This approval returns the full system clipboard text to the model and tool result. "
+                    "Do this only when the clipboard contents are safe to share."
+                )
+            return (
+                "This approval reads the system clipboard and returns only a short preview by default. "
+                "Full content requires include_content=true."
+            )
+        return ""
 
     def _issue_approval(self, action: str, payload: dict[str, Any]) -> str:
         approvals = self._read_approvals()

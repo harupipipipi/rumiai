@@ -21,6 +21,7 @@ import type {
   Profile,
   VersionInfo,
 } from '../store';
+import { RUMI_DISPLAY_VERSION } from './version';
 
 // ============================================================
 // Packs
@@ -113,7 +114,7 @@ export function transformProfile(api: ApiProfile): Profile {
 
 export function transformVersion(api: ApiVersion): VersionInfo {
   return {
-    app: api.display_version || api.app_version || 'beta 1.0.0',
+    app: api.display_version || api.app_version || RUMI_DISPLAY_VERSION,
     kernel: api.kernel_version,
     python: api.python_version,
     launcher: api.platform ? `${api.platform} ${api.platform_release}`.trim() : 'unknown',

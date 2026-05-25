@@ -44,6 +44,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from core_runtime.app_version import APP_DISPLAY_VERSION
 from ._helpers import _log_internal_error, _SAFE_ERROR_MSG
 
 try:
@@ -52,7 +53,6 @@ except ImportError:
     _KERNEL_VERSION = "1.10.0"
 
 logger = logging.getLogger(__name__)
-_APP_DISPLAY_VERSION = "beta 1.0.0"
 
 # Flow ID バリデーション: 英数字・アンダースコア・ドット・ハイフン、1〜128文字
 _RE_FLOW_ID = re.compile(r'^[a-zA-Z0-9_.\-]{1,128}$')
@@ -891,8 +891,8 @@ class ControlPanelHandlersMixin:
         """GET /api/panel/version — バージョン情報"""
         import platform
         return {
-            "app_version": _APP_DISPLAY_VERSION,
-            "display_version": _APP_DISPLAY_VERSION,
+            "app_version": APP_DISPLAY_VERSION,
+            "display_version": APP_DISPLAY_VERSION,
             "kernel_version": _KERNEL_VERSION,
             "python_version": platform.python_version(),
             "platform": platform.system(),

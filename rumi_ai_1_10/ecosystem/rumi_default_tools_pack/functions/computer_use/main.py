@@ -137,6 +137,11 @@ def run(context, args):
         "key_combo",
         "dry_run",
         "approval_token",
+        "computer_use_haze_sequence_id",
+        "computer_use_sequence_id",
+        "run_id",
+        "request_id",
+        "conversation_turn_id",
     ):
         if key in raw:
             payload[key] = raw.get(key)
