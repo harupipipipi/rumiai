@@ -363,6 +363,7 @@ class FrontendRegistry:
             schema = tool.get("schema", {}).get("parameters", {})
             execution_type = tool.get("execution", {}).get("type", "local")
             ui = dict(tool.get("ui", {})) if isinstance(tool.get("ui"), dict) else {}
+            label = self._tool_display_label(tool, ui)
             risk = str(tool.get("risk") or tool.get("metadata", {}).get("risk") or "low").strip().lower()
             tags = [str(tag) for tag in tool.get("tags", []) if str(tag)]
             if risk == "high" and "danger" not in tags:
@@ -370,7 +371,7 @@ class FrontendRegistry:
             items.append(
                 {
                     "id": tool.get("tool_id", tool.get("name", "tool")),
-                    "label": tool.get("name", tool.get("tool_id", "tool")),
+                    "label": label,
                     "category": "tool",
                     "description": tool.get("summary", ""),
                     "badge": "Dynamic" if execution_type == "dynamic" else None,
@@ -409,7 +410,7 @@ class FrontendRegistry:
                     "origin": {"kind": "tool_registry", "path": "domain/tool/registry.py"},
                     "panel": {
                         "kind": "tool_settings",
-                        "title": tool.get("name", tool.get("tool_id", "tool")),
+                        "title": label,
                         "fields": self._tool_settings_fields(ui),
                         "notes": [
                             "Tool call arguments stay in ToolRegistry schema and are not shown as settings.",
@@ -445,6 +446,19 @@ class FrontendRegistry:
         items.extend(self._hydrate_sidebar_items(self._config_list(extensions, "sidebar_items")))
 
         return sorted(self._dedupe_by_key(items, "id"), key=self._sidebar_item_sort_key)
+
+    @staticmethod
+    def _tool_display_label(tool: dict[str, Any], ui: dict[str, Any]) -> str:
+        for value in (
+            tool.get("display_name"),
+            ui.get("composer_label"),
+            tool.get("name"),
+            tool.get("tool_id"),
+        ):
+            label = str(value or "").strip()
+            if label:
+                return label
+        return "tool"
 
     def _skill_items(self) -> list[dict[str, Any]]:
         try:
