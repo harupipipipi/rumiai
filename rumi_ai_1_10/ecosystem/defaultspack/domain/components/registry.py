@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import json
 import threading
 from pathlib import Path
 from typing import Iterable
@@ -75,9 +76,48 @@ def build_domain_component_roots(
             if _is_dir(sibling) and _is_file(sibling / "ecosystem.json") and _is_dir(sibling / "domain"):
                 _append_unique(roots, sibling / "domain")
 
+    for managed_pack in _managed_current_pack_roots():
+        if managed_pack == pack_root:
+            continue
+        if _is_dir(managed_pack / "domain"):
+            _append_unique(roots, managed_pack / "domain")
+
     _append_unique(roots, pack_root / "user_data" / "shared" / "domain_components")
     for root in extra_roots or ():
         _append_unique(roots, root)
+    return roots
+
+
+def _managed_current_pack_roots() -> list[Path]:
+    user_data = os.environ.get("RUMI_USER_DATA")
+    if not user_data:
+        return []
+    packs_dir = Path(user_data) / "packs"
+    if not _is_dir(packs_dir):
+        return []
+    roots: list[Path] = []
+    for pointer in sorted(packs_dir.glob("*/current.json")):
+        try:
+            data = json.loads(pointer.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+            continue
+        if not isinstance(data, dict):
+            continue
+        rel = data.get("path")
+        pack_id = data.get("pack_id")
+        if not isinstance(rel, str) or not rel or not isinstance(pack_id, str) or not pack_id:
+            continue
+        rel_path = Path(rel)
+        if rel_path.is_absolute() or ".." in rel_path.parts or "\x00" in rel:
+            continue
+        pack_root = pointer.parent
+        target = pack_root / rel_path
+        try:
+            target.resolve().relative_to(pack_root.resolve())
+        except (OSError, ValueError):
+            continue
+        if _is_file(target / "ecosystem.json"):
+            roots.append(target)
     return roots
 
 

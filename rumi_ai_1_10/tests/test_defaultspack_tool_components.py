@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -48,6 +49,66 @@ def test_tool_registry_loads_manifest_backed_tool_components():
     assert browser_tool["requires_approval"] is True
     assert browser_tool["metadata"]["component_id"] == "browser_computer"
     assert browser_tool["metadata"]["source_pack_id"] == "rumi_default_tools_pack"
+
+
+def test_tool_registry_loads_managed_current_support_pack_tools(tmp_path, monkeypatch):
+    user_data = tmp_path / "user_data"
+    defaultspack_root = user_data / "packs" / "defaultspack" / "versions" / "2.0.0"
+    tools_root = user_data / "packs" / "rumi_default_tools_pack" / "versions" / "1.0.0"
+    defaultspack_root.mkdir(parents=True)
+    (defaultspack_root / "ecosystem.json").write_text(
+        json.dumps({"pack_id": "defaultspack", "version": "2.0.0"}),
+        encoding="utf-8",
+    )
+    manifest_dir = tools_root / "tools" / "computer_use"
+    manifest_dir.mkdir(parents=True)
+    (tools_root / "ecosystem.json").write_text(
+        json.dumps({"pack_id": "rumi_default_tools_pack", "version": "1.0.0"}),
+        encoding="utf-8",
+    )
+    (manifest_dir / "manifest.json").write_text(
+        json.dumps(
+            {
+                "id": "computer_use",
+                "description": "Managed support pack computer tool",
+                "config": {
+                    "tool_id": "computer_use",
+                    "name": "computer_use",
+                    "summary": "Use visible-screen computer actions.",
+                    "execution": {
+                        "type": "rumi_function",
+                        "qualified_name": "rumi_default_tools_pack:computer_use",
+                    },
+                    "tool_category": "desktop",
+                    "risk": "high",
+                    "requires_approval": True,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    (user_data / "packs" / "rumi_default_tools_pack" / "current.json").write_text(
+        json.dumps(
+            {
+                "schema": "rumi.pack_current.v1",
+                "pack_id": "rumi_default_tools_pack",
+                "version": "1.0.0",
+                "path": "versions/1.0.0",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setenv("RUMI_USER_DATA", str(user_data))
+    monkeypatch.setattr(ToolRegistry, "_pack_root", lambda self: defaultspack_root)
+    ToolRegistry._instance = None
+    registry = ToolRegistry()
+
+    computer_use = registry.get("computer_use")
+    assert computer_use is not None
+    assert computer_use["metadata"]["source_pack_id"] == "rumi_default_tools_pack"
+    assert computer_use["requires_approval"] is True
+    ToolRegistry._instance = None
 
 
 def test_manifest_backed_tool_components_keep_approval_policy_enforced():

@@ -347,3 +347,29 @@ class TestLaunchAppArguments:
         meta = json.loads((apps_dir / "defaultspack.json").read_text(encoding="utf-8"))
         assert meta["pack_dir"] == str(pack_dir)
         assert mock_popen.call_args.kwargs["cwd"] == str(pack_dir)
+
+    def test_macos_shortcut_exports_rumi_user_data(self, tmp_path, monkeypatch):
+        user_data = tmp_path / "user-data"
+        pack_dir = tmp_path / "pack"
+        pack_dir.mkdir()
+        pack_shell = tmp_path / "pack-shell"
+        pack_shell.write_text("#!/bin/sh\n", encoding="utf-8")
+        pack_shell.chmod(0o755)
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("RUMI_USER_DATA", str(user_data))
+
+        manager = DesktopAppManager(repo_dir=str(tmp_path / "repo"))
+        shortcut = manager._create_macos_app(
+            "defaultspack",
+            str(pack_shell),
+            str(pack_dir),
+            {
+                "command": "python defaultspack/desktop_app.py",
+                "window": {"title": "Rumi Defaultspack"},
+                "env": {"RUMI_DEFAULTSPACK_PORT": "8766"},
+            },
+        )
+
+        launch_script = Path(shortcut, "Contents", "MacOS", "launch").read_text(encoding="utf-8")
+        assert f"export RUMI_USER_DATA={user_data}" in launch_script
+        assert 'export PYTHONPATH="$APP_ROOT:${PYTHONPATH:-}"' in launch_script

@@ -485,6 +485,12 @@ class DesktopAppManager:
         )
         token_path = _desktop_api_token_path()
         token_file = str(token_path) if token_path is not None else ""
+        user_data = _runtime_user_data_dir()
+        user_data_export = (
+            f"export RUMI_USER_DATA={shlex.quote(str(user_data))}\n"
+            if user_data is not None
+            else ""
+        )
         venv_python = _runtime_python_for_app()
         app_root = _default_repo_dir()
         kernel_cmd = _kernel_command_for_runtime()
@@ -499,6 +505,7 @@ class DesktopAppManager:
             f'KERNEL_COMMAND={shlex.quote(kernel_cmd)}\n'
             f'TOKEN_FILE={shlex.quote(token_file)}\n'
             f'export PATH={shlex.quote(str(Path(venv_python).parent))}:$PATH\n'
+            f'{user_data_export}'
             'export PYTHONPATH="$APP_ROOT:${PYTHONPATH:-}"\n'
             f'{env_exports}\n'
             'if [ -z "${RUMI_API_TOKEN:-}" ]; then\n'

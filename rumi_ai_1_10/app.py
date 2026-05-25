@@ -195,11 +195,11 @@ def main():
     # Runtime packs must load from the managed user-data store.  The bundled
     # defaultspack is only a seed/fallback and is copied before discovery.
     try:
-        from core_runtime.pack_seed import ensure_managed_defaultspack_installed
+        from core_runtime.pack_seed import ensure_official_seed_packs_installed
 
-        ensure_managed_defaultspack_installed()
+        ensure_official_seed_packs_installed()
     except Exception:
-        _logger.error("Failed to install managed defaultspack seed", exc_info=True)
+        _logger.error("Failed to install managed official pack seeds", exc_info=True)
         raise
 
     # --- host_execution ガード (W19-A) ---

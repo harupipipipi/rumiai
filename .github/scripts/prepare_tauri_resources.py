@@ -51,6 +51,7 @@ GENERATED_RESOURCE_DIRS = (
 )
 EDGE_HAZE_SOURCE = Path("ecosystem/rumi_default_tools_pack/domain/computer/mac/EdgeHaze.swift")
 EDGE_HAZE_BUNDLED_REL = Path("bundled/helpers/edge_haze/edge_haze")
+PACK_SEED_IDS = ("defaultspack", "rumi_default_tools_pack")
 UV_PINNED_VERSION = "0.11.14"
 UV_SHA256_BY_TARGET = {
     "aarch64-apple-darwin": "4333af5c0730d94323a7819bbdf87ce92dd07fc857d67fff0059e0fca31b5c02",
@@ -154,24 +155,36 @@ def copy_generated_resource_dirs(source_root: Path, dest_root: Path) -> int:
     return copied
 
 
-def stage_defaultspack_seed(source_root: Path, dest_root: Path) -> int:
-    src_dir = source_root / "ecosystem" / "defaultspack"
-    if not src_dir.exists():
-        return 0
-    dest_seed = dest_root / "pack_seeds" / "defaultspack"
-    if dest_seed.exists():
-        shutil.rmtree(dest_seed)
+def stage_pack_seeds(source_root: Path, dest_root: Path, pack_ids: tuple[str, ...] = PACK_SEED_IDS) -> int:
     copied = 0
-    for src in src_dir.rglob("*"):
-        if not src.is_file():
+    for pack_id in pack_ids:
+        src_dir = source_root / "ecosystem" / pack_id
+        if not src_dir.exists():
             continue
-        rel_under_app = src.relative_to(source_root).as_posix()
-        if should_skip_source_rel(rel_under_app):
-            continue
-        rel_under_seed = src.relative_to(src_dir)
-        copy_file(src, dest_seed / rel_under_seed)
-        copied += 1
+        dest_seed = dest_root / "pack_seeds" / pack_id
+        if dest_seed.exists():
+            shutil.rmtree(dest_seed)
+        for src in src_dir.rglob("*"):
+            if not src.is_file():
+                continue
+            rel_under_app = src.relative_to(source_root).as_posix()
+            if should_skip_source_rel(rel_under_app):
+                continue
+            rel_under_seed = src.relative_to(src_dir)
+            copy_file(src, dest_seed / rel_under_seed)
+            copied += 1
     return copied
+
+
+def stage_defaultspack_seed(source_root: Path, dest_root: Path) -> int:
+    """Backward-compatible wrapper used by older tests/scripts."""
+    return stage_pack_seeds(source_root, dest_root, ("defaultspack",))
+
+
+def stage_official_pack_seeds(source_root: Path, dest_root: Path) -> int:
+    if (dest_root / "pack_seeds").exists():
+        shutil.rmtree(dest_root / "pack_seeds")
+    return stage_pack_seeds(source_root, dest_root)
 
 
 def is_windows_target(target: str) -> bool:
@@ -403,6 +416,7 @@ def validate_bundle(dest_root: Path, require_runtime_tools: bool, target: str | 
         Path("requirements.txt"),
         Path("core_runtime/core_pack/core_control_panel/web/index.html"),
         Path("pack_seeds/defaultspack/ecosystem.json"),
+        Path("pack_seeds/rumi_default_tools_pack/ecosystem.json"),
         Path("ecosystem/defaultspack/ecosystem.json"),
         Path("ecosystem/defaultspack/ui/shell.html"),
         Path("ecosystem/defaultspack/ui/shell-app.js"),
@@ -479,7 +493,7 @@ def main() -> int:
 
     tracked_count = copy_tracked_runtime_files(repo_root, source_root, dest_root)
     generated_count = copy_generated_resource_dirs(source_root, dest_root)
-    seed_count = stage_defaultspack_seed(source_root, dest_root)
+    seed_count = stage_official_pack_seeds(source_root, dest_root)
     staged_haze = stage_edge_haze_helper(
         source_root,
         dest_root,

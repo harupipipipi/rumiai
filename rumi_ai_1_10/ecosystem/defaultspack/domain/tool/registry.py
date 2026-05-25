@@ -88,12 +88,59 @@ class ToolRegistry:
 
     def _installed_pack_roots(self) -> list[Path]:
         ecosystem_dir = self._ecosystem_dir()
-        if not ecosystem_dir.is_dir():
-            return [self._pack_root()]
         roots: list[Path] = []
+
+        def append_unique(path: Path) -> None:
+            try:
+                resolved = path.resolve()
+            except OSError:
+                resolved = path
+            if all(existing.resolve() != resolved for existing in roots):
+                roots.append(path)
+
+        if not ecosystem_dir.is_dir():
+            append_unique(self._pack_root())
+            for path in self._managed_current_pack_roots():
+                append_unique(path)
+            return roots
         for path in sorted(ecosystem_dir.iterdir()):
             if path.is_dir() and (path / "ecosystem.json").is_file():
-                roots.append(path)
+                append_unique(path)
+        for path in self._managed_current_pack_roots():
+            append_unique(path)
+        return roots
+
+    @staticmethod
+    def _managed_current_pack_roots() -> list[Path]:
+        user_data = os.environ.get("RUMI_USER_DATA")
+        if not user_data:
+            return []
+        packs_dir = Path(user_data) / "packs"
+        if not packs_dir.is_dir():
+            return []
+        roots: list[Path] = []
+        for pointer in sorted(packs_dir.glob("*/current.json")):
+            try:
+                data = json.loads(pointer.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+                continue
+            if not isinstance(data, dict):
+                continue
+            rel = data.get("path")
+            pack_id = data.get("pack_id")
+            if not isinstance(rel, str) or not rel or not isinstance(pack_id, str) or not pack_id:
+                continue
+            rel_path = Path(rel)
+            if rel_path.is_absolute() or ".." in rel_path.parts or "\x00" in rel:
+                continue
+            pack_root = pointer.parent
+            target = pack_root / rel_path
+            try:
+                target.resolve().relative_to(pack_root.resolve())
+            except (OSError, ValueError):
+                continue
+            if (target / "ecosystem.json").is_file():
+                roots.append(target)
         return roots
 
     def _load_pack_tools(self):

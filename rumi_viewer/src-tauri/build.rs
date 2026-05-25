@@ -9,6 +9,7 @@ const GENERATED_RESOURCE_DIRS: &[&str] = &[
     "ecosystem/defaultspack/ui",
     "bundled",
 ];
+const PACK_SEED_IDS: &[&str] = &["defaultspack", "rumi_default_tools_pack"];
 
 fn main() {
     println!("cargo:rerun-if-changed=splash/index.html");
@@ -40,7 +41,7 @@ fn stage_runtime_bundle() -> io::Result<()> {
         copy_runtime_tree(&runtime_root, &staged_root, &runtime_root)?;
     }
     copy_generated_resource_dirs(&runtime_root, &staged_root)?;
-    stage_defaultspack_seed(&runtime_root, &staged_root)?;
+    stage_official_pack_seeds(&runtime_root, &staged_root)?;
 
     let bundled_src = project_dir.join("bundled");
     if bundled_src.exists() {
@@ -260,16 +261,19 @@ fn copy_generated_resource_dirs(runtime_root: &Path, staged_root: &Path) -> io::
     Ok(())
 }
 
-fn stage_defaultspack_seed(runtime_root: &Path, staged_root: &Path) -> io::Result<()> {
-    let source_dir = runtime_root.join("ecosystem").join("defaultspack");
-    if !source_dir.exists() {
-        return Ok(());
+fn stage_official_pack_seeds(runtime_root: &Path, staged_root: &Path) -> io::Result<()> {
+    let seed_root = staged_root.join("pack_seeds");
+    if seed_root.exists() {
+        clear_dir(&seed_root)?;
     }
-    let seed_dir = staged_root.join("pack_seeds").join("defaultspack");
-    if seed_dir.exists() {
-        clear_dir(&seed_dir)?;
+    for pack_id in PACK_SEED_IDS {
+        let source_dir = runtime_root.join("ecosystem").join(pack_id);
+        if !source_dir.exists() {
+            continue;
+        }
+        copy_dir_recursive_filtered(&source_dir, &seed_root.join(pack_id), runtime_root)?;
     }
-    copy_dir_recursive_filtered(&source_dir, &seed_dir, runtime_root)
+    Ok(())
 }
 
 fn copy_runtime_tree(src: &Path, dst: &Path, runtime_root: &Path) -> io::Result<()> {

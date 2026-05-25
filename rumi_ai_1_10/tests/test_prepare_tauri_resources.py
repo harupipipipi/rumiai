@@ -126,6 +126,7 @@ def test_validate_bundle_requires_edge_haze_helper_for_release_apple_target(tmp_
         Path("requirements.txt"),
         Path("core_runtime/core_pack/core_control_panel/web/index.html"),
         Path("pack_seeds/defaultspack/ecosystem.json"),
+        Path("pack_seeds/rumi_default_tools_pack/ecosystem.json"),
         Path("ecosystem/defaultspack/ecosystem.json"),
         Path("ecosystem/defaultspack/ui/shell.html"),
         Path("ecosystem/defaultspack/ui/shell-app.js"),

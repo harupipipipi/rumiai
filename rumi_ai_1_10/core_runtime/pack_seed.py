@@ -17,6 +17,7 @@ from .paths import (
 )
 
 CURRENT_SCHEMA = "rumi.pack_current.v1"
+OFFICIAL_SEED_PACK_IDS = ("defaultspack", "rumi_default_tools_pack")
 
 
 class PackSeedError(RuntimeError):
@@ -90,6 +91,14 @@ def write_current_pointer_atomic(
 
 def ensure_managed_defaultspack_installed() -> dict[str, Any]:
     return ensure_seed_pack_installed("defaultspack")
+
+
+def ensure_official_seed_packs_installed(pack_ids: tuple[str, ...] | None = None) -> list[dict[str, Any]]:
+    """Install bundled official seed packs that defaultspack depends on at runtime."""
+    results: list[dict[str, Any]] = []
+    for pack_id in pack_ids or OFFICIAL_SEED_PACK_IDS:
+        results.append(ensure_seed_pack_installed(pack_id))
+    return results
 
 
 def ensure_seed_pack_installed(pack_id: str) -> dict[str, Any]:

@@ -154,3 +154,19 @@ def test_legacy_seed_migration_copies_bundled_defaultspack(tmp_path, monkeypatch
 
     assert result["source"] == "legacy_seed_migration"
     assert (managed / "defaultspack" / "versions" / "2.0.0" / "ecosystem.json").is_file()
+
+
+def test_official_seed_packs_include_default_tools_pack(tmp_path, monkeypatch):
+    seed_root = tmp_path / "pack_seeds"
+    managed = tmp_path / "user_data" / "packs"
+    _write_pack(seed_root, pack_id="defaultspack", version="2.0.0")
+    _write_pack(seed_root, pack_id="rumi_default_tools_pack", version="1.0.0")
+    monkeypatch.setattr(pack_seed, "PACK_SEEDS_DIR", seed_root)
+    monkeypatch.setattr(pack_seed, "MANAGED_PACKS_DIR", managed)
+    monkeypatch.setattr(pack_seed, "BUNDLED_LEGACY_ECOSYSTEM_DIR", tmp_path / "ecosystem")
+
+    results = pack_seed.ensure_official_seed_packs_installed()
+
+    assert {item["pack_id"] for item in results} == {"defaultspack", "rumi_default_tools_pack"}
+    assert (managed / "defaultspack" / "current.json").is_file()
+    assert (managed / "rumi_default_tools_pack" / "current.json").is_file()
