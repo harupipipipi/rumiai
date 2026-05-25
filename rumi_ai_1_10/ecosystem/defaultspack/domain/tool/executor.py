@@ -259,7 +259,7 @@ class ToolExecutor:
             return None
         if bool(getattr(response, "success", False)):
             return None
-        if getattr(response, "error_type", "") != "caller_requires_denied":
+        if getattr(response, "error_type", "") not in {"caller_requires_denied", "requires_denied"}:
             return None
         qualified_name = str(request.get("qualified_name") or "")
         pack_id, _, function_id = qualified_name.partition(":")
@@ -472,7 +472,7 @@ class ToolExecutor:
         error = getattr(response, "error", None)
         if not success:
             if (
-                getattr(response, "error_type", None) in {"caller_requires_denied", "pack_not_approved"}
+                getattr(response, "error_type", None) in {"caller_requires_denied", "pack_not_approved", "requires_denied"}
                 and isinstance(tool_def, dict)
                 and _requires_approval(tool_def)
             ):

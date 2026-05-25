@@ -26,6 +26,43 @@ class TestDefaultspackGoogleProvider(unittest.TestCase):
 
         self.assertIn("google", providers)
 
+    def test_detect_available_providers_keeps_google_with_manifest_provider(self):
+        from domain.ai_client.providers import detect_available_providers
+
+        with patch.dict(
+            os.environ,
+            {
+                "GEMINI_API_KEY": "test-google-key",
+                "XIAOMI_MIMO_TOKEN_PLAN_SGP_API_KEY": "test-mimo-key",
+            },
+            clear=True,
+        ):
+            providers = detect_available_providers()
+
+        self.assertIn("xiaomi-token-plan-sgp", providers)
+        self.assertIn("google", providers)
+
+    def test_ai_client_resolves_google_when_manifest_provider_is_available(self):
+        from domain.ai_client.client import AIClient
+
+        AIClient._instance = None
+        try:
+            with patch.dict(
+                os.environ,
+                {
+                    "GEMINI_API_KEY": "test-google-key",
+                    "XIAOMI_MIMO_TOKEN_PLAN_SGP_API_KEY": "test-mimo-key",
+                },
+                clear=True,
+            ):
+                client = AIClient()
+                provider, model_name = client.resolve_provider("google/gemma-4-31b-it")
+
+            self.assertEqual(provider.__class__.__name__, "GoogleProvider")
+            self.assertEqual(model_name, "gemma-4-31b-it")
+        finally:
+            AIClient._instance = None
+
     def test_google_provider_prefers_google_api_key_when_both_are_set(self):
         from domain.ai_client.providers.google_provider import GoogleProvider
 

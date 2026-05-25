@@ -12,6 +12,7 @@ import { buildBuiltinPlacementManifests, filterPlacementCandidates, normalizePin
 import { selectedApisForModel, toggleModelApiRoute, updateModelApiRouteText } from "../lib/modelApiRoutes";
 import { settingsFieldSearchText, settingsSectionSearchText } from "../lib/settingsSearch";
 import type { SettingsModalRendererProps } from "./types";
+import type { DesktopPermissionStatus, DesktopSystemInfo } from "../lib/desktopSystemInfo";
 
 function formatReadonlyValue(value: unknown, fallback: unknown): string {
   const resolved = value ?? fallback ?? "";
@@ -23,6 +24,81 @@ function formatReadonlyValue(value: unknown, fallback: unknown): string {
 function colorFieldValue(value: unknown, fallback: unknown): string {
   const resolved = String(value ?? fallback ?? "#ffffff").trim();
   return /^#[0-9a-fA-F]{6}$/.test(resolved) ? resolved : "#ffffff";
+}
+
+function permissionStatusLabel(permission: DesktopPermissionStatus): string {
+  if (permission.granted === true || permission.status === "granted") return "Granted";
+  if (permission.granted === false || permission.status === "missing") return "Missing";
+  if (permission.status === "not_checked") return "Manual check";
+  if (permission.status === "unsupported") return "Unsupported";
+  return permission.status || "Unknown";
+}
+
+function permissionBadgeClass(permission: DesktopPermissionStatus): string {
+  if (permission.granted === true || permission.status === "granted") {
+    return "border-emerald-500/30 bg-emerald-500/10 text-emerald-300";
+  }
+  if (permission.granted === false || permission.status === "missing") {
+    return "border-rose-500/30 bg-rose-500/10 text-rose-300";
+  }
+  if (permission.status === "not_checked") {
+    return "border-amber-500/30 bg-amber-500/10 text-amber-200";
+  }
+  return "border-zinc-800 bg-zinc-900 text-zinc-400";
+}
+
+function SystemInfoPanel({ info }: { info?: DesktopSystemInfo | null }) {
+  if (!info) {
+    return (
+      <div className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-4 text-sm leading-6 text-zinc-400">
+        Rumi Viewer で開くと、macOS の Accessibility / Screen Recording などの現在の承認状態をここに表示します。
+      </div>
+    );
+  }
+  const versionRows = [
+    ["App", info.display_version],
+    ["Viewer", info.viewer_version],
+    ["Channel", info.build_channel],
+    ["Platform", [info.platform, info.platform_release].filter(Boolean).join(" ")],
+  ];
+  return (
+    <div className="space-y-4">
+      <div className="grid gap-3 sm:grid-cols-2">
+        {versionRows.map(([label, value]) => (
+          <div key={label} className="flex items-center justify-between gap-3 rounded-lg border border-zinc-800 bg-zinc-950/50 px-3 py-2.5">
+            <span className="text-xs text-zinc-500">{label}</span>
+            <span className="font-mono text-xs text-zinc-200">{value || "unknown"}</span>
+          </div>
+        ))}
+      </div>
+      <section className="space-y-3">
+        <div>
+          <h4 className="text-sm font-medium text-zinc-100">macOS Permissions</h4>
+          <p className="mt-1 text-xs text-zinc-500">Computer Use と画面確認に使う macOS 側の承認状態です。</p>
+        </div>
+        <div className="grid gap-3 lg:grid-cols-2">
+          {info.permissions.map((permission) => (
+            <div key={permission.id} className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-3">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-sm font-medium text-zinc-100">{permission.label}</div>
+                  <p className="mt-1 text-xs leading-5 text-zinc-500">{permission.detail}</p>
+                </div>
+                <span className={cn("shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-medium", permissionBadgeClass(permission))}>
+                  {permissionStatusLabel(permission)}
+                </span>
+              </div>
+              {permission.settings_hint && (
+                <p className="mt-3 rounded-md border border-zinc-800 bg-zinc-900/50 px-2.5 py-2 text-[11px] text-zinc-500">
+                  {permission.settings_hint}
+                </p>
+              )}
+            </div>
+          ))}
+        </div>
+      </section>
+    </div>
+  );
 }
 
 async function copyTextToClipboard(text: string): Promise<void> {
@@ -2337,6 +2413,7 @@ export function SettingsModalRenderer({
   previewsCount,
   settingsSections,
   settingsValues,
+  desktopSystemInfo,
   locale = "ja",
   onClose,
   onOpenSection,
@@ -2652,6 +2729,9 @@ export function SettingsModalRenderer({
                           : []}
                         onSettingChange={onSettingChange}
                       />
+                    )}
+                    {activeSection.id === "system_info" && (
+                      <SystemInfoPanel info={desktopSystemInfo} />
                     )}
                     <div className="grid gap-4 lg:grid-cols-2">
                       {visiblePrimaryFields.map(renderField)}

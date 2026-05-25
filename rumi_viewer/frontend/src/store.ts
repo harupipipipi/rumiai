@@ -27,6 +27,7 @@ import {
   transformProfile,
   transformVersion,
 } from './lib/transforms';
+import { RUMI_DISPLAY_VERSION } from './lib/version';
 
 export type Theme = 'Rumi' | 'Minimal' | 'Standard' | 'Rounded';
 const VALID_THEMES: Theme[] = ['Rumi', 'Minimal', 'Standard', 'Rounded'];
@@ -201,7 +202,7 @@ const defaultProfile: Profile = {
 };
 
 const defaultVersion: VersionInfo = {
-  app: 'v1.10.0',
+  app: RUMI_DISPLAY_VERSION,
   kernel: '--',
   python: '--',
   launcher: '--',

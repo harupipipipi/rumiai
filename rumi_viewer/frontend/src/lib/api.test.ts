@@ -9,6 +9,7 @@ import {
   compileStartupProfilePreview,
   createStartupProfile,
   fetchBackgroundControlStatus,
+  fetchDesktopSystemInfo,
   hasPendingPanelBootstrapCode,
   isDesktopShellAvailable,
   openExternalUrl,
@@ -16,6 +17,7 @@ import {
   setStartupProfileNodeOverride,
   showAppWindow,
 } from './api.ts';
+import { RUMI_DISPLAY_VERSION } from './version.ts';
 
 class MemoryStorage {
   private readonly values = new Map<string, string>();
@@ -53,6 +55,7 @@ let tauriReauthorizeCount = 0;
 let tauriOpenExternalCount = 0;
 let tauriSendToBackgroundCount = 0;
 let tauriShowAppWindowCount = 0;
+let tauriDesktopInfoCount = 0;
 let sessionStorageRef: MemoryStorage;
 let fetchHandler: ((input: string | URL | Request, init?: RequestInit) => Promise<Response>) | null = null;
 
@@ -91,6 +94,27 @@ function installBrowser(href: string): MemoryStorage {
                   label: 'main',
                   minimized: false,
                   visible: false,
+                },
+              ],
+            };
+          }
+          if (command === 'get_desktop_system_info') {
+            tauriDesktopInfoCount += 1;
+            return {
+              app_name: 'Rumi AI',
+              display_version: RUMI_DISPLAY_VERSION,
+              viewer_version: '1.0.0-beta.1',
+              build_channel: 'beta',
+              platform: 'macos',
+              platform_release: '15.0',
+              permissions: [
+                {
+                  id: 'accessibility',
+                  label: 'Accessibility',
+                  status: 'granted',
+                  granted: true,
+                  detail: 'Allows UI control.',
+                  settings_hint: 'System Settings > Privacy & Security > Accessibility',
                 },
               ],
             };
@@ -182,6 +206,7 @@ beforeEach(() => {
   tauriOpenExternalCount = 0;
   tauriSendToBackgroundCount = 0;
   tauriShowAppWindowCount = 0;
+  tauriDesktopInfoCount = 0;
   installBrowser('http://127.0.0.1:8765/panel/');
   installFetchMock();
 });
@@ -391,6 +416,16 @@ test('desktop shell helpers expose background control commands', async () => {
   assert.equal(status?.windows[0]?.label, 'main');
   assert.equal(tauriSendToBackgroundCount, 1);
   assert.equal(tauriShowAppWindowCount, 1);
+});
+
+test('fetchDesktopSystemInfo reads viewer version and macOS permissions from Tauri', async () => {
+  const info = await fetchDesktopSystemInfo();
+
+  assert.equal(tauriDesktopInfoCount, 1);
+  assert.equal(info?.display_version, RUMI_DISPLAY_VERSION);
+  assert.equal(info?.viewer_version, '1.0.0-beta.1');
+  assert.equal(info?.permissions[0]?.id, 'accessibility');
+  assert.equal(info?.permissions[0]?.granted, true);
 });
 
 test('startup profile wrappers use v3 payloads and endpoints', async () => {

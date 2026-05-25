@@ -44,6 +44,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from core_runtime.app_version import APP_DISPLAY_VERSION
 from ._helpers import _log_internal_error, _SAFE_ERROR_MSG
 
 try:
@@ -890,6 +891,8 @@ class ControlPanelHandlersMixin:
         """GET /api/panel/version — バージョン情報"""
         import platform
         return {
+            "app_version": APP_DISPLAY_VERSION,
+            "display_version": APP_DISPLAY_VERSION,
             "kernel_version": _KERNEL_VERSION,
             "python_version": platform.python_version(),
             "platform": platform.system(),

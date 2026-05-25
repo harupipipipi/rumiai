@@ -17,6 +17,53 @@ import base64
 from pathlib import Path
 from typing import Any
 
+_CLIPBOARD_PREVIEW_CHARS = 500
+
+
+def _key_press_count(payload: dict[str, Any]) -> int:
+    for key in ("count", "times", "repeat"):
+        if key not in payload:
+            continue
+        try:
+            return max(1, min(200, int(payload.get(key))))
+        except (TypeError, ValueError):
+            return 1
+    return 1
+
+
+def _normalize_key_name(key: Any) -> str:
+    value = str(key or "").strip()
+    aliases = {
+        "retrun": "return",
+        "retun": "return",
+        "newline": "return",
+        "new_line": "return",
+        "bksp": "backspace",
+        "bs": "backspace",
+        "back": "backspace",
+    }
+    return aliases.get(value.lower(), value)
+
+
+def _key_combo_from_payload(payload: dict[str, Any]) -> str:
+    explicit = str(payload.get("key_combo") or "").strip()
+    if explicit:
+        parts = [part.strip() for part in explicit.split("+") if part.strip()]
+        if not parts:
+            return ""
+        parts[-1] = _normalize_key_name(parts[-1])
+        return "+".join(parts)
+    key = payload.get("key")
+    if key is None:
+        return ""
+    modifiers = payload.get("modifiers")
+    if not isinstance(modifiers, list):
+        modifier = payload.get("modifier")
+        modifiers = [modifier] if modifier else []
+    parts = [str(item).strip() for item in modifiers if str(item or "").strip()]
+    parts.append(_normalize_key_name(key))
+    return "+".join(parts)
+
 
 def _current_python_snippet_command(code: str) -> list[str]:
     return [sys.executable, "-c", code]
@@ -44,6 +91,7 @@ class BrowserComputerController:
         return self._computer_seat
 
     def run(self, action: str, payload: dict[str, Any] | None = None, *, yolo_mode: bool = False) -> dict[str, Any]:
+        action = self._normalize_action(action)
         payload = payload or {}
         yolo_mode = self._truthy(yolo_mode)
         if action == "browser.open_url":
@@ -82,6 +130,17 @@ class BrowserComputerController:
             return self._select_window(payload)
         if action == "computer.screenshot":
             return self._screenshot(payload=payload, dry_run=self._truthy(payload.get("dry_run")), yolo_mode=yolo_mode)
+        if action in {"computer.clipboard", "computer.clipboard.get", "computer.clipboard.read"}:
+            return self._clipboard_read(payload, yolo_mode=yolo_mode)
+        if action in {"computer.clipboard.set", "computer.clipboard.write", "computer.clipboard.clear"}:
+            return self._clipboard_write(action, payload, yolo_mode=yolo_mode)
+        if action in {"computer.backspace", "computer.delete_back"}:
+            payload = dict(payload)
+            payload.setdefault("key", "backspace")
+            result = self._desktop_action("computer.key", payload, yolo_mode=yolo_mode)
+            result["action"] = "computer.backspace"
+            result.setdefault("underlying_action", "computer.key")
+            return result
         if action in {"computer.move", "computer.click", "computer.drag", "computer.type", "computer.key", "computer.scroll"}:
             return self._desktop_action(action, payload, yolo_mode=yolo_mode)
         if action == "computer.observe":
@@ -93,6 +152,59 @@ class BrowserComputerController:
         if action in {"computer.doctor", "computer.diagnose"}:
             return self._computer_seat_doctor()
         raise ValueError(f"Unsupported browser/computer action: {action}")
+
+    @staticmethod
+    def _normalize_action(action: str) -> str:
+        raw = str(action or "").strip()
+        action_map = {
+            "": "browser.session",
+            "session": "browser.session",
+            "open_url": "browser.open_url",
+            "browser_open_url": "browser.open_url",
+            "context": "computer.context",
+            "app_context": "computer.context",
+            "state": "computer.context",
+            "screenshot": "computer.screenshot",
+            "move": "computer.move",
+            "cursor_move": "computer.move",
+            "mouse_move": "computer.move",
+            "click": "computer.click",
+            "drag": "computer.drag",
+            "mouse_drag": "computer.drag",
+            "type": "computer.type",
+            "key": "computer.key",
+            "backspace": "computer.backspace",
+            "delete_back": "computer.backspace",
+            "scroll": "computer.scroll",
+            "clipboard": "computer.clipboard.read",
+            "clipboard_read": "computer.clipboard.read",
+            "clipboard_get": "computer.clipboard.read",
+            "clipboard_write": "computer.clipboard.write",
+            "clipboard_set": "computer.clipboard.write",
+            "clipboard_clear": "computer.clipboard.clear",
+            "apps": "computer.apps",
+            "applications": "computer.apps",
+            "open_apps": "computer.apps",
+            "list_apps": "computer.apps",
+            "select_app": "computer.select_app",
+            "app": "computer.select_app",
+            "show_app": "computer.show_app",
+            "focus_app": "computer.show_app",
+            "activate_app": "computer.show_app",
+            "main_app": "computer.show_app",
+            "show": "computer.show_app",
+            "select_window": "computer.select_window",
+            "window": "computer.select_window",
+            "windows": "computer.windows",
+            "list_windows": "computer.windows",
+            "observe": "computer.observe",
+            "semantic_action": "computer.semantic_action",
+            "press": "computer.semantic_action",
+            "pid_event": "computer.pid_event",
+            "doctor": "computer.doctor",
+            "diagnose": "computer.doctor",
+        }
+        return action_map.get(raw, raw)
 
     def _edge_haze(self, action: str, payload: dict[str, Any]):
         try:
@@ -132,7 +244,8 @@ class BrowserComputerController:
             subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             opened_with_managed_profile = True
         else:
-            opened = self._open_url_foreground(url, app_name=target_app)
+            with self._edge_haze("browser.open_url", payload):
+                opened = self._open_url_foreground(url, app_name=target_app)
             if not opened:
                 return {
                     "action": "browser.open_url",
@@ -1312,7 +1425,15 @@ class BrowserComputerController:
             elif action == "computer.type":
                 result = svc.type_text(target, text=action_payload.get("text", ""))
             elif action == "computer.key":
-                result = svc.key(target, key_combo=action_payload.get("key", "") or action_payload.get("key_combo", ""))
+                count = _key_press_count(action_payload)
+                result = {}
+                for _ in range(count):
+                    result = svc.key(target, key_combo=_key_combo_from_payload(action_payload))
+                    if not result or not result.get("executed"):
+                        break
+                if result:
+                    result["count"] = count
+                    result["requested_count"] = count
             elif action == "computer.scroll":
                 direction = action_payload.get("direction", "down")
                 result = svc.scroll(target, x=int(action_payload.get("x", 0)), y=int(action_payload.get("y", 0)), direction=direction, clicks=int(action_payload.get("amount", 3)))
@@ -1465,6 +1586,8 @@ class BrowserComputerController:
         result: dict[str, Any] = {"action": action, "executed": True, "platform": system}
         if action in {"computer.type", "computer.key", "computer.scroll"}:
             result["driver"] = "foreground_input"
+        if action == "computer.key":
+            result["count"] = _key_press_count(action_payload)
         if action in {"computer.move", "computer.click"}:
             result["target"] = {"x": int(action_payload.get("x", 0)), "y": int(action_payload.get("y", 0))}
             if click_marker:
@@ -1489,6 +1612,89 @@ class BrowserComputerController:
             )
             result.update(screenshot)
         return result
+
+    def _clipboard_read(self, payload: dict[str, Any], *, yolo_mode: bool) -> dict[str, Any]:
+        include_content = self._truthy(payload.get("include_content")) or self._truthy(payload.get("full_content"))
+        approval_payload = self._safe_payload(
+            {
+                **payload,
+                "include_content": include_content,
+                "clipboard_access": "full_content" if include_content else "preview_only",
+            }
+        )
+        if not (yolo_mode or self._consume_approval(payload, "computer.clipboard.read", approval_payload)):
+            return self._approval_required("computer.clipboard.read", approval_payload)
+        content = self._system_clipboard_read()
+        result: dict[str, Any] = {
+            "action": "computer.clipboard.read",
+            "format": "text/plain",
+            "content_preview": self._clipboard_preview(content),
+            "content_included": include_content,
+            "length": len(content),
+            "truncated": len(content) > _CLIPBOARD_PREVIEW_CHARS,
+        }
+        if include_content:
+            result["content"] = content
+        else:
+            result["content_note"] = (
+                "Full clipboard content is omitted by default; retry with include_content=true "
+                "after explicit approval when the model needs the exact text."
+            )
+        return result
+
+    def _clipboard_write(self, action: str, payload: dict[str, Any], *, yolo_mode: bool) -> dict[str, Any]:
+        content = "" if action == "computer.clipboard.clear" else str(
+            payload.get("content", payload.get("text", payload.get("value", ""))) or ""
+        )
+        approval_payload = self._safe_payload({**payload, "content": content})
+        if not (yolo_mode or self._consume_approval(payload, action, approval_payload)):
+            return self._approval_required(action, approval_payload)
+        self._system_clipboard_write(content)
+        return {
+            "action": action,
+            "written": True,
+            "format": "text/plain",
+            "length": len(content),
+            "cleared": action == "computer.clipboard.clear",
+        }
+
+    @staticmethod
+    def _system_clipboard_read() -> str:
+        system = platform.system()
+        if system == "Darwin":
+            completed = subprocess.run(["pbpaste"], capture_output=True, text=True, check=False)
+            return completed.stdout
+        if system == "Windows":
+            completed = subprocess.run(
+                ["powershell", "-NoProfile", "-Command", "Get-Clipboard -Raw"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            return completed.stdout
+        raise RuntimeError("Clipboard is supported on macOS and Windows.")
+
+    @staticmethod
+    def _system_clipboard_write(content: str) -> None:
+        system = platform.system()
+        if system == "Darwin":
+            subprocess.run(["pbcopy"], input=content, text=True, check=True)
+            return
+        if system == "Windows":
+            subprocess.run(
+                ["powershell", "-NoProfile", "-Command", "Set-Clipboard -Value ([Console]::In.ReadToEnd())"],
+                input=content,
+                text=True,
+                check=True,
+            )
+            return
+        raise RuntimeError("Clipboard is supported on macOS and Windows.")
+
+    @staticmethod
+    def _clipboard_preview(content: str) -> str:
+        if len(content) <= _CLIPBOARD_PREVIEW_CHARS:
+            return content
+        return content[:_CLIPBOARD_PREVIEW_CHARS] + "..."
 
     @staticmethod
     def _should_capture_after_action(action: str, payload: dict[str, Any]) -> bool:
@@ -3194,9 +3400,17 @@ end run
             if not isinstance(modifiers, list):
                 modifier = payload.get("modifier")
                 modifiers = [modifier] if modifier else []
+            combo_parts = [part.strip() for part in str(payload.get("key_combo") or "").split("+") if part.strip()]
+            if combo_parts:
+                modifiers = combo_parts[:-1] + modifiers
+                key = combo_parts[-1]
+            key = _normalize_key_name(key)
             using = self._apple_script_modifiers(modifiers)
             if isinstance(key, int):
-                return f'tell application "System Events" to key code {key}{using}'
+                return self._repeat_apple_script(
+                    f'tell application "System Events" to key code {key}{using}',
+                    _key_press_count(payload),
+                )
             normalized = str(key).strip().lower()
             key_codes = {
                 "return": 36,
@@ -3215,12 +3429,26 @@ end run
                 "space": 49,
             }
             if normalized in key_codes:
-                return f'tell application "System Events" to key code {key_codes[normalized]}{using}'
-            return f'tell application "System Events" to keystroke {json.dumps(str(key), ensure_ascii=False)}{using}'
+                command = f'tell application "System Events" to key code {key_codes[normalized]}{using}'
+            else:
+                command = f'tell application "System Events" to keystroke {json.dumps(str(key), ensure_ascii=False)}{using}'
+            return self._repeat_apple_script(command, _key_press_count(payload))
         if action == "computer.scroll":
             amount = int(payload.get("amount", 1))
             return f'tell application "System Events" to scroll wheel {amount}'
         raise ValueError(action)
+
+    @staticmethod
+    def _repeat_apple_script(command: str, count: int) -> str:
+        count = max(1, min(200, int(count or 1)))
+        if count == 1:
+            return command
+        escaped = json.dumps(command)
+        return (
+            f"repeat {count} times\n"
+            f"  run script {escaped}\n"
+            "end repeat"
+        )
 
     @staticmethod
     def _apple_script_modifiers(modifiers: list[Any]) -> str:
@@ -3476,8 +3704,17 @@ public class RumiDpi {
             self._run_powershell("\n".join(prelude + [f"[System.Windows.Forms.SendKeys]::SendWait('{text}')"]))
             return
         if action == "computer.key":
-            key = self._windows_send_key(str(payload.get("key", "ENTER")), payload.get("modifiers") or payload.get("modifier"))
-            self._run_powershell("\n".join(prelude + [f"[System.Windows.Forms.SendKeys]::SendWait('{key}')"]))
+            key = self._windows_send_key(_key_combo_from_payload({**payload, "key": payload.get("key", "ENTER")}), None)
+            count = _key_press_count(payload)
+            self._run_powershell(
+                "\n".join(
+                    prelude
+                    + [
+                        f"$key = '{key}'",
+                        f"for ($i = 0; $i -lt {count}; $i++) {{ [System.Windows.Forms.SendKeys]::SendWait($key) }}",
+                    ]
+                )
+            )
             return
         if action == "computer.scroll":
             amount = int(payload.get("amount", 1))
@@ -4005,7 +4242,7 @@ $proc = Get-Process -Id $procId -ErrorAction SilentlyContinue
 
     def _approval_required(self, action: str, payload: dict[str, Any]) -> dict[str, Any]:
         token = self._issue_approval(action, payload)
-        return {
+        response = {
             "action": action,
             "requires_approval": True,
             "approval_token": token,
@@ -4013,6 +4250,24 @@ $proc = Get-Process -Id $procId -ErrorAction SilentlyContinue
             "approval_hint": "Repeat the same action with payload.approval_token after an explicit user confirmation.",
             "payload": payload,
         }
+        warning = self._approval_warning(action, payload)
+        if warning:
+            response["approval_warning"] = warning
+        return response
+
+    @staticmethod
+    def _approval_warning(action: str, payload: dict[str, Any]) -> str:
+        if action == "computer.clipboard.read":
+            if payload.get("include_content") is True:
+                return (
+                    "This approval returns the full system clipboard text to the model and tool result. "
+                    "Do this only when the clipboard contents are safe to share."
+                )
+            return (
+                "This approval reads the system clipboard and returns only a short preview by default. "
+                "Full content requires include_content=true."
+            )
+        return ""
 
     def _issue_approval(self, action: str, payload: dict[str, Any]) -> str:
         approvals = self._read_approvals()

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useAppStore, Theme, ColorMode, AVATAR_OPTIONS, UpdateTarget } from '@/src/store';
-import { fetchBackgroundControlStatus, isDesktopShellAvailable, sendToBackground } from '@/src/lib/api';
-import type { BackgroundControlStatus } from '@/src/lib/apiTypes';
+import { fetchBackgroundControlStatus, fetchDesktopSystemInfo, isDesktopShellAvailable, sendToBackground } from '@/src/lib/api';
+import type { BackgroundControlStatus, DesktopPermissionStatus, DesktopSystemInfo } from '@/src/lib/apiTypes';
 import { useT } from '@/src/lib/i18n';
 import { cn } from '@/src/lib/utils';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/src/components/ui/Card';
@@ -9,7 +9,22 @@ import { Button } from '@/src/components/ui/Button';
 import { Input } from '@/src/components/ui/Input';
 import { Badge } from '@/src/components/ui/Badge';
 import { Switch } from '@/src/components/ui/Switch';
-import { User, Settings as SettingsIcon, Globe, Briefcase, Palette, Moon, Sun, LogIn, Loader2, CheckCircle2, ChevronDown, RefreshCw, DownloadCloud, MonitorOff } from 'lucide-react';
+import { User, Settings as SettingsIcon, Globe, Briefcase, Palette, Moon, Sun, LogIn, Loader2, CheckCircle2, ChevronDown, RefreshCw, DownloadCloud, MonitorOff, ShieldCheck } from 'lucide-react';
+
+function permissionBadgeVariant(permission: DesktopPermissionStatus): 'success' | 'warning' | 'destructive' | 'secondary' {
+  if (permission.granted === true || permission.status === 'granted') return 'success';
+  if (permission.granted === false || permission.status === 'missing') return 'destructive';
+  if (permission.status === 'not_checked') return 'warning';
+  return 'secondary';
+}
+
+function permissionStatusLabel(permission: DesktopPermissionStatus): string {
+  if (permission.granted === true || permission.status === 'granted') return 'Granted';
+  if (permission.granted === false || permission.status === 'missing') return 'Missing';
+  if (permission.status === 'not_checked') return 'Manual check';
+  if (permission.status === 'unsupported') return 'Unsupported';
+  return permission.status || 'Unknown';
+}
 
 export function Settings() {
   const t = useT();
@@ -40,7 +55,24 @@ export function Settings() {
   const [showAvatarPicker, setShowAvatarPicker] = useState(false);
   const [backgroundStatus, setBackgroundStatus] = useState<BackgroundControlStatus | null>(null);
   const [backgroundBusy, setBackgroundBusy] = useState(false);
+  const [desktopInfo, setDesktopInfo] = useState<DesktopSystemInfo | null>(null);
+  const [desktopInfoBusy, setDesktopInfoBusy] = useState(false);
   const desktopShellAvailable = isDesktopShellAvailable();
+
+  const loadDesktopInfo = async () => {
+    if (!desktopShellAvailable) {
+      return;
+    }
+    setDesktopInfoBusy(true);
+    try {
+      setDesktopInfo(await fetchDesktopSystemInfo());
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to read macOS permissions';
+      addToast(message, 'error');
+    } finally {
+      setDesktopInfoBusy(false);
+    }
+  };
 
   const loadBackgroundStatus = async () => {
     if (!desktopShellAvailable) {
@@ -80,6 +112,7 @@ export function Settings() {
       loadUpdates();
       loadUpdateSettings();
       void loadBackgroundStatus();
+      void loadDesktopInfo();
     }
   }, [activeTab, loadUpdates, loadUpdateSettings]);
 
@@ -381,7 +414,8 @@ export function Settings() {
               <CardContent>
                 <div className="grid gap-3 sm:grid-cols-2">
                   {[
-                    ['App Version', version.app],
+                    ['App Version', desktopInfo?.display_version ?? version.app],
+                    ['Viewer Version', desktopInfo?.viewer_version ?? 'unknown'],
                     ['Kernel Version', version.kernel],
                     ['Python Version', version.python],
                     ['Launcher Version', version.launcher],
@@ -446,6 +480,49 @@ export function Settings() {
                       Send to Background
                     </Button>
                   </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {desktopShellAvailable && (
+              <Card>
+                <CardHeader className="flex-row items-center justify-between space-y-0">
+                  <div>
+                    <CardTitle>macOS Permissions</CardTitle>
+                    <CardDescription>Current privacy approvals used by Computer Use and screen capture.</CardDescription>
+                  </div>
+                  <Button variant="outline" size="sm" onClick={loadDesktopInfo} disabled={desktopInfoBusy} loading={desktopInfoBusy}>
+                    <RefreshCw className="h-3.5 w-3.5" />
+                    Refresh
+                  </Button>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    {(desktopInfo?.permissions ?? []).map((permission) => (
+                      <div key={permission.id} className="rounded-lg border border-border p-4">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="flex min-w-0 items-start gap-2">
+                            <ShieldCheck className="mt-0.5 h-4 w-4 flex-shrink-0 text-text-muted" />
+                            <div className="min-w-0">
+                              <p className="text-sm font-medium text-text-main">{permission.label}</p>
+                              <p className="mt-1 text-xs leading-5 text-text-muted">{permission.detail}</p>
+                            </div>
+                          </div>
+                          <Badge variant={permissionBadgeVariant(permission)}>{permissionStatusLabel(permission)}</Badge>
+                        </div>
+                        {permission.settings_hint && (
+                          <p className="mt-3 rounded-md bg-bg-hover px-3 py-2 text-xs text-text-muted">
+                            {permission.settings_hint}
+                          </p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                  {!desktopInfo && !desktopInfoBusy && (
+                    <p className="rounded-lg border border-border bg-bg-main/50 px-4 py-3 text-sm text-text-muted">
+                      Permission status is available when this page is running inside Rumi Viewer.
+                    </p>
+                  )}
                 </CardContent>
               </Card>
             )}

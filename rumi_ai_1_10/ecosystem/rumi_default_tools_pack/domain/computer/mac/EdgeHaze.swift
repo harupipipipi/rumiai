@@ -11,6 +11,13 @@ struct HazeConfig {
     let speed: CGFloat
 }
 
+struct HazeLease: Decodable {
+    let schema: String?
+    let pid: Int?
+    let sequence_id: String?
+    let deadline_epoch: Double?
+}
+
 func env(_ key: String, _ fallback: String) -> String {
     let value = ProcessInfo.processInfo.environment[key]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     return value.isEmpty ? fallback : value
@@ -60,6 +67,30 @@ func resolvedConfig() -> HazeConfig {
         edgeWidth: envCGFloat("RUMI_EDGE_HAZE_EDGE_WIDTH", 150, min: 40, max: 420),
         speed: envCGFloat("RUMI_EDGE_HAZE_SPEED", 1, min: 0.1, max: 4)
     )
+}
+
+func leaseIsCurrent() -> Bool {
+    let path = env("RUMI_EDGE_HAZE_LEASE_PATH", "")
+    let expectedSequenceID = env("RUMI_EDGE_HAZE_SEQUENCE_ID", "")
+    if path.isEmpty || expectedSequenceID.isEmpty {
+        return true
+    }
+    guard let data = FileManager.default.contents(atPath: path) else {
+        return false
+    }
+    guard let lease = try? JSONDecoder().decode(HazeLease.self, from: data) else {
+        return false
+    }
+    guard lease.schema == "rumi.edge_haze_lease.v1" else {
+        return false
+    }
+    guard lease.sequence_id == expectedSequenceID else {
+        return false
+    }
+    guard let deadline = lease.deadline_epoch else {
+        return false
+    }
+    return deadline >= Date().timeIntervalSince1970
 }
 
 final class EdgeHazeWindow: NSWindow {
@@ -166,6 +197,12 @@ for screen in NSScreen.screens {
 Timer.scheduledTimer(withTimeInterval: 1.0 / 30.0, repeats: true) { _ in
     for window in windows {
         window.contentView?.needsDisplay = true
+    }
+}
+
+Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { _ in
+    if !leaseIsCurrent() {
+        app.terminate(nil)
     }
 }
 

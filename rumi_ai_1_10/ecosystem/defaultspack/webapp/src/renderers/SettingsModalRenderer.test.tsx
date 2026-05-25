@@ -90,3 +90,51 @@ test("settings surface pinned placements render in the modal", () => {
   assert.match(html, /Models/);
   assert.match(html, /このセクションを開く/);
 });
+
+test("settings system info renders viewer version and macOS permissions", () => {
+  const html = renderToStaticMarkup(
+    createElement(SettingsModalRenderer, {
+      isOpen: true,
+      activeSectionId: "system_info",
+      catalog: {
+        sidebar: { filters: [], items: [] },
+        settings: { sections: [], values: {} },
+        chat_rendering: { renderers: [] },
+        extension_points: [],
+      },
+      health: null,
+      previewsCount: 0,
+      settingsSections: [
+        { id: "system_info", label: "System Info", description: "Version and permission status", fields: [] },
+      ],
+      settingsValues: {},
+      desktopSystemInfo: {
+        app_name: "Rumi AI",
+        display_version: "beta 1.0.0",
+        viewer_version: "1.0.0-beta.1",
+        build_channel: "beta",
+        platform: "macos",
+        platform_release: "15.0",
+        permissions: [
+          {
+            id: "screen_recording",
+            label: "Screen Recording",
+            status: "missing",
+            granted: false,
+            detail: "Allows screen capture.",
+            settings_hint: "System Settings > Privacy & Security > Screen Recording",
+          },
+        ],
+      },
+      onClose: () => undefined,
+      onOpenSection: () => undefined,
+      onSettingChange: () => undefined,
+    }),
+  );
+
+  assert.match(html, /beta 1\.0\.0/);
+  assert.match(html, /1\.0\.0-beta\.1/);
+  assert.match(html, /macOS Permissions/);
+  assert.match(html, /Screen Recording/);
+  assert.match(html, /Missing/);
+});

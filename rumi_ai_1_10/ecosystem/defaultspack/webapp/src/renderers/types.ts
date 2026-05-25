@@ -1,6 +1,7 @@
 import type { FormEvent, MutableRefObject, ReactNode } from "react";
 
 import type { ChatActivityEvent, ChatContentBlock, CodingContextEntry, CodingGitStatus, CodingWorkspaceRecord, ComposerWidgetAction, ConversationSteerItem, ModelCommandCandidate, ModelProfile, SettingsSection, SidebarAction, SidebarItem, ToolLogEntry, UICatalog } from "../lib/api";
+import type { DesktopSystemInfo } from "../lib/desktopSystemInfo";
 import type { ComposerCommandItem } from "../lib/api";
 import type { ChatItem, HistoryBoardNewTaskOptions } from "../components/HistoryBoard";
 import type { ToolPreviewItem, ToolPreviewMode } from "../components/ToolPreview";
@@ -215,6 +216,7 @@ export type SettingsModalRendererProps = {
   previewsCount: number;
   settingsSections: SettingsSection[];
   settingsValues: Record<string, Record<string, unknown>>;
+  desktopSystemInfo?: DesktopSystemInfo | null;
   locale?: LocaleSetting;
   onClose: () => void;
   onOpenSection?: (sectionId: string) => void;

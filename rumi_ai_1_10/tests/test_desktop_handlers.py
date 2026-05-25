@@ -7,6 +7,7 @@ Phase V-4: desktop_app:execute capability API tests.
 from __future__ import annotations
 
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -19,6 +20,7 @@ if str(_REPO_DIR) not in sys.path:
     sys.path.insert(0, str(_REPO_DIR))
 
 from core_runtime.api.desktop_handlers import DesktopHandlersMixin
+from core_runtime.pack_api_server import _persist_desktop_api_token
 
 
 # ======================================================================
@@ -189,6 +191,22 @@ class TestDesktopHandlers(unittest.TestCase):
                 cgm_mod.get_capability_grant_manager = orig_grant
             if orig_container:
                 di_mod.get_container = orig_container
+
+    def test_persist_desktop_api_token_writes_next_to_user_data(self):
+        """Viewer が暗号化 HMAC を読めなくても pack app を起動できるよう token を同期する。"""
+        import core_runtime.paths as paths_mod
+
+        original_user_data = paths_mod.USER_DATA_DIR
+        with tempfile.TemporaryDirectory() as tmp:
+            user_data = Path(tmp) / "user_data"
+            user_data.mkdir()
+            paths_mod.USER_DATA_DIR = user_data
+            try:
+                _persist_desktop_api_token("desktop-token")
+                token_path = Path(tmp) / ".desktop_api_token"
+                self.assertEqual(token_path.read_text(encoding="utf-8"), "desktop-token")
+            finally:
+                paths_mod.USER_DATA_DIR = original_user_data
 
 
 if __name__ == "__main__":

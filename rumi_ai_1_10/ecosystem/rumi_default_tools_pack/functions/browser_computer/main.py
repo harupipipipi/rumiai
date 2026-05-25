@@ -6,12 +6,23 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from functions._tool_common import tool_result
 
+_SEQUENCE_ID_KEYS = (
+    "computer_use_haze_sequence_id",
+    "computer_use_sequence_id",
+    "run_id",
+    "request_id",
+    "conversation_turn_id",
+    "_flow_run_request_id",
+    "_flow_execution_id",
+)
+
 
 def run(context, args):
     from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
 
     action = str(args.get("action", "browser.session"))
     payload = dict(args.get("payload") or {})
+    payload = _payload_with_sequence_defaults(payload, context, args)
     artifact_root = None
     workspace = context.get("conversation_workspace_dir") if isinstance(context, dict) else None
     if isinstance(workspace, str) and workspace:
@@ -57,6 +68,26 @@ def _payload_with_context_defaults(action, payload, context):
         if isinstance(target_title, str) and target_title.strip():
             payload.setdefault("title", target_title.strip())
     return payload
+
+
+def _payload_with_sequence_defaults(payload, context, args):
+    payload = dict(payload or {})
+    sequence_id = _sequence_id_from_mapping(payload) or _sequence_id_from_mapping(args)
+    if not sequence_id and isinstance(context, dict):
+        sequence_id = _sequence_id_from_mapping(context)
+    if sequence_id:
+        payload.setdefault("computer_use_haze_sequence_id", sequence_id)
+    return payload
+
+
+def _sequence_id_from_mapping(value):
+    if not isinstance(value, dict):
+        return ""
+    for key in _SEQUENCE_ID_KEYS:
+        candidate = str(value.get(key) or "").strip()
+        if candidate:
+            return candidate
+    return ""
 
 
 def _truthy(value):

@@ -15,8 +15,8 @@
         "properties": {
           "action": {
             "type": "string",
-            "enum": ["context", "apps", "screenshot", "move", "click", "drag", "select_app", "show_app", "select_window", "windows", "type", "key", "scroll"],
-            "description": "Use context/apps/windows to inspect open apps, show_app with app/name to bring an app to the main visible screen, select_window with app/title to target a visible window, and screenshot before actions. For small or ambiguous image targets, do not click from the full screenshot; request screenshot crop/zoom/detail first, usually with source=latest, then click using normalized_x and normalized_y relative to the attached crop. source=latest crops from the last full/selected-window screenshot; use source=current_crop only for an intentional crop-of-crop. After a zoomed/cropped view, request a fresh screenshot before unrelated actions. point:[y,x] is legacy compatibility only. click/move/drag default to the virtual AI cursor and return marked previews without operating the real UI; set physical=true only after explicit approval to operate the visible UI. type/key/scroll return a post-action screenshot unless include_screenshot=false.",
+            "enum": ["context", "apps", "open_url", "browser_open_url", "screenshot", "move", "click", "drag", "select_app", "show_app", "select_window", "windows", "type", "key", "scroll", "clipboard", "clipboard_read", "clipboard_write", "clipboard_clear", "backspace"],
+            "description": "Use open_url with url and optional app=Google Chrome/Vivaldi to open a website directly in the visible browser. Use context/apps/windows to inspect open apps, show_app with app/name to bring an app to the main visible screen, select_window with app/title to target a visible window, and screenshot before actions. For small or ambiguous image targets, do not click from the full screenshot; request screenshot crop/zoom/detail first, usually with source=latest, then click using normalized_x and normalized_y relative to the attached crop. source=latest crops from the last full/selected-window screenshot; use source=current_crop only for an intentional crop-of-crop. After a zoomed/cropped view, request a fresh screenshot before unrelated actions. point:[y,x] is legacy compatibility only. click/move/drag default to the virtual AI cursor and return marked previews without operating the real UI; set physical=true only after explicit approval to operate the visible UI. type/key/scroll return a post-action screenshot unless include_screenshot=false.",
             "default": "screenshot"
           },
           "x": {"type": "integer"},
@@ -46,7 +46,13 @@
           "key": {"type": "string", "description": "Single key or shortcut key for action=key, for example backspace, return, or a with modifier=meta."},
           "modifier": {"type": "string", "description": "Optional single key modifier such as meta, command, control, shift, or alt."},
           "modifiers": {"type": "array", "items": {"type": "string"}, "description": "Optional key modifiers for action=key."},
+          "key_combo": {"type": "string", "description": "Optional key combo for action=key, for example command+a or shift+tab."},
+          "count": {"type": "integer", "description": "Number of times to press the key for action=key/backspace."},
+          "times": {"type": "integer", "description": "Alias for count."},
+          "repeat": {"type": "integer", "description": "Alias for count."},
           "amount": {"type": "integer"},
+          "content": {"type": "string", "description": "Text to write when action=clipboard_write."},
+          "value": {"type": "string", "description": "Alias for clipboard write content."},
           "target": {"type": "string"},
           "scope": {"type": "string", "description": "For action=apps: running, installed, or all."},
           "app": {"type": "string"},

@@ -68,6 +68,26 @@ from .api._helpers import _log_internal_error, _SAFE_ERROR_MSG
 logger = logging.getLogger(__name__)
 
 
+def _persist_desktop_api_token(api_token: str) -> None:
+    """Persist the current localhost API token for Viewer-launched pack apps."""
+    if not api_token:
+        return
+    try:
+        from .paths import USER_DATA_DIR
+
+        token_path = Path(USER_DATA_DIR).parent / ".desktop_api_token"
+        token_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path = token_path.with_name(f".{token_path.name}.tmp")
+        tmp_path.write_text(api_token, encoding="utf-8")
+        try:
+            os.chmod(tmp_path, 0o600)
+        except OSError:
+            pass
+        os.replace(tmp_path, token_path)
+    except Exception:
+        logger.debug("failed to persist desktop API token", exc_info=True)
+
+
 # --- スレッド終了待ちタイムアウト (秒) --- (PACK_ID_RE, SAFE_ID_RE, MAX_REQUEST_BODY_BYTES は validation.py から import)
 THREAD_JOIN_TIMEOUT_SECONDS = 5
 
@@ -1991,6 +2011,7 @@ class PackAPIServer:
         if internal_token is None:
             # HMACKeyManager からアクティブ鍵を取得
             internal_token = self._hmac_key_manager.get_active_key()
+            _persist_desktop_api_token(internal_token)
             token_prefix = internal_token[:8] + "..." if internal_token and len(internal_token) >= 8 else internal_token or "(empty)"
             logger.info("Using HMAC-managed API token (prefix): %s", token_prefix)
             logger.warning("To retrieve the full token, inspect: user_data/hmac_keys.json")
