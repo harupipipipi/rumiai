@@ -201,7 +201,7 @@ const defaultProfile: Profile = {
 };
 
 const defaultVersion: VersionInfo = {
-  app: 'v1.10.0',
+  app: 'beta 1.0.0',
   kernel: '--',
   python: '--',
   launcher: '--',

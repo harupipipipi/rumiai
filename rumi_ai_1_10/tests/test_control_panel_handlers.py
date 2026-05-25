@@ -119,6 +119,8 @@ class TestPanelGetVersion(unittest.TestCase):
     def test_version_returns_required_keys(self):
         handler = _FakeHandler()
         result = handler._panel_get_version()
+        self.assertEqual(result["display_version"], "beta 1.0.0")
+        self.assertEqual(result["app_version"], "beta 1.0.0")
         self.assertIn("kernel_version", result)
         self.assertIn("python_version", result)
         self.assertIn("platform", result)

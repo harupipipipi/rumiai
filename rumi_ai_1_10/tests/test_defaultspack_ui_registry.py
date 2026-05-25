@@ -134,6 +134,9 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
             self.assertFalse(field_ids & runtime_args)
         self.assertIn("custom-widget", sidebar_ids)
         self.assertIn("custom", section_ids)
+        self.assertIn("system_info", section_ids)
+        system_info_section = next(section for section in catalog["settings"]["sections"] if section["id"] == "system_info")
+        self.assertEqual(system_info_section["label"], "System Info")
         tools_section = next(section for section in catalog["settings"]["sections"] if section["id"] == "tools")
         tools_field_ids = {field["id"] for field in tools_section["fields"]}
         self.assertIn("tool_assist_mode", tools_field_ids)

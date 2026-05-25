@@ -64,10 +64,31 @@ export interface ApiProfile {
 
 /** GET /api/panel/version → data */
 export interface ApiVersion {
+  app_version?: string;
+  display_version?: string;
   kernel_version: string;
   python_version: string;
   platform: string;
   platform_release: string;
+}
+
+export interface DesktopPermissionStatus {
+  id: string;
+  label: string;
+  status: 'granted' | 'missing' | 'not_checked' | 'unsupported' | string;
+  granted: boolean | null;
+  detail: string;
+  settings_hint: string;
+}
+
+export interface DesktopSystemInfo {
+  app_name: string;
+  display_version: string;
+  viewer_version: string;
+  build_channel: string;
+  platform: string;
+  platform_release: string;
+  permissions: DesktopPermissionStatus[];
 }
 
 export type ApiUpdateTarget = 'rumiai' | 'defaultspack';

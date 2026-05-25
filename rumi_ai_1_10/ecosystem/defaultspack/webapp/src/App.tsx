@@ -15,6 +15,7 @@ import { cn } from "./lib/cn";
 import { canExecuteComposerEndpointAction, composerSkillMentionWidget, composerToolMentionWidget, isSafeLocalEndpoint, skillMentionIdsFromText, toolMentionIdsFromText } from "./lib/composerWidgets";
 import { conversationMatchesSpotlightFilter, conversationToSearchResult, type SpotlightFilter } from "./lib/conversationSpotlight";
 import { boundedDurationLabel } from "./lib/duration";
+import { fetchDesktopSystemInfo, type DesktopSystemInfo } from "./lib/desktopSystemInfo";
 import { normalizeLocale } from "./lib/i18n";
 import { PENDING_CHAT_REQUEST_TTL_MS, shouldClearPendingAfterConversationRefresh, type PendingChatRequest } from "./lib/pendingChat";
 import { isRecord, toolPreviewsFromMessages, upsertStreamActivityEvent } from "./lib/toolPreviews";
@@ -1903,6 +1904,7 @@ export default function App() {
   const [modelProfiles, setModelProfiles] = useState<ModelProfile[]>([]);
   const [settingsSections, setSettingsSections] = useState<SettingsSection[]>([]);
   const [settingsValues, setSettingsValues] = useState<Record<string, Record<string, unknown>>>({});
+  const [desktopSystemInfo, setDesktopSystemInfo] = useState<DesktopSystemInfo | null>(null);
   const [commandCatalog, setCommandCatalog] = useState<ComposerCommandItem[]>([]);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
@@ -2238,6 +2240,22 @@ export default function App() {
     if (window.location.pathname !== "/coding") return;
     setMode("coding");
   }, [setMode]);
+
+  useEffect(() => {
+    if (!isSettingsOpen) return;
+    let cancelled = false;
+    void fetchDesktopSystemInfo()
+      .then((info) => {
+        if (!cancelled) setDesktopSystemInfo(info);
+      })
+      .catch((infoError) => {
+        console.error(infoError);
+        if (!cancelled) setDesktopSystemInfo(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isSettingsOpen]);
 
   async function refreshHealth() {
     try {
@@ -4436,6 +4454,7 @@ export default function App() {
           previewsCount={canvasPreviews.length}
           settingsSections={settingsSections}
           settingsValues={settingsValues}
+          desktopSystemInfo={desktopSystemInfo}
           locale={locale}
           onClose={() => setIsSettingsOpen(false)}
           onOpenSection={openSettingsSection}

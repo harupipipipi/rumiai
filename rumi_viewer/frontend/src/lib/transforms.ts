@@ -113,10 +113,10 @@ export function transformProfile(api: ApiProfile): Profile {
 
 export function transformVersion(api: ApiVersion): VersionInfo {
   return {
-    app: 'v1.10.0',
+    app: api.display_version || api.app_version || 'beta 1.0.0',
     kernel: api.kernel_version,
     python: api.python_version,
-    launcher: 'unknown',
+    launcher: api.platform ? `${api.platform} ${api.platform_release}`.trim() : 'unknown',
     docker: {
       installed: false,
       version: '',

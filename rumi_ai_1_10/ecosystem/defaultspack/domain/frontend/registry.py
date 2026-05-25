@@ -1398,6 +1398,12 @@ class FrontendRegistry:
                     },
                 ],
             },
+            {
+                "id": "system_info",
+                "label": "System Info",
+                "description": "App version and macOS privacy permissions used by Computer Use.",
+                "fields": [],
+            },
         ]
 
         sections.extend(self._config_list(ui_surfaces, "settings_sections"))

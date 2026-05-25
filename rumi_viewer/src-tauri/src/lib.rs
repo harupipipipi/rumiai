@@ -3,6 +3,7 @@
 //! V2: Full implementation with setup hook, commands, tray menu, and navigation guard.
 
 mod config;
+mod desktop_system_info;
 mod health_check;
 mod kernel_manager;
 mod process_utils;
@@ -926,6 +927,7 @@ pub fn run() {
             send_to_background,
             show_app_window,
             get_background_control_status,
+            desktop_system_info::get_desktop_system_info,
             dock_registration::register_defaultspack_dock,
             dock_registration::launch_defaultspack_desktop
         ])

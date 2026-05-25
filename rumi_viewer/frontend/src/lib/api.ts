@@ -24,6 +24,7 @@ import type {
   SetupStatusResponseData,
   HealthResponseData,
   BackgroundControlStatus,
+  DesktopSystemInfo,
   CapabilityGraphsResponseData,
   CapabilityGraphResponseData,
   CapabilityGraphCompileResponseData,
@@ -159,6 +160,15 @@ export async function fetchBackgroundControlStatus(): Promise<BackgroundControlS
   }
 
   return invoke<BackgroundControlStatus>('get_background_control_status');
+}
+
+export async function fetchDesktopSystemInfo(): Promise<DesktopSystemInfo | null> {
+  const invoke = getTauriInvoke();
+  if (!invoke) {
+    return null;
+  }
+
+  return invoke<DesktopSystemInfo>('get_desktop_system_info');
 }
 
 export async function launchDefaultspackDesktop(): Promise<string> {
