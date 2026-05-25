@@ -299,6 +299,11 @@ class ToolRegistry:
             ui = manifest.get("ui")
         if not isinstance(ui, dict):
             ui = {}
+        display_name = str(
+            config.get("display_name")
+            or manifest.get("display_name")
+            or ""
+        ).strip()
         execution = dict(config.get("execution", {}))
         handler = str(config.get("handler", "")).strip()
         write_action = bool(config.get("write_action", False))
@@ -350,6 +355,7 @@ class ToolRegistry:
         provisional = {
             "tool_id": tool_id,
             "name": str(config.get("name", tool_id)),
+            "display_name": display_name,
             "summary": str(config.get("summary", manifest.get("description", ""))),
             "description": str(manifest.get("description", "")),
             "tags": tags,
@@ -436,6 +442,7 @@ class ToolRegistry:
         return {
             "tool_id": tool_id,
             "name": str(config.get("name", tool_id)),
+            "display_name": display_name,
             "summary": str(config.get("summary", manifest.get("description", ""))),
             "description": str(manifest.get("description", "")),
             "tags": tags,

@@ -108,6 +108,9 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         self.assertEqual(provider_item["ui"]["widget_kind"], "panel")
         self.assertEqual(provider_item["ui"]["composer_action"]["type"], "open_panel")
         self.assertEqual(provider_item["ui"]["composer_action"]["target_item_id"], "provider-catalog")
+        computer_use_item = next(item for item in catalog["sidebar"]["items"] if item["id"] == "computer_use")
+        self.assertEqual(computer_use_item["label"], "Computer Use")
+        self.assertEqual(computer_use_item["panel"]["title"], "Computer Use")
         browser_use_item = next(item for item in catalog["sidebar"]["items"] if item["id"] == "browser_use")
         browser_use_field_ids = {field["id"] for field in browser_use_item["panel"]["fields"]}
         self.assertEqual(browser_use_field_ids, {"default_target", "mode", "safety", "quality"})
