@@ -55,7 +55,8 @@ RUMI_AUTO_APPROVE_LOCAL=true cargo tauri dev
 - frontend source は viewer 側にありますが、配信経路は kernel の `/panel/` のままです
 - `defaultspack` 自体は kernel から component として読み込まれます
 - `defaultspack` の独立 HTTP frontend は `DEFAULTS_HTTP_PORT` 既定値 `8766` ですが、viewer の初期導線とは別です
-- viewer は `user_data/packs/defaultspack/current.json` があればそれを優先して読むため、setup/更新済みの `Defaultspack v2` を viewer から開けます
+- viewer はまず `rumi_home/user_data/packs/defaultspack/current.json` を見て、移行互換として `app_data_dir/user_data/packs/defaultspack/current.json` も参照します
+- そのため setup/更新済みの `Defaultspack v2` が managed pack として切り替わっていれば、viewer からその実体を開けます
 
 ## よくある詰まり方
 

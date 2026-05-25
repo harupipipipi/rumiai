@@ -88,7 +88,7 @@ cargo tauri dev
 ```
 
 開発用 viewer は repo 内の `rumi_ai_1_10/` を自動検出して kernel を起動します。
-起動後は Home の `Open Defaultspack` から、選択済みの `Defaultspack v2` UI まで進めます。
+起動後は Home の `Open Defaultspack` から、managed current pointer で選択されている `Defaultspack v2` UI まで進めます。
 起動時の詰まり方を含めたガイドは [`rumi_ai_1_10/docs/rumi_viewer_start.md`](./rumi_ai_1_10/docs/rumi_viewer_start.md) を参照してください。
 
 ## Development
