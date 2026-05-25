@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import io
+from types import SimpleNamespace
 import tarfile
 import zipfile
 from pathlib import Path
@@ -86,3 +87,55 @@ def test_stage_uv_fails_on_checksum_mismatch_before_extract(tmp_path, monkeypatc
         module.stage_uv(tmp_path / "app", target, version)
 
     assert not (tmp_path / "app" / "bundled" / "uv").exists()
+
+
+def test_stage_edge_haze_helper_compiles_for_apple_target(tmp_path, monkeypatch):
+    module = _load_prepare_tauri_resources()
+    source_root = tmp_path / "rumi_ai_1_10"
+    source = source_root / module.EDGE_HAZE_SOURCE
+    source.parent.mkdir(parents=True)
+    source.write_text("print(\"haze\")\n", encoding="utf-8")
+    dest_root = tmp_path / "gen" / "app"
+
+    def fake_run(args, **kwargs):
+        dest = Path(args[-1])
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_text("binary", encoding="utf-8")
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(module.shutil, "which", lambda name: "/usr/bin/swiftc" if name == "swiftc" else None)
+    monkeypatch.setattr(module.subprocess, "run", fake_run)
+
+    staged = module.stage_edge_haze_helper(
+        source_root,
+        dest_root,
+        target="aarch64-apple-darwin",
+        required=True,
+    )
+
+    assert staged == dest_root / module.EDGE_HAZE_BUNDLED_REL
+    assert staged.exists()
+    assert staged.stat().st_mode & 0o111
+
+
+def test_validate_bundle_requires_edge_haze_helper_for_release_apple_target(tmp_path):
+    module = _load_prepare_tauri_resources()
+    dest_root = tmp_path / "gen" / "app"
+    required = [
+        Path("app.py"),
+        Path("requirements.txt"),
+        Path("core_runtime/core_pack/core_control_panel/web/index.html"),
+        Path("pack_seeds/defaultspack/ecosystem.json"),
+        Path("ecosystem/defaultspack/ecosystem.json"),
+        Path("ecosystem/defaultspack/ui/shell.html"),
+        Path("ecosystem/defaultspack/ui/shell-app.js"),
+        Path("bundled/uv"),
+        Path("bundled/pack-shell"),
+    ]
+    for rel in required:
+        path = dest_root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("x", encoding="utf-8")
+
+    with pytest.raises(FileNotFoundError, match="edge_haze"):
+        module.validate_bundle(dest_root, require_runtime_tools=True, target="aarch64-apple-darwin")

@@ -47,9 +47,88 @@ fn stage_runtime_bundle() -> io::Result<()> {
         copy_dir_recursive(&bundled_src, &staged_root.join("bundled"))?;
     }
 
+    stage_edge_haze_helper(&runtime_root, &staged_root)?;
     stage_pack_shell(&repo_root, &staged_root)?;
 
     Ok(())
+}
+
+fn stage_edge_haze_helper(runtime_root: &Path, staged_root: &Path) -> io::Result<()> {
+    if !cargo_target_is_macos() {
+        return Ok(());
+    }
+    let source = runtime_root
+        .join("ecosystem")
+        .join("rumi_default_tools_pack")
+        .join("domain")
+        .join("computer")
+        .join("mac")
+        .join("EdgeHaze.swift");
+    if !source.is_file() {
+        return Ok(());
+    }
+    let swiftc = match find_swiftc() {
+        Some(path) => path,
+        None => {
+            println!(
+                "cargo:warning=swiftc not found; computer-use edge haze helper will not be bundled"
+            );
+            return Ok(());
+        }
+    };
+    let dest = staged_root
+        .join("bundled")
+        .join("helpers")
+        .join("edge_haze")
+        .join("edge_haze");
+    if let Some(parent) = dest.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let output = Command::new(&swiftc)
+        .arg(&source)
+        .arg("-O")
+        .arg("-o")
+        .arg(&dest)
+        .output()?;
+    if !output.status.success() {
+        return Err(io::Error::new(
+            io::ErrorKind::Other,
+            format!(
+                "failed to compile EdgeHaze.swift with {}: {}",
+                swiftc.display(),
+                String::from_utf8_lossy(&output.stderr)
+            ),
+        ));
+    }
+    println!("cargo:rerun-if-changed={}", source.display());
+    Ok(())
+}
+
+fn cargo_target_is_macos() -> bool {
+    std::env::var("TARGET")
+        .map(|target| target.contains("apple-darwin"))
+        .unwrap_or(cfg!(target_os = "macos"))
+}
+
+fn find_swiftc() -> Option<PathBuf> {
+    if Command::new("swiftc")
+        .arg("--version")
+        .output()
+        .ok()?
+        .status
+        .success()
+    {
+        return Some(PathBuf::from("swiftc"));
+    }
+    if let Ok(output) = Command::new("xcrun").args(["--find", "swiftc"]).output() {
+        if output.status.success() {
+            let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !path.is_empty() {
+                return Some(PathBuf::from(path));
+            }
+        }
+    }
+    None
 }
 
 fn stage_pack_shell(repo_root: &Path, staged_root: &Path) -> io::Result<()> {

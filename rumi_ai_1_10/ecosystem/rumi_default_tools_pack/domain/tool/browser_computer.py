@@ -803,6 +803,8 @@ class BrowserComputerController:
         ).strip()
         running_apps = self._running_apps()
         selected = None
+        selected_source = "running"
+        launched = False
         target = str(payload.get("target") or "").strip().lower()
         if target in {"active", "front", "front_app", "active_app"} or not app_filter:
             selected = next((item for item in running_apps if item.get("active")), None)
@@ -817,9 +819,18 @@ class BrowserComputerController:
         if selected is None and installed_match and (payload.get("open") is True or payload.get("launch") is True):
             launched = self._launch_app(installed_match)
             if launched:
-                time.sleep(0.5)
-                running_apps = self._running_apps()
-                selected = next((item for item in running_apps if self._app_matches_filter(item, app_filter)), None)
+                for delay in (0.25, 0.5, 1.0):
+                    time.sleep(delay)
+                    running_apps = self._running_apps()
+                    selected = next((item for item in running_apps if self._app_matches_filter(item, app_filter)), None)
+                    if selected is not None:
+                        selected_source = "launched_running"
+                        break
+                if selected is None:
+                    selected = dict(installed_match)
+                    selected["running"] = True
+                    selected["launched"] = True
+                    selected_source = "installed_launch_fallback"
         if selected is None:
             self._clear_target_app()
             return {
@@ -832,6 +843,9 @@ class BrowserComputerController:
                 **({"installed_apps": installed} if payload.get("include_installed") is True else {}),
             }
         selected = self._normalize_app_record(selected)
+        if launched:
+            selected["launched"] = True
+        selected["selection_source"] = selected_source
         state = self._computer_state()
         state["target_app"] = selected
         if payload.get("focus", True) is not False:
@@ -852,6 +866,8 @@ class BrowserComputerController:
             "platform": platform.system(),
             "target_app": selected,
             "open_apps": running_apps,
+            **({"installed_match": installed_match} if installed_match else {}),
+            **({"running_apps_unavailable": True} if launched and not running_apps else {}),
             "computer_seat": self._computer_seat_metadata_for_target(selected),
         }
 
@@ -3493,6 +3509,11 @@ return "not_found"
             try:
                 completed = subprocess.run(["osascript", "-e", script], check=True, capture_output=True, text=True)
                 return "activated" in (completed.stdout or "")
+            except Exception:
+                pass
+            try:
+                subprocess.Popen(["open", "-a", app_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                return True
             except Exception:
                 return False
         if system == "Windows":

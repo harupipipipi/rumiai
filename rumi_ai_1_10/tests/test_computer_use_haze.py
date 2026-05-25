@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import contextlib
+import json
 import sys
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -89,6 +91,133 @@ def test_edge_haze_manager_compiles_starts_and_stops_on_macos(tmp_path, monkeypa
     assert events == ["compile", "start", "terminate", "wait:1"]
 
 
+def test_edge_haze_manager_uses_existing_binary_without_swiftc(tmp_path, monkeypatch):
+    from ecosystem.rumi_default_tools_pack.domain.computer.mac import edge_haze
+    from ecosystem.rumi_default_tools_pack.domain.computer.mac.edge_haze import (
+        ComputerUseEdgeHazeManager,
+        EdgeHazeSettings,
+    )
+
+    source = tmp_path / "EdgeHaze.swift"
+    source.write_text("print(\"haze\")\n", encoding="utf-8")
+    binary = tmp_path / "helpers" / "edge_haze"
+    binary.parent.mkdir(parents=True)
+    binary.write_text("binary", encoding="utf-8")
+    binary.chmod(0o755)
+    events: list[str] = []
+
+    class FakeProcess:
+        pid = 1357
+
+        def poll(self):
+            return None
+
+    def fake_popen(args, **kwargs):
+        events.append(f"start:{args[0]}")
+        return FakeProcess()
+
+    monkeypatch.setattr(edge_haze.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(edge_haze.shutil, "which", lambda name: None)
+    monkeypatch.setattr(edge_haze.subprocess, "run", lambda *args, **kwargs: events.append("compile"))
+    monkeypatch.setattr(edge_haze.subprocess, "Popen", fake_popen)
+    monkeypatch.setenv("RUMI_COMPUTER_USE_HAZE", "1")
+
+    manager = ComputerUseEdgeHazeManager(
+        pack_root=tmp_path,
+        source_path=source,
+        binary_path=binary,
+        settings=EdgeHazeSettings(enabled=True),
+    )
+
+    assert manager.start(action="computer.click", payload={"x": 1, "y": 2}) is True
+    assert events == [f"start:{binary}"]
+
+
+def test_edge_haze_manager_uses_bundled_binary_with_writable_lease(tmp_path, monkeypatch):
+    from ecosystem.rumi_default_tools_pack.domain.computer.mac import edge_haze
+    from ecosystem.rumi_default_tools_pack.domain.computer.mac.edge_haze import (
+        ComputerUseEdgeHazeManager,
+        EdgeHazeSettings,
+    )
+
+    app_root = tmp_path / "app"
+    pack_root = app_root / "ecosystem" / "rumi_default_tools_pack"
+    bundled = app_root / "bundled" / "helpers" / "edge_haze" / "edge_haze"
+    bundled.parent.mkdir(parents=True)
+    bundled.write_text("binary", encoding="utf-8")
+    bundled.chmod(0o755)
+    user_data = tmp_path / "user_data"
+    popen_args: list[list[str]] = []
+    popen_envs: list[dict[str, str]] = []
+
+    class FakeProcess:
+        pid = 9753
+
+        def poll(self):
+            return None
+
+    def fake_popen(args, **kwargs):
+        popen_args.append(list(args))
+        popen_envs.append(dict(kwargs.get("env") or {}))
+        return FakeProcess()
+
+    monkeypatch.setattr(edge_haze.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(edge_haze.shutil, "which", lambda name: None)
+    monkeypatch.setattr(edge_haze.subprocess, "Popen", fake_popen)
+    monkeypatch.setenv("RUMI_COMPUTER_USE_HAZE", "1")
+    monkeypatch.setenv("RUMI_USER_DATA", str(user_data))
+
+    manager = ComputerUseEdgeHazeManager(
+        pack_root=pack_root,
+        source_path=tmp_path / "missing.swift",
+        settings=EdgeHazeSettings(enabled=True),
+    )
+
+    assert manager.start(action="computer.click", payload={"x": 1, "y": 2}) is True
+    assert popen_args == [[str(bundled)]]
+    lease_path = Path(popen_envs[0]["RUMI_EDGE_HAZE_LEASE_PATH"])
+    assert lease_path == user_data / "shared" / "helpers" / "edge_haze" / "edge_haze.lease.json"
+    assert lease_path.exists()
+
+
+def test_edge_haze_manager_prefers_env_binary(tmp_path, monkeypatch):
+    from ecosystem.rumi_default_tools_pack.domain.computer.mac import edge_haze
+    from ecosystem.rumi_default_tools_pack.domain.computer.mac.edge_haze import (
+        ComputerUseEdgeHazeManager,
+        EdgeHazeSettings,
+    )
+
+    override = tmp_path / "override_edge_haze"
+    override.write_text("binary", encoding="utf-8")
+    override.chmod(0o755)
+    popen_args: list[list[str]] = []
+
+    class FakeProcess:
+        pid = 24601
+
+        def poll(self):
+            return None
+
+    def fake_popen(args, **kwargs):
+        popen_args.append(list(args))
+        return FakeProcess()
+
+    monkeypatch.setattr(edge_haze.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(edge_haze.shutil, "which", lambda name: None)
+    monkeypatch.setattr(edge_haze.subprocess, "Popen", fake_popen)
+    monkeypatch.setenv("RUMI_COMPUTER_USE_HAZE", "1")
+    monkeypatch.setenv("RUMI_EDGE_HAZE_BINARY", str(override))
+
+    manager = ComputerUseEdgeHazeManager(
+        pack_root=tmp_path / "pack",
+        source_path=tmp_path / "missing.swift",
+        settings=EdgeHazeSettings(enabled=True),
+    )
+
+    assert manager.start(action="computer.click", payload={"x": 1, "y": 2}) is True
+    assert popen_args == [[str(override)]]
+
+
 def test_edge_haze_reuses_process_for_same_sequence_until_sequence_ends(tmp_path, monkeypatch):
     from ecosystem.rumi_default_tools_pack.domain.computer.mac import edge_haze
     from ecosystem.rumi_default_tools_pack.domain.computer.mac.edge_haze import (
@@ -162,6 +291,8 @@ def test_edge_haze_reuses_process_for_same_sequence_until_sequence_ends(tmp_path
     assert "terminate_pid:2468" not in events
     assert popen_envs[0]["RUMI_EDGE_HAZE_SEQUENCE_ID"] == "run_123"
     assert popen_envs[0]["RUMI_EDGE_HAZE_LEASE_PATH"].endswith("edge_haze.lease.json")
+    lease = json.loads(Path(popen_envs[0]["RUMI_EDGE_HAZE_LEASE_PATH"]).read_text(encoding="utf-8"))
+    assert lease["deadline_epoch"] - time.time() > 60
 
     second.end_sequence("other_run")
     assert "terminate_pid:2468" not in events

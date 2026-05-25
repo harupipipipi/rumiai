@@ -4416,6 +4416,86 @@ def test_browser_computer_select_app_targets_non_browser_app_without_focus(tmp_p
     assert activated == []
 
 
+def test_browser_computer_select_app_uses_launched_installed_app_when_running_list_is_empty(tmp_path, monkeypatch):
+    import ecosystem.rumi_default_tools_pack.domain.tool.browser_computer as browser_computer
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+
+    monkeypatch.setattr(browser_computer.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(browser_computer.time, "sleep", lambda seconds: None)
+
+    launched = []
+    activated = []
+    controller = BrowserComputerController(artifact_root=tmp_path)
+    controller._session_path = tmp_path / "shared" / "browser_sessions.json"
+    controller._running_apps = lambda: []
+    controller._installed_apps = lambda payload=None: [
+        {"name": "Google Chrome", "path": "/Applications/Google Chrome.app", "running": False}
+    ]
+    controller._launch_app = lambda app: launched.append(app) or True
+    controller._activate_app_name = lambda app_name: activated.append(app_name) or True
+    controller._list_windows = lambda: []
+
+    result = controller.run("computer.select_app", {"app": "Chrome", "open": True}, yolo_mode=True)
+
+    assert result["selected"] is True
+    assert result["running_apps_unavailable"] is True
+    assert result["target_app"]["name"] == "Google Chrome"
+    assert result["target_app"]["running"] is True
+    assert result["target_app"]["launched"] is True
+    assert result["target_app"]["selection_source"] == "installed_launch_fallback"
+    assert controller._computer_state()["target_app"]["name"] == "Google Chrome"
+    assert launched[0]["name"] == "Google Chrome"
+    assert activated == ["Google Chrome"]
+
+
+def test_browser_computer_show_app_reports_launched_installed_app_as_shown(tmp_path, monkeypatch):
+    import ecosystem.rumi_default_tools_pack.domain.tool.browser_computer as browser_computer
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+
+    monkeypatch.setattr(browser_computer.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(browser_computer.time, "sleep", lambda seconds: None)
+
+    controller = BrowserComputerController(artifact_root=tmp_path)
+    controller._session_path = tmp_path / "shared" / "browser_sessions.json"
+    controller._running_apps = lambda: []
+    controller._installed_apps = lambda payload=None: [
+        {"name": "Google Chrome", "path": "/Applications/Google Chrome.app", "running": False}
+    ]
+    controller._launch_app = lambda app: True
+    controller._activate_app_name = lambda app_name: True
+    controller._list_windows = lambda: []
+
+    result = controller.run("computer.show_app", {"app": "Chrome"}, yolo_mode=True)
+
+    assert result["shown"] is True
+    assert "reason" not in result
+    assert result["target_app"]["name"] == "Google Chrome"
+    assert result["target_app"]["selection_source"] == "installed_launch_fallback"
+
+
+def test_browser_computer_activate_app_name_falls_back_to_open_a_on_macos(tmp_path, monkeypatch):
+    import ecosystem.rumi_default_tools_pack.domain.tool.browser_computer as browser_computer
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+
+    popen_args = []
+
+    def fail_run(*args, **kwargs):
+        raise RuntimeError("System Events unavailable")
+
+    def fake_popen(args, **kwargs):
+        popen_args.append(args)
+        return object()
+
+    monkeypatch.setattr(browser_computer.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(browser_computer.subprocess, "run", fail_run)
+    monkeypatch.setattr(browser_computer.subprocess, "Popen", fake_popen)
+
+    controller = BrowserComputerController(artifact_root=tmp_path)
+
+    assert controller._activate_app_name("Google Chrome") is True
+    assert popen_args == [["open", "-a", "Google Chrome"]]
+
+
 def test_browser_computer_show_app_focuses_matching_visible_window(tmp_path):
     from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
 

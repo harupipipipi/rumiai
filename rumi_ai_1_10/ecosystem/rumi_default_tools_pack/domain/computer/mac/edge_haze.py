@@ -18,6 +18,8 @@ _HEX_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
 _LEASE_SCHEMA = "rumi.edge_haze_lease.v1"
 _STANDALONE_SEQUENCE_ID = "standalone"
 _SEQUENCE_IDLE_SECONDS = 120.0
+_EDGE_HAZE_BINARY_NAME = "edge_haze"
+_EDGE_HAZE_BUNDLED_REL = Path("bundled") / "helpers" / "edge_haze" / _EDGE_HAZE_BINARY_NAME
 
 
 @dataclass(frozen=True)
@@ -47,12 +49,14 @@ class ComputerUseEdgeHazeManager:
     ) -> None:
         self._pack_root = pack_root or Path(__file__).resolve().parents[3]
         self._source_path = source_path or Path(__file__).with_name("EdgeHaze.swift")
-        self._binary_path = binary_path or self._pack_root / "user_data" / "shared" / "helpers" / "edge_haze" / "edge_haze"
+        self._helper_dir = self._default_helper_dir(self._pack_root)
+        self._explicit_binary_path = binary_path is not None
+        self._binary_path = binary_path or self._helper_dir / _EDGE_HAZE_BINARY_NAME
         self._settings_path = settings_path or self._default_settings_path(self._pack_root)
         self._settings = settings
         self._process: subprocess.Popen[Any] | None = None
         self._sequence_id = _STANDALONE_SEQUENCE_ID
-        self._lease_path = self._default_lease_path(self._binary_path)
+        self._lease_path = self._lease_path_for_binary(self._binary_path)
 
     @classmethod
     def from_pack_root(cls, pack_root: Path) -> "ComputerUseEdgeHazeManager":
@@ -79,7 +83,7 @@ class ComputerUseEdgeHazeManager:
         if binary is None:
             return False
         self._sequence_id = self._sequence_id_from_payload(payload)
-        self._lease_path = self._default_lease_path(binary)
+        self._lease_path = self._lease_path_for_binary(binary)
         existing = self._read_lease(self._lease_path)
         existing_pid = self._lease_pid(existing)
         if existing_pid and existing.get("sequence_id") == self._sequence_id and self._pid_alive(existing_pid):
@@ -125,7 +129,7 @@ class ComputerUseEdgeHazeManager:
         if not pid:
             return
         if self._sequence_id != _STANDALONE_SEQUENCE_ID:
-            self._write_lease_for_pid(pid, action="", active=False)
+            self._write_lease_for_pid(pid, action="", active=True)
             return
         linger_seconds = max(0.0, float(self.settings().linger_seconds))
         if linger_seconds > 0:
@@ -212,14 +216,20 @@ class ComputerUseEdgeHazeManager:
         )
 
     def _ensure_binary(self) -> Path | None:
-        if not self._source_path.exists():
-            return None
+        override = self._env_binary_path()
+        if override is not None:
+            return override
+        bundled = self._bundled_binary_path()
+        cached = self._binary_path if self._usable_binary(self._binary_path) else None
+        source_exists = self._source_path.exists()
         swiftc = shutil.which("swiftc")
+        if cached and (not source_exists or not swiftc or cached.stat().st_mtime >= self._source_path.stat().st_mtime):
+            return cached
+        if not source_exists:
+            return bundled or cached
         if not swiftc:
-            return None
+            return bundled or cached
         try:
-            if self._binary_path.exists() and self._binary_path.stat().st_mtime >= self._source_path.stat().st_mtime:
-                return self._binary_path
             self._binary_path.parent.mkdir(parents=True, exist_ok=True)
             completed = subprocess.run(
                 [swiftc, str(self._source_path), "-o", str(self._binary_path)],
@@ -227,11 +237,48 @@ class ComputerUseEdgeHazeManager:
                 timeout=25,
                 check=False,
             )
-            if completed.returncode != 0 or not self._binary_path.exists():
-                return None
+            if self._binary_path.exists():
+                self._binary_path.chmod(self._binary_path.stat().st_mode | 0o755)
+            if completed.returncode != 0 or not self._usable_binary(self._binary_path):
+                return bundled or cached
             return self._binary_path
         except Exception:
+            return bundled or cached
+
+    @staticmethod
+    def _usable_binary(path: Path | None) -> bool:
+        if path is None:
+            return False
+        try:
+            return path.is_file() and os.access(path, os.X_OK)
+        except Exception:
+            return False
+
+    @staticmethod
+    def _default_helper_dir(pack_root: Path) -> Path:
+        user_data = os.environ.get("RUMI_USER_DATA", "").strip()
+        if user_data:
+            return Path(user_data) / "shared" / "helpers" / "edge_haze"
+        return pack_root / "user_data" / "shared" / "helpers" / "edge_haze"
+
+    def _env_binary_path(self) -> Path | None:
+        override = os.environ.get("RUMI_EDGE_HAZE_BINARY", "").strip()
+        if not override:
             return None
+        path = Path(override).expanduser()
+        return path if self._usable_binary(path) else None
+
+    def _bundled_binary_path(self) -> Path | None:
+        candidates: list[Path] = []
+        try:
+            candidates.append(self._pack_root.parent.parent / _EDGE_HAZE_BUNDLED_REL)
+        except Exception:
+            pass
+        candidates.extend(parent / _EDGE_HAZE_BUNDLED_REL for parent in self._pack_root.parents)
+        for candidate in candidates:
+            if self._usable_binary(candidate):
+                return candidate
+        return None
 
     @staticmethod
     def _default_settings_path(pack_root: Path) -> Path:
@@ -244,6 +291,11 @@ class ComputerUseEdgeHazeManager:
     @staticmethod
     def _default_lease_path(binary_path: Path) -> Path:
         return binary_path.with_name(binary_path.name + ".lease.json")
+
+    def _lease_path_for_binary(self, binary_path: Path) -> Path:
+        if self._explicit_binary_path:
+            return self._default_lease_path(binary_path)
+        return self._helper_dir / f"{_EDGE_HAZE_BINARY_NAME}.lease.json"
 
     @staticmethod
     def _sequence_id_from_payload(payload: dict[str, Any]) -> str:

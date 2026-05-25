@@ -49,6 +49,8 @@ GENERATED_RESOURCE_DIRS = (
     "ecosystem/defaultspack/ui",
     "bundled",
 )
+EDGE_HAZE_SOURCE = Path("ecosystem/rumi_default_tools_pack/domain/computer/mac/EdgeHaze.swift")
+EDGE_HAZE_BUNDLED_REL = Path("bundled/helpers/edge_haze/edge_haze")
 UV_PINNED_VERSION = "0.11.14"
 UV_SHA256_BY_TARGET = {
     "aarch64-apple-darwin": "4333af5c0730d94323a7819bbdf87ce92dd07fc857d67fff0059e0fca31b5c02",
@@ -174,6 +176,10 @@ def stage_defaultspack_seed(source_root: Path, dest_root: Path) -> int:
 
 def is_windows_target(target: str) -> bool:
     return "windows" in target or target.endswith("-msvc")
+
+
+def is_apple_target(target: str | None) -> bool:
+    return bool(target and "apple-darwin" in target)
 
 
 def pack_shell_binary_name(target: str) -> str:
@@ -355,6 +361,42 @@ def stage_uv(source_root: Path, target: str, version: str) -> Path:
     return dest
 
 
+def stage_edge_haze_helper(
+    source_root: Path,
+    dest_root: Path,
+    *,
+    target: str | None,
+    required: bool,
+) -> Path | None:
+    should_stage = is_apple_target(target) or (target is None and sys.platform == "darwin")
+    if not should_stage:
+        return None
+    source = source_root / EDGE_HAZE_SOURCE
+    if not source.exists():
+        if required:
+            raise FileNotFoundError(f"Edge haze Swift source not found at {source}")
+        return None
+    swiftc = shutil.which("swiftc")
+    if not swiftc:
+        if required:
+            raise RuntimeError("swiftc is required to bundle the macOS computer-use edge haze helper")
+        return None
+    dest = dest_root / EDGE_HAZE_BUNDLED_REL
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    completed = subprocess.run(
+        [swiftc, str(source), "-O", "-o", str(dest)],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=60,
+    )
+    if completed.returncode != 0 or not dest.exists():
+        message = (completed.stderr or completed.stdout or "unknown swiftc failure").strip()
+        raise RuntimeError(f"Failed to compile EdgeHaze.swift: {message}")
+    dest.chmod(dest.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+    return dest
+
+
 def validate_bundle(dest_root: Path, require_runtime_tools: bool, target: str | None) -> None:
     required = [
         Path("app.py"),
@@ -374,10 +416,16 @@ def validate_bundle(dest_root: Path, require_runtime_tools: bool, target: str | 
                 Path("bundled") / pack_shell_binary_name(target),
             ]
         )
+        if is_apple_target(target):
+            required.append(EDGE_HAZE_BUNDLED_REL)
 
     missing = [str(path) for path in required if not (dest_root / path).exists()]
     if missing:
         raise FileNotFoundError("Missing bundled resource(s): " + ", ".join(missing))
+    if require_runtime_tools and is_apple_target(target):
+        haze_helper = dest_root / EDGE_HAZE_BUNDLED_REL
+        if not os.access(haze_helper, os.X_OK):
+            raise RuntimeError(f"Bundled edge haze helper is not executable: {haze_helper}")
 
     forbidden = []
     for path in dest_root.rglob("*"):
@@ -432,6 +480,14 @@ def main() -> int:
     tracked_count = copy_tracked_runtime_files(repo_root, source_root, dest_root)
     generated_count = copy_generated_resource_dirs(source_root, dest_root)
     seed_count = stage_defaultspack_seed(source_root, dest_root)
+    staged_haze = stage_edge_haze_helper(
+        source_root,
+        dest_root,
+        target=args.target,
+        required=args.require_runtime_tools and is_apple_target(args.target),
+    )
+    if staged_haze:
+        print(f"Staged {staged_haze.relative_to(repo_root)}")
 
     validate_bundle(dest_root, args.require_runtime_tools, args.target)
     print(
