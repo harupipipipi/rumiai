@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import os
 import json
+import shlex
 import sys
 from pathlib import Path
 from unittest import mock
@@ -26,17 +27,19 @@ def manager(tmp_path):
 
 
 @pytest.fixture
-def sample_meta():
+def sample_meta(tmp_path):
     """Sample app metadata as saved by register_app()."""
+    pack_dir = tmp_path / "packs" / "test-pack-001"
+    pack_dir.mkdir(parents=True)
     return {
         "pack_id": "test-pack-001",
         "command": "python app.py --verbose",
-        "pack_dir": "/tmp/packs/test-pack-001",
+        "pack_dir": str(pack_dir),
         "pack_shell": "/usr/local/bin/pack-shell",
         "requires_api_token": True,
         "window": {"title": "Test App"},
         "env": {"CUSTOM_VAR": "hello"},
-        "working_dir": "/tmp/packs/test-pack-001",
+        "working_dir": str(pack_dir),
         "platforms": [],
     }
 
@@ -73,8 +76,14 @@ class TestLaunchAppArguments:
             "test-pack-001",
             "--command",
             "python app.py --verbose",
+            "--port",
+            "8765",
+            "--kernel-cmd",
+            f"{shlex.quote(desktop_app_manager._runtime_python_for_app())} -m app",
+            "--timeout",
+            "120",
             "--working-dir",
-            "/tmp/packs/test-pack-001",
+            sample_meta["working_dir"],
         ]
 
     @mock.patch("subprocess.Popen")
@@ -263,3 +272,78 @@ class TestLaunchAppArguments:
         assert result["success"] is False
         assert "RUMI_API_TOKEN" in result["error"]
         mock_popen.assert_not_called()
+
+    def test_default_manager_uses_rumi_user_data_apps_dir(self, tmp_path, monkeypatch):
+        user_data = tmp_path / "user-data"
+        monkeypatch.setenv("RUMI_USER_DATA", str(user_data))
+
+        manager = DesktopAppManager()
+
+        assert Path(manager._apps_dir) == user_data / "apps"
+
+    @mock.patch("subprocess.Popen")
+    def test_launch_refreshes_stale_meta_from_managed_pack(
+        self, mock_popen, tmp_path, monkeypatch
+    ):
+        user_data = tmp_path / "user-data"
+        pack_dir = user_data / "packs" / "defaultspack" / "versions" / "2.0.0"
+        pack_dir.mkdir(parents=True)
+        (pack_dir / "ecosystem.json").write_text(
+            json.dumps(
+                {
+                    "pack_id": "defaultspack",
+                    "desktop_app": {
+                        "command": "python defaultspack/desktop_app.py",
+                        "env": {"RUMI_DEFAULTSPACK_SURFACE": "browser"},
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        current = user_data / "packs" / "defaultspack" / "current.json"
+        current.write_text(
+            json.dumps(
+                {
+                    "schema": "rumi.pack_current.v1",
+                    "pack_id": "defaultspack",
+                    "version": "2.0.0",
+                    "path": "versions/2.0.0",
+                }
+            ),
+            encoding="utf-8",
+        )
+        apps_dir = user_data / "apps"
+        apps_dir.mkdir()
+        (apps_dir / "defaultspack.json").write_text(
+            json.dumps(
+                {
+                    "pack_id": "defaultspack",
+                    "command": "python old.py",
+                    "pack_dir": str(tmp_path / "missing-old-bundle"),
+                    "pack_shell": str(tmp_path / "missing-pack-shell"),
+                    "requires_api_token": True,
+                    "env": {"RUMI_DEFAULTSPACK_SURFACE": "browser"},
+                    "working_dir": "",
+                }
+            ),
+            encoding="utf-8",
+        )
+        pack_shell = tmp_path / "pack-shell"
+        pack_shell.write_text("#!/bin/sh\n", encoding="utf-8")
+        pack_shell.chmod(0o755)
+        monkeypatch.setenv("RUMI_USER_DATA", str(user_data))
+        monkeypatch.setenv("RUMI_PACK_SHELL_PATH", str(pack_shell))
+
+        mock_proc = mock.MagicMock()
+        mock_proc.poll.return_value = None
+        mock_proc.pid = 12345
+        mock_popen.return_value = mock_proc
+
+        manager = DesktopAppManager()
+        with mock.patch.object(manager, "_create_shortcut", return_value=str(tmp_path / "Rumi.app")):
+            result = manager.launch_app("defaultspack", api_token="issued-token")
+
+        assert result["success"] is True
+        meta = json.loads((apps_dir / "defaultspack.json").read_text(encoding="utf-8"))
+        assert meta["pack_dir"] == str(pack_dir)
+        assert mock_popen.call_args.kwargs["cwd"] == str(pack_dir)

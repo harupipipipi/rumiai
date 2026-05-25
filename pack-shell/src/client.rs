@@ -1,6 +1,7 @@
 use anyhow::{bail, Context, Result};
 use log::debug;
 use serde::Deserialize;
+use serde_json::Value;
 use std::time::Duration;
 
 /// Response from POST /api/desktop/token
@@ -58,10 +59,9 @@ impl KernelClient {
                     debug!("Health check returned status: {}", resp.status());
                     return false;
                 }
-                match resp.json::<serde_json::Value>() {
+                match resp.json::<Value>() {
                     Ok(body) => {
-                        let status = body.get("status").and_then(|v| v.as_str());
-                        status == Some("ok")
+                        health_body_ok(&body)
                     }
                     Err(e) => {
                         debug!("Failed to parse health response: {}", e);
@@ -137,6 +137,21 @@ impl KernelClient {
     }
 }
 
+fn health_body_ok(body: &Value) -> bool {
+    if body.get("status").and_then(|v| v.as_str()) == Some("ok") {
+        return true;
+    }
+    if body
+        .get("data")
+        .and_then(|data| data.get("status"))
+        .and_then(|v| v.as_str())
+        == Some("ok")
+    {
+        return true;
+    }
+    false
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -172,5 +187,29 @@ mod tests {
         assert!(!resp.success);
         assert!(resp.data.is_none());
         assert_eq!(resp.error, Some("unauthorized".to_string()));
+    }
+
+    #[test]
+    fn test_health_body_accepts_legacy_status_shape() {
+        let body: serde_json::Value = serde_json::json!({"status": "ok"});
+        assert!(health_body_ok(&body));
+    }
+
+    #[test]
+    fn test_health_body_accepts_envelope_shape() {
+        let body: serde_json::Value = serde_json::json!({
+            "success": true,
+            "data": {"status": "ok", "panel_ready": true}
+        });
+        assert!(health_body_ok(&body));
+    }
+
+    #[test]
+    fn test_health_body_rejects_non_ok_status() {
+        let body: serde_json::Value = serde_json::json!({
+            "success": true,
+            "data": {"status": "starting"}
+        });
+        assert!(!health_body_ok(&body));
     }
 }

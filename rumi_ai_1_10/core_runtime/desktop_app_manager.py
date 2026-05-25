@@ -22,8 +22,13 @@ logger = logging.getLogger(__name__)
 _PACK_SHELL_PATH_ENV = "RUMI_PACK_SHELL_PATH"
 _PACK_API_TOKEN_ENV = "RUMI_API_TOKEN"
 
-# 登録済みアプリのメタデータ保存先（REPO/user_data/apps/ 相当）
+# 登録済みアプリのメタデータ保存先。
+#
+# Viewer-launched runtimes must not write into bundled app resources.  The
+# default manager therefore writes to RUMI_USER_DATA/apps.  Tests and older
+# repo-local callers that pass repo_dir explicitly keep using repo/user_data/apps.
 _APPS_SUBDIR = "user_data/apps"
+_USER_DATA_APPS_SUBDIR = "apps"
 
 
 def _subprocess_creation_kwargs() -> Dict[str, Any]:
@@ -35,6 +40,8 @@ def _subprocess_creation_kwargs() -> Dict[str, Any]:
 def _prepend_runtime_python_to_path(env: Dict[str, str]) -> None:
     python_dir = str(Path(sys.executable).resolve().parent)
     env["PATH"] = python_dir + os.pathsep + env.get("PATH", "")
+    repo_dir = _default_repo_dir()
+    env["PYTHONPATH"] = repo_dir + os.pathsep + env.get("PYTHONPATH", "")
     env.setdefault("PYTHONUTF8", "1")
     env.setdefault("PYTHONIOENCODING", "utf-8")
     env.setdefault("PYTHONUNBUFFERED", "1")
@@ -46,6 +53,14 @@ def _runtime_python_for_app() -> str:
         if pythonw.is_file():
             return str(pythonw)
     return sys.executable
+
+
+def _runtime_port() -> str:
+    return str(os.environ.get("RUMI_PORT") or "8765")
+
+
+def _kernel_command_for_runtime() -> str:
+    return f"{shlex.quote(_runtime_python_for_app())} -m app"
 
 
 def _normalize_app_command_args(popen_args: List[str]) -> List[str]:
@@ -60,6 +75,20 @@ def _normalize_app_command_args(popen_args: List[str]) -> List[str]:
 def _default_repo_dir() -> str:
     """Resolve the rumi_ai_1_10 root for viewer-launched kernel processes."""
     return str(Path(__file__).resolve().parents[1])
+
+
+def _runtime_user_data_dir() -> Optional[Path]:
+    configured = os.environ.get("RUMI_USER_DATA")
+    if configured:
+        return Path(configured).expanduser()
+    return None
+
+
+def _desktop_api_token_path() -> Optional[Path]:
+    user_data = _runtime_user_data_dir()
+    if user_data is None:
+        return None
+    return user_data.parent / ".desktop_api_token"
 
 
 def _pack_shell_binary_name() -> str:
@@ -94,8 +123,13 @@ class DesktopAppManager:
     """Pack デスクトップアプリのライフサイクルマネージャ。"""
 
     def __init__(self, repo_dir: Optional[str] = None):
+        explicit_repo_dir = repo_dir is not None
         self._repo_dir = repo_dir or os.environ.get("REPO") or _default_repo_dir()
-        self._apps_dir = os.path.join(self._repo_dir, _APPS_SUBDIR) if self._repo_dir else ""
+        user_data = _runtime_user_data_dir()
+        if not explicit_repo_dir and user_data is not None:
+            self._apps_dir = str(user_data / _USER_DATA_APPS_SUBDIR)
+        else:
+            self._apps_dir = os.path.join(self._repo_dir, _APPS_SUBDIR) if self._repo_dir else ""
         self._running: Dict[str, subprocess.Popen] = {}
 
     # ------------------------------------------------------------------
@@ -250,6 +284,21 @@ class DesktopAppManager:
         _prepend_runtime_python_to_path(env)
 
         working_dir = meta.get("working_dir") or meta.get("pack_dir", "")
+        if self._meta_needs_refresh(meta, working_dir, issued_desktop_token=bool(issued_desktop_token)):
+            registration = self._register_known_pack_if_available(pack_id)
+            if registration.get("success"):
+                meta = self._load_meta(pack_id) or meta
+                command = meta.get("command", command)
+                env.update(meta.get("env", {}))
+                if env_overrides:
+                    env.update({str(key): str(value) for key, value in env_overrides.items()})
+                working_dir = meta.get("working_dir") or meta.get("pack_dir", "")
+            elif not working_dir or not os.path.isdir(working_dir):
+                return {
+                    "success": False,
+                    "error": f"App metadata is stale for {pack_id}: {registration.get('error')}",
+                }
+
         if issued_desktop_token:
             return self._launch_direct(pack_id, command, working_dir, env)
 
@@ -259,7 +308,19 @@ class DesktopAppManager:
             if not pack_shell:
                 return {"success": False, "error": "pack-shell binary not found"}
 
-        popen_args = [pack_shell, "run", pack_id, "--command", command]
+        popen_args = [
+            pack_shell,
+            "run",
+            pack_id,
+            "--command",
+            command,
+            "--port",
+            _runtime_port(),
+            "--kernel-cmd",
+            _kernel_command_for_runtime(),
+            "--timeout",
+            "120",
+        ]
         if working_dir:
             popen_args.extend(["--working-dir", working_dir])
 
@@ -417,9 +478,48 @@ class DesktopAppManager:
         # 実行ファイル
         launch_path = os.path.join(macos_dir, "launch")
         command = config.get("command", "")
+        env_exports = "\n".join(
+            f"export {key}={shlex.quote(str(value))}"
+            for key, value in sorted((config.get("env") or {}).items())
+            if isinstance(key, str)
+        )
+        token_path = _desktop_api_token_path()
+        token_file = str(token_path) if token_path is not None else ""
+        venv_python = _runtime_python_for_app()
+        app_root = _default_repo_dir()
+        kernel_cmd = _kernel_command_for_runtime()
         launch_script = (
             '#!/bin/bash\n'
-            f'exec "{pack_shell}" run "{pack_id}" --command "{command}" --working-dir "{pack_dir}"\n'
+            'set -e\n'
+            f'PACK_SHELL={shlex.quote(pack_shell)}\n'
+            f'APP_WORKING_DIR={shlex.quote(pack_dir)}\n'
+            f'APP_ROOT={shlex.quote(app_root)}\n'
+            f'PYTHON={shlex.quote(venv_python)}\n'
+            f'DESKTOP_COMMAND={shlex.quote(command)}\n'
+            f'KERNEL_COMMAND={shlex.quote(kernel_cmd)}\n'
+            f'TOKEN_FILE={shlex.quote(token_file)}\n'
+            f'export PATH={shlex.quote(str(Path(venv_python).parent))}:$PATH\n'
+            'export PYTHONPATH="$APP_ROOT:${PYTHONPATH:-}"\n'
+            f'{env_exports}\n'
+            'if [ -z "${RUMI_API_TOKEN:-}" ]; then\n'
+            '  RUMI_API_TOKEN=$("$PYTHON" - <<\'PY\'\n'
+            'from core_runtime.hmac_key_manager import HMACKeyManager\n'
+            'print(HMACKeyManager().get_active_key())\n'
+            'PY\n'
+            ') || true\n'
+            '  export RUMI_API_TOKEN\n'
+            'fi\n'
+            'if [ -z "${RUMI_API_TOKEN:-}" ] && [ -n "$TOKEN_FILE" ] && [ -f "$TOKEN_FILE" ]; then\n'
+            '  RUMI_API_TOKEN=$(cat "$TOKEN_FILE" 2>/dev/null | tr -d "\\n")\n'
+            '  export RUMI_API_TOKEN\n'
+            'fi\n'
+            'exec "$PACK_SHELL" run '
+            f'{shlex.quote(pack_id)} '
+            '--command "$DESKTOP_COMMAND" '
+            f'--port {_runtime_port()} '
+            '--kernel-cmd "$KERNEL_COMMAND" '
+            '--working-dir "$APP_WORKING_DIR" '
+            '--timeout 120\n'
         )
         with open(launch_path, "w", encoding="utf-8") as f:
             f.write(launch_script)
@@ -541,8 +641,50 @@ class DesktopAppManager:
         except Exception:
             return None
 
+    def _meta_needs_refresh(
+        self,
+        meta: Dict[str, Any],
+        working_dir: str,
+        *,
+        issued_desktop_token: bool,
+    ) -> bool:
+        if working_dir and not os.path.isdir(working_dir):
+            return True
+        if not issued_desktop_token:
+            pack_shell = str(meta.get("pack_shell") or "")
+            if pack_shell and not os.path.isfile(pack_shell):
+                return True
+        return False
+
+    def _managed_pack_ecosystem_path(self, pack_id: str) -> Optional[Path]:
+        user_data = _runtime_user_data_dir()
+        if user_data is None:
+            return None
+        managed_root = user_data / "packs" / pack_id
+        current_json = managed_root / "current.json"
+        if current_json.is_file():
+            try:
+                data = json.loads(current_json.read_text(encoding="utf-8"))
+            except Exception:
+                data = {}
+            if data.get("pack_id") == pack_id:
+                rel = str(data.get("path") or "")
+                rel_path = Path(rel)
+                if rel and not rel_path.is_absolute() and ".." not in rel_path.parts:
+                    ecosystem = managed_root / rel_path / "ecosystem.json"
+                    if ecosystem.is_file():
+                        return ecosystem
+        direct = managed_root / "ecosystem.json"
+        if direct.is_file():
+            return direct
+        return None
+
     def _register_known_pack_if_available(self, pack_id: str) -> Dict[str, Any]:
-        """Register a repo-local pack desktop app lazily on first launch."""
+        """Register a managed or repo-local pack desktop app lazily on first launch."""
+        managed_ecosystem = self._managed_pack_ecosystem_path(pack_id)
+        if managed_ecosystem is not None:
+            return self.register_from_ecosystem(str(managed_ecosystem))
+
         if not self._repo_dir:
             return {"success": False, "error": "repo dir is not configured"}
 

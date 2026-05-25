@@ -26,6 +26,7 @@ SETUP_PACK_ALL_OK_PERMISSIONS = [
     "pack.install",
     "pack.uninstall",
     "pack.migrate",
+    "desktop_app.execute",
     "setup_pack.module.manage",
 ]
 

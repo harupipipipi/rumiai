@@ -117,7 +117,8 @@ class CapabilityGrantManager:
     SECRET_KEY_FILE = "user_data/permissions/.secret_key"
     
     def __init__(self, grants_dir: str = None, secret_key: str = None):
-        self._grants_dir = Path(grants_dir) if grants_dir else Path(self.DEFAULT_GRANTS_DIR)
+        self._user_data_dir = self._resolve_user_data_dir()
+        self._grants_dir = Path(grants_dir) if grants_dir else self._default_grants_dir()
         self._secret_key = secret_key or self._load_or_create_secret_key()
         self._grants: Dict[str, CapabilityGrant] = {}
         self._tampered_principals: Set[str] = set()
@@ -125,6 +126,18 @@ class CapabilityGrantManager:
         
         self._ensure_dir()
         self._load_all_grants()
+
+    @staticmethod
+    def _resolve_user_data_dir() -> Optional[Path]:
+        configured = os.environ.get("RUMI_USER_DATA")
+        if configured:
+            return Path(configured).expanduser()
+        return None
+
+    def _default_grants_dir(self) -> Path:
+        if self._user_data_dir is not None:
+            return self._user_data_dir / "permissions" / "capabilities"
+        return Path(self.DEFAULT_GRANTS_DIR)
     
     def _now_ts(self) -> str:
         return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
@@ -135,7 +148,11 @@ class CapabilityGrantManager:
     
     def _load_or_create_secret_key(self) -> str:
         """NetworkGrantManager と同じ secret_key を流用"""
-        key_file = Path(self.SECRET_KEY_FILE)
+        key_file = (
+            self._user_data_dir / "permissions" / ".secret_key"
+            if self._user_data_dir is not None
+            else Path(self.SECRET_KEY_FILE)
+        )
         
         if key_file.exists():
             try:

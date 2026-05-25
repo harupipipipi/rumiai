@@ -49,6 +49,32 @@ def test_core_desktop_execute_manifest_uses_dot_permission_id():
     assert manifest["grant_config"]["permission_id"] == "desktop_app.execute"
 
 
+def test_capability_grants_default_to_rumi_user_data(tmp_path, monkeypatch):
+    from core_runtime.capability_grant_manager import CapabilityGrantManager
+
+    user_data = tmp_path / "user-data"
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+    monkeypatch.chdir(cwd)
+    monkeypatch.setenv("RUMI_USER_DATA", str(user_data))
+
+    manager = CapabilityGrantManager()
+    manager.grant_permission(
+        "defaultspack",
+        "desktop_app.execute",
+        {"allowed_packs": ["defaultspack"]},
+    )
+
+    assert (user_data / "permissions" / "capabilities" / "defaultspack.json").is_file()
+    assert not (cwd / "user_data" / "permissions" / "capabilities" / "defaultspack.json").exists()
+
+
+def test_setup_all_ok_includes_defaultspack_desktop_launch_permission():
+    from core_runtime.setup_pack import SETUP_PACK_ALL_OK_PERMISSIONS
+
+    assert "desktop_app.execute" in SETUP_PACK_ALL_OK_PERMISSIONS
+
+
 def test_runtime_registers_desktop_launch_handlers():
     from core_runtime.kernel_handlers_runtime import KernelRuntimeHandlersMixin
 
