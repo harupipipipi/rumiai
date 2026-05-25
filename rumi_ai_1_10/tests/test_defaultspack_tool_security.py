@@ -471,6 +471,91 @@ def test_computer_use_physical_action_returns_approval_before_local_execution(mo
     assert result["widget"]["arguments"]["physical"] is True
 
 
+def test_computer_use_requires_denied_returns_approval_before_local_execution(monkeypatch):
+    class FakeCapabilityExecutor:
+        def execute(self, principal_id, request):
+            return SimpleNamespace(
+                success=False,
+                error_type="requires_denied",
+                error="Function requires permission 'computer.control' not granted",
+            )
+
+    def fail_local(*args, **kwargs):
+        raise AssertionError("computer_use must wait for approval before fallback")
+
+    monkeypatch.setattr(ToolExecutor, "_execute_local", fail_local)
+
+    result = ToolExecutor()._execute_rumi_function(
+        {
+            "tool_id": "computer_use",
+            "name": "computer_use",
+            "execution": {
+                "type": "rumi_function",
+                "qualified_name": "rumi_default_tools_pack:computer_use",
+            },
+            "risk": "high",
+            "requires_approval": True,
+            "capability_grants": ["computer.control"],
+            "metadata": {"source_pack_id": "rumi_default_tools_pack"},
+        },
+        {"action": "open_url", "url": "https://gemini.google.com"},
+        {
+            "user_requested_computer_use": True,
+            "capability_executor": FakeCapabilityExecutor(),
+        },
+    )
+
+    assert result["is_error"] is False
+    assert result["widget"]["type"] == "approval_request"
+    assert result["widget"]["arguments"]["action"] == "open_url"
+
+
+def test_computer_use_requires_denied_falls_back_after_tool_server_approval(monkeypatch):
+    class FakeCapabilityExecutor:
+        def execute(self, principal_id, request):
+            return SimpleNamespace(
+                success=False,
+                error_type="requires_denied",
+                error="Function requires permission 'computer.control' not granted",
+            )
+
+    seen = {}
+
+    def fake_local(self, tool_name, arguments, context):
+        seen["tool_name"] = tool_name
+        seen["arguments"] = arguments
+        seen["context"] = context
+        return {"result": "local ok", "is_error": False, "widget": {"type": tool_name}}
+
+    monkeypatch.setattr(ToolExecutor, "_execute_local", fake_local)
+
+    result = ToolExecutor()._execute_rumi_function(
+        {
+            "tool_id": "computer_use",
+            "name": "computer_use",
+            "execution": {
+                "type": "rumi_function",
+                "qualified_name": "rumi_default_tools_pack:computer_use",
+            },
+            "risk": "high",
+            "requires_approval": True,
+            "capability_grants": ["computer.control"],
+            "metadata": {"source_pack_id": "rumi_default_tools_pack"},
+        },
+        {"action": "open_url", "url": "https://gemini.google.com"},
+        {
+            "user_requested_computer_use": True,
+            "profile_policy": {"yolo_mode": True},
+            "capability_executor": FakeCapabilityExecutor(),
+        },
+    )
+
+    assert result["is_error"] is False
+    assert result["result"] == "local ok"
+    assert seen["tool_name"] == "computer_use"
+    assert seen["arguments"]["action"] == "open_url"
+
+
 def test_prefocus_computer_target_window_does_not_execute_without_approval(monkeypatch):
     class FakeCapabilityExecutor:
         def execute(self, principal_id, request):

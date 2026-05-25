@@ -6,13 +6,20 @@ import os
 import platform
 import re
 import shutil
+import signal
 import subprocess
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterator
 
 
 _HEX_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
+_LEASE_SCHEMA = "rumi.edge_haze_lease.v1"
+_STANDALONE_SEQUENCE_ID = "standalone"
+_SEQUENCE_IDLE_SECONDS = 120.0
+_EDGE_HAZE_BINARY_NAME = "edge_haze"
+_EDGE_HAZE_BUNDLED_REL = Path("bundled") / "helpers" / "edge_haze" / _EDGE_HAZE_BINARY_NAME
 
 
 @dataclass(frozen=True)
@@ -25,6 +32,7 @@ class EdgeHazeSettings:
     opacity: float = 0.36
     edge_width: int = 150
     animation_speed: float = 1.0
+    linger_seconds: float = 3.0
 
 
 class ComputerUseEdgeHazeManager:
@@ -41,10 +49,14 @@ class ComputerUseEdgeHazeManager:
     ) -> None:
         self._pack_root = pack_root or Path(__file__).resolve().parents[3]
         self._source_path = source_path or Path(__file__).with_name("EdgeHaze.swift")
-        self._binary_path = binary_path or self._pack_root / "user_data" / "shared" / "helpers" / "edge_haze" / "edge_haze"
+        self._helper_dir = self._default_helper_dir(self._pack_root)
+        self._explicit_binary_path = binary_path is not None
+        self._binary_path = binary_path or self._helper_dir / _EDGE_HAZE_BINARY_NAME
         self._settings_path = settings_path or self._default_settings_path(self._pack_root)
         self._settings = settings
         self._process: subprocess.Popen[Any] | None = None
+        self._sequence_id = _STANDALONE_SEQUENCE_ID
+        self._lease_path = self._lease_path_for_binary(self._binary_path)
 
     @classmethod
     def from_pack_root(cls, pack_root: Path) -> "ComputerUseEdgeHazeManager":
@@ -59,6 +71,7 @@ class ComputerUseEdgeHazeManager:
             self.stop()
 
     def start(self, *, action: str = "", payload: dict[str, Any] | None = None) -> bool:
+        payload = payload or {}
         settings = self.settings()
         if not settings.enabled:
             return False
@@ -69,6 +82,15 @@ class ComputerUseEdgeHazeManager:
         binary = self._ensure_binary()
         if binary is None:
             return False
+        self._sequence_id = self._sequence_id_from_payload(payload)
+        self._lease_path = self._lease_path_for_binary(binary)
+        existing = self._read_lease(self._lease_path)
+        existing_pid = self._lease_pid(existing)
+        if existing_pid and existing.get("sequence_id") == self._sequence_id and self._pid_alive(existing_pid):
+            self._write_lease_for_pid(existing_pid, action=action, active=True)
+            return True
+        if existing_pid and existing.get("sequence_id") != self._sequence_id and self._pid_alive(existing_pid):
+            self._terminate_pid(existing_pid)
         env = os.environ.copy()
         env.update(
             {
@@ -80,10 +102,12 @@ class ComputerUseEdgeHazeManager:
                 "RUMI_EDGE_HAZE_EDGE_WIDTH": str(settings.edge_width),
                 "RUMI_EDGE_HAZE_SPEED": str(settings.animation_speed),
                 "RUMI_EDGE_HAZE_ACTION": action,
+                "RUMI_EDGE_HAZE_LEASE_PATH": str(self._lease_path),
+                "RUMI_EDGE_HAZE_SEQUENCE_ID": self._sequence_id,
             }
         )
         try:
-            self._process = subprocess.Popen(
+            process = subprocess.Popen(
                 [str(binary)],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
@@ -91,6 +115,10 @@ class ComputerUseEdgeHazeManager:
                 env=env,
                 start_new_session=True,
             )
+            self._process = process
+            pid = int(getattr(process, "pid", 0) or 0)
+            if pid > 0:
+                self._write_lease_for_pid(pid, action=action, active=True)
             return True
         except Exception:
             self._process = None
@@ -99,6 +127,31 @@ class ComputerUseEdgeHazeManager:
     def stop(self) -> None:
         process = self._process
         self._process = None
+        pid = int(getattr(process, "pid", 0) or 0) if process is not None else self._lease_pid(self._read_lease(self._lease_path))
+        if not pid:
+            self._terminate_process(process)
+            return
+        linger_seconds = max(0.0, float(self.settings().linger_seconds))
+        if self._sequence_id != _STANDALONE_SEQUENCE_ID or linger_seconds > 0:
+            self._write_lease_for_pid(pid, action="", active=False)
+            return
+        self._terminate_process(process)
+        self._remove_lease_if_matches(pid=pid, sequence_id=self._sequence_id)
+
+    def end_sequence(self, sequence_id: str) -> None:
+        sequence_id = str(sequence_id or "").strip()
+        if not sequence_id:
+            return
+        lease = self._read_lease(self._lease_path)
+        if lease.get("sequence_id") != sequence_id:
+            return
+        pid = self._lease_pid(lease)
+        if pid:
+            self._terminate_pid(pid)
+        self._remove_lease_if_matches(pid=pid, sequence_id=sequence_id)
+
+    @staticmethod
+    def _terminate_process(process: subprocess.Popen[Any] | None) -> None:
         if process is None:
             return
         try:
@@ -111,6 +164,26 @@ class ComputerUseEdgeHazeManager:
                 process.kill()
             except Exception:
                 pass
+
+    @classmethod
+    def _terminate_pid(cls, pid: int) -> None:
+        if pid <= 0:
+            return
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except ProcessLookupError:
+            return
+        except Exception:
+            return
+        deadline = time.time() + 1.0
+        while time.time() < deadline:
+            if not cls._pid_alive(pid):
+                return
+            time.sleep(0.05)
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except Exception:
+            pass
 
     def settings(self) -> EdgeHazeSettings:
         if self._settings is None:
@@ -139,17 +212,24 @@ class ComputerUseEdgeHazeManager:
             opacity=self._clamped_float(values.get("opacity"), 0.36, 0.05, 0.9),
             edge_width=int(self._clamped_float(values.get("edge_width"), 150, 40, 420)),
             animation_speed=self._clamped_float(values.get("animation_speed"), 1.0, 0.1, 4.0),
+            linger_seconds=self._clamped_float(values.get("linger_seconds"), 3.0, 0.0, 30.0),
         )
 
     def _ensure_binary(self) -> Path | None:
-        if not self._source_path.exists():
-            return None
+        override = self._env_binary_path()
+        if override is not None:
+            return override
+        bundled = self._bundled_binary_path()
+        cached = self._binary_path if self._usable_binary(self._binary_path) else None
+        source_exists = self._source_path.exists()
         swiftc = shutil.which("swiftc")
+        if cached and (not source_exists or not swiftc or cached.stat().st_mtime >= self._source_path.stat().st_mtime):
+            return cached
+        if not source_exists:
+            return bundled or cached
         if not swiftc:
-            return None
+            return bundled or cached
         try:
-            if self._binary_path.exists() and self._binary_path.stat().st_mtime >= self._source_path.stat().st_mtime:
-                return self._binary_path
             self._binary_path.parent.mkdir(parents=True, exist_ok=True)
             completed = subprocess.run(
                 [swiftc, str(self._source_path), "-o", str(self._binary_path)],
@@ -157,11 +237,48 @@ class ComputerUseEdgeHazeManager:
                 timeout=25,
                 check=False,
             )
-            if completed.returncode != 0 or not self._binary_path.exists():
-                return None
+            if self._binary_path.exists():
+                self._binary_path.chmod(self._binary_path.stat().st_mode | 0o755)
+            if completed.returncode != 0 or not self._usable_binary(self._binary_path):
+                return bundled or cached
             return self._binary_path
         except Exception:
+            return bundled or cached
+
+    @staticmethod
+    def _usable_binary(path: Path | None) -> bool:
+        if path is None:
+            return False
+        try:
+            return path.is_file() and os.access(path, os.X_OK)
+        except Exception:
+            return False
+
+    @staticmethod
+    def _default_helper_dir(pack_root: Path) -> Path:
+        user_data = os.environ.get("RUMI_USER_DATA", "").strip()
+        if user_data:
+            return Path(user_data) / "shared" / "helpers" / "edge_haze"
+        return pack_root / "user_data" / "shared" / "helpers" / "edge_haze"
+
+    def _env_binary_path(self) -> Path | None:
+        override = os.environ.get("RUMI_EDGE_HAZE_BINARY", "").strip()
+        if not override:
             return None
+        path = Path(override).expanduser()
+        return path if self._usable_binary(path) else None
+
+    def _bundled_binary_path(self) -> Path | None:
+        candidates: list[Path] = []
+        try:
+            candidates.append(self._pack_root.parent.parent / _EDGE_HAZE_BUNDLED_REL)
+        except Exception:
+            pass
+        candidates.extend(parent / _EDGE_HAZE_BUNDLED_REL for parent in self._pack_root.parents)
+        for candidate in candidates:
+            if self._usable_binary(candidate):
+                return candidate
+        return None
 
     @staticmethod
     def _default_settings_path(pack_root: Path) -> Path:
@@ -170,6 +287,91 @@ class ComputerUseEdgeHazeManager:
             return Path(override)
         ecosystem_root = pack_root.parent
         return ecosystem_root / "defaultspack" / "user_data" / "shared" / "frontend_settings.json"
+
+    @staticmethod
+    def _default_lease_path(binary_path: Path) -> Path:
+        return binary_path.with_name(binary_path.name + ".lease.json")
+
+    def _lease_path_for_binary(self, binary_path: Path) -> Path:
+        if self._explicit_binary_path:
+            return self._default_lease_path(binary_path)
+        return self._helper_dir / f"{_EDGE_HAZE_BINARY_NAME}.lease.json"
+
+    @staticmethod
+    def _sequence_id_from_payload(payload: dict[str, Any]) -> str:
+        for key in ("computer_use_haze_sequence_id", "computer_use_sequence_id", "run_id", "request_id"):
+            value = str(payload.get(key) or "").strip()
+            if value:
+                return value
+        return _STANDALONE_SEQUENCE_ID
+
+    def _deadline_seconds(self, *, active: bool) -> float:
+        if self._sequence_id != _STANDALONE_SEQUENCE_ID:
+            if active:
+                return _SEQUENCE_IDLE_SECONDS
+            return max(0.0, float(self.settings().linger_seconds))
+        return max(0.0, float(self.settings().linger_seconds))
+
+    def _write_lease_for_pid(self, pid: int, *, action: str, active: bool) -> None:
+        now = time.time()
+        self._write_lease(
+            self._lease_path,
+            {
+                "schema": _LEASE_SCHEMA,
+                "pid": int(pid),
+                "sequence_id": self._sequence_id,
+                "deadline_epoch": now + self._deadline_seconds(active=active),
+                "updated_at_epoch": now,
+                "action": action,
+            },
+        )
+
+    @staticmethod
+    def _write_lease(path: Path, value: dict[str, Any]) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_name(path.name + ".tmp")
+        tmp.write_text(json.dumps(value, sort_keys=True), encoding="utf-8")
+        tmp.replace(path)
+
+    @staticmethod
+    def _read_lease(path: Path) -> dict[str, Any]:
+        try:
+            value = json.loads(path.read_text(encoding="utf-8"))
+            return value if isinstance(value, dict) else {}
+        except Exception:
+            return {}
+
+    @staticmethod
+    def _lease_pid(lease: dict[str, Any]) -> int:
+        try:
+            return int(lease.get("pid") or 0)
+        except Exception:
+            return 0
+
+    @staticmethod
+    def _pid_alive(pid: int) -> bool:
+        if pid <= 0:
+            return False
+        try:
+            os.kill(pid, 0)
+            return True
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True
+        except Exception:
+            return False
+
+    def _remove_lease_if_matches(self, *, pid: int, sequence_id: str) -> None:
+        lease = self._read_lease(self._lease_path)
+        if self._lease_pid(lease) != pid or lease.get("sequence_id") != sequence_id:
+            return
+        try:
+            self._lease_path.unlink()
+        except FileNotFoundError:
+            pass
+        except Exception:
+            pass
 
     @staticmethod
     def _truthy(value: Any) -> bool:

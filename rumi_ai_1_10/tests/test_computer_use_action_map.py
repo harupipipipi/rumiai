@@ -15,6 +15,8 @@ if _funcs_dir not in sys.path:
 EXPECTED_ACTIONS = [
     "screenshot", "click", "type", "key", "scroll", "context",
     "apps", "windows", "select_app", "select_window", "show_app", "move", "drag",
+    "open_url", "browser_open_url",
+    "clipboard", "clipboard_read", "clipboard_write", "clipboard_clear", "backspace",
     "observe", "semantic_action", "press", "pid_event", "doctor", "diagnose",
 ]
 
@@ -49,3 +51,54 @@ def test_action_map_doctor_maps_correctly():
     source = main_path.read_text()
     assert '"doctor": "computer.doctor"' in source
     assert '"diagnose": "computer.doctor"' in source
+
+
+def test_action_map_open_url_maps_to_browser_open_url(monkeypatch):
+    from computer_use import main as computer_use_main
+
+    captured = {}
+
+    def fake_run_browser_computer(context, args):
+        captured["context"] = context
+        captured["args"] = args
+        return {"status": "ok"}
+
+    monkeypatch.setattr(computer_use_main, "_run_browser_computer", fake_run_browser_computer)
+
+    result = computer_use_main.run(
+        {"conversation_workspace_dir": "/tmp/workspace"},
+        {"action": "open_url", "url": "https://example.com", "app": "Google Chrome"},
+    )
+
+    assert result == {"status": "ok"}
+    assert captured["args"]["action"] == "browser.open_url"
+    assert captured["args"]["payload"]["url"] == "https://example.com"
+    assert captured["args"]["payload"]["app"] == "Google Chrome"
+
+
+def test_action_map_browser_open_url_maps_correctly():
+    main_path = Path(_funcs_dir) / "computer_use" / "main.py"
+    source = main_path.read_text()
+    assert '"browser_open_url": "browser.open_url"' in source
+
+
+def test_action_map_preserves_clipboard_and_repeat_payload(monkeypatch):
+    from computer_use import main as computer_use_main
+
+    captured = {}
+
+    def fake_run_browser_computer(context, args):
+        captured["args"] = args
+        return {"status": "ok"}
+
+    monkeypatch.setattr(computer_use_main, "_run_browser_computer", fake_run_browser_computer)
+
+    computer_use_main.run(
+        {},
+        {"action": "backspace", "count": 4, "key_combo": "retrun", "content": "hello"},
+    )
+
+    assert captured["args"]["action"] == "computer.backspace"
+    assert captured["args"]["payload"]["count"] == 4
+    assert captured["args"]["payload"]["key_combo"] == "retrun"
+    assert captured["args"]["payload"]["content"] == "hello"

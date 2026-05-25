@@ -30,6 +30,7 @@ def test_show_app_stores_active_window_for_selected_app(monkeypatch, tmp_path):
     )
     monkeypatch.setattr(controller, "_active_window_for_app", lambda app_name: active_window)
     monkeypatch.setattr(controller, "_active_window", lambda: active_window)
+    monkeypatch.setattr(controller, "_matching_window", lambda payload: None)
     monkeypatch.setattr("ecosystem.rumi_default_tools_pack.domain.tool.browser_computer.time.sleep", lambda seconds: None)
 
     result = controller.run("computer.show_app", {"app": "Google Chrome"})
