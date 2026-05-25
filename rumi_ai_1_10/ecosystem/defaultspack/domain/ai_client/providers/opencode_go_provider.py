@@ -132,7 +132,7 @@ _OPENCODE_GO_MODEL_SPECS: List[Dict[str, Any]] = [
         "model_id": "mimo-v2-omni",
         "display_name": "MiMo V2 Omni via OpenCode Go",
         "priority": 14,
-        "defaults": {"chat": True},
+        "defaults": {"chat": True, "vision": True},
         "transport": "openai_chat_completions",
         "endpoint_path": "/chat/completions",
         "source": "opencode_go_models_endpoint",
@@ -153,6 +153,7 @@ _OPENCODE_GO_MODEL_SPECS: List[Dict[str, Any]] = [
 
 
 def _known_model_entry(spec: Dict[str, Any]) -> Dict[str, Any]:
+    defaults = dict(spec.get("defaults", {}))
     metadata = {
         "transport": spec["transport"],
         "endpoint_path": spec["endpoint_path"],
@@ -173,12 +174,12 @@ def _known_model_entry(spec: Dict[str, Any]) -> Dict[str, Any]:
         "type": "chat",
         "enabled": True,
         "priority": spec["priority"],
-        "defaults": dict(spec.get("defaults", {})),
+        "defaults": defaults,
         "capabilities": {
             "chat": True,
             "streaming": True,
             "tool_calls": False,
-            "vision": False,
+            "vision": bool(defaults.get("vision")),
             "reasoning": False,
         },
         "metadata": metadata,
