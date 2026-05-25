@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import os
 import sys
+import tempfile
 import unittest
+from importlib import import_module
 from pathlib import Path
 from unittest.mock import patch
 
@@ -68,6 +70,39 @@ class TestDefaultspackDesktopSurface(unittest.TestCase):
         self.assertEqual(result, 0)
         self.assertTrue(fake_server.started)
         self.assertTrue(fake_server.stopped)
+
+    def test_managed_pack_root_alias_supports_ecosystem_defaultspack_imports(self):
+        from defaultspack import desktop_app
+
+        saved_modules = {
+            name: module
+            for name, module in sys.modules.items()
+            if name == "ecosystem" or name.startswith("ecosystem.defaultspack")
+        }
+        try:
+            for name in list(sys.modules):
+                if name == "ecosystem" or name.startswith("ecosystem.defaultspack"):
+                    sys.modules.pop(name, None)
+
+            with tempfile.TemporaryDirectory() as tmp:
+                pack_root = Path(tmp)
+                domain_dir = pack_root / "domain"
+                domain_dir.mkdir()
+                (domain_dir / "__init__.py").write_text("", encoding="utf-8")
+                (domain_dir / "managed_marker.py").write_text(
+                    "VALUE = 'managed-defaultspack'\n",
+                    encoding="utf-8",
+                )
+
+                desktop_app._install_ecosystem_defaultspack_alias(pack_root)
+                module = import_module("ecosystem.defaultspack.domain.managed_marker")
+
+            self.assertEqual(module.VALUE, "managed-defaultspack")
+        finally:
+            for name in list(sys.modules):
+                if name == "ecosystem" or name.startswith("ecosystem.defaultspack"):
+                    sys.modules.pop(name, None)
+            sys.modules.update(saved_modules)
 
 
 if __name__ == "__main__":

@@ -4,6 +4,7 @@ import os
 import signal
 import sys
 import time
+import types
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -14,10 +15,52 @@ def _pack_root() -> Path:
 
 
 def _ensure_import_path() -> None:
-    for path in (_pack_root(), _pack_root().parents[1]):
+    pack_root = _pack_root()
+    configured_roots = (
+        os.environ.get("RUMI_APP_DIR"),
+        os.environ.get("RUMI_CORE_DIR"),
+        os.environ.get("REPO"),
+    )
+    for path in (
+        pack_root,
+        pack_root.parents[1],
+        *(Path(root) for root in configured_roots if root),
+    ):
         root = str(path)
         if root not in sys.path:
             sys.path.insert(0, root)
+    _install_ecosystem_defaultspack_alias(pack_root)
+
+
+def _install_ecosystem_defaultspack_alias(pack_root: Path) -> None:
+    """Expose a managed pack root as ecosystem.defaultspack.
+
+    Repo installs naturally import ``ecosystem.defaultspack`` via
+    ``rumi_ai_1_10/ecosystem/defaultspack``. Managed pack versions live under
+    user-data without that parent ``ecosystem`` directory, but some legacy
+    modules still import the canonical package path.
+    """
+    ecosystem = sys.modules.get("ecosystem")
+    if ecosystem is None:
+        ecosystem = types.ModuleType("ecosystem")
+        ecosystem.__path__ = []  # type: ignore[attr-defined]
+        sys.modules["ecosystem"] = ecosystem
+    elif not hasattr(ecosystem, "__path__"):
+        ecosystem.__path__ = []  # type: ignore[attr-defined]
+
+    defaultspack = sys.modules.get("ecosystem.defaultspack")
+    pack_path = str(pack_root)
+    if defaultspack is None:
+        defaultspack = types.ModuleType("ecosystem.defaultspack")
+        defaultspack.__path__ = [pack_path]  # type: ignore[attr-defined]
+        defaultspack.__package__ = "ecosystem.defaultspack"
+        sys.modules["ecosystem.defaultspack"] = defaultspack
+    else:
+        paths = list(getattr(defaultspack, "__path__", []))
+        if pack_path not in paths:
+            paths.insert(0, pack_path)
+            defaultspack.__path__ = paths  # type: ignore[attr-defined]
+    setattr(ecosystem, "defaultspack", defaultspack)
 
 
 def _url() -> str:

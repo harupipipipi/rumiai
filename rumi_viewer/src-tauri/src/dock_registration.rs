@@ -463,14 +463,46 @@ fn read_defaultspack_desktop_metadata(
 }
 
 fn read_desktop_api_token_from_config(config: &AppConfig) -> AnyResult<String> {
-    let hmac_keys_path = config.rumi_home.join("user_data").join("hmac_keys.json");
-    if !hmac_keys_path.exists() {
-        bail!(
-            "hmac_keys.json not found at {}. Start the Kernel first to generate API keys.",
-            hmac_keys_path.display()
-        );
+    let token_path = config.desktop_api_token_path();
+    if let Ok(token) = read_saved_desktop_api_token(&token_path) {
+        return Ok(token);
     }
-    read_desktop_api_token(&hmac_keys_path)
+
+    let candidates = [
+        config.user_data_dir.join("hmac_keys.json"),
+        config.rumi_home.join("user_data").join("hmac_keys.json"),
+    ];
+    let mut last_error: Option<anyhow::Error> = None;
+    for hmac_keys_path in candidates {
+        if !hmac_keys_path.exists() {
+            continue;
+        }
+        match read_desktop_api_token(&hmac_keys_path) {
+            Ok(token) => return Ok(token),
+            Err(error) => last_error = Some(error),
+        }
+    }
+    if let Some(error) = last_error {
+        return Err(error).with_context(|| {
+            format!(
+                "failed to read desktop API token. Start the Kernel or remove stale {}",
+                token_path.display()
+            )
+        });
+    }
+    bail!(
+        "hmac_keys.json not found. Start the Kernel first to generate API keys."
+    )
+}
+
+fn read_saved_desktop_api_token(token_path: &Path) -> AnyResult<String> {
+    let token = fs::read_to_string(token_path)
+        .with_context(|| format!("failed to read {}", token_path.display()))?;
+    let token = token.trim().to_string();
+    if token.is_empty() {
+        bail!("desktop API token is empty at {}", token_path.display());
+    }
+    Ok(token)
 }
 
 fn persist_desktop_api_token(config: &AppConfig, api_token: &str) -> AnyResult<PathBuf> {
@@ -517,6 +549,8 @@ fn spawn_defaultspack_local_server(
         .arg(&api_token)
         .env("PATH", path)
         .env("RUMI_HOME", &config.rumi_home)
+        .env("RUMI_APP_DIR", &config.app_dir)
+        .env("RUMI_USER_DATA", &config.user_data_dir)
         .env("RUMI_API_TOKEN", &api_token)
         .env("RUMI_DEFAULTSPACK_OPEN_BROWSER", "0")
         .current_dir(&metadata.app_working_dir)
@@ -615,6 +649,29 @@ mod tests {
         .unwrap();
         let result = read_desktop_api_token(&path).unwrap();
         assert_eq!(result, "active-token");
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn read_saved_desktop_api_token_trims_file_contents() {
+        let dir = std::env::temp_dir().join("rumi_dock_test_saved_token");
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(".desktop_api_token");
+        fs::write(&path, "saved-token\n").unwrap();
+        let result = read_saved_desktop_api_token(&path).unwrap();
+        assert_eq!(result, "saved-token");
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn read_saved_desktop_api_token_rejects_empty_file() {
+        let dir = std::env::temp_dir().join("rumi_dock_test_empty_saved_token");
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(".desktop_api_token");
+        fs::write(&path, "\n").unwrap();
+        let result = read_saved_desktop_api_token(&path);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("empty"));
         fs::remove_dir_all(&dir).ok();
     }
 
