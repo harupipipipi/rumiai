@@ -25,6 +25,7 @@ cargo tauri dev
 2. `~/Library/Application Support/dev.rumiai.app/venv` を用意する
 3. `python -m app` で kernel を起動する
 4. `http://127.0.0.1:8765/panel/` へ bootstrap する
+5. viewer から `Open Defaultspack` を押すと `defaultspack` の独立 UI を開く
 
 ## 開発時の承認フロー
 
@@ -46,6 +47,7 @@ RUMI_AUTO_APPROVE_LOCAL=true cargo tauri dev
 - 正常起動すると Tauri window が開きます
 - 初回状態では `/health` が `needs_setup: true` を返すことがあり、その場合は setup 画面から始まります
 - setup 完了後は panel UI に遷移します
+- panel の Home から `Open Defaultspack` を押すと、viewer が `defaultspack` の browser UI を起動します
 
 ## defaultspack との関係
 
@@ -53,6 +55,8 @@ RUMI_AUTO_APPROVE_LOCAL=true cargo tauri dev
 - frontend source は viewer 側にありますが、配信経路は kernel の `/panel/` のままです
 - `defaultspack` 自体は kernel から component として読み込まれます
 - `defaultspack` の独立 HTTP frontend は `DEFAULTS_HTTP_PORT` 既定値 `8766` ですが、viewer の初期導線とは別です
+- viewer はまず `rumi_home/user_data/packs/defaultspack/current.json` を見て、移行互換として `app_data_dir/user_data/packs/defaultspack/current.json` も参照します
+- そのため setup/更新済みの `Defaultspack v2` が managed pack として切り替わっていれば、viewer からその実体を開けます
 
 ## よくある詰まり方
 
