@@ -51,7 +51,7 @@ logger = logging.getLogger(__name__)
 
 
 TRUSTED_BUILTIN_PACK_IDS = {"defaultspack", "rumi_default_tools_pack"}
-MANAGED_OFFICIAL_PACK_IDS = {"defaultspack"}
+MANAGED_OFFICIAL_PACK_IDS = {"defaultspack", "rumi_default_tools_pack"}
 
 
 from .hmac_key_manager import (

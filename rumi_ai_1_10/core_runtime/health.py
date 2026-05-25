@@ -43,8 +43,8 @@ class HealthStatus(enum.Enum):
 # HealthChecker
 # ============================================================
 
-# プローブ関数の型: 引数なしで HealthStatus を返す
-ProbeFunc = Callable[[], HealthStatus]
+# プローブ関数の型: 引数なしで HealthStatus または (HealthStatus, message) を返す
+ProbeFunc = Callable[[], HealthStatus | Tuple[HealthStatus, str]]
 
 
 class HealthChecker:
@@ -127,11 +127,11 @@ class HealthChecker:
         try:
             with ThreadPoolExecutor(max_workers=1) as executor:
                 future = executor.submit(func)
-                status = future.result(timeout=timeout)
+                status, message = self._normalize_probe_result(future.result(timeout=timeout))
             elapsed_ms = (time.monotonic() - start) * 1000.0
             return {
                 "status": status.value,
-                "message": "ok",
+                "message": message,
                 "duration_ms": round(elapsed_ms, 2),
             }
         except FuturesTimeoutError:
@@ -148,6 +148,15 @@ class HealthChecker:
                 "message": f"error: {exc}",
                 "duration_ms": round(elapsed_ms, 2),
             }
+
+    @staticmethod
+    def _normalize_probe_result(
+        result: HealthStatus | Tuple[HealthStatus, str],
+    ) -> Tuple[HealthStatus, str]:
+        if isinstance(result, tuple):
+            status, message = result
+            return status, str(message or "ok")
+        return result, "ok"
 
     def aggregate_health(
         self, timeout: Optional[float] = None

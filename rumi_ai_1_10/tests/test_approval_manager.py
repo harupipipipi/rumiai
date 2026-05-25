@@ -178,7 +178,16 @@ def test_managed_rumi_pack_with_official_signature_is_builtin_approved(tmp_path,
     assert mgr.get_status("defaultspack") == PackStatus.APPROVED
 
 
-def test_managed_rumi_default_tools_pack_is_not_auto_approved(tmp_path, monkeypatch):
+def test_managed_rumi_default_tools_pack_is_builtin_approved_with_official_signature(
+    tmp_path, monkeypatch
+):
+    from core_runtime.update import trust
+
+    monkeypatch.setattr(
+        trust,
+        "load_official_trust_roots",
+        lambda: {"schema": "rumi.trust_roots.v1", "ed25519_public_keys": {"official": "public-key"}},
+    )
     mgr = _make_managed_builtin_manager(
         tmp_path,
         monkeypatch,
@@ -192,7 +201,8 @@ def test_managed_rumi_default_tools_pack_is_not_auto_approved(tmp_path, monkeypa
         },
     )
 
-    assert mgr.get_status("rumi_default_tools_pack") is None
+    assert mgr.get_status("rumi_default_tools_pack") == PackStatus.APPROVED
+    assert mgr.is_pack_approved_and_verified("rumi_default_tools_pack") == (True, None)
 
 
 # ===================================================================

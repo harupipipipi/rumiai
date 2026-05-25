@@ -151,6 +151,18 @@ class TestHealthChecker(unittest.TestCase):
         self.assertEqual(result["probes"]["bad"]["status"], "DOWN")
         self.assertIn("error", result["probes"]["bad"]["message"])
 
+    def test_probe_can_return_message(self):
+        """プローブは status と詳細 message を返せる"""
+        self.checker.register_probe(
+            "disk", lambda: (HealthStatus.DEGRADED, "91.0% used, 9.0 GiB free at /")
+        )
+        result = self.checker.aggregate_health()
+        self.assertEqual(result["probes"]["disk"]["status"], "DEGRADED")
+        self.assertEqual(
+            result["probes"]["disk"]["message"],
+            "91.0% used, 9.0 GiB free at /",
+        )
+
     def test_aggregate_result_has_duration(self):
         """プローブ結果に duration_ms が含まれる"""
         self.checker.register_probe("fast", lambda: HealthStatus.UP)

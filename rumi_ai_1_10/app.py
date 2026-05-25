@@ -154,6 +154,7 @@ def main():
         )
         import json
         import os
+        import shutil
         import tempfile
         checker = get_health_checker()
         if os.name == "nt":
@@ -161,7 +162,19 @@ def main():
         else:
             disk_path = "/"
         tmp_dir = tempfile.gettempdir()
-        checker.register_probe("disk", lambda: probe_disk_space(disk_path))
+
+        def _disk_probe():
+            status = probe_disk_space(disk_path)
+            try:
+                usage = shutil.disk_usage(disk_path)
+                used_pct = (usage.used / usage.total) * 100.0 if usage.total else 0.0
+                free_gib = usage.free / (1024 ** 3)
+                message = f"{used_pct:.1f}% used, {free_gib:.1f} GiB free at {disk_path}"
+            except Exception as exc:
+                message = f"usage unavailable at {disk_path}: {exc}"
+            return status, message
+
+        checker.register_probe("disk", _disk_probe)
         checker.register_probe("writable_tmp", lambda: probe_file_writable(tmp_dir))
         result = checker.aggregate_health()
         print(json.dumps(result, indent=2))

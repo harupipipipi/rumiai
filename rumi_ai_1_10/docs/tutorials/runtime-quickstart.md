@@ -18,7 +18,7 @@ python -m rumi_ai --health
 ## Step 2. runtime を起動
 
 ```bash
-python -m rumi_ai --headless
+python -m rumi_ai
 ```
 
 `[Rumi] startup.success` が出れば起動完了です。
