@@ -266,7 +266,7 @@ class ToolExecutor:
         local_tool = self._first_party_browser_computer_tool_for_function(pack_id, function_id)
         if local_tool not in {"browser_computer", "browser_use", "computer_use"}:
             return None
-        if _requires_approval(tool_def) and not _context_has_tool_server_approval(context):
+        if not _context_has_explicit_tool_server_approval(context):
             return None
         return self._execute_local(local_tool, request.get("args") or {}, context)
 
@@ -321,8 +321,7 @@ class ToolExecutor:
         if local_tool:
             if (
                 local_tool in {"browser_computer", "browser_use", "computer_use"}
-                and _requires_approval(tool_def)
-                and not _context_has_tool_server_approval(context)
+                and not _context_has_explicit_tool_server_approval(context)
             ):
                 return None
             return ToolExecutor()._execute_local(local_tool, request.get("args") or {}, context)
@@ -1406,6 +1405,12 @@ def _context_has_tool_server_approval(context):
     policy = policy_from_context(context)
     if _truthy(policy.get("yolo_mode")) or _is_policy_allow_context(context):
         return True
+    return _context_has_explicit_tool_server_approval(context)
+
+
+def _context_has_explicit_tool_server_approval(context):
+    if not isinstance(context, dict):
+        return False
     if context.get("_tool_server_approval_token_valid") is True:
         return True
     return bool(
