@@ -10,6 +10,7 @@ import {
   duplicateStartupProfile,
   fetchDashboard,
   fetchStartupProfiles,
+  launchDefaultspackDesktop,
   launchStartupProfile,
   removePackFromStartupProfile,
   restartKernel,
@@ -37,6 +38,7 @@ import { useAppStore, type DashboardData } from '@/src/store';
 import {
   AlertCircle,
   ArrowLeft,
+  AppWindow,
   Box,
   CheckCircle2,
   Copy,
@@ -94,6 +96,7 @@ export function Dashboard() {
   const [feedback, setFeedback] = useState<{ message: string; tone: 'error' | 'success' } | null>(null);
   const [actionState, setActionState] = useState<{ profileId?: string; type: ActionState } | null>(null);
   const [draft, setDraft] = useState<ApiStartupProfile | null>(null);
+  const [launchingDefaultspack, setLaunchingDefaultspack] = useState(false);
 
   const editProfileId = searchParams.get('edit');
   const searchQuery = searchParams.get('q') ?? '';
@@ -383,6 +386,20 @@ export function Dashboard() {
     });
   };
 
+  const handleLaunchDefaultspack = async () => {
+    if (launchingDefaultspack) return;
+    setLaunchingDefaultspack(true);
+    setFeedback(null);
+    try {
+      const message = await launchDefaultspackDesktop();
+      setSuccessFeedback(message);
+    } catch (error) {
+      setErrorFeedback(translateActionError(error, 'open Defaultspack v2'));
+    } finally {
+      setLaunchingDefaultspack(false);
+    }
+  };
+
   // --- Loading / Error states ---
 
   if (!runtimeReady && runtimeStatus !== 'error') {
@@ -441,6 +458,14 @@ export function Dashboard() {
             <p className="mt-1 text-sm text-text-muted">Launch and manage your startup profiles.</p>
           </div>
           <div className="flex items-center gap-3">
+            <Button
+              variant="outline"
+              onClick={() => void handleLaunchDefaultspack()}
+              disabled={!runtimeReady || launchingDefaultspack}
+              loading={launchingDefaultspack}
+            >
+              <AppWindow className="h-4 w-4" /> Open Defaultspack
+            </Button>
             <label className="flex items-center gap-2 rounded-lg border border-border bg-bg-card px-3 py-2 text-sm">
               <Search className="h-4 w-4 text-text-muted" />
               <input
