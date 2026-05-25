@@ -2,7 +2,12 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import type { ChatUiMessage } from "../renderers/types";
-import { pendingBrowserApproval, pendingCodingApproval, staleCodingApproval } from "./browserApproval";
+import {
+  browserComputerResultRequiresApproval,
+  pendingBrowserApproval,
+  pendingCodingApproval,
+  staleCodingApproval,
+} from "./browserApproval";
 
 function agentMessage(patch: Partial<ChatUiMessage>): ChatUiMessage {
   return {
@@ -35,6 +40,31 @@ test("returns a fresh browser computer approval request", () => {
   assert.deepEqual(approval, {
     action: "computer.screenshot",
     payload: { app: "Google Chrome" },
+    token: "tok",
+    toolName: "computer_use",
+  });
+});
+
+test("returns browser computer approvals stored on message metadata", () => {
+  const approval = pendingBrowserApproval([
+    agentMessage({
+      metadata: {
+        pendingApproval: {
+          tool_name: "computer_use",
+          action: "computer.click",
+          payload: { app: "Vivaldi", x: 10, y: 20 },
+          requires_approval: true,
+          approval_token: "tok",
+          approval_expires_in_seconds: 300,
+          timestamp: "2026-05-20T08:05:40Z",
+        },
+      },
+    }),
+  ], Date.parse("2026-05-20T08:06:00Z"));
+
+  assert.deepEqual(approval, {
+    action: "computer.click",
+    payload: { app: "Vivaldi", x: 10, y: 20 },
     token: "tok",
     toolName: "computer_use",
   });
@@ -113,6 +143,29 @@ test("returns pending coding approval requests without browser tokens", () => {
     toolCallId: "call_file",
     toolName: "coding_file_create",
   });
+});
+
+test("returns pending approval requests stored on message metadata", () => {
+  const approval = pendingCodingApproval([
+    agentMessage({
+      metadata: {
+        pendingApproval: {
+          tool_name: "browser_computer",
+          tool_call_id: "call_browser",
+          action: "computer.click",
+          operation: "tool.browser_computer",
+          payload: { action: "computer.click", payload: { x: 10, y: 20 } },
+          approval_required: true,
+          approval_request_id: "apr_browser",
+          risk_level: "medium",
+        },
+      },
+    }),
+  ]);
+
+  assert.equal(approval?.toolName, "browser_computer");
+  assert.equal(approval?.requestId, "apr_browser");
+  assert.deepEqual(approval?.payload, { action: "computer.click", payload: { x: 10, y: 20 } });
 });
 
 test("returns generic browser tool approval requests when they use approval request ids", () => {
@@ -263,4 +316,28 @@ test("does not treat actionable coding approvals as stale", () => {
   ]);
 
   assert.equal(approval, null);
+});
+
+test("detects approval-required browser computer execution results", () => {
+  assert.equal(browserComputerResultRequiresApproval({
+    status: "ok",
+    data: {
+      widget: {
+        type: "browser_computer",
+        requires_approval: true,
+        approval_token: "tok",
+      },
+    },
+  }), true);
+  assert.equal(browserComputerResultRequiresApproval({ status: "requires_approval" }), true);
+});
+
+test("does not flag completed browser computer execution results as approval-required", () => {
+  assert.equal(browserComputerResultRequiresApproval({
+    status: "ok",
+    data: {
+      action: "computer.click",
+      executed: true,
+    },
+  }), false);
 });

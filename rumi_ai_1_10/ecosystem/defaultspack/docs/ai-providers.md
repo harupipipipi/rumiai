@@ -117,6 +117,8 @@ service tier や preview/enterprise-only 条件は metadata に保持するだ�
 
 MiMo token plan は provider catalog の `subscription_plans` として保持する。現時点では `mimo_orbit_100t_grant_if_available` を catalog metadata として公開するだけで、manual signup / region scoped / do not auto enable の扱いにする。
 
+`xiaomi-token-plan-sgp` runtime は `mimo-v2-omni` を vision 用モデルとして公開し、画像入力は OpenAI 互換の `content` 配列形式を使う。
+
 警告: この provider を実行有効化すると、プロンプト、会話履歴、tool結果などのコンテキストが Xiaomi MiMo direct API に送信される。
 
 ### stub

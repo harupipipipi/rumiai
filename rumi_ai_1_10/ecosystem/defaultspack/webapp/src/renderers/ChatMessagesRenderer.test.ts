@@ -1,7 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 
-import { compactLogPreviewText, hasRunningToolActivityGroups, isCompactLogLikeMessageText, messageCopyText, shouldRenderImageBlockInChat, shouldShowEmptyResponseWarning, streamedBrowserScreenshots, summarizePendingToolNames, summarizeToolActivityGroups } from "./ChatMessagesRenderer";
+import { ChatMessagesRenderer, compactLogPreviewText, hasRunningToolActivityGroups, isCompactLogLikeMessageText, messageCopyText, shouldRenderImageBlockInChat, shouldShowEmptyResponseWarning, streamedBrowserScreenshots, summarizePendingToolNames, summarizeToolActivityGroups } from "./ChatMessagesRenderer";
 import type { ChatUiMessage } from "./types";
 
 function message(overrides: Partial<ChatUiMessage>): ChatUiMessage {
@@ -12,6 +14,22 @@ function message(overrides: Partial<ChatUiMessage>): ChatUiMessage {
     rawText: "",
     ...overrides,
   };
+}
+
+function renderMessages(messages: ChatUiMessage[]): string {
+  return renderToStaticMarkup(createElement(ChatMessagesRenderer, {
+    error: null,
+    isMessagesRegionVisible: true,
+    isLoading: false,
+    isNewConversation: false,
+    isGenerating: false,
+    messages,
+    messagesEndRef: { current: null },
+    unknownBlockStrategy: "json",
+    showActivityInMessages: false,
+    showWidgets: true,
+    onSuggestionClick: () => undefined,
+  }));
 }
 
 test("message copy text includes visible text and code blocks", () => {
@@ -25,6 +43,25 @@ test("message copy text includes visible text and code blocks", () => {
 
 test("message copy text falls back to raw text", () => {
   assert.equal(messageCopyText(message({ rawText: "fallback text" })), "fallback text");
+});
+
+test("assistant copy action renders at the bottom of the assistant bubble", () => {
+  const html = renderMessages([
+    message({
+      id: "assistant-bottom-copy",
+      content: [{ type: "markdown", text: "Assistant body for copy placement." }],
+      rawText: "Assistant body for copy placement.",
+    }),
+  ]);
+
+  assert.match(
+    html,
+    /Assistant body for copy placement\.<\/p><\/div><div class="rumi-message-actions[^"]*mt-3[^"]*w-full/,
+  );
+  assert.doesNotMatch(
+    html,
+    /Assistant body for copy placement\.<\/p><\/div><\/div><div class="rumi-message-actions/,
+  );
 });
 
 test("pending tool summary shows two names and the remaining count", () => {

@@ -17,7 +17,9 @@ def run(context, args):
     if isinstance(workspace, str) and workspace:
         artifact_root = Path(workspace) / "tools" / "computer"
     user_requested = bool(isinstance(context, dict) and context.get("user_requested_computer_use"))
-    yolo_mode = _truthy(context.get("yolo_mode")) if isinstance(context, dict) else False
+    yolo_mode = False
+    if isinstance(context, dict):
+        yolo_mode = _truthy(context.get("yolo_mode")) or context.get("_tool_server_approved") is True
     if user_requested and action == "browser.open_url" and not any(
         key in payload for key in ("persistent", "profile_id", "session_id")
     ):

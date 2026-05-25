@@ -342,8 +342,10 @@ async function writeClipboardText(text: string): Promise<void> {
 
 function MessageActionBar({
   message,
+  className,
 }: {
   message: ChatMessagesRendererProps["messages"][number];
+  className?: string;
 }) {
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
 
@@ -372,7 +374,7 @@ function MessageActionBar({
   ];
 
   return (
-    <div className="rumi-message-actions mt-1.5 flex min-h-6 items-center justify-start gap-1 opacity-80 transition-opacity group-hover/message:opacity-100 group-focus-within/message:opacity-100">
+    <div className={cn("rumi-message-actions flex min-h-6 items-center justify-start gap-1 opacity-80 transition-opacity group-hover/message:opacity-100 group-focus-within/message:opacity-100", className)}>
       {actions.map((action) => {
         const Icon = action.icon;
         return (
@@ -1153,11 +1155,12 @@ export function ChatMessagesRenderer({
                       </div>
 
                       {showWidgets && message.widget && <WidgetCard widget={message.widget} />}
+                      {message.role === "agent" && <MessageActionBar message={message} className="mt-3 w-full" />}
                     </div>
                       );
                     })()}
 
-                    <MessageActionBar message={message} />
+                    {message.role !== "agent" && <MessageActionBar message={message} className="mt-1.5" />}
                   </div>
                 </div>
               </div>

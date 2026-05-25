@@ -95,6 +95,32 @@ _TOKEN_PLAN_MODELS: List[Dict[str, Any]] = [
     },
 ]
 
+_MIMO_V2_OMNI_TOKEN_PLAN_MODEL: Dict[str, Any] = {
+    "model_id": "mimo-v2-omni",
+    "name": "MiMo V2 Omni",
+    "display_name": "MiMo V2 Omni",
+    "type": "chat",
+    "defaults": {"chat": True, "vision": True},
+    "capabilities": {
+        "chat": True,
+        "streaming": True,
+        "reasoning": False,
+        "tool_calls": True,
+        "vision": True,
+    },
+    "supports_vision": True,
+    "supports_image_input": True,
+    "metadata": {
+        "token_plan": True,
+        "tool_call_type": "openai",
+    },
+}
+
+_SGP_TOKEN_PLAN_MODELS: List[Dict[str, Any]] = [
+    *_TOKEN_PLAN_MODELS,
+    _MIMO_V2_OMNI_TOKEN_PLAN_MODEL,
+]
+
 
 class XiaomiMimoTokenPlanProvider(OpenAICompatibleProvider):
     """Xiaomi MiMo Token Plan OpenAI-compatible runtime provider."""
@@ -110,9 +136,11 @@ class XiaomiMimoTokenPlanProvider(OpenAICompatibleProvider):
         base_url_env: str,
         default_base_url: str,
         region: str,
+        token_plan_models: List[Dict[str, Any]] | None = None,
     ) -> None:
+        token_plan_models = token_plan_models or _TOKEN_PLAN_MODELS
         models: List[Dict[str, Any]] = []
-        for raw in _TOKEN_PLAN_MODELS:
+        for raw in token_plan_models:
             model = dict(raw)
             model["id"] = f"{provider_id}/{model['model_id']}"
             model["provider"] = provider_id
@@ -202,6 +230,8 @@ class XiaomiMimoTokenPlanCnProvider(XiaomiMimoTokenPlanProvider):
 
 
 class XiaomiMimoTokenPlanSgpProvider(XiaomiMimoTokenPlanProvider):
+    MODEL_IDS = {str(model["model_id"]) for model in _SGP_TOKEN_PLAN_MODELS}
+
     def __init__(self) -> None:
         super().__init__(
             provider_id="xiaomi-token-plan-sgp",
@@ -214,4 +244,5 @@ class XiaomiMimoTokenPlanSgpProvider(XiaomiMimoTokenPlanProvider):
             base_url_env="XIAOMI_MIMO_TOKEN_PLAN_SGP_BASE_URL",
             default_base_url="https://token-plan-sgp.xiaomimimo.com/v1",
             region="sgp",
+            token_plan_models=_SGP_TOKEN_PLAN_MODELS,
         )

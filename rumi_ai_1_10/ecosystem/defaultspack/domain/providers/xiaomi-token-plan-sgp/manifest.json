@@ -20,6 +20,7 @@
     "streaming": true,
     "tool_calls": true,
     "reasoning": true,
+    "vision": true,
     "openai_compatible": true
   },
   "provider_metadata": {
@@ -40,9 +41,10 @@
       "coding": "mimo-v2.5-pro",
       "agent": "mimo-v2.5-pro",
       "reasoning": "mimo-v2.5-pro",
-      "fast": "mimo-v2-flash"
+      "fast": "mimo-v2-flash",
+      "vision": "mimo-v2-omni"
     },
-    "capabilities": ["chat", "streaming", "tool_calls", "reasoning", "openai_compatible"]
+    "capabilities": ["chat", "streaming", "tool_calls", "reasoning", "vision", "openai_compatible"]
   },
   "provider_manifest": {
     "id": "xiaomi-token-plan-sgp",
@@ -69,12 +71,13 @@
       "coding": "mimo-v2.5-pro",
       "agent": "mimo-v2.5-pro",
       "reasoning": "mimo-v2.5-pro",
-      "fast": "mimo-v2-flash"
+      "fast": "mimo-v2-flash",
+      "vision": "mimo-v2-omni"
     },
     "capabilities": {
       "native_tool_calling": true,
       "structured_outputs": false,
-      "vision": false,
+      "vision": true,
       "embeddings": false,
       "streaming": true,
       "reasoning": true

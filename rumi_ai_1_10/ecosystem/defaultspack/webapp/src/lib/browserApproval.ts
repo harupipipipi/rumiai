@@ -35,8 +35,25 @@ const BROWSER_COMPUTER_TOOL_NAMES = new Set([
   "computer_use",
 ]);
 
+const APPROVAL_RESULT_STATUSES = new Set(["approval_required", "requires_approval", "pending_approval"]);
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+export function browserComputerResultRequiresApproval(value: unknown, depth = 0): boolean {
+  if (depth > 6) return false;
+  if (Array.isArray(value)) {
+    return value.some((item) => browserComputerResultRequiresApproval(item, depth + 1));
+  }
+  if (!isRecord(value)) return false;
+  const status = typeof value.status === "string" ? value.status.trim().toLowerCase() : "";
+  if (APPROVAL_RESULT_STATUSES.has(status)) return true;
+  if (value.requires_approval === true || value.approval_required === true) return true;
+  for (const key of ["data", "widget", "result", "tool_result"]) {
+    if (browserComputerResultRequiresApproval(value[key], depth + 1)) return true;
+  }
+  return false;
 }
 
 function numericTimestamp(value: unknown): number | null {
@@ -83,6 +100,13 @@ function approvalFromCandidate(
     token,
     toolName,
   };
+}
+
+function pendingApprovalFromMetadata(message: ChatUiMessage): Record<string, unknown> | undefined {
+  const metadata = message.metadata as Record<string, unknown> | undefined;
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return undefined;
+  const candidate = metadata.pendingApproval ?? metadata.pending_approval;
+  return isRecord(candidate) ? candidate : undefined;
 }
 
 function requestIdFromCandidate(candidate: Record<string, unknown> | undefined): string {
@@ -163,6 +187,14 @@ export function pendingBrowserApproval(messages: ChatUiMessage[], now = Date.now
   for (const message of [...messages].reverse()) {
     if (message.role === "user") return null;
     if (message.role !== "agent") continue;
+    const metadataApproval = pendingApprovalFromMetadata(message);
+    const metadataBrowserApproval = approvalFromCandidate(
+      metadataApproval,
+      String(metadataApproval?.tool_name ?? "browser_computer"),
+      metadataApproval?.timestamp,
+      now,
+    );
+    if (metadataBrowserApproval) return metadataBrowserApproval;
     for (const event of [...(message.events ?? [])].reverse()) {
       if (event.type !== "approval_requested" && event.phase !== "approval_requested") continue;
       const approval = approvalFromCandidate(
@@ -190,6 +222,16 @@ export function pendingCodingApproval(messages: ChatUiMessage[], now = Date.now(
   for (const message of [...messages].reverse()) {
     if (message.role === "user") return null;
     if (message.role !== "agent") continue;
+    const metadataApproval = pendingApprovalFromMetadata(message);
+    const metadataCodingApproval = codingApprovalFromCandidate(
+      metadataApproval,
+      String(metadataApproval?.tool_name ?? "tool"),
+      typeof metadataApproval?.tool_call_id === "string" ? metadataApproval.tool_call_id : undefined,
+      undefined,
+      metadataApproval?.timestamp,
+      now,
+    );
+    if (metadataCodingApproval) return metadataCodingApproval;
     for (const event of [...(message.events ?? [])].reverse()) {
       if (event.type !== "approval_requested" && event.phase !== "approval_requested") continue;
       const approval = codingApprovalFromCandidate(
@@ -226,7 +268,7 @@ export function staleCodingApproval(messages: ChatUiMessage[], now = Date.now())
   for (const message of [...messages].reverse()) {
     if (message.role === "user") return null;
     if (message.role !== "agent") continue;
-    const metadataApproval = message.metadata?.pendingApproval;
+    const metadataApproval = pendingApprovalFromMetadata(message);
     const metadataStale = staleCodingApprovalFromCandidate(
       metadataApproval,
       String(metadataApproval?.tool_name ?? "tool"),

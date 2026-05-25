@@ -8,7 +8,7 @@ import type { ChatItem, HistoryBoardNewTaskOptions } from "./components/HistoryB
 import type { ToolPreviewItem, ToolPreviewMode } from "./components/ToolPreview";
 import { buildToolPreviewDisplayItems, hasCanvasItems } from "./components/ToolPreview";
 import { api, defaultspackApiFetch, type ChatActivityEvent, type ChatContentBlock, type ChatMessage, type ChatStreamEvent, type ChatToolStreamEvent, type CodingWorkspaceRecord, type ComposerCommandExecuteResult, type ComposerCommandItem, type ComposerCommandMode, type ComposerWidgetAction, type Conversation, type ConversationSearchResult, type ConversationSteerItem, type ModelCommandCandidate, type ModelProfile, type OperationsCompanyStatus, type SettingsSection, type SidebarAction, type SidebarItem, type UICatalog } from "./lib/api";
-import { pendingBrowserApproval, pendingCodingApproval, staleCodingApproval, type BrowserApproval, type CodingApproval, type StaleCodingApproval } from "./lib/browserApproval";
+import { browserComputerResultRequiresApproval, pendingBrowserApproval, pendingCodingApproval, staleCodingApproval, type BrowserApproval, type CodingApproval, type StaleCodingApproval } from "./lib/browserApproval";
 import { reduceBrowserStateFromEvents } from "./lib/browserState";
 import { deriveConversationTitle, formatRelativeTime, messageToText, orderConversationMessages } from "./lib/chat";
 import { cn } from "./lib/cn";
@@ -1365,6 +1365,42 @@ function approvalPayloadPreview(payload: Record<string, unknown>): string {
   }
 }
 
+function redactApprovalTokens(value: unknown, depth = 0): unknown {
+  if (depth > 8) return "[truncated]";
+  if (Array.isArray(value)) return value.map((item) => redactApprovalTokens(item, depth + 1));
+  if (!isRecord(value)) return value;
+  const redacted: Record<string, unknown> = {};
+  for (const [key, item] of Object.entries(value)) {
+    const normalizedKey = key.toLowerCase();
+    redacted[key] = normalizedKey.includes("token") || normalizedKey.includes("secret")
+      ? "[redacted]"
+      : redactApprovalTokens(item, depth + 1);
+  }
+  return redacted;
+}
+
+function browserApprovalRuntimeContent(approval: BrowserApproval, result: unknown): string {
+  const safeResult = redactApprovalTokens(result);
+  const safePayload = redactApprovalTokens(approval.payload);
+  let resultJson = "";
+  let payloadJson = "";
+  try {
+    resultJson = JSON.stringify(safeResult, null, 2);
+    payloadJson = JSON.stringify(safePayload, null, 2);
+  } catch {
+    resultJson = String(safeResult);
+    payloadJson = String(safePayload);
+  }
+  return [
+    "User explicitly approved the browser/computer action, and the client executed it directly.",
+    `tool_name: ${approval.toolName}`,
+    `action: ${approval.action}`,
+    `payload: ${payloadJson}`,
+    `execution_result: ${resultJson}`,
+    "Continue from this result without asking for the same approval again.",
+  ].join("\n");
+}
+
 function normalizedPreviewUrl(value: string): string {
   try {
     const url = new URL(value);
@@ -1956,6 +1992,7 @@ export default function App() {
   const isUnloadingRef = useRef(false);
   const currentAbortControllerRef = useRef<AbortController | null>(null);
   const streamingConversationIdRef = useRef<string | null>(null);
+  const activeBrowserApprovalActionRef = useRef<string | null>(null);
   const activeCodingApprovalActionRef = useRef<string | null>(null);
 
   const rawSidebarItems: SidebarItem[] = catalog?.sidebar.items ?? [];
@@ -3387,6 +3424,9 @@ export default function App() {
   const approveBrowserAction = async () => {
     if (!browserApproval) return;
     if (!activeConversationId) return;
+    const approvalActionKey = `${browserApproval.toolName}:${browserApproval.action}:${browserApproval.token}`;
+    if (activeBrowserApprovalActionRef.current === approvalActionKey) return;
+    activeBrowserApprovalActionRef.current = approvalActionKey;
     setError(null);
     setIsGenerating(true);
     const approvalToolIds = selectedToolIds.length
@@ -3408,7 +3448,9 @@ export default function App() {
         browserApproval.action,
         approvedArguments,
       );
-      void result;
+      if (browserComputerResultRequiresApproval(result)) {
+        throw new Error("browser/computer の承認がまだ必要です。最新の承認カードからもう一度許可してください。");
+      }
       await api.sendMessage(activeConversationId, "ユーザーが許可しました。承認済みの操作を踏まえて続行してください。", {
         tool_policy: {
           ...((yoloMode || ultraYoloMode) ? { yolo_mode: true, allow_shell: true, allow_file_write: true, write_actions_require_approval: false } : {}),
@@ -3418,10 +3460,7 @@ export default function App() {
         tools: approvalToolIds.length ? approvalToolIds : undefined,
         metadata: {
           mode: "chat",
-          approval_followup: {
-            action: browserApproval.action,
-            tool_name: browserApproval.toolName,
-          },
+          runtime_content: browserApprovalRuntimeContent(browserApproval, result),
           selected_tools: approvalToolIds,
         },
       });
@@ -3433,6 +3472,7 @@ export default function App() {
       forgetPendingRequest(activeConversationId);
       setError(approvalError instanceof Error ? approvalError.message : "browser/computer の承認に失敗しました。");
     } finally {
+      activeBrowserApprovalActionRef.current = null;
       setIsGenerating(false);
     }
   };
@@ -4268,6 +4308,10 @@ export default function App() {
                       </div>
                       <button
                         type="button"
+                        onPointerDown={(event) => {
+                          event.preventDefault();
+                          void approveBrowserAction();
+                        }}
                         onClick={approveBrowserAction}
                         className="h-8 flex-shrink-0 rounded-lg bg-zinc-100 px-3 text-xs font-semibold text-zinc-950 hover:bg-white"
                       >

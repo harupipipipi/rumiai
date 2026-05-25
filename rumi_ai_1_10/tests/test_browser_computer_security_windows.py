@@ -43,6 +43,26 @@ def test_screenshot_requires_approval_before_capture_reuse_or_crop(tmp_path, mon
     assert result["payload"]["crop"]["width"] == 3
 
 
+def test_wrong_approval_replay_does_not_consume_valid_token(tmp_path):
+    controller = _controller(tmp_path)
+    approval = controller._approval_required("computer.screenshot", {"source": "latest"})
+    token = approval["approval_token"]
+
+    assert controller._consume_approval(
+        {"source": "stale", "approval_token": token},
+        "computer.screenshot",
+        {"source": "stale"},
+    ) is False
+    assert token in controller._read_approvals()
+
+    assert controller._consume_approval(
+        {"source": "latest", "approval_token": token},
+        "computer.screenshot",
+        {"source": "latest"},
+    ) is True
+    assert token not in controller._read_approvals()
+
+
 def test_yolo_string_false_does_not_bypass_screenshot_approval(tmp_path, monkeypatch):
     controller = _controller(tmp_path)
     monkeypatch.setattr(
@@ -110,6 +130,30 @@ def test_open_url_function_context_target_app_reaches_approval_payload(tmp_path)
 
     assert result["widget"]["requires_approval"] is True
     assert result["widget"]["payload"]["target_app"] == "Microsoft Edge"
+
+
+def test_function_context_server_approval_bypasses_local_approval(monkeypatch, tmp_path):
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+    from ecosystem.rumi_default_tools_pack.functions.browser_computer import main
+
+    captured = {}
+
+    def fake_run(self, action, payload=None, *, yolo_mode=False):
+        captured["action"] = action
+        captured["payload"] = payload
+        captured["yolo_mode"] = yolo_mode
+        return {"action": action, "requires_approval": False, "payload": payload or {}}
+
+    monkeypatch.setattr(BrowserComputerController, "run", fake_run)
+
+    result = main.run(
+        {"conversation_workspace_dir": str(tmp_path), "_tool_server_approved": True},
+        {"action": "computer.move", "payload": {"x": 10, "y": 20}},
+    )
+
+    assert result["is_error"] is False
+    assert captured["action"] == "computer.move"
+    assert captured["yolo_mode"] is True
 
 
 def test_pointer_actions_default_virtual_and_include_resolved_coordinates(tmp_path, monkeypatch):

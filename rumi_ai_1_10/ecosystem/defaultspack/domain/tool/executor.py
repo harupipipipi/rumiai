@@ -319,6 +319,12 @@ class ToolExecutor:
             return None
         local_tool = ToolExecutor._first_party_local_tool_for_function(pack_id, function_id)
         if local_tool:
+            if (
+                local_tool in {"browser_computer", "browser_use", "computer_use"}
+                and _requires_approval(tool_def)
+                and not _context_has_tool_server_approval(context)
+            ):
+                return None
             return ToolExecutor()._execute_local(local_tool, request.get("args") or {}, context)
         if not ToolExecutor._allows_direct_first_party_function_fallback(pack_id, function_id):
             return None
@@ -341,7 +347,10 @@ class ToolExecutor:
     def _first_party_local_tool_for_function(pack_id, function_id):
         if pack_id == "rumi_default_tools_pack":
             return {
+                "browser_computer": "browser_computer",
+                "browser_use": "browser_use",
                 "calculator": "calculator",
+                "computer_use": "computer_use",
             }.get(function_id)
         if pack_id == "defaultspack":
             return {
@@ -681,7 +690,7 @@ class ToolExecutor:
             result = BrowserComputerController(artifact_root=_conversation_tool_artifact_root(context)).run(
                 action,
                 _computer_use_payload_with_context_defaults(action, payload, context),
-                yolo_mode=_truthy(policy.get("yolo_mode")),
+                yolo_mode=_truthy(policy.get("yolo_mode")) or _context_has_tool_server_approval(context),
             )
             if _is_cancelled(context):
                 return _cancelled_tool_result(tool_name, action=action)

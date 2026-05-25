@@ -347,9 +347,18 @@ def test_xiaomi_token_plan_catalog_models_are_runtime_and_tool_capable():
     assert provider["availability"]["supports_invoke"] is True
     assert provider["metadata"]["config"]["auth_header"] == "api-key"
     assert provider["default_model_for"]["coding"] == "mimo-v2.5-pro"
+    assert provider["default_model_for"]["vision"] == "mimo-v2-omni"
+    assert "vision" in provider["capabilities"]
     assert "xiaomi-token-plan-sgp/mimo-v2.5-pro" in models
+    assert "xiaomi-token-plan-sgp/mimo-v2-omni" in models
 
     pro = models["xiaomi-token-plan-sgp/mimo-v2.5-pro"]
+    omni = models["xiaomi-token-plan-sgp/mimo-v2-omni"]
     assert pro["type"] == "reasoning"
     assert pro["defaults"]["chat"] is True
     assert "tool_calls" in pro["capabilities"]
+    assert omni["type"] == "chat"
+    assert omni["defaults"]["vision"] is True
+    assert "vision" in omni["capabilities"]
+    assert omni["supports_vision"] is True
+    assert omni["supports_image_input"] is True

@@ -127,6 +127,36 @@
         "tool_call_type": "openai",
         "token_plan_region_scoped": true
       }
+    },
+    {
+      "id": "xiaomi-token-plan-sgp/mimo-v2-omni",
+      "category": "llm_model",
+      "version": "1",
+      "provider_id": "xiaomi-token-plan-sgp",
+      "model_id": "mimo-v2-omni",
+      "display_name": "MiMo V2 Omni",
+      "type": "chat",
+      "enabled": true,
+      "priority": 5,
+      "defaults": {
+        "chat": true,
+        "vision": true
+      },
+      "capabilities": {
+        "chat": true,
+        "streaming": true,
+        "reasoning": false,
+        "tool_calls": true,
+        "vision": true
+      },
+      "supports_vision": true,
+      "supports_image_input": true,
+      "metadata": {
+        "region": "sgp",
+        "token_plan": true,
+        "tool_call_type": "openai",
+        "token_plan_region_scoped": true
+      }
     }
   ]
 }

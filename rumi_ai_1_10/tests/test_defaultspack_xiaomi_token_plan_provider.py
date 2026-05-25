@@ -109,6 +109,49 @@ def test_xiaomi_token_plan_provider_passes_openai_tools(monkeypatch):
     assert followup_messages[0]["reasoning_content"] == "I should call the write tool."
 
 
+def test_xiaomi_token_plan_omni_passes_openai_image_messages(monkeypatch):
+    from domain.ai_client.providers.xiaomi_mimo_token_plan_provider import XiaomiMimoTokenPlanSgpProvider
+
+    monkeypatch.setenv("XIAOMI_MIMO_TOKEN_PLAN_SGP_API_KEY", "test-token")
+    provider = XiaomiMimoTokenPlanSgpProvider()
+    captured = {}
+
+    def fake_request_json(path, body):
+        captured["path"] = path
+        captured["body"] = body
+        return {"choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}]}
+
+    with patch.object(provider, "_request_json", side_effect=fake_request_json):
+        provider.complete(
+            "mimo-v2-omni",
+            [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "Read the image."},
+                        {"type": "image_url", "image_url": {"url": "data:image/png;base64,aaa"}},
+                        {"type": "image", "source": {"media_type": "image/jpeg", "data": "bbb"}},
+                    ],
+                }
+            ],
+            [],
+            {},
+        )
+
+    assert captured["path"] == "/chat/completions"
+    assert captured["body"]["model"] == "mimo-v2-omni"
+    assert captured["body"]["messages"] == [
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "Read the image."},
+                {"type": "image_url", "image_url": {"url": "data:image/png;base64,aaa"}},
+                {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,bbb"}},
+            ],
+        }
+    ]
+
+
 def test_xiaomi_token_plan_models_are_tool_capable(monkeypatch):
     from domain.ai_client.providers.xiaomi_mimo_token_plan_provider import XiaomiMimoTokenPlanSgpProvider
 
@@ -116,8 +159,14 @@ def test_xiaomi_token_plan_models_are_tool_capable(monkeypatch):
     models = {item["id"]: item for item in XiaomiMimoTokenPlanSgpProvider().list_models()}
 
     pro = models["xiaomi-token-plan-sgp/mimo-v2.5-pro"]
+    omni = models["xiaomi-token-plan-sgp/mimo-v2-omni"]
 
     assert pro["type"] == "reasoning"
     assert pro["defaults"]["chat"] is True
     assert pro["capabilities"]["tool_calls"] is True
     assert pro["metadata"]["tool_call_type"] == "openai"
+    assert omni["type"] == "chat"
+    assert omni["defaults"]["vision"] is True
+    assert omni["capabilities"]["vision"] is True
+    assert omni["supports_vision"] is True
+    assert omni["supports_image_input"] is True

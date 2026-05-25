@@ -4713,8 +4713,7 @@ $proc = Get-Process -Id $procId -ErrorAction SilentlyContinue
         if not token:
             return False
         approvals = self._read_approvals()
-        record = approvals.pop(token, None)
-        self._write_approvals(approvals)
+        record = approvals.get(token)
         if not isinstance(record, dict):
             return False
         if record.get("action") != action:
@@ -4722,7 +4721,11 @@ $proc = Get-Process -Id $procId -ErrorAction SilentlyContinue
         if record.get("payload") != expected_payload:
             return False
         if float(record.get("expires_at") or 0) < time.time():
+            approvals.pop(token, None)
+            self._write_approvals(approvals)
             return False
+        approvals.pop(token, None)
+        self._write_approvals(approvals)
         return True
 
     def _read_approvals(self) -> dict[str, Any]:
