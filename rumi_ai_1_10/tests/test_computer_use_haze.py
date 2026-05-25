@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import importlib.util
 import json
 import sys
 import time
@@ -292,7 +293,7 @@ def test_edge_haze_reuses_process_for_same_sequence_until_sequence_ends(tmp_path
     assert popen_envs[0]["RUMI_EDGE_HAZE_SEQUENCE_ID"] == "run_123"
     assert popen_envs[0]["RUMI_EDGE_HAZE_LEASE_PATH"].endswith("edge_haze.lease.json")
     lease = json.loads(Path(popen_envs[0]["RUMI_EDGE_HAZE_LEASE_PATH"]).read_text(encoding="utf-8"))
-    assert lease["deadline_epoch"] - time.time() > 60
+    assert 0 < lease["deadline_epoch"] - time.time() <= 6
 
     second.end_sequence("other_run")
     assert "terminate_pid:2468" not in events
@@ -345,14 +346,51 @@ def test_browser_computer_wraps_visible_desktop_actions_with_haze(tmp_path, monk
     )
 
     assert result["executed"] is True
-    assert events == ["enter:computer.type", "exit:computer.type", "enter:computer.type", "exit:computer.type"]
+    assert events == ["enter:computer.type", "exit:computer.type"]
 
 
-def test_browser_computer_does_not_wrap_screenshot_with_haze(tmp_path, monkeypatch):
+def test_browser_computer_wraps_actual_screenshot_with_haze(tmp_path, monkeypatch):
+    from ecosystem.rumi_default_tools_pack.domain.tool import browser_computer
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+
+    events: list[str] = []
+
+    @contextlib.contextmanager
+    def fake_haze(self, action, payload):
+        events.append(f"enter:{action}")
+        try:
+            yield
+        finally:
+            events.append(f"exit:{action}")
+
+    def fake_capture(self, path, payload):
+        path.write_bytes(
+            b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01"
+            b"\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4"
+            b"\x89\x00\x00\x00\nIDATx\x9cc\x00\x01\x00\x00\x05"
+            b"\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
+        )
+        return {"platform": "Darwin", "supported": True}
+
+    monkeypatch.setattr(browser_computer.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(BrowserComputerController, "_edge_haze", fake_haze)
+    monkeypatch.setattr(BrowserComputerController, "_capture_or_reuse_screenshot", fake_capture)
+
+    result = BrowserComputerController(artifact_root=tmp_path).run(
+        "computer.screenshot",
+        {},
+        yolo_mode=True,
+    )
+
+    assert result["action"] == "computer.screenshot"
+    assert events == ["enter:computer.screenshot", "exit:computer.screenshot"]
+
+
+def test_browser_computer_keeps_screenshot_dry_run_haze_free(tmp_path, monkeypatch):
     from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
 
     def fail_haze(self, action, payload):
-        raise AssertionError("screenshot should not start haze")
+        raise AssertionError("dry-run screenshot should not start haze")
 
     monkeypatch.setattr(BrowserComputerController, "_edge_haze", fail_haze)
 
@@ -363,6 +401,84 @@ def test_browser_computer_does_not_wrap_screenshot_with_haze(tmp_path, monkeypat
     )
 
     assert result["action"] == "computer.screenshot"
+
+
+def test_browser_open_url_foreground_starts_haze(tmp_path, monkeypatch):
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+
+    events: list[str] = []
+
+    @contextlib.contextmanager
+    def fake_haze(self, action, payload):
+        events.append(f"enter:{action}")
+        try:
+            yield
+        finally:
+            events.append(f"exit:{action}")
+
+    monkeypatch.setattr(BrowserComputerController, "_edge_haze", fake_haze)
+    monkeypatch.setattr(BrowserComputerController, "_open_url_foreground", staticmethod(lambda url, app_name="": True))
+
+    result = BrowserComputerController(artifact_root=tmp_path).run(
+        "browser.open_url",
+        {"url": "https://gemini.google.com/", "app": "Google Chrome"},
+        yolo_mode=True,
+    )
+
+    assert result["opened"] is True
+    assert events == ["enter:browser.open_url", "exit:browser.open_url"]
+
+
+def test_browser_computer_file_loaded_controller_can_start_haze(tmp_path, monkeypatch):
+    from ecosystem.rumi_default_tools_pack.domain.computer.mac import edge_haze
+
+    binary = tmp_path / "user_data" / "shared" / "helpers" / "edge_haze" / "edge_haze"
+    binary.parent.mkdir(parents=True)
+    binary.write_text("binary", encoding="utf-8")
+    binary.chmod(0o755)
+    events: list[str] = []
+
+    class FakeProcess:
+        pid = 4321
+
+        def poll(self):
+            return None
+
+        def terminate(self):
+            events.append("terminate")
+
+        def wait(self, timeout=None):
+            events.append(f"wait:{timeout}")
+
+    def fake_popen(args, **kwargs):
+        events.append(f"start:{Path(args[0]).name}")
+        return FakeProcess()
+
+    monkeypatch.setattr(edge_haze.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(edge_haze.shutil, "which", lambda name: None)
+    monkeypatch.setattr(edge_haze.subprocess, "Popen", fake_popen)
+    monkeypatch.setenv("RUMI_USER_DATA", str(tmp_path / "user_data"))
+    monkeypatch.setenv("RUMI_COMPUTER_USE_HAZE", "1")
+
+    module_path = ROOT / "ecosystem" / "rumi_default_tools_pack" / "domain" / "tool" / "browser_computer.py"
+    spec = importlib.util.spec_from_file_location("file_loaded_browser_computer_for_haze_test", module_path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+
+    with module.BrowserComputerController(artifact_root=tmp_path)._edge_haze(
+        "computer.screenshot",
+        {"request_id": "haze-seq"},
+    ):
+        events.append("inside")
+
+    lease_path = binary.with_name("edge_haze.lease.json")
+    assert events == ["start:edge_haze", "inside"]
+    assert lease_path.exists()
+    lease = json.loads(lease_path.read_text(encoding="utf-8"))
+    assert lease["action"] == ""
+    assert lease["sequence_id"] == "haze-seq"
 
 
 def test_edge_haze_swift_helper_watches_lease_file():

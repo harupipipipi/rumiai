@@ -268,6 +268,27 @@ def _normalize_allowed_models(value: Any) -> list[str]:
     return normalized
 
 
+_XIAOMI_TOKEN_PLAN_SGP_LEGACY_MODELS = [
+    "mimo-v2.5-pro",
+    "mimo-v2.5",
+    "mimo-v2-pro",
+    "mimo-v2-flash",
+]
+_XIAOMI_TOKEN_PLAN_SGP_VISION_MODEL = "mimo-v2-omni"
+
+
+def _compat_allowed_models(provider_id: str, allowed_models: Any) -> list[str]:
+    models = _normalize_allowed_models(allowed_models)
+    if provider_id != "xiaomi-token-plan-sgp" or _XIAOMI_TOKEN_PLAN_SGP_VISION_MODEL in models:
+        return models
+    # Older MiMo Token Plan SGP key records were generated before Omni was
+    # exposed. Preserve intentionally narrow custom lists, but upgrade the
+    # historical full-token-plan list so the vision model becomes selectable.
+    if models and all(model in models for model in _XIAOMI_TOKEN_PLAN_SGP_LEGACY_MODELS):
+        return [*models, _XIAOMI_TOKEN_PLAN_SGP_VISION_MODEL]
+    return models
+
+
 def _get_store(pack_root: Path | None = None):
     from core_runtime.secrets_store import SecretsStore
 
@@ -683,7 +704,7 @@ def provider_named_api_keys(provider_id: str = "", *, pack_root: Path | None = N
             "updated_at": meta.updated_at,
             "kind": _normalize_kind(stored_meta.get("kind")),
             "base_url": str(stored_meta.get("base_url") or ""),
-            "allowed_models": _normalize_allowed_models(stored_meta.get("allowed_models", [])),
+            "allowed_models": _compat_allowed_models(key_provider, stored_meta.get("allowed_models", [])),
             "default_model": str(stored_meta.get("default_model") or ""),
             "notes": str(stored_meta.get("notes") or ""),
             "quota_label": str(stored_meta.get("quota_label") or ""),

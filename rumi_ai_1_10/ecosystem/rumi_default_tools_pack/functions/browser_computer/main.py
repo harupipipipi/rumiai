@@ -2,13 +2,29 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+import importlib.util
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from functions._tool_common import tool_result
 
 
-def run(context, args):
+def _browser_computer_controller_class():
+    module_path = Path(__file__).resolve().parents[2] / "domain" / "tool" / "browser_computer.py"
+    if module_path.is_file():
+        spec = importlib.util.spec_from_file_location("_rumi_pack_local_browser_computer", module_path)
+        if spec is not None and spec.loader is not None:
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            controller = getattr(module, "BrowserComputerController", None)
+            if controller is not None:
+                return controller
     from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+
+    return BrowserComputerController
+
+
+def run(context, args):
+    BrowserComputerController = _browser_computer_controller_class()
 
     action = str(args.get("action", "browser.session"))
     payload = dict(args.get("payload") or {})

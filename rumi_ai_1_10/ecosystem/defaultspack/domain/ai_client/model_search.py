@@ -185,7 +185,72 @@ def _profile_catalog() -> list[dict[str, Any]]:
         profiles.extend(service.runtime_defined_profiles(service.get_settings()))
     except Exception:
         pass
+    profiles.extend(_named_api_key_profiles(profiles))
     return profiles
+
+
+def _named_api_key_profiles(base_profiles: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    try:
+        from domain.ai_client.api_key_store import provider_named_api_keys, read_provider_api_key
+    except Exception:
+        return []
+    generated: list[dict[str, Any]] = []
+    for api_key in provider_named_api_keys():
+        if not isinstance(api_key, dict):
+            continue
+        provider_id = str(api_key.get("provider_id") or "").strip()
+        api_id = str(api_key.get("api_id") or "").strip()
+        if not provider_id or not api_id or not read_provider_api_key(provider_id, api_id):
+            continue
+        allowed = [str(item).strip() for item in api_key.get("allowed_models", []) if str(item or "").strip()]
+        default_model = str(api_key.get("default_model") or "").strip()
+        if default_model and default_model not in allowed:
+            allowed.insert(0, default_model)
+        for model_id in allowed:
+            base = _base_profile_for_model(base_profiles, provider_id, model_id)
+            if not base:
+                continue
+            profile = deepcopy(base)
+            profile_id = f"{provider_id}/{api_id}/{model_id}"
+            profile.update(
+                {
+                    "id": profile_id,
+                    "profile_id": profile_id,
+                    "qualified_model_id": profile_id,
+                    "provider": provider_id,
+                    "provider_id": provider_id,
+                    "model": model_id,
+                    "model_id": model_id,
+                    "configured": True,
+                    "display_name": f"{model_id} ({api_key.get('name') or api_id})",
+                    "name": f"{model_id} ({api_key.get('name') or api_id})",
+                    "availability": {"configured": True, "active": True, "status": "configured", "api_bound": True},
+                    "metadata": {
+                        **(profile.get("metadata") if isinstance(profile.get("metadata"), dict) else {}),
+                        "api_bound": True,
+                        "api_id": api_id,
+                        "base_url": api_key.get("base_url", ""),
+                    },
+                }
+            )
+            generated.append(profile)
+    return generated
+
+
+def _base_profile_for_model(profiles: list[dict[str, Any]], provider_id: str, model_id: str) -> dict[str, Any] | None:
+    qualified = f"{provider_id}/{model_id}"
+    for profile in profiles:
+        if not isinstance(profile, dict):
+            continue
+        aliases = {
+            str(profile.get("profile_id") or ""),
+            str(profile.get("qualified_model_id") or ""),
+            str(profile.get("id") or ""),
+            "{}/{}".format(profile.get("provider_id") or profile.get("provider") or "", profile.get("model_id") or profile.get("model") or ""),
+        }
+        if model_id in aliases or qualified in aliases:
+            return profile
+    return None
 
 
 def _public_model(profile: dict[str, Any]) -> dict[str, Any]:

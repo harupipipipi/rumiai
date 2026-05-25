@@ -260,6 +260,34 @@ def test_named_token_plan_key_maps_back_to_long_provider_id(tmp_path, monkeypatc
     assert os.environ["XIAOMI_MIMO_TOKEN_PLAN_SGP_API_KEY"] == "test-token"
 
 
+def test_named_token_plan_sgp_key_exposes_omni_for_legacy_full_model_list(tmp_path):
+    from domain.ai_client.api_key_store import provider_named_api_keys, set_provider_api_key
+
+    set_provider_api_key(
+        "xiaomi-token-plan-sgp",
+        "test-token",
+        name="MiMo Token Plan SGP",
+        default_model="mimo-v2.5-pro",
+        allowed_models=[
+            "mimo-v2.5-pro",
+            "mimo-v2.5",
+            "mimo-v2-pro",
+            "mimo-v2-flash",
+        ],
+        pack_root=tmp_path,
+    )
+
+    api_key = provider_named_api_keys("xiaomi-token-plan-sgp", pack_root=tmp_path)[0]
+
+    assert api_key["allowed_models"] == [
+        "mimo-v2.5-pro",
+        "mimo-v2.5",
+        "mimo-v2-pro",
+        "mimo-v2-flash",
+        "mimo-v2-omni",
+    ]
+
+
 def test_cloud_model_capability_false_values_are_preserved():
     from ecosystem.defaultspack.backend.ai_client.provider_catalog import list_profile_catalog
 

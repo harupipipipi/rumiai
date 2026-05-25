@@ -16,6 +16,7 @@ if _funcs_dir not in sys.path:
 EXPECTED_ACTIONS = [
     "screenshot", "click", "type", "key", "scroll", "context",
     "apps", "windows", "select_app", "select_window", "show_app", "move", "drag",
+    "open_url", "browser_open_url", "open",
     "monitors", "list_monitors", "displays", "list_displays", "select_monitor",
     "set_monitor", "switch_monitor", "window_monitor",
     "observe", "semantic_action", "press", "pid_event", "doctor", "diagnose",
@@ -54,6 +55,20 @@ def test_action_map_doctor_maps_correctly():
     source = main_path.read_text()
     assert '"doctor": "computer.doctor"' in source
     assert '"diagnose": "computer.doctor"' in source
+
+
+def test_action_map_open_url_maps_to_browser_open_url():
+    main_path = Path(_funcs_dir) / "computer_use" / "main.py"
+    source = main_path.read_text()
+    assert '"open_url": "browser.open_url"' in source
+    assert '"browser_open_url": "browser.open_url"' in source
+
+
+def test_browser_computer_function_prefers_pack_local_domain_import():
+    main_path = Path(_funcs_dir) / "browser_computer" / "main.py"
+    source = main_path.read_text()
+    assert "spec_from_file_location" in source
+    assert '"domain" / "tool" / "browser_computer.py"' in source
 
 
 def test_pid_event_target_fields_pass_through():

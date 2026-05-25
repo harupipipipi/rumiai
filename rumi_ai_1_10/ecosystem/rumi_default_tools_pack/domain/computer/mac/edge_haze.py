@@ -129,7 +129,7 @@ class ComputerUseEdgeHazeManager:
         if not pid:
             return
         if self._sequence_id != _STANDALONE_SEQUENCE_ID:
-            self._write_lease_for_pid(pid, action="", active=True)
+            self._write_lease_for_pid(pid, action="", active=False)
             return
         linger_seconds = max(0.0, float(self.settings().linger_seconds))
         if linger_seconds > 0:

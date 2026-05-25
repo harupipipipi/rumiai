@@ -307,6 +307,13 @@ class TestHMACKeyManagerInit:
         assert isinstance(key, str)
         assert len(key) > 0
 
+    def test_default_path_uses_rumi_user_data(self, tmp_path, monkeypatch):
+        """RUMI_USER_DATA 指定時は API トークンも同じ user_data に置く"""
+        monkeypatch.setenv("RUMI_USER_DATA", str(tmp_path))
+        mgr = HMACKeyManager()
+        assert (tmp_path / "hmac_keys.json").exists()
+        assert mgr.get_key_info()["keys_path"] == str(tmp_path / "hmac_keys.json")
+
     def test_reload_existing_keys(self, tmp_path):
         """既存の鍵ファイルからリロードされること"""
         keys_path = str(tmp_path / "hmac_keys.json")

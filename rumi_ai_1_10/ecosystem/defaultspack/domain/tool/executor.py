@@ -6,7 +6,9 @@ from .schema_adapter import is_tool_rejected_by_policy, policy_from_context
 from .security import is_trusted_pack_id, requires_approval_for_security, unsupported_execution_reason
 from domain.tool_policy.internal_context import internal_tool_decision_allows
 from pathlib import Path
+import importlib.util
 import json
+import os
 
 
 # P1-2: サンドボックス用の安全なビルトイン一覧
@@ -193,6 +195,12 @@ class ToolExecutor:
         approved_context, approval_error = _context_with_tool_approval_token(context, tool_def, arguments)
         if approval_error is not None:
             return approval_error
+        policy = policy_from_context(approved_context if isinstance(approved_context, dict) else {})
+        if _truthy(policy.get("yolo_mode")) or _is_policy_allow_context(approved_context):
+            approved_context["_tool_server_approved"] = True
+        local_tool = self._first_party_browser_computer_tool_for_function(pack_id, function_id)
+        if local_tool and _context_has_tool_server_approval(approved_context):
+            return self._execute_local(local_tool, arguments or {}, approved_context)
         forwarded_context = _function_call_context(approved_context, tool_def)
         if forwarded_context:
             request["context"] = forwarded_context
@@ -425,18 +433,76 @@ class ToolExecutor:
         except Exception:
             return
         try:
-            if registry.get(qualified_name) is not None:
+            existing = registry.get(qualified_name)
+            if existing is not None and not ToolExecutor._managed_function_should_replace(qualified_name, existing):
                 return
+            if existing is not None:
+                pack_id, _, _ = qualified_name.partition(":")
+                unregister = getattr(registry, "unregister_pack", None)
+                if callable(unregister):
+                    unregister(pack_id)
         except Exception:
             return
         ToolExecutor._load_pack_functions_into_registry(registry)
 
     @staticmethod
+    def _managed_function_should_replace(qualified_name, existing_entry):
+        pack_id, _, function_id = str(qualified_name or "").partition(":")
+        if not pack_id or not function_id:
+            return False
+        managed_dir = ToolExecutor._managed_function_dir(pack_id, function_id)
+        if managed_dir is None:
+            return False
+        existing_dir = getattr(existing_entry, "function_dir", None)
+        if existing_dir is None:
+            return True
+        try:
+            return Path(existing_dir).resolve() != managed_dir.resolve()
+        except OSError:
+            return Path(existing_dir) != managed_dir
+
+    @staticmethod
+    def _managed_function_dir(pack_id, function_id):
+        for pack_root in ToolExecutor._managed_current_pack_roots():
+            try:
+                manifest = json.loads((pack_root / "ecosystem.json").read_text(encoding="utf-8"))
+            except Exception:
+                manifest = {}
+            current_pack_id = str(manifest.get("pack_id") or pack_root.name).strip() or pack_root.name
+            if current_pack_id != pack_id:
+                continue
+            function_dir = pack_root / "functions" / function_id
+            if (function_dir / "manifest.json").is_file():
+                return function_dir
+        return None
+
+    @staticmethod
     def _load_pack_functions_into_registry(registry):
         ecosystem_dir = Path(__file__).resolve().parents[3]
-        for pack_root in sorted(ecosystem_dir.iterdir()):
-            if not pack_root.is_dir() or not (pack_root / "ecosystem.json").exists():
-                continue
+        pack_roots: list[Path] = []
+
+        def append_unique(path: Path) -> None:
+            try:
+                resolved = path.resolve()
+            except OSError:
+                resolved = path
+            for existing in pack_roots:
+                try:
+                    if existing.resolve() == resolved:
+                        return
+                except OSError:
+                    if existing == path:
+                        return
+            pack_roots.append(path)
+
+        for pack_root in ToolExecutor._managed_current_pack_roots():
+            append_unique(pack_root)
+        if ecosystem_dir.is_dir():
+            for pack_root in sorted(ecosystem_dir.iterdir()):
+                if pack_root.is_dir() and (pack_root / "ecosystem.json").exists():
+                    append_unique(pack_root)
+
+        for pack_root in pack_roots:
             try:
                 pack_manifest = json.loads((pack_root / "ecosystem.json").read_text(encoding="utf-8"))
             except Exception:
@@ -465,6 +531,39 @@ class ToolExecutor:
                     )
                 except Exception:
                     continue
+
+    @staticmethod
+    def _managed_current_pack_roots() -> list[Path]:
+        user_data = os.environ.get("RUMI_USER_DATA")
+        if not user_data:
+            return []
+        packs_dir = Path(user_data) / "packs"
+        if not packs_dir.is_dir():
+            return []
+        roots: list[Path] = []
+        for pointer in sorted(packs_dir.glob("*/current.json")):
+            try:
+                data = json.loads(pointer.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+                continue
+            if not isinstance(data, dict):
+                continue
+            rel = data.get("path")
+            pack_id = data.get("pack_id")
+            if not isinstance(rel, str) or not rel or not isinstance(pack_id, str) or not pack_id:
+                continue
+            rel_path = Path(rel)
+            if rel_path.is_absolute() or ".." in rel_path.parts or "\x00" in rel:
+                continue
+            pack_root = pointer.parent
+            target = pack_root / rel_path
+            try:
+                target.resolve().relative_to(pack_root.resolve())
+            except (OSError, ValueError):
+                continue
+            if (target / "ecosystem.json").is_file():
+                roots.append(target)
+        return roots
 
     @staticmethod
     def _principal_id(tool_def, context):
@@ -675,7 +774,7 @@ class ToolExecutor:
                 "widget": {"type": "research_sources", **result.as_dict()}
             }
         elif tool_name in {"browser_computer", "browser_use", "computer_use"}:
-            from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+            BrowserComputerController = _browser_computer_controller_class()
 
             policy = policy_from_context(context if isinstance(context, dict) else {})
             action, payload = _browser_computer_action_payload(tool_name, arguments)
@@ -1215,6 +1314,34 @@ def _computer_use_payload_with_context_defaults(action, payload, context):
         if physical_clicks and action == "computer.click" and "physical" not in payload:
             payload["physical"] = True
     return payload
+
+
+def _browser_computer_controller_class():
+    for pack_root in ToolExecutor._managed_current_pack_roots():
+        try:
+            manifest = json.loads((pack_root / "ecosystem.json").read_text(encoding="utf-8"))
+        except Exception:
+            manifest = {}
+        pack_id = str(manifest.get("pack_id") or pack_root.name).strip() or pack_root.name
+        if pack_id != "rumi_default_tools_pack":
+            continue
+        module_path = pack_root / "domain" / "tool" / "browser_computer.py"
+        if not module_path.is_file():
+            continue
+        try:
+            spec = importlib.util.spec_from_file_location("_rumi_managed_browser_computer", module_path)
+            if spec is None or spec.loader is None:
+                continue
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            controller = getattr(module, "BrowserComputerController", None)
+            if controller is not None:
+                return controller
+        except Exception:
+            continue
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+
+    return BrowserComputerController
 
 
 def _conversation_tool_artifact_root(context):

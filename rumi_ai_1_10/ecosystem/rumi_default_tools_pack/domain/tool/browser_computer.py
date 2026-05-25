@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import importlib.util
 import json
 import os
 import platform
@@ -252,7 +253,17 @@ class BrowserComputerController:
 
     def _edge_haze(self, action: str, payload: dict[str, Any]):
         try:
-            from ..computer.mac.edge_haze import ComputerUseEdgeHazeManager
+            try:
+                from ..computer.mac.edge_haze import ComputerUseEdgeHazeManager
+            except Exception:
+                edge_haze_path = Path(__file__).resolve().parents[1] / "computer" / "mac" / "edge_haze.py"
+                spec = importlib.util.spec_from_file_location("_rumi_computer_use_edge_haze", edge_haze_path)
+                if spec is None or spec.loader is None:
+                    raise
+                module = importlib.util.module_from_spec(spec)
+                sys.modules[spec.name] = module
+                spec.loader.exec_module(module)
+                ComputerUseEdgeHazeManager = module.ComputerUseEdgeHazeManager
 
             pack_root = Path(__file__).resolve().parents[2]
             return ComputerUseEdgeHazeManager.from_pack_root(pack_root).active(action=action, payload=payload)
@@ -288,7 +299,8 @@ class BrowserComputerController:
             subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             opened_with_managed_profile = True
         else:
-            opened = self._open_url_foreground(url, app_name=target_app)
+            with self._edge_haze("browser.open_url", payload):
+                opened = self._open_url_foreground(url, app_name=target_app)
             if not opened:
                 return {
                     "action": "browser.open_url",
@@ -485,7 +497,8 @@ class BrowserComputerController:
             return self._approval_required("computer.screenshot", approval_payload)
         self._artifact_root.mkdir(parents=True, exist_ok=True)
         path = self._artifact_root / f"screenshot-{int(time.time() * 1000)}.png"
-        capture = self._capture_or_reuse_screenshot(path, payload)
+        with self._edge_haze("computer.screenshot", payload):
+            capture = self._capture_or_reuse_screenshot(path, payload)
         system = capture.get("platform", platform.system())
         if not capture.get("supported", True):
             result = {
@@ -1733,49 +1746,48 @@ print(json.dumps(result))
             self._focus_action_target(action_payload)
         if action == "computer.drag" and payload.get("physical") is True:
             self._focus_action_target(action_payload)
-        # --- Attempt ComputerSeatService delegation ---
         with self._edge_haze(action, action_payload):
+            # --- Attempt ComputerSeatService delegation ---
             seat_result = self._try_computer_seat_action(action, action_payload)
-        if seat_result is not None and seat_result.get("executed"):
-            result: dict[str, Any] = {"action": action, "executed": True, "platform": system}
-            result["driver"] = seat_result.get("driver", "computer_seat")
-            result["is_fallback"] = seat_result.get("is_fallback", False)
-            if action in {"computer.move", "computer.click"}:
-                result["target"] = {"x": int(action_payload.get("x", 0)), "y": int(action_payload.get("y", 0))}
-                if click_marker:
-                    result["marker"] = click_marker
-            if action == "computer.drag":
-                result["target"] = {
-                    "from": {"x": int(action_payload.get("x1", 0)), "y": int(action_payload.get("y1", 0))},
-                    "to": {"x": int(action_payload.get("x2", 0)), "y": int(action_payload.get("y2", 0))},
-                }
-                if click_marker:
-                    result["marker"] = click_marker
-                if drag_marker:
-                    result["drag_marker"] = drag_marker
-            if action == "computer.scroll":
-                result["amount"] = _scroll_clicks(action_payload, default=1)
-            if action == "computer.key":
-                result["count"] = int(seat_result.get("count", _key_press_count(action_payload)) or 0)
-                result["requested_count"] = int(
-                    seat_result.get("requested_count", _key_press_count(action_payload)) or 0
-                )
-                if seat_result.get("partial"):
-                    result["partial"] = True
-            if self._should_capture_after_action(action, payload):
-                screenshot = self._capture_action_result_screenshot(
-                    action_payload,
-                    click_marker,
-                    action_name=action,
-                    drag_marker=drag_marker,
-                )
-                result.update(screenshot)
-            return result
-        foreground_error = self._foreground_action_focus_error(action, action_payload)
-        if foreground_error is not None:
-            return foreground_error
-        # --- Legacy platform-specific fallback ---
-        with self._edge_haze(action, action_payload):
+            if seat_result is not None and seat_result.get("executed"):
+                result: dict[str, Any] = {"action": action, "executed": True, "platform": system}
+                result["driver"] = seat_result.get("driver", "computer_seat")
+                result["is_fallback"] = seat_result.get("is_fallback", False)
+                if action in {"computer.move", "computer.click"}:
+                    result["target"] = {"x": int(action_payload.get("x", 0)), "y": int(action_payload.get("y", 0))}
+                    if click_marker:
+                        result["marker"] = click_marker
+                if action == "computer.drag":
+                    result["target"] = {
+                        "from": {"x": int(action_payload.get("x1", 0)), "y": int(action_payload.get("y1", 0))},
+                        "to": {"x": int(action_payload.get("x2", 0)), "y": int(action_payload.get("y2", 0))},
+                    }
+                    if click_marker:
+                        result["marker"] = click_marker
+                    if drag_marker:
+                        result["drag_marker"] = drag_marker
+                if action == "computer.scroll":
+                    result["amount"] = _scroll_clicks(action_payload, default=1)
+                if action == "computer.key":
+                    result["count"] = int(seat_result.get("count", _key_press_count(action_payload)) or 0)
+                    result["requested_count"] = int(
+                        seat_result.get("requested_count", _key_press_count(action_payload)) or 0
+                    )
+                    if seat_result.get("partial"):
+                        result["partial"] = True
+                if self._should_capture_after_action(action, payload):
+                    screenshot = self._capture_action_result_screenshot(
+                        action_payload,
+                        click_marker,
+                        action_name=action,
+                        drag_marker=drag_marker,
+                    )
+                    result.update(screenshot)
+                return result
+            foreground_error = self._foreground_action_focus_error(action, action_payload)
+            if foreground_error is not None:
+                return foreground_error
+            # --- Legacy platform-specific fallback ---
             if system == "Darwin" and action == "computer.move":
                 self._darwin_move_cursor(action_payload)
             elif system == "Darwin" and action == "computer.click":

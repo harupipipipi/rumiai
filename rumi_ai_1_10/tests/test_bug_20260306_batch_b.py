@@ -5,6 +5,7 @@ BUG-20260306-BATCH-B:
 - 候補1: 初期化ハンドラのサイレント失敗修正
 - 候補3: 遅延初期化の無限リトライ修正
 """
+import importlib
 import logging
 import types
 from unittest.mock import MagicMock, patch, PropertyMock
@@ -136,6 +137,23 @@ class TestRegistryLoadHandler:
                     result = mixin._h_registry_load({"ecosystem_dir": "eco"}, {})
 
         assert result is mock_reg
+
+    def test_default_ecosystem_arg_resolves_to_runtime_ecosystem_dir(self):
+        """startup flow の ecosystem_dir='ecosystem' は cwd ではなく runtime 配下を指す"""
+        from core_runtime.paths import ECOSYSTEM_DIR
+
+        mixin = _make_handler_mixin()
+        mock_reg = MagicMock(name="registry")
+        mock_reg.load_all_packs = MagicMock()
+        mock_regmod = MagicMock()
+        mock_Registry = MagicMock(return_value=mock_reg)
+        mock_regmod.Registry = mock_Registry
+
+        with patch.object(importlib, "import_module", return_value=mock_regmod):
+            result = mixin._h_registry_load({"ecosystem_dir": "ecosystem"}, {})
+
+        assert result is mock_reg
+        mock_Registry.assert_called_once_with(ecosystem_dir=ECOSYSTEM_DIR)
 
     def test_failure_returns_step_status_failed(self):
         """異常系: _kernel_step_status='failed' を含む dict が返ること"""

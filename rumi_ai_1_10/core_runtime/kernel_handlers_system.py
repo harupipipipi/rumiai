@@ -164,6 +164,10 @@ class KernelSystemHandlersMixin:
 
     def _h_registry_load(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
         ecosystem_dir = str(args.get("ecosystem_dir", "ecosystem"))
+        if Path(ecosystem_dir) == Path("ecosystem"):
+            from .paths import ECOSYSTEM_DIR
+
+            ecosystem_dir = ECOSYSTEM_DIR
         try:
             regmod = importlib.import_module("backend_core.ecosystem.registry")
             Registry = getattr(regmod, "Registry")

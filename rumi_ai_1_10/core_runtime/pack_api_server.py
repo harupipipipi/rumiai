@@ -344,18 +344,22 @@ class PackAPIHandler(
 
 
     @classmethod
-    def load_api_routes(cls, registry) -> int:
+    def load_api_routes(cls, registry, pack_ids: Optional[set[str]] = None, *, reset: bool = True) -> int:
         """Registry から全 Pack の api_routes を読み込み、ルーティングテーブルを構築する。
 
         完全一致ルートは dict で O(1) ルックアップ。
         パスパラメータ付きルートは正規表現でマッチ（route_handlers.py のパターンを踏襲）。
         """
-        cls._api_route_exact = {}
-        cls._api_route_patterns = []
+        if reset:
+            cls._api_route_exact = {}
+            cls._api_route_patterns = []
         if registry is None:
             return 0
+        selected_pack_ids = set(pack_ids or [])
         count = 0
         for pack_id, pack_info in registry.packs.items():
+            if selected_pack_ids and pack_id not in selected_pack_ids:
+                continue
             routes = pack_info.ecosystem.get("api_routes")
             if not routes or not isinstance(routes, list):
                 continue
@@ -534,6 +538,102 @@ class PackAPIHandler(
             self._send_response(APIResponse(False, error=_SAFE_ERROR_MSG), 500)
 
         return True
+
+    def _dispatch_interface_http_route(
+        self,
+        method: str,
+        path: str,
+        body: Optional[dict[str, Any]] = None,
+    ) -> bool:
+        """Dispatch defaultspack's InterfaceRegistry HTTP routes in-process."""
+        kernel = self.__class__.kernel
+        interface_registry = getattr(kernel, "interface_registry", None)
+        if interface_registry is None:
+            return False
+        try:
+            routes = interface_registry.get("io.http.route", strategy="all") or []
+        except Exception:
+            return False
+        method_upper = method.upper()
+        request_path = path.rstrip("/") or "/"
+        for entry in routes:
+            if not isinstance(entry, dict):
+                continue
+            if str(entry.get("method") or "").upper() != method_upper:
+                continue
+            compiled = _compile_template_path(str(entry.get("pattern") or ""))
+            if compiled is None:
+                continue
+            pattern, param_names = compiled
+            match = pattern.match(request_path)
+            if match is None:
+                continue
+            handler = entry.get("handler")
+            if not callable(handler):
+                continue
+            path_params: dict[str, str] = {}
+            for name in param_names:
+                value = unquote(match.group(name))
+                if not _is_safe_path_param(value):
+                    self._send_raw_json(
+                        {"status": "error", "error": {"code": "INVALID_PATH", "message": "Invalid path parameter"}},
+                        400,
+                    )
+                    return True
+                path_params[name] = value
+            request_data: dict[str, Any] = {}
+            if method_upper == "GET":
+                query = parse_qs(urlparse(self.path).query, keep_blank_values=True)
+                request_data.update({key: values[-1] for key, values in query.items() if values})
+            if isinstance(body, dict):
+                request_data.update(body)
+            path_inject = entry.get("path_inject") if isinstance(entry.get("path_inject"), dict) else {}
+            for source_key, dest_key in path_inject.items():
+                request_data[str(dest_key)] = path_params.get(str(source_key), "")
+            request_data["_method"] = method_upper
+            request_data["_actual_method"] = method_upper
+            context = {
+                "flow_id": "interface_http_route",
+                "step_id": "http_request",
+                "phase": "execute",
+                "owner_pack": "defaultspack",
+                "inputs": {},
+                "interface_registry": interface_registry,
+                "event_bus": getattr(kernel, "event_bus", None),
+            }
+            try:
+                from .kernel_facade import KernelFacade
+
+                context["_facade"] = KernelFacade(kernel)
+            except Exception:
+                pass
+            try:
+                result = handler(request_data, context)
+                sse_events = self._sse_events_from_result(result)
+                if sse_events is not None:
+                    self._send_sse(sse_events)
+                else:
+                    self._send_raw_json(result if isinstance(result, dict) else {"status": "ok", "data": result})
+            except Exception as exc:
+                _log_internal_error(f"interface_http_route:{method_upper}:{path}", exc)
+                self._send_raw_json(
+                    {"status": "error", "error": {"code": "INTERNAL_ERROR", "message": _SAFE_ERROR_MSG}},
+                    500,
+                )
+            return True
+        return False
+
+    def _send_raw_json(self, payload: Any, status: int = 200) -> None:
+        data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(data)))
+        origin = self._get_cors_origin(self.headers.get("Origin", ""))
+        if origin:
+            self.send_header("Access-Control-Allow-Origin", origin)
+            self.send_header("Vary", "Origin")
+        self.end_headers()
+        self.wfile.write(data)
 
     def _send_response(
         self,
@@ -1224,6 +1324,8 @@ class PackAPIHandler(
             # --- api_routes テーブルディスパッチ (施策3) ---
             if self._dispatch_api_route("GET", path):
                 return
+            if self._dispatch_interface_http_route("GET", path):
+                return
 
             if path == "/api/packs":
                 result = self._get_all_packs()
@@ -1429,6 +1531,8 @@ class PackAPIHandler(
 
             # --- api_routes テーブルディスパッチ (施策3) ---
             if self._dispatch_api_route("POST", path, body):
+                return
+            if self._dispatch_interface_http_route("POST", path, body):
                 return
 
             if path == "/api/network/grant":
@@ -1856,6 +1960,8 @@ class PackAPIHandler(
             # --- api_routes テーブルディスパッチ (施策3) ---
             if self._dispatch_api_route("PUT", path, body):
                 return
+            if self._dispatch_interface_http_route("PUT", path, body):
+                return
 
             match = self._match_pack_route(path, "PUT")
             if match:
@@ -1885,6 +1991,8 @@ class PackAPIHandler(
         try:
             # --- api_routes テーブルディスパッチ (施策3) ---
             if self._dispatch_api_route("DELETE", path):
+                return
+            if self._dispatch_interface_http_route("DELETE", path):
                 return
 
             # --- W19-B: Secret Grant DELETE endpoints ---
@@ -2022,11 +2130,14 @@ class PackAPIServer:
             from backend_core.ecosystem.registry import get_registry
 
             reg = get_registry()
-            PackAPIHandler.load_web_mounts(reg, pack_ids={"core_control_panel"})
-            PackAPIHandler.load_pre_auth_routes(reg, pack_ids={"core_control_panel"})
-            logger.info("Preloaded control panel shell routes before runtime-ready")
+            PackAPIHandler.load_pack_routes(reg)
+            PackAPIHandler.load_web_mounts(reg)
+            PackAPIHandler.load_pre_auth_routes(reg)
+            PackAPIHandler.load_api_routes(reg)
+            self._routes_loaded = True
+            logger.info("Loaded pack routes during API server startup")
         except Exception as e:
-            logger.warning("Failed to preload control panel shell routes: %s", e)
+            logger.warning("Failed to preload pack routes during API server startup: %s", e)
         try:
             if self.kernel and hasattr(self.kernel, 'event_bus') and self.kernel.event_bus:
                 def _deferred_load_routes(event_data=None):

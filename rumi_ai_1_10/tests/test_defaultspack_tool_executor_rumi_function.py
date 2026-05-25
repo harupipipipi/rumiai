@@ -347,7 +347,7 @@ def test_tool_executor_falls_back_to_local_browser_computer_with_server_approval
     assert captured["arguments"] == {"action": "computer.windows"}
 
 
-def test_tool_executor_yolo_policy_does_not_bypass_computer_use_capability_boundary(monkeypatch):
+def test_tool_executor_yolo_policy_runs_first_party_computer_use_locally(monkeypatch):
     from domain.tool.executor import ToolExecutor
 
     capability_executor = _caller_requires_denied_executor()
@@ -372,8 +372,10 @@ def test_tool_executor_yolo_policy_does_not_bypass_computer_use_capability_bound
     )
 
     assert result["is_error"] is False
-    assert result["widget"]["type"] == "approval_request"
-    assert "tool_name" not in captured
+    assert result["widget"]["type"] == "computer_use"
+    assert captured["tool_name"] == "computer_use"
+    assert captured["arguments"] == {"action": "context"}
+    assert captured["context"]["_tool_server_approved"] is True
 
 
 def test_tool_executor_local_computer_use_treats_server_approval_as_yolo(monkeypatch, tmp_path):
