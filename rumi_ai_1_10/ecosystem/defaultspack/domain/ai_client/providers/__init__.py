@@ -1257,8 +1257,8 @@ def detect_available_providers():
         if provider is not None:
             available[provider_id] = provider
 
-    if not available:
-        available.update(_load_legacy_providers())
+    for provider_id, provider in _load_legacy_providers().items():
+        available.setdefault(provider_id, provider)
     return available
 
 
