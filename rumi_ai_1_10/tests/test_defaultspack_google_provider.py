@@ -53,6 +53,14 @@ class TestDefaultspackGoogleProvider(unittest.TestCase):
 
         self.assertEqual(headers["Authorization"], "Bearer oauth-token")
 
+    def test_google_provider_treats_dns_resolution_errors_as_transient(self):
+        from domain.ai_client.providers.google_provider import GoogleProvider
+
+        provider = GoogleProvider()
+
+        self.assertTrue(provider._is_transient_google_connection_error(OSError("[Errno 8] nodename nor servname provided")))
+        self.assertTrue(provider._is_transient_google_connection_error(OSError("[Errno -2] Name or service not known")))
+
     def test_google_provider_uses_openai_compatible_chat_endpoint(self):
         from domain.ai_client.providers.google_provider import GoogleProvider
 

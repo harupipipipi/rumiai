@@ -517,16 +517,7 @@ class BrowserComputerController:
             result["data_url"] = data_url
             result["model_image"] = data_url
             result["model_image_path"] = str(model_path)
-        # Additive ComputerSeat metadata
-        try:
-            svc = self._get_computer_seat()
-            doctor = svc.doctor()
-            result["computer_seat"] = {
-                "driver_chain_order": doctor.get("driver_chain_order", []),
-                "capabilities": [d.get("capabilities", {}) for d in doctor.get("available_drivers", [])],
-            }
-        except Exception:
-            pass
+        result["computer_seat"] = self._computer_seat_context_summary(payload)
         return result
 
     def _screenshot_result(
@@ -674,17 +665,7 @@ class BrowserComputerController:
             result["windows"] = self._list_windows()
         if payload.get("include_installed_apps") is True:
             result["installed_apps"] = self._installed_apps(payload)
-        # Additive ComputerSeat metadata
-        try:
-            svc = self._get_computer_seat()
-            doctor = svc.doctor()
-            result["computer_seat"] = {
-                "driver_chain_order": doctor.get("driver_chain_order", []),
-                "capabilities": [d.get("capabilities", {}) for d in doctor.get("available_drivers", [])],
-                "recommended_next_actions": ["computer.screenshot", "computer.select_app", "computer.observe"],
-            }
-        except Exception:
-            pass
+        result["computer_seat"] = self._computer_seat_context_summary(payload)
         return result
 
     def _apps(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -848,13 +829,14 @@ class BrowserComputerController:
         selected["selection_source"] = selected_source
         state = self._computer_state()
         state["target_app"] = selected
-        if payload.get("focus", True) is not False:
+        if payload.get("focus", True) is not False and self._should_resolve_window_after_app_select(payload):
             active_window = self._active_window_for_app(str(selected.get("name") or selected.get("app") or ""))
             if active_window is not None:
                 state["target_window"] = active_window
         self._write_computer_state(state)
         if payload.get("focus", True) is not False:
             self._activate_app_name(str(selected.get("name") or selected.get("app") or ""))
+        if payload.get("focus", True) is not False and self._should_resolve_window_after_app_select(payload):
             active_window = self._active_window_for_app(str(selected.get("name") or selected.get("app") or ""))
             if active_window is not None:
                 state = self._computer_state()
@@ -876,7 +858,7 @@ class BrowserComputerController:
         action_payload["focus"] = True
         if action_payload.get("open") is not False and action_payload.get("launch") is not False:
             action_payload.setdefault("open", True)
-        selected_window = self._matching_window(action_payload) if self._has_window_filter(action_payload) else None
+        selected_window = self._matching_window(action_payload) if self._has_explicit_window_filter(action_payload) else None
         if selected_window is not None:
             state = self._computer_state()
             state["target_window"] = selected_window
@@ -894,7 +876,7 @@ class BrowserComputerController:
         result = self._select_app(action_payload)
         shown = bool(result.get("selected"))
         active_window = None
-        if shown:
+        if shown and self._should_resolve_window_after_app_select(action_payload):
             time.sleep(0.2)
             target_app = result.get("target_app") if isinstance(result.get("target_app"), dict) else {}
             active_window = self._active_window_for_app(str(target_app.get("name") or target_app.get("app") or ""))
@@ -910,9 +892,16 @@ class BrowserComputerController:
             **({"target_window": active_window} if active_window else {}),
             **({"open_apps": result.get("open_apps")} if result.get("open_apps") else {}),
             **({"installed_match": result.get("installed_match")} if result.get("installed_match") else {}),
-            "active_window": active_window or (self._active_window() if shown else None),
+            "active_window": active_window,
             **({"reason": "No running or installed app matched the request."} if not shown else {}),
         }
+
+    @staticmethod
+    def _should_resolve_window_after_app_select(payload: dict[str, Any] | None = None) -> bool:
+        payload = payload or {}
+        if payload.get("include_window") is True or payload.get("resolve_window") is True:
+            return True
+        return BrowserComputerController._has_explicit_window_filter_static(payload)
 
     @classmethod
     def _app_alias_tokens(cls, value: Any) -> set[str]:
@@ -1435,14 +1424,7 @@ class BrowserComputerController:
 
     def _computer_seat_metadata_for_target(self, target_record: dict[str, Any] | None) -> dict[str, Any]:
         """Build additive ComputerSeat metadata for a selected target."""
-        meta: dict[str, Any] = {}
-        try:
-            svc = self._get_computer_seat()
-            doctor = svc.doctor()
-            meta["driver_chain_order"] = doctor.get("driver_chain_order", [])
-            meta["capabilities"] = [d.get("capabilities", {}) for d in doctor.get("available_drivers", [])]
-        except Exception:
-            pass
+        meta: dict[str, Any] = self._computer_seat_context_summary({})
         if target_record:
             meta["target"] = {
                 "app": target_record.get("app") or target_record.get("name"),
@@ -1455,6 +1437,98 @@ class BrowserComputerController:
             }
             meta["recommended_next_actions"] = ["computer.screenshot", "computer.click", "computer.observe"]
         return meta
+
+    def _computer_seat_context_summary(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        payload = payload or {}
+        summary: dict[str, Any] = {
+            "driver_chain_order": [],
+            "capabilities": [],
+            "recommended_next_actions": ["computer.screenshot", "computer.select_app", "computer.observe"],
+        }
+        if platform.system() == "Darwin":
+            summary["permissions"] = self._darwin_permission_status()
+        if payload.get("include_driver_diagnostics") is not True and payload.get("include_computer_seat_diagnostics") is not True:
+            summary["diagnostics_deferred"] = True
+            return summary
+        try:
+            svc = self._get_computer_seat()
+            doctor = svc.doctor()
+            summary["driver_chain_order"] = doctor.get("driver_chain_order", [])
+            summary["capabilities"] = [d.get("capabilities", {}) for d in doctor.get("available_drivers", [])]
+            summary["diagnostics_deferred"] = False
+        except Exception as exc:
+            summary["diagnostics_deferred"] = False
+            summary["diagnostics_error"] = str(exc)
+        return summary
+
+    @staticmethod
+    def _darwin_permission_status() -> dict[str, Any]:
+        code = r"""
+import ctypes
+import ctypes.util
+import json
+
+result = {"platform": "Darwin"}
+try:
+    import ApplicationServices
+
+    result["accessibility_trusted"] = bool(ApplicationServices.AXIsProcessTrusted())
+except Exception as exc:
+    try:
+        app_services_path = ctypes.util.find_library("ApplicationServices")
+        if not app_services_path:
+            raise RuntimeError("ApplicationServices framework not found")
+        app_services = ctypes.CDLL(app_services_path)
+        app_services.AXIsProcessTrusted.restype = ctypes.c_bool
+        result["accessibility_trusted"] = bool(app_services.AXIsProcessTrusted())
+        result["accessibility_source"] = "ctypes"
+    except Exception as fallback_exc:
+        result["accessibility_trusted"] = None
+        result["accessibility_error"] = str(exc)
+        result["accessibility_fallback_error"] = str(fallback_exc)
+
+try:
+    import Quartz
+
+    preflight = getattr(Quartz, "CGPreflightScreenCaptureAccess", None)
+    result["screen_capture_allowed"] = bool(preflight()) if callable(preflight) else None
+except Exception as exc:
+    try:
+        core_graphics_path = ctypes.util.find_library("CoreGraphics")
+        app_services_path = ctypes.util.find_library("ApplicationServices")
+        framework_path = core_graphics_path or app_services_path
+        if not framework_path:
+            raise RuntimeError("CoreGraphics/ApplicationServices framework not found")
+        framework = ctypes.CDLL(framework_path)
+        framework.CGPreflightScreenCaptureAccess.restype = ctypes.c_bool
+        result["screen_capture_allowed"] = bool(framework.CGPreflightScreenCaptureAccess())
+        result["screen_capture_source"] = "ctypes"
+    except Exception as fallback_exc:
+        result["screen_capture_allowed"] = None
+        result["screen_capture_error"] = str(exc)
+        result["screen_capture_fallback_error"] = str(fallback_exc)
+
+missing = []
+if result.get("accessibility_trusted") is False:
+    missing.append("accessibility")
+if result.get("screen_capture_allowed") is False:
+    missing.append("screen_recording")
+result["missing"] = missing
+result["likely_permission_blocked"] = bool(missing)
+print(json.dumps(result))
+"""
+        try:
+            completed = subprocess.run(
+                _current_python_snippet_command(code),
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=3,
+            )
+            data = json.loads(completed.stdout or "{}")
+            return data if isinstance(data, dict) else {"platform": "Darwin", "status": "unknown"}
+        except Exception as exc:
+            return {"platform": "Darwin", "status": "unknown", "error": str(exc)}
 
     def _computer_seat_observe(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Delegate to ComputerSeatService.observe."""
@@ -2462,6 +2536,21 @@ class BrowserComputerController:
         filters = self._window_filter(payload)
         return bool(filters.get("app") or filters.get("title"))
 
+    @staticmethod
+    def _has_explicit_window_filter_static(payload: dict[str, Any] | None = None) -> bool:
+        payload = payload or {}
+        filters = BrowserComputerController._window_filter(payload)
+        if filters.get("title") or isinstance(payload.get("window"), dict):
+            return True
+        for key in ("window_id", "window_title", "title_contains", "window_index"):
+            value = payload.get(key)
+            if value is not None and str(value).strip():
+                return True
+        return False
+
+    def _has_explicit_window_filter(self, payload: dict[str, Any] | None = None) -> bool:
+        return self._has_explicit_window_filter_static(payload)
+
     def _matching_window(self, payload: dict[str, Any]) -> dict[str, Any] | None:
         filters = self._window_filter(payload)
         app = filters.get("app", "").lower()
@@ -3405,6 +3494,9 @@ end tell
             return ""
 
     def _darwin_running_apps(self) -> list[dict[str, Any]]:
+        appkit_apps = self._darwin_running_apps_appkit()
+        if appkit_apps:
+            return appkit_apps
         script = r'''
 tell application "System Events"
   set output to ""
@@ -3421,7 +3513,7 @@ tell application "System Events"
 end tell
 '''
         try:
-            completed = subprocess.run(["osascript", "-e", script], check=True, capture_output=True, text=True)
+            completed = subprocess.run(["osascript", "-e", script], check=True, capture_output=True, text=True, timeout=5)
         except Exception:
             return []
         apps: list[dict[str, Any]] = []
@@ -3453,6 +3545,86 @@ end tell
             if pid is not None:
                 app["pid"] = pid
             apps.append(app)
+        return apps
+
+    @staticmethod
+    def _darwin_running_apps_appkit() -> list[dict[str, Any]]:
+        code = r"""
+import json
+import AppKit
+
+apps = []
+for app in AppKit.NSWorkspace.sharedWorkspace().runningApplications():
+    try:
+        if int(app.activationPolicy()) != 0:
+            continue
+        name = str(app.localizedName() or "").strip()
+        if not name:
+            continue
+        item = {
+            "name": name,
+            "app": name,
+            "running": True,
+            "active": bool(app.isActive()),
+            "pid": int(app.processIdentifier()),
+            "window_count": 0,
+            "has_windows": False,
+        }
+        bundle_id = str(app.bundleIdentifier() or "").strip()
+        if bundle_id:
+            item["bundle_id"] = bundle_id
+        bundle_url = app.bundleURL()
+        if bundle_url is not None:
+            path = str(bundle_url.path() or "").strip()
+            if path:
+                item["path"] = path
+        apps.append(item)
+    except Exception:
+        continue
+print(json.dumps(apps))
+"""
+        try:
+            completed = subprocess.run(
+                _current_python_snippet_command(code),
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=3,
+            )
+            data = json.loads(completed.stdout or "[]")
+        except Exception:
+            return []
+        if not isinstance(data, list):
+            return []
+        apps: list[dict[str, Any]] = []
+        seen: set[tuple[str, int]] = set()
+        for item in data:
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("name") or item.get("app") or "").strip()
+            try:
+                pid = int(item.get("pid") or 0)
+            except Exception:
+                pid = 0
+            key = (name.lower(), pid)
+            if not name or key in seen:
+                continue
+            seen.add(key)
+            normalized = {
+                "name": name,
+                "app": str(item.get("app") or name),
+                "running": True,
+                "active": bool(item.get("active")),
+                "window_count": int(item.get("window_count") or 0),
+                "has_windows": bool(item.get("has_windows")),
+            }
+            if pid > 0:
+                normalized["pid"] = pid
+            for key_name in ("bundle_id", "path"):
+                value = str(item.get(key_name) or "").strip()
+                if value:
+                    normalized[key_name] = value
+            apps.append(normalized)
         return apps
 
     @staticmethod
@@ -3488,6 +3660,8 @@ end tell
             return False
         system = platform.system()
         if system == "Darwin":
+            if self._activate_app_name_appkit(app_name):
+                return True
             script = """
 tell application "System Events"
   set appNeedle to %s
@@ -3507,7 +3681,13 @@ end try
 return "not_found"
 """ % json.dumps(app_name)
             try:
-                completed = subprocess.run(["osascript", "-e", script], check=True, capture_output=True, text=True)
+                completed = subprocess.run(
+                    ["osascript", "-e", script],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=4,
+                )
                 return "activated" in (completed.stdout or "")
             except Exception:
                 pass
@@ -3530,6 +3710,44 @@ return "not_found"
             except Exception:
                 return False
         return False
+
+    @staticmethod
+    def _activate_app_name_appkit(app_name: str) -> bool:
+        code = r"""
+import json
+import sys
+import AppKit
+
+needle = sys.argv[1].strip().lower()
+if not needle:
+    print("false")
+    raise SystemExit(0)
+for app in AppKit.NSWorkspace.sharedWorkspace().runningApplications():
+    try:
+        name = str(app.localizedName() or "").strip()
+        bundle_id = str(app.bundleIdentifier() or "").strip()
+        haystack = " ".join(part.lower() for part in (name, bundle_id) if part)
+        if needle in haystack:
+            ok = bool(app.activateWithOptions_(AppKit.NSApplicationActivateIgnoringOtherApps))
+            print(json.dumps(ok))
+            raise SystemExit(0)
+    except SystemExit:
+        raise
+    except Exception:
+        continue
+print("false")
+"""
+        try:
+            completed = subprocess.run(
+                _current_python_snippet_command(code) + [app_name],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=3,
+            )
+            return (completed.stdout or "").strip().lower() == "true"
+        except Exception:
+            return False
 
     def _launch_app(self, app: dict[str, Any]) -> bool:
         path = str(app.get("path") or "").strip()

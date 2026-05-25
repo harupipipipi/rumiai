@@ -4478,8 +4478,10 @@ def test_browser_computer_activate_app_name_falls_back_to_open_a_on_macos(tmp_pa
     from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
 
     popen_args = []
+    run_kwargs = []
 
     def fail_run(*args, **kwargs):
+        run_kwargs.append(kwargs)
         raise RuntimeError("System Events unavailable")
 
     def fake_popen(args, **kwargs):
@@ -4493,7 +4495,184 @@ def test_browser_computer_activate_app_name_falls_back_to_open_a_on_macos(tmp_pa
     controller = BrowserComputerController(artifact_root=tmp_path)
 
     assert controller._activate_app_name("Google Chrome") is True
+    assert run_kwargs[0]["timeout"] == 3
+    assert run_kwargs[1]["timeout"] == 4
     assert popen_args == [["open", "-a", "Google Chrome"]]
+
+
+def test_browser_computer_activate_app_name_uses_appkit_fast_path(tmp_path, monkeypatch):
+    import ecosystem.rumi_default_tools_pack.domain.tool.browser_computer as browser_computer
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+
+    run_calls = []
+    popen_args = []
+
+    class Completed:
+        stdout = "true\n"
+
+    def fake_run(args, **kwargs):
+        run_calls.append((args, kwargs))
+        return Completed()
+
+    def fake_popen(args, **kwargs):
+        popen_args.append(args)
+        return object()
+
+    monkeypatch.setattr(browser_computer.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(browser_computer.subprocess, "run", fake_run)
+    monkeypatch.setattr(browser_computer.subprocess, "Popen", fake_popen)
+
+    controller = BrowserComputerController(artifact_root=tmp_path)
+
+    assert controller._activate_app_name("Google Chrome") is True
+    assert run_calls[0][0][0] == browser_computer.sys.executable
+    assert run_calls[0][1]["timeout"] == 3
+    assert popen_args == []
+
+
+def test_browser_computer_show_app_app_only_skips_window_scan(tmp_path, monkeypatch):
+    import ecosystem.rumi_default_tools_pack.domain.tool.browser_computer as browser_computer
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+
+    monkeypatch.setattr(browser_computer.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(browser_computer.time, "sleep", lambda seconds: None)
+
+    controller = BrowserComputerController(artifact_root=tmp_path)
+    controller._session_path = tmp_path / "shared" / "browser_sessions.json"
+    controller._running_apps = lambda: [{"name": "Google Chrome", "app": "Google Chrome", "running": True}]
+    controller._installed_apps = lambda payload=None: []
+    controller._activate_app_name = lambda app_name: True
+    controller._list_windows = lambda: (_ for _ in ()).throw(AssertionError("app-only show_app should not scan windows"))
+
+    result = controller.run("computer.show_app", {"app": "Chrome"}, yolo_mode=True)
+
+    assert result["shown"] is True
+    assert result["target_app"]["name"] == "Google Chrome"
+    assert result["active_window"] is None
+
+
+def test_browser_computer_context_defers_driver_doctor_by_default(tmp_path, monkeypatch):
+    import ecosystem.rumi_default_tools_pack.domain.tool.browser_computer as browser_computer
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+
+    monkeypatch.setattr(browser_computer.platform, "system", lambda: "Darwin")
+
+    controller = BrowserComputerController(artifact_root=tmp_path)
+    controller._running_apps = lambda: []
+    controller._list_windows = lambda: []
+    controller._list_monitors = lambda: []
+    controller._cursor_position = lambda: None
+    controller._darwin_permission_status = lambda: {"platform": "Darwin", "likely_permission_blocked": True}
+    controller._get_computer_seat = lambda: (_ for _ in ()).throw(AssertionError("driver doctor should be deferred"))
+
+    result = controller.run("computer.context", {"include_screenshot": False}, yolo_mode=True)
+
+    assert result["computer_seat"]["diagnostics_deferred"] is True
+    assert result["computer_seat"]["permissions"]["likely_permission_blocked"] is True
+
+
+def test_browser_computer_context_can_request_driver_diagnostics(tmp_path, monkeypatch):
+    import ecosystem.rumi_default_tools_pack.domain.tool.browser_computer as browser_computer
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+
+    class Service:
+        def doctor(self):
+            return {
+                "driver_chain_order": ["fast"],
+                "available_drivers": [{"capabilities": {"can_foreground_action": True}}],
+            }
+
+    monkeypatch.setattr(browser_computer.platform, "system", lambda: "Darwin")
+
+    controller = BrowserComputerController(artifact_root=tmp_path)
+    controller._running_apps = lambda: []
+    controller._list_windows = lambda: []
+    controller._list_monitors = lambda: []
+    controller._cursor_position = lambda: None
+    controller._darwin_permission_status = lambda: {"platform": "Darwin", "likely_permission_blocked": False}
+    controller._get_computer_seat = lambda: Service()
+
+    result = controller.run(
+        "computer.context",
+        {"include_screenshot": False, "include_driver_diagnostics": True},
+        yolo_mode=True,
+    )
+
+    assert result["computer_seat"]["diagnostics_deferred"] is False
+    assert result["computer_seat"]["driver_chain_order"] == ["fast"]
+
+
+def test_browser_computer_darwin_running_apps_prefers_appkit_fast_path(tmp_path, monkeypatch):
+    import json
+
+    import ecosystem.rumi_default_tools_pack.domain.tool.browser_computer as browser_computer
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+
+    run_calls = []
+
+    class Completed:
+        stdout = json.dumps(
+            [
+                {
+                    "name": "Google Chrome",
+                    "app": "Google Chrome",
+                    "running": True,
+                    "active": True,
+                    "pid": 123,
+                    "bundle_id": "com.google.Chrome",
+                    "path": "/Applications/Google Chrome.app",
+                }
+            ]
+        )
+
+    def fake_run(args, **kwargs):
+        run_calls.append((args, kwargs))
+        return Completed()
+
+    monkeypatch.setattr(browser_computer.subprocess, "run", fake_run)
+
+    controller = BrowserComputerController(artifact_root=tmp_path)
+    apps = controller._darwin_running_apps()
+
+    assert apps == [
+        {
+            "name": "Google Chrome",
+            "app": "Google Chrome",
+            "running": True,
+            "active": True,
+            "window_count": 0,
+            "has_windows": False,
+            "pid": 123,
+            "bundle_id": "com.google.Chrome",
+            "path": "/Applications/Google Chrome.app",
+        }
+    ]
+    assert run_calls[0][0][0] == browser_computer.sys.executable
+    assert run_calls[0][1]["timeout"] == 3
+
+
+def test_browser_computer_darwin_running_apps_fallback_has_timeout(tmp_path, monkeypatch):
+    import ecosystem.rumi_default_tools_pack.domain.tool.browser_computer as browser_computer
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+
+    run_kwargs = []
+
+    class Completed:
+        stdout = "Google Chrome\t123\ttrue\t1\n"
+
+    def fake_run(args, **kwargs):
+        run_kwargs.append(kwargs)
+        return Completed()
+
+    monkeypatch.setattr(BrowserComputerController, "_darwin_running_apps_appkit", staticmethod(lambda: []))
+    monkeypatch.setattr(browser_computer.subprocess, "run", fake_run)
+
+    controller = BrowserComputerController(artifact_root=tmp_path)
+    apps = controller._darwin_running_apps()
+
+    assert apps[0]["name"] == "Google Chrome"
+    assert apps[0]["pid"] == 123
+    assert run_kwargs[0]["timeout"] == 5
 
 
 def test_browser_computer_show_app_focuses_matching_visible_window(tmp_path):

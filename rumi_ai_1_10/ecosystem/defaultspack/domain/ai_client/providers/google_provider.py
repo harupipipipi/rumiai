@@ -21,6 +21,9 @@ _TRANSIENT_GOOGLE_CONNECTION_TOKENS = (
     "remote end closed",
     "timed out",
     "timeout",
+    "nodename nor servname",
+    "name or service not known",
+    "failed to resolve",
     "temporarily unavailable",
     "temporary failure",
 )
