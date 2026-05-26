@@ -174,6 +174,8 @@ def compile_startup_capabilities(
         )
         diagnostics.extend(compile_result.diagnostics)
         runtime_profile = compile_result.runtime_profile
+        if isinstance(runtime_profile, dict):
+            runtime_profile = _apply_startup_runtime_selection(runtime_profile, startup_profile)
         runtime_profile_key = None
         if isinstance(runtime_profile, dict):
             runtime_profile_key = _string_or_none(runtime_profile.get("registry_key"))
@@ -302,3 +304,53 @@ def _diagnostic(level: str, code: str, message: str, **meta: Any) -> Dict[str, A
         "message": message,
         **meta,
     }
+
+
+def _apply_startup_runtime_selection(
+    runtime_profile: Dict[str, Any],
+    startup_profile: Dict[str, Any],
+) -> Dict[str, Any]:
+    selected = {}
+    metadata = startup_profile.get("metadata")
+    if isinstance(metadata, dict) and isinstance(metadata.get("selected"), dict):
+        selected = metadata.get("selected") or {}
+    tools = [
+        str(item).strip()
+        for item in (selected.get("tools") if isinstance(selected, dict) and isinstance(selected.get("tools"), list) else [])
+        if str(item or "").strip()
+    ]
+    policy = dict(runtime_profile.get("policy") if isinstance(runtime_profile.get("policy"), dict) else {})
+    startup_policy = startup_profile.get("policy") if isinstance(startup_profile.get("policy"), dict) else {}
+    policy.update(startup_policy)
+    if "tool_allowlist" not in policy and tools:
+        policy["tool_allowlist"] = list(tools)
+    runtime_profile["policy"] = policy
+
+    if not tools:
+        return runtime_profile
+
+    defaultspack = runtime_profile.get("defaultspack")
+    if not isinstance(defaultspack, dict):
+        defaultspack = {}
+        runtime_profile["defaultspack"] = defaultspack
+    agents = defaultspack.get("agents")
+    if not isinstance(agents, dict) or not agents:
+        defaultspack["agents"] = {"profile_selected": {"tools": list(tools)}}
+        return runtime_profile
+
+    selected_tools = set(tools)
+    for agent_key, agent_config in list(agents.items()):
+        if not isinstance(agent_config, dict):
+            continue
+        current_tools = agent_config.get("tools")
+        if isinstance(current_tools, list) and current_tools:
+            agent_config["tools"] = [
+                str(item).strip()
+                for item in current_tools
+                if str(item or "").strip() in selected_tools
+            ]
+        else:
+            agent_config["tools"] = list(tools)
+        agents[agent_key] = agent_config
+    defaultspack["agents"] = agents
+    return runtime_profile

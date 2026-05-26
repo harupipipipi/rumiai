@@ -243,11 +243,18 @@ export interface ApiStartupProfile {
   created_at: number;
   updated_at: number;
   capability_profile_id?: string | null;
+  default_flow?: string | null;
   default_graph?: string | null;
+  system_prompt_id?: string | null;
+  default_prompt_id?: string | null;
   launch_capability_graph?: boolean;
   surfaces?: Record<string, unknown>;
+  enabled_nodes?: string[];
+  disabled_nodes?: string[];
+  node_settings?: Record<string, Record<string, unknown>>;
   policy?: Record<string, unknown>;
   permissions?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
   profile_workspace?: ApiProfileWorkspacePaths;
 }
 
@@ -322,6 +329,102 @@ export interface StartupProfileCompilePreviewResponseData {
     diagnostics: ApiCapabilityDiagnostic[];
   };
   surface_launch_target?: ApiSurfaceLaunchTarget | null;
+  diagnostics: ApiCapabilityDiagnostic[];
+}
+
+export interface ApiProfileGraphNode {
+  id: string;
+  kind: string;
+  label: string;
+  ref: string;
+  metadata: Record<string, unknown>;
+}
+
+export interface ApiProfileGraphEdge {
+  id: string;
+  from_id: string;
+  to_id: string;
+  kind: string;
+  active: boolean;
+  metadata: Record<string, unknown>;
+}
+
+export interface ApiProfileGraphSelected {
+  tools: string[];
+  webhooks: string[];
+  api_routes: string[];
+  prompts: string[];
+  frontend: string[];
+  flows: string[];
+  nodes: string[];
+  [key: string]: string[] | Record<string, unknown>;
+}
+
+export interface ApiProfileGraphDocument {
+  version: number;
+  profile_id: string;
+  nodes: ApiProfileGraphNode[];
+  edges: ApiProfileGraphEdge[];
+  selected: ApiProfileGraphSelected;
+}
+
+export interface ApiProfileGraphAvailableItem {
+  id: string;
+  label: string;
+  kind: string;
+  [key: string]: unknown;
+}
+
+export interface StartupProfileGraphResponseData {
+  profile_id: string;
+  profile: ApiStartupProfile;
+  graph: ApiProfileGraphDocument;
+  available: {
+    tools: ApiProfileGraphAvailableItem[];
+    webhooks: ApiProfileGraphAvailableItem[];
+    api_routes: ApiProfileGraphAvailableItem[];
+    prompts: ApiProfileGraphAvailableItem[];
+    frontend: ApiProfileGraphAvailableItem[];
+    flows: ApiProfileGraphAvailableItem[];
+    capability_nodes: ApiProfileGraphAvailableItem[];
+    input_profiles?: ApiProfileGraphAvailableItem[];
+  };
+  summary: {
+    selected_tool_count: number;
+    available_tool_count: number;
+    selected_webhook_count: number;
+    available_webhook_count: number;
+    api_route_count: number;
+    selected_frontend_count: number;
+    selected_prompt_count: number;
+  };
+  diagnostics: ApiCapabilityDiagnostic[];
+}
+
+export interface StartupProfileGraphCompilePreviewResponseData extends StartupProfileGraphResponseData {
+  compile_preview: StartupProfileCompilePreviewResponseData;
+  profile_graph_runtime_preview: {
+    selected: ApiProfileGraphSelected;
+    policy: Record<string, unknown>;
+    tool_filter_result: Array<Record<string, unknown>>;
+    prompt_resolution: Record<string, unknown>;
+    webhook_status: ApiProfileGraphAvailableItem[];
+    api_route_policy: Record<string, unknown>;
+    frontend_selection: ApiProfileGraphAvailableItem[];
+    diagnostics: ApiCapabilityDiagnostic[];
+  };
+}
+
+export interface ApiMapResponseData {
+  nodes: ApiProfileGraphNode[];
+  edges: ApiProfileGraphEdge[];
+  summary: {
+    node_count: number;
+    edge_count: number;
+    route_count: number;
+    tool_count: number;
+    webhook_count: number;
+  };
   diagnostics: ApiCapabilityDiagnostic[];
 }
 

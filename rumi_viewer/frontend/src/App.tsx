@@ -8,6 +8,8 @@ import { Packs } from '@/src/pages/Packs';
 import { PackDetail } from '@/src/pages/PackDetail';
 import { NodeManager } from '@/src/pages/NodeManager';
 import { GraphEditor } from '@/src/pages/GraphEditor';
+import { ProfileGraphEditor } from '@/src/pages/ProfileGraphEditor';
+import { ApiMap } from '@/src/pages/ApiMap';
 import { ProfileWorkspace } from '@/src/pages/ProfileWorkspace';
 import { StartupProfiles } from '@/src/pages/StartupProfiles';
 import { Flows } from '@/src/pages/Flows';
@@ -96,6 +98,8 @@ export default function App() {
           <Route path={`${panelRoutes.packs.slice(1)}/:id`} element={<PackDetail />} />
           <Route path={panelRoutes.nodes.slice(1)} element={<NodeManager />} />
           <Route path={panelRoutes.graphEditor.slice(1)} element={<GraphEditor />} />
+          <Route path={panelRoutes.profileGraph.slice(1)} element={<ProfileGraphEditor />} />
+          <Route path={panelRoutes.apiMap.slice(1)} element={<ApiMap />} />
           <Route path={panelRoutes.profileWorkspace.slice(1)} element={<ProfileWorkspace />} />
           <Route path={panelRoutes.startup.slice(1)} element={<StartupProfiles />} />
           <Route path={panelRoutes.flows.slice(1)} element={<Flows />} />

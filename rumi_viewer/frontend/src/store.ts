@@ -34,6 +34,28 @@ const VALID_THEMES: Theme[] = ['Rumi', 'Minimal', 'Standard', 'Rounded'];
 
 export type ColorMode = 'light' | 'dark';
 
+function readLocalStorage(key: string): string | null {
+  try {
+    if (typeof localStorage === 'undefined' || typeof localStorage.getItem !== 'function') {
+      return null;
+    }
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function writeLocalStorage(key: string, value: string): void {
+  try {
+    if (typeof localStorage === 'undefined' || typeof localStorage.setItem !== 'function') {
+      return;
+    }
+    localStorage.setItem(key, value);
+  } catch {
+    // Ignore storage failures in non-browser contexts.
+  }
+}
+
 export const AVATAR_OPTIONS = [
   'https://picsum.photos/seed/rumi-av1/128/128',
   'https://picsum.photos/seed/rumi-av2/128/128',
@@ -232,21 +254,21 @@ function transformUpdateInfo(update: {
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
-  theme: (localStorage.getItem('rumi-theme') as Theme) || 'Rumi',
+  theme: (readLocalStorage('rumi-theme') as Theme) || 'Rumi',
   setTheme: (theme) => {
-    localStorage.setItem('rumi-theme', theme);
+    writeLocalStorage('rumi-theme', theme);
     set({ theme });
   },
 
-  colorMode: (localStorage.getItem('rumi-color-mode') as ColorMode) || 'dark',
+  colorMode: (readLocalStorage('rumi-color-mode') as ColorMode) || 'dark',
   setColorMode: (mode) => {
-    localStorage.setItem('rumi-color-mode', mode);
+    writeLocalStorage('rumi-color-mode', mode);
     set({ colorMode: mode });
   },
 
-  isSetupDone: localStorage.getItem('rumi-setup') === 'true',
+  isSetupDone: readLocalStorage('rumi-setup') === 'true',
   setSetupDone: (done) => {
-    localStorage.setItem('rumi-setup', String(done));
+    writeLocalStorage('rumi-setup', String(done));
     set({ isSetupDone: done });
   },
 

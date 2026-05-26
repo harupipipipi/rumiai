@@ -15,11 +15,15 @@ API 一覧:
   POST /api/panel/startup/profiles/{id}/duplicate — 起動プロファイル複製
   POST /api/panel/startup/profiles/{id}/activate  — 起動プロファイル切り替え
   POST /api/panel/startup/profiles/{id}/compile-preview — 起動プロファイルGraph compile preview
+  GET  /api/panel/startup/profiles/{id}/graph — 起動プロファイル runtime graph
+  PUT  /api/panel/startup/profiles/{id}/graph — 起動プロファイル runtime graph 更新
+  POST /api/panel/startup/profiles/{id}/graph/compile-preview — 起動プロファイル runtime graph compile preview
   POST /api/panel/startup/profiles/{id}/launch    — 起動プロファイル起動
   POST /api/panel/startup/profiles/{id}/packs     — Pack 追加
   DELETE /api/panel/startup/profiles/{id}/packs/{pack_id} — Pack 削除
   PUT  /api/panel/startup/profiles/{id}/overrides — Node 差し替え設定
   DELETE /api/panel/startup/profiles/{id}/overrides/{port_key} — Node 差し替え解除
+  GET  /api/panel/api-map            — runtime/API map
   GET  /api/panel/flows              — Flow 一覧（本文なし）
   GET  /api/panel/flows/{id}         — Flow 詳細（YAML 本文付き）
   POST /api/panel/flows              — Flow 新規作成
@@ -89,6 +93,7 @@ class ControlPanelHandlersMixin:
         return StartupProfileManager(
             interface_registry=getattr(self, "interface_registry", None),
             approval_manager=getattr(self, "approval_manager", None),
+            ecosystem_dir=getattr(self, "ecosystem_dir", None),
             profile_workspace_manager=getattr(self, "profile_workspace_manager", None),
         )
 
@@ -331,6 +336,133 @@ class ControlPanelHandlersMixin:
             _log_internal_error("panel_compile_startup_profile_preview", e)
             return {"error": _SAFE_ERROR_MSG, "status_code": 500}
 
+    def _panel_get_startup_profile_graph(self, profile_id: str) -> Dict[str, Any]:
+        try:
+            from ..profile_graph_builder import build_startup_profile_graph_response
+
+            manager = self._panel_startup_profile_manager()
+            catalog = manager._build_catalog()
+            state = manager._load_state(catalog)
+            profile = manager._get_profile(state.get("profiles") or [], profile_id)
+            if profile is None:
+                return {"error": f"Profile '{profile_id}' not found", "status_code": 404}
+            return build_startup_profile_graph_response(
+                profile,
+                startup_catalog=catalog,
+                profile_workspace_manager=manager.profile_workspace_manager,
+                ecosystem_dir=manager.ecosystem_dir,
+            )
+        except Exception as e:
+            _log_internal_error("panel_get_startup_profile_graph", e)
+            return {"error": _SAFE_ERROR_MSG, "status_code": 500}
+
+    def _panel_update_startup_profile_graph(self, profile_id: str, body: Dict[str, Any]) -> Dict[str, Any]:
+        try:
+            from ..profile_graph_builder import build_startup_profile_graph_response
+            from ..profile_graph_models import normalize_profile_graph_document
+
+            manager = self._panel_startup_profile_manager()
+            catalog = manager._build_catalog()
+            state = manager._load_state(catalog)
+            current = manager._get_profile(state.get("profiles") or [], profile_id)
+            if current is None:
+                return {"error": f"Profile '{profile_id}' not found", "status_code": 404}
+
+            graph = body.get("graph") if isinstance(body, dict) and isinstance(body.get("graph"), dict) else {}
+            selected = body.get("selected") if isinstance(body, dict) and isinstance(body.get("selected"), dict) else None
+            document, _ = normalize_profile_graph_document(profile_id, graph, selected, strict=True)
+
+            metadata = dict(current.get("metadata") if isinstance(current.get("metadata"), dict) else {})
+            metadata["profile_graph"] = document.persisted_graph_payload()
+            metadata["selected"] = document.selected
+
+            policy = dict(current.get("policy") if isinstance(current.get("policy"), dict) else {})
+            policy["tool_allowlist"] = list(document.selected.get("tools") or [])
+            policy["api_route_allowlist"] = list(document.selected.get("api_routes") or [])
+
+            prompts = document.selected.get("prompts") if isinstance(document.selected.get("prompts"), list) else []
+            payload: Dict[str, Any] = {
+                "metadata": metadata,
+                "policy": policy,
+                "system_prompt_id": prompts[0] if prompts else None,
+            }
+
+            result = manager.update_runtime_fields(profile_id, payload)
+            if result.get("error"):
+                return result
+            return build_startup_profile_graph_response(
+                result["profile"],
+                startup_catalog=catalog,
+                profile_workspace_manager=manager.profile_workspace_manager,
+                ecosystem_dir=manager.ecosystem_dir,
+            )
+        except ValueError as e:
+            return {"error": str(e), "status_code": 400}
+        except Exception as e:
+            _log_internal_error("panel_update_startup_profile_graph", e)
+            return {"error": _SAFE_ERROR_MSG, "status_code": 500}
+
+    def _panel_compile_startup_profile_graph_preview(self, profile_id: str, body: Dict[str, Any]) -> Dict[str, Any]:
+        try:
+            from ..profile_graph_builder import (
+                build_profile_graph_runtime_preview,
+                build_startup_profile_graph_response,
+            )
+            from ..profile_graph_models import normalize_profile_graph_document
+
+            manager = self._panel_startup_profile_manager()
+            catalog = manager._build_catalog()
+            state = manager._load_state(catalog)
+            current = manager._get_profile(state.get("profiles") or [], profile_id)
+            if current is None:
+                return {"error": f"Profile '{profile_id}' not found", "status_code": 404}
+
+            graph = body.get("graph") if isinstance(body, dict) and isinstance(body.get("graph"), dict) else {}
+            selected = body.get("selected") if isinstance(body, dict) and isinstance(body.get("selected"), dict) else None
+            document, _ = normalize_profile_graph_document(profile_id, graph, selected, strict=True)
+
+            metadata = dict(current.get("metadata") if isinstance(current.get("metadata"), dict) else {})
+            metadata["profile_graph"] = document.persisted_graph_payload()
+            metadata["selected"] = document.selected
+
+            policy = dict(current.get("policy") if isinstance(current.get("policy"), dict) else {})
+            policy["tool_allowlist"] = list(document.selected.get("tools") or [])
+            policy["api_route_allowlist"] = list(document.selected.get("api_routes") or [])
+
+            prompts = document.selected.get("prompts") if isinstance(document.selected.get("prompts"), list) else []
+            preview_payload: Dict[str, Any] = {
+                "metadata": metadata,
+                "policy": policy,
+                "system_prompt_id": prompts[0] if prompts else None,
+            }
+
+            compile_preview = manager.compile_profile_preview(profile_id, {"profile": preview_payload})
+            if compile_preview.get("error"):
+                return compile_preview
+
+            graph_response = build_startup_profile_graph_response(
+                compile_preview.get("profile") if isinstance(compile_preview.get("profile"), dict) else current,
+                startup_catalog=catalog,
+                profile_workspace_manager=manager.profile_workspace_manager,
+                ecosystem_dir=manager.ecosystem_dir,
+            )
+            runtime_preview = build_profile_graph_runtime_preview(
+                compile_preview.get("profile") if isinstance(compile_preview.get("profile"), dict) else current,
+                available=graph_response.get("available") if isinstance(graph_response.get("available"), dict) else None,
+                profile_workspace_manager=manager.profile_workspace_manager,
+                ecosystem_dir=manager.ecosystem_dir,
+            )
+            return {
+                **graph_response,
+                "compile_preview": compile_preview,
+                "profile_graph_runtime_preview": runtime_preview,
+            }
+        except ValueError as e:
+            return {"error": str(e), "status_code": 400}
+        except Exception as e:
+            _log_internal_error("panel_compile_startup_profile_graph_preview", e)
+            return {"error": _SAFE_ERROR_MSG, "status_code": 500}
+
     def _panel_get_startup_profile_workspace(self, profile_id: str) -> Dict[str, Any]:
         try:
             return self._panel_startup_profile_manager().get_profile_workspace(profile_id)
@@ -371,6 +503,19 @@ class ControlPanelHandlersMixin:
             return self._panel_startup_profile_manager().clear_node_override(profile_id, port_key)
         except Exception as e:
             _log_internal_error("panel_clear_startup_profile_node_override", e)
+            return {"error": _SAFE_ERROR_MSG, "status_code": 500}
+
+    def _panel_get_api_map(self, query: Dict[str, Any] | None = None) -> Dict[str, Any]:
+        try:
+            from ecosystem.defaultspack.domain.api_map.builder import build_api_map
+
+            params = query if isinstance(query, dict) else {}
+            return build_api_map(
+                profile_id=str(params.get("profile_id") or "").strip() or None,
+                focus=str(params.get("focus") or "").strip() or None,
+            )
+        except Exception as e:
+            _log_internal_error("panel_get_api_map", e)
             return {"error": _SAFE_ERROR_MSG, "status_code": 500}
 
     # ------------------------------------------------------------------

@@ -181,6 +181,55 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         self.assertEqual(catalog["app"]["icon"], "/static/assets/icons/defaultspack-icon.png")
         self.assertEqual(catalog["diagnostics"], [])
 
+    def test_catalog_filters_profile_visibility_for_selected_frontend_ids(self):
+        from core_runtime.profile_workspace import ProfileWorkspaceManager
+        from domain.frontend.registry import FrontendRegistry
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pack_root = Path(tmpdir) / "defaultspack"
+            ext_dir = pack_root / "user_data" / "shared" / "frontend_extensions"
+            ext_dir.mkdir(parents=True, exist_ok=True)
+            (ext_dir / "profile.ui.json").write_text(
+                json.dumps(
+                    {
+                        "sidebar_items": [
+                            {
+                                "id": "research_sidebar",
+                                "label": "Research Sidebar",
+                                "category": "widget",
+                                "profile_visibility": {"selected_frontend_ids": ["research_sidebar"]},
+                            },
+                            {
+                                "id": "coding_sidebar",
+                                "label": "Coding Sidebar",
+                                "category": "widget",
+                                "profile_visibility": {"selected_frontend_ids": ["coding_sidebar"]},
+                            },
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            user_data_root = Path(tmpdir) / "rumi_user_data"
+            profile_manager = ProfileWorkspaceManager(user_data_root)
+            profile_manager.initialize_profile_workspace(
+                {
+                    "profile_id": "research-profile",
+                    "name": "Research Profile",
+                    "metadata": {"selected": {"frontend": ["research_sidebar"]}},
+                    "policy": {},
+                }
+            )
+
+            with patch.dict(os.environ, {"RUMI_USER_DATA": str(user_data_root)}):
+                registry = FrontendRegistry(pack_root=pack_root)
+                catalog = registry.build_catalog(profile_id="research-profile")
+
+        sidebar_ids = {item["id"] for item in catalog["sidebar"]["items"]}
+        self.assertIn("research_sidebar", sidebar_ids)
+        self.assertNotIn("coding_sidebar", sidebar_ids)
+
     def test_frontend_extensions_filter_to_selected_setup_targets(self):
         from domain.frontend.registry import FrontendRegistry
 

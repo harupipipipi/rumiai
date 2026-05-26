@@ -10,7 +10,7 @@
     "clean": "node scripts/clean.mjs",
     "lint": "tsc --noEmit",
     "audit": "npm audit --audit-level=high",
-    "test": "node --import tsx --test src/lib/*.test.ts scripts/*.test.mjs"
+    "test": "node --import tsx --test src/lib/*.test.ts src/pages/*.test.tsx scripts/*.test.mjs"
   },
   "dependencies": {
     "@codemirror/lang-yaml": "^6.1.2",

@@ -4,6 +4,8 @@ import type {
   PackToggleResponseData,
   StartupProfilesResponseData,
   ApiStartupProfile,
+  StartupProfileGraphResponseData,
+  StartupProfileGraphCompilePreviewResponseData,
   StartupProfileCompilePreviewResponseData,
   StartupProfileMutationResponseData,
   StartupProfileDeleteResponseData,
@@ -33,6 +35,7 @@ import type {
   CapabilityProfileCloneResponseData,
   CapabilityProfileNodesResponseData,
   CapabilityProfilesResponseData,
+  ApiMapResponseData,
 } from './apiTypes';
 
 // Base URL: empty string means relative path (works with Vite proxy)
@@ -400,9 +403,31 @@ export function createStartupProfile(
   });
 }
 
+export type StartupProfileUpdatePayload = Partial<Pick<
+  ApiStartupProfile,
+  | 'name'
+  | 'base_pack'
+  | 'graph_id'
+  | 'packs'
+  | 'node_overrides'
+  | 'default_flow'
+  | 'default_graph'
+  | 'system_prompt_id'
+  | 'default_prompt_id'
+  | 'capability_profile_id'
+  | 'launch_capability_graph'
+  | 'surfaces'
+  | 'policy'
+  | 'permissions'
+  | 'enabled_nodes'
+  | 'disabled_nodes'
+  | 'node_settings'
+  | 'metadata'
+>>;
+
 export function updateStartupProfile(
   id: string,
-  data: { name?: string; base_pack?: string; graph_id?: string; packs?: string[]; node_overrides?: Record<string, string> },
+  data: StartupProfileUpdatePayload,
 ): Promise<StartupProfileMutationResponseData> {
   return apiFetch<StartupProfileMutationResponseData>(
     `/api/panel/startup/profiles/${encodeURIComponent(id)}`,
@@ -452,6 +477,56 @@ export function compileStartupProfilePreview(
       body: JSON.stringify(profile ? { profile } : {}),
     },
   );
+}
+
+export function fetchStartupProfileGraph(id: string): Promise<StartupProfileGraphResponseData> {
+  return apiFetch<StartupProfileGraphResponseData>(
+    `/api/panel/startup/profiles/${encodeURIComponent(id)}/graph`,
+  );
+}
+
+export function updateStartupProfileGraph(
+  id: string,
+  payload: {
+    graph?: Record<string, unknown>;
+    selected?: Record<string, unknown>;
+  },
+): Promise<StartupProfileGraphResponseData> {
+  return apiFetch<StartupProfileGraphResponseData>(
+    `/api/panel/startup/profiles/${encodeURIComponent(id)}/graph`,
+    {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+export function compileStartupProfileGraphPreview(
+  id: string,
+  payload: {
+    graph?: Record<string, unknown>;
+    selected?: Record<string, unknown>;
+  },
+): Promise<StartupProfileGraphCompilePreviewResponseData> {
+  return apiFetch<StartupProfileGraphCompilePreviewResponseData>(
+    `/api/panel/startup/profiles/${encodeURIComponent(id)}/graph/compile-preview`,
+    {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+export function fetchApiMap(params?: { profile_id?: string; focus?: string }): Promise<ApiMapResponseData> {
+  const search = new URLSearchParams();
+  if (params?.profile_id) {
+    search.set('profile_id', params.profile_id);
+  }
+  if (params?.focus) {
+    search.set('focus', params.focus);
+  }
+  const query = search.toString();
+  return apiFetch<ApiMapResponseData>(`/api/panel/api-map${query ? `?${query}` : ''}`);
 }
 
 export function addPackToStartupProfile(id: string, packId: string): Promise<StartupProfileMutationResponseData> {

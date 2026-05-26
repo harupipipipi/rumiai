@@ -53,6 +53,17 @@
     },
     {
       "method": "GET",
+      "path_pattern": "/api/panel/startup/profiles/{id}/graph",
+      "handler": "_panel_get_startup_profile_graph"
+    },
+    {
+      "method": "GET",
+      "path": "/api/panel/api-map",
+      "handler": "_panel_get_api_map",
+      "pass_query": true
+    },
+    {
+      "method": "GET",
       "path": "/api/panel/nodes",
       "handler": "_panel_get_nodes"
     },
@@ -221,6 +232,12 @@
     },
     {
       "method": "POST",
+      "path_pattern": "/api/panel/startup/profiles/{id}/graph/compile-preview",
+      "handler": "_panel_compile_startup_profile_graph_preview",
+      "pass_body": true
+    },
+    {
+      "method": "POST",
       "path_pattern": "/api/panel/startup/profiles/{id}/launch",
       "handler": "_panel_launch_startup_profile"
     },
@@ -292,6 +309,12 @@
       "method": "PUT",
       "path_pattern": "/api/panel/startup/profiles/{id}",
       "handler": "_panel_update_startup_profile",
+      "pass_body": true
+    },
+    {
+      "method": "PUT",
+      "path_pattern": "/api/panel/startup/profiles/{id}/graph",
+      "handler": "_panel_update_startup_profile_graph",
       "pass_body": true
     },
     {

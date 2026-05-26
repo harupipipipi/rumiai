@@ -9,5 +9,6 @@ from domain.frontend.registry import FrontendRegistry
 
 
 def run(input_data, context):
+    data = input_data if isinstance(input_data, dict) else {}
     registry = FrontendRegistry()
-    return ok(registry.build_catalog())
+    return ok(registry.build_catalog(profile_id=str(data.get("profile_id") or "").strip() or None))

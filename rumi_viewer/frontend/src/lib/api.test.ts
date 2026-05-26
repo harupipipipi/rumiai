@@ -6,16 +6,21 @@ import {
   apiFetch,
   bootstrapPanelSession,
   clearStartupProfileNodeOverride,
+  compileStartupProfileGraphPreview,
   compileStartupProfilePreview,
   createStartupProfile,
+  fetchApiMap,
   fetchBackgroundControlStatus,
   fetchDesktopSystemInfo,
+  fetchStartupProfileGraph,
   hasPendingPanelBootstrapCode,
   isDesktopShellAvailable,
   openExternalUrl,
   sendToBackground,
   setStartupProfileNodeOverride,
   showAppWindow,
+  updateStartupProfile,
+  updateStartupProfileGraph,
 } from './api.ts';
 import { RUMI_DISPLAY_VERSION } from './version.ts';
 
@@ -485,4 +490,50 @@ test('startup profile wrappers use v3 payloads and endpoints', async () => {
       updated_at: 1,
     },
   }));
+});
+
+test('profile graph wrappers call the graph endpoints and support metadata fields', async () => {
+  await updateStartupProfile('profile-1', {
+    name: 'Research',
+    system_prompt_id: 'research.system',
+    metadata: {selected: {tools: ['web_search']}},
+    policy: {tool_allowlist: ['web_search']},
+  });
+  assert.equal(lastFetchUrl, '/api/panel/startup/profiles/profile-1');
+  assert.equal(lastFetchInit?.method, 'PUT');
+  assert.equal(lastFetchInit?.body, JSON.stringify({
+    name: 'Research',
+    system_prompt_id: 'research.system',
+    metadata: {selected: {tools: ['web_search']}},
+    policy: {tool_allowlist: ['web_search']},
+  }));
+
+  await fetchStartupProfileGraph('profile-1');
+  assert.equal(lastFetchUrl, '/api/panel/startup/profiles/profile-1/graph');
+  assert.equal(lastFetchInit?.method, 'GET');
+
+  await updateStartupProfileGraph('profile-1', {
+    graph: {version: 1, nodes: [], edges: []},
+    selected: {tools: ['web_search']},
+  });
+  assert.equal(lastFetchUrl, '/api/panel/startup/profiles/profile-1/graph');
+  assert.equal(lastFetchInit?.method, 'PUT');
+  assert.equal(lastFetchInit?.body, JSON.stringify({
+    graph: {version: 1, nodes: [], edges: []},
+    selected: {tools: ['web_search']},
+  }));
+
+  await compileStartupProfileGraphPreview('profile-1', {
+    graph: {version: 1, nodes: [], edges: []},
+    selected: {prompts: ['research.system']},
+  });
+  assert.equal(lastFetchUrl, '/api/panel/startup/profiles/profile-1/graph/compile-preview');
+  assert.equal(lastFetchInit?.method, 'POST');
+  assert.equal(lastFetchInit?.body, JSON.stringify({
+    graph: {version: 1, nodes: [], edges: []},
+    selected: {prompts: ['research.system']},
+  }));
+
+  await fetchApiMap({profile_id: 'profile-1', focus: 'tool:web_search'});
+  assert.equal(lastFetchUrl, '/api/panel/api-map?profile_id=profile-1&focus=tool%3Aweb_search');
 });

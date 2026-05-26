@@ -3,5 +3,5 @@ import { panelRoutes } from '@/src/lib/routes';
 
 export function StartupProfiles() {
   const location = useLocation();
-  return <Navigate to={`${panelRoutes.home}${location.search}${location.hash}`} replace />;
+  return <Navigate to={`${panelRoutes.profileGraph}${location.search}${location.hash}`} replace />;
 }

@@ -5,6 +5,8 @@ export const panelRoutes = {
   packDetail: (id: string) => `/packs/${id}`,
   nodes: '/nodes',
   graphEditor: '/graphs',
+  profileGraph: '/profile-graph',
+  apiMap: '/api-map',
   profileWorkspace: '/profile-workspace',
   startup: '/startup',
   flows: '/flows',
