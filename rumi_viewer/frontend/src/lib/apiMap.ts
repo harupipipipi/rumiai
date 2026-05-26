@@ -103,8 +103,11 @@ export function deriveApiMapView(
   const nodes = data?.nodes || [];
   const edges = data?.edges || [];
   const nodeById = new Map(nodes.map((node) => [node.id, node]));
-  const listNodes = filterApiMapNodes(nodes, options.search || '', options.category || 'all');
-  const selectedNode = resolveSelectedNode(nodes, listNodes, options.selectedNodeId);
+  const filteredNodes = filterApiMapNodes(nodes, options.search || '', options.category || 'all');
+  const selectedNode = resolveSelectedNode(nodes, filteredNodes, options.selectedNodeId);
+  const listNodes = selectedNode && filteredNodes.some((node) => node.id === selectedNode.id)
+    ? [selectedNode, ...filteredNodes.filter((node) => node.id !== selectedNode.id)]
+    : filteredNodes;
 
   if (!selectedNode) {
     return {

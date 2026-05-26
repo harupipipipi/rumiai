@@ -128,6 +128,10 @@ export function ApiMap() {
   }, [addToast, searchParams]);
 
   const categoryCounts = useMemo(() => countApiMapNodesByCategory(data?.nodes || []), [data]);
+  const visibleCategories = useMemo(
+    () => API_MAP_NODE_CATEGORIES.filter((category) => category === 'all' || categoryCounts[category] > 0),
+    [categoryCounts],
+  );
   const view = useMemo(() => deriveApiMapView(data, {
     selectedNodeId,
     search: nodeSearch,
@@ -177,7 +181,7 @@ export function ApiMap() {
 
   return (
     <div className="flex flex-1 flex-col gap-5 overflow-y-auto overflow-x-hidden bg-bg-main p-6 animate-in fade-in slide-in-from-bottom-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold text-text-main">API Map</h1>
           <div className="mt-2 flex flex-wrap gap-2">
@@ -185,8 +189,10 @@ export function ApiMap() {
             <Badge variant="outline">{data?.summary.flow_count || 0} flows</Badge>
             <Badge variant="outline">{categoryCounts.operation || 0} runtime units</Badge>
             <Badge variant="outline">{data?.summary.tool_count || 0} tool facades</Badge>
-            <Badge variant="outline">{data?.summary.webhook_count || 0} webhooks</Badge>
           </div>
+          <p className="mt-2 max-w-3xl text-xs text-text-muted">
+            Routes and flows converge on defaultspack operations. Tools are model-facing facades; blocks stay as implementation detail.
+          </p>
         </div>
         <Button type="button" size="sm" variant="outline" onClick={handleRefresh}>
           <RefreshCw className="h-4 w-4" />
@@ -194,12 +200,12 @@ export function ApiMap() {
         </Button>
       </div>
 
-      <section className="rounded-xl border border-border bg-bg-card p-4">
-        <div className="grid gap-3 xl:grid-cols-[minmax(220px,260px)_minmax(240px,1fr)_auto]">
+      <section className="rounded-xl bg-bg-card/70 p-3 ring-1 ring-border/70">
+        <div className="grid gap-2 lg:grid-cols-[minmax(180px,220px)_minmax(240px,1fr)_auto]">
           <label className="text-sm text-text-muted">
-            Profile
+            <span className="sr-only">Profile</span>
             <select
-              className="mt-2 h-10 w-full rounded-lg border border-border bg-bg-main px-3 text-text-main"
+              className="h-9 w-full rounded-lg border border-border bg-bg-main px-3 text-sm text-text-main"
               value={profileId}
               onChange={(event) => setProfileId(event.target.value)}
             >
@@ -210,44 +216,43 @@ export function ApiMap() {
             </select>
           </label>
           <label className="text-sm text-text-muted">
-            Focus
+            <span className="sr-only">Focus</span>
             <Input
-              className="mt-2 font-mono text-xs"
+              className="h-9 font-mono text-xs"
               placeholder="api:POST /api/chat/conversations/{id}/messages"
               value={focusInput}
               onChange={(event) => setFocusInput(event.target.value)}
             />
           </label>
           <div className="flex flex-wrap items-end gap-2">
-            <Button type="button" onClick={handleApplyContext}>
+            <Button type="button" size="sm" onClick={handleApplyContext}>
               <Route className="h-4 w-4" />
-              Apply Context
+              Apply
             </Button>
-            <Button type="button" variant="outline" onClick={handleResetFocus}>
+            <Button type="button" size="sm" variant="outline" onClick={handleResetFocus}>
               Reset
             </Button>
           </div>
         </div>
       </section>
 
-      <RuntimeModelNote />
-
-      <div className="grid gap-5 xl:grid-cols-[320px_minmax(0,1fr)]">
-        <section className="min-w-0 space-y-4">
-          <PanelTitle icon={Search} title="Runtime Directory" />
-          <div className="rounded-xl border border-border bg-bg-card p-4">
+      <div className="grid gap-4 lg:grid-cols-[280px_minmax(0,1fr)] 2xl:grid-cols-[300px_minmax(0,1fr)]">
+        <section className="min-w-0 space-y-3 lg:sticky lg:top-4 lg:self-start">
+          <PanelTitle icon={Search} title="Explore" />
+          <div className="rounded-xl border border-border/80 bg-bg-card/80 p-3">
             <Input
-              placeholder="Search route, operation, facade, webhook"
+              className="h-9 text-sm"
+              placeholder="Search runtime"
               value={nodeSearch}
               onChange={(event) => setNodeSearch(event.target.value)}
             />
-            <div className="mt-3 flex flex-wrap gap-2">
-              {API_MAP_NODE_CATEGORIES.map((category) => (
+            <div className="mt-3 flex flex-wrap gap-1.5">
+              {visibleCategories.map((category) => (
                 <button
                   key={category}
                   type="button"
                   className={cn(
-                    'inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs transition-colors',
+                    'inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] transition-colors',
                     nodeCategory === category
                       ? 'border-accent bg-accent/10 text-accent'
                       : 'border-border text-text-muted hover:bg-bg-hover hover:text-text-main',
@@ -261,13 +266,13 @@ export function ApiMap() {
                 </button>
               ))}
             </div>
-            <div className="mt-4 max-h-[72vh] space-y-2 overflow-auto pr-1">
-              {view.listNodes.slice(0, 120).map((node) => (
+            <div className="mt-3 max-h-[calc(100vh-330px)] min-h-[260px] space-y-1.5 overflow-auto pr-1">
+              {view.listNodes.slice(0, 60).map((node) => (
                 <button
                   key={node.id}
                   type="button"
                   className={cn(
-                    'w-full min-w-0 rounded-lg border px-3 py-3 text-left transition-colors',
+                    'w-full min-w-0 rounded-lg border px-2.5 py-2 text-left transition-colors',
                     selectedNode?.id === node.id ? 'border-accent bg-accent/10' : 'border-border hover:bg-bg-hover',
                   )}
                   onClick={() => handleSelectNode(node.id)}
@@ -278,7 +283,7 @@ export function ApiMap() {
                     </Badge>
                     {node.metadata?.risk ? <Badge variant="warning">{String(node.metadata.risk)}</Badge> : null}
                   </div>
-                  <div className="mt-2 truncate text-sm font-semibold text-text-main">{node.label || node.ref || node.id}</div>
+                  <div className="mt-1.5 truncate text-sm font-semibold text-text-main">{node.label || node.ref || node.id}</div>
                   <div className="truncate font-mono text-[11px] text-text-muted">{node.id}</div>
                 </button>
               ))}
@@ -296,13 +301,6 @@ export function ApiMap() {
                 selectedNode={selectedNode}
                 onSelectNode={handleSelectNode}
               />
-
-              <div className="grid gap-3 md:grid-cols-4">
-                <SummaryTile label="Visible" value={view.visibleNodes.length} detail="Focused entities" />
-                <SummaryTile label="Incoming" value={view.inboundEdges.length} detail="Into selection" />
-                <SummaryTile label="Outgoing" value={view.outboundEdges.length} detail="From selection" />
-                <SummaryTile label="HTTP Traces" value={data?.runtime_paths?.length || 0} detail="Routes resolved" />
-              </div>
 
               <ConnectionsPanel
                 groups={view.connectionGroups}
@@ -338,29 +336,6 @@ export function ApiMap() {
   );
 }
 
-function RuntimeModelNote() {
-  return (
-    <section className="rounded-xl border border-border bg-bg-card/80 p-4">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="text-sm font-semibold text-text-main">Runtime model</div>
-          <p className="mt-1 max-w-4xl text-sm text-text-muted">
-            Rumi treats defaultspack functions as the stable operation boundary. HTTP routes and flow steps call
-            operations; tools are model-visible facades over those operations or external runtimes; blocks are internal
-            implementation modules shown only when they explain the adapter path.
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <Badge variant="outline">routes → flows</Badge>
-          <Badge variant="outline">functions = operations</Badge>
-          <Badge variant="outline">tools = facades</Badge>
-          <Badge variant="outline">blocks = implementation</Badge>
-        </div>
-      </div>
-    </section>
-  );
-}
-
 function RuntimeTrace({
   loading,
   path,
@@ -372,6 +347,8 @@ function RuntimeTrace({
   selectedNode: ApiProfileGraphNode | null;
   onSelectNode: (nodeId: string) => void;
 }) {
+  const [showAllSteps, setShowAllSteps] = useState(false);
+
   if (loading) {
     return (
       <div className="rounded-xl border border-border bg-bg-card p-4">
@@ -394,14 +371,18 @@ function RuntimeTrace({
     );
   }
 
+  const steps = path.steps || [];
+  const visibleSteps = showAllSteps ? steps : steps.slice(0, 6);
+  const hiddenStepCount = Math.max(0, steps.length - visibleSteps.length);
+
   return (
-    <div className="rounded-xl border border-border bg-bg-card p-4">
+    <div className="rounded-xl border border-border bg-bg-card p-4 shadow-[0_24px_80px_-70px_rgba(0,0,0,0.9)]">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <PanelTitle icon={Workflow} title="Runtime Trace" compact />
         <div className="flex flex-wrap gap-2">
           <Badge variant="default">{path.entrypoint.method || 'HTTP'}</Badge>
           <Badge variant="outline">{path.entrypoint.source || 'route_registry'}</Badge>
-          <Badge variant="outline">{path.entrypoint.source_type || 'route'}</Badge>
+          <Badge variant="outline">{steps.length} steps</Badge>
         </div>
       </div>
 
@@ -416,14 +397,25 @@ function RuntimeTrace({
         {path.primary ? (
           <TargetTraceCard target={path.primary} badge="primary" onSelectNode={onSelectNode} />
         ) : null}
-        {path.steps?.length ? (
+        {steps.length ? (
           <div className="rounded-lg border border-border bg-bg-main/60 p-3">
-            <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-text-main">
-              <GitBranch className="h-4 w-4 text-accent" />
-              Flow steps
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2 text-sm font-semibold text-text-main">
+                <GitBranch className="h-4 w-4 text-accent" />
+                Flow steps
+              </div>
+              {hiddenStepCount ? (
+                <Button type="button" size="sm" variant="ghost" onClick={() => setShowAllSteps(true)}>
+                  Show {hiddenStepCount} more
+                </Button>
+              ) : showAllSteps && steps.length > 6 ? (
+                <Button type="button" size="sm" variant="ghost" onClick={() => setShowAllSteps(false)}>
+                  Collapse
+                </Button>
+              ) : null}
             </div>
             <div className="grid gap-2">
-              {path.steps.map((step) => (
+              {visibleSteps.map((step) => (
                 <StepTraceCard key={step.node_id} step={step} onSelectNode={onSelectNode} />
               ))}
             </div>
@@ -570,9 +562,14 @@ function InspectorPanel({selectedNode}: {selectedNode: ApiProfileGraphNode | nul
               {selectedNode.id}
             </div>
           </div>
-          <pre className="max-h-[280px] overflow-auto rounded-lg border border-border bg-bg-main/70 p-3 text-xs text-text-muted">
-            {JSON.stringify(selectedNode.metadata || {}, null, 2)}
-          </pre>
+          <details className="rounded-lg border border-border bg-bg-main/70">
+            <summary className="cursor-pointer px-3 py-2 text-xs font-medium text-text-muted">
+              Raw metadata
+            </summary>
+            <pre className="max-h-[220px] overflow-auto border-t border-border p-3 text-xs text-text-muted">
+              {JSON.stringify(selectedNode.metadata || {}, null, 2)}
+            </pre>
+          </details>
         </div>
       ) : (
         <div className="mt-3">
@@ -624,16 +621,6 @@ function ConnectionsPanel({
         ))}
         {!items.length ? <EmptyBox text="No direct connections." /> : null}
       </div>
-    </div>
-  );
-}
-
-function SummaryTile({label, value, detail}: {label: string; value: number; detail: string}) {
-  return (
-    <div className="rounded-xl border border-border bg-bg-card px-3 py-3">
-      <div className="text-[11px] uppercase tracking-[0.14em] text-text-muted">{label}</div>
-      <div className="mt-1 text-2xl font-semibold text-text-main">{value}</div>
-      <div className="mt-1 text-xs text-text-muted">{detail}</div>
     </div>
   );
 }
