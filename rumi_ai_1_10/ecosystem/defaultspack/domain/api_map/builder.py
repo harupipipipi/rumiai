@@ -141,6 +141,16 @@ def build_api_map(*, profile_id: str | None = None, focus: str | None = None) ->
             "webhook_count": len([node for node in filtered_nodes if node["kind"] == "webhook"]),
             "flow_count": len([node for node in filtered_nodes if node["kind"] == "flow"]),
             "function_count": len([node for node in filtered_nodes if node["kind"] == "function"]),
+            "operation_count": len([
+                node
+                for node in filtered_nodes
+                if node["kind"] in {"function", "tool", "block", "handler", "tool_handler"}
+            ]),
+            "implementation_count": len([
+                node
+                for node in filtered_nodes
+                if node["kind"] in {"block", "handler", "tool_handler"}
+            ]),
             "selected_tool_count": len(profile_edges.get("selected", {}).get("tools", [])),
             "selected_route_count": len(profile_edges.get("selected", {}).get("api_routes", [])),
         },
@@ -175,6 +185,7 @@ def _add_http_route(
         route_id,
         route_id,
         {
+            "runtime_role": "entrypoint",
             "method": spec.method,
             "path": spec.pattern,
             "route_source": _route_source(spec),
@@ -242,7 +253,14 @@ def _add_http_route(
 
     if spec.handler_name:
         handler_node_id = f"handler:{spec.handler_name}"
-        _add_node(nodes, handler_node_id, "handler", spec.handler_name, spec.handler_name, {"handler_name": spec.handler_name})
+        _add_node(
+            nodes,
+            handler_node_id,
+            "handler",
+            spec.handler_name,
+            spec.handler_name,
+            {"runtime_role": "implementation", "handler_name": spec.handler_name},
+        )
         _add_edge(edges, route_node_id, handler_node_id, "handled_by", {"handler_name": spec.handler_name})
         path["primary"] = {"kind": "handler", "id": spec.handler_name, "node_id": handler_node_id}
 
@@ -285,6 +303,7 @@ def _add_flow_steps(
             step_id,
             {
                 "flow_id": flow_id,
+                "runtime_role": "flow_step",
                 "step_id": step_id,
                 "step_type": step_type,
                 "order": index + 1,
@@ -376,7 +395,14 @@ def _add_tool_execution(
     handler = str(execution.get("handler") or "").strip()
     if handler:
         handler_node_id = f"handler:{handler}"
-        _add_node(nodes, handler_node_id, "tool_handler", handler.rsplit(":", 1)[-1], handler, {"handler": handler, "execution_type": execution_type})
+        _add_node(
+            nodes,
+            handler_node_id,
+            "tool_handler",
+            handler.rsplit(":", 1)[-1],
+            handler,
+            {"runtime_role": "implementation", "handler": handler, "execution_type": execution_type},
+        )
         _add_edge(edges, tool_node_id, handler_node_id, "executes_handler", {"handler": handler, "execution_type": execution_type})
         return
     runtime_node_id = f"runtime:{execution_type or 'local'}"
@@ -599,7 +625,7 @@ def _add_block_node(nodes: Dict[str, Dict[str, Any]], block_module: str, metadat
         "block",
         block_module.rsplit(".", 1)[-1],
         block_module,
-        {"block_module": block_module, **dict(metadata or {})},
+        {"runtime_role": "implementation", "block_module": block_module, **dict(metadata or {})},
     )
 
 
@@ -639,6 +665,7 @@ def _flow_node_id(flow_id: str) -> str:
 
 def _function_metadata(spec: FunctionSpec) -> Dict[str, Any]:
     return {
+        "runtime_role": "operation",
         "function_id": spec.function_id,
         "qualified_name": f"defaultspack:{spec.function_id}",
         "aliases": list(spec.aliases),
@@ -655,6 +682,7 @@ def _tool_metadata(tool: Dict[str, Any]) -> Dict[str, Any]:
     metadata = tool.get("metadata") if isinstance(tool.get("metadata"), dict) else {}
     return {
         **dict(tool),
+        "runtime_role": "tool_facade",
         "execution_type": str(execution.get("type") or "local"),
         "handler": str(execution.get("handler") or ""),
         "qualified_name": str(execution.get("qualified_name") or ""),

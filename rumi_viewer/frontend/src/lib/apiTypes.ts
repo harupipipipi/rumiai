@@ -426,6 +426,8 @@ export interface ApiMapResponseData {
     webhook_count: number;
     flow_count?: number;
     function_count?: number;
+    operation_count?: number;
+    implementation_count?: number;
     selected_tool_count?: number;
     selected_route_count?: number;
   };

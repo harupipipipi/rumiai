@@ -2,17 +2,13 @@ import type {ApiMapResponseData, ApiMapRuntimePath, ApiProfileGraphEdge, ApiProf
 
 export const API_MAP_NODE_CATEGORY_LABELS = {
   all: 'All',
+  entrypoint: 'Entrypoints',
+  flow: 'Runtime Flow',
+  operation: 'Runtime Units',
+  integration: 'Integrations',
   profile: 'Profiles',
-  api: 'API',
-  flow: 'Flows',
-  step: 'Steps',
-  function: 'Functions',
-  block: 'Blocks',
-  tool: 'Tools',
-  webhook: 'Webhooks',
-  prompt: 'Prompts',
-  frontend: 'Frontend',
-  node: 'Nodes',
+  surface: 'Surfaces',
+  other: 'Other',
 } as const;
 
 export type ApiMapNodeCategory = keyof typeof API_MAP_NODE_CATEGORY_LABELS;
@@ -33,33 +29,28 @@ export interface ApiMapDerivedView {
 
 export function apiMapNodeCategory(node: ApiProfileGraphNode): Exclude<ApiMapNodeCategory, 'all'> {
   const prefix = node.id.split(':', 1)[0];
+  const kind = String(node.kind || '').toLowerCase();
+  if (prefix === 'api' || prefix === 'webhook') return 'entrypoint';
+  if (prefix === 'flow' || prefix === 'step' || kind === 'flow_step' || kind === 'runtime_choice') return 'flow';
+  if (prefix === 'function' || prefix === 'tool' || prefix === 'block' || prefix === 'handler') return 'operation';
+  if (kind === 'tool_handler' || kind === 'mcp_server' || kind === 'capability' || kind === 'delivery_action' || kind === 'input_profile') {
+    return 'integration';
+  }
   if (prefix === 'profile') return 'profile';
-  if (prefix === 'api') return 'api';
-  if (prefix === 'flow') return 'flow';
-  if (prefix === 'step') return 'step';
-  if (prefix === 'function') return 'function';
-  if (prefix === 'block') return 'block';
-  if (prefix === 'tool') return 'tool';
-  if (prefix === 'webhook') return 'webhook';
-  if (prefix === 'prompt') return 'prompt';
-  if (prefix === 'frontend') return 'frontend';
-  return 'node';
+  if (prefix === 'prompt' || prefix === 'frontend') return 'surface';
+  return 'other';
 }
 
 export function countApiMapNodesByCategory(nodes: ApiProfileGraphNode[]): Record<ApiMapNodeCategory, number> {
   const counts = {
     all: nodes.length,
-    profile: 0,
-    api: 0,
+    entrypoint: 0,
     flow: 0,
-    step: 0,
-    function: 0,
-    block: 0,
-    tool: 0,
-    webhook: 0,
-    prompt: 0,
-    frontend: 0,
-    node: 0,
+    operation: 0,
+    integration: 0,
+    profile: 0,
+    surface: 0,
+    other: 0,
   } satisfies Record<ApiMapNodeCategory, number>;
 
   for (const node of nodes) {
@@ -162,6 +153,39 @@ export function edgePeerNodeId(edge: ApiProfileGraphEdge, nodeId: string): strin
 
 export function formatApiMapEdgeKind(kind: string): string {
   return kind.replace(/_/g, ' ');
+}
+
+export function apiMapNodeRoleLabel(node: ApiProfileGraphNode): string {
+  const kind = String(node.kind || '').toLowerCase();
+  const prefix = node.id.split(':', 1)[0];
+  if (prefix === 'api') return 'HTTP route';
+  if (prefix === 'webhook') return 'Webhook ingress';
+  if (prefix === 'flow') return 'Flow';
+  if (prefix === 'step' || kind === 'flow_step') return 'Flow step';
+  if (prefix === 'function') return 'Operation';
+  if (prefix === 'tool') return 'Tool facade';
+  if (prefix === 'block') return 'Implementation';
+  if (kind === 'handler' || kind === 'tool_handler' || prefix === 'handler') return 'Handler';
+  if (kind === 'mcp_server') return 'MCP server';
+  if (kind === 'capability') return 'Capability';
+  if (kind === 'delivery_action') return 'Delivery';
+  if (kind === 'input_profile') return 'Input profile';
+  if (prefix === 'profile') return 'Profile policy';
+  if (prefix === 'prompt') return 'Prompt';
+  if (prefix === 'frontend') return 'Frontend surface';
+  return node.kind || 'Runtime entity';
+}
+
+export function apiMapNodeRoleDescription(node: ApiProfileGraphNode): string {
+  const prefix = node.id.split(':', 1)[0];
+  if (prefix === 'function') return 'Stable defaultspack operation boundary used by routes, flows, and tool facades.';
+  if (prefix === 'tool') return 'Model-visible facade. It may call a Rumi function, MCP server, capability, or handler.';
+  if (prefix === 'block') return 'Internal implementation module behind an operation or legacy route adapter.';
+  if (prefix === 'api') return 'HTTP entrypoint matched by defaultspack transport.';
+  if (prefix === 'flow') return 'Declarative runtime path executed by FlowEngine.';
+  if (prefix === 'step') return 'A FlowEngine step. Function steps converge on defaultspack operations.';
+  if (prefix === 'webhook') return 'External ingress endpoint from WebhookEndpointStore.';
+  return '';
 }
 
 export function runtimePathForNode(data: ApiMapResponseData | null, nodeId?: string | null): ApiMapRuntimePath | null {

@@ -90,6 +90,11 @@ def test_api_map_contains_route_tool_and_webhook_edges(monkeypatch: pytest.Monke
         if node["id"] == "api:POST /api/chat/conversations/{id}/messages"
     )
     assert route["metadata"]["source_type"] == "flow"
+    assert route["metadata"]["runtime_role"] == "entrypoint"
+    block = next(node for node in payload["nodes"] if node["id"] == "block:chat.messages")
+    assert block["metadata"]["runtime_role"] == "implementation"
+    assert payload["summary"]["operation_count"] >= 2
+    assert payload["summary"]["implementation_count"] >= 1
     assert payload["profile_runtime"]["policy"]["api_route_allowlist"] == [
         "POST /api/chat/conversations/{id}/messages"
     ]

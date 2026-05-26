@@ -4,18 +4,15 @@ import {
   Boxes,
   Braces,
   GitBranch,
-  Loader2,
   Network,
   RefreshCw,
   Route,
   Search,
   ShieldCheck,
-  Waypoints,
   Workflow,
   Zap,
 } from 'lucide-react';
 
-import {ProfileGraphCanvas} from '@/src/components/profile-graph/ProfileGraphCanvas';
 import {Badge} from '@/src/components/ui/Badge';
 import {Button} from '@/src/components/ui/Button';
 import {Input} from '@/src/components/ui/Input';
@@ -23,6 +20,8 @@ import {fetchApiMap, fetchStartupProfiles} from '@/src/lib/api';
 import {
   API_MAP_NODE_CATEGORIES,
   API_MAP_NODE_CATEGORY_LABELS,
+  apiMapNodeRoleDescription,
+  apiMapNodeRoleLabel,
   countApiMapNodesByCategory,
   deriveApiMapView,
   edgePeerNodeId,
@@ -38,7 +37,6 @@ import type {
   ApiProfileGraphNode,
   ApiStartupProfile,
 } from '@/src/lib/apiTypes';
-import {graphNodeKindLabel} from '@/src/lib/profileGraph';
 import {cn} from '@/src/lib/utils';
 import {useAppStore} from '@/src/store';
 
@@ -152,18 +150,6 @@ export function ApiMap() {
       .sort((left, right) => formatApiMapEdgeKind(left.edge.kind).localeCompare(formatApiMapEdgeKind(right.edge.kind)));
   }, [selectedNode, view.inboundEdges, view.nodeById, view.outboundEdges]);
 
-  const canvasNodes = useMemo(() => {
-    const selectedFirst = selectedNode
-      ? [selectedNode, ...view.visibleNodes.filter((node) => node.id !== selectedNode.id)]
-      : view.visibleNodes;
-    return selectedFirst.slice(0, 18);
-  }, [selectedNode, view.visibleNodes]);
-  const canvasNodeIds = useMemo(() => new Set(canvasNodes.map((node) => node.id)), [canvasNodes]);
-  const canvasEdges = useMemo(
-    () => view.visibleEdges.filter((edge) => canvasNodeIds.has(edge.from_id) && canvasNodeIds.has(edge.to_id)),
-    [canvasEdgesKey(canvasNodeIds), view.visibleEdges],
-  );
-  const hiddenCanvasNodes = Math.max(0, view.visibleNodes.length - canvasNodes.length);
   const profileRuntime = asRecord(data?.profile_runtime);
   const profilePolicy = asRecord(profileRuntime.policy);
   const selectedProfileRuntime = asRecord(profileRuntime.selected);
@@ -190,15 +176,15 @@ export function ApiMap() {
   };
 
   return (
-    <div className="flex flex-1 flex-col gap-5 overflow-y-auto bg-bg-main p-6 animate-in fade-in slide-in-from-bottom-4">
+    <div className="flex flex-1 flex-col gap-5 overflow-y-auto overflow-x-hidden bg-bg-main p-6 animate-in fade-in slide-in-from-bottom-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold text-text-main">API Map</h1>
           <div className="mt-2 flex flex-wrap gap-2">
             <Badge variant="outline">{data?.summary.route_count || 0} routes</Badge>
             <Badge variant="outline">{data?.summary.flow_count || 0} flows</Badge>
-            <Badge variant="outline">{data?.summary.function_count || 0} functions</Badge>
-            <Badge variant="outline">{data?.summary.tool_count || 0} tools</Badge>
+            <Badge variant="outline">{categoryCounts.operation || 0} runtime units</Badge>
+            <Badge variant="outline">{data?.summary.tool_count || 0} tool facades</Badge>
             <Badge variant="outline">{data?.summary.webhook_count || 0} webhooks</Badge>
           </div>
         </div>
@@ -209,7 +195,7 @@ export function ApiMap() {
       </div>
 
       <section className="rounded-xl border border-border bg-bg-card p-4">
-        <div className="grid gap-3 lg:grid-cols-[minmax(220px,260px)_minmax(240px,1fr)_auto]">
+        <div className="grid gap-3 xl:grid-cols-[minmax(220px,260px)_minmax(240px,1fr)_auto]">
           <label className="text-sm text-text-muted">
             Profile
             <select
@@ -232,7 +218,7 @@ export function ApiMap() {
               onChange={(event) => setFocusInput(event.target.value)}
             />
           </label>
-          <div className="flex items-end gap-2">
+          <div className="flex flex-wrap items-end gap-2">
             <Button type="button" onClick={handleApplyContext}>
               <Route className="h-4 w-4" />
               Apply Context
@@ -244,12 +230,14 @@ export function ApiMap() {
         </div>
       </section>
 
-      <div className="grid gap-5 lg:grid-cols-[300px_minmax(0,1fr)_300px] xl:grid-cols-[330px_minmax(0,1fr)_340px]">
-        <section className="space-y-4">
+      <RuntimeModelNote />
+
+      <div className="grid gap-5 xl:grid-cols-[320px_minmax(0,1fr)]">
+        <section className="min-w-0 space-y-4">
           <PanelTitle icon={Search} title="Runtime Directory" />
           <div className="rounded-xl border border-border bg-bg-card p-4">
             <Input
-              placeholder="Search route, function, block, tool"
+              placeholder="Search route, operation, facade, webhook"
               value={nodeSearch}
               onChange={(event) => setNodeSearch(event.target.value)}
             />
@@ -273,20 +261,20 @@ export function ApiMap() {
                 </button>
               ))}
             </div>
-            <div className="mt-4 max-h-[620px] space-y-2 overflow-auto pr-1">
+            <div className="mt-4 max-h-[72vh] space-y-2 overflow-auto pr-1">
               {view.listNodes.slice(0, 120).map((node) => (
                 <button
                   key={node.id}
                   type="button"
                   className={cn(
-                    'w-full rounded-lg border px-3 py-3 text-left transition-colors',
+                    'w-full min-w-0 rounded-lg border px-3 py-3 text-left transition-colors',
                     selectedNode?.id === node.id ? 'border-accent bg-accent/10' : 'border-border hover:bg-bg-hover',
                   )}
                   onClick={() => handleSelectNode(node.id)}
                 >
                   <div className="flex flex-wrap items-center gap-2">
                     <Badge variant={selectedNode?.id === node.id ? 'default' : 'outline'}>
-                      {graphNodeKindLabel(node)}
+                      {apiMapNodeRoleLabel(node)}
                     </Badge>
                     {node.metadata?.risk ? <Badge variant="warning">{String(node.metadata.risk)}</Badge> : null}
                   </div>
@@ -299,57 +287,40 @@ export function ApiMap() {
           </div>
         </section>
 
-        <main className="space-y-4">
-          <RuntimeTrace path={selectedRuntimePath} selectedNode={selectedNode} onSelectNode={handleSelectNode} />
-
-          <div className="rounded-xl border border-border bg-bg-card p-4">
-            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-              <PanelTitle icon={Waypoints} title="Local Wiring" compact />
-              <div className="flex flex-wrap gap-2">
-                <Badge variant="secondary">{canvasNodes.length} nodes</Badge>
-                <Badge variant="secondary">{canvasEdges.length} edges</Badge>
-                {hiddenCanvasNodes ? <Badge variant="warning">+{hiddenCanvasNodes} grouped</Badge> : null}
-              </div>
-            </div>
-            {loading ? (
-              <div className="flex min-h-[420px] items-center justify-center rounded-xl border border-border bg-bg-main/40">
-                <div className="flex items-center gap-3 text-text-muted">
-                  <Loader2 className="h-5 w-5 animate-spin" />
-                  <span>Loading runtime map</span>
-                </div>
-              </div>
-            ) : (
-              <ProfileGraphCanvas
-                nodes={canvasNodes}
-                edges={canvasEdges}
-                selectedNodeId={selectedNode?.id || null}
+        <main className="min-w-0 space-y-4">
+          <div className="grid gap-4 2xl:grid-cols-[minmax(0,1fr)_340px]">
+            <div className="min-w-0 space-y-4">
+              <RuntimeTrace
+                loading={loading}
+                path={selectedRuntimePath}
+                selectedNode={selectedNode}
                 onSelectNode={handleSelectNode}
-                emptyMessage="No runtime wiring for the current focus."
               />
-            )}
-          </div>
 
-          <div className="grid gap-3 md:grid-cols-4">
-            <SummaryTile label="Visible" value={view.visibleNodes.length} detail="Focused nodes" />
-            <SummaryTile label="Incoming" value={view.inboundEdges.length} detail="Inbound edges" />
-            <SummaryTile label="Outgoing" value={view.outboundEdges.length} detail="Outbound edges" />
-            <SummaryTile label="Paths" value={data?.runtime_paths?.length || 0} detail="HTTP traces" />
+              <div className="grid gap-3 md:grid-cols-4">
+                <SummaryTile label="Visible" value={view.visibleNodes.length} detail="Focused entities" />
+                <SummaryTile label="Incoming" value={view.inboundEdges.length} detail="Into selection" />
+                <SummaryTile label="Outgoing" value={view.outboundEdges.length} detail="From selection" />
+                <SummaryTile label="HTTP Traces" value={data?.runtime_paths?.length || 0} detail="Routes resolved" />
+              </div>
+
+              <ConnectionsPanel
+                groups={view.connectionGroups}
+                items={connectionItems}
+                onSelectNode={handleSelectNode}
+              />
+            </div>
+
+            <aside className="min-w-0 space-y-4">
+              <ProfileRuntimePanel
+                profileRuntime={profileRuntime}
+                policy={profilePolicy}
+                selected={selectedProfileRuntime}
+              />
+              <InspectorPanel selectedNode={selectedNode} />
+            </aside>
           </div>
         </main>
-
-        <aside className="space-y-4">
-          <ProfileRuntimePanel
-            profileRuntime={profileRuntime}
-            policy={profilePolicy}
-            selected={selectedProfileRuntime}
-          />
-          <InspectorPanel selectedNode={selectedNode} />
-          <ConnectionsPanel
-            groups={view.connectionGroups}
-            items={connectionItems}
-            onSelectNode={handleSelectNode}
-          />
-        </aside>
       </div>
 
       <section className="rounded-xl border border-border bg-bg-card p-4">
@@ -367,15 +338,51 @@ export function ApiMap() {
   );
 }
 
+function RuntimeModelNote() {
+  return (
+    <section className="rounded-xl border border-border bg-bg-card/80 p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-sm font-semibold text-text-main">Runtime model</div>
+          <p className="mt-1 max-w-4xl text-sm text-text-muted">
+            Rumi treats defaultspack functions as the stable operation boundary. HTTP routes and flow steps call
+            operations; tools are model-visible facades over those operations or external runtimes; blocks are internal
+            implementation modules shown only when they explain the adapter path.
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Badge variant="outline">routes → flows</Badge>
+          <Badge variant="outline">functions = operations</Badge>
+          <Badge variant="outline">tools = facades</Badge>
+          <Badge variant="outline">blocks = implementation</Badge>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function RuntimeTrace({
+  loading,
   path,
   selectedNode,
   onSelectNode,
 }: {
+  loading: boolean;
   path: ApiMapRuntimePath | null;
   selectedNode: ApiProfileGraphNode | null;
   onSelectNode: (nodeId: string) => void;
 }) {
+  if (loading) {
+    return (
+      <div className="rounded-xl border border-border bg-bg-card p-4">
+        <PanelTitle icon={Workflow} title="Runtime Trace" compact />
+        <div className="mt-3">
+          <EmptyBox text="Loading runtime map..." />
+        </div>
+      </div>
+    );
+  }
+
   if (!path) {
     return (
       <div className="rounded-xl border border-border bg-bg-card p-4">
@@ -434,14 +441,14 @@ function StepTraceCard({step, onSelectNode}: {step: ApiMapRuntimeStep; onSelectN
   return (
     <button
       type="button"
-      className="grid gap-2 rounded-lg border border-border bg-bg-card px-3 py-2 text-left transition-colors hover:bg-bg-hover md:grid-cols-[72px_1fr]"
+      className="grid min-w-0 gap-2 rounded-lg border border-border bg-bg-card px-3 py-2 text-left transition-colors hover:bg-bg-hover sm:grid-cols-[150px_minmax(0,1fr)]"
       onClick={() => onSelectNode(step.node_id)}
     >
       <div className="flex items-center gap-2">
         <Badge variant="secondary">#{step.order || '-'}</Badge>
-        <Badge variant="outline">{step.step_type || 'step'}</Badge>
+        <Badge variant="outline">{step.step_type === 'function' ? 'operation' : step.step_type || 'step'}</Badge>
       </div>
-      <div>
+      <div className="min-w-0">
         <div className="truncate text-sm font-semibold text-text-main">{step.id}</div>
         <div className="truncate font-mono text-[11px] text-text-muted">
           {step.target?.id || step.target?.node_id || step.node_id}
@@ -461,12 +468,13 @@ function TargetTraceCard({
   onSelectNode: (nodeId: string) => void;
 }) {
   const nodeId = target.node_id || target.block_node_id || '';
+  const targetBadge = target.kind === 'function' ? `${badge} operation` : target.kind === 'block' ? `${badge} implementation` : badge;
   return (
     <TraceCard
       icon={target.kind === 'flow' ? Workflow : target.kind === 'function' ? Zap : Braces}
       title={target.id || target.block_module || nodeId}
       subtitle={target.block_module || nodeId}
-      badge={badge}
+      badge={targetBadge}
       onClick={nodeId ? () => onSelectNode(nodeId) : undefined}
     />
   );
@@ -489,7 +497,7 @@ function TraceCard({
   return (
     <Comp
       type={onClick ? 'button' : undefined}
-      className="flex w-full items-start gap-3 rounded-lg border border-border bg-bg-main/70 px-3 py-3 text-left transition-colors hover:bg-bg-hover"
+      className="flex w-full min-w-0 items-start gap-3 rounded-lg border border-border bg-bg-main/70 px-3 py-3 text-left transition-colors hover:bg-bg-hover"
       onClick={onClick}
     >
       <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-border bg-bg-card text-accent">
@@ -541,15 +549,21 @@ function ProfileRuntimePanel({
 }
 
 function InspectorPanel({selectedNode}: {selectedNode: ApiProfileGraphNode | null}) {
+  const description = selectedNode ? apiMapNodeRoleDescription(selectedNode) : '';
   return (
     <div className="rounded-xl border border-border bg-bg-card p-4">
       <PanelTitle icon={Boxes} title="Inspector" compact />
       {selectedNode ? (
         <div className="mt-3 space-y-3">
           <div className="flex flex-wrap gap-2">
-            <Badge variant="default">{graphNodeKindLabel(selectedNode)}</Badge>
+            <Badge variant="default">{apiMapNodeRoleLabel(selectedNode)}</Badge>
             <Badge variant="outline">{selectedNode.kind}</Badge>
           </div>
+          {description ? (
+            <div className="rounded-lg border border-border bg-bg-main/70 px-3 py-2 text-xs text-text-muted">
+              {description}
+            </div>
+          ) : null}
           <div>
             <div className="text-sm font-semibold text-text-main">{selectedNode.label || selectedNode.id}</div>
             <div className="mt-1 break-all rounded-lg border border-border bg-bg-main/70 px-3 py-2 font-mono text-[11px] text-text-muted">
@@ -665,8 +679,4 @@ function asRecord(value: unknown): Record<string, unknown> {
 
 function listLength(value: unknown): number {
   return Array.isArray(value) ? value.length : 0;
-}
-
-function canvasEdgesKey(set: Set<string>): string {
-  return [...set].join('|');
 }
