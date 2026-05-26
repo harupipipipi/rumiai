@@ -424,8 +424,47 @@ export interface ApiMapResponseData {
     route_count: number;
     tool_count: number;
     webhook_count: number;
+    flow_count?: number;
+    function_count?: number;
+    selected_tool_count?: number;
+    selected_route_count?: number;
   };
+  runtime_paths?: ApiMapRuntimePath[];
+  profile_runtime?: Record<string, unknown>;
   diagnostics: ApiCapabilityDiagnostic[];
+}
+
+export interface ApiMapRuntimePath {
+  id: string;
+  label: string;
+  entrypoint: {
+    node_id: string;
+    method?: string;
+    path?: string;
+    source?: string;
+    source_type?: string;
+  };
+  primary?: ApiMapRuntimeTarget | null;
+  fallback?: ApiMapRuntimeTarget | null;
+  steps?: ApiMapRuntimeStep[];
+}
+
+export interface ApiMapRuntimeTarget {
+  kind?: string;
+  id?: string;
+  node_id?: string;
+  block_node_id?: string;
+  block_module?: string;
+  resolved?: boolean;
+}
+
+export interface ApiMapRuntimeStep {
+  kind?: string;
+  id: string;
+  node_id: string;
+  step_type?: string;
+  order?: number;
+  target?: ApiMapRuntimeTarget | null;
 }
 
 export interface StartupProfileDeleteResponseData {

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   activateStartupProfile,
   addPackToStartupProfile,
@@ -34,6 +34,7 @@ import {
   titleCasePortKey,
   type StartupSortMode,
 } from '@/src/lib/startupProfiles';
+import { apiMapRoute, profileGraphRoute } from '@/src/lib/routes';
 import { transformDashboard } from '@/src/lib/transforms';
 import { useAppStore, type DashboardData } from '@/src/store';
 import {
@@ -48,8 +49,10 @@ import {
   Plus,
   RefreshCw,
   Rocket,
+  Route,
   Save,
   Search,
+  Share2,
   Star,
   Trash2,
 } from 'lucide-react';
@@ -85,6 +88,7 @@ export function Dashboard() {
   const runtimeReady = useAppStore((state) => state.runtimeReady);
   const runtimeStatus = useAppStore((state) => state.runtimeStatus);
   const runtimeError = useAppStore((state) => state.runtimeError);
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
 
   const [dashboard, setDashboard] = useState<DashboardData>(defaultDashboard);
@@ -341,6 +345,17 @@ export function Dashboard() {
     } catch (error) {
       setErrorFeedback(translateActionError(error, 'launch this profile'));
     } finally { setActionState(null); }
+  };
+
+  const handleOpenProfileGraph = (profileId: string) => {
+    navigate(profileGraphRoute(profileId));
+  };
+
+  const handleOpenApiMap = (profileId: string) => {
+    navigate(apiMapRoute({
+      profileId,
+      focus: `profile:${profileId}`,
+    }));
   };
 
   const handleDelete = (profileId: string, name: string) => {
@@ -645,6 +660,8 @@ export function Dashboard() {
           handleDuplicate={handleDuplicate}
           handleDelete={handleDelete}
           handleLaunch={handleLaunch}
+          handleOpenProfileGraph={handleOpenProfileGraph}
+          handleOpenApiMap={handleOpenApiMap}
           handleAddPack={handleAddPack}
           handleRemovePack={handleRemovePack}
           handleOverrideChange={handleOverrideChange}
@@ -673,6 +690,8 @@ interface EditPanelProps {
   handleDuplicate: (id: string) => Promise<void>;
   handleDelete: (id: string, name: string) => void;
   handleLaunch: (id: string) => Promise<void>;
+  handleOpenProfileGraph: (id: string) => void;
+  handleOpenApiMap: (id: string) => void;
   handleAddPack: (packId: string) => Promise<void>;
   handleRemovePack: (packId: string) => Promise<void>;
   handleOverrideChange: (portKey: string, nodeId: string) => Promise<void>;
@@ -682,6 +701,7 @@ function EditPanel({
   draft, setDraft, catalog, catalogPacks, selectedBasePack, availablePacksToAdd,
   isDirty, actionState, profileCount, editProfileId, patchSearchParams,
   handleSave, handleActivate, handleDuplicate, handleDelete, handleLaunch,
+  handleOpenProfileGraph, handleOpenApiMap,
   handleAddPack, handleRemovePack, handleOverrideChange,
 }: EditPanelProps) {
   const [compilePreview, setCompilePreview] = useState<StartupProfileCompilePreviewResponseData | null>(null);
@@ -749,6 +769,12 @@ function EditPanel({
 
         {/* Actions - destructive separated left, primary right */}
         <div className="flex flex-wrap gap-2">
+          <Button variant="outline" size="sm" onClick={() => handleOpenProfileGraph(draft.profile_id)}>
+            <Share2 className="h-3.5 w-3.5" /> Open Profile Graph
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => handleOpenApiMap(draft.profile_id)}>
+            <Route className="h-3.5 w-3.5" /> Open API Map
+          </Button>
           <Button variant="outline" size="sm" onClick={() => void handleDuplicate(draft.profile_id)} disabled={actionState?.profileId === draft.profile_id}>
             <Copy className="h-3.5 w-3.5" /> Duplicate
           </Button>

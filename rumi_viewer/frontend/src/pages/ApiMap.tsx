@@ -1,34 +1,90 @@
-import {useEffect, useState} from 'react';
-import {Loader2, RefreshCw, Route} from 'lucide-react';
+import {useEffect, useMemo, useState} from 'react';
+import {useSearchParams} from 'react-router-dom';
+import {
+  Boxes,
+  Braces,
+  GitBranch,
+  Loader2,
+  Network,
+  RefreshCw,
+  Route,
+  Search,
+  ShieldCheck,
+  Waypoints,
+  Workflow,
+  Zap,
+} from 'lucide-react';
 
 import {ProfileGraphCanvas} from '@/src/components/profile-graph/ProfileGraphCanvas';
 import {Badge} from '@/src/components/ui/Badge';
 import {Button} from '@/src/components/ui/Button';
 import {Input} from '@/src/components/ui/Input';
 import {fetchApiMap, fetchStartupProfiles} from '@/src/lib/api';
-import type {ApiMapResponseData, ApiStartupProfile} from '@/src/lib/apiTypes';
+import {
+  API_MAP_NODE_CATEGORIES,
+  API_MAP_NODE_CATEGORY_LABELS,
+  countApiMapNodesByCategory,
+  deriveApiMapView,
+  edgePeerNodeId,
+  formatApiMapEdgeKind,
+  type ApiMapNodeCategory,
+} from '@/src/lib/apiMap';
+import type {
+  ApiMapResponseData,
+  ApiMapRuntimePath,
+  ApiMapRuntimeStep,
+  ApiMapRuntimeTarget,
+  ApiProfileGraphEdge,
+  ApiProfileGraphNode,
+  ApiStartupProfile,
+} from '@/src/lib/apiTypes';
+import {graphNodeKindLabel} from '@/src/lib/profileGraph';
+import {cn} from '@/src/lib/utils';
 import {useAppStore} from '@/src/store';
+
+function resolveFocusedNodeId(nodes: ApiProfileGraphNode[], profileId: string, focus: string): string | null {
+  const candidates = [
+    String(focus || '').trim(),
+    profileId ? `profile:${profileId}` : '',
+    'api:POST /api/chat/conversations/{id}/messages',
+    nodes[0]?.id || '',
+  ].filter(Boolean);
+  return candidates.find((candidate) => nodes.some((node) => node.id === candidate)) || null;
+}
 
 export function ApiMap() {
   const addToast = useAppStore((state) => state.addToast);
+  const [searchParams, setSearchParams] = useSearchParams();
   const [profiles, setProfiles] = useState<ApiStartupProfile[]>([]);
-  const [profileId, setProfileId] = useState('');
-  const [focus, setFocus] = useState('');
-  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [profileId, setProfileId] = useState(searchParams.get('profile_id') || '');
+  const [focusInput, setFocusInput] = useState(searchParams.get('focus') || '');
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(searchParams.get('focus'));
+  const [nodeSearch, setNodeSearch] = useState('');
+  const [nodeCategory, setNodeCategory] = useState<ApiMapNodeCategory>('all');
   const [data, setData] = useState<ApiMapResponseData | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const load = async (nextProfileId = profileId, nextFocus = focus) => {
+  const syncQueryParams = (nextProfileId: string, nextFocus: string) => {
+    const next = new URLSearchParams(searchParams);
+    if (nextProfileId) {
+      next.set('profile_id', nextProfileId);
+    } else {
+      next.delete('profile_id');
+    }
+    if (nextFocus.trim()) {
+      next.set('focus', nextFocus.trim());
+    } else {
+      next.delete('focus');
+    }
+    setSearchParams(next, {replace: true});
+  };
+
+  const loadMap = async (nextProfileId: string, nextFocus: string) => {
     setLoading(true);
     try {
-      const response = await fetchApiMap({
-        profile_id: nextProfileId || undefined,
-        focus: nextFocus || undefined,
-      });
+      const response = await fetchApiMap({profile_id: nextProfileId || undefined});
       setData(response);
-      if (!selectedNodeId && response.nodes[0]?.id) {
-        setSelectedNodeId(response.nodes[0].id);
-      }
+      setSelectedNodeId(resolveFocusedNodeId(response.nodes, nextProfileId, nextFocus));
     } catch (error) {
       addToast(error instanceof Error ? error.message : 'Failed to load API map', 'error');
     } finally {
@@ -38,15 +94,26 @@ export function ApiMap() {
 
   useEffect(() => {
     let cancelled = false;
-    Promise.all([fetchStartupProfiles(), fetchApiMap()])
+    const requestedProfileId = searchParams.get('profile_id') || '';
+    const requestedFocus = searchParams.get('focus') || '';
+    setProfileId(requestedProfileId);
+    setFocusInput(requestedFocus);
+    setLoading(true);
+
+    Promise.all([
+      fetchStartupProfiles(),
+      fetchApiMap({profile_id: requestedProfileId || undefined}),
+    ])
       .then(([startupProfiles, apiMap]) => {
-        if (cancelled) {
-          return;
-        }
+        if (cancelled) return;
+        const resolvedProfileId = requestedProfileId
+          || startupProfiles.active_profile_id
+          || startupProfiles.profiles[0]?.profile_id
+          || '';
         setProfiles(startupProfiles.profiles);
-        setProfileId(startupProfiles.active_profile_id || startupProfiles.profiles[0]?.profile_id || '');
+        setProfileId(resolvedProfileId);
         setData(apiMap);
-        setSelectedNodeId(apiMap.nodes[0]?.id || null);
+        setSelectedNodeId(resolveFocusedNodeId(apiMap.nodes, resolvedProfileId, requestedFocus));
       })
       .catch((error) => {
         if (!cancelled) {
@@ -54,32 +121,95 @@ export function ApiMap() {
         }
       })
       .finally(() => {
-        if (!cancelled) {
-          setLoading(false);
-        }
+        if (!cancelled) setLoading(false);
       });
+
     return () => {
       cancelled = true;
     };
-  }, [addToast]);
+  }, [addToast, searchParams]);
+
+  const categoryCounts = useMemo(() => countApiMapNodesByCategory(data?.nodes || []), [data]);
+  const view = useMemo(() => deriveApiMapView(data, {
+    selectedNodeId,
+    search: nodeSearch,
+    category: nodeCategory,
+  }), [data, nodeCategory, nodeSearch, selectedNodeId]);
+
+  const selectedNode = view.selectedNode;
+  const selectedRuntimePath = view.selectedRuntimePath;
+  const connectionItems = useMemo(() => {
+    if (!selectedNode) return [];
+    return [
+      ...view.outboundEdges.map((edge) => ({edge, direction: 'outbound' as const})),
+      ...view.inboundEdges.map((edge) => ({edge, direction: 'inbound' as const})),
+    ]
+      .map((item) => {
+        const peerNodeId = edgePeerNodeId(item.edge, selectedNode.id);
+        return {...item, node: peerNodeId ? view.nodeById.get(peerNodeId) || null : null};
+      })
+      .filter((item): item is {edge: ApiProfileGraphEdge; direction: 'inbound' | 'outbound'; node: ApiProfileGraphNode} => Boolean(item.node))
+      .sort((left, right) => formatApiMapEdgeKind(left.edge.kind).localeCompare(formatApiMapEdgeKind(right.edge.kind)));
+  }, [selectedNode, view.inboundEdges, view.nodeById, view.outboundEdges]);
+
+  const canvasNodes = useMemo(() => {
+    const selectedFirst = selectedNode
+      ? [selectedNode, ...view.visibleNodes.filter((node) => node.id !== selectedNode.id)]
+      : view.visibleNodes;
+    return selectedFirst.slice(0, 18);
+  }, [selectedNode, view.visibleNodes]);
+  const canvasNodeIds = useMemo(() => new Set(canvasNodes.map((node) => node.id)), [canvasNodes]);
+  const canvasEdges = useMemo(
+    () => view.visibleEdges.filter((edge) => canvasNodeIds.has(edge.from_id) && canvasNodeIds.has(edge.to_id)),
+    [canvasEdgesKey(canvasNodeIds), view.visibleEdges],
+  );
+  const hiddenCanvasNodes = Math.max(0, view.visibleNodes.length - canvasNodes.length);
+  const profileRuntime = asRecord(data?.profile_runtime);
+  const profilePolicy = asRecord(profileRuntime.policy);
+  const selectedProfileRuntime = asRecord(profileRuntime.selected);
+
+  const handleApplyContext = () => {
+    syncQueryParams(profileId, focusInput);
+  };
+
+  const handleRefresh = () => {
+    void loadMap(profileId, focusInput);
+  };
+
+  const handleSelectNode = (nodeId: string) => {
+    setSelectedNodeId(nodeId);
+    setFocusInput(nodeId);
+    syncQueryParams(profileId, nodeId);
+  };
+
+  const handleResetFocus = () => {
+    const nextFocus = profileId ? `profile:${profileId}` : 'api:POST /api/chat/conversations/{id}/messages';
+    setFocusInput(nextFocus);
+    setSelectedNodeId(nextFocus);
+    syncQueryParams(profileId, nextFocus);
+  };
 
   return (
     <div className="flex flex-1 flex-col gap-5 overflow-y-auto bg-bg-main p-6 animate-in fade-in slide-in-from-bottom-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold text-text-main">API Map</h1>
-          <p className="mt-1 text-sm text-text-muted">
-            Inspect route-to-block, tool-to-handler, webhook-to-input-profile, and profile selection edges in one map.
-          </p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <Badge variant="outline">{data?.summary.route_count || 0} routes</Badge>
+            <Badge variant="outline">{data?.summary.flow_count || 0} flows</Badge>
+            <Badge variant="outline">{data?.summary.function_count || 0} functions</Badge>
+            <Badge variant="outline">{data?.summary.tool_count || 0} tools</Badge>
+            <Badge variant="outline">{data?.summary.webhook_count || 0} webhooks</Badge>
+          </div>
         </div>
-        <Button type="button" size="sm" variant="outline" onClick={() => void load()}>
+        <Button type="button" size="sm" variant="outline" onClick={handleRefresh}>
           <RefreshCw className="h-4 w-4" />
           Refresh
         </Button>
       </div>
 
-      <section className="rounded-2xl border border-border bg-bg-card p-4">
-        <div className="grid gap-3 lg:grid-cols-[minmax(220px,260px)_minmax(200px,1fr)_auto]">
+      <section className="rounded-xl border border-border bg-bg-card p-4">
+        <div className="grid gap-3 lg:grid-cols-[minmax(220px,260px)_minmax(240px,1fr)_auto]">
           <label className="text-sm text-text-muted">
             Profile
             <select
@@ -94,69 +224,449 @@ export function ApiMap() {
             </select>
           </label>
           <label className="text-sm text-text-muted">
-            Focus node
+            Focus
             <Input
-              className="mt-2"
-              placeholder="tool:web_search or api:GET /api/panel/api-map"
-              value={focus}
-              onChange={(event) => setFocus(event.target.value)}
+              className="mt-2 font-mono text-xs"
+              placeholder="api:POST /api/chat/conversations/{id}/messages"
+              value={focusInput}
+              onChange={(event) => setFocusInput(event.target.value)}
             />
           </label>
-          <div className="flex items-end">
-            <Button type="button" onClick={() => void load(profileId, focus)}>
+          <div className="flex items-end gap-2">
+            <Button type="button" onClick={handleApplyContext}>
               <Route className="h-4 w-4" />
-              Apply Filters
+              Apply Context
+            </Button>
+            <Button type="button" variant="outline" onClick={handleResetFocus}>
+              Reset
             </Button>
           </div>
         </div>
       </section>
 
-      {loading ? (
-        <div className="flex min-h-[520px] items-center justify-center rounded-2xl border border-border bg-bg-card">
-          <div className="flex items-center gap-3 text-text-muted">
-            <Loader2 className="h-5 w-5 animate-spin" />
-            <span>Loading API map</span>
+      <div className="grid gap-5 lg:grid-cols-[300px_minmax(0,1fr)_300px] xl:grid-cols-[330px_minmax(0,1fr)_340px]">
+        <section className="space-y-4">
+          <PanelTitle icon={Search} title="Runtime Directory" />
+          <div className="rounded-xl border border-border bg-bg-card p-4">
+            <Input
+              placeholder="Search route, function, block, tool"
+              value={nodeSearch}
+              onChange={(event) => setNodeSearch(event.target.value)}
+            />
+            <div className="mt-3 flex flex-wrap gap-2">
+              {API_MAP_NODE_CATEGORIES.map((category) => (
+                <button
+                  key={category}
+                  type="button"
+                  className={cn(
+                    'inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs transition-colors',
+                    nodeCategory === category
+                      ? 'border-accent bg-accent/10 text-accent'
+                      : 'border-border text-text-muted hover:bg-bg-hover hover:text-text-main',
+                  )}
+                  onClick={() => setNodeCategory(category)}
+                >
+                  <span>{API_MAP_NODE_CATEGORY_LABELS[category]}</span>
+                  <span className="rounded-full bg-bg-main px-1.5 py-0.5 text-[10px] text-text-muted">
+                    {categoryCounts[category]}
+                  </span>
+                </button>
+              ))}
+            </div>
+            <div className="mt-4 max-h-[620px] space-y-2 overflow-auto pr-1">
+              {view.listNodes.slice(0, 120).map((node) => (
+                <button
+                  key={node.id}
+                  type="button"
+                  className={cn(
+                    'w-full rounded-lg border px-3 py-3 text-left transition-colors',
+                    selectedNode?.id === node.id ? 'border-accent bg-accent/10' : 'border-border hover:bg-bg-hover',
+                  )}
+                  onClick={() => handleSelectNode(node.id)}
+                >
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge variant={selectedNode?.id === node.id ? 'default' : 'outline'}>
+                      {graphNodeKindLabel(node)}
+                    </Badge>
+                    {node.metadata?.risk ? <Badge variant="warning">{String(node.metadata.risk)}</Badge> : null}
+                  </div>
+                  <div className="mt-2 truncate text-sm font-semibold text-text-main">{node.label || node.ref || node.id}</div>
+                  <div className="truncate font-mono text-[11px] text-text-muted">{node.id}</div>
+                </button>
+              ))}
+              {!view.listNodes.length ? <EmptyBox text="No matching runtime entities." /> : null}
+            </div>
           </div>
-        </div>
-      ) : (
-        <ProfileGraphCanvas
-          nodes={data?.nodes || []}
-          edges={data?.edges || []}
-          selectedNodeId={selectedNodeId}
-          onSelectNode={setSelectedNodeId}
-          emptyMessage="No API map nodes were returned."
-        />
-      )}
+        </section>
 
-      <section className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
-        <article className="rounded-2xl border border-border bg-bg-card p-4">
-          <div className="mb-3 flex flex-wrap gap-2">
-            <Badge variant="outline">{data?.summary.route_count || 0} routes</Badge>
-            <Badge variant="outline">{data?.summary.tool_count || 0} tools</Badge>
-            <Badge variant="outline">{data?.summary.webhook_count || 0} webhooks</Badge>
-            <Badge variant="secondary">{data?.summary.edge_count || 0} edges</Badge>
-          </div>
-          <pre className="max-h-[320px] overflow-auto rounded-xl border border-border bg-bg-main/70 p-3 text-xs text-text-muted">
-            {JSON.stringify(data?.summary || {}, null, 2)}
-          </pre>
-        </article>
+        <main className="space-y-4">
+          <RuntimeTrace path={selectedRuntimePath} selectedNode={selectedNode} onSelectNode={handleSelectNode} />
 
-        <article className="rounded-2xl border border-border bg-bg-card p-4">
-          <h2 className="text-sm font-semibold text-text-main">Diagnostics</h2>
-          <div className="mt-3 space-y-2">
-            {data?.diagnostics?.length ? data.diagnostics.map((diagnostic, index) => (
-              <div key={`${diagnostic.code}-${index}`} className="rounded-xl border border-border bg-bg-main/70 px-3 py-2 text-sm text-text-muted">
-                <div className="font-medium text-text-main">{diagnostic.code}</div>
-                <div className="mt-1 text-xs">{diagnostic.message}</div>
+          <div className="rounded-xl border border-border bg-bg-card p-4">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <PanelTitle icon={Waypoints} title="Local Wiring" compact />
+              <div className="flex flex-wrap gap-2">
+                <Badge variant="secondary">{canvasNodes.length} nodes</Badge>
+                <Badge variant="secondary">{canvasEdges.length} edges</Badge>
+                {hiddenCanvasNodes ? <Badge variant="warning">+{hiddenCanvasNodes} grouped</Badge> : null}
               </div>
-            )) : (
-              <div className="rounded-xl border border-dashed border-border px-3 py-6 text-sm text-text-muted">
-                No diagnostics for the current API map view.
+            </div>
+            {loading ? (
+              <div className="flex min-h-[420px] items-center justify-center rounded-xl border border-border bg-bg-main/40">
+                <div className="flex items-center gap-3 text-text-muted">
+                  <Loader2 className="h-5 w-5 animate-spin" />
+                  <span>Loading runtime map</span>
+                </div>
               </div>
+            ) : (
+              <ProfileGraphCanvas
+                nodes={canvasNodes}
+                edges={canvasEdges}
+                selectedNodeId={selectedNode?.id || null}
+                onSelectNode={handleSelectNode}
+                emptyMessage="No runtime wiring for the current focus."
+              />
             )}
           </div>
-        </article>
+
+          <div className="grid gap-3 md:grid-cols-4">
+            <SummaryTile label="Visible" value={view.visibleNodes.length} detail="Focused nodes" />
+            <SummaryTile label="Incoming" value={view.inboundEdges.length} detail="Inbound edges" />
+            <SummaryTile label="Outgoing" value={view.outboundEdges.length} detail="Outbound edges" />
+            <SummaryTile label="Paths" value={data?.runtime_paths?.length || 0} detail="HTTP traces" />
+          </div>
+        </main>
+
+        <aside className="space-y-4">
+          <ProfileRuntimePanel
+            profileRuntime={profileRuntime}
+            policy={profilePolicy}
+            selected={selectedProfileRuntime}
+          />
+          <InspectorPanel selectedNode={selectedNode} />
+          <ConnectionsPanel
+            groups={view.connectionGroups}
+            items={connectionItems}
+            onSelectNode={handleSelectNode}
+          />
+        </aside>
+      </div>
+
+      <section className="rounded-xl border border-border bg-bg-card p-4">
+        <PanelTitle icon={ShieldCheck} title="Diagnostics" />
+        <div className="mt-3 space-y-2">
+          {data?.diagnostics?.length ? data.diagnostics.map((diagnostic, index) => (
+            <div key={`${diagnostic.code}-${index}`} className="rounded-lg border border-border bg-bg-main/70 px-3 py-2 text-sm text-text-muted">
+              <div className="font-medium text-text-main">{diagnostic.code}</div>
+              <div className="mt-1 text-xs">{diagnostic.message}</div>
+            </div>
+          )) : <EmptyBox text="No diagnostics for this profile and focus." />}
+        </div>
       </section>
     </div>
   );
+}
+
+function RuntimeTrace({
+  path,
+  selectedNode,
+  onSelectNode,
+}: {
+  path: ApiMapRuntimePath | null;
+  selectedNode: ApiProfileGraphNode | null;
+  onSelectNode: (nodeId: string) => void;
+}) {
+  if (!path) {
+    return (
+      <div className="rounded-xl border border-border bg-bg-card p-4">
+        <PanelTitle icon={Workflow} title="Runtime Trace" compact />
+        <div className="mt-3">
+          <EmptyBox text={selectedNode ? 'This entity is not part of an HTTP runtime trace.' : 'Select a runtime entity.'} />
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-xl border border-border bg-bg-card p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <PanelTitle icon={Workflow} title="Runtime Trace" compact />
+        <div className="flex flex-wrap gap-2">
+          <Badge variant="default">{path.entrypoint.method || 'HTTP'}</Badge>
+          <Badge variant="outline">{path.entrypoint.source || 'route_registry'}</Badge>
+          <Badge variant="outline">{path.entrypoint.source_type || 'route'}</Badge>
+        </div>
+      </div>
+
+      <div className="mt-4 grid gap-3">
+        <TraceCard
+          icon={Route}
+          title={path.label}
+          subtitle={path.entrypoint.path || path.entrypoint.node_id}
+          badge="HTTP route"
+          onClick={() => onSelectNode(path.entrypoint.node_id)}
+        />
+        {path.primary ? (
+          <TargetTraceCard target={path.primary} badge="primary" onSelectNode={onSelectNode} />
+        ) : null}
+        {path.steps?.length ? (
+          <div className="rounded-lg border border-border bg-bg-main/60 p-3">
+            <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-text-main">
+              <GitBranch className="h-4 w-4 text-accent" />
+              Flow steps
+            </div>
+            <div className="grid gap-2">
+              {path.steps.map((step) => (
+                <StepTraceCard key={step.node_id} step={step} onSelectNode={onSelectNode} />
+              ))}
+            </div>
+          </div>
+        ) : null}
+        {path.fallback ? (
+          <TargetTraceCard target={path.fallback} badge="fallback" onSelectNode={onSelectNode} />
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function StepTraceCard({step, onSelectNode}: {step: ApiMapRuntimeStep; onSelectNode: (nodeId: string) => void}) {
+  return (
+    <button
+      type="button"
+      className="grid gap-2 rounded-lg border border-border bg-bg-card px-3 py-2 text-left transition-colors hover:bg-bg-hover md:grid-cols-[72px_1fr]"
+      onClick={() => onSelectNode(step.node_id)}
+    >
+      <div className="flex items-center gap-2">
+        <Badge variant="secondary">#{step.order || '-'}</Badge>
+        <Badge variant="outline">{step.step_type || 'step'}</Badge>
+      </div>
+      <div>
+        <div className="truncate text-sm font-semibold text-text-main">{step.id}</div>
+        <div className="truncate font-mono text-[11px] text-text-muted">
+          {step.target?.id || step.target?.node_id || step.node_id}
+        </div>
+      </div>
+    </button>
+  );
+}
+
+function TargetTraceCard({
+  target,
+  badge,
+  onSelectNode,
+}: {
+  target: ApiMapRuntimeTarget;
+  badge: string;
+  onSelectNode: (nodeId: string) => void;
+}) {
+  const nodeId = target.node_id || target.block_node_id || '';
+  return (
+    <TraceCard
+      icon={target.kind === 'flow' ? Workflow : target.kind === 'function' ? Zap : Braces}
+      title={target.id || target.block_module || nodeId}
+      subtitle={target.block_module || nodeId}
+      badge={badge}
+      onClick={nodeId ? () => onSelectNode(nodeId) : undefined}
+    />
+  );
+}
+
+function TraceCard({
+  icon: Icon,
+  title,
+  subtitle,
+  badge,
+  onClick,
+}: {
+  icon: typeof Route;
+  title?: string;
+  subtitle?: string;
+  badge: string;
+  onClick?: () => void;
+}) {
+  const Comp = onClick ? 'button' : 'div';
+  return (
+    <Comp
+      type={onClick ? 'button' : undefined}
+      className="flex w-full items-start gap-3 rounded-lg border border-border bg-bg-main/70 px-3 py-3 text-left transition-colors hover:bg-bg-hover"
+      onClick={onClick}
+    >
+      <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-border bg-bg-card text-accent">
+        <Icon className="h-4 w-4" />
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge variant="outline">{badge}</Badge>
+        </div>
+        <div className="mt-2 truncate text-sm font-semibold text-text-main">{title || 'unresolved'}</div>
+        {subtitle ? <div className="truncate font-mono text-[11px] text-text-muted">{subtitle}</div> : null}
+      </div>
+    </Comp>
+  );
+}
+
+function ProfileRuntimePanel({
+  profileRuntime,
+  policy,
+  selected,
+}: {
+  profileRuntime: Record<string, unknown>;
+  policy: Record<string, unknown>;
+  selected: Record<string, unknown>;
+}) {
+  const enforce = Boolean(policy.enforce_api_route_allowlist);
+  return (
+    <div className="rounded-xl border border-border bg-bg-card p-4">
+      <PanelTitle icon={ShieldCheck} title="Profile Runtime" compact />
+      <div className="mt-3 space-y-3">
+        <KeyValue label="Profile" value={String(profileRuntime.profile_id || 'active')} />
+        <KeyValue label="Prompt" value={String(profileRuntime.system_prompt_id || profileRuntime.default_prompt_id || 'none')} />
+        <div className="flex flex-wrap gap-2">
+          <Badge variant={enforce ? 'success' : 'warning'}>
+            API strict {enforce ? 'on' : 'off'}
+          </Badge>
+          <Badge variant="outline">{listLength(policy.tool_allowlist)} allowed tools</Badge>
+          <Badge variant="outline">{listLength(policy.api_route_allowlist)} selected routes</Badge>
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          <MiniCount label="Tools" value={listLength(selected.tools)} />
+          <MiniCount label="Webhooks" value={listLength(selected.webhooks)} />
+          <MiniCount label="Prompts" value={listLength(selected.prompts)} />
+          <MiniCount label="Frontend" value={listLength(selected.frontend)} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function InspectorPanel({selectedNode}: {selectedNode: ApiProfileGraphNode | null}) {
+  return (
+    <div className="rounded-xl border border-border bg-bg-card p-4">
+      <PanelTitle icon={Boxes} title="Inspector" compact />
+      {selectedNode ? (
+        <div className="mt-3 space-y-3">
+          <div className="flex flex-wrap gap-2">
+            <Badge variant="default">{graphNodeKindLabel(selectedNode)}</Badge>
+            <Badge variant="outline">{selectedNode.kind}</Badge>
+          </div>
+          <div>
+            <div className="text-sm font-semibold text-text-main">{selectedNode.label || selectedNode.id}</div>
+            <div className="mt-1 break-all rounded-lg border border-border bg-bg-main/70 px-3 py-2 font-mono text-[11px] text-text-muted">
+              {selectedNode.id}
+            </div>
+          </div>
+          <pre className="max-h-[280px] overflow-auto rounded-lg border border-border bg-bg-main/70 p-3 text-xs text-text-muted">
+            {JSON.stringify(selectedNode.metadata || {}, null, 2)}
+          </pre>
+        </div>
+      ) : (
+        <div className="mt-3">
+          <EmptyBox text="No runtime entity selected." />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ConnectionsPanel({
+  groups,
+  items,
+  onSelectNode,
+}: {
+  groups: Array<{kind: string; edges: ApiProfileGraphEdge[]}>;
+  items: Array<{edge: ApiProfileGraphEdge; direction: 'inbound' | 'outbound'; node: ApiProfileGraphNode}>;
+  onSelectNode: (nodeId: string) => void;
+}) {
+  return (
+    <div className="rounded-xl border border-border bg-bg-card p-4">
+      <PanelTitle icon={Network} title="Connections" compact />
+      <div className="mt-3 flex flex-wrap gap-2">
+        {groups.map((group) => (
+          <Badge key={group.kind} variant="secondary">
+            {formatApiMapEdgeKind(group.kind)} {group.edges.length}
+          </Badge>
+        ))}
+      </div>
+      <div className="mt-3 max-h-[360px] space-y-2 overflow-auto pr-1">
+        {items.map((item, index) => (
+          <button
+            key={`${item.edge.id}-${index}`}
+            type="button"
+            className="w-full rounded-lg border border-border bg-bg-main/70 px-3 py-3 text-left transition-colors hover:bg-bg-hover"
+            onClick={() => onSelectNode(item.node.id)}
+          >
+            <div className="flex items-center justify-between gap-2">
+              <Badge variant={item.direction === 'outbound' ? 'default' : 'secondary'}>
+                {item.direction}
+              </Badge>
+              <span className="text-[11px] uppercase tracking-[0.14em] text-text-muted">
+                {formatApiMapEdgeKind(item.edge.kind)}
+              </span>
+            </div>
+            <div className="mt-2 truncate text-sm font-semibold text-text-main">{item.node.label || item.node.id}</div>
+            <div className="truncate font-mono text-[11px] text-text-muted">{item.node.id}</div>
+          </button>
+        ))}
+        {!items.length ? <EmptyBox text="No direct connections." /> : null}
+      </div>
+    </div>
+  );
+}
+
+function SummaryTile({label, value, detail}: {label: string; value: number; detail: string}) {
+  return (
+    <div className="rounded-xl border border-border bg-bg-card px-3 py-3">
+      <div className="text-[11px] uppercase tracking-[0.14em] text-text-muted">{label}</div>
+      <div className="mt-1 text-2xl font-semibold text-text-main">{value}</div>
+      <div className="mt-1 text-xs text-text-muted">{detail}</div>
+    </div>
+  );
+}
+
+function PanelTitle({icon: Icon, title, compact = false}: {icon: typeof Route; title: string; compact?: boolean}) {
+  return (
+    <div className={cn('flex items-center gap-2', !compact && 'mb-3')}>
+      <Icon className="h-4 w-4 text-accent" />
+      <h2 className="text-sm font-semibold text-text-main">{title}</h2>
+    </div>
+  );
+}
+
+function EmptyBox({text}: {text: string}) {
+  return (
+    <div className="rounded-lg border border-dashed border-border px-3 py-6 text-sm text-text-muted">
+      {text}
+    </div>
+  );
+}
+
+function KeyValue({label, value}: {label: string; value: string}) {
+  return (
+    <div>
+      <div className="text-[11px] uppercase tracking-[0.14em] text-text-muted">{label}</div>
+      <div className="mt-1 truncate text-sm font-semibold text-text-main">{value}</div>
+    </div>
+  );
+}
+
+function MiniCount({label, value}: {label: string; value: number}) {
+  return (
+    <div className="rounded-lg border border-border bg-bg-main/70 px-3 py-2">
+      <div className="text-[10px] uppercase tracking-[0.14em] text-text-muted">{label}</div>
+      <div className="mt-1 text-lg font-semibold text-text-main">{value}</div>
+    </div>
+  );
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function listLength(value: unknown): number {
+  return Array.isArray(value) ? value.length : 0;
+}
+
+function canvasEdgesKey(set: Set<string>): string {
+  return [...set].join('|');
 }

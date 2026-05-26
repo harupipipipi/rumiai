@@ -79,10 +79,20 @@ def test_api_map_contains_route_tool_and_webhook_edges(monkeypatch: pytest.Monke
     payload = build_api_map(profile_id="research-profile")
     edges = {(edge["from_id"], edge["to_id"], edge["kind"]) for edge in payload["edges"]}
 
-    assert ("api:POST /api/chat/conversations/{id}/messages", "node:chat.messages", "handled_by") in edges
-    assert ("tool:web_search", "node:domain.search:web_search", "executes") in edges
+    assert ("api:POST /api/chat/conversations/{id}/messages", "flow:research.flow", "enters_flow") in edges
+    assert ("api:POST /api/chat/conversations/{id}/messages", "block:chat.messages", "handled_by") in edges
+    assert ("tool:web_search", "handler:domain.search:web_search", "executes_handler") in edges
     assert ("webhook:research-webhook", "node:ingress.research", "uses_input_profile") in edges
     assert ("profile:research-profile", "tool:web_search", "selects") in edges
+    route = next(
+        node
+        for node in payload["nodes"]
+        if node["id"] == "api:POST /api/chat/conversations/{id}/messages"
+    )
+    assert route["metadata"]["source_type"] == "flow"
+    assert payload["profile_runtime"]["policy"]["api_route_allowlist"] == [
+        "POST /api/chat/conversations/{id}/messages"
+    ]
     assert any(
         diagnostic.get("code") == "api_route_allowlist_not_enforced"
         for diagnostic in payload["diagnostics"]
