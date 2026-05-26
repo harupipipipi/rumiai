@@ -143,7 +143,7 @@ export function ProfileGraphEditorShell({
         <div>
           <h1 className="text-2xl font-semibold text-text-main">Profile Graph</h1>
           <p className="mt-1 text-sm text-text-muted">
-            Wire tools, webhooks, API routes, prompts, frontend surfaces, flows, and nodes into a visible runtime profile.
+            Wire tools, webhooks, API routes, prompts, frontend pieces, flows, and launch nodes into a visible runtime profile.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -248,11 +248,13 @@ export function ProfileGraphEditorShell({
                     <Badge variant="outline">{String(preview.profile_graph_runtime_preview.prompt_resolution?.selected_prompt_id ?? 'no prompt')}</Badge>
                   </div>
                   <div>selected tools: {(preview.profile_graph_runtime_preview.selected?.tools || []).join(', ') || '--'}</div>
-                  <div>frontend: {(preview.profile_graph_runtime_preview.selected?.frontend || []).join(', ') || '--'}</div>
+                  <div>frontend catalog: {(preview.profile_graph_runtime_preview.selected?.frontend || []).join(', ') || '--'}</div>
+                  <div>launch surface: {String(preview.compile_preview.surface_launch_target?.node_id ?? preview.compile_preview.capability_graph?.surface_launch_target?.node_id ?? '--')}</div>
+                  <div>launch pack: {String(preview.compile_preview.surface_launch_target?.pack_id ?? preview.compile_preview.capability_graph?.surface_launch_target?.pack_id ?? '--')}</div>
                   <div>api strict mode: {String(Boolean(preview.profile_graph_runtime_preview.api_route_policy?.enforce))}</div>
                 </div>
               ) : (
-                <p className="text-sm text-text-muted">Run Preview Runtime to inspect the effective prompt, tool filter result, webhook status, and API policy.</p>
+                <p className="text-sm text-text-muted">Run Preview Runtime to inspect the effective prompt, tool filter result, launch surface, webhook status, and API policy.</p>
               )}
             </article>
 
@@ -308,9 +310,12 @@ export function ProfileGraphEditorShell({
               <Network className="h-4 w-4 text-accent" />
               <h2 className="text-sm font-semibold text-text-main">Raw Graph</h2>
             </div>
-            <pre className="max-h-[340px] overflow-auto rounded-xl border border-border bg-bg-main/70 p-3 text-xs text-text-muted">
-              {JSON.stringify(profileGraphRequestPayload(draft || normalizeProfileGraphDocument(selectedProfileId, null)), null, 2)}
-            </pre>
+            <details className="rounded-xl border border-border bg-bg-main/70">
+              <summary className="cursor-pointer px-3 py-2 text-sm text-text-muted">Show JSON payload</summary>
+              <pre className="max-h-[340px] overflow-auto border-t border-border p-3 text-xs text-text-muted">
+                {JSON.stringify(profileGraphRequestPayload(draft || normalizeProfileGraphDocument(selectedProfileId, null)), null, 2)}
+              </pre>
+            </details>
           </article>
         </section>
       </div>

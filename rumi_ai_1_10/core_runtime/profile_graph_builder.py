@@ -756,13 +756,18 @@ def _startup_catalog_nodes(startup_catalog: Dict[str, Any] | None) -> List[Dict[
                 continue
             display_name = node.get("display_name") if isinstance(node.get("display_name"), dict) else {}
             label = str(display_name.get("en") or display_name.get("ja") or node.get("component_id") or node_id)
+            node_metadata = dict(node.get("metadata") if isinstance(node.get("metadata"), dict) else {})
+            launch = node_metadata.get("launch") if isinstance(node_metadata.get("launch"), dict) else {}
             nodes[node_id] = {
                 "id": node_id,
                 "label": label,
                 "kind": "capability_node",
-                "component_type": str(node.get("component_type") or ""),
+                "component_type": str(node.get("component_type") or node_metadata.get("component_type") or ""),
+                "component_id": str(node.get("component_id") or node_metadata.get("component_id") or ""),
                 "source_pack_id": pack_id,
-                "metadata": dict(node.get("metadata") if isinstance(node.get("metadata"), dict) else {}),
+                "ports": list(node.get("ports") if isinstance(node.get("ports"), list) else []),
+                "launch": dict(launch),
+                "metadata": node_metadata,
             }
     return sorted(nodes.values(), key=lambda item: item["id"])
 

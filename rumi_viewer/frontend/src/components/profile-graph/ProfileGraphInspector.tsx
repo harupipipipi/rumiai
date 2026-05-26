@@ -34,6 +34,7 @@ export function ProfileGraphInspector({
   const category = categoryForGraphNodeId(node.id);
   const canRemove = Boolean(category && node.ref);
   const previewSelected = preview?.selected && category ? preview.selected[category] : undefined;
+  const launchSurface = isLaunchSurfaceNode(node);
 
   return (
     <section className="rounded-2xl border border-border bg-bg-card p-4">
@@ -53,6 +54,7 @@ export function ProfileGraphInspector({
       <div className="mt-4 flex flex-wrap gap-2">
         <Badge variant="outline">{node.kind}</Badge>
         {category ? <Badge variant="secondary">{category}</Badge> : null}
+        {launchSurface ? <Badge variant="default">launch surface</Badge> : null}
         {Array.isArray(previewSelected) && previewSelected.includes(node.ref) ? (
           <Badge variant="default">active in preview</Badge>
         ) : null}
@@ -102,4 +104,16 @@ export function ProfileGraphInspector({
       </div>
     </section>
   );
+}
+
+function isLaunchSurfaceNode(node: ApiProfileGraphNode): boolean {
+  const metadata = node.metadata ?? {};
+  const nested = typeof metadata.metadata === 'object' && metadata.metadata ? metadata.metadata as Record<string, unknown> : {};
+  const componentType = String(metadata.component_type || nested.component_type || '').toLowerCase();
+  const launchCandidate = typeof metadata.launch === 'object' && metadata.launch
+    ? metadata.launch as Record<string, unknown>
+    : typeof nested.launch === 'object' && nested.launch
+      ? nested.launch as Record<string, unknown>
+      : {};
+  return componentType === 'frontend' && String(launchCandidate.kind || '').toLowerCase() === 'desktop_app';
 }

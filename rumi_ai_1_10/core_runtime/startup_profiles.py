@@ -205,8 +205,10 @@ class StartupProfileManager:
             updated_at=_now_ts(),
         )
 
-        # Runtime-only updates must not rewrite the structural launch graph.
-        for field_name in ("base_pack", "graph_id", "graph_ports", "packs", "node_overrides"):
+        # Runtime-only updates must not rewrite the selected launch graph shape.
+        # Node overrides are allowed because Profile Graph runtime wiring projects
+        # selected launch surfaces through this field.
+        for field_name in ("base_pack", "graph_id", "graph_ports", "packs"):
             if updated.get(field_name) != current.get(field_name):
                 return {
                     "error": f"Runtime field update cannot change '{field_name}'",

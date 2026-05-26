@@ -98,6 +98,9 @@ export function ProfileGraphPalette({
               </div>
               <div className="mt-2 flex flex-wrap gap-2">
                 <Badge variant="outline">{item.kind}</Badge>
+                {isLaunchSurfaceCandidate(item) ? (
+                  <Badge variant="default">launch surface</Badge>
+                ) : null}
                 {typeof item.path === 'string' && item.path ? (
                   <Badge variant="secondary">path</Badge>
                 ) : null}
@@ -114,5 +117,26 @@ export function ProfileGraphPalette({
         )}
       </div>
     </section>
+  );
+}
+
+function isLaunchSurfaceCandidate(item: ApiProfileGraphAvailableItem): boolean {
+  const componentType = String(item.component_type || '').toLowerCase();
+  const launch = item.launch;
+  const ports = Array.isArray(item.ports) ? item.ports : [];
+  const hasSurfacePort = ports.some((port) => {
+    if (!port || typeof port !== 'object') {
+      return false;
+    }
+    const direction = String((port as {direction?: unknown}).direction || '').toLowerCase();
+    const standards = Array.isArray((port as {standards?: unknown[]}).standards) ? (port as {standards: unknown[]}).standards : [];
+    return direction === 'output' && standards.some((value) => String(value) === 'rumi.surface');
+  });
+  return (
+    componentType === 'frontend' &&
+    !!launch &&
+    typeof launch === 'object' &&
+    String((launch as {kind?: unknown}).kind || '').toLowerCase() === 'desktop_app' &&
+    hasSurfacePort
   );
 }

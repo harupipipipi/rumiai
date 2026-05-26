@@ -89,11 +89,12 @@ class ControlPanelHandlersMixin:
 
     def _panel_startup_profile_manager(self):
         from ..startup_profiles import StartupProfileManager
+        kernel = getattr(self, "kernel", None)
 
         return StartupProfileManager(
-            interface_registry=getattr(self, "interface_registry", None),
-            approval_manager=getattr(self, "approval_manager", None),
-            ecosystem_dir=getattr(self, "ecosystem_dir", None),
+            interface_registry=getattr(self, "interface_registry", None) or getattr(kernel, "interface_registry", None),
+            approval_manager=getattr(self, "approval_manager", None) or getattr(kernel, "approval_manager", None),
+            ecosystem_dir=getattr(self, "ecosystem_dir", None) or getattr(kernel, "ecosystem_dir", None),
             profile_workspace_manager=getattr(self, "profile_workspace_manager", None),
         )
 
@@ -360,6 +361,7 @@ class ControlPanelHandlersMixin:
         try:
             from ..profile_graph_builder import build_startup_profile_graph_response
             from ..profile_graph_models import normalize_profile_graph_document
+            from ..profile_runtime_selection import apply_profile_graph_selection
 
             manager = self._panel_startup_profile_manager()
             catalog = manager._build_catalog()
@@ -368,8 +370,17 @@ class ControlPanelHandlersMixin:
             if current is None:
                 return {"error": f"Profile '{profile_id}' not found", "status_code": 404}
 
-            graph = body.get("graph") if isinstance(body, dict) and isinstance(body.get("graph"), dict) else {}
-            selected = body.get("selected") if isinstance(body, dict) and isinstance(body.get("selected"), dict) else None
+            current_metadata = current.get("metadata") if isinstance(current.get("metadata"), dict) else {}
+            graph = (
+                body.get("graph")
+                if isinstance(body, dict) and isinstance(body.get("graph"), dict)
+                else current_metadata.get("profile_graph")
+            )
+            selected = (
+                body.get("selected")
+                if isinstance(body, dict) and isinstance(body.get("selected"), dict)
+                else current_metadata.get("selected")
+            )
             document, _ = normalize_profile_graph_document(profile_id, graph, selected, strict=True)
 
             metadata = dict(current.get("metadata") if isinstance(current.get("metadata"), dict) else {})
@@ -379,12 +390,19 @@ class ControlPanelHandlersMixin:
             policy = dict(current.get("policy") if isinstance(current.get("policy"), dict) else {})
             policy["tool_allowlist"] = list(document.selected.get("tools") or [])
             policy["api_route_allowlist"] = list(document.selected.get("api_routes") or [])
+            derived = apply_profile_graph_selection({
+                "metadata": metadata,
+                "node_overrides": {},
+            })
 
             prompts = document.selected.get("prompts") if isinstance(document.selected.get("prompts"), list) else []
             payload: Dict[str, Any] = {
                 "metadata": metadata,
                 "policy": policy,
                 "system_prompt_id": prompts[0] if prompts else None,
+                "node_overrides": dict(
+                    derived.get("node_overrides") if isinstance(derived.get("node_overrides"), dict) else {}
+                ),
             }
 
             result = manager.update_runtime_fields(profile_id, payload)
@@ -409,6 +427,7 @@ class ControlPanelHandlersMixin:
                 build_startup_profile_graph_response,
             )
             from ..profile_graph_models import normalize_profile_graph_document
+            from ..profile_runtime_selection import apply_profile_graph_selection
 
             manager = self._panel_startup_profile_manager()
             catalog = manager._build_catalog()
@@ -417,8 +436,17 @@ class ControlPanelHandlersMixin:
             if current is None:
                 return {"error": f"Profile '{profile_id}' not found", "status_code": 404}
 
-            graph = body.get("graph") if isinstance(body, dict) and isinstance(body.get("graph"), dict) else {}
-            selected = body.get("selected") if isinstance(body, dict) and isinstance(body.get("selected"), dict) else None
+            current_metadata = current.get("metadata") if isinstance(current.get("metadata"), dict) else {}
+            graph = (
+                body.get("graph")
+                if isinstance(body, dict) and isinstance(body.get("graph"), dict)
+                else current_metadata.get("profile_graph")
+            )
+            selected = (
+                body.get("selected")
+                if isinstance(body, dict) and isinstance(body.get("selected"), dict)
+                else current_metadata.get("selected")
+            )
             document, _ = normalize_profile_graph_document(profile_id, graph, selected, strict=True)
 
             metadata = dict(current.get("metadata") if isinstance(current.get("metadata"), dict) else {})
@@ -428,12 +456,19 @@ class ControlPanelHandlersMixin:
             policy = dict(current.get("policy") if isinstance(current.get("policy"), dict) else {})
             policy["tool_allowlist"] = list(document.selected.get("tools") or [])
             policy["api_route_allowlist"] = list(document.selected.get("api_routes") or [])
+            derived = apply_profile_graph_selection({
+                "metadata": metadata,
+                "node_overrides": {},
+            })
 
             prompts = document.selected.get("prompts") if isinstance(document.selected.get("prompts"), list) else []
             preview_payload: Dict[str, Any] = {
                 "metadata": metadata,
                 "policy": policy,
                 "system_prompt_id": prompts[0] if prompts else None,
+                "node_overrides": dict(
+                    derived.get("node_overrides") if isinstance(derived.get("node_overrides"), dict) else {}
+                ),
             }
 
             compile_preview = manager.compile_profile_preview(profile_id, {"profile": preview_payload})

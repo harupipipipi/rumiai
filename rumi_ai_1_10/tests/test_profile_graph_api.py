@@ -375,3 +375,60 @@ def test_profile_graph_compile_preview_returns_runtime_selection_diagnostics(
         diagnostic.get("code") == "api_route_allowlist_not_enforced"
         for diagnostic in runtime_preview["diagnostics"]
     )
+
+
+def test_profile_graph_compile_preview_uses_saved_selection_when_body_is_empty(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    manager = _FakeManager(tmp_path)
+    manager.current_profile["metadata"] = {
+        "profile_graph": {
+            "nodes": [
+                {
+                    "id": "node:test_profile_frontend_pack.web_surface",
+                    "kind": "node",
+                    "ref": "test_profile_frontend_pack.web_surface",
+                    "metadata": {
+                        "component_type": "frontend",
+                        "launch": {
+                            "kind": "desktop_app",
+                            "pack_id": "test_profile_frontend_pack",
+                            "surface": "browser",
+                            "default": True,
+                        },
+                        "ports": [
+                            {
+                                "id": "surface",
+                                "direction": "output",
+                                "standards": ["rumi.surface"],
+                            }
+                        ],
+                    },
+                }
+            ],
+            "edges": [],
+        },
+        "selected": {
+            "tools": ["web_search"],
+            "webhooks": [],
+            "api_routes": [],
+            "prompts": [],
+            "frontend": [],
+            "flows": [],
+            "nodes": ["test_profile_frontend_pack.web_surface"],
+        }
+    }
+    manager.current_profile["policy"] = {"tool_allowlist": ["web_search"]}
+    manager.current_profile["node_overrides"] = {
+        "frontend.surface": "test_profile_frontend_pack.web_surface",
+    }
+    monkeypatch.setattr("core_runtime.profile_graph_builder.build_startup_profile_graph_response", _graph_response)
+    handler = _FakeHandler()
+    monkeypatch.setattr(handler, "_panel_startup_profile_manager", lambda: manager)
+
+    result = handler._panel_compile_startup_profile_graph_preview("research-profile", {})
+
+    runtime_preview = result["profile_graph_runtime_preview"]
+    assert runtime_preview["selected"]["tools"] == ["web_search"]
+    assert result["compile_preview"]["profile"]["node_overrides"]["frontend.surface"] == "test_profile_frontend_pack.web_surface"

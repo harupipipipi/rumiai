@@ -37,6 +37,71 @@ def test_apply_profile_graph_selection_projects_selected_fields() -> None:
     assert normalized["system_prompt_id"] == "research.system"
 
 
+def test_apply_profile_graph_selection_syncs_prompt_changes() -> None:
+    profile = {
+        "profile_id": "research-profile",
+        "system_prompt_id": "research.system",
+        "metadata": {
+            "selected": {
+                "tools": [],
+                "webhooks": [],
+                "api_routes": [],
+                "prompts": ["coding.system"],
+                "frontend": [],
+                "flows": [],
+                "nodes": [],
+            }
+        },
+    }
+
+    normalized = apply_profile_graph_selection(profile)
+
+    assert normalized["system_prompt_id"] == "coding.system"
+
+
+def test_apply_profile_graph_selection_projects_launch_surface_node_override() -> None:
+    profile = {
+        "profile_id": "research-profile",
+        "node_overrides": {"frontend.surface": "defaultspack.frontend_surface"},
+        "metadata": {
+            "selected": {
+                "tools": [],
+                "webhooks": [],
+                "api_routes": [],
+                "prompts": [],
+                "frontend": [],
+                "flows": [],
+                "nodes": ["test_profile_frontend_pack.web_surface"],
+            },
+            "profile_graph": {
+                "nodes": [
+                    {
+                        "id": "node:test_profile_frontend_pack.web_surface",
+                        "kind": "capability_node",
+                        "ref": "test_profile_frontend_pack.web_surface",
+                        "metadata": {
+                            "component_type": "frontend",
+                            "launch": {"kind": "desktop_app", "pack_id": "test_profile_frontend_pack"},
+                            "ports": [
+                                {
+                                    "id": "surface",
+                                    "direction": "output",
+                                    "standards": ["rumi.surface"],
+                                }
+                            ],
+                        },
+                    }
+                ],
+                "edges": [],
+            },
+        },
+    }
+
+    normalized = apply_profile_graph_selection(profile)
+
+    assert normalized["node_overrides"]["frontend.surface"] == "test_profile_frontend_pack.web_surface"
+
+
 def test_unselected_tools_are_rejected_by_runtime_policy_filter() -> None:
     startup_profile = {
         "profile_id": "research-profile",
