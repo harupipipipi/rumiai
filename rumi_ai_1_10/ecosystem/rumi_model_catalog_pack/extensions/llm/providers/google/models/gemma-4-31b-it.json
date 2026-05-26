@@ -10,5 +10,9 @@
   "supports_thinking": true,
   "thinking_levels": ["minimal", "high"],
   "default_thinking_level": "high",
-  "capabilities": ["chat", "tool_calls", "vision"]
+  "capabilities": {
+    "chat": true,
+    "tool_calls": true,
+    "vision": true
+  }
 }

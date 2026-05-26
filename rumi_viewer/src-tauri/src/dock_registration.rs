@@ -299,6 +299,7 @@ exec "$PACK_SHELL" run "defaultspack" \
   --port {kernel_port} \
   --kernel-cmd "$KERNEL_COMMAND" \
   --working-dir "$APP_WORKING_DIR" \
+  --api-token "$RUMI_API_TOKEN" \
   --timeout 120
 "#,
         rumi_home = shell_quote_path(rumi_home),
@@ -716,6 +717,7 @@ mod tests {
         assert!(script.contains("--command \"$DESKTOP_COMMAND\""));
         assert!(script.contains("--port 8767"));
         assert!(script.contains("--kernel-cmd \"$KERNEL_COMMAND\""));
+        assert!(script.contains("--api-token \"$RUMI_API_TOKEN\""));
     }
 
     #[test]
