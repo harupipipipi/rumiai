@@ -676,7 +676,7 @@ class ToolExecutor:
             result = BrowserComputerController(artifact_root=_conversation_tool_artifact_root(context)).run(
                 action,
                 _computer_use_payload_with_context_defaults(action, payload, context),
-                yolo_mode=_truthy(policy.get("yolo_mode")),
+                yolo_mode=_truthy(policy.get("yolo_mode")) or _context_has_tool_server_approval(context),
             )
             if _is_cancelled(context):
                 return _cancelled_tool_result(tool_name, action=action)
@@ -1369,6 +1369,9 @@ def _function_call_context(context, tool_def):
     policy = policy_from_context(context)
     if _truthy(policy.get("yolo_mode")) or _is_policy_allow_context(context):
         forwarded["_tool_server_approved"] = True
+    if context.get("_tool_server_approval_token_valid") is True:
+        forwarded["_tool_server_approved"] = True
+        forwarded["_tool_server_approval_token_valid"] = True
     if _requires_approval(tool_def) and bool(context.get("_tool_server_approved")):
         forwarded["_tool_server_approved"] = True
     return forwarded

@@ -254,6 +254,8 @@ fn build_launch_script(
     pack_shell: &Path,
     token_file: &Path,
     rumi_home: &Path,
+    app_dir: &Path,
+    user_data_dir: &Path,
     venv_dir: &Path,
     kernel_port: u16,
     app_working_dir: &Path,
@@ -275,6 +277,8 @@ fn build_launch_script(
     format!(
         r#"#!/bin/bash
 RUMI_HOME={rumi_home}
+RUMI_APP_DIR={app_dir}
+RUMI_USER_DATA={user_data_dir}
 VENV_DIR={venv_dir}
 PACK_SHELL={pack_shell}
 TOKEN_FILE={token_file}
@@ -284,6 +288,8 @@ KERNEL_COMMAND={kernel_command}
 
 export PATH="$VENV_DIR/bin:$PATH"
 export RUMI_HOME
+export RUMI_APP_DIR
+export RUMI_USER_DATA
 {env_exports}
 RUMI_API_TOKEN=$(cat "$TOKEN_FILE" 2>/dev/null | tr -d '\n')
 export RUMI_API_TOKEN
@@ -296,6 +302,8 @@ exec "$PACK_SHELL" run "defaultspack" \
   --timeout 120
 "#,
         rumi_home = shell_quote_path(rumi_home),
+        app_dir = shell_quote_path(app_dir),
+        user_data_dir = shell_quote_path(user_data_dir),
         venv_dir = shell_quote_path(venv_dir),
         pack_shell = shell_quote_path(pack_shell),
         token_file = shell_quote_path(token_file),
@@ -313,6 +321,8 @@ fn create_macos_app_bundle(
     pack_shell: &Path,
     token_file: &Path,
     rumi_home: &Path,
+    rumi_app_dir: &Path,
+    user_data_dir: &Path,
     venv_dir: &Path,
     kernel_port: u16,
     app_working_dir: &Path,
@@ -362,6 +372,8 @@ fn create_macos_app_bundle(
         pack_shell,
         token_file,
         rumi_home,
+        rumi_app_dir,
+        user_data_dir,
         venv_dir,
         kernel_port,
         app_working_dir,
@@ -592,6 +604,8 @@ fn ensure_defaultspack_app_bundle(config: &AppConfig) -> AnyResult<PathBuf> {
         &pack_shell,
         &token_path,
         &config.rumi_home,
+        &config.app_dir,
+        &config.user_data_dir,
         &config.venv_dir,
         config.kernel_port,
         &metadata.app_working_dir,
@@ -682,6 +696,8 @@ mod tests {
             Path::new("/tmp/Rumi's bin/pack-shell"),
             Path::new("/tmp/token file"),
             Path::new("/tmp/rumi home"),
+            Path::new("/tmp/app dir"),
+            Path::new("/tmp/user data"),
             Path::new("/tmp/venv dir"),
             8767,
             Path::new("/tmp/work $(bad)"),
@@ -690,6 +706,8 @@ mod tests {
         );
 
         assert!(script.contains("PACK_SHELL='/tmp/Rumi'\\''s bin/pack-shell'"));
+        assert!(script.contains("RUMI_APP_DIR='/tmp/app dir'"));
+        assert!(script.contains("RUMI_USER_DATA='/tmp/user data'"));
         assert!(script.contains("TOKEN_FILE='/tmp/token file'"));
         assert!(script.contains("APP_WORKING_DIR='/tmp/work $(bad)'"));
         assert!(script.contains("DESKTOP_COMMAND='python -c \"print('\\''hello'\\'')\"'"));

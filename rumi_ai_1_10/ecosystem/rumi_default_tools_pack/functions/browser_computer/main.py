@@ -28,7 +28,7 @@ def run(context, args):
     if isinstance(workspace, str) and workspace:
         artifact_root = Path(workspace) / "tools" / "computer"
     user_requested = bool(isinstance(context, dict) and context.get("user_requested_computer_use"))
-    yolo_mode = _truthy(context.get("yolo_mode")) if isinstance(context, dict) else False
+    yolo_mode = _truthy(context.get("yolo_mode")) or _context_has_server_approval(context)
     if user_requested and action == "browser.open_url" and not any(
         key in payload for key in ("persistent", "profile_id", "session_id")
     ):
@@ -88,6 +88,15 @@ def _sequence_id_from_mapping(value):
         if candidate:
             return candidate
     return ""
+
+
+def _context_has_server_approval(context):
+    if not isinstance(context, dict):
+        return False
+    return bool(
+        context.get("_tool_server_approval_token_valid") is True
+        or context.get("_tool_server_approved") is True
+    )
 
 
 def _truthy(value):
