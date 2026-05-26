@@ -36,8 +36,11 @@ def test_groq_manifest_first_runtime_provider_and_allowlist(monkeypatch):
         "groq/llama-3.3-70b-versatile",
         "groq/llama-3.1-8b-instant",
         "groq/meta-llama/llama-4-scout-17b-16e-instruct",
+        "groq/groq/compound",
+        "groq/groq/compound-mini",
     }.issubset(models)
-    assert not any("compound" in model_id.lower() for model_id in models)
+    assert models["groq/groq/compound"]["metadata"]["capabilities"]["tool_calls"] is False
+    assert models["groq/groq/compound-mini"]["metadata"]["capabilities"]["tool_calls"] is False
 
     monkeypatch.setenv("GROQ_API_KEY", "test-groq-key")
     assert "groq" in detect_available_providers()
@@ -62,6 +65,45 @@ def test_cerebras_manifest_first_runtime_provider(monkeypatch):
 
     monkeypatch.setenv("CEREBRAS_API_KEY", "test-cerebras-key")
     assert "cerebras" in detect_available_providers()
+
+
+def test_openai_compatible_provider_merges_remote_models_into_curated_catalog(tmp_path):
+    from domain.ai_client.providers.openai_compatible_provider import OpenAICompatibleProvider
+
+    provider = OpenAICompatibleProvider(
+        provider_id="groq",
+        api_key="test-groq-key",
+        default_base_url="https://api.groq.com/openai/v1",
+        credential_required=False,
+        remote_model_discovery=True,
+        known_models=[
+            {
+                "id": "groq/openai/gpt-oss-120b",
+                "model_id": "openai/gpt-oss-120b",
+                "display_name": "GPT OSS 120B",
+                "capabilities": {"reasoning": True, "tool_calls": True},
+            },
+        ],
+    )
+
+    cache_path = tmp_path / "groq.models.json"
+
+    with patch.object(provider, "_remote_model_cache_path", return_value=cache_path), patch.object(
+        provider,
+        "_fetch_remote_models",
+        return_value=[
+            provider._normalize_remote_model({"id": "groq/compound-beta"}) or {},
+            provider._normalize_remote_model({"id": "meta-llama/llama-4-scout-17b-16e-instruct"}) or {},
+        ],
+    ):
+        models = {item["id"]: item for item in provider.list_models()}
+
+    assert "groq/openai/gpt-oss-120b" in models
+    assert "groq/compound-beta" in models
+    assert "groq/meta-llama/llama-4-scout-17b-16e-instruct" in models
+    assert models["groq/compound-beta"]["capabilities"]["tool_calls"] is False
+    assert models["groq/meta-llama/llama-4-scout-17b-16e-instruct"]["capabilities"]["vision"] is True
+    assert cache_path.exists()
 
 
 def test_cerebras_openai_compatible_params_match_model_contract():

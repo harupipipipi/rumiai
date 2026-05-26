@@ -3850,6 +3850,9 @@ def test_fallback_routes_expose_agent_service_and_coding_surfaces():
     assert ("GET", "/api/agent/company/manifest", "ecosystem.rumi_operations_company_pack.blocks.agent.company.manifest") in routes
     assert ("GET", "/api/agent/company/status", "ecosystem.rumi_operations_company_pack.blocks.agent.company.status") in routes
     assert ("POST", "/api/agent/company/bootstrap", "ecosystem.rumi_operations_company_pack.blocks.agent.company.bootstrap") in routes
+    assert ("GET", "/api/agent/mimo-company/manifest", "ecosystem.rumi_operations_company_pack.blocks.agent.mimo_company.manifest") in routes
+    assert ("GET", "/api/agent/mimo-company/status", "ecosystem.rumi_operations_company_pack.blocks.agent.mimo_company.status") in routes
+    assert ("POST", "/api/agent/mimo-company/bootstrap", "ecosystem.rumi_operations_company_pack.blocks.agent.mimo_company.bootstrap") in routes
     assert ("GET", "/api/agent/org/roles", "blocks.agent.org.list_roles") in routes
     assert ("GET", "/api/chat/channels", "blocks.chat.channel.list") in routes
     assert ("POST", "/api/share", "blocks.share.create") in routes
@@ -3911,6 +3914,30 @@ def test_fallback_operations_company_routes_precede_generic_agent_status():
     assert handler({}, params) == {"status": "ok"}
     assert captured == {
         "block_module": "ecosystem.rumi_operations_company_pack.blocks.agent.company.status",
+        "path_params": {},
+    }
+
+
+def test_fallback_mimo_company_routes_precede_generic_agent_status():
+    from ecosystem.defaultspack.transport.http import DefaultsHttpServer
+
+    server = DefaultsHttpServer(facade=None)
+    captured = {}
+
+    def fake_invoke(block_module, request_data, path_params, inject=None):
+        captured["block_module"] = block_module
+        captured["path_params"] = path_params
+        return {"status": "ok"}
+
+    server._invoke_fallback_block = fake_invoke
+    handler, params, _, path_inject = server._match_route("GET", "/api/agent/mimo-company/status")
+
+    assert params == {}
+    assert path_inject == {}
+    assert handler is not None
+    assert handler({}, params) == {"status": "ok"}
+    assert captured == {
+        "block_module": "ecosystem.rumi_operations_company_pack.blocks.agent.mimo_company.status",
         "path_params": {},
     }
 

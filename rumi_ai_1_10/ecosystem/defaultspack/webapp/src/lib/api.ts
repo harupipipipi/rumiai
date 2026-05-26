@@ -445,6 +445,8 @@ export type OperationsCompanyStatus = {
   };
 };
 
+export type MimoCodingCompanyStatus = OperationsCompanyStatus;
+
 export type ChatActivityEvent = {
   type: string;
   message?: string;
@@ -1802,6 +1804,29 @@ export const api = {
     model?: string;
   }) {
     return request<OperationsCompanyStatus>("/api/agent/company/bootstrap", {
+      method: "POST",
+      body: JSON.stringify(options ?? {}),
+    });
+  },
+
+  getMimoCodingCompanyStatus() {
+    return request<MimoCodingCompanyStatus>("/api/agent/mimo-company/status");
+  },
+
+  bootstrapMimoCodingCompany(options?: {
+    start_nonstop?: boolean;
+    heartbeat_minutes?: number;
+    review_interval_minutes?: number;
+    qa_interval_minutes?: number;
+    model?: string;
+    vision_model?: string;
+    fast_model?: string;
+    qa_targets?: string[];
+    run_initial_review_now?: boolean;
+    seed_tasks?: boolean;
+    seed_knowledge?: boolean;
+  }) {
+    return request<MimoCodingCompanyStatus>("/api/agent/mimo-company/bootstrap", {
       method: "POST",
       body: JSON.stringify(options ?? {}),
     });

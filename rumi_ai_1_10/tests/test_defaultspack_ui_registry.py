@@ -160,6 +160,8 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         self.assertIn("api_keys", apis_field_ids)
         self.assertNotIn("model_api_routes", apis_field_ids)
         self.assertIn("operations_company", section_ids)
+        self.assertIn("mimo_coding_company", section_ids)
+        self.assertIn("mimo-coding-company", sidebar_ids)
         self.assertNotIn("research", section_ids)
         self.assertNotIn("browser_computer", section_ids)
         self.assertNotIn("collaboration", section_ids)

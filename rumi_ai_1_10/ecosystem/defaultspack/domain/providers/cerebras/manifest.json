@@ -77,7 +77,9 @@
       "default_service_tier": "default",
       "priority_tier_private_preview": true,
       "service_tier_request_injection": "explicit_only",
-      "model_sync": "fixed_allowlist"
+      "model_sync": "remote_merge",
+      "model_list_path": "/models",
+      "model_cache_ttl_seconds": 21600
     }
   },
   "aliases": {

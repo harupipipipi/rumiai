@@ -57,6 +57,15 @@ test("buildGroupsFromChats groups metadata chats in compact workspace buckets", 
       metadata: { company_id: "operations-company" },
     },
     {
+      id: "company-2",
+      title: "MiMo company",
+      date: "Today",
+      type: "chat",
+      conversationKind: "mimo_coding_company",
+      tags: ["mimo-coding-company"],
+      metadata: { company_id: "mimo-coding-company" },
+    },
+    {
       id: "coding-1",
       title: "Fix renderer",
       date: "Today",
@@ -83,7 +92,7 @@ test("buildGroupsFromChats groups metadata chats in compact workspace buckets", 
 
   assert.deepEqual(groups.map((group) => group.title), ["Pinned", "Company", "Coding", "Tags", "Recent"]);
   assert.deepEqual(groups[0]?.chats.map((chat) => chat.id), ["pinned-1"]);
-  assert.deepEqual(groups[1]?.chats.map((chat) => chat.id), ["company-1"]);
+  assert.deepEqual(groups[1]?.chats.map((chat) => chat.id), ["company-1", "company-2"]);
   assert.deepEqual(groups[2]?.chats.map((chat) => chat.id), ["coding-1"]);
   assert.equal(groups[3]?.subGroups[0]?.title, "#design");
   assert.deepEqual(groups[3]?.subGroups[0]?.chats.map((chat) => chat.id), ["tagged-1"]);

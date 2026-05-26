@@ -34,6 +34,10 @@
         "token_plan": true,
         "thinking_format": "deepseek",
         "tool_call_type": "openai",
+        "reasoning_content_roundtrip_required_with_tool_calls": true,
+        "request_defaults": {
+          "top_p": 0.95
+        },
         "token_plan_region_scoped": true
       }
     },
@@ -57,7 +61,7 @@
         "streaming": true,
         "reasoning": true,
         "tool_calls": true,
-        "vision": false
+        "vision": true
       },
       "supports_thinking": true,
       "thinking_levels": ["low", "medium", "high", "xhigh"],
@@ -67,6 +71,11 @@
         "token_plan": true,
         "thinking_format": "deepseek",
         "tool_call_type": "openai",
+        "reasoning_content_roundtrip_required_with_tool_calls": true,
+        "native_multimodal": true,
+        "request_defaults": {
+          "top_p": 0.95
+        },
         "token_plan_region_scoped": true
       }
     },
@@ -98,6 +107,50 @@
         "token_plan": true,
         "thinking_format": "deepseek",
         "tool_call_type": "openai",
+        "reasoning_content_roundtrip_required_with_tool_calls": true,
+        "request_defaults": {
+          "top_p": 0.95
+        },
+        "token_plan_region_scoped": true
+      }
+    },
+    {
+      "id": "xiaomi-token-plan-cn/mimo-v2-omni",
+      "category": "llm_model",
+      "version": "1",
+      "provider_id": "xiaomi-token-plan-cn",
+      "model_id": "mimo-v2-omni",
+      "display_name": "MiMo V2 Omni",
+      "type": "vision",
+      "enabled": true,
+      "priority": 4,
+      "defaults": {
+        "vision": true,
+        "agent": true
+      },
+      "capabilities": {
+        "chat": true,
+        "streaming": true,
+        "reasoning": true,
+        "tool_calls": true,
+        "vision": true
+      },
+      "supports_thinking": true,
+      "thinking_levels": ["low", "medium", "high", "xhigh"],
+      "default_thinking_level": "medium",
+      "context_window": 1048576,
+      "max_context": 1048576,
+      "max_context_tokens": 1048576,
+      "metadata": {
+        "region": "cn",
+        "token_plan": true,
+        "thinking_format": "deepseek",
+        "tool_call_type": "openai",
+        "reasoning_content_roundtrip_required_with_tool_calls": true,
+        "native_multimodal": true,
+        "request_defaults": {
+          "top_p": 0.95
+        },
         "token_plan_region_scoped": true
       }
     },
@@ -110,7 +163,7 @@
       "display_name": "MiMo V2 Omni",
       "type": "chat",
       "enabled": true,
-      "priority": 4,
+      "priority": 5,
       "defaults": {
         "chat": true,
         "vision": true
@@ -130,6 +183,9 @@
         "token_plan": true,
         "thinking_format": "deepseek",
         "tool_call_type": "openai",
+        "request_defaults": {
+          "top_p": 0.95
+        },
         "token_plan_region_scoped": true,
         "vision_verified": true
       }

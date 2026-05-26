@@ -29,6 +29,8 @@ _TOKEN_PLAN_MODELS: List[Dict[str, Any]] = [
             "token_plan": True,
             "thinking_format": "deepseek",
             "tool_call_type": "openai",
+            "reasoning_content_roundtrip_required_with_tool_calls": True,
+            "request_defaults": {"top_p": 0.95},
         },
     },
     {
@@ -42,7 +44,7 @@ _TOKEN_PLAN_MODELS: List[Dict[str, Any]] = [
             "streaming": True,
             "reasoning": True,
             "tool_calls": True,
-            "vision": False,
+            "vision": True,
         },
         "supports_thinking": True,
         "thinking_levels": ["low", "medium", "high", "xhigh"],
@@ -51,6 +53,9 @@ _TOKEN_PLAN_MODELS: List[Dict[str, Any]] = [
             "token_plan": True,
             "thinking_format": "deepseek",
             "tool_call_type": "openai",
+            "reasoning_content_roundtrip_required_with_tool_calls": True,
+            "native_multimodal": True,
+            "request_defaults": {"top_p": 0.95},
         },
     },
     {
@@ -73,6 +78,36 @@ _TOKEN_PLAN_MODELS: List[Dict[str, Any]] = [
             "token_plan": True,
             "thinking_format": "deepseek",
             "tool_call_type": "openai",
+            "reasoning_content_roundtrip_required_with_tool_calls": True,
+            "request_defaults": {"top_p": 0.95},
+        },
+    },
+    {
+        "model_id": "mimo-v2-omni",
+        "name": "MiMo V2 Omni",
+        "display_name": "MiMo V2 Omni",
+        "type": "vision",
+        "defaults": {"vision": True, "agent": True},
+        "capabilities": {
+            "chat": True,
+            "streaming": True,
+            "reasoning": True,
+            "tool_calls": True,
+            "vision": True,
+        },
+        "supports_thinking": True,
+        "thinking_levels": ["low", "medium", "high", "xhigh"],
+        "default_thinking_level": "medium",
+        "context_window": 1048576,
+        "max_context": 1048576,
+        "max_context_tokens": 1048576,
+        "metadata": {
+            "token_plan": True,
+            "thinking_format": "deepseek",
+            "tool_call_type": "openai",
+            "reasoning_content_roundtrip_required_with_tool_calls": True,
+            "native_multimodal": True,
+            "request_defaults": {"top_p": 0.95},
         },
     },
     {
@@ -96,6 +131,7 @@ _TOKEN_PLAN_MODELS: List[Dict[str, Any]] = [
             "thinking_format": "deepseek",
             "tool_call_type": "openai",
             "vision_verified": True,
+            "request_defaults": {"top_p": 0.95},
         },
     },
 ]
@@ -161,6 +197,30 @@ class XiaomiMimoTokenPlanProvider(OpenAICompatibleProvider):
                 "xiaomi-mimo-token-plan: unsupported model. "
                 f"defaultspack supports only: {supported}"
             )
+
+    def _translate_model_params(self, model, params):
+        translated = dict(params or {})
+        extra_body = dict(translated.get("extra_body") if isinstance(translated.get("extra_body"), dict) else {})
+        model_entry = self._known_model_entry(model)
+        supports_thinking = bool(model_entry.get("supports_thinking"))
+
+        raw_level = str(translated.pop("thinking_level", "") or translated.pop("reasoning_effort", "")).strip().lower()
+        if not isinstance(extra_body.get("thinking"), dict):
+            if raw_level == "none":
+                extra_body["thinking"] = {"type": "disabled"}
+            elif supports_thinking:
+                # Xiaomi MiMo uses a DeepSeek-style thinking toggle instead of
+                # OpenAI reasoning_effort. Keep the prompt simple and let the
+                # provider use its own default internal depth when enabled.
+                extra_body["thinking"] = {"type": "enabled"}
+        translated.pop("reasoning_effort", None)
+        if supports_thinking and extra_body:
+            translated["extra_body"] = extra_body
+        elif extra_body:
+            extra_body.pop("thinking", None)
+            if extra_body:
+                translated["extra_body"] = extra_body
+        return translated
 
     def list_models(self) -> List[Dict[str, Any]]:
         return [dict(model) for model in self.KNOWN_MODELS]

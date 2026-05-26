@@ -37,6 +37,7 @@ def test_operations_company_profile_coexists_with_default_profile():
 
     assert "defaultspack.local_agent" in profile_ids
     assert "defaultspack.operations_company" in profile_ids
+    assert "defaultspack.mimo_coding_company" in profile_ids
     assert manifest["counts"]["profiles"] >= 2
 
 
@@ -78,6 +79,62 @@ def test_operations_conversation_resolves_pack_system_prompt():
 
     assert "Rumi Operations Company" in prompt
     assert "Client Manager" in prompt
+
+
+def test_mimo_coding_company_bootstrap_creates_company_conversation_and_loops(tmp_path, monkeypatch):
+    from ecosystem.rumi_operations_company_pack.domain.agent.mimo_coding_company import MimoCodingCompanyRuntime
+    from domain.agent.scheduler import Scheduler
+    from domain.chat.store import ChatStore
+
+    _reset_defaultspack_singletons()
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(tmp_path / "chat" / "conversations.json"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_COMPANY_STORE_PATH", str(tmp_path / "companies"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_MIMO_CODING_STATE_PATH", str(tmp_path / "mimo" / "state.json"))
+
+    runtime = MimoCodingCompanyRuntime(pack_root=tmp_path / "ops_pack")
+    status = runtime.bootstrap(
+        start_nonstop=True,
+        heartbeat_minutes=30,
+        review_interval_minutes=180,
+        qa_interval_minutes=240,
+        model="stub/default",
+        vision_model="stub/default",
+        fast_model="stub/default",
+        qa_targets=["http://127.0.0.1:3000"],
+        seed_knowledge=False,
+        run_initial_review_now=False,
+    )
+
+    assert status["bootstrapped"] is True
+    assert status["company"]["id"] == "mimo-coding-company"
+    assert status["conversation_id"]
+    assert status["harness"]["qa_targets"] == ["http://127.0.0.1:3000"]
+    assert len(status["harness"]["seeded_task_ids"]) == 4
+
+    conversation = ChatStore().get_conversation(status["conversation_id"])
+    assert conversation["conversation_kind"] == "mimo_coding_company"
+    assert conversation["agent_id"] == "client_manager"
+    assert conversation["metadata"]["profile_id"] == "defaultspack.mimo_coding_company"
+    assert "mimo-coding-company" in conversation["tags"]
+
+    loop_keys = {schedule["task"]["metadata"]["loop_key"] for schedule in status["schedules"]}
+    assert {"kickoff_review", "heartbeat", "improvement_loop", "qa_loop"} <= loop_keys
+    assert any(schedule["task"]["agent_id"] == "browser_qa" for schedule in status["schedules"])
+
+    for schedule in status["schedules"]:
+        Scheduler().delete_schedule(schedule["id"])
+    _reset_defaultspack_singletons()
+
+
+def test_mimo_coding_conversation_resolves_pack_system_prompt():
+    from blocks.chat.send import _conversation_system_prompt
+    from domain.prompt.manager import get_manager
+
+    prompt = _conversation_system_prompt({"system_prompt_id": "mimo_coding_company"}, get_manager())
+
+    assert "MiMo Coding Company" in prompt
+    assert "Toolsmith builds missing tools or skills instead of stopping" in prompt
 
 
 def test_operations_heartbeat_trigger_persists_into_single_client_conversation(tmp_path, monkeypatch):
@@ -127,5 +184,6 @@ def test_rumi_api_tool_lists_routes_and_requires_mutation_approval():
 
     assert listed["status"] == "ok"
     assert any(route["path"] == "/api/agent/company/status" for route in listed["data"]["routes"])
+    assert any(route["path"] == "/api/agent/mimo-company/status" for route in listed["data"]["routes"])
     assert mutation["status"] == "ok"
     assert mutation["data"]["approval_required"] is True
