@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib
 import json
 from copy import deepcopy
 from pathlib import Path
@@ -20,6 +21,13 @@ ALLOWED_RUMI_FUNCTIONS = {
     "ai_get_effective_thinking_level",
     "ai_normalize_thinking_level",
 }
+
+# pack_block execution type: lets a manifest-defined slash command dispatch to a
+# pack-controlled Python block (modules under blocks/) that exposes a run(input,
+# context) callable. Restricted to default/pack origins so user manifests can
+# never load arbitrary modules.
+PACK_BLOCK_ALLOWED_ORIGINS = (MANIFEST_ORIGIN_DEFAULT, MANIFEST_ORIGIN_PACK)
+PACK_BLOCK_ALLOWED_MODULE_PREFIXES = ("blocks.",)
 
 
 def ok(data: Any = None) -> dict[str, Any]:
@@ -113,6 +121,9 @@ class SlashCommandRegistry:
         if execution_type == "chat_action":
             return self._execute_chat_action(command, execution, args, payload, context or {})
 
+        if execution_type == "pack_block":
+            return self._execute_pack_block(command, execution, args, payload, context or {})
+
         return error("unsupported command execution type", "INVALID_COMMAND", details={"type": execution_type})
 
     def _execute_model_command(
@@ -199,6 +210,84 @@ class SlashCommandRegistry:
         if isinstance(result, dict) and result.get("status") == "ok":
             return ok({"command": self._public_command(command), "executed": True, "result": result.get("data")})
         return result if isinstance(result, dict) else error("compact command failed", "EXECUTION_FAILED")
+
+    def _execute_pack_block(
+        self,
+        command: dict[str, Any],
+        execution: dict[str, Any],
+        args: dict[str, Any],
+        payload: dict[str, Any],
+        context: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Dispatch the slash command to a pack-controlled block module.
+
+        Manifests provide ``execution.qualified_name`` as ``"<pack_id>:<dotted.path>"``;
+        the dotted path is resolved relative to ``blocks.`` (or accepted as-is when
+        already starting with ``blocks.``). The target module must expose a callable
+        ``run(input, context)`` that returns ``{"status": "ok", "data": ...}`` or
+        ``{"status": "error", ...}``.
+
+        Restricted to default and pack origins (never user origin) and to modules
+        under ``blocks.`` so user manifests can never load arbitrary modules.
+        """
+        origin = command.get("_manifest_origin")
+        if origin not in PACK_BLOCK_ALLOWED_ORIGINS:
+            return error(
+                "pack_block execution is only allowed for default and pack manifests",
+                "INVALID_COMMAND",
+            )
+        qualified_name = str(execution.get("qualified_name") or "").strip()
+        if not qualified_name or ":" not in qualified_name:
+            return error(
+                "pack_block command requires qualified_name '<pack_id>:<module.path>'",
+                "INVALID_COMMAND",
+            )
+        _pack_id, _, module_id = qualified_name.partition(":")
+        module_id = module_id.strip().lstrip(".")
+        if not module_id:
+            return error(
+                "pack_block command requires a module path after the pack prefix",
+                "INVALID_COMMAND",
+            )
+        if module_id.startswith("blocks."):
+            module_path = module_id
+        else:
+            module_path = "blocks." + module_id
+        if not any(module_path.startswith(prefix) for prefix in PACK_BLOCK_ALLOWED_MODULE_PREFIXES):
+            return error(
+                "pack_block target module is not on the allowlist of module roots",
+                "INVALID_COMMAND",
+            )
+        try:
+            module = importlib.import_module(module_path)
+        except Exception as exc:
+            return error(f"pack_block target failed to import: {exc}", "EXECUTION_FAILED")
+        runner = getattr(module, "run", None)
+        if not callable(runner):
+            return error(
+                "pack_block target does not expose a callable run(input, context)",
+                "INVALID_COMMAND",
+            )
+
+        block_input: dict[str, Any] = dict(args)
+        for forwarded in ("conversation_id", "mode"):
+            value = payload.get(forwarded)
+            if value not in (None, "") and forwarded not in block_input:
+                block_input[forwarded] = value
+
+        try:
+            result = runner(block_input, dict(context or {}))
+        except Exception as exc:
+            return error(f"pack_block execution failed: {exc}", "EXECUTION_FAILED")
+        if isinstance(result, dict) and result.get("status") == "ok":
+            return ok({
+                "command": self._public_command(command),
+                "executed": True,
+                "result": result.get("data"),
+            })
+        if isinstance(result, dict):
+            return result
+        return error("pack_block returned an unexpected response", "EXECUTION_FAILED")
 
     def _execute_builtin_rumi_function(self, qualified_name: str, args: dict[str, Any]) -> dict[str, Any] | None:
         function_id = self._rumi_function_id(qualified_name)
