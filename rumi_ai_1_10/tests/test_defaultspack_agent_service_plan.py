@@ -677,6 +677,7 @@ def test_chat_stream_direct_path_honors_conversation_cancel(tmp_path, monkeypatc
 
 def test_chat_stop_marks_streaming_assistant_draft_cancelled(tmp_path, monkeypatch):
     import blocks.chat.stop as stop_module
+    from domain.chat.cancellation import get_chat_cancellation_registry
     from domain.chat.store import ChatStore
 
     storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
@@ -718,6 +719,54 @@ def test_chat_stop_marks_streaming_assistant_draft_cancelled(tmp_path, monkeypat
     assert stored["metadata"]["thinking"]["state"] == "cancelled"
     assert "streaming" not in stored["metadata"]
     assert "draft" not in stored["metadata"]
+    assert get_chat_cancellation_registry().is_cancelled(conversation["id"]) is False
+    ChatStore._instance = None
+
+
+def test_chat_stop_does_not_poison_future_run_when_no_active_callbacks(tmp_path, monkeypatch):
+    import blocks.chat.stop as stop_module
+    from domain.chat.cancellation import get_chat_cancellation_registry
+    from domain.chat.store import ChatStore
+
+    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
+    ChatStore._instance = None
+
+    store = ChatStore()
+    conversation = store.create_conversation(model="stub/default")
+    user_message = store.add_message(
+        conversation["id"],
+        {
+            "role": "user",
+            "content": [{"type": "text", "text": "resume later"}],
+            "raw_text": "resume later",
+        },
+    )
+    store.add_message(
+        conversation["id"],
+        {
+            "role": "assistant",
+            "parent_id": user_message["id"],
+            "content": [{"type": "text", "text": "許可が必要なため、ユーザーが承認するまで待機します。承認後に続行します。"}],
+            "raw_text": "許可が必要なため、ユーザーが承認するまで待機します。承認後に続行します。",
+            "finish_reason": "approval_required",
+            "metadata": {
+                "pending_approval": {
+                    "tool_name": "coding_file_patch",
+                    "approval_request_id": "apr_demo",
+                }
+            },
+            "events": [],
+            "tool_logs": [],
+            "model": "stub/default",
+        },
+    )
+
+    result = stop_module.run({"conversation_id": conversation["id"]}, {})
+
+    assert result["status"] == "ok"
+    assert result["data"]["persisted_cancelled"] is False
+    assert get_chat_cancellation_registry().is_cancelled(conversation["id"]) is False
     ChatStore._instance = None
 
 
@@ -5804,3 +5853,54 @@ def test_artifact_store_is_local_and_versioned(tmp_path):
         assert "escapes artifact root" in str(exc)
     else:
         raise AssertionError("artifact store allowed path traversal")
+
+def test_chat_cancellation_register_keeps_pending_stop_request():
+    """request_cancel before register should NOT be lost.
+
+    stop.run calls request_cancel even when no streaming callback is
+    registered yet.  The pending cancel flag must survive so that the
+    next register() fires the callback immediately — otherwise the
+    stop request is silently dropped.
+    """
+    from domain.chat.cancellation import ChatCancellationRegistry
+
+    reg = ChatCancellationRegistry()
+    called = []
+    reg.request_cancel("conv_pending")
+    reg.register("conv_pending", lambda: called.append(True))
+    assert called == [True], f"pending stop was dropped: {called}"
+
+
+def test_stop_run_skips_request_cancel_when_no_active_callbacks(tmp_path, monkeypatch):
+    """stop.run must not pollute _cancelled when no callback is active.
+
+    Without the has_callbacks guard, request_cancel marks the
+    conversation as cancelled even when nothing is streaming,
+    which causes the *next* turn's register() to fire immediately.
+    """
+    from domain.chat.cancellation import ChatCancellationRegistry, get_chat_cancellation_registry
+    from domain.chat.store import ChatStore
+
+    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
+    ChatStore._instance = None
+
+    store = ChatStore()
+    conversation = store.create_conversation(model="stub/default")
+
+    reg = get_chat_cancellation_registry()
+    # No callback registered → stop.run must NOT call request_cancel
+    from blocks.chat.stop import run
+    result = run({"conversation_id": conversation["id"]}, {})
+
+    assert result["status"] == "ok"
+    assert reg.is_cancelled(conversation["id"]) is False, (
+        "request_cancel was called without active callbacks"
+    )
+
+    # Next turn: register should NOT fire immediately
+    next_called = []
+    reg.register(conversation["id"], lambda: next_called.append(True))
+    assert next_called == [], f"cancel flag leaked to next turn: {next_called}"
+
+    ChatStore._instance = None
