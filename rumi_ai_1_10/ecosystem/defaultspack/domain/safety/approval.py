@@ -400,6 +400,23 @@ def verify_execution_token(
     return TokenVerification(True, request_id=request_id)
 
 
+def get_approval_request(request_id: str) -> dict[str, Any] | None:
+    """Return a stored approval request as a plain dict, or ``None`` if missing.
+
+    Used by the approval-followup replay path to recover the approved arguments
+    deterministically from the stored ``details["arguments"]`` payload.
+    """
+    if not request_id:
+        return None
+    with _LOCK:
+        request = _REQUESTS.get(str(request_id)) or _request_from_mapping(
+            get_approval_store().get_request(str(request_id))
+        )
+    if request is None:
+        return None
+    return asdict(request)
+
+
 def list_approval_requests(status: str | None = None, *, include_expired: bool = True, limit: int = 100) -> list[dict[str, Any]]:
     limit = max(1, min(500, int(limit or 100)))
     requests = get_approval_store().list_requests(include_expired=True, limit=500)

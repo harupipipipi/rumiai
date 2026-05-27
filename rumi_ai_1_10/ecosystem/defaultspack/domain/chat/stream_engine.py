@@ -555,6 +555,45 @@ class _AssistantDraft:
             self.message = updated
         return updated
 
+    def fail(
+        self,
+        *,
+        content_text: str,
+        thinking_transcript: str,
+        events: list[dict[str, Any]],
+        tool_logs: list[dict[str, Any]],
+        reason: str = "stream_interrupted",
+    ) -> dict[str, Any] | None:
+        if not self.message:
+            return None
+        final_text = content_text.strip() or "応答ストリームが中断しました。最後の tool 結果を確認してください。"
+        metadata = {
+            "model": self._model,
+            "thinking": {"state": "failed"},
+            "thinking_level": self._params.get("thinking_level"),
+            "interrupted": True,
+            "interruption_reason": reason,
+        }
+        if thinking_transcript:
+            metadata["thinking"]["transcript"] = thinking_transcript
+        updated = self._store.update_message(
+            self._conversation_id,
+            self.id,
+            {
+                "content": [{"type": "text", "text": final_text}],
+                "raw_text": final_text,
+                "finish_reason": "error",
+                "usage": {},
+                "metadata": metadata,
+                "events": list(events),
+                "tool_logs": list(tool_logs),
+                "model": self._model,
+            },
+        )
+        if updated is not None:
+            self.message = updated
+        return updated
+
     def discard(self) -> None:
         if not self.message:
             return
@@ -649,6 +688,7 @@ class ChatRunEngine:
                     pass
 
         draft: _AssistantDraft | None = None
+        draft_completed = False
         cancellation_registry.register(prepared.conversation_id, request_cancel)
         try:
             yield self._emit(
@@ -732,6 +772,7 @@ class ChatRunEngine:
                         events=list(self._activity_events),
                         tool_logs=list(self._tool_logs),
                     )
+                    draft_completed = True
                 yield cancelled_event
                 return
             except RuntimeError as exc:
@@ -788,6 +829,7 @@ class ChatRunEngine:
                     message="Failed to add assistant message",
                 )
                 return
+            draft_completed = True
 
             yield self._emit(
                 "assistant_message_completed",
@@ -809,6 +851,16 @@ class ChatRunEngine:
             )
         finally:
             self._cancel_event.set()
+            if draft is not None and not draft_completed:
+                try:
+                    draft.fail(
+                        content_text="".join(self._text_parts),
+                        thinking_transcript="".join(self._thinking_transcript_parts),
+                        events=list(self._activity_events),
+                        tool_logs=list(self._tool_logs),
+                    )
+                except Exception:
+                    pass
             cancellation_registry.unregister(prepared.conversation_id, request_cancel)
 
     def _process_conversation_steer(self, conversation_id: str, context: dict[str, Any]) -> list[dict[str, Any]]:
@@ -939,6 +991,22 @@ class ChatRunEngine:
     def _execute(self, prepared: PreparedChatRun, draft: _AssistantDraft | None) -> Iterator[dict[str, Any]]:
         working_messages = list(prepared.standard_messages)
         working_ir = prepared.provider_chat_ir or prepared.chat_ir
+        # Deterministic approval-followup replay (single-shot, before model loop).
+        # When the UI delivers an ``approval_followup`` whose token + tool_name +
+        # request_id resolve to an approved pending tool, we replay that exact
+        # pending tool once with the stored approved arguments before letting
+        # the model speak. This removes any reliance on the model deciding to
+        # re-issue the tool call from natural-language hints, which was the
+        # root cause of executed_tools=[] hallucinated commit-success bugs.
+        #
+        # If the replay surfaces an approval/blocked response (the tool itself
+        # still needs approval, or recovery is blocked) the helper returns a
+        # fully formed response and we short-circuit the model loop here.
+        replay_blocked = yield from self._replay_approval_followup_if_present(
+            prepared, working_messages, working_ir, draft,
+        )
+        if replay_blocked is not None:
+            return replay_blocked
         tool_context_message = _tool_visibility_message(prepared.provider_tools)
         if tool_context_message is not None:
             insert_at = 1 if working_messages and working_messages[0].get("role") == "system" else 0
@@ -1344,6 +1412,228 @@ class ChatRunEngine:
         }
         response["metadata"] = metadata
         return response
+
+    def _replay_approval_followup_if_present(
+        self,
+        prepared: PreparedChatRun,
+        working_messages: list[dict[str, Any]],
+        working_ir: Any,
+        draft: _AssistantDraft | None,
+    ) -> Iterator[dict[str, Any]]:
+        """Deterministically replay an approved coding tool when the user-side
+        approval-followup metadata resolves to an approved pending tool.
+
+        Uses ``approval_token`` + ``tool_name`` + ``request_id`` from the
+        ``approval_followup`` metadata block to look up the stored approved
+        arguments, executes the pending tool once with those arguments and the
+        token, appends the synthetic assistant tool_use + tool_result pair to
+        the working chain, and clears ``provider_tools`` so the model can only
+        summarize the result.
+
+        Falls through (no-op) for non-coding flows, missing tokens, expired or
+        consumed tokens, mismatched args_hash, tool_name mismatch, or any
+        internal error. The existing model-driven path then runs unchanged so
+        we never regress non-followup turns.
+
+        When the replayed tool result itself reports ``approval_required`` or
+        a ``tool_blocked`` recovery kind, this generator emits the same
+        ``approval_requested`` / ``tool_blocked`` events the model-driven
+        path would emit and *returns* a fully formed blocked response so the
+        caller can short-circuit the model loop and surface the
+        approval/blocking path directly. In all other cases the generator
+        returns ``None`` and the caller continues into the summary turn.
+        """
+        metadata = prepared.metadata if isinstance(prepared.metadata, dict) else {}
+        followup = metadata.get("approval_followup") if isinstance(metadata.get("approval_followup"), dict) else None
+        if not followup:
+            return None
+        token = str(followup.get("approval_token") or followup.get("token") or "").strip()
+        tool_name = str(followup.get("tool_name") or "").strip()
+        request_id = str(followup.get("request_id") or followup.get("approval_request_id") or "").strip()
+        if not (token and tool_name and request_id):
+            return None
+
+        try:
+            from domain.safety import approval as _approval_mod
+        except Exception:
+            return None
+
+        try:
+            request = _approval_mod.get_approval_request(request_id)
+        except Exception:
+            request = None
+        if not isinstance(request, dict):
+            return None
+        # Replay only when the request was approved by the user. ``consumed``
+        # is excluded because the one-shot token has already burnt and would
+        # not pass verify_execution_token below.
+        if str(request.get("status") or "") != "approved":
+            return None
+
+        details = request.get("details") if isinstance(request.get("details"), dict) else {}
+        # Safety guard: if the original approval request stored the requesting
+        # tool_name, the followup must target the exact same tool. This blocks
+        # a malicious or stale followup from reusing an approved token to
+        # invoke a different tool than the one the user actually saw and
+        # approved. When the request did not record a tool_name (older /
+        # non-coding flows) we skip this check and fall through to the
+        # signed-token verification below, which still binds the approval to
+        # the operation + args_hash.
+        request_tool_name = str(details.get("tool_name") or "").strip()
+        if request_tool_name and request_tool_name != tool_name:
+            return None
+
+        stored_args = details.get("arguments") if isinstance(details.get("arguments"), dict) else None
+        if stored_args is None:
+            return None
+        operation = str(request.get("operation") or "").strip()
+        if not operation:
+            return None
+
+        try:
+            args_hash = _approval_mod.hash_arguments(stored_args)
+            verification = _approval_mod.verify_execution_token(
+                token, operation, args_hash, consume=False,
+            )
+        except Exception:
+            return None
+        if not getattr(verification, "valid", False):
+            return None
+
+        invoke_args = dict(stored_args)
+        invoke_args["approval_token"] = token
+        tool_call_id = "replay_" + gen_id()
+
+        # Mark we have started this synthetic tool call before emitting any event
+        # so subsequent hooks treat it as a single deterministic execution.
+        self._started_tool_call_ids.add(tool_call_id)
+
+        display_started = _tool_display_payload(tool_name, invoke_args, status="running")
+        yield self._emit(
+            "tool_call_started",
+            data={
+                "tool_name": tool_name,
+                "tool_call_id": tool_call_id,
+                "arguments": invoke_args,
+                "approval_replay": True,
+                **display_started,
+            },
+            message=display_started["display_text"],
+            phase="tool_call_started",
+            tool_name=tool_name,
+            tool_call_id=tool_call_id,
+            arguments=invoke_args,
+            approval_replay=True,
+        )
+        self._sync_draft(draft, force=True)
+
+        try:
+            result = self._execute_tool(prepared, tool_name, tool_call_id, invoke_args)
+        except Exception as exc:  # pragma: no cover - defensive
+            result = {
+                "result": "approval-followup replay failed: {}".format(exc),
+                "is_error": True,
+                "widget": None,
+            }
+
+        summary = _tool_result_summary(tool_name, result)
+        artifacts = _tool_result_artifacts(result)
+        status = "failed" if _tool_result_is_error(result) else "completed"
+        display_completed = _tool_display_payload(tool_name, invoke_args, status=status, summary=summary)
+        yield self._emit(
+            "tool_call_completed",
+            data={
+                "tool_name": tool_name,
+                "tool_call_id": tool_call_id,
+                "is_error": _tool_result_is_error(result),
+                "recovery_kind": _tool_result_recovery_kind(result),
+                "result_summary": summary,
+                "summary": summary,
+                "approval_replay": True,
+                **display_completed,
+                "result": _bounded_compact_tool_result(result, summary, artifacts),
+                "artifacts": artifacts,
+                "artifact_paths": [artifact.get("path") for artifact in artifacts if artifact.get("path")],
+            },
+            message=display_completed["display_text"],
+            phase="tool_call_completed",
+            tool_name=tool_name,
+            tool_call_id=tool_call_id,
+            is_error=_tool_result_is_error(result),
+            approval_replay=True,
+        )
+        self._sync_draft(draft, force=True)
+
+        # Safety guard: if the replayed tool itself still reports an approval
+        # is required (e.g. a nested / chained approval flow) we must NOT
+        # advance to the natural-language summary turn, otherwise the model
+        # would speak as if the operation succeeded while the underlying tool
+        # is actually still pending. Surface the approval path directly using
+        # the same helpers as the model-driven branch in ``_execute``.
+        approval_request = _approval_request_from_tool_result(tool_name, tool_call_id, invoke_args, result)
+        if approval_request is not None:
+            approval_event = self._emit(
+                "approval_requested",
+                data=approval_request,
+                message=_APPROVAL_WAITING_TEXT,
+                phase="approval_requested",
+                tool_name=tool_name,
+                tool_call_id=tool_call_id,
+                requires_approval=True,
+            )
+            self._sync_draft(draft, force=True)
+            yield approval_event
+            return _approval_waiting_response(
+                prepared.model,
+                approval_request,
+                prepared.params,
+                events=list(self._activity_events),
+            )
+
+        synth_tool_uses = [{"id": tool_call_id, "name": tool_name, "input": invoke_args}]
+        _append_assistant_tool_use_message(working_messages, synth_tool_uses)
+        try:
+            append_assistant_tool_use_to_ir(working_ir, synth_tool_uses)
+        except Exception:
+            pass
+        _append_tool_result_message(working_messages, tool_name, result, tool_call_id, model=prepared.model)
+        try:
+            append_tool_result_to_ir(working_ir, tool_name, result, tool_call_id, model=prepared.model)
+        except Exception:
+            pass
+
+        # Safety guard: when the replayed tool reports a recovery kind that
+        # blocks further automation (e.g. visible window required, focus
+        # required) the model summary turn must not run, otherwise the user
+        # would see a confident summary for an operation that never reached
+        # the host. Surface the same ``tool_blocked`` status the model-driven
+        # branch in ``_execute`` emits and short-circuit with the existing
+        # ``_tool_blocked_response`` helper.
+        recovery_kind = _tool_result_recovery_kind(result)
+        if recovery_kind in {"visible_window_required", "focus_required"}:
+            yield self._emit(
+                "status",
+                data={"tool_name": tool_name, "tool_call_id": tool_call_id, "recovery_kind": recovery_kind},
+                message="可視画面外の tool 実行要求のため停止しました",
+                phase="tool_blocked",
+                tool_name=tool_name,
+                tool_call_id=tool_call_id,
+            )
+            self._sync_draft(draft, force=True)
+            return _tool_blocked_response(tool_name, result)
+
+        # Strip provider tools so the upcoming model turn produces only a
+        # natural-language summary; we have already replayed the pending tool
+        # exactly once, and any further provider tool call from the same
+        # followup turn would be a regression of the deterministic contract.
+        prepared.provider_tools = []
+        if isinstance(prepared.tool_context, dict):
+            prepared.tool_context["approval_replayed"] = {
+                "tool_name": tool_name,
+                "tool_call_id": tool_call_id,
+                "request_id": request_id,
+            }
+        return None
 
     def _execute_tool(
         self,

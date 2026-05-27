@@ -77,12 +77,35 @@ def approval_invalid_response(operation: str, input_data: dict[str, Any] | None,
     return result
 
 
+_REPLAY_ARG_IGNORE_KEYS = ("approval_token", "_headers", "_method", "_raw_body", "_raw_body_base64")
+
+
+def _replayable_args(args: dict[str, Any] | None) -> dict[str, Any]:
+    """Return a deep-enough copy of ``args`` safe to embed in approval details.
+
+    Strips token/transport keys so the stored arguments deterministically match
+    the args_hash and can be replayed by the approval-followup path without
+    leaking transport metadata.
+    """
+    if not isinstance(args, dict):
+        return {}
+    payload = dict(args)
+    for key in _REPLAY_ARG_IGNORE_KEYS:
+        payload.pop(key, None)
+    return payload
+
+
 def approval_required(operation, risk_level="high", args: dict[str, Any] | None = None, **details):
+    replay_args = _replayable_args(args)
+    # Embed the approved arguments inside the approval request details so the
+    # approval-followup path can replay the exact pending tool deterministically
+    # without depending on the model's natural-language compliance.
+    details_with_args = {"arguments": replay_args, **details}
     request = _approval_module().create_approval_request(
         operation,
         risk_level,
-        args or details,
-        details=details,
+        replay_args or details,
+        details=details_with_args,
     )
     payload = {
         "approval_required": True,
