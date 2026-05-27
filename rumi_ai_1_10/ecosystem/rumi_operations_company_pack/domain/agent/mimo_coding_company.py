@@ -134,6 +134,8 @@ PERSONA_MISSIONS = {
     },
 }
 
+TERMINAL_TASK_STATUSES = {"done", "completed", "closed", "cancelled", "canceled", "resolved"}
+
 FALLBACK_KNOWLEDGE_DOCS = [
     (
         "README.md",
@@ -448,8 +450,9 @@ class MimoCodingCompanyRuntime:
         company = self._sync_company_record(state)
         open_tasks = 0
         try:
-            task_list = CompanyTaskStore().list(COMPANY_ID, status="open", limit=200, offset=0)
-            open_tasks = task_list[1] if task_list is not None else 0
+            task_list = CompanyTaskStore().list(COMPANY_ID, limit=500, offset=0)
+            tasks = task_list[0] if task_list is not None else []
+            open_tasks = len([task for task in tasks if self._is_active_task(task)])
         except Exception:
             open_tasks = 0
         try:
@@ -477,6 +480,7 @@ class MimoCodingCompanyRuntime:
                 "docker_swarm": deepcopy(state.get("docker_swarm") if isinstance(state.get("docker_swarm"), dict) else self._docker_swarm_state()),
                 "knowledge_bundle_paths": [str(path) for path in self._knowledge_bundle_paths()],
                 "seeded_task_ids": list(state.get("seeded_task_ids") if isinstance(state.get("seeded_task_ids"), list) else []),
+                "stream_task_ids": deepcopy(state.get("stream_task_ids") if isinstance(state.get("stream_task_ids"), dict) else {}),
                 "seeded_knowledge_ids": list(state.get("seeded_knowledge_ids") if isinstance(state.get("seeded_knowledge_ids"), list) else []),
                 "open_task_count": open_tasks,
                 "knowledge_entry_count": knowledge_total,
@@ -825,6 +829,7 @@ class MimoCodingCompanyRuntime:
                 "knowledge_bundle_paths": [str(path) for path in self._knowledge_bundle_paths()],
                 "autonomy_board": deepcopy(state.get("autonomy_board") if isinstance(state.get("autonomy_board"), dict) else self._autonomy_board(state)),
                 "qa_swarm_plan": deepcopy(state.get("qa_swarm_plan") if isinstance(state.get("qa_swarm_plan"), dict) else self._qa_swarm_plan(state)),
+                "stream_task_ids": deepcopy(state.get("stream_task_ids") if isinstance(state.get("stream_task_ids"), dict) else {}),
             }
             return CompanyService().store.ensure_company(
                 company_id=COMPANY_ID,
@@ -881,10 +886,21 @@ class MimoCodingCompanyRuntime:
         return created_ids
 
     def _seed_tasks(self, state: dict[str, Any]) -> list[str]:
-        existing = list(state.get("seeded_task_ids") if isinstance(state.get("seeded_task_ids"), list) else [])
-        if existing:
-            return existing
         store = CompanyTaskStore()
+        listed = store.list(COMPANY_ID, limit=500, offset=0)
+        tasks = listed[0] if listed is not None else []
+        tasks_by_stream: dict[str, list[dict[str, Any]]] = {}
+        for task in tasks:
+            if not isinstance(task, dict):
+                continue
+            metadata = task.get("metadata") if isinstance(task.get("metadata"), dict) else {}
+            stream_id = str(metadata.get("stream_id") or "").strip()
+            if not stream_id:
+                continue
+            tasks_by_stream.setdefault(stream_id, []).append(task)
+
+        task_ids: list[str] = []
+        stream_task_ids: dict[str, str] = {}
         specs = [
             {
                 "title": stream["title"],
@@ -895,24 +911,59 @@ class MimoCodingCompanyRuntime:
             }
             for stream in IMPROVEMENT_STREAMS
         ]
-        task_ids: list[str] = []
         for spec in specs:
+            stream_id = str(spec.get("stream_id") or "")
+            stream_tasks = tasks_by_stream.get(stream_id, [])
+            active = next((task for task in stream_tasks if self._is_active_task(task)), None)
+            metadata = {
+                "profile_id": PROFILE_ID,
+                "company_id": COMPANY_ID,
+                "conversation_id": state.get("conversation_id"),
+                "stream_id": stream_id,
+            }
+            if active:
+                updates: dict[str, Any] = {}
+                if active.get("title") != spec["title"]:
+                    updates["title"] = spec["title"]
+                if active.get("description") != spec["description"]:
+                    updates["description"] = spec["description"]
+                if active.get("target_agent_ids") != spec["target_agent_ids"]:
+                    updates["target_agent_ids"] = list(spec["target_agent_ids"])
+                current_metadata = active.get("metadata") if isinstance(active.get("metadata"), dict) else {}
+                merged_metadata = {**current_metadata, **metadata}
+                if current_metadata != merged_metadata:
+                    updates["metadata"] = merged_metadata
+                if updates:
+                    active = store.update(COMPANY_ID, str(active.get("id")), updates) or active
+                if active.get("id"):
+                    active_id = str(active["id"])
+                    task_ids.append(active_id)
+                    stream_task_ids[stream_id] = active_id
+                continue
+
             created = store.create(
                 COMPANY_ID,
                 title=spec["title"],
                 description=spec["description"],
                 target_agent_ids=spec["target_agent_ids"],
                 source=spec["source"],
-                metadata={
-                    "profile_id": PROFILE_ID,
-                    "company_id": COMPANY_ID,
-                    "conversation_id": state.get("conversation_id"),
-                    "stream_id": spec.get("stream_id"),
-                },
+                metadata=metadata,
             )
             if isinstance(created, dict) and created.get("id"):
-                task_ids.append(str(created["id"]))
+                created_id = str(created["id"])
+                task_ids.append(created_id)
+                stream_task_ids[stream_id] = created_id
+        state["stream_task_ids"] = stream_task_ids
         return task_ids
+
+    @staticmethod
+    def _is_active_task(task: dict[str, Any] | None) -> bool:
+        if not isinstance(task, dict):
+            return False
+        status = str(task.get("status") or "").strip().lower()
+        if not status:
+            return True
+        return status not in TERMINAL_TASK_STATUSES
 
     def _schedule_policy(self) -> dict[str, Any]:
         return {
