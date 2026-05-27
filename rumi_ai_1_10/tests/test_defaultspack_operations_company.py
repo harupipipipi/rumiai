@@ -125,6 +125,7 @@ def test_mimo_coding_company_bootstrap_creates_company_conversation_and_loops(tm
     assert Path(status["harness"]["docker_swarm"]["compose_path"]).is_file()
     assert Path(status["harness"]["docker_swarm"]["template_compose_path"]).is_file()
     assert Path(status["harness"]["docker_swarm"]["workers"][0]["assignment_path"]).is_file()
+    assert status["harness"]["docker_swarm"]["monitoring"]["reported_workers"] == 0
     queued_tasks = CompanyTaskStore().list("mimo-coding-company", status="queued", limit=50, offset=0)
     assert queued_tasks is not None and queued_tasks[1] == 6
     assignment = json.loads(Path(status["harness"]["docker_swarm"]["workers"][0]["assignment_path"]).read_text(encoding="utf-8"))
@@ -267,6 +268,65 @@ def test_mimo_coding_company_rebootstrap_replenishes_completed_stream_task(tmp_p
     assert replacement_task_id != stream_task_id
     assert second["harness"]["open_task_count"] == 6
     assert queued_tasks is not None and queued_tasks[1] == 6
+
+    for schedule in second["schedules"]:
+        Scheduler().delete_schedule(schedule["id"])
+    _reset_defaultspack_singletons()
+
+
+def test_mimo_coding_company_status_aggregates_worker_runtime_status(tmp_path, monkeypatch):
+    from ecosystem.rumi_operations_company_pack.domain.agent.mimo_coding_company import MimoCodingCompanyRuntime
+    from domain.agent.scheduler import Scheduler
+
+    _reset_defaultspack_singletons()
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(tmp_path / "chat" / "conversations.json"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_COMPANY_STORE_PATH", str(tmp_path / "companies"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_MIMO_CODING_STATE_PATH", str(tmp_path / "mimo" / "state.json"))
+
+    runtime = MimoCodingCompanyRuntime(pack_root=tmp_path / "ops_pack")
+    first = runtime.bootstrap(
+        start_nonstop=True,
+        heartbeat_minutes=30,
+        review_interval_minutes=180,
+        qa_interval_minutes=240,
+        model="stub/default",
+        vision_model="stub/default",
+        fast_model="stub/default",
+        qa_targets=["http://127.0.0.1:3000"],
+        seed_knowledge=False,
+        run_initial_review_now=False,
+    )
+    worker = first["harness"]["docker_swarm"]["workers"][0]
+    status_path = Path(worker["status_path"])
+    status_path.parent.mkdir(parents=True, exist_ok=True)
+    status_path.write_text(
+        json.dumps(
+            {
+                "worker_id": worker["worker_id"],
+                "persona_id": worker["persona_id"],
+                "started_at": "2026-05-27T00:00:00Z",
+                "assignment": {
+                    "worker_id": worker["worker_id"],
+                    "persona_id": worker["persona_id"],
+                },
+                "browser_launch": {"attempted": True, "start_url": "http://127.0.0.1:3000"},
+                "display": ":99",
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    second = runtime.status()
+    monitoring = second["harness"]["docker_swarm"]["monitoring"]
+
+    assert monitoring["total_workers"] == len(second["harness"]["docker_swarm"]["workers"])
+    assert monitoring["reported_workers"] == 1
+    assert monitoring["browser_launch_attempted_workers"] == 1
+    assert monitoring["workers"][0]["assignment_match"] is True
+    assert second["company"]["metadata"]["docker_swarm"]["monitoring"]["reported_workers"] == 1
 
     for schedule in second["schedules"]:
         Scheduler().delete_schedule(schedule["id"])

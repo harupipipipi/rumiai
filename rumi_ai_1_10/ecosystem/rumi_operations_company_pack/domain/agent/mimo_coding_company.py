@@ -462,6 +462,9 @@ class MimoCodingCompanyRuntime:
             knowledge_total = 0
         autonomy_board = deepcopy(state.get("autonomy_board") if isinstance(state.get("autonomy_board"), dict) else self._autonomy_board(state))
         qa_swarm_plan = deepcopy(state.get("qa_swarm_plan") if isinstance(state.get("qa_swarm_plan"), dict) else self._qa_swarm_plan(state))
+        docker_swarm = self._docker_swarm_with_monitoring(
+            deepcopy(state.get("docker_swarm") if isinstance(state.get("docker_swarm"), dict) else self._docker_swarm_state())
+        )
         return {
             "profile_id": PROFILE_ID,
             "bootstrapped": bool(org),
@@ -478,7 +481,7 @@ class MimoCodingCompanyRuntime:
                 "fast_model": state.get("fast_model") or DEFAULT_FAST_MODEL,
                 "utility_models": deepcopy(state.get("utility_models") if isinstance(state.get("utility_models"), dict) else UTILITY_MODELS),
                 "qa_targets": list(state.get("qa_targets") if isinstance(state.get("qa_targets"), list) else []),
-                "docker_swarm": deepcopy(state.get("docker_swarm") if isinstance(state.get("docker_swarm"), dict) else self._docker_swarm_state()),
+                "docker_swarm": docker_swarm,
                 "knowledge_bundle_paths": [str(path) for path in self._knowledge_bundle_paths()],
                 "seeded_task_ids": list(state.get("seeded_task_ids") if isinstance(state.get("seeded_task_ids"), list) else []),
                 "stream_task_ids": deepcopy(state.get("stream_task_ids") if isinstance(state.get("stream_task_ids"), dict) else {}),
@@ -778,6 +781,70 @@ class MimoCodingCompanyRuntime:
         }
         return swarm_state
 
+    @staticmethod
+    def _read_json_file(path: Path) -> dict[str, Any]:
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            return payload if isinstance(payload, dict) else {}
+        except Exception:
+            return {}
+
+    def _docker_swarm_with_monitoring(self, swarm_state: dict[str, Any]) -> dict[str, Any]:
+        swarm = deepcopy(swarm_state) if isinstance(swarm_state, dict) else {}
+        swarm["monitoring"] = self._docker_swarm_monitoring(swarm)
+        return swarm
+
+    def _docker_swarm_monitoring(self, swarm_state: dict[str, Any]) -> dict[str, Any]:
+        workers = swarm_state.get("workers") if isinstance(swarm_state.get("workers"), list) else []
+        observed_workers: list[dict[str, Any]] = []
+        reported_workers = 0
+        browser_launch_attempted_workers = 0
+        missing_status_workers: list[str] = []
+        for raw_worker in workers:
+            if not isinstance(raw_worker, dict):
+                continue
+            worker = dict(raw_worker)
+            worker_id = str(worker.get("worker_id") or "")
+            status_path_text = str(worker.get("status_path") or "")
+            status_path = Path(status_path_text) if status_path_text else None
+            status_payload = self._read_json_file(status_path) if status_path is not None else {}
+            reported = bool(status_payload)
+            browser_launch = status_payload.get("browser_launch") if isinstance(status_payload.get("browser_launch"), dict) else {}
+            browser_attempted = bool(browser_launch.get("attempted"))
+            assignment = status_payload.get("assignment") if isinstance(status_payload.get("assignment"), dict) else {}
+            assignment_match = False
+            if assignment:
+                assignment_match = (
+                    str(assignment.get("worker_id") or "") == worker_id
+                    and str(assignment.get("persona_id") or "") == str(worker.get("persona_id") or "")
+                )
+            if reported:
+                reported_workers += 1
+            else:
+                missing_status_workers.append(worker_id)
+            if browser_attempted:
+                browser_launch_attempted_workers += 1
+            observed_workers.append(
+                {
+                    "worker_id": worker_id,
+                    "persona_id": str(worker.get("persona_id") or ""),
+                    "qa_target": str(worker.get("qa_target") or ""),
+                    "status_path": status_path_text,
+                    "reported": reported,
+                    "started_at": str(status_payload.get("started_at") or ""),
+                    "browser_launch_attempted": browser_attempted,
+                    "assignment_match": assignment_match,
+                    "display": str(status_payload.get("display") or worker.get("display") or ""),
+                }
+            )
+        return {
+            "total_workers": len(observed_workers),
+            "reported_workers": reported_workers,
+            "browser_launch_attempted_workers": browser_launch_attempted_workers,
+            "missing_status_workers": missing_status_workers,
+            "workers": observed_workers,
+        }
+
     def _docker_worker_assignment(self, worker: dict[str, Any]) -> dict[str, Any]:
         persona_id = str(worker.get("persona_id") or "first_time_user")
         persona_specs = {str(item.get("id")): item for item in self._persona_specs()}
@@ -947,6 +1014,9 @@ class MimoCodingCompanyRuntime:
 
     def _sync_company_record(self, state: dict[str, Any]) -> dict[str, Any] | None:
         try:
+            docker_swarm = self._docker_swarm_with_monitoring(
+                deepcopy(state.get("docker_swarm") if isinstance(state.get("docker_swarm"), dict) else self._docker_swarm_state())
+            )
             metadata = {
                 "profile_id": PROFILE_ID,
                 "conversation_group_id": self._conversation_group_id(),
@@ -957,7 +1027,7 @@ class MimoCodingCompanyRuntime:
                 "fast_model": state.get("fast_model") or DEFAULT_FAST_MODEL,
                 "self_improving": True,
                 "qa_targets": list(state.get("qa_targets") if isinstance(state.get("qa_targets"), list) else []),
-                "docker_swarm": deepcopy(state.get("docker_swarm") if isinstance(state.get("docker_swarm"), dict) else self._docker_swarm_state()),
+                "docker_swarm": docker_swarm,
                 "knowledge_bundle_paths": [str(path) for path in self._knowledge_bundle_paths()],
                 "autonomy_board": deepcopy(state.get("autonomy_board") if isinstance(state.get("autonomy_board"), dict) else self._autonomy_board(state)),
                 "qa_swarm_plan": deepcopy(state.get("qa_swarm_plan") if isinstance(state.get("qa_swarm_plan"), dict) else self._qa_swarm_plan(state)),

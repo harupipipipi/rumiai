@@ -266,6 +266,7 @@ def test_mimo_coding_company_runtime_syncs_default_company_record(tmp_path, monk
     assert status["company"]["metadata"]["autonomy_board"]["next_focus"][0]["id"] == "initial_harness_review"
     assert status["company"]["metadata"]["qa_swarm_plan"]["workers"][0]["mission"]
     assert len(status["company"]["metadata"]["stream_task_ids"]) == 6
+    assert status["company"]["metadata"]["docker_swarm"]["monitoring"]["total_workers"] >= 1
     assert status["company"]["agents"]["toolsmith"]["system_prompt"]
     assert "build the smallest viable one instead of stopping" in status["company"]["agents"]["toolsmith"]["system_prompt"]
 
