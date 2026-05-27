@@ -263,6 +263,8 @@ def test_mimo_coding_company_runtime_syncs_default_company_record(tmp_path, monk
     assert status["company"]["conversation_group_id"] == "company:mimo-coding-company"
     assert status["company"]["metadata"]["conversation_id"] == status["conversation_id"]
     assert status["company"]["metadata"]["self_improving"] is True
+    assert status["company"]["metadata"]["autonomy_board"]["next_focus"][0]["id"] == "initial_harness_review"
+    assert status["company"]["metadata"]["qa_swarm_plan"]["workers"][0]["mission"]
     assert status["company"]["agents"]["toolsmith"]["system_prompt"]
     assert "build the smallest viable one instead of stopping" in status["company"]["agents"]["toolsmith"]["system_prompt"]
 

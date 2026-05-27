@@ -58,6 +58,82 @@ DEFAULT_PERSONA_SPECS = [
     },
 ]
 
+IMPROVEMENT_STREAMS = [
+    {
+        "id": "initial_harness_review",
+        "title": "Initial harness review",
+        "description": "Review the repo and current harness shape. Prefer one small high-value improvement first.",
+        "target_agent_ids": ["project_manager", "reviewer"],
+        "preferred_tools": ["todo", "subagent", "coding_git_diff", "knowledge_create"],
+        "owner_role": "project_manager",
+        "preferred_model_role": "main",
+    },
+    {
+        "id": "provider_search_coverage",
+        "title": "Provider and search coverage",
+        "description": "Improve search quality, provider discovery, and model catalogs. Keep Groq, Cerebras, and Xiaomi current.",
+        "target_agent_ids": ["toolsmith", "project_manager"],
+        "preferred_tools": ["web_search", "knowledge_search", "knowledge_create", "coding_file_patch"],
+        "owner_role": "toolsmith",
+        "preferred_model_role": "main",
+    },
+    {
+        "id": "frontend_qa_swarm",
+        "title": "Frontend QA swarm",
+        "description": "Run browser and computer-use QA with multiple personas and log only evidence-backed bugs.",
+        "target_agent_ids": ["browser_qa", "reviewer"],
+        "preferred_tools": ["browser_use", "browser_companion", "computer_use", "todo"],
+        "owner_role": "browser_qa",
+        "preferred_model_role": "vision",
+    },
+    {
+        "id": "docker_worker_swarm",
+        "title": "Docker worker swarm",
+        "description": "Use isolated Ubuntu Docker workers for browser and computer-use QA whenever Docker is available.",
+        "target_agent_ids": ["browser_qa", "toolsmith"],
+        "preferred_tools": ["coding_terminal_exec", "sandbox_exec", "computer_use", "knowledge_create"],
+        "owner_role": "toolsmith",
+        "preferred_model_role": "vision",
+    },
+    {
+        "id": "tool_skill_gap_closure",
+        "title": "Tool and skill gap closure",
+        "description": "When a task needs a missing tool or skill, create the smallest viable one instead of giving up.",
+        "target_agent_ids": ["toolsmith", "coding_engineer"],
+        "preferred_tools": ["coding_file_patch", "coding_file_create", "knowledge_create", "subagent"],
+        "owner_role": "toolsmith",
+        "preferred_model_role": "main",
+    },
+    {
+        "id": "knowledge_capture_loop",
+        "title": "Knowledge capture loop",
+        "description": "Keep the knowledge bundle current so later self-improvement loops learn from wins, failures, and QA findings.",
+        "target_agent_ids": ["project_manager", "toolsmith"],
+        "preferred_tools": ["knowledge_create", "knowledge_update", "knowledge_search", "todo"],
+        "owner_role": "project_manager",
+        "preferred_model_role": "fast",
+    },
+]
+
+PERSONA_MISSIONS = {
+    "first_time_user": {
+        "mission": "Find onboarding gaps, missing defaults, and dead-end flows.",
+        "probe_areas": ["landing flow", "first task creation", "empty states", "setup defaults"],
+    },
+    "power_user": {
+        "mission": "Stress advanced controls, provider settings, and bulk actions.",
+        "probe_areas": ["settings panels", "model picker", "tool toggles", "batch actions"],
+    },
+    "impatient_user": {
+        "mission": "Interrupt flows, click early, and expose brittle loading states.",
+        "probe_areas": ["loading states", "retry flows", "navigation while pending", "double-submit safety"],
+    },
+    "keyboard_heavy_user": {
+        "mission": "Check focus order, shortcuts, and keyboard-only usability.",
+        "probe_areas": ["focus order", "composer submit/cancel", "dialogs", "sidebar navigation"],
+    },
+}
+
 FALLBACK_KNOWLEDGE_DOCS = [
     (
         "README.md",
@@ -380,6 +456,8 @@ class MimoCodingCompanyRuntime:
             knowledge_total = int(KnowledgeStore().list_entries(limit=1, offset=0).get("total", 0))
         except Exception:
             knowledge_total = 0
+        autonomy_board = deepcopy(state.get("autonomy_board") if isinstance(state.get("autonomy_board"), dict) else self._autonomy_board(state))
+        qa_swarm_plan = deepcopy(state.get("qa_swarm_plan") if isinstance(state.get("qa_swarm_plan"), dict) else self._qa_swarm_plan(state))
         return {
             "profile_id": PROFILE_ID,
             "bootstrapped": bool(org),
@@ -402,6 +480,8 @@ class MimoCodingCompanyRuntime:
                 "seeded_knowledge_ids": list(state.get("seeded_knowledge_ids") if isinstance(state.get("seeded_knowledge_ids"), list) else []),
                 "open_task_count": open_tasks,
                 "knowledge_entry_count": knowledge_total,
+                "autonomy_board": autonomy_board,
+                "qa_swarm_plan": qa_swarm_plan,
             },
             "state": state,
             "manifest": self.manifest(),
@@ -458,6 +538,8 @@ class MimoCodingCompanyRuntime:
             persona_ids=cleaned_personas,
             qa_targets=cleaned_targets,
         )
+        state["autonomy_board"] = self._autonomy_board(state)
+        state["qa_swarm_plan"] = self._qa_swarm_plan(state)
         company = self._sync_company_record(state)
         if seed_knowledge:
             state["seeded_knowledge_ids"] = self._seed_knowledge(state, company)
@@ -741,6 +823,8 @@ class MimoCodingCompanyRuntime:
                 "qa_targets": list(state.get("qa_targets") if isinstance(state.get("qa_targets"), list) else []),
                 "docker_swarm": deepcopy(state.get("docker_swarm") if isinstance(state.get("docker_swarm"), dict) else self._docker_swarm_state()),
                 "knowledge_bundle_paths": [str(path) for path in self._knowledge_bundle_paths()],
+                "autonomy_board": deepcopy(state.get("autonomy_board") if isinstance(state.get("autonomy_board"), dict) else self._autonomy_board(state)),
+                "qa_swarm_plan": deepcopy(state.get("qa_swarm_plan") if isinstance(state.get("qa_swarm_plan"), dict) else self._qa_swarm_plan(state)),
             }
             return CompanyService().store.ensure_company(
                 company_id=COMPANY_ID,
@@ -803,41 +887,13 @@ class MimoCodingCompanyRuntime:
         store = CompanyTaskStore()
         specs = [
             {
-                "title": "Initial harness review",
-                "description": "Review the repo and current harness shape. Prefer one small high-value improvement first.",
-                "target_agent_ids": ["project_manager", "reviewer"],
+                "title": stream["title"],
+                "description": stream["description"],
+                "target_agent_ids": list(stream["target_agent_ids"]),
                 "source": "bootstrap",
-            },
-            {
-                "title": "Search and provider improvement",
-                "description": "Improve search quality, provider discovery, and model catalogs. Keep Groq/Cerebras/Xiaomi current.",
-                "target_agent_ids": ["toolsmith", "project_manager"],
-                "source": "bootstrap",
-            },
-            {
-                "title": "Frontend QA swarm",
-                "description": "Run browser/computer-use QA with multiple user personas and log only evidence-backed bugs.",
-                "target_agent_ids": ["browser_qa", "reviewer"],
-                "source": "bootstrap",
-            },
-            {
-                "title": "Docker worker swarm",
-                "description": "Use isolated Ubuntu Docker workers for browser/computer-use QA whenever Docker is available.",
-                "target_agent_ids": ["browser_qa", "toolsmith"],
-                "source": "bootstrap",
-            },
-            {
-                "title": "Tool and skill gap closure",
-                "description": "When a task needs a missing tool or skill, create the smallest viable one instead of giving up.",
-                "target_agent_ids": ["toolsmith", "coding_engineer"],
-                "source": "bootstrap",
-            },
-            {
-                "title": "Knowledge capture loop",
-                "description": "Keep the knowledge bundle current so later self-improvement loops learn from previous wins, failures, and QA findings.",
-                "target_agent_ids": ["project_manager", "toolsmith"],
-                "source": "bootstrap",
-            },
+                "stream_id": stream["id"],
+            }
+            for stream in IMPROVEMENT_STREAMS
         ]
         task_ids: list[str] = []
         for spec in specs:
@@ -851,6 +907,7 @@ class MimoCodingCompanyRuntime:
                     "profile_id": PROFILE_ID,
                     "company_id": COMPANY_ID,
                     "conversation_id": state.get("conversation_id"),
+                    "stream_id": spec.get("stream_id"),
                 },
             )
             if isinstance(created, dict) and created.get("id"):
@@ -888,29 +945,33 @@ class MimoCodingCompanyRuntime:
         schedule_ids = state.setdefault("schedule_ids", {})
         scheduler = Scheduler()
         existing_id = schedule_ids.get(key)
+        task = {
+            "message": message,
+            "model": model,
+            "conversation_id": state.get("conversation_id"),
+            "timeout": 600,
+            "profile_id": PROFILE_ID,
+            "agent_id": agent_id,
+            "thinking_level": "high",
+            "tools": list(tools),
+            "tool_policy": self._schedule_policy(),
+            "metadata": {
+                "profile_id": PROFILE_ID,
+                "company_id": COMPANY_ID,
+                "conversation_id": state.get("conversation_id"),
+                "loop_key": key,
+            },
+        }
+        config = {"value": safe_minutes, "unit": "minutes"}
+        name = f"MiMo Coding Company {key.replace('_', ' ')}"
         if existing_id and scheduler.get_schedule(existing_id):
+            self._refresh_schedule(existing_id, task=task, config=config, name=name, description=description)
             return str(existing_id)
         schedule = scheduler.create_schedule(
             "interval",
-            {
-                "message": message,
-                "model": model,
-                "conversation_id": state.get("conversation_id"),
-                "timeout": 600,
-                "profile_id": PROFILE_ID,
-                "agent_id": agent_id,
-                "thinking_level": "high",
-                "tools": list(tools),
-                "tool_policy": self._schedule_policy(),
-                "metadata": {
-                    "profile_id": PROFILE_ID,
-                    "company_id": COMPANY_ID,
-                    "conversation_id": state.get("conversation_id"),
-                    "loop_key": key,
-                },
-            },
-            {"value": safe_minutes, "unit": "minutes"},
-            name=f"MiMo Coding Company {key.replace('_', ' ')}",
+            task,
+            config,
+            name=name,
             description=description,
         )
         schedule_ids[key] = schedule["id"]
@@ -931,29 +992,33 @@ class MimoCodingCompanyRuntime:
         schedule_ids = state.setdefault("schedule_ids", {})
         scheduler = Scheduler()
         existing_id = schedule_ids.get(key)
+        task = {
+            "message": message,
+            "model": model,
+            "conversation_id": state.get("conversation_id"),
+            "timeout": 900,
+            "profile_id": PROFILE_ID,
+            "agent_id": agent_id,
+            "thinking_level": "high",
+            "tools": list(tools),
+            "tool_policy": self._schedule_policy(),
+            "metadata": {
+                "profile_id": PROFILE_ID,
+                "company_id": COMPANY_ID,
+                "conversation_id": state.get("conversation_id"),
+                "loop_key": key,
+            },
+        }
+        config = {"run_at": run_at.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")}
+        name = "MiMo Coding Company kickoff review"
         if existing_id and scheduler.get_schedule(existing_id):
+            self._refresh_schedule(existing_id, task=task, config=config, name=name, description=description)
             return str(existing_id)
         schedule = scheduler.create_schedule(
             "once",
-            {
-                "message": message,
-                "model": model,
-                "conversation_id": state.get("conversation_id"),
-                "timeout": 900,
-                "profile_id": PROFILE_ID,
-                "agent_id": agent_id,
-                "thinking_level": "high",
-                "tools": list(tools),
-                "tool_policy": self._schedule_policy(),
-                "metadata": {
-                    "profile_id": PROFILE_ID,
-                    "company_id": COMPANY_ID,
-                    "conversation_id": state.get("conversation_id"),
-                    "loop_key": key,
-                },
-            },
-            {"run_at": run_at.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")},
-            name="MiMo Coding Company kickoff review",
+            task,
+            config,
+            name=name,
             description=description,
         )
         schedule_ids[key] = schedule["id"]
@@ -969,11 +1034,92 @@ class MimoCodingCompanyRuntime:
                 schedules.append(schedule)
         return schedules
 
+    def _refresh_schedule(
+        self,
+        schedule_id: str,
+        *,
+        task: dict[str, Any],
+        config: dict[str, Any],
+        name: str,
+        description: str,
+    ) -> None:
+        scheduler = Scheduler()
+        current = scheduler.get_schedule(schedule_id)
+        if not current:
+            return
+        updates: dict[str, Any] = {}
+        if current.get("task") != task:
+            updates["task"] = task
+        if current.get("config") != config:
+            updates["config"] = config
+        if current.get("name") != name:
+            updates["name"] = name
+        if current.get("description") != description:
+            updates["description"] = description
+        if updates:
+            scheduler.update_schedule(schedule_id, updates)
+
+    def _autonomy_board(self, state: dict[str, Any]) -> dict[str, Any]:
+        main_model = str(state.get("main_model") or DEFAULT_MAIN_MODEL)
+        vision_model = str(state.get("vision_model") or DEFAULT_VISION_MODEL)
+        fast_model = str(state.get("fast_model") or DEFAULT_FAST_MODEL)
+        qa_targets = list(state.get("qa_targets") if isinstance(state.get("qa_targets"), list) else [])
+        streams: list[dict[str, Any]] = []
+        for stream in IMPROVEMENT_STREAMS:
+            item = deepcopy(stream)
+            model_role = str(item.get("preferred_model_role") or "main")
+            item["recommended_model"] = {
+                "main": main_model,
+                "vision": vision_model,
+                "fast": fast_model,
+            }.get(model_role, main_model)
+            if item["id"] in {"frontend_qa_swarm", "docker_worker_swarm"}:
+                item["qa_targets"] = list(qa_targets)
+            streams.append(item)
+        return {
+            "selection_policy": "Pick one unfinished stream at a time. Use short prompts. Land one verified change before switching streams.",
+            "supervision_contract": "Client Manager monitors, Project Manager delegates, Reviewer verifies, Toolsmith builds missing tools instead of stopping.",
+            "streams": streams,
+            "next_focus": streams[:3],
+        }
+
+    def _qa_swarm_plan(self, state: dict[str, Any]) -> dict[str, Any]:
+        docker_swarm = state.get("docker_swarm") if isinstance(state.get("docker_swarm"), dict) else self._docker_swarm_state()
+        workers = docker_swarm.get("workers") if isinstance(docker_swarm.get("workers"), list) else []
+        persona_specs = {str(item.get("id")): item for item in self._persona_specs()}
+        assignments: list[dict[str, Any]] = []
+        for worker in workers:
+            if not isinstance(worker, dict):
+                continue
+            persona_id = str(worker.get("persona_id") or "first_time_user")
+            persona_meta = PERSONA_MISSIONS.get(persona_id, {})
+            persona_spec = persona_specs.get(persona_id, {})
+            assignments.append(
+                {
+                    "worker_id": str(worker.get("worker_id") or ""),
+                    "container_name": str(worker.get("container_name") or ""),
+                    "persona_id": persona_id,
+                    "persona_label": str(persona_spec.get("label") or persona_id),
+                    "qa_target": str(worker.get("qa_target") or ""),
+                    "mission": str(persona_meta.get("mission") or str(persona_spec.get("goal") or "")),
+                    "probe_areas": list(persona_meta.get("probe_areas") or []),
+                    "evidence_required": "Screenshots or exact repro steps before filing a bug.",
+                }
+            )
+        return {
+            "coordinator_agent_id": "browser_qa",
+            "reporting_policy": "Report only evidence-backed bugs. Stay quiet if the assigned path passes.",
+            "workers": assignments,
+        }
+
     def _kickoff_message(self, state: dict[str, Any]) -> str:
+        focus_items = self._autonomy_board(state).get("next_focus", [])
+        focus = ", ".join(str(item.get("title") or item.get("id") or "") for item in focus_items[:3] if isinstance(item, dict))
         return (
-            "Start with one simple coding task. Review the current repo and harness, pick the smallest high-value improvement, "
-            "then hand implementation to @coding_engineer and review to @reviewer. "
-            "Record the decision in the knowledge bundle. If a missing tool or skill blocks progress, ask @toolsmith to create it."
+            "Start MiMo Coding Company with one simple coding task. Pick one stream"
+            + (": " + focus if focus else "")
+            + ". Use short prompts. Hand implementation to @coding_engineer, review to @reviewer, and record the outcome in knowledge. "
+            "If a missing tool or skill blocks progress, ask @toolsmith to create the smallest viable version."
         )
 
     def _heartbeat_message(self, state: dict[str, Any]) -> str:
@@ -984,27 +1130,33 @@ class MimoCodingCompanyRuntime:
 
     def _improvement_message(self, state: dict[str, Any]) -> str:
         main_model = str(state.get("main_model") or DEFAULT_MAIN_MODEL)
-        docker_swarm = state.get("docker_swarm") if isinstance(state.get("docker_swarm"), dict) else {}
-        worker_count = int(docker_swarm.get("worker_count") or DEFAULT_DOCKER_WORKER_COUNT)
+        focus_items = self._autonomy_board(state).get("next_focus", [])
+        focus = "; ".join(str(item.get("title") or item.get("id") or "") for item in focus_items[:3] if isinstance(item, dict))
         return (
-            "Run the self-improvement loop. Pick one unfinished or newly discovered high-value task around coding harness quality, "
-            "provider/model coverage, search quality, or repo UX. Keep prompts short. Use "
+            "Run the self-improvement loop. Keep prompts short. Pick one stream"
+            + (": " + focus if focus else "")
+            + ". Use "
             + main_model
-            + " as the main reasoning model. Prefer Docker-isolated QA with "
-            + str(worker_count)
-            + " Ubuntu workers when useful. If the best next step needs a new tool or skill, create the smallest viable version instead of stopping."
+            + " as the main reasoning model. If the best next step needs a new tool or skill, create the smallest viable version instead of stopping. "
+            "Land one verified change, then capture what changed in knowledge."
         )
 
     def _qa_message(self, state: dict[str, Any]) -> str:
-        targets = list(state.get("qa_targets") if isinstance(state.get("qa_targets"), list) else [])
-        docker_swarm = state.get("docker_swarm") if isinstance(state.get("docker_swarm"), dict) else {}
-        personas = list(docker_swarm.get("personas") if isinstance(docker_swarm.get("personas"), list) else [])
-        target_text = ", ".join(targets) if targets else "the active localhost/defaultspack surface"
+        assignments = self._qa_swarm_plan(state).get("workers", [])
+        summary = "; ".join(
+            (
+                str(item.get("worker_id") or "")
+                + " "
+                + str(item.get("persona_label") or item.get("persona_id") or "")
+                + " -> "
+                + str(item.get("qa_target") or "defaultspack surface")
+            )
+            for item in assignments[:4]
+            if isinstance(item, dict)
+        )
         return (
-            "Run a QA swarm on "
-            + target_text
-            + ". Simulate multiple user personas"
-            + (": " + ", ".join(personas) if personas else "")
-            + ", click around, and use browser_use, browser_companion, or computer_use as needed. "
-            "Log only evidence-backed bugs with repro steps. Stay quiet if everything passes."
+            "Run a QA swarm with short prompts."
+            + (" Assignments: " + summary + "." if summary else "")
+            + " Click around, use browser_use, browser_companion, or computer_use as needed, and log only evidence-backed bugs with repro steps. "
+            "Stay quiet if everything passes."
         )
