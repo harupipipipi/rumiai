@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import shlex
 import sys
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
@@ -686,6 +688,14 @@ class MimoCodingCompanyRuntime:
         except IndexError:
             return self.source_pack_root
 
+    def _docker_project_name(self) -> str:
+        digest = hashlib.sha1(str(self.state_path).encode("utf-8")).hexdigest()[:10]
+        return f"mimo-coding-{digest}"
+
+    def _docker_worker_container_name(self, worker_id: str) -> str:
+        cleaned_worker_id = str(worker_id or "").strip().replace("_", "-") or "worker"
+        return f"{self._docker_project_name()}-{cleaned_worker_id}"
+
     @staticmethod
     def _write_json_file(path: Path, payload: dict[str, Any]) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -732,8 +742,11 @@ class MimoCodingCompanyRuntime:
         runtime_dir = self._docker_runtime_dir()
         assignments_dir = runtime_dir / "assignments"
         status_dir = runtime_dir / "status"
+        assignments_dir.mkdir(parents=True, exist_ok=True)
+        status_dir.mkdir(parents=True, exist_ok=True)
         bundle_dir = Path(str(swarm_state.get("bundle_dir") or self._docker_bundle_dir()))
         workspace_root = self._workspace_root()
+        project_name = self._docker_project_name()
         workers: list[dict[str, Any]] = []
         assignment_paths: dict[str, str] = {}
         status_paths: dict[str, str] = {}
@@ -745,6 +758,7 @@ class MimoCodingCompanyRuntime:
             worker_id = str(worker.get("worker_id") or "")
             if not worker_id:
                 continue
+            worker["container_name"] = self._docker_worker_container_name(worker_id)
             assignment_path = assignments_dir / f"{worker_id}.assignment.json"
             status_path = status_dir / f"{worker_id}.status.json"
             assignment = self._docker_worker_assignment(worker)
@@ -760,6 +774,7 @@ class MimoCodingCompanyRuntime:
         generated_compose_path.write_text(
             self._render_docker_swarm_compose(
                 bundle_dir=bundle_dir,
+                project_name=project_name,
                 workspace_root=workspace_root,
                 runtime_dir=runtime_dir,
                 workers=workers,
@@ -770,14 +785,22 @@ class MimoCodingCompanyRuntime:
         swarm_state["runtime_dir"] = str(runtime_dir)
         swarm_state["assignment_dir"] = str(assignments_dir)
         swarm_state["status_dir"] = str(status_dir)
+        swarm_state["project_name"] = project_name
+        supervisor_path = runtime_dir / "supervisor.json"
+        swarm_state["supervisor_path"] = str(supervisor_path)
         swarm_state["assignment_paths"] = assignment_paths
         swarm_state["status_paths"] = status_paths
         swarm_state["workers"] = workers
+        quoted_compose_path = shlex.quote(str(generated_compose_path))
+        quoted_supervisor_path = shlex.quote(str(supervisor_path))
+        quoted_project_filter = shlex.quote("label=rumi.project_name=" + project_name)
         swarm_state["commands"] = {
-            "up": f"docker compose -f {generated_compose_path} up --build -d",
-            "logs": f"docker compose -f {generated_compose_path} logs -f",
-            "ps": f"docker compose -f {generated_compose_path} ps",
-            "down": f"docker compose -f {generated_compose_path} down -v",
+            "up": f"docker compose --project-name {project_name} -f {quoted_compose_path} up --build -d",
+            "logs": f"docker compose --project-name {project_name} -f {quoted_compose_path} logs -f",
+            "ps": f"docker compose --project-name {project_name} -f {quoted_compose_path} ps",
+            "down": f"docker compose --project-name {project_name} -f {quoted_compose_path} down -v",
+            "docker_ps": f"docker ps --filter {quoted_project_filter}",
+            "supervisor": f"cat {quoted_supervisor_path}",
         }
         return swarm_state
 
@@ -791,7 +814,11 @@ class MimoCodingCompanyRuntime:
 
     def _docker_swarm_with_monitoring(self, swarm_state: dict[str, Any]) -> dict[str, Any]:
         swarm = deepcopy(swarm_state) if isinstance(swarm_state, dict) else {}
-        swarm["monitoring"] = self._docker_swarm_monitoring(swarm)
+        monitoring = self._docker_swarm_monitoring(swarm)
+        swarm["monitoring"] = monitoring
+        supervisor_path_text = str(swarm.get("supervisor_path") or self._docker_runtime_dir() / "supervisor.json")
+        swarm["supervisor_path"] = supervisor_path_text
+        self._write_json_file(Path(supervisor_path_text), self._docker_supervisor_payload(swarm, monitoring))
         return swarm
 
     def _docker_swarm_monitoring(self, swarm_state: dict[str, Any]) -> dict[str, Any]:
@@ -874,6 +901,35 @@ class MimoCodingCompanyRuntime:
             summary += " Assignment mismatch: " + ", ".join(item for item in mismatched if item) + "."
         return summary
 
+    def _docker_supervisor_payload(self, swarm_state: dict[str, Any], monitoring: dict[str, Any]) -> dict[str, Any]:
+        workers = swarm_state.get("workers") if isinstance(swarm_state.get("workers"), list) else []
+        return {
+            "company_id": COMPANY_ID,
+            "project_name": str(swarm_state.get("project_name") or self._docker_project_name()),
+            "runtime_dir": str(swarm_state.get("runtime_dir") or self._docker_runtime_dir()),
+            "compose_path": str(swarm_state.get("compose_path") or ""),
+            "assignment_dir": str(swarm_state.get("assignment_dir") or ""),
+            "status_dir": str(swarm_state.get("status_dir") or ""),
+            "commands": deepcopy(swarm_state.get("commands") if isinstance(swarm_state.get("commands"), dict) else {}),
+            "worker_count": int(swarm_state.get("worker_count") or len(workers)),
+            "personas": list(swarm_state.get("personas") if isinstance(swarm_state.get("personas"), list) else []),
+            "qa_targets": list(swarm_state.get("qa_targets") if isinstance(swarm_state.get("qa_targets"), list) else []),
+            "workers": [
+                {
+                    "worker_id": str(worker.get("worker_id") or ""),
+                    "container_name": str(worker.get("container_name") or ""),
+                    "persona_id": str(worker.get("persona_id") or ""),
+                    "qa_target": str(worker.get("qa_target") or ""),
+                    "assignment_path": str(worker.get("assignment_path") or ""),
+                    "status_path": str(worker.get("status_path") or ""),
+                }
+                for worker in workers
+                if isinstance(worker, dict)
+            ],
+            "monitoring": deepcopy(monitoring),
+            "refreshed_at": timestamp(),
+        }
+
     def _docker_worker_assignment(self, worker: dict[str, Any]) -> dict[str, Any]:
         persona_id = str(worker.get("persona_id") or "first_time_user")
         persona_specs = {str(item.get("id")): item for item in self._persona_specs()}
@@ -901,6 +957,7 @@ class MimoCodingCompanyRuntime:
         self,
         *,
         bundle_dir: Path,
+        project_name: str,
         workspace_root: Path,
         runtime_dir: Path,
         workers: list[dict[str, Any]],
@@ -917,6 +974,11 @@ class MimoCodingCompanyRuntime:
                     "      dockerfile: \"Dockerfile\"",
                     "    image: \"rumiai/mimo-coding-company-worker:latest\"",
                     f"    container_name: {self._yaml_quote(worker.get('container_name') or service_id)}",
+                    "    labels:",
+                    f"      rumi.company_id: {self._yaml_quote(COMPANY_ID)}",
+                    f"      rumi.project_name: {self._yaml_quote(project_name)}",
+                    f"      rumi.worker_id: {self._yaml_quote(worker_id)}",
+                    f"      rumi.persona_id: {self._yaml_quote(worker.get('persona_id') or '')}",
                     "    environment:",
                     "      DISPLAY: \":99\"",
                     "      WORKER_ROLE: \"browser_qa\"",

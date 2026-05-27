@@ -124,13 +124,25 @@ def test_mimo_coding_company_bootstrap_creates_company_conversation_and_loops(tm
     assert status["harness"]["qa_swarm_plan"]["workers"][0]["qa_target"] == "http://127.0.0.1:3000"
     assert Path(status["harness"]["docker_swarm"]["compose_path"]).is_file()
     assert Path(status["harness"]["docker_swarm"]["template_compose_path"]).is_file()
+    assert Path(status["harness"]["docker_swarm"]["status_dir"]).is_dir()
+    assert Path(status["harness"]["docker_swarm"]["supervisor_path"]).is_file()
     assert Path(status["harness"]["docker_swarm"]["workers"][0]["assignment_path"]).is_file()
     assert status["harness"]["docker_swarm"]["monitoring"]["reported_workers"] == 0
+    assert "--project-name " + status["harness"]["docker_swarm"]["project_name"] in status["harness"]["docker_swarm"]["commands"]["up"]
+    assert "docker ps --filter" in status["harness"]["docker_swarm"]["commands"]["docker_ps"]
+    assert status["harness"]["docker_swarm"]["workers"][0]["container_name"].startswith(
+        status["harness"]["docker_swarm"]["project_name"] + "-"
+    )
     queued_tasks = CompanyTaskStore().list("mimo-coding-company", status="queued", limit=50, offset=0)
     assert queued_tasks is not None and queued_tasks[1] == 6
     assignment = json.loads(Path(status["harness"]["docker_swarm"]["workers"][0]["assignment_path"]).read_text(encoding="utf-8"))
+    supervisor = json.loads(Path(status["harness"]["docker_swarm"]["supervisor_path"]).read_text(encoding="utf-8"))
+    assert assignment["container_name"] == status["harness"]["docker_swarm"]["workers"][0]["container_name"]
     assert assignment["persona_id"] == "first_time_user"
     assert assignment["qa_target"] == "http://127.0.0.1:3000"
+    assert supervisor["project_name"] == status["harness"]["docker_swarm"]["project_name"]
+    assert supervisor["monitoring"]["reported_workers"] == 0
+    assert supervisor["commands"]["docker_ps"] == status["harness"]["docker_swarm"]["commands"]["docker_ps"]
 
     conversation = ChatStore().get_conversation(status["conversation_id"])
     assert conversation["conversation_kind"] == "mimo_coding_company"
@@ -212,11 +224,14 @@ def test_mimo_coding_company_rebootstrap_refreshes_existing_schedule_messages(tm
     assert improvement_schedule["config"] == {"value": 120, "unit": "minutes"}
     assert second["harness"]["qa_swarm_plan"]["workers"][0]["persona_id"] == "power_user"
     assert second["harness"]["qa_swarm_plan"]["workers"][0]["qa_target"] == "http://127.0.0.1:3001"
+    assert second["harness"]["docker_swarm"]["project_name"] == first["harness"]["docker_swarm"]["project_name"]
+    assert second["harness"]["docker_swarm"]["workers"][0]["container_name"] == first["harness"]["docker_swarm"]["workers"][0]["container_name"]
     assignment = json.loads(Path(second["harness"]["docker_swarm"]["workers"][0]["assignment_path"]).read_text(encoding="utf-8"))
     compose_text = Path(second["harness"]["docker_swarm"]["compose_path"]).read_text(encoding="utf-8")
     assert assignment["persona_id"] == "power_user"
     assert assignment["qa_target"] == "http://127.0.0.1:3001"
     assert "http://127.0.0.1:3001" in compose_text
+    assert "rumi.project_name" in compose_text
 
     for schedule in second["schedules"]:
         Scheduler().delete_schedule(schedule["id"])
@@ -325,12 +340,16 @@ def test_mimo_coding_company_status_aggregates_worker_runtime_status(tmp_path, m
 
     second = runtime.status()
     monitoring = second["harness"]["docker_swarm"]["monitoring"]
+    supervisor = json.loads(Path(second["harness"]["docker_swarm"]["supervisor_path"]).read_text(encoding="utf-8"))
 
     assert monitoring["total_workers"] == len(second["harness"]["docker_swarm"]["workers"])
     assert monitoring["reported_workers"] == 1
     assert monitoring["browser_launch_attempted_workers"] == 1
     assert monitoring["workers"][0]["assignment_match"] is True
     assert second["company"]["metadata"]["docker_swarm"]["monitoring"]["reported_workers"] == 1
+    assert supervisor["monitoring"]["reported_workers"] == 1
+    assert supervisor["workers"][0]["container_name"] == second["harness"]["docker_swarm"]["workers"][0]["container_name"]
+    assert supervisor["commands"]["supervisor"].startswith("cat ")
 
     refreshed = runtime.bootstrap(
         start_nonstop=True,
