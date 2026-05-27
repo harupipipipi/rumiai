@@ -75,6 +75,15 @@ class SubagentController:
         child_metadata["workspace"] = workspace_contract
         child = store.update_conversation(child["id"], {"metadata": child_metadata}) or child
         child = store.update_conversation(child["id"], {"title": title}) or child
+        params = dict(arguments.get("params") if isinstance(arguments.get("params"), dict) else {})
+        if "tool_policy" not in params and isinstance(context.get("profile_policy"), dict):
+            params["tool_policy"] = dict(context.get("profile_policy") or {})
+        inherited_tools = list(arguments.get("tools") if isinstance(arguments.get("tools"), list) else self._connected_tools(context))
+        message_metadata = {"source": "subagent_tool"}
+        if isinstance(context.get("profile_id"), str) and context.get("profile_id").strip():
+            message_metadata["profile_id"] = context.get("profile_id").strip()
+        if agent_id:
+            message_metadata["agent_id"] = agent_id
         result = dispatch_input(
             RumiInputEnvelope(
                 role="user",
@@ -87,9 +96,9 @@ class SubagentController:
                     "model_route": {"preferred_model": model},
                 },
                 delivery={"action_id": "chat.message"},
-                metadata={"source": "subagent_tool"},
-                params=dict(arguments.get("params") if isinstance(arguments.get("params"), dict) else {}),
-                tools=list(arguments.get("tools") if isinstance(arguments.get("tools"), list) else []),
+                metadata=message_metadata,
+                params=params,
+                tools=inherited_tools,
             ),
             {**context, "chat_history_mode": "current_turn"},
         )
@@ -105,3 +114,9 @@ class SubagentController:
             "summary": summary,
             "workspace": workspace_contract,
         }
+
+    @staticmethod
+    def _connected_tools(context: dict[str, Any]) -> list[str]:
+        graph = context.get("capability_graph") if isinstance(context.get("capability_graph"), dict) else {}
+        connected = graph.get("connected_tools") if isinstance(graph.get("connected_tools"), list) else []
+        return [str(item).strip() for item in connected if isinstance(item, str) and str(item).strip()]

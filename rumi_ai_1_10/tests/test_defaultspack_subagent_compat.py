@@ -109,14 +109,29 @@ def test_rumi_default_tools_subagent_compat_uses_dispatcher(monkeypatch, tmp_pat
 
     def fake_dispatch(envelope, context):
         seen["called"] = envelope.target["conversation_id"]
+        seen["tools"] = envelope.tools
+        seen["params"] = envelope.params
+        seen["metadata"] = envelope.metadata
         return {"status": "ok", "assistant_text": "done"}
 
     monkeypatch.setattr("ecosystem.rumi_default_tools_pack.domain.tool.subagent.dispatch_input", fake_dispatch)
 
-    result = SubagentController().run({"task": "delegate this"}, {"conversation_id": parent["id"], "model": "stub/default"})
+    result = SubagentController().run(
+        {"task": "delegate this"},
+        {
+            "conversation_id": parent["id"],
+            "model": "stub/default",
+            "profile_id": "defaultspack.mimo_coding_company",
+            "profile_policy": {"profile_id": "defaultspack.mimo_coding_company"},
+            "capability_graph": {"connected_tools": ["todo", "coding_file_search"]},
+        },
+    )
 
     assert result["summary"] == "done"
     assert seen["called"]
+    assert seen["tools"] == ["todo", "coding_file_search"]
+    assert seen["params"]["tool_policy"]["profile_id"] == "defaultspack.mimo_coding_company"
+    assert seen["metadata"]["profile_id"] == "defaultspack.mimo_coding_company"
 
 
 def test_tool_selector_no_longer_depends_on_special_subagent_only_path(monkeypatch):

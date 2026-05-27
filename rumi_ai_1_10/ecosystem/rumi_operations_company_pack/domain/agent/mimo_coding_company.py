@@ -828,6 +828,7 @@ class MimoCodingCompanyRuntime:
             "profile_id": PROFILE_ID,
             "non_stop": True,
             "allow_shell": True,
+            "allow_network": True,
             "allow_file_write": True,
             "write_actions_require_approval": False,
             "delete_actions_require_approval": True,

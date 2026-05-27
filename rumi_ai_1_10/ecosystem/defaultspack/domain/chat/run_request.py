@@ -219,6 +219,24 @@ def prepare_chat_run(input_data: dict[str, Any], context: dict[str, Any] | None 
             request_context["skills"] = [str(item) for item in forced_skill_ids if str(item).strip()]
         elif isinstance(forced_skill_ids, str) and forced_skill_ids.strip():
             request_context["skills"] = forced_skill_ids
+    conversation_metadata = conversation.get("metadata") if isinstance(conversation.get("metadata"), dict) else {}
+    resolved_profile_id = str(
+        request_context.get("profile_id")
+        or metadata.get("profile_id")
+        or conversation_metadata.get("profile_id")
+        or ""
+    ).strip()
+    if resolved_profile_id:
+        request_context["profile_id"] = resolved_profile_id
+    resolved_agent_id = str(
+        request_context.get("agent_id")
+        or metadata.get("agent_id")
+        or conversation.get("agent_id")
+        or conversation_metadata.get("agent_id")
+        or ""
+    ).strip()
+    if resolved_agent_id:
+        request_context["agent_id"] = resolved_agent_id
     request_context.update(_approval_followup_tool_context(metadata))
     tool_policy = params.get("tool_policy")
     if isinstance(tool_policy, dict):
@@ -226,6 +244,9 @@ def prepare_chat_run(input_data: dict[str, Any], context: dict[str, Any] | None 
             **(request_context.get("profile_policy") if isinstance(request_context.get("profile_policy"), dict) else {}),
             **tool_policy,
         }
+        policy_profile_id = str(tool_policy.get("profile_id") or "").strip()
+        if policy_profile_id and not request_context.get("profile_id"):
+            request_context["profile_id"] = policy_profile_id
         tool_choice = tool_policy.get("tool_choice")
         if "tool_choice" not in params and (
             isinstance(tool_choice, dict)

@@ -1,6 +1,7 @@
 from .registry import ToolRegistry
 from .mcp_client import McpClient
 from .mcp_registry import McpRegistry
+from .autonomy import autonomous_tool_execution_allowed
 from .eligibility import rejection_result
 from .schema_adapter import is_tool_rejected_by_policy, policy_from_context
 from .security import is_trusted_pack_id, requires_approval_for_security, unsupported_execution_reason
@@ -318,11 +319,15 @@ class ToolExecutor:
             return None
         if bool(getattr(response, "success", False)):
             return None
-        if getattr(response, "error_type", "") not in {
+        error_type = getattr(response, "error_type", "")
+        if error_type not in {
             "function_not_found",
             "function_registry_unavailable",
             "pack_not_approved",
-        }:
+        } and not (
+            error_type in {"caller_requires_denied", "requires_denied"}
+            and _context_has_tool_server_approval(context)
+        ):
             return None
         qualified_name = str(request.get("qualified_name") or "")
         pack_id, _, function_id = qualified_name.partition(":")
@@ -332,6 +337,8 @@ class ToolExecutor:
             return None
         local_tool = ToolExecutor._first_party_local_tool_for_function(pack_id, function_id)
         if local_tool:
+            if _requires_approval(tool_def) and not _context_has_tool_server_approval(context):
+                return None
             return ToolExecutor()._execute_local_with_tool_def(local_tool, request.get("args") or {}, context, tool_def)
         if not ToolExecutor._allows_direct_first_party_function_fallback(pack_id, function_id):
             return None
@@ -359,6 +366,8 @@ class ToolExecutor:
         if pack_id == "defaultspack":
             return {
                 "tool_calculator": "calculator",
+                "tool_subagent": "subagent",
+                "tool_todo": "todo",
             }.get(function_id)
         return None
 
@@ -368,7 +377,13 @@ class ToolExecutor:
             ("defaultspack", "tool_calculator"),
             ("defaultspack", "coding_file_create"),
             ("defaultspack", "coding_file_write"),
+            ("defaultspack", "knowledge_create"),
+            ("defaultspack", "knowledge_get"),
+            ("defaultspack", "knowledge_list"),
+            ("defaultspack", "knowledge_search"),
+            ("defaultspack", "knowledge_update"),
             ("rumi_default_tools_pack", "calculator"),
+            ("rumi_default_tools_pack", "rumi_api"),
         }
 
     @staticmethod
@@ -494,6 +509,16 @@ class ToolExecutor:
                 and isinstance(tool_def, dict)
                 and _requires_approval(tool_def)
             ):
+                if _context_has_tool_server_approval(context):
+                    return {
+                        "result": str(error or "Capability execution denied after server approval"),
+                        "is_error": True,
+                        "widget": {
+                            "type": "tool_execution_denied",
+                            "tool_name": _tool_approval_tool_name(tool_def),
+                            "reason": str(error or "capability execution denied"),
+                        },
+                    }
                 return _approval_required_tool_response(tool_def, arguments or {}, context)
             return {
                 "result": str(error or "Capability execution failed"),
@@ -1269,6 +1294,16 @@ def _requires_approval(tool_def):
     return requires_approval_for_security(tool_def)
 
 
+def _tool_has_autonomous_internal_approval(tool_def, arguments, context):
+    if not isinstance(tool_def, dict):
+        return False
+    return autonomous_tool_execution_allowed(
+        _tool_approval_tool_name(tool_def),
+        arguments if isinstance(arguments, dict) else {},
+        context if isinstance(context, dict) else {},
+    )
+
+
 def _tool_approval_tool_name(tool_def):
     return str(tool_def.get("name") or tool_def.get("tool_id") or "tool").strip() or "tool"
 
@@ -1384,7 +1419,13 @@ def _preflight_user_requested_computer_approval(tool_name, tool_def, arguments, 
 
 def _context_with_tool_approval_token(context, tool_def, arguments, *extra_lookup_keys):
     next_context = dict(context or {}) if isinstance(context, dict) else {}
-    if not isinstance(tool_def, dict) or not _requires_approval(tool_def):
+    if not isinstance(tool_def, dict):
+        return next_context, None
+    if _tool_has_autonomous_internal_approval(tool_def, arguments, next_context):
+        next_context["_tool_server_approved"] = True
+        next_context["_tool_server_approval_token_valid"] = True
+        return next_context, None
+    if not _requires_approval(tool_def):
         return next_context, None
     if _context_has_tool_server_approval(next_context):
         return next_context, None

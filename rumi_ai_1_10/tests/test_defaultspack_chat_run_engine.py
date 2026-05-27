@@ -255,6 +255,48 @@ def test_prepare_chat_run_forwards_approval_followup_token_to_tool_context(tmp_p
     assert prepared.tool_context["tool_approval_tokens"] == expected
     ChatStore._instance = None
 
+def test_prepare_chat_run_promotes_profile_and_agent_ids_into_tool_context(tmp_path, monkeypatch):
+    from domain.chat.run_request import prepare_chat_run
+    from domain.chat.store import ChatStore
+
+    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
+    ChatStore._instance = None
+
+    store = ChatStore()
+    conversation = store.create_conversation(
+        model="stub/default",
+        metadata={"profile_id": "defaultspack.mimo_coding_company"},
+    )
+
+    prepared = prepare_chat_run(
+        {
+            "conversation_id": conversation["id"],
+            "message": {
+                "role": "user",
+                "content": "scheduled review",
+                "metadata": {
+                    "profile_id": "defaultspack.mimo_coding_company",
+                    "agent_id": "project_manager",
+                },
+            },
+            "params": {
+                "tool_policy": {
+                    "profile_id": "defaultspack.mimo_coding_company",
+                    "tool_choice": "auto",
+                }
+            },
+            "tools": ["todo"],
+        },
+        {"run_source": "scheduler"},
+    )
+
+    assert prepared.request_context["profile_id"] == "defaultspack.mimo_coding_company"
+    assert prepared.tool_context["profile_id"] == "defaultspack.mimo_coding_company"
+    assert prepared.request_context["agent_id"] == "project_manager"
+    assert prepared.tool_context["agent_id"] == "project_manager"
+    ChatStore._instance = None
+
 
 def test_prepare_chat_run_maps_computer_approval_followup_aliases(tmp_path, monkeypatch):
     from domain.chat.run_request import prepare_chat_run
