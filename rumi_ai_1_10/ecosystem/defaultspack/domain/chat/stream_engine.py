@@ -1502,19 +1502,28 @@ class ChatRunEngine:
 
         invoke_args = dict(stored_args)
         invoke_args["approval_token"] = token
+        # ``display_args`` is the version we expose to the model context
+        # (synthetic tool_use message + IR), the SSE event stream, and any
+        # nested-approval payload that surfaces from the replayed tool result.
+        # Stripping ``approval_token`` here prevents the one-shot signed token
+        # from leaking into a subsequent model prompt or a UI-visible
+        # approval-required payload where a malicious component could attempt
+        # to replay it. ``invoke_args`` (with token) is only handed to the
+        # actual tool executor below.
+        display_args = {k: v for k, v in invoke_args.items() if k != "approval_token"}
         tool_call_id = "replay_" + gen_id()
 
         # Mark we have started this synthetic tool call before emitting any event
         # so subsequent hooks treat it as a single deterministic execution.
         self._started_tool_call_ids.add(tool_call_id)
 
-        display_started = _tool_display_payload(tool_name, invoke_args, status="running")
+        display_started = _tool_display_payload(tool_name, display_args, status="running")
         yield self._emit(
             "tool_call_started",
             data={
                 "tool_name": tool_name,
                 "tool_call_id": tool_call_id,
-                "arguments": invoke_args,
+                "arguments": display_args,
                 "approval_replay": True,
                 **display_started,
             },
@@ -1522,7 +1531,7 @@ class ChatRunEngine:
             phase="tool_call_started",
             tool_name=tool_name,
             tool_call_id=tool_call_id,
-            arguments=invoke_args,
+            arguments=display_args,
             approval_replay=True,
         )
         self._sync_draft(draft, force=True)
@@ -1539,7 +1548,7 @@ class ChatRunEngine:
         summary = _tool_result_summary(tool_name, result)
         artifacts = _tool_result_artifacts(result)
         status = "failed" if _tool_result_is_error(result) else "completed"
-        display_completed = _tool_display_payload(tool_name, invoke_args, status=status, summary=summary)
+        display_completed = _tool_display_payload(tool_name, display_args, status=status, summary=summary)
         yield self._emit(
             "tool_call_completed",
             data={
@@ -1570,8 +1579,31 @@ class ChatRunEngine:
         # would speak as if the operation succeeded while the underlying tool
         # is actually still pending. Surface the approval path directly using
         # the same helpers as the model-driven branch in ``_execute``.
-        approval_request = _approval_request_from_tool_result(tool_name, tool_call_id, invoke_args, result)
+        # ``display_args`` is intentionally passed here instead of
+        # ``invoke_args`` so the nested approval payload that bubbles up to
+        # the UI never carries the one-shot signed token of the *outer*
+        # approval - a leaked token there could be replayed by a downstream
+        # component to invoke another tool.
+        approval_request = _approval_request_from_tool_result(tool_name, tool_call_id, display_args, result)
         if approval_request is not None:
+            # Defensive scrub: even when the engine passes ``display_args``
+            # to ``_approval_request_from_tool_result`` (so the *fallback*
+            # arguments are token-free), the function still prefers
+            # ``result["payload"]`` when the tool result provides one. A
+            # tool that builds its payload via ``payload=dict(arguments)``
+            # would therefore echo the outer (spent) one-shot token back
+            # into the nested approval payload that bubbles up to the UI
+            # and is recorded into the assistant-side activity log. The
+            # outer ``approval_token`` field is also forced to ``None`` if
+            # the tool somehow surfaced it - a chained approval must mint
+            # its own fresh token, never recycle ours.
+            nested_payload = approval_request.get("payload")
+            if isinstance(nested_payload, dict) and "approval_token" in nested_payload:
+                scrubbed = dict(nested_payload)
+                scrubbed.pop("approval_token", None)
+                approval_request["payload"] = scrubbed
+            if approval_request.get("approval_token") == token:
+                approval_request["approval_token"] = None
             approval_event = self._emit(
                 "approval_requested",
                 data=approval_request,
@@ -1590,7 +1622,11 @@ class ChatRunEngine:
                 events=list(self._activity_events),
             )
 
-        synth_tool_uses = [{"id": tool_call_id, "name": tool_name, "input": invoke_args}]
+        # ``display_args`` is also used for the synthetic assistant
+        # ``tool_use`` block so the one-shot approval token never appears in
+        # the model context (working_messages + IR) of any subsequent model
+        # turn. The actual tool execution above already received the token.
+        synth_tool_uses = [{"id": tool_call_id, "name": tool_name, "input": display_args}]
         _append_assistant_tool_use_message(working_messages, synth_tool_uses)
         try:
             append_assistant_tool_use_to_ir(working_ir, synth_tool_uses)
@@ -1626,6 +1662,16 @@ class ChatRunEngine:
         # natural-language summary; we have already replayed the pending tool
         # exactly once, and any further provider tool call from the same
         # followup turn would be a regression of the deterministic contract.
+        # The original list is snapshotted on ``tool_context`` so
+        # ``_final_response`` can still surface the truthful set of attached
+        # tools on the finalised assistant ``metadata.attached_tools`` /
+        # ``metadata.attached_tool_count`` (the suppression here is scoped to
+        # the model summary turn only).
+        if isinstance(prepared.tool_context, dict):
+            prepared.tool_context.setdefault(
+                "_attached_provider_tools_snapshot",
+                list(prepared.provider_tools or []),
+            )
         prepared.provider_tools = []
         if isinstance(prepared.tool_context, dict):
             prepared.tool_context["approval_replayed"] = {
@@ -1686,11 +1732,23 @@ class ChatRunEngine:
             finalized["metadata"] = metadata
         metadata = dict(finalized.get("metadata") or {})
         requested_tools = list(prepared.tools_called or [])
+        # When the approval-followup replay path transiently suppresses
+        # ``provider_tools`` for the summary turn, ``tool_context`` holds a
+        # snapshot of the originally attached tools so the finalised
+        # assistant ``metadata`` can still report the truthful attached-tool
+        # set. Falls back to the live ``provider_tools`` for non-replay
+        # turns where no snapshot was taken.
+        attached_provider_tools_source = prepared.provider_tools
+        if isinstance(prepared.tool_context, dict):
+            snapshot = prepared.tool_context.get("_attached_provider_tools_snapshot")
+            if isinstance(snapshot, list):
+                attached_provider_tools_source = snapshot
         attached_provider_tools = [
             name
-            for name in (tool_name_from_definition(tool) for tool in prepared.provider_tools)
+            for name in (tool_name_from_definition(tool) for tool in attached_provider_tools_source)
             if name
         ]
+        attached_tool_count = len(attached_provider_tools_source)
         executed_tools: list[str] = []
         for log in self._tool_logs:
             tool_name = str(log.get("tool_name") or "").strip()
@@ -1702,7 +1760,7 @@ class ChatRunEngine:
         metadata.update(
             {
                 "model": prepared.model,
-                "attached_tool_count": len(prepared.provider_tools),
+                "attached_tool_count": attached_tool_count,
                 "requested_tools": requested_tools,
                 "attached_tools": attached_provider_tools,
                 "attached_provider_tools": attached_provider_tools,

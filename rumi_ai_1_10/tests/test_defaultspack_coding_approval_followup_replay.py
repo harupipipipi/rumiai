@@ -593,6 +593,17 @@ def test_approval_followup_replay_with_nested_approval_required_short_circuits(t
     # not be swallowed by the summary turn.
     assert approval_events, events
     assert approval_events[0].get("tool_name") == "coding_git_commit"
+    # Defensive scrub: the chained-approval simulation above returns
+    # ``payload=dict(arguments)`` which includes the outer (now spent)
+    # one-shot ``approval_token``. The bubbled-up approval payload must
+    # NOT carry that token forward, otherwise UIs / downstream loggers
+    # would see the spent credential and a malicious component could
+    # attempt to replay it. The chained approval must mint its own
+    # token, never recycle ours.
+    nested_payload = approval_events[0].get("payload") or {}
+    assert isinstance(nested_payload, dict)
+    assert "approval_token" not in nested_payload, approval_events[0]
+    assert approval_events[0].get("approval_token") != token, approval_events[0]
 
     done_events = [event for event in events if event.get("type") == "done"]
     assert done_events
@@ -706,4 +717,340 @@ def test_approval_followup_replay_with_tool_blocked_recovery_short_circuits(tmp_
     # remain in the blocked-recovery state instead of summarising success.
     assert final_message["metadata"]["executed_tools"] == ["coding_git_commit"]
     assert final_message.get("finish_reason") in {"tool_blocked", "stop"}, final_message
+    ChatStore._instance = None
+
+
+def test_approval_followup_token_cannot_replay_twice(tmp_path, monkeypatch):
+    """The one-shot approval token must be replay-safe across separate
+    chat runs: once the first ``approval_followup`` has executed the
+    pending tool (which consumes the token via ``verify_execution_token``
+    and flips the request status to ``consumed``), a *second* chat run
+    that carries the same ``approval_token`` + ``request_id`` must NOT
+    execute the tool a second time. The replay path falls through to the
+    regular model-driven turn instead so the user / model can never
+    silently double-spend an approval.
+    """
+    from blocks.chat.stream import run as stream_run
+    import domain.chat.stream_engine as engine_module
+    from domain.chat.store import ChatStore
+    from domain.safety import approval
+    from domain.tool.executor import ToolExecutor
+
+    approval.reset_approval_state_for_tests()
+    args = {"message": "fix typo", "paths": ["a.txt"]}
+    token, request_id = _approve_pending(
+        args, tool_name="coding_git_commit", operation="tool.coding_git_commit",
+    )
+
+    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
+    ChatStore._instance = None
+    store = ChatStore()
+    conversation = store.create_conversation(model="stub/default")
+
+    recorded = {}
+    import blocks.chat.stream as stream_module
+    monkeypatch.setattr(engine_module, "AIClient", lambda: _NoToolFakeClient(recorded))
+    monkeypatch.setattr(stream_module, "AIClient", lambda: _NoToolFakeClient(recorded))
+
+    from domain.chat.stream_engine import ChatRunEngine
+
+    def _fake_complete_turn(self, prepared, messages):
+        recorded.setdefault("complete_calls", []).append(
+            {
+                "model": prepared.model,
+                "tools": list(prepared.provider_tools or []),
+            }
+        )
+        return {
+            "content": [{"type": "text", "text": "ok"}],
+            "finish_reason": "stop",
+            "usage": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
+        }
+
+    monkeypatch.setattr(ChatRunEngine, "_complete_turn", _fake_complete_turn)
+
+    invoked: list[dict] = []
+
+    def _fake_execute(self, tool_name, arguments, context):
+        invoked.append({"tool_name": tool_name, "arguments": dict(arguments)})
+        # Real coding tools consume the one-shot token via
+        # ``verify_execution_token(consume=True)``; mirror that here so the
+        # approval store transitions to ``consumed`` exactly the way the
+        # production tool body does, exercising the replay-safety contract
+        # end-to-end without depending on the real tool implementation.
+        tok = str((arguments or {}).get("approval_token") or "").strip()
+        if tok:
+            try:
+                from domain.safety import approval as _approval_mod
+
+                replay_args = {k: v for k, v in arguments.items() if k != "approval_token"}
+                _approval_mod.verify_execution_token(
+                    tok,
+                    "tool.coding_git_commit",
+                    _approval_mod.hash_arguments(replay_args),
+                    consume=True,
+                )
+            except Exception:
+                pass
+        return {
+            "result": "Commit created",
+            "is_error": False,
+            "widget": None,
+            "data": {"commit_hash": "abc1234"},
+        }
+
+    followup_message = {
+        "role": "user",
+        "content": "ユーザーが許可しました。承認済みの操作を続行してください。",
+        "metadata": {
+            "approval_followup": {
+                "approval_token": token,
+                "operation": "tool.coding_git_commit",
+                "request_id": request_id,
+                "tool_name": "coding_git_commit",
+            },
+        },
+    }
+
+    with patch.object(ToolExecutor, "execute", _fake_execute):
+        first = stream_run(
+            {
+                "conversation_id": conversation["id"],
+                "message": dict(followup_message),
+                "tools": [],
+            },
+            {},
+        )
+        first_events = list(first["events"])
+
+        # The approval store must now report the request as consumed and
+        # ``verify_execution_token`` must reject the same token, before the
+        # second chat run is even attempted.
+        request_after_first = approval.get_approval_request(request_id)
+        assert request_after_first is not None
+        assert request_after_first["status"] == "consumed"
+        verification_after_first = approval.verify_execution_token(
+            token,
+            "tool.coding_git_commit",
+            approval.hash_arguments(args),
+            consume=False,
+        )
+        assert verification_after_first.valid is False
+
+        second = stream_run(
+            {
+                "conversation_id": conversation["id"],
+                "message": dict(followup_message),
+                "tools": [],
+            },
+            {},
+        )
+        second_events = list(second["events"])
+
+    # First run replayed the tool exactly once.
+    assert first.get("_sse") is True
+    started_first = [event for event in first_events if event.get("type") == "tool_call_started"]
+    assert len(started_first) == 1
+    assert started_first[0].get("approval_replay") is True
+
+    # Second run: the same token must not produce a synthetic replay event,
+    # and the tool must not be invoked a second time.
+    assert second.get("_sse") is True
+    started_second = [event for event in second_events if event.get("type") == "tool_call_started"]
+    replay_second = [event for event in started_second if event.get("approval_replay") is True]
+    assert replay_second == [], second_events
+    assert len(invoked) == 1, invoked
+
+    # The second assistant message must reflect the fall-through path: no
+    # synthetic execution surfaces in ``executed_tools``.
+    done_second = [event for event in second_events if event.get("type") == "done"]
+    assert done_second
+    final_second = done_second[-1]["message"]
+    assert final_second["metadata"]["executed_tools"] == []
+    ChatStore._instance = None
+
+
+def test_approval_followup_replay_keeps_attached_tools_metadata_truthful(tmp_path, monkeypatch):
+    """The replay path suppresses ``provider_tools`` for the *summary turn
+    only* so the model cannot re-issue another tool call from the same
+    followup. The finalised assistant ``metadata.attached_tools`` and
+    ``metadata.attached_tool_count`` must still reflect the truthful set
+    of tools the conversation was started with - otherwise auditors and
+    UI surfaces would see ``attached_tools=[]`` for a turn that was
+    actually attached to coding tools, masking tool-policy bugs.
+    """
+    from blocks.chat.stream import run as stream_run
+    import domain.chat.stream_engine as engine_module
+    from domain.chat.store import ChatStore
+    from domain.chat.run_request import prepare_chat_run as _real_prepare_chat_run
+    from domain.safety import approval
+    from domain.tool.executor import ToolExecutor
+
+    approval.reset_approval_state_for_tests()
+    args = {"message": "fix typo", "paths": ["a.txt"]}
+    token, request_id = _approve_pending(
+        args, tool_name="coding_git_commit", operation="tool.coding_git_commit",
+    )
+
+    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
+    ChatStore._instance = None
+    store = ChatStore()
+    conversation = store.create_conversation(model="stub/default")
+
+    # Inject a non-empty ``provider_tools`` list on the prepared run so the
+    # suppression in the replay path is observable AND the metadata
+    # snapshot path is exercised. Going through ``prepare_chat_run``
+    # naturally would require a full tool-policy + eligibility setup that
+    # is not the subject of this regression.
+    fake_tool_def = {
+        "type": "function",
+        "function": {
+            "name": "coding_git_commit",
+            "description": "Stage + commit changes",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    }
+
+    def _wrapped_prepare(input_data, context):
+        prepared = _real_prepare_chat_run(input_data, context)
+        prepared.provider_tools = [fake_tool_def]
+        seen = {name for name in prepared.tools_called or []}
+        if "coding_git_commit" not in seen:
+            prepared.tools_called = list(prepared.tools_called or []) + ["coding_git_commit"]
+        return prepared
+
+    monkeypatch.setattr(engine_module, "prepare_chat_run", _wrapped_prepare)
+
+    recorded = {}
+    import blocks.chat.stream as stream_module
+    monkeypatch.setattr(engine_module, "AIClient", lambda: _NoToolFakeClient(recorded))
+    monkeypatch.setattr(stream_module, "AIClient", lambda: _NoToolFakeClient(recorded))
+
+    from domain.chat.stream_engine import ChatRunEngine
+
+    def _fake_complete_turn(self, prepared, messages):
+        recorded.setdefault("complete_calls", []).append(
+            {
+                "model": prepared.model,
+                "tools": list(prepared.provider_tools or []),
+                "messages": messages,
+            }
+        )
+        return {
+            "content": [{"type": "text", "text": "Commit summary: hash=abc1234."}],
+            "finish_reason": "stop",
+            "usage": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
+        }
+
+    monkeypatch.setattr(ChatRunEngine, "_complete_turn", _fake_complete_turn)
+
+    invoked: list[dict] = []
+
+    def _fake_execute(self, tool_name, arguments, context):
+        invoked.append({"tool_name": tool_name, "arguments": dict(arguments)})
+        return {
+            "result": "Commit created",
+            "is_error": False,
+            "widget": None,
+            "data": {"commit_hash": "abc1234"},
+        }
+
+    with patch.object(ToolExecutor, "execute", _fake_execute):
+        result = stream_run(
+            {
+                "conversation_id": conversation["id"],
+                "message": {
+                    "role": "user",
+                    "content": "ユーザーが許可しました。続行してください。",
+                    "metadata": {
+                        "approval_followup": {
+                            "approval_token": token,
+                            "operation": "tool.coding_git_commit",
+                            "request_id": request_id,
+                            "tool_name": "coding_git_commit",
+                        },
+                    },
+                },
+                "tools": [],
+            },
+            {},
+        )
+        events = list(result["events"])
+
+    assert result.get("_sse") is True
+    # Replay must have run once and the summary turn must have run with
+    # provider_tools suppressed (so the model cannot re-issue another tool
+    # call from the same followup turn).
+    assert len(invoked) == 1
+    assert recorded.get("complete_calls"), "summary turn never ran"
+    assert recorded["complete_calls"][0]["tools"] == []
+
+    done_events = [event for event in events if event.get("type") == "done"]
+    assert done_events
+    final_message = done_events[-1]["message"]
+    metadata = final_message["metadata"]
+    # Despite the transient suppression, the truthful attached-tool set
+    # must remain on the finalised metadata.
+    assert "coding_git_commit" in metadata["attached_tools"]
+    assert metadata["attached_tool_count"] == 1
+    assert "coding_git_commit" in metadata["attached_provider_tools"]
+    assert metadata["executed_tools"] == ["coding_git_commit"]
+    # The synthetic tool_use block fed to the summary turn must NOT carry
+    # the approval token: the model context view of the turn would
+    # otherwise expose the one-shot signed token to any downstream
+    # serialiser, log, or provider trace. We walk both shapes the chat
+    # backend can emit - Anthropic-style ``content``-list-of-blocks and
+    # OpenAI-style ``tool_calls[*].function.arguments`` (JSON) - so the
+    # leak check is non-vacuous even when ``_append_assistant_tool_use_message``
+    # routes through the OpenAI-style ``tool_calls`` field.
+    summary_messages = recorded["complete_calls"][0].get("messages")
+    assert isinstance(summary_messages, list), recorded["complete_calls"][0]
+    assert summary_messages, "summary turn must run with a non-empty message chain"
+    saw_synthetic_tool_call = False
+    for msg in summary_messages:
+        if not isinstance(msg, dict):
+            continue
+        # Anthropic-style content blocks (``[{"type": "tool_use", "input": {...}}, ...]``).
+        content = msg.get("content")
+        if isinstance(content, list):
+            for block in content:
+                if not isinstance(block, dict):
+                    continue
+                if block.get("type") in {"tool_use", "tool_call"}:
+                    block_input = block.get("input") or block.get("arguments") or {}
+                    if isinstance(block_input, dict):
+                        assert "approval_token" not in block_input, block
+                        saw_synthetic_tool_call = True
+        # OpenAI-style ``tool_calls`` field with JSON-encoded arguments.
+        tool_calls = msg.get("tool_calls")
+        if isinstance(tool_calls, list):
+            for call in tool_calls:
+                if not isinstance(call, dict):
+                    continue
+                fn = call.get("function") if isinstance(call.get("function"), dict) else {}
+                raw_arguments = fn.get("arguments") if "arguments" in fn else call.get("arguments")
+                if isinstance(raw_arguments, str):
+                    try:
+                        decoded = __import__("json").loads(raw_arguments)
+                    except Exception:
+                        decoded = {}
+                else:
+                    decoded = raw_arguments if isinstance(raw_arguments, dict) else {}
+                if isinstance(decoded, dict):
+                    assert "approval_token" not in decoded, call
+                    saw_synthetic_tool_call = True
+                # The serialised JSON must not carry the literal token even
+                # when the assertion above is bypassed by an exotic shape.
+                if isinstance(raw_arguments, str):
+                    assert token not in raw_arguments, call
+        # Tool-result messages must not echo the token in their content
+        # text either - downstream serialisers / loggers would otherwise
+        # see the spent token in the model context view.
+        if msg.get("role") == "tool":
+            tool_content = msg.get("content")
+            if isinstance(tool_content, str):
+                assert token not in tool_content, msg
+    assert saw_synthetic_tool_call, summary_messages
     ChatStore._instance = None
