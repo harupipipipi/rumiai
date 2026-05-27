@@ -54,6 +54,8 @@ def run(input_data, context):
             vision_model=_validated_model(input_data.get("vision_model"), label="vision_model", default=DEFAULT_VISION_MODEL),
             fast_model=_validated_model(input_data.get("fast_model"), label="fast_model", default=DEFAULT_FAST_MODEL),
             qa_targets=_as_string_list(input_data.get("qa_targets")),
+            docker_worker_count=max(1, min(_as_int(input_data.get("docker_worker_count"), 3), 16)),
+            docker_personas=_as_string_list(input_data.get("docker_personas")),
             seed_tasks=bool(input_data.get("seed_tasks", True)),
             seed_knowledge=bool(input_data.get("seed_knowledge", True)),
             run_initial_review_now=bool(input_data.get("run_initial_review_now", False)),

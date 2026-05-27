@@ -162,6 +162,10 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         self.assertIn("operations_company", section_ids)
         self.assertIn("mimo_coding_company", section_ids)
         self.assertIn("mimo-coding-company", sidebar_ids)
+        mimo_section = next(section for section in catalog["settings"]["sections"] if section["id"] == "mimo_coding_company")
+        mimo_field_ids = {field["id"] for field in mimo_section["fields"]}
+        self.assertIn("docker_worker_count", mimo_field_ids)
+        self.assertIn("docker_personas", mimo_field_ids)
         self.assertNotIn("research", section_ids)
         self.assertNotIn("browser_computer", section_ids)
         self.assertNotIn("collaboration", section_ids)

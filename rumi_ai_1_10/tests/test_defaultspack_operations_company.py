@@ -102,6 +102,8 @@ def test_mimo_coding_company_bootstrap_creates_company_conversation_and_loops(tm
         vision_model="stub/default",
         fast_model="stub/default",
         qa_targets=["http://127.0.0.1:3000"],
+        docker_worker_count=4,
+        docker_personas=["first_time_user", "power_user"],
         seed_knowledge=False,
         run_initial_review_now=False,
     )
@@ -110,7 +112,10 @@ def test_mimo_coding_company_bootstrap_creates_company_conversation_and_loops(tm
     assert status["company"]["id"] == "mimo-coding-company"
     assert status["conversation_id"]
     assert status["harness"]["qa_targets"] == ["http://127.0.0.1:3000"]
-    assert len(status["harness"]["seeded_task_ids"]) == 4
+    assert len(status["harness"]["seeded_task_ids"]) == 6
+    assert status["harness"]["docker_swarm"]["worker_count"] == 4
+    assert status["harness"]["docker_swarm"]["personas"] == ["first_time_user", "power_user"]
+    assert len(status["harness"]["docker_swarm"]["workers"]) == 4
 
     conversation = ChatStore().get_conversation(status["conversation_id"])
     assert conversation["conversation_kind"] == "mimo_coding_company"
@@ -125,6 +130,22 @@ def test_mimo_coding_company_bootstrap_creates_company_conversation_and_loops(tm
     for schedule in status["schedules"]:
         Scheduler().delete_schedule(schedule["id"])
     _reset_defaultspack_singletons()
+
+
+def test_mimo_coding_company_static_knowledge_and_docker_bundles_exist():
+    from ecosystem.rumi_operations_company_pack.domain.agent.mimo_coding_company import MimoCodingCompanyRuntime
+
+    runtime = MimoCodingCompanyRuntime()
+    manifest = runtime.manifest()
+    docker_paths = manifest["docker"]["template_paths"]
+    knowledge_docs = manifest["knowledge_bundle"]["documents"]
+
+    assert Path(docker_paths["compose"]).is_file()
+    assert Path(docker_paths["dockerfile"]).is_file()
+    assert Path(docker_paths["entrypoint"]).is_file()
+    assert Path(docker_paths["personas"]).is_file()
+    assert knowledge_docs
+    assert all(Path(path).is_file() for path in knowledge_docs)
 
 
 def test_mimo_coding_conversation_resolves_pack_system_prompt():

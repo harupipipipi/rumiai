@@ -4068,6 +4068,48 @@ def test_external_web_provider_rejects_private_network_urls():
     assert "non-public" in result.summary
 
 
+def test_external_web_provider_filters_domains_and_prefers_official_sources():
+    from domain.research.providers import ExternalWebProvider
+
+    html = """
+    <html>
+      <a class="result__a" href="https://blog.example.com/groq-compound">Unofficial Groq notes</a>
+      <div class="result__snippet">Notes from a third party.</div>
+      <a class="result__a" href="https://groq.com/docs/compound">Groq Compound Docs</a>
+      <div class="result__snippet">Official docs.</div>
+    </html>
+    """
+    provider = ExternalWebProvider(fetcher=lambda url, timeout: html)
+
+    filtered = provider.search("groq compound docs", domains=["groq.com"], official_only=True)
+
+    assert len(filtered.sources) == 1
+    assert filtered.sources[0]["url"] == "https://groq.com/docs/compound"
+    assert filtered.sources[0]["trust_level"] == "high"
+    assert filtered.sources[0]["metadata"]["official"] is True
+
+
+def test_external_web_provider_can_enrich_result_pages():
+    from domain.research.providers import ExternalWebProvider
+
+    def fake_fetch(url, timeout):
+        if "duckduckgo.com" in url:
+            return """
+            <html>
+              <a class="result__a" href="https://example.com/docs">Example Docs</a>
+              <div class="result__snippet">Short snippet.</div>
+            </html>
+            """
+        return "<html><title>Example Docs</title><body>Example Docs Detailed body text for the enriched summary.</body></html>"
+
+    provider = ExternalWebProvider(fetcher=fake_fetch)
+    result = provider.search("example docs", fetch_pages=True)
+
+    assert result.sources[0]["title"] == "Example Docs"
+    assert "Detailed body text" in result.sources[0]["summary"]
+    assert result.sources[0]["metadata"]["enriched_from_page"] is True
+
+
 def test_browser_computer_controller_gates_desktop_actions():
     from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
 

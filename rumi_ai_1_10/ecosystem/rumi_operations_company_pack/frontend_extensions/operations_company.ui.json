@@ -74,6 +74,7 @@
         {"id": "heartbeat_minutes", "label": "Heartbeat Minutes", "type": "number", "default": 30, "min": 1, "max": 1440},
         {"id": "review_interval_minutes", "label": "Improvement Loop Minutes", "type": "number", "default": 180, "min": 5, "max": 1440},
         {"id": "qa_interval_minutes", "label": "QA Loop Minutes", "type": "number", "default": 240, "min": 5, "max": 1440},
+        {"id": "docker_worker_count", "label": "Docker Worker Count", "type": "number", "default": 3, "min": 1, "max": 16},
         {"id": "run_initial_review_now", "label": "Trigger Initial Review Now", "type": "toggle", "default": true},
         {
           "id": "model_allowlist",
@@ -87,6 +88,13 @@
           "type": "textarea",
           "default": "http://127.0.0.1:3000\nhttp://127.0.0.1:8000",
           "help": "One URL or target per line. Used by the browser/computer-use QA loop."
+        },
+        {
+          "id": "docker_personas",
+          "label": "Docker Personas",
+          "type": "textarea",
+          "default": "first_time_user\npower_user\nimpatient_user\nkeyboard_heavy_user",
+          "help": "One persona id per line. Assigned across isolated Ubuntu workers."
         }
       ]
     }

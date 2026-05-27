@@ -17,5 +17,8 @@ def run(input_data, context=None):
         limit=int(input_data.get("limit", 5)),
         allow_network=bool(input_data.get("allow_network", True)),
         timeout=float(input_data.get("timeout", 8.0)),
+        domains=input_data.get("domains"),
+        official_only=bool(input_data.get("official_only", False)),
+        fetch_pages=bool(input_data.get("fetch_pages", False)),
     )
     return ok(result.as_dict())

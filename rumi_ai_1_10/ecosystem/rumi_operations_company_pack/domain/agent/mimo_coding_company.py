@@ -32,6 +32,51 @@ COMPANY_DESCRIPTION = "Self-improving MiMo-first coding company for long-running
 DEFAULT_MAIN_MODEL = "xiaomi-token-plan-sgp/mimo-v2.5-pro"
 DEFAULT_VISION_MODEL = "xiaomi-token-plan-sgp/mimo-v2-omni"
 DEFAULT_FAST_MODEL = "xiaomi-token-plan-sgp/mimo-v2-flash"
+DEFAULT_DOCKER_WORKER_COUNT = 3
+
+DEFAULT_PERSONA_SPECS = [
+    {
+        "id": "first_time_user",
+        "label": "First-time user",
+        "goal": "Find broken onboarding, missing defaults, and dead-end flows.",
+    },
+    {
+        "id": "power_user",
+        "label": "Power user",
+        "goal": "Stress advanced controls, model settings, and bulk actions.",
+    },
+    {
+        "id": "impatient_user",
+        "label": "Impatient user",
+        "goal": "Interrupt flows, click quickly, and expose brittle loading states.",
+    },
+    {
+        "id": "keyboard_heavy_user",
+        "label": "Keyboard-heavy user",
+        "goal": "Check focus order, shortcuts, and input affordances.",
+    },
+]
+
+FALLBACK_KNOWLEDGE_DOCS = [
+    (
+        "README.md",
+        "# MiMo Coding Company\n\n"
+        "This harness runs MiMo-first long-lived coding loops with a Client Manager, PM, coder, reviewer, QA, "
+        "toolsmith, and scheduler.\n",
+    ),
+    (
+        "self_improvement_loop.md",
+        "# Self Improvement Loop\n\n"
+        "Start with one small verified improvement. If a missing tool or skill blocks progress, build the smallest "
+        "viable version instead of stopping.\n",
+    ),
+    (
+        "docker_worker_swarm.md",
+        "# Docker Worker Swarm\n\n"
+        "Use isolated Ubuntu workers for browser/computer-use QA when Docker is available. Assign different personas "
+        "and targets to separate workers.\n",
+    ),
+]
 
 MODEL_ALLOWLIST = [
     "xiaomi-token-plan-sgp/mimo-v2.5-pro",
@@ -223,6 +268,7 @@ class MimoCodingCompanyRuntime:
                 "settings_source": "defaultspack.frontend_settings",
                 "browser_profile_id": "defaultspack-shared",
                 "knowledge_store": "defaultspack.user_data.shared.knowledge",
+                "knowledge_bundle_dir": str(self._knowledge_bundle_dir()),
             },
             "models": {
                 "default_main_model": DEFAULT_MAIN_MODEL,
@@ -261,6 +307,14 @@ class MimoCodingCompanyRuntime:
                 "preferred_image": "ubuntu:22.04",
                 "display_sessions_supported": True,
                 "browser_qa_strategy": "isolated_ubuntu_sessions_when_available",
+                "default_worker_count": DEFAULT_DOCKER_WORKER_COUNT,
+                "template_paths": {
+                    "compose": str(self._docker_bundle_dir() / "compose.yaml"),
+                    "dockerfile": str(self._docker_bundle_dir() / "Dockerfile"),
+                    "entrypoint": str(self._docker_bundle_dir() / "worker-entrypoint.sh"),
+                    "personas": str(self._docker_bundle_dir() / "personas.json"),
+                },
+                "personas": self._persona_specs(),
             },
             "tool_policy": {
                 "allowlist": list(TOOL_ALLOWLIST),
@@ -269,6 +323,10 @@ class MimoCodingCompanyRuntime:
                     role["role_key"]: list(role["allowed_tools"])
                     for role in ROLE_DEFINITIONS
                 },
+            },
+            "knowledge_bundle": {
+                "directory": str(self._knowledge_bundle_dir()),
+                "documents": [str(path) for path in self._knowledge_bundle_paths()],
             },
             "roles": deepcopy(ROLE_DEFINITIONS),
         }
@@ -304,6 +362,8 @@ class MimoCodingCompanyRuntime:
                 "fast_model": state.get("fast_model") or DEFAULT_FAST_MODEL,
                 "utility_models": deepcopy(state.get("utility_models") if isinstance(state.get("utility_models"), dict) else UTILITY_MODELS),
                 "qa_targets": list(state.get("qa_targets") if isinstance(state.get("qa_targets"), list) else []),
+                "docker_swarm": deepcopy(state.get("docker_swarm") if isinstance(state.get("docker_swarm"), dict) else self._docker_swarm_state()),
+                "knowledge_bundle_paths": [str(path) for path in self._knowledge_bundle_paths()],
                 "seeded_task_ids": list(state.get("seeded_task_ids") if isinstance(state.get("seeded_task_ids"), list) else []),
                 "seeded_knowledge_ids": list(state.get("seeded_knowledge_ids") if isinstance(state.get("seeded_knowledge_ids"), list) else []),
                 "open_task_count": open_tasks,
@@ -325,6 +385,8 @@ class MimoCodingCompanyRuntime:
         vision_model: str | None = None,
         fast_model: str | None = None,
         qa_targets: list[str] | None = None,
+        docker_worker_count: int = DEFAULT_DOCKER_WORKER_COUNT,
+        docker_personas: list[str] | None = None,
         seed_tasks: bool = True,
         seed_knowledge: bool = True,
         run_initial_review_now: bool = False,
@@ -333,6 +395,7 @@ class MimoCodingCompanyRuntime:
         selected_vision_model = self._allowed_model(vision_model or DEFAULT_VISION_MODEL)
         selected_fast_model = self._allowed_model(fast_model or DEFAULT_FAST_MODEL)
         cleaned_targets = self._clean_targets(qa_targets)
+        cleaned_personas = self._clean_personas(docker_personas)
 
         self._define_roles(main_model, selected_vision_model, selected_fast_model)
         state = self._load_state()
@@ -356,6 +419,11 @@ class MimoCodingCompanyRuntime:
             "fast_reply": selected_fast_model,
         }
         state["qa_targets"] = cleaned_targets
+        state["docker_swarm"] = self._docker_swarm_state(
+            worker_count=max(1, min(int(docker_worker_count or DEFAULT_DOCKER_WORKER_COUNT), 16)),
+            persona_ids=cleaned_personas,
+            qa_targets=cleaned_targets,
+        )
         company = self._sync_company_record(state)
         if seed_knowledge:
             state["seeded_knowledge_ids"] = self._seed_knowledge(state, company)
@@ -443,6 +511,82 @@ class MimoCodingCompanyRuntime:
             if value and value not in cleaned:
                 cleaned.append(value)
         return cleaned
+
+    def _persona_specs(self) -> list[dict[str, Any]]:
+        path = self._docker_bundle_dir() / "personas.json"
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(raw, list):
+                specs = [item for item in raw if isinstance(item, dict) and str(item.get("id") or "").strip()]
+                if specs:
+                    return specs
+        except Exception:
+            pass
+        return deepcopy(DEFAULT_PERSONA_SPECS)
+
+    def _clean_personas(self, persona_ids: list[str] | None) -> list[str]:
+        available = {str(item.get("id")) for item in self._persona_specs()}
+        cleaned: list[str] = []
+        for item in persona_ids or []:
+            value = str(item or "").strip()
+            if value and value in available and value not in cleaned:
+                cleaned.append(value)
+        if cleaned:
+            return cleaned
+        return [str(item.get("id")) for item in self._persona_specs()]
+
+    def _knowledge_bundle_dir(self) -> Path:
+        return self.pack_root / "knowledge" / "mimo_coding_company"
+
+    def _knowledge_bundle_paths(self) -> list[Path]:
+        directory = self._knowledge_bundle_dir()
+        if not directory.is_dir():
+            return []
+        return sorted(path for path in directory.glob("*.md") if path.is_file())
+
+    def _docker_bundle_dir(self) -> Path:
+        return self.pack_root / "docker" / "mimo_coding_company"
+
+    def _docker_swarm_state(
+        self,
+        *,
+        worker_count: int = DEFAULT_DOCKER_WORKER_COUNT,
+        persona_ids: list[str] | None = None,
+        qa_targets: list[str] | None = None,
+    ) -> dict[str, Any]:
+        personas = self._clean_personas(persona_ids)
+        targets = list(qa_targets or [])
+        bundle_dir = self._docker_bundle_dir()
+        workers: list[dict[str, Any]] = []
+        for index in range(max(1, worker_count)):
+            persona_id = personas[index % len(personas)] if personas else "first_time_user"
+            target = targets[index % len(targets)] if targets else ""
+            workers.append(
+                {
+                    "worker_id": f"worker-{index + 1}",
+                    "container_name": f"mimo-qa-worker-{index + 1}",
+                    "persona_id": persona_id,
+                    "qa_target": target,
+                    "display": True,
+                }
+            )
+        compose_path = bundle_dir / "compose.yaml"
+        return {
+            "enabled": True,
+            "worker_count": max(1, worker_count),
+            "personas": personas,
+            "qa_targets": targets,
+            "bundle_dir": str(bundle_dir),
+            "compose_path": str(compose_path),
+            "dockerfile_path": str(bundle_dir / "Dockerfile"),
+            "entrypoint_path": str(bundle_dir / "worker-entrypoint.sh"),
+            "workers": workers,
+            "commands": {
+                "up": f"docker compose -f {compose_path} up --build --scale worker={max(1, worker_count)} -d",
+                "logs": f"docker compose -f {compose_path} logs -f",
+                "down": f"docker compose -f {compose_path} down -v",
+            },
+        }
 
     def _conversation_group_id(self) -> str:
         return "company:" + COMPANY_ID
@@ -561,6 +705,8 @@ class MimoCodingCompanyRuntime:
                 "fast_model": state.get("fast_model") or DEFAULT_FAST_MODEL,
                 "self_improving": True,
                 "qa_targets": list(state.get("qa_targets") if isinstance(state.get("qa_targets"), list) else []),
+                "docker_swarm": deepcopy(state.get("docker_swarm") if isinstance(state.get("docker_swarm"), dict) else self._docker_swarm_state()),
+                "knowledge_bundle_paths": [str(path) for path in self._knowledge_bundle_paths()],
             }
             return CompanyService().store.ensure_company(
                 company_id=COMPANY_ID,
@@ -577,39 +723,32 @@ class MimoCodingCompanyRuntime:
         except Exception:
             return None
 
+    def _knowledge_seed_documents(self) -> list[tuple[str, str, str]]:
+        docs: list[tuple[str, str, str]] = []
+        for path in self._knowledge_bundle_paths():
+            try:
+                body = path.read_text(encoding="utf-8").strip()
+            except Exception:
+                continue
+            title = path.stem.replace("_", " ").replace("-", " ").title()
+            first_line = next((line.strip() for line in body.splitlines() if line.strip()), "")
+            if first_line.startswith("#"):
+                title = first_line.lstrip("#").strip() or title
+            docs.append((title, body + "\n", str(path)))
+        if docs:
+            return docs
+        return [(filename, body, filename) for filename, body in FALLBACK_KNOWLEDGE_DOCS]
+
     def _seed_knowledge(self, state: dict[str, Any], company: dict[str, Any] | None) -> list[str]:
         existing = list(state.get("seeded_knowledge_ids") if isinstance(state.get("seeded_knowledge_ids"), list) else [])
         if existing:
             return existing
         store = KnowledgeStore()
-        entries = [
-            (
-                "Mimo Coding Company Runbook",
-                "\n".join(
-                    [
-                        "Main goal: strengthen the coding harness and improve the repo over long-running loops.",
-                        "Main model: " + str(state.get("main_model") or DEFAULT_MAIN_MODEL),
-                        "Vision model: " + str(state.get("vision_model") or DEFAULT_VISION_MODEL),
-                        "Rule: if a needed tool or skill is missing, create the smallest viable one instead of stopping.",
-                        "Rule: start with small coding reviews, then widen into search, provider sync, QA, and self-improvement.",
-                    ]
-                ),
-            ),
-            (
-                "Mimo Coding Company QA Personas",
-                "\n".join(
-                    [
-                        "Personas: first-time user, returning power user, impatient user, keyboard-heavy user.",
-                        "Use browser_use, browser_companion, or computer_use depending on what the target needs.",
-                        "Record only evidence-backed bugs and repro steps.",
-                    ]
-                ),
-            ),
-        ]
+        entries = self._knowledge_seed_documents()
         created_ids: list[str] = []
-        for title, body in entries:
+        for title, body, source_path in entries:
             entry = store.create(
-                f"# {title}\n\n{body}\n",
+                body if body.lstrip().startswith("#") else f"# {title}\n\n{body}\n",
                 metadata={
                     "profile_id": PROFILE_ID,
                     "company_id": COMPANY_ID,
@@ -617,6 +756,7 @@ class MimoCodingCompanyRuntime:
                     "title": title,
                     "conversation_id": state.get("conversation_id"),
                     "company_name": company.get("name") if isinstance(company, dict) else COMPANY_NAME,
+                    "source_path": source_path,
                 },
             )
             created_ids.append(str(entry.get("id")))
@@ -647,9 +787,21 @@ class MimoCodingCompanyRuntime:
                 "source": "bootstrap",
             },
             {
+                "title": "Docker worker swarm",
+                "description": "Use isolated Ubuntu Docker workers for browser/computer-use QA whenever Docker is available.",
+                "target_agent_ids": ["browser_qa", "toolsmith"],
+                "source": "bootstrap",
+            },
+            {
                 "title": "Tool and skill gap closure",
                 "description": "When a task needs a missing tool or skill, create the smallest viable one instead of giving up.",
                 "target_agent_ids": ["toolsmith", "coding_engineer"],
+                "source": "bootstrap",
+            },
+            {
+                "title": "Knowledge capture loop",
+                "description": "Keep the knowledge bundle current so later self-improvement loops learn from previous wins, failures, and QA findings.",
+                "target_agent_ids": ["project_manager", "toolsmith"],
                 "source": "bootstrap",
             },
         ]
@@ -786,7 +938,7 @@ class MimoCodingCompanyRuntime:
         return (
             "Start with one simple coding task. Review the current repo and harness, pick the smallest high-value improvement, "
             "then hand implementation to @coding_engineer and review to @reviewer. "
-            "Record the decision in knowledge. If a missing tool or skill blocks progress, ask @toolsmith to create it."
+            "Record the decision in the knowledge bundle. If a missing tool or skill blocks progress, ask @toolsmith to create it."
         )
 
     def _heartbeat_message(self, state: dict[str, Any]) -> str:
@@ -797,19 +949,27 @@ class MimoCodingCompanyRuntime:
 
     def _improvement_message(self, state: dict[str, Any]) -> str:
         main_model = str(state.get("main_model") or DEFAULT_MAIN_MODEL)
+        docker_swarm = state.get("docker_swarm") if isinstance(state.get("docker_swarm"), dict) else {}
+        worker_count = int(docker_swarm.get("worker_count") or DEFAULT_DOCKER_WORKER_COUNT)
         return (
             "Run the self-improvement loop. Pick one unfinished or newly discovered high-value task around coding harness quality, "
             "provider/model coverage, search quality, or repo UX. Keep prompts short. Use "
             + main_model
-            + " as the main reasoning model. If the best next step needs a new tool or skill, create the smallest viable version instead of stopping."
+            + " as the main reasoning model. Prefer Docker-isolated QA with "
+            + str(worker_count)
+            + " Ubuntu workers when useful. If the best next step needs a new tool or skill, create the smallest viable version instead of stopping."
         )
 
     def _qa_message(self, state: dict[str, Any]) -> str:
         targets = list(state.get("qa_targets") if isinstance(state.get("qa_targets"), list) else [])
+        docker_swarm = state.get("docker_swarm") if isinstance(state.get("docker_swarm"), dict) else {}
+        personas = list(docker_swarm.get("personas") if isinstance(docker_swarm.get("personas"), list) else [])
         target_text = ", ".join(targets) if targets else "the active localhost/defaultspack surface"
         return (
             "Run a QA swarm on "
             + target_text
-            + ". Simulate multiple user personas, click around, and use browser_use, browser_companion, or computer_use as needed. "
+            + ". Simulate multiple user personas"
+            + (": " + ", ".join(personas) if personas else "")
+            + ", click around, and use browser_use, browser_companion, or computer_use as needed. "
             "Log only evidence-backed bugs with repro steps. Stay quiet if everything passes."
         )

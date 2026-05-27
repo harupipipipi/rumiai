@@ -3888,6 +3888,7 @@ export default function App() {
   };
 
   const mimoCodingTargets = () => settingList(settingsValues.mimo_coding_company?.qa_targets);
+  const mimoCodingPersonas = () => settingList(settingsValues.mimo_coding_company?.docker_personas);
 
   const handleStartMimoCodingCompany = async () => {
     setMimoCodingBusy(true);
@@ -3902,6 +3903,8 @@ export default function App() {
         vision_model: preferredMimoVisionModel(),
         fast_model: preferredMimoFastModel(),
         qa_targets: mimoCodingTargets(),
+        docker_worker_count: Math.max(1, Math.min(16, settingNumber(settingsValues.mimo_coding_company?.docker_worker_count, 3))),
+        docker_personas: mimoCodingPersonas(),
         run_initial_review_now: settingsValues.mimo_coding_company?.run_initial_review_now !== false,
       });
       setMimoCodingStatus(status);
@@ -4017,6 +4020,8 @@ export default function App() {
           vision_model: preferredMimoVisionModel(),
           fast_model: preferredMimoFastModel(),
           qa_targets: mimoCodingTargets(),
+          docker_worker_count: Math.max(1, Math.min(16, settingNumber(settingsValues.mimo_coding_company?.docker_worker_count, 3))),
+          docker_personas: mimoCodingPersonas(),
           run_initial_review_now: settingsValues.mimo_coding_company?.run_initial_review_now !== false,
         });
         setMimoCodingStatus(result as MimoCodingCompanyStatus);

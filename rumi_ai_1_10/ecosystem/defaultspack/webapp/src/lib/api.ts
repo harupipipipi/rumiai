@@ -1822,6 +1822,8 @@ export const api = {
     vision_model?: string;
     fast_model?: string;
     qa_targets?: string[];
+    docker_worker_count?: number;
+    docker_personas?: string[];
     run_initial_review_now?: boolean;
     seed_tasks?: boolean;
     seed_knowledge?: boolean;
