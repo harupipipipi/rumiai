@@ -103,6 +103,8 @@ class BrowserStateNormalizer:
         events: list[dict[str, Any]] = []
         tool_name = self._clean_string(tool_name)
         tool_call_id = self._clean_string(tool_call_id)
+        if not self._should_emit_browser_state(tool_name, resolved_action):
+            return BrowserStateEmission(events=events, state_revision=self._state_revision)
 
         if self._should_emit_invalidation(resolved_action, roots):
             self._append_event(
@@ -157,6 +159,12 @@ class BrowserStateNormalizer:
             )
 
         return BrowserStateEmission(events=events, state_revision=self._state_revision)
+
+    def _should_emit_browser_state(self, tool_name: str, action: str) -> bool:
+        normalized_tool = self._clean_string(tool_name).replace("-", "_")
+        if normalized_tool.startswith("browser_") or normalized_tool.startswith("computer_"):
+            return True
+        return action in _MUTATING_ACTIONS or action in _DOM_ACTIONS or action in _SNAPSHOT_ACTIONS
 
     def _append_event(
         self,

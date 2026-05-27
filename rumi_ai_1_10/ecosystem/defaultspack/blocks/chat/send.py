@@ -798,6 +798,8 @@ def _tool_result_recovery_kind(result):
     kind = str(recovery.get("kind") or "").strip()
     if kind:
         return kind
+    if not _tool_result_is_error(result):
+        return ""
     reason = _tool_result_reason(result).lower()
     if "visible window" in reason or "background computer-use is disabled" in reason:
         return "visible_window_required"
