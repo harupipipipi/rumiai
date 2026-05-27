@@ -98,6 +98,7 @@ node_settings:
       - coding_file_restore
       - coding_git_status
       - coding_git_diff
+      - coding_git_commit
       - coding_terminal_exec
       - sandbox_exec
       - python_exec
@@ -162,6 +163,7 @@ policy:
     - coding_file_restore
     - coding_git_status
     - coding_git_diff
+    - coding_git_commit
     - coding_terminal_exec
     - sandbox_exec
     - python_exec

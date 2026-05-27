@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+from functools import lru_cache
 import os
 import re
 import sys
@@ -13,6 +14,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 from blocks._common import gen_id
 from domain.ai_client.capabilities.registry import get_model_provider_capabilities
 from blocks.chat._context_helpers import enrich_messages, extract_user_text
+from domain.capability.catalog import CapabilityCatalog
 from domain.capabilities.runtime_snapshot import build_runtime_capability_snapshot
 from domain.ai_client.model_runtime_settings import ModelRuntimeSettingsService
 from domain.ai_client.model_router import ModelRoutingRequest, route_model_request
@@ -228,6 +230,7 @@ def prepare_chat_run(input_data: dict[str, Any], context: dict[str, Any] | None 
     ).strip()
     if resolved_profile_id:
         request_context["profile_id"] = resolved_profile_id
+        _hydrate_profile_policy_from_profile_id(request_context, resolved_profile_id)
     resolved_agent_id = str(
         request_context.get("agent_id")
         or metadata.get("agent_id")
@@ -237,6 +240,7 @@ def prepare_chat_run(input_data: dict[str, Any], context: dict[str, Any] | None 
     ).strip()
     if resolved_agent_id:
         request_context["agent_id"] = resolved_agent_id
+    _propagate_conversation_workspace(request_context, metadata, conversation_metadata)
     request_context.update(_approval_followup_tool_context(metadata))
     tool_policy = params.get("tool_policy")
     if isinstance(tool_policy, dict):
@@ -736,6 +740,95 @@ def _runtime_user_content_override(metadata: dict[str, Any] | None) -> str:
         return ""
     return value.strip()
 
+_WORKSPACE_ID_KEYS = ("workspace_id", "workspaceId")
+_WORKSPACE_ROOT_KEYS = ("workspace_root", "workspaceRoot", "rootPath")
+
+
+@lru_cache(maxsize=64)
+def _profile_snapshot(profile_id: str) -> dict[str, Any]:
+    candidate = str(profile_id or "").strip()
+    if not candidate:
+        return {}
+    try:
+        from core_runtime.profile_workspace import ProfileWorkspaceManager
+
+        loaded = ProfileWorkspaceManager().load_profile_yaml(candidate)
+        if isinstance(loaded, dict) and loaded:
+            return dict(loaded)
+    except Exception:
+        pass
+    try:
+        loaded = CapabilityCatalog().profile(candidate)
+        if isinstance(loaded, dict) and loaded:
+            return dict(loaded)
+    except Exception:
+        pass
+    return {}
+
+
+def _first_non_empty_str(*sources: dict[str, Any] | None, keys: tuple[str, ...]) -> str:
+    for source in sources:
+        if not isinstance(source, dict):
+            continue
+        for key in keys:
+            value = source.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+            if value not in (None, "") and not isinstance(value, str):
+                return str(value)
+    return ""
+
+
+def _hydrate_profile_policy_from_profile_id(request_context: dict[str, Any], profile_id: str) -> None:
+    if not isinstance(request_context, dict):
+        return
+    snapshot = _profile_snapshot(profile_id)
+    policy = snapshot.get("policy") if isinstance(snapshot, dict) else None
+    if not isinstance(policy, dict) or not policy:
+        return
+    existing = request_context.get("profile_policy") if isinstance(request_context.get("profile_policy"), dict) else {}
+    request_context["profile_policy"] = {
+        **policy,
+        **existing,
+    }
+
+
+def _propagate_conversation_workspace(
+    request_context: dict[str, Any],
+    message_metadata: dict[str, Any] | None,
+    conversation_metadata: dict[str, Any] | None,
+) -> None:
+    if not isinstance(request_context, dict):
+        return
+    workspace_id = _first_non_empty_str(request_context, message_metadata, conversation_metadata, keys=_WORKSPACE_ID_KEYS)
+    if workspace_id:
+        request_context["workspace_id"] = workspace_id
+    workspace_root = _first_non_empty_str(
+        request_context,
+        message_metadata,
+        conversation_metadata,
+        keys=_WORKSPACE_ROOT_KEYS,
+    )
+    if workspace_root:
+        request_context["workspace_root"] = workspace_root
+    if request_context.get("workspace_id") and request_context.get("workspace_root"):
+        return
+    try:
+        from domain.coding.workspace_store import WorkspaceStore
+
+        store = WorkspaceStore()
+        selected_workspace_id = store.selected_workspace_id()
+        if not selected_workspace_id:
+            return
+        selected = store.get(selected_workspace_id)
+        if not isinstance(selected, dict):
+            return
+        request_context.setdefault("workspace_id", selected_workspace_id)
+        root_path = selected.get("root_path")
+        if isinstance(root_path, str) and root_path.strip():
+            request_context.setdefault("workspace_root", root_path.strip())
+    except Exception:
+        return
 
 def _approval_followup_tool_context(metadata: dict[str, Any] | None) -> dict[str, Any]:
     if not isinstance(metadata, dict):
