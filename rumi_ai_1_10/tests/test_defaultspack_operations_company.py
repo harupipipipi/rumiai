@@ -148,6 +148,59 @@ def test_mimo_coding_company_static_knowledge_and_docker_bundles_exist():
     assert all(Path(path).is_file() for path in knowledge_docs)
 
 
+def test_mimo_coding_company_manifest_expands_catalog_backed_groq_and_cerebras_models():
+    from domain.ai_client.providers import get_all_known_models
+    from ecosystem.rumi_operations_company_pack.domain.agent.mimo_coding_company import MimoCodingCompanyRuntime
+
+    runtime = MimoCodingCompanyRuntime()
+    allowlist = set(runtime.manifest()["model_self_selection"]["allowlist"])
+
+    expected = {
+        str(model.get("qualified_model_id") or model.get("id"))
+        for provider_id in ("groq", "cerebras")
+        for model in get_all_known_models(provider_id=provider_id)
+        if isinstance(model, dict) and str(model.get("type") or "chat").strip().lower() in {"", "chat", "reasoning"}
+    }
+
+    assert "groq/openai/gpt-oss-20b" in allowlist
+    assert "cerebras/zai-glm-4.7" in allowlist
+    assert expected <= allowlist
+
+
+def test_mimo_coding_company_bootstrap_block_accepts_catalog_backed_models(tmp_path, monkeypatch):
+    from ecosystem.rumi_operations_company_pack.blocks.agent.mimo_company import bootstrap
+    from domain.agent.scheduler import Scheduler
+
+    _reset_defaultspack_singletons()
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(tmp_path / "chat" / "conversations.json"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_COMPANY_STORE_PATH", str(tmp_path / "companies"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_MIMO_CODING_STATE_PATH", str(tmp_path / "mimo" / "state.json"))
+
+    result = bootstrap.run(
+        {
+            "start_nonstop": True,
+            "heartbeat_minutes": 30,
+            "review_interval_minutes": 180,
+            "qa_interval_minutes": 240,
+            "model": "groq/openai/gpt-oss-20b",
+            "vision_model": "stub/default",
+            "fast_model": "cerebras/zai-glm-4.7",
+            "seed_knowledge": False,
+            "run_initial_review_now": False,
+        },
+        {},
+    )
+
+    assert result["status"] == "ok"
+    assert result["data"]["harness"]["main_model"] == "groq/openai/gpt-oss-20b"
+    assert result["data"]["harness"]["fast_model"] == "cerebras/zai-glm-4.7"
+
+    for schedule in result["data"]["schedules"]:
+        Scheduler().delete_schedule(schedule["id"])
+    _reset_defaultspack_singletons()
+
+
 def test_mimo_coding_conversation_resolves_pack_system_prompt():
     from blocks.chat.send import _conversation_system_prompt
     from domain.prompt.manager import get_manager

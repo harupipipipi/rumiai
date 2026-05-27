@@ -13,7 +13,7 @@ from ecosystem.rumi_operations_company_pack.domain.agent.mimo_coding_company imp
     DEFAULT_MAIN_MODEL,
     DEFAULT_VISION_MODEL,
     MimoCodingCompanyRuntime,
-    MODEL_ALLOWLIST,
+    current_model_allowlist,
 )
 
 
@@ -36,7 +36,7 @@ def _as_string_list(value):
 
 def _validated_model(value, *, label, default):
     cleaned = str(value or default).strip()
-    if cleaned not in MODEL_ALLOWLIST:
+    if cleaned not in current_model_allowlist():
         raise ValueError(label + " is not allowed for MiMo coding company: " + cleaned)
     return cleaned
 

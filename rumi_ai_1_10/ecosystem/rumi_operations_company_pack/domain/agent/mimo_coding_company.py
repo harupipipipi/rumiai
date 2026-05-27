@@ -19,6 +19,7 @@ from domain.agent.org_manager import OrgManager
 from domain.agent.role_registry import RoleRegistry
 from domain.agent.scheduler import Scheduler
 from domain.ai_client.model_runtime_settings import ModelRuntimeSettingsService
+from domain.ai_client.providers import get_all_known_models
 from domain.company.service import CompanyService
 from domain.company.task_store import CompanyTaskStore
 from domain.knowledge.store import KnowledgeStore
@@ -93,6 +94,8 @@ MODEL_ALLOWLIST = [
     "cerebras/gpt-oss-120b",
     "stub/default",
 ]
+
+CATALOG_EXPANDED_MODEL_PROVIDERS = ("groq", "cerebras")
 
 UTILITY_MODELS = {
     "subagent_default": DEFAULT_MAIN_MODEL,
@@ -249,6 +252,36 @@ def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def current_model_allowlist() -> list[str]:
+    allowlist: list[str] = []
+    seen: set[str] = set()
+
+    def append(candidate: Any) -> None:
+        value = str(candidate or "").strip()
+        if not value or value in seen:
+            return
+        seen.add(value)
+        allowlist.append(value)
+
+    for model_id in MODEL_ALLOWLIST:
+        append(model_id)
+
+    for provider_id in CATALOG_EXPANDED_MODEL_PROVIDERS:
+        try:
+            catalog_models = get_all_known_models(provider_id=provider_id)
+        except Exception:
+            continue
+        for model in catalog_models:
+            if not isinstance(model, dict):
+                continue
+            model_type = str(model.get("type") or "chat").strip().lower()
+            if model_type not in {"", "chat", "reasoning"}:
+                continue
+            append(model.get("qualified_model_id") or model.get("id"))
+
+    return allowlist
+
+
 class MimoCodingCompanyRuntime:
     def __init__(self, pack_root: Path | None = None) -> None:
         self.pack_root = pack_root or Path(__file__).resolve().parents[2]
@@ -256,6 +289,7 @@ class MimoCodingCompanyRuntime:
         self.state_path = self._resolve_state_path()
 
     def manifest(self) -> dict[str, Any]:
+        model_allowlist = current_model_allowlist()
         return {
             "profile_id": PROFILE_ID,
             "name": COMPANY_NAME,
@@ -274,12 +308,12 @@ class MimoCodingCompanyRuntime:
                 "default_main_model": DEFAULT_MAIN_MODEL,
                 "default_vision_model": DEFAULT_VISION_MODEL,
                 "default_fast_model": DEFAULT_FAST_MODEL,
-                "allowlist": list(MODEL_ALLOWLIST),
+                "allowlist": list(model_allowlist),
                 "utility_models": dict(UTILITY_MODELS),
             },
             "model_self_selection": {
                 "enabled": True,
-                "allowlist": list(MODEL_ALLOWLIST),
+                "allowlist": list(model_allowlist),
                 "default_reasoning_effort": "high",
                 "max_switches_per_day": 48,
                 "audit_required": False,
@@ -499,7 +533,7 @@ class MimoCodingCompanyRuntime:
 
     def _allowed_model(self, model: str) -> str:
         cleaned = str(model or "").strip()
-        if cleaned not in MODEL_ALLOWLIST:
+        if cleaned not in current_model_allowlist():
             raise ValueError("model is not allowed for MiMo Coding Company: " + cleaned)
         return cleaned
 
@@ -835,7 +869,7 @@ class MimoCodingCompanyRuntime:
             "terminal_actions_require_approval": False,
             "normal_status_silent": True,
             "tool_allowlist": TOOL_ALLOWLIST,
-            "model_allowlist": MODEL_ALLOWLIST,
+            "model_allowlist": current_model_allowlist(),
         }
 
     def _ensure_interval_schedule(
