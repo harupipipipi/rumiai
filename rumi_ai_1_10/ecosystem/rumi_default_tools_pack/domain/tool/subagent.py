@@ -35,14 +35,31 @@ class SubagentController:
 
         model = str(arguments.get("model") or context.get("model") or parent.get("model") or "stub/default")
         title = str(arguments.get("title") or task[:48] or "Subagent").strip()
-        agent_id = str(arguments.get("agent_id") or "subagent")
+        agent_id = str(arguments.get("agent_id") or context.get("agent_id") or "subagent")
+        parent_metadata = parent.get("metadata") if isinstance(parent.get("metadata"), dict) else {}
+        if not isinstance(parent_metadata, dict):
+            parent_metadata = {}
+        inherited_metadata = {
+            key: parent_metadata.get(key)
+            for key in ("profile_id", "company_id", "client_manager_agent_id")
+            if parent_metadata.get(key) is not None
+        }
+        system_prompt_id = str(
+            arguments.get("system_prompt_id")
+            or context.get("system_prompt_id")
+            or parent.get("system_prompt_id")
+            or ""
+        ).strip() or None
         child = store.create_conversation(
             model=model,
+            system_prompt_id=system_prompt_id,
             parent_conversation_id=parent_id,
             conversation_kind="subagent",
             agent_id=agent_id,
             tags=[*list(parent.get("tags", [])), "subagent"],
+            group_id=parent.get("group_id"),
             metadata={
+                **inherited_metadata,
                 "parent_conversation_id": parent_id,
                 "subagent": {
                     "task": task,
@@ -84,10 +101,16 @@ class SubagentController:
             message_metadata["profile_id"] = context.get("profile_id").strip()
         if agent_id:
             message_metadata["agent_id"] = agent_id
+        effective_task = task
+        if inherited_tools:
+            effective_task = (
+                "Use the connected tools directly. Do not claim missing repo or file access unless a tool call fails.\n\n"
+                + task
+            )
         result = dispatch_input(
             RumiInputEnvelope(
                 role="user",
-                input=task,
+                input=effective_task,
                 chat={"conversation_id": child["id"], "title": title, "model": model},
                 source={"kind": "internal", "provider": "subagent", "event_id": "subagent:" + child["id"]},
                 target={
