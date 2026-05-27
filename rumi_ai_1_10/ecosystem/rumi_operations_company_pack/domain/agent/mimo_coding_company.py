@@ -362,7 +362,8 @@ def current_model_allowlist() -> list[str]:
 
 class MimoCodingCompanyRuntime:
     def __init__(self, pack_root: Path | None = None) -> None:
-        self.pack_root = pack_root or Path(__file__).resolve().parents[2]
+        self.source_pack_root = Path(__file__).resolve().parents[2]
+        self.pack_root = pack_root or self.source_pack_root
         self.defaultspack_root = self.pack_root.parent / "defaultspack"
         self.state_path = self._resolve_state_path()
 
@@ -656,7 +657,10 @@ class MimoCodingCompanyRuntime:
         return [str(item.get("id")) for item in self._persona_specs()]
 
     def _knowledge_bundle_dir(self) -> Path:
-        return self.pack_root / "knowledge" / "mimo_coding_company"
+        primary = self.pack_root / "knowledge" / "mimo_coding_company"
+        if primary.is_dir():
+            return primary
+        return self.source_pack_root / "knowledge" / "mimo_coding_company"
 
     def _knowledge_bundle_paths(self) -> list[Path]:
         directory = self._knowledge_bundle_dir()
@@ -665,7 +669,24 @@ class MimoCodingCompanyRuntime:
         return sorted(path for path in directory.glob("*.md") if path.is_file())
 
     def _docker_bundle_dir(self) -> Path:
-        return self.pack_root / "docker" / "mimo_coding_company"
+        primary = self.pack_root / "docker" / "mimo_coding_company"
+        if primary.is_dir():
+            return primary
+        return self.source_pack_root / "docker" / "mimo_coding_company"
+
+    def _docker_runtime_dir(self) -> Path:
+        return self.state_path.parent / "docker_swarm"
+
+    def _workspace_root(self) -> Path:
+        try:
+            return self.source_pack_root.parents[2]
+        except IndexError:
+            return self.source_pack_root
+
+    @staticmethod
+    def _write_json_file(path: Path, payload: dict[str, Any]) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
     def _docker_swarm_state(
         self,
@@ -691,22 +712,133 @@ class MimoCodingCompanyRuntime:
                 }
             )
         compose_path = bundle_dir / "compose.yaml"
-        return {
+        swarm_state = {
             "enabled": True,
             "worker_count": max(1, worker_count),
             "personas": personas,
             "qa_targets": targets,
             "bundle_dir": str(bundle_dir),
-            "compose_path": str(compose_path),
+            "template_compose_path": str(compose_path),
             "dockerfile_path": str(bundle_dir / "Dockerfile"),
             "entrypoint_path": str(bundle_dir / "worker-entrypoint.sh"),
             "workers": workers,
-            "commands": {
-                "up": f"docker compose -f {compose_path} up --build --scale worker={max(1, worker_count)} -d",
-                "logs": f"docker compose -f {compose_path} logs -f",
-                "down": f"docker compose -f {compose_path} down -v",
-            },
         }
+        return self._materialize_docker_swarm_artifacts(swarm_state)
+
+    def _materialize_docker_swarm_artifacts(self, swarm_state: dict[str, Any]) -> dict[str, Any]:
+        runtime_dir = self._docker_runtime_dir()
+        assignments_dir = runtime_dir / "assignments"
+        status_dir = runtime_dir / "status"
+        bundle_dir = Path(str(swarm_state.get("bundle_dir") or self._docker_bundle_dir()))
+        workspace_root = self._workspace_root()
+        workers: list[dict[str, Any]] = []
+        assignment_paths: dict[str, str] = {}
+        status_paths: dict[str, str] = {}
+
+        for raw_worker in swarm_state.get("workers", []) if isinstance(swarm_state.get("workers"), list) else []:
+            if not isinstance(raw_worker, dict):
+                continue
+            worker = dict(raw_worker)
+            worker_id = str(worker.get("worker_id") or "")
+            if not worker_id:
+                continue
+            assignment_path = assignments_dir / f"{worker_id}.assignment.json"
+            status_path = status_dir / f"{worker_id}.status.json"
+            assignment = self._docker_worker_assignment(worker)
+            self._write_json_file(assignment_path, assignment)
+            worker["assignment_path"] = str(assignment_path)
+            worker["status_path"] = str(status_path)
+            workers.append(worker)
+            assignment_paths[worker_id] = str(assignment_path)
+            status_paths[worker_id] = str(status_path)
+
+        generated_compose_path = runtime_dir / "compose.generated.yaml"
+        generated_compose_path.parent.mkdir(parents=True, exist_ok=True)
+        generated_compose_path.write_text(
+            self._render_docker_swarm_compose(
+                bundle_dir=bundle_dir,
+                workspace_root=workspace_root,
+                runtime_dir=runtime_dir,
+                workers=workers,
+            ),
+            encoding="utf-8",
+        )
+        swarm_state["compose_path"] = str(generated_compose_path)
+        swarm_state["runtime_dir"] = str(runtime_dir)
+        swarm_state["assignment_dir"] = str(assignments_dir)
+        swarm_state["status_dir"] = str(status_dir)
+        swarm_state["assignment_paths"] = assignment_paths
+        swarm_state["status_paths"] = status_paths
+        swarm_state["workers"] = workers
+        swarm_state["commands"] = {
+            "up": f"docker compose -f {generated_compose_path} up --build -d",
+            "logs": f"docker compose -f {generated_compose_path} logs -f",
+            "ps": f"docker compose -f {generated_compose_path} ps",
+            "down": f"docker compose -f {generated_compose_path} down -v",
+        }
+        return swarm_state
+
+    def _docker_worker_assignment(self, worker: dict[str, Any]) -> dict[str, Any]:
+        persona_id = str(worker.get("persona_id") or "first_time_user")
+        persona_specs = {str(item.get("id")): item for item in self._persona_specs()}
+        persona_spec = persona_specs.get(persona_id, {})
+        mission = PERSONA_MISSIONS.get(persona_id, {})
+        return {
+            "worker_id": str(worker.get("worker_id") or ""),
+            "container_name": str(worker.get("container_name") or ""),
+            "persona_id": persona_id,
+            "persona_label": str(persona_spec.get("label") or persona_id),
+            "qa_target": str(worker.get("qa_target") or ""),
+            "mission": str(mission.get("mission") or str(persona_spec.get("goal") or "")),
+            "probe_areas": list(mission.get("probe_areas") or []),
+            "prompt_style": "Keep prompts short, concrete, and evidence-first.",
+            "reporting_policy": "Report only evidence-backed bugs with exact repro steps or screenshots.",
+            "tools_hint": ["browser_use", "browser_companion", "computer_use"],
+            "model_hint": DEFAULT_VISION_MODEL,
+        }
+
+    @staticmethod
+    def _yaml_quote(value: Any) -> str:
+        return json.dumps("" if value is None else str(value))
+
+    def _render_docker_swarm_compose(
+        self,
+        *,
+        bundle_dir: Path,
+        workspace_root: Path,
+        runtime_dir: Path,
+        workers: list[dict[str, Any]],
+    ) -> str:
+        lines = ["services:"]
+        for worker in workers:
+            worker_id = str(worker.get("worker_id") or "")
+            service_id = worker_id.replace("_", "-")
+            lines.extend(
+                [
+                    f"  {service_id}:",
+                    "    build:",
+                    f"      context: {self._yaml_quote(bundle_dir)}",
+                    "      dockerfile: \"Dockerfile\"",
+                    "    image: \"rumiai/mimo-coding-company-worker:latest\"",
+                    f"    container_name: {self._yaml_quote(worker.get('container_name') or service_id)}",
+                    "    environment:",
+                    "      DISPLAY: \":99\"",
+                    "      WORKER_ROLE: \"browser_qa\"",
+                    f"      START_URL: {self._yaml_quote(worker.get('qa_target') or '')}",
+                    f"      WORKER_ID: {self._yaml_quote(worker_id)}",
+                    f"      WORKER_PERSONA_ID: {self._yaml_quote(worker.get('persona_id') or '')}",
+                    f"      WORKER_ASSIGNMENT_FILE: {self._yaml_quote('/rumi-swarm/assignments/' + worker_id + '.assignment.json')}",
+                    f"      WORKER_STATUS_FILE: {self._yaml_quote('/rumi-swarm/status/' + worker_id + '.status.json')}",
+                    "    working_dir: \"/workspace\"",
+                    "    volumes:",
+                    f"      - {self._yaml_quote(str(workspace_root) + ':/workspace')}",
+                    f"      - {self._yaml_quote(str(runtime_dir) + ':/rumi-swarm')}",
+                    "    shm_size: \"1gb\"",
+                    "    tty: true",
+                    "    stdin_open: true",
+                ]
+            )
+        return "\n".join(lines) + "\n"
 
     def _conversation_group_id(self) -> str:
         return "company:" + COMPANY_ID

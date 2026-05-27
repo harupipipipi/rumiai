@@ -122,8 +122,14 @@ def test_mimo_coding_company_bootstrap_creates_company_conversation_and_loops(tm
     assert status["harness"]["autonomy_board"]["next_focus"][0]["id"] == "initial_harness_review"
     assert status["harness"]["qa_swarm_plan"]["workers"][0]["persona_id"] == "first_time_user"
     assert status["harness"]["qa_swarm_plan"]["workers"][0]["qa_target"] == "http://127.0.0.1:3000"
+    assert Path(status["harness"]["docker_swarm"]["compose_path"]).is_file()
+    assert Path(status["harness"]["docker_swarm"]["template_compose_path"]).is_file()
+    assert Path(status["harness"]["docker_swarm"]["workers"][0]["assignment_path"]).is_file()
     queued_tasks = CompanyTaskStore().list("mimo-coding-company", status="queued", limit=50, offset=0)
     assert queued_tasks is not None and queued_tasks[1] == 6
+    assignment = json.loads(Path(status["harness"]["docker_swarm"]["workers"][0]["assignment_path"]).read_text(encoding="utf-8"))
+    assert assignment["persona_id"] == "first_time_user"
+    assert assignment["qa_target"] == "http://127.0.0.1:3000"
 
     conversation = ChatStore().get_conversation(status["conversation_id"])
     assert conversation["conversation_kind"] == "mimo_coding_company"
@@ -201,6 +207,11 @@ def test_mimo_coding_company_rebootstrap_refreshes_existing_schedule_messages(tm
     assert improvement_schedule["config"] == {"value": 120, "unit": "minutes"}
     assert second["harness"]["qa_swarm_plan"]["workers"][0]["persona_id"] == "power_user"
     assert second["harness"]["qa_swarm_plan"]["workers"][0]["qa_target"] == "http://127.0.0.1:3001"
+    assignment = json.loads(Path(second["harness"]["docker_swarm"]["workers"][0]["assignment_path"]).read_text(encoding="utf-8"))
+    compose_text = Path(second["harness"]["docker_swarm"]["compose_path"]).read_text(encoding="utf-8")
+    assert assignment["persona_id"] == "power_user"
+    assert assignment["qa_target"] == "http://127.0.0.1:3001"
+    assert "http://127.0.0.1:3001" in compose_text
 
     for schedule in second["schedules"]:
         Scheduler().delete_schedule(schedule["id"])
