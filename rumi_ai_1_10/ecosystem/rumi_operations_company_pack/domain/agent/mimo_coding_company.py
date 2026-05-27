@@ -845,6 +845,35 @@ class MimoCodingCompanyRuntime:
             "workers": observed_workers,
         }
 
+    def _docker_swarm_monitoring_summary(self, state: dict[str, Any]) -> str:
+        docker_swarm = self._docker_swarm_with_monitoring(
+            deepcopy(state.get("docker_swarm") if isinstance(state.get("docker_swarm"), dict) else self._docker_swarm_state())
+        )
+        monitoring = docker_swarm.get("monitoring") if isinstance(docker_swarm.get("monitoring"), dict) else {}
+        try:
+            total_workers = int(monitoring.get("total_workers") or 0)
+            reported_workers = int(monitoring.get("reported_workers") or 0)
+            browser_workers = int(monitoring.get("browser_launch_attempted_workers") or 0)
+        except (TypeError, ValueError):
+            return ""
+        if total_workers <= 0:
+            return ""
+        summary = (
+            f"Swarm monitor: {reported_workers}/{total_workers} workers reported status; "
+            f"{browser_workers}/{total_workers} attempted browser launch."
+        )
+        missing = monitoring.get("missing_status_workers") if isinstance(monitoring.get("missing_status_workers"), list) else []
+        if missing:
+            summary += " Missing status: " + ", ".join(str(item) for item in missing if str(item).strip()) + "."
+        mismatched = [
+            str(item.get("worker_id") or "")
+            for item in (monitoring.get("workers") if isinstance(monitoring.get("workers"), list) else [])
+            if isinstance(item, dict) and item.get("reported") and item.get("assignment_match") is False
+        ]
+        if mismatched:
+            summary += " Assignment mismatch: " + ", ".join(item for item in mismatched if item) + "."
+        return summary
+
     def _docker_worker_assignment(self, worker: dict[str, Any]) -> dict[str, Any]:
         persona_id = str(worker.get("persona_id") or "first_time_user")
         persona_specs = {str(item.get("id")): item for item in self._persona_specs()}
@@ -1376,9 +1405,11 @@ class MimoCodingCompanyRuntime:
         )
 
     def _heartbeat_message(self, state: dict[str, Any]) -> str:
+        monitoring_summary = self._docker_swarm_monitoring_summary(state)
         return (
             "Run a short heartbeat for the MiMo Coding Company. Check pending tasks, recent failures, QA bugs, and blocked work. "
-            "If nothing important changed, stay silent. If action is needed, mention @client_manager and @project_manager with evidence."
+            + (monitoring_summary + " " if monitoring_summary else "")
+            + "If nothing important changed, stay silent. If action is needed, mention @client_manager and @project_manager with evidence."
         )
 
     def _improvement_message(self, state: dict[str, Any]) -> str:
@@ -1396,6 +1427,7 @@ class MimoCodingCompanyRuntime:
 
     def _qa_message(self, state: dict[str, Any]) -> str:
         assignments = self._qa_swarm_plan(state).get("workers", [])
+        monitoring_summary = self._docker_swarm_monitoring_summary(state)
         summary = "; ".join(
             (
                 str(item.get("worker_id") or "")
@@ -1409,7 +1441,9 @@ class MimoCodingCompanyRuntime:
         )
         return (
             "Run a QA swarm with short prompts."
+            + (" " + monitoring_summary if monitoring_summary else "")
             + (" Assignments: " + summary + "." if summary else "")
-            + " Click around, use browser_use, browser_companion, or computer_use as needed, and log only evidence-backed bugs with repro steps. "
+            + " Click around, use browser_use, browser_companion, or computer_use as needed, and prioritize workers missing status or browser launch before broad exploration. "
+            "Log only evidence-backed bugs with repro steps. "
             "Stay quiet if everything passes."
         )

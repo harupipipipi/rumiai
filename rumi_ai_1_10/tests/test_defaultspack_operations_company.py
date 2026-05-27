@@ -141,6 +141,10 @@ def test_mimo_coding_company_bootstrap_creates_company_conversation_and_loops(tm
     loop_keys = {schedule["task"]["metadata"]["loop_key"] for schedule in status["schedules"]}
     assert {"kickoff_review", "heartbeat", "improvement_loop", "qa_loop"} <= loop_keys
     assert any(schedule["task"]["agent_id"] == "browser_qa" for schedule in status["schedules"])
+    heartbeat_schedule = next(schedule for schedule in status["schedules"] if schedule["task"]["metadata"]["loop_key"] == "heartbeat")
+    qa_schedule = next(schedule for schedule in status["schedules"] if schedule["task"]["metadata"]["loop_key"] == "qa_loop")
+    assert "0/4 workers reported status" in heartbeat_schedule["task"]["message"]
+    assert "0/4 workers reported status" in qa_schedule["task"]["message"]
 
     for schedule in status["schedules"]:
         Scheduler().delete_schedule(schedule["id"])
@@ -328,7 +332,24 @@ def test_mimo_coding_company_status_aggregates_worker_runtime_status(tmp_path, m
     assert monitoring["workers"][0]["assignment_match"] is True
     assert second["company"]["metadata"]["docker_swarm"]["monitoring"]["reported_workers"] == 1
 
-    for schedule in second["schedules"]:
+    refreshed = runtime.bootstrap(
+        start_nonstop=True,
+        heartbeat_minutes=30,
+        review_interval_minutes=180,
+        qa_interval_minutes=240,
+        model="stub/default",
+        vision_model="stub/default",
+        fast_model="stub/default",
+        qa_targets=["http://127.0.0.1:3000"],
+        seed_knowledge=False,
+        run_initial_review_now=False,
+    )
+    heartbeat_schedule = next(schedule for schedule in refreshed["schedules"] if schedule["task"]["metadata"]["loop_key"] == "heartbeat")
+    qa_schedule = next(schedule for schedule in refreshed["schedules"] if schedule["task"]["metadata"]["loop_key"] == "qa_loop")
+    assert "1/3 workers reported status" in heartbeat_schedule["task"]["message"]
+    assert "1/3 attempted browser launch" in qa_schedule["task"]["message"]
+
+    for schedule in refreshed["schedules"]:
         Scheduler().delete_schedule(schedule["id"])
     _reset_defaultspack_singletons()
 
