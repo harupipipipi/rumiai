@@ -260,6 +260,17 @@ export type CompanyMessage = {
   mentions?: string[];
   task_ids?: string[];
   metadata?: Record<string, unknown>;
+  handoff?: {
+    target_agent_id?: string;
+    reason?: string;
+  };
+  attachments?: Array<{
+    name?: string;
+    path?: string;
+    url?: string;
+    mime_type?: string;
+    size?: number;
+  }>;
   created_at?: string;
   updated_at?: string;
 };
