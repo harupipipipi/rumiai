@@ -555,6 +555,33 @@ class CapabilityExecutor:
             logger.debug("dev auto reapprove failed for pack '%s'", pack_id, exc_info=True)
             return False
 
+    def _has_permission_via_runtime_or_grant(self, principal_id: str, permission_id: str) -> bool:
+        permission_manager = getattr(self, "_permission_manager", None)
+        if permission_manager is not None:
+            try:
+                if permission_manager.has_permission(principal_id, permission_id):
+                    return True
+            except Exception:
+                logger.debug(
+                    "permission_manager.has_permission failed for '%s' / '%s'",
+                    principal_id,
+                    permission_id,
+                    exc_info=True,
+                )
+        grant_manager = getattr(self, "_grant_manager", None)
+        if grant_manager is not None:
+            try:
+                result = grant_manager.check(principal_id, permission_id)
+                return getattr(result, "allowed", None) is True
+            except Exception:
+                logger.debug(
+                    "grant_manager.check failed for '%s' / '%s'",
+                    principal_id,
+                    permission_id,
+                    exc_info=True,
+                )
+        return False
+
     # ------------------------------------------------------------------
     # _unified_execute
     # ------------------------------------------------------------------
@@ -811,17 +838,17 @@ class CapabilityExecutor:
                     self._audit(principal_id, "function.call", None, resp, args, request_id,
                                 detail_reason=f"approval_manager error for pack '{pack_id}': {exc}")
                     return resp
-        if not (is_core or is_trusted_builtin) and entry.requires and self._permission_manager is not None:
+        if not (is_core or is_trusted_builtin) and entry.requires:
             for req_perm in entry.requires:
-                if not self._permission_manager.has_permission(pack_id, req_perm):
+                if not self._has_permission_via_runtime_or_grant(pack_id, req_perm):
                     resp = CapabilityResponse(success=False,
                                               error=f"Function requires permission '{req_perm}' not granted to pack '{pack_id}'",
                                               error_type="requires_denied", latency_ms=(time.time() - start_time) * 1000)
                     self._audit(principal_id, "function.call", None, resp, args, request_id,
                                 detail_reason=f"Pack '{pack_id}' lacks required permission '{req_perm}'")
                     return resp
-        if self._permission_manager is not None and not principal_is_trusted_builtin:
-            if not self._permission_manager.has_permission(principal_id, "function.call"):
+        if not principal_is_trusted_builtin:
+            if not self._has_permission_via_runtime_or_grant(principal_id, "function.call"):
                 resp = CapabilityResponse(success=False, error="Permission denied: function.call",
                                           error_type="permission_denied", latency_ms=(time.time() - start_time) * 1000)
                 self._audit(principal_id, "function.call", None, resp, args, request_id,
