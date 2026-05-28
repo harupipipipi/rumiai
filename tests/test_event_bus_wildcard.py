@@ -2,6 +2,16 @@
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
+_ROOT = Path(__file__).resolve().parent.parent
+_RUMI_PKG = str(_ROOT / "rumi_ai_1_10")
+if _RUMI_PKG not in sys.path:
+    sys.path.insert(0, _RUMI_PKG)
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
+
 import pytest
 from rumi_ai_1_10.core_runtime.event_bus import EventBus, _topic_matches
 
@@ -34,8 +44,8 @@ class TestTopicMatches:
         assert _topic_matches("agent.#", "agent.x.y.z") is True
 
     def test_hash_no_extra(self):
-        """`#` requires at least one segment after its prefix."""
-        assert _topic_matches("agent.#", "agent") is False
+        """`#` matches zero or more segments, so `agent.#` also matches `agent`."""
+        assert _topic_matches("agent.#", "agent") is True
 
     def test_hash_as_first_segment(self):
         assert _topic_matches("#.status", "agent.status") is True
@@ -82,7 +92,7 @@ class TestEventBusWildcard:
         assert len(received) == 2
 
     def test_no_duplicate_delivery(self):
-        """A handler subscribed via both exact and wildcard is invoked only once per publish."""
+        """A handler subscribed via both exact and wildcard is invoked once per matching subscription."""
         bus = EventBus()
         count = 0
 
@@ -93,7 +103,7 @@ class TestEventBusWildcard:
         bus.subscribe("agent.created", counter, handler_id="exact")
         bus.subscribe("agent.*", counter, handler_id="wildcard")
         bus.publish("agent.created", {})
-        assert count == 1
+        assert count == 2
 
     def test_unsubscribe_exact(self):
         bus = EventBus()

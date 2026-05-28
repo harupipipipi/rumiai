@@ -26,17 +26,24 @@ def _topic_matches(pattern: str, topic: str) -> bool:
     - ``*`` matches exactly one segment  (``agent.*`` → ``agent.created``)
     - ``#`` matches zero or more segments (``#.status`` → ``status``, ``agent.status``)
     """
-    parts = pattern.split(".")
-    regex_parts: list[str] = []
-    for p in parts:
-        if p == "#":
-            regex_parts.append(r"(?:[^.]+\.)*[^.]+")
-        elif p == "*":
-            regex_parts.append(r"[^.]+")
-        else:
-            regex_parts.append(re.escape(p))
-    regex = r"^" + r"\.".join(regex_parts) + r"$"
-    return bool(re.match(regex, topic))
+    p_parts = pattern.split(".")
+    t_parts = topic.split(".")
+    return _match_parts(p_parts, t_parts)
+
+
+def _match_parts(p_parts: list[str], t_parts: list[str]) -> bool:
+    if not p_parts:
+        return not t_parts
+    if p_parts[0] == "#":
+        for i in range(len(t_parts) + 1):
+            if _match_parts(p_parts[1:], t_parts[i:]):
+                return True
+        return False
+    if not t_parts:
+        return False
+    if p_parts[0] == "*" or p_parts[0] == t_parts[0]:
+        return _match_parts(p_parts[1:], t_parts[1:])
+    return False
 
 
 @dataclass
