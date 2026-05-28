@@ -1318,7 +1318,7 @@ def _tool_approval_scope(tool_def, arguments):
         action, payload = _browser_computer_action_payload(tool_name, arguments)
         if str(action or "").startswith(("browser.", "computer.")):
             return str(action), _approval_hash_arguments(_browser_computer_request_arguments(tool_name, action, payload))
-    return _tool_approval_operation(tool_def), dict(arguments or {}) if isinstance(arguments, dict) else {}
+    return _tool_approval_operation(tool_def), _approval_replayable_arguments(arguments)
 
 
 def _tool_approval_display_arguments(tool_def, arguments, approval_args):
@@ -1373,6 +1373,15 @@ def _approval_token_from_arguments(arguments):
     if not isinstance(arguments, dict):
         return ""
     return str(arguments.get("approval_token") or "").strip()
+
+
+def _approval_replayable_arguments(arguments):
+    if not isinstance(arguments, dict):
+        return {}
+    replay_args = dict(arguments)
+    for key in ("approval_token", "_headers", "_method", "_raw_body", "_raw_body_base64"):
+        replay_args.pop(key, None)
+    return replay_args
 
 
 def _approval_token_from_context(context, tool_def, arguments=None, *extra_keys):
@@ -1492,6 +1501,7 @@ def _approval_required_tool_response(tool_def, arguments, context=None):
             "function_id": operation,
             "pack_id": str(context.get("owner_pack") or context.get("pack_id") or context.get("_source_pack_id") or "defaultspack"),
             "conversation_id": str(context.get("conversation_id") or context.get("conversation_turn_id") or ""),
+            "arguments": display_args,
         },
     )
     return {

@@ -117,6 +117,42 @@ def test_approval_required_strips_token_and_transport_keys_from_stored_args():
     assert request["details"]["arguments"] == {"message": "fix typo"}
 
 
+def test_executor_approval_required_tool_response_embeds_replayable_args():
+    """Generic executor approval requests must also persist replayable args.
+
+    Without this, chat approval-followup falls through to the model path for
+    mutation tools like ``coding_file_patch``, which then drifts and burns the
+    approval token on mismatched arguments.
+    """
+    from domain.safety import approval
+    from domain.tool.executor import _approval_required_tool_response
+
+    approval.reset_approval_state_for_tests()
+    tool_def = {
+        "name": "coding_file_patch",
+        "risk": "high",
+        "requires_approval": True,
+    }
+    args = {
+        "path": "executor.py",
+        "old": "before",
+        "new": "after",
+        "approval_token": "strip-me",
+        "_headers": {"X-Rumi-Approval": "stale"},
+    }
+    response = _approval_required_tool_response(tool_def, args)
+    request_id = response["widget"]["approval_request_id"]
+    request = approval.get_approval_request(request_id)
+    assert request is not None
+    assert request["details"]["tool_name"] == "coding_file_patch"
+    assert request["details"]["arguments"] == {
+        "path": "executor.py",
+        "old": "before",
+        "new": "after",
+    }
+    assert request["args_hash"] == approval.hash_arguments(request["details"]["arguments"])
+
+
 def _make_conversation_with_followup(tmp_path, monkeypatch, *, args, token, request_id, tool_name):
     """Build a chat conversation whose latest user message carries a valid
     approval-followup metadata block targeting ``tool_name``."""

@@ -537,6 +537,24 @@ class CapabilityExecutor:
         except (OSError, TypeError):
             return False
 
+    def _dev_auto_reapprove_pack(self, pack_id: str) -> bool:
+        if str(os.environ.get("RUMI_ENVIRONMENT", "")).lower() not in {"development", "dev"}:
+            return False
+        if str(os.environ.get("RUMI_AUTO_APPROVE_LOCAL", "")).lower() != "true":
+            return False
+        approval_manager = getattr(self, "_approval_manager", None)
+        if approval_manager is None:
+            return False
+        try:
+            scan_packs = getattr(approval_manager, "scan_packs", None)
+            if callable(scan_packs):
+                scan_packs()
+            result = approval_manager.approve(pack_id)
+            return bool(getattr(result, "success", False))
+        except Exception:
+            logger.debug("dev auto reapprove failed for pack '%s'", pack_id, exc_info=True)
+            return False
+
     # ------------------------------------------------------------------
     # _unified_execute
     # ------------------------------------------------------------------
@@ -770,6 +788,13 @@ class CapabilityExecutor:
                 else:
                     is_approved = bool(approved_result)
                     reason = None
+                if not is_approved and self._dev_auto_reapprove_pack(pack_id):
+                    approved_result = self._approval_manager.is_pack_approved_and_verified(pack_id)
+                    if isinstance(approved_result, tuple):
+                        is_approved, reason = approved_result
+                    else:
+                        is_approved = bool(approved_result)
+                        reason = None
                 if not is_approved:
                     resp = CapabilityResponse(success=False, error=f"Pack not approved: {pack_id}",
                                               error_type="pack_not_approved", latency_ms=(time.time() - start_time) * 1000)
