@@ -9,7 +9,6 @@ event_bus.py - publish/subscribe(疎結合通信)
 
 from __future__ import annotations
 
-import re
 import sys
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
