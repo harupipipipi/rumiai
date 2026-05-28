@@ -18,6 +18,12 @@
   ],
   "input_schema": {
     "type": "object",
+    "properties": {
+      "path": {"type": "string"},
+      "start_line": {"type": "integer", "minimum": 1},
+      "end_line": {"type": "integer", "minimum": 1}
+    },
+    "required": ["path"],
     "additionalProperties": true
   },
   "output_schema": {
