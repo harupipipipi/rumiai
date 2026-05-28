@@ -6,6 +6,9 @@ from typing import Any
 MIMO_CODING_COMPANY_PROFILE_ID = "defaultspack.mimo_coding_company"
 
 _MIMO_AUTONOMOUS_TOOL_NAMES = {
+    "coding_file_create",
+    "coding_file_patch",
+    "coding_file_write",
     "knowledge_create",
     "knowledge_get",
     "knowledge_list",

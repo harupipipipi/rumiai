@@ -103,7 +103,7 @@ def test_tool_policy_allows_mimo_company_read_only_rumi_api_requests():
     assert decision.requires_approval is False
 
 
-def test_tool_policy_keeps_mimo_company_repo_writes_behind_approval():
+def test_tool_policy_allows_mimo_company_repo_writes_without_approval():
     ToolRegistry._instance = None
     tool = ToolRegistry().get("coding_file_write")
 
@@ -115,8 +115,24 @@ def test_tool_policy_keeps_mimo_company_repo_writes_behind_approval():
     )
 
     assert decision.allowed is True
-    assert decision.action == "ask"
-    assert decision.requires_approval is True
+    assert decision.action == "allow"
+    assert decision.requires_approval is False
+
+
+def test_tool_policy_allows_mimo_company_repo_patches_without_approval():
+    ToolRegistry._instance = None
+    tool = ToolRegistry().get("coding_file_patch")
+
+    decision = decide_tool_policy(
+        tool,
+        {"profile_id": "defaultspack.mimo_coding_company"},
+        tool_name="coding_file_patch",
+        arguments={"path": ".gitignore", "old": "foo", "new": "foo\nbar"},
+    )
+
+    assert decision.allowed is True
+    assert decision.action == "allow"
+    assert decision.requires_approval is False
 
 
 def test_tool_policy_denies_shell_when_disabled():
