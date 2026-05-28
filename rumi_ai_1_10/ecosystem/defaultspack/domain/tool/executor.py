@@ -9,6 +9,7 @@ from domain.tool_policy.internal_context import internal_tool_decision_allows
 from pathlib import Path
 import inspect
 import json
+import os
 
 
 # P1-2: サンドボックス用の安全なビルトイン一覧
@@ -242,6 +243,14 @@ class ToolExecutor:
         principal_id = self._principal_id(tool_def, context)
         try:
             executor = self._capability_executor(context)
+            approval_error = self._prepare_deferred_tool_approval(
+                tool_def,
+                request,
+                context,
+                executor,
+            )
+            if approval_error is not None:
+                return approval_error
             response = executor.execute(principal_id, request)
             fallback = self._fallback_function_call_if_first_party_unapproved(
                 tool_def,
@@ -269,6 +278,92 @@ class ToolExecutor:
                 "widget": None,
             }
         return self._tool_response_from_capability(response, tool_def, request.get("args") or {}, context)
+
+    @staticmethod
+    def _function_call_pack_approval_status(capability_executor, pack_id):
+        manager = getattr(capability_executor, "_approval_manager", None)
+        if manager is None:
+            try:
+                from core_runtime.approval_manager import get_approval_manager
+
+                manager = get_approval_manager()
+            except Exception:
+                manager = None
+        if manager is None:
+            return True, None
+        approved = manager.is_pack_approved_and_verified(pack_id)
+        if isinstance(approved, tuple):
+            return bool(approved[0]), approved[1]
+        return bool(approved), None
+
+    def _dev_auto_approve_pack(self, pack_id, capability_executor=None):
+        rumi_env = os.environ.get("RUMI_ENVIRONMENT", "").lower()
+        auto_approve = os.environ.get("RUMI_AUTO_APPROVE_LOCAL", "").lower()
+        if rumi_env not in {"development", "dev"} or auto_approve != "true":
+            return False
+        manager = getattr(capability_executor, "_approval_manager", None)
+        if manager is None:
+            try:
+                from core_runtime.approval_manager import get_approval_manager
+
+                manager = get_approval_manager()
+            except Exception:
+                manager = None
+        if manager is None:
+            return False
+        try:
+            if hasattr(manager, "scan_packs"):
+                manager.scan_packs()
+            result = manager.approve(pack_id)
+            return bool(getattr(result, "success", False))
+        except Exception:
+            return False
+
+    def _consume_deferred_tool_approval(self, context):
+        if not isinstance(context, dict):
+            return None
+        token = str(context.get("_tool_server_approval_token") or "").strip()
+        operation = str(context.get("_tool_server_approval_operation") or "").strip()
+        args_hash = str(context.get("_tool_server_approval_args_hash") or "").strip()
+        if not token or not operation or not args_hash:
+            return None
+        verification = _approval_module().verify_execution_token(
+            token,
+            operation,
+            args_hash,
+            consume=True,
+        )
+        if verification.valid:
+            return None
+        return {
+            "result": verification.message or "approval token is invalid",
+            "is_error": True,
+            "widget": None,
+        }
+
+    def _prepare_deferred_tool_approval(self, tool_def, request, context, capability_executor):
+        if not isinstance(context, dict) or context.get("_tool_server_approval_token_valid") is not True:
+            return None
+        if str(request.get("type") or "").strip() == "function.call":
+            qualified_name = str(request.get("qualified_name") or "").strip()
+            pack_id, _, _ = qualified_name.partition(":")
+            if pack_id:
+                approved, reason = self._function_call_pack_approval_status(capability_executor, pack_id)
+                if not approved and self._dev_auto_approve_pack(pack_id, capability_executor):
+                    approved, reason = self._function_call_pack_approval_status(capability_executor, pack_id)
+                if not approved:
+                    return {
+                        "result": "Pack not approved: {}".format(pack_id),
+                        "is_error": True,
+                        "widget": {
+                            "type": "tool_execution_denied",
+                            "tool_name": _tool_approval_tool_name(tool_def),
+                            "reason": "Pack not approved: {}".format(pack_id),
+                        },
+                        "error_type": "pack_not_approved",
+                        "pack_not_approved_reason": reason,
+                    }
+        return self._consume_deferred_tool_approval(context)
 
     def _fallback_local_tool_if_first_party_capability_denied(self, tool_def, request, context, response):
         if request.get("type") != "function.call":
@@ -1443,12 +1538,14 @@ def _context_with_tool_approval_token(context, tool_def, arguments, *extra_looku
         return next_context, None
     approval = _approval_module()
     operation, approval_args = _tool_approval_scope(tool_def, arguments)
+    args_hash = approval.hash_arguments(approval_args)
     verification = approval.verify_execution_token(
         token,
         operation,
-        approval.hash_arguments(approval_args),
+        args_hash,
         pack_id=str(next_context.get("owner_pack") or next_context.get("pack_id") or next_context.get("_source_pack_id") or "defaultspack"),
         conversation_id=str(next_context.get("conversation_id") or next_context.get("conversation_turn_id") or ""),
+        consume=False,
     )
     if (
         not verification.valid
@@ -1473,6 +1570,9 @@ def _context_with_tool_approval_token(context, tool_def, arguments, *extra_looku
     if verification.valid:
         next_context["_tool_server_approved"] = True
         next_context["_tool_server_approval_token_valid"] = True
+        next_context["_tool_server_approval_token"] = token
+        next_context["_tool_server_approval_operation"] = operation
+        next_context["_tool_server_approval_args_hash"] = args_hash
         return next_context, None
     if verification.code in _STALE_APPROVAL_TOKEN_CODES:
         return next_context, _approval_required_tool_response(tool_def, arguments, next_context)

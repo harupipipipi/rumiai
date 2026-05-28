@@ -66,8 +66,19 @@ def _pack_not_approved_executor():
     capability_executor.execute.return_value = SimpleNamespace(
         success=False,
         output=None,
-        error="pack not approved",
+        error="Pack not approved: defaultspack",
         error_type="pack_not_approved",
+    )
+    return capability_executor
+
+
+def _success_executor():
+    capability_executor = MagicMock()
+    capability_executor.execute.return_value = SimpleNamespace(
+        success=True,
+        output={"result": "done", "is_error": False, "widget": None},
+        error=None,
+        error_type=None,
     )
     return capability_executor
 
@@ -256,6 +267,97 @@ def test_tool_executor_approval_token_can_come_from_execution_context():
     assert result["result"] == "done"
     _, request = capability_executor.execute.call_args.args
     assert request["context"]["_tool_server_approved"] is True
+
+
+def test_tool_executor_pack_not_approved_does_not_consume_approval_token(monkeypatch):
+    from domain.safety import approval
+    from domain.tool.executor import ToolExecutor
+
+    monkeypatch.delenv("RUMI_ENVIRONMENT", raising=False)
+    monkeypatch.delenv("RUMI_AUTO_APPROVE_LOCAL", raising=False)
+    approval.reset_approval_state_for_tests()
+    args = {"path": "index.html", "old": "<body>old</body>", "new": "<body>new</body>"}
+    first = ToolExecutor()._execute_rumi_function(
+        _coding_write_tool_def("coding_file_patch"),
+        args,
+        {"principal_id": "defaultspack", "capability_executor": _caller_requires_denied_executor()},
+    )
+    decision = approval.approve(first["widget"]["approval_request_id"])
+    assert decision["approved"] is True
+
+    monkeypatch.setattr(
+        ToolExecutor,
+        "_function_call_pack_approval_status",
+        staticmethod(lambda capability_executor, pack_id: (False, "not_approved")),
+    )
+    capability_executor = _pack_not_approved_executor()
+    result = ToolExecutor()._execute_rumi_function(
+        _coding_write_tool_def("coding_file_patch"),
+        {**args, "approval_token": decision["token"]},
+        {"principal_id": "defaultspack", "capability_executor": capability_executor},
+    )
+
+    assert result["is_error"] is True
+    assert result["widget"] == {
+        "type": "tool_execution_denied",
+        "tool_name": "coding_file_patch",
+        "reason": "Pack not approved: defaultspack",
+    }
+    capability_executor.execute.assert_not_called()
+    verification = approval.verify_execution_token(
+        decision["token"],
+        "tool.coding_file_patch",
+        approval.hash_arguments(args),
+        consume=False,
+    )
+    assert verification.valid is True
+
+
+def test_tool_executor_dev_auto_approve_retries_before_consuming_approval_token(monkeypatch):
+    from domain.safety import approval
+    from domain.tool.executor import ToolExecutor
+
+    monkeypatch.setenv("RUMI_ENVIRONMENT", "development")
+    monkeypatch.setenv("RUMI_AUTO_APPROVE_LOCAL", "true")
+    approval.reset_approval_state_for_tests()
+    args = {"path": "index.html", "old": "<body>old</body>", "new": "<body>new</body>"}
+    first = ToolExecutor()._execute_rumi_function(
+        _coding_write_tool_def("coding_file_patch"),
+        args,
+        {"principal_id": "defaultspack", "capability_executor": _caller_requires_denied_executor()},
+    )
+    decision = approval.approve(first["widget"]["approval_request_id"])
+    assert decision["approved"] is True
+
+    capability_executor = _success_executor()
+    statuses = iter([(False, "not_approved"), (True, None)])
+    monkeypatch.setattr(
+        ToolExecutor,
+        "_function_call_pack_approval_status",
+        staticmethod(lambda capability_executor, pack_id: next(statuses)),
+    )
+    monkeypatch.setattr(
+        ToolExecutor,
+        "_dev_auto_approve_pack",
+        lambda self, pack_id, capability_executor=None: True,
+    )
+
+    result = ToolExecutor()._execute_rumi_function(
+        _coding_write_tool_def("coding_file_patch"),
+        {**args, "approval_token": decision["token"]},
+        {"principal_id": "defaultspack", "capability_executor": capability_executor},
+    )
+
+    assert result["result"] == "done"
+    capability_executor.execute.assert_called_once()
+    verification = approval.verify_execution_token(
+        decision["token"],
+        "tool.coding_file_patch",
+        approval.hash_arguments(args),
+        consume=False,
+    )
+    assert verification.valid is False
+    assert verification.code == "APPROVAL_TOKEN_USED"
 
 
 def test_tool_executor_mimo_company_marks_safe_rumi_api_calls_server_approved():
