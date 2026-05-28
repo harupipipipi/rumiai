@@ -319,7 +319,7 @@ fn create_macos_app_bundle(
     command: &str,
     env_vars: &[(String, String)],
 ) -> AnyResult<PathBuf> {
-    let safe_name = app_name.replace('/', "_").replace(' ', "_");
+    let safe_name = app_name.replace('/', "_");
     let apps_base = dirs_home().join("Applications");
     fs::create_dir_all(&apps_base)
         .with_context(|| format!("failed to create {}", apps_base.display()))?;
@@ -345,6 +345,8 @@ fn create_macos_app_bundle(
     <key>CFBundleIdentifier</key>
     <string>{bundle_id}</string>
     <key>CFBundleName</key>
+    <string>{escaped_app_name}</string>
+    <key>CFBundleDisplayName</key>
     <string>{escaped_app_name}</string>
     <key>CFBundleVersion</key>
     <string>1.0.0</string>
