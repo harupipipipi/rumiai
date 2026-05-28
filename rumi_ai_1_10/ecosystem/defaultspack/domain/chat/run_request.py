@@ -52,6 +52,7 @@ MAX_ATTACHMENT_TEXT_CHARS_PER_FILE = 120_000
 MAX_ATTACHMENT_IMAGE_BYTES = 8 * 1024 * 1024
 _DATA_IMAGE_PREFIX = "data:image/"
 _PROMPT_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+_VECTOR_TOOL_ASSIST_PROFILE_IDS = {"defaultspack.mimo_coding_company"}
 _COMPUTER_USE_REQUEST_RE = re.compile(
     r"compute[\s_-]*use|compu?ter[\s_-]*use|computer\s+ツール|コンピューター操作|pc操作|"
     r"(google\s*chrome|chrome|chatgpt|vivaldi|vivladi|line|ブラウザ|browser).{0,80}(操作|送信|入力|クリック|開いて|開く)",
@@ -1107,22 +1108,33 @@ def _resolve_selected_tools(
     registry = ToolRegistry()
     if not isinstance(raw_tools, list):
         tools = registry.list_tools()
-        mode = effective_tool_assist_mode(pack_root=Path(__file__).resolve().parents[2])
+        pack_root = Path(__file__).resolve().parents[2]
+        mode = effective_tool_assist_mode(pack_root=pack_root)
+        prefers_vector = _profile_prefers_vector_tool_assist(context)
+        if mode == "all" and prefers_vector:
+            mode = "vector"
         if mode == "off":
             return [], []
         if mode == "all":
             return tools, []
+        candidate_tools = tools
+        if prefers_vector:
+            candidate_tools = filter_tool_definitions_for_runtime_profile(
+                tools,
+                None,
+                policy_context=context or {},
+            )
         recommended_ids = recommend_tool_ids(
             user_text,
-            tools,
-            limit=tool_assist_limit(pack_root=Path(__file__).resolve().parents[2]),
+            candidate_tools,
+            limit=tool_assist_limit(pack_root=pack_root),
         )
-        resolved = [tool for tool in tools if str(tool.get("tool_id") or "") in set(recommended_ids)]
+        resolved = [tool for tool in candidate_tools if str(tool.get("tool_id") or "") in set(recommended_ids)]
         if isinstance(context, dict):
             context["tool_assist"] = {
                 "mode": "vector",
                 "recommended_tools": recommended_ids,
-                "available_tool_count": len(tools),
+                "available_tool_count": len(candidate_tools),
             }
         return resolved, []
     resolved = []
@@ -1142,6 +1154,21 @@ def _resolve_selected_tools(
             continue
         resolved.append(tool_def)
     return resolved, unknown
+
+
+def _profile_prefers_vector_tool_assist(context: dict[str, Any] | None) -> bool:
+    if not isinstance(context, dict):
+        return False
+    candidate = str(
+        context.get("profile_id")
+        or (
+            context.get("profile_policy").get("profile_id")
+            if isinstance(context.get("profile_policy"), dict)
+            else ""
+        )
+        or ""
+    ).strip()
+    return candidate in _VECTOR_TOOL_ASSIST_PROFILE_IDS
 
 
 def _infer_requested_tools_from_message(user_text: str) -> list[str]:
