@@ -742,6 +742,28 @@ def _runtime_user_content_override(metadata: dict[str, Any] | None) -> str:
 
 _WORKSPACE_ID_KEYS = ("workspace_id", "workspaceId")
 _WORKSPACE_ROOT_KEYS = ("workspace_root", "workspaceRoot", "rootPath")
+_MERGED_PROFILE_DICT_FIELDS = ("policy", "permissions", "metadata", "surfaces", "node_settings")
+
+
+def _merge_profile_snapshot_sources(
+    profile_id: str,
+    catalog_profile: dict[str, Any] | None,
+    workspace_profile: dict[str, Any] | None,
+) -> dict[str, Any]:
+    merged = dict(catalog_profile) if isinstance(catalog_profile, dict) else {}
+    overrides = dict(workspace_profile) if isinstance(workspace_profile, dict) else {}
+    for field in _MERGED_PROFILE_DICT_FIELDS:
+        base = merged.get(field) if isinstance(merged.get(field), dict) else {}
+        override = overrides.get(field) if isinstance(overrides.get(field), dict) else {}
+        if base or override:
+            merged[field] = {**base, **override}
+    for key, value in overrides.items():
+        if key in _MERGED_PROFILE_DICT_FIELDS:
+            continue
+        merged[key] = value
+    if merged:
+        merged.setdefault("profile_id", profile_id)
+    return merged
 
 
 @lru_cache(maxsize=64)
@@ -749,20 +771,25 @@ def _profile_snapshot(profile_id: str) -> dict[str, Any]:
     candidate = str(profile_id or "").strip()
     if not candidate:
         return {}
+    workspace_profile: dict[str, Any] = {}
     try:
         from core_runtime.profile_workspace import ProfileWorkspaceManager
 
         loaded = ProfileWorkspaceManager().load_profile_yaml(candidate)
         if isinstance(loaded, dict) and loaded:
-            return dict(loaded)
+            workspace_profile = dict(loaded)
     except Exception:
-        pass
+        workspace_profile = {}
+    catalog_profile: dict[str, Any] = {}
     try:
         loaded = CapabilityCatalog().profile(candidate)
         if isinstance(loaded, dict) and loaded:
-            return dict(loaded)
+            catalog_profile = dict(loaded)
     except Exception:
-        pass
+        catalog_profile = {}
+    merged = _merge_profile_snapshot_sources(candidate, catalog_profile, workspace_profile)
+    if merged:
+        return merged
     return {}
 
 
