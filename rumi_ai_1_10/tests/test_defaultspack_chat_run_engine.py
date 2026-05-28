@@ -624,6 +624,59 @@ def test_complete_turn_retries_transient_ai_error_after_tool_use():
     assert any(event.get("type") == "ai_retry_scheduled" for event in engine._activity_events)
 
 
+def test_complete_turn_retries_wrapped_429_after_tool_use():
+    from domain.chat.run_request import PreparedChatRun
+    from domain.chat.stream_engine import ChatRunEngine
+
+    class FlakyClient:
+        def __init__(self):
+            self.calls = 0
+
+        def complete(self, model, messages, tools=None, params=None):
+            self.calls += 1
+            if self.calls == 1:
+                raise RuntimeError(
+                    'OpenAI API error 400: {"error":{"code":"429","message":"Cluster rate limit exceeded, request queued but not admitted","param":"","type":"router_queue_limitation"}}'
+                )
+            return {
+                "content": [{"type": "text", "text": "continued after wrapped 429"}],
+                "finish_reason": "stop",
+            }
+
+    client = FlakyClient()
+    engine = ChatRunEngine(store=object(), client=client)
+    engine._tool_logs = [{"tool_name": "coding_file_read", "result": {"status": "ok"}}]
+    prepared = PreparedChatRun(
+        conversation_id="conv-1",
+        conversation={"id": "conv-1"},
+        input_data={},
+        request_id="req-1",
+        content=[],
+        metadata=None,
+        user_message={"id": "user-1"},
+        model="xiaomi-token-plan-sgp/mimo-v2.5-pro",
+        params={"retry": {"max_attempts": 2, "delays": [0]}},
+        request_context={},
+        tool_context={},
+        standard_messages=[],
+        user_text="hello",
+        system_prompt="",
+        enrich_info={},
+        raw_tools=[],
+        provider_tools=[],
+        tools_called=[],
+        connected_tool_names=set(),
+        call_handler=None,
+        model_routing={},
+    )
+
+    response = engine._complete_turn(prepared, [{"role": "user", "content": "hello"}])
+
+    assert client.calls == 2
+    assert response["content"] == [{"type": "text", "text": "continued after wrapped 429"}]
+    assert any(event.get("type") == "ai_retry_scheduled" for event in engine._activity_events)
+
+
 def test_stream_empty_thinking_retry_preserves_tools_for_tool_calls():
     from domain.chat.run_request import PreparedChatRun
     from domain.chat.stream_engine import ChatRunEngine
