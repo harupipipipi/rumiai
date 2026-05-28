@@ -13,7 +13,8 @@ from pathlib import Path
 from typing import Any, Dict
 
 _PACK_ROOT = Path(__file__).resolve().parents[1]
-_PACK_LOCAL_PACKAGES = ("blocks", "domain", "transport")
+_REPO_ROOT = _PACK_ROOT.parent.parent
+_PACK_LOCAL_PACKAGES = ("blocks", "domain", "transport", "ecosystem")
 
 
 def _path_is_inside_pack(path: Path) -> bool:
@@ -47,6 +48,9 @@ def _drop_foreign_top_level_package(package_name: str) -> None:
 def _prepare_pack_imports() -> None:
     pack_root = str(_PACK_ROOT)
     sys.path = [item for item in sys.path if item != pack_root]
+    repo_root = str(_REPO_ROOT)
+    if repo_root not in sys.path:
+        sys.path.insert(0, repo_root)
     sys.path.insert(0, pack_root)
     for package_name in _PACK_LOCAL_PACKAGES:
         _drop_foreign_top_level_package(package_name)
