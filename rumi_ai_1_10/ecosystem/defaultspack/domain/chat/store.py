@@ -63,12 +63,18 @@ class ChatStore:
             cls._instance._lock = threading.RLock()
             cls._instance._conversations = cls._instance._load_conversations()
             if cls._instance._conversations:
-                cls._instance._save_conversation_files()
+                try:
+                    cls._instance._save_conversation_files()
+                except OSError:
+                    pass
         elif cls._instance._storage_path != storage_path:
             cls._instance._storage_path = storage_path
             cls._instance._conversations = cls._instance._load_conversations()
             if cls._instance._conversations:
-                cls._instance._save_conversation_files()
+                try:
+                    cls._instance._save_conversation_files()
+                except OSError:
+                    pass
         return cls._instance
 
     @staticmethod
