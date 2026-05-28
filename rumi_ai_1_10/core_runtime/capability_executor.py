@@ -502,12 +502,25 @@ class CapabilityExecutor:
             resolved = pack_dir.resolve()
         except OSError:
             resolved = pack_dir
+        ecosystem_root = None
+        if _ECOSYSTEM_DIR:
+            try:
+                ecosystem_root = Path(_ECOSYSTEM_DIR).resolve()
+            except OSError:
+                ecosystem_root = Path(_ECOSYSTEM_DIR)
+        if ecosystem_root is not None:
+            try:
+                relative = resolved.relative_to(ecosystem_root)
+            except ValueError:
+                return False
+            if not relative.parts:
+                return False
+            if pack_id and relative.parts[0] != pack_id:
+                return False
+            return True
         if pack_id and resolved.name != pack_id:
             return False
-        if resolved.parent.name != "ecosystem":
-            return False
-        runtime_root = resolved.parent.parent
-        return runtime_root.name == "app"
+        return resolved.parent.name == "ecosystem"
 
     def _is_trusted_builtin_pack(self, pack_id: str, pack_root_hint=None) -> bool:
         normalized_pack_id = str(pack_id or "").strip()
@@ -518,7 +531,8 @@ class CapabilityExecutor:
         helper = getattr(approval_manager, "_is_trusted_builtin_pack", None)
         if callable(helper):
             try:
-                return bool(helper(normalized_pack_id))
+                if bool(helper(normalized_pack_id)):
+                    return True
             except Exception:
                 logger.debug(
                     "approval_manager trusted builtin lookup failed for '%s'",

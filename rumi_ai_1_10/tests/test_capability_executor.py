@@ -373,6 +373,39 @@ class TestFunctionCallBuiltinTrustScope(unittest.TestCase):
         permission_manager.has_permission.assert_called_once_with("defaultspack", "tool.write")
 
     @patch("core_runtime.capability_executor.get_audit_logger", new_callable=MagicMock)
+    def test_function_call_repo_defaultspack_path_is_treated_as_trusted_builtin(self, mock_audit_module):
+        mock_audit_module.return_value = MagicMock()
+        entry = _make_function_entry("defaultspack", requires=["ai.route.model"])
+        entry.function_dir = str(_project_root / "ecosystem" / "defaultspack" / "functions" / "ai_route_model")
+        entry.main_py_path = str(Path(entry.function_dir) / "main.py")
+        function_registry = MagicMock()
+        function_registry.get.return_value = entry
+
+        approval_manager = MagicMock()
+        approval_manager.is_pack_approved_and_verified.return_value = (True, None)
+        approval_manager._is_trusted_builtin_pack.return_value = False
+
+        permission_manager = MagicMock()
+        permission_manager.has_permission.return_value = False
+
+        executor = _make_executor(
+            function_registry=function_registry,
+            approval_manager=approval_manager,
+            permission_manager=permission_manager,
+        )
+
+        success_response = CapabilityResponse(success=True, output={"ok": True})
+        with patch.object(executor, "_execute_user_function", return_value=success_response) as mock_exec:
+            resp = executor.execute(
+                "defaultspack",
+                {"type": "function.call", "qualified_name": "defaultspack:test_func"},
+            )
+
+        self.assertTrue(resp.success)
+        permission_manager.has_permission.assert_not_called()
+        mock_exec.assert_called_once()
+
+    @patch("core_runtime.capability_executor.get_audit_logger", new_callable=MagicMock)
     def test_function_call_dev_auto_reapproves_stale_pack(self, mock_audit_module):
         mock_audit_module.return_value = MagicMock()
         entry = _make_function_entry("defaultspack")
