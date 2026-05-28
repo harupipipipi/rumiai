@@ -60,7 +60,7 @@ and an `iterations` array recording any partial progress.
 
 ## Extensibility note: `pack_block` execution type
 
-`/goal` is implemented as a *file-additions-only* feature:
+After the `pack_block` hook is in place, `/goal` itself is implemented through file additions:
 
 * `commands/manifests/goal.json` declares the slash command.
 * `blocks/goal/run.py` implements the goal-pursuit loop.
