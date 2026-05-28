@@ -221,9 +221,34 @@ class GitOps:
             "files_changed": len([line for line in diff.splitlines() if line.startswith("diff --git ")]),
         }
 
-    def commit(self, message, all_tracked=False):
-        """コミットを実行する。"""
-        if all_tracked:
+    def commit(self, message, all_tracked=False, paths=None, files=None):
+        """コミットを実行する。
+
+        paths / files: list[str] — 指定ファイルだけstageしてcommitする。
+        all_tracked: bool — git add -u で全trackedファイルをstageする。
+        paths (or files) と all_tracked=True の併用は禁止。
+        .env 等の restricted path は WorkspaceRestrictedPath を送出。
+        ../ traversal は WorkspacePathViolation を送出。
+        """
+        selected = paths if paths is not None else files
+        if selected is not None and all_tracked:
+            raise ValueError("paths/files and all_tracked=True cannot be used together")
+        if selected is not None:
+            if not isinstance(selected, (list, tuple)) or not selected:
+                raise ValueError("paths/files must be a non-empty list of strings")
+            for p in selected:
+                if not isinstance(p, str) or not p.strip():
+                    raise ValueError("each path must be a non-empty string")
+                normalized = p.replace("\\", "/").strip()
+                parts = [part for part in normalized.split("/") if part and part != "."]
+                if any(part == ".." for part in parts):
+                    from .workspace_jail import WorkspacePathViolation
+                    raise WorkspacePathViolation(
+                        f"Path traversal detected: '{p}' resolves outside workspace root"
+                    )
+                self._jail.ensure_allowed(normalized, operation="git commit")
+            self._run(["add", "--", *selected])
+        elif all_tracked:
             self._run(["add", "-u"])
         if self.status()["clean"]:
             raise RuntimeError("nothing to commit")
@@ -233,6 +258,7 @@ class GitOps:
             "commit_hash": commit_hash,
             "message": message,
             "output": output,
+            "paths": list(selected) if selected else None,
         }
 
     def push(self, remote="origin", branch=None, dry_run=False):

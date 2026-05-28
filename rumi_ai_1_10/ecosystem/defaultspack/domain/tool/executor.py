@@ -252,6 +252,16 @@ class ToolExecutor:
             if approval_error is not None:
                 return approval_error
             response = executor.execute(principal_id, request)
+            if (
+                isinstance(context, dict)
+                and context.get("_tool_server_approval_token_valid") is True
+                and getattr(response, "error_type", "") == "pack_not_approved"
+                and str(request.get("type") or "").strip() == "function.call"
+            ):
+                qualified_name = str(request.get("qualified_name") or "").strip()
+                pack_id, _, _ = qualified_name.partition(":")
+                if pack_id and self._dev_auto_approve_pack(pack_id):
+                    response = executor.execute(principal_id, request)
             fallback = self._fallback_function_call_if_first_party_unapproved(
                 tool_def,
                 request,
@@ -277,7 +287,12 @@ class ToolExecutor:
                 "is_error": True,
                 "widget": None,
             }
-        return self._tool_response_from_capability(response, tool_def, request.get("args") or {}, context)
+        result = self._tool_response_from_capability(response, tool_def, request.get("args") or {}, context)
+        if isinstance(result, dict) and not result.get("is_error"):
+            consume_error = self._consume_deferred_tool_approval(context)
+            if consume_error is not None:
+                return consume_error
+        return result
 
     @staticmethod
     def _function_call_pack_approval_status(capability_executor, pack_id):
@@ -363,7 +378,8 @@ class ToolExecutor:
                         "error_type": "pack_not_approved",
                         "pack_not_approved_reason": reason,
                     }
-        return self._consume_deferred_tool_approval(context)
+        context["_tool_server_approved"] = True
+        return None
 
     def _fallback_local_tool_if_first_party_capability_denied(self, tool_def, request, context, response):
         if request.get("type") != "function.call":
