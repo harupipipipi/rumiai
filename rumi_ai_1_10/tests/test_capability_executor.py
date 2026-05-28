@@ -28,6 +28,7 @@ from core_runtime.capability_executor import (
     CapabilityExecutor,
     CapabilityResponse,
     MAX_FLOW_CALL_DEPTH,
+    get_capability_executor,
     _flow_call_stack_local,
 )
 
@@ -516,6 +517,38 @@ class TestFunctionCallBuiltinTrustScope(unittest.TestCase):
         permission_manager.has_permission.assert_called_once_with("rumi_default_tools_pack", "function.call")
         grant_manager.check.assert_called_once_with("rumi_default_tools_pack", "function.call")
         mock_exec.assert_called_once()
+
+
+def test_get_capability_executor_initializes_cached_container_instance(monkeypatch):
+    class _FakeContainer:
+        def __init__(self, executor):
+            self._executor = executor
+
+        def get(self, name):
+            assert name == "capability_executor"
+            return self._executor
+
+    executor = CapabilityExecutor()
+    assert executor._initialized is False
+    initialize_calls = {"count": 0}
+
+    def fake_initialize():
+        initialize_calls["count"] += 1
+        executor._initialized = True
+        return True
+
+    monkeypatch.setattr(executor, "initialize", fake_initialize)
+
+    monkeypatch.setattr(
+        "core_runtime.di_container.get_container",
+        lambda: _FakeContainer(executor),
+    )
+
+    resolved = get_capability_executor()
+
+    assert resolved is executor
+    assert resolved._initialized is True
+    assert initialize_calls["count"] == 1
 
 
 if __name__ == "__main__":

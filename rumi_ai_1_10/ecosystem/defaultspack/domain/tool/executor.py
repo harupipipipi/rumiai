@@ -522,6 +522,8 @@ class ToolExecutor:
 
             executor = get_container().get_or_none("capability_executor")
             if executor is not None and callable(getattr(executor, "execute", None)):
+                if not getattr(executor, "_initialized", False) and callable(getattr(executor, "initialize", None)):
+                    executor.initialize()
                 return executor
         except Exception:
             pass
@@ -529,7 +531,10 @@ class ToolExecutor:
             from core_runtime.capability_executor import CapabilityExecutor
         except Exception as exc:
             raise RuntimeError("CapabilityExecutor is not available: {}".format(exc)) from exc
-        return CapabilityExecutor()
+        executor = CapabilityExecutor()
+        if callable(getattr(executor, "initialize", None)):
+            executor.initialize()
+        return executor
 
     @staticmethod
     def _ensure_shared_function_registered(qualified_name):

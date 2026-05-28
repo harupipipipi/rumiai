@@ -318,7 +318,9 @@ def _register_defaults(container: DIContainer) -> None:
 
     def _capability_executor_factory() -> "CapabilityExecutor":  # noqa: F821
         from .capability_executor import CapabilityExecutor
-        return CapabilityExecutor()
+        instance = CapabilityExecutor()
+        instance.initialize()
+        return instance
 
     # --- Wave 8: Kernel core services ---
     def _diagnostics_factory() -> "Diagnostics":  # noqa: F821

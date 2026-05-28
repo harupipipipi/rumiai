@@ -1424,13 +1424,17 @@ _executor_lock = threading.Lock()
 
 def get_capability_executor() -> CapabilityExecutor:
     from .di_container import get_container
-    return get_container().get("capability_executor")
+    executor = get_container().get("capability_executor")
+    if not getattr(executor, "_initialized", False):
+        executor.initialize()
+    return executor
 
 def reset_capability_executor() -> CapabilityExecutor:
     global _global_executor
     from .di_container import get_container
     container = get_container()
     new = CapabilityExecutor()
+    new.initialize()
     with _executor_lock:
         _global_executor = new
     container.set_instance("capability_executor", new)

@@ -50,6 +50,44 @@ def test_tool_executor_no_longer_builds_private_function_registry():
     assert not hasattr(ToolExecutor, "_build_function_registry")
 
 
+def test_tool_executor_uses_initialized_container_capability_executor(monkeypatch):
+    from domain.tool.executor import ToolExecutor
+
+    class _FakeExecutor:
+        def __init__(self):
+            self._initialized = False
+            self.initialize_calls = 0
+
+        def initialize(self):
+            self.initialize_calls += 1
+            self._initialized = True
+            return True
+
+        def execute(self, principal_id, request):
+            return SimpleNamespace(success=True, output={"result": "ok"}, error=None, error_type=None)
+
+    class _FakeContainer:
+        def __init__(self, executor):
+            self._executor = executor
+
+        def get_or_none(self, name):
+            if name == "capability_executor":
+                return self._executor
+            return None
+
+    fake_executor = _FakeExecutor()
+    monkeypatch.setattr(
+        "core_runtime.di_container.get_container",
+        lambda: _FakeContainer(fake_executor),
+    )
+
+    resolved = ToolExecutor._capability_executor({})
+
+    assert resolved is fake_executor
+    assert fake_executor._initialized is True
+    assert fake_executor.initialize_calls == 1
+
+
 def _caller_requires_denied_executor():
     capability_executor = MagicMock()
     capability_executor.execute.return_value = SimpleNamespace(
