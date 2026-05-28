@@ -17,8 +17,9 @@ import json
 import sys
 import tempfile
 import unittest
+from types import SimpleNamespace
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULTSPACK_ROOT = ROOT / "ecosystem" / "defaultspack"
@@ -75,8 +76,16 @@ class TestPackBlockExecutionType(unittest.TestCase):
             )
             registry = SlashCommandRegistry(pack_root)
 
-            with patch("blocks.goal.run.run") as mocked_run:
-                mocked_run.return_value = {"status": "ok", "data": {"echo": "hi"}}
+            fake_run = Mock(return_value={"status": "ok", "data": {"echo": "hi"}})
+            fake_module = SimpleNamespace(
+                __file__=str(pack_root / "blocks" / "goal" / "run.py"),
+                run=fake_run,
+            )
+
+            with patch(
+                "domain.frontend.command_registry.importlib.import_module",
+                return_value=fake_module,
+            ):
                 result = registry.execute(
                     {"command": "echo", "mode": "chat", "args": {"message": "hi"}},
                     {},
@@ -85,8 +94,8 @@ class TestPackBlockExecutionType(unittest.TestCase):
         self.assertEqual(result["status"], "ok")
         self.assertTrue(result["data"]["executed"])
         self.assertEqual(result["data"]["result"], {"echo": "hi"})
-        mocked_run.assert_called_once()
-        call_args, _ = mocked_run.call_args
+        fake_run.assert_called_once()
+        call_args, _ = fake_run.call_args
         self.assertEqual(call_args[0]["message"], "hi")
 
     def test_pack_block_dispatches_for_pack_manifest_origin(self):
@@ -114,13 +123,88 @@ class TestPackBlockExecutionType(unittest.TestCase):
             )
             registry = SlashCommandRegistry(pack_root)
 
-            with patch("blocks.goal.run.run") as mocked_run:
-                mocked_run.return_value = {"status": "ok", "data": {"echo": "ok"}}
+            fake_run = Mock(return_value={"status": "ok", "data": {"echo": "ok"}})
+            fake_module = SimpleNamespace(
+                __file__=str(pack_root / "blocks" / "goal" / "run.py"),
+                run=fake_run,
+            )
+
+            with patch(
+                "domain.frontend.command_registry.importlib.import_module",
+                return_value=fake_module,
+            ):
                 result = registry.execute({"command": "echo", "mode": "chat"}, {})
 
         self.assertEqual(result["status"], "ok")
         self.assertTrue(result["data"]["executed"])
         self.assertEqual(result["data"]["result"], {"echo": "ok"})
+        fake_run.assert_called_once()
+
+    def test_pack_block_rejects_unknown_pack_id(self):
+        from domain.frontend.command_registry import SlashCommandRegistry
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pack_root = Path(tmpdir)
+            (pack_root / "commands").mkdir(parents=True, exist_ok=True)
+            (pack_root / "commands" / "default_commands.json").write_text(
+                json.dumps(
+                    [
+                        {
+                            "id": "echo",
+                            "name": "echo",
+                            "modes": ["chat"],
+                            "execution": {
+                                "type": "pack_block",
+                                "qualified_name": "otherpack:goal.run",
+                            },
+                        }
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            registry = SlashCommandRegistry(pack_root)
+
+            with patch("domain.frontend.command_registry.importlib.import_module") as mocked_import:
+                result = registry.execute({"command": "echo", "mode": "chat"}, {})
+
+        self.assertEqual(result["status"], "error")
+        self.assertEqual(result["error"]["code"], "INVALID_COMMAND")
+        mocked_import.assert_not_called()
+
+    def test_pack_block_rejects_modules_outside_pack_blocks_root(self):
+        from domain.frontend.command_registry import SlashCommandRegistry
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pack_root = Path(tmpdir)
+            (pack_root / "commands").mkdir(parents=True, exist_ok=True)
+            (pack_root / "commands" / "default_commands.json").write_text(
+                json.dumps(
+                    [
+                        {
+                            "id": "echo",
+                            "name": "echo",
+                            "modes": ["chat"],
+                            "execution": {
+                                "type": "pack_block",
+                                "qualified_name": "defaultspack:goal.run",
+                            },
+                        }
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            registry = SlashCommandRegistry(pack_root)
+            fake_module = SimpleNamespace(__file__=str(pack_root / "escape.py"), run=lambda *_: None)
+
+            with patch(
+                "domain.frontend.command_registry.importlib.import_module",
+                return_value=fake_module,
+            ) as mocked_import:
+                result = registry.execute({"command": "echo", "mode": "chat"}, {})
+
+        self.assertEqual(result["status"], "error")
+        self.assertEqual(result["error"]["code"], "INVALID_COMMAND")
+        mocked_import.assert_called_once()
 
     def test_pack_block_rejects_user_origin_manifest(self):
         from domain.frontend.command_registry import SlashCommandRegistry
@@ -205,7 +289,14 @@ class TestPackBlockExecutionType(unittest.TestCase):
                 encoding="utf-8",
             )
             registry = SlashCommandRegistry(pack_root)
-            result = registry.execute({"command": "noop", "mode": "chat"}, {})
+
+            fake_module = SimpleNamespace(__file__=str(pack_root / "blocks" / "_common.py"))
+
+            with patch(
+                "domain.frontend.command_registry.importlib.import_module",
+                return_value=fake_module,
+            ):
+                result = registry.execute({"command": "noop", "mode": "chat"}, {})
 
         self.assertEqual(result["status"], "error")
         self.assertEqual(result["error"]["code"], "INVALID_COMMAND")
@@ -225,6 +316,7 @@ class TestGoalSlashCommandRegistration(unittest.TestCase):
         goal_cmd = next(command for command in commands if command["id"] == "goal")
         self.assertEqual(goal_cmd["execution"]["type"], "pack_block")
         self.assertEqual(goal_cmd["execution"]["qualified_name"], "defaultspack:goal.run")
+        self.assertEqual(goal_cmd["modes"], ["chat", "coding"])
         # Required goal arg keeps the registry's MISSING_ARGUMENT validation honest.
         self.assertTrue(any(arg["name"] == "goal" and arg.get("required") for arg in goal_cmd["args"]))
 
@@ -314,6 +406,47 @@ class TestGoalBlockLoop(unittest.TestCase):
             "Add input validation",
             self._user_prompt(worker_calls[1]),
         )
+
+    def test_goal_loop_normalizes_invalid_evaluator_verdicts(self):
+        from blocks.goal.run import run as goal_run
+
+        cases = [
+            ("invalid_json", "not json at all"),
+            ("raw_text_object", json.dumps({"raw_text": "model could not comply"})),
+            (
+                "string_achieved",
+                json.dumps(
+                    {
+                        "achieved": "yes",
+                        "reason": "stringly typed verdict",
+                        "next_instruction": "",
+                    }
+                ),
+            ),
+            (
+                "missing_next_instruction",
+                json.dumps({"achieved": False, "reason": "Need one more pass."}),
+            ),
+        ]
+
+        for name, evaluator_output in cases:
+            with self.subTest(name=name):
+                handler = _ScriptedCallHandler(["Worker draft", evaluator_output])
+                result = goal_run(
+                    {"goal": "Refine the goal loop", "max_iterations": 1},
+                    {"call_handler": handler},
+                )
+
+                self.assertEqual(result["status"], "ok")
+                data = result["data"]
+                self.assertFalse(data["achieved"])
+                self.assertEqual(data["iteration_count"], 1)
+                self.assertEqual(data["stopped_reason"], "max_iterations_reached")
+                self.assertEqual(data["iterations"][0]["verdict"]["achieved"], False)
+                self.assertEqual(
+                    data["iterations"][0]["verdict"]["next_instruction"],
+                    "Continue working toward the goal with concrete progress.",
+                )
 
     def test_goal_loop_stops_at_max_iterations_when_never_achieved(self):
         from blocks.goal.run import run as goal_run

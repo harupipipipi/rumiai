@@ -7,7 +7,7 @@
     "category": "tools",
     "visibility": "default",
     "risk": "medium",
-    "modes": ["chat", "coding", "agent"],
+    "modes": ["chat", "coding"],
     "args": [
       { "name": "goal", "type": "string", "required": true },
       { "name": "max_iterations", "type": "string", "required": false },

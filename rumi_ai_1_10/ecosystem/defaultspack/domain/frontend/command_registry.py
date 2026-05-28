@@ -28,6 +28,7 @@ ALLOWED_RUMI_FUNCTIONS = {
 # never load arbitrary modules.
 PACK_BLOCK_ALLOWED_ORIGINS = (MANIFEST_ORIGIN_DEFAULT, MANIFEST_ORIGIN_PACK)
 PACK_BLOCK_ALLOWED_MODULE_PREFIXES = ("blocks.",)
+PACK_BLOCK_ALLOWED_PACK_IDS = {"defaultspack", "default"}
 
 
 def ok(data: Any = None) -> dict[str, Any]:
@@ -243,6 +244,9 @@ class SlashCommandRegistry:
                 "INVALID_COMMAND",
             )
         _pack_id, _, module_id = qualified_name.partition(":")
+        pack_id = _pack_id.strip()
+        if pack_id not in PACK_BLOCK_ALLOWED_PACK_IDS:
+            return error("pack_block pack_id is not allowed for this registry", "INVALID_COMMAND")
         module_id = module_id.strip().lstrip(".")
         if not module_id:
             return error(
@@ -262,6 +266,14 @@ class SlashCommandRegistry:
             module = importlib.import_module(module_path)
         except Exception as exc:
             return error(f"pack_block target failed to import: {exc}", "EXECUTION_FAILED")
+        module_file = getattr(module, "__file__", None)
+        if not module_file:
+            return error("pack_block target escaped pack blocks root", "INVALID_COMMAND")
+        allowed_root = (self._pack_root / "blocks").resolve()
+        try:
+            Path(module_file).resolve().relative_to(allowed_root)
+        except ValueError:
+            return error("pack_block target escaped pack blocks root", "INVALID_COMMAND")
         runner = getattr(module, "run", None)
         if not callable(runner):
             return error(

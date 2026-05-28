@@ -8,8 +8,8 @@ Drives a goal-pursuit loop with two roles:
 
 The loop runs until the evaluator confirms the goal is achieved or until a hard
 iteration cap is reached. The block is invoked via the ``pack_block`` slash
-command execution type, so it lives entirely as file additions under
-``blocks/goal/`` (no existing-file modifications required to add the feature).
+command execution type and runs model-only Worker/Evaluator turns; it does not
+execute tools directly.
 """
 
 from __future__ import annotations
@@ -122,10 +122,10 @@ def run(input_data: Any = None, context: Any = None) -> dict[str, Any]:
                 iterations,
             )
 
-        verdict = _parse_verdict(evaluator_response.get("output"))
-        achieved = bool(verdict.get("achieved"))
-        reason = str(verdict.get("reason") or "")
-        next_instruction = str(verdict.get("next_instruction") or "")
+        verdict = _normalize_verdict(evaluator_response.get("output"))
+        achieved = verdict["achieved"]
+        reason = verdict["reason"]
+        next_instruction = verdict["next_instruction"]
 
         iterations.append(
             {
@@ -259,6 +259,28 @@ def _parse_verdict(output: Any) -> dict[str, Any]:
         "achieved": False,
         "reason": "could not parse evaluator verdict",
         "next_instruction": "Continue working toward the goal.",
+    }
+
+
+def _normalize_verdict(output: Any) -> dict[str, Any]:
+    verdict = _parse_verdict(output)
+    if not isinstance(verdict.get("achieved"), bool):
+        return {
+            "achieved": False,
+            "reason": "evaluator verdict missing boolean achieved",
+            "next_instruction": "Continue working toward the goal with concrete progress.",
+        }
+
+    achieved = verdict["achieved"]
+    reason = str(verdict.get("reason") or "")
+    next_instruction = str(verdict.get("next_instruction") or "").strip()
+    if not achieved and not next_instruction:
+        next_instruction = "Continue working toward the goal with concrete progress."
+
+    return {
+        "achieved": achieved,
+        "reason": reason,
+        "next_instruction": next_instruction,
     }
 
 

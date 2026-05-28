@@ -1,6 +1,6 @@
 # /goal slash command
 
-`/goal <description>` runs a goal-pursuit loop in the defaultspack console:
+`/goal <description>` runs a goal-pursuit loop in the defaultspack console without direct tool execution:
 
 1. A **Worker** agent produces the next concrete contribution toward the goal.
 2. After each Worker turn, an independent third-party **Evaluator** agent
@@ -68,6 +68,9 @@ and an `iterations` array recording any partial progress.
 The feature is wired up via the `pack_block` execution type in
 `SlashCommandRegistry`, which lets a manifest dispatch to a Python block under
 `blocks/<dotted.path>` exposing `run(input, context) -> dict`.
+
+This block does not execute tools directly; it only makes model calls for the
+Worker and Evaluator turns.
 `pack_block` is allowed only for `default` and `pack` manifest origins (never
 for user manifests under `user_data/shared/commands/`), so untrusted command
 manifests cannot load arbitrary modules.
