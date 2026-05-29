@@ -283,75 +283,100 @@ fn xml_escape(value: &str) -> String {
 }
 
 fn build_launch_script(
+    pack_shell: &Path,
+    token_file: &Path,
     rumi_home: &Path,
-    health_url: &str,
-    browser_url: &str,
+    app_dir: &Path,
+    user_data_dir: &Path,
+    venv_dir: &Path,
+    kernel_port: u16,
+    app_working_dir: &Path,
+    command: &str,
+    env_vars: &[(String, String)],
 ) -> String {
-    let signal_file = rumi_home.join(".defaultspack_launch_request");
+    let env_exports = env_vars
+        .iter()
+        .map(|(key, value)| format!("export {key}={}", shell_quote(value)))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let env_exports = if env_exports.is_empty() {
+        String::new()
+    } else {
+        format!("\n# Environment declared by defaultspack desktop_app metadata.\n{env_exports}\n")
+    };
+
+    let kernel_command = kernel_command_for_python(&venv_bin_dir(venv_dir).join("python3"));
+
     format!(
         r#"#!/bin/bash
+set -euo pipefail
+
 RUMI_HOME={rumi_home}
-HEALTH_URL={health_url}
-BROWSER_URL={browser_url}
-SIGNAL_FILE={signal_file}
+RUMI_APP_DIR={app_dir}
+RUMI_USER_DATA={user_data_dir}
+VENV_DIR={venv_dir}
+PACK_SHELL={pack_shell}
+TOKEN_FILE={token_file}
+APP_WORKING_DIR={app_working_dir}
+DESKTOP_COMMAND={command}
+KERNEL_COMMAND={kernel_command}
 
-# If defaultspack is already running, open the browser and exit.
-if curl -sf "$HEALTH_URL" > /dev/null 2>&1; then
-    open "$BROWSER_URL"
-    exit 0
-fi
+export PATH="$VENV_DIR/bin:$PATH"
+export RUMI_HOME
+export RUMI_APP_DIR
+export RUMI_USER_DATA
+{env_exports}
 
-# Write a signal file so Rumi AI launches defaultspack on startup or
-# when it next becomes active.  This ensures pack-shell runs inside
-# Rumi AI's process tree and inherits its macOS TCC permissions
-# (Accessibility, Screen Recording, etc.).
-mkdir -p "$RUMI_HOME"
-printf 'launch\n' > "$SIGNAL_FILE"
+RUMI_API_TOKEN=$(cat "$TOKEN_FILE" 2>/dev/null | tr -d '\n')
+export RUMI_API_TOKEN
 
-# Activate (or start) Rumi AI.  When Rumi AI sees the signal file it
-# will start defaultspack and open the browser.
-open -a "Rumi AI"
-
-# Wait up to 90 seconds for defaultspack to become ready.
-for _i in $(seq 1 90); do
-    if curl -sf "$HEALTH_URL" > /dev/null 2>&1; then
-        rm -f "$SIGNAL_FILE"
-        open "$BROWSER_URL"
-        exit 0
-    fi
-    sleep 1
-done
-
-# Timed out.  Clean up the signal file and exit.
-rm -f "$SIGNAL_FILE"
-echo "Timed out waiting for defaultspack to start." >&2
-exit 1
+exec "$PACK_SHELL" run "defaultspack" \
+  --command "$DESKTOP_COMMAND" \
+  --port {kernel_port} \
+  --kernel-cmd "$KERNEL_COMMAND" \
+  --working-dir "$APP_WORKING_DIR" \
+  --timeout 120
 "#,
         rumi_home = shell_quote_path(rumi_home),
-        health_url = shell_quote(health_url),
-        browser_url = shell_quote(browser_url),
-        signal_file = shell_quote_path(&signal_file),
+        app_dir = shell_quote_path(app_dir),
+        user_data_dir = shell_quote_path(user_data_dir),
+        venv_dir = shell_quote_path(venv_dir),
+        pack_shell = shell_quote_path(pack_shell),
+        token_file = shell_quote_path(token_file),
+        app_working_dir = shell_quote_path(app_working_dir),
+        command = shell_quote(command),
+        kernel_command = shell_quote(&kernel_command),
+        kernel_port = kernel_port,
+        env_exports = env_exports,
     )
 }
 
 /// Generate a macOS .app bundle at `~/Applications/Rumi Defaultspack.app`.
 ///
-/// The generated .app launches via a thin proxy script that delegates to
-/// Rumi AI.app, so that pack-shell runs inside Rumi AI's process tree and
-/// inherits its macOS TCC permissions (Accessibility, Screen Recording, etc.).
+/// The generated .app launches defaultspack directly under its own bundle
+/// identity so that macOS TCC permissions (Accessibility, Screen Recording,
+/// etc.) are granted to Rumi Defaultspack.app, not Rumi AI.app.
 fn create_macos_app_bundle(
     app_name: &str,
+    pack_shell: &Path,
+    token_file: &Path,
     rumi_home: &Path,
-    health_url: &str,
-    browser_url: &str,
+    app_dir: &Path,
+    user_data_dir: &Path,
+    venv_dir: &Path,
+    kernel_port: u16,
+    app_working_dir: &Path,
+    command: &str,
+    env_vars: &[(String, String)],
 ) -> AnyResult<PathBuf> {
     let safe_name = app_name.replace('/', "_");
     let apps_base = dirs_home().join("Applications");
     fs::create_dir_all(&apps_base)
         .with_context(|| format!("failed to create {}", apps_base.display()))?;
 
-    let app_dir = apps_base.join(format!("{safe_name}.app"));
-    let contents_dir = app_dir.join("Contents");
+    let bundle_dir = apps_base.join(format!("{safe_name}.app"));
+    let contents_dir = bundle_dir.join("Contents");
     let macos_dir = contents_dir.join("MacOS");
     fs::create_dir_all(&macos_dir)
         .with_context(|| format!("failed to create {}", macos_dir.display()))?;
@@ -384,9 +409,20 @@ fn create_macos_app_bundle(
     fs::write(&plist_path, &plist_content)
         .with_context(|| format!("failed to write {}", plist_path.display()))?;
 
-    // Launch script – proxies through Rumi AI so pack-shell inherits TCC.
+    // Launch script – runs pack-shell/defaultspack directly under this bundle.
     let launch_path = macos_dir.join("launch");
-    let launch_script = build_launch_script(rumi_home, health_url, browser_url);
+    let launch_script = build_launch_script(
+        pack_shell,
+        token_file,
+        rumi_home,
+        app_dir,
+        user_data_dir,
+        venv_dir,
+        kernel_port,
+        app_working_dir,
+        command,
+        env_vars,
+    );
     fs::write(&launch_path, &launch_script)
         .with_context(|| format!("failed to write {}", launch_path.display()))?;
 
@@ -399,7 +435,7 @@ fn create_macos_app_bundle(
         fs::set_permissions(&launch_path, perms)?;
     }
 
-    Ok(app_dir)
+    Ok(bundle_dir)
 }
 
 fn dirs_home() -> PathBuf {
@@ -694,31 +730,31 @@ fn ensure_defaultspack_app_bundle(config: &AppConfig) -> AnyResult<PathBuf> {
         bail!("Defaultspack dock registration is only supported on macOS");
     }
 
-    // 1. Read ecosystem.json to determine the port (for health/browser URLs)
+    let pack_shell = config
+        .pack_shell_path()
+        .context("pack-shell binary not found. Build it with `cargo build` in pack-shell/")?;
+
     let metadata = read_defaultspack_desktop_metadata(config)?;
-    let port = metadata.port;
-    let health_url = defaultspack_health_url(port);
-    let browser_url = defaultspack_browser_url(port);
 
-    // 2. Save the desktop API token so Rumi AI can use it when it
-    //    launches defaultspack via the signal file.
-    let _api_token = read_desktop_api_token_from_config(config)?;
-    let _token_path = persist_desktop_api_token(config, &_api_token)?;
+    let api_token = read_desktop_api_token_from_config(config)?;
+    let token_path = persist_desktop_api_token(config, &api_token)?;
 
-    // 3. Generate .app bundle (proxy script that delegates to Rumi AI)
     let app_name = "Rumi Defaultspack";
     let app_dir = create_macos_app_bundle(
         app_name,
+        &pack_shell,
+        &token_path,
         &config.rumi_home,
-        &health_url,
-        &browser_url,
+        &config.app_dir,
+        &config.user_data_dir,
+        &config.venv_dir,
+        config.kernel_port,
+        &metadata.app_working_dir,
+        &metadata.command,
+        &metadata.env_vars,
     )?;
 
-    // 4. Ad-hoc code-sign so macOS TCC can identify the bundle.
     codesign_app_bundle(&app_dir)?;
-
-    // 5. Register with Launch Services so the app appears in
-    //    Launchpad, Spotlight, and System Settings > Privacy & Security.
     register_with_launch_services(&app_dir)?;
 
     Ok(app_dir)
@@ -799,19 +835,48 @@ mod tests {
 
     #[test]
     #[cfg(unix)]
-    fn launch_script_delegates_to_rumi_ai() {
+    fn launch_script_sets_rumi_app_dir_and_user_data() {
         let script = build_launch_script(
-            Path::new("/tmp/rumi home"),
-            "http://127.0.0.1:8766/api/health",
-            "http://localhost:8766/chat",
+            Path::new("/tmp/pack-shell"),
+            Path::new("/tmp/token"),
+            Path::new("/tmp/rumi-home"),
+            Path::new("/tmp/app-dir"),
+            Path::new("/tmp/user-data"),
+            Path::new("/tmp/venv"),
+            8765,
+            Path::new("/tmp/defaultspack"),
+            "python -m defaultspack.desktop_app",
+            &[],
         );
 
-        assert!(script.contains("RUMI_HOME='/tmp/rumi home'"));
-        assert!(script.contains("HEALTH_URL='http://127.0.0.1:8766/api/health'"));
-        assert!(script.contains("BROWSER_URL='http://localhost:8766/chat'"));
-        assert!(script.contains("SIGNAL_FILE='/tmp/rumi home/.defaultspack_launch_request'"));
-        assert!(script.contains("open -a \"Rumi AI\""));
-        assert!(script.contains("rm -f \"$SIGNAL_FILE\""));
+        assert!(script.contains("RUMI_APP_DIR='/tmp/app-dir'"));
+        assert!(script.contains("RUMI_USER_DATA='/tmp/user-data'"));
+        assert!(script.contains("exec \"$PACK_SHELL\" run \"defaultspack\""));
+        assert!(!script.contains(".defaultspack_launch_request"));
+        assert!(!script.contains("open -a \"Rumi AI\""));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn launch_script_includes_env_exports() {
+        let script = build_launch_script(
+            Path::new("/tmp/pack-shell"),
+            Path::new("/tmp/token"),
+            Path::new("/tmp/rumi-home"),
+            Path::new("/tmp/app-dir"),
+            Path::new("/tmp/user-data"),
+            Path::new("/tmp/venv"),
+            8765,
+            Path::new("/tmp/defaultspack"),
+            "python -m defaultspack.desktop_app",
+            &[
+                ("RUMI_DEFAULTSPACK_SURFACE".into(), "webview".into()),
+                ("DEFAULTS_HTTP_PORT".into(), "8766".into()),
+            ],
+        );
+
+        assert!(script.contains("export RUMI_DEFAULTSPACK_SURFACE='webview'"));
+        assert!(script.contains("export DEFAULTS_HTTP_PORT='8766'"));
     }
 
     #[test]

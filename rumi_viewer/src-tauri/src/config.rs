@@ -401,6 +401,19 @@ mod tests {
     }
 
     #[test]
+    fn app_config_separates_app_dir_from_user_data_dir() {
+        let config = AppConfig::detect_for_tauri(
+            PathBuf::from("/tmp/resources"),
+            PathBuf::from("/tmp/app-data"),
+        )
+        .unwrap();
+
+        assert_eq!(config.app_dir, PathBuf::from("/tmp/resources/app"));
+        assert_eq!(config.rumi_home, PathBuf::from("/tmp/resources/app"));
+        assert_eq!(config.user_data_dir, PathBuf::from("/tmp/app-data/user_data"));
+    }
+
+    #[test]
     fn venv_python_path_is_reasonable() {
         let resource = PathBuf::from("/tmp/res");
         let appdata = PathBuf::from("/tmp/data");
