@@ -357,7 +357,7 @@ fn create_macos_app_bundle(
         .with_context(|| format!("failed to create {}", macos_dir.display()))?;
 
     // Info.plist
-    let bundle_id = "dev.rumiai.app";
+    let bundle_id = "dev.rumiai.defaultspack";
     let plist_path = contents_dir.join("Info.plist");
     let escaped_app_name = xml_escape(app_name);
     let plist_content = format!(
