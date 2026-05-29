@@ -29,6 +29,37 @@ use kernel_manager::KernelManager;
 
 mod dock_registration;
 
+/// Check for a `.defaultspack_launch_request` signal file left by the Dock
+/// .app bundle.  When present the proxy script wrote the file to ask Rumi AI
+/// to launch defaultspack inside its own process tree (so that pack-shell
+/// inherits TCC permissions like Accessibility and Screen Recording).
+fn process_defaultspack_launch_request(app_handle: &AppHandle) {
+    use dock_registration::launch_defaultspack_desktop_impl;
+
+    let config = match app_handle.try_state::<AppConfig>() {
+        Some(c) => c.inner().clone(),
+        None => {
+            warn!("Defaultspack launch request: AppConfig not available");
+            return;
+        }
+    };
+
+    let signal_path = config.rumi_home.join(".defaultspack_launch_request");
+    if !signal_path.exists() {
+        return;
+    }
+
+    info!("Found defaultspack launch request at {}", signal_path.display());
+
+    // Remove the signal file first so we don't process it twice.
+    let _ = fs::remove_file(&signal_path);
+
+    match launch_defaultspack_desktop_impl(&config) {
+        Ok(msg) => info!("{msg}"),
+        Err(e) => error!("Failed to launch defaultspack from signal file: {e:#}"),
+    }
+}
+
 /// Wrapper around a shared progress string, managed as Tauri State.
 pub struct SetupProgress(pub Arc<Mutex<String>>);
 pub struct ShutdownState(pub Arc<AtomicBool>);
@@ -905,6 +936,10 @@ pub fn run() {
 
                 // Delayed background update check.
                 run_delayed_update_check();
+
+                // Process any defaultspack launch request left by the Dock .app
+                // proxy script while Rumi AI was not running.
+                process_defaultspack_launch_request(&handle);
             });
 
             tray::setup_tray(app)?;
@@ -944,6 +979,9 @@ pub fn run() {
                         warn!("Failed to reopen primary window: {error}");
                     }
                 }
+
+                #[cfg(target_os = "macos")]
+                process_defaultspack_launch_request(app_handle);
 
                 #[cfg(not(target_os = "macos"))]
                 {
