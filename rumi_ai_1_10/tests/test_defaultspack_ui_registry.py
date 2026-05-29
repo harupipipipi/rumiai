@@ -886,6 +886,9 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
             def _handle_context_info(self, request_data, path_params):
                 return {}
 
+            def _handle_desktop_system_info(self, request_data, path_params):
+                return {}
+
             def _handle_chat_redirect(self, request_data, path_params):
                 return {}
 
@@ -1145,6 +1148,9 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
                 return {}
 
             def _handle_context_info(self, request_data, path_params):
+                return {}
+
+            def _handle_desktop_system_info(self, request_data, path_params):
                 return {}
 
             def _handle_chat_redirect(self, request_data, path_params):

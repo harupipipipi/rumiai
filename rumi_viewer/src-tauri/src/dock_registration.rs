@@ -10,7 +10,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, bail, Context, Result as AnyResult};
-use log::{error, info};
+use log::{error, info, warn};
 use serde_json::Value;
 
 use crate::config::AppConfig;
@@ -199,9 +199,12 @@ fn is_defaultspack_http_ready(port: u16) -> bool {
 fn wait_for_defaultspack_http_ready(port: u16, child: &mut Child) -> AnyResult<()> {
     let client = defaultspack_health_client()?;
     let deadline = Instant::now() + DEFAULTSPACK_READY_TIMEOUT;
+    let mut poll_count: u32 = 0;
 
     loop {
+        poll_count += 1;
         if check_defaultspack_http_ready(&client, port) {
+            info!("wait_for_defaultspack_http_ready: ready after {poll_count} polls on port {port}");
             return Ok(());
         }
 
@@ -209,15 +212,53 @@ fn wait_for_defaultspack_http_ready(port: u16, child: &mut Child) -> AnyResult<(
             .try_wait()
             .context("failed to inspect defaultspack launch process")?
         {
+            let stdout_str = child.stdout.take().map(|mut out| {
+                let mut buf = String::new();
+                let _ = std::io::Read::read_to_string(&mut out, &mut buf);
+                buf
+            }).unwrap_or_default();
+            let stderr_str = child.stderr.take().map(|mut err| {
+                let mut buf = String::new();
+                let _ = std::io::Read::read_to_string(&mut err, &mut buf);
+                buf
+            }).unwrap_or_default();
+            if !stdout_str.is_empty() {
+                info!("wait_for_defaultspack_http_ready: pack-shell stdout: {}", stdout_str.trim());
+            }
+            if !stderr_str.is_empty() {
+                warn!("wait_for_defaultspack_http_ready: pack-shell stderr: {}", stderr_str.trim());
+            }
             bail!("Defaultspack exited before its local server was ready: {status}");
         }
 
         if Instant::now() >= deadline {
+            warn!("wait_for_defaultspack_http_ready: timed out after {poll_count} polls, killing pack-shell");
+            let _ = child.kill();
+            let stdout_str = child.stdout.take().map(|mut out| {
+                let mut buf = String::new();
+                let _ = std::io::Read::read_to_string(&mut out, &mut buf);
+                buf
+            }).unwrap_or_default();
+            let stderr_str = child.stderr.take().map(|mut err| {
+                let mut buf = String::new();
+                let _ = std::io::Read::read_to_string(&mut err, &mut buf);
+                buf
+            }).unwrap_or_default();
+            if !stdout_str.is_empty() {
+                info!("wait_for_defaultspack_http_ready: pack-shell stdout (after kill): {}", stdout_str.trim());
+            }
+            if !stderr_str.is_empty() {
+                warn!("wait_for_defaultspack_http_ready: pack-shell stderr (after kill): {}", stderr_str.trim());
+            }
             bail!(
                 "Defaultspack local server did not become ready at {} within {} seconds",
                 defaultspack_health_url(port),
                 DEFAULTSPACK_READY_TIMEOUT.as_secs()
             );
+        }
+
+        if poll_count % 20 == 0 {
+            info!("wait_for_defaultspack_http_ready: still waiting (poll #{poll_count}) on port {port}...");
         }
 
         thread::sleep(DEFAULTSPACK_READY_POLL_INTERVAL);
@@ -443,19 +484,56 @@ pub fn launch_defaultspack_desktop(config: tauri::State<'_, AppConfig>) -> Resul
 }
 
 pub(crate) fn launch_defaultspack_desktop_impl(config: &AppConfig) -> AnyResult<String> {
-    let metadata = read_defaultspack_desktop_metadata(config)?;
+    info!("launch_defaultspack_desktop_impl: starting");
+
+    let metadata = match read_defaultspack_desktop_metadata(config) {
+        Ok(m) => {
+            info!("launch_defaultspack_desktop_impl: metadata loaded (port={}, command={}, working_dir={})",
+                m.port, m.command, m.app_working_dir.display());
+            m
+        }
+        Err(e) => {
+            error!("launch_defaultspack_desktop_impl: failed to read defaultspack metadata: {e:#}");
+            info!("launch_defaultspack_desktop_impl: ecosystem_json path={}",
+                config.defaultspack_ecosystem_json().display());
+            return Err(e);
+        }
+    };
     let url = defaultspack_browser_url(metadata.port);
+    info!("launch_defaultspack_desktop_impl: browser URL will be {url}");
 
     if !is_defaultspack_http_ready(metadata.port) {
-        let mut child = spawn_defaultspack_local_server(config, &metadata)?;
-        wait_for_defaultspack_http_ready(metadata.port, &mut child)?;
-        info!("Defaultspack local server is ready at {url}");
+        info!("launch_defaultspack_desktop_impl: health check indicates server not ready, spawning...");
+        let mut child = match spawn_defaultspack_local_server(config, &metadata) {
+            Ok(c) => {
+                info!("launch_defaultspack_desktop_impl: spawned pack-shell pid={}", c.id());
+                c
+            }
+            Err(e) => {
+                error!("launch_defaultspack_desktop_impl: failed to spawn pack-shell: {e:#}");
+                info!("launch_defaultspack_desktop_impl: pack_shell_path={}",
+                    config.pack_shell_path().map(|p| p.display().to_string()).unwrap_or_else(|| "<not found>".to_string()));
+                return Err(e);
+            }
+        };
+        match wait_for_defaultspack_http_ready(metadata.port, &mut child) {
+            Ok(()) => info!("launch_defaultspack_desktop_impl: server became ready at {url}"),
+            Err(e) => {
+                error!("launch_defaultspack_desktop_impl: wait_for_ready failed: {e:#}");
+                match child.try_wait() {
+                    Ok(Some(status)) => error!("launch_defaultspack_desktop_impl: pack-shell exited with {status}"),
+                    Ok(None) => error!("launch_defaultspack_desktop_impl: pack-shell still running but server not responding"),
+                    Err(wait_err) => error!("launch_defaultspack_desktop_impl: could not check pack-shell status: {wait_err}"),
+                }
+                return Err(e);
+            }
+        }
     } else {
-        info!("Defaultspack local server is already ready at {url}");
+        info!("launch_defaultspack_desktop_impl: health check passed, server already ready at {url}");
     }
 
     open::that_detached(&url).with_context(|| format!("failed to open {url}"))?;
-    info!("Opened defaultspack browser URL: {url}");
+    info!("launch_defaultspack_desktop_impl: opened browser URL {url}");
     Ok(format!("Opening Rumi Defaultspack at {url}"))
 }
 
@@ -487,22 +565,33 @@ fn read_defaultspack_desktop_metadata(
 
 fn read_desktop_api_token_from_config(config: &AppConfig) -> AnyResult<String> {
     let token_path = config.desktop_api_token_path();
+    info!("read_desktop_api_token_from_config: trying saved token at {}", token_path.display());
     if let Ok(token) = read_saved_desktop_api_token(&token_path) {
+        info!("read_desktop_api_token_from_config: found saved token ({} chars)", token.len());
         return Ok(token);
     }
+    info!("read_desktop_api_token_from_config: no saved token, trying hmac_keys.json candidates");
 
     let candidates = [
         config.user_data_dir.join("hmac_keys.json"),
         config.rumi_home.join("user_data").join("hmac_keys.json"),
     ];
     let mut last_error: Option<anyhow::Error> = None;
-    for hmac_keys_path in candidates {
+    for hmac_keys_path in &candidates {
+        info!("read_desktop_api_token_from_config: checking {}", hmac_keys_path.display());
         if !hmac_keys_path.exists() {
+            info!("read_desktop_api_token_from_config: does not exist");
             continue;
         }
         match read_desktop_api_token(&hmac_keys_path) {
-            Ok(token) => return Ok(token),
-            Err(error) => last_error = Some(error),
+            Ok(token) => {
+                info!("read_desktop_api_token_from_config: got token from hmac_keys.json ({} chars)", token.len());
+                return Ok(token);
+            }
+            Err(error) => {
+                warn!("read_desktop_api_token_from_config: hmac_keys.json exists but read failed: {error:#}");
+                last_error = Some(error);
+            }
         }
     }
     if let Some(error) = last_error {
@@ -514,7 +603,9 @@ fn read_desktop_api_token_from_config(config: &AppConfig) -> AnyResult<String> {
         });
     }
     bail!(
-        "hmac_keys.json not found. Start the Kernel first to generate API keys."
+        "hmac_keys.json not found (checked {}, {}). Start the Kernel first to generate API keys.",
+        candidates[0].display(),
+        candidates[1].display()
     )
 }
 
@@ -554,6 +645,14 @@ fn spawn_defaultspack_local_server(
     let kernel_command = kernel_command_for_python(&config.venv_python());
     let path = append_path_prefix(&venv_bin_dir(&config.venv_dir), std::env::var_os("PATH"))?;
 
+    info!(
+        "spawn_defaultspack_local_server: pack_shell={}, port={}, kernel_cmd={}, working_dir={}",
+        pack_shell.display(),
+        config.kernel_port,
+        kernel_command,
+        metadata.app_working_dir.display(),
+    );
+
     let mut command = process_utils::command(&pack_shell);
     command
         .arg("run")
@@ -563,7 +662,7 @@ fn spawn_defaultspack_local_server(
         .arg("--port")
         .arg(config.kernel_port.to_string())
         .arg("--kernel-cmd")
-        .arg(kernel_command)
+        .arg(&kernel_command)
         .arg("--working-dir")
         .arg(&metadata.app_working_dir)
         .arg("--timeout")
@@ -578,8 +677,8 @@ fn spawn_defaultspack_local_server(
         .env("RUMI_DEFAULTSPACK_OPEN_BROWSER", "0")
         .current_dir(&metadata.app_working_dir)
         .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
 
     for (key, value) in &metadata.env_vars {
         command.env(key, value);

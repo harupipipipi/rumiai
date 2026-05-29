@@ -55,8 +55,8 @@ fn process_defaultspack_launch_request(app_handle: &AppHandle) {
     let _ = fs::remove_file(&signal_path);
 
     match launch_defaultspack_desktop_impl(&config) {
-        Ok(msg) => info!("{msg}"),
-        Err(e) => error!("Failed to launch defaultspack from signal file: {e:#}"),
+        Ok(msg) => info!("[signal-file] {msg}"),
+        Err(e) => error!("[signal-file] Failed to launch defaultspack: {e:#}"),
     }
 }
 
