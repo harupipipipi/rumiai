@@ -138,3 +138,31 @@ test("settings system info renders viewer version and macOS permissions", () => 
   assert.match(html, /Screen Recording/);
   assert.match(html, /Missing/);
 });
+
+test("settings system info shows browser context message when info is null", () => {
+  const html = renderToStaticMarkup(
+    createElement(SettingsModalRenderer, {
+      isOpen: true,
+      activeSectionId: "system_info",
+      catalog: {
+        sidebar: { filters: [], items: [] },
+        settings: { sections: [], values: {} },
+        chat_rendering: { renderers: [] },
+        extension_points: [],
+      },
+      health: null,
+      previewsCount: 0,
+      settingsSections: [
+        { id: "system_info", label: "System Info", description: "Version and permission status", fields: [] },
+      ],
+      settingsValues: {},
+      desktopSystemInfo: null,
+      onClose: () => undefined,
+      onOpenSection: () => undefined,
+      onSettingChange: () => undefined,
+    }),
+  );
+
+  assert.match(html, /承認状態を取得できませんでした/);
+  assert.match(html, /外部ブラウザ/);
+});

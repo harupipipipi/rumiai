@@ -51,7 +51,8 @@ function SystemInfoPanel({ info }: { info?: DesktopSystemInfo | null }) {
   if (!info) {
     return (
       <div className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-4 text-sm leading-6 text-zinc-400">
-        macOS の Accessibility / Screen Recording などの承認状態を読み込めませんでした。
+        macOS の Accessibility / Screen Recording などの承認状態を取得できませんでした。
+        外部ブラウザで開いている場合、権限状態は Rumi Viewer 本体の設定画面から確認できます。
       </div>
     );
   }
