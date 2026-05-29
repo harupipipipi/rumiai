@@ -880,6 +880,31 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
+    fn launch_script_uses_direct_defaultspack_identity_only() {
+        let script = build_launch_script(
+            Path::new("/tmp/pack-shell"),
+            Path::new("/tmp/token"),
+            Path::new("/tmp/rumi-home"),
+            Path::new("/tmp/app-dir"),
+            Path::new("/tmp/user-data"),
+            Path::new("/tmp/venv"),
+            8765,
+            Path::new("/tmp/defaultspack"),
+            "python -m defaultspack.desktop_app",
+            &[],
+        );
+
+        assert!(script.contains("exec \"$PACK_SHELL\" run \"defaultspack\""));
+        assert!(script.contains("--working-dir \"$APP_WORKING_DIR\""));
+        assert!(script.contains("--kernel-cmd \"$KERNEL_COMMAND\""));
+
+        assert!(!script.contains("SIGNAL_FILE"));
+        assert!(!script.contains("Rumi AI"));
+        assert!(!script.contains("defaultspack_launch_request"));
+    }
+
+    #[test]
     fn xml_escape_escapes_plist_values() {
         assert_eq!(
             xml_escape("Rumi & <Default> \"Pack\""),
