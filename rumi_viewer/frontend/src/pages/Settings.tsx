@@ -489,7 +489,7 @@ export function Settings() {
                 <CardHeader className="flex-row items-center justify-between space-y-0">
                   <div>
                     <CardTitle>macOS Permissions</CardTitle>
-                    <CardDescription>Current privacy approvals used by Computer Use and screen capture.</CardDescription>
+                    <CardDescription>Rumi Viewer is the macOS permission host for Computer Use and screen capture.</CardDescription>
                   </div>
                   <Button variant="outline" size="sm" onClick={loadDesktopInfo} disabled={desktopInfoBusy} loading={desktopInfoBusy}>
                     <RefreshCw className="h-3.5 w-3.5" />
@@ -497,6 +497,17 @@ export function Settings() {
                   </Button>
                 </CardHeader>
                 <CardContent className="space-y-4">
+                  <div className="rounded-lg border border-border bg-bg-main/50 p-4">
+                    <p className="text-sm font-medium text-text-main">macOS権限ホスト: {desktopInfo?.permission_subject ?? 'Rumi Viewer'}</p>
+                    <p className="mt-2 text-xs leading-5 text-text-muted">
+                      Rumiの画面確認・クリック・キーボード操作は、Rumi Viewerに許可された権限を使って実行されます。DefaultspackやCLIは、許可された操作だけをViewer経由で要求します。
+                    </p>
+                    <div className="mt-3 flex flex-wrap gap-2 text-[11px] text-text-muted">
+                      <span className="rounded-full border border-border px-2.5 py-1">画面を見る</span>
+                      <span className="rounded-full border border-border px-2.5 py-1">クリック・キーボード操作</span>
+                      <span className="rounded-full border border-border px-2.5 py-1">ブラウザ操作</span>
+                    </div>
+                  </div>
                   <div className="grid gap-3 sm:grid-cols-2">
                     {(desktopInfo?.permissions ?? []).map((permission) => (
                       <div key={permission.id} className="rounded-lg border border-border p-4">
@@ -520,7 +531,7 @@ export function Settings() {
                   </div>
                   {!desktopInfo && !desktopInfoBusy && (
                     <p className="rounded-lg border border-border bg-bg-main/50 px-4 py-3 text-sm text-text-muted">
-                      Permission status is available when this page is running inside Rumi Viewer.
+                      Start Rumi Viewer, then grant Accessibility / Screen Recording / Input Monitoring here.
                     </p>
                   )}
                 </CardContent>

@@ -5,7 +5,7 @@ from pathlib import Path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from blocks._common import error, ok
-from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+from domain.host_bridge.computer_router import run_computer_action
 
 
 def run(input_data, context=None):
@@ -14,9 +14,12 @@ def run(input_data, context=None):
         return error("'action' is required", code="INVALID_INPUT")
     try:
         yolo_mode = _truthy(context.get("yolo_mode")) if isinstance(context, dict) else False
-        result = BrowserComputerController(artifact_root=_artifact_root(context)).run(
+        result = run_computer_action(
             str(action),
             dict(input_data.get("payload") or {}),
+            context if isinstance(context, dict) else None,
+            tool_name="browser_computer",
+            artifact_root=_artifact_root(context),
             yolo_mode=yolo_mode,
         )
     except Exception as exc:

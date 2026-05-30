@@ -18,10 +18,11 @@ _SEQUENCE_ID_KEYS = (
 
 
 def run(context, args):
-    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+    from ecosystem.defaultspack.domain.host_bridge.computer_router import run_computer_action
 
     action = str(args.get("action", "browser.session"))
     payload = dict(args.get("payload") or {})
+    tool_name = str(args.get("tool_name") or "browser_computer").strip() or "browser_computer"
     payload = _payload_with_sequence_defaults(payload, context, args)
     artifact_root = None
     workspace = context.get("conversation_workspace_dir") if isinstance(context, dict) else None
@@ -34,9 +35,12 @@ def run(context, args):
     ):
         payload["persistent"] = False
     payload = _payload_with_context_defaults(action, payload, context)
-    result = BrowserComputerController(artifact_root=artifact_root).run(
+    result = run_computer_action(
         action,
         payload,
+        context if isinstance(context, dict) else None,
+        tool_name=tool_name,
+        artifact_root=artifact_root,
         yolo_mode=yolo_mode,
     )
     summary = "browser_computer {} completed".format(result.get("action", "action"))

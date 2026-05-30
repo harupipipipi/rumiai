@@ -115,6 +115,12 @@ test("settings system info renders viewer version and macOS permissions", () => 
         build_channel: "beta",
         platform: "macos",
         platform_release: "15.0",
+        permission_subject: "Rumi Viewer",
+        host_broker: {
+          enabled: true,
+          available: true,
+          status: "running",
+        },
         permissions: [
           {
             id: "screen_recording",
@@ -134,7 +140,37 @@ test("settings system info renders viewer version and macOS permissions", () => 
 
   assert.match(html, /beta 1\.0\.0/);
   assert.match(html, /1\.0\.0-beta\.1/);
+  assert.match(html, /macOSの承認対象は Rumi Viewer です/);
   assert.match(html, /macOS Permissions/);
   assert.match(html, /Screen Recording/);
   assert.match(html, /Missing/);
+});
+
+test("settings system info shows browser context message when info is null", () => {
+  const html = renderToStaticMarkup(
+    createElement(SettingsModalRenderer, {
+      isOpen: true,
+      activeSectionId: "system_info",
+      catalog: {
+        sidebar: { filters: [], items: [] },
+        settings: { sections: [], values: {} },
+        chat_rendering: { renderers: [] },
+        extension_points: [],
+      },
+      health: null,
+      previewsCount: 0,
+      settingsSections: [
+        { id: "system_info", label: "System Info", description: "Version and permission status", fields: [] },
+      ],
+      settingsValues: {},
+      desktopSystemInfo: null,
+      onClose: () => undefined,
+      onOpenSection: () => undefined,
+      onSettingChange: () => undefined,
+    }),
+  );
+
+  assert.match(html, /権限状態を取得できませんでした/);
+  assert.match(html, /Rumi Viewerを起動し/);
+  assert.doesNotMatch(html, /Rumi Defaultspack\.app/);
 });

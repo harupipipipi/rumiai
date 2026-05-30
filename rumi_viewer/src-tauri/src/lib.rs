@@ -5,6 +5,9 @@
 mod config;
 mod desktop_system_info;
 mod health_check;
+mod host_audit;
+mod host_broker;
+mod host_broker_types;
 mod kernel_manager;
 mod process_utils;
 mod python_env;
@@ -25,6 +28,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager};
 
 use config::AppConfig;
+use host_broker::HostBrokerRuntime;
 use kernel_manager::KernelManager;
 
 mod dock_registration;
@@ -801,6 +805,7 @@ pub fn run() {
 
             std::fs::create_dir_all(&config.log_dir).ok();
             std::fs::create_dir_all(&config.user_data_dir).ok();
+            std::fs::create_dir_all(config.host_broker_dir()).ok();
 
             let progress = SetupProgress(Arc::new(Mutex::new(
                 "Initializing...".to_string(),
@@ -811,6 +816,9 @@ pub fn run() {
 
             let panel_bootstrap_secret = load_or_create_panel_bootstrap_secret(&config)
                 .context("failed to load persisted panel bootstrap secret")?;
+            let host_broker = HostBrokerRuntime::start(&config)
+                .context("failed to start Viewer host broker")?;
+            app.manage(host_broker.clone());
             config.kernel_port = resolve_available_kernel_port(&config, &panel_bootstrap_secret);
             set_allowed_navigation_ports(
                 &allowed_navigation_ports_for_setup,

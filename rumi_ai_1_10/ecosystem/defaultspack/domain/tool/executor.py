@@ -662,7 +662,7 @@ class ToolExecutor:
                 "widget": {"type": "research_sources", **result.as_dict()}
             }
         elif tool_name in {"browser_computer", "browser_use", "computer_use"}:
-            from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+            from ecosystem.defaultspack.domain.host_bridge.computer_router import run_computer_action
 
             policy = policy_from_context(context if isinstance(context, dict) else {})
             action, payload = _browser_computer_action_payload(tool_name, arguments)
@@ -673,9 +673,12 @@ class ToolExecutor:
                 key in payload for key in ("persistent", "profile_id", "session_id")
             ):
                 payload["persistent"] = False
-            result = BrowserComputerController(artifact_root=_conversation_tool_artifact_root(context)).run(
+            result = run_computer_action(
                 action,
                 _computer_use_payload_with_context_defaults(action, payload, context),
+                context if isinstance(context, dict) else None,
+                tool_name=tool_name,
+                artifact_root=_conversation_tool_artifact_root(context),
                 yolo_mode=_truthy(policy.get("yolo_mode")),
             )
             if _is_cancelled(context):

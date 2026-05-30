@@ -118,6 +118,21 @@ impl AppConfig {
             .join(".rumi_panel_bootstrap_secret")
     }
 
+    /// Return the directory where Viewer host broker files are stored.
+    pub fn host_broker_dir(&self) -> PathBuf {
+        self.user_data_dir.join("host_broker")
+    }
+
+    /// Return the path to the Viewer host broker connection file.
+    pub fn host_broker_connection_path(&self) -> PathBuf {
+        self.host_broker_dir().join("connection.json")
+    }
+
+    /// Return the path to the Viewer host broker audit log.
+    pub fn host_broker_audit_log_path(&self) -> PathBuf {
+        self.host_broker_dir().join("audit.jsonl")
+    }
+
     /// Return the path where a bundled `uv` binary would live.
     ///
     /// Layout: `{app_dir}/bundled/uv` (Unix) or `{app_dir}/bundled/uv.exe` (Windows).
@@ -398,6 +413,22 @@ mod tests {
         assert!(config.python_dir.to_string_lossy().contains("test_appdata"));
         assert_eq!(config.rumi_home, config.app_dir);
         assert!(!config.is_dev_workspace());
+    }
+
+    #[test]
+    fn app_config_separates_app_dir_from_user_data_dir() {
+        let config = AppConfig::detect_for_tauri(
+            PathBuf::from("/tmp/resources"),
+            PathBuf::from("/tmp/app-data"),
+        )
+        .unwrap();
+
+        assert_eq!(config.app_dir, PathBuf::from("/tmp/resources/app"));
+        assert_eq!(config.rumi_home, PathBuf::from("/tmp/resources/app"));
+        assert_eq!(
+            config.user_data_dir,
+            PathBuf::from("/tmp/app-data/user_data")
+        );
     }
 
     #[test]

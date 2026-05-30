@@ -539,6 +539,7 @@ _FALLBACK_HTTP_ROUTE_SPECS = [
 _ALWAYS_AVAILABLE_HTTP_ROUTE_SPECS = [
     HttpRouteSpec("GET", "/api/health", handler_name="_handle_health"),
     HttpRouteSpec("GET", "/api/context", handler_name="_handle_context_info"),
+    HttpRouteSpec("GET", "/api/desktop-system-info", handler_name="_handle_desktop_system_info"),
     HttpRouteSpec("GET", "/", handler_name="_handle_chat_redirect"),
     HttpRouteSpec("GET", "/chat", handler_name="_handle_static"),
     HttpRouteSpec("GET", "/static/{path}", handler_name="_handle_static_file"),

@@ -617,6 +617,7 @@ def _runtime_user_content_override(metadata: dict[str, Any] | None) -> str:
         return ""
     return value.strip()
 
+
 def _approval_followup_tool_context(metadata: dict[str, Any] | None) -> dict[str, Any]:
     if not isinstance(metadata, dict):
         return {}
@@ -627,13 +628,19 @@ def _approval_followup_tool_context(metadata: dict[str, Any] | None) -> dict[str
     tool_name = str(followup.get("tool_name") or "").strip()
     if not token or not tool_name:
         return {}
-    operation = str(followup.get("operation") or followup.get("action") or "").strip()
+    action = str(followup.get("action") or "").strip()
+    operation = str(followup.get("operation") or action or "").strip()
     request_id = str(followup.get("request_id") or followup.get("approval_request_id") or "").strip()
     token_map = {tool_name: token}
+    if action:
+        token_map[action] = token
     if operation:
         token_map[operation] = token
     if request_id:
         token_map[request_id] = token
+    if tool_name in {"computer_use", "browser_use", "browser_computer"}:
+        for alias in ("computer_use", "browser_use", "browser_computer"):
+            token_map[alias] = token
     return {"tool_approval_tokens": token_map}
 
 

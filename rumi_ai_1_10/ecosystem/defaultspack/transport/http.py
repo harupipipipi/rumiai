@@ -64,6 +64,23 @@ _CHAT_TURN_HTTP_FALLBACKS = {
 }
 
 
+def _platform_release():
+    if sys.platform != "darwin":
+        return ""
+    try:
+        import subprocess
+
+        result = subprocess.run(
+            ["sw_vers", "-productVersion"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        return result.stdout.strip() or "unknown"
+    except Exception:
+        return "unknown"
+
+
 class DefaultsHttpServer:
     def __init__(self, facade):
         self.facade = facade
@@ -700,6 +717,88 @@ class DefaultsHttpServer:
         return self._invoke_fallback_block("blocks.dev.replay", request_data, path_params)
 
     # ---- System Handlers (fallback) ----
+
+    def _handle_desktop_system_info(self, request_data, path_params):
+        if sys.platform == "darwin":
+            try:
+                from ecosystem.defaultspack.domain.host_bridge.viewer_broker_client import (
+                    ViewerBrokerClient,
+                )
+
+                client = ViewerBrokerClient.from_environment()
+                if client.available():
+                    payload = client.permissions()
+                    permissions = payload.get("permissions")
+                    if isinstance(permissions, list):
+                        return ok({
+                            "app_name": "Rumi AI",
+                            "display_version": "",
+                            "viewer_version": "",
+                            "build_channel": "beta",
+                            "platform": sys.platform,
+                            "platform_release": _platform_release(),
+                            "permission_subject": str(payload.get("permission_subject") or "Rumi Viewer"),
+                            "host_broker": payload.get("host_broker") or {
+                                "enabled": True,
+                                "available": True,
+                                "status": "running",
+                            },
+                            "permissions": permissions,
+                        })
+            except Exception:
+                pass
+
+            return ok({
+                "app_name": "Rumi AI",
+                "display_version": "",
+                "viewer_version": "",
+                "build_channel": "beta",
+                "platform": sys.platform,
+                "platform_release": _platform_release(),
+                "permission_subject": "Rumi Viewer",
+                "host_broker": {
+                    "enabled": False,
+                    "available": False,
+                    "status": "unavailable",
+                    "recovery": "Open Rumi Viewer and grant macOS permissions there.",
+                },
+                "permissions": [
+                    {
+                        "id": "viewer_host",
+                        "label": "Rumi Viewer",
+                        "status": "missing",
+                        "granted": False,
+                        "detail": "Rumi Viewer is required as the macOS permission host.",
+                        "settings_hint": "Open Rumi Viewer and grant Accessibility / Screen Recording / Input Monitoring.",
+                    }
+                ],
+            })
+
+        permissions = []
+        permissions.append({
+            "id": "macos_privacy",
+            "label": "macOS Privacy",
+            "status": "unsupported",
+            "granted": None,
+            "detail": "macOS permission checks are only available on macOS.",
+            "settings_hint": "",
+        })
+
+        return ok({
+            "app_name": "Rumi AI",
+            "display_version": "",
+            "viewer_version": "",
+            "build_channel": "beta",
+            "platform": sys.platform,
+            "platform_release": _platform_release(),
+            "permission_subject": "Rumi Viewer",
+            "host_broker": {
+                "enabled": False,
+                "available": False,
+                "status": "unsupported",
+            },
+            "permissions": permissions,
+        })
 
     def _handle_health(self, request_data, path_params):
         return ok({

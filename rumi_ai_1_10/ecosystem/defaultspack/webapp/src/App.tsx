@@ -8,7 +8,7 @@ import type { ChatItem, HistoryBoardNewTaskOptions } from "./components/HistoryB
 import type { ToolPreviewItem, ToolPreviewMode } from "./components/ToolPreview";
 import { buildToolPreviewDisplayItems, hasCanvasItems } from "./components/ToolPreview";
 import { api, defaultspackApiFetch, type ChatActivityEvent, type ChatContentBlock, type ChatMessage, type ChatStreamEvent, type ChatToolStreamEvent, type CodingWorkspaceRecord, type ComposerCommandExecuteResult, type ComposerCommandItem, type ComposerCommandMode, type ComposerWidgetAction, type Conversation, type ConversationSearchResult, type ConversationSteerItem, type ModelCommandCandidate, type ModelProfile, type OperationsCompanyStatus, type SettingsSection, type SidebarAction, type SidebarItem, type UICatalog } from "./lib/api";
-import { pendingBrowserApproval, pendingCodingApproval, staleCodingApproval, type BrowserApproval, type CodingApproval, type StaleCodingApproval } from "./lib/browserApproval";
+import { pendingBrowserApproval, pendingRuntimeApproval, staleRuntimeApproval, type BrowserApproval, type RuntimeApproval, type StaleRuntimeApproval } from "./lib/browserApproval";
 import { reduceBrowserStateFromEvents } from "./lib/browserState";
 import { deriveConversationTitle, formatRelativeTime, messageToText, orderConversationMessages } from "./lib/chat";
 import { cn } from "./lib/cn";
@@ -1384,13 +1384,13 @@ function canvasPreviewIdentity(preview: ToolPreviewItem): string {
   return `code:${data.filename}:${data.diff ?? data.content ?? ""}`;
 }
 
-function codingApprovalRuntimeContent(approval: CodingApproval, token?: string): string {
+function runtimeApprovalRuntimeContent(approval: RuntimeApproval, token?: string): string {
   const payload = approvalPayloadPreview({
     ...approval.payload,
     ...(token ? { approval_token: token } : {}),
   });
   return [
-    "The user approved the pending server-side coding operation.",
+    "The user approved the pending server-side tool operation.",
     "Continue by calling the exact pending tool once with the approved arguments below.",
     "Do not ask the user for the same approval again unless the tool returns a new approval_request_id.",
     `Tool: ${approval.toolName}`,
@@ -1401,7 +1401,23 @@ function codingApprovalRuntimeContent(approval: CodingApproval, token?: string):
   ].join("\n");
 }
 
-function staleCodingApprovalTitle(approval: StaleCodingApproval): string {
+function browserApprovalRuntimeContent(approval: BrowserApproval): string {
+  const payload = approvalPayloadPreview({
+    ...approval.payload,
+    approval_token: approval.token,
+  });
+  return [
+    "The user approved the pending browser/computer action.",
+    "Continue by calling the exact pending tool once with the approved arguments below.",
+    "Do not ask the user for the same approval again unless the tool returns a new approval request.",
+    `Tool: ${approval.toolName}`,
+    `Action: ${approval.action}`,
+    "Approved arguments JSON:",
+    payload,
+  ].join("\n");
+}
+
+function staleRuntimeApprovalTitle(approval: StaleRuntimeApproval): string {
   const label = approval.operation || approval.toolName || "tool";
   return `${label} は再実行が必要です`;
 }
@@ -1935,7 +1951,7 @@ export default function App() {
   const [canvasMemo, setCanvasMemo] = useLocalStorage("rumi-canvas-memo", "");
   const [activePreviewId, setActivePreviewId] = useState<string | null>(null);
   const [previews, setPreviews] = useState<ToolPreviewItem[]>([]);
-  const [settledCodingApprovalIds, setSettledCodingApprovalIds] = useState<string[]>([]);
+  const [settledRuntimeApprovalIds, setSettledRuntimeApprovalIds] = useState<string[]>([]);
   const [health, setHealth] = useState<{ status: string; pack: string; ts: string } | null>(null);
   const [operationsStatus, setOperationsStatus] = useState<OperationsCompanyStatus | null>(null);
   const [operationsBusy, setOperationsBusy] = useState(false);
@@ -1958,7 +1974,7 @@ export default function App() {
   const isUnloadingRef = useRef(false);
   const currentAbortControllerRef = useRef<AbortController | null>(null);
   const streamingConversationIdRef = useRef<string | null>(null);
-  const activeCodingApprovalActionRef = useRef<string | null>(null);
+  const activeRuntimeApprovalActionRef = useRef<string | null>(null);
 
   const rawSidebarItems: SidebarItem[] = catalog?.sidebar.items ?? [];
   const chatItems = buildChatItems(conversations);
@@ -2026,12 +2042,12 @@ export default function App() {
     pendingRequest && Date.now() - pendingRequest.startedAt < PENDING_CHAT_REQUEST_TTL_MS,
   );
   const browserApproval = pendingBrowserApproval(messages);
-  const rawCodingApproval = pendingCodingApproval(messages);
-  const settledCodingApprovalIdSet = useMemo(() => new Set(settledCodingApprovalIds), [settledCodingApprovalIds]);
-  const codingApproval = !ultraYoloMode && rawCodingApproval && !settledCodingApprovalIdSet.has(rawCodingApproval.requestId)
-    ? rawCodingApproval
+  const rawRuntimeApproval = pendingRuntimeApproval(messages);
+  const settledRuntimeApprovalIdSet = useMemo(() => new Set(settledRuntimeApprovalIds), [settledRuntimeApprovalIds]);
+  const runtimeApproval = !ultraYoloMode && rawRuntimeApproval && !settledRuntimeApprovalIdSet.has(rawRuntimeApproval.requestId)
+    ? rawRuntimeApproval
     : null;
-  const staleCodingApprovalNotice = !ultraYoloMode && !rawCodingApproval ? staleCodingApproval(messages) : null;
+  const staleRuntimeApprovalNotice = !ultraYoloMode && !rawRuntimeApproval ? staleRuntimeApproval(messages) : null;
   const visibleBrowserApproval = !ultraYoloMode ? browserApproval : null;
   const messageToolPreviews = useMemo(
     () => toolPreviewsFromMessages(activeConversation?.messages ?? []),
@@ -3417,17 +3433,8 @@ export default function App() {
       toolNames: approvalToolIds,
     });
     try {
-      const approvedArguments = {
-        ...browserApproval.payload,
-        approval_token: browserApproval.token,
-      };
-      const result = await api.approveBrowserComputerAction(
-        browserApproval.toolName,
-        browserApproval.action,
-        approvedArguments,
-      );
-      void result;
       await api.sendMessage(activeConversationId, "ユーザーが許可しました。承認済みの操作を踏まえて続行してください。", {
+        tool_choice: "required",
         tool_policy: {
           ...((yoloMode || ultraYoloMode) ? { yolo_mode: true, allow_shell: true, allow_file_write: true, write_actions_require_approval: false } : {}),
           ...(disabledToolIds.length ? { disabled_tools: disabledToolIds } : {}),
@@ -3438,8 +3445,10 @@ export default function App() {
           mode: "chat",
           approval_followup: {
             action: browserApproval.action,
+            approval_token: browserApproval.token,
             tool_name: browserApproval.toolName,
           },
+          runtime_content: browserApprovalRuntimeContent(browserApproval),
           selected_tools: approvalToolIds,
         },
       });
@@ -3456,36 +3465,36 @@ export default function App() {
   };
 
   const approveCodingAction = async () => {
-    if (!codingApproval) return;
+    if (!runtimeApproval) return;
     if (!activeConversationId) return;
-    if (activeCodingApprovalActionRef.current === codingApproval.requestId) return;
-    activeCodingApprovalActionRef.current = codingApproval.requestId;
+    if (activeRuntimeApprovalActionRef.current === runtimeApproval.requestId) return;
+    activeRuntimeApprovalActionRef.current = runtimeApproval.requestId;
     setError(null);
     setIsGenerating(true);
     rememberPendingRequest({
       conversationId: activeConversationId,
       startedAt: Date.now(),
       status: "承認済みの操作を続行しています",
-      toolNames: [codingApproval.toolName],
-      toolStartedAt: { [codingApproval.toolName]: Date.now() },
+      toolNames: [runtimeApproval.toolName],
+      toolStartedAt: { [runtimeApproval.toolName]: Date.now() },
     });
     try {
       const approvalWorkspace = workspaceContextFromConversation(activeConversation);
-      const decision = await api.approveCodingApproval(codingApproval.requestId);
+      const decision = await api.approveCodingApproval(runtimeApproval.requestId);
       if (!decision.approved) {
         throw new Error(decision.reason || "approval failed");
       }
-      setSettledCodingApprovalIds((ids) => (
-        ids.includes(codingApproval.requestId) ? ids : [...ids, codingApproval.requestId].slice(-50)
+      setSettledRuntimeApprovalIds((ids) => (
+        ids.includes(runtimeApproval.requestId) ? ids : [...ids, runtimeApproval.requestId].slice(-50)
       ));
       await api.sendMessage(activeConversationId, "ユーザーが許可しました。承認済みの操作を続行してください。", {
         tool_choice: "required",
         tool_policy: {
           ...(ultraYoloMode ? { yolo_mode: true, allow_shell: true, allow_file_write: true, write_actions_require_approval: false } : {}),
           ...(approvalWorkspace.workspaceId ? { workspace_id: approvalWorkspace.workspaceId } : {}),
-          selected_tools: [codingApproval.toolName],
+          selected_tools: [runtimeApproval.toolName],
         },
-        tools: [codingApproval.toolName],
+        tools: [runtimeApproval.toolName],
         metadata: {
           mode,
           ...(approvalWorkspace.workspaceId ? {
@@ -3494,14 +3503,14 @@ export default function App() {
             workspace_root: approvalWorkspace.workspaceRoot,
           } : {}),
           approval_followup: {
-            action: codingApproval.action,
-            operation: codingApproval.operation,
+            action: runtimeApproval.action,
+            operation: runtimeApproval.operation,
             approval_token: decision.token,
-            request_id: codingApproval.requestId,
-            tool_name: codingApproval.toolName,
+            request_id: runtimeApproval.requestId,
+            tool_name: runtimeApproval.toolName,
           },
-          runtime_content: codingApprovalRuntimeContent(codingApproval, decision.token),
-          selected_tools: [codingApproval.toolName],
+          runtime_content: runtimeApprovalRuntimeContent(runtimeApproval, decision.token),
+          selected_tools: [runtimeApproval.toolName],
         },
       });
       forgetPendingRequest(activeConversationId);
@@ -3510,30 +3519,30 @@ export default function App() {
       await refreshConversations(activeConversationId);
     } catch (approvalError) {
       forgetPendingRequest(activeConversationId);
-      setError(approvalError instanceof Error ? approvalError.message : "coding 承認に失敗しました。");
+      setError(approvalError instanceof Error ? approvalError.message : "runtime 承認に失敗しました。");
     } finally {
-      activeCodingApprovalActionRef.current = null;
+      activeRuntimeApprovalActionRef.current = null;
       setIsGenerating(false);
     }
   };
 
   const denyCodingAction = async () => {
-    if (!codingApproval) return;
+    if (!runtimeApproval) return;
     if (!activeConversationId) return;
-    if (activeCodingApprovalActionRef.current === codingApproval.requestId) return;
-    activeCodingApprovalActionRef.current = codingApproval.requestId;
+    if (activeRuntimeApprovalActionRef.current === runtimeApproval.requestId) return;
+    activeRuntimeApprovalActionRef.current = runtimeApproval.requestId;
     setError(null);
     try {
-      await api.denyCodingApproval(codingApproval.requestId, "Denied from chat approval card");
-      setSettledCodingApprovalIds((ids) => (
-        ids.includes(codingApproval.requestId) ? ids : [...ids, codingApproval.requestId].slice(-50)
+      await api.denyCodingApproval(runtimeApproval.requestId, "Denied from chat approval card");
+      setSettledRuntimeApprovalIds((ids) => (
+        ids.includes(runtimeApproval.requestId) ? ids : [...ids, runtimeApproval.requestId].slice(-50)
       ));
       await loadConversation(activeConversationId, false);
       await refreshConversations(activeConversationId);
     } catch (approvalError) {
-      setError(approvalError instanceof Error ? approvalError.message : "coding 承認の拒否に失敗しました。");
+      setError(approvalError instanceof Error ? approvalError.message : "runtime 承認の拒否に失敗しました。");
     } finally {
-      activeCodingApprovalActionRef.current = null;
+      activeRuntimeApprovalActionRef.current = null;
     }
   };
 
@@ -4117,7 +4126,7 @@ export default function App() {
       steerBusy={modelSteerBusy}
       steerQueuedCount={steerItems.filter((item) => item.status === "queued").length}
       steerPreviewItems={isCentered ? [] : activeComposerSteerItems(steerItems, isGenerating || isConversationPending)}
-      suppressPopovers={Boolean(visibleBrowserApproval || codingApproval || staleCodingApprovalNotice)}
+      suppressPopovers={Boolean(visibleBrowserApproval || runtimeApproval || staleRuntimeApprovalNotice)}
       onOpenModelManager={() => openSettingsSection("models")}
       onOpenToolSettings={() => openSettingsSection("tools")}
       onSwitchToVisionModel={handleSwitchToVisionModel}
@@ -4294,28 +4303,28 @@ export default function App() {
                     </div>
                   </div>
                 )}
-                {!visibleBrowserApproval && codingApproval && (
+                {!visibleBrowserApproval && runtimeApproval && (
                   <div className="pointer-events-auto absolute bottom-full left-1/2 z-[60] mb-2 w-[min(560px,calc(100vw-32px))] -translate-x-1/2 rounded-xl border border-amber-500/30 bg-zinc-950 p-3 shadow-2xl">
                     <div className="flex items-center justify-between gap-3">
                       <div className="min-w-0">
                         <div className="flex min-w-0 items-center gap-2">
                           <span className={cn(
                             "shrink-0 rounded border px-1.5 py-0.5 text-[10px]",
-                            codingApproval.riskLevel === "high"
+                            runtimeApproval.riskLevel === "high"
                               ? "border-red-500/30 bg-red-500/10 text-red-200"
                               : "border-amber-500/30 bg-amber-500/10 text-amber-200",
                           )}>
-                            {codingApproval.riskLevel ?? "approval"}
+                            {runtimeApproval.riskLevel ?? "approval"}
                           </span>
-                          <p className="truncate text-sm font-medium text-zinc-100">{codingApproval.operation} の承認が必要です</p>
+                          <p className="truncate text-sm font-medium text-zinc-100">{runtimeApproval.operation} の承認が必要です</p>
                         </div>
-                        {codingApproval.summary && (
-                          <p className="mt-1 truncate text-[11px] text-zinc-500">{codingApproval.summary}</p>
+                        {runtimeApproval.summary && (
+                          <p className="mt-1 truncate text-[11px] text-zinc-500">{runtimeApproval.summary}</p>
                         )}
                         <details className="mt-1 text-[11px] text-zinc-500">
                           <summary className="cursor-pointer select-none text-zinc-500 hover:text-zinc-300">payload を表示</summary>
                           <pre className="mt-1 max-h-24 overflow-auto whitespace-pre-wrap rounded-md border border-zinc-800 bg-black/30 p-2 font-mono">
-                            {approvalPayloadPreview(codingApproval.payload)}
+                            {approvalPayloadPreview(runtimeApproval.payload)}
                           </pre>
                         </details>
                       </div>
@@ -4346,14 +4355,14 @@ export default function App() {
                     </div>
                   </div>
                 )}
-                {!visibleBrowserApproval && !codingApproval && staleCodingApprovalNotice && (
+                {!visibleBrowserApproval && !runtimeApproval && staleRuntimeApprovalNotice && (
                   <div className="pointer-events-auto absolute bottom-full left-1/2 z-[60] mb-2 w-[min(560px,calc(100vw-32px))] -translate-x-1/2 rounded-xl border border-zinc-700 bg-zinc-950 p-3 shadow-2xl">
                     <div className="min-w-0">
                       <div className="flex min-w-0 items-center gap-2">
                         <span className="shrink-0 rounded border border-zinc-700 bg-zinc-900 px-1.5 py-0.5 text-[10px] text-zinc-400">
                           expired
                         </span>
-                        <p className="truncate text-sm font-medium text-zinc-100">{staleCodingApprovalTitle(staleCodingApprovalNotice)}</p>
+                        <p className="truncate text-sm font-medium text-zinc-100">{staleRuntimeApprovalTitle(staleRuntimeApprovalNotice)}</p>
                       </div>
                       <p className="mt-1 truncate text-[11px] text-zinc-500">
                         古い承認カードを検出しました。最新の承認カードが届くと、この画面からそのまま許可できます。
@@ -4361,7 +4370,7 @@ export default function App() {
                       <details className="mt-1 text-[11px] text-zinc-500">
                         <summary className="cursor-pointer select-none text-zinc-500 hover:text-zinc-300">payload を表示</summary>
                         <pre className="mt-1 max-h-24 overflow-auto whitespace-pre-wrap rounded-md border border-zinc-800 bg-black/30 p-2 font-mono">
-                          {approvalPayloadPreview(staleCodingApprovalNotice.payload)}
+                          {approvalPayloadPreview(staleRuntimeApprovalNotice.payload)}
                         </pre>
                       </details>
                     </div>

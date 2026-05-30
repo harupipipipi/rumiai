@@ -51,7 +51,7 @@ function SystemInfoPanel({ info }: { info?: DesktopSystemInfo | null }) {
   if (!info) {
     return (
       <div className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-4 text-sm leading-6 text-zinc-400">
-        Rumi Viewer で開くと、macOS の Accessibility / Screen Recording などの現在の承認状態をここに表示します。
+        Rumi Viewer の権限状態を取得できませんでした。Rumi Viewerを起動し、Accessibility / Screen Recording / Input Monitoring を許可してください。
       </div>
     );
   }
@@ -71,6 +71,20 @@ function SystemInfoPanel({ info }: { info?: DesktopSystemInfo | null }) {
           </div>
         ))}
       </div>
+      <section className="space-y-3 rounded-xl border border-zinc-800 bg-zinc-950/40 p-4">
+        <div>
+          <h4 className="text-sm font-medium text-zinc-100">Permission Host</h4>
+          <p className="mt-1 text-xs leading-5 text-zinc-500">
+            macOSの承認対象は {info.permission_subject || "Rumi Viewer"} です。
+            DefaultspackはRumi Viewer経由で、許可された操作だけを実行します。
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2 text-[11px] text-zinc-400">
+          <span className="rounded-full border border-zinc-800 bg-zinc-900/70 px-2.5 py-1">画面を見る</span>
+          <span className="rounded-full border border-zinc-800 bg-zinc-900/70 px-2.5 py-1">クリック・キーボード操作</span>
+          <span className="rounded-full border border-zinc-800 bg-zinc-900/70 px-2.5 py-1">ブラウザ操作</span>
+        </div>
+      </section>
       <section className="space-y-3">
         <div>
           <h4 className="text-sm font-medium text-zinc-100">macOS Permissions</h4>
