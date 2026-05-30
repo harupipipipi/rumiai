@@ -823,16 +823,22 @@ function ProviderApiKeyPrompt({
   );
 }
 
+export function modelDropdownPlacementClassName(placement: "above" | "below"): string {
+  return placement === "below" ? "top-full -right-44 mt-2 max-[900px]:right-0" : "bottom-full right-0 mb-2";
+}
+
 function ModelDropdown({
   profiles,
   selectedProfile,
   isGenerating,
+  placement = "above",
   onSelect,
   onClose,
 }: {
   profiles: ModelProfile[];
   selectedProfile: ModelProfile | null;
   isGenerating: boolean;
+  placement?: "above" | "below";
   onSelect: (profileId: string) => void;
   onClose: () => void;
 }) {
@@ -853,7 +859,11 @@ function ModelDropdown({
   return (
     <>
       <button type="button" aria-label="close model dropdown" className="fixed inset-0 rumi-layer-local-popover cursor-default" onClick={onClose} />
-      <div className="absolute bottom-full right-0 mb-2 rumi-layer-command-palette w-[min(360px,calc(100vw-88px))] max-w-[calc(100vw-88px)] overflow-hidden rounded-xl border border-zinc-700/70 bg-zinc-950 shadow-2xl">
+      <div
+        className={`absolute rumi-layer-command-palette w-[min(360px,calc(100vw-88px))] max-w-[calc(100vw-88px)] overflow-hidden rounded-xl border border-zinc-700/70 bg-zinc-950 shadow-2xl ${
+          modelDropdownPlacementClassName(placement)
+        }`}
+      >
         <div className="border-b border-zinc-800 p-2">
           <div className="relative">
             <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-500" />
@@ -1139,6 +1149,25 @@ function modelCandidateApiKeyBadge(candidate: ModelCommandCandidate): string | n
   const availability = candidate.availability ?? {};
   if (availability.configured === true || availability.status === "configured" || availability.status === "active") return "key set";
   return null;
+}
+
+type PopupAnchorRect = Pick<DOMRect, "left" | "right" | "top">;
+
+export function modelCandidatePopupStyleForAnchor(
+  anchorRect: PopupAnchorRect | null,
+  viewportWidth: number,
+  preferredWidth = 460,
+): CSSProperties | undefined {
+  if (!anchorRect || viewportWidth <= 0) return undefined;
+  const width = Math.min(preferredWidth, Math.max(260, viewportWidth - 16));
+  const left = Math.max(8, Math.min(anchorRect.right - width, viewportWidth - width - 8));
+  const top = Math.max(8, anchorRect.top - 8);
+  return {
+    left,
+    top,
+    width,
+    transform: "translateY(-100%)",
+  };
 }
 
 function ModelCommandCandidatePopup({
@@ -1464,18 +1493,10 @@ export function ComposerRenderer({
   );
 
   const updateComposerPopoverAnchor = useCallback(() => {
-    const textarea = textareaRef.current;
-    if (!textarea || typeof window === "undefined") return;
-    const rect = textarea.getBoundingClientRect();
-    const width = Math.min(460, Math.max(260, window.innerWidth - 16));
-    const left = Math.max(8, Math.min(rect.left, window.innerWidth - width - 8));
-    const top = Math.max(8, rect.top - 8);
-    setComposerPopoverStyle({
-      left,
-      top,
-      width,
-      transform: "translateY(-100%)",
-    });
+    if (typeof window === "undefined") return;
+    const modelPickerNode = chromeWidgetNodeMapRef.current.get("model-picker");
+    const anchorRect = modelPickerNode?.getBoundingClientRect() ?? textareaRef.current?.getBoundingClientRect() ?? null;
+    setComposerPopoverStyle(modelCandidatePopupStyleForAnchor(anchorRect, window.innerWidth));
   }, []);
 
   const syncTextareaSelection = useCallback(() => {
@@ -2208,6 +2229,7 @@ export function ComposerRenderer({
                 profiles={selectableProfiles}
                 selectedProfile={selectedProfile}
                 isGenerating={isGenerating}
+                placement={isNewConversation ? "below" : "above"}
                 onSelect={requestModelProfileSelect}
                 onClose={() => setModelDropdownOpen(false)}
               />

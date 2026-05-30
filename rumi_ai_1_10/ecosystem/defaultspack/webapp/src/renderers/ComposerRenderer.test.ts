@@ -8,7 +8,9 @@ import {
   filterAtMentionFiles,
   insertAtMentionText,
   composerChromeWidgetStyle,
+  modelDropdownPlacementClassName,
   modelCandidateMenuKeyAction,
+  modelCandidatePopupStyleForAnchor,
   nextModelCandidateIndex,
   profileNeedsApiKey,
   ComposerRenderer,
@@ -126,6 +128,35 @@ test("model candidate menu keyboard helpers cycle and select", () => {
   assert.deepEqual(modelCandidateMenuKeyAction("Tab", false, 0, 0), { handled: false });
   assert.deepEqual(modelCandidateMenuKeyAction("Enter", false, 0, 0), { handled: false });
   assert.deepEqual(modelCandidateMenuKeyAction("Escape", false, 0, 0), { handled: false });
+});
+
+test("new conversation model dropdown opens below and offset to the right", () => {
+  assert.equal(modelDropdownPlacementClassName("below"), "top-full -right-44 mt-2 max-[900px]:right-0");
+  assert.equal(modelDropdownPlacementClassName("above"), "bottom-full right-0 mb-2");
+});
+
+test("model candidate popup anchors to the right edge of the model control", () => {
+  assert.deepEqual(
+    modelCandidatePopupStyleForAnchor({ left: 820, right: 1010, top: 410 }, 1280),
+    {
+      left: 550,
+      top: 402,
+      width: 460,
+      transform: "translateY(-100%)",
+    },
+  );
+});
+
+test("model candidate popup stays inside the viewport when anchored near the left edge", () => {
+  assert.deepEqual(
+    modelCandidatePopupStyleForAnchor({ left: 40, right: 180, top: 210 }, 360),
+    {
+      left: 8,
+      top: 202,
+      width: 344,
+      transform: "translateY(-100%)",
+    },
+  );
 });
 
 test("model dropdown search supports @provider filters", () => {
