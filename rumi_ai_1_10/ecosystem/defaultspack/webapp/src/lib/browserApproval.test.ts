@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import type { ChatUiMessage } from "../renderers/types";
-import { pendingBrowserApproval, pendingCodingApproval, staleCodingApproval } from "./browserApproval";
+import { pendingBrowserApproval, pendingRuntimeApproval, staleRuntimeApproval } from "./browserApproval";
 
 function agentMessage(patch: Partial<ChatUiMessage>): ChatUiMessage {
   return {
@@ -105,8 +105,8 @@ test("prefers approval request ids over browser approval tokens", () => {
   assert.equal(approval, null);
 });
 
-test("returns pending coding approval requests without browser tokens", () => {
-  const approval = pendingCodingApproval([
+test("returns pending runtime approval requests without browser tokens", () => {
+  const approval = pendingRuntimeApproval([
     agentMessage({
       events: [{
         type: "approval_requested",
@@ -136,7 +136,7 @@ test("returns pending coding approval requests without browser tokens", () => {
 });
 
 test("returns generic browser tool approval requests when they use approval request ids", () => {
-  const approval = pendingCodingApproval([
+  const approval = pendingRuntimeApproval([
     agentMessage({
       toolLogs: [{
         tool_name: "browser_computer",
@@ -161,7 +161,7 @@ test("returns generic browser tool approval requests when they use approval requ
 });
 
 test("returns stale browser tool approvals when no token or request id exists", () => {
-  const approval = staleCodingApproval([
+  const approval = staleRuntimeApproval([
     agentMessage({
       toolLogs: [{
         tool_name: "browser_computer",
@@ -182,8 +182,8 @@ test("returns stale browser tool approvals when no token or request id exists", 
   assert.equal(approval?.reason, "missing_approval_request_id");
 });
 
-test("uses tool log arguments as coding approval payload fallback", () => {
-  const approval = pendingCodingApproval([
+test("uses tool log arguments as runtime approval payload fallback", () => {
+  const approval = pendingRuntimeApproval([
     agentMessage({
       toolLogs: [{
         tool_name: "coding_file_create",
@@ -205,8 +205,8 @@ test("uses tool log arguments as coding approval payload fallback", () => {
   assert.deepEqual(approval?.payload, { path: "index.html", content: "<html></html>" });
 });
 
-test("ignores expired coding approval requests", () => {
-  const approval = pendingCodingApproval([
+test("ignores expired runtime approval requests", () => {
+  const approval = pendingRuntimeApproval([
     agentMessage({
       events: [{
         type: "approval_requested",
@@ -224,8 +224,8 @@ test("ignores expired coding approval requests", () => {
   assert.equal(approval, null);
 });
 
-test("returns stale coding approvals without actionable request ids", () => {
-  const approval = staleCodingApproval([
+test("returns stale runtime approvals without actionable request ids", () => {
+  const approval = staleRuntimeApproval([
     agentMessage({
       metadata: {
         pendingApproval: {
@@ -264,8 +264,8 @@ test("returns stale coding approvals without actionable request ids", () => {
   });
 });
 
-test("does not treat actionable coding approvals as stale", () => {
-  const approval = staleCodingApproval([
+test("does not treat actionable runtime approvals as stale", () => {
+  const approval = staleRuntimeApproval([
     agentMessage({
       toolLogs: [{
         tool_name: "coding_file_create",
