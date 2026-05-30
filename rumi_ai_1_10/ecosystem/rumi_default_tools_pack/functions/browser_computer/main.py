@@ -22,6 +22,7 @@ def run(context, args):
 
     action = str(args.get("action", "browser.session"))
     payload = dict(args.get("payload") or {})
+    tool_name = str(args.get("tool_name") or "browser_computer").strip() or "browser_computer"
     payload = _payload_with_sequence_defaults(payload, context, args)
     artifact_root = None
     workspace = context.get("conversation_workspace_dir") if isinstance(context, dict) else None
@@ -38,6 +39,7 @@ def run(context, args):
         action,
         payload,
         context if isinstance(context, dict) else None,
+        tool_name=tool_name,
         artifact_root=artifact_root,
         yolo_mode=yolo_mode,
     )

@@ -1401,6 +1401,22 @@ function codingApprovalRuntimeContent(approval: CodingApproval, token?: string):
   ].join("\n");
 }
 
+function browserApprovalRuntimeContent(approval: BrowserApproval): string {
+  const payload = approvalPayloadPreview({
+    ...approval.payload,
+    approval_token: approval.token,
+  });
+  return [
+    "The user approved the pending browser/computer action.",
+    "Continue by calling the exact pending tool once with the approved arguments below.",
+    "Do not ask the user for the same approval again unless the tool returns a new approval request.",
+    `Tool: ${approval.toolName}`,
+    `Action: ${approval.action}`,
+    "Approved arguments JSON:",
+    payload,
+  ].join("\n");
+}
+
 function staleCodingApprovalTitle(approval: StaleCodingApproval): string {
   const label = approval.operation || approval.toolName || "tool";
   return `${label} は再実行が必要です`;
@@ -3417,17 +3433,8 @@ export default function App() {
       toolNames: approvalToolIds,
     });
     try {
-      const approvedArguments = {
-        ...browserApproval.payload,
-        approval_token: browserApproval.token,
-      };
-      const result = await api.approveBrowserComputerAction(
-        browserApproval.toolName,
-        browserApproval.action,
-        approvedArguments,
-      );
-      void result;
       await api.sendMessage(activeConversationId, "ユーザーが許可しました。承認済みの操作を踏まえて続行してください。", {
+        tool_choice: "required",
         tool_policy: {
           ...((yoloMode || ultraYoloMode) ? { yolo_mode: true, allow_shell: true, allow_file_write: true, write_actions_require_approval: false } : {}),
           ...(disabledToolIds.length ? { disabled_tools: disabledToolIds } : {}),
@@ -3438,8 +3445,10 @@ export default function App() {
           mode: "chat",
           approval_followup: {
             action: browserApproval.action,
+            approval_token: browserApproval.token,
             tool_name: browserApproval.toolName,
           },
+          runtime_content: browserApprovalRuntimeContent(browserApproval),
           selected_tools: approvalToolIds,
         },
       });

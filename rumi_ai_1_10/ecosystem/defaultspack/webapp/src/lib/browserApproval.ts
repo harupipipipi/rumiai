@@ -71,6 +71,7 @@ function approvalFromCandidate(
   now: number,
 ): BrowserApproval | null {
   if (!candidate?.requires_approval && !candidate?.approval_required) return null;
+  if (requestIdFromCandidate(candidate)) return null;
   if (!candidate.approval_token) return null;
   const token = String(candidate.approval_token);
   if (!token.trim() || token === "[redacted]") return null;

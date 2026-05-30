@@ -70,6 +70,29 @@ def test_computer_router_routes_darwin_computer_calls_to_viewer(monkeypatch):
     assert result["context"]["conversation_id"] == "conv_1"
 
 
+def test_computer_router_uses_context_token_for_viewer_approval(monkeypatch):
+    from ecosystem.defaultspack.domain.host_bridge import computer_router
+
+    class FakeClient:
+        def available(self):
+            return True
+
+        def run_computer(self, function_id, args, context=None, artifact_root=None):
+            return {"action": function_id, "approval_token_seen": args.get("approval_token")}
+
+    monkeypatch.setattr(computer_router.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(computer_router.ViewerBrokerClient, "from_environment", classmethod(lambda cls: FakeClient()))
+
+    result = computer_router.run_computer_action(
+        "computer.click",
+        {"x": 10},
+        {"tool_approval_tokens": {"computer.click": "tok_ctx"}},
+        tool_name="computer_use",
+    )
+
+    assert result["approval_token_seen"] == "tok_ctx"
+
+
 def test_computer_router_skips_viewer_for_internal_host_execution(tmp_path, monkeypatch):
     from ecosystem.defaultspack.domain.host_bridge import computer_router
     from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
@@ -184,6 +207,69 @@ def test_viewer_broker_client_preserves_approval_payload_from_broker(monkeypatch
     assert result["host_audit_id"] == "host-audit-1"
 
 
+def test_computer_router_wraps_viewer_approval_into_request_id(monkeypatch):
+    from ecosystem.defaultspack.domain.host_bridge import computer_router
+
+    class FakeClient:
+        def available(self):
+            return True
+
+        def run_computer(self, function_id, args, context=None, artifact_root=None):
+            return {
+                "action": function_id,
+                "requires_approval": True,
+                "approval_token": "viewer_tok",
+                "approval_hint": "approval required",
+            }
+
+    monkeypatch.setattr(computer_router.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(computer_router.ViewerBrokerClient, "from_environment", classmethod(lambda cls: FakeClient()))
+
+    result = computer_router.run_computer_action(
+        "computer.click",
+        {"x": 10, "y": 20},
+        {"conversation_id": "conv_1"},
+        tool_name="computer_use",
+    )
+
+    assert result["requires_approval"] is True
+    assert result["approval_required"] is True
+    assert result["tool_name"] == "computer_use"
+    assert result["operation"] == "computer.click"
+    assert result["payload"] == {"x": 10, "y": 20}
+    assert str(result["approval_request_id"]).startswith("apr_")
+    assert result["message"] == "approval required"
+
+
+def test_tool_executor_routes_local_computer_tools_through_router(monkeypatch):
+    from domain.tool.executor import ToolExecutor
+    from ecosystem.defaultspack.domain.host_bridge import computer_router
+
+    captured: dict[str, object] = {}
+
+    def fake_router(action, payload, context=None, *, tool_name="computer_use", artifact_root=None, yolo_mode=False):
+        captured["action"] = action
+        captured["payload"] = dict(payload)
+        captured["context"] = dict(context or {})
+        captured["tool_name"] = tool_name
+        return {"action": action, "ok": True}
+
+    monkeypatch.setattr(computer_router, "run_computer_action", fake_router)
+
+    result = ToolExecutor()._execute_local(
+        "computer_use",
+        {"action": "click", "x": 10, "y": 20},
+        {"conversation_id": "conv_1"},
+    )
+
+    assert result["is_error"] is False
+    assert captured["action"] == "computer.click"
+    assert captured["payload"]["x"] == 10
+    assert captured["payload"]["y"] == 20
+    assert captured["tool_name"] == "computer_use"
+    assert captured["context"]["conversation_id"] == "conv_1"
+
+
 def test_computer_host_helper_accepts_workspace_artifact_root(monkeypatch, tmp_path):
     from core_runtime.host_broker import computer_host_helper
 
@@ -214,10 +300,11 @@ def test_defaultspack_browser_computer_block_uses_router(monkeypatch):
 
     captured: dict[str, object] = {}
 
-    def fake_router(action, payload, context=None, *, artifact_root=None, yolo_mode=False):
+    def fake_router(action, payload, context=None, *, tool_name="computer_use", artifact_root=None, yolo_mode=False):
         captured["action"] = action
         captured["payload"] = dict(payload)
         captured["context"] = dict(context or {})
+        captured["tool_name"] = tool_name
         captured["artifact_root"] = artifact_root
         captured["yolo_mode"] = yolo_mode
         return {"action": action, "ok": True}
@@ -233,4 +320,5 @@ def test_defaultspack_browser_computer_block_uses_router(monkeypatch):
     assert captured["action"] == "computer.observe"
     assert captured["payload"]["detail"] == "full"
     assert captured["context"]["conversation_workspace_dir"] == "/tmp/work"
+    assert captured["tool_name"] == "browser_computer"
     assert captured["yolo_mode"] is True

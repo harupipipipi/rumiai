@@ -85,6 +85,26 @@ test("ignores redacted approval tokens from stored tool logs", () => {
   assert.equal(approval, null);
 });
 
+test("prefers approval request ids over browser approval tokens", () => {
+  const approval = pendingBrowserApproval([
+    agentMessage({
+      events: [{
+        type: "approval_requested",
+        tool_name: "computer_use",
+        action: "computer.screenshot",
+        payload: { app: "Google Chrome" },
+        requires_approval: true,
+        approval_token: "tok",
+        approval_request_id: "apr_browser",
+        approval_expires_in_seconds: 300,
+        timestamp: "2026-05-20T08:05:40Z",
+      }],
+    }),
+  ], Date.parse("2026-05-20T08:06:00Z"));
+
+  assert.equal(approval, null);
+});
+
 test("returns pending coding approval requests without browser tokens", () => {
   const approval = pendingCodingApproval([
     agentMessage({
