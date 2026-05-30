@@ -7,6 +7,15 @@ export type DesktopPermissionStatus = {
   settings_hint: string;
 };
 
+export type HostBrokerStatus = {
+  enabled: boolean;
+  available?: boolean;
+  status: string;
+  url?: string | null;
+  connection_path?: string | null;
+  recovery?: string | null;
+};
+
 export type DesktopSystemInfo = {
   app_name: string;
   display_version: string;
@@ -14,6 +23,8 @@ export type DesktopSystemInfo = {
   build_channel: string;
   platform: string;
   platform_release: string;
+  permission_subject?: string;
+  host_broker?: HostBrokerStatus;
   permissions: DesktopPermissionStatus[];
 };
 

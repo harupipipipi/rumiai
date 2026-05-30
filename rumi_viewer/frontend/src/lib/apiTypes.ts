@@ -81,6 +81,15 @@ export interface DesktopPermissionStatus {
   settings_hint: string;
 }
 
+export interface HostBrokerStatus {
+  enabled: boolean;
+  available?: boolean;
+  status: string;
+  url?: string | null;
+  connection_path?: string | null;
+  recovery?: string | null;
+}
+
 export interface DesktopSystemInfo {
   app_name: string;
   display_version: string;
@@ -88,6 +97,8 @@ export interface DesktopSystemInfo {
   build_channel: string;
   platform: string;
   platform_release: string;
+  permission_subject?: string;
+  host_broker?: HostBrokerStatus;
   permissions: DesktopPermissionStatus[];
 }
 

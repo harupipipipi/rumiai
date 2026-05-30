@@ -266,6 +266,7 @@ def test_browser_computer_run_passes_context_sequence_to_controller(monkeypatch)
             return {"action": action}
 
         monkeypatch.setattr(BrowserComputerController, "run", fake_controller_run)
+        monkeypatch.setenv("RUMI_COMPUTER_HOST_INTERNAL", "1")
 
         browser_computer_main.run({"request_id": "req_ctx"}, {"action": "computer.type", "payload": {"text": "hi"}})
 

@@ -115,6 +115,12 @@ test("settings system info renders viewer version and macOS permissions", () => 
         build_channel: "beta",
         platform: "macos",
         platform_release: "15.0",
+        permission_subject: "Rumi Viewer",
+        host_broker: {
+          enabled: true,
+          available: true,
+          status: "running",
+        },
         permissions: [
           {
             id: "screen_recording",
@@ -134,6 +140,7 @@ test("settings system info renders viewer version and macOS permissions", () => 
 
   assert.match(html, /beta 1\.0\.0/);
   assert.match(html, /1\.0\.0-beta\.1/);
+  assert.match(html, /macOSの承認対象は Rumi Viewer です/);
   assert.match(html, /macOS Permissions/);
   assert.match(html, /Screen Recording/);
   assert.match(html, /Missing/);
@@ -163,6 +170,7 @@ test("settings system info shows browser context message when info is null", () 
     }),
   );
 
-  assert.match(html, /承認状態を取得できませんでした/);
-  assert.match(html, /外部ブラウザ/);
+  assert.match(html, /権限状態を取得できませんでした/);
+  assert.match(html, /Rumi Viewerを起動し/);
+  assert.doesNotMatch(html, /Rumi Defaultspack\.app/);
 });
