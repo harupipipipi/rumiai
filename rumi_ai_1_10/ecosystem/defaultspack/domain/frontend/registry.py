@@ -272,7 +272,13 @@ class FrontendRegistry:
                 "label": "Conversation History",
                 "uses": ["chat"],
                 "contracts": {"conversations": "/api/chat/conversations"},
-                "schema": {"type": "object", "properties": {"items": {"type": "array"}, "active_id": {"type": ["string", "null"]}}},
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "items": {"type": "array", "items": {"type": "object"}},
+                        "active_id": {"type": "string", "nullable": True},
+                    },
+                },
             },
             {
                 "id": "ai_chat",
@@ -288,8 +294,8 @@ class FrontendRegistry:
                     "type": "object",
                     "required": ["conversation", "messages"],
                     "properties": {
-                        "conversation": {"type": ["object", "null"]},
-                        "messages": {"type": "array"},
+                        "conversation": {"type": "object", "nullable": True},
+                        "messages": {"type": "array", "items": {"type": "object"}},
                         "composer": {"type": "object"},
                     },
                 },
@@ -305,11 +311,11 @@ class FrontendRegistry:
                 "schema": {
                     "type": "object",
                     "properties": {
-                        "tool_timeline": {"type": "array"},
-                        "plan_steps": {"type": "array"},
-                        "approvals": {"type": "array"},
-                        "attachments": {"type": "array"},
-                        "audio": {"type": "array"},
+                        "tool_timeline": {"type": "array", "items": {"type": "object"}},
+                        "plan_steps": {"type": "array", "items": {"type": "object"}},
+                        "approvals": {"type": "array", "items": {"type": "object"}},
+                        "attachments": {"type": "array", "items": {"type": "object"}},
+                        "audio": {"type": "array", "items": {"type": "object"}},
                     },
                 },
             },
@@ -319,7 +325,13 @@ class FrontendRegistry:
                 "label": "Extension Sidebar",
                 "uses": ["tool", "widget", "frontend", "artifact", "extension"],
                 "contracts": {"catalog": "/api/ui/catalog", "settings": "/api/ui/settings"},
-                "schema": {"type": "object", "properties": {"items": {"type": "array"}, "filters": {"type": "array"}}},
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "items": {"type": "array", "items": {"type": "object"}},
+                        "filters": {"type": "array", "items": {"type": "object"}},
+                    },
+                },
             },
             {
                 "id": "settings",
@@ -327,7 +339,13 @@ class FrontendRegistry:
                 "label": "Settings",
                 "uses": ["frontend"],
                 "contracts": {"settings": "/api/ui/settings"},
-                "schema": {"type": "object", "properties": {"sections": {"type": "array"}, "values": {"type": "object"}}},
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "sections": {"type": "array", "items": {"type": "object"}},
+                        "values": {"type": "object"},
+                    },
+                },
             },
         ]
         parts.extend(self._config_list(ui_surfaces, "parts"))

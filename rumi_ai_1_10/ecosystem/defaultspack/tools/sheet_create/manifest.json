@@ -31,10 +31,19 @@
         "additionalProperties": true,
         "properties": {
           "rows": {
-            "type": "array"
+            "type": "array",
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
           },
           "columns": {
-            "type": "array"
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           },
           "output_path": {
             "type": "string"

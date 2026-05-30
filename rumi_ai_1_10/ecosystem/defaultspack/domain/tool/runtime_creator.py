@@ -250,45 +250,59 @@ class RuntimeToolCreator:
             "warnings": warnings,
         }
 
-    def _validate_json_schema(self, schema):
+    def _validate_json_schema(self, schema, path="parameters"):
         """JSON Schema の基本的な妥当性を検証する"""
         errors = []
         schema_type = schema.get("type")
-        if schema_type != "object":
+        if path == "parameters" and schema_type != "object":
             errors.append(
                 "parameters.type must be 'object' (got '{}')".format(schema_type)
             )
             return errors
 
+        if schema_type == "array":
+            items = schema.get("items")
+            if not isinstance(items, dict):
+                errors.append("{}.items must be a dict".format(path))
+            else:
+                errors.extend(self._validate_json_schema(items, "{}.items".format(path)))
+            return errors
+
         properties = schema.get("properties")
         if properties is not None:
             if not isinstance(properties, dict):
-                errors.append("parameters.properties must be a dict")
+                errors.append("{}.properties must be a dict".format(path))
             else:
                 for prop_name, prop_schema in properties.items():
                     if not isinstance(prop_schema, dict):
                         errors.append(
-                            "parameters.properties.{} must be a dict".format(prop_name)
+                            "{}.properties.{} must be a dict".format(path, prop_name)
                         )
                         continue
                     prop_type = prop_schema.get("type")
                     if prop_type is not None and prop_type not in _VALID_JSON_SCHEMA_TYPES:
                         errors.append(
-                            "parameters.properties.{}.type '{}' is not a valid JSON Schema type".format(
-                                prop_name, prop_type
+                            "{}.properties.{}.type '{}' is not a valid JSON Schema type".format(
+                                path, prop_name, prop_type
                             )
                         )
+                    errors.extend(
+                        self._validate_json_schema(
+                            prop_schema,
+                            "{}.properties.{}".format(path, prop_name),
+                        )
+                    )
 
         required = schema.get("required")
         if required is not None:
             if not isinstance(required, list):
-                errors.append("parameters.required must be a list")
+                errors.append("{}.required must be a list".format(path))
             elif properties is not None and isinstance(properties, dict):
                 for req_name in required:
                     if req_name not in properties:
                         errors.append(
-                            "parameters.required references '{}' but it is not in properties".format(
-                                req_name
+                            "{}.required references '{}' but it is not in properties".format(
+                                path, req_name
                             )
                         )
 
