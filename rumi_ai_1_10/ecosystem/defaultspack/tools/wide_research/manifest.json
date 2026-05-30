@@ -37,7 +37,10 @@
             "type": "string"
           },
           "source_types": {
-            "type": "array"
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           },
           "max_sources": {
             "type": "integer"
@@ -46,10 +49,16 @@
             "type": "string"
           },
           "export_formats": {
-            "type": "array"
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           },
           "local_sources": {
-            "type": "array"
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         },
         "required": [

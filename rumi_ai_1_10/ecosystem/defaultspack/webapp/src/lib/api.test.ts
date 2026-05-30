@@ -1,7 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { api, normalizeChatStreamEvent, normalizeBrowserComputerApprovalAction, usesBrowserComputerApprovalEndpoint } from "./api";
-import { frontendCommandArgs, keepSelectedToolsAfterSend, parseCommandBoolean } from "../App";
+import type { ComposerCommandItem } from "./api";
+import { frontendCommandArgs, keepSelectedToolsAfterSend, parseCommandBoolean, parseSlashCommandInput, resolveUltraYoloModeState, resolvedFrontendCommandArgs } from "../App";
 
 test("frontend command args prefer backend-coerced values", () => {
   assert.deepEqual(
@@ -10,11 +11,67 @@ test("frontend command args prefer backend-coerced values", () => {
   );
 });
 
+test("frontend execution keeps locally parsed command args", () => {
+  const command: ComposerCommandItem = {
+    id: "ultra_yolo",
+    name: "ultra",
+    label: "Ultra Yolo",
+    category: "mode",
+    visibility: "default",
+    risk: "medium",
+    args: [{ name: "enabled", type: "boolean", required: false }],
+    execution: { type: "frontend", action: "toggle_ultra_yolo" },
+  };
+
+  assert.deepEqual(
+    resolvedFrontendCommandArgs(command, {}, { enabled: true }),
+    {},
+  );
+});
+
 test("frontend boolean command parsing handles explicit false strings", () => {
   assert.equal(parseCommandBoolean("false", true), false);
   assert.equal(parseCommandBoolean("0", true), false);
   assert.equal(parseCommandBoolean("off", true), false);
   assert.equal(parseCommandBoolean(undefined, true), true);
+});
+
+test("slash command parsing supports multi-word aliases without treating them as args", () => {
+  const commands: ComposerCommandItem[] = [
+    {
+      id: "ultra_yolo",
+      name: "ultra",
+      aliases: ["ultrayolo", "ultra_yolo"],
+      label: "Ultra Yolo",
+      category: "mode",
+      visibility: "default",
+      risk: "medium",
+      args: [{ name: "enabled", type: "boolean", required: false }],
+      execution: { type: "frontend", action: "toggle_ultra_yolo" },
+    },
+  ];
+
+  const parsed = parseSlashCommandInput("/ultra yolo", commands);
+  assert.equal(parsed?.command.id, "ultra_yolo");
+  assert.deepEqual(parsed?.args, {});
+
+  const explicitOff = parseSlashCommandInput("/ultra yolo off", commands);
+  assert.deepEqual(explicitOff?.args, { enabled: "off" });
+});
+
+test("ultra yolo restore state returns to the previous yolo mode", () => {
+  assert.deepEqual(
+    resolveUltraYoloModeState({ yoloMode: false, ultraYoloMode: false, restoreYoloMode: false }, true),
+    { yoloMode: true, ultraYoloMode: true, restoreYoloMode: false },
+  );
+  assert.deepEqual(
+    resolveUltraYoloModeState({ yoloMode: true, ultraYoloMode: true, restoreYoloMode: false }, false),
+    { yoloMode: false, ultraYoloMode: false, restoreYoloMode: false },
+  );
+  assert.deepEqual(
+    resolveUltraYoloModeState({ yoloMode: true, ultraYoloMode: true, restoreYoloMode: true }, false),
+    { yoloMode: true, ultraYoloMode: false, restoreYoloMode: false },
+  );
 });
 
 test("executeUiCommand preserves model candidate results", async () => {

@@ -209,15 +209,67 @@ test("composer chrome widgets declare layout widths separately from actions", ()
   );
 
   assert.match(html, /data-composer-widget="file-attach"/);
-  assert.match(html, /data-composer-widget="model-control"/);
+  assert.match(html, /data-composer-widget="model-picker"/);
+  assert.match(html, /data-composer-widget="thinking-control"/);
   assert.match(html, /data-composer-widget="send"/);
   assert.match(html, /data-composer-widget="file-attach" data-composer-slot="leading"/);
-  assert.match(html, /data-composer-widget="model-control" data-composer-slot="trailing"/);
-  assert.match(html, /style="[^"]*flex:0 1 14rem;min-width:11rem;max-width:15rem/);
-  assert.match(html, /class="[^"]*flex w-full min-w-0 items-center/);
+  assert.match(html, /data-composer-widget="model-picker" data-composer-slot="trailing"/);
+  assert.match(html, /style="[^"]*flex:0 0 11.5rem;min-width:11.5rem;max-width:11.5rem/);
+  assert.match(html, /class="[^"]*rumi-composer-control-surface[^"]*gap-2/);
   assert.match(html, /class="[^"]*min-w-0 flex-1 truncate/);
   assert.match(html, /aria-label="Thinking level"/);
   assert.doesNotMatch(html, />thinking</);
+});
+
+test("composer renders model status indicators beside the model picker", () => {
+  const html = renderToStaticMarkup(
+    createElement(ComposerRenderer, {
+      input: "",
+      placeholder: "メッセージを入力...",
+      isGenerating: false,
+      selectedProfile: {
+        profile_id: "google/gemini",
+        display_name: "Gemini",
+        provider_id: "google",
+        model_id: "gemini",
+        supports_thinking: true,
+        thinking_levels: ["high"],
+      },
+      favoriteProfiles: [],
+      inlineExtensions: [],
+      belowExtensions: [],
+      thinkingLevel: "high",
+      contextUsage: { ratio: 0, usedTokens: 0, maxContext: 0, label: "0%" },
+      modelStatusIndicators: [
+        {
+          id: "yolo",
+          name: "YOLO",
+          description: "YOLO が ON です。",
+          svgMarkup: "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 100 100\" width=\"100\" height=\"100\"><circle cx=\"50\" cy=\"50\" r=\"40\" fill=\"#fca355\" /></svg>",
+          tone: "warning",
+          action: {
+            label: "標準に戻す",
+            onSelect: () => undefined,
+          },
+        },
+      ],
+      yoloMode: true,
+      onInputChange: () => undefined,
+      onSubmit: () => undefined,
+      onModelProfileSelect: () => undefined,
+      onThinkingLevelChange: () => undefined,
+    }),
+  );
+
+  assert.match(html, /aria-label="YOLO"/);
+  assert.match(html, /title="YOLO が ON です。"/);
+  assert.match(html, /viewBox="0 0 100 100"/);
+  assert.match(html, /data-composer-widget="model-picker"/);
+  assert.match(html, /data-composer-widget="thinking-control"/);
+  assert.match(html, /data-composer-widget="model-status"/);
+  assert.ok(html.indexOf('data-composer-widget="model-picker"') < html.indexOf('data-composer-widget="thinking-control"'));
+  assert.ok(html.indexOf('data-composer-widget="thinking-control"') < html.indexOf('data-composer-widget="model-status"'));
+  assert.doesNotMatch(html, /data-composer-widget="yolo-status"/);
 });
 
 test("composer model drop selects the model instead of creating a widget chip", () => {

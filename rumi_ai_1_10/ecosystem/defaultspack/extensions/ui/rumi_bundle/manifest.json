@@ -68,8 +68,8 @@
         "schema": {
           "type": "object",
           "properties": {
-            "items": { "type": "array" },
-            "active_id": { "type": ["string", "null"] }
+            "items": { "type": "array", "items": { "type": "object" } },
+            "active_id": { "type": "string", "nullable": true }
           }
         }
       },
@@ -87,8 +87,8 @@
           "type": "object",
           "required": ["conversation", "messages"],
           "properties": {
-            "conversation": { "type": ["object", "null"] },
-            "messages": { "type": "array" },
+            "conversation": { "type": "object", "nullable": true },
+            "messages": { "type": "array", "items": { "type": "object" } },
             "composer": { "type": "object" }
           }
         }
@@ -104,11 +104,11 @@
         "schema": {
           "type": "object",
           "properties": {
-            "tool_timeline": { "type": "array" },
-            "plan_steps": { "type": "array" },
-            "approvals": { "type": "array" },
-            "attachments": { "type": "array" },
-            "audio": { "type": "array" }
+            "tool_timeline": { "type": "array", "items": { "type": "object" } },
+            "plan_steps": { "type": "array", "items": { "type": "object" } },
+            "approvals": { "type": "array", "items": { "type": "object" } },
+            "attachments": { "type": "array", "items": { "type": "object" } },
+            "audio": { "type": "array", "items": { "type": "object" } }
           }
         }
       },
@@ -124,8 +124,8 @@
         "schema": {
           "type": "object",
           "properties": {
-            "items": { "type": "array" },
-            "filters": { "type": "array" }
+            "items": { "type": "array", "items": { "type": "object" } },
+            "filters": { "type": "array", "items": { "type": "object" } }
           }
         }
       },
@@ -140,7 +140,7 @@
         "schema": {
           "type": "object",
           "properties": {
-            "sections": { "type": "array" },
+            "sections": { "type": "array", "items": { "type": "object" } },
             "values": { "type": "object" }
           }
         }

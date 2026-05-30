@@ -466,6 +466,15 @@ class GoogleProvider(OpenAICompatibleProvider):
             return {"type": "object", "properties": {}, "required": []}
         schema = dict(value)
         normalized: Dict[str, Any] = {}
+        schema_type = schema.get("type")
+        if isinstance(schema_type, (list, tuple)):
+            type_values = [str(item).strip() for item in schema_type if str(item).strip()]
+            non_null = [item for item in type_values if item != "null"]
+            if len(non_null) == 1 and len(non_null) != len(type_values):
+                normalized["type"] = non_null[0]
+                normalized["nullable"] = True
+            elif non_null:
+                normalized["type"] = non_null[0]
         for key, item in schema.items():
             if key == "properties" and isinstance(item, dict):
                 normalized[key] = {
@@ -476,12 +485,15 @@ class GoogleProvider(OpenAICompatibleProvider):
             elif key == "items":
                 normalized[key] = GoogleProvider._native_schema(item)
             elif key in {"type", "description", "enum", "required", "nullable", "format"}:
-                normalized[key] = item
+                if key != "type" or "type" not in normalized:
+                    normalized[key] = item
         if "type" not in normalized:
             normalized["type"] = "object"
         if normalized.get("type") == "object":
             normalized.setdefault("properties", {})
             normalized.setdefault("required", [])
+        if normalized.get("type") == "array":
+            normalized.setdefault("items", {"type": "object", "properties": {}, "required": []})
         return normalized
 
     @classmethod

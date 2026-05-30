@@ -34,7 +34,21 @@
             "type": "string"
           },
           "steps": {
-            "type": "array"
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "tool": {
+                  "type": "string"
+                },
+                "args": {
+                  "type": "object"
+                }
+              }
+            }
           },
           "approved": {
             "type": "boolean"
