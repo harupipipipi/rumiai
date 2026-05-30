@@ -204,7 +204,9 @@ fn wait_for_defaultspack_http_ready(port: u16, child: &mut Child) -> AnyResult<(
     loop {
         poll_count += 1;
         if check_defaultspack_http_ready(&client, port) {
-            info!("wait_for_defaultspack_http_ready: ready after {poll_count} polls on port {port}");
+            info!(
+                "wait_for_defaultspack_http_ready: ready after {poll_count} polls on port {port}"
+            );
             return Ok(());
         }
 
@@ -212,21 +214,35 @@ fn wait_for_defaultspack_http_ready(port: u16, child: &mut Child) -> AnyResult<(
             .try_wait()
             .context("failed to inspect defaultspack launch process")?
         {
-            let stdout_str = child.stdout.take().map(|mut out| {
-                let mut buf = String::new();
-                let _ = std::io::Read::read_to_string(&mut out, &mut buf);
-                buf
-            }).unwrap_or_default();
-            let stderr_str = child.stderr.take().map(|mut err| {
-                let mut buf = String::new();
-                let _ = std::io::Read::read_to_string(&mut err, &mut buf);
-                buf
-            }).unwrap_or_default();
+            let stdout_str = child
+                .stdout
+                .take()
+                .map(|mut out| {
+                    let mut buf = String::new();
+                    let _ = std::io::Read::read_to_string(&mut out, &mut buf);
+                    buf
+                })
+                .unwrap_or_default();
+            let stderr_str = child
+                .stderr
+                .take()
+                .map(|mut err| {
+                    let mut buf = String::new();
+                    let _ = std::io::Read::read_to_string(&mut err, &mut buf);
+                    buf
+                })
+                .unwrap_or_default();
             if !stdout_str.is_empty() {
-                info!("wait_for_defaultspack_http_ready: pack-shell stdout: {}", stdout_str.trim());
+                info!(
+                    "wait_for_defaultspack_http_ready: pack-shell stdout: {}",
+                    stdout_str.trim()
+                );
             }
             if !stderr_str.is_empty() {
-                warn!("wait_for_defaultspack_http_ready: pack-shell stderr: {}", stderr_str.trim());
+                warn!(
+                    "wait_for_defaultspack_http_ready: pack-shell stderr: {}",
+                    stderr_str.trim()
+                );
             }
             bail!("Defaultspack exited before its local server was ready: {status}");
         }
@@ -234,21 +250,35 @@ fn wait_for_defaultspack_http_ready(port: u16, child: &mut Child) -> AnyResult<(
         if Instant::now() >= deadline {
             warn!("wait_for_defaultspack_http_ready: timed out after {poll_count} polls, killing pack-shell");
             let _ = child.kill();
-            let stdout_str = child.stdout.take().map(|mut out| {
-                let mut buf = String::new();
-                let _ = std::io::Read::read_to_string(&mut out, &mut buf);
-                buf
-            }).unwrap_or_default();
-            let stderr_str = child.stderr.take().map(|mut err| {
-                let mut buf = String::new();
-                let _ = std::io::Read::read_to_string(&mut err, &mut buf);
-                buf
-            }).unwrap_or_default();
+            let stdout_str = child
+                .stdout
+                .take()
+                .map(|mut out| {
+                    let mut buf = String::new();
+                    let _ = std::io::Read::read_to_string(&mut out, &mut buf);
+                    buf
+                })
+                .unwrap_or_default();
+            let stderr_str = child
+                .stderr
+                .take()
+                .map(|mut err| {
+                    let mut buf = String::new();
+                    let _ = std::io::Read::read_to_string(&mut err, &mut buf);
+                    buf
+                })
+                .unwrap_or_default();
             if !stdout_str.is_empty() {
-                info!("wait_for_defaultspack_http_ready: pack-shell stdout (after kill): {}", stdout_str.trim());
+                info!(
+                    "wait_for_defaultspack_http_ready: pack-shell stdout (after kill): {}",
+                    stdout_str.trim()
+                );
             }
             if !stderr_str.is_empty() {
-                warn!("wait_for_defaultspack_http_ready: pack-shell stderr (after kill): {}", stderr_str.trim());
+                warn!(
+                    "wait_for_defaultspack_http_ready: pack-shell stderr (after kill): {}",
+                    stderr_str.trim()
+                );
             }
             bail!(
                 "Defaultspack local server did not become ready at {} within {} seconds",
@@ -354,9 +384,8 @@ exec "$PACK_SHELL" run "defaultspack" \
 
 /// Generate a macOS .app bundle at `~/Applications/Rumi Defaultspack.app`.
 ///
-/// The generated .app launches defaultspack directly under its own bundle
-/// identity so that macOS TCC permissions (Accessibility, Screen Recording,
-/// etc.) are granted to Rumi Defaultspack.app, not Rumi AI.app.
+/// The generated .app launches defaultspack directly as a dedicated UI/launch
+/// surface. macOS Computer Use permissions are hosted by Rumi Viewer.
 fn create_macos_app_bundle(
     app_name: &str,
     pack_shell: &Path,
@@ -530,8 +559,10 @@ pub(crate) fn launch_defaultspack_desktop_impl(config: &AppConfig) -> AnyResult<
         }
         Err(e) => {
             error!("launch_defaultspack_desktop_impl: failed to read defaultspack metadata: {e:#}");
-            info!("launch_defaultspack_desktop_impl: ecosystem_json path={}",
-                config.defaultspack_ecosystem_json().display());
+            info!(
+                "launch_defaultspack_desktop_impl: ecosystem_json path={}",
+                config.defaultspack_ecosystem_json().display()
+            );
             return Err(e);
         }
     };
@@ -542,13 +573,21 @@ pub(crate) fn launch_defaultspack_desktop_impl(config: &AppConfig) -> AnyResult<
         info!("launch_defaultspack_desktop_impl: health check indicates server not ready, spawning...");
         let mut child = match spawn_defaultspack_local_server(config, &metadata) {
             Ok(c) => {
-                info!("launch_defaultspack_desktop_impl: spawned pack-shell pid={}", c.id());
+                info!(
+                    "launch_defaultspack_desktop_impl: spawned pack-shell pid={}",
+                    c.id()
+                );
                 c
             }
             Err(e) => {
                 error!("launch_defaultspack_desktop_impl: failed to spawn pack-shell: {e:#}");
-                info!("launch_defaultspack_desktop_impl: pack_shell_path={}",
-                    config.pack_shell_path().map(|p| p.display().to_string()).unwrap_or_else(|| "<not found>".to_string()));
+                info!(
+                    "launch_defaultspack_desktop_impl: pack_shell_path={}",
+                    config
+                        .pack_shell_path()
+                        .map(|p| p.display().to_string())
+                        .unwrap_or_else(|| "<not found>".to_string())
+                );
                 return Err(e);
             }
         };
@@ -565,7 +604,9 @@ pub(crate) fn launch_defaultspack_desktop_impl(config: &AppConfig) -> AnyResult<
             }
         }
     } else {
-        info!("launch_defaultspack_desktop_impl: health check passed, server already ready at {url}");
+        info!(
+            "launch_defaultspack_desktop_impl: health check passed, server already ready at {url}"
+        );
     }
 
     open::that_detached(&url).with_context(|| format!("failed to open {url}"))?;
@@ -601,9 +642,15 @@ fn read_defaultspack_desktop_metadata(
 
 fn read_desktop_api_token_from_config(config: &AppConfig) -> AnyResult<String> {
     let token_path = config.desktop_api_token_path();
-    info!("read_desktop_api_token_from_config: trying saved token at {}", token_path.display());
+    info!(
+        "read_desktop_api_token_from_config: trying saved token at {}",
+        token_path.display()
+    );
     if let Ok(token) = read_saved_desktop_api_token(&token_path) {
-        info!("read_desktop_api_token_from_config: found saved token ({} chars)", token.len());
+        info!(
+            "read_desktop_api_token_from_config: found saved token ({} chars)",
+            token.len()
+        );
         return Ok(token);
     }
     info!("read_desktop_api_token_from_config: no saved token, trying hmac_keys.json candidates");
@@ -614,14 +661,20 @@ fn read_desktop_api_token_from_config(config: &AppConfig) -> AnyResult<String> {
     ];
     let mut last_error: Option<anyhow::Error> = None;
     for hmac_keys_path in &candidates {
-        info!("read_desktop_api_token_from_config: checking {}", hmac_keys_path.display());
+        info!(
+            "read_desktop_api_token_from_config: checking {}",
+            hmac_keys_path.display()
+        );
         if !hmac_keys_path.exists() {
             info!("read_desktop_api_token_from_config: does not exist");
             continue;
         }
         match read_desktop_api_token(&hmac_keys_path) {
             Ok(token) => {
-                info!("read_desktop_api_token_from_config: got token from hmac_keys.json ({} chars)", token.len());
+                info!(
+                    "read_desktop_api_token_from_config: got token from hmac_keys.json ({} chars)",
+                    token.len()
+                );
                 return Ok(token);
             }
             Err(error) => {

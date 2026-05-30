@@ -148,6 +148,11 @@ impl KernelManager {
             .env("RUMI_LOG_DIR", &self.config.log_dir)
             .env("RUMI_PORT", self.config.kernel_port.to_string())
             .env("RUMI_PANEL_BOOTSTRAP_SECRET", &self.panel_bootstrap_secret)
+            .env(
+                "RUMI_VIEWER_HOST_BROKER_CONNECTION",
+                self.config.host_broker_connection_path(),
+            )
+            .env("RUMI_MACOS_PERMISSION_HOST", "rumi_viewer")
             .envs(python_runtime_env_vars())
             .env(
                 "RUMI_ENVIRONMENT",
