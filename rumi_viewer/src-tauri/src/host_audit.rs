@@ -20,6 +20,10 @@ pub struct HostAuditEntry {
     pub conversation_id: Option<String>,
     pub allowed: bool,
     pub result_ok: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub approval_token_present: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub approval_result: Option<String>,
     pub args_summary: Value,
 }
 

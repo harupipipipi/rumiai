@@ -30,7 +30,19 @@ def run_computer_action(
     if should_route_to_viewer(action):
         client = ViewerBrokerClient.from_environment()
         if client.available():
-            return client.run_computer(action, payload, context=context)
+            try:
+                return client.run_computer(action, payload, context=context, artifact_root=artifact_root)
+            except Exception as exc:
+                return {
+                    "action": action,
+                    "is_error": True,
+                    "reason": f"Rumi Viewer host broker is unavailable: {exc}",
+                    "recovery": {
+                        "kind": "open_rumi_viewer",
+                        "note": "Open Rumi Viewer and grant macOS permissions there.",
+                    },
+                    "permission_subject": "Rumi Viewer",
+                }
         return {
             "action": action,
             "is_error": True,

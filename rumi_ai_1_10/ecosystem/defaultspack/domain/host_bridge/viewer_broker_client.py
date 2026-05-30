@@ -49,7 +49,13 @@ class ViewerBrokerClient:
     def permissions(self) -> dict[str, Any]:
         return self._request("GET", "/api/host/permissions")
 
-    def run_computer(self, function_id: str, args: dict[str, Any], context: dict[str, Any] | None = None) -> dict[str, Any]:
+    def run_computer(
+        self,
+        function_id: str,
+        args: dict[str, Any],
+        context: dict[str, Any] | None = None,
+        artifact_root: Path | None = None,
+    ) -> dict[str, Any]:
         payload = {
             "function_id": function_id,
             "profile_id": _context_value(context, "profile_id", "input_profile_id"),
@@ -58,6 +64,8 @@ class ViewerBrokerClient:
             "approval_token": _string(args.get("approval_token")),
             "args": dict(args or {}),
         }
+        if artifact_root is not None:
+            payload["artifact_root"] = str(artifact_root)
         response = self._request("POST", "/api/host/computer/run", payload)
         audit_id = _string(response.get("audit_id"))
         if response.get("ok") is True and isinstance(response.get("result"), dict):
@@ -70,6 +78,14 @@ class ViewerBrokerClient:
         error = response.get("error") if isinstance(response, dict) else {}
         message = _string((error or {}).get("message")) or "Viewer broker request failed."
         code = _string((error or {}).get("code")) or "VIEWER_HOST_FAILED"
+        if code == "APPROVAL_REQUIRED" and isinstance(response.get("result"), dict):
+            result = dict(response["result"])
+            result.setdefault("action", function_id)
+            result.setdefault("error_code", code)
+            if audit_id:
+                result.setdefault("host_audit_id", audit_id)
+            result.setdefault("permission_subject", "Rumi Viewer")
+            return result
         return {
             "action": function_id,
             "is_error": True,

@@ -53,7 +53,7 @@ def test_computer_router_routes_darwin_computer_calls_to_viewer(monkeypatch):
         def available(self):
             return True
 
-        def run_computer(self, function_id, args, context=None):
+        def run_computer(self, function_id, args, context=None, artifact_root=None):
             return {"action": function_id, "routed": True, "payload": dict(args), "context": dict(context or {})}
 
     monkeypatch.setattr(computer_router.platform, "system", lambda: "Darwin")
@@ -115,6 +115,98 @@ def test_computer_router_returns_recovery_when_viewer_is_unavailable(monkeypatch
     assert result["is_error"] is True
     assert result["permission_subject"] == "Rumi Viewer"
     assert "Open Rumi Viewer" in result["recovery"]["note"]
+
+
+def test_computer_router_returns_recovery_when_viewer_connection_is_stale(monkeypatch, tmp_path):
+    from ecosystem.defaultspack.domain.host_bridge import computer_router
+
+    class FakeClient:
+        def available(self):
+            return True
+
+        def run_computer(self, function_id, args, context=None, artifact_root=None):
+            raise RuntimeError("connection refused")
+
+    monkeypatch.setattr(computer_router.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(computer_router.ViewerBrokerClient, "from_environment", classmethod(lambda cls: FakeClient()))
+
+    result = computer_router.run_computer_action("computer.screenshot", {}, {}, artifact_root=tmp_path)
+
+    assert result["is_error"] is True
+    assert "unavailable" in result["reason"]
+    assert result["permission_subject"] == "Rumi Viewer"
+
+
+def test_viewer_broker_client_includes_artifact_root_in_run_request(tmp_path, monkeypatch):
+    from ecosystem.defaultspack.domain.host_bridge.viewer_broker_client import ViewerBrokerClient
+
+    captured: dict[str, object] = {}
+
+    def fake_request(self, method, path, payload=None):
+        captured["method"] = method
+        captured["path"] = path
+        captured["payload"] = dict(payload or {})
+        return {"ok": True, "result": {"action": "computer.screenshot"}}
+
+    monkeypatch.setattr(ViewerBrokerClient, "_request", fake_request)
+    client = ViewerBrokerClient(url="http://127.0.0.1:8770", token="secret-token")
+
+    client.run_computer("computer.screenshot", {}, context={"conversation_id": "conv_1"}, artifact_root=tmp_path)
+
+    assert captured["method"] == "POST"
+    assert captured["path"] == "/api/host/computer/run"
+    assert captured["payload"]["artifact_root"] == str(tmp_path)
+
+
+def test_viewer_broker_client_preserves_approval_payload_from_broker(monkeypatch):
+    from ecosystem.defaultspack.domain.host_bridge.viewer_broker_client import ViewerBrokerClient
+
+    def fake_request(self, method, path, payload=None):
+        return {
+            "ok": False,
+            "audit_id": "host-audit-1",
+            "result": {
+                "action": "computer.click",
+                "requires_approval": True,
+                "approval_token": "tok",
+            },
+            "error": {"code": "APPROVAL_REQUIRED", "message": "Approval required."},
+        }
+
+    monkeypatch.setattr(ViewerBrokerClient, "_request", fake_request)
+    client = ViewerBrokerClient(url="http://127.0.0.1:8770", token="secret-token")
+
+    result = client.run_computer("computer.click", {"x": 10})
+
+    assert result["requires_approval"] is True
+    assert result["approval_token"] == "tok"
+    assert result["error_code"] == "APPROVAL_REQUIRED"
+    assert result["host_audit_id"] == "host-audit-1"
+
+
+def test_computer_host_helper_accepts_workspace_artifact_root(monkeypatch, tmp_path):
+    from core_runtime.host_broker import computer_host_helper
+
+    chat_store_path = tmp_path / "chat" / "conversations.json"
+    artifact_root = chat_store_path.parent / "conversations" / "conv-1" / "workspace" / "tools" / "computer"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(chat_store_path))
+
+    result = computer_host_helper._validated_artifact_root(str(artifact_root))
+
+    assert result == artifact_root.resolve()
+
+
+def test_computer_host_helper_rejects_non_workspace_artifact_root(tmp_path):
+    from core_runtime.host_broker import computer_host_helper
+
+    invalid_root = tmp_path / "rogue" / "computer"
+
+    try:
+        computer_host_helper._validated_artifact_root(str(invalid_root))
+    except ValueError as exc:
+        assert "artifact_root" in str(exc)
+    else:  # pragma: no cover - safety net for explicit failure messaging
+        raise AssertionError("expected artifact_root validation to fail")
 
 
 def test_defaultspack_browser_computer_block_uses_router(monkeypatch):

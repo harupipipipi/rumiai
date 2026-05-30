@@ -48,6 +48,8 @@ pub struct HostBrokerComputerRunRequest {
     #[serde(default)]
     pub approval_token: Option<String>,
     #[serde(default)]
+    pub artifact_root: Option<String>,
+    #[serde(default)]
     pub args: Value,
 }
 

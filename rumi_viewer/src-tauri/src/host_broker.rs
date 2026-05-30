@@ -273,6 +273,12 @@ fn parse_auth_token(headers: &HashMap<String, String>) -> Option<String> {
 fn execute_computer_run(shared: &HostBrokerShared, request: HostBrokerComputerRunRequest) -> Value {
     let function_id = request.function_id.trim().to_string();
     let audit_id = format!("host-audit-{}", generate_broker_token());
+    let approval_token_present = request
+        .approval_token
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .is_some();
     let allowed = function_allowed(&function_id);
     if !allowed {
         return serialize_run_response(
@@ -286,6 +292,8 @@ fn execute_computer_run(shared: &HostBrokerShared, request: HostBrokerComputerRu
                 conversation_id: request.conversation_id.clone(),
                 allowed: false,
                 result_ok: false,
+                approval_token_present: Some(approval_token_present),
+                approval_result: None,
                 args_summary: summarize_args(&request.args),
             },
             HostBrokerComputerRunResponse {
@@ -303,14 +311,7 @@ fn execute_computer_run(shared: &HostBrokerShared, request: HostBrokerComputerRu
         );
     }
 
-    if high_risk_function(&function_id)
-        && request
-            .approval_token
-            .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .is_none()
-    {
+    if high_risk_function(&function_id) && !approval_token_present {
         return serialize_run_response(
             &shared.config,
             HostAuditEntry {
@@ -322,6 +323,8 @@ fn execute_computer_run(shared: &HostBrokerShared, request: HostBrokerComputerRu
                 conversation_id: request.conversation_id.clone(),
                 allowed: false,
                 result_ok: false,
+                approval_token_present: Some(false),
+                approval_result: Some("missing_token".to_string()),
                 args_summary: summarize_args(&request.args),
             },
             HostBrokerComputerRunResponse {
@@ -338,15 +341,39 @@ fn execute_computer_run(shared: &HostBrokerShared, request: HostBrokerComputerRu
         );
     }
 
-    let helper_result = run_computer_helper(&shared.config, &request.function_id, &request.args);
+    let helper_result = run_computer_helper(
+        &shared.config,
+        &request.function_id,
+        &request.args,
+        request.artifact_root.as_deref(),
+    );
     match helper_result {
         Ok(result) => {
             let result_ok = result.get("ok").and_then(Value::as_bool).unwrap_or(false);
             let payload = result.get("result").cloned();
+            let payload_requires_approval = helper_payload_requires_approval(payload.as_ref());
+            let approval_result = approval_result_for(
+                &function_id,
+                approval_token_present,
+                payload_requires_approval,
+            );
+            let helper_error_code = result
+                .get("error_code")
+                .and_then(Value::as_str)
+                .unwrap_or(if payload_requires_approval {
+                    "APPROVAL_REQUIRED"
+                } else {
+                    "VIEWER_HOST_FAILED"
+                })
+                .to_string();
             let error_message = result
                 .get("error")
                 .and_then(Value::as_str)
-                .unwrap_or("Viewer host helper failed")
+                .unwrap_or(if payload_requires_approval {
+                    "This Viewer-controlled computer action requires approval."
+                } else {
+                    "Viewer host helper failed"
+                })
                 .to_string();
             serialize_run_response(
                 &shared.config,
@@ -358,10 +385,12 @@ fn execute_computer_run(shared: &HostBrokerShared, request: HostBrokerComputerRu
                     pack_id: request.pack_id.clone(),
                     conversation_id: request.conversation_id.clone(),
                     allowed: true,
-                    result_ok,
+                    result_ok: result_ok && !payload_requires_approval,
+                    approval_token_present: Some(approval_token_present),
+                    approval_result,
                     args_summary: summarize_args(&request.args),
                 },
-                if result_ok {
+                if result_ok && !payload_requires_approval {
                     HostBrokerComputerRunResponse {
                         ok: true,
                         function_id,
@@ -373,9 +402,9 @@ fn execute_computer_run(shared: &HostBrokerShared, request: HostBrokerComputerRu
                     HostBrokerComputerRunResponse {
                         ok: false,
                         function_id,
-                        result: None,
+                        result: payload,
                         error: Some(HostBrokerError {
-                            code: "VIEWER_HOST_FAILED".to_string(),
+                            code: helper_error_code,
                             message: error_message,
                         }),
                         audit_id,
@@ -394,6 +423,12 @@ fn execute_computer_run(shared: &HostBrokerShared, request: HostBrokerComputerRu
                 conversation_id: request.conversation_id.clone(),
                 allowed: true,
                 result_ok: false,
+                approval_token_present: Some(approval_token_present),
+                approval_result: if high_risk_function(&function_id) && approval_token_present {
+                    Some("helper_error".to_string())
+                } else {
+                    approval_result_for(&function_id, approval_token_present, false)
+                },
                 args_summary: summarize_args(&request.args),
             },
             HostBrokerComputerRunResponse {
@@ -449,6 +484,42 @@ fn function_allowed(function_id: &str) -> bool {
     )
 }
 
+fn helper_payload_requires_approval(payload: Option<&Value>) -> bool {
+    let Some(Value::Object(map)) = payload else {
+        return false;
+    };
+    map.get("requires_approval")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+        || map
+            .get("approval_required")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+}
+
+fn approval_result_for(
+    function_id: &str,
+    approval_token_present: bool,
+    payload_requires_approval: bool,
+) -> Option<String> {
+    if high_risk_function(function_id) {
+        return Some(
+            if !approval_token_present {
+                "missing_token"
+            } else if payload_requires_approval {
+                "rejected"
+            } else {
+                "approved"
+            }
+            .to_string(),
+        );
+    }
+    if payload_requires_approval {
+        return Some("requires_approval".to_string());
+    }
+    None
+}
+
 fn high_risk_function(function_id: &str) -> bool {
     matches!(
         function_id,
@@ -464,7 +535,12 @@ fn high_risk_function(function_id: &str) -> bool {
     )
 }
 
-fn run_computer_helper(config: &AppConfig, function_id: &str, args: &Value) -> Result<Value> {
+fn run_computer_helper(
+    config: &AppConfig,
+    function_id: &str,
+    args: &Value,
+    artifact_root: Option<&str>,
+) -> Result<Value> {
     let helper_path = config
         .app_dir
         .join("core_runtime")
@@ -489,6 +565,7 @@ fn run_computer_helper(config: &AppConfig, function_id: &str, args: &Value) -> R
     let body = json!({
         "function_id": function_id,
         "args": args,
+        "artifact_root": artifact_root,
     });
 
     if let Some(stdin) = child.stdin.as_mut() {
@@ -649,5 +726,38 @@ mod tests {
         assert!(!high_risk_function("computer.screenshot"));
         assert!(function_allowed("computer.clipboard.clear"));
         assert!(!function_allowed("computer.launch_missiles"));
+    }
+
+    #[test]
+    fn helper_payload_approval_detection_matches_browser_controller_schema() {
+        assert!(helper_payload_requires_approval(Some(
+            &json!({"requires_approval": true})
+        )));
+        assert!(helper_payload_requires_approval(Some(
+            &json!({"approval_required": true})
+        )));
+        assert!(!helper_payload_requires_approval(Some(
+            &json!({"requires_approval": false})
+        )));
+    }
+
+    #[test]
+    fn approval_result_tracks_missing_rejected_and_approved_states() {
+        assert_eq!(
+            approval_result_for("computer.click", false, false).as_deref(),
+            Some("missing_token")
+        );
+        assert_eq!(
+            approval_result_for("computer.click", true, true).as_deref(),
+            Some("rejected")
+        );
+        assert_eq!(
+            approval_result_for("computer.click", true, false).as_deref(),
+            Some("approved")
+        );
+        assert_eq!(
+            approval_result_for("computer.screenshot", true, true).as_deref(),
+            Some("requires_approval")
+        );
     }
 }
