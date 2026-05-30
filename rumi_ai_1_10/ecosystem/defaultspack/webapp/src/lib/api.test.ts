@@ -722,7 +722,8 @@ test("browserComputer calls dedicated browser-computer endpoint", async () => {
       action: "computer.screenshot",
       payload: { reason: "test" },
     });
-    assert.ok(requestHeaders?.get("X-Rumi-CSRF"));
+    const headers = requestHeaders as Headers | null;
+    assert.ok(headers?.get("X-Rumi-CSRF"));
     assert.deepEqual(result, { handled: true });
   } finally {
     globalThis.fetch = originalFetch;
@@ -780,7 +781,8 @@ test("browser computer approvals use the browser-computer endpoint for computer_
       action: "computer.screenshot",
       payload: { app: "Google Chrome", approval_token: "tok" },
     });
-    assert.ok(requestHeaders?.get("X-Rumi-CSRF"));
+    const headers = requestHeaders as Headers | null;
+    assert.ok(headers?.get("X-Rumi-CSRF"));
     assert.deepEqual(result, { approved: true });
   } finally {
     globalThis.fetch = originalFetch;
