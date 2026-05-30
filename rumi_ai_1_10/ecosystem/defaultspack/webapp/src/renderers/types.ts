@@ -57,6 +57,21 @@ export type ContextUsageInfo = {
   label: string;
 };
 
+export type ComposerModelStatusIndicatorAction = {
+  label: string;
+  onSelect: () => void;
+  tone?: "neutral" | "info" | "warning" | "danger";
+};
+
+export type ComposerModelStatusIndicator = {
+  id: string;
+  name: string;
+  description: string;
+  svgMarkup: string;
+  tone?: "neutral" | "info" | "warning" | "danger";
+  action?: ComposerModelStatusIndicatorAction | null;
+};
+
 export type SettingChangeHandler = (sectionId: string, fieldId: string, value: unknown) => void;
 
 export type TitleBarRendererProps = {
@@ -128,6 +143,7 @@ export type ComposerRendererProps = {
   modelCommandCandidates?: ModelCommandCandidate[];
   modelPickerRequestId?: number;
   yoloMode?: boolean;
+  modelStatusIndicators?: ComposerModelStatusIndicator[];
   voiceInputEnabled?: boolean;
   voiceInputUseAi?: boolean;
   mode?: AppMode;

@@ -19,12 +19,14 @@ import {
   Wrench,
   X,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 
 import type {
   AttachedFile,
   ComposerCommandItem,
   ComposerExtensionItem,
+  ComposerModelStatusIndicator,
   ComposerRendererProps,
   ComposerSkillItem,
   DroppedWidget,
@@ -37,7 +39,7 @@ import { CodingWorkspacePicker } from "../components/coding/CodingWorkspacePicke
 import { RuntimeCapabilityBanner } from "../components/RuntimeCapabilityBanner";
 import { WarmActionIcon } from "../components/WarmActionIcon";
 import { fileToAttachment } from "../lib/attachments";
-import { composerSkillMentionWidget, composerToolMentionWidget, filterComposerSkillMentions, filterComposerToolMentions, resolveComposerWidgetDrop } from "../lib/composerWidgets";
+import { filterComposerSkillMentions, filterComposerToolMentions, resolveComposerWidgetDrop } from "../lib/composerWidgets";
 import { HISTORY_CHAT_DROP_MIME, parseHistoryChatDrop } from "../lib/historyComposer";
 import { sortedToolGroups, toolGroupFor } from "../lib/toolUi";
 
@@ -106,10 +108,19 @@ const COMPOSER_CHROME_WIDTHS = {
   icon: { basis: "2rem", min: "2rem", max: "2rem" },
   mode: { basis: "auto", min: "2rem", max: "7rem", shrink: 1 },
   badge: { basis: "auto", min: "0", max: "11rem", shrink: 1 },
-  model: { basis: "14rem", min: "11rem", max: "15rem", shrink: 1 },
+  model: { basis: "11.5rem", min: "11.5rem", max: "11.5rem", shrink: 0 },
+  thinking: { basis: "5.25rem", min: "5.25rem", max: "5.25rem", shrink: 0 },
+  status: { basis: "auto", min: "2.5rem", shrink: 0 },
   send: { basis: "2rem", min: "2rem", max: "2rem" },
   sendLarge: { basis: "2.25rem", min: "2.25rem", max: "2.25rem" },
 } satisfies Record<string, ComposerChromeWidth>;
+
+const COMPOSER_CONTROL_SURFACE_CLASSNAME = "rumi-composer-control-surface flex h-[36px] min-w-0 items-center rounded-[1rem] border border-zinc-700/40 bg-zinc-800/40 px-2.5";
+const useIsomorphicLayoutEffect = typeof window === "undefined" ? useEffect : useLayoutEffect;
+const MODEL_STATUS_POPOVER_WIDTH = 240;
+const MODEL_STATUS_POPOVER_HEIGHT = 176;
+const MODEL_STATUS_POPOVER_GAP = 10;
+const MODEL_STATUS_POPOVER_VIEWPORT_MARGIN = 16;
 
 export function composerChromeWidgetStyle(width: ComposerChromeWidth): CSSProperties {
   return {
@@ -117,6 +128,272 @@ export function composerChromeWidgetStyle(width: ComposerChromeWidth): CSSProper
     minWidth: width.min,
     maxWidth: width.max,
   };
+}
+
+function SendButtonIcon({ className = "" }: { className?: string }) {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 100 100"
+      className={className}
+    >
+      <rect width="100" height="100" fill="#212121" rx="8" />
+      <circle cx="50" cy="50" r="40" fill="#ffffff" />
+      <path
+        d="M 50 35 L 50 65 M 35 50 L 50 35 L 65 50"
+        fill="none"
+        stroke="#000000"
+        strokeWidth="6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+const MODEL_STATUS_TONE_STYLES: Record<NonNullable<ComposerModelStatusIndicator["tone"]>, { icon: string; popover: string; button: string }> = {
+  neutral: {
+    icon: "text-zinc-300",
+    popover: "border-zinc-700/80",
+    button: "bg-zinc-100 text-zinc-950 hover:bg-white",
+  },
+  info: {
+    icon: "text-sky-300",
+    popover: "border-sky-500/30",
+    button: "bg-sky-100 text-sky-950 hover:bg-white",
+  },
+  warning: {
+    icon: "text-amber-300",
+    popover: "border-amber-500/30",
+    button: "bg-amber-100 text-amber-950 hover:bg-white",
+  },
+  danger: {
+    icon: "text-orange-300",
+    popover: "border-orange-500/35",
+    button: "bg-orange-100 text-orange-950 hover:bg-white",
+  },
+};
+
+function inlineSvgMarkup(markup: string): string {
+  const sanitized = markup.replace(/\s(width|height)="[^"]*"/gi, "");
+  return sanitized.replace(
+    /<svg\b([^>]*)>/i,
+    '<svg$1 width="100%" height="100%" aria-hidden="true" focusable="false" style="display:block;width:100%;height:100%;">',
+  );
+}
+
+function clampPopoverOffset(value: number, min: number, max: number): number {
+  if (max < min) return min;
+  return Math.min(Math.max(value, min), max);
+}
+
+function ModelStatusIndicatorButton({
+  indicator,
+  open,
+  onToggle,
+  onClose,
+}: {
+  indicator: ComposerModelStatusIndicator;
+  open: boolean;
+  onToggle: () => void;
+  onClose: () => void;
+}) {
+  const tone = MODEL_STATUS_TONE_STYLES[indicator.tone ?? "warning"];
+  const actionTone = MODEL_STATUS_TONE_STYLES[indicator.action?.tone ?? indicator.tone ?? "warning"];
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const [popoverStyle, setPopoverStyle] = useState<CSSProperties | null>(null);
+
+  const updatePopoverStyle = useCallback(() => {
+    if (typeof window === "undefined" || !triggerRef.current) return;
+    const rect = triggerRef.current.getBoundingClientRect();
+    const minLeft = MODEL_STATUS_POPOVER_VIEWPORT_MARGIN;
+    const maxLeft = window.innerWidth - MODEL_STATUS_POPOVER_WIDTH - MODEL_STATUS_POPOVER_VIEWPORT_MARGIN;
+    const nextLeft = clampPopoverOffset(rect.right - MODEL_STATUS_POPOVER_WIDTH, minLeft, maxLeft);
+    const spaceBelow = window.innerHeight - rect.bottom - MODEL_STATUS_POPOVER_VIEWPORT_MARGIN;
+    const placeBelow = spaceBelow >= MODEL_STATUS_POPOVER_HEIGHT || rect.top < MODEL_STATUS_POPOVER_HEIGHT + MODEL_STATUS_POPOVER_GAP;
+    const nextTop = placeBelow
+      ? clampPopoverOffset(
+        rect.bottom + MODEL_STATUS_POPOVER_GAP,
+        MODEL_STATUS_POPOVER_VIEWPORT_MARGIN,
+        window.innerHeight - MODEL_STATUS_POPOVER_HEIGHT - MODEL_STATUS_POPOVER_VIEWPORT_MARGIN,
+      )
+      : clampPopoverOffset(
+        rect.top - MODEL_STATUS_POPOVER_HEIGHT - MODEL_STATUS_POPOVER_GAP,
+        MODEL_STATUS_POPOVER_VIEWPORT_MARGIN,
+        window.innerHeight - MODEL_STATUS_POPOVER_HEIGHT - MODEL_STATUS_POPOVER_VIEWPORT_MARGIN,
+      );
+    setPopoverStyle({ left: nextLeft, top: nextTop });
+  }, []);
+
+  useIsomorphicLayoutEffect(() => {
+    if (!open) {
+      setPopoverStyle(null);
+      return;
+    }
+    updatePopoverStyle();
+    if (typeof window === "undefined") return;
+    window.addEventListener("resize", updatePopoverStyle);
+    window.addEventListener("scroll", updatePopoverStyle, true);
+    return () => {
+      window.removeEventListener("resize", updatePopoverStyle);
+      window.removeEventListener("scroll", updatePopoverStyle, true);
+    };
+  }, [open, updatePopoverStyle]);
+
+  const openPopover = (
+    <>
+      <button
+        type="button"
+        aria-label="close status indicator"
+        className="fixed inset-0 z-[84] cursor-default bg-transparent"
+        onClick={onClose}
+      />
+      <div
+        className={`fixed z-[85] w-[240px] rounded-xl border bg-zinc-950 p-3 shadow-2xl ${tone.popover}`}
+        style={popoverStyle ?? {
+          right: MODEL_STATUS_POPOVER_VIEWPORT_MARGIN,
+          top: MODEL_STATUS_POPOVER_VIEWPORT_MARGIN,
+        }}
+      >
+        <div className="flex items-start gap-2">
+          <span
+            aria-hidden="true"
+            className="mt-0.5 block h-5 w-5 flex-shrink-0"
+            dangerouslySetInnerHTML={{ __html: inlineSvgMarkup(indicator.svgMarkup) }}
+          />
+          <div className="min-w-0">
+            <p className="text-sm font-medium text-zinc-100">{indicator.name}</p>
+            <p className="mt-1 text-[11px] leading-relaxed text-zinc-400">{indicator.description}</p>
+          </div>
+        </div>
+        {indicator.action && (
+          <button
+            type="button"
+            onClick={() => {
+              indicator.action?.onSelect();
+              onClose();
+            }}
+            className={`mt-3 flex h-8 w-full items-center justify-center rounded-lg px-3 text-xs font-semibold transition-colors ${actionTone.button}`}
+          >
+            {indicator.action.label}
+          </button>
+        )}
+      </div>
+    </>
+  );
+
+  return (
+    <div className="group/status relative flex items-center">
+      <button
+        ref={triggerRef}
+        type="button"
+        aria-label={indicator.name}
+        title={indicator.description}
+        aria-expanded={open}
+        onClick={onToggle}
+        className={`relative flex h-[18px] w-[18px] flex-shrink-0 items-center justify-center rounded-sm transition-transform hover:scale-[1.04] ${tone.icon}`}
+      >
+        <span
+          aria-hidden="true"
+          className="block h-full w-full"
+          dangerouslySetInnerHTML={{ __html: inlineSvgMarkup(indicator.svgMarkup) }}
+        />
+      </button>
+      {!open && (
+        <div className="pointer-events-none absolute bottom-full right-0 z-[85] mb-2 w-max max-w-[220px] rounded-lg border border-zinc-800 bg-zinc-950/95 px-2 py-1 text-[10px] leading-snug text-zinc-300 opacity-0 shadow-xl transition-opacity group-hover/status:opacity-100">
+          <span className="block font-medium text-zinc-100">{indicator.name}</span>
+          <span className="block text-zinc-400">{indicator.description}</span>
+        </div>
+      )}
+      {open && (
+        typeof document !== "undefined"
+          ? createPortal(openPopover, document.body)
+          : openPopover
+      )}
+    </div>
+  );
+}
+
+type ComposerMentionDescriptor = {
+  kind: "tool" | "skill" | "file";
+  label: string;
+};
+
+function humanizeMentionLabel(token: string, descriptor?: ComposerMentionDescriptor): string {
+  const source = descriptor?.label || token;
+  const clean = source.replace(/^@/, "").trim() || token;
+  const tail = clean.split("/").filter(Boolean).pop() ?? clean;
+  return `@${tail.replace(/[_-]+/g, " ")}`;
+}
+
+function renderComposerMentionText(
+  value: string,
+  mentionLookup: Map<string, ComposerMentionDescriptor>,
+  keyPrefix = "",
+): ReactNode[] {
+  const nodes: ReactNode[] = [];
+  const mentionPattern = /(^|\s)@([A-Za-z0-9_./:-]+)/g;
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = mentionPattern.exec(value))) {
+    const leading = match[1] ?? "";
+    const token = match[2] ?? "";
+    const mentionStart = match.index + leading.length;
+    const mentionEnd = mentionStart + token.length + 1;
+    const descriptor = mentionLookup.get(token.toLowerCase());
+
+    if (!descriptor) continue;
+    if (mentionStart > lastIndex) {
+      nodes.push(value.slice(lastIndex, mentionStart));
+    }
+
+    const Icon = descriptor.kind === "tool" ? Wrench : descriptor.kind === "skill" ? BrainCircuit : FileText;
+    nodes.push(
+      <span
+        key={`${keyPrefix}${mentionStart}-${token}`}
+        className="mx-[1px] inline-flex h-[20px] translate-y-[2px] items-center gap-1 rounded-full bg-sky-500/15 px-1.5 text-sky-200 ring-1 ring-sky-400/25"
+      >
+        <Icon size={11} className="flex-shrink-0 text-sky-300" />
+        <span>{humanizeMentionLabel(token, descriptor)}</span>
+      </span>,
+    );
+    lastIndex = mentionEnd;
+  }
+
+  if (lastIndex < value.length) {
+    nodes.push(value.slice(lastIndex));
+  }
+  return nodes;
+}
+
+function ComposerMentionOverlay({
+  value,
+  mentionLookup,
+  cursorPosition = value.length,
+  showCaret = false,
+  className = "",
+}: {
+  value: string;
+  mentionLookup: Map<string, ComposerMentionDescriptor>;
+  cursorPosition?: number;
+  showCaret?: boolean;
+  className?: string;
+}) {
+  if (!value) return null;
+  const caretIndex = Math.max(0, Math.min(cursorPosition, value.length));
+  const beforeCaret = value.slice(0, caretIndex);
+  const afterCaret = value.slice(caretIndex);
+  return (
+    <div
+      aria-hidden="true"
+      className={`rumi-composer-mention-overlay pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap break-words text-zinc-100 ${className}`}
+    >
+      {renderComposerMentionText(beforeCaret, mentionLookup, "before-")}
+      {showCaret && <span className="rumi-composer-fake-caret" />}
+      {renderComposerMentionText(afterCaret, mentionLookup, "after-")}
+    </div>
+  );
 }
 
 function composerChromeWidgetsForSlot(
@@ -128,10 +405,17 @@ function composerChromeWidgetsForSlot(
     .sort((left, right) => left.order - right.order);
 }
 
-function ComposerChromeWidget({ widget }: { widget: ComposerChromeWidgetSpec }) {
+function ComposerChromeWidget({
+  widget,
+  onNodeChange,
+}: {
+  widget: ComposerChromeWidgetSpec;
+  onNodeChange?: (widgetId: string, node: HTMLDivElement | null) => void;
+}) {
   const mobileClass = widget.mobile === "hide" ? "max-[640px]:hidden" : "";
   return (
     <div
+      ref={(node) => onNodeChange?.(widget.id, node)}
       data-composer-widget={widget.id}
       data-composer-slot={widget.slot}
       className={`rumi-composer-widget flex min-w-0 items-center ${mobileClass} ${widget.className ?? ""}`}
@@ -569,7 +853,7 @@ function ModelDropdown({
   return (
     <>
       <button type="button" aria-label="close model dropdown" className="fixed inset-0 z-20 cursor-default" onClick={onClose} />
-      <div className="absolute bottom-full left-0 mb-2 z-[70] w-[min(360px,calc(100vw-32px))] overflow-hidden rounded-xl border border-zinc-700/70 bg-zinc-950 shadow-2xl">
+      <div className="absolute bottom-full right-0 mb-2 z-[80] w-[min(360px,calc(100vw-88px))] max-w-[calc(100vw-88px)] overflow-hidden rounded-xl border border-zinc-700/70 bg-zinc-950 shadow-2xl">
         <div className="border-b border-zinc-800 p-2">
           <div className="relative">
             <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-500" />
@@ -706,14 +990,12 @@ function AtMentionMenu({
   onActiveIndexChange,
   onSelect,
   onClose,
-  style,
 }: {
   candidates: ComposerAtMentionCandidate[];
   activeIndex: number;
   onActiveIndexChange: (index: number) => void;
   onSelect: (candidate: ComposerAtMentionCandidate) => void;
   onClose: () => void;
-  style?: CSSProperties;
 }) {
   if (candidates.length === 0) return null;
 
@@ -724,8 +1006,7 @@ function AtMentionMenu({
         role="listbox"
         aria-label="Composer mentions"
         data-testid="composer-at-mention-candidates"
-        style={style}
-        className="fixed z-50 w-[min(440px,calc(100vw-32px))] overflow-hidden rounded-xl border border-zinc-700/70 bg-zinc-950 shadow-2xl"
+        className="absolute bottom-full left-4 z-40 mb-2 w-[min(420px,calc(100vw-32px))] overflow-hidden rounded-xl border border-zinc-700/70 bg-zinc-950 shadow-2xl max-[640px]:left-2"
       >
         <div className="border-b border-zinc-800 px-3 py-2 flex items-center justify-between gap-2">
           <span className="inline-flex min-w-0 items-center gap-2">
@@ -949,6 +1230,7 @@ export function ComposerRenderer({
   modelCommandCandidates = [],
   modelPickerRequestId = 0,
   yoloMode = false,
+  modelStatusIndicators = [],
   voiceInputEnabled = true,
   voiceInputUseAi = false,
   mode = "chat",
@@ -997,6 +1279,7 @@ export function ComposerRenderer({
   const [openFolder, setOpenFolder] = useState<"tools" | "models" | "commands">("tools");
   const [openToolGroup, setOpenToolGroup] = useState<string | null>(null);
   const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
+  const [openModelStatusId, setOpenModelStatusId] = useState<string | null>(null);
   const [apiKeyPromptProfile, setApiKeyPromptProfile] = useState<ModelProfile | null>(null);
   const [locallyConfiguredProviders, setLocallyConfiguredProviders] = useState<Set<string>>(() => new Set());
   const [modeSelectorOpen, setModeSelectorOpen] = useState(false);
@@ -1007,16 +1290,23 @@ export function ComposerRenderer({
   const [selectedModelCandidateIndex, setSelectedModelCandidateIndex] = useState(0);
   const [composerPopoverStyle, setComposerPopoverStyle] = useState<CSSProperties | undefined>(undefined);
   const [isVoiceListening, setIsVoiceListening] = useState(false);
+  const [textareaSelection, setTextareaSelection] = useState({ start: input.length, end: input.length });
+  const [textareaFocused, setTextareaFocused] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const menuButtonRef = useRef<HTMLButtonElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const recognitionRef = useRef<{ stop: () => void } | null>(null);
+  const chromeWidgetNodeMapRef = useRef<Map<string, HTMLDivElement>>(new Map());
+  const chromeWidgetPositionMapRef = useRef<Map<string, { left: number; top: number }>>(new Map());
+  const chromeWidgetCleanupTimersRef = useRef<Map<string, number>>(new Map());
+  const hasMeasuredChromeWidgetLayoutRef = useRef(false);
   const submitPointerHandledRef = useRef(false);
   const lastModelPickerRequestIdRef = useRef(modelPickerRequestId);
   const chromeButtonTabIndex = keyboardButtonNavigation ? undefined : -1;
   const profileName = profileDisplayName(selectedProfile);
   const selectedProviderLabel = profileProviderLabel(selectedProfile);
+  const visibleModelStatusIndicators = modelStatusIndicators.filter(Boolean);
   const levels = selectedProfile?.supports_thinking
     ? selectedProfile.thinking_levels?.length
       ? selectedProfile.thinking_levels
@@ -1027,10 +1317,14 @@ export function ComposerRenderer({
     contextUsage.maxContext < 0
       ? `${contextUsage.usedTokens} tokens / unlimited`
       : `${contextUsage.usedTokens} / ${contextUsage.maxContext || "unknown"} tokens`;
-  const toolItems = useMemo(() => [...inlineExtensions, ...belowExtensions], [inlineExtensions, belowExtensions]);
-  const selectableProfiles = modelProfiles.length > 0 ? modelProfiles : favoriteProfiles;
-  const selectedToolIdSet = useMemo(() => new Set(selectedToolIds), [selectedToolIds]);
-  const computerUseSelected = selectedToolIds.some((toolId) => (
+	  const toolItems = useMemo(() => [...inlineExtensions, ...belowExtensions], [inlineExtensions, belowExtensions]);
+	  const selectableProfiles = modelProfiles.length > 0 ? modelProfiles : favoriteProfiles;
+	  const selectedToolIdSet = useMemo(() => new Set(selectedToolIds), [selectedToolIds]);
+	  const visibleDroppedWidgets = useMemo(
+	    () => droppedWidgets.filter((widget) => widget.metadata?.source !== "composer_at_mention"),
+	    [droppedWidgets],
+	  );
+	  const computerUseSelected = selectedToolIds.some((toolId) => (
     toolId === "computer_use"
     || toolId === "browser_computer"
     || toolId === "browser_use"
@@ -1076,9 +1370,9 @@ export function ComposerRenderer({
   const branchOptions = codingContext?.branches?.length ? codingContext.branches : codingContext?.branch ? [codingContext.branch] : [];
   const currentDirectory = codingContext?.directory || ".";
   const selectedCodingWorkspace = codingWorkspaces.find((workspace) => workspace.workspace_id === (selectedCodingWorkspaceId || codingContext?.workspaceId)) ?? codingWorkspaces[0] ?? null;
-  const atMentionCandidates = useMemo<ComposerAtMentionCandidate[]>(() => {
-    const toolCandidates = filterComposerToolMentions(toolItems, atMentionQuery, 14).map((item) => ({
-      kind: "tool" as const,
+	  const atMentionCandidates = useMemo<ComposerAtMentionCandidate[]>(() => {
+	    const toolCandidates = filterComposerToolMentions(toolItems, atMentionQuery, 14).map((item) => ({
+	      kind: "tool" as const,
       id: `tool:${item.id}`,
       label: item.id,
       description: item.description ?? item.label,
@@ -1100,10 +1394,44 @@ export function ComposerRenderer({
           file,
         }))
       : [];
-    return [...toolCandidates, ...skillCandidates, ...fileCandidates];
-  }, [atMentionQuery, codingContext?.files, mode, skillExtensions, toolItems]);
+	    return [...toolCandidates, ...skillCandidates, ...fileCandidates];
+	  }, [atMentionQuery, codingContext?.files, mode, skillExtensions, toolItems]);
 
-  const needsApiKey = useCallback(
+	  const composerMentionLookup = useMemo(() => {
+	    const lookup = new Map<string, ComposerMentionDescriptor>();
+	    const add = (token: string | undefined, descriptor: ComposerMentionDescriptor) => {
+	      const normalized = token?.trim().toLowerCase();
+	      if (normalized && !lookup.has(normalized)) lookup.set(normalized, descriptor);
+	    };
+
+	    for (const item of toolItems) {
+	      const descriptor: ComposerMentionDescriptor = {
+	        kind: "tool",
+	        label: item.ui?.composer_label ?? item.label ?? item.id,
+	      };
+	      add(item.id, descriptor);
+	      add(item.id.split("/").pop(), descriptor);
+	    }
+	    for (const skill of skillExtensions) {
+	      const descriptor: ComposerMentionDescriptor = {
+	        kind: "skill",
+	        label: skill.label || skill.id,
+	      };
+	      add(skill.id, descriptor);
+	      add(skill.id.split("/").pop(), descriptor);
+	    }
+	    for (const file of codingContext?.files ?? []) {
+	      const descriptor: ComposerMentionDescriptor = {
+	        kind: "file",
+	        label: file.split("/").pop() || file,
+	      };
+	      add(file, descriptor);
+	      add(file.split("/").pop(), descriptor);
+	    }
+	    return lookup;
+	  }, [codingContext?.files, skillExtensions, toolItems]);
+
+	  const needsApiKey = useCallback(
     (profile: ModelProfile | null | undefined) => (
       profileNeedsApiKey(profile) && !locallyConfiguredProviders.has(profileProviderId(profile))
     ),
@@ -1125,6 +1453,24 @@ export function ComposerRenderer({
     });
   }, []);
 
+  const syncTextareaSelection = useCallback(() => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+    const next = {
+      start: textarea.selectionStart ?? input.length,
+      end: textarea.selectionEnd ?? textarea.selectionStart ?? input.length,
+    };
+    setTextareaSelection((current) => (
+      current.start === next.start && current.end === next.end ? current : next
+    ));
+  }, [input.length]);
+
+  const syncTextareaFocusAndSelection = useCallback(() => {
+    const textarea = textareaRef.current;
+    setTextareaFocused(Boolean(textarea && typeof document !== "undefined" && document.activeElement === textarea));
+    syncTextareaSelection();
+  }, [syncTextareaSelection]);
+
   const requestModelProfileSelect = useCallback(
     (profileId: string) => {
       const profile = selectableProfiles.find((item) => (
@@ -1142,6 +1488,12 @@ export function ComposerRenderer({
     },
     [needsApiKey, onModelProfileSelect, selectableProfiles],
   );
+
+  const registerChromeWidgetNode = useCallback((widgetId: string, node: HTMLDivElement | null) => {
+    const nodeMap = chromeWidgetNodeMapRef.current;
+    if (node) nodeMap.set(widgetId, node);
+    else nodeMap.delete(widgetId);
+  }, []);
 
   const saveProviderApiKey = useCallback(
     async (providerId: string, value: string) => {
@@ -1197,6 +1549,16 @@ export function ComposerRenderer({
   }, [atMentionCandidates.length]);
 
   useEffect(() => {
+    setTextareaSelection((current) => {
+      const nextStart = Math.min(current.start, input.length);
+      const nextEnd = Math.min(current.end, input.length);
+      return current.start === nextStart && current.end === nextEnd
+        ? current
+        : { start: nextStart, end: nextEnd };
+    });
+  }, [input.length]);
+
+  useEffect(() => {
     setSelectedModelCandidateIndex((current) => {
       if (modelCommandCandidates.length === 0) return 0;
       return Math.min(current, modelCommandCandidates.length - 1);
@@ -1226,7 +1588,7 @@ export function ComposerRenderer({
   }, [onModelCommandCandidatesClose, suppressPopovers]);
 
   useEffect(() => {
-    if (!atMentionOpen && !hasModelCommandCandidates) return;
+    if (!hasModelCommandCandidates) return;
     updateComposerPopoverAnchor();
     window.addEventListener("resize", updateComposerPopoverAnchor);
     window.addEventListener("scroll", updateComposerPopoverAnchor, true);
@@ -1234,7 +1596,7 @@ export function ComposerRenderer({
       window.removeEventListener("resize", updateComposerPopoverAnchor);
       window.removeEventListener("scroll", updateComposerPopoverAnchor, true);
     };
-  }, [atMentionOpen, hasModelCommandCandidates, updateComposerPopoverAnchor]);
+  }, [hasModelCommandCandidates, updateComposerPopoverAnchor]);
 
   useEffect(() => {
     textareaRef.current?.focus({ preventScroll: true });
@@ -1243,6 +1605,35 @@ export function ComposerRenderer({
     }, 80);
     return () => window.clearTimeout(focusTimer);
   }, []);
+
+  useEffect(() => {
+    const textarea = textareaRef.current;
+    if (!textarea || typeof document === "undefined" || typeof window === "undefined") return;
+
+    const sync = () => syncTextareaFocusAndSelection();
+    const syncAfterBrowserUpdate = () => {
+      window.requestAnimationFrame(sync);
+    };
+
+    textarea.addEventListener("focus", sync);
+    textarea.addEventListener("blur", sync);
+    textarea.addEventListener("click", syncAfterBrowserUpdate);
+    textarea.addEventListener("input", syncAfterBrowserUpdate);
+    textarea.addEventListener("keyup", syncAfterBrowserUpdate);
+    textarea.addEventListener("select", syncAfterBrowserUpdate);
+    document.addEventListener("selectionchange", syncAfterBrowserUpdate);
+    syncAfterBrowserUpdate();
+
+    return () => {
+      textarea.removeEventListener("focus", sync);
+      textarea.removeEventListener("blur", sync);
+      textarea.removeEventListener("click", syncAfterBrowserUpdate);
+      textarea.removeEventListener("input", syncAfterBrowserUpdate);
+      textarea.removeEventListener("keyup", syncAfterBrowserUpdate);
+      textarea.removeEventListener("select", syncAfterBrowserUpdate);
+      document.removeEventListener("selectionchange", syncAfterBrowserUpdate);
+    };
+  }, [syncTextareaFocusAndSelection]);
 
   useEffect(() => {
     const handleDocumentSlashFocus = (event: KeyboardEvent) => {
@@ -1333,13 +1724,14 @@ export function ComposerRenderer({
   const handleInputChange = useCallback(
     (value: string) => {
       onInputChange(value);
+      syncTextareaSelection();
       updateAtMentionStateFromInput(value);
 
       if (!value.startsWith("/") || value.startsWith("//")) {
         setSelectedCommandIndex(0);
       }
     },
-    [onInputChange, updateAtMentionStateFromInput],
+    [onInputChange, syncTextareaSelection, updateAtMentionStateFromInput],
   );
 
   const handleAtMentionSelect = useCallback(
@@ -1348,26 +1740,23 @@ export function ComposerRenderer({
       if (!textarea) return;
 
       const cursorPos = textarea.selectionStart;
-      const mentionText = candidate.kind === "tool" ? candidate.item.id : candidate.kind === "skill" ? candidate.skill.id : candidate.file;
-      const next = insertAtMentionText(input, cursorPos, mentionText);
-      onInputChange(next.value);
-      if (candidate.kind === "tool") {
-        onDropWidget?.(composerToolMentionWidget(candidate.item));
-      } else if (candidate.kind === "skill") {
-        onDropWidget?.(composerSkillMentionWidget(candidate.skill));
-      } else if (mode === "coding") {
-        onAtFileAttach?.(candidate.file);
-      }
+	      const mentionText = candidate.kind === "tool" ? candidate.item.id : candidate.kind === "skill" ? candidate.skill.id : candidate.file;
+	      const next = insertAtMentionText(input, cursorPos, mentionText);
+	      onInputChange(next.value);
+	      if (candidate.kind === "file" && mode === "coding") {
+	        onAtFileAttach?.(candidate.file);
+	      }
       setAtMentionOpen(false);
       setAtMentionQuery("");
 
       setTimeout(() => {
         textarea.setSelectionRange(next.cursor, next.cursor);
         textarea.focus();
+        setTextareaSelection({ start: next.cursor, end: next.cursor });
       }, 0);
     },
-    [input, mode, onAtFileAttach, onDropWidget, onInputChange],
-  );
+	    [input, mode, onAtFileAttach, onInputChange],
+	  );
 
   const attachFiles = useCallback(async (files: FileList | null) => {
     if (!files?.length) return;
@@ -1607,26 +1996,22 @@ export function ComposerRenderer({
     ],
   );
 
+  useEffect(() => {
+    if (!openModelStatusId) return;
+    if (!visibleModelStatusIndicators.some((indicator) => indicator.id === openModelStatusId)) {
+      setOpenModelStatusId(null);
+    }
+  }, [openModelStatusId, visibleModelStatusIndicators]);
+
+  useEffect(() => () => {
+    if (typeof window === "undefined") return;
+    for (const timeoutId of chromeWidgetCleanupTimersRef.current.values()) {
+      window.clearTimeout(timeoutId);
+    }
+    chromeWidgetCleanupTimersRef.current.clear();
+  }, []);
+
   const chromeWidgets: ComposerChromeWidgetSpec[] = [
-    {
-      id: "menu",
-      slot: "leading",
-      order: 10,
-      width: COMPOSER_CHROME_WIDTHS.icon,
-      render: () => (
-        <button
-          ref={menuButtonRef}
-          type="button"
-          tabIndex={chromeButtonTabIndex}
-          disabled={isGenerating}
-          title="追加"
-          onClick={() => setMenuOpen((value) => !value)}
-          className="h-8 w-8 flex flex-shrink-0 items-center justify-center text-zinc-400 hover:text-zinc-100 hover:bg-zinc-700/60 rounded-lg transition-colors disabled:opacity-50"
-        >
-          <WarmActionIcon kind="menu" size="md" />
-        </button>
-      ),
-    },
     {
       id: "file-attach",
       slot: "leading",
@@ -1641,9 +2026,9 @@ export function ComposerRenderer({
           onClick={() => fileInputRef.current?.click()}
           className={`${
             isNewConversation
-              ? "border border-zinc-700/70 bg-zinc-900/30 text-zinc-300 hover:border-zinc-600 hover:bg-zinc-800/70"
+              ? "text-zinc-200 hover:bg-zinc-800/60 hover:text-white"
               : "text-zinc-400 hover:text-zinc-100 hover:bg-zinc-700/60"
-          } h-8 w-8 flex flex-shrink-0 items-center justify-center rounded-lg transition-colors disabled:opacity-50`}
+          } ${isNewConversation ? "h-7 w-7" : "h-8 w-8"} flex flex-shrink-0 items-center justify-center rounded-lg transition-colors disabled:opacity-50`}
         >
           <WarmActionIcon kind="attach" size="md" />
         </button>
@@ -1656,16 +2041,16 @@ export function ComposerRenderer({
       mobile: "hide",
       width: COMPOSER_CHROME_WIDTHS.icon,
       render: () => (
-        <button
-          type="button"
-          tabIndex={chromeButtonTabIndex}
-          disabled={isGenerating || !voiceInputEnabled}
-          title={isVoiceListening ? "音声入力を停止" : voiceInputUseAi ? "音声入力（AI文字起こし）" : "音声入力"}
-          onClick={toggleVoiceInput}
-          className={`h-8 w-8 flex flex-shrink-0 items-center justify-center rounded-lg transition-colors disabled:opacity-50 ${
-            isVoiceListening ? "bg-rose-500/15 text-rose-300 hover:bg-rose-500/25" : "text-zinc-400 hover:text-zinc-100 hover:bg-zinc-700/60"
-          }`}
-        >
+	        <button
+	          type="button"
+	          tabIndex={chromeButtonTabIndex}
+	          disabled={isGenerating || !voiceInputEnabled}
+	          title={isVoiceListening ? "音声入力を停止" : voiceInputUseAi ? "音声入力（AI文字起こし）" : "音声入力"}
+	          onClick={toggleVoiceInput}
+	          className={`${isNewConversation ? "h-7 w-7" : "h-8 w-8"} flex flex-shrink-0 items-center justify-center rounded-lg transition-colors disabled:opacity-50 ${
+	            isVoiceListening ? "bg-rose-500/15 text-rose-300 hover:bg-rose-500/25" : "text-zinc-400 hover:text-zinc-100 hover:bg-zinc-700/60"
+	          }`}
+	        >
           <WarmActionIcon kind="mic" size="md" />
         </button>
       ),
@@ -1674,6 +2059,7 @@ export function ComposerRenderer({
       id: "mode",
       slot: "leading",
       order: 40,
+      visible: false,
       width: COMPOSER_CHROME_WIDTHS.mode,
       render: () => (
         <div className="group/mode relative flex min-w-0 max-w-full">
@@ -1724,7 +2110,7 @@ export function ComposerRenderer({
       id: "yolo-status",
       slot: "leading",
       order: 50,
-      visible: yoloMode,
+      visible: yoloMode && visibleModelStatusIndicators.length === 0,
       width: COMPOSER_CHROME_WIDTHS.badge,
       className: "overflow-hidden",
       render: () => (
@@ -1761,14 +2147,14 @@ export function ComposerRenderer({
       ),
     },
     {
-      id: "model-control",
+      id: "model-picker",
       slot: "trailing",
       order: 10,
       mobile: "hide",
       width: COMPOSER_CHROME_WIDTHS.model,
-      className: "rumi-model-control",
+      className: "rumi-composer-dock-control",
       render: () => (
-        <div className="rumi-model-control flex w-full min-w-0 items-center gap-1.5 bg-zinc-800/40 rounded-lg px-2.5 py-1 border border-zinc-700/40">
+        <div className={`${COMPOSER_CONTROL_SURFACE_CLASSNAME} rumi-model-control gap-2`}>
           <div
             title={contextTitle}
             className="h-3.5 w-3.5 flex-shrink-0 rounded-full p-[2px]"
@@ -1802,32 +2188,66 @@ export function ComposerRenderer({
               />
             )}
           </div>
-          {levels.length > 0 && (
-            <label className="inline-flex flex-shrink-0 items-center border-l border-zinc-700/50 pl-1.5 ml-0.5 text-[11px] font-medium text-zinc-500">
-              <select
-                value={thinkingLevel ?? levels[0]}
-                onChange={(event) => onThinkingLevelChange(event.target.value)}
-                disabled={isGenerating}
-                tabIndex={chromeButtonTabIndex}
-                className="bg-transparent text-[11px] font-medium text-zinc-400 outline-none cursor-pointer hover:text-zinc-200 transition-colors disabled:opacity-50"
-                aria-label="Thinking level"
-                title="Thinking level"
-              >
-                {levels.map((level) => (
-                  <option key={level} value={level} className="bg-zinc-900 text-zinc-100">
-                    {THINKING_LABELS[level] ?? level}
-                  </option>
-                ))}
-              </select>
-            </label>
-          )}
+        </div>
+      ),
+    },
+    {
+      id: "thinking-control",
+      slot: "trailing",
+      order: 20,
+      visible: levels.length > 0,
+      mobile: "hide",
+      width: COMPOSER_CHROME_WIDTHS.thinking,
+      className: "rumi-composer-dock-control",
+      render: () => (
+        <label className={`${COMPOSER_CONTROL_SURFACE_CLASSNAME} cursor-pointer justify-between gap-1.5 text-[11px] font-medium text-zinc-500`}>
+          <select
+            value={thinkingLevel ?? levels[0]}
+            onChange={(event) => onThinkingLevelChange(event.target.value)}
+            disabled={isGenerating}
+            tabIndex={chromeButtonTabIndex}
+            className="w-full cursor-pointer appearance-none bg-transparent text-right text-[11px] font-medium text-zinc-300 outline-none transition-colors hover:text-zinc-100 disabled:opacity-50"
+            aria-label="Thinking level"
+            title="Thinking level"
+          >
+            {levels.map((level) => (
+              <option key={level} value={level} className="bg-zinc-900 text-zinc-100">
+                {THINKING_LABELS[level] ?? level}
+              </option>
+            ))}
+          </select>
+          <ChevronDown size={12} className="pointer-events-none flex-shrink-0 text-zinc-500" />
+        </label>
+      ),
+    },
+    {
+      id: "model-status",
+      slot: "trailing",
+      order: 30,
+      visible: visibleModelStatusIndicators.length > 0,
+      mobile: "hide",
+      width: COMPOSER_CHROME_WIDTHS.status,
+      className: "rumi-composer-dock-control",
+      render: () => (
+        <div className={`${COMPOSER_CONTROL_SURFACE_CLASSNAME} justify-center px-2`}>
+          <div className="flex items-center gap-1">
+            {visibleModelStatusIndicators.map((indicator) => (
+              <ModelStatusIndicatorButton
+                key={indicator.id}
+                indicator={indicator}
+                open={openModelStatusId === indicator.id}
+                onToggle={() => setOpenModelStatusId((current) => current === indicator.id ? null : indicator.id)}
+                onClose={() => setOpenModelStatusId(null)}
+              />
+            ))}
+          </div>
         </div>
       ),
     },
     {
       id: "send",
       slot: "trailing",
-      order: 20,
+      order: 40,
       width: isNewConversation ? COMPOSER_CHROME_WIDTHS.sendLarge : COMPOSER_CHROME_WIDTHS.send,
       render: () => (
         <button
@@ -1836,22 +2256,110 @@ export function ComposerRenderer({
           disabled={!isGenerating && (!input.trim() && attachedFiles.length === 0)}
           onPointerDown={handleSendButtonPointerDown}
           onClick={handleSendButtonClick}
-          title={isGenerating ? (input.trim() ? "ステアを送る" : "停止") : "送信"}
-          className={`rumi-send-button ${
-            isNewConversation ? "h-9 w-9" : "w-8 h-8 max-[640px]:h-7 max-[640px]:w-7"
-          } flex flex-shrink-0 items-center justify-center bg-zinc-200 text-black rounded-lg disabled:opacity-30 disabled:cursor-not-allowed hover:bg-white shadow-sm transition-colors`}
+	          title={isGenerating ? (input.trim() ? "ステアを送る" : "停止") : "送信"}
+	          className={`rumi-send-button ${
+	            isNewConversation ? "h-7 w-7" : "w-8 h-8 max-[640px]:h-7 max-[640px]:w-7"
+	          } flex flex-shrink-0 items-center justify-center rounded-lg disabled:opacity-30 disabled:cursor-not-allowed transition-opacity ${
+            isGenerating
+              ? "bg-zinc-200 text-black hover:bg-white shadow-sm transition-colors"
+              : "bg-transparent p-0 hover:opacity-90"
+          }`}
         >
           {isGenerating && !input.trim() ? (
             <WarmActionIcon kind="stop" size={isNewConversation ? "lg" : "md"} className="shadow-none ring-0" />
           ) : isGenerating ? (
             <CornerDownRight size={15} strokeWidth={2.4} />
           ) : (
-            <WarmActionIcon kind="send" size={isNewConversation ? "lg" : "md"} className="shadow-none ring-0" />
+            <SendButtonIcon className="h-full w-full" />
           )}
         </button>
       ),
     },
   ];
+
+  const leadingChromeWidgets = composerChromeWidgetsForSlot(chromeWidgets, "leading");
+  const trailingChromeWidgets = composerChromeWidgetsForSlot(chromeWidgets, "trailing");
+  const newConversationInlineLeadingWidgets = leadingChromeWidgets.filter((widget) => widget.id === "file-attach");
+  const newConversationInlineActionWidgets = leadingChromeWidgets.filter((widget) => (
+    widget.id !== "file-attach" && widget.id !== "voice-input"
+  ));
+  const newConversationTopRightWidgets = leadingChromeWidgets.filter((widget) => widget.id === "voice-input");
+  const newConversationSendWidgets = trailingChromeWidgets.filter((widget) => widget.id === "send");
+  const newConversationTrailingWidgets = trailingChromeWidgets.filter((widget) => widget.id !== "send");
+  const animatedDockWidgetIds = (isNewConversation ? newConversationTrailingWidgets : trailingChromeWidgets).map((widget) => widget.id);
+  const animatedDockLayoutSignature = [
+    animatedDockWidgetIds.join("|"),
+    profileName,
+    selectedProviderLabel,
+    thinkingLevel ?? "",
+    levels.join("|"),
+    visibleModelStatusIndicators.map((indicator) => indicator.id).join("|"),
+  ].join("::");
+
+  useIsomorphicLayoutEffect(() => {
+    if (typeof window === "undefined") return;
+    const nextPositions = new Map<string, { left: number; top: number }>();
+
+    for (const widgetId of animatedDockWidgetIds) {
+      const node = chromeWidgetNodeMapRef.current.get(widgetId);
+      if (!node) continue;
+      const rect = node.getBoundingClientRect();
+      nextPositions.set(widgetId, { left: rect.left, top: rect.top });
+    }
+
+    if (!hasMeasuredChromeWidgetLayoutRef.current) {
+      chromeWidgetPositionMapRef.current = nextPositions;
+      hasMeasuredChromeWidgetLayoutRef.current = true;
+      return;
+    }
+
+    for (const [widgetId, nextPosition] of nextPositions.entries()) {
+      const node = chromeWidgetNodeMapRef.current.get(widgetId);
+      if (!node) continue;
+      const previousPosition = chromeWidgetPositionMapRef.current.get(widgetId);
+      const existingTimer = chromeWidgetCleanupTimersRef.current.get(widgetId);
+      if (existingTimer) {
+        window.clearTimeout(existingTimer);
+        chromeWidgetCleanupTimersRef.current.delete(widgetId);
+      }
+
+      const finishAnimation = () => {
+        if (chromeWidgetNodeMapRef.current.get(widgetId) !== node) return;
+        node.style.transition = "";
+        node.style.transform = "";
+        node.style.opacity = "";
+      };
+
+      if (!previousPosition) {
+        node.style.transition = "none";
+        node.style.opacity = "0";
+        node.style.transform = "translateX(10px)";
+        void node.getBoundingClientRect();
+        node.style.transition = "transform 220ms cubic-bezier(0.22, 1, 0.36, 1), opacity 180ms ease";
+        node.style.opacity = "1";
+        node.style.transform = "translateX(0)";
+        chromeWidgetCleanupTimersRef.current.set(widgetId, window.setTimeout(finishAnimation, 260));
+        continue;
+      }
+
+      const deltaX = previousPosition.left - nextPosition.left;
+      const deltaY = previousPosition.top - nextPosition.top;
+      if (Math.abs(deltaX) < 0.5 && Math.abs(deltaY) < 0.5) {
+        finishAnimation();
+        continue;
+      }
+
+      node.style.transition = "none";
+      node.style.transform = `translate(${deltaX}px, ${deltaY}px)`;
+      node.style.opacity = "1";
+      void node.getBoundingClientRect();
+      node.style.transition = "transform 240ms cubic-bezier(0.22, 1, 0.36, 1), opacity 180ms ease";
+      node.style.transform = "translate(0px, 0px)";
+      chromeWidgetCleanupTimersRef.current.set(widgetId, window.setTimeout(finishAnimation, 280));
+    }
+
+    chromeWidgetPositionMapRef.current = nextPositions;
+  }, [animatedDockLayoutSignature, animatedDockWidgetIds]);
 
   return (
     <div
@@ -1870,9 +2378,9 @@ export function ComposerRenderer({
           onSubmit={handleSubmitWithApiKeyGuard}
           className={`rumi-composer-frame ${
             isNewConversation
-              ? "rumi-composer-new min-h-[154px] rounded-3xl border-zinc-700/70 bg-[#242423]"
-              : "rounded-xl border-zinc-700/30 bg-[#2b2b2d] max-[640px]:rounded-xl"
-          } relative flex flex-col border overflow-visible shadow-2xl shadow-black/20 focus-within:border-zinc-500/60`}
+              ? "rumi-composer-new border-transparent bg-transparent"
+              : "rounded-xl border-zinc-700/30 bg-[#2b2b2d] shadow-2xl shadow-black/20 focus-within:border-zinc-500/60 max-[640px]:rounded-xl"
+          } relative flex flex-col border overflow-visible`}
         >
           {apiKeyPromptProfile && (
             <ProviderApiKeyPrompt
@@ -1962,7 +2470,6 @@ export function ComposerRenderer({
               onActiveIndexChange={setSelectedAtMentionIndex}
               onSelect={handleAtMentionSelect}
               onClose={() => setAtMentionOpen(false)}
-              style={composerPopoverStyle}
             />
           )}
 
@@ -2180,30 +2687,102 @@ export function ComposerRenderer({
             </div>
           )}
 
-          <textarea
-            ref={textareaRef}
-            autoFocus
-            value={input}
-            onChange={(event) => handleInputChange(event.target.value)}
-            placeholder={
-              isSteerMode
-                ? "実行中のAIへステアを入力..."
-                : mode === "coding"
-                ? "コーディング指示を入力... (@ でtool/ファイル)"
-                : placeholder
-            }
-            className={`${
-              isNewConversation
-                ? "rumi-composer-input-new min-h-[54px] px-6 pt-4 text-[18px] font-medium leading-[1.5] placeholder:text-zinc-500"
-                : "min-h-[34px] px-5 pt-3 text-[15px] max-[640px]:min-h-[32px] max-[640px]:px-3 max-[640px]:pt-2.5 max-[640px]:pb-0 max-[640px]:text-[13px]"
-            } rumi-composer-textarea w-full select-text bg-transparent border-none outline-none text-zinc-100 pb-0 resize-none max-h-[130px]`}
-            onKeyDownCapture={(event) => {
-              if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "a") {
-                event.stopPropagation();
+          {isNewConversation ? (
+            <div className="grid gap-1.5">
+              <div className="rumi-composer-main-panel grid min-h-[46px] grid-cols-[1.75rem_minmax(0,1fr)_auto] items-center gap-x-3 rounded-[1.4rem] border border-white/20 bg-[#242423] px-4 py-1">
+              <div className="self-center">
+                {newConversationInlineLeadingWidgets.map((widget) => (
+                  <ComposerChromeWidget key={widget.id} widget={widget} />
+                ))}
+                </div>
+                <div className="relative min-w-0 self-center">
+                  <ComposerMentionOverlay
+                    value={input}
+                    mentionLookup={composerMentionLookup}
+                    cursorPosition={textareaSelection.start}
+                    showCaret={textareaFocused && textareaSelection.start === textareaSelection.end}
+                    className="h-[22px] text-[16px] font-medium leading-[22px]"
+                  />
+                  <textarea
+                    ref={textareaRef}
+                    autoFocus
+                    rows={1}
+                    value={input}
+                    onChange={(event) => handleInputChange(event.target.value)}
+                    placeholder={
+                      isSteerMode
+                        ? "実行中のAIへステアを入力..."
+                        : mode === "coding"
+                        ? "コーディング指示を入力... (@ でtool/ファイル)"
+                        : placeholder
+                    }
+                    className={`rumi-composer-input-new rumi-composer-textarea relative z-10 h-[22px] min-h-[22px] w-full max-h-[72px] select-text resize-none overflow-hidden border-none bg-transparent px-0 pb-0 pt-0 text-[16px] font-medium leading-[22px] text-transparent outline-none placeholder:text-zinc-500 ${
+                      input ? "caret-transparent" : "caret-zinc-100"
+                    }`}
+                    onFocus={() => {
+                      setTextareaFocused(true);
+                      syncTextareaSelection();
+                    }}
+                    onBlur={() => setTextareaFocused(false)}
+                    onClick={syncTextareaSelection}
+                    onKeyUp={syncTextareaSelection}
+                    onSelect={syncTextareaSelection}
+                    onKeyDownCapture={(event) => {
+                      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "a") {
+                        event.stopPropagation();
+                      }
+                    }}
+                    onKeyDown={handleKeyDown}
+                  />
+                </div>
+                <div className="flex items-center justify-end gap-2 self-center">
+                  {newConversationInlineActionWidgets.map((widget) => (
+                    <ComposerChromeWidget key={widget.id} widget={widget} />
+                  ))}
+                  {newConversationTopRightWidgets.map((widget) => (
+                    <ComposerChromeWidget key={widget.id} widget={widget} />
+                  ))}
+                  {newConversationSendWidgets.map((widget) => (
+                    <ComposerChromeWidget key={widget.id} widget={widget} />
+                  ))}
+                </div>
+              </div>
+              {newConversationTrailingWidgets.length > 0 && (
+                <div className="rumi-composer-model-dock flex min-w-0 justify-end pr-5 max-[640px]:hidden">
+                  <div className="rumi-composer-dock-rail flex min-w-0 items-center justify-end gap-2">
+                    {newConversationTrailingWidgets.map((widget) => (
+                      <ComposerChromeWidget
+                        key={widget.id}
+                        widget={widget}
+                        onNodeChange={registerChromeWidgetNode}
+                      />
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : (
+            <textarea
+              ref={textareaRef}
+              autoFocus
+              value={input}
+              onChange={(event) => handleInputChange(event.target.value)}
+              placeholder={
+                isSteerMode
+                  ? "実行中のAIへステアを入力..."
+                  : mode === "coding"
+                  ? "コーディング指示を入力... (@ でtool/ファイル)"
+                  : placeholder
               }
-            }}
-            onKeyDown={handleKeyDown}
-          />
+              className="rumi-composer-textarea min-h-[34px] w-full max-h-[130px] select-text resize-none border-none bg-transparent px-5 pb-0 pt-3 text-[15px] text-zinc-100 outline-none max-[640px]:min-h-[32px] max-[640px]:px-3 max-[640px]:pb-0 max-[640px]:pt-2.5 max-[640px]:text-[13px]"
+              onKeyDownCapture={(event) => {
+                if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "a") {
+                  event.stopPropagation();
+                }
+              }}
+              onKeyDown={handleKeyDown}
+            />
+          )}
 
           {isSteerMode && (
             <div className="flex min-h-5 items-center gap-2 px-5 pt-1 text-[10px] leading-none text-zinc-500 max-[640px]:px-3">
@@ -2235,13 +2814,13 @@ export function ComposerRenderer({
             }}
           />
 
-          {((!isNewConversation && attachedFiles.length > 0) || droppedWidgets.length > 0) && (
-            <div className="px-5 pt-1.5 pb-0.5 flex flex-wrap gap-1 max-[640px]:px-3">
-              {!isNewConversation && attachedFiles.map((file) => (
-                <FileChip key={file.id} file={file} onRemove={onFileRemove} />
-              ))}
-              {droppedWidgets.map((widget) => (
-                <DroppedWidgetChip
+	          {((!isNewConversation && attachedFiles.length > 0) || visibleDroppedWidgets.length > 0) && (
+	            <div className="px-5 pt-1.5 pb-0.5 flex flex-wrap gap-1 max-[640px]:px-3">
+	              {!isNewConversation && attachedFiles.map((file) => (
+	                <FileChip key={file.id} file={file} onRemove={onFileRemove} />
+	              ))}
+	              {visibleDroppedWidgets.map((widget) => (
+	                <DroppedWidgetChip
                   key={widget.id}
                   widget={widget.type === "tool" ? { ...widget, enabled: selectedToolIdSet.has(widget.sourceItemId || widget.id) } : widget}
                   onAction={onWidgetAction}
@@ -2251,23 +2830,25 @@ export function ComposerRenderer({
             </div>
           )}
 
-          <div
-            className={`${
-              isNewConversation ? "rumi-composer-actions px-5 pb-4" : "px-4 pb-2 max-[640px]:px-2 max-[640px]:pb-1.5"
-            } flex items-center justify-between gap-2 pt-0 max-[640px]:gap-1.5`}
-          >
-            <div className="flex min-w-0 items-center gap-1 overflow-hidden">
-              {composerChromeWidgetsForSlot(chromeWidgets, "leading").map((widget) => (
-                <ComposerChromeWidget key={widget.id} widget={widget} />
-              ))}
-            </div>
+          {!isNewConversation && (
+            <div className="px-4 pb-2 pt-0 flex items-center justify-between gap-2 max-[640px]:gap-1.5 max-[640px]:px-2 max-[640px]:pb-1.5">
+              <div className="flex min-w-0 items-center gap-1 overflow-hidden">
+                {leadingChromeWidgets.map((widget) => (
+                  <ComposerChromeWidget key={widget.id} widget={widget} />
+                ))}
+              </div>
 
-            <div className="rumi-composer-submit-area flex flex-shrink-0 items-center justify-end gap-2">
-              {composerChromeWidgetsForSlot(chromeWidgets, "trailing").map((widget) => (
-                <ComposerChromeWidget key={widget.id} widget={widget} />
-              ))}
+              <div className="rumi-composer-submit-area flex flex-shrink-0 items-center justify-end gap-2">
+                {trailingChromeWidgets.map((widget) => (
+                  <ComposerChromeWidget
+                    key={widget.id}
+                    widget={widget}
+                    onNodeChange={registerChromeWidgetNode}
+                  />
+                ))}
+              </div>
             </div>
-          </div>
+          )}
 
           {mode === "coding" && codingContext && (
             <div className="px-5 pb-2 pt-0 flex flex-wrap items-center gap-2 text-[11px] text-zinc-500 max-[640px]:px-3">

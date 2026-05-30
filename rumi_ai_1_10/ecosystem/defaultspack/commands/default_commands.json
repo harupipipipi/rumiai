@@ -143,7 +143,7 @@
   {
     "id": "ultra_yolo",
     "name": "ultra",
-    "aliases": ["ultrayolo", "ultra_yolo"],
+    "aliases": ["ultra yolo", "ultrayolo", "ultra_yolo"],
     "label": "Ultra Yolo",
     "description": "Toggle automatic approval for tools that normally require permission. /ultra yolo, /ultrayolo, and /ultra_yolo all work.",
     "category": "mode",
