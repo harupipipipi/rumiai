@@ -564,6 +564,9 @@ def test_build_fallback_http_routes_contains_core_routes():
         def _handle_context_info(self, request_data, path_params):
             return {"status": "ok"}
 
+        def _handle_desktop_system_info(self, request_data, path_params):
+            return {"status": "ok"}
+
         def _handle_chat_redirect(self, request_data, path_params):
             return {"status": "ok"}
 

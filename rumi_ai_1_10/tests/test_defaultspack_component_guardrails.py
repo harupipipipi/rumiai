@@ -25,6 +25,9 @@ class _FakeServer:
     def _handle_context_info(self, *_args, **_kwargs):
         return {"status": "ok"}
 
+    def _handle_desktop_system_info(self, *_args, **_kwargs):
+        return {"status": "ok"}
+
     def _handle_chat_redirect(self, *_args, **_kwargs):
         return {"status": "ok"}
 
