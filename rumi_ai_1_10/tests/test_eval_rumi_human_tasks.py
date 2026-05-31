@@ -91,8 +91,10 @@ def test_validate_response_text_checks_length_required_and_forbidden_text() -> N
 
 
 def test_run_task_fetches_conversation_when_post_response_has_no_text(monkeypatch) -> None:
-    def fake_send_task_once(*args):
-        return "conversation-1", 200, {"status": "ok", "data": {"id": "conversation-1"}}
+    monkeypatch.setattr(eval_rumi, "_create_conversation", lambda *args: "conversation-1")
+
+    def fake_send_turn_once(*args):
+        return 200, {"status": "ok", "data": {"id": "conversation-1"}}
 
     def fake_get_conversation(*args):
         return (
@@ -108,7 +110,7 @@ def test_run_task_fetches_conversation_when_post_response_has_no_text(monkeypatc
             },
         )
 
-    monkeypatch.setattr(eval_rumi, "_send_task_once", fake_send_task_once)
+    monkeypatch.setattr(eval_rumi, "_send_turn_once", fake_send_turn_once)
     monkeypatch.setattr(eval_rumi, "_get_conversation", fake_get_conversation)
 
     result = eval_rumi.run_task(
@@ -130,8 +132,10 @@ def test_run_task_fetches_conversation_when_post_response_has_no_text(monkeypatc
 
 
 def test_run_task_keeps_preview_for_quality_error(monkeypatch) -> None:
-    def fake_send_task_once(*args):
-        return "conversation-1", 200, {"status": "ok", "data": {"id": "conversation-1"}}
+    monkeypatch.setattr(eval_rumi, "_create_conversation", lambda *args: "conversation-1")
+
+    def fake_send_turn_once(*args):
+        return 200, {"status": "ok", "data": {"id": "conversation-1"}}
 
     def fake_get_conversation(*args):
         return (
@@ -146,7 +150,7 @@ def test_run_task_keeps_preview_for_quality_error(monkeypatch) -> None:
             },
         )
 
-    monkeypatch.setattr(eval_rumi, "_send_task_once", fake_send_task_once)
+    monkeypatch.setattr(eval_rumi, "_send_turn_once", fake_send_turn_once)
     monkeypatch.setattr(eval_rumi, "_get_conversation", fake_get_conversation)
 
     result = eval_rumi.run_task(
@@ -162,6 +166,47 @@ def test_run_task_keeps_preview_for_quality_error(monkeypatch) -> None:
     assert result.classification == "quality_error"
     assert result.response_preview == "短い回答"
     assert result.response_chars == len("短い回答")
+
+
+def test_run_task_sends_multiple_turns_in_one_conversation(monkeypatch) -> None:
+    sent_turns = []
+    monkeypatch.setattr(eval_rumi, "_create_conversation", lambda *args: "conversation-1")
+
+    def fake_send_turn_once(base_url, token, model, timeout, conversation_id, turn):
+        sent_turns.append((conversation_id, turn["prompt"]))
+        return (
+            200,
+            {
+                "status": "ok",
+                "data": {
+                    "content": "answer for " + turn["prompt"],
+                },
+            },
+        )
+
+    monkeypatch.setattr(eval_rumi, "_send_turn_once", fake_send_turn_once)
+
+    result = eval_rumi.run_task(
+        "http://127.0.0.1:8765",
+        "token",
+        "google/gemma-4-31b-it",
+        1,
+        {
+            "id": "multi",
+            "turns": [
+                {"prompt": "first", "min_chars": 5, "must_include": "first"},
+                {"prompt": "second", "min_chars": 5, "must_include": "second"},
+            ],
+        },
+        0,
+    )
+
+    assert result.ok is True
+    assert result.turn_count == 2
+    assert sent_turns == [
+        ("conversation-1", "first"),
+        ("conversation-1", "second"),
+    ]
 
 
 def test_load_tasks_preserves_content_expectations(tmp_path: Path) -> None:
@@ -191,5 +236,45 @@ def test_load_tasks_preserves_content_expectations(tmp_path: Path) -> None:
             "min_chars": 42,
             "must_include": ["TODO"],
             "must_not_include": ["https://"],
+        }
+    ]
+
+
+def test_load_tasks_supports_multi_turn_tasks(tmp_path: Path) -> None:
+    path = tmp_path / "tasks.json"
+    path.write_text(
+        json.dumps(
+            [
+                {
+                    "id": "multi",
+                    "min_chars": 10,
+                    "must_include": "final",
+                    "turns": [
+                        "first prompt",
+                        {
+                            "prompt": "second prompt",
+                            "must_not_include": "https://",
+                        },
+                    ],
+                }
+            ],
+        ),
+        encoding="utf-8",
+    )
+
+    tasks = eval_rumi._load_tasks(path, default_min_chars=20)
+
+    assert tasks == [
+        {
+            "id": "multi",
+            "turns": [
+                {"prompt": "first prompt", "min_chars": 10},
+                {
+                    "prompt": "second prompt",
+                    "min_chars": 10,
+                    "must_include": ["final"],
+                    "must_not_include": ["https://"],
+                },
+            ],
         }
     ]

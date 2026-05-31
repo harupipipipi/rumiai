@@ -77,6 +77,7 @@ class EvalResult:
     error: str = ""
     response_preview: str = ""
     response_chars: int = 0
+    turn_count: int = 1
 
     def to_dict(self) -> dict[str, Any]:
         return dataclasses.asdict(self)
@@ -285,6 +286,20 @@ def _validate_response_text(task: dict[str, Any], text: str) -> tuple[bool, str]
     return True, ""
 
 
+def _task_turns(task: dict[str, Any]) -> list[dict[str, Any]]:
+    turns = task.get("turns")
+    if isinstance(turns, list) and turns:
+        return turns
+    return [
+        {
+            "prompt": task["prompt"],
+            "min_chars": task.get("min_chars", 20),
+            "must_include": task.get("must_include", []),
+            "must_not_include": task.get("must_not_include", []),
+        }
+    ]
+
+
 def _create_conversation(
     base_url: str,
     token: str,
@@ -340,12 +355,31 @@ def _send_task_once(
         timeout,
         "eval " + task["id"],
     )
+    status, envelope = _send_turn_once(
+        base_url,
+        token,
+        model,
+        timeout,
+        conversation_id,
+        {"prompt": task["prompt"]},
+    )
+    return conversation_id, status, envelope
+
+
+def _send_turn_once(
+    base_url: str,
+    token: str,
+    model: str,
+    timeout: float,
+    conversation_id: str,
+    turn: dict[str, Any],
+) -> tuple[int, dict[str, Any]]:
     payload = {
         "conversation_id": conversation_id,
         "model": model,
         "message": {
             "role": "user",
-            "content": task["prompt"],
+            "content": turn["prompt"],
             "metadata": {"selected_tools": []},
         },
         "tools": [],
@@ -365,7 +399,7 @@ def _send_task_once(
         payload,
         timeout,
     )
-    return conversation_id, status, envelope
+    return status, envelope
 
 
 def run_task(
@@ -377,6 +411,7 @@ def run_task(
     retries: int,
 ) -> EvalResult:
     started = time.monotonic()
+    turns = _task_turns(task)
     attempts = 0
     conversation_id = ""
     last_error = ""
@@ -387,18 +422,34 @@ def run_task(
     for attempt in range(retries + 1):
         attempts = attempt + 1
         try:
-            conversation_id, status, envelope = _send_task_once(
+            conversation_id = _create_conversation(
                 base_url,
                 token,
                 model,
                 timeout,
-                task,
+                "eval " + task["id"],
             )
-            last_status = status
-            if _is_ok_chat_response(envelope):
+            for turn_index, turn in enumerate(turns, start=1):
+                status, envelope = _send_turn_once(
+                    base_url,
+                    token,
+                    model,
+                    timeout,
+                    conversation_id,
+                    turn,
+                )
+                last_status = status
+                if not _is_ok_chat_response(envelope):
+                    error_payload = envelope.get("error") if isinstance(envelope, dict) else None
+                    last_error = json.dumps(
+                        error_payload or envelope,
+                        ensure_ascii=False,
+                    )[:500]
+                    last_classification = "app_error"
+                    break
                 response_text = _extract_response_text(envelope)
-                if not response_text and conversation_id:
-                    _, conversation_envelope = _get_conversation(
+                if not response_text:
+                    _conversation_status, conversation_envelope = _get_conversation(
                         base_url,
                         token,
                         timeout,
@@ -408,13 +459,14 @@ def run_task(
                 last_preview = response_text[:240]
                 last_response_chars = len(response_text)
                 content_ok, content_error = _validate_response_text(
-                    task,
+                    turn,
                     response_text,
                 )
                 if not content_ok:
-                    last_error = content_error
+                    last_error = "turn {}: {}".format(turn_index, content_error)
                     last_classification = "quality_error"
                     break
+            else:
                 return EvalResult(
                     task_id=task["id"],
                     ok=True,
@@ -422,13 +474,11 @@ def run_task(
                     attempts=attempts,
                     elapsed_seconds=time.monotonic() - started,
                     conversation_id=conversation_id,
-                    http_status=status,
-                    response_preview=response_text[:240],
-                    response_chars=len(response_text),
+                    http_status=last_status,
+                    response_preview=last_preview,
+                    response_chars=last_response_chars,
+                    turn_count=len(turns),
                 )
-            error_payload = envelope.get("error") if isinstance(envelope, dict) else None
-            last_error = json.dumps(error_payload or envelope, ensure_ascii=False)[:500]
-            last_classification = "app_error"
         except Exception as exc:
             last_classification = _classify_exception(exc)
             if isinstance(exc, HttpJsonError):
@@ -456,7 +506,39 @@ def run_task(
         error=last_error,
         response_preview=last_preview,
         response_chars=last_response_chars,
+        turn_count=len(turns),
     )
+
+
+def _normalize_turn(
+    raw_turn: Any,
+    task_id: str,
+    turn_index: int,
+    default_min_chars: int,
+) -> dict[str, Any]:
+    if isinstance(raw_turn, str):
+        raw = {"prompt": raw_turn}
+    elif isinstance(raw_turn, dict):
+        raw = raw_turn
+    else:
+        raise ValueError(
+            "task {} turn {} is not an object or string".format(
+                task_id,
+                turn_index,
+            )
+        )
+    prompt = str(raw.get("prompt") or "").strip()
+    if not prompt:
+        raise ValueError("task {} turn {} has no prompt".format(task_id, turn_index))
+    turn: dict[str, Any] = {
+        "prompt": prompt,
+        "min_chars": int(raw.get("min_chars", default_min_chars)),
+    }
+    for field_name in ("must_include", "must_not_include"):
+        values = _string_list(raw.get(field_name), field_name)
+        if values:
+            turn[field_name] = values
+    return turn
 
 
 def _load_tasks(path: Path | None, default_min_chars: int) -> list[dict[str, Any]]:
@@ -476,13 +558,28 @@ def _load_tasks(path: Path | None, default_min_chars: int) -> list[dict[str, Any
         if not isinstance(item, dict):
             raise ValueError("task {} is not an object".format(index))
         task_id = str(item.get("id") or "task_{}".format(index + 1))
+        task_default_min_chars = int(item.get("min_chars", default_min_chars))
+        turns_raw = item.get("turns")
+        if turns_raw is not None:
+            if not isinstance(turns_raw, list) or not turns_raw:
+                raise ValueError("task {} turns must be a non-empty list".format(task_id))
+            turns = [
+                _normalize_turn(turn, task_id, turn_index, task_default_min_chars)
+                for turn_index, turn in enumerate(turns_raw, start=1)
+            ]
+            for field_name in ("must_include", "must_not_include"):
+                values = _string_list(item.get(field_name), field_name)
+                if values and not turns[-1].get(field_name):
+                    turns[-1][field_name] = values
+            tasks.append({"id": task_id, "turns": turns})
+            continue
         prompt = str(item.get("prompt") or "").strip()
         if not prompt:
             raise ValueError("task {} has no prompt".format(task_id))
         task: dict[str, Any] = {
             "id": task_id,
             "prompt": prompt,
-            "min_chars": int(item.get("min_chars", default_min_chars)),
+            "min_chars": task_default_min_chars,
         }
         for field_name in ("must_include", "must_not_include"):
             values = _string_list(item.get(field_name), field_name)
@@ -550,11 +647,12 @@ def main(argv: list[str] | None = None) -> int:
                 out.flush()
                 status = "ok" if result.ok else result.classification
                 print(
-                    "[{}] {} in {:.1f}s after {} attempt(s)".format(
+                    "[{}] {} in {:.1f}s after {} attempt(s), {} turn(s)".format(
                         result.task_id,
                         status,
                         result.elapsed_seconds,
                         result.attempts,
+                        result.turn_count,
                     )
                 )
 
