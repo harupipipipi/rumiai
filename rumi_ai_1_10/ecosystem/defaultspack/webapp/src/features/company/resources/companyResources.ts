@@ -1,0 +1,25 @@
+import { api, arrayFromRecord } from "../../../lib/api";
+
+export const companyResources = {
+  listCompanies: api.listCompanies,
+  getCompanyStatus: api.getCompanyStatus,
+  getP2PStatus: api.getP2PStatus,
+  getP2PIdentity: api.getP2PIdentity,
+  listP2PPeers: api.listP2PPeers,
+  listCompanyAgents: api.listCompanyAgents,
+  listCompanyChannels: api.listCompanyChannels,
+  listCompanyTasks: api.listCompanyTasks,
+  listCompanyInboundRoutes: api.listCompanyInboundRoutes,
+  listCompanyMessages: api.listCompanyMessages,
+  sendCompanyMessage: api.sendCompanyMessage,
+  upsertCompanyInboundRoute: api.upsertCompanyInboundRoute,
+  deleteCompanyInboundRoute: api.deleteCompanyInboundRoute,
+  updateCompanySettings: api.updateCompanySettings,
+  startP2PPairing: api.startP2PPairing,
+  sendP2PMessage: api.sendP2PMessage,
+  createCompanyTask: api.createCompanyTask,
+  updateCompanyTask: api.updateCompanyTask,
+  bootstrapCompanyWorkspace: api.bootstrapCompanyWorkspace,
+};
+
+export { arrayFromRecord };

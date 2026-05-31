@@ -7,7 +7,8 @@ import { ArtifactPreviewDialog, type ArtifactPreviewDialogItem } from "../compon
 import { cn } from "../lib/cn";
 import { elapsedDurationLabel, formatCompactDuration, timestampMs } from "../lib/duration";
 import { buildToolActivityGroups, toolFolderFor, type ToolActivityGroup } from "../lib/toolActivity";
-import { api, type BrowserScreenshot, type ChatContentBlock } from "../lib/api";
+import type { ChatContentBlock } from "../lib/api";
+import { chatMessageResources, type BrowserScreenshot } from "../features/chat/resources/chatMessageResources";
 import type { ChatMessagesRendererProps } from "./types";
 
 type ImagePreviewDetail = {
@@ -337,7 +338,7 @@ async function writeClipboardText(text: string): Promise<void> {
     }
   }
 
-  await api.writeClipboard(text);
+  await chatMessageResources.writeClipboard(text);
 }
 
 function MessageActionBar({
@@ -831,7 +832,7 @@ function BrowserScreenshotStrip({
     if (!message.conversationId || !canFetchStoredScreenshots) return () => {
       cancelled = true;
     };
-    void api.getBrowserScreenshots(message.conversationId, message.id)
+    void chatMessageResources.getBrowserScreenshots(message.conversationId, message.id)
       .then((result) => {
         if (!cancelled) {
           setScreenshots(result.screenshots ?? []);

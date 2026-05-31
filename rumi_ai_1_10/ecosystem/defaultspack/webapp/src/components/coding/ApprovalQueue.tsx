@@ -1,8 +1,9 @@
 import { Check, RefreshCw, ShieldAlert, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
-import { api, type CodingApprovalDecision, type CodingApprovalRequest } from "../../lib/api";
+import type { CodingApprovalDecision, CodingApprovalRequest } from "../../lib/api";
 import { cn } from "../../lib/cn";
+import { codingResources } from "../../features/coding/resources/codingResources";
 
 function formatApprovalTime(value?: number): string {
   if (!value) return "";
@@ -34,7 +35,7 @@ export function ApprovalQueue({
     if (initialApprovals) return;
     setError(null);
     try {
-      const result = await api.listCodingApprovals({ limit, include_expired: true });
+      const result = await codingResources.listCodingApprovals({ limit, include_expired: true });
       setRequests(result.requests);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -51,10 +52,10 @@ export function ApprovalQueue({
     setError(null);
     try {
       if (decision === "approve") {
-        const approved = await api.approveCodingApproval(requestId);
+        const approved = await codingResources.approveCodingApproval(requestId);
         if (request) onApproved?.(approved, request);
       } else {
-        await api.denyCodingApproval(requestId, "Denied from coding cockpit");
+        await codingResources.denyCodingApproval(requestId, "Denied from coding cockpit");
       }
       await load();
       if (initialApprovals) {

@@ -774,7 +774,7 @@ function CalendarComposerPanel({
       aria-label="Calendar month"
       className="relative h-full min-h-0 w-full overflow-hidden rounded-[26px] border border-zinc-800 bg-[#101112] shadow-[0_24px_80px_rgba(0,0,0,0.36)]"
     >
-      <div className="pointer-events-none absolute left-4 top-3 z-20 flex items-center gap-2">
+      <div className="pointer-events-none absolute left-4 top-3 rumi-layer-local-popover flex items-center gap-2">
         <button
           type="button"
           aria-label="前の月"
@@ -888,7 +888,7 @@ function CalendarComposerPanel({
           key={`${activeEditor.mode}-${activeEditor.itemId ?? "new"}-${activeEditor.startKey}-${activeEditor.endKey}`}
           role="dialog"
           aria-label={`${calendarRangeLabel(activeEditor.startKey, activeEditor.endKey)}に追加`}
-          className="rumi-calendar-popover absolute z-30 w-[min(320px,calc(100%-24px))] rounded-2xl border border-zinc-700 bg-zinc-950/95 p-3 text-left shadow-[0_24px_70px_rgba(0,0,0,0.65)] backdrop-blur"
+          className="rumi-calendar-popover absolute rumi-layer-global-overlay w-[min(320px,calc(100%-24px))] rounded-2xl border border-zinc-700 bg-zinc-950/95 p-3 text-left shadow-[0_24px_70px_rgba(0,0,0,0.65)] backdrop-blur"
           style={popoverStyle}
           onPointerDown={(event) => event.stopPropagation()}
           onClick={(event) => event.stopPropagation()}
@@ -964,7 +964,7 @@ function CalendarComposerPanel({
                 <div
                   role="listbox"
                   aria-label="カレンダー時刻候補"
-                  className="absolute bottom-11 left-0 z-40 max-h-[300px] w-[210px] overflow-y-auto rounded-[22px] border border-zinc-700 bg-zinc-800 p-1.5 shadow-[0_18px_60px_rgba(0,0,0,0.55)]"
+                  className="absolute bottom-11 left-0 rumi-layer-global-overlay max-h-[300px] w-[210px] overflow-y-auto rounded-[22px] border border-zinc-700 bg-zinc-800 p-1.5 shadow-[0_18px_60px_rgba(0,0,0,0.55)]"
                 >
                   {timeOptions.map((option) => (
                     <button
@@ -4282,7 +4282,7 @@ export default function App() {
                   />
                 )}
                 {visibleBrowserApproval && (
-                  <div className="pointer-events-auto absolute bottom-full left-1/2 z-[60] mb-2 w-[min(520px,calc(100vw-32px))] -translate-x-1/2 rounded-xl border border-orange-500/30 bg-zinc-950 p-3 shadow-2xl">
+                  <div className="pointer-events-auto absolute bottom-full left-1/2 rumi-layer-modal mb-2 w-[min(520px,calc(100vw-32px))] -translate-x-1/2 rounded-xl border border-orange-500/30 bg-zinc-950 p-3 shadow-2xl">
                     <div className="flex items-center justify-between gap-3">
                       <div className="min-w-0">
                         <p className="truncate text-sm font-medium text-zinc-100">{visibleBrowserApproval.action} の承認が必要です</p>
@@ -4304,7 +4304,7 @@ export default function App() {
                   </div>
                 )}
                 {!visibleBrowserApproval && runtimeApproval && (
-                  <div className="pointer-events-auto absolute bottom-full left-1/2 z-[60] mb-2 w-[min(560px,calc(100vw-32px))] -translate-x-1/2 rounded-xl border border-amber-500/30 bg-zinc-950 p-3 shadow-2xl">
+                  <div className="pointer-events-auto absolute bottom-full left-1/2 rumi-layer-modal mb-2 w-[min(560px,calc(100vw-32px))] -translate-x-1/2 rounded-xl border border-amber-500/30 bg-zinc-950 p-3 shadow-2xl">
                     <div className="flex items-center justify-between gap-3">
                       <div className="min-w-0">
                         <div className="flex min-w-0 items-center gap-2">
@@ -4356,7 +4356,7 @@ export default function App() {
                   </div>
                 )}
                 {!visibleBrowserApproval && !runtimeApproval && staleRuntimeApprovalNotice && (
-                  <div className="pointer-events-auto absolute bottom-full left-1/2 z-[60] mb-2 w-[min(560px,calc(100vw-32px))] -translate-x-1/2 rounded-xl border border-zinc-700 bg-zinc-950 p-3 shadow-2xl">
+                  <div className="pointer-events-auto absolute bottom-full left-1/2 rumi-layer-modal mb-2 w-[min(560px,calc(100vw-32px))] -translate-x-1/2 rounded-xl border border-zinc-700 bg-zinc-950 p-3 shadow-2xl">
                     <div className="min-w-0">
                       <div className="flex min-w-0 items-center gap-2">
                         <span className="shrink-0 rounded border border-zinc-700 bg-zinc-900 px-1.5 py-0.5 text-[10px] text-zinc-400">

@@ -626,9 +626,9 @@ function CategorySwitcher({
 
       {isOpen && (
         <>
-          <div className="fixed inset-0 z-40" onClick={() => setIsOpen(false)} />
+          <div className="fixed inset-0 rumi-layer-global-overlay" onClick={() => setIsOpen(false)} />
           <div
-            className="fixed z-50 bg-zinc-900 border border-zinc-800 rounded-lg shadow-xl overflow-hidden min-w-[150px]"
+            className="fixed rumi-layer-modal bg-zinc-900 border border-zinc-800 rounded-lg shadow-xl overflow-hidden min-w-[150px]"
             style={menuPosition}
           >
             <div className="px-2 py-1.5 border-b border-zinc-800/60">
@@ -720,9 +720,9 @@ function SidebarSearchControl({
 
       {isOpen && (
         <>
-          <div className="fixed inset-0 z-40" onClick={() => setIsOpen(false)} />
+          <div className="fixed inset-0 rumi-layer-global-overlay" onClick={() => setIsOpen(false)} />
           <div
-            className="fixed z-50 w-64 rounded-xl border border-zinc-700/70 bg-zinc-950 p-2 shadow-2xl"
+            className="fixed rumi-layer-modal w-64 rounded-xl border border-zinc-700/70 bg-zinc-950 p-2 shadow-2xl"
             style={menuPosition}
           >
             <label className="relative block">
@@ -1396,7 +1396,7 @@ export function RightSidebar({
         />
       )}
 
-      <span className="absolute right-full mr-2 px-2 py-1 bg-zinc-800 text-zinc-200 text-[10px] rounded-md opacity-0 group-hover/btn:opacity-100 pointer-events-none transition-opacity whitespace-nowrap border border-zinc-700 shadow-lg z-50">
+      <span className="absolute right-full mr-2 px-2 py-1 bg-zinc-800 text-zinc-200 text-[10px] rounded-md opacity-0 group-hover/btn:opacity-100 pointer-events-none transition-opacity whitespace-nowrap border border-zinc-700 shadow-lg rumi-layer-modal">
         {item.label}
         <span className={cn("ml-1 text-[8px] px-1 py-px rounded", categoryColor(item.category, "badge"))}>
           {item.category}
@@ -1465,7 +1465,7 @@ export function RightSidebar({
             role="separator"
             aria-label="Tool panel幅を変更"
             title="Tool panel幅を変更"
-            className="absolute left-0 top-0 z-20 h-full w-1.5 cursor-col-resize bg-transparent transition-colors hover:bg-zinc-700/60"
+            className="absolute left-0 top-0 rumi-layer-local-popover h-full w-1.5 cursor-col-resize bg-transparent transition-colors hover:bg-zinc-700/60"
             onPointerDown={startPanelResize}
           />
           <div className="h-10 flex items-center justify-between px-2.5 border-b border-zinc-800/60 flex-shrink-0">
@@ -1637,7 +1637,7 @@ export function RightSidebar({
                                 )}
                               </label>
                               {toolManagerSearchQuery.trim() && isToolManagerSearchOpen && (
-                                <div data-testid="tool-manager-candidates" className="absolute left-0 right-0 top-[calc(100%+6px)] z-30 overflow-hidden rounded-xl border border-zinc-700/70 bg-zinc-950 py-1 shadow-2xl">
+                                <div data-testid="tool-manager-candidates" className="absolute left-0 right-0 top-[calc(100%+6px)] rumi-layer-global-overlay overflow-hidden rounded-xl border border-zinc-700/70 bg-zinc-950 py-1 shadow-2xl">
                                   <div className="flex items-center justify-between border-b border-zinc-800 px-3 py-2 text-[10px] text-zinc-600">
                                     <span>候補</span>
                                     <span>{toolManagerSearchItems.length} / {toolManagerBaseItems.length}</span>
@@ -1969,7 +1969,7 @@ export function RightSidebar({
             </button>
             {placementMenuOpen && (
               <div
-                className="absolute left-full top-0 z-50 ml-2 w-56 overflow-hidden rounded-xl border border-zinc-700/70 bg-zinc-950 py-1 shadow-2xl"
+                className="absolute left-full top-0 rumi-layer-modal ml-2 w-56 overflow-hidden rounded-xl border border-zinc-700/70 bg-zinc-950 py-1 shadow-2xl"
                 onPointerDown={(event) => event.stopPropagation()}
               >
                 <div className="border-b border-zinc-800 px-3 py-2">
@@ -2072,7 +2072,7 @@ export function RightSidebar({
                     <span className="absolute -top-0.5 -right-0.5 text-[7px] bg-zinc-700 text-zinc-300 px-0.5 rounded-full leading-tight">
                       {group.count}
                     </span>
-                    <span className="absolute right-full mr-2 px-2 py-1 bg-zinc-800 text-zinc-200 text-[10px] rounded-md opacity-0 group-hover/group:opacity-100 pointer-events-none transition-opacity whitespace-nowrap border border-zinc-700 shadow-lg z-40">
+                    <span className="absolute right-full mr-2 px-2 py-1 bg-zinc-800 text-zinc-200 text-[10px] rounded-md opacity-0 group-hover/group:opacity-100 pointer-events-none transition-opacity whitespace-nowrap border border-zinc-700 shadow-lg rumi-layer-global-overlay">
                       {group.path?.length && group.path.length > 1 ? group.path.join(" / ") : group.label || TOOL_GROUP_LABELS[group.id] || group.id}
                     </span>
                     {(isGroupActive || isGroupOpen) && (
@@ -2081,7 +2081,7 @@ export function RightSidebar({
                   </button>
                   {openToolGroupMenu === group.id && (
                     <div
-                      className="fixed z-50 w-56 overflow-hidden rounded-xl border border-zinc-700/70 bg-zinc-950 py-1 text-left shadow-2xl"
+                      className="fixed rumi-layer-modal w-56 overflow-hidden rounded-xl border border-zinc-700/70 bg-zinc-950 py-1 text-left shadow-2xl"
                       style={toolGroupMenuPosition ? { top: `${toolGroupMenuPosition.top}px`, right: `${toolGroupMenuPosition.right}px` } : undefined}
                     >
                       <div className="border-b border-zinc-800 px-3 py-2">
@@ -2168,7 +2168,7 @@ export function RightSidebar({
             const enabled = selectedToolIdSet.has(item.id);
             return (
               <div
-                className="fixed z-[70] w-44 overflow-hidden rounded-xl border border-zinc-700/70 bg-zinc-950 py-1 text-left shadow-2xl"
+                className="fixed rumi-layer-command-palette w-44 overflow-hidden rounded-xl border border-zinc-700/70 bg-zinc-950 py-1 text-left shadow-2xl"
                 style={{ left: `${contextMenu.x}px`, top: `${contextMenu.y}px` }}
                 onPointerDown={(event) => event.stopPropagation()}
               >
@@ -2240,7 +2240,7 @@ export function RightSidebar({
                     title="Settings"
                   >
             <Settings size={16} className="h-4 w-4 shrink-0" />
-            <span className="absolute right-full mr-2 px-2 py-1 bg-zinc-800 text-zinc-200 text-[10px] rounded-md opacity-0 group-hover/btn:opacity-100 pointer-events-none transition-opacity whitespace-nowrap border border-zinc-700 shadow-lg z-50">
+            <span className="absolute right-full mr-2 px-2 py-1 bg-zinc-800 text-zinc-200 text-[10px] rounded-md opacity-0 group-hover/btn:opacity-100 pointer-events-none transition-opacity whitespace-nowrap border border-zinc-700 shadow-lg rumi-layer-modal">
               Settings
             </span>
           </button>

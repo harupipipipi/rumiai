@@ -1,7 +1,8 @@
 import { GitCompare, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { api, type CodingDiffResponse, type CodingGitStatus } from "../../lib/api";
+import type { CodingDiffResponse, CodingGitStatus } from "../../lib/api";
+import { codingResources } from "../../features/coding/resources/codingResources";
 
 function collectFiles(status: CodingGitStatus | null): string[] {
   if (!status) return [];
@@ -30,8 +31,8 @@ export function DiffPanel({
     setError(null);
     try {
       const [nextStatus, nextDiff] = await Promise.all([
-        api.getGitStatus({ workspace_id: workspaceId }),
-        api.getGitDiff({ workspace_id: workspaceId }),
+        codingResources.getGitStatus({ workspace_id: workspaceId }),
+        codingResources.getGitDiff({ workspace_id: workspaceId }),
       ]);
       setStatus(nextStatus);
       setDiff(nextDiff);

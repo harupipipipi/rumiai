@@ -1,8 +1,9 @@
 import { Play, Terminal as TerminalIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
-import { api, type CodingTerminalResponse } from "../../lib/api";
+import type { CodingTerminalResponse } from "../../lib/api";
 import { cn } from "../../lib/cn";
+import { codingResources } from "../../features/coding/resources/codingResources";
 
 type TerminalLog = CodingTerminalResponse & {
   id: string;
@@ -79,7 +80,7 @@ export function TerminalPanel({
     const timeout = 30;
     setBusy(true);
     try {
-      const result = await api.runTerminalCommand(nextCommand, { workspace_id: workspaceId, timeout });
+      const result = await codingResources.runTerminalCommand(nextCommand, { workspace_id: workspaceId, timeout });
       pushLog({ ...result, id: `${Date.now()}:${nextCommand}`, timeout, workspace_id: workspaceId ?? null });
     } catch (err) {
       pushLog({
@@ -111,7 +112,7 @@ export function TerminalPanel({
         item.id === pending.id ? { ...item, replay_status: "retrying" } : item
       )));
       try {
-        const result = await api.runTerminalCommand(pending.command, {
+        const result = await codingResources.runTerminalCommand(pending.command, {
           workspace_id: pending.workspace_id !== undefined ? pending.workspace_id : workspaceId,
           cwd: pending.cwd ?? undefined,
           timeout: pending.timeout ?? 30,

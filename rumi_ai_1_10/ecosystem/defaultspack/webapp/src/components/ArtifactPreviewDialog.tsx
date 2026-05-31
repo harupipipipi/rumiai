@@ -61,7 +61,7 @@ export function ArtifactPreviewDialog({
 
   return (
     <div
-      className="rumi-image-preview-backdrop fixed inset-0 z-50 flex items-center justify-center bg-black/72 px-4 py-5 backdrop-blur-md"
+      className="rumi-image-preview-backdrop fixed inset-0 rumi-layer-modal flex items-center justify-center bg-black/72 px-4 py-5 backdrop-blur-md"
       role="dialog"
       aria-modal="true"
       aria-label={item.title}

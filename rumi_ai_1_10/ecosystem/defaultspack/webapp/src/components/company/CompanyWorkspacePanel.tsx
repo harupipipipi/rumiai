@@ -1,19 +1,18 @@
 import { AlertTriangle, Bot, ClipboardList, MessageSquare, Route, Settings, Share2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import {
-  api,
-  arrayFromRecord,
-  type CompanyAgent,
-  type CompanyChannel,
-  type CompanyInboundRoute,
-  type CompanyMessage,
-  type CompanyRecord,
-  type CompanyTask,
-  type P2PIdentity,
-  type P2PPeer,
-  type P2PStatusResponse,
+import type {
+  CompanyAgent,
+  CompanyChannel,
+  CompanyInboundRoute,
+  CompanyMessage,
+  CompanyRecord,
+  CompanyTask,
+  P2PIdentity,
+  P2PPeer,
+  P2PStatusResponse,
 } from "../../lib/api";
+import { arrayFromRecord, companyResources } from "../../features/company/resources/companyResources";
 import { CompanyAgentList } from "./CompanyAgentList";
 import { CompanyChannelView } from "./CompanyChannelView";
 import { CompanyInboundRoutesPanel } from "./CompanyInboundRoutesPanel";
@@ -60,11 +59,11 @@ export function CompanyWorkspacePanel() {
     setError(null);
     try {
       const [companyListResult, statusResult, p2pStatusResult, p2pIdentityResult, peersResult] = await Promise.allSettled([
-        api.listCompanies(),
-        api.getCompanyStatus(requestedCompanyId ?? activeCompanyId ?? undefined),
-        api.getP2PStatus(),
-        api.getP2PIdentity(),
-        api.listP2PPeers(),
+        companyResources.listCompanies(),
+        companyResources.getCompanyStatus(requestedCompanyId ?? activeCompanyId ?? undefined),
+        companyResources.getP2PStatus(),
+        companyResources.getP2PIdentity(),
+        companyResources.listP2PPeers(),
       ]);
 
       const listedCompanies = companyListResult.status === "fulfilled" ? companyListResult.value.companies : [];
@@ -80,11 +79,11 @@ export function CompanyWorkspacePanel() {
 
       if (selectedId) {
         const [agentResult, channelResult, taskResult, routeResult, messageResult] = await Promise.allSettled([
-          api.listCompanyAgents(selectedId),
-          api.listCompanyChannels(selectedId),
-          api.listCompanyTasks(selectedId),
-          api.listCompanyInboundRoutes(selectedId),
-          api.listCompanyMessages(selectedId, { channel_id: activeChannelId ?? undefined, limit: 80 }),
+          companyResources.listCompanyAgents(selectedId),
+          companyResources.listCompanyChannels(selectedId),
+          companyResources.listCompanyTasks(selectedId),
+          companyResources.listCompanyInboundRoutes(selectedId),
+          companyResources.listCompanyMessages(selectedId, { channel_id: activeChannelId ?? undefined, limit: 80 }),
         ]);
         setAgents(agentResult.status === "fulfilled" ? agentResult.value.agents : arrayFromRecord(statusCompany?.agents));
         const nextChannels = channelResult.status === "fulfilled" ? channelResult.value.channels : arrayFromRecord(statusCompany?.channels);
@@ -146,7 +145,7 @@ export function CompanyWorkspacePanel() {
               setActiveChannelId(channelId);
               void loadCompany(activeCompanyId);
             }}
-            onSendMessage={(content, channelId) => activeCompanyId && void run(() => api.sendCompanyMessage(activeCompanyId, { content, channel_id: channelId, sender_id: "user" }))}
+            onSendMessage={(content, channelId) => activeCompanyId && void run(() => companyResources.sendCompanyMessage(activeCompanyId, { content, channel_id: channelId, sender_id: "user" }))}
           />
         );
       case "agents":
@@ -156,8 +155,8 @@ export function CompanyWorkspacePanel() {
           <CompanyInboundRoutesPanel
             routes={routes}
             busy={busy}
-            onUpsertRoute={(route) => activeCompanyId && void run(() => api.upsertCompanyInboundRoute(activeCompanyId, route))}
-            onDeleteRoute={(routeId) => activeCompanyId && void run(() => api.deleteCompanyInboundRoute(activeCompanyId, routeId))}
+            onUpsertRoute={(route) => activeCompanyId && void run(() => companyResources.upsertCompanyInboundRoute(activeCompanyId, route))}
+            onDeleteRoute={(routeId) => activeCompanyId && void run(() => companyResources.deleteCompanyInboundRoute(activeCompanyId, routeId))}
           />
         );
       case "settings":
@@ -165,7 +164,7 @@ export function CompanyWorkspacePanel() {
           <CompanySettingsPanel
             settings={activeCompany?.settings ?? {}}
             busy={busy}
-            onSave={(settings) => activeCompanyId && void run(() => api.updateCompanySettings(activeCompanyId, settings))}
+            onSave={(settings) => activeCompanyId && void run(() => companyResources.updateCompanySettings(activeCompanyId, settings))}
           />
         );
       case "p2p":
@@ -175,8 +174,8 @@ export function CompanyWorkspacePanel() {
             identity={p2pIdentity}
             peers={peers}
             busy={busy}
-            onStartPairing={(peerLabel) => void run(() => api.startP2PPairing({ peer_label: peerLabel, allowed_company_ids: activeCompanyId ? [activeCompanyId] : undefined }))}
-            onSendMessage={(peerId, text) => void run(() => api.sendP2PMessage(peerId, { text, body: { text, company_id: activeCompanyId ?? undefined } }))}
+            onStartPairing={(peerLabel) => void run(() => companyResources.startP2PPairing({ peer_label: peerLabel, allowed_company_ids: activeCompanyId ? [activeCompanyId] : undefined }))}
+            onSendMessage={(peerId, text) => void run(() => companyResources.sendP2PMessage(peerId, { text, body: { text, company_id: activeCompanyId ?? undefined } }))}
           />
         );
       case "tasks":
@@ -186,8 +185,8 @@ export function CompanyWorkspacePanel() {
             tasks={tasks}
             agents={agents}
             busy={busy}
-            onCreateTask={(title, targetAgentIds) => activeCompanyId && void run(() => api.createCompanyTask(activeCompanyId, { title, target_agent_ids: targetAgentIds }))}
-            onUpdateTask={(taskId, updates) => activeCompanyId && void run(() => api.updateCompanyTask(activeCompanyId, taskId, updates))}
+            onCreateTask={(title, targetAgentIds) => activeCompanyId && void run(() => companyResources.createCompanyTask(activeCompanyId, { title, target_agent_ids: targetAgentIds }))}
+            onUpdateTask={(taskId, updates) => activeCompanyId && void run(() => companyResources.updateCompanyTask(activeCompanyId, taskId, updates))}
           />
         );
     }
@@ -212,7 +211,7 @@ export function CompanyWorkspacePanel() {
         activeCompanyId={activeCompanyId}
         busy={busy}
         onSelect={(companyId) => void loadCompany(companyId)}
-        onBootstrap={() => void run(() => api.bootstrapCompanyWorkspace({ source: "webapp" }))}
+        onBootstrap={() => void run(() => companyResources.bootstrapCompanyWorkspace({ source: "webapp" }))}
         onRefresh={() => void loadCompany(activeCompanyId)}
       />
 

@@ -3,7 +3,6 @@ import { AnimatePresence, motion } from "motion/react";
 import { Check, ChevronDown, Copy, Loader2, MoreVertical, Pencil, Plus, Search, Trash2, X } from "lucide-react";
 
 import { cn } from "../lib/cn";
-import { api } from "../lib/api";
 import type { ModelSearchItem, SettingsSection } from "../lib/api";
 import { PlacementHtmlRenderer } from "../components/PlacementHtmlRenderer";
 import { ToolSettingsPanel } from "../components/ToolSettingsPanel";
@@ -11,6 +10,8 @@ import { t } from "../lib/i18n";
 import { buildBuiltinPlacementManifests, filterPlacementCandidates, normalizePinnedPlacements, togglePinnedPlacement, type PlacementManifest } from "../lib/placement";
 import { selectedApisForModel, toggleModelApiRoute, updateModelApiRouteText } from "../lib/modelApiRoutes";
 import { settingsFieldSearchText, settingsSectionSearchText } from "../lib/settingsSearch";
+import { settingsApiResources } from "../features/settings/resources/settingsApiResources";
+import { availabilityCopy, type ModelAvailabilityAfterKeySave } from "../features/settings/resources/useModelAvailability";
 import type { SettingsModalRendererProps } from "./types";
 import type { DesktopPermissionStatus, DesktopSystemInfo } from "../lib/desktopSystemInfo";
 
@@ -61,6 +62,7 @@ function SystemInfoPanel({ info }: { info?: DesktopSystemInfo | null }) {
     ["Channel", info.build_channel],
     ["Platform", [info.platform, info.platform_release].filter(Boolean).join(" ")],
   ];
+  const unverified = !info.reliable || (info.source !== "viewer_tauri" && info.source !== "viewer_broker");
   return (
     <div className="space-y-4">
       <div className="grid gap-3 sm:grid-cols-2">
@@ -85,6 +87,11 @@ function SystemInfoPanel({ info }: { info?: DesktopSystemInfo | null }) {
           <span className="rounded-full border border-zinc-800 bg-zinc-900/70 px-2.5 py-1">ブラウザ操作</span>
         </div>
       </section>
+      {unverified ? (
+        <section className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-4 text-sm leading-6 text-amber-100">
+          Viewer permission status is unverified. Open Rumi Viewer or reconnect Viewer broker.
+        </section>
+      ) : (
       <section className="space-y-3">
         <div>
           <h4 className="text-sm font-medium text-zinc-100">macOS Permissions</h4>
@@ -111,6 +118,7 @@ function SystemInfoPanel({ info }: { info?: DesktopSystemInfo | null }) {
           ))}
         </div>
       </section>
+      )}
     </div>
   );
 }
@@ -311,8 +319,8 @@ function CustomSelect({
       </button>
       {open && (
         <>
-          <button type="button" aria-label="close select" className="fixed inset-0 z-10 cursor-default" onClick={() => setOpen(false)} />
-          <div className="absolute left-0 top-[calc(100%+6px)] z-20 max-h-56 w-[min(360px,calc(100vw-32px))] max-w-[calc(100vw-32px)] overflow-y-auto rounded-lg border border-zinc-700 bg-zinc-950 p-1 shadow-2xl">
+          <button type="button" aria-label="close select" className="fixed inset-0 rumi-layer-panel cursor-default" onClick={() => setOpen(false)} />
+          <div className="absolute left-0 top-[calc(100%+6px)] rumi-layer-local-popover max-h-56 w-[min(360px,calc(100vw-32px))] max-w-[calc(100vw-32px)] overflow-y-auto rounded-lg border border-zinc-700 bg-zinc-950 p-1 shadow-2xl">
             {options.map((option) => (
               <button
                 key={option.value}
@@ -491,7 +499,7 @@ function SettingsModelSearchSelect({
     const timer = window.setTimeout(() => {
       setBusy(true);
       setError("");
-      api.searchModels({ query: query.trim(), max_results: 30 })
+      settingsApiResources.searchModels({ query: query.trim(), max_results: 30 })
         .then((result) => {
           setRemoteResults(result.models ?? []);
         })
@@ -535,8 +543,8 @@ function SettingsModelSearchSelect({
       </button>
       {open && (
         <>
-          <button type="button" aria-label="モデル検索を閉じる" className="fixed inset-0 z-10 cursor-default" onClick={() => setOpen(false)} />
-          <div className="absolute left-0 right-0 top-[calc(100%+6px)] z-20 overflow-hidden rounded-lg border border-zinc-700 bg-zinc-950 shadow-2xl">
+          <button type="button" aria-label="モデル検索を閉じる" className="fixed inset-0 rumi-layer-panel cursor-default" onClick={() => setOpen(false)} />
+          <div className="absolute left-0 right-0 top-[calc(100%+6px)] rumi-layer-local-popover overflow-hidden rounded-lg border border-zinc-700 bg-zinc-950 shadow-2xl">
             <label className="m-2 flex h-9 items-center gap-2 rounded-lg border border-zinc-800 bg-black/30 px-3 text-xs text-zinc-500 focus-within:border-zinc-600 focus-within:text-zinc-300">
               <Search size={14} />
               <input
@@ -681,7 +689,7 @@ function ProviderOAuthPanel({
                     try {
                       popup = window.open("", `rumi-oauth-${providerId}`, "popup=yes,width=560,height=760");
                       setBusyAction(`${providerId}:start`);
-                      const result = await api.startProviderOAuth(providerId);
+                      const result = await settingsApiResources.startProviderOAuth(providerId);
                       if (popup) {
                         popup.location.href = result.authorize_url;
                         popup.focus();
@@ -722,7 +730,7 @@ function ProviderOAuthPanel({
                   onClick={async () => {
                     try {
                       setBusyAction(`${providerId}:disconnect`);
-                      await api.disconnectProviderOAuth(providerId);
+                      await settingsApiResources.disconnectProviderOAuth(providerId);
                       refresh(providerId);
                       setMessages((current) => ({
                         ...current,
@@ -755,7 +763,7 @@ function ProviderOAuthPanel({
                   onClick={async () => {
                     try {
                       setBusyAction(`${providerId}:clear`);
-                      await api.clearProviderOAuthClientConfig(providerId);
+                      await settingsApiResources.clearProviderOAuthClientConfig(providerId);
                       setClientDrafts((current) => ({ ...current, [providerId]: "" }));
                       refresh(providerId);
                       setMessages((current) => ({
@@ -808,7 +816,7 @@ function ProviderOAuthPanel({
                   onClick={async () => {
                     try {
                       setBusyAction(`${providerId}:save`);
-                      await api.saveProviderOAuthClientConfig(providerId, draft);
+                      await settingsApiResources.saveProviderOAuthClientConfig(providerId, draft);
                       setClientDrafts((current) => ({ ...current, [providerId]: "" }));
                       refresh(providerId);
                       setMessages((current) => ({
@@ -911,7 +919,7 @@ function PublicUrlField({
     setBusy(true);
     setCopied(false);
     try {
-      const next = await api.createPublicUrl({
+      const next = await settingsApiResources.createPublicUrl({
         provider_id: providerId,
         local_url: localUrl,
         route_path: routePath,
@@ -930,7 +938,7 @@ function PublicUrlField({
   const closeUrl = async () => {
     const urlId = String(result?.url_id ?? "");
     if (urlId && urlId !== "static") {
-      await api.closePublicUrl(urlId).catch(console.error);
+      await settingsApiResources.closePublicUrl(urlId).catch(console.error);
     }
     setResult(null);
     persist(null);
@@ -1181,8 +1189,8 @@ function SearchableProviderSelect({
       </button>
       {open && (
         <>
-          <button type="button" aria-label="close provider select" className="fixed inset-0 z-10 cursor-default" onClick={closeAll} />
-          <div className="absolute left-0 top-[calc(100%+6px)] z-20 w-[min(520px,calc(100vw-32px))] max-w-[calc(100vw-32px)] overflow-hidden rounded-lg border border-zinc-700 bg-zinc-950 shadow-2xl">
+          <button type="button" aria-label="close provider select" className="fixed inset-0 rumi-layer-panel cursor-default" onClick={closeAll} />
+          <div className="absolute left-0 top-[calc(100%+6px)] rumi-layer-local-popover w-[min(520px,calc(100vw-32px))] max-w-[calc(100vw-32px)] overflow-hidden rounded-lg border border-zinc-700 bg-zinc-950 shadow-2xl">
             <label className="m-2 flex h-9 items-center gap-2 rounded-lg border border-zinc-800 bg-black/30 px-3 text-xs text-zinc-500 focus-within:border-zinc-600 focus-within:text-zinc-300">
               <Search size={14} />
               <input
@@ -1326,7 +1334,7 @@ function ApiQuickAddForm({
 }: {
   providerOptions: ApiProviderOption[];
   defaultProviderId?: string;
-  onSubmit: (payload: { provider_id: string; name: string; value: string; kind: "llm" | "custom" }) => void;
+  onSubmit: (payload: { provider_id: string; name: string; value: string; kind: "llm" | "custom" }) => void | Promise<void>;
   onCancel?: () => void;
   className?: string;
 }) {
@@ -1382,7 +1390,7 @@ function ApiQuickAddForm({
             disabled={!ready}
             onClick={() => {
               if (!ready) return;
-              onSubmit({
+              void onSubmit({
                 provider_id: providerId.trim(),
                 name: name.trim(),
                 value: secret,
@@ -1428,7 +1436,9 @@ function SettingsField({
   const [apiDefaultModel, setApiDefaultModel] = useState("");
   const [apiQuotaLabel, setApiQuotaLabel] = useState("");
   const [apiNotes, setApiNotes] = useState("");
-  const [apiSaveState, setApiSaveState] = useState<"idle" | "saved">("idle");
+  const [apiSaveState, setApiSaveState] = useState<"idle" | "saving" | "saved">("idle");
+  const [apiSaveError, setApiSaveError] = useState("");
+  const [apiAvailability, setApiAvailability] = useState<ModelAvailabilityAfterKeySave | null>(null);
   const [tokenProvider, setTokenProvider] = useState("line");
   const [tokenName, setTokenName] = useState("main");
   const [tokenKind, setTokenKind] = useState("channel_access_token");
@@ -1495,24 +1505,18 @@ function SettingsField({
         : visibleApis;
       const selectedApis = selectedApisForModel(routeText, selectedModel);
       const hasOtherProviderApis = llmRegisteredApis.some((apiRow) => String(apiRow.provider_id ?? "") !== selectedProvider);
-      const handleQuickAddApi = (payload: { provider_id: string; name: string; value: string; kind: "llm" | "custom" }) => {
-        const providerOption = providerOptionsForRoutes.find((option) => option.provider_id === payload.provider_id);
-        if (providerOption && !providerOption.builtin) {
-          onChange(sectionId, field.id, {
-            action: "register_provider",
-            provider_id: payload.provider_id,
-            label: payload.provider_id,
-            kind: payload.kind,
-          });
-        }
-        onChange(sectionId, field.id, {
-          action: "upsert",
-          provider_id: payload.provider_id,
-          api_id: payload.name,
+      const handleQuickAddApi = async (payload: { provider_id: string; name: string; value: string; kind: "llm" | "custom" }) => {
+        await settingsApiResources.saveProviderApiKey(payload.provider_id, payload.value, {
+          apiId: payload.name,
           name: payload.name,
-          value: payload.value,
           kind: payload.kind,
+          defaultModel: selectedModel,
         });
+        const routeRef = `${payload.provider_id}/${payload.name}`;
+        const nextRouteText = selectedApisForModel(routeText, selectedModel).includes(routeRef)
+          ? routeText
+          : toggleModelApiRoute(routeText, selectedModel, routeRef);
+        onChange(sectionId, field.id, nextRouteText);
         setRouteInlineAddOpen(false);
       };
       control = (
@@ -1686,29 +1690,51 @@ function SettingsField({
       const selectedProviderOption = providerOptions.find((option) => option.provider_id === apiProvider);
       const selectedKind: "llm" | "custom" = selectedProviderOption?.kind ?? "llm";
       const isCustomProvider = !selectedProviderOption?.builtin;
-      const handleSubmitApi = () => {
-        if (!apiProvider.trim() || !apiName.trim() || !apiSecret.trim()) return;
-        onChange(sectionId, field.id, {
-          action: "upsert",
-          provider_id: apiProvider,
-          api_id: apiName,
-          name: apiName,
-          value: apiSecret,
-          kind: selectedKind,
-          base_url: apiBaseUrl.trim(),
-          allowed_models: apiAllowedModels.split(",").map((item) => item.trim()).filter(Boolean),
-          default_model: apiDefaultModel.trim(),
-          quota_label: apiQuotaLabel.trim(),
-          notes: apiNotes.trim(),
-        });
-        setApiSecret("");
-        setApiBaseUrl("");
-        setApiAllowedModels("");
-        setApiDefaultModel("");
-        setApiQuotaLabel("");
-        setApiNotes("");
-        setApiSaveState("saved");
+      const resetApiSaveFeedback = () => {
+        setApiSaveState("idle");
+        setApiSaveError("");
+        setApiAvailability(null);
       };
+      const handleSubmitApi = async () => {
+        if (!apiProvider.trim() || !apiName.trim() || !apiSecret.trim()) return;
+        setApiSaveState("saving");
+        setApiSaveError("");
+        setApiAvailability(null);
+        const allowedModels = apiAllowedModels.split(",").map((item) => item.trim()).filter(Boolean);
+        try {
+          const result = await settingsApiResources.saveProviderApiKey(apiProvider, apiSecret, {
+            apiId: apiName,
+            name: apiName,
+            baseUrl: apiBaseUrl.trim() || undefined,
+            allowedModels: allowedModels.length ? allowedModels : undefined,
+            defaultModel: apiDefaultModel.trim() || undefined,
+            quotaLabel: apiQuotaLabel.trim() || undefined,
+            notes: apiNotes.trim() || undefined,
+            kind: selectedKind,
+          });
+          setApiAvailability(result.model_availability ?? {
+            status: "route_required",
+            provider_id: apiProvider,
+            api_id: apiName,
+            candidate_models: [],
+            reason: "Saved, but the backend did not confirm model availability. Choose a model route before using this key.",
+          });
+          setApiSecret("");
+          setApiBaseUrl("");
+          setApiAllowedModels("");
+          setApiDefaultModel("");
+          setApiQuotaLabel("");
+          setApiNotes("");
+          setApiSaveState("saved");
+          onChange(sectionId, field.id, {
+            action: "oauth_refresh",
+          });
+        } catch (saveError) {
+          setApiSaveState("idle");
+          setApiSaveError(saveError instanceof Error ? saveError.message : "API key save failed.");
+        }
+      };
+      const apiFeedback = apiSaveState === "saved" ? availabilityCopy(apiAvailability) : null;
       control = (
         <div className="space-y-4">
           <ProviderOAuthPanel
@@ -1813,13 +1839,13 @@ function SettingsField({
                           <button
                             type="button"
                             aria-label="close api menu"
-                            className="fixed inset-0 z-10 cursor-default"
+                            className="fixed inset-0 rumi-layer-panel cursor-default"
                             onClick={(event) => {
                               event.stopPropagation();
                               setOpenApiMenuKey("");
                             }}
                           />
-                          <div className="absolute right-0 top-[calc(100%+6px)] z-20 w-32 overflow-hidden rounded-lg border border-zinc-700 bg-zinc-950 py-1 shadow-2xl">
+                          <div className="absolute right-0 top-[calc(100%+6px)] rumi-layer-local-popover w-32 overflow-hidden rounded-lg border border-zinc-700 bg-zinc-950 py-1 shadow-2xl">
                             <button
                               type="button"
                               onClick={(event) => {
@@ -1868,7 +1894,7 @@ function SettingsField({
                 options={providerOptions}
                 onChange={(next) => {
                   setApiProvider(next);
-                  setApiSaveState("idle");
+                  resetApiSaveFeedback();
                 }}
                 onAddCustom={(option) => {
                   onChange(sectionId, field.id, {
@@ -1878,14 +1904,14 @@ function SettingsField({
                     kind: option.kind,
                   });
                   setApiProvider(option.providerId);
-                  setApiSaveState("idle");
+                  resetApiSaveFeedback();
                 }}
               />
               <input
                 value={apiName}
                 onChange={(event) => {
                   setApiName(event.target.value);
-                  setApiSaveState("idle");
+                  resetApiSaveFeedback();
                 }}
                 placeholder="名前 (例: main, work)"
                 className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 outline-none"
@@ -1896,7 +1922,7 @@ function SettingsField({
                 value={apiSecret}
                 onChange={(event) => {
                   setApiSecret(event.target.value);
-                  setApiSaveState("idle");
+                  resetApiSaveFeedback();
                 }}
                 placeholder={`${apiProvider || "provider"} API key`}
                 onKeyDown={(event) => {
@@ -1909,16 +1935,16 @@ function SettingsField({
               />
               <button
                 type="button"
-                disabled={!apiProvider.trim() || !apiName.trim() || !apiSecret.trim()}
+                disabled={apiSaveState === "saving" || !apiProvider.trim() || !apiName.trim() || !apiSecret.trim()}
                 onClick={handleSubmitApi}
                 className={cn(
                   "rounded-lg border px-3 py-2 text-xs transition-colors",
-                  apiProvider.trim() && apiName.trim() && apiSecret.trim()
+                  apiSaveState !== "saving" && apiProvider.trim() && apiName.trim() && apiSecret.trim()
                     ? "bg-zinc-100 text-zinc-950 border-zinc-100"
                     : "bg-zinc-900 text-zinc-600 border-zinc-800 cursor-not-allowed",
                 )}
               >
-                Save
+                {apiSaveState === "saving" ? "Saving" : "Save"}
               </button>
             </div>
             {isCustomProvider && (
@@ -1935,7 +1961,7 @@ function SettingsField({
                   value={apiBaseUrl}
                   onChange={(event) => {
                     setApiBaseUrl(event.target.value);
-                    setApiSaveState("idle");
+                    resetApiSaveFeedback();
                   }}
                   placeholder="base_url (optional)"
                   className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 outline-none"
@@ -1944,7 +1970,7 @@ function SettingsField({
                   value={apiDefaultModel}
                   onChange={(event) => {
                     setApiDefaultModel(event.target.value);
-                    setApiSaveState("idle");
+                    resetApiSaveFeedback();
                   }}
                   placeholder="default model for this API"
                   className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 outline-none"
@@ -1953,7 +1979,7 @@ function SettingsField({
                   value={apiAllowedModels}
                   onChange={(event) => {
                     setApiAllowedModels(event.target.value);
-                    setApiSaveState("idle");
+                    resetApiSaveFeedback();
                   }}
                   placeholder="allowed models, comma separated"
                   className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 outline-none"
@@ -1962,7 +1988,7 @@ function SettingsField({
                   value={apiQuotaLabel}
                   onChange={(event) => {
                     setApiQuotaLabel(event.target.value);
-                    setApiSaveState("idle");
+                    resetApiSaveFeedback();
                   }}
                   placeholder="quota label"
                   className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 outline-none"
@@ -1971,7 +1997,7 @@ function SettingsField({
                   value={apiNotes}
                   onChange={(event) => {
                     setApiNotes(event.target.value);
-                    setApiSaveState("idle");
+                    resetApiSaveFeedback();
                   }}
                   placeholder="notes for routing"
                   className="min-h-20 rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 outline-none md:col-span-2"
@@ -1982,7 +2008,23 @@ function SettingsField({
               </p>
             </details>
           </div>
-          {apiSaveState === "saved" && <p className="text-[11px] text-emerald-400">Saved</p>}
+          {apiFeedback?.text && (
+            <div
+              className={cn(
+                "rounded-lg border px-3 py-2 text-[11px]",
+                apiFeedback.tone === "success"
+                  ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
+                  : "border-amber-500/30 bg-amber-500/10 text-amber-100",
+              )}
+            >
+              {apiFeedback.text}
+            </div>
+          )}
+          {apiSaveError && (
+            <div className="rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-[11px] text-rose-200">
+              {apiSaveError}
+            </div>
+          )}
         </div>
       );
       break;
@@ -2102,13 +2144,13 @@ function SettingsField({
                           <button
                             type="button"
                             aria-label="close token menu"
-                            className="fixed inset-0 z-10 cursor-default"
+                            className="fixed inset-0 rumi-layer-panel cursor-default"
                             onClick={(event) => {
                               event.stopPropagation();
                               setOpenTokenMenuKey("");
                             }}
                           />
-                          <div className="absolute right-0 top-[calc(100%+6px)] z-20 w-32 overflow-hidden rounded-lg border border-zinc-700 bg-zinc-950 py-1 shadow-2xl">
+                          <div className="absolute right-0 top-[calc(100%+6px)] rumi-layer-local-popover w-32 overflow-hidden rounded-lg border border-zinc-700 bg-zinc-950 py-1 shadow-2xl">
                             <button
                               type="button"
                               onClick={(event) => {
@@ -2583,7 +2625,7 @@ export function SettingsModalRenderer({
   return (
     <AnimatePresence>
       {isOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
+        <div className="fixed inset-0 rumi-layer-modal flex items-center justify-center">
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -2619,7 +2661,7 @@ export function SettingsModalRenderer({
                     <Plus size={15} />
                   </button>
                   {placementMenuOpen && (
-                    <div className="absolute right-0 top-[calc(100%+8px)] z-20 w-72 overflow-hidden rounded-xl border border-zinc-700 bg-zinc-950 p-1.5 shadow-2xl">
+                    <div className="absolute right-0 top-[calc(100%+8px)] rumi-layer-local-popover w-72 overflow-hidden rounded-xl border border-zinc-700 bg-zinc-950 p-1.5 shadow-2xl">
                       <div className="border-b border-zinc-800 px-2 py-2 text-[11px] text-zinc-500">
                         Settings placement candidates
                       </div>

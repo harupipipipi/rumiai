@@ -621,7 +621,7 @@ function SortableChatItem({ chat, activeChatId, onChatSelect, onRename, onToggle
           "box-border w-full max-w-full min-h-7 flex items-center gap-1.5 pr-1.5 py-1 rounded-[3px] text-left group/chat transition-colors cursor-grab active:cursor-grabbing outline-none",
           isActive ? "bg-zinc-800/80" : "hover:bg-zinc-800/50",
           chat.conversationKind === "subagent" && "text-zinc-400",
-          isDragging && "ring-1 ring-emerald-500/50 z-50"
+          isDragging && "ring-1 ring-emerald-500/50 rumi-layer-modal"
         )}
         onClick={() => { if (!isEditing) onChatSelect(chat.id); }}
         onDoubleClick={(e) => { e.stopPropagation(); setIsEditing(true); }}
@@ -1636,7 +1636,7 @@ export function HistoryBoard({
     <form
       onSubmit={(event) => void handleCreateGroup(event)}
       className={cn(
-        "z-50 flex w-full flex-col gap-2 rounded-lg border border-zinc-800 bg-zinc-950/95 p-2 text-xs shadow-xl shadow-black/30",
+        "rumi-layer-modal flex w-full flex-col gap-2 rounded-lg border border-zinc-800 bg-zinc-950/95 p-2 text-xs shadow-xl shadow-black/30",
         isCompact && "absolute left-full top-14 ml-2 w-64"
       )}
     >
@@ -1918,7 +1918,7 @@ export function HistoryBoard({
         </SortableContext>
 
         {/* Fixed Account Bar */}
-        <div className="absolute bottom-0 left-0 right-0 h-12 px-3 border-t border-zinc-800/60 bg-[#09090b]/95 backdrop-blur-sm z-30 flex items-center">
+        <div className="absolute bottom-0 left-0 right-0 h-12 px-3 border-t border-zinc-800/60 bg-[#09090b]/95 backdrop-blur-sm rumi-layer-global-overlay flex items-center">
           <div className="flex items-center gap-2.5 px-1 w-full">
             {accountIcon && accountIconIsImage ? (
               <img src={accountIcon} alt="" className="w-7 h-7 rounded-full object-cover flex-shrink-0 bg-zinc-800" />
