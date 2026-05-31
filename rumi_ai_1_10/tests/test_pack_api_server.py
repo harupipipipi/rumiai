@@ -178,6 +178,54 @@ class TestSSEResponses:
 # 5-9. 認証 (_check_auth)
 # ---------------------------------------------------------------------------
 
+class _DisconnectedWriter:
+    def __init__(self, exc: Exception):
+        self.exc = exc
+
+    def write(self, data) -> None:
+        raise self.exc
+
+    def flush(self) -> None:
+        raise self.exc
+
+
+class TestClientDisconnectHandling:
+    def test_send_response_handles_header_connection_abort(self) -> None:
+        handler = _make_handler(headers=_make_headers())
+        handler.close_connection = False
+        handler.end_headers.side_effect = ConnectionAbortedError(
+            10053,
+            "connection aborted",
+        )
+
+        PackAPIHandler._send_response(
+            handler,
+            APIResponse(True, data={"ok": True}),
+        )
+
+        assert handler.close_connection is True
+
+    def test_send_raw_json_handles_body_connection_reset(self) -> None:
+        handler = _make_handler(headers=_make_headers())
+        handler.close_connection = False
+        handler.wfile = _DisconnectedWriter(
+            ConnectionResetError(10054, "connection reset by peer"),
+        )
+
+        handler._send_raw_json({"ok": True})
+
+        assert handler.close_connection is True
+
+    def test_send_sse_handles_broken_pipe(self) -> None:
+        handler = _make_handler(headers=_make_headers())
+        handler.close_connection = False
+        handler.wfile = _DisconnectedWriter(BrokenPipeError(10054, "broken pipe"))
+
+        handler._send_sse([{"type": "done"}])
+
+        assert handler.close_connection is True
+
+
 class TestCheckAuth:
     def test_auth_success_hmac_manager(self) -> None:
         """HMACKeyManager.verify_token が True を返す → 認証成功"""
