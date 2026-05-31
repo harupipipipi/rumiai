@@ -25,6 +25,16 @@ def test_computer_use_context_apps_windows_alias_is_canonicalized_for_approval_s
     assert approval_args == {}
 
 
+def test_computer_use_open_url_alias_is_canonicalized_for_approval_scope():
+    operation, approval_args = _tool_approval_scope(
+        {"tool_id": "computer_use", "name": "computer_use"},
+        {"action": "open_url", "url": "https://gemini.google.com"},
+    )
+
+    assert operation == "browser.open_url"
+    assert approval_args == {"url": "https://gemini.google.com"}
+
+
 def test_computer_use_followup_token_does_not_apply_to_different_action(monkeypatch):
     class FakeCapabilityExecutor:
         def execute(self, principal_id, request):
@@ -598,6 +608,7 @@ def test_computer_use_requires_denied_returns_approval_before_local_execution(mo
 
     assert result["is_error"] is False
     assert result["widget"]["type"] == "approval_request"
+    assert result["widget"]["action"] == "browser.open_url"
     assert result["widget"]["arguments"]["action"] == "open_url"
 
 

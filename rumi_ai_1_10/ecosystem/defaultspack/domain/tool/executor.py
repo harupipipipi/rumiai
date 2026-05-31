@@ -1074,6 +1074,8 @@ def _browser_computer_action_payload(tool_name, arguments):
     else:
         action_map = {
             "": "computer.screenshot",
+            "open_url": "browser.open_url",
+            "open": "browser.open_url",
             "context/apps/windows": "computer.context",
             "context_apps_windows": "computer.context",
             "context": "computer.context",
