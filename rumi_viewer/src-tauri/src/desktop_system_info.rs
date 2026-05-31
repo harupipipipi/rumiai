@@ -15,6 +15,8 @@ pub struct DesktopPermissionStatus {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct DesktopSystemInfo {
+    pub source: String,
+    pub reliable: bool,
     pub app_name: String,
     pub display_version: String,
     pub viewer_version: String,
@@ -36,6 +38,8 @@ pub fn get_desktop_system_info(
 pub fn collect_desktop_system_info(host_broker: HostBrokerStatus) -> DesktopSystemInfo {
     let viewer_version = env!("CARGO_PKG_VERSION").to_string();
     DesktopSystemInfo {
+        source: "viewer_tauri".to_string(),
+        reliable: true,
         app_name: "Rumi AI".to_string(),
         display_version: display_version_from_package_version(&viewer_version),
         viewer_version,
@@ -190,6 +194,8 @@ mod tests {
         );
         assert!(!info.viewer_version.is_empty());
         assert_eq!(info.permission_subject, "Rumi Viewer");
+        assert_eq!(info.source, "viewer_tauri");
+        assert!(info.reliable);
     }
 
     #[test]

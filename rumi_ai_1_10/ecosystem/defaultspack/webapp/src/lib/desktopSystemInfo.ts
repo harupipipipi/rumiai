@@ -16,7 +16,11 @@ export type HostBrokerStatus = {
   recovery?: string | null;
 };
 
+export type DesktopSystemInfoSource = "viewer_tauri" | "viewer_broker" | "fallback" | string;
+
 export type DesktopSystemInfo = {
+  source: DesktopSystemInfoSource;
+  reliable: boolean;
   app_name: string;
   display_version: string;
   viewer_version: string;
@@ -52,6 +56,8 @@ function isDesktopSystemInfoShape(value: unknown): value is DesktopSystemInfo {
   if (!value || typeof value !== "object") return false;
   const obj = value as Record<string, unknown>;
   return (
+    typeof obj.source === "string" &&
+    typeof obj.reliable === "boolean" &&
     typeof obj.app_name === "string" &&
     typeof obj.platform === "string" &&
     Array.isArray(obj.permissions)

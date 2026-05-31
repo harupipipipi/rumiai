@@ -87,6 +87,8 @@ describe("desktopSystemInfo", () => {
         status: "ok",
         data: {
           app_name: "Rumi AI",
+          source: "viewer_broker",
+          reliable: true,
           display_version: "1.0.0",
           viewer_version: "1.0.0",
           build_channel: "beta",
@@ -106,6 +108,8 @@ describe("desktopSystemInfo", () => {
         const result = await fetchDesktopSystemInfo();
         assert.notEqual(result, null);
         assert.equal(result!.app_name, "Rumi AI");
+        assert.equal(result!.source, "viewer_broker");
+        assert.equal(result!.reliable, true);
         assert.equal(result!.permissions.length, 1);
         assert.equal(result!.permissions[0].id, "accessibility");
       } finally {
@@ -114,6 +118,35 @@ describe("desktopSystemInfo", () => {
     });
 
     it("returns DesktopSystemInfo via HTTP fallback when response is bare object", async () => {
+      setupWindowMock();
+      const savedFetch = globalThis.fetch;
+      const payload = {
+        app_name: "Rumi AI",
+        source: "fallback",
+        reliable: false,
+        display_version: "",
+        viewer_version: "1.0.0",
+        build_channel: "beta",
+        platform: "darwin",
+        platform_release: "15.0",
+        permissions: [],
+      };
+      globalThis.fetch = async () =>
+        new Response(JSON.stringify(payload), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      try {
+        const result = await fetchDesktopSystemInfo();
+        assert.notEqual(result, null);
+        assert.equal(result!.app_name, "Rumi AI");
+        assert.equal(result!.reliable, false);
+      } finally {
+        globalThis.fetch = savedFetch;
+      }
+    });
+
+    it("rejects legacy HTTP payloads without reliability metadata", async () => {
       setupWindowMock();
       const savedFetch = globalThis.fetch;
       const payload = {
@@ -132,8 +165,7 @@ describe("desktopSystemInfo", () => {
         });
       try {
         const result = await fetchDesktopSystemInfo();
-        assert.notEqual(result, null);
-        assert.equal(result!.app_name, "Rumi AI");
+        assert.equal(result, null);
       } finally {
         globalThis.fetch = savedFetch;
       }

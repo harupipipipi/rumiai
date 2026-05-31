@@ -109,6 +109,8 @@ test("settings system info renders viewer version and macOS permissions", () => 
       ],
       settingsValues: {},
       desktopSystemInfo: {
+        source: "viewer_tauri",
+        reliable: true,
         app_name: "Rumi AI",
         display_version: "beta 1.0.0",
         viewer_version: "1.0.0-beta.1",
@@ -144,6 +146,61 @@ test("settings system info renders viewer version and macOS permissions", () => 
   assert.match(html, /macOS Permissions/);
   assert.match(html, /Screen Recording/);
   assert.match(html, /Missing/);
+});
+
+test("settings system info does not show missing permissions when viewer state is unreliable", () => {
+  const html = renderToStaticMarkup(
+    createElement(SettingsModalRenderer, {
+      isOpen: true,
+      activeSectionId: "system_info",
+      catalog: {
+        sidebar: { filters: [], items: [] },
+        settings: { sections: [], values: {} },
+        chat_rendering: { renderers: [] },
+        extension_points: [],
+      },
+      health: null,
+      previewsCount: 0,
+      settingsSections: [
+        { id: "system_info", label: "System Info", description: "Version and permission status", fields: [] },
+      ],
+      settingsValues: {},
+      desktopSystemInfo: {
+        source: "fallback",
+        reliable: false,
+        app_name: "Rumi AI",
+        display_version: "",
+        viewer_version: "",
+        build_channel: "beta",
+        platform: "darwin",
+        platform_release: "15.0",
+        permission_subject: "Rumi Viewer",
+        host_broker: {
+          enabled: false,
+          available: false,
+          status: "unavailable",
+        },
+        permissions: [
+          {
+            id: "viewer_host",
+            label: "Rumi Viewer",
+            status: "missing",
+            granted: false,
+            detail: "Fallback row should not be rendered.",
+            settings_hint: "Open Rumi Viewer.",
+          },
+        ],
+      },
+      onClose: () => undefined,
+      onOpenSection: () => undefined,
+      onSettingChange: () => undefined,
+    }),
+  );
+
+  assert.match(html, /Viewer permission status is unverified/);
+  assert.doesNotMatch(html, /macOS Permissions/);
+  assert.doesNotMatch(html, /Missing/);
+  assert.doesNotMatch(html, /Fallback row should not be rendered/);
 });
 
 test("settings system info shows browser context message when info is null", () => {

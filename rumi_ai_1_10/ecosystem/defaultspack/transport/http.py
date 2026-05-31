@@ -730,7 +730,15 @@ class DefaultsHttpServer:
                     payload = client.permissions()
                     permissions = payload.get("permissions")
                     if isinstance(permissions, list):
+                        host_broker = payload.get("host_broker") or {
+                            "enabled": True,
+                            "available": True,
+                            "status": "running",
+                        }
+                        reliable = bool(host_broker.get("available")) if isinstance(host_broker, dict) else False
                         return ok({
+                            "source": "viewer_broker",
+                            "reliable": reliable,
                             "app_name": "Rumi AI",
                             "display_version": "",
                             "viewer_version": "",
@@ -738,17 +746,15 @@ class DefaultsHttpServer:
                             "platform": sys.platform,
                             "platform_release": _platform_release(),
                             "permission_subject": str(payload.get("permission_subject") or "Rumi Viewer"),
-                            "host_broker": payload.get("host_broker") or {
-                                "enabled": True,
-                                "available": True,
-                                "status": "running",
-                            },
+                            "host_broker": host_broker,
                             "permissions": permissions,
                         })
             except Exception:
                 pass
 
             return ok({
+                "source": "fallback",
+                "reliable": False,
                 "app_name": "Rumi AI",
                 "display_version": "",
                 "viewer_version": "",
@@ -762,16 +768,7 @@ class DefaultsHttpServer:
                     "status": "unavailable",
                     "recovery": "Open Rumi Viewer and grant macOS permissions there.",
                 },
-                "permissions": [
-                    {
-                        "id": "viewer_host",
-                        "label": "Rumi Viewer",
-                        "status": "missing",
-                        "granted": False,
-                        "detail": "Rumi Viewer is required as the macOS permission host.",
-                        "settings_hint": "Open Rumi Viewer and grant Accessibility / Screen Recording / Input Monitoring.",
-                    }
-                ],
+                "permissions": [],
             })
 
         permissions = []
@@ -785,6 +782,8 @@ class DefaultsHttpServer:
         })
 
         return ok({
+            "source": "fallback",
+            "reliable": False,
             "app_name": "Rumi AI",
             "display_version": "",
             "viewer_version": "",
