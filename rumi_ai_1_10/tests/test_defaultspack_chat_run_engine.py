@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -353,6 +354,8 @@ def test_approval_followup_executes_exact_payload_before_model_turn(tmp_path, mo
     assert captured["tool_call_id"] == "call_original"
     assert captured["arguments"] == {"action": "click", "x": 10, "y": 20}
     assert captured["approval_tokens"]["computer.click"] == "tok_followup"
+    assert captured["approval_tokens"]["apr_followup"] == "tok_followup"
+    assert "tok_followup" not in json.dumps(captured["model_messages"], ensure_ascii=False)
     assert any(message.get("role") == "tool" for message in captured["model_messages"])
     assert any(event.get("type") == "tool_call_completed" for event in events)
     ChatStore._instance = None

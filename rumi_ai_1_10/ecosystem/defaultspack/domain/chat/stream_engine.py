@@ -188,11 +188,33 @@ def _approval_followup_tool_use(metadata: dict[str, Any] | None) -> dict[str, An
     if tool_name in {"browser_computer", "browser_use", "computer_use"} and action and not arguments.get("action"):
         arguments["action"] = action
     tool_name, arguments = _normalize_tool_call_name_and_arguments(tool_name, arguments)
+    token_map = {tool_name: token}
+    request_id = str(followup.get("request_id") or followup.get("approval_request_id") or "").strip()
+    for key in (action, operation, request_id):
+        if key:
+            token_map[key] = token
+    if tool_name in {"computer_use", "browser_use", "browser_computer"}:
+        for alias in ("computer_use", "browser_use", "browser_computer"):
+            token_map[alias] = token
     return {
         "id": str(followup.get("tool_call_id") or followup.get("request_id") or gen_id()).strip(),
         "name": tool_name,
         "input": arguments,
+        "approval_context": {"tool_approval_tokens": token_map},
     }
+
+
+def _merge_tool_context(base: dict[str, Any] | None, extra: dict[str, Any] | None) -> dict[str, Any]:
+    merged = dict(base or {})
+    if not isinstance(extra, dict):
+        return merged
+    for key, value in extra.items():
+        if key == "tool_approval_tokens" and isinstance(value, dict):
+            existing = merged.get(key) if isinstance(merged.get(key), dict) else {}
+            merged[key] = {**existing, **value}
+        else:
+            merged[key] = value
+    return merged
 
 
 def _approval_request_from_tool_result(
@@ -837,7 +859,15 @@ class ChatRunEngine:
             yield event
         for event in self._before_tool_call(prepared, tool_name, tool_call_id, arguments):
             yield event
-        result = self._execute_tool(prepared, tool_name, tool_call_id, arguments)
+        approval_context = block.get("approval_context") if isinstance(block.get("approval_context"), dict) else None
+        original_tool_context = prepared.tool_context
+        if approval_context:
+            prepared.tool_context = _merge_tool_context(prepared.tool_context, approval_context)
+        try:
+            result = self._execute_tool(prepared, tool_name, tool_call_id, arguments)
+        finally:
+            if approval_context:
+                prepared.tool_context = original_tool_context
         self._raise_if_cancelled()
         summary = _tool_result_summary(tool_name, result)
         artifacts = _tool_result_artifacts(result)
