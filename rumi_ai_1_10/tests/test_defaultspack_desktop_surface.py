@@ -104,6 +104,96 @@ class TestDefaultspackDesktopSurface(unittest.TestCase):
                     sys.modules.pop(name, None)
             sys.modules.update(saved_modules)
 
+    def test_managed_pack_alias_keeps_sibling_tools_pack_visible(self):
+        from defaultspack import desktop_app
+
+        saved_modules = {
+            name: module
+            for name, module in sys.modules.items()
+            if name == "ecosystem" or name.startswith("ecosystem.")
+        }
+        try:
+            for name in list(sys.modules):
+                if name == "ecosystem" or name.startswith("ecosystem."):
+                    sys.modules.pop(name, None)
+
+            with tempfile.TemporaryDirectory() as tmp:
+                tmp_path = Path(tmp)
+                app_dir = tmp_path / "app"
+                tools_pkg = app_dir / "ecosystem" / "rumi_default_tools_pack"
+                tool_dir = tools_pkg / "domain" / "tool"
+                tool_dir.mkdir(parents=True)
+                (tools_pkg / "__init__.py").write_text("", encoding="utf-8")
+                (tools_pkg / "domain" / "__init__.py").write_text("", encoding="utf-8")
+                (tool_dir / "__init__.py").write_text("", encoding="utf-8")
+                (tool_dir / "marker.py").write_text("VALUE = 'tools-pack'\n", encoding="utf-8")
+
+                pack_root = tmp_path / "user_data" / "packs" / "defaultspack" / "versions" / "2.0.0"
+                (pack_root / "domain").mkdir(parents=True)
+                (pack_root / "domain" / "__init__.py").write_text("", encoding="utf-8")
+                (pack_root / "domain" / "managed_marker.py").write_text(
+                    "VALUE = 'managed-defaultspack'\n",
+                    encoding="utf-8",
+                )
+
+                with patch.dict(os.environ, {"RUMI_APP_DIR": str(app_dir)}, clear=False):
+                    desktop_app._install_ecosystem_defaultspack_alias(pack_root)
+                    managed = import_module("ecosystem.defaultspack.domain.managed_marker")
+                    tools = import_module("ecosystem.rumi_default_tools_pack.domain.tool.marker")
+
+            self.assertEqual(managed.VALUE, "managed-defaultspack")
+            self.assertEqual(tools.VALUE, "tools-pack")
+        finally:
+            for name in list(sys.modules):
+                if name == "ecosystem" or name.startswith("ecosystem."):
+                    sys.modules.pop(name, None)
+            sys.modules.update(saved_modules)
+
+    def test_legacy_pack_alias_keeps_resource_ecosystem_visible(self):
+        from defaultspack import desktop_app
+
+        saved_modules = {
+            name: module
+            for name, module in sys.modules.items()
+            if name == "ecosystem" or name.startswith("ecosystem.")
+        }
+        try:
+            for name in list(sys.modules):
+                if name == "ecosystem" or name.startswith("ecosystem."):
+                    sys.modules.pop(name, None)
+
+            with tempfile.TemporaryDirectory() as tmp:
+                app_dir = Path(tmp) / "app"
+                ecosystem_dir = app_dir / "ecosystem"
+                pack_root = ecosystem_dir / "defaultspack"
+                default_domain = pack_root / "domain"
+                tools_pkg = ecosystem_dir / "rumi_default_tools_pack"
+                tool_dir = tools_pkg / "domain" / "tool"
+                default_domain.mkdir(parents=True)
+                tool_dir.mkdir(parents=True)
+                (default_domain / "__init__.py").write_text("", encoding="utf-8")
+                (default_domain / "legacy_marker.py").write_text(
+                    "VALUE = 'legacy-defaultspack'\n",
+                    encoding="utf-8",
+                )
+                (tools_pkg / "__init__.py").write_text("", encoding="utf-8")
+                (tools_pkg / "domain" / "__init__.py").write_text("", encoding="utf-8")
+                (tool_dir / "__init__.py").write_text("", encoding="utf-8")
+                (tool_dir / "marker.py").write_text("VALUE = 'legacy-tools-pack'\n", encoding="utf-8")
+
+                with patch.dict(os.environ, {"RUMI_APP_DIR": str(app_dir)}, clear=False):
+                    desktop_app._install_ecosystem_defaultspack_alias(pack_root)
+                    legacy_default = import_module("ecosystem.defaultspack.domain.legacy_marker")
+                    legacy_tools = import_module("ecosystem.rumi_default_tools_pack.domain.tool.marker")
+
+            self.assertEqual(legacy_default.VALUE, "legacy-defaultspack")
+            self.assertEqual(legacy_tools.VALUE, "legacy-tools-pack")
+        finally:
+            for name in list(sys.modules):
+                if name == "ecosystem" or name.startswith("ecosystem."):
+                    sys.modules.pop(name, None)
+            sys.modules.update(saved_modules)
+
 
 if __name__ == "__main__":
     unittest.main()

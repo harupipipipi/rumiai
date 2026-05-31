@@ -18,25 +18,29 @@ _SEQUENCE_ID_KEYS = (
 
 
 def run(context, args):
-    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+    from ecosystem.defaultspack.domain.host_bridge.computer_router import run_computer_action
 
     action = str(args.get("action", "browser.session"))
     payload = dict(args.get("payload") or {})
+    tool_name = str(args.get("tool_name") or "browser_computer").strip() or "browser_computer"
     payload = _payload_with_sequence_defaults(payload, context, args)
     artifact_root = None
     workspace = context.get("conversation_workspace_dir") if isinstance(context, dict) else None
     if isinstance(workspace, str) and workspace:
         artifact_root = Path(workspace) / "tools" / "computer"
     user_requested = bool(isinstance(context, dict) and context.get("user_requested_computer_use"))
-    yolo_mode = _truthy(context.get("yolo_mode")) if isinstance(context, dict) else False
+    yolo_mode = _truthy(context.get("yolo_mode")) or _context_has_server_approval(context)
     if user_requested and action == "browser.open_url" and not any(
         key in payload for key in ("persistent", "profile_id", "session_id")
     ):
         payload["persistent"] = False
     payload = _payload_with_context_defaults(action, payload, context)
-    result = BrowserComputerController(artifact_root=artifact_root).run(
+    result = run_computer_action(
         action,
         payload,
+        context if isinstance(context, dict) else None,
+        tool_name=tool_name,
+        artifact_root=artifact_root,
         yolo_mode=yolo_mode,
     )
     summary = "browser_computer {} completed".format(result.get("action", "action"))
@@ -88,6 +92,15 @@ def _sequence_id_from_mapping(value):
         if candidate:
             return candidate
     return ""
+
+
+def _context_has_server_approval(context):
+    if not isinstance(context, dict):
+        return False
+    return bool(
+        context.get("_tool_server_approval_token_valid") is True
+        or context.get("_tool_server_approved") is True
+    )
 
 
 def _truthy(value):

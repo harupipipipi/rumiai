@@ -37,7 +37,7 @@ import { CodingWorkspacePicker } from "../components/coding/CodingWorkspacePicke
 import { RuntimeCapabilityBanner } from "../components/RuntimeCapabilityBanner";
 import { WarmActionIcon } from "../components/WarmActionIcon";
 import { fileToAttachment } from "../lib/attachments";
-import { composerSkillMentionWidget, composerToolMentionWidget, filterComposerSkillMentions, filterComposerToolMentions, resolveComposerWidgetDrop } from "../lib/composerWidgets";
+import { composerSkillMentionWidget, composerToolMentionWidget, filterComposerSkillMentions, filterComposerToolMentions, resolveComposerWidgetDrop, skillMentionIdsFromText, toolMentionIdsFromText } from "../lib/composerWidgets";
 import { HISTORY_CHAT_DROP_MIME, parseHistoryChatDrop } from "../lib/historyComposer";
 import { sortedToolGroups, toolGroupFor } from "../lib/toolUi";
 
@@ -409,7 +409,7 @@ function DroppedWidgetChip({
 
   return (
     <span
-      className={`inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[11px] cursor-pointer transition-colors ${
+      className={`inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[11px] transition-colors ${onToggle ? "cursor-pointer" : "cursor-default"} ${
         widget.enabled
           ? "border-emerald-600/50 bg-emerald-900/30 text-emerald-300"
           : "border-zinc-700/60 bg-zinc-800/70 text-zinc-400"
@@ -482,8 +482,8 @@ function ProviderApiKeyPrompt({
 
   return (
     <>
-      <button type="button" aria-label="close api key prompt" className="fixed inset-0 z-30 cursor-default" onClick={onCancel} />
-      <div className="absolute bottom-full right-3 z-40 mb-2 w-[min(430px,calc(100vw-32px))] overflow-hidden rounded-xl border border-zinc-700/80 bg-zinc-950 shadow-2xl">
+      <button type="button" aria-label="close api key prompt" className="fixed inset-0 rumi-layer-global-overlay cursor-default" onClick={onCancel} />
+      <div className="absolute bottom-full right-3 rumi-layer-global-overlay mb-2 w-[min(430px,calc(100vw-32px))] overflow-hidden rounded-xl border border-zinc-700/80 bg-zinc-950 shadow-2xl">
         <div className="border-b border-zinc-800 px-4 py-3">
           <div className="flex items-center gap-2 text-sm font-medium text-zinc-100">
             <KeyRound size={15} className="text-zinc-400" />
@@ -568,8 +568,8 @@ function ModelDropdown({
 
   return (
     <>
-      <button type="button" aria-label="close model dropdown" className="fixed inset-0 z-20 cursor-default" onClick={onClose} />
-      <div className="absolute bottom-full left-0 mb-2 z-[70] w-[min(360px,calc(100vw-32px))] overflow-hidden rounded-xl border border-zinc-700/70 bg-zinc-950 shadow-2xl">
+      <button type="button" aria-label="close model dropdown" className="fixed inset-0 rumi-layer-local-popover cursor-default" onClick={onClose} />
+      <div className="absolute bottom-full left-0 mb-2 rumi-layer-command-palette w-[min(360px,calc(100vw-32px))] overflow-hidden rounded-xl border border-zinc-700/70 bg-zinc-950 shadow-2xl">
         <div className="border-b border-zinc-800 p-2">
           <div className="relative">
             <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-500" />
@@ -661,8 +661,8 @@ function ModeSelector({
 }) {
   return (
     <>
-      <button type="button" aria-label="close mode selector" className="fixed inset-0 z-20 cursor-default" onClick={onClose} />
-      <div className="absolute bottom-full left-0 mb-2 z-50 w-[220px] overflow-hidden rounded-xl border border-zinc-700/70 bg-zinc-950 shadow-2xl">
+      <button type="button" aria-label="close mode selector" className="fixed inset-0 rumi-layer-local-popover cursor-default" onClick={onClose} />
+      <div className="absolute bottom-full left-0 mb-2 rumi-layer-modal w-[220px] overflow-hidden rounded-xl border border-zinc-700/70 bg-zinc-950 shadow-2xl">
         <div className="border-b border-zinc-800 px-3 py-2">
           <p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">モード選択</p>
         </div>
@@ -719,13 +719,13 @@ function AtMentionMenu({
 
   return (
     <>
-      <button type="button" aria-label="close mention menu" className="fixed inset-0 z-20 cursor-default" onClick={onClose} />
+      <button type="button" aria-label="close mention menu" className="fixed inset-0 rumi-layer-local-popover cursor-default" onClick={onClose} />
       <div
         role="listbox"
         aria-label="Composer mentions"
         data-testid="composer-at-mention-candidates"
         style={style}
-        className="fixed z-50 w-[min(440px,calc(100vw-32px))] overflow-hidden rounded-xl border border-zinc-700/70 bg-zinc-950 shadow-2xl"
+        className="fixed rumi-layer-modal w-[min(440px,calc(100vw-32px))] overflow-hidden rounded-xl border border-zinc-700/70 bg-zinc-950 shadow-2xl"
       >
         <div className="border-b border-zinc-800 px-3 py-2 flex items-center justify-between gap-2">
           <span className="inline-flex min-w-0 items-center gap-2">
@@ -879,7 +879,7 @@ function ModelCommandCandidatePopup({
       role="listbox"
       aria-label="Model candidates"
       style={style}
-      className="fixed z-50 w-[min(460px,calc(100vw-32px))] overflow-hidden rounded-xl border border-zinc-700/70 bg-zinc-950 shadow-2xl"
+      className="fixed rumi-layer-modal w-[min(460px,calc(100vw-32px))] overflow-hidden rounded-xl border border-zinc-700/70 bg-zinc-950 shadow-2xl"
     >
       <div className="flex items-center justify-between gap-2 border-b border-zinc-800 px-3 py-2">
         <span className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Models</span>
@@ -1036,6 +1036,32 @@ export function ComposerRenderer({
     || toolId === "browser_use"
     || toolId === "browser_companion"
   ));
+  const mentionPreviewWidgets = useMemo(() => {
+    const visibleIds = new Set(droppedWidgets.map((widget) => widget.sourceItemId || widget.id));
+    const widgets: DroppedWidget[] = [];
+
+    for (const toolId of toolMentionIdsFromText(input, toolItems)) {
+      if (visibleIds.has(toolId)) continue;
+      const item = toolItems.find((candidate) => candidate.id === toolId);
+      if (!item) continue;
+      visibleIds.add(toolId);
+      widgets.push(composerToolMentionWidget(item));
+    }
+
+    for (const skillId of skillMentionIdsFromText(input, skillExtensions)) {
+      if (visibleIds.has(skillId)) continue;
+      const skill = skillExtensions.find((candidate) => candidate.id === skillId);
+      if (!skill) continue;
+      visibleIds.add(skillId);
+      widgets.push(composerSkillMentionWidget(skill));
+    }
+
+    return widgets;
+  }, [droppedWidgets, input, skillExtensions, toolItems]);
+  const visibleComposerWidgets = useMemo(() => [
+    ...droppedWidgets.map((widget) => ({ widget, interactive: true })),
+    ...mentionPreviewWidgets.map((widget) => ({ widget, interactive: false })),
+  ], [droppedWidgets, mentionPreviewWidgets]);
   const hasAttachedImages = attachedFiles.some((file) => String(file.type ?? "").startsWith("image/"));
   const imageBridgePlanned = hasAttachedImages && !selectedProfile?.supports_vision && !selectedProfile?.supports_image_input;
   const toolGroups = useMemo(() => groupToolItems(toolItems), [toolItems]);
@@ -1893,7 +1919,7 @@ export function ComposerRenderer({
           )}
           {showCommandSuggestions && (
             showThinkingLevelChips ? (
-              <div className="absolute bottom-full left-4 z-40 mb-2 flex w-[min(520px,calc(100vw-32px))] flex-wrap items-center gap-2 rounded-xl border border-zinc-700/70 bg-zinc-950/95 px-3 py-2 shadow-2xl">
+              <div className="absolute bottom-full left-4 rumi-layer-global-overlay mb-2 flex w-[min(520px,calc(100vw-32px))] flex-wrap items-center gap-2 rounded-xl border border-zinc-700/70 bg-zinc-950/95 px-3 py-2 shadow-2xl">
                 <span className="mr-1 text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Thinking</span>
                 {matchedCommands.map((command, index) => {
                   const level = command.id.replace(/^think:/, "");
@@ -1916,7 +1942,7 @@ export function ComposerRenderer({
                 })}
               </div>
             ) : (
-              <div className="absolute bottom-full left-4 z-40 mb-2 w-[min(420px,calc(100vw-32px))] overflow-hidden rounded-xl border border-zinc-700/70 bg-zinc-950 shadow-2xl">
+              <div className="absolute bottom-full left-4 rumi-layer-global-overlay mb-2 w-[min(420px,calc(100vw-32px))] overflow-hidden rounded-xl border border-zinc-700/70 bg-zinc-950 shadow-2xl">
                 <div className="border-b border-zinc-800 px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-zinc-500">
                   Commands
                 </div>
@@ -1972,10 +1998,10 @@ export function ComposerRenderer({
                         type="button"
                         aria-label="close composer menu"
                         tabIndex={chromeButtonTabIndex}
-                        className="fixed inset-0 z-20 cursor-default"
+                        className="fixed inset-0 rumi-layer-local-popover cursor-default"
                         onClick={() => setMenuOpen(false)}
                       />
-              <div ref={menuRef} className="absolute bottom-full left-4 z-40 mb-2 grid w-[min(480px,calc(100vw-32px))] grid-cols-[120px_minmax(0,1fr)] overflow-hidden rounded-xl border border-zinc-700/70 bg-zinc-950 shadow-2xl max-[640px]:left-2 max-[640px]:grid-cols-1">
+              <div ref={menuRef} className="absolute bottom-full left-4 rumi-layer-global-overlay mb-2 grid w-[min(480px,calc(100vw-32px))] grid-cols-[120px_minmax(0,1fr)] overflow-hidden rounded-xl border border-zinc-700/70 bg-zinc-950 shadow-2xl max-[640px]:left-2 max-[640px]:grid-cols-1">
                 <div className="border-r border-zinc-800 bg-zinc-950/90 p-1.5 max-[640px]:flex max-[640px]:border-b max-[640px]:border-r-0">
                   {(
                     [
@@ -2235,17 +2261,17 @@ export function ComposerRenderer({
             }}
           />
 
-          {((!isNewConversation && attachedFiles.length > 0) || droppedWidgets.length > 0) && (
+          {((!isNewConversation && attachedFiles.length > 0) || visibleComposerWidgets.length > 0) && (
             <div className="px-5 pt-1.5 pb-0.5 flex flex-wrap gap-1 max-[640px]:px-3">
               {!isNewConversation && attachedFiles.map((file) => (
                 <FileChip key={file.id} file={file} onRemove={onFileRemove} />
               ))}
-              {droppedWidgets.map((widget) => (
+              {visibleComposerWidgets.map(({ widget, interactive }) => (
                 <DroppedWidgetChip
-                  key={widget.id}
-                  widget={widget.type === "tool" ? { ...widget, enabled: selectedToolIdSet.has(widget.sourceItemId || widget.id) } : widget}
-                  onAction={onWidgetAction}
-                  onToggle={onWidgetToggle}
+                  key={`${interactive ? "dropped" : "mention"}:${widget.id}`}
+                  widget={interactive && widget.type === "tool" ? { ...widget, enabled: selectedToolIdSet.has(widget.sourceItemId || widget.id) } : widget}
+                  onAction={interactive ? onWidgetAction : undefined}
+                  onToggle={interactive ? onWidgetToggle : undefined}
                 />
               ))}
             </div>

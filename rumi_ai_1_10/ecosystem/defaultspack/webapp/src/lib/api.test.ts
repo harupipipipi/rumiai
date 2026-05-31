@@ -778,9 +778,42 @@ test("browser computer approvals use the browser-computer endpoint for computer_
 test("browser approval helpers identify visible computer tools", () => {
   assert.equal(usesBrowserComputerApprovalEndpoint("computer_use"), true);
   assert.equal(usesBrowserComputerApprovalEndpoint("browser_use"), true);
+  assert.equal(usesBrowserComputerApprovalEndpoint("browser_open_url"), true);
+  assert.equal(usesBrowserComputerApprovalEndpoint("open_browser"), true);
   assert.equal(usesBrowserComputerApprovalEndpoint("other_tool"), false);
   assert.equal(normalizeBrowserComputerApprovalAction("computer_use", "context"), "computer.context");
   assert.equal(normalizeBrowserComputerApprovalAction("computer_use", "computer.screenshot"), "computer.screenshot");
+  assert.equal(normalizeBrowserComputerApprovalAction("browser_open_url", "open_url"), "browser.open_url");
+  assert.equal(normalizeBrowserComputerApprovalAction("open_browser", "open_browser"), "browser.open_url");
+});
+
+test("browser open aliases use the browser-computer approval endpoint", async () => {
+  const originalFetch = globalThis.fetch;
+  let requestUrl = "";
+  let requestBody: any = null;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    requestUrl = String(input);
+    requestBody = JSON.parse(String(init?.body ?? "{}"));
+    return new Response(JSON.stringify({
+      status: "ok",
+      data: { approved: true },
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }) as typeof fetch;
+
+  try {
+    const result = await api.approveBrowserComputerAction("browser_open_url", "open_url", {
+      url: "https://gemini.google.com",
+      approval_token: "tok",
+    });
+    assert.equal(requestUrl, "/api/tools/browser-computer");
+    assert.deepEqual(requestBody, {
+      action: "browser.open_url",
+      payload: { url: "https://gemini.google.com", approval_token: "tok" },
+    });
+    assert.deepEqual(result, { approved: true });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test("coding context, branch, and workspace read helpers use existing API routes", async () => {

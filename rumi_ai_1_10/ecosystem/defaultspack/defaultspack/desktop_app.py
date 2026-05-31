@@ -40,13 +40,21 @@ def _install_ecosystem_defaultspack_alias(pack_root: Path) -> None:
     user-data without that parent ``ecosystem`` directory, but some legacy
     modules still import the canonical package path.
     """
+    ecosystem_dirs = _candidate_ecosystem_dirs(pack_root)
     ecosystem = sys.modules.get("ecosystem")
     if ecosystem is None:
         ecosystem = types.ModuleType("ecosystem")
-        ecosystem.__path__ = []  # type: ignore[attr-defined]
+        ecosystem.__path__ = [str(path) for path in ecosystem_dirs]  # type: ignore[attr-defined]
         sys.modules["ecosystem"] = ecosystem
     elif not hasattr(ecosystem, "__path__"):
-        ecosystem.__path__ = []  # type: ignore[attr-defined]
+        ecosystem.__path__ = [str(path) for path in ecosystem_dirs]  # type: ignore[attr-defined]
+    else:
+        paths = list(getattr(ecosystem, "__path__", []))
+        for ecosystem_dir in ecosystem_dirs:
+            ecosystem_path = str(ecosystem_dir)
+            if ecosystem_path not in paths:
+                paths.insert(0, ecosystem_path)
+        ecosystem.__path__ = paths  # type: ignore[attr-defined]
 
     defaultspack = sys.modules.get("ecosystem.defaultspack")
     pack_path = str(pack_root)
@@ -61,6 +69,39 @@ def _install_ecosystem_defaultspack_alias(pack_root: Path) -> None:
             paths.insert(0, pack_path)
             defaultspack.__path__ = paths  # type: ignore[attr-defined]
     setattr(ecosystem, "defaultspack", defaultspack)
+
+
+def _candidate_ecosystem_dirs(pack_root: Path) -> list[Path]:
+    candidates: list[Path] = []
+
+    if pack_root.parent.name == "ecosystem":
+        candidates.append(pack_root.parent)
+
+    for root in (
+        os.environ.get("RUMI_APP_DIR"),
+        os.environ.get("RUMI_CORE_DIR"),
+        os.environ.get("REPO"),
+    ):
+        if root:
+            candidates.append(Path(root) / "ecosystem")
+
+    for entry in sys.path:
+        if entry:
+            candidates.append(Path(entry) / "ecosystem")
+
+    resolved: list[Path] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        try:
+            path = candidate.resolve()
+        except OSError:
+            path = candidate
+        key = str(path)
+        if key in seen or not candidate.exists() or not candidate.is_dir():
+            continue
+        seen.add(key)
+        resolved.append(candidate)
+    return resolved
 
 
 def _url() -> str:

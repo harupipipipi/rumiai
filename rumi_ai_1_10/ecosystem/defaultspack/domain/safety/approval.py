@@ -11,12 +11,19 @@ import uuid
 from dataclasses import asdict, dataclass
 from typing import Any
 
-from .approval_store import get_approval_store
+from .approval_state_json import (
+    clear_approval_state_mirrors,
+    load_approval_state_requests,
+    normalize_request as normalize_json_approval_request,
+    refresh_approval_state_mirrors,
+)
+from .approval_store import get_approval_store, persist_runtime_secret_for_broker
 
 
 _TOKEN_VERSION = "v1"
 _DEFAULT_EXPIRES_IN_SECONDS = 300
 _RUNTIME_SECRET = os.environ.get("RUMI_DEFAULTSPACK_APPROVAL_SECRET") or get_approval_store().get_or_create_runtime_secret()
+persist_runtime_secret_for_broker(_RUNTIME_SECRET)
 _LOCK = threading.RLock()
 _REQUESTS: dict[str, "ApprovalRequest"] = {}
 _USED_TOKEN_IDS: set[str] = set()
@@ -126,6 +133,39 @@ def display_summary(operation: str, args: dict[str, Any] | None) -> str:
     return operation
 
 
+def _request_payload(request: ApprovalRequest) -> dict[str, Any]:
+    payload = asdict(request)
+    payload["display_summary"] = display_summary(request.operation, request.details)
+    return payload
+
+
+def _stored_approval_payloads() -> list[dict[str, Any]]:
+    payloads: list[dict[str, Any]] = []
+    for item in get_approval_store().list_requests(include_expired=True, limit=500):
+        request = _request_from_mapping(item)
+        if request is not None:
+            payloads.append(_request_payload(request))
+    return payloads
+
+
+def _refresh_approval_state_mirrors_from_store() -> None:
+    refresh_approval_state_mirrors(_stored_approval_payloads())
+
+
+def _request_is_visible(
+    request: dict[str, Any],
+    status: str | None,
+    *,
+    include_expired: bool,
+    now: int,
+) -> bool:
+    if status and str(request.get("status") or "") != str(status):
+        return False
+    if not include_expired and int(request.get("expires_at") or 0) < now:
+        return False
+    return True
+
+
 def create_approval_request(
     operation: str,
     risk_level: str,
@@ -147,7 +187,8 @@ def create_approval_request(
     with _LOCK:
         _REQUESTS[request.request_id] = request
         get_approval_store().save_request(request)
-    payload = asdict(request)
+        _refresh_approval_state_mirrors_from_store()
+    payload = _request_payload(request)
     payload["display_summary"] = display_summary(operation, args or details or {})
     return payload
 
@@ -165,6 +206,7 @@ def deny(request_id: str, reason: str = "") -> dict[str, Any]:
         request.decision_at = _now()
         _REQUESTS[request.request_id] = request
         get_approval_store().save_request(request)
+        _refresh_approval_state_mirrors_from_store()
         return asdict(ApprovalDecision(request.request_id, request.status, False, reason=reason))
 
 
@@ -191,6 +233,7 @@ def approve(request_id: str) -> dict[str, Any]:
             request.decision_at = now
             _REQUESTS[request.request_id] = request
             get_approval_store().save_request(request)
+            _refresh_approval_state_mirrors_from_store()
             return asdict(
                 ApprovalDecision(request.request_id, request.status, False, reason="approval request expired")
             )
@@ -198,7 +241,17 @@ def approve(request_id: str) -> dict[str, Any]:
         request.decision_at = now
         _REQUESTS[request.request_id] = request
         get_approval_store().save_request(request)
-        token = issue_execution_token(request.request_id, request.args_hash, expires_at=request.expires_at)
+        _refresh_approval_state_mirrors_from_store()
+        details = request.details if isinstance(request.details, dict) else {}
+        token = issue_execution_token(
+            request.request_id,
+            request.args_hash,
+            expires_at=request.expires_at,
+            operation=request.operation,
+            function_id=str(details.get("function_id") or details.get("action") or ""),
+            pack_id=str(details.get("pack_id") or ""),
+            conversation_id=str(details.get("conversation_id") or ""),
+        )
         return asdict(
             ApprovalDecision(
                 request.request_id,
@@ -210,7 +263,16 @@ def approve(request_id: str) -> dict[str, Any]:
         )
 
 
-def issue_execution_token(request_id: str, args_hash: str, *, expires_at: int | None = None) -> str:
+def issue_execution_token(
+    request_id: str,
+    args_hash: str,
+    *,
+    expires_at: int | None = None,
+    operation: str = "",
+    function_id: str = "",
+    pack_id: str = "",
+    conversation_id: str = "",
+) -> str:
     payload = {
         "version": _TOKEN_VERSION,
         "jti": "tok_" + uuid.uuid4().hex,
@@ -218,6 +280,14 @@ def issue_execution_token(request_id: str, args_hash: str, *, expires_at: int | 
         "args_hash": str(args_hash),
         "expires_at": int(expires_at or (_now() + _DEFAULT_EXPIRES_IN_SECONDS)),
     }
+    if operation:
+        payload["operation"] = str(operation)
+    if function_id:
+        payload["function_id"] = str(function_id)
+    if pack_id:
+        payload["pack_id"] = str(pack_id)
+    if conversation_id:
+        payload["conversation_id"] = str(conversation_id)
     body = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
     encoded = _b64url_encode(body)
     signature = hmac.new(
@@ -234,6 +304,8 @@ def verify_execution_token(
     args_hash: str,
     *,
     consume: bool = True,
+    pack_id: str = "",
+    conversation_id: str = "",
 ) -> TokenVerification:
     token = str(token or "")
     if "." not in token:
@@ -252,6 +324,25 @@ def verify_execution_token(
         return TokenVerification(False, "APPROVAL_TOKEN_INVALID", "approval token version is invalid")
     if int(payload.get("expires_at") or 0) < _now():
         return TokenVerification(False, "APPROVAL_EXPIRED", "approval token expired")
+    token_operation = str(payload.get("operation") or "")
+    if token_operation and token_operation != str(operation):
+        return TokenVerification(
+            False,
+            "APPROVAL_OPERATION_MISMATCH",
+            "approval token operation mismatch",
+        )
+    expected_pack_id = str(pack_id or "")
+    token_pack_id = str(payload.get("pack_id") or "")
+    if (expected_pack_id or token_pack_id) and token_pack_id != expected_pack_id:
+        return TokenVerification(False, "APPROVAL_PACK_MISMATCH", "approval token pack mismatch")
+    expected_conversation_id = str(conversation_id or "")
+    token_conversation_id = str(payload.get("conversation_id") or "")
+    if (expected_conversation_id or token_conversation_id) and token_conversation_id != expected_conversation_id:
+        return TokenVerification(
+            False,
+            "APPROVAL_CONVERSATION_MISMATCH",
+            "approval token conversation mismatch",
+        )
     if str(payload.get("args_hash") or "") != str(args_hash):
         return TokenVerification(
             False,
@@ -305,13 +396,16 @@ def verify_execution_token(
             request.status = "consumed"
             request.decision_at = _now()
             _REQUESTS[request_id] = request
+            _refresh_approval_state_mirrors_from_store()
     return TokenVerification(True, request_id=request_id)
 
 
 def list_approval_requests(status: str | None = None, *, include_expired: bool = True, limit: int = 100) -> list[dict[str, Any]]:
-    requests = get_approval_store().list_requests(status=status, include_expired=include_expired, limit=limit)
-    result = []
+    limit = max(1, min(500, int(limit or 100)))
+    requests = get_approval_store().list_requests(include_expired=True, limit=500)
+    sqlite_by_id: dict[str, dict[str, Any]] = {}
     now = _now()
+    expired_any = False
     for item in requests:
         request = _request_from_mapping(item)
         if request is None:
@@ -320,9 +414,36 @@ def list_approval_requests(status: str | None = None, *, include_expired: bool =
             request.status = "expired"
             request.decision_at = now
             get_approval_store().save_request(request)
-        payload = asdict(request)
-        payload["display_summary"] = display_summary(request.operation, request.details)
-        result.append(payload)
+            expired_any = True
+        sqlite_by_id[request.request_id] = _request_payload(request)
+    if expired_any:
+        _refresh_approval_state_mirrors_from_store()
+
+    merged: dict[str, dict[str, Any]] = {}
+    for item in load_approval_state_requests():
+        request = normalize_json_approval_request(item)
+        if request is None:
+            continue
+        if request.get("status") == "pending" and int(request.get("expires_at") or 0) < now:
+            request["status"] = "expired"
+            request["decision_at"] = now
+        request["display_summary"] = display_summary(
+            str(request.get("operation") or ""),
+            request.get("details") if isinstance(request.get("details"), dict) else {},
+        )
+        merged[request["request_id"]] = request
+    merged.update(sqlite_by_id)
+
+    result = [
+        request
+        for request in merged.values()
+        if _request_is_visible(request, status, include_expired=include_expired, now=now)
+    ]
+    result.sort(
+        key=lambda item: (int(item.get("created_at") or 0), str(item.get("request_id") or "")),
+        reverse=True,
+    )
+    result = result[:limit]
     return result
 
 
@@ -331,3 +452,4 @@ def reset_approval_state_for_tests() -> None:
         _REQUESTS.clear()
         _USED_TOKEN_IDS.clear()
         get_approval_store().clear()
+        clear_approval_state_mirrors()

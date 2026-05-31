@@ -107,6 +107,13 @@ function installBrowser(href: string): MemoryStorage {
               build_channel: 'beta',
               platform: 'macos',
               platform_release: '15.0',
+              permission_subject: 'Rumi Viewer',
+              host_broker: {
+                enabled: true,
+                available: true,
+                status: 'running',
+                url: 'http://127.0.0.1:8770',
+              },
               permissions: [
                 {
                   id: 'accessibility',
@@ -424,6 +431,8 @@ test('fetchDesktopSystemInfo reads viewer version and macOS permissions from Tau
   assert.equal(tauriDesktopInfoCount, 1);
   assert.equal(info?.display_version, RUMI_DISPLAY_VERSION);
   assert.equal(info?.viewer_version, '1.0.0-beta.1');
+  assert.equal(info?.permission_subject, 'Rumi Viewer');
+  assert.equal(info?.host_broker?.status, 'running');
   assert.equal(info?.permissions[0]?.id, 'accessibility');
   assert.equal(info?.permissions[0]?.granted, true);
 });

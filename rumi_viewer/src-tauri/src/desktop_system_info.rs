@@ -1,5 +1,8 @@
 use serde::Serialize;
 
+use crate::host_broker::HostBrokerRuntime;
+use crate::host_broker_types::HostBrokerStatus;
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct DesktopPermissionStatus {
     pub id: String,
@@ -12,36 +15,50 @@ pub struct DesktopPermissionStatus {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct DesktopSystemInfo {
+    pub source: String,
+    pub reliable: bool,
     pub app_name: String,
     pub display_version: String,
     pub viewer_version: String,
     pub build_channel: String,
     pub platform: String,
     pub platform_release: String,
+    pub permission_subject: String,
+    pub host_broker: HostBrokerStatus,
     pub permissions: Vec<DesktopPermissionStatus>,
 }
 
 #[tauri::command]
-pub fn get_desktop_system_info() -> DesktopSystemInfo {
-    collect_desktop_system_info()
+pub fn get_desktop_system_info(
+    host_broker: tauri::State<'_, HostBrokerRuntime>,
+) -> DesktopSystemInfo {
+    collect_desktop_system_info(host_broker.inner().status_snapshot())
 }
 
-pub fn collect_desktop_system_info() -> DesktopSystemInfo {
+pub fn collect_desktop_system_info(host_broker: HostBrokerStatus) -> DesktopSystemInfo {
     let viewer_version = env!("CARGO_PKG_VERSION").to_string();
     DesktopSystemInfo {
+        source: "viewer_tauri".to_string(),
+        reliable: true,
         app_name: "Rumi AI".to_string(),
         display_version: display_version_from_package_version(&viewer_version),
         viewer_version,
         build_channel: "beta".to_string(),
         platform: std::env::consts::OS.to_string(),
         platform_release: platform_release(),
+        permission_subject: "Rumi Viewer".to_string(),
+        host_broker,
         permissions: collect_permissions(),
     }
 }
 
 fn display_version_from_package_version(version: &str) -> String {
     if let Some((base, pre_release)) = version.split_once('-') {
-        if let Some(label) = pre_release.split('.').next().filter(|value| !value.is_empty()) {
+        if let Some(label) = pre_release
+            .split('.')
+            .next()
+            .filter(|value| !value.is_empty())
+        {
             return format!("{label} {base}");
         }
     }
@@ -67,7 +84,7 @@ fn platform_release() -> String {
     }
 }
 
-fn collect_permissions() -> Vec<DesktopPermissionStatus> {
+pub fn collect_permissions() -> Vec<DesktopPermissionStatus> {
     #[cfg(target_os = "macos")]
     {
         macos_permissions()
@@ -166,15 +183,24 @@ mod tests {
 
     #[test]
     fn reports_beta_display_version() {
-        let info = collect_desktop_system_info();
-        assert_eq!(info.display_version, display_version_from_package_version(&info.viewer_version));
-        assert_eq!(display_version_from_package_version("1.2.3-beta.4"), "beta 1.2.3");
+        let info = collect_desktop_system_info(HostBrokerStatus::disabled("test"));
+        assert_eq!(
+            info.display_version,
+            display_version_from_package_version(&info.viewer_version)
+        );
+        assert_eq!(
+            display_version_from_package_version("1.2.3-beta.4"),
+            "beta 1.2.3"
+        );
         assert!(!info.viewer_version.is_empty());
+        assert_eq!(info.permission_subject, "Rumi Viewer");
+        assert_eq!(info.source, "viewer_tauri");
+        assert!(info.reliable);
     }
 
     #[test]
     fn permission_rows_have_stable_ids() {
-        let info = collect_desktop_system_info();
+        let info = collect_desktop_system_info(HostBrokerStatus::disabled("test"));
         let ids: Vec<&str> = info.permissions.iter().map(|row| row.id.as_str()).collect();
         #[cfg(target_os = "macos")]
         {
@@ -185,5 +211,22 @@ mod tests {
         {
             assert_eq!(ids, vec!["macos_privacy"]);
         }
+    }
+
+    #[test]
+    fn desktop_system_info_includes_host_broker_status() {
+        let info = collect_desktop_system_info(HostBrokerStatus {
+            enabled: true,
+            available: true,
+            status: "running".to_string(),
+            url: Some("http://127.0.0.1:8770".to_string()),
+            connection_path: Some("/tmp/connection.json".to_string()),
+            recovery: None,
+        });
+        assert_eq!(info.host_broker.status, "running");
+        assert_eq!(
+            info.host_broker.url.as_deref(),
+            Some("http://127.0.0.1:8770")
+        );
     }
 }

@@ -394,8 +394,11 @@ export function Dashboard() {
     setFeedback(null);
     try {
       const message = await launchDefaultspackDesktop();
+      console.log('[defaultspack-launch] success:', message);
       setSuccessFeedback(message);
     } catch (error) {
+      const rawMessage = error instanceof Error ? error.message : String(error);
+      console.error('[defaultspack-launch] failed:', rawMessage);
       setErrorFeedback(translateActionError(error, 'open Defaultspack v2'));
     } finally {
       setLaunchingDefaultspack(false);

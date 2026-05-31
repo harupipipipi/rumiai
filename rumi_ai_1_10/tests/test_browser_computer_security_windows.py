@@ -61,6 +61,7 @@ def test_user_requested_computer_use_does_not_bypass_local_executor_approval(tmp
 
     ToolExecutor = executor_module.ToolExecutor
     monkeypatch.setattr(executor_module, "policy_from_context", lambda context: context.get("profile_policy", {}))
+    monkeypatch.setenv("RUMI_COMPUTER_HOST_INTERNAL", "1")
 
     monkeypatch.setattr(
         "ecosystem.rumi_default_tools_pack.domain.tool.browser_computer.BrowserComputerController._capture_action_result_screenshot",
@@ -110,6 +111,68 @@ def test_open_url_function_context_target_app_reaches_approval_payload(tmp_path)
 
     assert result["widget"]["requires_approval"] is True
     assert result["widget"]["payload"]["target_app"] == "Microsoft Edge"
+
+
+def test_open_url_function_accepts_server_approval_context(tmp_path, monkeypatch):
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+    from ecosystem.rumi_default_tools_pack.functions.browser_computer import main
+
+    opened = {}
+
+    def fake_open(url, *, app_name=""):
+        opened["url"] = url
+        opened["app_name"] = app_name
+        return True
+
+    monkeypatch.setattr(BrowserComputerController, "_open_url_foreground", staticmethod(fake_open))
+
+    result = main.run(
+        {
+            "conversation_workspace_dir": str(tmp_path),
+            "computer_use_target_app": "Google Chrome",
+            "_tool_server_approved": True,
+        },
+        {"action": "browser.open_url", "payload": {"url": "https://gemini.google.com", "persistent": False}},
+    )
+
+    assert result["is_error"] is False
+    assert result["widget"]["opened"] is True
+    assert result["widget"].get("requires_approval") is not True
+    assert opened == {"url": "https://gemini.google.com", "app_name": "Google Chrome"}
+
+
+def test_local_browser_computer_accepts_server_approval_context(tmp_path, monkeypatch):
+    from domain.tool import executor as executor_module
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+
+    ToolExecutor = executor_module.ToolExecutor
+    monkeypatch.setattr(executor_module, "policy_from_context", lambda context: context.get("profile_policy", {}))
+
+    opened = {}
+
+    def fake_open(url, *, app_name=""):
+        opened["url"] = url
+        opened["app_name"] = app_name
+        return True
+
+    monkeypatch.setattr(BrowserComputerController, "_open_url_foreground", staticmethod(fake_open))
+
+    executor = ToolExecutor.__new__(ToolExecutor)
+    result = executor._execute_local(
+        "browser_computer",
+        {"action": "browser.open_url", "payload": {"url": "https://gemini.google.com", "persistent": False}},
+        {
+            "conversation_workspace_dir": str(tmp_path),
+            "computer_use_target_app": "Google Chrome",
+            "_tool_server_approval_token_valid": True,
+            "profile_policy": {"yolo_mode": "false"},
+        },
+    )
+
+    assert result["is_error"] is False
+    assert result["widget"]["opened"] is True
+    assert result["widget"].get("requires_approval") is not True
+    assert opened == {"url": "https://gemini.google.com", "app_name": "Google Chrome"}
 
 
 def test_pointer_actions_default_virtual_and_include_resolved_coordinates(tmp_path, monkeypatch):

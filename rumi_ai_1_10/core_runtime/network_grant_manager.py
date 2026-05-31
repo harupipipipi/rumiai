@@ -93,12 +93,17 @@ class NetworkGrantManager:
     SECRET_KEY_FILE = "user_data/permissions/.secret_key"
     
     def __init__(self, grants_dir: str = None, secret_key: str = None):
-        self._grants_dir = Path(grants_dir) if grants_dir else Path(self.GRANTS_DIR)
+        if grants_dir:
+            self._grants_dir = Path(grants_dir)
+        else:
+            from .paths import USER_DATA_DIR
+            self._grants_dir = USER_DATA_DIR / "permissions" / "network"
         if secret_key:
             self._secret_key: bytes = secret_key.encode("utf-8")
         else:
+            from .paths import USER_DATA_DIR as _UDD
             self._secret_key = generate_or_load_signing_key(
-                Path(self.SECRET_KEY_FILE),
+                _UDD / "permissions" / ".secret_key",
             )
         self._grants: Dict[str, NetworkGrant] = {}
         self._disabled_packs: Set[str] = set()  # ModifiedでDisabledになったPack

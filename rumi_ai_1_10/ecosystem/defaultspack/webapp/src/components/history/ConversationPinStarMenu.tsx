@@ -45,7 +45,7 @@ export function ConversationPinStarMenu({
       )}
       {open && (
         <div
-          className="absolute right-0 top-full z-40 mt-1 w-36 overflow-hidden rounded-md border border-zinc-800 bg-zinc-950 shadow-xl"
+          className="absolute right-0 top-full rumi-layer-global-overlay mt-1 w-36 overflow-hidden rounded-md border border-zinc-800 bg-zinc-950 shadow-xl"
           onClick={(event) => event.stopPropagation()}
         >
           {onTogglePinned && (

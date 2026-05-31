@@ -56,18 +56,29 @@ export function Settings() {
   const [backgroundStatus, setBackgroundStatus] = useState<BackgroundControlStatus | null>(null);
   const [backgroundBusy, setBackgroundBusy] = useState(false);
   const [desktopInfo, setDesktopInfo] = useState<DesktopSystemInfo | null>(null);
+  const [desktopInfoError, setDesktopInfoError] = useState<string | null>(null);
   const [desktopInfoBusy, setDesktopInfoBusy] = useState(false);
   const desktopShellAvailable = isDesktopShellAvailable();
 
   const loadDesktopInfo = async () => {
     if (!desktopShellAvailable) {
+      setDesktopInfo(null);
+      setDesktopInfoError('macOS permission status is only available inside Rumi Viewer.');
       return;
     }
     setDesktopInfoBusy(true);
+    setDesktopInfoError(null);
     try {
-      setDesktopInfo(await fetchDesktopSystemInfo());
+      const info = await fetchDesktopSystemInfo();
+      if (!info) {
+        setDesktopInfo(null);
+        setDesktopInfoError('Rumi Viewer permission bridge is unavailable. Reopen this page from Rumi Viewer and try again.');
+        return;
+      }
+      setDesktopInfo(info);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to read macOS permissions';
+      setDesktopInfoError(message);
       addToast(message, 'error');
     } finally {
       setDesktopInfoBusy(false);
@@ -152,6 +163,7 @@ export function Settings() {
 
   const themes: Theme[] = ['Rumi', 'Minimal', 'Standard', 'Rounded'];
   const updateName = (target: UpdateTarget) => target === 'rumiai' ? 'Rumi AI' : 'defaultspack';
+  const permissionRows = desktopInfo?.permissions ?? [];
 
   const handleApplyUpdate = async (target: UpdateTarget) => {
     await applyUpdate(target);
@@ -489,7 +501,7 @@ export function Settings() {
                 <CardHeader className="flex-row items-center justify-between space-y-0">
                   <div>
                     <CardTitle>macOS Permissions</CardTitle>
-                    <CardDescription>Current privacy approvals used by Computer Use and screen capture.</CardDescription>
+                    <CardDescription>Rumi Viewer is the macOS permission host for Computer Use and screen capture.</CardDescription>
                   </div>
                   <Button variant="outline" size="sm" onClick={loadDesktopInfo} disabled={desktopInfoBusy} loading={desktopInfoBusy}>
                     <RefreshCw className="h-3.5 w-3.5" />
@@ -497,8 +509,19 @@ export function Settings() {
                   </Button>
                 </CardHeader>
                 <CardContent className="space-y-4">
+                  <div className="rounded-lg border border-border bg-bg-main/50 p-4">
+                    <p className="text-sm font-medium text-text-main">macOS権限ホスト: {desktopInfo?.permission_subject ?? 'Rumi Viewer'}</p>
+                    <p className="mt-2 text-xs leading-5 text-text-muted">
+                      Rumiの画面確認・クリック・キーボード操作は、Rumi Viewerに許可された権限を使って実行されます。DefaultspackやCLIは、許可された操作だけをViewer経由で要求します。
+                    </p>
+                    <div className="mt-3 flex flex-wrap gap-2 text-[11px] text-text-muted">
+                      <span className="rounded-full border border-border px-2.5 py-1">画面を見る</span>
+                      <span className="rounded-full border border-border px-2.5 py-1">クリック・キーボード操作</span>
+                      <span className="rounded-full border border-border px-2.5 py-1">ブラウザ操作</span>
+                    </div>
+                  </div>
                   <div className="grid gap-3 sm:grid-cols-2">
-                    {(desktopInfo?.permissions ?? []).map((permission) => (
+                    {permissionRows.map((permission) => (
                       <div key={permission.id} className="rounded-lg border border-border p-4">
                         <div className="flex items-start justify-between gap-3">
                           <div className="flex min-w-0 items-start gap-2">
@@ -518,9 +541,24 @@ export function Settings() {
                       </div>
                     ))}
                   </div>
-                  {!desktopInfo && !desktopInfoBusy && (
+                  {desktopInfoBusy && permissionRows.length === 0 && (
                     <p className="rounded-lg border border-border bg-bg-main/50 px-4 py-3 text-sm text-text-muted">
-                      Permission status is available when this page is running inside Rumi Viewer.
+                      Reading macOS permission status from Rumi Viewer...
+                    </p>
+                  )}
+                  {desktopInfoError && permissionRows.length === 0 && (
+                    <p className="rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+                      {desktopInfoError}
+                    </p>
+                  )}
+                  {!desktopInfoBusy && !desktopInfoError && desktopInfo && permissionRows.length === 0 && (
+                    <p className="rounded-lg border border-border bg-bg-main/50 px-4 py-3 text-sm text-text-muted">
+                      Rumi Viewer returned no macOS permission rows. Use Refresh after changing System Settings.
+                    </p>
+                  )}
+                  {!desktopInfoBusy && !desktopInfoError && !desktopInfo && (
+                    <p className="rounded-lg border border-border bg-bg-main/50 px-4 py-3 text-sm text-text-muted">
+                      Click Refresh to read macOS permission status from Rumi Viewer.
                     </p>
                   )}
                 </CardContent>

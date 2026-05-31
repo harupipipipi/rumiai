@@ -494,6 +494,17 @@ export type ModelProfile = {
   local?: boolean;
 };
 
+export type ModelCandidate = {
+  provider_id: string;
+  model_id: string;
+  label?: string;
+  profile_id?: string;
+};
+
+export type ModelAvailabilityAfterKeySave =
+  | { status: "models_available"; profiles: ModelProfile[]; selected_profile_id: string }
+  | { status: "route_required"; provider_id: string; api_id: string; candidate_models: ModelCandidate[]; reason: string };
+
 export type ModelCommandCandidate = {
   profile_id: string;
   display_name: string;
@@ -1028,6 +1039,14 @@ const BROWSER_COMPUTER_APPROVAL_TOOLS = new Set([
   "browser_companion",
   "browser_use",
   "computer_use",
+  "browser_open_url",
+  "open_browser",
+]);
+
+const BROWSER_OPEN_ACTION_ALIASES = new Set([
+  "browser_open_url",
+  "open_browser",
+  "open_url",
 ]);
 
 const COMPUTER_APPROVAL_ACTION_ALIASES = new Set([
@@ -1064,6 +1083,9 @@ export function usesBrowserComputerApprovalEndpoint(toolName: string): boolean {
 
 export function normalizeBrowserComputerApprovalAction(toolName: string, action: string): string {
   const normalizedAction = String(action || "").trim();
+  if (usesBrowserComputerApprovalEndpoint(toolName) && BROWSER_OPEN_ACTION_ALIASES.has(normalizedAction)) {
+    return "browser.open_url";
+  }
   if (
     usesBrowserComputerApprovalEndpoint(toolName)
     && normalizedAction
@@ -1452,7 +1474,7 @@ export const api = {
     quotaLabel?: string;
     kind?: string;
   }) {
-    return request<{ provider_id: string; api_id?: string; name?: string; configured: boolean; kind?: string }>("/api/ai/provider-key", {
+    return request<{ provider_id: string; api_id?: string; name?: string; configured: boolean; kind?: string; model_availability?: ModelAvailabilityAfterKeySave }>("/api/ai/provider-key", {
       method: "POST",
       body: JSON.stringify({
         provider_id: providerId,

@@ -1,15 +1,15 @@
 import { Bot, FolderGit2, Globe2, PlugZap, RefreshCw, Users } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import {
-  api,
-  type BrowserArtifact,
-  type CodingApprovalDecision,
-  type CodingApprovalRequest,
-  type CodingAgentSession,
-  type CodingWorkspaceRecord,
-  type McpServerRecord,
+import type {
+  BrowserArtifact,
+  CodingApprovalDecision,
+  CodingApprovalRequest,
+  CodingAgentSession,
+  CodingWorkspaceRecord,
+  McpServerRecord,
 } from "../../lib/api";
+import { codingResources } from "../../features/coding/resources/codingResources";
 import { ApprovalQueue } from "./ApprovalQueue";
 import { CheckpointPanel } from "./CheckpointPanel";
 import { DiffPanel } from "./DiffPanel";
@@ -78,8 +78,8 @@ export function CodingCockpit({
     setStatus(null);
     try {
       const [mcp, artifacts] = await Promise.all([
-        api.listMcpServers(),
-        api.listBrowserArtifacts({ limit: 8 }),
+        codingResources.listMcpServers(),
+        codingResources.listBrowserArtifacts({ limit: 8 }),
       ]);
       setMcpServers(mcp.servers);
       setBrowserArtifacts(artifacts.artifacts);
@@ -96,7 +96,7 @@ export function CodingCockpit({
     const task = sessionTask.trim() || "Inspect workspace changes";
     setStatus(null);
     try {
-      const result = await api.createCodingAgentSession({
+      const result = await codingResources.createCodingAgentSession({
         task,
         workspace_id: activeWorkspaceId,
         agents: [{ agent_id: "worker", role: "worker", task }],
@@ -112,7 +112,7 @@ export function CodingCockpit({
     const refreshed: CodingAgentSession[] = [];
     for (const session of sessions) {
       try {
-        const result = await api.getCodingAgentSessionStatus(session.session_id);
+        const result = await codingResources.getCodingAgentSessionStatus(session.session_id);
         refreshed.push(result);
       } catch {
         refreshed.push(session);
@@ -145,14 +145,14 @@ export function CodingCockpit({
         command,
         args: parseMcpArgs(mcpArgs),
       };
-      await api.registerMcpServer({ server_id: serverId, name: serverId, config });
-      let result = await api.connectMcpServer({ server_id: serverId });
+      await codingResources.registerMcpServer({ server_id: serverId, name: serverId, config });
+      let result = await codingResources.connectMcpServer({ server_id: serverId });
       if (result.approval_required && typeof result.approval_request_id === "string") {
-        const decision = await api.approveCodingApproval(result.approval_request_id);
+        const decision = await codingResources.approveCodingApproval(result.approval_request_id);
         if (!decision.approved || !decision.token) {
           throw new Error("MCP approval was not granted");
         }
-        result = await api.connectMcpServer({ server_id: serverId, approval_token: decision.token });
+        result = await codingResources.connectMcpServer({ server_id: serverId, approval_token: decision.token });
       }
       const tools = Array.isArray(result.tools) ? result.tools.length : 0;
       setMcpServerId("");

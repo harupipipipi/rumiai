@@ -767,7 +767,7 @@ function HtmlPreviewContent({
       </div>
       <div className="relative min-h-0 flex-1 bg-white">
         {isLoading && (
-          <div className="absolute inset-0 z-10 flex items-center justify-center bg-zinc-950 text-[11px] text-zinc-500">
+          <div className="absolute inset-0 rumi-layer-panel flex items-center justify-center bg-zinc-950 text-[11px] text-zinc-500">
             HTML を読み込んでいます
           </div>
         )}
@@ -1129,7 +1129,7 @@ export function ToolPreviewPanel({
             <Plus size={14} />
           </button>
           {isPickerOpen && (
-            <div className="absolute right-0 top-8 z-40 w-64 overflow-hidden rounded-lg border border-zinc-800 bg-zinc-950 shadow-2xl">
+            <div className="absolute right-0 top-8 rumi-layer-global-overlay w-64 overflow-hidden rounded-lg border border-zinc-800 bg-zinc-950 shadow-2xl">
               <div className="border-b border-zinc-800 px-3 py-2 text-[10px] font-medium uppercase tracking-wide text-zinc-500">
                 新規タブ
               </div>

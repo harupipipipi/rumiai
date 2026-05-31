@@ -3838,15 +3838,11 @@ def test_browser_computer_route_module_imports_and_delegates(monkeypatch):
     module = importlib.import_module("blocks.tool.browser_computer")
     calls = []
 
-    class FakeBrowserComputerController:
-        def __init__(self, *args, **kwargs):
-            pass
+    def fake_run_computer_action(action, payload, context=None, **kwargs):
+        calls.append((action, payload, context, kwargs))
+        return {"handled": True}
 
-        def run(self, action, payload, *, yolo_mode=False):
-            calls.append((action, payload))
-            return {"handled": True}
-
-    monkeypatch.setattr(module, "BrowserComputerController", FakeBrowserComputerController)
+    monkeypatch.setattr(module, "run_computer_action", fake_run_computer_action)
 
     result = module.run(
         {"action": "computer.screenshot", "payload": {"reason": "test"}},
@@ -3854,7 +3850,7 @@ def test_browser_computer_route_module_imports_and_delegates(monkeypatch):
     )
 
     assert result == {"status": "ok", "data": {"handled": True}}
-    assert calls == [("computer.screenshot", {"reason": "test"})]
+    assert calls == [("computer.screenshot", {"reason": "test"}, {}, {"tool_name": "browser_computer", "artifact_root": None, "yolo_mode": False})]
 
 
 def test_stdio_and_uds_chat_stop_routes_inject_conversation_id():

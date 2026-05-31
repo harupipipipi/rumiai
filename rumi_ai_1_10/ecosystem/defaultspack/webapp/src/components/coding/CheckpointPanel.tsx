@@ -1,7 +1,8 @@
 import { RotateCcw, Save, ShieldAlert } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
-import { api, type CodingCheckpoint, type CodingDiffResponse } from "../../lib/api";
+import type { CodingCheckpoint, CodingDiffResponse } from "../../lib/api";
+import { codingResources } from "../../features/coding/resources/codingResources";
 
 function checkpointLabel(checkpoint: CodingCheckpoint): string {
   return String(checkpoint.snapshot_id || checkpoint.path || "checkpoint");
@@ -27,7 +28,7 @@ export function CheckpointPanel({
     if (initialCheckpoints) return;
     setError(null);
     try {
-      const result = await api.listCodingCheckpoints({ workspace_id: workspaceId, limit: 20 });
+      const result = await codingResources.listCodingCheckpoints({ workspace_id: workspaceId, limit: 20 });
       setCheckpoints(result.checkpoints);
       setSelectedSnapshotId((current) => current || result.checkpoints[0]?.snapshot_id || "");
     } catch (err) {
@@ -38,7 +39,7 @@ export function CheckpointPanel({
   const loadDiff = useCallback(async () => {
     if (initialDiff) return;
     try {
-      const result = await api.getGitDiff({ workspace_id: workspaceId });
+      const result = await codingResources.getGitDiff({ workspace_id: workspaceId });
       setDiff(result);
     } catch {
       setDiff(null);
@@ -55,7 +56,7 @@ export function CheckpointPanel({
     setError(null);
     setMessage(null);
     try {
-      const result = await api.createCodingCheckpoint({
+      const result = await codingResources.createCodingCheckpoint({
         workspace_id: workspaceId,
         paths: ["."],
         operation: "cockpit",
@@ -75,7 +76,7 @@ export function CheckpointPanel({
     setError(null);
     setMessage(null);
     try {
-      const result = await api.restoreCodingSnapshot(selectedSnapshotId, { workspace_id: workspaceId });
+      const result = await codingResources.restoreCodingSnapshot(selectedSnapshotId, { workspace_id: workspaceId });
       const approvalRequired = Boolean(result.approval_required || result.approval_request);
       setMessage(approvalRequired ? "Approval required" : `Restored ${selectedSnapshotId}`);
     } catch (err) {

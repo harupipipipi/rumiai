@@ -117,7 +117,11 @@ class CapabilityGrantManager:
     SECRET_KEY_FILE = "user_data/permissions/.secret_key"
     
     def __init__(self, grants_dir: str = None, secret_key: str = None):
-        self._grants_dir = Path(grants_dir) if grants_dir else Path(self.DEFAULT_GRANTS_DIR)
+        if grants_dir:
+            self._grants_dir = Path(grants_dir)
+        else:
+            from .paths import USER_DATA_DIR
+            self._grants_dir = USER_DATA_DIR / "permissions" / "capabilities"
         self._secret_key = secret_key or self._load_or_create_secret_key()
         self._grants: Dict[str, CapabilityGrant] = {}
         self._tampered_principals: Set[str] = set()
@@ -135,7 +139,8 @@ class CapabilityGrantManager:
     
     def _load_or_create_secret_key(self) -> str:
         """NetworkGrantManager と同じ secret_key を流用"""
-        key_file = Path(self.SECRET_KEY_FILE)
+        from .paths import USER_DATA_DIR
+        key_file = USER_DATA_DIR / "permissions" / ".secret_key"
         
         if key_file.exists():
             try:

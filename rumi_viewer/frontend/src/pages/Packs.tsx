@@ -45,9 +45,11 @@ export function Packs() {
     setLaunchingDesktop(true);
     try {
       const message = await launchDefaultspackDesktop();
+      console.log('[defaultspack-launch] success:', message);
       addToast(message, 'success');
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Failed to launch Defaultspack';
+      console.error('[defaultspack-launch] failed:', msg);
       addToast(msg, 'error');
     } finally {
       setLaunchingDesktop(false);

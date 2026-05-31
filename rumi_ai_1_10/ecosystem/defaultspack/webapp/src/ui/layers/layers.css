@@ -1,0 +1,35 @@
+.rumi-layer-base {
+  z-index: 0;
+}
+
+.rumi-layer-panel {
+  z-index: 10;
+}
+
+.rumi-layer-local-popover {
+  z-index: 20;
+}
+
+.rumi-layer-global-overlay {
+  z-index: 40;
+}
+
+.rumi-layer-modal-backdrop {
+  z-index: 50;
+}
+
+.rumi-layer-modal {
+  z-index: 60;
+}
+
+.rumi-layer-command-palette {
+  z-index: 70;
+}
+
+.rumi-layer-toast {
+  z-index: 80;
+}
+
+.rumi-layer-debug {
+  z-index: 90;
+}

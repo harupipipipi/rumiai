@@ -7,7 +7,7 @@ export type BrowserApproval = {
   toolName: string;
 };
 
-export type CodingApproval = {
+export type RuntimeApproval = {
   action: string;
   operation: string;
   payload: Record<string, unknown>;
@@ -18,7 +18,7 @@ export type CodingApproval = {
   toolName: string;
 };
 
-export type StaleCodingApproval = {
+export type StaleRuntimeApproval = {
   operation: string;
   payload: Record<string, unknown>;
   reason: string;
@@ -33,7 +33,12 @@ const BROWSER_COMPUTER_TOOL_NAMES = new Set([
   "browser_companion",
   "browser_use",
   "computer_use",
+  "browser_open_url",
+  "open_browser",
 ]);
+
+const BROWSER_OPEN_TOOL_ALIASES = new Set(["browser_open_url", "open_browser"]);
+const BROWSER_OPEN_ACTION_ALIASES = new Set(["browser_open_url", "open_browser", "open_url"]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
@@ -71,17 +76,19 @@ function approvalFromCandidate(
   now: number,
 ): BrowserApproval | null {
   if (!candidate?.requires_approval && !candidate?.approval_required) return null;
+  if (requestIdFromCandidate(candidate)) return null;
   if (!candidate.approval_token) return null;
   const token = String(candidate.approval_token);
   if (!token.trim() || token === "[redacted]") return null;
   if (approvalExpired(candidate, observedAt, now)) return null;
   const rawPayload = candidate.payload;
-  const toolName = String(candidate.tool_name ?? fallbackToolName);
+  const rawToolName = String(candidate.tool_name ?? fallbackToolName);
+  const rawAction = String(candidate.action ?? "browser.session");
   return {
-    action: String(candidate.action ?? "browser.session"),
+    action: BROWSER_OPEN_ACTION_ALIASES.has(rawAction) ? "browser.open_url" : rawAction,
     payload: isRecord(rawPayload) ? rawPayload : {},
     token,
-    toolName,
+    toolName: BROWSER_OPEN_TOOL_ALIASES.has(rawToolName) ? "browser_computer" : rawToolName,
   };
 }
 
@@ -89,14 +96,14 @@ function requestIdFromCandidate(candidate: Record<string, unknown> | undefined):
   return String(candidate?.approval_request_id ?? candidate?.request_id ?? "").trim();
 }
 
-function codingApprovalFromCandidate(
+function runtimeApprovalFromCandidate(
   candidate: Record<string, unknown> | undefined,
   fallbackToolName = "tool",
   fallbackToolCallId?: string,
   fallbackPayload?: Record<string, unknown>,
   observedAt?: unknown,
   now = Date.now(),
-): CodingApproval | null {
+): RuntimeApproval | null {
   const requestId = requestIdFromCandidate(candidate);
   if (!candidate || !requestId) return null;
   if (!candidate.requires_approval && !candidate.approval_required) return null;
@@ -125,14 +132,14 @@ function codingApprovalFromCandidate(
   };
 }
 
-function staleCodingApprovalFromCandidate(
+function staleRuntimeApprovalFromCandidate(
   candidate: Record<string, unknown> | undefined,
   fallbackToolName = "tool",
   fallbackToolCallId?: string,
   fallbackPayload?: Record<string, unknown>,
   observedAt?: unknown,
   now = Date.now(),
-): StaleCodingApproval | null {
+): StaleRuntimeApproval | null {
   if (!candidate?.requires_approval && !candidate?.approval_required) return null;
   if (requestIdFromCandidate(candidate)) return null;
   if (approvalExpired(candidate, observedAt, now)) return null;
@@ -186,13 +193,13 @@ export function pendingBrowserApproval(messages: ChatUiMessage[], now = Date.now
   return null;
 }
 
-export function pendingCodingApproval(messages: ChatUiMessage[], now = Date.now()): CodingApproval | null {
+export function pendingRuntimeApproval(messages: ChatUiMessage[], now = Date.now()): RuntimeApproval | null {
   for (const message of [...messages].reverse()) {
     if (message.role === "user") return null;
     if (message.role !== "agent") continue;
     for (const event of [...(message.events ?? [])].reverse()) {
       if (event.type !== "approval_requested" && event.phase !== "approval_requested") continue;
-      const approval = codingApprovalFromCandidate(
+      const approval = runtimeApprovalFromCandidate(
         event as Record<string, unknown>,
         String(event.tool_name ?? "tool"),
         typeof event.tool_call_id === "string" ? event.tool_call_id : undefined,
@@ -208,7 +215,7 @@ export function pendingCodingApproval(messages: ChatUiMessage[], now = Date.now(
       const widget = isRecord(data?.widget) ? data.widget : undefined;
       const candidate = (widget?.requires_approval || widget?.approval_required ? widget : data) as Record<string, unknown> | undefined;
       const fallbackPayload = isRecord(log.arguments) ? log.arguments : undefined;
-      const approval = codingApprovalFromCandidate(
+      const approval = runtimeApprovalFromCandidate(
         candidate,
         String(log.tool_name ?? "tool"),
         typeof log.tool_call_id === "string" ? log.tool_call_id : undefined,
@@ -222,12 +229,12 @@ export function pendingCodingApproval(messages: ChatUiMessage[], now = Date.now(
   return null;
 }
 
-export function staleCodingApproval(messages: ChatUiMessage[], now = Date.now()): StaleCodingApproval | null {
+export function staleRuntimeApproval(messages: ChatUiMessage[], now = Date.now()): StaleRuntimeApproval | null {
   for (const message of [...messages].reverse()) {
     if (message.role === "user") return null;
     if (message.role !== "agent") continue;
     const metadataApproval = message.metadata?.pendingApproval;
-    const metadataStale = staleCodingApprovalFromCandidate(
+    const metadataStale = staleRuntimeApprovalFromCandidate(
       metadataApproval,
       String(metadataApproval?.tool_name ?? "tool"),
       typeof metadataApproval?.tool_call_id === "string" ? metadataApproval.tool_call_id : undefined,
@@ -238,7 +245,7 @@ export function staleCodingApproval(messages: ChatUiMessage[], now = Date.now())
     if (metadataStale) return metadataStale;
     for (const event of [...(message.events ?? [])].reverse()) {
       if (event.type !== "approval_requested" && event.phase !== "approval_requested") continue;
-      const stale = staleCodingApprovalFromCandidate(
+      const stale = staleRuntimeApprovalFromCandidate(
         event as Record<string, unknown>,
         String(event.tool_name ?? "tool"),
         typeof event.tool_call_id === "string" ? event.tool_call_id : undefined,
@@ -254,7 +261,7 @@ export function staleCodingApproval(messages: ChatUiMessage[], now = Date.now())
       const widget = isRecord(data?.widget) ? data.widget : undefined;
       const candidate = (widget?.requires_approval || widget?.approval_required ? widget : data) as Record<string, unknown> | undefined;
       const fallbackPayload = isRecord(log.arguments) ? log.arguments : undefined;
-      const stale = staleCodingApprovalFromCandidate(
+      const stale = staleRuntimeApprovalFromCandidate(
         candidate,
         String(log.tool_name ?? "tool"),
         typeof log.tool_call_id === "string" ? log.tool_call_id : undefined,

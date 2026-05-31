@@ -3085,6 +3085,7 @@ name = "rumi-viewer"
 version = "1.0.0-beta.1"
 dependencies = [
  "anyhow",
+ "base64 0.22.1",
  "dirs",
  "env_logger",
  "flate2",
@@ -3095,6 +3096,7 @@ dependencies = [
  "semver",
  "serde",
  "serde_json",
+ "sha2",
  "tar",
  "tauri",
  "tauri-build",
