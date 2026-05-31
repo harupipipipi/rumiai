@@ -906,10 +906,28 @@ class ControlPanelHandlersMixin:
     def _panel_check_updates(self) -> Dict[str, Any]:
         """GET /api/panel/updates — rumiai/defaultspack の更新確認"""
         try:
-            from ..github_update_manager import get_github_update_manager
+            from ..github_update_manager import GitHubUpdateError, get_github_update_manager
 
             manager = get_github_update_manager()
-            checks = manager.check_many(["rumiai", "defaultspack"])
+            targets = ["rumiai", "defaultspack"]
+            try:
+                checks = manager.check_many(targets)
+            except GitHubUpdateError as e:
+                logger.warning("panel_check_updates unavailable: %s", e)
+                fallback_updates = []
+                for target in targets:
+                    current_version = manager.current_version(target)
+                    fallback_updates.append(
+                        {
+                            "target": target,
+                            "current_version": current_version,
+                            "latest_version": current_version,
+                            "update_available": False,
+                            "release_url": "",
+                            "repo": manager.repo,
+                        }
+                    )
+                return {"updates": fallback_updates, "check_error": str(e)}
             return {"updates": [check.to_dict() for check in checks]}
         except Exception as e:
             _log_internal_error("panel_check_updates", e)

@@ -16,6 +16,7 @@ sys.path.insert(0, str(_REPO_ROOT))
 from core_runtime.api.control_panel_handlers import ControlPanelHandlersMixin
 from core_runtime.app_version import APP_DISPLAY_VERSION
 import core_runtime.api.control_panel_handlers as control_panel_handlers
+from core_runtime.github_update_manager import GitHubUpdateError
 
 
 class _FakeHandler(ControlPanelHandlersMixin):
@@ -127,6 +128,36 @@ class TestPanelGetVersion(unittest.TestCase):
         self.assertIn("platform", result)
         self.assertIsInstance(result["kernel_version"], str)
         self.assertIsInstance(result["python_version"], str)
+
+
+class TestPanelCheckUpdates(unittest.TestCase):
+    """GET /api/panel/updates のテスト"""
+
+    def test_update_check_failure_returns_non_fatal_snapshot(self):
+        handler = _FakeHandler()
+
+        class FakeUpdateManager:
+            repo = "example/rumiai"
+
+            def check_many(self, targets):
+                raise GitHubUpdateError("release metadata unavailable")
+
+            def current_version(self, target):
+                return {"rumiai": "1.10.0", "defaultspack": "2.0.0"}[target]
+
+        with patch(
+            "core_runtime.github_update_manager.get_github_update_manager",
+            return_value=FakeUpdateManager(),
+        ):
+            result = handler._panel_check_updates()
+
+        self.assertNotIn("status_code", result)
+        self.assertEqual(result["check_error"], "release metadata unavailable")
+        self.assertEqual(len(result["updates"]), 2)
+        self.assertEqual(result["updates"][0]["target"], "rumiai")
+        self.assertEqual(result["updates"][0]["current_version"], "1.10.0")
+        self.assertEqual(result["updates"][0]["latest_version"], "1.10.0")
+        self.assertFalse(result["updates"][0]["update_available"])
 
 
 class TestPanelGetProfile(unittest.TestCase):
