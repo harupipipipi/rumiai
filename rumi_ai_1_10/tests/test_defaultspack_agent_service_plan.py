@@ -5445,6 +5445,7 @@ def test_computer_click_falls_back_to_swift_on_macos(tmp_path, monkeypatch):
     assert calls[0][0][0] == sys.executable
     assert calls[0][0][1] == "-c"
     assert calls[1][0][0] == "/usr/bin/swift"
+    assert calls[1][1]["timeout"] == browser_computer._DARWIN_CGEVENT_TIMEOUT_SECONDS
     assert "leftMouseDown" in calls[1][0][2]
     assert "CGPoint(x: 120, y: 240)" in calls[1][0][2]
 

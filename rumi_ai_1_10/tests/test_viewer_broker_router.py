@@ -47,6 +47,34 @@ def test_viewer_broker_client_reads_connection_json(tmp_path, monkeypatch):
     assert client.token == "file-token"
 
 
+def test_viewer_broker_client_waits_longer_than_helper_timeout(monkeypatch):
+    from ecosystem.defaultspack.domain.host_bridge import viewer_broker_client
+    from ecosystem.defaultspack.domain.host_bridge.viewer_broker_client import ViewerBrokerClient
+
+    seen = {}
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self):
+            return b"{}"
+
+    def fake_urlopen(request, timeout):
+        seen["timeout"] = timeout
+        return FakeResponse()
+
+    monkeypatch.setattr(viewer_broker_client.urllib.request, "urlopen", fake_urlopen)
+
+    ViewerBrokerClient(url="http://127.0.0.1:8770", token="secret-token").permissions()
+
+    assert seen["timeout"] == viewer_broker_client.VIEWER_BROKER_REQUEST_TIMEOUT_SECONDS
+    assert seen["timeout"] > viewer_broker_client.VIEWER_BROKER_HELPER_TIMEOUT_SECONDS
+
+
 def test_computer_router_routes_darwin_computer_calls_to_viewer(monkeypatch):
     from ecosystem.defaultspack.domain.host_bridge import computer_router
 

@@ -36,7 +36,7 @@ const MAX_HEADER_BYTES: usize = 1024 * 1024;
 const MAX_BODY_BYTES: usize = 1024 * 1024;
 const REQUEST_READ_TIMEOUT: Duration = Duration::from_secs(5);
 const REQUEST_WRITE_TIMEOUT: Duration = Duration::from_secs(5);
-const HELPER_TIMEOUT: Duration = Duration::from_secs(15);
+const HELPER_TIMEOUT: Duration = Duration::from_secs(45);
 const APPROVAL_TOKEN_VERSION: &str = "v1";
 
 const ARG_HASH_IGNORE_KEYS: &[&str] = &[

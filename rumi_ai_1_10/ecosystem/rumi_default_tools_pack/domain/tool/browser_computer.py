@@ -19,6 +19,7 @@ from typing import Any
 
 _CLIPBOARD_PREVIEW_CHARS = 500
 _DARWIN_AUTOMATION_TIMEOUT_SECONDS = 2
+_DARWIN_CGEVENT_TIMEOUT_SECONDS = 8
 _DARWIN_SCREENSHOT_TIMEOUT_SECONDS = 10
 
 
@@ -3423,7 +3424,7 @@ $hwnd = [IntPtr]{hwnd}
                     "up?.post(tap: .cghidEventTap)\n"
                 )
                 try:
-                    subprocess.run([swift, "-e", swift_code], check=True, timeout=_DARWIN_AUTOMATION_TIMEOUT_SECONDS)
+                    subprocess.run([swift, "-e", swift_code], check=True, timeout=_DARWIN_CGEVENT_TIMEOUT_SECONDS)
                     return
                 except Exception:
                     pass
