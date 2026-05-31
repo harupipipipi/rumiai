@@ -28,6 +28,7 @@ def run_computer_action(
     tool_arguments: dict[str, Any] | None = None,
     artifact_root: Path | None = None,
     yolo_mode: bool = False,
+    controller_cls: type[Any] | None = None,
 ) -> dict[str, Any]:
     normalized_action = str(action or "")
     normalized_payload = dict(payload or {})
@@ -87,6 +88,7 @@ def run_computer_action(
         artifact_root=artifact_root,
         yolo_mode=effective_yolo_mode,
         context=normalized_context,
+        controller_cls=controller_cls,
     )
 
 
@@ -99,8 +101,10 @@ def _run_local_controller(
     artifact_root: Path | None,
     yolo_mode: bool,
     context: dict[str, Any] | None,
+    controller_cls: type[Any] | None = None,
 ) -> dict[str, Any]:
-    result = BrowserComputerController(artifact_root=artifact_root).run(
+    controller_type = controller_cls or BrowserComputerController
+    result = controller_type(artifact_root=artifact_root).run(
         action,
         payload,
         yolo_mode=yolo_mode,
@@ -108,10 +112,11 @@ def _run_local_controller(
     if not isinstance(result, dict):
         return {"action": action, "result": result}
     if _is_request_approval_needed(result):
+        approval_payload = result.get("payload") if isinstance(result.get("payload"), dict) else payload
         return _approval_required_response(
             tool_name,
             str(result.get("action") or action),
-            payload,
+            dict(approval_payload),
             result,
             context,
         )

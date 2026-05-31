@@ -643,6 +643,11 @@ class ToolExecutor:
         """
         if _is_cancelled(context):
             return _cancelled_tool_result(tool_name)
+        explicit_tool_def = tool_def if isinstance(tool_def, dict) else getattr(self, "_current_local_tool_def", None)
+        if not isinstance(tool_def, dict):
+            registry = getattr(self, "_registry", None)
+            tool_def = registry.get(tool_name) if registry is not None else {}
+            tool_def = tool_def or {}
         if tool_name == "web_search":
             from domain.research.providers import ExternalWebProvider
 
@@ -677,7 +682,8 @@ class ToolExecutor:
             from domain.host_bridge.computer_router import run_computer_action
 
             next_arguments = dict(arguments or {})
-            effective_tool_def = tool_def if isinstance(tool_def, dict) else getattr(self, "_current_local_tool_def", None)
+            current_tool_def = explicit_tool_def
+            effective_tool_def = tool_def if isinstance(tool_def, dict) else current_tool_def
             approval_tool_def = effective_tool_def if isinstance(effective_tool_def, dict) else {
                 "tool_id": tool_name,
                 "name": tool_name,
@@ -716,7 +722,7 @@ class ToolExecutor:
                 "artifact_root": _conversation_tool_artifact_root(next_context),
                 "yolo_mode": _truthy(policy.get("yolo_mode")),
             }
-            if isinstance(effective_tool_def, dict):
+            if isinstance(current_tool_def, dict):
                 router_kwargs["tool_arguments"] = next_arguments
             result = run_computer_action(
                 action,
