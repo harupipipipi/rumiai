@@ -36,6 +36,7 @@ def run(context):
             _lazy("blocks.ui.conversation_preview"),
             {"id": "conversation_id"},
         ),
+        ("POST", "/api/ui/select-directory", _lazy("blocks.ui.select_directory"), {}),
     ]
 
     for method, pattern, handler, path_inject in routes:
