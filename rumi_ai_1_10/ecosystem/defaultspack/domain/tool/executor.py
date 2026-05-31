@@ -169,7 +169,7 @@ class ToolExecutor:
         if handler and not handler.endswith(":ToolExecutor.execute"):
             return self._execute_handler(tool_def, arguments, context)
 
-        return self._execute_local(tool_name, arguments, context)
+        return self._execute_local_with_tool_def(tool_name, arguments, context, tool_def)
 
     def _execute_rumi_function(self, tool_def, arguments, context):
         execution = tool_def.get("execution", {}) if isinstance(tool_def, dict) else {}
@@ -268,7 +268,7 @@ class ToolExecutor:
             return None
         if _requires_approval(tool_def) and not _context_has_tool_server_approval(context):
             return None
-        return self._execute_local(local_tool, request.get("args") or {}, context)
+        return self._execute_local_with_tool_def(local_tool, request.get("args") or {}, context, tool_def)
 
     @staticmethod
     def _first_party_browser_computer_tool_for_function(pack_id, function_id):
@@ -314,7 +314,7 @@ class ToolExecutor:
             return None
         local_tool = ToolExecutor._first_party_local_tool_for_function(pack_id, function_id)
         if local_tool:
-            return ToolExecutor()._execute_local(local_tool, request.get("args") or {}, context)
+            return ToolExecutor()._execute_local_with_tool_def(local_tool, request.get("args") or {}, context, tool_def)
         if not ToolExecutor._allows_direct_first_party_function_fallback(pack_id, function_id):
             return None
         try:
@@ -625,6 +625,18 @@ class ToolExecutor:
             "widget": {"type": "approval_request", **data} if is_approval else result,
         }
 
+    def _execute_local_with_tool_def(self, tool_name, arguments, context, tool_def):
+        had_previous = hasattr(self, "_current_local_tool_def")
+        previous = getattr(self, "_current_local_tool_def", None)
+        self._current_local_tool_def = tool_def
+        try:
+            return self._execute_local(tool_name, arguments, context)
+        finally:
+            if had_previous:
+                self._current_local_tool_def = previous
+            else:
+                delattr(self, "_current_local_tool_def")
+
     def _execute_local(self, tool_name, arguments, context, tool_def=None):
         """
         ローカルツール実行（最小動作版: 固定レスポンスを返す）
@@ -665,7 +677,8 @@ class ToolExecutor:
             from domain.host_bridge.computer_router import run_computer_action
 
             next_arguments = dict(arguments or {})
-            approval_tool_def = tool_def if isinstance(tool_def, dict) else {
+            effective_tool_def = tool_def if isinstance(tool_def, dict) else getattr(self, "_current_local_tool_def", None)
+            approval_tool_def = effective_tool_def if isinstance(effective_tool_def, dict) else {
                 "tool_id": tool_name,
                 "name": tool_name,
                 "requires_approval": True,
@@ -703,7 +716,7 @@ class ToolExecutor:
                 "artifact_root": _conversation_tool_artifact_root(next_context),
                 "yolo_mode": _truthy(policy.get("yolo_mode")),
             }
-            if isinstance(tool_def, dict):
+            if isinstance(effective_tool_def, dict):
                 router_kwargs["tool_arguments"] = next_arguments
             result = run_computer_action(
                 action,

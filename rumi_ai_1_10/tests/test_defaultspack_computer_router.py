@@ -132,3 +132,30 @@ def test_tool_executor_local_computer_use_accepts_context_approval_token(monkeyp
     assert result["is_error"] is False
     assert captured["payload"]["approval_token"] == decision["token"]
     assert captured["context"]["_tool_server_approved"] is True
+
+
+def test_computer_use_pack_function_routes_original_arguments(monkeypatch) -> None:
+    from ecosystem.rumi_default_tools_pack.functions.computer_use.main import run
+
+    captured: dict[str, object] = {}
+
+    def fake_router(action, payload, context=None, *, tool_name="computer_use", tool_arguments=None, artifact_root=None, yolo_mode=False):
+        captured["action"] = action
+        captured["payload"] = dict(payload)
+        captured["context"] = dict(context or {})
+        captured["tool_name"] = tool_name
+        captured["tool_arguments"] = dict(tool_arguments or {})
+        return {"action": action, "tool_name": tool_name, "apps": [{"name": "Google Chrome"}]}
+
+    monkeypatch.setattr("domain.host_bridge.computer_router.run_computer_action", fake_router)
+
+    result = run(
+        {"conversation_workspace_dir": "/tmp/conversation/workspace"},
+        {"action": "apps"},
+    )
+
+    assert result["is_error"] is False
+    assert captured["action"] == "computer.apps"
+    assert captured["tool_name"] == "computer_use"
+    assert captured["tool_arguments"] == {"action": "apps"}
+    assert result["widget"]["type"] == "computer_use"
