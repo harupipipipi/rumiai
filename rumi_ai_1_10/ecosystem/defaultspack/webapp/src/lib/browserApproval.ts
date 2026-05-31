@@ -33,7 +33,12 @@ const BROWSER_COMPUTER_TOOL_NAMES = new Set([
   "browser_companion",
   "browser_use",
   "computer_use",
+  "browser_open_url",
+  "open_browser",
 ]);
+
+const BROWSER_OPEN_TOOL_ALIASES = new Set(["browser_open_url", "open_browser"]);
+const BROWSER_OPEN_ACTION_ALIASES = new Set(["browser_open_url", "open_browser", "open_url"]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
@@ -77,12 +82,13 @@ function approvalFromCandidate(
   if (!token.trim() || token === "[redacted]") return null;
   if (approvalExpired(candidate, observedAt, now)) return null;
   const rawPayload = candidate.payload;
-  const toolName = String(candidate.tool_name ?? fallbackToolName);
+  const rawToolName = String(candidate.tool_name ?? fallbackToolName);
+  const rawAction = String(candidate.action ?? "browser.session");
   return {
-    action: String(candidate.action ?? "browser.session"),
+    action: BROWSER_OPEN_ACTION_ALIASES.has(rawAction) ? "browser.open_url" : rawAction,
     payload: isRecord(rawPayload) ? rawPayload : {},
     token,
-    toolName,
+    toolName: BROWSER_OPEN_TOOL_ALIASES.has(rawToolName) ? "browser_computer" : rawToolName,
   };
 }
 

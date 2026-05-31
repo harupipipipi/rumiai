@@ -1028,6 +1028,14 @@ const BROWSER_COMPUTER_APPROVAL_TOOLS = new Set([
   "browser_companion",
   "browser_use",
   "computer_use",
+  "browser_open_url",
+  "open_browser",
+]);
+
+const BROWSER_OPEN_ACTION_ALIASES = new Set([
+  "browser_open_url",
+  "open_browser",
+  "open_url",
 ]);
 
 const COMPUTER_APPROVAL_ACTION_ALIASES = new Set([
@@ -1064,6 +1072,9 @@ export function usesBrowserComputerApprovalEndpoint(toolName: string): boolean {
 
 export function normalizeBrowserComputerApprovalAction(toolName: string, action: string): string {
   const normalizedAction = String(action || "").trim();
+  if (usesBrowserComputerApprovalEndpoint(toolName) && BROWSER_OPEN_ACTION_ALIASES.has(normalizedAction)) {
+    return "browser.open_url";
+  }
   if (
     usesBrowserComputerApprovalEndpoint(toolName)
     && normalizedAction

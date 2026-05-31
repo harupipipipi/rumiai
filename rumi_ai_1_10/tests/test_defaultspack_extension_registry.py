@@ -326,6 +326,32 @@ def test_build_extensions_roots_includes_all_packs_without_setup_selection(tmp_p
     assert (pack_b / "extensions").resolve() in roots
 
 
+def test_build_extensions_roots_includes_app_catalog_pack_for_managed_defaultspack(
+    monkeypatch, tmp_path: Path
+):
+    import ecosystem.defaultspack.domain.extensions.runtime as runtime
+
+    managed_defaultspack = (
+        tmp_path / "user_data" / "packs" / "defaultspack" / "versions" / "2.0.0"
+    )
+    _write_json(managed_defaultspack / "rumi-pack.json", {"pack_id": "defaultspack"})
+    _write_json(managed_defaultspack / "ecosystem.json", {"pack_id": "defaultspack"})
+    (managed_defaultspack / "extensions").mkdir(parents=True, exist_ok=True)
+    app_dir = tmp_path / "app"
+    app_ecosystem_root = app_dir / "ecosystem"
+    app_defaultspack = _make_extension_pack(app_ecosystem_root, "defaultspack")
+    model_catalog_pack = _make_extension_pack(app_ecosystem_root, "rumi_model_catalog_pack")
+
+    monkeypatch.setenv("RUMI_APP_DIR", str(app_dir))
+    monkeypatch.setattr(runtime, "selected_extension_pack_ids", lambda pack_root: None)
+
+    roots = {path.resolve() for path in runtime.build_extensions_roots(managed_defaultspack)}
+
+    assert (managed_defaultspack / "extensions").resolve() in roots
+    assert (model_catalog_pack / "extensions").resolve() in roots
+    assert (app_defaultspack / "extensions").resolve() not in roots
+
+
 def test_build_extensions_roots_filters_to_selected_setup_targets(tmp_path: Path):
     rumi_root = tmp_path / "rumi_ai_1_10"
     ecosystem_root = rumi_root / "ecosystem"

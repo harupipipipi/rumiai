@@ -40,6 +40,30 @@ test("returns a fresh browser computer approval request", () => {
   });
 });
 
+test("canonicalizes browser open approval aliases", () => {
+  const approval = pendingBrowserApproval([
+    agentMessage({
+      events: [{
+        type: "approval_requested",
+        tool_name: "browser_open_url",
+        action: "open_url",
+        payload: { url: "https://gemini.google.com" },
+        requires_approval: true,
+        approval_token: "tok",
+        approval_expires_in_seconds: 300,
+        timestamp: "2026-05-20T08:05:40Z",
+      }],
+    }),
+  ], Date.parse("2026-05-20T08:06:00Z"));
+
+  assert.deepEqual(approval, {
+    action: "browser.open_url",
+    payload: { url: "https://gemini.google.com" },
+    token: "tok",
+    toolName: "browser_computer",
+  });
+});
+
 test("ignores expired browser computer approvals", () => {
   const approval = pendingBrowserApproval([
     agentMessage({
