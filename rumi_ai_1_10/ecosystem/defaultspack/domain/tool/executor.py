@@ -420,10 +420,16 @@ class ToolExecutor:
 
     @staticmethod
     def _load_pack_functions_into_registry(registry):
-        ecosystem_dir = Path(__file__).resolve().parents[3]
-        for pack_root in sorted(ecosystem_dir.iterdir()):
-            if not pack_root.is_dir() or not (pack_root / "ecosystem.json").exists():
-                continue
+        from .registry import (
+            _bundled_ecosystem_dirs_from_env,
+            discover_installed_pack_roots,
+        )
+
+        pack_root = Path(__file__).resolve().parents[2]
+        for pack_root in discover_installed_pack_roots(
+            pack_root,
+            extra_ecosystem_dirs=_bundled_ecosystem_dirs_from_env(),
+        ):
             try:
                 pack_manifest = json.loads((pack_root / "ecosystem.json").read_text(encoding="utf-8"))
             except Exception:
@@ -915,6 +921,8 @@ def _browser_computer_action_payload(tool_name, arguments):
             "open_url": "browser.open_url",
             "open": "browser.open_url",
             "context": "computer.context",
+            "context/apps/windows": "computer.context",
+            "computer.context/apps/windows": "computer.context",
             "app_context": "computer.context",
             "state": "computer.context",
             "screenshot": "computer.screenshot",
@@ -1018,6 +1026,8 @@ def _browser_computer_action_payload(tool_name, arguments):
         action_map = {
             "": "computer.screenshot",
             "context": "computer.context",
+            "context/apps/windows": "computer.context",
+            "computer.context/apps/windows": "computer.context",
             "app_context": "computer.context",
             "state": "computer.context",
             "screenshot": "computer.screenshot",
@@ -1207,7 +1217,43 @@ def _approval_token_from_arguments(arguments):
     return str(arguments.get("approval_token") or "").strip()
 
 
-def _approval_token_from_context(context, tool_def):
+def _approval_followup_token_from_context(context, tool_def, arguments):
+    if not isinstance(context, dict):
+        return ""
+    entries = context.get("tool_approval_followups")
+    if isinstance(entries, dict):
+        entries = [entries]
+    if not isinstance(entries, list):
+        return ""
+    tool_name = _tool_approval_tool_name(tool_def)
+    operation = _tool_approval_operation(tool_def)
+    try:
+        args_hash = _approval_module().hash_arguments(arguments if isinstance(arguments, dict) else {})
+    except Exception:
+        return ""
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        token = str(entry.get("token") or "").strip()
+        if not token:
+            continue
+        entry_tool = str(entry.get("tool_name") or "").strip()
+        if entry_tool and entry_tool != tool_name:
+            continue
+        entry_operation = str(entry.get("operation") or "").strip()
+        if entry_operation and entry_operation != operation:
+            continue
+        entry_args_hash = str(entry.get("args_hash") or "").strip()
+        if entry_args_hash and entry_args_hash != args_hash:
+            continue
+        return token
+    return ""
+
+
+def _approval_token_from_context(context, tool_def, arguments):
+    token = _approval_followup_token_from_context(context, tool_def, arguments)
+    if token:
+        return token
     if not isinstance(context, dict):
         return ""
     tokens = context.get("tool_approval_tokens")
@@ -1229,7 +1275,7 @@ def _context_with_tool_approval_token(context, tool_def, arguments):
         return next_context, None
     if _context_has_tool_server_approval(next_context):
         return next_context, None
-    token = _approval_token_from_arguments(arguments) or _approval_token_from_context(context, tool_def)
+    token = _approval_token_from_arguments(arguments) or _approval_token_from_context(context, tool_def, arguments)
     if not token:
         return next_context, None
     approval = _approval_module()
@@ -1239,6 +1285,8 @@ def _context_with_tool_approval_token(context, tool_def, arguments):
         approval.hash_arguments(arguments if isinstance(arguments, dict) else {}),
     )
     if verification.valid:
+        if isinstance(arguments, dict) and not str(arguments.get("approval_token") or "").strip():
+            arguments["approval_token"] = token
         next_context["_tool_server_approved"] = True
         next_context["_tool_server_approval_token_valid"] = True
         return next_context, None

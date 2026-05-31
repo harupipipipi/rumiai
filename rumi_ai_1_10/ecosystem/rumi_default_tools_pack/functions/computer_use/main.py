@@ -20,6 +20,8 @@ def run(context, args):
         "drag": "computer.drag",
         "mouse_drag": "computer.drag",
         "context": "computer.context",
+        "context/apps/windows": "computer.context",
+        "computer.context/apps/windows": "computer.context",
         "app_context": "computer.context",
         "state": "computer.context",
         "apps": "computer.apps",

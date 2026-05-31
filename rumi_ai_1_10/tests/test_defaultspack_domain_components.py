@@ -95,6 +95,39 @@ def test_component_roots_skip_unreadable_sibling_pack_candidates(tmp_path, monke
     assert restricted / "domain" not in roots
 
 
+def test_component_roots_include_bundle_ecosystem_from_runtime_env(tmp_path, monkeypatch):
+    import domain.components.registry as registry_module
+
+    managed = tmp_path / "managed" / "defaultspack"
+    _write_json(managed / "ecosystem.json", {"pack_id": "defaultspack"})
+    bundle_tools = tmp_path / "bundle" / "ecosystem" / "rumi_default_tools_pack"
+    _write_json(bundle_tools / "ecosystem.json", {"pack_id": "rumi_default_tools_pack"})
+    _write_json(
+        bundle_tools / "domain" / "tools" / "demo" / "manifest.json",
+        {
+            "id": "demo_tool",
+            "category": "tools",
+            "kind": "tool",
+            "version": "1",
+            "status": "stable",
+            "entrypoints": {"handler": "missing.module:handler"},
+            "security": {"approval": "never"},
+        },
+    )
+    monkeypatch.setenv(
+        "RUMI_DEFAULTSPACK_EXTENSION_ROOTS",
+        str(tmp_path / "bundle" / "ecosystem"),
+    )
+    monkeypatch.delenv("RUMI_APP_DIR", raising=False)
+    monkeypatch.delenv("RUMI_HOME", raising=False)
+
+    roots = build_domain_component_roots(managed, extra_roots=registry_module._env_roots())
+    registry = DomainComponentRegistry(roots)
+
+    assert bundle_tools / "domain" in roots
+    assert registry.get("tools", "demo_tool").source_pack_id == "rumi_default_tools_pack"
+
+
 def test_component_registry_supports_category_scoped_aliases(tmp_path):
     root = tmp_path / "pack" / "domain"
     _write_json(

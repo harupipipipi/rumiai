@@ -32,14 +32,69 @@ def _append_unique_root(roots: list[Path], root: Path | str) -> None:
         roots.append(candidate)
 
 
-def _extra_extension_roots_from_env(raw: str | None = None) -> list[Path]:
-    value = os.environ.get(_EXTRA_EXTENSION_ROOTS_ENV, "") if raw is None else raw
+def _pack_roots_in_ecosystem_dir(
+    ecosystem_dir: Path,
+    *,
+    selected_pack_ids: set[str] | None = None,
+) -> list[Path]:
+    if not ecosystem_dir.is_dir():
+        return []
     roots: list[Path] = []
-    for item in value.split(os.pathsep):
-        item = item.strip()
-        if not item:
+    for path in sorted(ecosystem_dir.iterdir()):
+        if selected_pack_ids is not None and path.name not in selected_pack_ids:
             continue
-        _append_unique_root(roots, item)
+        extensions = path / "extensions"
+        if path.is_dir() and (path / "ecosystem.json").is_file() and extensions.is_dir():
+            roots.append(path)
+    return roots
+
+
+def _append_resolved_extension_roots(
+    roots: list[Path],
+    root: Path | str,
+    *,
+    selected_pack_ids: set[str] | None = None,
+    allow_direct_root: bool = True,
+) -> None:
+    candidate = Path(root).expanduser()
+    if (candidate / "ecosystem.json").is_file():
+        _append_unique_root(roots, candidate)
+        return
+    for ecosystem_dir in (candidate, candidate / "ecosystem"):
+        pack_roots = _pack_roots_in_ecosystem_dir(
+            ecosystem_dir,
+            selected_pack_ids=selected_pack_ids,
+        )
+        if not pack_roots:
+            continue
+        for pack_root in pack_roots:
+            _append_unique_root(roots, pack_root)
+        return
+    if allow_direct_root:
+        _append_unique_root(roots, candidate)
+
+
+def _extra_extension_roots_from_env(raw: str | None = None) -> list[Path]:
+    roots: list[Path] = []
+    sources = (
+        [(raw, True)]
+        if raw is not None
+        else [
+            (os.environ.get(_EXTRA_EXTENSION_ROOTS_ENV, ""), True),
+            (os.environ.get("RUMI_APP_DIR", ""), False),
+            (os.environ.get("RUMI_HOME", ""), False),
+        ]
+    )
+    for value, allow_direct_root in sources:
+        for item in str(value or "").split(os.pathsep):
+            item = item.strip()
+            if not item:
+                continue
+            _append_resolved_extension_roots(
+                roots,
+                item,
+                allow_direct_root=allow_direct_root,
+            )
     return roots
 
 
@@ -70,7 +125,11 @@ def build_extensions_roots(
 
     _append_unique_root(roots, pack_root / "user_data" / "shared" / "extensions")
     for root in extra_roots or ():
-        _append_unique_root(roots, root)
+        _append_resolved_extension_roots(
+            roots,
+            root,
+            selected_pack_ids=selected_pack_ids,
+        )
     return roots
 
 

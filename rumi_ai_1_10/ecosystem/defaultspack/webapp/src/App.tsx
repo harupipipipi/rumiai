@@ -3446,6 +3446,7 @@ export default function App() {
           approval_followup: {
             action: browserApproval.action,
             approval_token: browserApproval.token,
+            payload: browserApproval.payload,
             tool_name: browserApproval.toolName,
           },
           runtime_content: browserApprovalRuntimeContent(browserApproval),
@@ -3506,6 +3507,7 @@ export default function App() {
             action: runtimeApproval.action,
             operation: runtimeApproval.operation,
             approval_token: decision.token,
+            payload: runtimeApproval.payload,
             request_id: runtimeApproval.requestId,
             tool_name: runtimeApproval.toolName,
           },

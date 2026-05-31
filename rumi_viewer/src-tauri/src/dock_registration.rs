@@ -176,6 +176,75 @@ fn read_defaultspack_port(env_vars: &[(String, String)]) -> AnyResult<u16> {
     Ok(DEFAULTSPACK_DEFAULT_PORT)
 }
 
+fn bundled_extension_pack_roots(app_dir: &Path) -> Vec<PathBuf> {
+    let ecosystem_dir = app_dir.join("ecosystem");
+    let Ok(entries) = fs::read_dir(&ecosystem_dir) else {
+        return Vec::new();
+    };
+
+    let mut roots = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        if path.file_name().and_then(|name| name.to_str()) == Some("defaultspack") {
+            continue;
+        }
+        if path.join("ecosystem.json").is_file() && path.join("extensions").is_dir() {
+            roots.push(path);
+        }
+    }
+    roots.sort();
+    roots
+}
+
+fn merge_extension_root_env_value(
+    existing: Option<&str>,
+    extra_pack_roots: &[PathBuf],
+) -> AnyResult<Option<String>> {
+    let mut roots: Vec<PathBuf> = existing
+        .map(std::env::split_paths)
+        .into_iter()
+        .flatten()
+        .collect();
+    for root in extra_pack_roots {
+        if !roots.iter().any(|existing_root| existing_root == root) {
+            roots.push(root.clone());
+        }
+    }
+    if roots.is_empty() {
+        return Ok(None);
+    }
+    let joined = std::env::join_paths(roots)
+        .map_err(|error| anyhow!("failed to build RUMI_DEFAULTSPACK_EXTENSION_ROOTS: {error}"))?;
+    Ok(Some(joined.to_string_lossy().into_owned()))
+}
+
+fn inject_bundled_extension_roots(
+    env_vars: &mut Vec<(String, String)>,
+    app_dir: &Path,
+) -> AnyResult<()> {
+    let extra_pack_roots = bundled_extension_pack_roots(app_dir);
+    let existing_index = env_vars
+        .iter()
+        .position(|(key, _)| key == "RUMI_DEFAULTSPACK_EXTENSION_ROOTS");
+    let existing_value = existing_index
+        .and_then(|index| env_vars.get(index))
+        .map(|(_, value)| value.as_str());
+    let Some(merged) = merge_extension_root_env_value(existing_value, &extra_pack_roots)? else {
+        return Ok(());
+    };
+
+    if let Some(index) = existing_index {
+        env_vars[index].1 = merged;
+    } else {
+        env_vars.push(("RUMI_DEFAULTSPACK_EXTENSION_ROOTS".to_string(), merged));
+        env_vars.sort_by(|left, right| left.0.cmp(&right.0));
+    }
+    Ok(())
+}
+
 fn check_defaultspack_http_ready(client: &reqwest::blocking::Client, port: u16) -> bool {
     client
         .get(defaultspack_health_url(port))
@@ -629,7 +698,8 @@ fn read_defaultspack_desktop_metadata(
         .parent()
         .context("defaultspack ecosystem.json has no parent directory")?;
     let app_working_dir = resolve_desktop_app_working_dir(&desktop_app, pack_root);
-    let env_vars = read_desktop_app_env(&desktop_app)?;
+    let mut env_vars = read_desktop_app_env(&desktop_app)?;
+    inject_bundled_extension_roots(&mut env_vars, &config.app_dir)?;
     let port = read_defaultspack_port(&env_vars)?;
 
     Ok(DefaultspackDesktopMetadata {
@@ -977,6 +1047,60 @@ mod tests {
         .unwrap();
         let (cmd, _) = read_desktop_app_command(&path).unwrap();
         assert_eq!(cmd, "python app.py");
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn bundled_extension_pack_roots_discovers_sibling_packs() {
+        let dir = std::env::temp_dir().join("rumi_dock_test_extension_roots");
+        let ecosystem_dir = dir.join("ecosystem");
+        let defaultspack = ecosystem_dir.join("defaultspack");
+        let catalog = ecosystem_dir.join("rumi_model_catalog_pack");
+        let invalid = ecosystem_dir.join("notes");
+
+        fs::create_dir_all(defaultspack.join("extensions")).unwrap();
+        fs::create_dir_all(catalog.join("extensions")).unwrap();
+        fs::create_dir_all(&invalid).unwrap();
+        fs::write(defaultspack.join("ecosystem.json"), "{}").unwrap();
+        fs::write(catalog.join("ecosystem.json"), "{}").unwrap();
+
+        let roots = bundled_extension_pack_roots(&dir);
+        assert_eq!(roots, vec![catalog]);
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn inject_bundled_extension_roots_merges_existing_env() {
+        let dir = std::env::temp_dir().join("rumi_dock_test_extension_env");
+        let ecosystem_dir = dir.join("ecosystem");
+        let catalog = ecosystem_dir.join("rumi_model_catalog_pack");
+        let extra = ecosystem_dir.join("extra_pack");
+        let existing = ecosystem_dir.join("existing_pack");
+
+        for pack_root in [&catalog, &extra, &existing] {
+            fs::create_dir_all(pack_root.join("extensions")).unwrap();
+            fs::write(pack_root.join("ecosystem.json"), "{}").unwrap();
+        }
+
+        let existing_value = std::env::join_paths([existing.clone()]).unwrap();
+        let mut env_vars = vec![(
+            "RUMI_DEFAULTSPACK_EXTENSION_ROOTS".to_string(),
+            existing_value.to_string_lossy().into_owned(),
+        )];
+        inject_bundled_extension_roots(&mut env_vars, &dir).unwrap();
+
+        let value = env_vars
+            .iter()
+            .find(|(key, _)| key == "RUMI_DEFAULTSPACK_EXTENSION_ROOTS")
+            .map(|(_, value)| value.clone())
+            .unwrap();
+        let paths: Vec<PathBuf> = std::env::split_paths(&value).collect();
+        assert!(paths.contains(&existing));
+        assert!(paths.contains(&catalog));
+        assert!(paths.contains(&extra));
+        assert_eq!(paths.len(), 3);
+
         fs::remove_dir_all(&dir).ok();
     }
 

@@ -114,11 +114,13 @@ def test_prepare_chat_run_current_turn_history_only_still_works(tmp_path, monkey
 
 
 def test_prepare_chat_run_maps_approval_followup_tokens_for_action_operation_and_computer_aliases(tmp_path, monkeypatch):
+    from domain.safety import approval as approval_module
     from domain.chat.run_request import prepare_chat_run
     from domain.chat.store import ChatStore
 
     store = _setup_store(tmp_path, monkeypatch)
     conv = store.create_conversation(model="stub/default")
+    approved_payload = {"action": "context/apps/windows"}
 
     prepared = prepare_chat_run(
         {
@@ -128,10 +130,11 @@ def test_prepare_chat_run_maps_approval_followup_tokens_for_action_operation_and
                 "metadata": {
                     "approval_followup": {
                         "tool_name": "computer_use",
-                        "action": "apps",
-                        "operation": "computer.apps",
+                        "action": "tool.computer_use",
+                        "operation": "tool.computer_use",
                         "approval_token": "tok_followup",
                         "request_id": "apr_followup",
+                        "payload": approved_payload,
                     },
                 },
             },
@@ -139,12 +142,15 @@ def test_prepare_chat_run_maps_approval_followup_tokens_for_action_operation_and
         {},
     )
 
-    assert prepared.request_context["tool_approval_tokens"] == {
-        "computer_use": "tok_followup",
-        "browser_use": "tok_followup",
-        "browser_computer": "tok_followup",
-        "apps": "tok_followup",
-        "computer.apps": "tok_followup",
-        "apr_followup": "tok_followup",
-    }
+    assert prepared.request_context["tool_approval_tokens"] == {"apr_followup": "tok_followup"}
+    assert prepared.request_context["tool_approval_followups"] == [
+        {
+            "tool_name": "computer_use",
+            "token": "tok_followup",
+            "action": "tool.computer_use",
+            "operation": "tool.computer_use",
+            "request_id": "apr_followup",
+            "args_hash": approval_module.hash_arguments(approved_payload),
+        }
+    ]
     ChatStore._instance = None

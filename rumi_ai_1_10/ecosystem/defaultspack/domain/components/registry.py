@@ -35,6 +35,8 @@ def _coerce_domain_root(path: Path | str) -> Path:
     candidate = Path(path).expanduser()
     if _is_file(candidate / "ecosystem.json"):
         return candidate / "domain"
+    if candidate.name == "extensions" and _is_file(candidate.parent / "ecosystem.json"):
+        return candidate.parent / "domain"
     return candidate
 
 
@@ -44,13 +46,68 @@ def _append_unique(roots: list[Path], root: Path | str) -> None:
         roots.append(candidate)
 
 
-def _env_roots(raw: str | None = None) -> list[Path]:
-    value = os.environ.get(_EXTRA_DOMAIN_ROOTS_ENV, "") if raw is None else raw
+def _pack_roots_in_ecosystem_dir(ecosystem_dir: Path) -> list[Path]:
+    if not _is_dir(ecosystem_dir):
+        return []
     roots: list[Path] = []
-    for item in value.split(os.pathsep):
-        item = item.strip()
-        if item:
-            _append_unique(roots, item)
+    try:
+        children = sorted(ecosystem_dir.iterdir())
+    except OSError:
+        return []
+    for child in children:
+        if _is_dir(child) and _is_file(child / "ecosystem.json"):
+            roots.append(child)
+    return roots
+
+
+def _append_resolved_root(roots: list[Path], root: Path | str) -> None:
+    _append_resolved_root_with_options(roots, root, allow_direct_root=True)
+
+
+def _append_resolved_root_with_options(
+    roots: list[Path],
+    root: Path | str,
+    *,
+    allow_direct_root: bool,
+) -> None:
+    candidate = Path(root).expanduser()
+    if _is_file(candidate / "ecosystem.json") or (
+        candidate.name == "extensions" and _is_file(candidate.parent / "ecosystem.json")
+    ):
+        _append_unique(roots, candidate)
+        return
+    for ecosystem_dir in (candidate, candidate / "ecosystem"):
+        pack_roots = _pack_roots_in_ecosystem_dir(ecosystem_dir)
+        if not pack_roots:
+            continue
+        for pack_root in pack_roots:
+            _append_unique(roots, pack_root)
+        return
+    if allow_direct_root:
+        _append_unique(roots, candidate)
+
+
+def _env_roots(raw: str | None = None) -> list[Path]:
+    roots: list[Path] = []
+    sources = (
+        [(raw, True)]
+        if raw is not None
+        else [
+            (os.environ.get(_EXTRA_DOMAIN_ROOTS_ENV, ""), True),
+            (os.environ.get("RUMI_DEFAULTSPACK_EXTENSION_ROOTS", ""), True),
+            (os.environ.get("RUMI_APP_DIR", ""), False),
+            (os.environ.get("RUMI_HOME", ""), False),
+        ]
+    )
+    for value, allow_direct_root in sources:
+        for item in str(value or "").split(os.pathsep):
+            item = item.strip()
+            if item:
+                _append_resolved_root_with_options(
+                    roots,
+                    item,
+                    allow_direct_root=allow_direct_root,
+                )
     return roots
 
 
@@ -77,7 +134,7 @@ def build_domain_component_roots(
 
     _append_unique(roots, pack_root / "user_data" / "shared" / "domain_components")
     for root in extra_roots or ():
-        _append_unique(roots, root)
+        _append_resolved_root(roots, root)
     return roots
 
 

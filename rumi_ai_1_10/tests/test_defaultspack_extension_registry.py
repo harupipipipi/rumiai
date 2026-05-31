@@ -365,6 +365,53 @@ def test_build_extensions_roots_fails_closed_on_invalid_setup_selection(tmp_path
     assert (pack_a / "extensions").resolve() not in roots
 
 
+def test_build_extensions_roots_uses_bundle_app_ecosystem_from_runtime_env(tmp_path: Path, monkeypatch):
+    import ecosystem.defaultspack.domain.extensions.runtime as runtime
+
+    managed_root = tmp_path / "managed" / "defaultspack"
+    _write_json(managed_root / "ecosystem.json", {"pack_id": "defaultspack"})
+    (managed_root / "extensions").mkdir(parents=True, exist_ok=True)
+
+    bundle_app = tmp_path / "bundle_app"
+    catalog_pack = _make_extension_pack(bundle_app / "ecosystem", "rumi_model_catalog_pack")
+    _write_json(
+        catalog_pack / "extensions" / "llm" / "providers" / "google" / "manifest.json",
+        {
+            "id": "google",
+            "category": "llm_provider",
+            "version": "1",
+            "adapter": "openai_compatible",
+            "enabled": True,
+        },
+    )
+    _write_json(
+        catalog_pack / "extensions" / "llm" / "providers" / "google" / "models" / "gemma-4-31b-it.json",
+        {
+            "id": "google/gemma-4-31b-it",
+            "category": "llm_model",
+            "version": "1",
+            "provider_id": "google",
+            "model_id": "gemma-4-31b-it",
+            "enabled": True,
+        },
+    )
+    monkeypatch.delenv("RUMI_DEFAULTSPACK_EXTENSION_ROOTS", raising=False)
+    monkeypatch.delenv("RUMI_HOME", raising=False)
+    monkeypatch.setenv("RUMI_APP_DIR", str(bundle_app))
+
+    roots = build_extensions_roots(
+        managed_root,
+        extra_roots=runtime._extra_extension_roots_from_env(),
+    )
+
+    registry = ExtensionRegistry(roots)
+    assert (catalog_pack / "extensions").resolve() in {path.resolve() for path in roots}
+    assert any(
+        model["id"] == "google/gemma-4-31b-it"
+        for model in registry.llm().models(provider_id="google", enabled_only=True)
+    )
+
+
 def test_get_extension_registry_force_reload_preserves_registry_identity(monkeypatch, tmp_path: Path):
     import ecosystem.defaultspack.domain.extensions.runtime as runtime
 

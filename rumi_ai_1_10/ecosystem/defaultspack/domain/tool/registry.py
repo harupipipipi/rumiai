@@ -25,6 +25,59 @@ _TOOL_SEARCH_METADATA_KEYS = {
 }
 
 
+def _append_unique_path(paths: list[Path], candidate: Path) -> None:
+    if candidate not in paths:
+        paths.append(candidate)
+
+
+def _pack_roots_in_ecosystem_dir(ecosystem_dir: Path) -> list[Path]:
+    if not ecosystem_dir.is_dir():
+        return []
+    roots: list[Path] = []
+    for path in sorted(ecosystem_dir.iterdir()):
+        if path.is_dir() and (path / "ecosystem.json").is_file():
+            roots.append(path)
+    return roots
+
+
+def _bundled_ecosystem_dirs_from_env() -> list[Path]:
+    roots: list[Path] = []
+    raw_extension_roots = str(os.environ.get("RUMI_DEFAULTSPACK_EXTENSION_ROOTS") or "").strip()
+    if raw_extension_roots:
+        for raw_root in raw_extension_roots.split(os.pathsep):
+            candidate = Path(raw_root).expanduser()
+            if candidate.is_dir():
+                _append_unique_path(roots, candidate)
+                continue
+            ecosystem_dir = candidate / "ecosystem"
+            if ecosystem_dir.is_dir():
+                _append_unique_path(roots, ecosystem_dir)
+    for env_name in ("RUMI_APP_DIR", "RUMI_HOME"):
+        raw = str(os.environ.get(env_name) or "").strip()
+        if not raw:
+            continue
+        candidate = Path(raw).expanduser()
+        ecosystem_dir = candidate / "ecosystem"
+        if ecosystem_dir.is_dir():
+            _append_unique_path(roots, ecosystem_dir)
+    return roots
+
+
+def discover_installed_pack_roots(
+    pack_root: Path,
+    *,
+    extra_ecosystem_dirs: list[Path] | None = None,
+) -> list[Path]:
+    roots: list[Path] = []
+    ecosystem_dirs = [pack_root.parent, *(extra_ecosystem_dirs or [])]
+    for ecosystem_dir in ecosystem_dirs:
+        for candidate in _pack_roots_in_ecosystem_dir(ecosystem_dir):
+            _append_unique_path(roots, candidate)
+    if not roots:
+        roots.append(pack_root)
+    return roots
+
+
 def _search_metadata_from_manifest(manifest: dict, config: dict) -> dict:
     metadata = {}
     for container in (
@@ -87,14 +140,10 @@ class ToolRegistry:
         return self._pack_root().parent
 
     def _installed_pack_roots(self) -> list[Path]:
-        ecosystem_dir = self._ecosystem_dir()
-        if not ecosystem_dir.is_dir():
-            return [self._pack_root()]
-        roots: list[Path] = []
-        for path in sorted(ecosystem_dir.iterdir()):
-            if path.is_dir() and (path / "ecosystem.json").is_file():
-                roots.append(path)
-        return roots
+        return discover_installed_pack_roots(
+            self._pack_root(),
+            extra_ecosystem_dirs=_bundled_ecosystem_dirs_from_env(),
+        )
 
     def _load_pack_tools(self):
         loaded = self._load_extension_tools()

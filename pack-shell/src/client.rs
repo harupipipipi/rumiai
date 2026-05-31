@@ -59,10 +59,7 @@ impl KernelClient {
                     return false;
                 }
                 match resp.json::<serde_json::Value>() {
-                    Ok(body) => {
-                        let status = body.get("status").and_then(|v| v.as_str());
-                        status == Some("ok")
-                    }
+                    Ok(body) => health_status(&body) == Some("ok"),
                     Err(e) => {
                         debug!("Failed to parse health response: {}", e);
                         false
@@ -137,9 +134,21 @@ impl KernelClient {
     }
 }
 
+fn health_status(body: &serde_json::Value) -> Option<&str> {
+    body.get("status")
+        .and_then(|value| value.as_str())
+        .or_else(|| {
+            body.get("data")
+                .and_then(|value| value.as_object())
+                .and_then(|data| data.get("status"))
+                .and_then(|value| value.as_str())
+        })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     #[test]
     fn test_desktop_token_deserialize() {
@@ -172,5 +181,35 @@ mod tests {
         assert!(!resp.success);
         assert!(resp.data.is_none());
         assert_eq!(resp.error, Some("unauthorized".to_string()));
+    }
+
+    #[test]
+    fn test_health_status_reads_top_level_status() {
+        let body = json!({
+            "status": "ok"
+        });
+        assert_eq!(health_status(&body), Some("ok"));
+    }
+
+    #[test]
+    fn test_health_status_reads_enveloped_status() {
+        let body = json!({
+            "success": true,
+            "data": {
+                "status": "ok"
+            }
+        });
+        assert_eq!(health_status(&body), Some("ok"));
+    }
+
+    #[test]
+    fn test_health_status_returns_none_when_missing() {
+        let body = json!({
+            "success": true,
+            "data": {
+                "runtime_ready": true
+            }
+        });
+        assert_eq!(health_status(&body), None);
     }
 }

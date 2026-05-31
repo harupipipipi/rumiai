@@ -29,7 +29,7 @@ def run(context, args):
     if isinstance(workspace, str) and workspace:
         artifact_root = Path(workspace) / "tools" / "computer"
     user_requested = bool(isinstance(context, dict) and context.get("user_requested_computer_use"))
-    yolo_mode = _truthy(context.get("yolo_mode")) if isinstance(context, dict) else False
+    yolo_mode = _server_approved(context) if isinstance(context, dict) else False
     if user_requested and action == "browser.open_url" and not any(
         key in payload for key in ("persistent", "profile_id", "session_id")
     ):
@@ -98,3 +98,13 @@ def _truthy(value):
     if isinstance(value, str):
         return value.strip().lower() in {"1", "true", "yes", "y", "on"}
     return bool(value)
+
+
+def _server_approved(context):
+    if not isinstance(context, dict):
+        return False
+    if _truthy(context.get("yolo_mode")):
+        return True
+    return _truthy(context.get("_tool_server_approved")) or _truthy(
+        context.get("_tool_server_approval_token_valid")
+    )

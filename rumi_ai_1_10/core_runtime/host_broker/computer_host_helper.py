@@ -72,6 +72,13 @@ def _allowed_conversation_roots() -> list[Path]:
         roots.append(Path(override).expanduser().resolve().parent / "conversations")
     base = Path(__file__).resolve().parents[2]
     roots.append(base / "ecosystem" / "defaultspack" / "user_data" / "shared" / "chat" / "conversations")
+    user_data = str(os.environ.get("RUMI_USER_DATA") or "").strip()
+    pack_id = str(os.environ.get("RUMI_PACK_ID") or "defaultspack").strip() or "defaultspack"
+    if user_data:
+        versions_dir = Path(user_data).expanduser().resolve() / "packs" / pack_id / "versions"
+        if versions_dir.is_dir():
+            for version_dir in sorted(versions_dir.iterdir()):
+                roots.append(version_dir / "user_data" / "shared" / "chat" / "conversations")
 
     deduped: list[Path] = []
     seen: set[str] = set()

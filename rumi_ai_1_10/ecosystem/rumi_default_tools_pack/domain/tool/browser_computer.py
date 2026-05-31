@@ -162,6 +162,8 @@ class BrowserComputerController:
             "open_url": "browser.open_url",
             "browser_open_url": "browser.open_url",
             "context": "computer.context",
+            "context/apps/windows": "computer.context",
+            "computer.context/apps/windows": "computer.context",
             "app_context": "computer.context",
             "state": "computer.context",
             "screenshot": "computer.screenshot",

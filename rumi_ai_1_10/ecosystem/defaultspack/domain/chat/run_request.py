@@ -618,30 +618,67 @@ def _runtime_user_content_override(metadata: dict[str, Any] | None) -> str:
     return value.strip()
 
 
-def _approval_followup_tool_context(metadata: dict[str, Any] | None) -> dict[str, Any]:
+def _approval_followup_entries(metadata: dict[str, Any] | None) -> list[dict[str, Any]]:
     if not isinstance(metadata, dict):
-        return {}
+        return []
     followup = metadata.get("approval_followup")
     if not isinstance(followup, dict):
-        return {}
+        return []
     token = str(followup.get("approval_token") or followup.get("token") or "").strip()
     tool_name = str(followup.get("tool_name") or "").strip()
     if not token or not tool_name:
-        return {}
+        return []
+    entry: dict[str, Any] = {
+        "tool_name": tool_name,
+        "token": token,
+    }
     action = str(followup.get("action") or "").strip()
     operation = str(followup.get("operation") or action or "").strip()
     request_id = str(followup.get("request_id") or followup.get("approval_request_id") or "").strip()
-    token_map = {tool_name: token}
     if action:
-        token_map[action] = token
+        entry["action"] = action
     if operation:
-        token_map[operation] = token
+        entry["operation"] = operation
+    if request_id:
+        entry["request_id"] = request_id
+    payload = followup.get("payload")
+    if isinstance(payload, dict):
+        try:
+            from domain.safety import approval as approval_module
+
+            entry["args_hash"] = approval_module.hash_arguments(payload)
+        except Exception:
+            pass
+    return [entry]
+
+
+def _approval_followup_tool_context(metadata: dict[str, Any] | None) -> dict[str, Any]:
+    entries = _approval_followup_entries(metadata)
+    if not entries:
+        return {}
+    entry = entries[0]
+    tool_name = str(entry.get("tool_name") or "").strip()
+    token = str(entry.get("token") or "").strip()
+    action = str(entry.get("action") or "").strip()
+    operation = str(entry.get("operation") or "").strip()
+    request_id = str(entry.get("request_id") or "").strip()
+    token_map: dict[str, str] = {}
     if request_id:
         token_map[request_id] = token
-    if tool_name in {"computer_use", "browser_use", "browser_computer"}:
-        for alias in ("computer_use", "browser_use", "browser_computer"):
-            token_map[alias] = token
-    return {"tool_approval_tokens": token_map}
+    has_exact_payload = bool(str(entry.get("args_hash") or "").strip())
+    if not has_exact_payload or tool_name not in {"computer_use", "browser_use", "browser_computer"}:
+        token_map[tool_name] = token
+        if action:
+            token_map[action] = token
+        if operation:
+            token_map[operation] = token
+        if tool_name in {"computer_use", "browser_use", "browser_computer"}:
+            for alias in ("computer_use", "browser_use", "browser_computer"):
+                token_map[alias] = token
+    return {
+        "tool_approval_tokens": token_map,
+        "tool_approval_followups": entries,
+    }
 
 
 def _consume_turn_model_route_override(
