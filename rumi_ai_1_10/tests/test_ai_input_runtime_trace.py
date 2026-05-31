@@ -48,6 +48,16 @@ def _fake_prompt(input_data):
     }
 
 
+def _fake_enrich_messages(standard_messages, system_prompt, conversation_id, user_text, manager):
+    return {
+        "knowledge_text": "--- Related Knowledge ---\n[1] Runtime knowledge",
+        "memory_text": "--- Related Memory ---\n[1] Runtime memory",
+        "knowledge_results": [{"id": "knowledge-1", "content": "Runtime knowledge"}],
+        "memory_results": [{"id": "memory-1", "content": "Runtime memory"}],
+        "enriched_prompt": system_prompt,
+    }
+
+
 def test_ai_input_trace_is_applied_to_chat_runtime_context(monkeypatch, tmp_path: Path) -> None:
     user_data_root = tmp_path / "user_data"
     chat_store_path = tmp_path / "chat" / "conversations.json"
@@ -73,6 +83,7 @@ def test_ai_input_trace_is_applied_to_chat_runtime_context(monkeypatch, tmp_path
     )
 
     conversation = ChatStore().create_conversation(model="stub/default")
+    monkeypatch.setattr("domain.chat.run_request.enrich_messages", _fake_enrich_messages)
     monkeypatch.setattr("core_runtime.ai_input_segments.ToolRegistry", _FakeToolRegistry)
     monkeypatch.setattr("core_runtime.ai_input_segments.resolve_effective_prompt", _fake_prompt)
     monkeypatch.setattr("domain.chat.run_request.route_model_request", lambda request: _Decision("stub/default"))
@@ -111,7 +122,12 @@ def test_ai_input_trace_is_applied_to_chat_runtime_context(monkeypatch, tmp_path
     assert prepared.request_context["ai_input_trace"]["profile_id"] == "research-profile"
     assert prepared.request_context["effective_tool_allowlist"] == ["web_search"]
     assert "Runtime prompt for research.system" in prepared.standard_messages[0]["content"]
+    assert "Runtime knowledge" in prepared.standard_messages[0]["content"]
+    assert "Runtime memory" in prepared.standard_messages[0]["content"]
     trace_dir = user_data_root / "profiles" / "research-profile" / "runtime_traces"
     trace = json.loads((trace_dir / "latest_ai_input.json").read_text(encoding="utf-8"))
     assert trace["blocked"] == []
+    assert trace["provider_payload_summary"]["context_segment_count"] == 2
+    context_segment_ids = [segment["id"] for segment in trace["effective_input"]["context_segments"]]
+    assert context_segment_ids == ["retrieval:knowledge.results", "memory:conversation.recalled_memory"]
     ChatStore._instance = None

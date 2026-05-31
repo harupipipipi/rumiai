@@ -4,6 +4,7 @@ import test from 'node:test';
 import {
   aiInputEffectiveToolIds,
   aiInputHeavyNodes,
+  aiInputPolicySegments,
   insertConditionGate,
   normalizeAiInputConfig,
   toggleAiInputEdge,
@@ -47,6 +48,26 @@ test('aiInputEffectiveToolIds returns enabled tool ids', () => {
   } as unknown as StartupProfileAiInputResponseData;
 
   assert.deepEqual(aiInputEffectiveToolIds(data), ['web_search', 'computer_use']);
+});
+
+test('aiInputPolicySegments returns API route and policy segments', () => {
+  const data = {
+    effective_input: {
+      policy: {
+        segments: [
+          {
+            id: 'api_route:POST_.api.chat',
+            source: 'profile.policy.api_route_allowlist',
+            source_type: 'api_route',
+            tokens: 12,
+          },
+          {id: 'bad'},
+        ],
+      },
+    },
+  } as unknown as StartupProfileAiInputResponseData;
+
+  assert.deepEqual(aiInputPolicySegments(data).map((segment) => segment.id), ['api_route:POST_.api.chat']);
 });
 
 test('insertConditionGate disables original edge and inserts gate wiring', () => {

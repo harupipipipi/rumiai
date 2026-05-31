@@ -15,6 +15,7 @@ import {
 import {
   aiInputEffectiveToolIds,
   aiInputHeavyNodes,
+  aiInputPolicySegments,
   insertConditionGate,
   normalizeAiInputConfig,
   toggleAiInputEdge,
@@ -57,6 +58,7 @@ export function AiInputInspector() {
   );
   const heavyNodes = useMemo(() => aiInputHeavyNodes(visibleData), [visibleData]);
   const effectiveToolIds = useMemo(() => aiInputEffectiveToolIds(visibleData), [visibleData]);
+  const policySegments = useMemo(() => aiInputPolicySegments(visibleData), [visibleData]);
   const dirty = useMemo(() => {
     if (!data) return false;
     return JSON.stringify(normalizeAiInputConfig(data.ai_input)) !== JSON.stringify(normalizeAiInputConfig(draftConfig));
@@ -360,7 +362,26 @@ export function AiInputInspector() {
             </InspectorCard>
 
             <InspectorCard title="Prompt Segments" icon={Sparkles}>
-              <SegmentList segments={visibleData.effective_input.system_segments} />
+              <SegmentList segments={visibleData.effective_input.system_segments} emptyMessage="No active prompt segments." />
+            </InspectorCard>
+
+            <InspectorCard title="Context & Policy" icon={Eye}>
+              <div className="space-y-4">
+                <div>
+                  <div className="mb-2 text-xs font-medium uppercase tracking-wide text-text-muted">Memory / Context</div>
+                  <SegmentList
+                    segments={visibleData.effective_input.context_segments}
+                    emptyMessage="No context or memory segments reach the provider payload."
+                  />
+                </div>
+                <div>
+                  <div className="mb-2 text-xs font-medium uppercase tracking-wide text-text-muted">Policy / API Routes</div>
+                  <SegmentList
+                    segments={policySegments}
+                    emptyMessage="No policy or API route segments reach the model input policy port."
+                  />
+                </div>
+              </div>
             </InspectorCard>
           </section>
 
@@ -419,9 +440,9 @@ function InspectorCard({
   );
 }
 
-function SegmentList({segments}: {segments: ApiPromptSegment[]}) {
+function SegmentList({segments, emptyMessage}: {segments: ApiPromptSegment[]; emptyMessage: string}) {
   if (!segments.length) {
-    return <div className="text-sm text-text-muted">No active prompt segments.</div>;
+    return <div className="text-sm text-text-muted">{emptyMessage}</div>;
   }
   return (
     <div className="space-y-2">

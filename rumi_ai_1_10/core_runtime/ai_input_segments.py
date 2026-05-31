@@ -20,6 +20,7 @@ from ecosystem.defaultspack.domain.tool.schema_adapter import (  # noqa: E402
     adapt_tool_definition,
     tool_name_from_definition,
 )
+from ecosystem.defaultspack.transport.registry import canonical_http_route_specs  # noqa: E402
 
 
 def collect_prompt_segments(
@@ -100,6 +101,99 @@ def collect_tool_schema_segments(profile: dict[str, Any], available_tools: list[
     return segments
 
 
+def collect_context_segments(
+    profile: dict[str, Any],
+    *,
+    workspace_manager: ProfileWorkspaceManager | None = None,
+    request_context: dict[str, Any] | None = None,
+) -> list[PromptSegment]:
+    del workspace_manager
+    profile_id = str(profile.get("profile_id") or "").strip()
+    context = request_context if isinstance(request_context, dict) else {}
+    segments: list[PromptSegment] = []
+    knowledge_text = str(context.get("knowledge_text") or "").strip()
+    if knowledge_text:
+        segments.append(
+            PromptSegment(
+                id="retrieval:knowledge.results",
+                text=knowledge_text,
+                source="knowledge.search_results",
+                source_type="retrieval_source",
+                tokens=estimate_tokens(knowledge_text),
+                priority=20,
+                enabled=True,
+                metadata={
+                    "profile_id": profile_id,
+                    "allow_disable": True,
+                    "source_kind": "knowledge",
+                    "result_count": _result_count(context.get("knowledge_results")),
+                },
+            )
+        )
+    memory_text = str(context.get("memory_text") or "").strip()
+    if memory_text:
+        segments.append(
+            PromptSegment(
+                id="memory:conversation.recalled_memory",
+                text=memory_text,
+                source="memory.recall_results",
+                source_type="memory_source",
+                tokens=estimate_tokens(memory_text),
+                priority=30,
+                enabled=True,
+                metadata={
+                    "profile_id": profile_id,
+                    "allow_disable": True,
+                    "source_kind": "memory",
+                    "result_count": _result_count(context.get("memory_results")),
+                },
+            )
+        )
+    return segments
+
+
+def collect_api_route_segments(profile: dict[str, Any]) -> list[PromptSegment]:
+    policy = profile.get("policy") if isinstance(profile.get("policy"), dict) else {}
+    allowlist = _string_set(policy.get("api_route_allowlist"))
+    if not allowlist:
+        return []
+    catalog = _api_route_catalog()
+    enforce = bool(policy.get("enforce_api_route_allowlist", False))
+    segments: list[PromptSegment] = []
+    for index, route_id in enumerate(sorted(allowlist)):
+        route = catalog.get(route_id, {"id": route_id})
+        text = json.dumps(
+            {
+                "route": route_id,
+                "handler": route.get("handler", ""),
+                "always_available": bool(route.get("always_available", False)),
+                "enforced": enforce,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+        segments.append(
+            PromptSegment(
+                id=f"api_route:{_safe_node_suffix(route_id)}",
+                text=text,
+                source="profile.policy.api_route_allowlist",
+                source_type="api_route",
+                tokens=estimate_tokens(text),
+                priority=30 + index,
+                enabled=True,
+                reason="" if enforce else "api_route_allowlist_preview_only",
+                metadata={
+                    "allow_disable": True,
+                    "route_id": route_id,
+                    "handler": route.get("handler", ""),
+                    "always_available": bool(route.get("always_available", False)),
+                    "enforce_api_route_allowlist": enforce,
+                },
+            )
+        )
+    return segments
+
+
 def collect_policy_segment(profile: dict[str, Any]) -> PromptSegment:
     policy = profile.get("policy") if isinstance(profile.get("policy"), dict) else {}
     text = json.dumps(policy, ensure_ascii=False, sort_keys=True)
@@ -170,6 +264,10 @@ def _resolve_prompt_text(
 
 def _tool_allowlist(policy: dict[str, Any]) -> set[str]:
     value = policy.get("tool_allowlist") or policy.get("enabled_tools") or policy.get("allowed_tools")
+    return _string_set(value)
+
+
+def _string_set(value: Any) -> set[str]:
     if isinstance(value, str):
         value = [part.strip() for part in value.split(",")]
     if not isinstance(value, list):
@@ -177,6 +275,38 @@ def _tool_allowlist(policy: dict[str, Any]) -> set[str]:
     return {str(item).strip() for item in value if str(item).strip()}
 
 
+def _result_count(value: Any) -> int:
+    return len(value) if isinstance(value, list) else 0
+
+
 def _tool_source(tool: dict[str, Any]) -> str:
     metadata = tool.get("metadata") if isinstance(tool.get("metadata"), dict) else {}
     return str(metadata.get("source_pack_id") or tool.get("source_pack_id") or metadata.get("source") or "")
+
+
+def _api_route_catalog() -> dict[str, dict[str, Any]]:
+    catalog: dict[str, dict[str, Any]] = {}
+    base_keys = {
+        (spec.method, spec.pattern)
+        for spec in canonical_http_route_specs(include_always_available=False)
+    }
+    for spec in canonical_http_route_specs(include_always_available=True):
+        route_id = f"{spec.method} {spec.pattern}"
+        catalog[route_id] = {
+            "id": route_id,
+            "handler": spec.block_module or spec.function_name or spec.handler_name or "",
+            "always_available": (spec.method, spec.pattern) not in base_keys,
+        }
+    return catalog
+
+
+def _safe_node_suffix(value: str) -> str:
+    return (
+        str(value or "")
+        .strip()
+        .replace(" ", "_")
+        .replace("/", ".")
+        .replace("{", "")
+        .replace("}", "")
+        .replace(":", "")
+    )

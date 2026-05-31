@@ -212,6 +212,7 @@ def prepare_chat_run(input_data: dict[str, Any], context: dict[str, Any] | None 
     request_context["model"] = model
     request_context["chat_params"] = params
     request_context["request_id"] = request_id
+    _copy_enriched_context_into_request_context(request_context, enrich_info)
     if isinstance(metadata, dict):
         forced_skill_ids = metadata.get("skills") or metadata.get("skill_ids") or metadata.get("selected_skills")
         if isinstance(forced_skill_ids, list):
@@ -477,12 +478,27 @@ def _apply_effective_ai_input_to_request_context(
 
     effective = trace.get("effective_input") if isinstance(trace.get("effective_input"), dict) else {}
     segments = effective.get("system_segments") if isinstance(effective.get("system_segments"), list) else []
+    context_segments = effective.get("context_segments") if isinstance(effective.get("context_segments"), list) else []
     system_text = "\n\n".join(
         str(segment.get("text") or segment.get("preview") or "").strip()
-        for segment in segments
+        for segment in [*segments, *context_segments]
         if isinstance(segment, dict) and str(segment.get("text") or segment.get("preview") or "").strip()
     )
     return updated, system_text
+
+
+def _copy_enriched_context_into_request_context(
+    request_context: dict[str, Any],
+    enrich_info: dict[str, Any],
+) -> None:
+    for key in ("knowledge_text", "memory_text"):
+        value = str(enrich_info.get(key) or "").strip()
+        if value:
+            request_context[key] = value
+    for key in ("knowledge_results", "memory_results"):
+        value = enrich_info.get(key)
+        if isinstance(value, list):
+            request_context[key] = list(value)
 
 
 def _replace_system_prompt_message(messages: list[dict[str, Any]], system_prompt: str) -> None:

@@ -51,7 +51,13 @@ def _profile(tmp_path: Path) -> dict:
         "graph_ports": [],
         "packs": ["defaultspack"],
         "node_overrides": {},
-        "metadata": {"selected": {"prompts": ["research.system"], "tools": ["web_search"]}},
+        "metadata": {
+            "selected": {
+                "prompts": ["research.system"],
+                "tools": ["web_search"],
+                "api_routes": ["POST /api/chat/conversations/{id}/messages"],
+            }
+        },
         "policy": {},
     }
     ProfileWorkspaceManager(tmp_path / "user_data").initialize_profile_workspace(profile)
@@ -170,3 +176,38 @@ def test_tool_allowlist_filters_provider_tools(monkeypatch, tmp_path: Path) -> N
     disabled_ids = [segment.get("tool_id") for segment in payload["effective_input"]["disabled_segments"]]
     assert tool_ids == ["web_search"]
     assert "computer_use" in disabled_ids
+
+
+def test_api_route_and_memory_sources_connect_to_model_input(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr("core_runtime.ai_input_segments.ToolRegistry", _FakeToolRegistry)
+    monkeypatch.setattr("core_runtime.ai_input_segments.resolve_effective_prompt", _fake_prompt)
+
+    payload = build_ai_input_graph_response(
+        _profile(tmp_path),
+        profile_workspace_manager=ProfileWorkspaceManager(tmp_path / "user_data"),
+        request_context={
+            "knowledge_text": "--- Related Knowledge ---\n[1] Runtime knowledge",
+            "memory_text": "--- Related Memory ---\n[1] Runtime memory",
+            "knowledge_results": [{"id": "knowledge-1"}],
+            "memory_results": [{"id": "memory-1"}],
+        },
+    )
+
+    node_kinds = {node["id"]: node["kind"] for node in payload["graph"]["nodes"]}
+    edges = {(edge["from_id"], edge["to_port"]) for edge in payload["graph"]["edges"]}
+    policy_segment_ids = [
+        segment["id"]
+        for segment in payload["effective_input"]["policy"].get("segments", [])
+    ]
+    context_segment_ids = [
+        segment["id"]
+        for segment in payload["effective_input"]["context_segments"]
+    ]
+    assert node_kinds["retrieval:knowledge.results"] == "retrieval_source"
+    assert node_kinds["memory:conversation.recalled_memory"] == "memory_source"
+    assert "retrieval:knowledge.results" in context_segment_ids
+    assert "memory:conversation.recalled_memory" in context_segment_ids
+    assert ("retrieval:knowledge.results", "context") in edges
+    assert ("memory:conversation.recalled_memory", "context") in edges
+    assert any(node_id.startswith("api_route:") and kind == "api_route" for node_id, kind in node_kinds.items())
+    assert any(segment_id.startswith("api_route:") for segment_id in policy_segment_ids)

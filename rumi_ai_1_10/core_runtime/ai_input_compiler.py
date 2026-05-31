@@ -64,7 +64,7 @@ def compile_effective_ai_input(
             continue
         if isinstance(segment, ToolSchemaSegment):
             tool_schemas.append(segment)
-        elif segment.id.startswith("policy:"):
+        elif target_port == "policy":
             policy_segments.append(segment)
         elif target_port == "context":
             context_segments.append(segment)
@@ -199,7 +199,7 @@ def _target_port_for_segment(segment: PromptSegment | ToolSchemaSegment) -> str:
         return "tools"
     if segment.source_type in {"memory_source", "retrieval_source"}:
         return "context"
-    if segment.source_type == "profile_policy" or segment.id.startswith("policy:"):
+    if segment.source_type in {"profile_policy", "api_route"} or segment.id.startswith("policy:"):
         return "policy"
     return "system"
 

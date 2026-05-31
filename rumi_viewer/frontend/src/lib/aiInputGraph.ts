@@ -1,6 +1,7 @@
 import type {
   ApiAiInputConfig,
   ApiAiInputEdge,
+  ApiPromptSegment,
   StartupProfileAiInputResponseData,
 } from '@/src/lib/apiTypes';
 
@@ -105,6 +106,14 @@ export function aiInputEffectiveToolIds(data: StartupProfileAiInputResponseData 
     .filter((value): value is string => Boolean(value));
 }
 
+export function aiInputPolicySegments(data: StartupProfileAiInputResponseData | null): ApiPromptSegment[] {
+  const policy = data?.effective_input.policy;
+  if (!isRecord(policy) || !Array.isArray(policy.segments)) {
+    return [];
+  }
+  return policy.segments.filter(isPromptSegment);
+}
+
 function uniqueStrings(value: unknown[]): string[] {
   return Array.from(new Set(value.map((item) => String(item || '').trim()).filter(Boolean))).sort();
 }
@@ -148,6 +157,16 @@ function upsertEdges(current: ApiAiInputEdge[], nextEdges: ApiAiInputEdge[]): Ap
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isPromptSegment(value: unknown): value is ApiPromptSegment {
+  if (!isRecord(value)) {
+    return false;
+  }
+  return typeof value.id === 'string'
+    && typeof value.source === 'string'
+    && typeof value.source_type === 'string'
+    && typeof value.tokens === 'number';
 }
 
 function recordOfRecords(value: unknown): Record<string, Record<string, unknown>> {
