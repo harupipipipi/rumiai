@@ -8,7 +8,7 @@ import type { ChatItem, HistoryBoardNewTaskOptions } from "./components/HistoryB
 import type { ToolPreviewItem, ToolPreviewMode } from "./components/ToolPreview";
 import { buildToolPreviewDisplayItems, hasCanvasItems } from "./components/ToolPreview";
 import { api, defaultspackApiFetch, type ChatActivityEvent, type ChatContentBlock, type ChatMessage, type ChatStreamEvent, type ChatToolStreamEvent, type CodingWorkspaceRecord, type ComposerCommandExecuteResult, type ComposerCommandItem, type ComposerCommandMode, type ComposerWidgetAction, type Conversation, type ConversationSearchResult, type ConversationSteerItem, type ModelCommandCandidate, type ModelProfile, type OperationsCompanyStatus, type SettingsSection, type SidebarAction, type SidebarItem, type UICatalog } from "./lib/api";
-import { pendingBrowserApproval, pendingRuntimeApproval, staleRuntimeApproval, type BrowserApproval, type RuntimeApproval, type StaleRuntimeApproval } from "./lib/browserApproval";
+import { browserApprovalRuntimeContent, pendingBrowserApproval, pendingRuntimeApproval, staleRuntimeApproval, type BrowserApproval, type RuntimeApproval, type StaleRuntimeApproval } from "./lib/browserApproval";
 import { reduceBrowserStateFromEvents } from "./lib/browserState";
 import { deriveConversationTitle, formatRelativeTime, messageToText, orderConversationMessages } from "./lib/chat";
 import { cn } from "./lib/cn";
@@ -1422,33 +1422,6 @@ function runtimeApprovalRuntimeContent(approval: RuntimeApproval, token?: string
     "Approved arguments JSON:",
     payload,
   ].join("\n");
-}
-
-function browserApprovalRuntimeContent(approval: BrowserApproval, token?: string): string {
-  const approvedArguments = approval.toolName === "browser_computer"
-    ? {
-        action: approval.action,
-        payload: {
-          ...approval.payload,
-          ...(token ? { approval_token: token } : {}),
-        },
-      }
-    : {
-        action: approval.action,
-        ...approval.payload,
-        ...(token ? { approval_token: token } : {}),
-      };
-  const payload = approvalPayloadPreview(approvedArguments);
-  return [
-    "The user approved the pending computer/browser operation.",
-    "Continue by calling the exact pending tool once with the approved arguments below.",
-    "Do not ask the user for the same approval again unless the tool returns a new approval_request_id.",
-    `Tool: ${approval.toolName}`,
-    `Operation: ${approval.action}`,
-    approval.requestId ? `Approval request id: ${approval.requestId}` : "",
-    "Approved arguments JSON:",
-    payload,
-  ].filter(Boolean).join("\n");
 }
 
 function staleRuntimeApprovalTitle(approval: StaleRuntimeApproval): string {
@@ -3669,6 +3642,11 @@ export default function App() {
           throw new Error(decision.reason || "approval failed");
         }
         approvalToken = decision.token ?? "";
+        setSettledRuntimeApprovalIds((ids) => (
+          ids.includes(browserApproval.requestId ?? "")
+            ? ids
+            : [...ids, browserApproval.requestId ?? ""].filter(Boolean).slice(-50)
+        ));
       }
       await api.sendMessage(activeConversationId, "ユーザーが許可しました。承認済みの操作を踏まえて続行してください。", {
         tool_choice: "required",

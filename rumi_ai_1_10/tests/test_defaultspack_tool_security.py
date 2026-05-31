@@ -11,8 +11,99 @@ DEFAULTSPACK_ROOT = ROOT / "ecosystem" / "defaultspack"
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(DEFAULTSPACK_ROOT))
 
-from domain.tool.executor import ToolExecutor  # noqa: E402
+from domain.tool.executor import ToolExecutor, _context_with_tool_approval_token, _tool_approval_scope  # noqa: E402
 from domain.tool.registry import ToolRegistry  # noqa: E402
+
+
+def test_computer_use_context_apps_windows_alias_is_canonicalized_for_approval_scope():
+    operation, approval_args = _tool_approval_scope(
+        {"tool_id": "computer_use", "name": "computer_use"},
+        {"action": "context/apps/windows"},
+    )
+
+    assert operation == "computer.context"
+    assert approval_args == {}
+
+
+def test_computer_use_followup_token_does_not_apply_to_different_action(monkeypatch):
+    class FakeCapabilityExecutor:
+        def execute(self, principal_id, request):
+            return SimpleNamespace(
+                success=False,
+                error_type="requires_denied",
+                error="Function requires permission 'computer.control' not granted",
+            )
+
+    def fail_local(*args, **kwargs):
+        raise AssertionError("unapproved follow-up action must request approval before local execution")
+
+    monkeypatch.setattr(ToolExecutor, "_execute_local", fail_local)
+
+    result = ToolExecutor()._execute_rumi_function(
+        {
+            "tool_id": "computer_use",
+            "name": "computer_use",
+            "execution": {
+                "type": "rumi_function",
+                "qualified_name": "rumi_default_tools_pack:computer_use",
+            },
+            "risk": "high",
+            "requires_approval": True,
+            "capability_grants": ["computer.control"],
+            "metadata": {"source_pack_id": "rumi_default_tools_pack"},
+        },
+        {"action": "show_app", "app": "Google Chrome"},
+        {
+            "user_requested_computer_use": True,
+            "conversation_id": "conv-followup-scope",
+            "capability_executor": FakeCapabilityExecutor(),
+            "tool_approval_tokens": {
+                "computer_use": "tok_context",
+                "browser_use": "tok_context",
+                "browser_computer": "tok_context",
+                "computer.context": "tok_context",
+            },
+        },
+    )
+
+    assert result["is_error"] is False
+    assert result["widget"]["type"] == "approval_request"
+    assert result["widget"]["action"] == "computer.show_app"
+
+
+def test_followup_context_token_beats_model_supplied_fake_token(monkeypatch):
+    from domain.tool import executor as executor_module
+
+    seen = {}
+
+    class FakeApproval:
+        @staticmethod
+        def hash_arguments(args):
+            return "hashed-args"
+
+        @staticmethod
+        def verify_execution_token(token, operation, args_hash, **kwargs):
+            seen.update({"token": token, "operation": operation, "args_hash": args_hash, **kwargs})
+            return SimpleNamespace(valid=token == "tok_context", message="invalid fake token")
+
+    monkeypatch.setattr(executor_module, "_approval_module", lambda: FakeApproval)
+
+    context, error = _context_with_tool_approval_token(
+        {
+            "pack_id": "defaultspack",
+            "conversation_id": "conv-token-precedence",
+            "tool_approval_tokens": {"computer.screenshot": "tok_context"},
+        },
+        {"tool_id": "computer_use", "name": "computer_use", "requires_approval": True},
+        {"action": "screenshot", "approval_token": "tok_fake"},
+    )
+
+    assert error is None
+    assert context["_tool_server_approval_token_valid"] is True
+    assert seen["token"] == "tok_context"
+    assert seen["operation"] == "computer.screenshot"
+    assert seen["pack_id"] == "defaultspack"
+    assert seen["conversation_id"] == "conv-token-precedence"
 
 
 def test_tool_security_rejects_untrusted_legacy_execution_manifests_without_write_action():
@@ -554,6 +645,92 @@ def test_computer_use_requires_denied_falls_back_after_tool_server_approval(monk
     assert result["result"] == "local ok"
     assert seen["tool_name"] == "computer_use"
     assert seen["arguments"]["action"] == "open_url"
+
+
+def test_computer_use_pack_not_approved_waits_for_approval(monkeypatch):
+    class FakeCapabilityExecutor:
+        def execute(self, principal_id, request):
+            return SimpleNamespace(
+                success=False,
+                error_type="pack_not_approved",
+                error="Pack not approved: rumi_default_tools_pack",
+            )
+
+    def fail_local(*args, **kwargs):
+        raise AssertionError("computer_use must wait for approval before local fallback")
+
+    monkeypatch.setattr(ToolExecutor, "_execute_local", fail_local)
+
+    result = ToolExecutor()._execute_rumi_function(
+        {
+            "tool_id": "computer_use",
+            "name": "computer_use",
+            "execution": {
+                "type": "rumi_function",
+                "qualified_name": "rumi_default_tools_pack:computer_use",
+            },
+            "risk": "high",
+            "requires_approval": True,
+            "capability_grants": ["computer.control"],
+            "metadata": {"source_pack_id": "rumi_default_tools_pack"},
+        },
+        {"action": "screenshot", "app": "Google Chrome"},
+        {
+            "user_requested_computer_use": True,
+            "capability_executor": FakeCapabilityExecutor(),
+        },
+    )
+
+    assert result["is_error"] is False
+    assert result["widget"]["type"] == "approval_request"
+    assert result["widget"]["action"] == "computer.screenshot"
+
+
+def test_computer_use_pack_not_approved_falls_back_after_tool_server_approval(monkeypatch):
+    class FakeCapabilityExecutor:
+        def execute(self, principal_id, request):
+            return SimpleNamespace(
+                success=False,
+                error_type="pack_not_approved",
+                error="Pack not approved: rumi_default_tools_pack",
+            )
+
+    seen = {}
+
+    def fake_local(self, tool_name, arguments, context):
+        seen["tool_name"] = tool_name
+        seen["arguments"] = arguments
+        seen["context"] = context
+        return {"result": "local ok", "is_error": False, "widget": {"type": tool_name}}
+
+    monkeypatch.setattr(ToolExecutor, "_execute_local", fake_local)
+
+    result = ToolExecutor()._execute_rumi_function(
+        {
+            "tool_id": "computer_use",
+            "name": "computer_use",
+            "execution": {
+                "type": "rumi_function",
+                "qualified_name": "rumi_default_tools_pack:computer_use",
+            },
+            "risk": "high",
+            "requires_approval": True,
+            "capability_grants": ["computer.control"],
+            "metadata": {"source_pack_id": "rumi_default_tools_pack"},
+        },
+        {"action": "screenshot", "app": "Google Chrome"},
+        {
+            "user_requested_computer_use": True,
+            "_tool_server_approved": True,
+            "pack_id": "defaultspack",
+            "capability_executor": FakeCapabilityExecutor(),
+        },
+    )
+
+    assert result["is_error"] is False
+    assert result["result"] == "local ok"
+    assert seen["tool_name"] == "computer_use"
+    assert seen["arguments"]["action"] == "screenshot"
 
 
 def test_prefocus_computer_target_window_does_not_execute_without_approval(monkeypatch):

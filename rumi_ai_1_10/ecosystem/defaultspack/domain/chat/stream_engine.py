@@ -149,6 +149,25 @@ def _should_emit_model_routing_status(model_routing: dict[str, Any] | None) -> b
     return bool(selected and original and selected != original)
 
 
+def _normalize_tool_call_name_and_arguments(
+    tool_name: str,
+    arguments: dict[str, Any],
+) -> tuple[str, dict[str, Any]]:
+    name = str(tool_name or "").strip()
+    if ":" not in name:
+        return name, arguments
+    base, suffix = name.split(":", 1)
+    base = base.strip()
+    suffix = suffix.strip()
+    if base not in {"browser_computer", "browser_use", "computer_use"}:
+        return name, arguments
+    normalized_args = dict(arguments or {})
+    action = str(normalized_args.get("action") or "").strip()
+    if suffix and not action:
+        normalized_args["action"] = suffix
+    return base, normalized_args
+
+
 def _approval_request_from_tool_result(
     tool_name: str,
     tool_call_id: str,
@@ -822,6 +841,7 @@ class ChatRunEngine:
                     continue
                 tool_call_id = str(block.get("id") or block.get("tool_call_id") or gen_id()).strip()
                 arguments = self._tool_arguments(block)
+                tool_name, arguments = _normalize_tool_call_name_and_arguments(tool_name, arguments)
                 if tool_call_id not in self._started_tool_call_ids:
                     self._started_tool_call_ids.add(tool_call_id)
                     display_payload = _tool_display_payload(tool_name, arguments, status="running")

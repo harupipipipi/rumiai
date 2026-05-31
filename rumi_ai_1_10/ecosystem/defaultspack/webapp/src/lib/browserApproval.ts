@@ -76,18 +76,22 @@ function approvalExpired(candidate: Record<string, unknown>, observedAt: unknown
 function approvalFromCandidate(
   candidate: Record<string, unknown> | undefined,
   fallbackToolName = "browser_computer",
+  fallbackToolCallId: string | undefined,
+  fallbackPayload: Record<string, unknown> | undefined,
   observedAt: unknown,
   now: number,
 ): BrowserApproval | null {
   if (!candidate?.requires_approval && !candidate?.approval_required) return null;
-  const token = typeof candidate.approval_token === "string"
-    ? candidate.approval_token.trim()
-    : "";
   const requestId = requestIdFromCandidate(candidate);
+  const rawToken = typeof candidate.approval_token === "string" ? candidate.approval_token.trim() : "";
+  const token = rawToken && rawToken !== "[redacted]" ? rawToken : "";
   if (!token && !requestId) return null;
-  if (token === "[redacted]") return null;
   if (approvalExpired(candidate, observedAt, now)) return null;
-  const rawPayload = candidate.payload;
+  const rawPayload = isRecord(candidate.payload)
+    ? candidate.payload
+    : isRecord(candidate.arguments)
+      ? candidate.arguments
+      : fallbackPayload;
   const rawToolName = String(candidate.tool_name ?? fallbackToolName);
   const rawAction = String(candidate.action ?? candidate.operation ?? "browser.session");
   const approval: BrowserApproval = {
@@ -190,6 +194,8 @@ export function pendingBrowserApproval(messages: ChatUiMessage[], now = Date.now
       const approval = approvalFromCandidate(
         event as Record<string, unknown>,
         String(event.tool_name ?? "browser_computer"),
+        typeof event.tool_call_id === "string" ? event.tool_call_id : undefined,
+        undefined,
         event.timestamp,
         now,
       );
@@ -201,7 +207,14 @@ export function pendingBrowserApproval(messages: ChatUiMessage[], now = Date.now
       const data = isRecord(result?.data) ? result.data : result;
       const widget = isRecord(data?.widget) ? data.widget : undefined;
       const candidate = (widget?.requires_approval || widget?.approval_required ? widget : data) as Record<string, unknown> | undefined;
-      const approval = approvalFromCandidate(candidate, String(log.tool_name), log.timestamp, now);
+      const approval = approvalFromCandidate(
+        candidate,
+        String(log.tool_name),
+        typeof log.tool_call_id === "string" ? log.tool_call_id : undefined,
+        isRecord(log.arguments) ? log.arguments : undefined,
+        log.timestamp,
+        now,
+      );
       if (approval) return approval;
     }
   }
@@ -211,7 +224,7 @@ export function pendingBrowserApproval(messages: ChatUiMessage[], now = Date.now
 export function browserApprovalToolArguments(approval: BrowserApproval, token?: string): Record<string, unknown> {
   const payload = {
     ...approval.payload,
-    ...(token ? { approval_token: token } : {}),
+    ...((token || approval.token) ? { approval_token: token || approval.token } : {}),
   };
   if (approval.toolName === "browser_computer") {
     return {
@@ -234,7 +247,7 @@ export function browserApprovalRuntimeContent(approval: BrowserApproval, token?:
     payloadText = String(toolArguments);
   }
   return [
-    "The user approved the pending computer/browser operation.",
+    "The user approved the pending browser/computer operation.",
     "Continue by calling the exact pending tool once with the approved arguments below.",
     "Do not ask the user for the same approval again unless the tool returns a new approval_request_id.",
     `Tool: ${approval.toolName}`,

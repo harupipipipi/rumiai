@@ -313,6 +313,11 @@ class ToolExecutor:
             return None
         if _is_explicitly_untrusted_tool(tool_def if isinstance(tool_def, dict) else {}):
             return None
+        browser_local_tool = ToolExecutor._first_party_browser_computer_tool_for_function(pack_id, function_id)
+        if browser_local_tool and getattr(response, "error_type", "") == "pack_not_approved":
+            if _requires_approval(tool_def) and not _context_has_tool_server_approval(context):
+                return None
+            return ToolExecutor()._execute_local(browser_local_tool, request.get("args") or {}, context)
         local_tool = ToolExecutor._first_party_local_tool_for_function(pack_id, function_id)
         if local_tool:
             return ToolExecutor()._execute_local_with_tool_def(local_tool, request.get("args") or {}, context, tool_def)
@@ -967,6 +972,8 @@ def _browser_computer_action_payload(tool_name, arguments):
             "session": "browser.session",
             "open_url": "browser.open_url",
             "open": "browser.open_url",
+            "context/apps/windows": "computer.context",
+            "context_apps_windows": "computer.context",
             "context": "computer.context",
             "app_context": "computer.context",
             "state": "computer.context",
@@ -1072,6 +1079,8 @@ def _browser_computer_action_payload(tool_name, arguments):
     else:
         action_map = {
             "": "computer.screenshot",
+            "context/apps/windows": "computer.context",
+            "context_apps_windows": "computer.context",
             "context": "computer.context",
             "app_context": "computer.context",
             "state": "computer.context",
@@ -1323,15 +1332,22 @@ def _approval_token_from_context(context, tool_def, arguments=None, *extra_keys)
     tokens = context.get("tool_approval_tokens")
     if not isinstance(tokens, dict):
         return ""
-    keys = [
-        _tool_approval_tool_name(tool_def),
-        _tool_approval_operation(tool_def),
-    ]
-    if isinstance(arguments, dict):
-        scoped_operation, _ = _tool_approval_scope(tool_def, arguments)
-        if scoped_operation:
-            keys.append(scoped_operation)
-    keys.extend(str(key or "").strip() for key in extra_keys if str(key or "").strip())
+    tool_name = _tool_approval_tool_name(tool_def)
+    scoped_operation, _ = _tool_approval_scope(tool_def, arguments if isinstance(arguments, dict) else {})
+    if tool_name in {"browser_computer", "browser_use", "computer_use"}:
+        keys = [
+            scoped_operation,
+            *[str(key or "").strip() for key in extra_keys if str(key or "").strip()],
+            tool_name,
+            _tool_approval_operation(tool_def),
+        ]
+    else:
+        keys = [
+            tool_name,
+            _tool_approval_operation(tool_def),
+            scoped_operation,
+            *[str(key or "").strip() for key in extra_keys if str(key or "").strip()],
+        ]
     for key in keys:
         token = str(tokens.get(key) or "").strip()
         if token:
@@ -1345,12 +1361,7 @@ def _context_with_tool_approval_token(context, tool_def, arguments, *extra_looku
         return next_context, None
     if _context_has_tool_server_approval(next_context):
         return next_context, None
-    token = _approval_token_from_arguments(arguments) or _approval_token_from_context(
-        context,
-        tool_def,
-        arguments,
-        *extra_lookup_keys,
-    )
+    token = _approval_token_from_context(context, tool_def, arguments, *extra_lookup_keys) or _approval_token_from_arguments(arguments)
     if not token:
         return next_context, None
     approval = _approval_module()

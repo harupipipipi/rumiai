@@ -18,6 +18,8 @@ from pathlib import Path
 from typing import Any
 
 _CLIPBOARD_PREVIEW_CHARS = 500
+_DARWIN_AUTOMATION_TIMEOUT_SECONDS = 2
+_DARWIN_SCREENSHOT_TIMEOUT_SECONDS = 10
 
 
 def _key_press_count(payload: dict[str, Any]) -> int:
@@ -1573,7 +1575,7 @@ class BrowserComputerController:
                 self._darwin_type(action_payload)
             elif system == "Darwin":
                 script = self._apple_script(action, action_payload)
-                subprocess.run(["osascript", "-e", script], check=True)
+                subprocess.run(["osascript", "-e", script], check=True, timeout=_DARWIN_AUTOMATION_TIMEOUT_SECONDS)
             elif system == "Windows":
                 self._windows_desktop_action(action, action_payload)
             else:
@@ -2213,16 +2215,28 @@ class BrowserComputerController:
                         int(capture_rect.get("height", 0)),
                     )
                     try:
-                        subprocess.run(["screencapture", "-x", "-R", rect, str(path)], check=True)
+                        subprocess.run(
+                            ["screencapture", "-x", "-R", rect, str(path)],
+                            check=True,
+                            timeout=_DARWIN_SCREENSHOT_TIMEOUT_SECONDS,
+                        )
                     except subprocess.CalledProcessError:
                         window_id = target.get("window_id")
                         if not window_id:
                             raise
-                        subprocess.run(["screencapture", "-x", "-l", str(int(window_id)), str(path)], check=True)
+                        subprocess.run(
+                            ["screencapture", "-x", "-l", str(int(window_id)), str(path)],
+                            check=True,
+                            timeout=_DARWIN_SCREENSHOT_TIMEOUT_SECONDS,
+                        )
                 else:
                     window_id = target.get("window_id")
                     if window_id:
-                        subprocess.run(["screencapture", "-x", "-l", str(int(window_id)), str(path)], check=True)
+                        subprocess.run(
+                            ["screencapture", "-x", "-l", str(int(window_id)), str(path)],
+                            check=True,
+                            timeout=_DARWIN_SCREENSHOT_TIMEOUT_SECONDS,
+                        )
                     else:
                         rect = "{},{},{},{}".format(
                             int(target.get("x", 0)),
@@ -2230,9 +2244,17 @@ class BrowserComputerController:
                             int(target.get("width", 0)),
                             int(target.get("height", 0)),
                         )
-                        subprocess.run(["screencapture", "-x", "-R", rect, str(path)], check=True)
+                        subprocess.run(
+                            ["screencapture", "-x", "-R", rect, str(path)],
+                            check=True,
+                            timeout=_DARWIN_SCREENSHOT_TIMEOUT_SECONDS,
+                        )
             else:
-                subprocess.run(["screencapture", "-x", str(path)], check=True)
+                subprocess.run(
+                    ["screencapture", "-x", str(path)],
+                    check=True,
+                    timeout=_DARWIN_SCREENSHOT_TIMEOUT_SECONDS,
+                )
             return {"platform": system, "target_window": target}
         if system == "Windows":
             capture_bounds = self._windows_screenshot(path, target=target)
@@ -2908,7 +2930,13 @@ tell application "System Events"
 end tell
 '''
         try:
-            completed = subprocess.run(["osascript", "-e", script], check=True, capture_output=True, text=True)
+            completed = subprocess.run(
+                ["osascript", "-e", script],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=_DARWIN_AUTOMATION_TIMEOUT_SECONDS,
+            )
         except Exception:
             return []
         windows: list[dict[str, Any]] = []
@@ -2944,6 +2972,7 @@ end tell
                 check=True,
                 capture_output=True,
                 text=True,
+                timeout=_DARWIN_AUTOMATION_TIMEOUT_SECONDS,
             )
             return (completed.stdout or "").strip()
         except Exception:
@@ -2966,7 +2995,13 @@ tell application "System Events"
 end tell
 '''
         try:
-            completed = subprocess.run(["osascript", "-e", script], check=True, capture_output=True, text=True)
+            completed = subprocess.run(
+                ["osascript", "-e", script],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=_DARWIN_AUTOMATION_TIMEOUT_SECONDS,
+            )
         except Exception:
             return []
         apps: list[dict[str, Any]] = []
@@ -3052,7 +3087,13 @@ end try
 return "not_found"
 """ % json.dumps(app_name)
             try:
-                completed = subprocess.run(["osascript", "-e", script], check=True, capture_output=True, text=True)
+                completed = subprocess.run(
+                    ["osascript", "-e", script],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=_DARWIN_AUTOMATION_TIMEOUT_SECONDS,
+                )
                 return "activated" in (completed.stdout or "")
             except Exception:
                 return False
@@ -3227,7 +3268,13 @@ tell application "System Events"
 end tell
 """ % (json.dumps(raw_app), json.dumps(raw_title))
             try:
-                subprocess.run(["osascript", "-e", script], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                subprocess.run(
+                    ["osascript", "-e", script],
+                    check=True,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    timeout=_DARWIN_AUTOMATION_TIMEOUT_SECONDS,
+                )
             except Exception:
                 pass
         elif platform.system() == "Windows":
@@ -3315,7 +3362,7 @@ $hwnd = [IntPtr]{hwnd}
                 except Exception:
                     pass
             script = self._apple_script("computer.click", payload)
-            subprocess.run(["osascript", "-e", script], check=True)
+            subprocess.run(["osascript", "-e", script], check=True, timeout=_DARWIN_AUTOMATION_TIMEOUT_SECONDS)
 
     def _darwin_drag(self, payload: dict[str, Any]) -> None:
         x1 = int(payload.get("x1", payload.get("x", 0)))
@@ -3352,7 +3399,7 @@ $hwnd = [IntPtr]{hwnd}
     def _darwin_type(self, payload: dict[str, Any]) -> None:
         text = str(payload.get("text", ""))
         command = ["osascript", "-e", self._darwin_clipboard_paste_script(), "--", text]
-        subprocess.run(command, check=True)
+        subprocess.run(command, check=True, timeout=_DARWIN_AUTOMATION_TIMEOUT_SECONDS)
 
     @staticmethod
     def _darwin_clipboard_paste_script() -> str:
@@ -4090,6 +4137,9 @@ $proc = Get-Process -Id $procId -ErrorAction SilentlyContinue
                 str(executable),
                 f"--user-data-dir={browser_data}",
                 f"--disk-cache-dir={cache_dir}",
+                "--no-first-run",
+                "--no-default-browser-check",
+                "--disable-sync",
                 "--new-window",
                 url,
             ],

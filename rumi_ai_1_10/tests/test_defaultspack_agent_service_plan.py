@@ -5582,6 +5582,9 @@ def test_browser_open_url_uses_managed_profile_launch_plan(tmp_path):
     assert result["launch"]["command"][0] == str(fake_browser)
     assert "--user-data-dir=" in result["launch"]["command"][1]
     assert "--disk-cache-dir=" in result["launch"]["command"][2]
+    assert "--no-first-run" in result["launch"]["command"]
+    assert "--no-default-browser-check" in result["launch"]["command"]
+    assert "--disable-sync" in result["launch"]["command"]
     assert result["launch"]["command"][-1] == "https://example.test"
 
 

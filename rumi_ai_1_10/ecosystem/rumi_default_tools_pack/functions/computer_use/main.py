@@ -12,6 +12,8 @@ def run(context, args):
     payload = dict(raw.get("payload") or {})
     action_map = {
         "": "computer.screenshot",
+        "context/apps/windows": "computer.context",
+        "context_apps_windows": "computer.context",
         "screenshot": "computer.screenshot",
         "move": "computer.move",
         "cursor_move": "computer.move",

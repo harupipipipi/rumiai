@@ -11,6 +11,22 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(DEFAULTSPACK_ROOT))
 
 
+def test_computer_use_action_suffix_tool_name_is_normalized():
+    from domain.chat.stream_engine import _normalize_tool_call_name_and_arguments
+
+    tool_name, arguments = _normalize_tool_call_name_and_arguments(
+        "computer_use:open_url",
+        {"url": "https://www.google.com", "app": "Google Chrome"},
+    )
+
+    assert tool_name == "computer_use"
+    assert arguments == {
+        "action": "open_url",
+        "url": "https://www.google.com",
+        "app": "Google Chrome",
+    }
+
+
 def test_send_and_stream_wrappers_consume_same_engine_final_message(tmp_path, monkeypatch):
     from domain.chat.store import ChatStore
     from blocks.chat.send import run as send_run
