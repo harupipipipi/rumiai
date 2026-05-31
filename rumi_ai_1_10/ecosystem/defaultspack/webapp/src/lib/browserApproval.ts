@@ -3,7 +3,11 @@ import type { ChatUiMessage } from "../renderers/types";
 export type BrowserApproval = {
   action: string;
   payload: Record<string, unknown>;
-  token: string;
+  token?: string;
+  requestId?: string;
+  riskLevel?: string;
+  summary?: string;
+  toolCallId?: string;
   toolName: string;
 };
 
@@ -76,20 +80,31 @@ function approvalFromCandidate(
   now: number,
 ): BrowserApproval | null {
   if (!candidate?.requires_approval && !candidate?.approval_required) return null;
-  if (requestIdFromCandidate(candidate)) return null;
-  if (!candidate.approval_token) return null;
-  const token = String(candidate.approval_token);
-  if (!token.trim() || token === "[redacted]") return null;
+  const token = typeof candidate.approval_token === "string"
+    ? candidate.approval_token.trim()
+    : "";
+  const requestId = requestIdFromCandidate(candidate);
+  if (!token && !requestId) return null;
+  if (token === "[redacted]") return null;
   if (approvalExpired(candidate, observedAt, now)) return null;
   const rawPayload = candidate.payload;
   const rawToolName = String(candidate.tool_name ?? fallbackToolName);
-  const rawAction = String(candidate.action ?? "browser.session");
-  return {
+  const rawAction = String(candidate.action ?? candidate.operation ?? "browser.session");
+  const approval: BrowserApproval = {
     action: BROWSER_OPEN_ACTION_ALIASES.has(rawAction) ? "browser.open_url" : rawAction,
     payload: isRecord(rawPayload) ? rawPayload : {},
-    token,
     toolName: BROWSER_OPEN_TOOL_ALIASES.has(rawToolName) ? "browser_computer" : rawToolName,
   };
+  if (token) approval.token = token;
+  if (requestId) approval.requestId = requestId;
+  if (typeof candidate.risk_level === "string") approval.riskLevel = candidate.risk_level;
+  if (typeof candidate.display_summary === "string") {
+    approval.summary = candidate.display_summary;
+  } else if (typeof candidate.message === "string") {
+    approval.summary = candidate.message;
+  }
+  if (typeof candidate.tool_call_id === "string") approval.toolCallId = candidate.tool_call_id;
+  return approval;
 }
 
 function requestIdFromCandidate(candidate: Record<string, unknown> | undefined): string {
@@ -191,6 +206,43 @@ export function pendingBrowserApproval(messages: ChatUiMessage[], now = Date.now
     }
   }
   return null;
+}
+
+export function browserApprovalToolArguments(approval: BrowserApproval, token?: string): Record<string, unknown> {
+  const payload = {
+    ...approval.payload,
+    ...(token ? { approval_token: token } : {}),
+  };
+  if (approval.toolName === "browser_computer") {
+    return {
+      action: approval.action,
+      payload,
+    };
+  }
+  return {
+    action: approval.action,
+    ...payload,
+  };
+}
+
+export function browserApprovalRuntimeContent(approval: BrowserApproval, token?: string): string {
+  const toolArguments = browserApprovalToolArguments(approval, token);
+  let payloadText = "";
+  try {
+    payloadText = JSON.stringify(toolArguments, null, 2);
+  } catch {
+    payloadText = String(toolArguments);
+  }
+  return [
+    "The user approved the pending computer/browser operation.",
+    "Continue by calling the exact pending tool once with the approved arguments below.",
+    "Do not ask the user for the same approval again unless the tool returns a new approval_request_id.",
+    `Tool: ${approval.toolName}`,
+    `Operation: ${approval.action}`,
+    approval.requestId ? `Approval request id: ${approval.requestId}` : "",
+    "Approved arguments JSON:",
+    payloadText,
+  ].filter(Boolean).join("\n");
 }
 
 export function pendingRuntimeApproval(messages: ChatUiMessage[], now = Date.now()): RuntimeApproval | null {

@@ -239,6 +239,50 @@ def test_prepare_chat_run_forwards_approval_followup_token_to_tool_context(tmp_p
     ChatStore._instance = None
 
 
+def test_prepare_chat_run_maps_computer_approval_followup_aliases(tmp_path, monkeypatch):
+    from domain.chat.run_request import prepare_chat_run
+    from domain.chat.store import ChatStore
+
+    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
+    ChatStore._instance = None
+
+    store = ChatStore()
+    conversation = store.create_conversation(model="stub/default")
+
+    prepared = prepare_chat_run(
+        {
+            "conversation_id": conversation["id"],
+            "message": {
+                "role": "user",
+                "content": "ユーザーが許可しました。承認済みの操作を続行してください。",
+                "metadata": {
+                    "approval_followup": {
+                        "approval_token": "tok_browser",
+                        "action": "computer.apps",
+                        "operation": "computer.apps",
+                        "request_id": "apr_browser_1",
+                        "tool_name": "computer_use",
+                    },
+                },
+            },
+            "tools": [],
+        },
+        {},
+    )
+
+    expected = {
+        "computer_use": "tok_browser",
+        "browser_use": "tok_browser",
+        "browser_computer": "tok_browser",
+        "computer.apps": "tok_browser",
+        "apr_browser_1": "tok_browser",
+    }
+    assert prepared.request_context["tool_approval_tokens"] == expected
+    assert prepared.tool_context["tool_approval_tokens"] == expected
+    ChatStore._instance = None
+
+
 def test_prepare_chat_run_injects_matched_skill_and_chat_references(tmp_path, monkeypatch):
     import json
 

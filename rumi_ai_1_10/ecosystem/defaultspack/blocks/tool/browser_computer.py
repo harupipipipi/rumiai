@@ -18,7 +18,7 @@ def run(input_data, context=None):
             str(action),
             dict(input_data.get("payload") or {}),
             context if isinstance(context, dict) else None,
-            tool_name="browser_computer",
+            tool_name=str(input_data.get("tool_name") or "browser_computer"),
             artifact_root=_artifact_root(context),
             yolo_mode=yolo_mode,
         )

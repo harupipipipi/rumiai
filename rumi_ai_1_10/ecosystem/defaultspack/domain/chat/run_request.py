@@ -736,7 +736,11 @@ def _approval_followup_tool_context(metadata: dict[str, Any] | None) -> dict[str
         token_map[operation] = token
     if request_id:
         token_map[request_id] = token
-    if tool_name in {"computer_use", "browser_use", "browser_computer"}:
+    if tool_name in {"computer_use", "browser_use", "browser_computer"} and any(
+        candidate.startswith(("computer.", "browser."))
+        for candidate in (action, operation)
+        if candidate
+    ):
         for alias in ("computer_use", "browser_use", "browser_computer"):
             token_map[alias] = token
     return {"tool_approval_tokens": token_map}

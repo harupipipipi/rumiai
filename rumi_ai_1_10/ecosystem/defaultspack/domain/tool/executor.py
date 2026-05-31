@@ -625,7 +625,7 @@ class ToolExecutor:
             "widget": {"type": "approval_request", **data} if is_approval else result,
         }
 
-    def _execute_local(self, tool_name, arguments, context):
+    def _execute_local(self, tool_name, arguments, context, tool_def=None):
         """
         ローカルツール実行（最小動作版: 固定レスポンスを返す）
         """
@@ -662,24 +662,54 @@ class ToolExecutor:
                 "widget": {"type": "research_sources", **result.as_dict()}
             }
         elif tool_name in {"browser_computer", "browser_use", "computer_use"}:
-            from ecosystem.defaultspack.domain.host_bridge.computer_router import run_computer_action
+            from domain.host_bridge.computer_router import run_computer_action
 
-            policy = policy_from_context(context if isinstance(context, dict) else {})
-            action, payload = _browser_computer_action_payload(tool_name, arguments)
+            next_arguments = dict(arguments or {})
+            approval_tool_def = tool_def if isinstance(tool_def, dict) else {
+                "tool_id": tool_name,
+                "name": tool_name,
+                "requires_approval": True,
+            }
+            action, payload = _browser_computer_action_payload(tool_name, next_arguments)
+            next_context, approval_error = _context_with_tool_approval_token(
+                context,
+                approval_tool_def,
+                next_arguments,
+                action,
+                str(next_arguments.get("action") or "").strip(),
+            )
+            if approval_error is not None:
+                return approval_error
+            token = _approval_token_from_arguments(next_arguments) or _approval_token_from_context(
+                next_context,
+                approval_tool_def,
+                next_arguments,
+                action,
+                str(next_arguments.get("action") or "").strip(),
+            )
+            if token and "approval_token" not in payload:
+                payload["approval_token"] = token
+            policy = policy_from_context(next_context if isinstance(next_context, dict) else {})
             if _is_cancelled(context):
                 return _cancelled_tool_result(tool_name, action=action)
-            user_requested = bool(isinstance(context, dict) and context.get("user_requested_computer_use"))
+            user_requested = bool(isinstance(next_context, dict) and next_context.get("user_requested_computer_use"))
             if user_requested and action == "browser.open_url" and not any(
                 key in payload for key in ("persistent", "profile_id", "session_id")
             ):
                 payload["persistent"] = False
+            payload = _computer_use_payload_with_context_defaults(action, payload, next_context)
+            router_kwargs = {
+                "tool_name": tool_name,
+                "artifact_root": _conversation_tool_artifact_root(next_context),
+                "yolo_mode": _truthy(policy.get("yolo_mode")),
+            }
+            if isinstance(tool_def, dict):
+                router_kwargs["tool_arguments"] = next_arguments
             result = run_computer_action(
                 action,
-                _computer_use_payload_with_context_defaults(action, payload, context),
-                context if isinstance(context, dict) else None,
-                tool_name=tool_name,
-                artifact_root=_conversation_tool_artifact_root(context),
-                yolo_mode=_truthy(policy.get("yolo_mode")) or _context_has_tool_server_approval(context),
+                payload,
+                next_context if isinstance(next_context, dict) else None,
+                **router_kwargs,
             )
             if _is_cancelled(context):
                 return _cancelled_tool_result(tool_name, action=action)
@@ -1206,24 +1236,45 @@ def _tool_approval_scope(tool_def, arguments):
     if tool_name in {"browser_computer", "browser_use", "computer_use"} and isinstance(arguments, dict):
         action, payload = _browser_computer_action_payload(tool_name, arguments)
         if str(action or "").startswith(("browser.", "computer.")):
-            return str(action), _approval_hash_arguments(payload)
+            return str(action), _approval_hash_arguments(_browser_computer_request_arguments(tool_name, action, payload))
     return _tool_approval_operation(tool_def), dict(arguments or {}) if isinstance(arguments, dict) else {}
 
 
 def _tool_approval_display_arguments(tool_def, arguments, approval_args):
     tool_name = _tool_approval_tool_name(tool_def)
     if tool_name in {"browser_computer", "browser_use", "computer_use"} and isinstance(arguments, dict):
-        return dict(arguments)
+        _, payload = _browser_computer_action_payload(tool_name, arguments)
+        return dict(payload)
     return approval_args
 
 
 def _approval_hash_arguments(arguments):
     if not isinstance(arguments, dict):
         return {}
-    value = dict(arguments)
-    value.pop("approval_token", None)
-    value.pop("approved", None)
-    return value
+    def sanitize(value):
+        if isinstance(value, dict):
+            return {
+                key: sanitize(item)
+                for key, item in value.items()
+                if key not in {"approval_token", "approved"}
+            }
+        if isinstance(value, list):
+            return [sanitize(item) for item in value]
+        return value
+
+    return sanitize(dict(arguments))
+
+
+def _browser_computer_request_arguments(tool_name, action, payload):
+    if tool_name == "browser_computer":
+        return {
+            "action": str(action or "browser.session"),
+            "payload": dict(payload or {}),
+        }
+    return {
+        "action": str(action or ""),
+        **dict(payload or {}),
+    }
 
 
 def _tool_approval_risk_level(tool_def):
@@ -1236,31 +1287,40 @@ def _approval_token_from_arguments(arguments):
     return str(arguments.get("approval_token") or "").strip()
 
 
-def _approval_token_from_context(context, tool_def, arguments=None):
+def _approval_token_from_context(context, tool_def, arguments=None, *extra_keys):
     if not isinstance(context, dict):
         return ""
     tokens = context.get("tool_approval_tokens")
     if not isinstance(tokens, dict):
         return ""
-    scoped_operation, _ = _tool_approval_scope(tool_def, arguments if isinstance(arguments, dict) else {})
-    for key in (
+    keys = [
         _tool_approval_tool_name(tool_def),
         _tool_approval_operation(tool_def),
-        scoped_operation,
-    ):
+    ]
+    if isinstance(arguments, dict):
+        scoped_operation, _ = _tool_approval_scope(tool_def, arguments)
+        if scoped_operation:
+            keys.append(scoped_operation)
+    keys.extend(str(key or "").strip() for key in extra_keys if str(key or "").strip())
+    for key in keys:
         token = str(tokens.get(key) or "").strip()
         if token:
             return token
     return ""
 
 
-def _context_with_tool_approval_token(context, tool_def, arguments):
+def _context_with_tool_approval_token(context, tool_def, arguments, *extra_lookup_keys):
     next_context = dict(context or {}) if isinstance(context, dict) else {}
     if not isinstance(tool_def, dict) or not _requires_approval(tool_def):
         return next_context, None
     if _context_has_tool_server_approval(next_context):
         return next_context, None
-    token = _approval_token_from_arguments(arguments) or _approval_token_from_context(context, tool_def, arguments)
+    token = _approval_token_from_arguments(arguments) or _approval_token_from_context(
+        context,
+        tool_def,
+        arguments,
+        *extra_lookup_keys,
+    )
     if not token:
         return next_context, None
     approval = _approval_module()
@@ -1314,7 +1374,7 @@ def _approval_required_tool_response(tool_def, arguments, context=None):
             "operation": operation,
             "action": operation,
             "arguments": _redact_sensitive_arguments(display_args),
-            "payload": _redact_sensitive_arguments(args),
+            "payload": _redact_sensitive_arguments(display_args),
             "approval_request_id": request["request_id"],
             "args_hash": request["args_hash"],
             "expires_at": request["expires_at"],
