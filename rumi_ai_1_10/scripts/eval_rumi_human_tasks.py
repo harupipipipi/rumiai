@@ -76,6 +76,7 @@ class EvalResult:
     http_status: int | None = None
     error: str = ""
     response_preview: str = ""
+    response_chars: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         return dataclasses.asdict(self)
@@ -181,16 +182,28 @@ def _classify_exception(exc: BaseException) -> str:
     return "unexpected_error"
 
 
-def _extract_preview(envelope: dict[str, Any]) -> str:
+def _extract_response_text(envelope: dict[str, Any]) -> str:
     data = envelope.get("data") if isinstance(envelope, dict) else None
     if not isinstance(data, dict):
         return ""
+    nested = data.get("data")
+    if isinstance(nested, dict):
+        nested_text = _extract_response_text({"data": nested})
+        if nested_text:
+            return nested_text
+    messages = data.get("messages")
+    if isinstance(messages, list):
+        for message in reversed(messages):
+            if isinstance(message, dict) and message.get("role") == "assistant":
+                message_text = _extract_text_from_message(message)
+                if message_text:
+                    return message_text
     raw_text = data.get("raw_text")
     if isinstance(raw_text, str) and raw_text.strip():
-        return raw_text.strip()[:240]
+        return raw_text.strip()
     content = data.get("content")
     if isinstance(content, str):
-        return content.strip()[:240]
+        return content.strip()
     if isinstance(content, list):
         parts = []
         for block in content:
@@ -200,21 +213,76 @@ def _extract_preview(envelope: dict[str, Any]) -> str:
                 text = block.get("text")
                 if isinstance(text, str):
                     parts.append(text)
-        return " ".join(parts).strip()[:240]
+        return " ".join(parts).strip()
     return ""
+
+
+def _extract_text_from_message(message: dict[str, Any]) -> str:
+    raw_text = message.get("raw_text")
+    if isinstance(raw_text, str) and raw_text.strip():
+        return raw_text.strip()
+    content = message.get("content")
+    if isinstance(content, str):
+        return content.strip()
+    if isinstance(content, list):
+        parts = []
+        for block in content:
+            if isinstance(block, str):
+                parts.append(block)
+            elif isinstance(block, dict):
+                text = block.get("text")
+                if isinstance(text, str):
+                    parts.append(text)
+        return " ".join(parts).strip()
+    return ""
+
+
+def _extract_preview(envelope: dict[str, Any]) -> str:
+    return _extract_response_text(envelope)[:240]
 
 
 def _is_ok_chat_response(envelope: dict[str, Any]) -> bool:
     if not isinstance(envelope, dict):
         return False
     if envelope.get("status") == "ok":
-        return bool(_extract_preview(envelope) or envelope.get("data"))
+        return bool(_extract_response_text(envelope) or envelope.get("data"))
     if envelope.get("success") is True:
         data = envelope.get("data")
         if isinstance(data, dict) and data.get("status") == "ok":
-            return bool(_extract_preview(data) or data.get("data"))
+            return bool(_extract_response_text(data) or data.get("data"))
         return bool(data)
     return False
+
+
+def _string_list(value: Any, field_name: str) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        values = [value]
+    elif isinstance(value, list):
+        values = value
+    else:
+        raise ValueError("{} must be a string or list".format(field_name))
+    result = []
+    for item in values:
+        text = str(item).strip()
+        if text:
+            result.append(text)
+    return result
+
+
+def _validate_response_text(task: dict[str, Any], text: str) -> tuple[bool, str]:
+    min_chars = int(task.get("min_chars", 20))
+    if len(text.strip()) < min_chars:
+        return False, "response shorter than min_chars {}".format(min_chars)
+    lower_text = text.casefold()
+    for expected in _string_list(task.get("must_include"), "must_include"):
+        if expected.casefold() not in lower_text:
+            return False, "missing required text: {}".format(expected)
+    for forbidden in _string_list(task.get("must_not_include"), "must_not_include"):
+        if forbidden.casefold() in lower_text:
+            return False, "forbidden text present: {}".format(forbidden)
+    return True, ""
 
 
 def _create_conversation(
@@ -240,12 +308,30 @@ def _create_conversation(
     return str(data["id"])
 
 
+def _get_conversation(
+    base_url: str,
+    token: str,
+    timeout: float,
+    conversation_id: str,
+) -> tuple[int, dict[str, Any]]:
+    return _json_request(
+        base_url,
+        "GET",
+        "/api/chat/conversations/{}".format(
+            urllib.parse.quote(conversation_id, safe=""),
+        ),
+        token,
+        None,
+        timeout,
+    )
+
+
 def _send_task_once(
     base_url: str,
     token: str,
     model: str,
     timeout: float,
-    task: dict[str, str],
+    task: dict[str, Any],
 ) -> tuple[str, int, dict[str, Any]]:
     conversation_id = _create_conversation(
         base_url,
@@ -287,7 +373,7 @@ def run_task(
     token: str,
     model: str,
     timeout: float,
-    task: dict[str, str],
+    task: dict[str, Any],
     retries: int,
 ) -> EvalResult:
     started = time.monotonic()
@@ -296,6 +382,8 @@ def run_task(
     last_error = ""
     last_status: int | None = None
     last_classification = "not_run"
+    last_preview = ""
+    last_response_chars = 0
     for attempt in range(retries + 1):
         attempts = attempt + 1
         try:
@@ -308,6 +396,25 @@ def run_task(
             )
             last_status = status
             if _is_ok_chat_response(envelope):
+                response_text = _extract_response_text(envelope)
+                if not response_text and conversation_id:
+                    _, conversation_envelope = _get_conversation(
+                        base_url,
+                        token,
+                        timeout,
+                        conversation_id,
+                    )
+                    response_text = _extract_response_text(conversation_envelope)
+                last_preview = response_text[:240]
+                last_response_chars = len(response_text)
+                content_ok, content_error = _validate_response_text(
+                    task,
+                    response_text,
+                )
+                if not content_ok:
+                    last_error = content_error
+                    last_classification = "quality_error"
+                    break
                 return EvalResult(
                     task_id=task["id"],
                     ok=True,
@@ -316,7 +423,8 @@ def run_task(
                     elapsed_seconds=time.monotonic() - started,
                     conversation_id=conversation_id,
                     http_status=status,
-                    response_preview=_extract_preview(envelope),
+                    response_preview=response_text[:240],
+                    response_chars=len(response_text),
                 )
             error_payload = envelope.get("error") if isinstance(envelope, dict) else None
             last_error = json.dumps(error_payload or envelope, ensure_ascii=False)[:500]
@@ -346,12 +454,20 @@ def run_task(
         conversation_id=conversation_id,
         http_status=last_status,
         error=last_error,
+        response_preview=last_preview,
+        response_chars=last_response_chars,
     )
 
 
-def _load_tasks(path: Path | None) -> list[dict[str, str]]:
+def _load_tasks(path: Path | None, default_min_chars: int) -> list[dict[str, Any]]:
     if path is None:
-        return list(DEFAULT_PROMPTS)
+        return [
+            {
+                **task,
+                "min_chars": int(task.get("min_chars", default_min_chars)),
+            }
+            for task in DEFAULT_PROMPTS
+        ]
     raw = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(raw, list):
         raise ValueError("tasks file must be a JSON list")
@@ -363,7 +479,16 @@ def _load_tasks(path: Path | None) -> list[dict[str, str]]:
         prompt = str(item.get("prompt") or "").strip()
         if not prompt:
             raise ValueError("task {} has no prompt".format(task_id))
-        tasks.append({"id": task_id, "prompt": prompt})
+        task: dict[str, Any] = {
+            "id": task_id,
+            "prompt": prompt,
+            "min_chars": int(item.get("min_chars", default_min_chars)),
+        }
+        for field_name in ("must_include", "must_not_include"):
+            values = _string_list(item.get(field_name), field_name)
+            if values:
+                task[field_name] = values
+        tasks.append(task)
     return tasks
 
 
@@ -379,6 +504,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT_SECONDS)
     parser.add_argument("--workers", type=int, default=DEFAULT_WORKERS)
     parser.add_argument("--retries", type=int, default=1)
+    parser.add_argument("--min-chars", type=int, default=20)
     parser.add_argument("--token-file", type=Path)
     parser.add_argument("--tasks", type=Path)
     parser.add_argument("--output", type=Path, default=_default_output_path())
@@ -389,7 +515,7 @@ def main(argv: list[str] | None = None) -> int:
         print("RUMI_API_TOKEN or .desktop_api_token is required", file=sys.stderr)
         return 2
 
-    tasks = _load_tasks(args.tasks)
+    tasks = _load_tasks(args.tasks, args.min_chars)
     args.output.parent.mkdir(parents=True, exist_ok=True)
 
     print(
