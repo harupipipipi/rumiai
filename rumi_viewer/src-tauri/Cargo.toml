@@ -25,6 +25,8 @@ open = "5"
 rand = "0.8"
 which = "7"
 dirs = "6"
+base64 = "0.22"
+sha2 = "0.10"
 
 [profile.release]
 strip = true

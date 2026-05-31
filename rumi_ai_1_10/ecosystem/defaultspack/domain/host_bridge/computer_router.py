@@ -38,7 +38,7 @@ def run_computer_action(
             try:
                 result = client.run_computer(action, payload, context=context, artifact_root=artifact_root)
                 if _requires_approval(result):
-                    return _approval_required_response(tool_name, action, payload, result)
+                    return _approval_required_response(tool_name, action, payload, result, context)
                 return result
             except Exception as exc:
                 return {
@@ -91,6 +91,16 @@ def _approval_token_from_context(
     return ""
 
 
+def _context_value(context: dict[str, Any] | None, *keys: str) -> str:
+    if not isinstance(context, dict):
+        return ""
+    for key in keys:
+        value = str(context.get(key) or "").strip()
+        if value:
+            return value
+    return ""
+
+
 def _requires_approval(result: dict[str, Any] | None) -> bool:
     if not isinstance(result, dict):
         return False
@@ -102,11 +112,14 @@ def _approval_required_response(
     action: str,
     payload: dict[str, Any],
     result: dict[str, Any],
+    context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if str(result.get("approval_request_id") or result.get("request_id") or "").strip():
         return result
     from domain.safety import approval
 
+    pack_id = _context_value(context, "owner_pack", "pack_id", "_source_pack_id") or "defaultspack"
+    conversation_id = _context_value(context, "conversation_id", "conversation_turn_id")
     request = approval.create_approval_request(
         str(action or tool_name or "computer_use"),
         "high",
@@ -114,7 +127,10 @@ def _approval_required_response(
         details={
             "tool_name": str(tool_name or "computer_use"),
             "action": str(action or tool_name or "computer_use"),
+            "function_id": str(action or tool_name or "computer_use"),
             "payload": dict(payload or {}),
+            "pack_id": pack_id,
+            "conversation_id": conversation_id,
             "permission_subject": "Rumi Viewer",
         },
     )

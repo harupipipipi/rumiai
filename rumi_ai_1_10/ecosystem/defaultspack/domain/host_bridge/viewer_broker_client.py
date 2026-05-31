@@ -59,7 +59,7 @@ class ViewerBrokerClient:
         payload = {
             "function_id": function_id,
             "profile_id": _context_value(context, "profile_id", "input_profile_id"),
-            "pack_id": _context_value(context, "owner_pack") or "defaultspack",
+            "pack_id": _context_value(context, "owner_pack", "pack_id", "_source_pack_id") or "defaultspack",
             "conversation_id": _context_value(context, "conversation_id", "conversation_turn_id"),
             "approval_token": _string(args.get("approval_token")),
             "args": dict(args or {}),

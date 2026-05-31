@@ -25,6 +25,13 @@ def default_approval_db_path() -> Path:
     return _pack_root() / "user_data" / "safety" / "approval.sqlite3"
 
 
+def default_approval_secret_path() -> Path:
+    override = os.environ.get("RUMI_DEFAULTSPACK_APPROVAL_SECRET_PATH")
+    if override:
+        return Path(override)
+    return default_approval_db_path().with_name("approval_runtime_secret")
+
+
 def _json_dumps(value: Any) -> str:
     return json.dumps(value if value is not None else {}, ensure_ascii=False, sort_keys=True)
 
@@ -219,9 +226,11 @@ class ApprovalStore:
     def get_or_create_runtime_secret(self) -> str:
         existing = self.get_metadata("runtime_secret")
         if existing:
+            persist_runtime_secret_for_broker(existing)
             return existing
         generated = secrets.token_urlsafe(32)
         self.set_metadata("runtime_secret", generated)
+        persist_runtime_secret_for_broker(generated)
         return generated
 
     @staticmethod
@@ -250,3 +259,19 @@ def get_approval_store() -> ApprovalStore:
         if _STORE is None or _STORE.path != expected_path:
             _STORE = ApprovalStore(expected_path)
         return _STORE
+
+
+def persist_runtime_secret_for_broker(secret: str) -> None:
+    value = str(secret or "").strip()
+    if not value:
+        return
+    try:
+        path = default_approval_secret_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(value + "\n", encoding="utf-8")
+        try:
+            path.chmod(0o600)
+        except OSError:
+            pass
+    except Exception:
+        pass
