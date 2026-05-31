@@ -161,6 +161,7 @@ def test_non_tool_calling_model_marks_tools_blocked_or_detached(monkeypatch, tmp
     assert entry["status"] == "blocked"
     assert entry["reason_code"] == "model_unsupported"
     assert "model.tool_calling" in entry["required"]["model_capabilities"]
+    assert "actual" not in entry
 
 
 def test_ai_calling_filtered_tool_rejected_at_execution():

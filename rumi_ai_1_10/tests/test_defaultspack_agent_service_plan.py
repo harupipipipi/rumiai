@@ -369,6 +369,28 @@ def test_chat_send_persists_terminal_ai_error_message(tmp_path, monkeypatch):
     ChatStore._instance = None
 
 
+def test_chat_terminal_ai_error_compacts_google_tool_schema_failure():
+    from blocks.chat.send import _ai_error_response
+
+    raw_error = (
+        'AI request failed: Google API error 400: {"error":{"code":400,'
+        '"message":"* GenerateContentRequest.tools[0].function_declarations[53].parameters.properties[rows].items: missing field\\n'
+        '* GenerateContentRequest.tools[0].function_declarations[54].parameters.properties[columns].items: missing field\\n'
+        '* GenerateContentRequest.tools[0].function_declarations[55].parameters.properties[items].items: missing field",'
+        '"status":"INVALID_ARGUMENT"}}'
+    )
+
+    response = _ai_error_response("google/gemma-4-31b-it", raw_error, {})
+    text = response["content"][0]["text"]
+
+    assert "APIエラーでこのタスクを終了しました。" in text
+    assert "Google HTTP 400" in text
+    assert "INVALID_ARGUMENT" in text
+    assert "tool 定義" in text
+    assert len(text) < 1000
+    assert "raw_message" in response["metadata"]["error"]
+
+
 def test_chat_store_links_subagent_conversations(tmp_path, monkeypatch):
     from domain.chat.store import ChatStore
 

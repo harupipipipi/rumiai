@@ -40,6 +40,7 @@ from domain.chat.ir_legacy_adapter import (
     legacy_standard_messages_to_ir,
 )
 from domain.chat.message_builder import build_assistant_message
+from domain.chat.public_metadata import compact_provider_planning
 from domain.chat.run_request import PreparedChatRun, prepare_chat_run
 from domain.chat.tool_call_accumulator import ToolCallAccumulator
 from domain.chat.store import ChatStore
@@ -1306,7 +1307,7 @@ class ChatRunEngine:
                 "model_routing": dict(prepared.model_routing or {}),
                 "chat_references": dict(prepared.chat_references or {}),
                 "ir": {"schema_version": prepared.ir_schema_version},
-                "provider_planning": redact_sensitive_value(dict(prepared.provider_planning or {})),
+                "provider_planning": compact_provider_planning(redact_sensitive_value(dict(prepared.provider_planning or {}))),
                 "provider_capabilities": redact_sensitive_value(dict(prepared.provider_capabilities or {})),
             }
         )

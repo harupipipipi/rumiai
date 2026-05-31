@@ -39,11 +39,11 @@ import { CodingWorkspacePicker } from "../components/coding/CodingWorkspacePicke
 import { RuntimeCapabilityBanner } from "../components/RuntimeCapabilityBanner";
 import { WarmActionIcon } from "../components/WarmActionIcon";
 import { fileToAttachment } from "../lib/attachments";
-import { composerSkillMentionWidget, composerToolMentionWidget, filterComposerSkillMentions, filterComposerToolMentions, resolveComposerWidgetDrop, skillMentionIdsFromText, toolMentionIdsFromText } from "../lib/composerWidgets";
+import { composerSkillMentionDisplay, composerSkillMentionWidget, composerToolMentionDisplay, composerToolMentionWidget, filterComposerSkillMentions, filterComposerToolMentions, resolveComposerWidgetDrop, skillMentionIdsFromText, toolMentionIdsFromText } from "../lib/composerWidgets";
 import { HISTORY_CHAT_DROP_MIME, parseHistoryChatDrop } from "../lib/historyComposer";
 import { sortedToolGroups, toolGroupFor } from "../lib/toolUi";
 
-export { composerSkillMentionWidget, composerToolMentionWidget, filterComposerSkillMentions, filterComposerToolMentions, resolveComposerWidgetDrop, skillMentionIdsFromText, toolMentionIdsFromText } from "../lib/composerWidgets";
+export { composerSkillMentionDisplay, composerSkillMentionWidget, composerToolMentionDisplay, composerToolMentionWidget, filterComposerSkillMentions, filterComposerToolMentions, resolveComposerWidgetDrop, skillMentionIdsFromText, toolMentionIdsFromText } from "../lib/composerWidgets";
 
 const THINKING_LABELS: Record<string, string> = {
   none: "なし",
@@ -1424,21 +1424,27 @@ export function ComposerRenderer({
   const branchOptions = codingContext?.branches?.length ? codingContext.branches : codingContext?.branch ? [codingContext.branch] : [];
   const currentDirectory = codingContext?.directory || ".";
   const selectedCodingWorkspace = codingWorkspaces.find((workspace) => workspace.workspace_id === (selectedCodingWorkspaceId || codingContext?.workspaceId)) ?? codingWorkspaces[0] ?? null;
-	  const atMentionCandidates = useMemo<ComposerAtMentionCandidate[]>(() => {
-	    const toolCandidates = filterComposerToolMentions(toolItems, atMentionQuery, 14).map((item) => ({
-	      kind: "tool" as const,
-      id: `tool:${item.id}`,
-      label: item.id,
-      description: item.description ?? item.label,
-      item,
-    }));
-    const skillCandidates = filterComposerSkillMentions(skillExtensions, atMentionQuery, 8).map((skill) => ({
-      kind: "skill" as const,
-      id: `skill:${skill.id}`,
-      label: skill.id,
-      description: skill.description ?? skill.label,
-      skill,
-    }));
+  const atMentionCandidates = useMemo<ComposerAtMentionCandidate[]>(() => {
+    const toolCandidates = filterComposerToolMentions(toolItems, atMentionQuery, 14).map((item) => {
+      const display = composerToolMentionDisplay(item);
+      return {
+        kind: "tool" as const,
+        id: `tool:${item.id}`,
+        label: display.label,
+        description: display.description,
+        item,
+      };
+    });
+    const skillCandidates = filterComposerSkillMentions(skillExtensions, atMentionQuery, 8).map((skill) => {
+      const display = composerSkillMentionDisplay(skill);
+      return {
+        kind: "skill" as const,
+        id: `skill:${skill.id}`,
+        label: display.label,
+        description: display.description,
+        skill,
+      };
+    });
     const fileCandidates = mode === "coding"
       ? filterAtMentionFiles(codingContext?.files ?? [], atMentionQuery).slice(0, 8).map((file) => ({
           kind: "file" as const,

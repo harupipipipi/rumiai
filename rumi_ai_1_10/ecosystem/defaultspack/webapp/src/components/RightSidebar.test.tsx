@@ -27,6 +27,53 @@ test("left sidebar default does not render every tool detail panel", () => {
   assert.doesNotMatch(html, /Detail panel text/);
 });
 
+test("right sidebar initially focuses the rail on tools", () => {
+  const html = renderToStaticMarkup(
+    createElement(RightSidebar, {
+      items: [
+        { id: "tool_a", label: "Tool A", category: "tool" },
+        { id: "widget_a", label: "Widget A", category: "widget" },
+      ],
+      settingsValues: {
+        sidebar: { pinned_item_ids: [], starred_item_ids: [], custom_tool_tags: {}, ui_placements: [] },
+        tools: { disabled_tool_ids: [], hidden_tool_ids: [] },
+      },
+      settingsSections: [],
+      selectedToolIds: [],
+      onSettingChange: noop,
+      onOpenSettings: noop,
+    }),
+  );
+
+  assert.match(html, /title="Filter: Tools"/);
+  assert.match(html, /title="other \(1\)"/);
+  assert.doesNotMatch(html, /title="Widget A"/);
+});
+
+test("right sidebar keeps initial tool groups compact", () => {
+  const html = renderToStaticMarkup(
+    createElement(RightSidebar, {
+      items: Array.from({ length: 12 }, (_value, index) => ({
+        id: `tool_${index}`,
+        label: `Tool ${index}`,
+        category: "tool" as const,
+        ui: { group_id: `group-${String(index).padStart(2, "0")}`, group_label: `Group ${index}` },
+      })),
+      settingsValues: {
+        sidebar: { pinned_item_ids: [], starred_item_ids: [], custom_tool_tags: {}, ui_placements: [] },
+        tools: { disabled_tool_ids: [], hidden_tool_ids: [] },
+      },
+      settingsSections: [],
+      selectedToolIds: [],
+      onSettingChange: noop,
+      onOpenSettings: noop,
+    }),
+  );
+
+  assert.match(html, /title="More tools \(4 groups\)"/);
+  assert.doesNotMatch(html, /title="Group 11 \(1\)"/);
+});
+
 test("YOLO switch and Model Manager can be pinned", () => {
   const html = renderToStaticMarkup(
     createElement(RightSidebar, {

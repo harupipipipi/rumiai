@@ -757,6 +757,47 @@ class TestDefaultspackGoogleProvider(unittest.TestCase):
         self.assertEqual(response["content"][1]["id"], "call_browser_1")
         self.assertEqual(response["content"][1]["name"], "browser_use")
 
+    def test_google_native_gemma_adds_array_items_to_function_declarations(self):
+        from domain.ai_client.providers.google_provider import GoogleProvider
+
+        provider = GoogleProvider()
+        body = provider._native_body(
+            "gemma-4-31b-it",
+            [{"role": "user", "content": "render a table"}],
+            [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "table_render",
+                        "description": "Render table data.",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "rows": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "cells": {"type": "array"},
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                }
+            ],
+            {},
+        )
+
+        parameters = body["tools"][0]["functionDeclarations"][0]["parameters"]
+        rows_schema = parameters["properties"]["rows"]
+        cells_schema = rows_schema["items"]["properties"]["cells"]
+        self.assertEqual(rows_schema["type"], "array")
+        self.assertEqual(rows_schema["items"]["type"], "object")
+        self.assertEqual(cells_schema["type"], "array")
+        self.assertEqual(cells_schema["items"]["type"], "object")
+
     def test_google_native_gemma_stream_parses_thought_and_function_call(self):
         from domain.ai_client.providers.google_provider import GoogleProvider
 
