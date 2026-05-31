@@ -13,6 +13,7 @@ from domain.ai_client.api_key_store import (
     rename_provider_api_key,
     set_provider_api_key,
 )
+from domain.ai_client.model_availability import ModelAvailabilityService
 
 
 def run(input_data, context):
@@ -76,5 +77,17 @@ def run(input_data, context):
             )
         if not result.get("success"):
             return error(result.get("error") or "failed to save api key", "API_KEY_SAVE_FAILED")
-        return ok({key: value for key, value in result.items() if key != "error"})
+        payload = {key: value for key, value in result.items() if key != "error"}
+        if (
+            action in {"upsert", "rename"}
+            and payload.get("configured")
+            and str(payload.get("kind") or "llm").strip().lower() != "custom"
+        ):
+            payload["model_availability"] = ModelAvailabilityService().after_provider_key_saved(
+                str(payload.get("provider_id") or provider_id),
+                str(payload.get("api_id") or api_id or "default"),
+                default_model=str((input_data or {}).get("default_model") or payload.get("default_model") or ""),
+                allowed_models=(input_data or {}).get("allowed_models", payload.get("allowed_models")),
+            )
+        return ok(payload)
     return error("unsupported method", "METHOD_NOT_ALLOWED")
