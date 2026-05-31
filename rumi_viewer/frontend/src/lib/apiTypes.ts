@@ -346,6 +346,9 @@ export interface ApiProfileGraphEdge {
   to_id: string;
   kind: string;
   active: boolean;
+  from_port?: string;
+  to_port?: string;
+  gate_id?: string | null;
   metadata: Record<string, unknown>;
 }
 
@@ -413,6 +416,118 @@ export interface StartupProfileGraphCompilePreviewResponseData extends StartupPr
     frontend_selection: ApiProfileGraphAvailableItem[];
     diagnostics: ApiCapabilityDiagnostic[];
   };
+}
+
+export interface ApiAiInputNode {
+  id: string;
+  kind: string;
+  label: string;
+  ref: string;
+  input_ports: string[];
+  output_ports: string[];
+  metadata: Record<string, unknown>;
+}
+
+export interface ApiAiInputEdge {
+  id: string;
+  from_id: string;
+  from_port: string;
+  to_id: string;
+  to_port: string;
+  kind: string;
+  active: boolean;
+  gate_id?: string | null;
+  metadata: Record<string, unknown>;
+}
+
+export interface ApiPromptSegment {
+  id: string;
+  text?: string;
+  preview?: string;
+  source: string;
+  source_type: string;
+  tokens: number;
+  priority: number;
+  enabled: boolean;
+  reason: string;
+  metadata: Record<string, unknown>;
+}
+
+export interface ApiToolSchemaSegment {
+  id: string;
+  tool_id: string;
+  name: string;
+  schema?: Record<string, unknown>;
+  tokens: number;
+  enabled: boolean;
+  reason: string;
+  metadata: Record<string, unknown>;
+}
+
+export interface ApiAiInputConfig {
+  version: number;
+  disabled_edges: string[];
+  gates: Record<string, Record<string, unknown>>;
+  inserted_edges: ApiAiInputEdge[];
+  budgets: Record<string, Record<string, unknown>>;
+}
+
+export interface StartupProfileAiInputResponseData {
+  profile_id: string;
+  profile: ApiStartupProfile;
+  ai_input: ApiAiInputConfig;
+  model_input: {
+    node_id: string;
+    provider?: string | null;
+    model?: string | null;
+  };
+  graph: {
+    nodes: ApiAiInputNode[];
+    edges: ApiAiInputEdge[];
+  };
+  effective_input: {
+    profile_id: string;
+    model_node_id: string;
+    system_segments: ApiPromptSegment[];
+    developer_segments: ApiPromptSegment[];
+    context_segments: ApiPromptSegment[];
+    tool_schemas: ApiToolSchemaSegment[];
+    policy: Record<string, unknown>;
+    disabled_segments: Array<Record<string, unknown>>;
+  };
+  token_estimate: {
+    total: number;
+    by_port: Record<string, number>;
+    by_node: Record<string, number>;
+  };
+  gate_decisions: Array<Record<string, unknown>>;
+  diagnostics: ApiCapabilityDiagnostic[];
+  diff?: {
+    before_tokens: number;
+    after_tokens: number;
+    removed_segments: string[];
+    added_segments: string[];
+  };
+}
+
+export interface ApiAiInputTraceSummary {
+  trace_id?: string | null;
+  created_at?: number | null;
+  conversation_id?: string | null;
+  run_id?: string | null;
+  profile_id?: string | null;
+  blocked_count?: number;
+  token_estimate?: {
+    total?: number;
+    by_port?: Record<string, number>;
+    by_node?: Record<string, number>;
+  };
+  provider_payload_summary?: Record<string, unknown>;
+}
+
+export interface StartupProfileAiInputTracesResponseData {
+  profile_id: string;
+  traces: ApiAiInputTraceSummary[];
 }
 
 export interface ApiMapResponseData {

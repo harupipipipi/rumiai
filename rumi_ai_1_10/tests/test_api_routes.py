@@ -67,7 +67,7 @@ class TestApiRouteTableBuild(unittest.TestCase):
         registry = self._make_mock_registry([
             {"method": "GET", "path": "/api/panel/dashboard", "handler": "_panel_get_dashboard"},
         ])
-        count = PackAPIHandler.load_api_routes(registry)
+        count = PackAPIHandler.load_api_routes(registry, pack_ids={"test_pack"})
         self.assertEqual(count, 1)
         self.assertIn(("GET", "/api/panel/dashboard"), PackAPIHandler._api_route_exact)
         entry = PackAPIHandler._api_route_exact[("GET", "/api/panel/dashboard")]
@@ -79,7 +79,7 @@ class TestApiRouteTableBuild(unittest.TestCase):
         registry = self._make_mock_registry([
             {"method": "GET", "path_pattern": "/api/panel/flows/{id}", "handler": "_panel_get_flow_detail"},
         ])
-        count = PackAPIHandler.load_api_routes(registry)
+        count = PackAPIHandler.load_api_routes(registry, pack_ids={"test_pack"})
         self.assertEqual(count, 1)
         self.assertEqual(len(PackAPIHandler._api_route_patterns), 1)
         method, pattern, param_names, entry = PackAPIHandler._api_route_patterns[0]
@@ -94,7 +94,7 @@ class TestApiRouteTableBuild(unittest.TestCase):
             {"method": "GET", "path_pattern": "/api/panel/flows/{id}", "handler": "_panel_get_flow_detail"},
             {"method": "POST", "path_pattern": "/api/panel/packs/{id}/enable", "handler": "_panel_enable_pack"},
         ])
-        PackAPIHandler.load_api_routes(registry)
+        PackAPIHandler.load_api_routes(registry, pack_ids={"test_pack"})
 
         # flows/{id}
         _, pattern1, _, _ = PackAPIHandler._api_route_patterns[0]
@@ -114,7 +114,7 @@ class TestApiRouteTableBuild(unittest.TestCase):
         registry = self._make_mock_registry([
             {"method": "POST", "path": "/api/panel/flows", "handler": "_panel_create_flow", "pass_body": True},
         ])
-        PackAPIHandler.load_api_routes(registry)
+        PackAPIHandler.load_api_routes(registry, pack_ids={"test_pack"})
         self.assertNotIn(("GET", "/api/panel/flows"), PackAPIHandler._api_route_exact)
         self.assertIn(("POST", "/api/panel/flows"), PackAPIHandler._api_route_exact)
 
@@ -124,7 +124,7 @@ class TestApiRouteTableBuild(unittest.TestCase):
         registry = self._make_mock_registry([
             {"method": "GET", "path": "/api/panel/dashboard", "handler": "_panel_get_dashboard"},
         ])
-        PackAPIHandler.load_api_routes(registry)
+        PackAPIHandler.load_api_routes(registry, pack_ids={"test_pack"})
         self.assertNotIn(("GET", "/api/unknown"), PackAPIHandler._api_route_exact)
 
     def test_invalid_handler_name_rejected(self):
@@ -133,7 +133,7 @@ class TestApiRouteTableBuild(unittest.TestCase):
         registry = self._make_mock_registry([
             {"method": "GET", "path": "/api/bad", "handler": "os.system('rm -rf /')"},
         ])
-        count = PackAPIHandler.load_api_routes(registry)
+        count = PackAPIHandler.load_api_routes(registry, pack_ids={"test_pack"})
         self.assertEqual(count, 0)
 
     def test_pass_body_flag(self):
@@ -142,7 +142,7 @@ class TestApiRouteTableBuild(unittest.TestCase):
         registry = self._make_mock_registry([
             {"method": "POST", "path": "/api/panel/flows", "handler": "_panel_create_flow", "pass_body": True},
         ])
-        PackAPIHandler.load_api_routes(registry)
+        PackAPIHandler.load_api_routes(registry, pack_ids={"test_pack"})
         entry = PackAPIHandler._api_route_exact[("POST", "/api/panel/flows")]
         self.assertTrue(entry["pass_body"])
 
@@ -152,7 +152,7 @@ class TestApiRouteTableBuild(unittest.TestCase):
         registry = self._make_mock_registry([
             {"method": "POST", "path": "/api/panel/kernel/restart", "handler": "_panel_restart_kernel", "response_mode": "raw"},
         ])
-        PackAPIHandler.load_api_routes(registry)
+        PackAPIHandler.load_api_routes(registry, pack_ids={"test_pack"})
         entry = PackAPIHandler._api_route_exact[("POST", "/api/panel/kernel/restart")]
         self.assertEqual(entry["response_mode"], "raw")
 

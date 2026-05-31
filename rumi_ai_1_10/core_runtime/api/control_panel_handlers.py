@@ -18,6 +18,9 @@ API 一覧:
   GET  /api/panel/startup/profiles/{id}/graph — 起動プロファイル runtime graph
   PUT  /api/panel/startup/profiles/{id}/graph — 起動プロファイル runtime graph 更新
   POST /api/panel/startup/profiles/{id}/graph/compile-preview — 起動プロファイル runtime graph compile preview
+  GET  /api/panel/startup/profiles/{id}/ai-input — AI input graph/effective payload
+  PUT  /api/panel/startup/profiles/{id}/ai-input — AI input graph settings update
+  POST /api/panel/startup/profiles/{id}/ai-input/compile-preview — AI input preview
   POST /api/panel/startup/profiles/{id}/launch    — 起動プロファイル起動
   POST /api/panel/startup/profiles/{id}/packs     — Pack 追加
   DELETE /api/panel/startup/profiles/{id}/packs/{pack_id} — Pack 削除
@@ -82,6 +85,40 @@ def is_kernel_restart_requested() -> bool:
 def clear_kernel_restart_request() -> None:
     global _restart_requested
     _restart_requested = False
+
+
+def copy_dict(value: Dict[str, Any]) -> Dict[str, Any]:
+    return {key: item for key, item in dict(value or {}).items()}
+
+
+def _ai_input_preview_diff(before: Dict[str, Any], after: Dict[str, Any]) -> Dict[str, Any]:
+    before_tokens = _ai_input_total_tokens(before)
+    after_tokens = _ai_input_total_tokens(after)
+    before_segments = _ai_input_segment_ids(before)
+    after_segments = _ai_input_segment_ids(after)
+    return {
+        "before_tokens": before_tokens,
+        "after_tokens": after_tokens,
+        "removed_segments": sorted(before_segments - after_segments),
+        "added_segments": sorted(after_segments - before_segments),
+    }
+
+
+def _ai_input_total_tokens(payload: Dict[str, Any]) -> int:
+    estimate = payload.get("token_estimate") if isinstance(payload.get("token_estimate"), dict) else {}
+    total = estimate.get("total")
+    return int(total) if isinstance(total, int) else 0
+
+
+def _ai_input_segment_ids(payload: Dict[str, Any]) -> set[str]:
+    effective = payload.get("effective_input") if isinstance(payload.get("effective_input"), dict) else {}
+    result: set[str] = set()
+    for key in ("system_segments", "developer_segments", "context_segments", "tool_schemas"):
+        entries = effective.get(key) if isinstance(effective.get(key), list) else []
+        for entry in entries:
+            if isinstance(entry, dict) and str(entry.get("id") or "").strip():
+                result.add(str(entry["id"]))
+    return result
 
 
 class ControlPanelHandlersMixin:
@@ -496,6 +533,125 @@ class ControlPanelHandlersMixin:
             return {"error": str(e), "status_code": 400}
         except Exception as e:
             _log_internal_error("panel_compile_startup_profile_graph_preview", e)
+            return {"error": _SAFE_ERROR_MSG, "status_code": 500}
+
+    def _panel_get_startup_profile_ai_input(
+        self,
+        profile_id: str,
+        query: Dict[str, Any] | None = None,
+    ) -> Dict[str, Any]:
+        try:
+            from ..ai_input_graph_builder import build_ai_input_graph_response
+
+            manager = self._panel_startup_profile_manager()
+            catalog = manager._build_catalog()
+            state = manager._load_state(catalog)
+            profile = manager._get_profile(state.get("profiles") or [], profile_id)
+            if profile is None:
+                return {"error": f"Profile '{profile_id}' not found", "status_code": 404}
+            include_text = str((query or {}).get("include_text") or "true").strip().lower() != "false"
+            return build_ai_input_graph_response(
+                profile,
+                startup_catalog=catalog,
+                profile_workspace_manager=manager.profile_workspace_manager,
+                ecosystem_dir=manager.ecosystem_dir,
+                include_text=include_text,
+            )
+        except Exception as e:
+            _log_internal_error("panel_get_startup_profile_ai_input", e)
+            return {"error": _SAFE_ERROR_MSG, "status_code": 500}
+
+    def _panel_update_startup_profile_ai_input(self, profile_id: str, body: Dict[str, Any]) -> Dict[str, Any]:
+        try:
+            from ..ai_input_graph_builder import build_ai_input_graph_response
+            from ..ai_input_models import normalize_ai_input_config
+
+            manager = self._panel_startup_profile_manager()
+            catalog = manager._build_catalog()
+            state = manager._load_state(catalog)
+            current = manager._get_profile(state.get("profiles") or [], profile_id)
+            if current is None:
+                return {"error": f"Profile '{profile_id}' not found", "status_code": 404}
+            raw_config = body.get("ai_input") if isinstance(body, dict) else None
+            config = normalize_ai_input_config(raw_config, strict=True)
+            metadata = dict(current.get("metadata") if isinstance(current.get("metadata"), dict) else {})
+            metadata["ai_input"] = config
+            result = manager.update_runtime_fields(profile_id, {"metadata": metadata})
+            if result.get("error"):
+                return result
+            return build_ai_input_graph_response(
+                result["profile"],
+                startup_catalog=catalog,
+                profile_workspace_manager=manager.profile_workspace_manager,
+                ecosystem_dir=manager.ecosystem_dir,
+                include_text=True,
+            )
+        except ValueError as e:
+            return {"error": str(e), "status_code": 400}
+        except Exception as e:
+            _log_internal_error("panel_update_startup_profile_ai_input", e)
+            return {"error": _SAFE_ERROR_MSG, "status_code": 500}
+
+    def _panel_compile_startup_profile_ai_input_preview(self, profile_id: str, body: Dict[str, Any]) -> Dict[str, Any]:
+        try:
+            from ..ai_input_graph_builder import build_ai_input_graph_response
+            from ..ai_input_models import normalize_ai_input_config
+
+            manager = self._panel_startup_profile_manager()
+            catalog = manager._build_catalog()
+            state = manager._load_state(catalog)
+            current = manager._get_profile(state.get("profiles") or [], profile_id)
+            if current is None:
+                return {"error": f"Profile '{profile_id}' not found", "status_code": 404}
+            metadata = dict(current.get("metadata") if isinstance(current.get("metadata"), dict) else {})
+            before = build_ai_input_graph_response(
+                current,
+                startup_catalog=catalog,
+                profile_workspace_manager=manager.profile_workspace_manager,
+                ecosystem_dir=manager.ecosystem_dir,
+                include_text=False,
+            )
+            if isinstance(body, dict) and "ai_input" in body:
+                metadata["ai_input"] = normalize_ai_input_config(body.get("ai_input"), strict=True)
+            draft = {**copy_dict(current), "metadata": metadata}
+            message = str(body.get("message") or "") if isinstance(body, dict) else ""
+            response = build_ai_input_graph_response(
+                draft,
+                startup_catalog=catalog,
+                profile_workspace_manager=manager.profile_workspace_manager,
+                ecosystem_dir=manager.ecosystem_dir,
+                include_text=True,
+                request_context={"message": message, "user_text": message},
+            )
+            response["diff"] = _ai_input_preview_diff(before, response)
+            return response
+        except ValueError as e:
+            return {"error": str(e), "status_code": 400}
+        except Exception as e:
+            _log_internal_error("panel_compile_startup_profile_ai_input_preview", e)
+            return {"error": _SAFE_ERROR_MSG, "status_code": 500}
+
+    def _panel_list_startup_profile_ai_input_traces(self, profile_id: str) -> Dict[str, Any]:
+        try:
+            from ..ai_input_trace_store import AiInputTraceStore
+
+            store = AiInputTraceStore(self._panel_startup_profile_manager().profile_workspace_manager)
+            return {"profile_id": profile_id, "traces": store.list_traces(profile_id)}
+        except Exception as e:
+            _log_internal_error("panel_list_startup_profile_ai_input_traces", e)
+            return {"error": _SAFE_ERROR_MSG, "status_code": 500}
+
+    def _panel_get_startup_profile_ai_input_trace(self, profile_id: str, trace_id: str) -> Dict[str, Any]:
+        try:
+            from ..ai_input_trace_store import AiInputTraceStore
+
+            store = AiInputTraceStore(self._panel_startup_profile_manager().profile_workspace_manager)
+            trace = store.get_trace(profile_id, trace_id)
+            if trace is None:
+                return {"error": f"Trace '{trace_id}' not found", "status_code": 404}
+            return trace
+        except Exception as e:
+            _log_internal_error("panel_get_startup_profile_ai_input_trace", e)
             return {"error": _SAFE_ERROR_MSG, "status_code": 500}
 
     def _panel_get_startup_profile_workspace(self, profile_id: str) -> Dict[str, Any]:

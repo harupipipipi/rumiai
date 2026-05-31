@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 import copy
-import json
 import sys
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Tuple
+from typing import Any, Dict, List, Tuple
 
 import yaml  # type: ignore[import-untyped]
 
@@ -12,7 +11,7 @@ _DEFAULTSPACK_IMPORT_ROOT = Path(__file__).resolve().parent.parent / "ecosystem"
 if str(_DEFAULTSPACK_IMPORT_ROOT) not in sys.path:
     sys.path.insert(0, str(_DEFAULTSPACK_IMPORT_ROOT))
 
-from .profile_graph_models import (
+from .profile_graph_models import (  # noqa: E402
     ProfileGraphDocument,
     ProfileGraphEdge,
     ProfileGraphNode,
@@ -20,16 +19,21 @@ from .profile_graph_models import (
     normalize_profile_graph_document,
     normalize_profile_graph_selected,
 )
-from .profile_workspace import ProfileWorkspaceManager
-from .profile_runtime_selection import apply_profile_graph_selection
+from .profile_workspace import ProfileWorkspaceManager  # noqa: E402
+from .profile_runtime_selection import apply_profile_graph_selection  # noqa: E402
 
-from ecosystem.defaultspack.domain.capability.catalog import CapabilityCatalog
-from ecosystem.defaultspack.domain.external.input_profile_registry import InputProfileRegistry
-from ecosystem.defaultspack.domain.frontend.registry import FrontendRegistry
-from ecosystem.defaultspack.domain.prompt.effective import resolve_effective_prompt
-from ecosystem.defaultspack.domain.tool.registry import ToolRegistry
-from ecosystem.defaultspack.domain.webhook.endpoint_store import WebhookEndpointStore
-from ecosystem.defaultspack.transport.registry import HttpRouteSpec, canonical_http_route_specs
+from ecosystem.defaultspack.domain.capability.catalog import CapabilityCatalog  # noqa: E402
+from ecosystem.defaultspack.domain.external.input_profile_registry import (  # noqa: E402
+    InputProfileRegistry,
+)
+from ecosystem.defaultspack.domain.frontend.registry import FrontendRegistry  # noqa: E402
+from ecosystem.defaultspack.domain.prompt.effective import resolve_effective_prompt  # noqa: E402
+from ecosystem.defaultspack.domain.tool.registry import ToolRegistry  # noqa: E402
+from ecosystem.defaultspack.domain.webhook.endpoint_store import WebhookEndpointStore  # noqa: E402
+from ecosystem.defaultspack.transport.registry import (  # noqa: E402
+    HttpRouteSpec,
+    canonical_http_route_specs,
+)
 
 
 def build_startup_profile_graph_response(
@@ -75,6 +79,10 @@ def build_startup_profile_graph_response(
             "api_route_count": len(available.get("api_routes") or []),
             "selected_frontend_count": len(hydrated_graph.selected.get("frontend") or []),
             "selected_prompt_count": len(hydrated_graph.selected.get("prompts") or []),
+        },
+        "ai_input": {
+            "available": True,
+            "endpoint": f"/api/panel/startup/profiles/{profile_id}/ai-input",
         },
         "diagnostics": diagnostics,
     }

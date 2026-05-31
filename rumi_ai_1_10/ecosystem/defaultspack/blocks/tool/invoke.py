@@ -1,13 +1,18 @@
-import sys, os; sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..")); from _common import ok, error, gen_id, timestamp
+import os
+import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
-from domain.tool.permission_checker import PermissionChecker
-from domain.tool.executor import ToolExecutor
-from domain.tool.registry import ToolRegistry
+
+from _common import error, ok  # noqa: E402
+from domain.tool.permission_checker import PermissionChecker  # noqa: E402
+from domain.tool.executor import ToolExecutor  # noqa: E402
+from domain.tool.registry import ToolRegistry  # noqa: E402
 from domain.tool_policy.internal_context import (
     internal_tool_decision,
     sanitize_tool_context,
     seal_tool_context,
-)
+)  # noqa: E402
 
 
 def _is_cancelled(context):
@@ -18,6 +23,53 @@ def _is_cancelled(context):
         except Exception:
             return False
     return False
+
+
+def _effective_tool_allowlist(context):
+    if not isinstance(context, dict):
+        return set()
+    value = context.get("effective_tool_allowlist")
+    if not value:
+        policy = context.get("profile_policy") if isinstance(context.get("profile_policy"), dict) else {}
+        value = policy.get("tool_allowlist") or policy.get("enabled_tools") or policy.get("allowed_tools")
+    if isinstance(value, str):
+        value = [part.strip() for part in value.split(",")]
+    if not isinstance(value, list):
+        return set()
+    return {str(item).strip() for item in value if str(item).strip()}
+
+
+def _blocked_by_profile_error(tool_name, context):
+    profile_id = ""
+    if isinstance(context, dict):
+        profile_id = str(context.get("active_startup_profile_id") or context.get("profile_id") or "")
+    if profile_id:
+        try:
+            from core_runtime.ai_input_trace_store import AiInputTraceStore
+
+            AiInputTraceStore().append_blocked_event(
+                profile_id,
+                {
+                    "event": "tool_blocked",
+                    "tool_id": tool_name,
+                    "reason": "not_in_effective_tool_allowlist",
+                    "source": "defaultspack.blocks.tool.invoke",
+                },
+            )
+        except Exception:
+            pass
+    return {
+        "status": "error",
+        "error": {
+            "code": "blocked_by_profile",
+            "message": "Tool blocked by active profile",
+            "details": {
+                "tool_id": tool_name,
+                "profile_id": profile_id,
+                "reason": "not_in_effective_tool_allowlist",
+            },
+        },
+    }
 
 
 def run(input_data, context):
@@ -44,6 +96,10 @@ def run(input_data, context):
                 tool_def = item
                 tool_name = item.get("tool_id", tool_name)
                 break
+
+    allowlist = _effective_tool_allowlist(context)
+    if allowlist and tool_name not in allowlist:
+        return _blocked_by_profile_error(tool_name, context)
 
     sealed_decision = internal_tool_decision(context)
     clean_context = sanitize_tool_context(context)

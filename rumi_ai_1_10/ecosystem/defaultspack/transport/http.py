@@ -251,6 +251,26 @@ class DefaultsHttpServer:
         route_key = f"{str(method or '').upper()} {str(pattern or '').strip()}"
         return route_key in {str(item).strip() for item in allowlist if str(item or '').strip()}
 
+    def _record_profile_blocked_route(self, method, pattern):
+        profile_id, _policy = self._active_profile_policy()
+        if not profile_id:
+            return
+        try:
+            from core_runtime.ai_input_trace_store import AiInputTraceStore
+
+            AiInputTraceStore().append_blocked_event(
+                profile_id,
+                {
+                    "event": "api_route_blocked",
+                    "method": str(method or "").upper(),
+                    "route": str(pattern or "").strip(),
+                    "reason": "not_in_api_route_allowlist",
+                    "source": "defaultspack.transport.http",
+                },
+            )
+        except Exception:
+            pass
+
     def _build_context(self):
         return {
             "flow_id": "transport_direct",
@@ -1050,6 +1070,7 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
                 self._send_json(404, error("not found: " + method + " " + path))
                 return
             if route_pattern and not self.server_ref._route_allowed_by_active_profile(method, route_pattern):
+                self.server_ref._record_profile_blocked_route(method, route_pattern)
                 self._send_json(
                     403,
                     error(

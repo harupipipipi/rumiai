@@ -58,6 +58,22 @@
     },
     {
       "method": "GET",
+      "path_pattern": "/api/panel/startup/profiles/{id}/ai-input",
+      "handler": "_panel_get_startup_profile_ai_input",
+      "pass_query": true
+    },
+    {
+      "method": "GET",
+      "path_pattern": "/api/panel/startup/profiles/{id}/ai-input/traces",
+      "handler": "_panel_list_startup_profile_ai_input_traces"
+    },
+    {
+      "method": "GET",
+      "path_pattern": "/api/panel/startup/profiles/{id}/ai-input/traces/{trace_id}",
+      "handler": "_panel_get_startup_profile_ai_input_trace"
+    },
+    {
+      "method": "GET",
       "path": "/api/panel/api-map",
       "handler": "_panel_get_api_map",
       "pass_query": true
@@ -238,6 +254,12 @@
     },
     {
       "method": "POST",
+      "path_pattern": "/api/panel/startup/profiles/{id}/ai-input/compile-preview",
+      "handler": "_panel_compile_startup_profile_ai_input_preview",
+      "pass_body": true
+    },
+    {
+      "method": "POST",
       "path_pattern": "/api/panel/startup/profiles/{id}/launch",
       "handler": "_panel_launch_startup_profile"
     },
@@ -315,6 +337,12 @@
       "method": "PUT",
       "path_pattern": "/api/panel/startup/profiles/{id}/graph",
       "handler": "_panel_update_startup_profile_graph",
+      "pass_body": true
+    },
+    {
+      "method": "PUT",
+      "path_pattern": "/api/panel/startup/profiles/{id}/ai-input",
+      "handler": "_panel_update_startup_profile_ai_input",
       "pass_body": true
     },
     {

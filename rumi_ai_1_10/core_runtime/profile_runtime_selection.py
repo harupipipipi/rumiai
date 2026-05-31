@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 from typing import Any, Dict
 
+from .ai_input_models import normalize_ai_input_config
 from .profile_graph_models import normalize_profile_graph_selected
 
 
@@ -19,6 +20,8 @@ def apply_profile_graph_selection(profile: dict[str, Any]) -> dict[str, Any]:
             "nodes": list(graph.get("nodes")) if isinstance(graph.get("nodes"), list) else [],
             "edges": list(graph.get("edges")) if isinstance(graph.get("edges"), list) else [],
         }
+    if "ai_input" in metadata:
+        metadata["ai_input"] = normalize_ai_input_config(metadata.get("ai_input"))
     normalized["metadata"] = metadata
 
     policy = dict(normalized.get("policy") if isinstance(normalized.get("policy"), dict) else {})

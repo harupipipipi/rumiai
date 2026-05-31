@@ -232,6 +232,17 @@ def prepare_chat_run(input_data: dict[str, Any], context: dict[str, Any] | None 
         ):
             params["tool_choice"] = tool_choice
 
+    request_context, effective_system_prompt = _apply_effective_ai_input_to_request_context(
+        request_context,
+        active_startup_profile,
+        conversation_id=conversation_id,
+        request_id=request_id,
+        user_text=user_text,
+    )
+    if effective_system_prompt:
+        system_prompt = effective_system_prompt
+        _replace_system_prompt_message(standard_messages, effective_system_prompt)
+
     raw_tools, provider_tools, tool_context = _available_tools(request_context, prepared_input, user_text=user_text)
     modalities = detect_modalities(content, metadata)
     routing_decision = route_model_request(
@@ -415,6 +426,72 @@ def prepare_chat_run(input_data: dict[str, Any], context: dict[str, Any] | None 
         chat_references=chat_references,
         matched_skills=matched_skills,
     )
+
+
+def _apply_effective_ai_input_to_request_context(
+    request_context: dict[str, Any],
+    active_profile: dict[str, Any] | None,
+    *,
+    conversation_id: str,
+    request_id: str,
+    user_text: str,
+) -> tuple[dict[str, Any], str]:
+    if not isinstance(active_profile, dict) or not str(active_profile.get("profile_id") or "").strip():
+        return request_context, ""
+    try:
+        from core_runtime.ai_input_graph_builder import build_runtime_ai_input_trace
+        from core_runtime.ai_input_trace_store import AiInputTraceStore
+    except Exception:
+        return request_context, ""
+
+    updated = dict(request_context or {})
+    trace = build_runtime_ai_input_trace(
+        active_profile,
+        conversation_id=conversation_id,
+        run_id=request_id,
+        user_message=user_text,
+        request_context=updated,
+        include_text=True,
+    )
+    allowed_tool_ids = [
+        str(item).strip()
+        for item in trace.get("allowed_tool_ids", [])
+        if str(item or "").strip()
+    ]
+    if allowed_tool_ids:
+        updated["effective_tool_allowlist"] = allowed_tool_ids
+        profile_policy = dict(updated.get("profile_policy") if isinstance(updated.get("profile_policy"), dict) else {})
+        profile_policy["tool_allowlist"] = allowed_tool_ids
+        updated["profile_policy"] = profile_policy
+    updated["ai_input_trace"] = {
+        "trace_id": trace.get("trace_id"),
+        "profile_id": trace.get("profile_id"),
+        "token_estimate": trace.get("token_estimate"),
+        "allowed_tool_ids": allowed_tool_ids,
+        "gate_decisions": trace.get("gate_decisions", []),
+    }
+    try:
+        AiInputTraceStore().save_trace(str(active_profile.get("profile_id") or ""), trace)
+    except Exception:
+        pass
+
+    effective = trace.get("effective_input") if isinstance(trace.get("effective_input"), dict) else {}
+    segments = effective.get("system_segments") if isinstance(effective.get("system_segments"), list) else []
+    system_text = "\n\n".join(
+        str(segment.get("text") or segment.get("preview") or "").strip()
+        for segment in segments
+        if isinstance(segment, dict) and str(segment.get("text") or segment.get("preview") or "").strip()
+    )
+    return updated, system_text
+
+
+def _replace_system_prompt_message(messages: list[dict[str, Any]], system_prompt: str) -> None:
+    if not system_prompt:
+        return
+    if messages and messages[0].get("role") == "system":
+        messages[0]["content"] = system_prompt
+        return
+    messages.insert(0, {"role": "system", "content": system_prompt})
 
 
 def _mark_tool_calling_unavailable(entries: Any, tool_names: list[str], actual: dict[str, Any]) -> list[dict[str, Any]]:

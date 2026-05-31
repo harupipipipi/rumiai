@@ -13,6 +13,8 @@ PROFILE_GRAPH_SELECTED_CATEGORIES = (
     "frontend",
     "flows",
     "nodes",
+    "ai_input_nodes",
+    "gates",
 )
 
 
@@ -41,6 +43,8 @@ class ProfileGraphEdge:
     to_id: str
     kind: str
     active: bool = True
+    from_port: str = ""
+    to_port: str = ""
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -50,6 +54,8 @@ class ProfileGraphEdge:
             "to_id": self.to_id,
             "kind": self.kind,
             "active": self.active,
+            "from_port": self.from_port,
+            "to_port": self.to_port,
             "metadata": dict(self.metadata),
         }
 
@@ -242,6 +248,7 @@ def _normalize_edges(
             continue
         seen_ids.add(edge_id)
         metadata = raw_edge.get("metadata")
+        edge_metadata = dict(metadata) if isinstance(metadata, dict) else {}
         edges.append(
             ProfileGraphEdge(
                 id=edge_id,
@@ -249,7 +256,9 @@ def _normalize_edges(
                 to_id=to_id,
                 kind=kind,
                 active=bool(raw_edge.get("active", True)),
-                metadata=dict(metadata) if isinstance(metadata, dict) else {},
+                from_port=str(raw_edge.get("from_port") or edge_metadata.get("from_port") or "").strip(),
+                to_port=str(raw_edge.get("to_port") or edge_metadata.get("to_port") or "").strip(),
+                metadata=edge_metadata,
             )
         )
     return edges

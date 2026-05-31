@@ -3902,7 +3902,7 @@ def test_fallback_operations_company_routes_precede_generic_agent_status():
         return {"status": "ok"}
 
     server._invoke_fallback_block = fake_invoke
-    handler, params, _, path_inject = server._match_route("GET", "/api/agent/company/status")
+    handler, params, _, path_inject, _ = server._match_route("GET", "/api/agent/company/status")
 
     assert params == {}
     assert path_inject == {}
@@ -4006,7 +4006,7 @@ def test_frontend_sidebar_api_routes_match_in_registry_mode():
     ]
 
     for method, path in expected:
-        handler, _, source, _ = server._match_route(method, path)
+        handler, _, source, _, _ = server._match_route(method, path)
         assert handler is not None, (method, path)
         assert source == "registry"
 

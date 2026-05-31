@@ -631,7 +631,7 @@ def test_registry_sorting_keeps_static_agent_company_status_before_generic_statu
             ]
 
     server = DefaultsHttpServer(Facade())
-    handler, params, source, path_inject = server._match_route("GET", "/api/agent/company/status")
+    handler, params, source, path_inject, _ = server._match_route("GET", "/api/agent/company/status")
 
     assert handler is company_status
     assert params == {}
@@ -673,7 +673,7 @@ def test_registry_chat_send_route_is_adapted_to_chat_turn_flow():
         return {"status": "ok", "data": {"flow": True}}
 
     server._invoke_flow_route = fake_flow_route
-    handler, params, source, path_inject = server._match_route(
+    handler, params, source, path_inject, _ = server._match_route(
         "POST",
         "/api/chat/conversations/c1/messages",
     )
@@ -730,7 +730,7 @@ def test_registry_chat_flow_handler_keeps_path_params_through_http_dispatch_shap
         return {"status": "ok", "data": {"flow": True}}
 
     server._invoke_flow_route = fake_flow_route
-    handler, params, source, path_inject = server._match_route(
+    handler, params, source, path_inject, _ = server._match_route(
         "POST",
         "/api/chat/conversations/c1/messages",
     )
@@ -787,7 +787,7 @@ def test_registry_chat_stream_route_is_adapted_to_chat_stream_turn_flow():
         return {"status": "ok", "data": {"_sse": True, "events": [{"type": "done"}]}}
 
     server._invoke_flow_route = fake_flow_route
-    handler, params, source, path_inject = server._match_route(
+    handler, params, source, path_inject, _ = server._match_route(
         "POST",
         "/api/chat/conversations/c1/stream",
     )
@@ -903,7 +903,7 @@ def test_new_fallback_routes_dispatch_to_expected_blocks(
         return {"status": "ok"}
 
     server._invoke_fallback_block = fake_invoke
-    handler, params, source, path_inject = server._match_route(method, path)
+    handler, params, source, path_inject, _ = server._match_route(method, path)
 
     assert handler is not None
     assert source == "fallback"

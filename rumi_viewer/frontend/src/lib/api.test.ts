@@ -7,12 +7,15 @@ import {
   bootstrapPanelSession,
   clearStartupProfileNodeOverride,
   compileStartupProfileGraphPreview,
+  compileStartupProfileAiInputPreview,
   compileStartupProfilePreview,
   createStartupProfile,
   fetchApiMap,
   fetchBackgroundControlStatus,
-  fetchDesktopSystemInfo,
+  fetchStartupProfileAiInput,
+  fetchStartupProfileAiInputTraces,
   fetchStartupProfileGraph,
+  fetchDesktopSystemInfo,
   hasPendingPanelBootstrapCode,
   isDesktopShellAvailable,
   openExternalUrl,
@@ -20,6 +23,7 @@ import {
   setStartupProfileNodeOverride,
   showAppWindow,
   updateStartupProfile,
+  updateStartupProfileAiInput,
   updateStartupProfileGraph,
 } from './api.ts';
 import { RUMI_DISPLAY_VERSION } from './version.ts';
@@ -536,4 +540,33 @@ test('profile graph wrappers call the graph endpoints and support metadata field
 
   await fetchApiMap({profile_id: 'profile-1', focus: 'tool:web_search'});
   assert.equal(lastFetchUrl, '/api/panel/api-map?profile_id=profile-1&focus=tool%3Aweb_search');
+});
+
+test('ai input wrappers call graph, preview, update, and trace endpoints', async () => {
+  await fetchStartupProfileAiInput('profile-1', {include_text: false});
+  assert.equal(lastFetchUrl, '/api/panel/startup/profiles/profile-1/ai-input?include_text=false');
+  assert.equal(lastFetchInit?.method, 'GET');
+
+  await updateStartupProfileAiInput('profile-1', {
+    version: 1,
+    disabled_edges: ['edge:prompt->model.system'],
+  });
+  assert.equal(lastFetchUrl, '/api/panel/startup/profiles/profile-1/ai-input');
+  assert.equal(lastFetchInit?.method, 'PUT');
+  assert.equal(lastFetchInit?.body, JSON.stringify({
+    ai_input: {
+      version: 1,
+      disabled_edges: ['edge:prompt->model.system'],
+    },
+  }));
+
+  await compileStartupProfileAiInputPreview('profile-1', {
+    ai_input: {disabled_edges: ['edge:prompt->model.system']},
+    message: 'preview this',
+  });
+  assert.equal(lastFetchUrl, '/api/panel/startup/profiles/profile-1/ai-input/compile-preview');
+  assert.equal(lastFetchInit?.method, 'POST');
+
+  await fetchStartupProfileAiInputTraces('profile-1');
+  assert.equal(lastFetchUrl, '/api/panel/startup/profiles/profile-1/ai-input/traces');
 });

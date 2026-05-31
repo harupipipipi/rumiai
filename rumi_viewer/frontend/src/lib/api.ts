@@ -6,6 +6,9 @@ import type {
   ApiStartupProfile,
   StartupProfileGraphResponseData,
   StartupProfileGraphCompilePreviewResponseData,
+  StartupProfileAiInputResponseData,
+  StartupProfileAiInputTracesResponseData,
+  ApiAiInputConfig,
   StartupProfileCompilePreviewResponseData,
   StartupProfileMutationResponseData,
   StartupProfileDeleteResponseData,
@@ -527,6 +530,54 @@ export function fetchApiMap(params?: { profile_id?: string; focus?: string }): P
   }
   const query = search.toString();
   return apiFetch<ApiMapResponseData>(`/api/panel/api-map${query ? `?${query}` : ''}`);
+}
+
+export function fetchStartupProfileAiInput(
+  id: string,
+  options?: {include_text?: boolean},
+): Promise<StartupProfileAiInputResponseData> {
+  const search = new URLSearchParams();
+  if (options?.include_text === false) {
+    search.set('include_text', 'false');
+  }
+  const query = search.toString();
+  return apiFetch<StartupProfileAiInputResponseData>(
+    `/api/panel/startup/profiles/${encodeURIComponent(id)}/ai-input${query ? `?${query}` : ''}`,
+  );
+}
+
+export function updateStartupProfileAiInput(
+  id: string,
+  aiInput: Partial<ApiAiInputConfig>,
+): Promise<StartupProfileAiInputResponseData> {
+  return apiFetch<StartupProfileAiInputResponseData>(
+    `/api/panel/startup/profiles/${encodeURIComponent(id)}/ai-input`,
+    {
+      method: 'PUT',
+      body: JSON.stringify({ai_input: aiInput}),
+    },
+  );
+}
+
+export function compileStartupProfileAiInputPreview(
+  id: string,
+  payload: {ai_input?: Partial<ApiAiInputConfig>; message?: string},
+): Promise<StartupProfileAiInputResponseData> {
+  return apiFetch<StartupProfileAiInputResponseData>(
+    `/api/panel/startup/profiles/${encodeURIComponent(id)}/ai-input/compile-preview`,
+    {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+export function fetchStartupProfileAiInputTraces(
+  id: string,
+): Promise<StartupProfileAiInputTracesResponseData> {
+  return apiFetch<StartupProfileAiInputTracesResponseData>(
+    `/api/panel/startup/profiles/${encodeURIComponent(id)}/ai-input/traces`,
+  );
 }
 
 export function addPackToStartupProfile(id: string, packId: string): Promise<StartupProfileMutationResponseData> {

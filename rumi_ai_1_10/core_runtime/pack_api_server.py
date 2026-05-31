@@ -403,6 +403,7 @@ class PackAPIHandler(
                     "function_id": function_id,
                     "pack_id": pack_id,
                     "pass_body": route.get("pass_body", False),
+                    "pass_query": route.get("pass_query", False),
                     "response_mode": route.get("response_mode", "result"),
                     "args": dict(route.get("args") or {}),
                     "path_param_map": dict(route.get("path_param_map") or {}),

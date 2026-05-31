@@ -3,7 +3,7 @@ import { useAppStore } from '@/src/store';
 import { useT } from '@/src/lib/i18n';
 import { cn } from '@/src/lib/utils';
 import { panelRoutes } from '@/src/lib/routes';
-import { Folder, FolderCog, LayoutGrid, Network, Settings, PanelLeft, Home, GitBranch, Share2, Route } from 'lucide-react';
+import { BrainCircuit, Folder, FolderCog, LayoutGrid, Network, Settings, PanelLeft, Home, GitBranch, Share2, Route } from 'lucide-react';
 
 export function Sidebar() {
   const t = useT();
@@ -20,6 +20,7 @@ export function Sidebar() {
     { to: panelRoutes.nodes, icon: Network, label: t('nav.nodes') },
     { to: panelRoutes.graphEditor, icon: GitBranch, label: 'Graphs' },
     { to: panelRoutes.profileGraph, icon: Share2, label: 'Profile Graph' },
+    { to: panelRoutes.aiInput, icon: BrainCircuit, label: 'AI Input' },
     { to: panelRoutes.apiMap, icon: Route, label: 'API Map' },
     { to: panelRoutes.profileWorkspace, icon: FolderCog, label: 'Profile Workspace' },
     { to: panelRoutes.settings, icon: Settings, label: t('nav.settings') },

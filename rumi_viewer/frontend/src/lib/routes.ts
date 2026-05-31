@@ -6,6 +6,7 @@ export const panelRoutes = {
   nodes: '/nodes',
   graphEditor: '/graphs',
   profileGraph: '/profile-graph',
+  aiInput: '/ai-input',
   apiMap: '/api-map',
   profileWorkspace: '/profile-workspace',
   startup: '/startup',
@@ -34,4 +35,8 @@ export function apiMapRoute(options?: {profileId?: string | null; focus?: string
     profile_id: options?.profileId,
     focus: options?.focus,
   });
+}
+
+export function aiInputRoute(profileId?: string | null): string {
+  return withQuery(panelRoutes.aiInput, {profile: profileId});
 }
