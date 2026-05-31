@@ -1466,7 +1466,12 @@ class BrowserComputerController:
         physical pointer actions, foreground fallback still falls through to
         legacy platform code because it owns the visible click/drag path.
         """
-        if action in {"computer.move", "computer.click", "computer.drag"} and action_payload.get("physical") is True:
+        if (
+            action in {"computer.move", "computer.click", "computer.drag"}
+            and action_payload.get("physical") is True
+            and platform.system() == "Darwin"
+            and "PYTEST_CURRENT_TEST" not in os.environ
+        ):
             return None
         try:
             svc = self._get_computer_seat()

@@ -304,6 +304,7 @@ class ToolExecutor:
         if getattr(response, "error_type", "") not in {
             "function_not_found",
             "function_registry_unavailable",
+            "pack_not_approved",
         }:
             return None
         qualified_name = str(request.get("qualified_name") or "")

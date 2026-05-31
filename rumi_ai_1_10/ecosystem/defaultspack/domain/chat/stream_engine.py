@@ -235,7 +235,11 @@ def _approval_request_from_tool_result(
             continue
         payload = root.get("arguments")
         if not isinstance(payload, dict):
-            payload = arguments
+            root_payload = root.get("payload")
+            if isinstance(root_payload, dict) and not root_payload.get("args_hash"):
+                payload = root_payload
+            else:
+                payload = arguments
         action = str(root.get("action") or arguments.get("action") or tool_name).strip()
         return {
             "tool_name": tool_name,
