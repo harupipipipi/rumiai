@@ -61,6 +61,17 @@ def _caller_requires_denied_executor():
     return capability_executor
 
 
+def _pack_not_approved_executor():
+    capability_executor = MagicMock()
+    capability_executor.execute.return_value = SimpleNamespace(
+        success=False,
+        output=None,
+        error="pack not approved",
+        error_type="pack_not_approved",
+    )
+    return capability_executor
+
+
 def _computer_control_tool_def(tool_name):
     return {
         "tool_id": tool_name,
@@ -132,6 +143,28 @@ def test_tool_executor_denied_computer_use_without_user_request_still_requires_a
     assert result["widget"]["tool_name"] == "computer_use"
     assert result["widget"]["operation"] == "computer.click"
     assert result["widget"]["payload"] == {"x": 10, "y": 20}
+    assert str(result["widget"]["approval_request_id"]).startswith("apr_")
+
+
+def test_tool_executor_pack_not_approved_computer_use_without_approval_requires_approval(monkeypatch):
+    from domain.tool.executor import ToolExecutor
+
+    capability_executor = _pack_not_approved_executor()
+
+    def fake_execute_local(self, tool_name, arguments, context):
+        raise AssertionError("computer_use must not run locally without approval")
+
+    monkeypatch.setattr(ToolExecutor, "_execute_local", fake_execute_local)
+
+    result = ToolExecutor()._execute_rumi_function(
+        _computer_control_tool_def("computer_use"),
+        {"action": "apps"},
+        {"principal_id": "defaultspack", "capability_executor": capability_executor},
+    )
+
+    assert result["is_error"] is False
+    assert result["widget"]["type"] == "approval_request"
+    assert result["widget"]["tool_name"] == "computer_use"
     assert str(result["widget"]["approval_request_id"]).startswith("apr_")
 
 
@@ -249,6 +282,42 @@ def test_tool_executor_falls_back_to_local_browser_computer_with_server_approval
     assert result["is_error"] is False
     assert captured["tool_name"] == "browser_computer"
     assert captured["arguments"] == {"action": "computer.windows"}
+
+
+def test_tool_executor_pack_not_approved_computer_use_uses_approved_local_fallback(monkeypatch):
+    from domain.safety import approval
+    from domain.tool.executor import ToolExecutor
+
+    approval.reset_approval_state_for_tests()
+    capability_executor = _pack_not_approved_executor()
+    arguments = {"action": "apps"}
+    request = approval.create_approval_request("tool.computer_use", "high", arguments)
+    decision = approval.approve(request["request_id"])
+    captured = {}
+
+    def fake_execute_local(self, tool_name, arguments, context):
+        captured["tool_name"] = tool_name
+        captured["arguments"] = dict(arguments or {})
+        captured["context"] = dict(context or {})
+        return {"result": "computer_use computer.apps completed", "is_error": False, "widget": {"type": tool_name}}
+
+    monkeypatch.setattr(ToolExecutor, "_execute_local", fake_execute_local)
+
+    result = ToolExecutor()._execute_rumi_function(
+        _computer_control_tool_def("computer_use"),
+        arguments,
+        {
+            "principal_id": "defaultspack",
+            "capability_executor": capability_executor,
+            "tool_approval_tokens": {"computer_use": decision["token"]},
+        },
+    )
+
+    assert result["is_error"] is False
+    assert captured["tool_name"] == "computer_use"
+    assert captured["arguments"] == arguments
+    assert captured["context"]["_tool_server_approved"] is True
+    assert captured["context"]["_tool_server_approval_token_valid"] is True
 
 
 def test_tool_executor_falls_back_to_local_computer_use_with_yolo_policy(monkeypatch):

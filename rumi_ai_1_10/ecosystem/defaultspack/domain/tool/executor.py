@@ -259,7 +259,7 @@ class ToolExecutor:
             return None
         if bool(getattr(response, "success", False)):
             return None
-        if getattr(response, "error_type", "") not in {"caller_requires_denied", "requires_denied"}:
+        if getattr(response, "error_type", "") not in {"caller_requires_denied", "pack_not_approved", "requires_denied"}:
             return None
         qualified_name = str(request.get("qualified_name") or "")
         pack_id, _, function_id = qualified_name.partition(":")
