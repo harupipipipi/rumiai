@@ -49,7 +49,8 @@
       "priority": 2,
       "defaults": {
         "chat": true,
-        "reasoning": true
+        "reasoning": true,
+        "fast": true
       },
       "capabilities": {
         "chat": true,
@@ -101,31 +102,36 @@
       }
     },
     {
-      "id": "xiaomi-token-plan-cn/mimo-v2-flash",
+      "id": "xiaomi-token-plan-cn/mimo-v2-omni",
       "category": "llm_model",
       "version": "1",
       "provider_id": "xiaomi-token-plan-cn",
-      "model_id": "mimo-v2-flash",
-      "display_name": "MiMo V2 Flash",
+      "model_id": "mimo-v2-omni",
+      "display_name": "MiMo V2 Omni",
       "type": "chat",
       "enabled": true,
       "priority": 4,
       "defaults": {
         "chat": true,
-        "fast": true
+        "vision": true
       },
       "capabilities": {
         "chat": true,
         "streaming": true,
-        "reasoning": false,
+        "reasoning": true,
         "tool_calls": true,
-        "vision": false
+        "vision": true
       },
+      "supports_thinking": true,
+      "thinking_levels": ["low", "medium", "high", "xhigh"],
+      "default_thinking_level": "medium",
       "metadata": {
         "region": "cn",
         "token_plan": true,
+        "thinking_format": "deepseek",
         "tool_call_type": "openai",
-        "token_plan_region_scoped": true
+        "token_plan_region_scoped": true,
+        "vision_verified": true
       }
     }
   ]
