@@ -37,7 +37,7 @@ import { CodingWorkspacePicker } from "../components/coding/CodingWorkspacePicke
 import { RuntimeCapabilityBanner } from "../components/RuntimeCapabilityBanner";
 import { WarmActionIcon } from "../components/WarmActionIcon";
 import { fileToAttachment } from "../lib/attachments";
-import { composerSkillMentionWidget, composerToolMentionWidget, filterComposerSkillMentions, filterComposerToolMentions, resolveComposerWidgetDrop } from "../lib/composerWidgets";
+import { composerSkillMentionWidget, composerToolMentionWidget, filterComposerSkillMentions, filterComposerToolMentions, resolveComposerWidgetDrop, skillMentionIdsFromText, toolMentionIdsFromText } from "../lib/composerWidgets";
 import { HISTORY_CHAT_DROP_MIME, parseHistoryChatDrop } from "../lib/historyComposer";
 import { sortedToolGroups, toolGroupFor } from "../lib/toolUi";
 
@@ -409,7 +409,7 @@ function DroppedWidgetChip({
 
   return (
     <span
-      className={`inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[11px] cursor-pointer transition-colors ${
+      className={`inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[11px] transition-colors ${onToggle ? "cursor-pointer" : "cursor-default"} ${
         widget.enabled
           ? "border-emerald-600/50 bg-emerald-900/30 text-emerald-300"
           : "border-zinc-700/60 bg-zinc-800/70 text-zinc-400"
@@ -1036,6 +1036,32 @@ export function ComposerRenderer({
     || toolId === "browser_use"
     || toolId === "browser_companion"
   ));
+  const mentionPreviewWidgets = useMemo(() => {
+    const visibleIds = new Set(droppedWidgets.map((widget) => widget.sourceItemId || widget.id));
+    const widgets: DroppedWidget[] = [];
+
+    for (const toolId of toolMentionIdsFromText(input, toolItems)) {
+      if (visibleIds.has(toolId)) continue;
+      const item = toolItems.find((candidate) => candidate.id === toolId);
+      if (!item) continue;
+      visibleIds.add(toolId);
+      widgets.push(composerToolMentionWidget(item));
+    }
+
+    for (const skillId of skillMentionIdsFromText(input, skillExtensions)) {
+      if (visibleIds.has(skillId)) continue;
+      const skill = skillExtensions.find((candidate) => candidate.id === skillId);
+      if (!skill) continue;
+      visibleIds.add(skillId);
+      widgets.push(composerSkillMentionWidget(skill));
+    }
+
+    return widgets;
+  }, [droppedWidgets, input, skillExtensions, toolItems]);
+  const visibleComposerWidgets = useMemo(() => [
+    ...droppedWidgets.map((widget) => ({ widget, interactive: true })),
+    ...mentionPreviewWidgets.map((widget) => ({ widget, interactive: false })),
+  ], [droppedWidgets, mentionPreviewWidgets]);
   const hasAttachedImages = attachedFiles.some((file) => String(file.type ?? "").startsWith("image/"));
   const imageBridgePlanned = hasAttachedImages && !selectedProfile?.supports_vision && !selectedProfile?.supports_image_input;
   const toolGroups = useMemo(() => groupToolItems(toolItems), [toolItems]);
@@ -2235,17 +2261,17 @@ export function ComposerRenderer({
             }}
           />
 
-          {((!isNewConversation && attachedFiles.length > 0) || droppedWidgets.length > 0) && (
+          {((!isNewConversation && attachedFiles.length > 0) || visibleComposerWidgets.length > 0) && (
             <div className="px-5 pt-1.5 pb-0.5 flex flex-wrap gap-1 max-[640px]:px-3">
               {!isNewConversation && attachedFiles.map((file) => (
                 <FileChip key={file.id} file={file} onRemove={onFileRemove} />
               ))}
-              {droppedWidgets.map((widget) => (
+              {visibleComposerWidgets.map(({ widget, interactive }) => (
                 <DroppedWidgetChip
-                  key={widget.id}
-                  widget={widget.type === "tool" ? { ...widget, enabled: selectedToolIdSet.has(widget.sourceItemId || widget.id) } : widget}
-                  onAction={onWidgetAction}
-                  onToggle={onWidgetToggle}
+                  key={`${interactive ? "dropped" : "mention"}:${widget.id}`}
+                  widget={interactive && widget.type === "tool" ? { ...widget, enabled: selectedToolIdSet.has(widget.sourceItemId || widget.id) } : widget}
+                  onAction={interactive ? onWidgetAction : undefined}
+                  onToggle={interactive ? onWidgetToggle : undefined}
                 />
               ))}
             </div>
