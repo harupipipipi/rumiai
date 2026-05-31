@@ -369,7 +369,13 @@ class PackAPIHandler(
 
 
     @classmethod
-    def load_api_routes(cls, registry, pack_ids: Optional[set[str]] = None) -> int:
+    def load_api_routes(
+        cls,
+        registry,
+        pack_ids: Optional[set[str]] = None,
+        *,
+        include_builtin_core_control_panel: bool = False,
+    ) -> int:
         """Registry から全 Pack の api_routes を読み込み、ルーティングテーブルを構築する。
 
         完全一致ルートは dict で O(1) ルックアップ。
@@ -427,7 +433,9 @@ class PackAPIHandler(
             count += _register_routes(pack_id, pack_info.ecosystem)
             loaded_pack_ids.add(pack_id)
 
-        should_include_control_panel = pack_ids is None or "core_control_panel" in pack_ids
+        should_include_control_panel = include_builtin_core_control_panel and (
+            pack_ids is None or "core_control_panel" in pack_ids
+        )
         if should_include_control_panel and "core_control_panel" not in loaded_pack_ids:
             fallback_path = (
                 Path(__file__).resolve().parent
@@ -2284,7 +2292,11 @@ class PackAPIServer:
             reg = get_registry()
             PackAPIHandler.load_web_mounts(reg, pack_ids={"core_control_panel"})
             PackAPIHandler.load_pre_auth_routes(reg, pack_ids={"core_control_panel"})
-            PackAPIHandler.load_api_routes(reg, pack_ids={"core_control_panel"})
+            PackAPIHandler.load_api_routes(
+                reg,
+                pack_ids={"core_control_panel"},
+                include_builtin_core_control_panel=True,
+            )
             logger.info("Preloaded control panel shell and API routes before runtime-ready")
         except Exception as e:
             logger.warning("Failed to preload control panel shell routes: %s", e)
@@ -2300,7 +2312,10 @@ class PackAPIServer:
                                 PackAPIHandler.load_pack_routes(reg)
                                 PackAPIHandler.load_web_mounts(reg)
                                 PackAPIHandler.load_pre_auth_routes(reg)
-                                PackAPIHandler.load_api_routes(reg)
+                                PackAPIHandler.load_api_routes(
+                                    reg,
+                                    include_builtin_core_control_panel=True,
+                                )
                                 logger.info("Pack routes loaded (deferred after system.ready)")
                             except Exception as e:
                                 logger.warning("Failed to load pack routes (deferred): %s", e)
@@ -2313,7 +2328,10 @@ class PackAPIServer:
                     PackAPIHandler.load_pack_routes(reg)
                     PackAPIHandler.load_web_mounts(reg)
                     PackAPIHandler.load_pre_auth_routes(reg)
-                    PackAPIHandler.load_api_routes(reg)
+                    PackAPIHandler.load_api_routes(
+                        reg,
+                        include_builtin_core_control_panel=True,
+                    )
                     self._routes_loaded = True
                 except Exception as e:
                     logger.warning("Failed to load pack routes: %s", e)

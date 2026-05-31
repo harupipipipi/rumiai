@@ -1,17 +1,14 @@
 from __future__ import annotations
 
 import copy
+from importlib import import_module
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
 import yaml  # type: ignore[import-untyped]
 
-_DEFAULTSPACK_IMPORT_ROOT = Path(__file__).resolve().parent.parent / "ecosystem" / "defaultspack"
-if str(_DEFAULTSPACK_IMPORT_ROOT) not in sys.path:
-    sys.path.insert(0, str(_DEFAULTSPACK_IMPORT_ROOT))
-
-from .profile_graph_models import (  # noqa: E402
+from .profile_graph_models import (
     ProfileGraphDocument,
     ProfileGraphEdge,
     ProfileGraphNode,
@@ -19,21 +16,32 @@ from .profile_graph_models import (  # noqa: E402
     normalize_profile_graph_document,
     normalize_profile_graph_selected,
 )
-from .profile_workspace import ProfileWorkspaceManager  # noqa: E402
-from .profile_runtime_selection import apply_profile_graph_selection  # noqa: E402
+from .profile_workspace import ProfileWorkspaceManager
+from .profile_runtime_selection import apply_profile_graph_selection
 
-from ecosystem.defaultspack.domain.capability.catalog import CapabilityCatalog  # noqa: E402
-from ecosystem.defaultspack.domain.external.input_profile_registry import (  # noqa: E402
-    InputProfileRegistry,
-)
-from ecosystem.defaultspack.domain.frontend.registry import FrontendRegistry  # noqa: E402
-from ecosystem.defaultspack.domain.prompt.effective import resolve_effective_prompt  # noqa: E402
-from ecosystem.defaultspack.domain.tool.registry import ToolRegistry  # noqa: E402
-from ecosystem.defaultspack.domain.webhook.endpoint_store import WebhookEndpointStore  # noqa: E402
-from ecosystem.defaultspack.transport.registry import (  # noqa: E402
-    HttpRouteSpec,
-    canonical_http_route_specs,
-)
+_DEFAULTSPACK_IMPORT_ROOT = Path(__file__).resolve().parent.parent / "ecosystem" / "defaultspack"
+if str(_DEFAULTSPACK_IMPORT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_DEFAULTSPACK_IMPORT_ROOT))
+
+CapabilityCatalog = import_module(
+    "ecosystem.defaultspack.domain.capability.catalog"
+).CapabilityCatalog
+InputProfileRegistry = import_module(
+    "ecosystem.defaultspack.domain.external.input_profile_registry"
+).InputProfileRegistry
+FrontendRegistry = import_module(
+    "ecosystem.defaultspack.domain.frontend.registry"
+).FrontendRegistry
+resolve_effective_prompt = import_module(
+    "ecosystem.defaultspack.domain.prompt.effective"
+).resolve_effective_prompt
+ToolRegistry = import_module("ecosystem.defaultspack.domain.tool.registry").ToolRegistry
+WebhookEndpointStore = import_module(
+    "ecosystem.defaultspack.domain.webhook.endpoint_store"
+).WebhookEndpointStore
+_transport_registry = import_module("ecosystem.defaultspack.transport.registry")
+HttpRouteSpec = _transport_registry.HttpRouteSpec
+canonical_http_route_specs = _transport_registry.canonical_http_route_specs
 
 
 def build_startup_profile_graph_response(

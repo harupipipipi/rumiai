@@ -718,7 +718,11 @@ class TestPackAPIServer:
             get_registry.assert_any_call()
             load_web_mounts.assert_any_call(fake_registry, pack_ids={"core_control_panel"})
             load_pre_auth_routes.assert_any_call(fake_registry, pack_ids={"core_control_panel"})
-            load_api_routes.assert_any_call(fake_registry, pack_ids={"core_control_panel"})
+            load_api_routes.assert_any_call(
+                fake_registry,
+                pack_ids={"core_control_panel"},
+                include_builtin_core_control_panel=True,
+            )
         finally:
             server.stop()
 
@@ -726,7 +730,10 @@ class TestPackAPIServer:
         """backend registry に core_control_panel がいない場合でも panel API を維持する。"""
         fake_registry = SimpleNamespace(packs={})
 
-        count = PackAPIHandler.load_api_routes(fake_registry)
+        count = PackAPIHandler.load_api_routes(
+            fake_registry,
+            include_builtin_core_control_panel=True,
+        )
 
         assert count > 0
         assert ("GET", "/api/panel/startup/profiles") in PackAPIHandler._api_route_exact

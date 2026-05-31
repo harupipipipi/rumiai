@@ -165,6 +165,10 @@ class DefaultsHttpServer:
                         key=lambda item: http_route_sort_key(item[0], item[1], item[4]),
                     ):
                         compiled = compile_http_route_pattern(pattern)
+                        try:
+                            setattr(handler, "__rumi_route_pattern__", pattern)
+                        except Exception:
+                            pass
                         registry_routes.append(
                             (method, compiled, handler, "registry", path_inject, pattern)
                         )
