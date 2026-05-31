@@ -394,7 +394,7 @@ class OpenAICompatibleProvider(OpenAIProvider):
         return self._normalize_remote_models(cache.get("models")) if cache else []
 
     def _remote_model_cache_path(self) -> Path:
-        cache_root = Path(__file__).resolve().parents[2] / "user_data" / "shared" / "provider_model_cache"
+        cache_root = Path(__file__).resolve().parents[3] / "user_data" / "shared" / "provider_model_cache"
         cache_root.mkdir(parents=True, exist_ok=True)
         return cache_root / f"{self.provider_id}.models.json"
 

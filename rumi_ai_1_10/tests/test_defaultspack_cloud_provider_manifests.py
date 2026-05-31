@@ -106,6 +106,29 @@ def test_openai_compatible_provider_merges_remote_models_into_curated_catalog(tm
     assert cache_path.exists()
 
 
+def test_openai_compatible_remote_model_cache_uses_defaultspack_shared_user_data():
+    from domain.ai_client.providers.openai_compatible_provider import OpenAICompatibleProvider
+
+    provider = OpenAICompatibleProvider(
+        provider_id="groq",
+        api_key="test-groq-key",
+        default_base_url="https://api.groq.com/openai/v1",
+        credential_required=False,
+        remote_model_discovery=True,
+    )
+
+    cache_path = provider._remote_model_cache_path()
+    expected = (
+        DEFAULTSPACK_ROOT
+        / "user_data"
+        / "shared"
+        / "provider_model_cache"
+        / "groq.models.json"
+    )
+
+    assert cache_path == expected
+
+
 def test_cerebras_openai_compatible_params_match_model_contract():
     from domain.ai_client.providers.openai_compatible_provider import OpenAICompatibleProvider
 
