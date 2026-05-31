@@ -83,6 +83,103 @@ def test_flow_yaml_routes_are_the_canonical_chat_ingress():
     assert canonical[("POST", "/api/chat/conversations/{id}/stream")].flow_id == "defaultspack.chat_stream_turn"
 
 
+def test_pack_api_dispatches_defaultspack_interface_routes(monkeypatch):
+    from core_runtime.pack_api_server import PackAPIHandler
+
+    calls = []
+
+    def ui_handler(request_data, context):
+        calls.append((request_data, context))
+        return {"status": "ok", "data": {"preview": request_data["conversation_id"]}}
+
+    class Registry:
+        def get(self, key, strategy="last"):
+            if key == "io.http.route" and strategy == "all":
+                return [
+                    {
+                        "method": "GET",
+                        "pattern": "/api/ui/conversations/{id}/preview",
+                        "handler": ui_handler,
+                        "path_inject": {"id": "conversation_id"},
+                    }
+                ]
+            return [] if strategy == "all" else None
+
+    class Kernel:
+        interface_registry = Registry()
+        event_bus = None
+
+    handler = object.__new__(PackAPIHandler)
+    handler.path = "/api/ui/conversations/c1/preview?mode=short"
+    handler.headers = {"Origin": "http://127.0.0.1:8765", "X-Test": "1"}
+    captured = []
+    handler._send_defaultspack_http_result = captured.append
+
+    previous_kernel = PackAPIHandler.kernel
+    monkeypatch.setattr(PackAPIHandler, "kernel", Kernel())
+    try:
+        assert handler._dispatch_defaultspack_http_route(
+            "GET",
+            "/api/ui/conversations/c1/preview",
+        )
+    finally:
+        monkeypatch.setattr(PackAPIHandler, "kernel", previous_kernel)
+
+    assert captured == [{"status": "ok", "data": {"preview": "c1"}}]
+    request_data, context = calls[0]
+    assert request_data["conversation_id"] == "c1"
+    assert request_data["mode"] == "short"
+    assert request_data["_method"] == "GET"
+    assert context["owner_pack"] == "defaultspack"
+    assert "_facade" in context
+
+
+def test_pack_api_uses_direct_defaultspack_fallback_without_registered_routes(monkeypatch):
+    from core_runtime.pack_api_server import PackAPIHandler
+    import ecosystem.defaultspack.transport.http as transport_http
+
+    calls = []
+
+    def fake_invoke_block(module_name, input_data, context):
+        calls.append((module_name, input_data, context))
+        return {"status": "ok", "data": {"id": "c1", "model": input_data.get("model")}}
+
+    class Registry:
+        def get(self, key, strategy="last"):
+            return [] if strategy == "all" else None
+
+    class Kernel:
+        interface_registry = Registry()
+        event_bus = None
+
+    monkeypatch.setattr(transport_http, "invoke_block", fake_invoke_block)
+
+    handler = object.__new__(PackAPIHandler)
+    handler.path = "/api/chat/conversations"
+    handler.headers = {"Origin": "http://127.0.0.1:8765"}
+    captured = []
+    handler._send_defaultspack_http_result = captured.append
+
+    previous_kernel = PackAPIHandler.kernel
+    monkeypatch.setattr(PackAPIHandler, "kernel", Kernel())
+    try:
+        assert handler._dispatch_defaultspack_http_route(
+            "POST",
+            "/api/chat/conversations",
+            {"model": "google/gemma-4-31b-it"},
+        )
+    finally:
+        monkeypatch.setattr(PackAPIHandler, "kernel", previous_kernel)
+
+    assert captured == [
+        {"status": "ok", "data": {"id": "c1", "model": "google/gemma-4-31b-it"}}
+    ]
+    module_name, input_data, context = calls[0]
+    assert module_name == "blocks.chat.create_conversation"
+    assert input_data["model"] == "google/gemma-4-31b-it"
+    assert context["owner_pack"] == "defaultspack"
+
+
 def test_chat_send_route_handler_invokes_flow_route_before_block_fallback():
     from ecosystem.defaultspack.transport.registry import (
         HttpRouteSpec,
