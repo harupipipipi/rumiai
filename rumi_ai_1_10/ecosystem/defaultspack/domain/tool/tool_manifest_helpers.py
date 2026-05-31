@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from domain.tool.schema_adapter import provider_tool_parameters
+
 
 REQUESTED_AGENT_OS_TOOL_IDS = [
     "artifact_file_read",
@@ -84,15 +86,15 @@ REQUESTED_AGENT_OS_TOOL_IDS = [
 
 
 def provider_tool_schema(tool_def: dict[str, Any]) -> dict[str, Any]:
-    schema = tool_def.get("schema") if isinstance(tool_def.get("schema"), dict) else {}
-    parameters = schema.get("parameters") if isinstance(schema.get("parameters"), dict) else schema
-    if not isinstance(parameters, dict) or not parameters:
-        parameters = {"type": "object", "properties": {}, "required": []}
+    schema_value = tool_def.get("schema")
+    schema: dict[str, Any] = schema_value if isinstance(schema_value, dict) else {}
+    schema_parameters = schema.get("parameters")
+    parameters = schema_parameters if isinstance(schema_parameters, dict) else schema
     return {
         "type": "function",
         "function": {
             "name": str(tool_def.get("tool_id") or tool_def.get("name") or ""),
             "description": str(tool_def.get("summary") or ""),
-            "parameters": parameters,
+            "parameters": provider_tool_parameters(parameters),
         },
     }

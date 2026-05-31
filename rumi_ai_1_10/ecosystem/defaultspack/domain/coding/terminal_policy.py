@@ -15,17 +15,31 @@ LOW_RISK_PREFIXES = {
     "git diff",
     "git log",
     "git show",
+    "git grep",
+    "git ls-files",
+    "git branch",
+    "git rev-parse",
+    "git remote -v",
+    "git blame",
     "ls",
     "dir",
     "pwd",
     "cat",
     "head",
     "tail",
+    "rg",
+    "rg --files",
     "pytest",
     "python -m pytest",
     "python3 -m pytest",
     "npm test",
     "npm run test",
+    "npm run lint",
+    "ruff check",
+    "mypy",
+    "cargo check",
+    "cargo test",
+    "cargo nextest run",
 }
 
 INSTALL_COMMANDS = {
@@ -273,6 +287,8 @@ def classify_command(command: Any, *, cwd: str | None = None, workspace_root: st
         reasons.append("shell_escape")
     if any(marker.lower() in normalized.lower() for marker in DOWNLOAD_EXEC_MARKERS):
         reasons.append("download_exec_pipe")
+    if normalized.lower().startswith("rg ") and (" --pre " in f" {normalized} " or " --pre=" in normalized):
+        reasons.append("tool_exec")
     if _starts_with_any(normalized, INSTALL_COMMANDS):
         reasons.append("install")
     if _starts_with_any(normalized, NETWORK_COMMANDS):
@@ -300,7 +316,7 @@ def classify_command(command: Any, *, cwd: str | None = None, workspace_root: st
 
     if "download_exec_pipe" in reasons:
         classification = "blocked"
-    elif any(reason in reasons for reason in ("destructive", "network", "install", "credential", "shell_escape")):
+    elif any(reason in reasons for reason in ("destructive", "network", "install", "credential", "shell_escape", "tool_exec")):
         classification = "high"
     else:
         classification = "medium"
