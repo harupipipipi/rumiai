@@ -1206,8 +1206,24 @@ def _tool_approval_scope(tool_def, arguments):
     if tool_name in {"browser_computer", "browser_use", "computer_use"} and isinstance(arguments, dict):
         action, payload = _browser_computer_action_payload(tool_name, arguments)
         if str(action or "").startswith(("browser.", "computer.")):
-            return str(action), payload
+            return str(action), _approval_hash_arguments(payload)
     return _tool_approval_operation(tool_def), dict(arguments or {}) if isinstance(arguments, dict) else {}
+
+
+def _tool_approval_display_arguments(tool_def, arguments, approval_args):
+    tool_name = _tool_approval_tool_name(tool_def)
+    if tool_name in {"browser_computer", "browser_use", "computer_use"} and isinstance(arguments, dict):
+        return dict(arguments)
+    return approval_args
+
+
+def _approval_hash_arguments(arguments):
+    if not isinstance(arguments, dict):
+        return {}
+    value = dict(arguments)
+    value.pop("approval_token", None)
+    value.pop("approved", None)
+    return value
 
 
 def _tool_approval_risk_level(tool_def):
@@ -1272,6 +1288,7 @@ def _approval_required_tool_response(tool_def, arguments, context=None):
     operation, approval_args = _tool_approval_scope(tool_def, arguments)
     risk_level = _tool_approval_risk_level(tool_def)
     args = approval_args
+    display_args = _tool_approval_display_arguments(tool_def, arguments, approval_args)
     context = context if isinstance(context, dict) else {}
     request = _approval_module().create_approval_request(
         operation,
@@ -1296,8 +1313,8 @@ def _approval_required_tool_response(tool_def, arguments, context=None):
             "risk_level": risk_level,
             "operation": operation,
             "action": operation,
-            "arguments": _redact_sensitive_arguments(args),
-            "payload": args,
+            "arguments": _redact_sensitive_arguments(display_args),
+            "payload": _redact_sensitive_arguments(args),
             "approval_request_id": request["request_id"],
             "args_hash": request["args_hash"],
             "expires_at": request["expires_at"],
