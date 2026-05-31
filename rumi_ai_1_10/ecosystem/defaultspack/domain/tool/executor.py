@@ -169,6 +169,9 @@ class ToolExecutor:
             return self._mcp_client.invoke(server_name, mcp_tool_name, arguments)
 
         if exec_type == "rumi_function":
+            approval = _preflight_user_requested_computer_approval(tool_name, tool_def, arguments, context)
+            if approval is not None:
+                return approval
             return self._execute_rumi_function(tool_def, arguments, context)
 
         if exec_type == "capability":
@@ -271,7 +274,8 @@ class ToolExecutor:
             return None
         if bool(getattr(response, "success", False)):
             return None
-        if getattr(response, "error_type", "") not in {"caller_requires_denied", "pack_not_approved", "requires_denied"}:
+        error_type = getattr(response, "error_type", "")
+        if error_type not in {"caller_requires_denied", "pack_not_approved", "requires_denied"}:
             return None
         qualified_name = str(request.get("qualified_name") or "")
         pack_id, _, function_id = qualified_name.partition(":")
@@ -279,6 +283,8 @@ class ToolExecutor:
         if local_tool not in {"browser_computer", "browser_use", "computer_use"}:
             return None
         if _requires_approval(tool_def) and not _context_has_tool_server_approval(context):
+            if error_type == "pack_not_approved":
+                return _approval_required_tool_response(tool_def, request.get("args") or {}, context)
             return None
         return self._execute_local_with_tool_def(local_tool, request.get("args") or {}, context, tool_def)
 
@@ -1361,6 +1367,19 @@ def _approval_token_from_context(context, tool_def, arguments=None, *extra_keys)
         if token:
             return token
     return ""
+
+def _preflight_user_requested_computer_approval(tool_name, tool_def, arguments, context):
+    if tool_name not in {"browser_computer", "browser_use", "computer_use"}:
+        return None
+    if not isinstance(context, dict) or not context.get("user_requested_computer_use"):
+        return None
+    if not isinstance(tool_def, dict) or not _requires_approval(tool_def):
+        return None
+    if _context_has_tool_server_approval(context):
+        return None
+    if _approval_token_from_context(context, tool_def, arguments) or _approval_token_from_arguments(arguments):
+        return None
+    return _approval_required_tool_response(tool_def, arguments or {}, context)
 
 
 def _context_with_tool_approval_token(context, tool_def, arguments, *extra_lookup_keys):
