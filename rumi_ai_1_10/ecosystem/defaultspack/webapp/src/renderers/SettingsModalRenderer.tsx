@@ -473,6 +473,18 @@ function modelOptionBadges(option: SettingsModelOption): string[] {
   return badges.slice(0, 4);
 }
 
+function parseModelAllowlist(value: unknown, fallback: unknown): string[] {
+  const source = value ?? fallback ?? "";
+  const items = Array.isArray(source)
+    ? source.map((item) => String(item ?? ""))
+    : String(source).split(/\r?\n|,/);
+  return Array.from(new Set(items.map((item) => item.trim()).filter(Boolean)));
+}
+
+function serializeModelAllowlist(items: string[]): string {
+  return Array.from(new Set(items.map((item) => item.trim()).filter(Boolean))).join("\n");
+}
+
 function SettingsModelSearchSelect({
   value,
   options,
@@ -607,6 +619,176 @@ function SettingsModelSearchSelect({
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+function ModelAllowlistField({
+  value,
+  fallback,
+  options,
+  onChange,
+}: {
+  value: unknown;
+  fallback: unknown;
+  options: SettingsModelOption[];
+  onChange: (value: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [remoteResults, setRemoteResults] = useState<ModelSearchItem[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const selectedModels = parseModelAllowlist(value, fallback);
+  const selectedSet = useMemo(() => new Set(selectedModels), [selectedModels]);
+  const trimmedQuery = query.trim();
+
+  useEffect(() => {
+    if (!open) return;
+    const timer = window.setTimeout(() => {
+      setBusy(true);
+      setError("");
+      api.searchModels({ query: trimmedQuery, max_results: 50 })
+        .then((result) => {
+          setRemoteResults(result.models ?? []);
+        })
+        .catch((searchError: unknown) => {
+          setRemoteResults([]);
+          setError(searchError instanceof Error ? searchError.message : "モデル検索に失敗しました");
+        })
+        .finally(() => setBusy(false));
+    }, trimmedQuery ? 160 : 0);
+    return () => window.clearTimeout(timer);
+  }, [open, trimmedQuery]);
+
+  const candidateOptions = useMemo(() => {
+    const localMatches = trimmedQuery
+      ? options.filter((option) => modelOptionMatchesSearch(option, trimmedQuery))
+      : options;
+    return dedupeModelOptions([
+      ...localMatches,
+      ...remoteResults.map(modelSearchItemToOption),
+    ])
+      .filter((option) => !selectedSet.has(option.value))
+      .slice(0, 50);
+  }, [options, remoteResults, selectedSet, trimmedQuery]);
+
+  const commit = (items: string[]) => onChange(serializeModelAllowlist(items));
+  const addModel = (modelId: string) => {
+    const cleaned = modelId.trim();
+    if (!cleaned || selectedSet.has(cleaned)) return;
+    commit([...selectedModels, cleaned]);
+    setOpen(false);
+    setQuery("");
+  };
+  const removeModel = (modelId: string) => {
+    commit(selectedModels.filter((item) => item !== modelId));
+  };
+
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap gap-2 rounded-lg border border-zinc-800 bg-zinc-950/70 p-2">
+        {selectedModels.length > 0 ? selectedModels.map((modelId) => (
+          <span
+            key={modelId}
+            className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-zinc-700 bg-zinc-900/90 px-2.5 py-1 text-xs text-zinc-200"
+            title={modelId}
+          >
+            <span className="max-w-[260px] truncate font-mono">{modelId}</span>
+            <button
+              type="button"
+              onClick={() => removeModel(modelId)}
+              className="rounded-full p-0.5 text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-100"
+              aria-label={`${modelId} を allowlist から削除`}
+            >
+              <X size={12} />
+            </button>
+          </span>
+        )) : (
+          <span className="px-1 py-1 text-xs text-zinc-600">モデル未指定です。空のときは profile の既定 allowlist を使います。</span>
+        )}
+      </div>
+      <div className="relative">
+        <button
+          type="button"
+          onClick={() => setOpen((current) => !current)}
+          className={cn(
+            "inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm transition-colors",
+            open
+              ? "border-emerald-500/60 bg-emerald-500/15 text-emerald-100"
+              : "border-zinc-800 bg-zinc-900 text-zinc-200 hover:border-zinc-700",
+          )}
+        >
+          <Plus size={14} />
+          モデルを追加
+        </button>
+        {open && (
+          <>
+            <button
+              type="button"
+              aria-label="モデル追加を閉じる"
+              className="fixed inset-0 z-10 cursor-default"
+              onClick={() => setOpen(false)}
+            />
+            <div className="absolute left-0 top-[calc(100%+8px)] z-20 w-[min(560px,calc(100vw-32px))] overflow-hidden rounded-xl border border-zinc-700 bg-zinc-950 shadow-2xl">
+              <label className="m-2 flex h-9 items-center gap-2 rounded-lg border border-zinc-800 bg-black/30 px-3 text-xs text-zinc-500 focus-within:border-zinc-600 focus-within:text-zinc-300">
+                <Search size={14} />
+                <input
+                  autoFocus
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder="モデルを検索... @google"
+                  className="min-w-0 flex-1 bg-transparent text-zinc-200 outline-none placeholder:text-zinc-600"
+                />
+                {busy && <Loader2 size={13} className="animate-spin text-zinc-500" />}
+                {query && (
+                  <button
+                    type="button"
+                    onClick={() => setQuery("")}
+                    className="rounded p-0.5 text-zinc-600 hover:bg-zinc-800 hover:text-zinc-300"
+                    aria-label="モデル検索をクリア"
+                  >
+                    <X size={13} />
+                  </button>
+                )}
+              </label>
+              {error && <div className="border-t border-zinc-800 px-3 py-2 text-[11px] text-rose-300">{error}</div>}
+              <div className="max-h-72 overflow-y-auto border-t border-zinc-800 p-1">
+                {candidateOptions.length > 0 ? candidateOptions.map((option) => {
+                  const badges = modelOptionBadges(option);
+                  return (
+                    <button
+                      key={option.value}
+                      type="button"
+                      onClick={() => addModel(option.value)}
+                      className="flex w-full items-start justify-between gap-3 rounded-md px-2.5 py-2 text-left text-zinc-400 transition-colors hover:bg-zinc-900 hover:text-zinc-100"
+                    >
+                      <span className="min-w-0">
+                        <span className="block truncate text-sm font-medium text-zinc-100">{option.label || option.value}</span>
+                        <span className="block truncate font-mono text-[11px] text-zinc-500">
+                          {option.value}
+                        </span>
+                      </span>
+                      <span className="flex max-w-[170px] flex-wrap justify-end gap-1">
+                        {badges.map((badge) => (
+                          <span key={badge} className="rounded-full border border-zinc-700 px-1.5 py-0.5 text-[10px] text-zinc-400">
+                            {badge}
+                          </span>
+                        ))}
+                        <Plus size={13} className="mt-1 shrink-0 text-emerald-300" />
+                      </span>
+                    </button>
+                  );
+                }) : (
+                  <div className="px-3 py-5 text-xs text-zinc-600">
+                    {busy ? "モデルを読み込んでいます..." : "追加できるモデルがありません。"}
+                  </div>
+                )}
+              </div>
+            </div>
+          </>
+        )}
+      </div>
     </div>
   );
 }
@@ -2431,7 +2613,14 @@ function SettingsField({
       );
       break;
     case "textarea":
-      control = (
+      control = sectionId === "operations_company" && field.id === "model_allowlist" ? (
+        <ModelAllowlistField
+          value={value}
+          fallback={field.default}
+          options={(field.options ?? []).map(modelFieldOptionToOption)}
+          onChange={(nextValue) => onChange(sectionId, field.id, nextValue)}
+        />
+      ) : (
         <textarea
           value={String(value ?? field.default ?? "")}
           onChange={(event) => onChange(sectionId, field.id, event.target.value)}
