@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sys
+import base64
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -174,11 +175,17 @@ def test_viewer_broker_client_includes_artifact_root_in_run_request(tmp_path, mo
     monkeypatch.setattr(ViewerBrokerClient, "_request", fake_request)
     client = ViewerBrokerClient(url="http://127.0.0.1:8770", token="secret-token")
 
-    client.run_computer("computer.screenshot", {}, context={"conversation_id": "conv_1"}, artifact_root=tmp_path)
+    client.run_computer(
+        "computer.screenshot",
+        {},
+        context={"conversation_id": "conv_1", "pack_id": "pack_1"},
+        artifact_root=tmp_path,
+    )
 
     assert captured["method"] == "POST"
     assert captured["path"] == "/api/host/computer/run"
     assert captured["payload"]["artifact_root"] == str(tmp_path)
+    assert captured["payload"]["pack_id"] == "pack_1"
 
 
 def test_viewer_broker_client_preserves_approval_payload_from_broker(monkeypatch):
@@ -208,7 +215,10 @@ def test_viewer_broker_client_preserves_approval_payload_from_broker(monkeypatch
 
 
 def test_computer_router_wraps_viewer_approval_into_request_id(monkeypatch):
+    from domain.safety import approval
     from ecosystem.defaultspack.domain.host_bridge import computer_router
+
+    approval.reset_approval_state_for_tests()
 
     class FakeClient:
         def available(self):
@@ -228,7 +238,7 @@ def test_computer_router_wraps_viewer_approval_into_request_id(monkeypatch):
     result = computer_router.run_computer_action(
         "computer.click",
         {"x": 10, "y": 20},
-        {"conversation_id": "conv_1"},
+        {"conversation_id": "conv_1", "owner_pack": "pack_1"},
         tool_name="computer_use",
     )
 
@@ -239,6 +249,14 @@ def test_computer_router_wraps_viewer_approval_into_request_id(monkeypatch):
     assert result["payload"] == {"x": 10, "y": 20}
     assert str(result["approval_request_id"]).startswith("apr_")
     assert result["message"] == "approval required"
+
+    decision = approval.approve(result["approval_request_id"])
+    encoded = decision["token"].split(".", 1)[0]
+    payload = json.loads(base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4)).decode("utf-8"))
+    assert payload["operation"] == "computer.click"
+    assert payload["function_id"] == "computer.click"
+    assert payload["pack_id"] == "pack_1"
+    assert payload["conversation_id"] == "conv_1"
 
 
 def test_tool_executor_routes_local_computer_tools_through_router(monkeypatch):

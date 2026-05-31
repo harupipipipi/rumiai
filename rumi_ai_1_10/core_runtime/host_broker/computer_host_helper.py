@@ -19,12 +19,17 @@ def main() -> int:
     request = json.loads(sys.stdin.read() or "{}")
     action = str(request.get("function_id") or "").strip()
     payload = dict(request.get("args") or {})
+    viewer_host_approved = bool(request.get("viewer_host_approved"))
 
     try:
         from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
 
         artifact_root = _validated_artifact_root(request.get("artifact_root"))
-        result = BrowserComputerController(artifact_root=artifact_root).run(action, payload, yolo_mode=False)
+        result = BrowserComputerController(artifact_root=artifact_root).run(
+            action,
+            payload,
+            yolo_mode=viewer_host_approved,
+        )
     except ValueError as exc:
         print(
             json.dumps(

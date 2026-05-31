@@ -11,12 +11,13 @@ import uuid
 from dataclasses import asdict, dataclass
 from typing import Any
 
-from .approval_store import get_approval_store
+from .approval_store import get_approval_store, persist_runtime_secret_for_broker
 
 
 _TOKEN_VERSION = "v1"
 _DEFAULT_EXPIRES_IN_SECONDS = 300
 _RUNTIME_SECRET = os.environ.get("RUMI_DEFAULTSPACK_APPROVAL_SECRET") or get_approval_store().get_or_create_runtime_secret()
+persist_runtime_secret_for_broker(_RUNTIME_SECRET)
 _LOCK = threading.RLock()
 _REQUESTS: dict[str, "ApprovalRequest"] = {}
 _USED_TOKEN_IDS: set[str] = set()
@@ -198,7 +199,16 @@ def approve(request_id: str) -> dict[str, Any]:
         request.decision_at = now
         _REQUESTS[request.request_id] = request
         get_approval_store().save_request(request)
-        token = issue_execution_token(request.request_id, request.args_hash, expires_at=request.expires_at)
+        details = request.details if isinstance(request.details, dict) else {}
+        token = issue_execution_token(
+            request.request_id,
+            request.args_hash,
+            expires_at=request.expires_at,
+            operation=request.operation,
+            function_id=str(details.get("function_id") or details.get("action") or ""),
+            pack_id=str(details.get("pack_id") or ""),
+            conversation_id=str(details.get("conversation_id") or ""),
+        )
         return asdict(
             ApprovalDecision(
                 request.request_id,
@@ -210,7 +220,16 @@ def approve(request_id: str) -> dict[str, Any]:
         )
 
 
-def issue_execution_token(request_id: str, args_hash: str, *, expires_at: int | None = None) -> str:
+def issue_execution_token(
+    request_id: str,
+    args_hash: str,
+    *,
+    expires_at: int | None = None,
+    operation: str = "",
+    function_id: str = "",
+    pack_id: str = "",
+    conversation_id: str = "",
+) -> str:
     payload = {
         "version": _TOKEN_VERSION,
         "jti": "tok_" + uuid.uuid4().hex,
@@ -218,6 +237,14 @@ def issue_execution_token(request_id: str, args_hash: str, *, expires_at: int | 
         "args_hash": str(args_hash),
         "expires_at": int(expires_at or (_now() + _DEFAULT_EXPIRES_IN_SECONDS)),
     }
+    if operation:
+        payload["operation"] = str(operation)
+    if function_id:
+        payload["function_id"] = str(function_id)
+    if pack_id:
+        payload["pack_id"] = str(pack_id)
+    if conversation_id:
+        payload["conversation_id"] = str(conversation_id)
     body = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
     encoded = _b64url_encode(body)
     signature = hmac.new(
@@ -234,6 +261,8 @@ def verify_execution_token(
     args_hash: str,
     *,
     consume: bool = True,
+    pack_id: str = "",
+    conversation_id: str = "",
 ) -> TokenVerification:
     token = str(token or "")
     if "." not in token:
@@ -252,6 +281,25 @@ def verify_execution_token(
         return TokenVerification(False, "APPROVAL_TOKEN_INVALID", "approval token version is invalid")
     if int(payload.get("expires_at") or 0) < _now():
         return TokenVerification(False, "APPROVAL_EXPIRED", "approval token expired")
+    token_operation = str(payload.get("operation") or "")
+    if token_operation and token_operation != str(operation):
+        return TokenVerification(
+            False,
+            "APPROVAL_OPERATION_MISMATCH",
+            "approval token operation mismatch",
+        )
+    expected_pack_id = str(pack_id or "")
+    token_pack_id = str(payload.get("pack_id") or "")
+    if (expected_pack_id or token_pack_id) and token_pack_id != expected_pack_id:
+        return TokenVerification(False, "APPROVAL_PACK_MISMATCH", "approval token pack mismatch")
+    expected_conversation_id = str(conversation_id or "")
+    token_conversation_id = str(payload.get("conversation_id") or "")
+    if (expected_conversation_id or token_conversation_id) and token_conversation_id != expected_conversation_id:
+        return TokenVerification(
+            False,
+            "APPROVAL_CONVERSATION_MISMATCH",
+            "approval token conversation mismatch",
+        )
     if str(payload.get("args_hash") or "") != str(args_hash):
         return TokenVerification(
             False,
