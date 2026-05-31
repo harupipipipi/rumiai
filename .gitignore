@@ -32,6 +32,7 @@ __pycache__/
 .env.*
 apikey.env
 sample.env.local
+.desktop_api_token
 .vscode/
 node_modules/
 dist/

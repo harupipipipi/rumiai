@@ -595,12 +595,33 @@ class TestRateLimit:
 
     def test_non_panel_route_still_uses_rate_limit_for_loopback(self) -> None:
         handler = _make_handler(client_address=("127.0.0.1", 12345))
-        handler.send_error = MagicMock()
 
         with patch.object(_rate_limiter, "is_allowed", return_value=False) as mocked:
             assert handler._check_rate_limit("/api/packs") is False
             mocked.assert_called_once_with("127.0.0.1")
-            handler.send_error.assert_called_once_with(429, "Too Many Requests")
+            handler._send_response.assert_called_once()
+            response, status = handler._send_response.call_args.args
+            assert response.success is False
+            assert response.error == "Too Many Requests"
+            assert status == 429
+
+    def test_rate_limit_response_handles_client_disconnect(self) -> None:
+        handler = _make_handler(client_address=("10.0.0.5", 12345))
+        handler.close_connection = False
+
+        def send_response(response, status=200, extra_headers=None) -> None:
+            PackAPIHandler._send_response(handler, response, status, extra_headers)
+
+        handler._send_response = send_response
+        handler.end_headers.side_effect = ConnectionAbortedError(
+            10053,
+            "connection aborted",
+        )
+
+        with patch.object(_rate_limiter, "is_allowed", return_value=False):
+            assert handler._check_rate_limit("/api/packs") is False
+
+        assert handler.close_connection is True
 
 
 # ---------------------------------------------------------------------------

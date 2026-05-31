@@ -830,7 +830,7 @@ class PackAPIHandler(
         if self._is_loopback_ip(ip) and (path.startswith("/api/panel/") or path.startswith("/panel") or path.startswith("/api/setup/")):
             return True
         if not _rate_limiter.is_allowed(ip):
-            self.send_error(429, "Too Many Requests")
+            self._send_response(APIResponse(False, error="Too Many Requests"), 429)
             return False
         return True
 
