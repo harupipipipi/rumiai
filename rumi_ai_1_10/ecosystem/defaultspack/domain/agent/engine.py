@@ -184,6 +184,17 @@ class AgentEngine:
         except Exception:
             pass
 
+    def _touch_execution(self, execution, event_type, payload=None):
+        try:
+            self._run_store.touch(
+                execution.execution_id,
+                status=getattr(execution, "status", None),
+                event_type=event_type,
+                payload=payload or {"status": getattr(execution, "status", None)},
+            )
+        except Exception:
+            pass
+
     def _durably_cancelled(self, execution_id):
         try:
             run = self._run_store.get_run(execution_id)
@@ -607,7 +618,9 @@ class AgentEngine:
         self._inject_pending_instructions(execution)
         if self._is_cancelled(execution):
             return self._cancelled_result(execution)
+        self._touch_execution(execution, "model_call_started", {"phase": "execute"})
         ai_result = self._ai_complete(execution.messages, execution.model, execution.context, execution.tools)
+        self._touch_execution(execution, "model_call_completed", {"phase": "execute"})
         if self._is_cancelled(execution):
             return self._cancelled_result(execution)
         parsed = self._parse_ai_response(ai_result)
@@ -692,7 +705,9 @@ class AgentEngine:
             pending["tool_name"],
             self._connected_tool_names(execution),
         )
+        self._touch_execution(execution, "tool_call_started", {"tool_name": pending["tool_name"]})
         tool_result = self._execute_tool(pending["tool_name"], pending["tool_args"], context_for_tool)
+        self._touch_execution(execution, "tool_call_completed", {"tool_name": pending["tool_name"]})
         if self._is_cancelled(execution):
             return self._cancelled_result(execution)
         tool_content = ""
@@ -745,7 +760,9 @@ class AgentEngine:
         self._inject_pending_instructions(execution)
         if self._is_cancelled(execution):
             return self._cancelled_result(execution)
+        self._touch_execution(execution, "model_call_started", {"phase": "approve"})
         ai_result = self._ai_complete(execution.messages, execution.model, context_for_tool, execution.tools)
+        self._touch_execution(execution, "model_call_completed", {"phase": "approve"})
         if self._is_cancelled(execution):
             return self._cancelled_result(execution)
         parsed = self._parse_ai_response(ai_result)
@@ -824,7 +841,9 @@ class AgentEngine:
         context_for_ai = dict(getattr(execution, "context", {}) or {})
         if self._is_cancelled(execution):
             return self._cancelled_result(execution)
+        self._touch_execution(execution, "model_call_started", {"phase": "reject"})
         ai_result = self._ai_complete(execution.messages, execution.model, context_for_ai, execution.tools)
+        self._touch_execution(execution, "model_call_completed", {"phase": "reject"})
         if self._is_cancelled(execution):
             return self._cancelled_result(execution)
         parsed = self._parse_ai_response(ai_result)
@@ -920,7 +939,9 @@ class AgentEngine:
             self._transcripts.append_message(execution.context["transcript_id"], message)
         execution.add_step("plan", {"action": "planning", "task": task})
         self._persist_execution(execution, "run_started", {"mode": "plan"})
+        self._touch_execution(execution, "model_call_started", {"phase": "plan"})
         ai_result = self._ai_complete(messages, execution.model, execution.context, [])
+        self._touch_execution(execution, "model_call_completed", {"phase": "plan"})
         parsed = self._parse_ai_response(ai_result)
         if parsed["type"] == "error":
             execution.status = "error"

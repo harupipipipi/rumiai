@@ -2,7 +2,7 @@
   "type": "agent",
   "id": "agent",
   "version": "1.0.0",
-  "description": "Agent domain — autonomous task execution, approval workflows, and multi-agent orchestration",
+  "description": "Agent domain — autonomous task execution, approval workflows, instructions, and CompanySlackRuntime compatibility wrappers",
   "connectivity": {
     "provides": [
       "defaults.agent.execute",

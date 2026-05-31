@@ -1,86 +1,109 @@
 import os
+import re
 import sys
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
-from blocks._common import ok, error
-from domain.agent.multi import MultiAgentOrchestrator
+from blocks._common import error, ok
 from blocks.agent._state import set_multi_session
+from domain.company.message_router import CompanySlackRuntime
+from domain.company.models import DEFAULT_COMPANY_ID, DEFAULT_COMPANY_NAME, normalize_agent
+from domain.company.store import CompanyStore
 
 
 def run(input_data, context):
-    """defaults.agent.multi_execute — マルチエージェントタスクを開始する。
-
-    input_data:
-        task         : str        (必須) タスク記述
-        agents       : list[dict] (必須) 各エージェントの定義
-                       [{name, role, model, system_prompt, tools}, ...]
-        orchestration: str        (任意) "round_robin" | "directed" | "free"
-        max_turns    : int        (任意) 最大ターン数
-    """
+    """Compatibility wrapper for the legacy multi-agent execute endpoint."""
     if not isinstance(input_data, dict):
         return error("input_data must be a dict")
     context = context or {}
-
-    task = input_data.get("task")
+    task = str(input_data.get("task") or "").strip()
     if not task:
         return error("task is required")
 
-    agents = input_data.get("agents")
-    if not agents or not isinstance(agents, list):
-        return error("agents is required and must be a non-empty list")
+    company_id = str(input_data.get("company_id") or DEFAULT_COMPANY_ID)
+    agents = _normalize_legacy_agents(input_data.get("agents"))
+    store = CompanyStore()
+    if store.get_company(company_id) is None:
+        store.ensure_company(
+            company_id=company_id,
+            name=DEFAULT_COMPANY_NAME,
+            description="Compatibility company workspace for legacy multi-agent requests.",
+            agents=agents or None,
+            metadata={"compatibility": "agent.multi"},
+        )
+    else:
+        for agent in agents:
+            store.upsert_agent(company_id, agent)
 
-    for i, agent in enumerate(agents):
-        if not isinstance(agent, dict):
-            return error("agents[" + str(i) + "] must be a dict")
-        if not agent.get("name"):
-            return error("agents[" + str(i) + "].name is required")
-        if not agent.get("role"):
-            return error("agents[" + str(i) + "].role is required")
-
-    orchestration = input_data.get("orchestration", "round_robin")
-    if orchestration not in ("round_robin", "directed", "free"):
-        return error("orchestration must be one of: round_robin, directed, free")
-
-    max_turns = input_data.get("max_turns", 10)
-    if not isinstance(max_turns, int) or max_turns < 1:
-        return error("max_turns must be a positive integer")
-
-    workspace_root = (
-        input_data.get("workspace_root")
-        or context.get("workspace_root")
-        or context.get("conversation_workspace_dir")
+    target_agent_ids = [agent["agent_id"] for agent in agents] if agents else ["operations_manager"]
+    result = CompanySlackRuntime(company_store=store).post_message(
+        company_id,
+        content=task,
+        sender_id=str(input_data.get("sender_id") or "legacy_multi"),
+        channel_id=str(input_data.get("channel_id") or "ops-company"),
+        target_agent_ids=target_agent_ids,
+        metadata={
+            "compatibility_endpoint": "/api/agent/multi/execute",
+            "legacy_multi": True,
+        },
+        context=context if isinstance(context, dict) else {},
     )
-    workspace_id = input_data.get("workspace_id") or context.get("workspace_id")
-    worktree_mode = input_data.get("worktree_mode") or context.get("worktree_mode")
+    if result is None:
+        return error("company workspace not found", "NOT_FOUND")
 
-    orchestrator = MultiAgentOrchestrator()
-    result = orchestrator.execute(
-        task=task,
-        agent_dicts=agents,
-        orchestration=orchestration,
-        max_turns=max_turns,
-        workspace_root=workspace_root,
-        workspace_id=workspace_id,
-        worktree_mode=worktree_mode,
-        context=context,
-    )
-
-    session_id = result.get("session_id", "")
-    session = result.get("session")
-    if session is not None:
-        set_multi_session(session_id, session)
-
-    output = {
-        "session_id": result.get("session_id"),
-        "status": result.get("status"),
-        "turn_results": result.get("turn_results", []),
-        "result": result.get("result"),
-        "workspace": result.get("result", {}).get("shared_context", {}).get("workspace", {})
-        if isinstance(result.get("result"), dict)
-        else {},
+    session_id = str((result.get("message") or {}).get("thread_id") or (result.get("message") or {}).get("message_id") or "")
+    session = {
+        "session_id": session_id,
+        "company_id": company_id,
+        "thread_id": session_id,
+        "status": "routed",
+        "legacy": True,
+        "runtime": "CompanySlackRuntime",
     }
+    set_multi_session(session_id, session)
+    return ok(
+        {
+            "session_id": session_id,
+            "status": "routed",
+            "result": result,
+            "turn_results": [],
+            "workspace": {},
+            "deprecation_warning": (
+                "/api/agent/multi/* is a compatibility wrapper. "
+                "CompanySlackRuntime routes messages, mentions, tasks, and AgentEngine runs asynchronously."
+            ),
+        }
+    )
 
-    if result.get("status") == "error":
-        return error(result.get("error", "unknown error"))
 
-    return ok(output)
+def _normalize_legacy_agents(value):
+    if not isinstance(value, list):
+        return []
+    agents = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or item.get("agent_id") or item.get("role") or "").strip()
+        if not name:
+            continue
+        agent_id = _slug(name)
+        agents.append(
+            normalize_agent(
+                {
+                    "agent_id": agent_id,
+                    "role_key": _slug(str(item.get("role") or name)),
+                    "agent_name": name,
+                    "display_name": name,
+                    "model": str(item.get("model") or "default"),
+                    "allowed_tools": list(item.get("tools") if isinstance(item.get("tools"), list) else []),
+                    "aliases": [name, str(item.get("role") or "")],
+                    "system_prompt": item.get("system_prompt") or item.get("role") or "",
+                }
+            )
+        )
+    return agents
+
+
+def _slug(value):
+    slug = re.sub(r"[^A-Za-z0-9_]+", "_", str(value or "").strip().lower()).strip("_")
+    return slug or "agent"

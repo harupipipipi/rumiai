@@ -13,6 +13,9 @@ MENTION_ALIASES = {
     "project_manager": "project_manager",
     "coding_engineer": "coding_engineer",
     "reviewer": "reviewer",
+    "ops_manager": "operations_manager",
+    "operations_manager": "operations_manager",
+    "scribe": "scribe",
 }
 
 
@@ -75,39 +78,15 @@ class CompanyMentionService:
         channel_id: str = DEFAULT_CHANNEL_ID,
         metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any] | None:
-        resolution = self.resolve(company_id, content)
-        if resolution is None:
-            return None
-        task = None
-        if resolution["resolved_agent_ids"]:
-            task = self.store.create_task(
-                company_id,
-                title="Mention request from " + sender_id,
-                description=content,
-                target_agent_ids=resolution["resolved_agent_ids"],
-                source="mention",
-                metadata={
-                    "mentions": resolution["mentions"],
-                    "unresolved_mentions": resolution["unresolved"],
-                    "sender_id": sender_id,
-                    "channel_id": channel_id,
-                    **(metadata or {}),
-                },
-            )
-        message = self.store.add_message(
+        from .message_router import CompanySlackRuntime
+
+        return CompanySlackRuntime(company_store=self.store).post_message(
             company_id,
-            channel_id=channel_id,
-            sender_id=sender_id,
             content=content,
-            mentions=resolution["mentions"],
-            task_ids=[task["id"]] if task else [],
+            sender_id=sender_id,
+            channel_id=channel_id,
             metadata=metadata or {},
         )
-        return {
-            "message": message,
-            "task": task,
-            "resolution": resolution,
-        }
 
     def _find_agent(self, agents: dict[str, dict[str, Any]], key: str) -> dict[str, Any] | None:
         for agent in agents.values():

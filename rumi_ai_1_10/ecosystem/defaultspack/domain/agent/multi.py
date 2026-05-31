@@ -2,6 +2,12 @@ import sys
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
+LEGACY_ONLY = True
+LEGACY_NOTICE = (
+    "domain.agent.multi is legacy-only. Primary company coordination is handled "
+    "by domain.company.message_router.CompanySlackRuntime."
+)
+
 import hashlib
 import re
 import shutil

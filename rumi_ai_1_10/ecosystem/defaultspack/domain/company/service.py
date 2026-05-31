@@ -13,6 +13,7 @@ from .models import (
     DEFAULT_CONVERSATION_GROUP_ID,
     default_agents,
 )
+from .runtime_store import CompanyRuntimeStore
 from .store import CompanyStore
 
 
@@ -61,11 +62,14 @@ class CompanyService:
         company = self.store.get_company(target_id)
         if company is None and target_id == DEFAULT_COMPANY_ID:
             company = migrate_operations_company_state(store=self.store) or self.bootstrap_default_company()
+        runtime_store = CompanyRuntimeStore()
         return {
             "bootstrapped": company is not None,
             "company_id": target_id,
             "company": company,
             "storage_file": str(self.store.storage_file),
+            "runtime_db_path": str(runtime_store.db_path),
+            "runtime": runtime_store.stats(target_id) if company is not None else {},
         }
 
     def mention(self, company_id: str, data: dict[str, Any]) -> dict[str, Any] | None:

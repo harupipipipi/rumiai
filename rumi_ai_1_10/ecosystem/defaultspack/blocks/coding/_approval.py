@@ -4,12 +4,13 @@ from __future__ import annotations
 
 from typing import Any
 
-from domain.safety.approval import (
-    create_approval_request,
-    hash_arguments,
-    verify_execution_token,
-)
 from domain.safety.audit import record_approval, record_denial
+
+
+def _approval_module():
+    from domain.safety import approval
+
+    return approval
 
 
 def _token_from_input(input_data: dict[str, Any] | None) -> str:
@@ -33,7 +34,8 @@ def is_server_approved(context=None, operation: str | None = None, input_data: d
     token = _token_from_input(input_data)
     if not token:
         return False
-    verification = verify_execution_token(token, operation, hash_arguments(input_data))
+    approval = _approval_module()
+    verification = approval.verify_execution_token(token, operation, approval.hash_arguments(input_data))
     if verification.valid:
         record_approval(operation, verification.request_id, "token_accepted")
         return True
@@ -51,10 +53,11 @@ def approval_error(operation: str, input_data: dict[str, Any] | None) -> dict[st
     token = _token_from_input(input_data)
     if not token:
         return None
-    verification = verify_execution_token(
+    approval = _approval_module()
+    verification = approval.verify_execution_token(
         token,
         operation,
-        hash_arguments(input_data),
+        approval.hash_arguments(input_data),
         consume=False,
     )
     if verification.valid:
@@ -75,7 +78,7 @@ def approval_invalid_response(operation: str, input_data: dict[str, Any] | None,
 
 
 def approval_required(operation, risk_level="high", args: dict[str, Any] | None = None, **details):
-    request = create_approval_request(
+    request = _approval_module().create_approval_request(
         operation,
         risk_level,
         args or details,

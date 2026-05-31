@@ -1,6 +1,6 @@
 {
   "function_id": "agent_multi_message",
-  "description": "Send a multi-agent message.",
+  "description": "Post a compatibility message to CompanySlackRuntime.",
   "tags": [
     "agent"
   ],
