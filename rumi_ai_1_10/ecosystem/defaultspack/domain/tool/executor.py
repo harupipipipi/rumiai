@@ -1272,6 +1272,7 @@ def _approval_required_tool_response(tool_def, arguments, context=None):
     operation, approval_args = _tool_approval_scope(tool_def, arguments)
     risk_level = _tool_approval_risk_level(tool_def)
     args = approval_args
+    display_args = dict(arguments or {}) if isinstance(arguments, dict) else {}
     context = context if isinstance(context, dict) else {}
     request = _approval_module().create_approval_request(
         operation,
@@ -1296,7 +1297,7 @@ def _approval_required_tool_response(tool_def, arguments, context=None):
             "risk_level": risk_level,
             "operation": operation,
             "action": operation,
-            "arguments": _redact_sensitive_arguments(args),
+            "arguments": _redact_sensitive_arguments(display_args),
             "payload": args,
             "approval_request_id": request["request_id"],
             "args_hash": request["args_hash"],
