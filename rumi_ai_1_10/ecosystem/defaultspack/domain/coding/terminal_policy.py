@@ -108,6 +108,16 @@ DOWNLOAD_EXEC_MARKERS = (
     "iex ",
     "Invoke-Expression",
 )
+WRITE_LIKE_OPTION_FLAGS = {
+    "--fix",
+    "--write",
+    "--update-snapshots",
+    "--snapshot-update",
+    "--bless",
+}
+INSTALL_LIKE_OPTION_FLAGS = {
+    "--install-types",
+}
 READ_PATH_COMMANDS = {"cat", "head", "tail", "less", "more"}
 SHELL_PATH_SEPARATORS = {"|", ";", "&&", "||", ">", "<", ">>", "<<", "2>", "2>>"}
 
@@ -265,6 +275,20 @@ def _outside_workspace_read_args(command: Any, cwd: str | None, low_risk_token: 
     return outside
 
 
+def _has_option_flag(command: Any, flags: set[str]) -> bool:
+    try:
+        args = inspection_args(command)
+    except ValueError:
+        return False
+    for arg in args[1:]:
+        text = str(arg)
+        if text in flags:
+            return True
+        if any(text.startswith(flag + "=") for flag in flags):
+            return True
+    return False
+
+
 def classify_command(command: Any, *, cwd: str | None = None, workspace_root: str | None = None) -> dict[str, Any]:
     normalized = normalized_command(command)
     if not normalized:
@@ -289,6 +313,10 @@ def classify_command(command: Any, *, cwd: str | None = None, workspace_root: st
         reasons.append("download_exec_pipe")
     if normalized.lower().startswith("rg ") and (" --pre " in f" {normalized} " or " --pre=" in normalized):
         reasons.append("tool_exec")
+    if _has_option_flag(command, WRITE_LIKE_OPTION_FLAGS):
+        reasons.append("write_option")
+    if _has_option_flag(command, INSTALL_LIKE_OPTION_FLAGS):
+        reasons.append("install")
     if _starts_with_any(normalized, INSTALL_COMMANDS):
         reasons.append("install")
     if _starts_with_any(normalized, NETWORK_COMMANDS):
@@ -316,7 +344,7 @@ def classify_command(command: Any, *, cwd: str | None = None, workspace_root: st
 
     if "download_exec_pipe" in reasons:
         classification = "blocked"
-    elif any(reason in reasons for reason in ("destructive", "network", "install", "credential", "shell_escape", "tool_exec")):
+    elif any(reason in reasons for reason in ("destructive", "network", "install", "credential", "shell_escape", "tool_exec", "write_option")):
         classification = "high"
     else:
         classification = "medium"

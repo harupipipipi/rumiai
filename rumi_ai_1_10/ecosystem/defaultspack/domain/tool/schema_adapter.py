@@ -360,6 +360,9 @@ def _compact_large_tool_schema(schema: Dict[str, Any]) -> None:
         if _compact_schema_fits_budget(schema):
             break
         transform(schema)
+    if not _compact_schema_fits_budget(schema):
+        schema.clear()
+        schema.update(copy.deepcopy(_DEFAULT_PARAMETERS_SCHEMA))
 
 
 def _compact_schema_fits_budget(schema: Dict[str, Any]) -> bool:

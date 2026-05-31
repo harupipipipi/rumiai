@@ -137,6 +137,25 @@ def test_provider_tool_schema_compacts_large_definition_payloads():
     }
 
 
+def test_provider_tool_schema_falls_back_when_flat_payload_still_exceeds_budget():
+    from domain.tool.schema_adapter import sanitize_provider_tool_schema
+
+    schema = sanitize_provider_tool_schema(
+        {
+            "type": "object",
+            "properties": {
+                f"field_{index:04}": {
+                    "type": "string",
+                    "description": "large generated field",
+                }
+                for index in range(500)
+            },
+        }
+    )
+
+    assert schema == {"type": "object", "properties": {}, "required": []}
+
+
 def test_function_tool_adapter_sanitizes_existing_function_parameters():
     from domain.tool.schema_adapter import adapt_tool_definition
 

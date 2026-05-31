@@ -46,6 +46,23 @@ def test_terminal_policy_keeps_read_commands_sensitive_when_shell_escape_or_outs
     assert "tool_exec" in pre_result["risk_reasons"]
 
 
+def test_terminal_policy_keeps_lint_and_typecheck_write_modes_approval_aware(tmp_path):
+    from domain.coding.terminal_policy import classify_command
+
+    cases = {
+        "ruff check . --fix": "write_option",
+        "npm run lint -- --fix": "write_option",
+        "pytest --update-snapshots": "write_option",
+        "mypy --install-types --non-interactive": "install",
+    }
+
+    for command, reason in cases.items():
+        result = classify_command(command, workspace_root=tmp_path)
+        assert result["approval_required"] is True
+        assert result["classification"] == "high"
+        assert reason in result["risk_reasons"]
+
+
 def test_terminal_policy_explains_network_install_destructive_and_shell_escape_risk(tmp_path):
     from domain.coding.terminal_policy import classify_command
 
