@@ -239,22 +239,16 @@ export function browserApprovalToolArguments(approval: BrowserApproval, token?: 
 }
 
 export function browserApprovalRuntimeContent(approval: BrowserApproval, token?: string): string {
-  const toolArguments = browserApprovalToolArguments(approval, token);
-  let payloadText = "";
-  try {
-    payloadText = JSON.stringify(toolArguments, null, 2);
-  } catch {
-    payloadText = String(toolArguments);
-  }
+  void token;
   return [
     "The user approved the pending browser/computer operation.",
-    "Continue by calling the exact pending tool once with the approved arguments below.",
+    "Continue with the exact pending tool once. The server attached the approval token out-of-band.",
     "Do not ask the user for the same approval again unless the tool returns a new approval_request_id.",
     `Tool: ${approval.toolName}`,
     `Operation: ${approval.action}`,
     approval.requestId ? `Approval request id: ${approval.requestId}` : "",
-    "Approved arguments JSON:",
-    payloadText,
+    "Approved arguments JSON (no token):",
+    JSON.stringify(approval.payload, null, 2),
   ].filter(Boolean).join("\n");
 }
 

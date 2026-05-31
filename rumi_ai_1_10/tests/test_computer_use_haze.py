@@ -319,7 +319,7 @@ def test_browser_computer_wraps_visible_desktop_actions_with_haze(tmp_path, monk
     def fake_haze(self, action, payload):
         events.append(f"enter:{action}")
         try:
-            yield
+            yield {"attempted": True, "started": True, "action": action, "sequence_id": "seq-test"}
         finally:
             events.append(f"exit:{action}")
 
@@ -335,6 +335,12 @@ def test_browser_computer_wraps_visible_desktop_actions_with_haze(tmp_path, monk
     )
 
     assert result["executed"] is True
+    assert result["edge_haze"] == {
+        "attempted": True,
+        "started": True,
+        "action": "computer.type",
+        "sequence_id": "seq-test",
+    }
     assert events == ["enter:computer.type", "exit:computer.type", "enter:computer.type", "exit:computer.type"]
 
 
@@ -347,7 +353,7 @@ def test_browser_computer_wraps_foreground_open_url_with_haze(tmp_path, monkeypa
     def fake_haze(self, action, payload):
         events.append(f"enter:{action}")
         try:
-            yield
+            yield {"attempted": True, "started": True, "action": action, "sequence_id": "seq-test"}
         finally:
             events.append(f"exit:{action}")
 
@@ -361,6 +367,12 @@ def test_browser_computer_wraps_foreground_open_url_with_haze(tmp_path, monkeypa
     )
 
     assert result["opened"] is True
+    assert result["edge_haze"] == {
+        "attempted": True,
+        "started": True,
+        "action": "browser.open_url",
+        "sequence_id": "seq-test",
+    }
     assert events == ["enter:browser.open_url", "exit:browser.open_url"]
 
 

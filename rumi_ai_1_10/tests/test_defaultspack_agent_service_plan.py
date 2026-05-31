@@ -1420,12 +1420,13 @@ def test_browser_computer_screenshot_falls_back_to_window_capture_when_rect_capt
     )
     calls = []
 
-    def fake_run(command, check):
+    def fake_run(command, check, **kwargs):
         del check
         calls.append(command)
         if "-R" in command:
             raise CalledProcessError(1, command)
         assert "-l" in command
+        assert "timeout" in kwargs
         return None
 
     monkeypatch.setattr(browser_computer.subprocess, "run", fake_run)

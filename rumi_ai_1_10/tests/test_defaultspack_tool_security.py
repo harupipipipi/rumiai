@@ -686,7 +686,7 @@ def test_computer_use_pack_not_approved_waits_for_approval(monkeypatch):
     assert result["widget"]["action"] == "computer.screenshot"
 
 
-def test_computer_use_pack_not_approved_falls_back_after_tool_server_approval(monkeypatch):
+def test_computer_use_pack_not_approved_does_not_fall_back_after_tool_server_approval(monkeypatch):
     class FakeCapabilityExecutor:
         def execute(self, principal_id, request):
             return SimpleNamespace(
@@ -695,15 +695,10 @@ def test_computer_use_pack_not_approved_falls_back_after_tool_server_approval(mo
                 error="Pack not approved: rumi_default_tools_pack",
             )
 
-    seen = {}
+    def fail_local(*args, **kwargs):
+        raise AssertionError("computer_use must not bypass pack approval")
 
-    def fake_local(self, tool_name, arguments, context):
-        seen["tool_name"] = tool_name
-        seen["arguments"] = arguments
-        seen["context"] = context
-        return {"result": "local ok", "is_error": False, "widget": {"type": tool_name}}
-
-    monkeypatch.setattr(ToolExecutor, "_execute_local", fake_local)
+    monkeypatch.setattr(ToolExecutor, "_execute_local", fail_local)
 
     result = ToolExecutor()._execute_rumi_function(
         {
@@ -728,9 +723,8 @@ def test_computer_use_pack_not_approved_falls_back_after_tool_server_approval(mo
     )
 
     assert result["is_error"] is False
-    assert result["result"] == "local ok"
-    assert seen["tool_name"] == "computer_use"
-    assert seen["arguments"]["action"] == "screenshot"
+    assert result["widget"]["type"] == "approval_request"
+    assert result["widget"]["action"] == "computer.screenshot"
 
 
 def test_prefocus_computer_target_window_does_not_execute_without_approval(monkeypatch):

@@ -161,7 +161,7 @@ test("accepts request id browser approvals without legacy tokens", () => {
   });
 });
 
-test("browserApprovalRuntimeContent includes approved token and request id", () => {
+test("browserApprovalRuntimeContent includes request id without exposing the token", () => {
   const text = browserApprovalRuntimeContent(
     {
       action: "computer.apps",
@@ -175,8 +175,8 @@ test("browserApprovalRuntimeContent includes approved token and request id", () 
   assert.match(text, /computer_use/);
   assert.match(text, /computer\.apps/);
   assert.match(text, /Approval request id: apr_1/);
-  assert.match(text, /approval_token/);
-  assert.match(text, /token-1/);
+  assert.doesNotMatch(text, /approval_token/);
+  assert.doesNotMatch(text, /token-1/);
 });
 
 test("returns pending runtime approval requests without browser tokens", () => {

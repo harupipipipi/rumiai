@@ -304,7 +304,6 @@ class ToolExecutor:
         if getattr(response, "error_type", "") not in {
             "function_not_found",
             "function_registry_unavailable",
-            "pack_not_approved",
         }:
             return None
         qualified_name = str(request.get("qualified_name") or "")
@@ -313,11 +312,6 @@ class ToolExecutor:
             return None
         if _is_explicitly_untrusted_tool(tool_def if isinstance(tool_def, dict) else {}):
             return None
-        browser_local_tool = ToolExecutor._first_party_browser_computer_tool_for_function(pack_id, function_id)
-        if browser_local_tool and getattr(response, "error_type", "") == "pack_not_approved":
-            if _requires_approval(tool_def) and not _context_has_tool_server_approval(context):
-                return None
-            return ToolExecutor()._execute_local(browser_local_tool, request.get("args") or {}, context)
         local_tool = ToolExecutor._first_party_local_tool_for_function(pack_id, function_id)
         if local_tool:
             return ToolExecutor()._execute_local_with_tool_def(local_tool, request.get("args") or {}, context, tool_def)
