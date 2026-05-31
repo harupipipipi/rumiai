@@ -6,6 +6,7 @@ from .schema_adapter import is_tool_rejected_by_policy, policy_from_context
 from .security import is_trusted_pack_id, requires_approval_for_security, unsupported_execution_reason
 from domain.tool_policy.internal_context import internal_tool_decision_allows
 from pathlib import Path
+import inspect
 import json
 
 
@@ -722,7 +723,10 @@ class ToolExecutor:
                 "artifact_root": _conversation_tool_artifact_root(next_context),
                 "yolo_mode": _truthy(policy.get("yolo_mode")),
             }
-            if isinstance(current_tool_def, dict):
+            if (
+                isinstance(current_tool_def, dict)
+                and "tool_arguments" in inspect.signature(run_computer_action).parameters
+            ):
                 router_kwargs["tool_arguments"] = next_arguments
             result = run_computer_action(
                 action,
@@ -1351,6 +1355,26 @@ def _context_with_tool_approval_token(context, tool_def, arguments, *extra_looku
         pack_id=str(next_context.get("owner_pack") or next_context.get("pack_id") or next_context.get("_source_pack_id") or "defaultspack"),
         conversation_id=str(next_context.get("conversation_id") or next_context.get("conversation_turn_id") or ""),
     )
+    if (
+        not verification.valid
+        and _tool_approval_tool_name(tool_def) in {"browser_computer", "browser_use", "computer_use"}
+        and isinstance(arguments, dict)
+    ):
+        verification = approval.verify_execution_token(
+            token,
+            _tool_approval_operation(tool_def),
+            approval.hash_arguments(dict(arguments or {})),
+            pack_id=str(next_context.get("owner_pack") or next_context.get("pack_id") or next_context.get("_source_pack_id") or "defaultspack"),
+            conversation_id=str(next_context.get("conversation_id") or next_context.get("conversation_turn_id") or ""),
+        )
+        if not verification.valid:
+            verification = approval.verify_execution_token(
+                token,
+                _tool_approval_operation(tool_def),
+                approval.hash_arguments(dict(arguments or {})),
+                pack_id="",
+                conversation_id="",
+            )
     if verification.valid:
         next_context["_tool_server_approved"] = True
         next_context["_tool_server_approval_token_valid"] = True

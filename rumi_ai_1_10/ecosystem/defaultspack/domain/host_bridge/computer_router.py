@@ -10,7 +10,6 @@ from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import Brows
 
 from .viewer_broker_client import ViewerBrokerClient
 
-
 def should_route_to_viewer(action: str) -> bool:
     if os.environ.get("RUMI_COMPUTER_HOST_INTERNAL") == "1":
         return False
