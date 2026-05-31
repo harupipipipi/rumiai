@@ -116,6 +116,50 @@ def test_followup_context_token_beats_model_supplied_fake_token(monkeypatch):
     assert seen["conversation_id"] == "conv-token-precedence"
 
 
+def test_stale_followup_token_requests_fresh_approval(monkeypatch):
+    from domain.tool import executor as executor_module
+
+    class FakeApproval:
+        @staticmethod
+        def hash_arguments(args):
+            return "changed-args"
+
+        @staticmethod
+        def verify_execution_token(token, operation, args_hash, **kwargs):
+            return SimpleNamespace(
+                valid=False,
+                code="APPROVAL_ARGUMENTS_CHANGED",
+                message="approval token does not match request arguments",
+            )
+
+        @staticmethod
+        def create_approval_request(operation, risk_level, args, *, details=None, expires_in=300):
+            return {
+                "request_id": "apr_fresh",
+                "args_hash": "fresh_hash",
+                "expires_at": 123,
+                "display_summary": operation,
+            }
+
+    monkeypatch.setattr(executor_module, "_approval_module", lambda: FakeApproval)
+
+    context, error = _context_with_tool_approval_token(
+        {
+            "pack_id": "defaultspack",
+            "conversation_id": "conv-stale-token",
+            "tool_approval_tokens": {"computer.click": "tok_old"},
+        },
+        {"tool_id": "computer_use", "name": "computer_use", "requires_approval": True, "risk": "high"},
+        {"action": "click", "normalized_x": 120, "normalized_y": 430, "coordinate_space": "normalized_1000"},
+    )
+
+    assert "_tool_server_approved" not in context
+    assert error["is_error"] is False
+    assert error["widget"]["type"] == "approval_request"
+    assert error["widget"]["approval_request_id"] == "apr_fresh"
+    assert error["widget"]["action"] == "computer.click"
+
+
 def test_tool_security_rejects_untrusted_legacy_execution_manifests_without_write_action():
     for exec_type in ("local", "handler", "dynamic", "prompt"):
         manifest = {
@@ -658,7 +702,7 @@ def test_computer_use_requires_denied_falls_back_after_tool_server_approval(monk
     assert seen["arguments"]["action"] == "open_url"
 
 
-def test_computer_use_pack_not_approved_waits_for_approval(monkeypatch):
+def test_computer_use_pack_not_approved_returns_pack_error(monkeypatch):
     class FakeCapabilityExecutor:
         def execute(self, principal_id, request):
             return SimpleNamespace(
@@ -692,9 +736,9 @@ def test_computer_use_pack_not_approved_waits_for_approval(monkeypatch):
         },
     )
 
-    assert result["is_error"] is False
-    assert result["widget"]["type"] == "approval_request"
-    assert result["widget"]["action"] == "computer.screenshot"
+    assert result["is_error"] is True
+    assert result["widget"] is None
+    assert "Pack not approved" in result["result"]
 
 
 def test_computer_use_pack_not_approved_does_not_fall_back_after_tool_server_approval(monkeypatch):
@@ -733,9 +777,9 @@ def test_computer_use_pack_not_approved_does_not_fall_back_after_tool_server_app
         },
     )
 
-    assert result["is_error"] is False
-    assert result["widget"]["type"] == "approval_request"
-    assert result["widget"]["action"] == "computer.screenshot"
+    assert result["is_error"] is True
+    assert result["widget"] is None
+    assert "Pack not approved" in result["result"]
 
 
 def test_prefocus_computer_target_window_does_not_execute_without_approval(monkeypatch):

@@ -66,6 +66,17 @@ _SAFE_BUILTINS = {
     #               property, object, __build_class__
 }
 
+_STALE_APPROVAL_TOKEN_CODES = {
+    "APPROVAL_ARGUMENTS_CHANGED",
+    "APPROVAL_OPERATION_MISMATCH",
+    "APPROVAL_PACK_MISMATCH",
+    "APPROVAL_CONVERSATION_MISMATCH",
+    "APPROVAL_TOKEN_USED",
+    "APPROVAL_EXPIRED",
+    "APPROVAL_NOT_APPROVED",
+    "APPROVAL_REQUEST_MISSING",
+}
+
 
 def json_dumps(value):
     return json.dumps(value, ensure_ascii=False)
@@ -473,7 +484,7 @@ class ToolExecutor:
         error = getattr(response, "error", None)
         if not success:
             if (
-                getattr(response, "error_type", None) in {"caller_requires_denied", "pack_not_approved", "requires_denied"}
+                getattr(response, "error_type", None) in {"caller_requires_denied", "requires_denied"}
                 and isinstance(tool_def, dict)
                 and _requires_approval(tool_def)
             ):
@@ -1394,6 +1405,8 @@ def _context_with_tool_approval_token(context, tool_def, arguments, *extra_looku
         next_context["_tool_server_approved"] = True
         next_context["_tool_server_approval_token_valid"] = True
         return next_context, None
+    if verification.code in _STALE_APPROVAL_TOKEN_CODES:
+        return next_context, _approval_required_tool_response(tool_def, arguments, next_context)
     return next_context, {
         "result": verification.message or "approval token is invalid",
         "is_error": True,
