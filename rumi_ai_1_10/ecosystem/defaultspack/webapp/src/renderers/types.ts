@@ -96,6 +96,8 @@ export type HistoryBoardRendererProps = {
   codingWorkspaces?: CodingWorkspaceRecord[];
   selectedCodingWorkspaceId?: string | null;
   onCodingWorkspaceCreate?: (rootPath: string) => Promise<CodingWorkspaceRecord | null | undefined>;
+  onDirectorySelect?: () => Promise<string | null | undefined>;
+  onGroupDataPathPrepare?: (rootPath: string) => Promise<{ rootPath: string; rumiDataPath: string } | null | undefined>;
   onCodingWorkspacesRefresh?: () => void | Promise<void>;
 };
 

@@ -111,6 +111,17 @@ export type CodingWorkspacesResponse = {
   selected_workspace_id?: string | null;
 };
 
+export type DirectorySelectionResponse = {
+  path: string | null;
+  cancelled?: boolean;
+};
+
+export type ChatGroupStorageResponse = {
+  root_path: string;
+  rumi_data_path: string;
+  chat_store_path: string;
+};
+
 export type CodingApprovalRequest = {
   request_id: string;
   operation: string;
@@ -2151,6 +2162,20 @@ export const api = {
     return request<{ workspace: CodingWorkspaceRecord }>("/api/coding/workspaces/trust", {
       method: "POST",
       body: JSON.stringify({ workspace_id: workspaceId }),
+    });
+  },
+
+  selectDirectory(prompt?: string) {
+    return request<DirectorySelectionResponse>("/api/ui/select-directory", {
+      method: "POST",
+      body: JSON.stringify({ prompt }),
+    });
+  },
+
+  prepareChatGroupStorage(rootPath: string) {
+    return request<ChatGroupStorageResponse>("/api/chat/group-storage", {
+      method: "POST",
+      body: JSON.stringify({ root_path: rootPath }),
     });
   },
 

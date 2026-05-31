@@ -157,6 +157,7 @@ class ChatStore:
                 "conversations": self._conversations,
             }
             self._save_conversation_files()
+            self._save_external_conversation_indexes()
             try:
                 self._atomic_write_json(self._storage_path, payload)
             except OSError as exc:
@@ -850,8 +851,38 @@ class ChatStore:
     # ----------------------------------------------------------
     # Per-chat files / workspace artifacts
     # ----------------------------------------------------------
+    @staticmethod
+    def _normalize_rumi_data_path(value):
+        text = str(value or "").strip()
+        if not text:
+            return None
+        path = Path(text).expanduser()
+        if path.name == "chat" and path.parent.name == ".rumiDP":
+            path = path.parent
+        elif path.name != ".rumiDP":
+            path = path / ".rumiDP"
+        return path
+
+    @staticmethod
+    def _conversation_rumi_data_path(conversation):
+        if not isinstance(conversation, dict):
+            return None
+        metadata = conversation.get("metadata") if isinstance(conversation.get("metadata"), dict) else {}
+        for key in ("rumi_data_path", "rumiDataPath", "rumi_dp_path", "rumiDPPath"):
+            data_path = ChatStore._normalize_rumi_data_path(metadata.get(key))
+            if data_path is not None:
+                return data_path
+        return None
+
+    def _conversation_storage_parent(self, conversation):
+        data_path = self._conversation_rumi_data_path(conversation)
+        if data_path is not None:
+            return data_path / "chat"
+        return self._storage_path.parent
+
     def conversation_dir(self, conversation_id):
-        return self._storage_path.parent / "conversations" / str(conversation_id)
+        conversation = self._conversations.get(str(conversation_id))
+        return self._conversation_storage_parent(conversation) / "conversations" / str(conversation_id)
 
     def conversation_workspace_dir(self, conversation_id):
         return self.conversation_dir(conversation_id) / "workspace"
@@ -923,6 +954,24 @@ class ChatStore:
                 "conversation": conversation,
             }
             self._atomic_write_json(conversation_dir / "history.json", payload)
+
+    def _save_external_conversation_indexes(self):
+        grouped = {}
+        default_parent = self._storage_path.parent
+        for conversation_id, conversation in self._conversations.items():
+            if not isinstance(conversation, dict):
+                continue
+            parent = self._conversation_storage_parent(conversation)
+            if parent == default_parent:
+                continue
+            grouped.setdefault(parent, {})[str(conversation_id)] = conversation
+        for parent, conversations in grouped.items():
+            payload = {
+                "schema_version": 1,
+                "updated_at": _now_ms(),
+                "conversations": conversations,
+            }
+            self._atomic_write_json(parent / "conversations.json", payload)
 
     def _persist_message_artifacts(self, conversation_id, msg):
         if not isinstance(msg, dict):

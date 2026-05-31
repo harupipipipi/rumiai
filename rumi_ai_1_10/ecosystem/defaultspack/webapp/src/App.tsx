@@ -39,6 +39,7 @@ type PendingNewTaskContext = {
   workspaceId?: string | null;
   workspaceLabel?: string | null;
   workspaceRoot?: string | null;
+  rumiDataPath?: string | null;
 };
 
 type CalendarItemKind = "task" | "event" | "reminder";
@@ -1116,6 +1117,7 @@ function workspaceContextFromMetadata(metadata: Record<string, unknown> | null |
     workspaceId: cleanOptionalString(metadata?.workspace_id ?? metadata?.workspaceId),
     workspaceLabel: cleanOptionalString(metadata?.workspace_label ?? metadata?.workspaceLabel),
     workspaceRoot: cleanOptionalString(metadata?.workspace_root ?? metadata?.workspaceRoot ?? metadata?.rootPath),
+    rumiDataPath: cleanOptionalString(metadata?.rumi_data_path ?? metadata?.rumiDataPath ?? metadata?.rumi_dp_path),
   };
 }
 
@@ -1134,8 +1136,9 @@ function workspaceContextFromHistoryOptions(options?: HistoryBoardNewTaskOptions
     workspaceId: cleanOptionalString(options.workspaceId),
     workspaceLabel: cleanOptionalString(options.workspaceLabel),
     workspaceRoot: cleanOptionalString(options.workspaceRoot),
+    rumiDataPath: cleanOptionalString(options.rumiDataPath),
   };
-  return context.groupId || context.workspaceId || context.workspaceRoot ? context : null;
+  return context.groupId || context.workspaceId || context.workspaceRoot || context.rumiDataPath ? context : null;
 }
 
 function formatBoardDate(updatedAt: number): string {
@@ -3479,6 +3482,19 @@ export default function App() {
     }
   };
 
+  const handleDirectorySelect = async () => {
+    const selected = await api.selectDirectory("New Group の保存先フォルダを選択");
+    return selected.cancelled ? null : selected.path;
+  };
+
+  const handlePrepareChatGroupStorage = async (rootPath: string) => {
+    const prepared = await api.prepareChatGroupStorage(rootPath);
+    return {
+      rootPath: prepared.root_path,
+      rumiDataPath: prepared.rumi_data_path,
+    };
+  };
+
   const handleFileRemove = (fileId: string) => {
     setAttachedFiles((prev) => prev.filter((f) => f.id !== fileId));
   };
@@ -3905,6 +3921,7 @@ export default function App() {
       ?? activeContextForSubmit.workspaceRoot
       ?? codingWorkspaces.find((workspace) => workspace.workspace_id === workspaceIdForSubmit)?.root_path
       ?? null;
+    const rumiDataPathForSubmit = pendingNewTaskContext?.rumiDataPath ?? activeContextForSubmit.rumiDataPath ?? null;
     const isCodingWorkspaceSubmit = mode === "coding" || Boolean(workspaceIdForSubmit);
 
     try {
@@ -3917,6 +3934,7 @@ export default function App() {
           tags: isCodingWorkspaceSubmit ? ["coding"] : undefined,
           metadata: {
             ...(groupIdForSubmit ? { group_id: groupIdForSubmit } : {}),
+            ...(rumiDataPathForSubmit ? { rumi_data_path: rumiDataPathForSubmit } : {}),
             ...(isCodingWorkspaceSubmit
             ? {
                 mode: "coding",
@@ -4169,6 +4187,7 @@ export default function App() {
         metadata: {
           mode: isOperationsMode ? "operations_company" : isCodingWorkspaceSubmit ? "coding" : mode,
           ...(groupIdForSubmit ? { group_id: groupIdForSubmit } : {}),
+          ...(rumiDataPathForSubmit ? { rumi_data_path: rumiDataPathForSubmit } : {}),
           ...(isOperationsMode ? {
             profile_id: "defaultspack.operations_company",
             agent_id: "client_manager",
@@ -4336,6 +4355,8 @@ export default function App() {
               codingWorkspaces={codingWorkspaces}
               selectedCodingWorkspaceId={effectiveWorkspaceId}
               onCodingWorkspaceCreate={handleCodingWorkspaceCreate}
+              onDirectorySelect={handleDirectorySelect}
+              onGroupDataPathPrepare={handlePrepareChatGroupStorage}
               onCodingWorkspacesRefresh={async () => {
                 await loadCodingWorkspaces();
               }}
@@ -4359,6 +4380,8 @@ export default function App() {
               codingWorkspaces={codingWorkspaces}
               selectedCodingWorkspaceId={effectiveWorkspaceId}
               onCodingWorkspaceCreate={handleCodingWorkspaceCreate}
+              onDirectorySelect={handleDirectorySelect}
+              onGroupDataPathPrepare={handlePrepareChatGroupStorage}
               onCodingWorkspacesRefresh={async () => {
                 await loadCodingWorkspaces();
               }}

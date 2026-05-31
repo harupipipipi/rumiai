@@ -1046,3 +1046,39 @@ test("coding workspace and compact helpers serialize request bodies", async () =
     body: { conversation_id: "c1", mode: "apply", approved: true },
   });
 });
+
+test("directory and group storage helpers target native selection routes", async () => {
+  const seen: Array<{ input: string; method: string; body?: unknown }> = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    seen.push({
+      input: String(input),
+      method: init?.method ?? "GET",
+      body: init?.body ? JSON.parse(String(init.body)) : undefined,
+    });
+    return new Response(JSON.stringify({
+      status: "ok",
+      data: String(input).includes("/select-directory")
+        ? { path: "/repo", cancelled: false }
+        : { root_path: "/repo", rumi_data_path: "/repo/.rumiDP", chat_store_path: "/repo/.rumiDP/chat/conversations.json" },
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }) as typeof fetch;
+
+  try {
+    await api.selectDirectory("保存先");
+    await api.prepareChatGroupStorage("/repo");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.deepEqual(seen[0], {
+    input: "/api/ui/select-directory",
+    method: "POST",
+    body: { prompt: "保存先" },
+  });
+  assert.deepEqual(seen[1], {
+    input: "/api/chat/group-storage",
+    method: "POST",
+    body: { root_path: "/repo" },
+  });
+});
