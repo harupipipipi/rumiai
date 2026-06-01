@@ -61,6 +61,17 @@ def _caller_requires_denied_executor():
     return capability_executor
 
 
+def _pack_not_approved_executor():
+    capability_executor = MagicMock()
+    capability_executor.execute.return_value = SimpleNamespace(
+        success=False,
+        output=None,
+        error="pack not approved",
+        error_type="pack_not_approved",
+    )
+    return capability_executor
+
+
 def _computer_control_tool_def(tool_name):
     return {
         "tool_id": tool_name,
@@ -253,6 +264,35 @@ def test_tool_executor_falls_back_to_local_computer_use_with_yolo_policy(monkeyp
     from domain.tool.executor import ToolExecutor
 
     capability_executor = _caller_requires_denied_executor()
+    captured = {}
+
+    def fake_execute_local(self, tool_name, arguments, context):
+        captured["tool_name"] = tool_name
+        captured["arguments"] = arguments
+        captured["context"] = context
+        return {"result": "computer_use computer.context completed", "is_error": False, "widget": {"type": tool_name}}
+
+    monkeypatch.setattr(ToolExecutor, "_execute_local", fake_execute_local)
+
+    result = ToolExecutor()._execute_rumi_function(
+        _computer_control_tool_def("computer_use"),
+        {"action": "context"},
+        {
+            "principal_id": "defaultspack",
+            "capability_executor": capability_executor,
+            "profile_policy": {"yolo_mode": True},
+        },
+    )
+
+    assert result["is_error"] is False
+    assert captured["tool_name"] == "computer_use"
+    assert captured["arguments"] == {"action": "context"}
+
+
+def test_tool_executor_falls_back_to_local_computer_use_when_pack_unapproved_but_yolo(monkeypatch):
+    from domain.tool.executor import ToolExecutor
+
+    capability_executor = _pack_not_approved_executor()
     captured = {}
 
     def fake_execute_local(self, tool_name, arguments, context):

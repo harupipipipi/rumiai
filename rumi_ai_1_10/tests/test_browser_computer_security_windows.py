@@ -165,6 +165,74 @@ def test_windows_open_url_can_target_specific_browser(monkeypatch):
     assert calls[0][1] == "https://example.test"
 
 
+def test_windows_open_url_remembers_new_managed_browser_window(tmp_path, monkeypatch):
+    from ecosystem.rumi_default_tools_pack.domain.tool import browser_computer
+
+    controller = _controller(tmp_path)
+    before = [
+        {
+            "app": "chrome",
+            "title": "Google - Google Chrome",
+            "x": 60,
+            "y": 60,
+            "width": 1200,
+            "height": 900,
+            "window_id": 101,
+        }
+    ]
+    after = before + [
+        {
+            "app": "chrome",
+            "title": "today news June 1 2026 - Google 検索 - Google Chrome",
+            "x": 80,
+            "y": 80,
+            "width": 1200,
+            "height": 900,
+            "window_id": 202,
+        }
+    ]
+    calls = []
+    window_calls = {"count": 0}
+
+    monkeypatch.setattr(browser_computer.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(browser_computer.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(
+        controller,
+        "_browser_launch_plan",
+        lambda url, profile_id, persistent=True: {
+            "mode": "managed_profile",
+            "browser": r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+            "command": [
+                r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+                "--new-window",
+                url,
+            ],
+        },
+    )
+    monkeypatch.setattr(
+        browser_computer.subprocess,
+        "Popen",
+        lambda command, **kwargs: calls.append(command) or subprocess.CompletedProcess(command, 0),
+    )
+
+    def fake_list_windows():
+        window_calls["count"] += 1
+        return before if window_calls["count"] == 1 else after
+
+    monkeypatch.setattr(controller, "_list_windows", fake_list_windows)
+
+    result = controller.run(
+        "browser.open_url",
+        {"url": "https://www.google.com/search?q=today+news+June+1+2026"},
+        yolo_mode=True,
+    )
+
+    assert result["opened"] is True
+    assert calls
+    assert result["target_window"]["window_id"] == 202
+    assert controller._computer_state()["target_window"]["window_id"] == 202
+
+
 def test_windows_virtual_screen_coordinates_are_reported_for_desktop_capture(tmp_path, monkeypatch):
     from ecosystem.rumi_default_tools_pack.domain.tool import browser_computer
 
@@ -187,6 +255,32 @@ def test_windows_virtual_screen_coordinates_are_reported_for_desktop_capture(tmp
 
     assert result["action_coordinate_system"]["screen"] == "virtual_screen"
     assert result["action_coordinate_system"]["x_range"] == [-1920, 1919]
+
+
+def test_windows_target_screenshot_focuses_window_before_copyfromscreen(tmp_path, monkeypatch):
+    controller = _controller(tmp_path)
+    target = {
+        "app": "chrome",
+        "title": "today news - Google Chrome",
+        "x": 100,
+        "y": 200,
+        "width": 900,
+        "height": 700,
+        "window_id": 4321,
+    }
+    focused = []
+    scripts = []
+
+    monkeypatch.setattr(controller, "_focus_window", lambda window: focused.append(window))
+    monkeypatch.setattr(controller, "_run_powershell", scripts.append)
+
+    bounds = controller._windows_screenshot(tmp_path / "shot.png", target=target)
+
+    assert focused == [target]
+    assert scripts
+    assert bounds["screen"] == "selected_window"
+    assert bounds["x"] == 100
+    assert bounds["width"] == 900
 
 
 def test_windows_sendkeys_escapes_literals_and_supports_modifiers():
@@ -230,6 +324,8 @@ def test_windows_focus_window_uses_foreground_api(tmp_path, monkeypatch):
     assert scripts
     assert "ShowWindowAsync($hwnd, 9)" in scripts[0]
     assert "SetForegroundWindow($hwnd)" in scripts[0]
+    assert "AttachThreadInput" in scripts[0]
+    assert "SetWindowPos($hwnd, $topMost" in scripts[0]
     assert "$hwnd = [IntPtr]1234" in scripts[0]
 
 

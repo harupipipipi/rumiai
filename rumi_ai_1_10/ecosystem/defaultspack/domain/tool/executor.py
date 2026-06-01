@@ -259,7 +259,7 @@ class ToolExecutor:
             return None
         if bool(getattr(response, "success", False)):
             return None
-        if getattr(response, "error_type", "") not in {"caller_requires_denied", "requires_denied"}:
+        if getattr(response, "error_type", "") not in {"caller_requires_denied", "requires_denied", "pack_not_approved"}:
             return None
         qualified_name = str(request.get("qualified_name") or "")
         pack_id, _, function_id = qualified_name.partition(":")
@@ -915,6 +915,8 @@ def _browser_computer_action_payload(tool_name, arguments):
             "open_url": "browser.open_url",
             "open": "browser.open_url",
             "context": "computer.context",
+            "context/apps/windows": "computer.context",
+            "apps/windows": "computer.context",
             "app_context": "computer.context",
             "state": "computer.context",
             "screenshot": "computer.screenshot",
@@ -1018,6 +1020,8 @@ def _browser_computer_action_payload(tool_name, arguments):
         action_map = {
             "": "computer.screenshot",
             "context": "computer.context",
+            "context/apps/windows": "computer.context",
+            "apps/windows": "computer.context",
             "app_context": "computer.context",
             "state": "computer.context",
             "screenshot": "computer.screenshot",

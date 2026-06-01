@@ -48,89 +48,73 @@ struct ParsedRequest {
 
 impl HostBrokerRuntime {
     pub fn start(config: &AppConfig) -> Result<Self> {
-        #[cfg(not(target_os = "macos"))]
-        {
-            return Ok(Self {
-                inner: Arc::new(HostBrokerShared {
-                    config: config.clone(),
-                    token: None,
-                    status: Mutex::new(HostBrokerStatus::disabled(
-                        "Viewer host broker is only enabled on macOS.",
-                    )),
+        fs::create_dir_all(config.host_broker_dir()).with_context(|| {
+            format!(
+                "failed to create host broker directory at {}",
+                config.host_broker_dir().display()
+            )
+        })?;
+
+        let listener = bind_listener()?;
+        let local_addr = listener
+            .local_addr()
+            .context("failed to read host broker local address")?;
+        let port = local_addr.port();
+        let url = format!("http://{DEFAULT_HOST}:{port}");
+        let token = generate_broker_token();
+        let connection = HostBrokerConnectionInfo {
+            version: 1,
+            host: DEFAULT_HOST.to_string(),
+            port,
+            url: url.clone(),
+            token: token.clone(),
+            permission_subject: PERMISSION_SUBJECT.to_string(),
+            pid: std::process::id(),
+            created_at: now_epoch_seconds(),
+        };
+        write_connection_file(&config.host_broker_connection_path(), &connection)?;
+
+        let runtime = Self {
+            inner: Arc::new(HostBrokerShared {
+                config: config.clone(),
+                token: Some(token),
+                status: Mutex::new(HostBrokerStatus {
+                    enabled: true,
+                    available: true,
+                    status: "running".to_string(),
+                    url: Some(url),
+                    connection_path: Some(
+                        config
+                            .host_broker_connection_path()
+                            .to_string_lossy()
+                            .to_string(),
+                    ),
+                    recovery: None,
                 }),
-            });
-        }
+            }),
+        };
 
-        #[cfg(target_os = "macos")]
-        {
-            fs::create_dir_all(config.host_broker_dir()).with_context(|| {
-                format!(
-                    "failed to create host broker directory at {}",
-                    config.host_broker_dir().display()
-                )
-            })?;
-
-            let listener = bind_listener()?;
-            let local_addr = listener
-                .local_addr()
-                .context("failed to read host broker local address")?;
-            let port = local_addr.port();
-            let url = format!("http://{DEFAULT_HOST}:{port}");
-            let token = generate_broker_token();
-            let connection = HostBrokerConnectionInfo {
-                version: 1,
-                host: DEFAULT_HOST.to_string(),
-                port,
-                url: url.clone(),
-                token: token.clone(),
-                permission_subject: PERMISSION_SUBJECT.to_string(),
-                pid: std::process::id(),
-                created_at: now_epoch_seconds(),
-            };
-            write_connection_file(&config.host_broker_connection_path(), &connection)?;
-
-            let runtime = Self {
-                inner: Arc::new(HostBrokerShared {
-                    config: config.clone(),
-                    token: Some(token),
-                    status: Mutex::new(HostBrokerStatus {
-                        enabled: true,
-                        available: true,
-                        status: "running".to_string(),
-                        url: Some(url),
-                        connection_path: Some(
-                            config
-                                .host_broker_connection_path()
-                                .to_string_lossy()
-                                .to_string(),
-                        ),
-                        recovery: None,
-                    }),
-                }),
-            };
-
-            let shared = Arc::clone(&runtime.inner);
-            thread::spawn(move || {
-                for stream in listener.incoming() {
-                    match stream {
-                        Ok(stream) => {
-                            let per_request = Arc::clone(&shared);
-                            thread::spawn(move || {
-                                if let Err(error) = handle_stream(stream, &per_request) {
-                                    warn!("Viewer host broker request failed: {error}");
-                                }
-                            });
-                        }
-                        Err(error) => {
-                            error!("Viewer host broker accept failed: {error}");
-                            break;
-                        }
+        let shared = Arc::clone(&runtime.inner);
+        thread::spawn(move || {
+            for stream in listener.incoming() {
+                match stream {
+                    Ok(stream) => {
+                        let per_request = Arc::clone(&shared);
+                        thread::spawn(move || {
+                            if let Err(error) = handle_stream(stream, &per_request) {
+                                warn!("Viewer host broker request failed: {error}");
+                            }
+                        });
+                    }
+                    Err(error) => {
+                        error!("Viewer host broker accept failed: {error}");
+                        break;
                     }
                 }
-            });
+            }
+        });
 
-            Ok(runtime)
-        }
+        Ok(runtime)
     }
 
     pub fn status_snapshot(&self) -> HostBrokerStatus {

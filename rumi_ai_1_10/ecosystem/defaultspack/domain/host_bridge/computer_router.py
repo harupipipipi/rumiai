@@ -11,9 +11,14 @@ from .viewer_broker_client import ViewerBrokerClient
 def should_route_to_viewer(action: str) -> bool:
     if os.environ.get("RUMI_COMPUTER_HOST_INTERNAL") == "1":
         return False
-    if platform.system() != "Darwin":
+    if not str(action or "").startswith("computer."):
         return False
-    return str(action or "").startswith("computer.")
+    force_viewer = str(os.environ.get("RUMI_COMPUTER_ROUTE_VIEWER", "") or "").strip().lower()
+    if force_viewer in {"1", "true", "yes", "on"}:
+        return True
+    if platform.system() == "Darwin":
+        return True
+    return ViewerBrokerClient.from_environment().available()
 
 
 def run_computer_action(
@@ -47,17 +52,17 @@ def run_computer_action(
                     "reason": f"Rumi Viewer host broker is unavailable: {exc}",
                     "recovery": {
                         "kind": "open_rumi_viewer",
-                        "note": "Open Rumi Viewer and grant macOS permissions there.",
+                        "note": "Open Rumi Viewer and make sure its host broker connection is available.",
                     },
                     "permission_subject": "Rumi Viewer",
                 }
         return {
             "action": action,
             "is_error": True,
-            "reason": "Rumi Viewer is required for computer control on macOS.",
+            "reason": "Rumi Viewer is required for this computer control route.",
             "recovery": {
                 "kind": "open_rumi_viewer",
-                "note": "Open Rumi Viewer and grant macOS permissions there.",
+                "note": "Open Rumi Viewer and make sure its host broker connection is available.",
             },
             "permission_subject": "Rumi Viewer",
         }

@@ -32,7 +32,21 @@ class OpenAIProvider(BaseProvider):
 
     def __init__(self):
         self._api_key = os.environ.get("OPENAI_API_KEY", "")
+        self._ensure_windows_ssl_environment()
         self._ssl_ctx = ssl.create_default_context()
+
+    @staticmethod
+    def _ensure_windows_ssl_environment():
+        if os.name != "nt" or os.environ.get("SystemRoot"):
+            return
+        for candidate in (
+            os.environ.get("WINDIR"),
+            os.path.join(os.environ.get("SystemDrive", "C:"), "Windows"),
+            r"C:\Windows",
+        ):
+            if candidate and os.path.isdir(candidate):
+                os.environ.setdefault("SystemRoot", candidate)
+                return
 
     # ── internal helpers ────────────────────────────────────────────────
 

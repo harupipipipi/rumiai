@@ -40,13 +40,19 @@ def _install_ecosystem_defaultspack_alias(pack_root: Path) -> None:
     user-data without that parent ``ecosystem`` directory, but some legacy
     modules still import the canonical package path.
     """
+    ecosystem_dir = str(pack_root.parent)
     ecosystem = sys.modules.get("ecosystem")
     if ecosystem is None:
         ecosystem = types.ModuleType("ecosystem")
-        ecosystem.__path__ = []  # type: ignore[attr-defined]
+        ecosystem.__path__ = [ecosystem_dir]  # type: ignore[attr-defined]
         sys.modules["ecosystem"] = ecosystem
     elif not hasattr(ecosystem, "__path__"):
-        ecosystem.__path__ = []  # type: ignore[attr-defined]
+        ecosystem.__path__ = [ecosystem_dir]  # type: ignore[attr-defined]
+    else:
+        paths = list(getattr(ecosystem, "__path__", []))
+        if ecosystem_dir not in paths:
+            paths.insert(0, ecosystem_dir)
+            ecosystem.__path__ = paths  # type: ignore[attr-defined]
 
     defaultspack = sys.modules.get("ecosystem.defaultspack")
     pack_path = str(pack_root)

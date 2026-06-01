@@ -238,11 +238,17 @@ class BrowserComputerController:
         if not approved:
             return self._approval_required("browser.open_url", approval_payload)
         self._ensure_profile(profile_id)
+        before_windows = self._list_windows() if platform.system() == "Windows" else []
         opened_with_managed_profile = False
+        opened_window = None
         if persistent and launch_plan.get("command") and not target_app:
             command = [str(part) for part in launch_plan["command"]]
             subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             opened_with_managed_profile = True
+            opened_window = self._wait_for_opened_browser_window(
+                before_windows,
+                app_hint=self._browser_app_hint_from_launch_plan(launch_plan),
+            )
         else:
             with self._edge_haze("browser.open_url", payload):
                 opened = self._open_url_foreground(url, app_name=target_app)
@@ -257,6 +263,7 @@ class BrowserComputerController:
                     **({"target_app": target_app} if target_app else {}),
                     "reason": "Opening the requested URL failed.",
                 }
+            opened_window = self._wait_for_opened_browser_window(before_windows, app_hint=target_app)
         sessions = self._read_sessions()
         sessions["last_url"] = url
         sessions["active_profile_id"] = profile_id
@@ -265,6 +272,8 @@ class BrowserComputerController:
             sessions.pop(stale_key, None)
         sessions["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         self._write_sessions(sessions)
+        if opened_window:
+            self._set_target_window(opened_window)
         return {
             "action": "browser.open_url",
             "url": url,
@@ -273,8 +282,60 @@ class BrowserComputerController:
             "persistent": persistent,
             "managed_profile": opened_with_managed_profile,
             "launch": launch_plan,
+            **({"target_window": opened_window} if opened_window else {}),
             **({"target_app": target_app} if target_app else {}),
         }
+
+    @staticmethod
+    def _browser_app_hint_from_launch_plan(launch_plan: dict[str, Any]) -> str:
+        browser = str(launch_plan.get("browser") or "")
+        lowered = browser.lower()
+        if "chrome" in lowered:
+            return "chrome"
+        if "msedge" in lowered or "edge" in lowered:
+            return "edge"
+        if "firefox" in lowered:
+            return "firefox"
+        if "vivaldi" in lowered:
+            return "vivaldi"
+        return ""
+
+    def _wait_for_opened_browser_window(self, before_windows: list[dict[str, Any]], *, app_hint: str = "") -> dict[str, Any] | None:
+        if platform.system() != "Windows":
+            return None
+        before_ids: set[int] = set()
+        for window in before_windows:
+            if not isinstance(window, dict) or window.get("window_id") is None:
+                continue
+            try:
+                before_ids.add(int(window["window_id"]))
+            except Exception:
+                continue
+        normalized_hint = app_hint.strip().lower()
+        best_existing: dict[str, Any] | None = None
+        for _ in range(20):
+            time.sleep(0.25)
+            candidates: list[dict[str, Any]] = []
+            new_candidates: list[dict[str, Any]] = []
+            for item in self._list_windows():
+                window = self._normalize_window_record(item)
+                if not window or not self._is_usable_target_window(window):
+                    continue
+                if normalized_hint and not self._window_matches_filter(window, app=normalized_hint, title=""):
+                    continue
+                candidates.append(window)
+                window_id = window.get("window_id")
+                if window_id is not None:
+                    try:
+                        if int(window_id) not in before_ids:
+                            new_candidates.append(window)
+                    except Exception:
+                        pass
+            if new_candidates:
+                return self._best_window_candidate(new_candidates, app=normalized_hint)
+            if candidates:
+                best_existing = self._best_window_candidate(candidates, app=normalized_hint)
+        return best_existing
 
     @staticmethod
     def _open_url_foreground(url: str, *, app_name: str = "") -> bool:
@@ -2624,6 +2685,15 @@ class BrowserComputerController:
             state.pop("target_window", None)
             self._write_computer_state(state)
 
+    def _set_target_window(self, window: dict[str, Any]) -> None:
+        normalized = self._normalize_window_record(window)
+        if not normalized or not self._is_usable_target_window(normalized):
+            return
+        state = self._computer_state()
+        state["target_window"] = normalized
+        state["target_app"] = {"name": normalized.get("app"), "app": normalized.get("app"), "running": True}
+        self._write_computer_state(state)
+
     def _clear_target_app(self) -> None:
         state = self._computer_state()
         if "target_app" in state:
@@ -3245,11 +3315,37 @@ using System.Runtime.InteropServices;
 public class RumiWindowFocus {{
   [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
   [DllImport("user32.dll")] public static extern bool ShowWindowAsync(IntPtr hWnd, int nCmdShow);
+  [DllImport("user32.dll")] public static extern bool BringWindowToTop(IntPtr hWnd);
+  [DllImport("user32.dll")] public static extern IntPtr SetActiveWindow(IntPtr hWnd);
+  [DllImport("user32.dll")] public static extern IntPtr SetFocus(IntPtr hWnd);
+  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+  [DllImport("kernel32.dll")] public static extern uint GetCurrentThreadId();
+  [DllImport("user32.dll")] public static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
+  [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
 }}
 '@ -ErrorAction SilentlyContinue
 $hwnd = [IntPtr]{hwnd}
+[IntPtr]$topMost = [IntPtr](-1)
+[IntPtr]$notTopMost = [IntPtr](-2)
+$swpNoMoveNoSizeShow = [uint32](0x0001 -bor 0x0002 -bor 0x0040)
 [void][RumiWindowFocus]::ShowWindowAsync($hwnd, 9)
+[uint32]$targetPid = 0
+$targetThread = [RumiWindowFocus]::GetWindowThreadProcessId($hwnd, [ref]$targetPid)
+$foreground = [RumiWindowFocus]::GetForegroundWindow()
+[uint32]$foregroundPid = 0
+$foregroundThread = [RumiWindowFocus]::GetWindowThreadProcessId($foreground, [ref]$foregroundPid)
+$currentThread = [RumiWindowFocus]::GetCurrentThreadId()
+if($targetThread -ne 0){{ [void][RumiWindowFocus]::AttachThreadInput($currentThread, $targetThread, $true) }}
+if($foregroundThread -ne 0){{ [void][RumiWindowFocus]::AttachThreadInput($currentThread, $foregroundThread, $true) }}
+[void][RumiWindowFocus]::SetWindowPos($hwnd, $topMost, 0, 0, 0, 0, $swpNoMoveNoSizeShow)
+[void][RumiWindowFocus]::SetWindowPos($hwnd, $notTopMost, 0, 0, 0, 0, $swpNoMoveNoSizeShow)
+[void][RumiWindowFocus]::BringWindowToTop($hwnd)
 [void][RumiWindowFocus]::SetForegroundWindow($hwnd)
+[void][RumiWindowFocus]::SetActiveWindow($hwnd)
+[void][RumiWindowFocus]::SetFocus($hwnd)
+if($foregroundThread -ne 0){{ [void][RumiWindowFocus]::AttachThreadInput($currentThread, $foregroundThread, $false) }}
+if($targetThread -ne 0){{ [void][RumiWindowFocus]::AttachThreadInput($currentThread, $targetThread, $false) }}
 """
             try:
                 self._run_powershell(script)
@@ -3581,6 +3677,9 @@ public class RumiDpi {
 '''
 
     def _windows_screenshot(self, path: Path, target: dict[str, Any] | None = None) -> dict[str, Any]:
+        if target:
+            self._focus_window(target)
+            time.sleep(0.15)
         escaped = self._ps_single(str(path))
         bounds_script = (
             "$bounds = New-Object System.Drawing.Rectangle({}, {}, {}, {})".format(

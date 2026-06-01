@@ -64,7 +64,7 @@ class AIClient:
                 ):
                     continue
                 if not cloud_enabled and entry.get("kind") not in {"builtin", "local"}:
-                    if not provider_has_api_key(name):
+                    if not (provider_has_api_key(name) or bool(availability.get("configured"))):
                         continue
                 self._providers[name] = instance
         except Exception:

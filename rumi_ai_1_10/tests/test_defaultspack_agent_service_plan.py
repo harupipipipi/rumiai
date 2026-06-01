@@ -4603,10 +4603,12 @@ def test_computer_use_local_action_map_supports_context_and_windows():
     from domain.tool.executor import _browser_computer_action_payload
 
     assert _browser_computer_action_payload("computer_use", {"action": "context"})[0] == "computer.context"
+    assert _browser_computer_action_payload("computer_use", {"action": "context/apps/windows"})[0] == "computer.context"
     assert _browser_computer_action_payload("computer_use", {"action": "windows"})[0] == "computer.windows"
     assert _browser_computer_action_payload("computer_use", {"action": "select_window"})[0] == "computer.select_window"
     assert _browser_computer_action_payload("computer_use", {"action": "drag"})[0] == "computer.drag"
     assert _browser_computer_action_payload("browser_use", {"action": "context"})[0] == "computer.context"
+    assert _browser_computer_action_payload("browser_use", {"action": "apps/windows"})[0] == "computer.context"
     assert _browser_computer_action_payload("browser_use", {"action": "windows"})[0] == "computer.windows"
     assert _browser_computer_action_payload("browser_use", {"action": "select_window"})[0] == "computer.select_window"
     assert _browser_computer_action_payload("browser_use", {"action": "drag"})[0] == "computer.drag"

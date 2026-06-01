@@ -70,6 +70,51 @@ def test_computer_router_routes_darwin_computer_calls_to_viewer(monkeypatch):
     assert result["context"]["conversation_id"] == "conv_1"
 
 
+def test_computer_router_routes_windows_calls_to_viewer_when_connection_is_available(monkeypatch):
+    from ecosystem.defaultspack.domain.host_bridge import computer_router
+
+    class FakeClient:
+        def available(self):
+            return True
+
+        def run_computer(self, function_id, args, context=None, artifact_root=None):
+            return {"action": function_id, "routed": True, "platform": "windows"}
+
+    monkeypatch.setattr(computer_router.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(computer_router.ViewerBrokerClient, "from_environment", classmethod(lambda cls: FakeClient()))
+
+    result = computer_router.run_computer_action("computer.screenshot", {}, {})
+
+    assert result["routed"] is True
+    assert result["platform"] == "windows"
+
+
+def test_computer_router_keeps_windows_local_when_viewer_is_unavailable(monkeypatch):
+    from ecosystem.defaultspack.domain.host_bridge import computer_router
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+
+    class FakeClient:
+        def available(self):
+            return False
+
+    captured: dict[str, object] = {}
+
+    def fake_run(self, action, payload, *, yolo_mode=False):
+        captured["action"] = action
+        captured["payload"] = dict(payload)
+        return {"action": action, "local": True}
+
+    monkeypatch.setattr(computer_router.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(computer_router.ViewerBrokerClient, "from_environment", classmethod(lambda cls: FakeClient()))
+    monkeypatch.setattr(BrowserComputerController, "run", fake_run)
+
+    result = computer_router.run_computer_action("computer.screenshot", {"detail": "full"}, {})
+
+    assert result["local"] is True
+    assert captured["action"] == "computer.screenshot"
+    assert captured["payload"] == {"detail": "full"}
+
+
 def test_computer_router_uses_context_token_for_viewer_approval(monkeypatch):
     from ecosystem.defaultspack.domain.host_bridge import computer_router
 

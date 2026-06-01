@@ -77,30 +77,51 @@ class TestDefaultspackDesktopSurface(unittest.TestCase):
         saved_modules = {
             name: module
             for name, module in sys.modules.items()
-            if name == "ecosystem" or name.startswith("ecosystem.defaultspack")
+            if name == "ecosystem"
+            or name.startswith("ecosystem.defaultspack")
+            or name.startswith("ecosystem.rumi_default_tools_pack")
         }
         try:
             for name in list(sys.modules):
-                if name == "ecosystem" or name.startswith("ecosystem.defaultspack"):
+                if (
+                    name == "ecosystem"
+                    or name.startswith("ecosystem.defaultspack")
+                    or name.startswith("ecosystem.rumi_default_tools_pack")
+                ):
                     sys.modules.pop(name, None)
 
             with tempfile.TemporaryDirectory() as tmp:
-                pack_root = Path(tmp)
+                ecosystem_dir = Path(tmp) / "ecosystem"
+                pack_root = ecosystem_dir / "defaultspack"
                 domain_dir = pack_root / "domain"
-                domain_dir.mkdir()
+                domain_dir.mkdir(parents=True)
                 (domain_dir / "__init__.py").write_text("", encoding="utf-8")
                 (domain_dir / "managed_marker.py").write_text(
                     "VALUE = 'managed-defaultspack'\n",
                     encoding="utf-8",
                 )
+                sibling_dir = ecosystem_dir / "rumi_default_tools_pack" / "domain"
+                sibling_dir.mkdir(parents=True)
+                (sibling_dir.parent / "__init__.py").write_text("", encoding="utf-8")
+                (sibling_dir / "__init__.py").write_text("", encoding="utf-8")
+                (sibling_dir / "sibling_marker.py").write_text(
+                    "VALUE = 'sibling-pack-visible'\n",
+                    encoding="utf-8",
+                )
 
                 desktop_app._install_ecosystem_defaultspack_alias(pack_root)
                 module = import_module("ecosystem.defaultspack.domain.managed_marker")
+                sibling = import_module("ecosystem.rumi_default_tools_pack.domain.sibling_marker")
 
             self.assertEqual(module.VALUE, "managed-defaultspack")
+            self.assertEqual(sibling.VALUE, "sibling-pack-visible")
         finally:
             for name in list(sys.modules):
-                if name == "ecosystem" or name.startswith("ecosystem.defaultspack"):
+                if (
+                    name == "ecosystem"
+                    or name.startswith("ecosystem.defaultspack")
+                    or name.startswith("ecosystem.rumi_default_tools_pack")
+                ):
                     sys.modules.pop(name, None)
             sys.modules.update(saved_modules)
 

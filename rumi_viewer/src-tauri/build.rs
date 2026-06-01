@@ -107,16 +107,28 @@ fn reset_dir(path: &Path) -> io::Result<()> {
 }
 
 fn clear_dir(path: &Path) -> io::Result<()> {
+    make_writable(path)?;
     for entry in fs::read_dir(path)? {
         let entry = entry?;
         let entry_path = entry.path();
         let file_type = entry.file_type()?;
         if file_type.is_dir() {
             clear_dir(&entry_path)?;
+            make_writable(&entry_path)?;
             fs::remove_dir(&entry_path)?;
         } else {
+            make_writable(&entry_path)?;
             fs::remove_file(&entry_path)?;
         }
+    }
+    Ok(())
+}
+
+fn make_writable(path: &Path) -> io::Result<()> {
+    let mut permissions = fs::metadata(path)?.permissions();
+    if permissions.readonly() {
+        permissions.set_readonly(false);
+        fs::set_permissions(path, permissions)?;
     }
     Ok(())
 }
