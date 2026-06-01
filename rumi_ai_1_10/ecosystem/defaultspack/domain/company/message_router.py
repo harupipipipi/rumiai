@@ -123,14 +123,14 @@ class CompanyMessageRouter:
     ) -> dict[str, Any]:
         company_id = str(company["id"])
         active = self.runtime_store.find_active_run_for_agent(company_id, agent_id)
-        self.runtime_store.add_inbox_item(
+        inbox_item = self.runtime_store.add_inbox_item(
             company_id,
             agent_id=agent_id,
             message_id=message["message_id"],
             run_id=active.get("run_id") if active else None,
             kind="mention",
             content=content,
-            status="delivered" if active else "open",
+            status="routing" if active else "open",
             priority=str(metadata.get("priority") or "normal"),
             metadata={"sender_id": sender_id, "thread_id": message.get("thread_id")},
         )
@@ -144,12 +144,23 @@ class CompanyMessageRouter:
                 sender_id=sender_id,
                 context=context,
             )
+            delivered = _instruction_ok(instruction)
+            self.runtime_store.update_inbox_item(
+                str(inbox_item["inbox_id"]),
+                {
+                    "status": "delivered" if delivered else "failed",
+                    "metadata": {"instruction": instruction},
+                },
+            )
+            if not delivered:
+                self._notify_instruction_failure(company_id, message, agent_id, active, instruction)
             return {
                 "agent_id": agent_id,
                 "route": "run.instruction",
                 "run_id": active.get("run_id"),
                 "instruction": instruction,
                 "status": instruction.get("status", "ok") if isinstance(instruction, dict) else "ok",
+                "inbox_id": inbox_item.get("inbox_id"),
             }
 
         task = self.runtime_store.create_task(
@@ -182,6 +193,7 @@ class CompanyMessageRouter:
             "task_id": task["task_id"],
             "dispatch": dispatch,
             "status": (dispatch or {}).get("dispatch", {}).get("status", "queued") if isinstance(dispatch, dict) else "queued",
+            "inbox_id": inbox_item.get("inbox_id"),
         }
 
     def _inject_instruction(
@@ -212,8 +224,35 @@ class CompanyMessageRouter:
             },
             params={"instruction": content, "priority": "urgent"},
         )
-        result = self.input_dispatcher(envelope, context or {})
+        try:
+            result = self.input_dispatcher(envelope, context or {})
+        except Exception as exc:
+            return {"status": "error", "error": str(exc)}
         return result if isinstance(result, dict) else {"status": "error", "error": str(result)}
+
+    def _notify_instruction_failure(
+        self,
+        company_id: str,
+        message: dict[str, Any],
+        agent_id: str,
+        active_run: dict[str, Any],
+        instruction: dict[str, Any],
+    ) -> None:
+        self.runtime_store.add_inbox_item(
+            company_id,
+            agent_id="operations_manager",
+            message_id=message.get("message_id"),
+            run_id=active_run.get("run_id"),
+            kind="instruction_failure",
+            content="Failed to inject company mention into active run for " + str(agent_id) + ".",
+            status="open",
+            priority="high",
+            metadata={
+                "agent_id": agent_id,
+                "thread_id": message.get("thread_id"),
+                "instruction": instruction,
+            },
+        )
 
     def _notify_manager(
         self,
@@ -260,3 +299,12 @@ def _dedupe(values: list[str]) -> list[str]:
             seen.add(key)
             result.append(key)
     return result
+
+
+def _instruction_ok(instruction: Any) -> bool:
+    if not isinstance(instruction, dict):
+        return False
+    status = str(instruction.get("status") or "ok").lower()
+    if status in {"error", "failed", "blocked"}:
+        return False
+    return not instruction.get("error")

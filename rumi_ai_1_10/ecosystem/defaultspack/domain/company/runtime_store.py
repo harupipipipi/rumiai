@@ -14,6 +14,7 @@ from .models import DEFAULT_CHANNEL_ID, gen_id
 
 
 ACTIVE_RUN_STATUSES = {"created", "queued", "running", "waiting_approval", "waiting_user_input", "paused", "resumable"}
+TERMINAL_RUN_STATUSES = {"completed", "done", "error", "failed", "cancelled", "canceled", "planned", "stale", "missing"}
 OPEN_TASK_STATUSES = {"queued", "assigned", "running", "waiting_approval", "blocked", "stale"}
 DONE_TASK_STATUSES = {"completed", "cancelled", "failed"}
 
@@ -58,6 +59,18 @@ def _decode_row(row: sqlite3.Row | dict[str, Any] | None) -> dict[str, Any] | No
     return data
 
 
+def _clean_agent_ids(agent_ids: Any) -> list[str]:
+    result: list[str] = []
+    seen: set[str] = set()
+    values = agent_ids if isinstance(agent_ids, list) else []
+    for value in values:
+        agent_id = str(value).strip()
+        if agent_id and agent_id not in seen:
+            seen.add(agent_id)
+            result.append(agent_id)
+    return result
+
+
 class CompanyRuntimeStore:
     """SQLite WAL store for Slack-like company runtime state."""
 
@@ -97,7 +110,7 @@ class CompanyRuntimeStore:
         return conn
 
     def _migrate(self, conn: sqlite3.Connection) -> None:
-        run_migrations(conn, [(1, self._migration_1)], table_name="company_runtime_migrations")
+        run_migrations(conn, [(1, self._migration_1), (2, self._migration_2)], table_name="company_runtime_migrations")
 
     @staticmethod
     def _migration_1(conn: sqlite3.Connection) -> None:
@@ -147,6 +160,15 @@ class CompanyRuntimeStore:
               updated_at TEXT NOT NULL,
               assigned_at TEXT,
               completed_at TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS company_task_assignments(
+              company_id TEXT NOT NULL,
+              task_id TEXT NOT NULL,
+              agent_id TEXT NOT NULL,
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL,
+              PRIMARY KEY(company_id, task_id, agent_id)
             );
 
             CREATE TABLE IF NOT EXISTS company_agent_runs(
@@ -199,12 +221,62 @@ class CompanyRuntimeStore:
             CREATE INDEX IF NOT EXISTS idx_company_messages_channel ON company_messages(company_id, channel_id, created_at);
             CREATE INDEX IF NOT EXISTS idx_company_tasks_status ON company_tasks(company_id, status, updated_at);
             CREATE INDEX IF NOT EXISTS idx_company_tasks_thread ON company_tasks(company_id, thread_id, updated_at);
+            CREATE INDEX IF NOT EXISTS idx_company_task_assignments_agent ON company_task_assignments(company_id, agent_id, updated_at);
+            CREATE INDEX IF NOT EXISTS idx_company_task_assignments_task ON company_task_assignments(company_id, task_id);
             CREATE INDEX IF NOT EXISTS idx_company_runs_agent_status ON company_agent_runs(company_id, agent_id, status, updated_at);
             CREATE INDEX IF NOT EXISTS idx_company_runs_run_id ON company_agent_runs(run_id);
             CREATE INDEX IF NOT EXISTS idx_company_inbox_agent_status ON company_agent_inbox(company_id, agent_id, status, updated_at);
             CREATE INDEX IF NOT EXISTS idx_company_summaries_dirty ON company_summaries(company_id, dirty, updated_at);
             """
         )
+
+    @staticmethod
+    def _migration_2(conn: sqlite3.Connection) -> None:
+        conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS company_task_assignments(
+              company_id TEXT NOT NULL,
+              task_id TEXT NOT NULL,
+              agent_id TEXT NOT NULL,
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL,
+              PRIMARY KEY(company_id, task_id, agent_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_company_task_assignments_agent ON company_task_assignments(company_id, agent_id, updated_at);
+            CREATE INDEX IF NOT EXISTS idx_company_task_assignments_task ON company_task_assignments(company_id, task_id);
+            """
+        )
+        rows = conn.execute(
+            """
+            SELECT company_id, task_id, target_agent_ids_json, created_at, updated_at
+            FROM company_tasks
+            """
+        ).fetchall()
+        for row in rows:
+            agent_ids = _clean_agent_ids(json_loads(row["target_agent_ids_json"], []))
+            for agent_id in agent_ids:
+                conn.execute(
+                    """
+                    INSERT OR IGNORE INTO company_task_assignments(company_id, task_id, agent_id, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (row["company_id"], row["task_id"], agent_id, row["created_at"], row["updated_at"]),
+                )
+
+    def _replace_task_assignments_locked(self, company_id: str, task_id: str, agent_ids: Any, now: str) -> None:
+        clean_ids = _clean_agent_ids(agent_ids)
+        self.conn.execute(
+            "DELETE FROM company_task_assignments WHERE company_id = ? AND task_id = ?",
+            (str(company_id), str(task_id)),
+        )
+        for agent_id in clean_ids:
+            self.conn.execute(
+                """
+                INSERT OR IGNORE INTO company_task_assignments(company_id, task_id, agent_id, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (str(company_id), str(task_id), agent_id, now, now),
+            )
 
     def ensure_thread(
         self,
@@ -376,6 +448,7 @@ class CompanyRuntimeStore:
     ) -> dict[str, Any]:
         now = utc_now()
         task_id = gen_id("task_")
+        clean_target_agent_ids = _clean_agent_ids(target_agent_ids or [])
         with self.conn:
             self.conn.execute(
                 """
@@ -393,7 +466,7 @@ class CompanyRuntimeStore:
                     message_id,
                     str(title),
                     str(description or ""),
-                    json_dumps(list(target_agent_ids or [])),
+                    json_dumps(clean_target_agent_ids),
                     str(source or "manual"),
                     str(status or "queued"),
                     str(priority or "normal"),
@@ -404,6 +477,7 @@ class CompanyRuntimeStore:
                     now if status in DONE_TASK_STATUSES else None,
                 ),
             )
+            self._replace_task_assignments_locked(str(company_id), task_id, clean_target_agent_ids, now)
         self.mark_summary_dirty(str(company_id), "task", task_id)
         return self.get_task(task_id) or {"task_id": task_id, "id": task_id}
 
@@ -428,10 +502,12 @@ class CompanyRuntimeStore:
         writable = {"title", "description", "source", "status", "priority", "channel_id", "thread_id", "message_id"}
         assignments = []
         params: list[Any] = []
+        new_target_agent_ids: list[str] | None = None
         for key, value in updates.items():
             if key == "target_agent_ids":
+                new_target_agent_ids = _clean_agent_ids(value)
                 assignments.append("target_agent_ids_json = ?")
-                params.append(json_dumps(list(value if isinstance(value, list) else [])))
+                params.append(json_dumps(new_target_agent_ids))
             elif key == "metadata" and isinstance(value, dict):
                 metadata = {**(task.get("metadata") if isinstance(task.get("metadata"), dict) else {}), **value}
                 assignments.append("metadata_json = ?")
@@ -456,6 +532,8 @@ class CompanyRuntimeStore:
             params.append(str(company_id))
         with self.conn:
             self.conn.execute("UPDATE company_tasks SET " + ", ".join(assignments) + " WHERE " + where, params)
+            if new_target_agent_ids is not None:
+                self._replace_task_assignments_locked(str(task["company_id"]), str(task_id), new_target_agent_ids, now)
         updated = self.get_task(task_id, company_id)
         if updated is not None:
             self.mark_summary_dirty(str(updated["company_id"]), "task", str(task_id))
@@ -479,14 +557,22 @@ class CompanyRuntimeStore:
         if thread_id:
             sql += " AND thread_id = ?"
             params.append(str(thread_id))
-        total_rows = self.conn.execute(sql + " ORDER BY updated_at DESC", params).fetchall()
-        tasks = [_decode_row(row) or {} for row in total_rows]
         if target_agent_id:
-            tasks = [task for task in tasks if str(target_agent_id) in task.get("target_agent_ids", [])]
-        total = len(tasks)
+            sql += """
+                AND EXISTS (
+                  SELECT 1 FROM company_task_assignments a
+                  WHERE a.company_id = company_tasks.company_id
+                    AND a.task_id = company_tasks.task_id
+                    AND a.agent_id = ?
+                )
+            """
+            params.append(str(target_agent_id))
+        total = int(self.conn.execute("SELECT COUNT(*) AS count FROM (" + sql + ")", params).fetchone()["count"])
+        rows = self.conn.execute(sql + " ORDER BY updated_at DESC LIMIT ? OFFSET ?", [*params, int(limit), int(offset)]).fetchall()
+        tasks = [_decode_row(row) or {} for row in rows]
         for task in tasks:
             task["id"] = task.get("task_id")
-        return tasks[int(offset): int(offset) + int(limit)], total
+        return tasks, total
 
     def list_open_tasks(self, company_id: str, *, limit: int = 100) -> list[dict[str, Any]]:
         tasks, _ = self.list_tasks(company_id, limit=limit * 2)
@@ -587,18 +673,25 @@ class CompanyRuntimeStore:
         ).fetchall()
         for row in rows:
             link = _decode_row(row) or {}
-            status = str(link.get("status") or "")
+            status = str(link.get("status") or "").lower()
             run_id = str(link.get("run_id") or "")
             try:
                 from domain.agent_runtime.run_store import AgentRunStore
 
                 run = AgentRunStore().get_run(run_id)
-                if isinstance(run, dict) and run.get("status"):
-                    status = str(run["status"])
-                    if status != link.get("status"):
+                if not isinstance(run, dict):
+                    self.update_run_link_status(run_id, "missing")
+                    continue
+                run_status = str(run.get("status") or "").lower()
+                if run_status:
+                    status = run_status
+                    if status != str(link.get("status") or "").lower():
                         self.update_run_link_status(run_id, status, heartbeat_at=run.get("heartbeat_at"))
             except Exception:
-                pass
+                self.update_run_link_status(run_id, "stale")
+                continue
+            if status in TERMINAL_RUN_STATUSES:
+                continue
             if status in ACTIVE_RUN_STATUSES:
                 link["status"] = status
                 return link

@@ -105,6 +105,15 @@ def test_mentions_create_queued_tasks_and_dispatches_agent_runs(tmp_path, monkey
     bootstrapped = bootstrap.run({}, {})
     company_id = bootstrapped["data"]["company"]["id"]
 
+    def fake_dispatch(envelope, context):
+        return {
+            "status": "queued",
+            "delegate": {"execution_id": "run_" + envelope.target["agent_id"], "status": "queued"},
+            "result": {"status": "queued"},
+        }
+
+    monkeypatch.setattr("domain.company.run_dispatcher.dispatch_input", fake_dispatch)
+
     resolved = mention.run(
         {
             "action": "resolve",

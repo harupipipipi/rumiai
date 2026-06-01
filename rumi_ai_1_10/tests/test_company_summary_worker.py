@@ -25,6 +25,7 @@ def test_scribe_summarizes_thread_task_run_and_company_scopes(tmp_path):
         target_agent_ids=["coding_engineer"],
         thread_id=message["thread_id"],
         message_id=message["message_id"],
+        metadata={"changed_files": ["app.py"], "decisions": ["Patch the bug"]},
     )
     run_store.upsert_run(AgentRun(run_id="run_1", session_key="s", task="work", status="completed", agent_id="coding_engineer"))
     runtime_store.record_agent_run("acme", agent_id="coding_engineer", run_id="run_1", task_id=task["task_id"], thread_id=message["thread_id"])
@@ -40,6 +41,21 @@ def test_scribe_summarizes_thread_task_run_and_company_scopes(tmp_path):
     assert "status=completed" in run_summary["summary"]
     assert "messages=1" in company_summary["summary"]
     assert thread_summary["generated_by"] == "scribe"
+    packet = task_summary["metadata"]["packet"]
+    assert {
+        "decisions",
+        "blockers",
+        "owners",
+        "approvals_needed",
+        "changed_files",
+        "next_actions",
+        "source_message_ids",
+        "source_run_ids",
+    } <= set(packet)
+    assert packet["owners"] == ["coding_engineer"]
+    assert packet["changed_files"] == ["app.py"]
+    assert packet["source_message_ids"] == [message["message_id"]]
+    assert packet["source_run_ids"] == ["run_1"]
     assert runtime_store.get_summary("acme", "thread", message["thread_id"])["dirty"] is False
 
 

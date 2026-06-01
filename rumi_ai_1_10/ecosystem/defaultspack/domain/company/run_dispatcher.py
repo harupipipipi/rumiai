@@ -247,14 +247,32 @@ def _execution_id_from_result(result: dict[str, Any]) -> str:
 def _task_status_from_results(results: list[dict[str, Any]]) -> str:
     if not results:
         return "queued"
-    statuses = [str(result.get("status") or "").lower() for result in results]
-    nested_statuses = [
-        str((result.get("delegate") if isinstance(result.get("delegate"), dict) else {}).get("status") or "").lower()
-        for result in results
-    ]
-    combined = statuses + nested_statuses
-    if any(status in {"waiting_approval", "blocked"} for status in combined):
+    combined = [_status for result in results for _status in _result_statuses(result)]
+    if any(status in {"waiting_approval", "waiting_user_input"} for status in combined):
         return "waiting_approval"
-    if any(status == "error" for status in statuses):
+    if any(status in {"error", "failed", "blocked"} for status in combined):
         return "blocked"
+    if any(status in {"running", "dispatching"} for status in combined):
+        return "running"
+    if combined and all(status in {"ok", "completed", "complete", "done", "success"} for status in combined):
+        return "completed"
+    if any(status in {"queued", "created"} for status in combined):
+        return "queued"
     return "queued"
+
+
+def _result_statuses(result: dict[str, Any]) -> list[str]:
+    statuses: list[str] = []
+    if not isinstance(result, dict):
+        return statuses
+    for value in (result.get("status"),):
+        status = str(value or "").strip().lower()
+        if status:
+            statuses.append(status)
+    for key in ("delegate", "result", "data"):
+        nested = result.get(key)
+        if isinstance(nested, dict):
+            status = str(nested.get("status") or "").strip().lower()
+            if status:
+                statuses.append(status)
+    return statuses

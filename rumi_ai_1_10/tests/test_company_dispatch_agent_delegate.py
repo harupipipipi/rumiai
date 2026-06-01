@@ -49,5 +49,23 @@ def test_dispatch_task_uses_agent_delegate_and_records_run_link(monkeypatch, tmp
     assert "Fix bug" in seen["task"]
     assert "coding_file_read" in seen["tools"]
     assert seen["profile_policy"]["direct_tool_execution"] is False
+    assert result["task"]["status"] == "running"
     assert result["run_links"][0]["run_id"] == "run_123"
     assert runtime_store.list_run_links(company["id"], task_id=task["task_id"])[0]["agent_id"] == "coding_engineer"
+
+
+def test_task_status_from_running_and_completed_delegate_results():
+    from domain.company.run_dispatcher import _task_status_from_results
+
+    assert (
+        _task_status_from_results(
+            [{"status": "ok", "delegate": {"execution_id": "run_1", "status": "running"}, "result": {"status": "running"}}]
+        )
+        == "running"
+    )
+    assert (
+        _task_status_from_results(
+            [{"status": "ok", "delegate": {"execution_id": "run_2", "status": "completed"}, "result": {"status": "completed"}}]
+        )
+        == "completed"
+    )
