@@ -22,6 +22,12 @@ if str(_repo_dir) not in sys.path:
 class TestIsWindowsDetection(unittest.TestCase):
     """IS_WINDOWS フラグのテスト"""
 
+    def tearDown(self):
+        import importlib
+        import core_runtime.compat as compat_mod
+
+        importlib.reload(compat_mod)
+
     def test_is_windows_matches_platform(self):
         from core_runtime.compat import IS_WINDOWS
         expected = sys.platform == "win32"
