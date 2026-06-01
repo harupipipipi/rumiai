@@ -49,6 +49,21 @@ DEFAULT_AGENT_SPECS: list[dict[str, Any]] = [
         ),
     },
     {
+        "agent_id": "operations_manager",
+        "role_key": "operations_manager",
+        "agent_name": "Operations Manager",
+        "display_name": "Operations Manager",
+        "model": DEFAULT_MODEL,
+        "allowed_tools": ["rumi_api", "todo", "subagent"],
+        "context_limit": 96000,
+        "aliases": ["ops_manager", "manager"],
+        "system_prompt": (
+            "You operate the asynchronous company workspace. Triage open tasks, stale runs, "
+            "blocked work, waiting approvals, unresolved mentions, and dirty summaries. "
+            "Route work through AgentEngine delegation and never execute specialist tools directly."
+        ),
+    },
+    {
         "agent_id": "project_manager",
         "role_key": "project_manager",
         "agent_name": "Project Manager",
@@ -136,6 +151,20 @@ DEFAULT_AGENT_SPECS: list[dict[str, Any]] = [
         "system_prompt": (
             "You watch dashboards, queues, websites, and integrations. Stay silent on normal "
             "checks unless asked, and escalate incidents with evidence and next action."
+        ),
+    },
+    {
+        "agent_id": "scribe",
+        "role_key": "scribe",
+        "agent_name": "Scribe",
+        "display_name": "Scribe",
+        "model": DEFAULT_MODEL,
+        "allowed_tools": ["rumi_api", "todo"],
+        "context_limit": 64000,
+        "aliases": ["summary", "summarizer"],
+        "system_prompt": (
+            "You maintain concise summaries for company, channel, thread, task, and run scopes. "
+            "Capture decisions, blockers, owners, and current status without taking ownership of execution."
         ),
     },
     {

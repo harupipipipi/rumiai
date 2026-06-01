@@ -445,6 +445,30 @@
       "description": "Add a company channel message"
     },
     {
+      "method": "GET",
+      "path": "/api/agent/companies/{company_id}/threads",
+      "flow_id": "company_workspace",
+      "description": "List company threads"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/companies/{company_id}/threads",
+      "flow_id": "company_workspace",
+      "description": "Create a company thread"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent/companies/{company_id}/threads/{thread_id}",
+      "flow_id": "company_workspace",
+      "description": "Get a company thread"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/companies/{company_id}/threads/{thread_id}/messages",
+      "flow_id": "company_workspace",
+      "description": "Post a company thread message"
+    },
+    {
       "method": "POST",
       "path": "/api/agent/companies/{company_id}/mention",
       "flow_id": "company_workspace",
@@ -473,6 +497,48 @@
       "path": "/api/agent/companies/{company_id}/tasks/{task_id}",
       "flow_id": "company_workspace",
       "description": "Update a company task"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/companies/{company_id}/tasks/{task_id}/dispatch",
+      "flow_id": "company_workspace",
+      "description": "Dispatch a company task through AgentEngine"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent/companies/{company_id}/runs",
+      "flow_id": "company_workspace",
+      "description": "List company run links"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent/companies/{company_id}/agents/{agent_id}/inbox",
+      "flow_id": "company_workspace",
+      "description": "List a company agent inbox"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/companies/{company_id}/agents/{agent_id}/inbox/{inbox_id}/consume",
+      "flow_id": "company_workspace",
+      "description": "Consume a company agent inbox item"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/companies/{company_id}/supervisor/tick",
+      "flow_id": "company_workspace",
+      "description": "Run an operations manager supervisor tick"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent/companies/{company_id}/summaries",
+      "flow_id": "company_workspace",
+      "description": "List company summaries"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/companies/{company_id}/summaries/refresh",
+      "flow_id": "company_workspace",
+      "description": "Refresh a company summary"
     },
     {
       "method": "GET",

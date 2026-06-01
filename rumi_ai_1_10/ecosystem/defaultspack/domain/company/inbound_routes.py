@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from .mention import CompanyMentionService
+from .message_router import CompanySlackRuntime
 from .models import DEFAULT_CHANNEL_ID
 from .store import CompanyStore
 
@@ -39,7 +39,7 @@ class CompanyInboundRouteService:
             if route is None or route.get("enabled") is False:
                 return None
         target_channel_id = channel_id or (route or {}).get("channel_id") or DEFAULT_CHANNEL_ID
-        return CompanyMentionService(self.store).create_message_task(
+        return CompanySlackRuntime(company_store=self.store).post_message(
             company_id,
             content=content,
             sender_id=sender_id,

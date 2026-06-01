@@ -2,12 +2,14 @@ from __future__ import annotations
 
 from typing import Any
 
+from .runtime_store import CompanyRuntimeStore
 from .store import CompanyStore
 
 
 class CompanyTaskStore:
-    def __init__(self, store: CompanyStore | None = None) -> None:
+    def __init__(self, store: CompanyStore | None = None, runtime_store: CompanyRuntimeStore | None = None) -> None:
         self.store = store or CompanyStore()
+        self.runtime_store = runtime_store or CompanyRuntimeStore()
 
     def create(
         self,
@@ -19,7 +21,9 @@ class CompanyTaskStore:
         source: str = "manual",
         metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any] | None:
-        return self.store.create_task(
+        if self.store.get_company(company_id) is None:
+            return None
+        return self.runtime_store.create_task(
             company_id,
             title=title,
             description=description,
@@ -37,7 +41,9 @@ class CompanyTaskStore:
         limit: int = 50,
         offset: int = 0,
     ) -> tuple[list[dict[str, Any]], int] | None:
-        return self.store.list_tasks(
+        if self.store.get_company(company_id) is None:
+            return None
+        return self.runtime_store.list_tasks(
             company_id,
             status=status,
             target_agent_id=target_agent_id,
@@ -46,7 +52,11 @@ class CompanyTaskStore:
         )
 
     def get(self, company_id: str, task_id: str) -> dict[str, Any] | None:
-        return self.store.get_task(company_id, task_id)
+        if self.store.get_company(company_id) is None:
+            return None
+        return self.runtime_store.get_task(task_id, company_id=company_id)
 
     def update(self, company_id: str, task_id: str, updates: dict[str, Any]) -> dict[str, Any] | None:
-        return self.store.update_task(company_id, task_id, updates)
+        if self.store.get_company(company_id) is None:
+            return None
+        return self.runtime_store.update_task(task_id, updates, company_id=company_id)

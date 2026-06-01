@@ -15,6 +15,7 @@ def _reset_defaultspack_singletons():
     from domain.agent.org_manager import OrgManager
     from domain.agent.scheduler import Scheduler
     from domain.chat.store import ChatStore
+    from domain.company.runtime_store import CompanyRuntimeStore
     from domain.tool.registry import ToolRegistry
 
     scheduler = Scheduler._instance
@@ -24,6 +25,7 @@ def _reset_defaultspack_singletons():
     Scheduler._instance = None
     OrgManager._instance = None
     ChatStore._instance = None
+    CompanyRuntimeStore._instance = None
     ToolRegistry._instance = None
 
 
@@ -51,7 +53,7 @@ def test_operations_company_bootstrap_creates_org_conversation_and_heartbeat(tmp
     status = OperationsCompanyRuntime().bootstrap(start_nonstop=True, heartbeat_minutes=30, model="stub/default")
 
     assert status["bootstrapped"] is True
-    assert status["org"]["member_count"] == 7
+    assert status["org"]["member_count"] == 9
     assert status["conversation_id"]
     conversation = ChatStore().get_conversation(status["conversation_id"])
     assert conversation["conversation_kind"] == "operations_company"

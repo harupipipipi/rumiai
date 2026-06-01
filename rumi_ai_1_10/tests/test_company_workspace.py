@@ -13,8 +13,12 @@ sys.path.insert(0, str(DEFAULTSPACK_ROOT))
 
 
 def _reset_company_store():
+    from domain.agent_runtime.run_store import AgentRunStore
+    from domain.company.runtime_store import CompanyRuntimeStore
     from domain.company.store import CompanyStore
 
+    AgentRunStore._instance = None
+    CompanyRuntimeStore._instance = None
     CompanyStore._instance = None
 
 
@@ -22,6 +26,7 @@ def _reset_defaultspack_singletons():
     from domain.agent.org_manager import OrgManager
     from domain.agent.scheduler import Scheduler
     from domain.chat.store import ChatStore
+    from domain.company.runtime_store import CompanyRuntimeStore
     from domain.company.store import CompanyStore
 
     scheduler = Scheduler._instance
@@ -31,6 +36,7 @@ def _reset_defaultspack_singletons():
     Scheduler._instance = None
     OrgManager._instance = None
     ChatStore._instance = None
+    CompanyRuntimeStore._instance = None
     CompanyStore._instance = None
 
 
@@ -89,14 +95,24 @@ def test_company_blocks_return_ok_error_envelopes(tmp_path, monkeypatch):
     assert deleted["data"]["deleted"] is True
 
 
-def test_mentions_create_queued_tasks_and_dispatch_is_queue_only(tmp_path, monkeypatch):
+def test_mentions_create_queued_tasks_and_dispatches_agent_runs(tmp_path, monkeypatch):
     from blocks.company import bootstrap, dispatch, mention, tasks
 
     monkeypatch.setenv("RUMI_DEFAULTSPACK_COMPANY_STORE_PATH", str(tmp_path / "companies"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_COMPANY_RUNTIME_DB_PATH", str(tmp_path / "company_runtime.db"))
     _reset_company_store()
 
     bootstrapped = bootstrap.run({}, {})
     company_id = bootstrapped["data"]["company"]["id"]
+
+    def fake_dispatch(envelope, context):
+        return {
+            "status": "queued",
+            "delegate": {"execution_id": "run_" + envelope.target["agent_id"], "status": "queued"},
+            "result": {"status": "queued"},
+        }
+
+    monkeypatch.setattr("domain.company.run_dispatcher.dispatch_input", fake_dispatch)
 
     resolved = mention.run(
         {
@@ -123,8 +139,9 @@ def test_mentions_create_queued_tasks_and_dispatch_is_queue_only(tmp_path, monke
     task = created["data"]["task"]
     assert task["status"] == "queued"
     assert task["source"] == "mention"
-    assert task["target_agent_ids"] == ["project_manager", "coding_engineer", "reviewer"]
-    assert created["data"]["message"]["task_ids"] == [task["id"]]
+    assert task["target_agent_ids"] == ["project_manager"]
+    assert created["data"]["message"]["task_ids"] == [route["task_id"] for route in created["data"]["routes"]]
+    assert {route["agent_id"] for route in created["data"]["routes"]} == {"project_manager", "coding_engineer", "reviewer"}
 
     dispatched = dispatch.run(
         {
@@ -136,20 +153,22 @@ def test_mentions_create_queued_tasks_and_dispatch_is_queue_only(tmp_path, monke
         {},
     )
     assert dispatched["data"]["dispatch"]["status"] == "queued"
-    assert dispatched["data"]["dispatch"]["policy"]["mode"] == "local_queue_only"
+    assert dispatched["data"]["dispatch"]["policy"]["mode"] == "agent_delegate"
     assert dispatched["data"]["dispatch"]["policy"]["direct_tool_execution"] is False
+    assert dispatched["data"]["run_links"]
 
     listed = tasks.run({"company_id": company_id, "status": "queued"}, {})
-    assert listed["data"]["total"] == 1
+    assert listed["data"]["total"] >= 3
 
     all_mentions = mention.run({"action": "resolve", "company_id": company_id, "content": "@all"}, {})
-    assert len(all_mentions["data"]["resolved_agent_ids"]) == 7
+    assert len(all_mentions["data"]["resolved_agent_ids"]) == 9
 
 
 def test_inbound_routes_ingest_message_and_queue_task(tmp_path, monkeypatch):
     from blocks.company import bootstrap, inbound_routes, messages
 
     monkeypatch.setenv("RUMI_DEFAULTSPACK_COMPANY_STORE_PATH", str(tmp_path / "companies"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_COMPANY_RUNTIME_DB_PATH", str(tmp_path / "company_runtime.db"))
     _reset_company_store()
 
     company_id = bootstrap.run({}, {})["data"]["company"]["id"]

@@ -22,7 +22,7 @@ Start here when navigating defaultspack docs. The canonical implementation is
 | UI and layout | [ui_and_layout.md](ui_and_layout.md) |
 | Chat module | [chat.md](chat.md) |
 | Agent runtime | [agent_runtime.md](agent_runtime.md) |
-| Multi-agent behavior | [multi-agent.md](multi-agent.md) |
+| Company workspace runtime | [multi-agent.md](multi-agent.md) |
 | Scheduler | [scheduler.md](scheduler.md) |
 
 ## Runtime Primitives
@@ -49,4 +49,3 @@ Start here when navigating defaultspack docs. The canonical implementation is
 | Gateway | [gateway.md](gateway.md) |
 | Transport | [transport.md](transport.md) |
 | Capability dependency resolution | [capability/dependency-resolution.md](capability/dependency-resolution.md) |
-

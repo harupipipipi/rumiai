@@ -85,7 +85,8 @@ handler は薄い入口であり、バリデーションと domain 呼び出し�
 
 - **`domain/chat/store.py`** — `ChatStore`: 会話とメッセージのインメモリ CRUD。シングルトン。
 - **`domain/agent/engine.py`** — `AgentEngine`: エージェントの実行ループ（think → tool_call → approve → response）。
-- **`domain/agent/multi.py`** — `MultiAgentOrchestrator`: マルチエージェントのオーケストレーション。
+- **`domain/company/message_router.py`** — `CompanySlackRuntime`: channel/thread/message/mention/task based company routing.
+- **`domain/agent/multi.py`** — legacy compatibility only.
 - **`domain/tool/registry.py`** — `ToolRegistry`: ツール定義の登録・管理。シングルトン。インメモリ + `user_data/shared/tools/` への永続化。
 - **`domain/prompt/manager.py`** — `PromptManager`: プロンプトの CRUD。インメモリ + `user_data/shared/prompts/` への永続化。
 - **`domain/prompt/template.py`** — `PromptTemplate`: passive prompt template representation.

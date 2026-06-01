@@ -452,11 +452,11 @@ OpenAI 互換エンドポイント。メッセージを送信して AI レスポ
 
 ---
 
-## Multi-Agent — マルチエージェント実行
+## Company Workspace Compatibility — legacy multi-agent endpoints
 
 ### POST /api/agent/multi/execute
 
-マルチエージェントセッションを開始する。内部で `blocks.agent.multi_execute` を呼び出す。
+互換性エンドポイント。内部では `CompanySlackRuntime` に会社メッセージを投稿し、mentions/tasks/AgentEngine runs として非同期にルーティングする。レスポンスには `deprecation_warning` が含まれる。
 
 **Request Body:**
 
@@ -464,29 +464,29 @@ OpenAI 互換エンドポイント。メッセージを送信して AI レスポ
 |---|---|---|---|
 | `task` | 必須 | `string` | タスクの記述 |
 | `agents` | 必須 | `array[object]` | エージェント定義のリスト（最低1つ）。各要素は `{name, role, model?, system_prompt?, tools?}` |
-| `orchestration` | 任意 | `string` | `"round_robin"`, `"directed"`, `"free"` のいずれか。デフォルト `"round_robin"` |
-| `max_turns` | 任意 | `int` | 最大ターン数。デフォルト `10`。1以上の正の整数 |
+| `company_id` | 任意 | `string` | ルーティング先 company workspace。未指定時は default company |
 
 **Response (`data`):**
 
 | フィールド | 型 | 説明 |
 |---|---|---|
-| `session_id` | `string` | セッション ID (`multi_` プレフィックス) |
-| `status` | `string` | セッション状態（`"completed"`, `"error"` 等） |
-| `turn_results` | `array` | 各ターンの結果 `[{agent, type, content}, ...]` |
-| `result` | `object` | セッション詳細オブジェクト |
+| `session_id` | `string` | 互換 session id。実体は company thread id |
+| `status` | `string` | ルーティング状態 |
+| `turn_results` | `array` | 互換用の空配列 |
+| `result` | `object` | CompanySlackRuntime routing result |
+| `deprecation_warning` | `string` | 互換 wrapper 告知 |
 
 **エラーケース:**
 
 | コード | 説明 |
 |---|---|
-| `ERROR` | `task` が未指定、`agents` が未指定または空、エージェント定義の `name`/`role` が未指定、`orchestration` が不正値、`max_turns` が正の整数でない |
+| `ERROR` | `task` が未指定、または company workspace routing に失敗 |
 
 ---
 
 ### GET /api/agent/multi/{id}/status
 
-マルチエージェントセッションの状態を取得する。内部で `blocks.agent.multi_status` を呼び出す。パスパラメータ `{id}` が `session_id` として注入される。
+互換 session id に対応する company thread の messages/tasks を取得する。パスパラメータ `{id}` が `session_id` として注入される。
 
 **パスパラメータ:**
 
@@ -494,19 +494,19 @@ OpenAI 互換エンドポイント。メッセージを送信して AI レスポ
 |---|---|---|---|
 | `id` | 必須 | `string` | session_id |
 
-**Response (`data`):** セッション状態オブジェクト（`session.to_dict()` の結果）
+**Response (`data`):** company thread status, messages, tasks, and compatibility warning.
 
 **エラーケース:**
 
 | コード | 説明 |
 |---|---|
-| `ERROR` | `session_id` が未指定またはセッションが存在しない |
+| `ERROR` | `session_id` が未指定 |
 
 ---
 
 ### POST /api/agent/multi/{id}/message
 
-実行中のマルチエージェントセッションに外部からメッセージを投入する。内部で `blocks.agent.multi_message` を呼び出す。パスパラメータ `{id}` が `session_id` として注入される。
+互換 session thread にメッセージを投稿する。mention は active run への runtime instruction、または AgentEngine delegated task として処理される。
 
 **パスパラメータ:**
 

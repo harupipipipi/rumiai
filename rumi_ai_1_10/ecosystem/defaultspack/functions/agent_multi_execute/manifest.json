@@ -1,6 +1,6 @@
 {
   "function_id": "agent_multi_execute",
-  "description": "Start a multi-agent execution.",
+  "description": "Compatibility wrapper that routes to CompanySlackRuntime.",
   "tags": [
     "agent"
   ],

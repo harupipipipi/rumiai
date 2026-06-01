@@ -167,8 +167,9 @@ rumiai_defaults/
 │   └── dev/                開発ツール handler（inspect, replay 等）
 ├── domain/                 ビジネスロジック層
 │   ├── chat/               ChatStore, message_converter, message_builder, exporter
-│   ├── agent/              AgentEngine, AgentExecution, MultiAgentOrchestrator,
-│   │                       AgentDefinition, InstructionQueue
+│   ├── agent/              AgentEngine, AgentExecution, AgentDefinition, InstructionQueue
+│   ├── company/            CompanySlackRuntime, runtime SQLite store, routing,
+│   │                       dispatch, supervisor, summaries
 │   ├── ai_client/          AIClient（プロバイダー抽象化）
 │   ├── tool/               ToolRegistry, builder
 │   ├── prompt/             PromptManager, PromptTemplate, renderer

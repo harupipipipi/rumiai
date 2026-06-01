@@ -15,7 +15,7 @@
           {"id": "operations.bootstrap", "label": "Start 24/7", "icon": "play", "method": "POST", "endpoint": "/api/agent/company/bootstrap", "payload": {"start_nonstop": true}}
         ],
         "notes": [
-          "Client Manager talks with the user while PM, coding, research, review, monitor, and scheduler roles coordinate internally.",
+          "Client Manager talks with the user while operations, PM, coding, research, review, monitor, scribe, and scheduler roles coordinate internally.",
           "Tools and settings are shared with the runtime, while role policies control allowlists and denylists."
         ]
       }

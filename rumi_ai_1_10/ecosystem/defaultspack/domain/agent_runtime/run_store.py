@@ -5,6 +5,7 @@ import os
 import sqlite3
 import threading
 from pathlib import Path
+from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable, Optional
 
 from core_runtime.runtime_audit_helpers import redact_sensitive
@@ -12,6 +13,20 @@ from core_runtime.runtime_events import RuntimeEvent, utc_now
 from core_runtime.runtime_state import run_migrations, sqlite_wal_connection
 
 from .models import AgentRun, RunStatus, json_dumps, json_loads
+
+
+def _normalize_run_ids(run_ids: Iterable[str] | str | None) -> list[str] | None:
+    if run_ids is None:
+        return None
+    values = [run_ids] if isinstance(run_ids, str) else list(run_ids)
+    result: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        run_id = str(value).strip()
+        if run_id and run_id not in seen:
+            seen.add(run_id)
+            result.append(run_id)
+    return result
 
 
 def default_runtime_dir() -> Path:
@@ -57,7 +72,7 @@ class AgentRunStore:
         return conn
 
     def _migrate(self, conn: sqlite3.Connection) -> None:
-        run_migrations(conn, [(1, self._migration_1)], table_name="agent_runtime_migrations")
+        run_migrations(conn, [(1, self._migration_1), (2, self._migration_2)], table_name="agent_runtime_migrations")
 
     @staticmethod
     def _migration_1(conn: sqlite3.Connection) -> None:
@@ -178,6 +193,15 @@ class AgentRunStore:
         except sqlite3.OperationalError:
             pass
 
+    @staticmethod
+    def _migration_2(conn: sqlite3.Connection) -> None:
+        conn.executescript(
+            """
+            CREATE INDEX IF NOT EXISTS idx_agent_runs_heartbeat ON agent_runs(status, heartbeat_at);
+            CREATE INDEX IF NOT EXISTS idx_agent_approvals_status ON agent_approvals(status, requested_at);
+            """
+        )
+
     def upsert_run(self, run: AgentRun) -> None:
         now = utc_now()
         created_at = run.created_at or now
@@ -254,15 +278,119 @@ class AgentRunStore:
             data[key] = json_loads(data.get(key), {} if key.endswith("_json") else None)
         return data
 
-    def list_runs(self, *, status: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
+    def list_runs(self, *, status: str | None = None, run_ids: Iterable[str] | str | None = None, limit: int = 100) -> list[dict[str, Any]]:
+        clean_run_ids = _normalize_run_ids(run_ids)
+        if clean_run_ids == []:
+            return []
         sql = "SELECT * FROM agent_runs"
         params: list[Any] = []
         if status:
             sql += " WHERE status = ?"
             params.append(status)
+        if clean_run_ids is not None:
+            sql += " AND " if status else " WHERE "
+            sql += "run_id IN (" + ",".join("?" for _ in clean_run_ids) + ")"
+            params.extend(clean_run_ids)
         sql += " ORDER BY updated_at DESC LIMIT ?"
         params.append(limit)
         rows = self.conn.execute(sql, params).fetchall()
+        return [self.get_run(row["run_id"]) for row in rows if row["run_id"]]
+
+    def list_active(self, *, agent_id: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
+        statuses = ("created", "queued", "running", "waiting_approval", "waiting_user_input", "paused", "resumable")
+        placeholders = ",".join("?" for _ in statuses)
+        sql = f"SELECT run_id FROM agent_runs WHERE status IN ({placeholders})"
+        params: list[Any] = list(statuses)
+        if agent_id:
+            sql += " AND agent_id = ?"
+            params.append(str(agent_id))
+        sql += " ORDER BY updated_at DESC LIMIT ?"
+        params.append(int(limit))
+        rows = self.conn.execute(sql, params).fetchall()
+        return [self.get_run(row["run_id"]) for row in rows if row["run_id"]]
+
+    def touch(
+        self,
+        run_id: str,
+        *,
+        status: str | None = None,
+        heartbeat_at: str | None = None,
+        event_type: str | None = None,
+        payload: dict[str, Any] | None = None,
+    ) -> None:
+        now = utc_now()
+        heartbeat = heartbeat_at or now
+        assignments = ["heartbeat_at = ?", "updated_at = ?"]
+        params: list[Any] = [heartbeat, now]
+        if status:
+            assignments.insert(0, "status = ?")
+            params.insert(0, str(status))
+        params.append(str(run_id))
+        with self.conn:
+            self.conn.execute(
+                "UPDATE agent_runs SET " + ", ".join(assignments) + " WHERE run_id = ?",
+                params,
+            )
+        if event_type:
+            self.add_event(run_id, event_type, payload or {"status": status, "heartbeat_at": heartbeat})
+
+    def touch_heartbeat(self, run_id: str, *, event_type: str = "heartbeat", payload: dict[str, Any] | None = None) -> None:
+        self.touch(run_id, event_type=event_type, payload=payload)
+
+    def list_stale(
+        self,
+        *,
+        stale_after_seconds: int = 600,
+        run_ids: Iterable[str] | str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        clean_run_ids = _normalize_run_ids(run_ids)
+        if clean_run_ids == []:
+            return []
+        cutoff = (datetime.now(timezone.utc) - timedelta(seconds=max(1, int(stale_after_seconds)))).isoformat().replace("+00:00", "Z")
+        statuses = ("running", "queued", "waiting_approval", "waiting_user_input", "paused", "resumable")
+        placeholders = ",".join("?" for _ in statuses)
+        run_filter = ""
+        params: list[Any] = [*statuses, cutoff]
+        if clean_run_ids is not None:
+            run_filter = " AND run_id IN (" + ",".join("?" for _ in clean_run_ids) + ")"
+            params.extend(clean_run_ids)
+        params.append(int(limit))
+        rows = self.conn.execute(
+            f"""
+            SELECT run_id FROM agent_runs
+            WHERE status IN ({placeholders})
+              AND COALESCE(heartbeat_at, updated_at, created_at) < ?
+              {run_filter}
+            ORDER BY COALESCE(heartbeat_at, updated_at, created_at) ASC
+            LIMIT ?
+            """,
+            params,
+        ).fetchall()
+        return [self.get_run(row["run_id"]) for row in rows if row["run_id"]]
+
+    def list_waiting_approval(self, *, run_ids: Iterable[str] | str | None = None, limit: int = 100) -> list[dict[str, Any]]:
+        clean_run_ids = _normalize_run_ids(run_ids)
+        if clean_run_ids == []:
+            return []
+        run_filter = ""
+        params: list[Any] = []
+        if clean_run_ids is not None:
+            run_filter = " AND r.run_id IN (" + ",".join("?" for _ in clean_run_ids) + ")"
+            params.extend(clean_run_ids)
+        params.append(int(limit))
+        rows = self.conn.execute(
+            f"""
+            SELECT DISTINCT r.run_id
+            FROM agent_runs r
+            LEFT JOIN agent_approvals a ON a.run_id = r.run_id
+            WHERE (r.status = 'waiting_approval' OR a.status = 'pending')
+            {run_filter}
+            ORDER BY r.updated_at DESC
+            LIMIT ?
+            """,
+            params,
+        ).fetchall()
         return [self.get_run(row["run_id"]) for row in rows if row["run_id"]]
 
     def update_status(
@@ -279,10 +407,10 @@ class AgentRunStore:
             self.conn.execute(
                 """
                 UPDATE agent_runs
-                SET status = ?, error = ?, result_json = ?, completed_at = COALESCE(?, completed_at), updated_at = ?
+                SET status = ?, error = ?, result_json = ?, completed_at = COALESCE(?, completed_at), updated_at = ?, heartbeat_at = ?
                 WHERE run_id = ?
                 """,
-                (status, error, json_dumps(result), completed_at, utc_now(), run_id),
+                (status, error, json_dumps(result), completed_at, utc_now(), utc_now(), run_id),
             )
 
     def replace_steps(self, run_id: str, steps: Iterable[Any]) -> None:

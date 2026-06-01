@@ -163,9 +163,11 @@ metadata:
     compression: adaptive
   organization_roles:
     - client_manager
+    - operations_manager
     - project_manager
     - coding_engineer
     - research_specialist
     - reviewer
     - operations_monitor
+    - scribe
     - scheduler
