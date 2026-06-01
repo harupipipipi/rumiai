@@ -340,6 +340,8 @@ class ToolExecutor:
         token = str(context.get("_tool_server_approval_token") or "").strip()
         operation = str(context.get("_tool_server_approval_operation") or "").strip()
         args_hash = str(context.get("_tool_server_approval_args_hash") or "").strip()
+        pack_id = str(context.get("_tool_server_approval_pack_id") or "").strip()
+        conversation_id = str(context.get("_tool_server_approval_conversation_id") or "").strip()
         if not token or not operation or not args_hash:
             return None
         verification = _approval_module().verify_execution_token(
@@ -347,6 +349,8 @@ class ToolExecutor:
             operation,
             args_hash,
             consume=True,
+            pack_id=pack_id,
+            conversation_id=conversation_id,
         )
         if verification.valid:
             return None
@@ -1589,11 +1593,15 @@ def _context_with_tool_approval_token(context, tool_def, arguments, *extra_looku
                 conversation_id="",
             )
     if verification.valid:
+        pack_id = str(next_context.get("owner_pack") or next_context.get("pack_id") or next_context.get("_source_pack_id") or "defaultspack")
+        conversation_id = str(next_context.get("conversation_id") or next_context.get("conversation_turn_id") or "")
         next_context["_tool_server_approved"] = True
         next_context["_tool_server_approval_token_valid"] = True
         next_context["_tool_server_approval_token"] = token
         next_context["_tool_server_approval_operation"] = operation
         next_context["_tool_server_approval_args_hash"] = args_hash
+        next_context["_tool_server_approval_pack_id"] = pack_id
+        next_context["_tool_server_approval_conversation_id"] = conversation_id
         return next_context, None
     if verification.code in _STALE_APPROVAL_TOKEN_CODES:
         return next_context, _approval_required_tool_response(tool_def, arguments, next_context)

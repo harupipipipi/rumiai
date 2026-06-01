@@ -347,6 +347,7 @@ def test_tool_executor_pack_not_approved_does_not_consume_approval_token(monkeyp
         "tool.coding_file_patch",
         approval.hash_arguments(args),
         consume=False,
+        pack_id="defaultspack",
     )
     assert verification.valid is True
 
@@ -393,6 +394,7 @@ def test_tool_executor_dev_auto_approve_retries_before_consuming_approval_token(
         "tool.coding_file_patch",
         approval.hash_arguments(args),
         consume=False,
+        pack_id="defaultspack",
     )
     assert verification.valid is False
     assert verification.code == "APPROVAL_TOKEN_USED"
