@@ -3979,7 +3979,7 @@ def test_fallback_mimo_company_routes_precede_generic_agent_status():
         return {"status": "ok"}
 
     server._invoke_fallback_block = fake_invoke
-    handler, params, _, path_inject = server._match_route("GET", "/api/agent/mimo-company/status")
+    handler, params, _, path_inject, _ = server._match_route("GET", "/api/agent/mimo-company/status")
 
     assert params == {}
     assert path_inject == {}
