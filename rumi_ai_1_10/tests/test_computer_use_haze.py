@@ -391,3 +391,30 @@ def test_browser_computer_does_not_wrap_screenshot_with_haze(tmp_path, monkeypat
     )
 
     assert result["action"] == "computer.screenshot"
+
+
+def test_browser_computer_screenshot_uses_darwin_timeout(tmp_path, monkeypatch):
+    from ecosystem.rumi_default_tools_pack.domain.tool import browser_computer
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+
+    calls: list[dict[str, object]] = []
+
+    def fake_run(args, check=False, timeout=None, **kwargs):
+        calls.append({"args": args, "check": check, "timeout": timeout, "kwargs": kwargs})
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(browser_computer.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(browser_computer.subprocess, "run", fake_run)
+
+    screenshot_path = tmp_path / "screenshot.png"
+    result = BrowserComputerController(artifact_root=tmp_path)._capture_screenshot(screenshot_path, {})
+
+    assert result == {"platform": "Darwin", "target_window": None}
+    assert calls == [
+        {
+            "args": ["screencapture", "-x", str(screenshot_path)],
+            "check": True,
+            "timeout": browser_computer._DARWIN_SCREENSHOT_TIMEOUT_SECONDS,
+            "kwargs": {},
+        }
+    ]
