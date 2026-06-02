@@ -20,15 +20,14 @@
     "streaming": true,
     "tool_calls": true,
     "reasoning": true,
+    "vision": true,
     "openai_compatible": true
   },
   "provider_metadata": {
     "display_name": "Xiaomi MiMo Token Plan CN",
     "kind": "cloud",
     "env_vars": [
-      "XIAOMI_MIMO_TOKEN_PLAN_CN_API_KEY",
-      "XIAOMI_MIMO_TOKEN_PLAN_API_KEY",
-      "MIMO_API_KEY"
+      "XIAOMI_MIMO_TOKEN_PLAN_CN_API_KEY"
     ],
     "base_url_envs": ["XIAOMI_MIMO_TOKEN_PLAN_CN_BASE_URL"],
     "catalog_only": false,
@@ -40,9 +39,10 @@
       "coding": "mimo-v2.5-pro",
       "agent": "mimo-v2.5-pro",
       "reasoning": "mimo-v2.5-pro",
-      "fast": "mimo-v2-flash"
+      "fast": "mimo-v2.5",
+      "vision": "mimo-v2-omni"
     },
-    "capabilities": ["chat", "streaming", "tool_calls", "reasoning", "openai_compatible"]
+    "capabilities": ["chat", "streaming", "tool_calls", "reasoning", "vision", "openai_compatible"]
   },
   "provider_manifest": {
     "id": "xiaomi-token-plan-cn",
@@ -54,9 +54,7 @@
     "adapter": "python_entrypoint",
     "entrypoint": "domain.ai_client.providers.xiaomi_mimo_token_plan_provider:XiaomiMimoTokenPlanCnProvider",
     "api_key_env": [
-      "XIAOMI_MIMO_TOKEN_PLAN_CN_API_KEY",
-      "XIAOMI_MIMO_TOKEN_PLAN_API_KEY",
-      "MIMO_API_KEY"
+      "XIAOMI_MIMO_TOKEN_PLAN_CN_API_KEY"
     ],
     "base_url_env": "XIAOMI_MIMO_TOKEN_PLAN_CN_BASE_URL",
     "credential_required": true,
@@ -69,12 +67,13 @@
       "coding": "mimo-v2.5-pro",
       "agent": "mimo-v2.5-pro",
       "reasoning": "mimo-v2.5-pro",
-      "fast": "mimo-v2-flash"
+      "fast": "mimo-v2.5",
+      "vision": "mimo-v2-omni"
     },
     "capabilities": {
       "native_tool_calling": true,
       "structured_outputs": false,
-      "vision": false,
+      "vision": true,
       "embeddings": false,
       "streaming": true,
       "reasoning": true

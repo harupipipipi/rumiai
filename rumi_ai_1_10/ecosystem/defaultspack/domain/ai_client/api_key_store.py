@@ -34,13 +34,9 @@ PROVIDER_SECRET_KEYS: Dict[str, List[str]] = {
     "xai": ["XAI_API_KEY"],
     "xiaomi-token-plan-ams": [
         "XIAOMI_MIMO_TOKEN_PLAN_AMS_API_KEY",
-        "XIAOMI_MIMO_TOKEN_PLAN_API_KEY",
-        "MIMO_API_KEY",
     ],
     "xiaomi-token-plan-cn": [
         "XIAOMI_MIMO_TOKEN_PLAN_CN_API_KEY",
-        "XIAOMI_MIMO_TOKEN_PLAN_API_KEY",
-        "MIMO_API_KEY",
     ],
     "xiaomi-token-plan-sgp": [
         "XIAOMI_MIMO_TOKEN_PLAN_SGP_API_KEY",

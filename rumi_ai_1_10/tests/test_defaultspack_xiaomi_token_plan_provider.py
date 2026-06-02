@@ -116,8 +116,59 @@ def test_xiaomi_token_plan_models_are_tool_capable(monkeypatch):
     models = {item["id"]: item for item in XiaomiMimoTokenPlanSgpProvider().list_models()}
 
     pro = models["xiaomi-token-plan-sgp/mimo-v2.5-pro"]
+    fast = models["xiaomi-token-plan-sgp/mimo-v2.5"]
+    omni = models["xiaomi-token-plan-sgp/mimo-v2-omni"]
 
     assert pro["type"] == "reasoning"
     assert pro["defaults"]["chat"] is True
     assert pro["capabilities"]["tool_calls"] is True
     assert pro["metadata"]["tool_call_type"] == "openai"
+    assert fast["defaults"]["fast"] is True
+    assert omni["defaults"]["vision"] is True
+    assert omni["capabilities"]["vision"] is True
+    assert omni["metadata"]["vision_verified"] is True
+    assert "xiaomi-token-plan-sgp/mimo-v2-flash" not in models
+
+
+def test_xiaomi_token_plan_rejects_removed_flash_model(monkeypatch):
+    from domain.ai_client.providers.xiaomi_mimo_token_plan_provider import XiaomiMimoTokenPlanSgpProvider
+
+    monkeypatch.setenv("XIAOMI_MIMO_TOKEN_PLAN_SGP_API_KEY", "test-token")
+    provider = XiaomiMimoTokenPlanSgpProvider()
+
+    try:
+        provider.complete("mimo-v2-flash", [{"role": "user", "content": "hello"}], [], {})
+    except RuntimeError as exc:
+        assert "unsupported model" in str(exc)
+        assert "mimo-v2-omni" in str(exc)
+    else:
+        raise AssertionError("mimo-v2-flash should not be advertised or callable")
+
+
+def test_xiaomi_token_plan_generic_key_registers_sgp_only(monkeypatch):
+    from domain.ai_client.client import AIClient
+    from domain.ai_client.providers import detect_available_providers
+
+    for env_name in (
+        "XIAOMI_MIMO_TOKEN_PLAN_AMS_API_KEY",
+        "XIAOMI_MIMO_TOKEN_PLAN_CN_API_KEY",
+        "XIAOMI_MIMO_TOKEN_PLAN_SGP_API_KEY",
+        "XIAOMI_MIMO_TOKEN_PLAN_API_KEY",
+        "MIMO_API_KEY",
+    ):
+        monkeypatch.delenv(env_name, raising=False)
+    monkeypatch.setenv("MIMO_API_KEY", "test-token")
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_ENABLE_CLOUD_PROVIDERS", "1")
+    monkeypatch.setattr(AIClient, "_instance", None)
+
+    token_plan_providers = {
+        provider_id
+        for provider_id in detect_available_providers()
+        if provider_id.startswith("xiaomi-token-plan")
+    }
+    client = AIClient()
+    provider, model_name = client.resolve_provider("mimo-v2.5-pro")
+
+    assert token_plan_providers == {"xiaomi-token-plan-sgp"}
+    assert provider.provider_id == "xiaomi-token-plan-sgp"
+    assert model_name == "mimo-v2.5-pro"
