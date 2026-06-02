@@ -18,6 +18,151 @@ body {
   overflow: hidden; /* Prevent body scroll, handle inside panes */
 }
 
+/* ----------------------------------
+   Luxe ambient layer
+   A subtle, theme-respecting backdrop that adds depth without competing with content.
+   Honors prefers-reduced-motion and collapses to a flat surface when disabled.
+   ---------------------------------- */
+.rumi-ambient {
+  position: relative;
+  isolation: isolate;
+}
+
+.rumi-ambient::before,
+.rumi-ambient::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  border-radius: inherit;
+}
+
+.rumi-ambient::before {
+  background:
+    radial-gradient(60% 80% at 8% 0%, rgba(99, 102, 241, 0.18), transparent 60%),
+    radial-gradient(50% 70% at 100% 12%, rgba(16, 185, 129, 0.10), transparent 60%);
+  opacity: 0.85;
+}
+
+.rumi-ambient::after {
+  background:
+    radial-gradient(40% 50% at 50% 100%, rgba(244, 244, 245, 0.05), transparent 60%);
+  opacity: 0.6;
+}
+
+.rumi-ambient-luxe {
+  border: 1px solid rgba(244, 244, 245, 0.06);
+  background:
+    linear-gradient(180deg, rgba(24, 24, 27, 0.78) 0%, rgba(9, 9, 11, 0.86) 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.05),
+    0 18px 56px rgba(0, 0, 0, 0.32);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+
+.rumi-ambient-luxe:hover {
+  border-color: rgba(244, 244, 245, 0.10);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    0 24px 72px rgba(0, 0, 0, 0.42);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .rumi-ambient::before {
+    transition: opacity 480ms cubic-bezier(0.2, 0.82, 0.2, 1);
+  }
+  .rumi-ambient-luxe {
+    transition:
+      border-color 220ms ease,
+      box-shadow 260ms ease;
+  }
+}
+
+/* ----------------------------------
+   Luxe surface primitives
+   Restrained ring + sheen for hero/featured surfaces.
+   ---------------------------------- */
+.rumi-luxe-surface {
+  position: relative;
+  border-radius: 1rem;
+  border: 1px solid rgba(244, 244, 245, 0.08);
+  background:
+    linear-gradient(180deg, rgba(24, 24, 27, 0.72) 0%, rgba(9, 9, 11, 0.82) 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.04),
+    0 18px 48px rgba(0, 0, 0, 0.32);
+}
+
+.rumi-luxe-divider {
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(244, 244, 245, 0.10) 50%,
+    transparent 100%
+  );
+}
+
+.rumi-luxe-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.18rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: rgba(244, 244, 245, 0.86);
+  background: rgba(244, 244, 245, 0.06);
+  border: 1px solid rgba(244, 244, 245, 0.10);
+}
+
+.rumi-luxe-pill-dot {
+  width: 0.4rem;
+  height: 0.4rem;
+  border-radius: 999px;
+  background: currentColor;
+  box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 18%, transparent);
+}
+
+/* ----------------------------------
+   Luxe interaction states
+   Reusable, additive focus + hover treatments that compose with existing layouts.
+   ---------------------------------- */
+.rumi-luxe-tap {
+  transition:
+    transform 160ms cubic-bezier(0.2, 0.82, 0.2, 1),
+    box-shadow 220ms ease,
+    border-color 220ms ease;
+}
+
+.rumi-luxe-tap:hover {
+  transform: translateY(-1px);
+}
+
+.rumi-luxe-tap:active {
+  transform: translateY(0) scale(0.99);
+}
+
+.rumi-focus-ring:focus-visible {
+  outline: none;
+  box-shadow:
+    0 0 0 1px rgba(244, 244, 245, 0.18),
+    0 0 0 3px color-mix(in srgb, rgb(99, 102, 241) 38%, transparent);
+  border-radius: 0.75rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rumi-luxe-tap,
+  .rumi-ambient::before,
+  .rumi-ambient-luxe {
+    transition: none !important;
+  }
+}
+
 .rumi-new-chat-stage {
   animation: rumi-stage-enter 520ms cubic-bezier(0.2, 0.82, 0.2, 1) both;
 }
@@ -704,7 +849,10 @@ body {
   }
 
   .rumi-composer-frame,
-  .rumi-send-button {
+  .rumi-send-button,
+  .rumi-luxe-tap,
+  .rumi-ambient-luxe,
+  .rumi-ambient::before {
     transition: none;
   }
 }
