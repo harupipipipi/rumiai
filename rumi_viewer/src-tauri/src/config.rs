@@ -220,6 +220,15 @@ impl AppConfig {
 
     /// Return the path to the defaultspack ecosystem.json.
     pub fn defaultspack_ecosystem_json(&self) -> PathBuf {
+        let bundled = self.bundled_defaultspack_ecosystem_json();
+        if self.is_dev_workspace() && bundled.exists() {
+            log::info!(
+                "Using repo defaultspack ecosystem during viewer dev startup from {}",
+                bundled.display()
+            );
+            return bundled;
+        }
+
         for managed_root in self.defaultspack_managed_roots() {
             match resolve_defaultspack_current_pointer(&managed_root) {
                 ManagedPointerResolution::Resolved(ecosystem_path) => {
@@ -241,10 +250,7 @@ impl AppConfig {
             }
         }
 
-        self.app_dir
-            .join("ecosystem")
-            .join("defaultspack")
-            .join("ecosystem.json")
+        bundled
     }
 
     fn defaultspack_managed_roots(&self) -> Vec<PathBuf> {
@@ -261,6 +267,13 @@ impl AppConfig {
             }
         }
         roots
+    }
+
+    fn bundled_defaultspack_ecosystem_json(&self) -> PathBuf {
+        self.app_dir
+            .join("ecosystem")
+            .join("defaultspack")
+            .join("ecosystem.json")
     }
 }
 
@@ -647,6 +660,57 @@ mod tests {
         assert_eq!(
             config.defaultspack_ecosystem_json(),
             managed.join("ecosystem.json")
+        );
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn defaultspack_ecosystem_prefers_repo_pack_in_dev_workspace() {
+        use std::fs;
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("rumi_viewer_defaultspack_dev_{unique}"));
+        let resource = root.join("rumi_viewer").join("src-tauri").join("resources");
+        let appdata = root.join("appdata");
+        let repo_defaultspack = root
+            .join("rumi_ai_1_10")
+            .join("ecosystem")
+            .join("defaultspack");
+        let managed = appdata
+            .join("user_data")
+            .join("packs")
+            .join("defaultspack")
+            .join("versions")
+            .join("2.5.0");
+
+        fs::create_dir_all(&repo_defaultspack).unwrap();
+        fs::create_dir_all(&managed).unwrap();
+        fs::write(root.join("rumi_ai_1_10").join("app.py"), "print('ok')\n").unwrap();
+        fs::write(
+            repo_defaultspack.join("ecosystem.json"),
+            "{\"source\":\"repo\"}",
+        )
+        .unwrap();
+        fs::write(managed.join("ecosystem.json"), "{\"source\":\"managed\"}").unwrap();
+        fs::write(
+            appdata
+                .join("user_data")
+                .join("packs")
+                .join("defaultspack")
+                .join("current.json"),
+            r#"{"schema":"rumi.pack_current.v1","pack_id":"defaultspack","version":"2.5.0","path":"versions/2.5.0"}"#,
+        )
+        .unwrap();
+
+        let config = AppConfig::detect_for_tauri(resource, appdata).unwrap();
+
+        assert_eq!(
+            config.defaultspack_ecosystem_json(),
+            repo_defaultspack.join("ecosystem.json")
         );
         fs::remove_dir_all(&root).ok();
     }
