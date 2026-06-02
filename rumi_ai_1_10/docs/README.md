@@ -16,6 +16,7 @@
 | Capability Graph / node / profile 仕様を確認したい | [capability_graph.md](./capability_graph.md) | [node_spec.md](./node_spec.md), [profile_spec.md](./profile_spec.md), [capability_graph_pr_plan.md](./capability_graph_pr_plan.md) |
 | API キー / secrets / 運用を知りたい | [operations.md](./operations.md) | [quality_pack/philosophy_memo.md](./quality_pack/philosophy_memo.md) |
 | defaultspack の実装側を追いたい | [../ecosystem/defaultspack/README.md](../ecosystem/defaultspack/README.md) | [../ecosystem/defaultspack/docs/getting-started.md](../ecosystem/defaultspack/docs/getting-started.md) |
+| Codex OSS から取り込んだ coding-tool 観点を見たい | [codex_oss_reference.md](./codex_oss_reference.md) | ルートの [../../AGENTS.md](../../AGENTS.md), [../../justfile](../../justfile) |
 
 ## まずここを見れば全体像が分かる3本
 

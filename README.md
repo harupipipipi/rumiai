@@ -68,6 +68,16 @@ python -m rumi_ai
 
 ## Common Tasks
 
+### Just shortcuts
+
+If you have `just` installed, common checks are available from the repo root:
+
+```bash
+just -l
+just tooling-test
+just integrity
+```
+
 ### Backend health check
 
 ```bash
@@ -122,3 +132,6 @@ python -m rumi_ai migrate-hmac
 - `rumi_mobile`: mobile remote client for the bearer-auth Kernel Pack API
 
 For architecture and runtime details, see [rumi_ai_1_10/README.md](./rumi_ai_1_10/README.md).
+
+For Codex OSS-inspired coding-tool conventions, see [AGENTS.md](./AGENTS.md) and
+[rumi_ai_1_10/docs/codex_oss_reference.md](./rumi_ai_1_10/docs/codex_oss_reference.md).

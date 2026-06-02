@@ -5,7 +5,7 @@ from typing import Any
 
 from domain.tool.name_mapping import ToolNameMapping, build_tool_name_mapping
 from domain.tool.protocol import ProviderToolDefinition, RumiToolCall, RumiToolDefinition
-from domain.tool.schema_adapter import tool_name_from_definition
+from domain.tool.schema_adapter import provider_tool_parameters, tool_name_from_definition
 
 
 def rumi_tool_from_definition(tool: Any) -> RumiToolDefinition:
@@ -13,16 +13,17 @@ def rumi_tool_from_definition(tool: Any) -> RumiToolDefinition:
         return tool
     if not isinstance(tool, dict):
         return RumiToolDefinition(name=str(tool or "tool"))
-    function_def = tool.get("function") if isinstance(tool.get("function"), dict) else {}
+    function_value = tool.get("function")
+    function_def: dict[str, Any] = function_value if isinstance(function_value, dict) else {}
     name = str(function_def.get("name") or tool_name_from_definition(tool) or "").strip()
-    schema = tool.get("schema") if isinstance(tool.get("schema"), dict) else {}
-    parameters = function_def.get("parameters") or schema.get("parameters") or schema
-    if not isinstance(parameters, dict):
-        parameters = {"type": "object", "properties": {}, "required": []}
+    schema_value = tool.get("schema")
+    schema: dict[str, Any] = schema_value if isinstance(schema_value, dict) else {}
+    schema_parameters = schema.get("parameters")
+    parameters = function_def.get("parameters") or (schema_parameters if isinstance(schema_parameters, dict) else schema)
     return RumiToolDefinition(
         name=name,
         description=str(function_def.get("description") or tool.get("summary") or tool.get("description") or ""),
-        parameters=parameters,
+        parameters=provider_tool_parameters(parameters),
         metadata={key: value for key, value in tool.items() if key not in {"function", "schema"}},
     )
 
@@ -39,12 +40,12 @@ def adapt_rumi_tools_to_provider_tools(
     definitions: list[ProviderToolDefinition] = []
     for tool in rumi_tools:
         alias = mapping.alias_for(tool.name)
-        payload = {
+        payload: dict[str, Any] = {
             "type": "function",
             "function": {
                 "name": alias,
                 "description": tool.description,
-                "parameters": tool.parameters or {"type": "object", "properties": {}, "required": []},
+                "parameters": provider_tool_parameters(tool.parameters),
             },
         }
         provider_tools.append(payload)
@@ -53,7 +54,8 @@ def adapt_rumi_tools_to_provider_tools(
 
 
 def decode_provider_tool_call_to_rumi_tool_call(tool_call: dict[str, Any], mapping: ToolNameMapping | None = None) -> RumiToolCall:
-    function_def = tool_call.get("function") if isinstance(tool_call.get("function"), dict) else {}
+    function_value = tool_call.get("function")
+    function_def: dict[str, Any] = function_value if isinstance(function_value, dict) else {}
     alias = str(function_def.get("name") or tool_call.get("name") or "").strip()
     name = mapping.original_for(alias) if mapping is not None else alias
     args = function_def.get("arguments", tool_call.get("arguments", {}))

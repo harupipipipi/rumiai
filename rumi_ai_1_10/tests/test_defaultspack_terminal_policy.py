@@ -14,11 +14,53 @@ sys.path.insert(0, str(DEFAULTSPACK_ROOT))
 def test_terminal_policy_marks_common_read_and_test_commands_low_risk(tmp_path):
     from domain.coding.terminal_policy import classify_command
 
-    for command in ("git status", "pytest", "python -m pytest", "npm test"):
+    for command in (
+        "git status",
+        "git ls-files",
+        "rg --files",
+        "rg approval rumi_ai_1_10",
+        "pytest",
+        "python -m pytest",
+        "npm test",
+        "ruff check core_runtime",
+        "cargo check",
+    ):
         result = classify_command(command, workspace_root=tmp_path)
         assert result["classification"] == "low"
         assert result["risk_level"] == "low"
         assert result["approval_required"] is False
+
+
+def test_terminal_policy_keeps_read_commands_sensitive_when_shell_escape_or_outside_path(tmp_path):
+    from domain.coding.terminal_policy import classify_command
+
+    shell_result = classify_command("rg TODO . > findings.txt", workspace_root=tmp_path)
+    outside_result = classify_command("rg TODO /tmp", workspace_root=tmp_path)
+    pre_result = classify_command("rg TODO . --pre python", workspace_root=tmp_path)
+
+    assert shell_result["approval_required"] is True
+    assert "shell_escape" in shell_result["risk_reasons"]
+    assert outside_result["approval_required"] is True
+    assert "outside_workspace_path" in outside_result["risk_reasons"]
+    assert pre_result["approval_required"] is True
+    assert "tool_exec" in pre_result["risk_reasons"]
+
+
+def test_terminal_policy_keeps_lint_and_typecheck_write_modes_approval_aware(tmp_path):
+    from domain.coding.terminal_policy import classify_command
+
+    cases = {
+        "ruff check . --fix": "write_option",
+        "npm run lint -- --fix": "write_option",
+        "pytest --update-snapshots": "write_option",
+        "mypy --install-types --non-interactive": "install",
+    }
+
+    for command, reason in cases.items():
+        result = classify_command(command, workspace_root=tmp_path)
+        assert result["approval_required"] is True
+        assert result["classification"] == "high"
+        assert reason in result["risk_reasons"]
 
 
 def test_terminal_policy_explains_network_install_destructive_and_shell_escape_risk(tmp_path):
