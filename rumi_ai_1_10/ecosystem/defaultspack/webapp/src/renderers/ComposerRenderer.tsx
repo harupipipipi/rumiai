@@ -245,11 +245,11 @@ function ModelStatusIndicatorButton({
       <button
         type="button"
         aria-label="close status indicator"
-        className="fixed inset-0 z-[84] cursor-default bg-transparent"
+        className="fixed inset-0 rumi-layer-global-overlay cursor-default bg-transparent"
         onClick={onClose}
       />
       <div
-        className={`fixed z-[85] w-[240px] rounded-xl border bg-zinc-950 p-3 shadow-2xl ${tone.popover}`}
+        className={`fixed rumi-layer-command-palette w-[240px] rounded-xl border bg-zinc-950 p-3 shadow-2xl ${tone.popover}`}
         style={popoverStyle ?? {
           right: MODEL_STATUS_POPOVER_VIEWPORT_MARGIN,
           top: MODEL_STATUS_POPOVER_VIEWPORT_MARGIN,
@@ -300,7 +300,7 @@ function ModelStatusIndicatorButton({
         />
       </button>
       {!open && (
-        <div className="pointer-events-none absolute bottom-full right-0 z-[85] mb-2 w-max max-w-[220px] rounded-lg border border-zinc-800 bg-zinc-950/95 px-2 py-1 text-[10px] leading-snug text-zinc-300 opacity-0 shadow-xl transition-opacity group-hover/status:opacity-100">
+        <div className="pointer-events-none absolute bottom-full right-0 rumi-layer-local-popover mb-2 w-max max-w-[220px] rounded-lg border border-zinc-800 bg-zinc-950/95 px-2 py-1 text-[10px] leading-snug text-zinc-300 opacity-0 shadow-xl transition-opacity group-hover/status:opacity-100">
           <span className="block font-medium text-zinc-100">{indicator.name}</span>
           <span className="block text-zinc-400">{indicator.description}</span>
         </div>
@@ -2763,7 +2763,7 @@ export function ComposerRenderer({
                         ? "コーディング指示を入力... (@ でtool/ファイル)"
                         : placeholder
                     }
-                    className={`rumi-composer-input-new rumi-composer-textarea relative z-10 h-[22px] min-h-[22px] w-full max-h-[72px] select-text resize-none overflow-hidden border-none bg-transparent px-0 pb-0 pt-0 text-[16px] font-medium leading-[22px] text-transparent outline-none placeholder:text-zinc-500 ${
+                    className={`rumi-composer-input-new rumi-composer-textarea relative rumi-layer-panel h-[22px] min-h-[22px] w-full max-h-[72px] select-text resize-none overflow-hidden border-none bg-transparent px-0 pb-0 pt-0 text-[16px] font-medium leading-[22px] text-transparent outline-none placeholder:text-zinc-500 ${
                       input ? "caret-transparent" : "caret-zinc-100"
                     }`}
                     onFocus={() => {

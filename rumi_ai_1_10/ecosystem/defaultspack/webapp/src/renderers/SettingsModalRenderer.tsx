@@ -648,7 +648,7 @@ function ModelAllowlistField({
     const timer = window.setTimeout(() => {
       setBusy(true);
       setError("");
-      api.searchModels({ query: trimmedQuery, max_results: 50 })
+      settingsApiResources.searchModels({ query: trimmedQuery, max_results: 50 })
         .then((result) => {
           setRemoteResults(result.models ?? []);
         })
@@ -727,10 +727,10 @@ function ModelAllowlistField({
             <button
               type="button"
               aria-label="モデル追加を閉じる"
-              className="fixed inset-0 z-10 cursor-default"
+              className="fixed inset-0 rumi-layer-panel cursor-default"
               onClick={() => setOpen(false)}
             />
-            <div className="absolute left-0 top-[calc(100%+8px)] z-20 w-[min(560px,calc(100vw-32px))] overflow-hidden rounded-xl border border-zinc-700 bg-zinc-950 shadow-2xl">
+            <div className="absolute left-0 top-[calc(100%+8px)] rumi-layer-local-popover w-[min(560px,calc(100vw-32px))] overflow-hidden rounded-xl border border-zinc-700 bg-zinc-950 shadow-2xl">
               <label className="m-2 flex h-9 items-center gap-2 rounded-lg border border-zinc-800 bg-black/30 px-3 text-xs text-zinc-500 focus-within:border-zinc-600 focus-within:text-zinc-300">
                 <Search size={14} />
                 <input
