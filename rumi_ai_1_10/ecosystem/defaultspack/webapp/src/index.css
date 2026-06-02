@@ -109,32 +109,62 @@ body {
 }
 
 .rumi-composer-new {
-  box-shadow:
-    0 28px 90px rgba(0, 0, 0, 0.42),
-    inset 0 1px 0 rgba(255, 255, 255, 0.04);
   animation: rumi-composer-enter 620ms 90ms cubic-bezier(0.18, 0.9, 0.22, 1) both;
 }
 
-.rumi-composer-new:focus-within {
-  border-color: rgba(212, 212, 216, 0.48);
+.rumi-composer-main-panel {
+  box-shadow:
+    0 28px 90px rgba(0, 0, 0, 0.42),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  transition:
+    border-color 180ms ease,
+    background-color 180ms ease,
+    box-shadow 220ms ease;
+}
+
+.rumi-composer-model-dock {
+  filter: drop-shadow(0 16px 38px rgba(0, 0, 0, 0.32));
+}
+
+.rumi-composer-dock-rail {
+  transition: gap 180ms ease;
+}
+
+.rumi-composer-dock-control {
+  overflow: visible;
+}
+
+.rumi-composer-control-surface {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.035),
+    0 10px 30px rgba(0, 0, 0, 0.18);
+  transition:
+    border-color 180ms ease,
+    background-color 180ms ease,
+    box-shadow 220ms ease,
+    transform 220ms ease;
+}
+
+.rumi-composer-new:focus-within .rumi-composer-main-panel {
+  border-color: rgba(244, 244, 245, 0.72);
   background-color: #222224;
   box-shadow:
     0 32px 110px rgba(0, 0, 0, 0.52),
-    0 0 0 1px rgba(244, 244, 245, 0.08),
+    0 0 0 1px rgba(244, 244, 245, 0.18),
     inset 0 1px 0 rgba(255, 255, 255, 0.06);
 }
 
 @container (max-width: 460px) {
-  .rumi-composer-new {
-    min-height: 132px;
+  .rumi-composer-main-panel {
+    min-height: 46px;
   }
 
   .rumi-composer-input-new {
-    min-height: 76px;
-    padding-inline: 1.25rem;
-    padding-top: 1.125rem;
-    font-size: 15px;
-    line-height: 1.5;
+    min-height: 20px;
+    padding-inline: 0;
+    padding-top: 0;
+    font-size: 14px;
+    line-height: 20px;
   }
 
   .rumi-composer-actions {
@@ -142,7 +172,7 @@ body {
     padding-bottom: 0.875rem;
   }
 
-  .rumi-model-control {
+  .rumi-composer-model-dock {
     display: none;
   }
 }
@@ -284,6 +314,17 @@ body {
   user-select: text !important;
   -webkit-user-select: text !important;
   cursor: text;
+}
+
+.rumi-composer-fake-caret {
+  display: inline-block;
+  width: 1.5px;
+  height: 1.12em;
+  margin-inline: 0;
+  border-radius: 999px;
+  background: #f4f4f5;
+  vertical-align: -0.16em;
+  animation: rumi-composer-caret-blink 1.05s steps(2, start) infinite;
 }
 
 .rumi-copy-icon-pop {
@@ -502,6 +543,18 @@ body {
   100% {
     opacity: 1;
     transform: translateY(0) scale(1) rotate(0deg);
+  }
+}
+
+@keyframes rumi-composer-caret-blink {
+  0%,
+  45% {
+    opacity: 1;
+  }
+
+  46%,
+  100% {
+    opacity: 0;
   }
 }
 

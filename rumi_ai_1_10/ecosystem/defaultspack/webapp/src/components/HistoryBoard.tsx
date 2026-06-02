@@ -86,6 +86,7 @@ export type ChatGroup = {
   workspaceId?: string | null;
   workspaceLabel?: string | null;
   workspaceRoot?: string | null;
+  rumiDataPath?: string | null;
 };
 
 export type CustomGroupInfo = {
@@ -94,6 +95,7 @@ export type CustomGroupInfo = {
   workspaceId?: string | null;
   workspaceLabel?: string | null;
   workspaceRoot?: string | null;
+  rumiDataPath?: string | null;
 };
 
 export type HistoryBoardNewTaskOptions = {
@@ -101,6 +103,7 @@ export type HistoryBoardNewTaskOptions = {
   workspaceId?: string | null;
   workspaceLabel?: string | null;
   workspaceRoot?: string | null;
+  rumiDataPath?: string | null;
 };
 
 export type AccountInfo = {
@@ -214,6 +217,7 @@ function customGroupFromStorageItem(item: unknown): CustomGroupInfo | null {
     workspaceId: stringOrNull(record.workspaceId ?? record.workspace_id),
     workspaceLabel: stringOrNull(record.workspaceLabel ?? record.workspace_label),
     workspaceRoot: stringOrNull(record.workspaceRoot ?? record.workspace_root ?? record.rootPath),
+    rumiDataPath: stringOrNull(record.rumiDataPath ?? record.rumi_data_path ?? record.rumiDPPath),
   };
 }
 
@@ -386,6 +390,7 @@ export function buildGroupsFromChats(chatItems: ChatItem[], customGroups: Custom
     workspaceId: group.workspaceId ?? null,
     workspaceLabel: group.workspaceLabel ?? null,
     workspaceRoot: group.workspaceRoot ?? null,
+    rumiDataPath: group.rumiDataPath ?? null,
     isCollapsed: false,
     chats: customChatBuckets.get(group.id) ?? [],
     subGroups: [],
@@ -1079,6 +1084,8 @@ interface HistoryBoardProps {
   codingWorkspaces?: CodingWorkspaceRecord[];
   selectedCodingWorkspaceId?: string | null;
   onCodingWorkspaceCreate?: (rootPath: string) => Promise<CodingWorkspaceRecord | null | undefined>;
+  onDirectorySelect?: () => Promise<string | null | undefined>;
+  onGroupDataPathPrepare?: (rootPath: string) => Promise<{ rootPath: string; rumiDataPath: string } | null | undefined>;
   onCodingWorkspacesRefresh?: () => void | Promise<void>;
 }
 
@@ -1096,6 +1103,7 @@ function newTaskOptionsForGroup(group: ChatGroup | null, fallbackGroupId: string
     workspaceId: group?.workspaceId ?? null,
     workspaceLabel: group?.workspaceLabel ?? null,
     workspaceRoot: group?.workspaceRoot ?? null,
+    rumiDataPath: group?.rumiDataPath ?? null,
   };
 }
 
@@ -1278,6 +1286,8 @@ export function HistoryBoard({
   codingWorkspaces = [],
   selectedCodingWorkspaceId = null,
   onCodingWorkspaceCreate,
+  onDirectorySelect,
+  onGroupDataPathPrepare,
   onCodingWorkspacesRefresh,
 }: HistoryBoardProps) {
   const [searchQuery, setSearchQuery] = useState("");
@@ -1292,6 +1302,7 @@ export function HistoryBoard({
   const [newGroupCustomPath, setNewGroupCustomPath] = useState("");
   const [newGroupError, setNewGroupError] = useState<string | null>(null);
   const [isCreatingGroup, setIsCreatingGroup] = useState(false);
+  const [isSelectingGroupDirectory, setIsSelectingGroupDirectory] = useState(false);
 
   const selectedCodingWorkspace = useMemo(
     () => codingWorkspaces.find((workspace) => workspace.workspace_id === selectedCodingWorkspaceId) ?? null,
@@ -1527,6 +1538,27 @@ export function HistoryBoard({
     setGroups(prev => [...prev, newGroup]);
   };
 
+  const handleSelectGroupDirectory = async () => {
+    if (isSelectingGroupDirectory) return;
+    if (!onDirectorySelect) {
+      setNewGroupError("Folder selection is unavailable.");
+      return;
+    }
+    setIsSelectingGroupDirectory(true);
+    setNewGroupError(null);
+    try {
+      const selected = await onDirectorySelect();
+      if (selected) {
+        setNewGroupWorkspaceChoice("custom");
+        setNewGroupCustomPath(selected);
+      }
+    } catch (error) {
+      setNewGroupError(error instanceof Error ? error.message : "Failed to select folder.");
+    } finally {
+      setIsSelectingGroupDirectory(false);
+    }
+  };
+
   const handleCreateGroup = async (event?: React.FormEvent) => {
     event?.preventDefault();
     if (isCreatingGroup) return;
@@ -1534,6 +1566,7 @@ export function HistoryBoard({
     setNewGroupError(null);
     const title = newGroupTitle.trim() || `Group ${groups.length + 1}`;
     let workspace: Pick<CodingWorkspaceRecord, "workspace_id" | "label" | "root_path"> | null = null;
+    let rumiDataPath: string | null = null;
     try {
       if (newGroupWorkspaceChoice === "current") {
         if (!selectedCodingWorkspaceId) {
@@ -1545,23 +1578,43 @@ export function HistoryBoard({
           label: selectedCodingWorkspaceId,
           root_path: "",
         };
+        if (!workspace.root_path) {
+          setNewGroupError("Current coding workspace has no folder path.");
+          return;
+        }
       } else if (newGroupWorkspaceChoice === "custom") {
         const rootPath = newGroupCustomPath.trim();
         if (!rootPath) {
-          setNewGroupError("Enter a workspace path.");
+          setNewGroupError("保存先フォルダを選択してください。");
           return;
         }
-        if (!onCodingWorkspaceCreate) {
+        workspace = codingWorkspaces.find((candidate) => candidate.root_path === rootPath) ?? null;
+        if (!workspace && !onCodingWorkspaceCreate) {
           setNewGroupError("Workspace creation is unavailable.");
           return;
         }
-        const created = await onCodingWorkspaceCreate(rootPath);
-        if (!created?.workspace_id) {
-          setNewGroupError("Workspace creation did not return a workspace.");
+        if (!workspace) {
+          const created = await onCodingWorkspaceCreate?.(rootPath);
+          if (!created?.workspace_id) {
+            setNewGroupError("Workspace creation did not return a workspace.");
+            return;
+          }
+          workspace = created;
+          await onCodingWorkspacesRefresh?.();
+        }
+      }
+
+      if (workspace?.root_path) {
+        if (!onGroupDataPathPrepare) {
+          setNewGroupError(".rumiDP storage preparation is unavailable.");
           return;
         }
-        workspace = created;
-        await onCodingWorkspacesRefresh?.();
+        const prepared = await onGroupDataPathPrepare(workspace.root_path);
+        if (!prepared?.rumiDataPath) {
+          setNewGroupError(".rumiDP storage preparation did not return a path.");
+          return;
+        }
+        rumiDataPath = prepared.rumiDataPath;
       }
 
       const customGroup: CustomGroupInfo = {
@@ -1570,6 +1623,7 @@ export function HistoryBoard({
         workspaceId: workspace?.workspace_id ?? null,
         workspaceLabel: workspace?.label ?? null,
         workspaceRoot: workspace?.root_path ?? null,
+        rumiDataPath,
       };
       createCustomGroup(customGroup);
       setIsCreateGroupOpen(false);
@@ -1686,12 +1740,26 @@ export function HistoryBoard({
         </p>
       )}
       {newGroupWorkspaceChoice === "custom" && (
-        <input
-          value={newGroupCustomPath}
-          onChange={(event) => setNewGroupCustomPath(event.target.value)}
-          className="h-8 rounded-md border border-zinc-800 bg-zinc-900/70 px-2 font-mono text-[11px] text-zinc-100 outline-none focus:border-emerald-500/60"
-          placeholder="/path/to/workspace"
-        />
+        <div className="flex flex-col gap-1 rounded-md border border-zinc-800 bg-zinc-900/60 p-1.5">
+          <button
+            type="button"
+            onClick={() => void handleSelectGroupDirectory()}
+            disabled={isSelectingGroupDirectory}
+            className="flex h-7 items-center justify-center gap-1.5 rounded bg-zinc-100 px-2 text-[11px] font-semibold text-zinc-950 transition-colors hover:bg-white disabled:cursor-wait disabled:opacity-60"
+          >
+            <FolderOpen size={12} />
+            {isSelectingGroupDirectory ? "選択中..." : "ファイルを設定"}
+          </button>
+          <p
+            className={cn(
+              "min-h-4 truncate px-1 font-mono text-[10px]",
+              newGroupCustomPath ? "text-zinc-300" : "text-zinc-500"
+            )}
+            title={newGroupCustomPath || undefined}
+          >
+            {newGroupCustomPath || "保存先フォルダ未選択"}
+          </p>
+        </div>
       )}
       {newGroupError && <p className="rounded border border-red-500/30 bg-red-500/10 px-2 py-1 text-[10px] text-red-200">{newGroupError}</p>}
       <button

@@ -202,6 +202,11 @@ class PackAPIHandler(
     DesktopHandlersMixin,
     BaseHTTPRequestHandler,
 ):
+    _CLIENT_DISCONNECT_EXCEPTIONS = (
+        BrokenPipeError,
+        ConnectionResetError,
+        ConnectionAbortedError,
+    )
     approval_manager = None
     container_orchestrator = None
     host_privilege_manager = None
@@ -565,34 +570,62 @@ class PackAPIHandler(
         response_headers = list(extra_headers or [])
         if self._panel_session_cookie:
             response_headers.append(("Set-Cookie", self._panel_session_cookie))
-        self.send_response(status)
-        self.send_header('Content-Type', 'application/json; charset=utf-8')
-        self.send_header('Content-Length', str(len(data)))
-        origin = self._get_cors_origin(self.headers.get('Origin', ''))
-        if origin:
-            self.send_header('Access-Control-Allow-Origin', origin)
-            self.send_header('Vary', 'Origin')
-        for header_name, header_value in response_headers:
-            self.send_header(header_name, header_value)
-        self.end_headers()
-        self.wfile.write(data)
+        try:
+            self.send_response(status)
+            self.send_header('Content-Type', 'application/json; charset=utf-8')
+            self.send_header('Content-Length', str(len(data)))
+            origin = self._get_cors_origin(self.headers.get('Origin', ''))
+            if origin:
+                self.send_header('Access-Control-Allow-Origin', origin)
+                self.send_header('Vary', 'Origin')
+            for header_name, header_value in response_headers:
+                self.send_header(header_name, header_value)
+            self.end_headers()
+            self.wfile.write(data)
+        except self._CLIENT_DISCONNECT_EXCEPTIONS:
+            self.close_connection = True
+
+    def _send_raw_json(
+        self,
+        payload: Any,
+        status: int = 200,
+        extra_headers: Optional[list[tuple[str, str]]] = None,
+    ) -> None:
+        data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        response_headers = list(extra_headers or [])
+        if self._panel_session_cookie:
+            response_headers.append(("Set-Cookie", self._panel_session_cookie))
+        try:
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(data)))
+            origin = self._get_cors_origin(self.headers.get("Origin", ""))
+            if origin:
+                self.send_header("Access-Control-Allow-Origin", origin)
+                self.send_header("Vary", "Origin")
+            for header_name, header_value in response_headers:
+                self.send_header(header_name, header_value)
+            self.end_headers()
+            self.wfile.write(data)
+        except self._CLIENT_DISCONNECT_EXCEPTIONS:
+            self.close_connection = True
 
     def _send_sse(self, events) -> None:
         response_headers: list[tuple[str, str]] = []
         if self._panel_session_cookie:
             response_headers.append(("Set-Cookie", self._panel_session_cookie))
-        self.send_response(200)
-        self.send_header('Content-Type', 'text/event-stream; charset=utf-8')
-        self.send_header('Cache-Control', 'no-cache, no-transform')
-        self.send_header('Connection', 'close')
-        origin = self._get_cors_origin(self.headers.get('Origin', ''))
-        if origin:
-            self.send_header('Access-Control-Allow-Origin', origin)
-            self.send_header('Vary', 'Origin')
-        for header_name, header_value in response_headers:
-            self.send_header(header_name, header_value)
-        self.end_headers()
         try:
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/event-stream; charset=utf-8')
+            self.send_header('Cache-Control', 'no-cache, no-transform')
+            self.send_header('Connection', 'close')
+            origin = self._get_cors_origin(self.headers.get('Origin', ''))
+            if origin:
+                self.send_header('Access-Control-Allow-Origin', origin)
+                self.send_header('Vary', 'Origin')
+            for header_name, header_value in response_headers:
+                self.send_header(header_name, header_value)
+            self.end_headers()
             for event in events:
                 if isinstance(event, bytes):
                     payload = event
@@ -602,8 +635,8 @@ class PackAPIHandler(
                     ).encode('utf-8')
                 self.wfile.write(payload)
                 self.wfile.flush()
-        except (BrokenPipeError, ConnectionResetError):
-            pass
+        except self._CLIENT_DISCONNECT_EXCEPTIONS:
+            self.close_connection = True
         finally:
             self.close_connection = True
 
@@ -619,6 +652,138 @@ class PackAPIHandler(
         ):
             return result["data"].get("events", [])
         return None
+
+    def _send_defaultspack_http_result(self, result: Any) -> None:
+        if isinstance(result, dict) and result.get("_static"):
+            body = str(result.get("body", "")).encode("utf-8")
+            try:
+                self.send_response(200)
+                self.send_header(
+                    "Content-Type",
+                    str(result.get("content_type", "text/html")),
+                )
+                self.send_header("Content-Length", str(len(body)))
+                origin = self._get_cors_origin(self.headers.get("Origin", ""))
+                if origin:
+                    self.send_header("Access-Control-Allow-Origin", origin)
+                    self.send_header("Vary", "Origin")
+                self.end_headers()
+                self.wfile.write(body)
+            except self._CLIENT_DISCONNECT_EXCEPTIONS:
+                self.close_connection = True
+            return
+        if isinstance(result, dict) and result.get("_redirect"):
+            try:
+                self.send_response(int(result.get("status_code", 302)))
+                self.send_header("Location", str(result.get("location") or "/chat"))
+                self.end_headers()
+            except self._CLIENT_DISCONNECT_EXCEPTIONS:
+                self.close_connection = True
+            return
+        sse_events = self._sse_events_from_result(result)
+        if sse_events is not None:
+            self._send_sse(sse_events)
+            return
+        status_code = 200
+        payload = result
+        if isinstance(result, dict) and result.get("status") == "error":
+            payload = dict(result)
+            status_code = int(payload.pop("_http_status", 400))
+        self._send_raw_json(payload, status=status_code)
+
+    def _defaultspack_request_data(
+        self,
+        method: str,
+        path_params: Optional[dict[str, str]] = None,
+        path_inject: Optional[dict[str, str]] = None,
+        body: Optional[dict[str, Any]] = None,
+    ) -> dict[str, Any]:
+        parsed_url = urlparse(self.path)
+        request_data: dict[str, Any] = {
+            key: values[-1]
+            for key, values in parse_qs(parsed_url.query, keep_blank_values=True).items()
+            if values
+        }
+        request_data["_headers"] = {
+            str(key): str(value) for key, value in self.headers.items()
+        }
+        if body:
+            request_data.update(body)
+        for url_param, data_key in (path_inject or {}).items():
+            request_data[data_key] = (path_params or {}).get(url_param, "")
+        request_data["_method"] = method.upper()
+        request_data["_actual_method"] = method.upper()
+        return request_data
+
+    def _defaultspack_http_context(self, facade: Any) -> dict[str, Any]:
+        return {
+            "flow_id": "transport_direct",
+            "step_id": "http_request",
+            "phase": "execute",
+            "ts": time.time(),
+            "owner_pack": "defaultspack",
+            "inputs": {},
+            "_facade": facade,
+        }
+
+    def _dispatch_defaultspack_http_route(
+        self,
+        method: str,
+        path: str,
+        body: Optional[dict[str, Any]] = None,
+    ) -> bool:
+        kernel = self.__class__.kernel
+        if kernel is None:
+            return False
+        try:
+            from .kernel_facade import KernelFacade
+            from ecosystem.defaultspack.transport.http import DefaultsHttpServer
+
+            facade = KernelFacade(kernel)
+            registry_routes = []
+            try:
+                registry_routes = facade.get_interface("io.http.route", strategy="all") or []
+            except Exception:
+                registry_routes = []
+            adapter_facade = facade if registry_routes else None
+            adapter = DefaultsHttpServer(adapter_facade)
+            handler, path_params, source, path_inject = adapter._match_route(
+                method.upper(),
+                path,
+            )
+            if handler is None:
+                return False
+            request_data = self._defaultspack_request_data(
+                method,
+                path_params=path_params or {},
+                path_inject=path_inject or {},
+                body=body,
+            )
+            if source == "registry":
+                if getattr(handler, "_defaultspack_flow_route_handler", False):
+                    result = handler(request_data, path_params or {})
+                else:
+                    result = handler(
+                        request_data,
+                        self._defaultspack_http_context(adapter_facade),
+                    )
+            else:
+                result = handler(request_data, path_params or {})
+            self._send_defaultspack_http_result(result)
+            return True
+        except Exception as e:
+            _log_internal_error(f"defaultspack_http_route:{method}:{path}", e)
+            self._send_raw_json(
+                {
+                    "status": "error",
+                    "error": {
+                        "code": "DEFAULTSPACK_ROUTE_FAILED",
+                        "message": _SAFE_ERROR_MSG,
+                    },
+                },
+                status=500,
+            )
+            return True
 
     def _discard_request_body(self) -> None:
         """Consume unread request bytes before returning an early response."""
@@ -665,7 +830,7 @@ class PackAPIHandler(
         if self._is_loopback_ip(ip) and (path.startswith("/api/panel/") or path.startswith("/panel") or path.startswith("/api/setup/")):
             return True
         if not _rate_limiter.is_allowed(ip):
-            self.send_error(429, "Too Many Requests")
+            self._send_response(APIResponse(False, error="Too Many Requests"), 429)
             return False
         return True
 
@@ -874,15 +1039,18 @@ class PackAPIHandler(
 </html>
 """
         data = html.encode("utf-8")
-        self.send_response(200)
-        self.send_header("Content-Type", "text/html; charset=utf-8")
-        self.send_header("Content-Length", str(len(data)))
-        origin = self._get_cors_origin(self.headers.get("Origin", ""))
-        if origin:
-            self.send_header("Access-Control-Allow-Origin", origin)
-            self.send_header("Vary", "Origin")
-        self.end_headers()
-        self.wfile.write(data)
+        try:
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(data)))
+            origin = self._get_cors_origin(self.headers.get("Origin", ""))
+            if origin:
+                self.send_header("Access-Control-Allow-Origin", origin)
+                self.send_header("Vary", "Origin")
+            self.end_headers()
+            self.wfile.write(data)
+        except self._CLIENT_DISCONNECT_EXCEPTIONS:
+            self.close_connection = True
 
     def _handle_panel_bootstrap(self) -> None:
         if self._panel_auth_manager is None:
@@ -1055,25 +1223,31 @@ class PackAPIHandler(
             self._send_response(APIResponse(False, error="Read error"), 500)
             return
 
-        self.send_response(200)
-        self.send_header("Content-Type", content_type)
-        self.send_header("Content-Length", str(len(data)))
-        origin = self._get_cors_origin(self.headers.get("Origin", ""))
-        if origin:
-            self.send_header("Access-Control-Allow-Origin", origin)
-            self.send_header("Vary", "Origin")
-        self.end_headers()
-        self.wfile.write(data)
+        try:
+            self.send_response(200)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(data)))
+            origin = self._get_cors_origin(self.headers.get("Origin", ""))
+            if origin:
+                self.send_header("Access-Control-Allow-Origin", origin)
+                self.send_header("Vary", "Origin")
+            self.end_headers()
+            self.wfile.write(data)
+        except self._CLIENT_DISCONNECT_EXCEPTIONS:
+            self.close_connection = True
 
     def do_OPTIONS(self) -> None:
-        self.send_response(200)
-        origin = self._get_cors_origin(self.headers.get('Origin', ''))
-        if origin:
-            self.send_header('Access-Control-Allow-Origin', origin)
-            self.send_header('Vary', 'Origin')
-        self.send_header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
-        self.send_header('Access-Control-Allow-Headers', 'Authorization, Content-Type, X-Rumi-CSRF, X-Rumi-Desktop-Bootstrap')
-        self.end_headers()
+        try:
+            self.send_response(200)
+            origin = self._get_cors_origin(self.headers.get('Origin', ''))
+            if origin:
+                self.send_header('Access-Control-Allow-Origin', origin)
+                self.send_header('Vary', 'Origin')
+            self.send_header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+            self.send_header('Access-Control-Allow-Headers', 'Authorization, Content-Type, X-Rumi-CSRF, X-Rumi-Desktop-Bootstrap')
+            self.end_headers()
+        except self._CLIENT_DISCONNECT_EXCEPTIONS:
+            self.close_connection = True
 
     @classmethod
     def _get_allowed_origins(cls) -> list:
@@ -1155,10 +1329,13 @@ class PackAPIHandler(
             return
 
         if _pre_auth_path == "/":
-            self.send_response(302)
-            self.send_header("Location", "/panel/")
-            self.send_header("Content-Length", "0")
-            self.end_headers()
+            try:
+                self.send_response(302)
+                self.send_header("Location", "/panel/")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+            except self._CLIENT_DISCONNECT_EXCEPTIONS:
+                self.close_connection = True
             return
 
         # --- テーブル駆動: 静的配信 (web_mount) ---
@@ -1243,6 +1420,8 @@ class PackAPIHandler(
         try:
             # --- api_routes テーブルディスパッチ (施策3) ---
             if self._dispatch_api_route("GET", path):
+                return
+            if self._dispatch_defaultspack_http_route("GET", path):
                 return
 
             if path == "/api/packs":
@@ -1449,6 +1628,8 @@ class PackAPIHandler(
 
             # --- api_routes テーブルディスパッチ (施策3) ---
             if self._dispatch_api_route("POST", path, body):
+                return
+            if self._dispatch_defaultspack_http_route("POST", path, body):
                 return
 
             if path == "/api/network/grant":
@@ -1876,6 +2057,8 @@ class PackAPIHandler(
             # --- api_routes テーブルディスパッチ (施策3) ---
             if self._dispatch_api_route("PUT", path, body):
                 return
+            if self._dispatch_defaultspack_http_route("PUT", path, body):
+                return
 
             match = self._match_pack_route(path, "PUT")
             if match:
@@ -1905,6 +2088,8 @@ class PackAPIHandler(
         try:
             # --- api_routes テーブルディスパッチ (施策3) ---
             if self._dispatch_api_route("DELETE", path):
+                return
+            if self._dispatch_defaultspack_http_route("DELETE", path):
                 return
 
             # --- W19-B: Secret Grant DELETE endpoints ---

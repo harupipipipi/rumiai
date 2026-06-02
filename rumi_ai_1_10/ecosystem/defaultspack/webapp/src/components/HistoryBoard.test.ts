@@ -112,6 +112,7 @@ test("buildGroupsFromChats keeps custom group workspace metadata and matching ch
     workspaceId: "ws-main",
     workspaceLabel: "Main",
     workspaceRoot: "/repo/main",
+    rumiDataPath: "/repo/main/.rumiDP",
   }];
 
   const groups = buildGroupsFromChats(chats, customGroups);
@@ -120,6 +121,7 @@ test("buildGroupsFromChats keeps custom group workspace metadata and matching ch
   assert.equal(groups[0]?.workspaceId, "ws-main");
   assert.equal(groups[0]?.workspaceLabel, "Main");
   assert.equal(groups[0]?.workspaceRoot, "/repo/main");
+  assert.equal(groups[0]?.rumiDataPath, "/repo/main/.rumiDP");
   assert.deepEqual(groups[0]?.chats.map((chat) => chat.id), ["group-chat"]);
   assert.equal(groups.find((group) => group.title === "Recent")?.chats[0]?.id, "plain-chat");
 });
@@ -129,7 +131,7 @@ test("loadCustomGroups migrates legacy and snake_case workspace records", () => 
   const values = new Map<string, string>();
   values.set("rumi-history-custom-groups", JSON.stringify([
     { id: "legacy", title: "Legacy" },
-    { id: "snake", title: "Snake", workspace_id: "ws1", workspace_label: "Repo", workspace_root: "/repo" },
+    { id: "snake", title: "Snake", workspace_id: "ws1", workspace_label: "Repo", workspace_root: "/repo", rumi_data_path: "/repo/.rumiDP" },
     { id: "", title: "ignored" },
   ]));
   Object.defineProperty(globalThis, "localStorage", {
@@ -142,8 +144,8 @@ test("loadCustomGroups migrates legacy and snake_case workspace records", () => 
 
   try {
     assert.deepEqual(loadCustomGroups(), [
-      { id: "legacy", title: "Legacy", workspaceId: null, workspaceLabel: null, workspaceRoot: null },
-      { id: "snake", title: "Snake", workspaceId: "ws1", workspaceLabel: "Repo", workspaceRoot: "/repo" },
+      { id: "legacy", title: "Legacy", workspaceId: null, workspaceLabel: null, workspaceRoot: null, rumiDataPath: null },
+      { id: "snake", title: "Snake", workspaceId: "ws1", workspaceLabel: "Repo", workspaceRoot: "/repo", rumiDataPath: "/repo/.rumiDP" },
     ]);
   } finally {
     if (previousDescriptor) {

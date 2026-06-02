@@ -24,7 +24,7 @@ import { hasShellRegion } from "./lib/uiShell";
 import { hasWorkspaceAttachment, workspaceFileToAttachment } from "./lib/workspaceAttachments";
 import { resolveDefaultspackRenderers } from "./renderers/defaultspackRenderers";
 import { RendererBoundary } from "./renderers/trustedRendererLoader";
-import type { AppMode, AttachedFile, ChatUiMessage, CodingContext, ComposerExtensionItem, ComposerSkillItem, ContextUsageInfo, DroppedWidget } from "./renderers/types";
+import type { AppMode, AttachedFile, ChatUiMessage, CodingContext, ComposerExtensionItem, ComposerModelStatusIndicator, ComposerSkillItem, ContextUsageInfo, DroppedWidget } from "./renderers/types";
 
 type ComposerCandidateMenuState = {
   mode: "model";
@@ -39,6 +39,7 @@ type PendingNewTaskContext = {
   workspaceId?: string | null;
   workspaceLabel?: string | null;
   workspaceRoot?: string | null;
+  rumiDataPath?: string | null;
 };
 
 type CalendarItemKind = "task" | "event" | "reminder";
@@ -96,6 +97,22 @@ type CalendarDragState = {
   startKey: string;
   startedAt: number;
 };
+
+const dangerShieldSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <rect width="100" height="100" rx="20" fill="#2d2e2f"/>
+  <g fill="none" stroke="#fca355" stroke-linecap="round" stroke-linejoin="round">
+    <path
+      d="M 50,25
+         C 62,25 72,28 75,32
+         C 75,55 68,70 50,78
+         C 32,70 25,55 25,32
+         C 28,28 38,25 50,25 Z"
+      stroke-width="5"
+    />
+    <line x1="50" y1="40" x2="50" y2="55" stroke-width="5.5"/>
+    <line x1="50" y1="64" x2="50" y2="64.1" stroke-width="6"/>
+  </g>
+</svg>`;
 
 const calendarSettingsDefaults: CalendarSettings = {
   agentCurrentChat: false,
@@ -1100,6 +1117,7 @@ function workspaceContextFromMetadata(metadata: Record<string, unknown> | null |
     workspaceId: cleanOptionalString(metadata?.workspace_id ?? metadata?.workspaceId),
     workspaceLabel: cleanOptionalString(metadata?.workspace_label ?? metadata?.workspaceLabel),
     workspaceRoot: cleanOptionalString(metadata?.workspace_root ?? metadata?.workspaceRoot ?? metadata?.rootPath),
+    rumiDataPath: cleanOptionalString(metadata?.rumi_data_path ?? metadata?.rumiDataPath ?? metadata?.rumi_dp_path),
   };
 }
 
@@ -1118,8 +1136,9 @@ function workspaceContextFromHistoryOptions(options?: HistoryBoardNewTaskOptions
     workspaceId: cleanOptionalString(options.workspaceId),
     workspaceLabel: cleanOptionalString(options.workspaceLabel),
     workspaceRoot: cleanOptionalString(options.workspaceRoot),
+    rumiDataPath: cleanOptionalString(options.rumiDataPath),
   };
-  return context.groupId || context.workspaceId || context.workspaceRoot ? context : null;
+  return context.groupId || context.workspaceId || context.workspaceRoot || context.rumiDataPath ? context : null;
 }
 
 function formatBoardDate(updatedAt: number): string {
@@ -1827,21 +1846,57 @@ function replaceChatIdInUrl(conversationId: string | null, pending?: boolean) {
   }
 }
 
-function parseSlashCommandInput(input: string, commands: ComposerCommandItem[]) {
+function commandNames(command: ComposerCommandItem): string[] {
+  return [command.id, command.name, ...(command.aliases ?? [])]
+    .map((value) => value.trim().toLowerCase())
+    .filter(Boolean)
+    .sort((left, right) => right.length - left.length);
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function matchCommandName(body: string, candidate: string): string | null {
+  const directPattern = new RegExp(`^${escapeRegExp(candidate)}(?:\\s+|$)`, "i");
+  const directMatch = body.match(directPattern);
+  if (directMatch) return directMatch[0].trimEnd();
+
+  const candidateParts = candidate.split(/[\s_-]+/).filter(Boolean);
+  if (candidateParts.length < 2) return null;
+  const flexiblePattern = new RegExp(`^${candidateParts.map(escapeRegExp).join("[\\s_-]+")}(?:\\s+|$)`, "i");
+  const flexibleMatch = body.match(flexiblePattern);
+  return flexibleMatch ? flexibleMatch[0].trimEnd() : null;
+}
+
+type ParsedSlashCommandInput = {
+  command: ComposerCommandItem;
+  args: Record<string, unknown>;
+  raw: string;
+};
+
+export function parseSlashCommandInput(input: string, commands: ComposerCommandItem[]): ParsedSlashCommandInput | null {
   const trimmed = input.trim();
   if (!trimmed.startsWith("/") || trimmed.startsWith("//")) return null;
-  const match = trimmed.match(/^\/(\S+)(?:\s+([\s\S]*))?$/);
-  if (!match) return null;
-  const name = match[1].toLowerCase();
-  const command = commands.find((item) => {
-    const names = [item.id, item.name, ...(item.aliases ?? [])].map((value) => value.toLowerCase());
-    return names.includes(name);
-  });
-  if (!command) return null;
+  const body = trimmed.slice(1).trim();
+  if (!body) return null;
+  const normalizedBody = body.toLowerCase();
 
-  const rest = (match[2] ?? "").trim();
+  let matchedCommand: ComposerCommandItem | null = null;
+  let matchedName = "";
+  for (const item of commands) {
+    const candidate = commandNames(item)
+      .map((name) => matchCommandName(normalizedBody, name))
+      .find((name): name is string => Boolean(name));
+    if (!candidate || candidate.length <= matchedName.length) continue;
+    matchedCommand = item;
+    matchedName = candidate;
+  }
+  if (!matchedCommand) return null;
+
+  const rest = body.slice(matchedName.length).trim();
   const args: Record<string, unknown> = {};
-  const specs = command.args ?? [];
+  const specs = matchedCommand.args ?? [];
   if (specs.length === 1 && rest) {
     args[specs[0].name] = rest;
   } else if (specs.length > 1 && rest) {
@@ -1855,7 +1910,7 @@ function parseSlashCommandInput(input: string, commands: ComposerCommandItem[]) 
       }
     });
   }
-  return { command, args, raw: trimmed };
+  return { command: matchedCommand, args, raw: trimmed };
 }
 
 export function parseCommandBoolean(value: unknown, fallback: boolean): boolean {
@@ -1876,6 +1931,52 @@ export function frontendCommandArgs(
   backendArgs: unknown,
 ): Record<string, unknown> {
   return isRecord(backendArgs) ? { ...backendArgs } : parsedArgs;
+}
+
+export function resolvedFrontendCommandArgs(
+  command: ComposerCommandItem,
+  parsedArgs: Record<string, unknown>,
+  backendArgs: unknown,
+): Record<string, unknown> {
+  return command.execution.type === "frontend"
+    ? parsedArgs
+    : frontendCommandArgs(parsedArgs, backendArgs);
+}
+
+type UltraYoloModeState = {
+  yoloMode: boolean;
+  ultraYoloMode: boolean;
+  restoreYoloMode: boolean;
+};
+
+export function resolveUltraYoloModeState(
+  state: UltraYoloModeState,
+  enabled: boolean,
+): UltraYoloModeState {
+  if (enabled) {
+    if (state.ultraYoloMode) {
+      return { ...state, yoloMode: true, ultraYoloMode: true };
+    }
+    return {
+      yoloMode: true,
+      ultraYoloMode: true,
+      restoreYoloMode: state.yoloMode,
+    };
+  }
+
+  if (!state.ultraYoloMode) {
+    return {
+      yoloMode: state.yoloMode,
+      ultraYoloMode: false,
+      restoreYoloMode: false,
+    };
+  }
+
+  return {
+    yoloMode: state.restoreYoloMode,
+    ultraYoloMode: false,
+    restoreYoloMode: false,
+  };
 }
 
 export function keepSelectedToolsAfterSend(settingsValues: Record<string, Record<string, unknown>>): boolean {
@@ -1959,7 +2060,8 @@ export default function App() {
   const [sidebarSelectionTick, setSidebarSelectionTick] = useState(0);
   const [yoloMode, setYoloMode] = useLocalStorage("rumi-yolo-mode", false);
   const [ultraYoloMode, setUltraYoloMode] = useLocalStorage("rumi-ultra-yolo-mode", false);
-  const [mode, setMode] = useLocalStorage<AppMode>("rumi-app-mode", "chat");
+  const [ultraYoloRestoreYoloMode, setUltraYoloRestoreYoloMode] = useLocalStorage("rumi-ultra-yolo-restore-yolo-mode", false);
+  const [mode, setMode] = useLocalStorage<AppMode>("rumi-app-mode", "agent");
   const [codingContext, setCodingContext] = useState<CodingContext | null>(null);
   const [codingWorkspaces, setCodingWorkspaces] = useState<CodingWorkspaceRecord[]>([]);
   const [selectedCodingWorkspaceId, setSelectedCodingWorkspaceId] = useState<string | null>(null);
@@ -1975,6 +2077,12 @@ export default function App() {
   const currentAbortControllerRef = useRef<AbortController | null>(null);
   const streamingConversationIdRef = useRef<string | null>(null);
   const activeRuntimeApprovalActionRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (mode === "chat") {
+      setMode("agent");
+    }
+  }, [mode, setMode]);
 
   const rawSidebarItems: SidebarItem[] = catalog?.sidebar.items ?? [];
   const chatItems = buildChatItems(conversations);
@@ -2049,6 +2157,51 @@ export default function App() {
     : null;
   const staleRuntimeApprovalNotice = !ultraYoloMode && !rawRuntimeApproval ? staleRuntimeApproval(messages) : null;
   const visibleBrowserApproval = !ultraYoloMode ? browserApproval : null;
+  const composerModelStatusIndicators = useMemo<ComposerModelStatusIndicator[]>(() => {
+    if (ultraYoloMode) {
+      return [
+        {
+          id: "ultra-yolo",
+          name: "Ultra YOLO",
+          description: "Ultra YOLO が ON です。承認が必要な coding / browser 操作まで自動許可されます。",
+          svgMarkup: dangerShieldSvg,
+          tone: "danger",
+          action: {
+            label: "YOLO に戻す",
+            tone: "danger",
+            onSelect: () => {
+              setUltraYoloMode(false);
+              setYoloMode(true);
+              setUltraYoloRestoreYoloMode(false);
+            },
+          },
+        },
+      ];
+    }
+
+    if (yoloMode) {
+      return [
+        {
+          id: "yolo",
+          name: "YOLO",
+          description: "YOLO が ON です。承認不要の tool は自動実行されます。",
+          svgMarkup: dangerShieldSvg,
+          tone: "warning",
+          action: {
+            label: "標準に戻す",
+            tone: "warning",
+            onSelect: () => {
+              setUltraYoloMode(false);
+              setYoloMode(false);
+              setUltraYoloRestoreYoloMode(false);
+            },
+          },
+        },
+      ];
+    }
+
+    return [];
+  }, [ultraYoloMode, yoloMode, setUltraYoloMode, setUltraYoloRestoreYoloMode, setYoloMode]);
   const messageToolPreviews = useMemo(
     () => toolPreviewsFromMessages(activeConversation?.messages ?? []),
     [activeConversation?.messages],
@@ -3049,10 +3202,10 @@ export default function App() {
         }
         return;
       case "set_mode_coding":
-        handleModeChange(mode === "coding" ? "chat" : "coding");
+        handleModeChange(mode === "coding" ? "agent" : "coding");
         return;
       case "set_mode_chat":
-        handleModeChange("chat");
+        handleModeChange("agent");
         return;
       case "set_mode_agent":
         handleModeChange("agent");
@@ -3061,11 +3214,17 @@ export default function App() {
         setYoloMode((value) => parseCommandBoolean(args.enabled, !value));
         return;
       case "toggle_ultra_yolo": {
-        setUltraYoloMode((value) => {
-          const enabled = parseCommandBoolean(args.enabled, !value);
-          if (enabled) setYoloMode(true);
-          return enabled;
-        });
+        const nextState = resolveUltraYoloModeState(
+          {
+            yoloMode,
+            ultraYoloMode,
+            restoreYoloMode: ultraYoloRestoreYoloMode,
+          },
+          parseCommandBoolean(args.enabled, !ultraYoloMode),
+        );
+        setYoloMode(nextState.yoloMode);
+        setUltraYoloMode(nextState.ultraYoloMode);
+        setUltraYoloRestoreYoloMode(nextState.restoreYoloMode);
         return;
       }
       case "open_tool_picker": {
@@ -3203,7 +3362,11 @@ export default function App() {
 
       if (result.action || parsed.command.execution.type === "frontend") {
         const frontendAction = parsed.command.execution.type === "frontend" ? parsed.command.execution.action : undefined;
-        runFrontendCommandAction(result.action ?? frontendAction, parsed.command, frontendCommandArgs(parsed.args, result.args));
+        runFrontendCommandAction(
+          result.action ?? frontendAction,
+          parsed.command,
+          resolvedFrontendCommandArgs(parsed.command, parsed.args, result.args),
+        );
       }
       if (parsed.command.execution.type === "rumi_function") {
         await refreshCatalog();
@@ -3317,6 +3480,19 @@ export default function App() {
       setError(workspaceError instanceof Error ? workspaceError.message : "workspace creation failed.");
       throw workspaceError;
     }
+  };
+
+  const handleDirectorySelect = async () => {
+    const selected = await api.selectDirectory("New Group の保存先フォルダを選択");
+    return selected.cancelled ? null : selected.path;
+  };
+
+  const handlePrepareChatGroupStorage = async (rootPath: string) => {
+    const prepared = await api.prepareChatGroupStorage(rootPath);
+    return {
+      rootPath: prepared.root_path,
+      rumiDataPath: prepared.rumi_data_path,
+    };
   };
 
   const handleFileRemove = (fileId: string) => {
@@ -3442,7 +3618,7 @@ export default function App() {
         },
         tools: approvalToolIds.length ? approvalToolIds : undefined,
         metadata: {
-          mode: "chat",
+          mode: "agent",
           approval_followup: {
             action: browserApproval.action,
             approval_token: browserApproval.token,
@@ -3745,6 +3921,7 @@ export default function App() {
       ?? activeContextForSubmit.workspaceRoot
       ?? codingWorkspaces.find((workspace) => workspace.workspace_id === workspaceIdForSubmit)?.root_path
       ?? null;
+    const rumiDataPathForSubmit = pendingNewTaskContext?.rumiDataPath ?? activeContextForSubmit.rumiDataPath ?? null;
     const isCodingWorkspaceSubmit = mode === "coding" || Boolean(workspaceIdForSubmit);
 
     try {
@@ -3757,6 +3934,7 @@ export default function App() {
           tags: isCodingWorkspaceSubmit ? ["coding"] : undefined,
           metadata: {
             ...(groupIdForSubmit ? { group_id: groupIdForSubmit } : {}),
+            ...(rumiDataPathForSubmit ? { rumi_data_path: rumiDataPathForSubmit } : {}),
             ...(isCodingWorkspaceSubmit
             ? {
                 mode: "coding",
@@ -4009,6 +4187,7 @@ export default function App() {
         metadata: {
           mode: isOperationsMode ? "operations_company" : isCodingWorkspaceSubmit ? "coding" : mode,
           ...(groupIdForSubmit ? { group_id: groupIdForSubmit } : {}),
+          ...(rumiDataPathForSubmit ? { rumi_data_path: rumiDataPathForSubmit } : {}),
           ...(isOperationsMode ? {
             profile_id: "defaultspack.operations_company",
             agent_id: "client_manager",
@@ -4112,6 +4291,7 @@ export default function App() {
       modelCommandCandidates={modelCommandCandidates}
       modelPickerRequestId={modelPickerRequestId}
       yoloMode={yoloMode || ultraYoloMode}
+      modelStatusIndicators={composerModelStatusIndicators}
       voiceInputEnabled={settingsValues.general?.voice_input_enabled !== false}
       voiceInputUseAi={settingsValues.general?.voice_input_use_ai === true}
       mode={mode}
@@ -4175,6 +4355,8 @@ export default function App() {
               codingWorkspaces={codingWorkspaces}
               selectedCodingWorkspaceId={effectiveWorkspaceId}
               onCodingWorkspaceCreate={handleCodingWorkspaceCreate}
+              onDirectorySelect={handleDirectorySelect}
+              onGroupDataPathPrepare={handlePrepareChatGroupStorage}
               onCodingWorkspacesRefresh={async () => {
                 await loadCodingWorkspaces();
               }}
@@ -4198,6 +4380,8 @@ export default function App() {
               codingWorkspaces={codingWorkspaces}
               selectedCodingWorkspaceId={effectiveWorkspaceId}
               onCodingWorkspaceCreate={handleCodingWorkspaceCreate}
+              onDirectorySelect={handleDirectorySelect}
+              onGroupDataPathPrepare={handlePrepareChatGroupStorage}
               onCodingWorkspacesRefresh={async () => {
                 await loadCodingWorkspaces();
               }}

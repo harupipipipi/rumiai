@@ -293,6 +293,7 @@ _FALLBACK_HTTP_ROUTE_SPECS = [
     HttpRouteSpec("GET", "/api/chat/conversations/{id}/run-results/{run_id}/browser-screenshots", block_module="blocks.chat.browser_screenshots", path_inject={"id": "conversation_id", "run_id": "run_id"}),
     HttpRouteSpec("GET", "/v1/conversations/{id}/run-results/{run_id}/browser-screenshots", block_module="blocks.chat.browser_screenshots", path_inject={"id": "conversation_id", "run_id": "run_id"}),
     HttpRouteSpec("GET", "/api/chat/conversations/{id}/artifact-file", block_module="blocks.chat.artifact_file", path_inject={"id": "conversation_id"}),
+    HttpRouteSpec("POST", "/api/chat/group-storage", block_module="blocks.chat.group_storage"),
     HttpRouteSpec("GET", "/api/integrations/secrets", block_module="blocks.integrations.secrets"),
     HttpRouteSpec("POST", "/api/integrations/secrets", block_module="blocks.integrations.secrets"),
     HttpRouteSpec("POST", "/api/integrations/slack/events", block_module="blocks.integrations.slack"),
@@ -558,6 +559,7 @@ _FALLBACK_HTTP_ROUTE_SPECS = [
     HttpRouteSpec("POST", "/api/ui/commands/execute", block_module="blocks.ui.commands"),
     HttpRouteSpec("POST", "/api/ui/clipboard", block_module="blocks.ui.clipboard"),
     HttpRouteSpec("GET", "/api/ui/conversations/{id}/preview", block_module="blocks.ui.conversation_preview", path_inject={"id": "conversation_id"}),
+    HttpRouteSpec("POST", "/api/ui/select-directory", block_module="blocks.ui.select_directory"),
 ]
 
 _ALWAYS_AVAILABLE_HTTP_ROUTE_SPECS = [

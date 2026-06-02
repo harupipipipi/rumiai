@@ -58,6 +58,21 @@ export type ContextUsageInfo = {
   label: string;
 };
 
+export type ComposerModelStatusIndicatorAction = {
+  label: string;
+  onSelect: () => void;
+  tone?: "neutral" | "info" | "warning" | "danger";
+};
+
+export type ComposerModelStatusIndicator = {
+  id: string;
+  name: string;
+  description: string;
+  svgMarkup: string;
+  tone?: "neutral" | "info" | "warning" | "danger";
+  action?: ComposerModelStatusIndicatorAction | null;
+};
+
 export type SettingChangeHandler = (sectionId: string, fieldId: string, value: unknown) => void;
 
 export type TitleBarRendererProps = {
@@ -81,6 +96,8 @@ export type HistoryBoardRendererProps = {
   codingWorkspaces?: CodingWorkspaceRecord[];
   selectedCodingWorkspaceId?: string | null;
   onCodingWorkspaceCreate?: (rootPath: string) => Promise<CodingWorkspaceRecord | null | undefined>;
+  onDirectorySelect?: () => Promise<string | null | undefined>;
+  onGroupDataPathPrepare?: (rootPath: string) => Promise<{ rootPath: string; rumiDataPath: string } | null | undefined>;
   onCodingWorkspacesRefresh?: () => void | Promise<void>;
 };
 
@@ -129,6 +146,7 @@ export type ComposerRendererProps = {
   modelCommandCandidates?: ModelCommandCandidate[];
   modelPickerRequestId?: number;
   yoloMode?: boolean;
+  modelStatusIndicators?: ComposerModelStatusIndicator[];
   voiceInputEnabled?: boolean;
   voiceInputUseAi?: boolean;
   mode?: AppMode;

@@ -91,6 +91,49 @@ test("settings surface pinned placements render in the modal", () => {
   assert.match(html, /このセクションを開く/);
 });
 
+test("operations company model allowlist renders as an addable selection list", () => {
+  const html = renderToStaticMarkup(
+    createElement(SettingsModalRenderer, {
+      isOpen: true,
+      activeSectionId: "operations_company",
+      catalog: {
+        sidebar: { filters: [], items: [] },
+        settings: { sections: [], values: {} },
+        chat_rendering: { renderers: [] },
+        extension_points: [],
+      },
+      health: null,
+      previewsCount: 0,
+      settingsSections: [
+        {
+          id: "operations_company",
+          label: "Operations Company",
+          fields: [
+            {
+              id: "model_allowlist",
+              label: "Model Allowlist",
+              type: "textarea",
+              default: "stub/default\ngoogle/gemini-2.5-flash",
+            },
+          ],
+        },
+      ],
+      settingsValues: {
+        operations_company: {
+          model_allowlist: "stub/default\ngoogle/gemini-2.5-flash",
+        },
+      },
+      onClose: () => undefined,
+      onSettingChange: () => undefined,
+    }),
+  );
+
+  assert.match(html, /モデルを追加/);
+  assert.match(html, /stub\/default/);
+  assert.match(html, /google\/gemini-2.5-flash/);
+  assert.doesNotMatch(html, /<textarea[^>]*>stub\/default/);
+});
+
 test("settings system info renders viewer version and macOS permissions", () => {
   const html = renderToStaticMarkup(
     createElement(SettingsModalRenderer, {

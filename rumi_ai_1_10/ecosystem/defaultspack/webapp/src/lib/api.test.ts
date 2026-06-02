@@ -1,7 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { api, defaultspackApiHeaders, normalizeChatStreamEvent, normalizeBrowserComputerApprovalAction, usesBrowserComputerApprovalEndpoint } from "./api";
-import { frontendCommandArgs, keepSelectedToolsAfterSend, parseCommandBoolean } from "../App";
+import type { ComposerCommandItem } from "./api";
+import { frontendCommandArgs, keepSelectedToolsAfterSend, parseCommandBoolean, parseSlashCommandInput, resolveUltraYoloModeState, resolvedFrontendCommandArgs } from "../App";
 
 test("frontend command args prefer backend-coerced values", () => {
   assert.deepEqual(
@@ -10,11 +11,67 @@ test("frontend command args prefer backend-coerced values", () => {
   );
 });
 
+test("frontend execution keeps locally parsed command args", () => {
+  const command: ComposerCommandItem = {
+    id: "ultra_yolo",
+    name: "ultra",
+    label: "Ultra Yolo",
+    category: "mode",
+    visibility: "default",
+    risk: "medium",
+    args: [{ name: "enabled", type: "boolean", required: false }],
+    execution: { type: "frontend", action: "toggle_ultra_yolo" },
+  };
+
+  assert.deepEqual(
+    resolvedFrontendCommandArgs(command, {}, { enabled: true }),
+    {},
+  );
+});
+
 test("frontend boolean command parsing handles explicit false strings", () => {
   assert.equal(parseCommandBoolean("false", true), false);
   assert.equal(parseCommandBoolean("0", true), false);
   assert.equal(parseCommandBoolean("off", true), false);
   assert.equal(parseCommandBoolean(undefined, true), true);
+});
+
+test("slash command parsing supports multi-word aliases without treating them as args", () => {
+  const commands: ComposerCommandItem[] = [
+    {
+      id: "ultra_yolo",
+      name: "ultra",
+      aliases: ["ultrayolo", "ultra_yolo"],
+      label: "Ultra Yolo",
+      category: "mode",
+      visibility: "default",
+      risk: "medium",
+      args: [{ name: "enabled", type: "boolean", required: false }],
+      execution: { type: "frontend", action: "toggle_ultra_yolo" },
+    },
+  ];
+
+  const parsed = parseSlashCommandInput("/ultra yolo", commands);
+  assert.equal(parsed?.command.id, "ultra_yolo");
+  assert.deepEqual(parsed?.args, {});
+
+  const explicitOff = parseSlashCommandInput("/ultra yolo off", commands);
+  assert.deepEqual(explicitOff?.args, { enabled: "off" });
+});
+
+test("ultra yolo restore state returns to the previous yolo mode", () => {
+  assert.deepEqual(
+    resolveUltraYoloModeState({ yoloMode: false, ultraYoloMode: false, restoreYoloMode: false }, true),
+    { yoloMode: true, ultraYoloMode: true, restoreYoloMode: false },
+  );
+  assert.deepEqual(
+    resolveUltraYoloModeState({ yoloMode: true, ultraYoloMode: true, restoreYoloMode: false }, false),
+    { yoloMode: false, ultraYoloMode: false, restoreYoloMode: false },
+  );
+  assert.deepEqual(
+    resolveUltraYoloModeState({ yoloMode: true, ultraYoloMode: true, restoreYoloMode: true }, false),
+    { yoloMode: true, ultraYoloMode: false, restoreYoloMode: false },
+  );
 });
 
 test("executeUiCommand preserves model candidate results", async () => {
@@ -987,5 +1044,41 @@ test("coding workspace and compact helpers serialize request bodies", async () =
     input: "/api/chat/conversations/c1/auto-compact",
     method: "POST",
     body: { conversation_id: "c1", mode: "apply", approved: true },
+  });
+});
+
+test("directory and group storage helpers target native selection routes", async () => {
+  const seen: Array<{ input: string; method: string; body?: unknown }> = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    seen.push({
+      input: String(input),
+      method: init?.method ?? "GET",
+      body: init?.body ? JSON.parse(String(init.body)) : undefined,
+    });
+    return new Response(JSON.stringify({
+      status: "ok",
+      data: String(input).includes("/select-directory")
+        ? { path: "/repo", cancelled: false }
+        : { root_path: "/repo", rumi_data_path: "/repo/.rumiDP", chat_store_path: "/repo/.rumiDP/chat/conversations.json" },
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }) as typeof fetch;
+
+  try {
+    await api.selectDirectory("保存先");
+    await api.prepareChatGroupStorage("/repo");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.deepEqual(seen[0], {
+    input: "/api/ui/select-directory",
+    method: "POST",
+    body: { prompt: "保存先" },
+  });
+  assert.deepEqual(seen[1], {
+    input: "/api/chat/group-storage",
+    method: "POST",
+    body: { root_path: "/repo" },
   });
 });

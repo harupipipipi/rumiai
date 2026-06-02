@@ -34,7 +34,13 @@
             "type": "string"
           },
           "rows": {
-            "type": "array"
+            "type": "array",
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
           }
         },
         "required": [

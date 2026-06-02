@@ -337,6 +337,18 @@
       "description": "Suggest or apply automatic conversation compaction"
     },
     {
+      "method": "POST",
+      "path": "/api/chat/group-storage",
+      "flow_id": "simple_chat",
+      "description": "Prepare a .rumiDP storage folder for a chat group"
+    },
+    {
+      "method": "POST",
+      "path": "/api/ui/select-directory",
+      "flow_id": "transport_direct",
+      "description": "Open a native directory chooser and return the selected folder path"
+    },
+    {
       "method": "GET",
       "path": "/api/agent/companies",
       "flow_id": "company_workspace",
