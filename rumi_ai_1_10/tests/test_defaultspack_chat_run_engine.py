@@ -255,6 +255,48 @@ def test_prepare_chat_run_forwards_approval_followup_token_to_tool_context(tmp_p
     assert prepared.tool_context["tool_approval_tokens"] == expected
     ChatStore._instance = None
 
+def test_prepare_chat_run_promotes_profile_and_agent_ids_into_tool_context(tmp_path, monkeypatch):
+    from domain.chat.run_request import prepare_chat_run
+    from domain.chat.store import ChatStore
+
+    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
+    ChatStore._instance = None
+
+    store = ChatStore()
+    conversation = store.create_conversation(
+        model="stub/default",
+        metadata={"profile_id": "defaultspack.mimo_coding_company"},
+    )
+
+    prepared = prepare_chat_run(
+        {
+            "conversation_id": conversation["id"],
+            "message": {
+                "role": "user",
+                "content": "scheduled review",
+                "metadata": {
+                    "profile_id": "defaultspack.mimo_coding_company",
+                    "agent_id": "project_manager",
+                },
+            },
+            "params": {
+                "tool_policy": {
+                    "profile_id": "defaultspack.mimo_coding_company",
+                    "tool_choice": "auto",
+                }
+            },
+            "tools": ["todo"],
+        },
+        {"run_source": "scheduler"},
+    )
+
+    assert prepared.request_context["profile_id"] == "defaultspack.mimo_coding_company"
+    assert prepared.tool_context["profile_id"] == "defaultspack.mimo_coding_company"
+    assert prepared.request_context["agent_id"] == "project_manager"
+    assert prepared.tool_context["agent_id"] == "project_manager"
+    ChatStore._instance = None
+
 
 def test_prepare_chat_run_maps_computer_approval_followup_aliases(tmp_path, monkeypatch):
     from domain.chat.run_request import prepare_chat_run
@@ -579,6 +621,59 @@ def test_complete_turn_retries_transient_ai_error_after_tool_use():
 
     assert client.calls == 2
     assert response["content"] == [{"type": "text", "text": "continued"}]
+    assert any(event.get("type") == "ai_retry_scheduled" for event in engine._activity_events)
+
+
+def test_complete_turn_retries_wrapped_429_after_tool_use():
+    from domain.chat.run_request import PreparedChatRun
+    from domain.chat.stream_engine import ChatRunEngine
+
+    class FlakyClient:
+        def __init__(self):
+            self.calls = 0
+
+        def complete(self, model, messages, tools=None, params=None):
+            self.calls += 1
+            if self.calls == 1:
+                raise RuntimeError(
+                    'OpenAI API error 400: {"error":{"code":"429","message":"Cluster rate limit exceeded, request queued but not admitted","param":"","type":"router_queue_limitation"}}'
+                )
+            return {
+                "content": [{"type": "text", "text": "continued after wrapped 429"}],
+                "finish_reason": "stop",
+            }
+
+    client = FlakyClient()
+    engine = ChatRunEngine(store=object(), client=client)
+    engine._tool_logs = [{"tool_name": "coding_file_read", "result": {"status": "ok"}}]
+    prepared = PreparedChatRun(
+        conversation_id="conv-1",
+        conversation={"id": "conv-1"},
+        input_data={},
+        request_id="req-1",
+        content=[],
+        metadata=None,
+        user_message={"id": "user-1"},
+        model="xiaomi-token-plan-sgp/mimo-v2.5-pro",
+        params={"retry": {"max_attempts": 2, "delays": [0]}},
+        request_context={},
+        tool_context={},
+        standard_messages=[],
+        user_text="hello",
+        system_prompt="",
+        enrich_info={},
+        raw_tools=[],
+        provider_tools=[],
+        tools_called=[],
+        connected_tool_names=set(),
+        call_handler=None,
+        model_routing={},
+    )
+
+    response = engine._complete_turn(prepared, [{"role": "user", "content": "hello"}])
+
+    assert client.calls == 2
+    assert response["content"] == [{"type": "text", "text": "continued after wrapped 429"}]
     assert any(event.get("type") == "ai_retry_scheduled" for event in engine._activity_events)
 
 

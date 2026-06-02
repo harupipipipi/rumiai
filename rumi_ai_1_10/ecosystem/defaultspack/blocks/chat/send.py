@@ -47,6 +47,10 @@ _NON_RETRYABLE_AI_ERROR_RE = re.compile(
     r"(api key|not configured|unauthorized|forbidden|authentication|invalid api|invalid request|bad request|\b400\b|\b401\b|\b403\b)",
     re.IGNORECASE,
 )
+_RETRYABLE_RATE_LIMIT_OVERRIDE_RE = re.compile(
+    r"\b429\b|rate limit|rate_limit|router_queue_limitation|quota|resource_exhausted",
+    re.IGNORECASE,
+)
 _COMPUTER_USE_REQUEST_RE = re.compile(
     r"compute[\s_-]*use|compu?ter[\s_-]*use|computer\s+ツール|コンピューター操作|pc操作|"
     r"(google\s*chrome|chrome|chatgpt|vivaldi|vivladi|line|ブラウザ|browser).{0,80}(操作|送信|入力|クリック|開いて|開く)",
@@ -120,6 +124,10 @@ def _ai_retry_delay(params, retry_index):
 def _is_retryable_ai_error(message):
     text = str(message or "")
     if not text:
+        return True
+    # Some providers wrap a transient inner 429 in an outer HTTP 400 envelope.
+    # Prefer the inner rate-limit signal so we still back off and retry.
+    if _RETRYABLE_RATE_LIMIT_OVERRIDE_RE.search(text):
         return True
     if _NON_RETRYABLE_AI_ERROR_RE.search(text):
         return False
@@ -798,6 +806,8 @@ def _tool_result_recovery_kind(result):
     kind = str(recovery.get("kind") or "").strip()
     if kind:
         return kind
+    if not _tool_result_is_error(result):
+        return ""
     reason = _tool_result_reason(result).lower()
     if "visible window" in reason or "background computer-use is disabled" in reason:
         return "visible_window_required"

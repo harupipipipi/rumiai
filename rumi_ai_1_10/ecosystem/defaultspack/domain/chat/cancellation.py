@@ -54,6 +54,13 @@ class ChatCancellationRegistry:
                 pass
         return True
 
+    def has_active_callbacks(self, conversation_id: str) -> bool:
+        conversation_id = str(conversation_id or "").strip()
+        if not conversation_id:
+            return False
+        with self._lock:
+            return bool(self._callbacks.get(conversation_id))
+
     def is_cancelled(self, conversation_id: str) -> bool:
         conversation_id = str(conversation_id or "").strip()
         if not conversation_id:

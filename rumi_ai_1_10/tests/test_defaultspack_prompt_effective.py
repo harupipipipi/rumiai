@@ -14,7 +14,13 @@ sys.path.insert(0, str(DEFAULTSPACK_ROOT))
 from blocks.prompt.load_effective import run  # noqa: E402
 
 
-def _workspace(tmp_path: Path, *, prompt_id: str = "default_chat") -> dict:
+def _workspace(
+    tmp_path: Path,
+    *,
+    profile_id: str = "p1",
+    prompt_id: str = "default_chat",
+    base_pack: str = "defaultspack",
+) -> dict:
     root = tmp_path / "profiles" / "p1"
     prompts_dir = root / "prompts"
     snapshots_dir = root / "ecosystem" / "snapshots"
@@ -24,8 +30,8 @@ def _workspace(tmp_path: Path, *, prompt_id: str = "default_chat") -> dict:
     profile_file.write_text(
         yaml.safe_dump(
             {
-                "profile_id": "p1",
-                "base_pack": "defaultspack",
+                "profile_id": profile_id,
+                "base_pack": base_pack,
                 "system_prompt_id": prompt_id,
             },
             sort_keys=False,
@@ -71,3 +77,25 @@ def test_effective_prompt_falls_back_to_defaultspack_prompt_component(tmp_path: 
 
     assert "default chat assistant" in result["data"]["content"]
     assert result["data"]["source_type"] == "pack_default"
+
+
+def test_effective_prompt_can_resolve_sibling_pack_prompt_from_profile_id(tmp_path: Path):
+    workspace = _workspace(
+        tmp_path,
+        profile_id="defaultspack.mimo_coding_company",
+        prompt_id="mimo_coding_company",
+        base_pack="",
+    )
+
+    result = run(
+        {
+            "profile_id": "defaultspack.mimo_coding_company",
+            "workspace": workspace,
+            "system_prompt_id": "mimo_coding_company",
+        },
+        {},
+    )
+
+    assert "MiMo Coding Company" in result["data"]["content"]
+    assert result["data"]["source_type"] == "pack_default"
+    assert result["data"]["source"] == "rumi_operations_company_pack.mimo_coding_company"

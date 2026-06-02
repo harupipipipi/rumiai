@@ -33,6 +33,8 @@
         "type": "object",
         "properties": {
           "message": {"type": "string"},
+          "paths": {"type": "array", "items": {"type": "string"}, "description": "Files to stage and commit. Only these files are committed; unrelated dirty files are left untouched."},
+          "files": {"type": "array", "items": {"type": "string"}, "description": "Alias for paths."},
           "all_tracked": {"type": "boolean"}
         },
         "required": ["message"]

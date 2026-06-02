@@ -68,6 +68,73 @@ def test_tool_policy_allows_first_party_memo_upsert_without_approval():
     assert decision.requires_approval is False
 
 
+def test_tool_policy_allows_mimo_company_autonomous_todo_updates():
+    ToolRegistry._instance = None
+    tool = ToolRegistry().get("todo")
+
+    decision = decide_tool_policy(
+        tool,
+        {"profile_id": "defaultspack.mimo_coding_company"},
+        tool_name="todo",
+        arguments={"action": "add", "title": "Review harness"},
+    )
+
+    assert decision.allowed is True
+    assert decision.action == "allow"
+    assert decision.requires_approval is False
+
+
+def test_tool_policy_allows_mimo_company_read_only_rumi_api_requests():
+    ToolRegistry._instance = None
+    tool = ToolRegistry().get("rumi_api")
+
+    decision = decide_tool_policy(
+        tool,
+        {
+            "profile_id": "defaultspack.mimo_coding_company",
+            "profile_policy": {"allow_network": True},
+        },
+        tool_name="rumi_api",
+        arguments={"action": "request", "method": "GET", "path": "/api/health"},
+    )
+
+    assert decision.allowed is True
+    assert decision.action == "allow"
+    assert decision.requires_approval is False
+
+
+def test_tool_policy_allows_mimo_company_repo_writes_without_approval():
+    ToolRegistry._instance = None
+    tool = ToolRegistry().get("coding_file_write")
+
+    decision = decide_tool_policy(
+        tool,
+        {"profile_id": "defaultspack.mimo_coding_company"},
+        tool_name="coding_file_write",
+        arguments={"path": "app.py", "content": "print('hi')"},
+    )
+
+    assert decision.allowed is True
+    assert decision.action == "allow"
+    assert decision.requires_approval is False
+
+
+def test_tool_policy_allows_mimo_company_repo_patches_without_approval():
+    ToolRegistry._instance = None
+    tool = ToolRegistry().get("coding_file_patch")
+
+    decision = decide_tool_policy(
+        tool,
+        {"profile_id": "defaultspack.mimo_coding_company"},
+        tool_name="coding_file_patch",
+        arguments={"path": ".gitignore", "old": "foo", "new": "foo\nbar"},
+    )
+
+    assert decision.allowed is True
+    assert decision.action == "allow"
+    assert decision.requires_approval is False
+
+
 def test_tool_policy_denies_shell_when_disabled():
     tool = {"tool_id": "terminal_exec", "category": "shell"}
     decision = decide_tool_policy(tool, {"profile_policy": {"allow_shell": False}}, tool_name="terminal_exec")
@@ -139,6 +206,23 @@ def test_persistent_permission_policy_yolo_allows_ask_decision(tmp_path):
     assert decision["allowed"] is True
     assert decision["requires_approval"] is False
     assert decision["matched_by"] == "yolo_mode"
+
+
+def test_persistent_permission_policy_allows_mimo_company_safe_autonomous_tools(tmp_path):
+    store = ToolPermissionPolicyStore(tmp_path / "permission_policy.json")
+    store.save({"default_action": "ask"})
+
+    decision = store.decide(
+        "todo",
+        tool_def={"tool_id": "todo", "name": "todo", "action_type": "update"},
+        arguments={"action": "list"},
+        context={"profile_id": "defaultspack.mimo_coding_company"},
+    )
+
+    assert decision["action"] == "allow"
+    assert decision["allowed"] is True
+    assert decision["requires_approval"] is False
+    assert decision["matched_by"] == "autonomous_profile"
 
 
 def test_tool_risk_recognizes_git_push():

@@ -1010,22 +1010,44 @@ RumiApp.prototype._doSend = function(text){
 RumiApp.prototype._tryStreamMessage = function(convId, msgObj, text){
   var self = this;
   var td = this.getActiveTabData();
-  return this.bridge.streamMessage(convId, msgObj).then(function(data){
-    if(data && data.stream_id){
-      return self.bridge.getConversation(convId).then(function(conv){
-        var msgs = conv.messages || [];
-        if(td && msgs.length > 0){
-          var lastMsg = msgs[msgs.length - 1];
-          if(lastMsg.role === "assistant"){
-            td.messages.push({role:"assistant", content: lastMsg.content || "[no response]"});
-            self._maybeUpdateTitle(td, text);
-            return;
+  return new Promise(function(resolve, reject){
+    var settled = false;
+    var timeoutMs = 12000;
+    var timeoutId = setTimeout(function(){
+      if(settled) return;
+      settled = true;
+      reject(new Error("stream timeout"));
+    }, timeoutMs);
+
+    self.bridge.streamMessage(convId, msgObj).then(function(data){
+      if(settled) return;
+      settled = true;
+      clearTimeout(timeoutId);
+      if(data && data.stream_id){
+        return self.bridge.getConversation(convId).then(function(conv){
+          var msgs = conv.messages || [];
+          if(td && msgs.length > 0){
+            var lastMsg = msgs[msgs.length - 1];
+            if(lastMsg.role === "assistant"){
+              td.messages.push({role:"assistant", content: lastMsg.content || "[no response]"});
+              self._maybeUpdateTitle(td, text);
+              resolve();
+              return;
+            }
           }
-        }
-        throw new Error("stream fallback");
-      });
-    }
-    throw new Error("stream fallback");
+          reject(new Error("stream fallback"));
+        }).catch(function(err){
+          reject(err);
+        });
+        return;
+      }
+      reject(new Error("stream fallback"));
+    }).catch(function(err){
+      if(settled) return;
+      settled = true;
+      clearTimeout(timeoutId);
+      reject(err);
+    });
   });
 };
 

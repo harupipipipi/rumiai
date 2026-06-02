@@ -4,7 +4,7 @@
   "version": "1.0.0",
   "metadata": {
     "name": "Rumi Operations Company Pack",
-    "description": "Operations Company product profile, routes, graph, prompt, and UI extension.",
+    "description": "Operations Company and MiMo Coding Company profiles, routes, prompts, and UI extensions.",
     "author": "Rumi AI Team",
     "license": "MIT"
   },
@@ -20,7 +20,10 @@
         "provides": [
           "rumi.operations_company.manifest",
           "rumi.operations_company.status",
-          "rumi.operations_company.bootstrap"
+          "rumi.operations_company.bootstrap",
+          "rumi.mimo_coding_company.manifest",
+          "rumi.mimo_coding_company.status",
+          "rumi.mimo_coding_company.bootstrap"
         ]
       }
     }

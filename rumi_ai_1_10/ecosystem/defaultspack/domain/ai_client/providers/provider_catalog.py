@@ -30,9 +30,15 @@ _OPENAI_COMPATIBLE_PROVIDERS = [
         "base_url_env_vars": ("GROQ_BASE_URL",),
         "default_base_url": "https://api.groq.com/openai/v1",
         "supports_embeddings": False,
+        "remote_model_discovery": True,
         "curated_models": [
             _chat("groq", "llama-3.3-70b-versatile", "Llama 3.3 70B Versatile"),
             _chat("groq", "llama-3.1-8b-instant", "Llama 3.1 8B Instant"),
+            _chat("groq", "qwen/qwen3-32b", "Qwen 3 32B"),
+            _chat("groq", "allam-2-7b", "Allam 2 7B"),
+            _chat("groq", "groq/compound", "Groq Compound"),
+            _chat("groq", "groq/compound-mini", "Groq Compound Mini"),
+            _chat("groq", "meta-llama/llama-4-maverick-17b-128e-instruct", "Llama 4 Maverick 17B 128E Instruct"),
             _chat("groq", "mixtral-8x7b-32768", "Mixtral 8x7B"),
         ],
     },
@@ -81,6 +87,7 @@ _OPENAI_COMPATIBLE_PROVIDERS = [
         "base_url_env_vars": ("CEREBRAS_BASE_URL",),
         "default_base_url": "https://api.cerebras.ai/v1",
         "supports_embeddings": False,
+        "remote_model_discovery": True,
         "curated_models": [
             _chat("cerebras", "gpt-oss-120b", "GPT OSS 120B"),
             _chat("cerebras", "zai-glm-4.7", "ZAI GLM 4.7"),
@@ -264,6 +271,9 @@ def _build_provider_class(spec):
         "supports_embeddings": spec.get("supports_embeddings", False),
         "curated_models": list(spec.get("curated_models", [])),
         "KNOWN_MODELS": list(spec.get("curated_models", [])),
+        "remote_model_discovery": bool(spec.get("remote_model_discovery", False)),
+        "remote_model_list_path": str(spec.get("remote_model_list_path", "/models") or "/models"),
+        "remote_model_cache_ttl_seconds": int(spec.get("remote_model_cache_ttl_seconds", 21600) or 21600),
         "__doc__": "{} API provider via OpenAI-compatible adapter.".format(spec["display_name"]),
     }
     class_name = "{}Provider".format(spec["provider_name"].replace("-", " ").title().replace(" ", ""))

@@ -179,8 +179,10 @@ function isCompanyChat(chat: ChatItem): boolean {
     chatCompanyId(chat)
     || groupId.startsWith("company:")
     || chat.conversationKind === "operations_company"
+    || chat.conversationKind === "mimo_coding_company"
     || tags.includes("company")
     || tags.includes("operations-company")
+    || tags.includes("mimo-coding-company")
   );
 }
 
@@ -302,7 +304,7 @@ export function buildGroupsFromChats(chatItems: ChatItem[], customGroups: Custom
       metadataBuckets.coding.push(normalized);
       return;
     }
-    const tags = chatTags(normalized).filter((tag) => !["company", "operations-company", "coding"].includes(tag));
+    const tags = chatTags(normalized).filter((tag) => !["company", "operations-company", "mimo-coding-company", "coding"].includes(tag));
     if (tags.length > 0) {
       const primary = tags[0];
       const bucket = tagBuckets.get(primary) ?? [];

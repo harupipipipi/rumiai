@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+from domain.tool.autonomy import autonomous_tool_execution_allowed
 from domain.tool.security import is_safe_first_party_memo_tool
 
 
@@ -211,6 +212,15 @@ class ToolPermissionPolicyStore:
         context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         decision = self.evaluate(tool_name=tool_name, tool_def=tool_def, arguments=arguments)
+        if decision.get("action") == _ACTION_ASK and autonomous_tool_execution_allowed(tool_name, arguments, context):
+            decision = copy.deepcopy(decision)
+            decision["action"] = _ACTION_ALLOW
+            decision["allowed"] = True
+            decision["requires_approval"] = False
+            decision["matched_by"] = "autonomous_profile"
+            decision["matched_value"] = str((context or {}).get("profile_id") or "")
+            decision["reason"] = "autonomous_profile"
+            return decision
         if decision.get("action") == _ACTION_ASK and _context_yolo_mode(context):
             decision = copy.deepcopy(decision)
             decision["action"] = _ACTION_ALLOW

@@ -32,6 +32,9 @@ def run(context):
         ("GET", "/api/agent/company/manifest", _lazy("blocks.agent.company.manifest"), {}),
         ("GET", "/api/agent/company/status", _lazy("blocks.agent.company.status"), {}),
         ("POST", "/api/agent/company/bootstrap", _lazy("blocks.agent.company.bootstrap"), {}),
+        ("GET", "/api/agent/mimo-company/manifest", _lazy("blocks.agent.mimo_company.manifest"), {}),
+        ("GET", "/api/agent/mimo-company/status", _lazy("blocks.agent.mimo_company.status"), {}),
+        ("POST", "/api/agent/mimo-company/bootstrap", _lazy("blocks.agent.mimo_company.bootstrap"), {}),
     ]
     for method, pattern, handler, path_inject in routes:
         interface_registry.register(

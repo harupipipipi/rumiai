@@ -104,19 +104,47 @@ def test_tool_subagent_compat_returns_structured_result(monkeypatch, tmp_path):
 
 def test_rumi_default_tools_subagent_compat_uses_dispatcher(monkeypatch, tmp_path):
     _configure_paths(monkeypatch, tmp_path)
-    parent = _parent_conversation()
+    ChatStore._instance = None
+    parent = ChatStore().create_conversation(
+        model="stub/default",
+        system_prompt_id="mimo_coding_company",
+        group_id="company:mimo-coding-company",
+        metadata={"profile_id": "defaultspack.mimo_coding_company", "company_id": "mimo-coding-company"},
+    )
     seen: dict[str, object] = {}
 
     def fake_dispatch(envelope, context):
         seen["called"] = envelope.target["conversation_id"]
+        seen["input"] = envelope.input
+        seen["tools"] = envelope.tools
+        seen["params"] = envelope.params
+        seen["metadata"] = envelope.metadata
         return {"status": "ok", "assistant_text": "done"}
 
     monkeypatch.setattr("ecosystem.rumi_default_tools_pack.domain.tool.subagent.dispatch_input", fake_dispatch)
 
-    result = SubagentController().run({"task": "delegate this"}, {"conversation_id": parent["id"], "model": "stub/default"})
+    result = SubagentController().run(
+        {"task": "delegate this"},
+        {
+            "conversation_id": parent["id"],
+            "model": "stub/default",
+            "profile_id": "defaultspack.mimo_coding_company",
+            "profile_policy": {"profile_id": "defaultspack.mimo_coding_company"},
+            "capability_graph": {"connected_tools": ["todo", "coding_file_search"]},
+        },
+    )
 
     assert result["summary"] == "done"
     assert seen["called"]
+    assert seen["input"].startswith("Use the connected tools directly.")
+    assert seen["tools"] == ["todo", "coding_file_search"]
+    assert seen["params"]["tool_policy"]["profile_id"] == "defaultspack.mimo_coding_company"
+    assert seen["metadata"]["profile_id"] == "defaultspack.mimo_coding_company"
+    child = ChatStore().get_conversation(result["child_conversation_id"])
+    assert child["system_prompt_id"] == "mimo_coding_company"
+    assert child["group_id"] == "company:mimo-coding-company"
+    assert child["metadata"]["profile_id"] == "defaultspack.mimo_coding_company"
+    assert child["metadata"]["company_id"] == "mimo-coding-company"
 
 
 def test_tool_selector_no_longer_depends_on_special_subagent_only_path(monkeypatch):
