@@ -1164,7 +1164,7 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
             return
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Rumi-CSRF")
 
     def log_message(self, format, *args):
         pass

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { api, normalizeChatStreamEvent, normalizeBrowserComputerApprovalAction, usesBrowserComputerApprovalEndpoint } from "./api";
+import { api, defaultspackApiHeaders, normalizeChatStreamEvent, normalizeBrowserComputerApprovalAction, usesBrowserComputerApprovalEndpoint } from "./api";
 import { frontendCommandArgs, keepSelectedToolsAfterSend, parseCommandBoolean } from "../App";
 
 test("frontend command args prefer backend-coerced values", () => {
@@ -694,13 +694,21 @@ test("streamMessage includes a local CSRF header", async () => {
   assert.ok(headers.get("X-Rumi-CSRF"));
 });
 
+test("unsafe API headers replace blank CSRF values", () => {
+  const headers = defaultspackApiHeaders("POST", { "X-Rumi-CSRF": " " });
+
+  assert.ok(headers.get("X-Rumi-CSRF")?.trim());
+});
+
 test("browserComputer calls dedicated browser-computer endpoint", async () => {
   const originalFetch = globalThis.fetch;
   let requestUrl = "";
   let requestBody: any = null;
+  let requestHeaders: Headers | null = null;
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     requestUrl = String(input);
     requestBody = JSON.parse(String(init?.body ?? "{}"));
+    requestHeaders = new Headers(init?.headers);
     return new Response(JSON.stringify({
       status: "ok",
       data: { handled: true },
@@ -714,6 +722,8 @@ test("browserComputer calls dedicated browser-computer endpoint", async () => {
       action: "computer.screenshot",
       payload: { reason: "test" },
     });
+    const headers = requestHeaders as Headers | null;
+    assert.ok(headers?.get("X-Rumi-CSRF"));
     assert.deepEqual(result, { handled: true });
   } finally {
     globalThis.fetch = originalFetch;
@@ -750,9 +760,11 @@ test("browser computer approvals use the browser-computer endpoint for computer_
   const originalFetch = globalThis.fetch;
   let requestUrl = "";
   let requestBody: any = null;
+  let requestHeaders: Headers | null = null;
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     requestUrl = String(input);
     requestBody = JSON.parse(String(init?.body ?? "{}"));
+    requestHeaders = new Headers(init?.headers);
     return new Response(JSON.stringify({
       status: "ok",
       data: { approved: true },
@@ -769,6 +781,8 @@ test("browser computer approvals use the browser-computer endpoint for computer_
       action: "computer.screenshot",
       payload: { app: "Google Chrome", approval_token: "tok" },
     });
+    const headers = requestHeaders as Headers | null;
+    assert.ok(headers?.get("X-Rumi-CSRF"));
     assert.deepEqual(result, { approved: true });
   } finally {
     globalThis.fetch = originalFetch;

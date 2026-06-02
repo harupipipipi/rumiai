@@ -116,6 +116,21 @@ def test_dynamic_tool_post_routes_are_guarded():
     )
 
 
+def test_non_sensitive_cors_allows_generated_csrf_header():
+    from transport.http import _RequestHandler
+
+    handler = _RequestHandler.__new__(_RequestHandler)
+    sent_headers = []
+    handler.path = "/api/health"
+    handler.headers = {}
+    handler.send_header = lambda name, value: sent_headers.append((name, value))
+
+    handler._send_cors_headers()
+
+    allowed_headers = dict(sent_headers)["Access-Control-Allow-Headers"]
+    assert "X-Rumi-CSRF" in allowed_headers
+
+
 def test_audit_redacts_secrets(tmp_path, monkeypatch):
     from domain.safety.audit import audit_path, record_attempt
 

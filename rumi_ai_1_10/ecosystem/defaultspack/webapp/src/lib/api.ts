@@ -1134,7 +1134,8 @@ export function defaultspackApiHeaders(method: string, headers?: HeadersInit): H
   if (!nextHeaders.has("Content-Type")) {
     nextHeaders.set("Content-Type", "application/json");
   }
-  if (isUnsafeHttpMethod(method) && !nextHeaders.has("X-Rumi-CSRF")) {
+  const csrfHeader = nextHeaders.get("X-Rumi-CSRF");
+  if (isUnsafeHttpMethod(method) && (!csrfHeader || !csrfHeader.trim())) {
     nextHeaders.set("X-Rumi-CSRF", getDefaultspackCsrfToken());
   }
   return nextHeaders;

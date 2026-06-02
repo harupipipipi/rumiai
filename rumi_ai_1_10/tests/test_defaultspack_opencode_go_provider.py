@@ -83,6 +83,8 @@ def test_opencode_go_catalog_includes_all_models():
     assert provider["env_vars"] == ["OPENCODE_GO_API_KEY", "OPENCODE_ZEN_API_KEY"]
     assert provider["default_model_for"]["coding"] == "kimi-k2.6"
     assert provider["default_model_for"]["fast"] == "deepseek-v4-flash"
+    assert provider["default_model_for"]["vision"] == "mimo-v2-omni"
+    assert "vision" in provider["capabilities"]
     assert {f"opencode-go/{model}" for model in ALL_MODELS}.issubset(models)
 
     minimax = models["opencode-go/minimax-m2.7"]
@@ -90,9 +92,19 @@ def test_opencode_go_catalog_includes_all_models():
     assert minimax["metadata"]["endpoint_path"] == "/messages"
 
     experimental = models["opencode-go/mimo-v2-omni"]
+    assert experimental["defaults"]["vision"] is True
+    assert "vision" in experimental["capabilities"]
+    assert experimental["metadata"]["capabilities"]["vision"] is True
     assert experimental["metadata"]["transport"] == "openai_chat_completions"
     assert experimental["metadata"]["experimental"] is True
     assert experimental["metadata"]["vision_unverified"] is True
+
+    from ecosystem.defaultspack.backend.ai_client.provider_catalog import list_model_catalog
+
+    legacy_models = {item["id"]: item for item in list_model_catalog("opencode-go")}
+    legacy_omni = legacy_models["opencode-go/mimo-v2-omni"]
+    assert legacy_omni["supports_vision"] is True
+    assert legacy_omni["supports_image_input"] is True
 
 
 @pytest.mark.parametrize("model", OPENAI_CHAT_MODELS)

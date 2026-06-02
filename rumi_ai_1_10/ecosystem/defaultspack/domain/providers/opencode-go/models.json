@@ -355,13 +355,14 @@
       "enabled": true,
       "priority": 14,
       "defaults": {
-        "chat": true
+        "chat": true,
+        "vision": true
       },
       "capabilities": {
         "chat": true,
         "streaming": true,
         "tool_calls": false,
-        "vision": false,
+        "vision": true,
         "reasoning": false
       },
       "metadata": {

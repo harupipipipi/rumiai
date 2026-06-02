@@ -19,6 +19,7 @@
   "capabilities": {
     "chat": true,
     "streaming": true,
+    "vision": true,
     "openai_compatible": true,
     "anthropic_compatible": true
   },
@@ -38,9 +39,10 @@
       "general": "qwen3.6-plus",
       "fast": "deepseek-v4-flash",
       "cheap": "qwen3.5-plus",
-      "reasoning": "mimo-v2.5-pro"
+      "reasoning": "mimo-v2.5-pro",
+      "vision": "mimo-v2-omni"
     },
-    "capabilities": ["chat", "streaming", "openai_compatible", "anthropic_compatible"]
+    "capabilities": ["chat", "streaming", "vision", "openai_compatible", "anthropic_compatible"]
   },
   "provider_manifest": {
     "id": "opencode-go",
@@ -65,12 +67,13 @@
       "general": "qwen3.6-plus",
       "fast": "deepseek-v4-flash",
       "cheap": "qwen3.5-plus",
-      "reasoning": "mimo-v2.5-pro"
+      "reasoning": "mimo-v2.5-pro",
+      "vision": "mimo-v2-omni"
     },
     "capabilities": {
       "native_tool_calling": false,
       "structured_outputs": false,
-      "vision": false,
+      "vision": true,
       "embeddings": false,
       "streaming": true
     },
