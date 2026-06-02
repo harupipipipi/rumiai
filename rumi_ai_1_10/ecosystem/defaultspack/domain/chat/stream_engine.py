@@ -204,6 +204,15 @@ def _approval_followup_tool_use(metadata: dict[str, Any] | None) -> dict[str, An
     }
 
 
+def _approval_followup_has_inline_payload(metadata: dict[str, Any] | None) -> bool:
+    if not isinstance(metadata, dict):
+        return False
+    followup = metadata.get("approval_followup")
+    if not isinstance(followup, dict):
+        return False
+    return isinstance(followup.get("payload"), dict) or isinstance(followup.get("arguments"), dict)
+
+
 def _merge_tool_context(base: dict[str, Any] | None, extra: dict[str, Any] | None) -> dict[str, Any]:
     merged = dict(base or {})
     if not isinstance(extra, dict):
@@ -1020,7 +1029,14 @@ class ChatRunEngine:
         tool_limit = _default_tool_limit_for_connected_tools(tool_limit, prepared.connected_tool_names)
 
         approval_followup = _approval_followup_tool_use(prepared.user_message.get("metadata"))
-        if approval_followup is not None:
+        approval_replay_state = prepared.tool_context if isinstance(prepared.tool_context, dict) else {}
+        allow_inline_followup = (
+            approval_followup is not None
+            and _approval_followup_has_inline_payload(prepared.user_message.get("metadata"))
+            and not approval_replay_state.get("approval_replayed")
+            and not approval_replay_state.get("_approval_followup_block_legacy")
+        )
+        if allow_inline_followup:
             _append_assistant_tool_use_message(working_messages, [approval_followup])
             try:
                 append_assistant_tool_use_to_ir(working_ir, [approval_followup])
@@ -1489,9 +1505,13 @@ class ChatRunEngine:
         operation = str(request.get("operation") or "").strip()
         if not operation:
             return None
+        if not operation.startswith("tool."):
+            return None
+        if isinstance(prepared.tool_context, dict):
+            prepared.tool_context["_approval_followup_block_legacy"] = True
 
         try:
-            args_hash = _approval_mod.hash_arguments(stored_args)
+            args_hash = str(request.get("args_hash") or "").strip() or _approval_mod.hash_arguments(stored_args)
             verification = _approval_mod.verify_execution_token(
                 token, operation, args_hash, consume=False,
             )
