@@ -127,6 +127,7 @@ def test_xiaomi_token_plan_models_are_tool_capable(monkeypatch):
     assert omni["defaults"]["vision"] is True
     assert omni["capabilities"]["vision"] is True
     assert omni["metadata"]["vision_verified"] is True
+    assert omni["metadata"]["request_defaults"]["top_p"] == 0.95
     assert "xiaomi-token-plan-sgp/mimo-v2-flash" not in models
 
 
@@ -143,6 +144,22 @@ def test_xiaomi_token_plan_rejects_removed_flash_model(monkeypatch):
         assert "mimo-v2-omni" in str(exc)
     else:
         raise AssertionError("mimo-v2-flash should not be advertised or callable")
+
+
+
+def test_xiaomi_token_plan_translates_thinking_level_to_xiaomi_thinking_payload(monkeypatch):
+    from domain.ai_client.providers.xiaomi_mimo_token_plan_provider import XiaomiMimoTokenPlanSgpProvider
+
+    monkeypatch.setenv("XIAOMI_MIMO_TOKEN_PLAN_SGP_API_KEY", "test-token")
+    provider = XiaomiMimoTokenPlanSgpProvider()
+
+    translated = provider._translate_model_params("mimo-v2.5-pro", {"thinking_level": "high", "top_p": 0.8})
+    disabled = provider._translate_model_params("mimo-v2.5-pro", {"thinking_level": "none"})
+
+    assert translated["top_p"] == 0.8
+    assert translated["extra_body"]["thinking"]["type"] == "enabled"
+    assert "reasoning_effort" not in translated
+    assert disabled["extra_body"]["thinking"]["type"] == "disabled"
 
 
 def test_xiaomi_token_plan_generic_key_registers_sgp_only(monkeypatch):

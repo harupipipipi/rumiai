@@ -32,6 +32,18 @@ def test_prompt_resolver_reads_component_backed_prompts():
     assert resolver.render("coding", {}) == resolver.resolve_prompt_text("coding")
 
 
+def test_prompt_resolver_reads_pack_backed_prompt_when_source_pack_is_known():
+    resolver = PromptResolver()
+
+    content = resolver.resolve_prompt_text(
+        "mimo_coding_company",
+        source_pack_id="rumi_operations_company_pack",
+    )
+
+    assert content is not None
+    assert "MiMo Coding Company" in content
+
+
 def test_prompt_manager_lists_component_prompts_and_preserves_custom_persistence(tmp_path, monkeypatch):
     import domain.prompt.manager as manager_module  # noqa: E402
 

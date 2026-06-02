@@ -38,6 +38,7 @@ sample.env.local
 .vscode/
 node_modules/
 dist/
+**/.desktop_api_token
 
 # フロントエンドビルド成果物（配布に必要なので除外しない）
 !rumi_ai_1_10/core_runtime/core_pack/*/web/

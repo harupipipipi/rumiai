@@ -14,5 +14,8 @@ def run(context, args):
         args.get("query", ""),
         limit=int(args.get("limit", 5)),
         allow_network=bool(args.get("allow_network", True)),
+        domains=args.get("domains"),
+        official_only=bool(args.get("official_only", False)),
+        fetch_pages=bool(args.get("fetch_pages", False)),
     )
     return tool_result(result.summary, widget={"type": "research_sources", **result.as_dict()})

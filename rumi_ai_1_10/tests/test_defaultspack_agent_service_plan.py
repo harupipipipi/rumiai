@@ -677,6 +677,7 @@ def test_chat_stream_direct_path_honors_conversation_cancel(tmp_path, monkeypatc
 
 def test_chat_stop_marks_streaming_assistant_draft_cancelled(tmp_path, monkeypatch):
     import blocks.chat.stop as stop_module
+    from domain.chat.cancellation import get_chat_cancellation_registry
     from domain.chat.store import ChatStore
 
     storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
@@ -718,6 +719,54 @@ def test_chat_stop_marks_streaming_assistant_draft_cancelled(tmp_path, monkeypat
     assert stored["metadata"]["thinking"]["state"] == "cancelled"
     assert "streaming" not in stored["metadata"]
     assert "draft" not in stored["metadata"]
+    assert get_chat_cancellation_registry().is_cancelled(conversation["id"]) is False
+    ChatStore._instance = None
+
+
+def test_chat_stop_does_not_poison_future_run_when_no_active_callbacks(tmp_path, monkeypatch):
+    import blocks.chat.stop as stop_module
+    from domain.chat.cancellation import get_chat_cancellation_registry
+    from domain.chat.store import ChatStore
+
+    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
+    ChatStore._instance = None
+
+    store = ChatStore()
+    conversation = store.create_conversation(model="stub/default")
+    user_message = store.add_message(
+        conversation["id"],
+        {
+            "role": "user",
+            "content": [{"type": "text", "text": "resume later"}],
+            "raw_text": "resume later",
+        },
+    )
+    store.add_message(
+        conversation["id"],
+        {
+            "role": "assistant",
+            "parent_id": user_message["id"],
+            "content": [{"type": "text", "text": "許可が必要なため、ユーザーが承認するまで待機します。承認後に続行します。"}],
+            "raw_text": "許可が必要なため、ユーザーが承認するまで待機します。承認後に続行します。",
+            "finish_reason": "approval_required",
+            "metadata": {
+                "pending_approval": {
+                    "tool_name": "coding_file_patch",
+                    "approval_request_id": "apr_demo",
+                }
+            },
+            "events": [],
+            "tool_logs": [],
+            "model": "stub/default",
+        },
+    )
+
+    result = stop_module.run({"conversation_id": conversation["id"]}, {})
+
+    assert result["status"] == "ok"
+    assert result["data"]["persisted_cancelled"] is False
+    assert get_chat_cancellation_registry().is_cancelled(conversation["id"]) is False
     ChatStore._instance = None
 
 
@@ -1420,12 +1469,13 @@ def test_browser_computer_screenshot_falls_back_to_window_capture_when_rect_capt
     )
     calls = []
 
-    def fake_run(command, check):
+    def fake_run(command, check, **kwargs):
         del check
         calls.append(command)
         if "-R" in command:
             raise CalledProcessError(1, command)
         assert "-l" in command
+        assert "timeout" in kwargs
         return None
 
     monkeypatch.setattr(browser_computer.subprocess, "run", fake_run)
@@ -3849,6 +3899,9 @@ def test_fallback_routes_expose_agent_service_and_coding_surfaces():
     assert ("GET", "/api/agent/company/manifest", "ecosystem.rumi_operations_company_pack.blocks.agent.company.manifest") in routes
     assert ("GET", "/api/agent/company/status", "ecosystem.rumi_operations_company_pack.blocks.agent.company.status") in routes
     assert ("POST", "/api/agent/company/bootstrap", "ecosystem.rumi_operations_company_pack.blocks.agent.company.bootstrap") in routes
+    assert ("GET", "/api/agent/mimo-company/manifest", "ecosystem.rumi_operations_company_pack.blocks.agent.mimo_company.manifest") in routes
+    assert ("GET", "/api/agent/mimo-company/status", "ecosystem.rumi_operations_company_pack.blocks.agent.mimo_company.status") in routes
+    assert ("POST", "/api/agent/mimo-company/bootstrap", "ecosystem.rumi_operations_company_pack.blocks.agent.mimo_company.bootstrap") in routes
     assert ("GET", "/api/agent/org/roles", "blocks.agent.org.list_roles") in routes
     assert ("GET", "/api/chat/channels", "blocks.chat.channel.list") in routes
     assert ("POST", "/api/share", "blocks.share.create") in routes
@@ -3910,6 +3963,30 @@ def test_fallback_operations_company_routes_precede_generic_agent_status():
     assert handler({}, params) == {"status": "ok"}
     assert captured == {
         "block_module": "ecosystem.rumi_operations_company_pack.blocks.agent.company.status",
+        "path_params": {},
+    }
+
+
+def test_fallback_mimo_company_routes_precede_generic_agent_status():
+    from ecosystem.defaultspack.transport.http import DefaultsHttpServer
+
+    server = DefaultsHttpServer(facade=None)
+    captured = {}
+
+    def fake_invoke(block_module, request_data, path_params, inject=None):
+        captured["block_module"] = block_module
+        captured["path_params"] = path_params
+        return {"status": "ok"}
+
+    server._invoke_fallback_block = fake_invoke
+    handler, params, _, path_inject, _ = server._match_route("GET", "/api/agent/mimo-company/status")
+
+    assert params == {}
+    assert path_inject == {}
+    assert handler is not None
+    assert handler({}, params) == {"status": "ok"}
+    assert captured == {
+        "block_module": "ecosystem.rumi_operations_company_pack.blocks.agent.mimo_company.status",
         "path_params": {},
     }
 
@@ -4038,6 +4115,48 @@ def test_external_web_provider_rejects_private_network_urls():
 
     assert result.sources == []
     assert "non-public" in result.summary
+
+
+def test_external_web_provider_filters_domains_and_prefers_official_sources():
+    from domain.research.providers import ExternalWebProvider
+
+    html = """
+    <html>
+      <a class="result__a" href="https://blog.example.com/groq-compound">Unofficial Groq notes</a>
+      <div class="result__snippet">Notes from a third party.</div>
+      <a class="result__a" href="https://groq.com/docs/compound">Groq Compound Docs</a>
+      <div class="result__snippet">Official docs.</div>
+    </html>
+    """
+    provider = ExternalWebProvider(fetcher=lambda url, timeout: html)
+
+    filtered = provider.search("groq compound docs", domains=["groq.com"], official_only=True)
+
+    assert len(filtered.sources) == 1
+    assert filtered.sources[0]["url"] == "https://groq.com/docs/compound"
+    assert filtered.sources[0]["trust_level"] == "high"
+    assert filtered.sources[0]["metadata"]["official"] is True
+
+
+def test_external_web_provider_can_enrich_result_pages():
+    from domain.research.providers import ExternalWebProvider
+
+    def fake_fetch(url, timeout):
+        if "duckduckgo.com" in url:
+            return """
+            <html>
+              <a class="result__a" href="https://example.com/docs">Example Docs</a>
+              <div class="result__snippet">Short snippet.</div>
+            </html>
+            """
+        return "<html><title>Example Docs</title><body>Example Docs Detailed body text for the enriched summary.</body></html>"
+
+    provider = ExternalWebProvider(fetcher=fake_fetch)
+    result = provider.search("example docs", fetch_pages=True)
+
+    assert result.sources[0]["title"] == "Example Docs"
+    assert "Detailed body text" in result.sources[0]["summary"]
+    assert result.sources[0]["metadata"]["enriched_from_page"] is True
 
 
 def test_browser_computer_controller_gates_desktop_actions():
@@ -5444,6 +5563,7 @@ def test_computer_click_falls_back_to_swift_on_macos(tmp_path, monkeypatch):
     assert calls[0][0][0] == sys.executable
     assert calls[0][0][1] == "-c"
     assert calls[1][0][0] == "/usr/bin/swift"
+    assert calls[1][1]["timeout"] == browser_computer._DARWIN_CGEVENT_TIMEOUT_SECONDS
     assert "leftMouseDown" in calls[1][0][2]
     assert "CGPoint(x: 120, y: 240)" in calls[1][0][2]
 
@@ -5582,6 +5702,9 @@ def test_browser_open_url_uses_managed_profile_launch_plan(tmp_path):
     assert result["launch"]["command"][0] == str(fake_browser)
     assert "--user-data-dir=" in result["launch"]["command"][1]
     assert "--disk-cache-dir=" in result["launch"]["command"][2]
+    assert "--no-first-run" in result["launch"]["command"]
+    assert "--no-default-browser-check" in result["launch"]["command"]
+    assert "--disable-sync" in result["launch"]["command"]
     assert result["launch"]["command"][-1] == "https://example.test"
 
 
@@ -5730,3 +5853,54 @@ def test_artifact_store_is_local_and_versioned(tmp_path):
         assert "escapes artifact root" in str(exc)
     else:
         raise AssertionError("artifact store allowed path traversal")
+
+def test_chat_cancellation_register_keeps_pending_stop_request():
+    """request_cancel before register should NOT be lost.
+
+    stop.run calls request_cancel even when no streaming callback is
+    registered yet.  The pending cancel flag must survive so that the
+    next register() fires the callback immediately — otherwise the
+    stop request is silently dropped.
+    """
+    from domain.chat.cancellation import ChatCancellationRegistry
+
+    reg = ChatCancellationRegistry()
+    called = []
+    reg.request_cancel("conv_pending")
+    reg.register("conv_pending", lambda: called.append(True))
+    assert called == [True], f"pending stop was dropped: {called}"
+
+
+def test_stop_run_skips_request_cancel_when_no_active_callbacks(tmp_path, monkeypatch):
+    """stop.run must not pollute _cancelled when no callback is active.
+
+    Without the has_callbacks guard, request_cancel marks the
+    conversation as cancelled even when nothing is streaming,
+    which causes the *next* turn's register() to fire immediately.
+    """
+    from domain.chat.cancellation import ChatCancellationRegistry, get_chat_cancellation_registry
+    from domain.chat.store import ChatStore
+
+    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
+    ChatStore._instance = None
+
+    store = ChatStore()
+    conversation = store.create_conversation(model="stub/default")
+
+    reg = get_chat_cancellation_registry()
+    # No callback registered → stop.run must NOT call request_cancel
+    from blocks.chat.stop import run
+    result = run({"conversation_id": conversation["id"]}, {})
+
+    assert result["status"] == "ok"
+    assert reg.is_cancelled(conversation["id"]) is False, (
+        "request_cancel was called without active callbacks"
+    )
+
+    # Next turn: register should NOT fire immediately
+    next_called = []
+    reg.register(conversation["id"], lambda: next_called.append(True))
+    assert next_called == [], f"cancel flag leaked to next turn: {next_called}"
+
+    ChatStore._instance = None

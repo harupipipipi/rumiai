@@ -260,6 +260,17 @@ export type CompanyMessage = {
   mentions?: string[];
   task_ids?: string[];
   metadata?: Record<string, unknown>;
+  handoff?: {
+    target_agent_id?: string;
+    reason?: string;
+  };
+  attachments?: Array<{
+    name?: string;
+    path?: string;
+    url?: string;
+    mime_type?: string;
+    size?: number;
+  }>;
   created_at?: string;
   updated_at?: string;
 };
@@ -444,6 +455,8 @@ export type OperationsCompanyStatus = {
     tool_policy?: { allowlist?: string[]; denylist?: string[]; role_overrides?: Record<string, string[]> };
   };
 };
+
+export type MimoCodingCompanyStatus = OperationsCompanyStatus;
 
 export type ChatActivityEvent = {
   type: string;
@@ -1802,6 +1815,31 @@ export const api = {
     model?: string;
   }) {
     return request<OperationsCompanyStatus>("/api/agent/company/bootstrap", {
+      method: "POST",
+      body: JSON.stringify(options ?? {}),
+    });
+  },
+
+  getMimoCodingCompanyStatus() {
+    return request<MimoCodingCompanyStatus>("/api/agent/mimo-company/status");
+  },
+
+  bootstrapMimoCodingCompany(options?: {
+    start_nonstop?: boolean;
+    heartbeat_minutes?: number;
+    review_interval_minutes?: number;
+    qa_interval_minutes?: number;
+    model?: string;
+    vision_model?: string;
+    fast_model?: string;
+    qa_targets?: string[];
+    docker_worker_count?: number;
+    docker_personas?: string[];
+    run_initial_review_now?: boolean;
+    seed_tasks?: boolean;
+    seed_knowledge?: boolean;
+  }) {
+    return request<MimoCodingCompanyStatus>("/api/agent/mimo-company/bootstrap", {
       method: "POST",
       body: JSON.stringify(options ?? {}),
     });

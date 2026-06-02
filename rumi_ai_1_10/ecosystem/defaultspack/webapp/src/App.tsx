@@ -7,8 +7,8 @@ import { WarmActionIcon } from "./components/WarmActionIcon";
 import type { ChatItem, HistoryBoardNewTaskOptions } from "./components/HistoryBoard";
 import type { ToolPreviewItem, ToolPreviewMode } from "./components/ToolPreview";
 import { buildToolPreviewDisplayItems, hasCanvasItems } from "./components/ToolPreview";
-import { api, defaultspackApiFetch, type ChatActivityEvent, type ChatContentBlock, type ChatMessage, type ChatStreamEvent, type ChatToolStreamEvent, type CodingWorkspaceRecord, type ComposerCommandExecuteResult, type ComposerCommandItem, type ComposerCommandMode, type ComposerWidgetAction, type Conversation, type ConversationSearchResult, type ConversationSteerItem, type ModelCommandCandidate, type ModelProfile, type OperationsCompanyStatus, type SettingsSection, type SidebarAction, type SidebarItem, type UICatalog } from "./lib/api";
-import { pendingBrowserApproval, pendingRuntimeApproval, staleRuntimeApproval, type BrowserApproval, type RuntimeApproval, type StaleRuntimeApproval } from "./lib/browserApproval";
+import { api, defaultspackApiFetch, type ChatActivityEvent, type ChatContentBlock, type ChatMessage, type ChatStreamEvent, type ChatToolStreamEvent, type CodingWorkspaceRecord, type ComposerCommandExecuteResult, type ComposerCommandItem, type ComposerCommandMode, type ComposerWidgetAction, type Conversation, type ConversationSearchResult, type ConversationSteerItem, type MimoCodingCompanyStatus, type ModelCommandCandidate, type ModelProfile, type OperationsCompanyStatus, type SettingsSection, type SidebarAction, type SidebarItem, type UICatalog } from "./lib/api";
+import { browserApprovalRuntimeContent, pendingBrowserApproval, pendingRuntimeApproval, staleRuntimeApproval, type BrowserApproval, type RuntimeApproval, type StaleRuntimeApproval } from "./lib/browserApproval";
 import { reduceBrowserStateFromEvents } from "./lib/browserState";
 import { deriveConversationTitle, formatRelativeTime, messageToText, orderConversationMessages } from "./lib/chat";
 import { cn } from "./lib/cn";
@@ -1424,41 +1424,22 @@ function runtimeApprovalRuntimeContent(approval: RuntimeApproval, token?: string
   ].join("\n");
 }
 
-function browserApprovalRuntimeContent(approval: BrowserApproval, token?: string): string {
-  const approvedArguments = approval.toolName === "browser_computer"
-    ? {
-        action: approval.action,
-        payload: {
-          ...approval.payload,
-          ...(token ? { approval_token: token } : {}),
-        },
-      }
-    : {
-        action: approval.action,
-        ...approval.payload,
-        ...(token ? { approval_token: token } : {}),
-      };
-  const payload = approvalPayloadPreview(approvedArguments);
-  return [
-    "The user approved the pending computer/browser operation.",
-    "Continue by calling the exact pending tool once with the approved arguments below.",
-    "Do not ask the user for the same approval again unless the tool returns a new approval_request_id.",
-    `Tool: ${approval.toolName}`,
-    `Operation: ${approval.action}`,
-    approval.requestId ? `Approval request id: ${approval.requestId}` : "",
-    "Approved arguments JSON:",
-    payload,
-  ].filter(Boolean).join("\n");
-}
-
 function staleRuntimeApprovalTitle(approval: StaleRuntimeApproval): string {
   const label = approval.operation || approval.toolName || "tool";
   return `${label} は再実行が必要です`;
 }
 
-function hasOperationsProfile(catalog: UICatalog | null): boolean {
+function hasAgentServiceProfile(catalog: UICatalog | null, profileId: string): boolean {
   const profiles = catalog?.agent_service?.profiles ?? [];
-  return profiles.some((profile) => String(profile.profile_id ?? profile.id ?? "") === "defaultspack.operations_company");
+  return profiles.some((profile) => String(profile.profile_id ?? profile.id ?? "") === profileId);
+}
+
+function hasOperationsProfile(catalog: UICatalog | null): boolean {
+  return hasAgentServiceProfile(catalog, "defaultspack.operations_company");
+}
+
+function hasMimoCodingProfile(catalog: UICatalog | null): boolean {
+  return hasAgentServiceProfile(catalog, "defaultspack.mimo_coding_company");
 }
 
 function isOperationsConversation(conversation: Conversation | null): boolean {
@@ -1467,6 +1448,15 @@ function isOperationsConversation(conversation: Conversation | null): boolean {
     conversation.conversation_kind === "operations_company"
     || conversation.metadata?.profile_id === "defaultspack.operations_company"
     || conversation.tags?.includes("operations-company")
+  );
+}
+
+function isMimoCodingConversation(conversation: Conversation | null): boolean {
+  if (!conversation) return false;
+  return (
+    conversation.conversation_kind === "mimo_coding_company"
+    || conversation.metadata?.profile_id === "defaultspack.mimo_coding_company"
+    || conversation.tags?.includes("mimo-coding-company")
   );
 }
 
@@ -2071,6 +2061,8 @@ export default function App() {
   const [health, setHealth] = useState<{ status: string; pack: string; ts: string } | null>(null);
   const [operationsStatus, setOperationsStatus] = useState<OperationsCompanyStatus | null>(null);
   const [operationsBusy, setOperationsBusy] = useState(false);
+  const [mimoCodingStatus, setMimoCodingStatus] = useState<MimoCodingCompanyStatus | null>(null);
+  const [mimoCodingBusy, setMimoCodingBusy] = useState(false);
   const [activeSidebarItemId, setActiveSidebarItemId] = useState<string | null>(null);
   const [sidebarSelectionTick, setSidebarSelectionTick] = useState(0);
   const [yoloMode, setYoloMode] = useLocalStorage("rumi-yolo-mode", false);
@@ -2287,6 +2279,7 @@ export default function App() {
   const isActivityPreviewVisible = showRegion("activity_preview") && effectiveShowPreview;
   const activityPreviewWidthPx = clampNumber(activityPreviewWidth, 220, 720, 340);
   const operationsProfileAvailable = hasOperationsProfile(catalog);
+  const mimoCodingProfileAvailable = hasMimoCodingProfile(catalog);
 
   const startActivityPreviewResize = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -2564,6 +2557,14 @@ export default function App() {
     }
   }
 
+  async function refreshMimoCodingStatus() {
+    try {
+      setMimoCodingStatus(await api.getMimoCodingCompanyStatus());
+    } catch (statusError) {
+      console.error(statusError);
+    }
+  }
+
   async function refreshPreview(conversationId: string | null) {
     if (!conversationId) {
       setPreviews([]);
@@ -2638,8 +2639,18 @@ export default function App() {
       }
       const shellBootstrap = Promise.all([refreshHealth(), refreshCatalog()])
         .then(([, nextCatalog]) => {
-          if (cancelled || !hasOperationsProfile(nextCatalog)) return;
-          return refreshOperationsStatus();
+          if (cancelled) return;
+          const statusRefreshes: Array<Promise<unknown>> = [];
+          if (hasOperationsProfile(nextCatalog)) {
+            statusRefreshes.push(refreshOperationsStatus());
+          }
+          if (hasMimoCodingProfile(nextCatalog)) {
+            statusRefreshes.push(refreshMimoCodingStatus());
+          }
+          if (statusRefreshes.length > 0) {
+            return Promise.all(statusRefreshes);
+          }
+          return undefined;
         })
         .catch((shellError) => {
           if (!cancelled) console.error(shellError);
@@ -2674,6 +2685,11 @@ export default function App() {
     if (!operationsProfileAvailable) return;
     void refreshOperationsStatus();
   }, [operationsProfileAvailable]);
+
+  useEffect(() => {
+    if (!mimoCodingProfileAvailable) return;
+    void refreshMimoCodingStatus();
+  }, [mimoCodingProfileAvailable]);
 
   useEffect(() => {
     const handlePopState = () => {
@@ -3669,6 +3685,11 @@ export default function App() {
           throw new Error(decision.reason || "approval failed");
         }
         approvalToken = decision.token ?? "";
+        setSettledRuntimeApprovalIds((ids) => (
+          ids.includes(browserApproval.requestId ?? "")
+            ? ids
+            : [...ids, browserApproval.requestId ?? ""].filter(Boolean).slice(-50)
+        ));
       }
       await api.sendMessage(activeConversationId, "ユーザーが許可しました。承認済みの操作を踏まえて続行してください。", {
         tool_choice: "required",
@@ -3690,7 +3711,9 @@ export default function App() {
             action: browserApproval.action,
             operation: browserApproval.action,
             approval_token: approvalToken,
+            payload: browserApproval.payload,
             request_id: browserApproval.requestId,
+            tool_call_id: browserApproval.toolCallId,
             tool_name: browserApproval.toolName,
           },
           runtime_content: browserApprovalRuntimeContent(browserApproval, approvalToken),
@@ -3751,7 +3774,9 @@ export default function App() {
             action: runtimeApproval.action,
             operation: runtimeApproval.operation,
             approval_token: decision.token,
+            payload: runtimeApproval.payload,
             request_id: runtimeApproval.requestId,
+            tool_call_id: runtimeApproval.toolCallId,
             tool_name: runtimeApproval.toolName,
           },
           runtime_content: runtimeApprovalRuntimeContent(runtimeApproval, decision.token),
@@ -3838,6 +3863,76 @@ export default function App() {
     await loadConversation(operationsStatus.conversation_id);
   };
 
+  const preferredMimoCodingModel = () => {
+    const allowlist = settingList(settingsValues.mimo_coding_company?.model_allowlist);
+    const manifestAllowlist = mimoCodingStatus?.manifest.model_self_selection?.allowlist ?? [];
+    const effectiveAllowlist = allowlist.length ? allowlist : manifestAllowlist;
+    if (effectiveAllowlist.includes(preferredModel)) return preferredModel;
+    if (effectiveAllowlist.includes("xiaomi-token-plan-sgp/mimo-v2.5-pro")) return "xiaomi-token-plan-sgp/mimo-v2.5-pro";
+    if (effectiveAllowlist.includes("stub/default")) return "stub/default";
+    return effectiveAllowlist[0] ?? "xiaomi-token-plan-sgp/mimo-v2.5-pro";
+  };
+
+  const preferredMimoVisionModel = () => {
+    const allowlist = settingList(settingsValues.mimo_coding_company?.model_allowlist);
+    const visionPreferred = allowlist.find((item) => /omni|vision|vl/i.test(item));
+    if (visionPreferred) return visionPreferred;
+    return "xiaomi-token-plan-sgp/mimo-v2-omni";
+  };
+
+  const preferredMimoFastModel = () => {
+    const allowlist = settingList(settingsValues.mimo_coding_company?.model_allowlist);
+    const fastPreferred = allowlist.find((item) => /flash|mini/i.test(item));
+    if (fastPreferred) return fastPreferred;
+    return "xiaomi-token-plan-sgp/mimo-v2-flash";
+  };
+
+  const mimoCodingTargets = () => settingList(settingsValues.mimo_coding_company?.qa_targets);
+  const mimoCodingPersonas = () => settingList(settingsValues.mimo_coding_company?.docker_personas);
+
+  const handleStartMimoCodingCompany = async () => {
+    setMimoCodingBusy(true);
+    setError(null);
+    try {
+      const status = await api.bootstrapMimoCodingCompany({
+        start_nonstop: true,
+        heartbeat_minutes: Math.max(1, Math.min(1440, settingNumber(settingsValues.mimo_coding_company?.heartbeat_minutes, 30))),
+        review_interval_minutes: Math.max(5, Math.min(1440, settingNumber(settingsValues.mimo_coding_company?.review_interval_minutes, 180))),
+        qa_interval_minutes: Math.max(5, Math.min(1440, settingNumber(settingsValues.mimo_coding_company?.qa_interval_minutes, 240))),
+        model: preferredMimoCodingModel(),
+        vision_model: preferredMimoVisionModel(),
+        fast_model: preferredMimoFastModel(),
+        qa_targets: mimoCodingTargets(),
+        docker_worker_count: Math.max(1, Math.min(16, settingNumber(settingsValues.mimo_coding_company?.docker_worker_count, 3))),
+        docker_personas: mimoCodingPersonas(),
+        run_initial_review_now: settingsValues.mimo_coding_company?.run_initial_review_now !== false,
+      });
+      setMimoCodingStatus(status);
+      await refreshConversations(status.conversation_id ?? null);
+    } catch (startError) {
+      setError(startError instanceof Error ? startError.message : "MiMo Coding Company の起動に失敗しました。");
+    } finally {
+      setMimoCodingBusy(false);
+    }
+  };
+
+  const handleOpenMimoCodingChat = async () => {
+    if (!mimoCodingStatus?.conversation_id) {
+      await handleStartMimoCodingCompany();
+      const refreshed = await api.getMimoCodingCompanyStatus();
+      setMimoCodingStatus(refreshed);
+      if (refreshed.conversation_id) {
+        setError(null);
+        await loadConversation(refreshed.conversation_id);
+        return refreshed.conversation_id;
+      }
+      return null;
+    }
+    setError(null);
+    await loadConversation(mimoCodingStatus.conversation_id);
+    return mimoCodingStatus.conversation_id;
+  };
+
   const handleTriggerOperationsHeartbeat = async () => {
     const heartbeat = operationsHeartbeatSchedule();
     if (!heartbeat?.id) return;
@@ -3912,6 +4007,27 @@ export default function App() {
           model: preferredOperationsModel(),
         });
         setOperationsStatus(result as OperationsCompanyStatus);
+      } else if (action.id === "mimo_company.status") {
+        result = await api.getMimoCodingCompanyStatus();
+        setMimoCodingStatus(result as MimoCodingCompanyStatus);
+      } else if (action.id === "mimo_company.bootstrap") {
+        result = await api.bootstrapMimoCodingCompany({
+          start_nonstop: true,
+          heartbeat_minutes: Math.max(1, Math.min(1440, settingNumber(settingsValues.mimo_coding_company?.heartbeat_minutes, 30))),
+          review_interval_minutes: Math.max(5, Math.min(1440, settingNumber(settingsValues.mimo_coding_company?.review_interval_minutes, 180))),
+          qa_interval_minutes: Math.max(5, Math.min(1440, settingNumber(settingsValues.mimo_coding_company?.qa_interval_minutes, 240))),
+          model: preferredMimoCodingModel(),
+          vision_model: preferredMimoVisionModel(),
+          fast_model: preferredMimoFastModel(),
+          qa_targets: mimoCodingTargets(),
+          docker_worker_count: Math.max(1, Math.min(16, settingNumber(settingsValues.mimo_coding_company?.docker_worker_count, 3))),
+          docker_personas: mimoCodingPersonas(),
+          run_initial_review_now: settingsValues.mimo_coding_company?.run_initial_review_now !== false,
+        });
+        setMimoCodingStatus(result as MimoCodingCompanyStatus);
+      } else if (action.id === "mimo_company.open_chat") {
+        const conversationId = await handleOpenMimoCodingChat();
+        result = { opened: true, conversation_id: conversationId };
       } else if (action.endpoint) {
         if (!isSafeLocalEndpoint(action.endpoint) || action.requires_approval) {
           throw new Error("この action は安全な /api/ endpoint ではないか、承認が必要なため直接実行できません。");
@@ -4018,6 +4134,7 @@ export default function App() {
         setActiveConversationId(conversation.id);
       }
       const isOperationsMode = isOperationsConversation(conversation);
+      const isMimoCodingMode = isMimoCodingConversation(conversation);
       submittedConversationId = conversation.id;
       const requestStartedAt = Date.now();
       rememberPendingRequest({
@@ -4239,6 +4356,23 @@ export default function App() {
             ...(operationsToolDenylist.length ? { tool_denylist: operationsToolDenylist } : {}),
           }
         : {};
+      const mimoCodingModelAllowlist = settingList(settingsValues.mimo_coding_company?.model_allowlist);
+      const mimoCodingToolAllowlist = mimoCodingStatus?.manifest.tool_policy?.allowlist ?? [];
+      const mimoCodingPolicy = isMimoCodingMode
+        ? {
+            profile_id: "defaultspack.mimo_coding_company",
+            non_stop: true,
+            allow_shell: true,
+            allow_file_write: true,
+            write_actions_require_approval: false,
+            delete_actions_require_approval: true,
+            terminal_actions_require_approval: false,
+            normal_status_silent: true,
+            max_concurrent_children: 6,
+            ...(mimoCodingModelAllowlist.length ? { model_allowlist: mimoCodingModelAllowlist } : {}),
+            ...(mimoCodingToolAllowlist.length ? { tool_allowlist: mimoCodingToolAllowlist } : {}),
+          }
+        : {};
       const shouldSendExplicitToolSelection = submittedToolIds.length > 0;
 
       await api.streamMessage(conversation.id, userText, {
@@ -4247,6 +4381,7 @@ export default function App() {
         tool_policy: {
           ...(ultraYoloMode ? { yolo_mode: true, allow_shell: true, allow_file_write: true, write_actions_require_approval: false } : {}),
           ...operationsPolicy,
+          ...mimoCodingPolicy,
           ...(isCodingWorkspaceSubmit && workspaceIdForSubmit ? { workspace_id: workspaceIdForSubmit } : {}),
           ...(disabledToolIds.length ? { disabled_tools: disabledToolIds } : {}),
           ...(shouldSendExplicitToolSelection ? { selected_tools: submittedToolIds } : {}),
@@ -4254,7 +4389,7 @@ export default function App() {
         attachments: submittedAttachments,
         tools: shouldSendExplicitToolSelection ? submittedToolIds : undefined,
         metadata: {
-          mode: isOperationsMode ? "operations_company" : isCodingWorkspaceSubmit ? "coding" : mode,
+          mode: isOperationsMode ? "operations_company" : isMimoCodingMode ? "mimo_coding_company" : isCodingWorkspaceSubmit ? "coding" : mode,
           ...(groupIdForSubmit ? { group_id: groupIdForSubmit } : {}),
           ...(rumiDataPathForSubmit ? { rumi_data_path: rumiDataPathForSubmit } : {}),
           ...(isOperationsMode ? {
@@ -4262,6 +4397,12 @@ export default function App() {
             agent_id: "client_manager",
             conversation_strategy: "one_agent_one_conversation",
             internal_channel: "ops-company",
+          } : {}),
+          ...(isMimoCodingMode ? {
+            profile_id: "defaultspack.mimo_coding_company",
+            agent_id: "client_manager",
+            conversation_strategy: "one_agent_one_conversation",
+            internal_channel: "mimo-coding-company",
           } : {}),
           ...(isCodingWorkspaceSubmit ? {
             workspace_id: workspaceIdForSubmit,

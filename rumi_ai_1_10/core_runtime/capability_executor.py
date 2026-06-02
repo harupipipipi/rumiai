@@ -502,12 +502,25 @@ class CapabilityExecutor:
             resolved = pack_dir.resolve()
         except OSError:
             resolved = pack_dir
+        ecosystem_root = None
+        if _ECOSYSTEM_DIR:
+            try:
+                ecosystem_root = Path(_ECOSYSTEM_DIR).resolve()
+            except OSError:
+                ecosystem_root = Path(_ECOSYSTEM_DIR)
+        if ecosystem_root is not None:
+            try:
+                relative = resolved.relative_to(ecosystem_root)
+            except ValueError:
+                return False
+            if not relative.parts:
+                return False
+            if pack_id and relative.parts[0] != pack_id:
+                return False
+            return True
         if pack_id and resolved.name != pack_id:
             return False
-        if resolved.parent.name != "ecosystem":
-            return False
-        runtime_root = resolved.parent.parent
-        return runtime_root.name == "app"
+        return resolved.parent.name == "ecosystem"
 
     def _is_trusted_builtin_pack(self, pack_id: str, pack_root_hint=None) -> bool:
         normalized_pack_id = str(pack_id or "").strip()
@@ -518,7 +531,8 @@ class CapabilityExecutor:
         helper = getattr(approval_manager, "_is_trusted_builtin_pack", None)
         if callable(helper):
             try:
-                return bool(helper(normalized_pack_id))
+                if bool(helper(normalized_pack_id)):
+                    return True
             except Exception:
                 logger.debug(
                     "approval_manager trusted builtin lookup failed for '%s'",
@@ -536,6 +550,51 @@ class CapabilityExecutor:
             return self._is_bundled_builtin_pack_dir(candidate_path, normalized_pack_id)
         except (OSError, TypeError):
             return False
+
+    def _dev_auto_reapprove_pack(self, pack_id: str) -> bool:
+        if str(os.environ.get("RUMI_ENVIRONMENT", "")).lower() not in {"development", "dev"}:
+            return False
+        if str(os.environ.get("RUMI_AUTO_APPROVE_LOCAL", "")).lower() != "true":
+            return False
+        approval_manager = getattr(self, "_approval_manager", None)
+        if approval_manager is None:
+            return False
+        try:
+            scan_packs = getattr(approval_manager, "scan_packs", None)
+            if callable(scan_packs):
+                scan_packs()
+            result = approval_manager.approve(pack_id)
+            return bool(getattr(result, "success", False))
+        except Exception:
+            logger.debug("dev auto reapprove failed for pack '%s'", pack_id, exc_info=True)
+            return False
+
+    def _has_permission_via_runtime_or_grant(self, principal_id: str, permission_id: str) -> bool:
+        permission_manager = getattr(self, "_permission_manager", None)
+        if permission_manager is not None:
+            try:
+                if permission_manager.has_permission(principal_id, permission_id):
+                    return True
+            except Exception:
+                logger.debug(
+                    "permission_manager.has_permission failed for '%s' / '%s'",
+                    principal_id,
+                    permission_id,
+                    exc_info=True,
+                )
+        grant_manager = getattr(self, "_grant_manager", None)
+        if grant_manager is not None:
+            try:
+                result = grant_manager.check(principal_id, permission_id)
+                return getattr(result, "allowed", None) is True
+            except Exception:
+                logger.debug(
+                    "grant_manager.check failed for '%s' / '%s'",
+                    principal_id,
+                    permission_id,
+                    exc_info=True,
+                )
+        return False
 
     # ------------------------------------------------------------------
     # _unified_execute
@@ -770,6 +829,13 @@ class CapabilityExecutor:
                 else:
                     is_approved = bool(approved_result)
                     reason = None
+                if not is_approved and self._dev_auto_reapprove_pack(pack_id):
+                    approved_result = self._approval_manager.is_pack_approved_and_verified(pack_id)
+                    if isinstance(approved_result, tuple):
+                        is_approved, reason = approved_result
+                    else:
+                        is_approved = bool(approved_result)
+                        reason = None
                 if not is_approved:
                     resp = CapabilityResponse(success=False, error=f"Pack not approved: {pack_id}",
                                               error_type="pack_not_approved", latency_ms=(time.time() - start_time) * 1000)
@@ -786,17 +852,17 @@ class CapabilityExecutor:
                     self._audit(principal_id, "function.call", None, resp, args, request_id,
                                 detail_reason=f"approval_manager error for pack '{pack_id}': {exc}")
                     return resp
-        if not (is_core or is_trusted_builtin) and entry.requires and self._permission_manager is not None:
+        if not (is_core or is_trusted_builtin) and entry.requires:
             for req_perm in entry.requires:
-                if not self._permission_manager.has_permission(pack_id, req_perm):
+                if not self._has_permission_via_runtime_or_grant(pack_id, req_perm):
                     resp = CapabilityResponse(success=False,
                                               error=f"Function requires permission '{req_perm}' not granted to pack '{pack_id}'",
                                               error_type="requires_denied", latency_ms=(time.time() - start_time) * 1000)
                     self._audit(principal_id, "function.call", None, resp, args, request_id,
                                 detail_reason=f"Pack '{pack_id}' lacks required permission '{req_perm}'")
                     return resp
-        if self._permission_manager is not None and not principal_is_trusted_builtin:
-            if not self._permission_manager.has_permission(principal_id, "function.call"):
+        if not principal_is_trusted_builtin:
+            if not self._has_permission_via_runtime_or_grant(principal_id, "function.call"):
                 resp = CapabilityResponse(success=False, error="Permission denied: function.call",
                                           error_type="permission_denied", latency_ms=(time.time() - start_time) * 1000)
                 self._audit(principal_id, "function.call", None, resp, args, request_id,
@@ -1372,13 +1438,17 @@ _executor_lock = threading.Lock()
 
 def get_capability_executor() -> CapabilityExecutor:
     from .di_container import get_container
-    return get_container().get("capability_executor")
+    executor = get_container().get("capability_executor")
+    if not getattr(executor, "_initialized", False):
+        executor.initialize()
+    return executor
 
 def reset_capability_executor() -> CapabilityExecutor:
     global _global_executor
     from .di_container import get_container
     container = get_container()
     new = CapabilityExecutor()
+    new.initialize()
     with _executor_lock:
         _global_executor = new
     container.set_instance("capability_executor", new)

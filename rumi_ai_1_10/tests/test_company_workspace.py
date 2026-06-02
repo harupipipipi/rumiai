@@ -233,3 +233,49 @@ def test_operations_company_runtime_syncs_default_company_record(tmp_path, monke
     for schedule in status["schedules"]:
         Scheduler().delete_schedule(schedule["id"])
     _reset_defaultspack_singletons()
+
+
+def test_mimo_coding_company_runtime_syncs_default_company_record(tmp_path, monkeypatch):
+    from ecosystem.rumi_operations_company_pack.domain.agent.mimo_coding_company import MimoCodingCompanyRuntime
+    from domain.agent.scheduler import Scheduler
+    from domain.chat.store import ChatStore
+
+    _reset_defaultspack_singletons()
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(tmp_path / "chat" / "conversations.json"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_MIMO_CODING_STATE_PATH", str(tmp_path / "mimo" / "state.json"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_COMPANY_STORE_PATH", str(tmp_path / "companies"))
+
+    runtime = MimoCodingCompanyRuntime(pack_root=tmp_path / "ops_pack")
+    status = runtime.bootstrap(
+        start_nonstop=True,
+        heartbeat_minutes=30,
+        review_interval_minutes=180,
+        qa_interval_minutes=240,
+        model="stub/default",
+        vision_model="stub/default",
+        fast_model="stub/default",
+        seed_knowledge=False,
+    )
+
+    assert status["bootstrapped"] is True
+    assert status["company"]["id"] == "mimo-coding-company"
+    assert status["company"]["conversation_group_id"] == "company:mimo-coding-company"
+    assert status["company"]["metadata"]["conversation_id"] == status["conversation_id"]
+    assert status["company"]["metadata"]["self_improving"] is True
+    assert status["company"]["metadata"]["autonomy_board"]["next_focus"][0]["id"] == "initial_harness_review"
+    assert status["company"]["metadata"]["qa_swarm_plan"]["workers"][0]["mission"]
+    assert len(status["company"]["metadata"]["stream_task_ids"]) == 6
+    assert status["company"]["metadata"]["docker_swarm"]["monitoring"]["total_workers"] >= 1
+    assert status["company"]["agents"]["toolsmith"]["system_prompt"]
+    assert "build the smallest viable one instead of stopping" in status["company"]["agents"]["toolsmith"]["system_prompt"]
+
+    conversation = ChatStore().get_conversation(status["conversation_id"])
+    assert conversation["group_id"] == "company:mimo-coding-company"
+
+    persisted = json.loads((tmp_path / "companies" / "companies.json").read_text(encoding="utf-8"))
+    assert persisted["companies"]["mimo-coding-company"]["metadata"]["conversation_id"] == status["conversation_id"]
+
+    for schedule in status["schedules"]:
+        Scheduler().delete_schedule(schedule["id"])
+    _reset_defaultspack_singletons()

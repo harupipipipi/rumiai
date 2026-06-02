@@ -200,6 +200,53 @@ def test_run_request_vector_tool_assist_recommends_when_tools_are_not_selected(m
     assert context["tool_assist"]["mode"] == "vector"
 
 
+def test_run_request_mimo_profile_prefers_vector_tool_assist_even_when_default_is_all(monkeypatch):
+    from domain.chat import run_request
+
+    fake_tools = [
+        {
+            "tool_id": "coding_file_read",
+            "name": "Read File",
+            "summary": "Read workspace source files.",
+            "tags": ["coding", "file", "read"],
+        },
+        {
+            "tool_id": "coding_file_search",
+            "name": "Search File",
+            "summary": "Search workspace files.",
+            "tags": ["coding", "file", "search"],
+        },
+        {
+            "tool_id": "sandbox_exec",
+            "name": "Sandbox Exec",
+            "summary": "Execute shell commands in a sandbox.",
+            "tags": ["shell", "execute"],
+        },
+    ]
+
+    class FakeRegistry:
+        def list_tools(self):
+            return list(fake_tools)
+
+        def get(self, tool_id):
+            return next((tool for tool in fake_tools if tool["tool_id"] == tool_id), None)
+
+    monkeypatch.setattr(run_request, "ToolRegistry", lambda: FakeRegistry())
+    monkeypatch.setattr(run_request, "effective_tool_assist_mode", lambda **_kwargs: "all")
+    monkeypatch.setattr(run_request, "tool_assist_limit", lambda **_kwargs: 4)
+
+    context = {"profile_id": "defaultspack.mimo_coding_company"}
+    resolved, unknown = run_request._resolve_selected_tools(
+        None,
+        user_text="ファイル名つきで短く返して。必要ならtoolで確認して。",
+        context=context,
+    )
+
+    assert unknown == []
+    assert [tool["tool_id"] for tool in resolved] == ["coding_file_read", "coding_file_search"]
+    assert context["tool_assist"]["mode"] == "vector"
+
+
 def test_run_request_tool_assist_off_keeps_unselected_tools_empty(monkeypatch):
     from domain.chat import run_request
 

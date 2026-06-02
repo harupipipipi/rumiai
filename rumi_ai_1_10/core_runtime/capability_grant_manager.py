@@ -29,7 +29,6 @@ from .hierarchical_grant import parse_principal_chain, intersect_config
 
 _UNSAFE_CHARS = re.compile(r'[/\\:*?"<>|.\x00-\x1f]')
 
-
 BATCH_GRANT_MAX_ITEMS = 50
 
 
