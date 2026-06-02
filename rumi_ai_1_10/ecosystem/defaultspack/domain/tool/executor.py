@@ -1266,6 +1266,13 @@ def _tool_approval_scope(tool_def, arguments):
 def _tool_approval_display_arguments(tool_def, arguments, approval_args):
     tool_name = _tool_approval_tool_name(tool_def)
     if tool_name in {"browser_computer", "browser_use", "computer_use"} and isinstance(arguments, dict):
+        return dict(arguments)
+    return approval_args
+
+
+def _tool_approval_display_payload(tool_def, arguments, approval_args):
+    tool_name = _tool_approval_tool_name(tool_def)
+    if tool_name in {"browser_computer", "browser_use", "computer_use"} and isinstance(arguments, dict):
         _, payload = _browser_computer_action_payload(tool_name, arguments)
         return dict(payload)
     return approval_args
@@ -1392,6 +1399,7 @@ def _approval_required_tool_response(tool_def, arguments, context=None):
     risk_level = _tool_approval_risk_level(tool_def)
     args = approval_args
     display_args = _tool_approval_display_arguments(tool_def, arguments, approval_args)
+    display_payload = _tool_approval_display_payload(tool_def, arguments, approval_args)
     context = context if isinstance(context, dict) else {}
     request = _approval_module().create_approval_request(
         operation,
@@ -1417,7 +1425,7 @@ def _approval_required_tool_response(tool_def, arguments, context=None):
             "operation": operation,
             "action": operation,
             "arguments": _redact_sensitive_arguments(display_args),
-            "payload": _redact_sensitive_arguments(display_args),
+            "payload": _redact_sensitive_arguments(display_payload),
             "approval_request_id": request["request_id"],
             "args_hash": request["args_hash"],
             "expires_at": request["expires_at"],

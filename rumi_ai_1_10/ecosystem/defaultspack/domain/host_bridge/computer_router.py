@@ -36,7 +36,7 @@ def run_computer_action(
         approval_token = _approval_token_from_context(normalized_context, tool_name, normalized_action)
         if approval_token:
             normalized_payload["approval_token"] = approval_token
-    effective_yolo_mode = bool(yolo_mode) or bool(normalized_context.get("_tool_server_approved"))
+    effective_yolo_mode = bool(yolo_mode) or _context_has_server_approval(normalized_context)
     if should_route_to_viewer(normalized_action):
         client = ViewerBrokerClient.from_environment()
         if client.available():
@@ -143,6 +143,15 @@ def _approval_token_from_context(
         if token:
             return token
     return ""
+
+
+def _context_has_server_approval(context: dict[str, Any] | None) -> bool:
+    if not isinstance(context, dict):
+        return False
+    return bool(
+        context.get("_tool_server_approved") is True
+        or context.get("_tool_server_approval_token_valid") is True
+    )
 
 
 def _context_value(context: dict[str, Any] | None, *keys: str) -> str:

@@ -119,6 +119,8 @@ def test_tool_executor_denied_browser_computer_without_approval_returns_approval
     assert result["is_error"] is False
     assert result["widget"]["type"] == "approval_request"
     assert result["widget"]["tool_name"] == "browser_computer"
+    assert result["widget"]["arguments"] == {"action": "computer.click", "payload": {"x": 10, "y": 20}}
+    assert result["widget"]["payload"] == {"x": 10, "y": 20}
     assert str(result["widget"]["approval_request_id"]).startswith("apr_")
 
 
@@ -142,6 +144,7 @@ def test_tool_executor_denied_computer_use_without_user_request_still_requires_a
     assert result["widget"]["type"] == "approval_request"
     assert result["widget"]["tool_name"] == "computer_use"
     assert result["widget"]["operation"] == "computer.click"
+    assert result["widget"]["arguments"] == {"action": "click", "x": 10, "y": 20}
     assert result["widget"]["payload"] == {"x": 10, "y": 20}
     assert str(result["widget"]["approval_request_id"]).startswith("apr_")
 
