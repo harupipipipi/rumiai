@@ -999,6 +999,118 @@ def test_compile_profile_preview_does_not_register_runtime_profile(tmp_path: Pat
     assert registry.get("runtime_profile.defaultspack.startup.defaultspack.startup") is None
 
 
+def test_update_runtime_fields_allows_profile_graph_save_when_base_pack_needs_reapproval(tmp_path: Path):
+    repo_defaultspack = Path(__file__).resolve().parents[1] / "ecosystem" / "defaultspack"
+    eco_root = tmp_path / "ecosystem"
+    shutil.copytree(repo_defaultspack, eco_root / "defaultspack")
+    manager = StartupProfileManager(
+        storage_path=tmp_path / "startup_profiles.json",
+        approval_manager=_FakeApprovalManager(reason_by_pack={"defaultspack": None}),
+        ecosystem_dir=str(eco_root),
+    )
+
+    created = manager.create_profile({
+        "base_pack": "defaultspack",
+        "name": "Runtime Only",
+        "default_graph": "defaultspack.startup",
+        "capability_profile_id": "defaultspack.startup",
+        "launch_capability_graph": True,
+    })
+    profile_id = created["profile"]["profile_id"]
+    manager.approval_manager = _FakeApprovalManager(
+        reason_by_pack={"defaultspack": "Pack 'defaultspack' changed since it was last approved. Re-approve it before launching."}
+    )
+
+    result = manager.update_runtime_fields(
+        profile_id,
+        {
+            "metadata": {
+                "selected": {
+                    "tools": ["web_search"],
+                    "webhooks": [],
+                    "api_routes": [],
+                    "prompts": [],
+                    "frontend": [],
+                    "flows": [],
+                    "nodes": [],
+                }
+            },
+            "policy": {"tool_allowlist": ["web_search"]},
+        },
+    )
+
+    assert result["updated"] is True
+    assert result["profile"]["metadata"]["selected"]["tools"] == ["web_search"]
+    assert result["profile"]["policy"]["tool_allowlist"] == ["web_search"]
+
+
+def test_update_runtime_fields_allows_profile_graph_surface_override_when_base_pack_needs_reapproval(tmp_path: Path):
+    repo_defaultspack = Path(__file__).resolve().parents[1] / "ecosystem" / "defaultspack"
+    eco_root = tmp_path / "ecosystem"
+    shutil.copytree(repo_defaultspack, eco_root / "defaultspack")
+    _write_frontendpack(eco_root, component_node=True)
+    manager = StartupProfileManager(
+        storage_path=tmp_path / "startup_profiles.json",
+        approval_manager=_FakeApprovalManager(reason_by_pack={"defaultspack": None, "frontendpack": None}),
+        ecosystem_dir=str(eco_root),
+    )
+
+    created = manager.create_profile({
+        "base_pack": "defaultspack",
+        "name": "Runtime Surface",
+        "default_graph": "defaultspack.startup",
+        "capability_profile_id": "defaultspack.startup",
+        "launch_capability_graph": True,
+    })
+    profile_id = created["profile"]["profile_id"]
+    manager.add_pack_to_profile(profile_id, "frontendpack")
+    manager.approval_manager = _FakeApprovalManager(
+        reason_by_pack={"defaultspack": "Pack changed", "frontendpack": None}
+    )
+
+    result = manager.update_runtime_fields(
+        profile_id,
+        {
+            "metadata": {
+                "selected": {
+                    "tools": [],
+                    "webhooks": [],
+                    "api_routes": [],
+                    "prompts": [],
+                    "frontend": [],
+                    "flows": [],
+                    "nodes": ["frontendpack.web_surface"],
+                },
+                "profile_graph": {
+                    "nodes": [
+                        {
+                            "id": "node:frontendpack.web_surface",
+                            "kind": "capability_node",
+                            "ref": "frontendpack.web_surface",
+                            "metadata": {
+                                "component_type": "frontend",
+                                "launch": {"kind": "desktop_app", "pack_id": "frontendpack"},
+                                "ports": [
+                                    {
+                                        "id": "surface",
+                                        "direction": "output",
+                                        "standards": ["rumi.surface"],
+                                    }
+                                ],
+                            },
+                        }
+                    ],
+                    "edges": [],
+                },
+            }
+        },
+    )
+
+    assert result["updated"] is True
+    assert result["profile"]["metadata"]["selected"]["nodes"] == ["frontendpack.web_surface"]
+    assert result["profile"]["node_overrides"]["frontend.surface"] == "frontendpack.web_surface"
+
+
 def test_launch_profile_strict_compile_failure(tmp_path: Path):
     repo_defaultspack = Path(__file__).resolve().parents[1] / "ecosystem" / "defaultspack"
     eco_root = tmp_path / "ecosystem"

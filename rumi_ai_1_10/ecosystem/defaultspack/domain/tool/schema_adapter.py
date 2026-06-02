@@ -601,13 +601,21 @@ def policy_from_context(context: Dict[str, Any]) -> Dict[str, Any]:
     try:
         from domain.runtime_config import merged_tool_policy
 
-        return merged_tool_policy(context)
+        policy = merged_tool_policy(context)
     except Exception:
         policy = context.get("profile_policy")
         if isinstance(policy, dict):
-            return policy
-        runtime_profile = context.get("runtime_profile")
-        return _policy_from_runtime_profile(runtime_profile)
+            policy = dict(policy)
+        else:
+            runtime_profile = context.get("runtime_profile")
+            policy = _policy_from_runtime_profile(runtime_profile)
+    if not isinstance(policy, dict):
+        policy = {}
+    effective_allowlist = _normalize_policy_tool_list(context.get("effective_tool_allowlist"))
+    if effective_allowlist:
+        policy = dict(policy)
+        policy["tool_allowlist"] = sorted(effective_allowlist)
+    return policy
 
 
 def _policy_from_runtime_profile(runtime_profile: Any) -> Dict[str, Any]:

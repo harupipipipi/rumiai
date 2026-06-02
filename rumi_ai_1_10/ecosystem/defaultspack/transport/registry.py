@@ -662,6 +662,10 @@ def build_http_routes_from_specs(server: Any, specs: List[HttpRouteSpec]):
             handler = _handler
         else:
             handler = getattr(server, spec.handler_name)
+        try:
+            setattr(handler, "__rumi_route_pattern__", spec.pattern)
+        except Exception:
+            pass
         routes.append((spec.method, compiled, handler, "fallback", dict(spec.path_inject)))
     return routes
 

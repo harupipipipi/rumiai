@@ -122,4 +122,12 @@ def run(context, args):
     ):
         if key in raw:
             payload[key] = raw.get(key)
-    return _run_browser_computer(context, {"action": action, "payload": payload, "tool_name": "browser_use"})
+    return _run_browser_computer(
+        context,
+        {
+            "action": action,
+            "payload": payload,
+            "tool_name": "browser_use",
+            "tool_arguments": raw,
+        },
+    )

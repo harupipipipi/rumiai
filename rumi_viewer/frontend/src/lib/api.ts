@@ -4,6 +4,11 @@ import type {
   PackToggleResponseData,
   StartupProfilesResponseData,
   ApiStartupProfile,
+  StartupProfileGraphResponseData,
+  StartupProfileGraphCompilePreviewResponseData,
+  StartupProfileAiInputResponseData,
+  StartupProfileAiInputTracesResponseData,
+  ApiAiInputConfig,
   StartupProfileCompilePreviewResponseData,
   StartupProfileMutationResponseData,
   StartupProfileDeleteResponseData,
@@ -33,6 +38,7 @@ import type {
   CapabilityProfileCloneResponseData,
   CapabilityProfileNodesResponseData,
   CapabilityProfilesResponseData,
+  ApiMapResponseData,
 } from './apiTypes';
 
 // Base URL: empty string means relative path (works with Vite proxy)
@@ -400,9 +406,31 @@ export function createStartupProfile(
   });
 }
 
+export type StartupProfileUpdatePayload = Partial<Pick<
+  ApiStartupProfile,
+  | 'name'
+  | 'base_pack'
+  | 'graph_id'
+  | 'packs'
+  | 'node_overrides'
+  | 'default_flow'
+  | 'default_graph'
+  | 'system_prompt_id'
+  | 'default_prompt_id'
+  | 'capability_profile_id'
+  | 'launch_capability_graph'
+  | 'surfaces'
+  | 'policy'
+  | 'permissions'
+  | 'enabled_nodes'
+  | 'disabled_nodes'
+  | 'node_settings'
+  | 'metadata'
+>>;
+
 export function updateStartupProfile(
   id: string,
-  data: { name?: string; base_pack?: string; graph_id?: string; packs?: string[]; node_overrides?: Record<string, string> },
+  data: StartupProfileUpdatePayload,
 ): Promise<StartupProfileMutationResponseData> {
   return apiFetch<StartupProfileMutationResponseData>(
     `/api/panel/startup/profiles/${encodeURIComponent(id)}`,
@@ -451,6 +479,104 @@ export function compileStartupProfilePreview(
       method: 'POST',
       body: JSON.stringify(profile ? { profile } : {}),
     },
+  );
+}
+
+export function fetchStartupProfileGraph(id: string): Promise<StartupProfileGraphResponseData> {
+  return apiFetch<StartupProfileGraphResponseData>(
+    `/api/panel/startup/profiles/${encodeURIComponent(id)}/graph`,
+  );
+}
+
+export function updateStartupProfileGraph(
+  id: string,
+  payload: {
+    graph?: Record<string, unknown>;
+    selected?: Record<string, unknown>;
+  },
+): Promise<StartupProfileGraphResponseData> {
+  return apiFetch<StartupProfileGraphResponseData>(
+    `/api/panel/startup/profiles/${encodeURIComponent(id)}/graph`,
+    {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+export function compileStartupProfileGraphPreview(
+  id: string,
+  payload: {
+    graph?: Record<string, unknown>;
+    selected?: Record<string, unknown>;
+  },
+): Promise<StartupProfileGraphCompilePreviewResponseData> {
+  return apiFetch<StartupProfileGraphCompilePreviewResponseData>(
+    `/api/panel/startup/profiles/${encodeURIComponent(id)}/graph/compile-preview`,
+    {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+export function fetchApiMap(params?: { profile_id?: string; focus?: string }): Promise<ApiMapResponseData> {
+  const search = new URLSearchParams();
+  if (params?.profile_id) {
+    search.set('profile_id', params.profile_id);
+  }
+  if (params?.focus) {
+    search.set('focus', params.focus);
+  }
+  const query = search.toString();
+  return apiFetch<ApiMapResponseData>(`/api/panel/api-map${query ? `?${query}` : ''}`);
+}
+
+export function fetchStartupProfileAiInput(
+  id: string,
+  options?: {include_text?: boolean},
+): Promise<StartupProfileAiInputResponseData> {
+  const search = new URLSearchParams();
+  if (options?.include_text === false) {
+    search.set('include_text', 'false');
+  }
+  const query = search.toString();
+  return apiFetch<StartupProfileAiInputResponseData>(
+    `/api/panel/startup/profiles/${encodeURIComponent(id)}/ai-input${query ? `?${query}` : ''}`,
+  );
+}
+
+export function updateStartupProfileAiInput(
+  id: string,
+  aiInput: Partial<ApiAiInputConfig>,
+): Promise<StartupProfileAiInputResponseData> {
+  return apiFetch<StartupProfileAiInputResponseData>(
+    `/api/panel/startup/profiles/${encodeURIComponent(id)}/ai-input`,
+    {
+      method: 'PUT',
+      body: JSON.stringify({ai_input: aiInput}),
+    },
+  );
+}
+
+export function compileStartupProfileAiInputPreview(
+  id: string,
+  payload: {ai_input?: Partial<ApiAiInputConfig>; message?: string},
+): Promise<StartupProfileAiInputResponseData> {
+  return apiFetch<StartupProfileAiInputResponseData>(
+    `/api/panel/startup/profiles/${encodeURIComponent(id)}/ai-input/compile-preview`,
+    {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+export function fetchStartupProfileAiInputTraces(
+  id: string,
+): Promise<StartupProfileAiInputTracesResponseData> {
+  return apiFetch<StartupProfileAiInputTracesResponseData>(
+    `/api/panel/startup/profiles/${encodeURIComponent(id)}/ai-input/traces`,
   );
 }
 

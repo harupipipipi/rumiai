@@ -1424,20 +1424,31 @@ function runtimeApprovalRuntimeContent(approval: RuntimeApproval, token?: string
   ].join("\n");
 }
 
-function browserApprovalRuntimeContent(approval: BrowserApproval): string {
-  const payload = approvalPayloadPreview({
-    ...approval.payload,
-    approval_token: approval.token,
-  });
+function browserApprovalRuntimeContent(approval: BrowserApproval, token?: string): string {
+  const approvedArguments = approval.toolName === "browser_computer"
+    ? {
+        action: approval.action,
+        payload: {
+          ...approval.payload,
+          ...(token ? { approval_token: token } : {}),
+        },
+      }
+    : {
+        action: approval.action,
+        ...approval.payload,
+        ...(token ? { approval_token: token } : {}),
+      };
+  const payload = approvalPayloadPreview(approvedArguments);
   return [
-    "The user approved the pending browser/computer action.",
+    "The user approved the pending computer/browser operation.",
     "Continue by calling the exact pending tool once with the approved arguments below.",
-    "Do not ask the user for the same approval again unless the tool returns a new approval request.",
+    "Do not ask the user for the same approval again unless the tool returns a new approval_request_id.",
     `Tool: ${approval.toolName}`,
-    `Action: ${approval.action}`,
+    `Operation: ${approval.action}`,
+    approval.requestId ? `Approval request id: ${approval.requestId}` : "",
     "Approved arguments JSON:",
     payload,
-  ].join("\n");
+  ].filter(Boolean).join("\n");
 }
 
 function staleRuntimeApprovalTitle(approval: StaleRuntimeApproval): string {
@@ -3650,22 +3661,39 @@ export default function App() {
       toolNames: approvalToolIds,
     });
     try {
+      const approvalWorkspace = workspaceContextFromConversation(activeConversation);
+      let approvalToken = browserApproval.token ?? "";
+      if (browserApproval.requestId) {
+        const decision = await api.approveCodingApproval(browserApproval.requestId);
+        if (!decision.approved) {
+          throw new Error(decision.reason || "approval failed");
+        }
+        approvalToken = decision.token ?? "";
+      }
       await api.sendMessage(activeConversationId, "ユーザーが許可しました。承認済みの操作を踏まえて続行してください。", {
         tool_choice: "required",
         tool_policy: {
           ...((yoloMode || ultraYoloMode) ? { yolo_mode: true, allow_shell: true, allow_file_write: true, write_actions_require_approval: false } : {}),
+          ...(approvalWorkspace.workspaceId ? { workspace_id: approvalWorkspace.workspaceId } : {}),
           ...(disabledToolIds.length ? { disabled_tools: disabledToolIds } : {}),
           ...(approvalToolIds.length ? { selected_tools: approvalToolIds } : {}),
         },
         tools: approvalToolIds.length ? approvalToolIds : undefined,
         metadata: {
-          mode: "agent",
+          mode,
+          ...(approvalWorkspace.workspaceId ? {
+            workspace_id: approvalWorkspace.workspaceId,
+            workspace_label: approvalWorkspace.workspaceLabel,
+            workspace_root: approvalWorkspace.workspaceRoot,
+          } : {}),
           approval_followup: {
             action: browserApproval.action,
-            approval_token: browserApproval.token,
+            operation: browserApproval.action,
+            approval_token: approvalToken,
+            request_id: browserApproval.requestId,
             tool_name: browserApproval.toolName,
           },
-          runtime_content: browserApprovalRuntimeContent(browserApproval),
+          runtime_content: browserApprovalRuntimeContent(browserApproval, approvalToken),
           selected_tools: approvalToolIds,
         },
       });

@@ -6,9 +6,15 @@ import {
   apiFetch,
   bootstrapPanelSession,
   clearStartupProfileNodeOverride,
+  compileStartupProfileGraphPreview,
+  compileStartupProfileAiInputPreview,
   compileStartupProfilePreview,
   createStartupProfile,
+  fetchApiMap,
   fetchBackgroundControlStatus,
+  fetchStartupProfileAiInput,
+  fetchStartupProfileAiInputTraces,
+  fetchStartupProfileGraph,
   fetchDesktopSystemInfo,
   hasPendingPanelBootstrapCode,
   isDesktopShellAvailable,
@@ -16,6 +22,9 @@ import {
   sendToBackground,
   setStartupProfileNodeOverride,
   showAppWindow,
+  updateStartupProfile,
+  updateStartupProfileAiInput,
+  updateStartupProfileGraph,
 } from './api.ts';
 import { RUMI_DISPLAY_VERSION } from './version.ts';
 
@@ -485,4 +494,79 @@ test('startup profile wrappers use v3 payloads and endpoints', async () => {
       updated_at: 1,
     },
   }));
+});
+
+test('profile graph wrappers call the graph endpoints and support metadata fields', async () => {
+  await updateStartupProfile('profile-1', {
+    name: 'Research',
+    system_prompt_id: 'research.system',
+    metadata: {selected: {tools: ['web_search']}},
+    policy: {tool_allowlist: ['web_search']},
+  });
+  assert.equal(lastFetchUrl, '/api/panel/startup/profiles/profile-1');
+  assert.equal(lastFetchInit?.method, 'PUT');
+  assert.equal(lastFetchInit?.body, JSON.stringify({
+    name: 'Research',
+    system_prompt_id: 'research.system',
+    metadata: {selected: {tools: ['web_search']}},
+    policy: {tool_allowlist: ['web_search']},
+  }));
+
+  await fetchStartupProfileGraph('profile-1');
+  assert.equal(lastFetchUrl, '/api/panel/startup/profiles/profile-1/graph');
+  assert.equal(lastFetchInit?.method, 'GET');
+
+  await updateStartupProfileGraph('profile-1', {
+    graph: {version: 1, nodes: [], edges: []},
+    selected: {tools: ['web_search']},
+  });
+  assert.equal(lastFetchUrl, '/api/panel/startup/profiles/profile-1/graph');
+  assert.equal(lastFetchInit?.method, 'PUT');
+  assert.equal(lastFetchInit?.body, JSON.stringify({
+    graph: {version: 1, nodes: [], edges: []},
+    selected: {tools: ['web_search']},
+  }));
+
+  await compileStartupProfileGraphPreview('profile-1', {
+    graph: {version: 1, nodes: [], edges: []},
+    selected: {prompts: ['research.system']},
+  });
+  assert.equal(lastFetchUrl, '/api/panel/startup/profiles/profile-1/graph/compile-preview');
+  assert.equal(lastFetchInit?.method, 'POST');
+  assert.equal(lastFetchInit?.body, JSON.stringify({
+    graph: {version: 1, nodes: [], edges: []},
+    selected: {prompts: ['research.system']},
+  }));
+
+  await fetchApiMap({profile_id: 'profile-1', focus: 'tool:web_search'});
+  assert.equal(lastFetchUrl, '/api/panel/api-map?profile_id=profile-1&focus=tool%3Aweb_search');
+});
+
+test('ai input wrappers call graph, preview, update, and trace endpoints', async () => {
+  await fetchStartupProfileAiInput('profile-1', {include_text: false});
+  assert.equal(lastFetchUrl, '/api/panel/startup/profiles/profile-1/ai-input?include_text=false');
+  assert.equal(lastFetchInit?.method, 'GET');
+
+  await updateStartupProfileAiInput('profile-1', {
+    version: 1,
+    disabled_edges: ['edge:prompt->model.system'],
+  });
+  assert.equal(lastFetchUrl, '/api/panel/startup/profiles/profile-1/ai-input');
+  assert.equal(lastFetchInit?.method, 'PUT');
+  assert.equal(lastFetchInit?.body, JSON.stringify({
+    ai_input: {
+      version: 1,
+      disabled_edges: ['edge:prompt->model.system'],
+    },
+  }));
+
+  await compileStartupProfileAiInputPreview('profile-1', {
+    ai_input: {disabled_edges: ['edge:prompt->model.system']},
+    message: 'preview this',
+  });
+  assert.equal(lastFetchUrl, '/api/panel/startup/profiles/profile-1/ai-input/compile-preview');
+  assert.equal(lastFetchInit?.method, 'POST');
+
+  await fetchStartupProfileAiInputTraces('profile-1');
+  assert.equal(lastFetchUrl, '/api/panel/startup/profiles/profile-1/ai-input/traces');
 });

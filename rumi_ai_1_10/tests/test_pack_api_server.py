@@ -15,6 +15,7 @@ import time
 import urllib.request
 from email.message import Message
 from http.server import ThreadingHTTPServer
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch, PropertyMock
 
 import pytest
@@ -693,6 +694,50 @@ class TestPackAPIServer:
             assert server.thread.daemon is True
         finally:
             server.stop()
+
+    @patch("core_runtime.pack_api_server.get_hmac_key_manager")
+    def test_start_preloads_core_control_panel_api_routes(self, mock_get_hmac, monkeypatch) -> None:
+        """runtime-ready 前でも panel API が 404 にならないよう core_control_panel の api_routes を先読みする。"""
+        mock_get_hmac.return_value = MagicMock()
+        server = PackAPIServer(host="127.0.0.1", port=0, internal_token="token")
+        fake_registry = object()
+
+        get_registry = MagicMock(return_value=fake_registry)
+        load_web_mounts = MagicMock()
+        load_pre_auth_routes = MagicMock()
+        load_api_routes = MagicMock()
+
+        monkeypatch.setattr("backend_core.ecosystem.registry.get_registry", get_registry)
+        monkeypatch.setattr(PackAPIHandler, "load_web_mounts", load_web_mounts)
+        monkeypatch.setattr(PackAPIHandler, "load_pre_auth_routes", load_pre_auth_routes)
+        monkeypatch.setattr(PackAPIHandler, "load_api_routes", load_api_routes)
+
+        try:
+            server.start()
+            assert get_registry.call_count >= 1
+            get_registry.assert_any_call()
+            load_web_mounts.assert_any_call(fake_registry, pack_ids={"core_control_panel"})
+            load_pre_auth_routes.assert_any_call(fake_registry, pack_ids={"core_control_panel"})
+            load_api_routes.assert_any_call(
+                fake_registry,
+                pack_ids={"core_control_panel"},
+                include_builtin_core_control_panel=True,
+            )
+        finally:
+            server.stop()
+
+    def test_load_api_routes_falls_back_to_builtin_core_control_panel(self) -> None:
+        """backend registry に core_control_panel がいない場合でも panel API を維持する。"""
+        fake_registry = SimpleNamespace(packs={})
+
+        count = PackAPIHandler.load_api_routes(
+            fake_registry,
+            include_builtin_core_control_panel=True,
+        )
+
+        assert count > 0
+        assert ("GET", "/api/panel/startup/profiles") in PackAPIHandler._api_route_exact
+        assert ("GET", "/api/panel/api-map") in PackAPIHandler._api_route_exact
 
     @patch("core_runtime.pack_api_server.get_hmac_key_manager")
     def test_long_response_does_not_block_concurrent_get(

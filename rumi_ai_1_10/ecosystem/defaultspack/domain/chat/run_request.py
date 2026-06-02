@@ -123,6 +123,8 @@ def prepare_chat_run(input_data: dict[str, Any], context: dict[str, Any] | None 
     conversation = store.get_conversation(conversation_id)
     if conversation is None:
         raise ValueError("Conversation not found")
+    active_startup_profile = _load_active_startup_profile()
+    conversation = _conversation_with_active_profile_prompt(conversation, active_startup_profile)
 
     message = input_data.get("message") if isinstance(input_data.get("message"), dict) else {}
     content, metadata = _prepared_user_content(store, conversation_id, message)
@@ -199,7 +201,7 @@ def prepare_chat_run(input_data: dict[str, Any], context: dict[str, Any] | None 
             conversation_id=conversation_id,
         )["level"]
 
-    request_context = dict(context or {})
+    request_context = _merge_active_startup_profile_context(context or {}, active_startup_profile)
     if effective_inferred_tool_ids:
         request_context["user_requested_computer_use"] = True
         request_context = _apply_computer_use_context_preferences(request_context, user_text)
@@ -210,6 +212,7 @@ def prepare_chat_run(input_data: dict[str, Any], context: dict[str, Any] | None 
     request_context["model"] = model
     request_context["chat_params"] = params
     request_context["request_id"] = request_id
+    _copy_enriched_context_into_request_context(request_context, enrich_info)
     if isinstance(metadata, dict):
         forced_skill_ids = metadata.get("skills") or metadata.get("skill_ids") or metadata.get("selected_skills")
         if isinstance(forced_skill_ids, list):
@@ -229,6 +232,17 @@ def prepare_chat_run(input_data: dict[str, Any], context: dict[str, Any] | None 
             or str(tool_choice or "").strip().lower() in {"auto", "none", "required"}
         ):
             params["tool_choice"] = tool_choice
+
+    request_context, effective_system_prompt = _apply_effective_ai_input_to_request_context(
+        request_context,
+        active_startup_profile,
+        conversation_id=conversation_id,
+        request_id=request_id,
+        user_text=user_text,
+    )
+    if effective_system_prompt:
+        system_prompt = effective_system_prompt
+        _replace_system_prompt_message(standard_messages, effective_system_prompt)
 
     raw_tools, provider_tools, tool_context = _available_tools(request_context, prepared_input, user_text=user_text)
     modalities = detect_modalities(content, metadata)
@@ -413,6 +427,87 @@ def prepare_chat_run(input_data: dict[str, Any], context: dict[str, Any] | None 
         chat_references=chat_references,
         matched_skills=matched_skills,
     )
+
+
+def _apply_effective_ai_input_to_request_context(
+    request_context: dict[str, Any],
+    active_profile: dict[str, Any] | None,
+    *,
+    conversation_id: str,
+    request_id: str,
+    user_text: str,
+) -> tuple[dict[str, Any], str]:
+    if not isinstance(active_profile, dict) or not str(active_profile.get("profile_id") or "").strip():
+        return request_context, ""
+    try:
+        from core_runtime.ai_input_graph_builder import build_runtime_ai_input_trace
+        from core_runtime.ai_input_trace_store import AiInputTraceStore
+    except Exception:
+        return request_context, ""
+
+    updated = dict(request_context or {})
+    trace = build_runtime_ai_input_trace(
+        active_profile,
+        conversation_id=conversation_id,
+        run_id=request_id,
+        user_message=user_text,
+        request_context=updated,
+        include_text=True,
+    )
+    allowed_tool_ids = [
+        str(item).strip()
+        for item in trace.get("allowed_tool_ids", [])
+        if str(item or "").strip()
+    ]
+    if allowed_tool_ids:
+        updated["effective_tool_allowlist"] = allowed_tool_ids
+        profile_policy = dict(updated.get("profile_policy") if isinstance(updated.get("profile_policy"), dict) else {})
+        profile_policy["tool_allowlist"] = allowed_tool_ids
+        updated["profile_policy"] = profile_policy
+    updated["ai_input_trace"] = {
+        "trace_id": trace.get("trace_id"),
+        "profile_id": trace.get("profile_id"),
+        "token_estimate": trace.get("token_estimate"),
+        "allowed_tool_ids": allowed_tool_ids,
+        "gate_decisions": trace.get("gate_decisions", []),
+    }
+    try:
+        AiInputTraceStore().save_trace(str(active_profile.get("profile_id") or ""), trace)
+    except Exception:
+        pass
+
+    effective = trace.get("effective_input") if isinstance(trace.get("effective_input"), dict) else {}
+    segments = effective.get("system_segments") if isinstance(effective.get("system_segments"), list) else []
+    context_segments = effective.get("context_segments") if isinstance(effective.get("context_segments"), list) else []
+    system_text = "\n\n".join(
+        str(segment.get("text") or segment.get("preview") or "").strip()
+        for segment in [*segments, *context_segments]
+        if isinstance(segment, dict) and str(segment.get("text") or segment.get("preview") or "").strip()
+    )
+    return updated, system_text
+
+
+def _copy_enriched_context_into_request_context(
+    request_context: dict[str, Any],
+    enrich_info: dict[str, Any],
+) -> None:
+    for key in ("knowledge_text", "memory_text"):
+        value = str(enrich_info.get(key) or "").strip()
+        if value:
+            request_context[key] = value
+    for key in ("knowledge_results", "memory_results"):
+        value = enrich_info.get(key)
+        if isinstance(value, list):
+            request_context[key] = list(value)
+
+
+def _replace_system_prompt_message(messages: list[dict[str, Any]], system_prompt: str) -> None:
+    if not system_prompt:
+        return
+    if messages and messages[0].get("role") == "system":
+        messages[0]["content"] = system_prompt
+        return
+    messages.insert(0, {"role": "system", "content": system_prompt})
 
 
 def _mark_tool_calling_unavailable(entries: Any, tool_names: list[str], actual: dict[str, Any]) -> list[dict[str, Any]]:
@@ -641,7 +736,11 @@ def _approval_followup_tool_context(metadata: dict[str, Any] | None) -> dict[str
         token_map[operation] = token
     if request_id:
         token_map[request_id] = token
-    if tool_name in {"computer_use", "browser_use", "browser_computer"}:
+    if tool_name in {"computer_use", "browser_use", "browser_computer"} and any(
+        candidate.startswith(("computer.", "browser."))
+        for candidate in (action, operation)
+        if candidate
+    ):
         for alias in ("computer_use", "browser_use", "browser_computer"):
             token_map[alias] = token
     return {"tool_approval_tokens": token_map}
@@ -698,6 +797,94 @@ def _conversation_system_prompt(conv: dict[str, Any], manager: Any) -> str:
         except OSError:
             pass
     return manager.get_system_prompt()
+
+
+def _load_active_startup_profile() -> dict[str, Any]:
+    try:
+        from core_runtime.profile_paths import active_profile_id
+        from core_runtime.profile_runtime_selection import apply_profile_graph_selection
+        from core_runtime.profile_workspace import ProfileWorkspaceManager
+    except Exception:
+        return {}
+
+    try:
+        profile_id = str(active_profile_id() or "").strip()
+    except Exception:
+        return {}
+    if not profile_id:
+        return {}
+
+    try:
+        profile = ProfileWorkspaceManager().load_profile_yaml(profile_id)
+    except Exception:
+        return {"profile_id": profile_id}
+    if not isinstance(profile, dict):
+        profile = {"profile_id": profile_id}
+    profile.setdefault("profile_id", profile_id)
+    try:
+        return apply_profile_graph_selection(profile)
+    except Exception:
+        return profile
+
+
+def _conversation_with_active_profile_prompt(
+    conversation: dict[str, Any],
+    active_profile: dict[str, Any] | None,
+) -> dict[str, Any]:
+    conv = dict(conversation or {})
+    if str(conv.get("system_prompt_id") or "").strip():
+        return conv
+    if not isinstance(active_profile, dict):
+        return conv
+    prompt_id = str(active_profile.get("system_prompt_id") or active_profile.get("default_prompt_id") or "").strip()
+    if prompt_id:
+        conv["system_prompt_id"] = prompt_id
+    return conv
+
+
+def _merge_active_startup_profile_context(
+    context: dict[str, Any],
+    active_profile: dict[str, Any] | None,
+) -> dict[str, Any]:
+    merged = dict(context or {})
+    if not isinstance(active_profile, dict):
+        return merged
+
+    profile_id = str(active_profile.get("profile_id") or "").strip()
+    if not profile_id:
+        return merged
+
+    policy = active_profile.get("policy") if isinstance(active_profile.get("policy"), dict) else {}
+    existing_policy = merged.get("profile_policy") if isinstance(merged.get("profile_policy"), dict) else {}
+    if policy or existing_policy:
+        merged["profile_policy"] = {
+            **dict(policy or {}),
+            **dict(existing_policy or {}),
+        }
+
+    metadata = active_profile.get("metadata") if isinstance(active_profile.get("metadata"), dict) else {}
+    selected = metadata.get("selected") if isinstance(metadata.get("selected"), dict) else {}
+    if selected and "profile_graph_selection" not in merged:
+        merged["profile_graph_selection"] = {
+            key: list(value) if isinstance(value, list) else value
+            for key, value in selected.items()
+        }
+
+    merged.setdefault("active_startup_profile_id", profile_id)
+    merged.setdefault(
+        "active_startup_profile",
+        {
+            "profile_id": profile_id,
+            "system_prompt_id": active_profile.get("system_prompt_id"),
+            "default_prompt_id": active_profile.get("default_prompt_id"),
+            "selected": merged.get("profile_graph_selection", {}),
+        },
+    )
+
+    runtime_profile_key = str(active_profile.get("last_runtime_profile_key") or "").strip()
+    if runtime_profile_key and not merged.get("runtime_profile_key") and not merged.get("_runtime_profile_key"):
+        merged["runtime_profile_key"] = runtime_profile_key
+    return merged
 
 
 def _attachment_text_blocks(attachments: list[dict[str, Any]]) -> list[dict[str, Any]]:

@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from .paths import discover_pack_locations
+from .profile_runtime_selection import apply_profile_graph_selection
 from .profile_workspace import ProfileWorkspaceManager
 from .node_models import make_core_start_node
 from .port_standards import can_connect_ports as _can_connect_standard_ports
@@ -147,6 +148,7 @@ class StartupProfileManager:
             "node_overrides": {},
             **self._runtime_profile_fields(profile_id, payload),
         }
+        profile = apply_profile_graph_selection(profile)
         profile["created_at"] = _now_ts()
         profile["updated_at"] = profile["created_at"]
 
@@ -182,6 +184,37 @@ class StartupProfileManager:
         error = self._validate_profile(updated, catalog)
         if error:
             return {"error": error, "status_code": 400}
+        state["profiles"][index] = updated
+        self._save_state(state)
+        workspace_payload = self._sync_profile_workspace(updated)
+        return {"profile": updated, "profile_workspace": workspace_payload, "updated": True}
+
+    def update_runtime_fields(self, profile_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        catalog = self._build_catalog()
+        state = self._load_state(catalog)
+        index = self._find_profile_index(state["profiles"], profile_id)
+        if index is None:
+            return {"error": f"Profile '{profile_id}' not found", "status_code": 404}
+
+        current = copy.deepcopy(state["profiles"][index])
+        updated = self._build_profile_from_payload(
+            profile_id,
+            current,
+            payload,
+            catalog,
+            updated_at=_now_ts(),
+        )
+
+        # Runtime-only updates must not rewrite the selected launch graph shape.
+        # Node overrides are allowed because Profile Graph runtime wiring projects
+        # selected launch surfaces through this field.
+        for field_name in ("base_pack", "graph_id", "graph_ports", "packs"):
+            if updated.get(field_name) != current.get(field_name):
+                return {
+                    "error": f"Runtime field update cannot change '{field_name}'",
+                    "status_code": 400,
+                }
+
         state["profiles"][index] = updated
         self._save_state(state)
         workspace_payload = self._sync_profile_workspace(updated)
@@ -720,7 +753,7 @@ class StartupProfileManager:
             else self._unique_string_list(current.get("packs", []))
         )
         node_overrides = dict(new_node_overrides) if isinstance(new_node_overrides, dict) else {}
-        return {
+        profile = {
             "version": PROFILE_VERSION,
             "profile_id": profile_id,
             "name": str(merged_payload.get("name") or profile_id),
@@ -737,6 +770,7 @@ class StartupProfileManager:
             "created_at": int(current.get("created_at") or _now_ts()),
             "updated_at": int(updated_at),
         }
+        return apply_profile_graph_selection(profile)
 
     def _default_state(self, catalog: Dict[str, Any]) -> Dict[str, Any]:
         default_profile = self._default_startup_profile(catalog) if self.seed_default_profile else None
@@ -778,7 +812,7 @@ class StartupProfileManager:
             if not graph_id or not graph_ports:
                 continue
             created_at = _now_ts()
-            return {
+            return apply_profile_graph_selection({
                 "version": PROFILE_VERSION,
                 "profile_id": "default-profile",
                 "name": "Default Profile",
@@ -800,7 +834,7 @@ class StartupProfileManager:
                         "surfaces": {"preferred": "browser", "enabled": ["browser", "cli"]},
                     },
                 ),
-            }
+            })
         return None
 
     def _normalize_state(self, state: Dict[str, Any], catalog: Dict[str, Any]) -> Dict[str, Any]:
@@ -819,6 +853,7 @@ class StartupProfileManager:
                 normalized["profile_id"] = profile_id
             else:
                 normalized = self._migrate_profile(profile_id, raw_profile, catalog)
+            normalized = apply_profile_graph_selection(normalized)
             normalized = self._normalize_default_profile_launch_fields(normalized)
             normalized["name"] = str(raw_profile.get("name") or normalized.get("name") or profile_id)
             normalized["created_at"] = int(raw_profile.get("created_at") or _now_ts())
@@ -885,7 +920,7 @@ class StartupProfileManager:
             packs = [base_pack]
 
         runtime = self._runtime_profile_fields(profile_id, raw)
-        return {
+        return apply_profile_graph_selection({
             "version": PROFILE_VERSION,
             "profile_id": profile_id,
             "name": str(raw.get("name") or profile_id),
@@ -895,7 +930,7 @@ class StartupProfileManager:
             "packs": packs,
             "node_overrides": node_overrides,
             **runtime,
-        }
+        })
 
     def _normalize_default_profile_launch_fields(self, profile: Dict[str, Any]) -> Dict[str, Any]:
         if (

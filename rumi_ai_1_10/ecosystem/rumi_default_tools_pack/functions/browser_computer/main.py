@@ -18,12 +18,15 @@ _SEQUENCE_ID_KEYS = (
 
 
 def run(context, args):
-    from ecosystem.defaultspack.domain.host_bridge.computer_router import run_computer_action
+    from domain.host_bridge.computer_router import run_computer_action
 
     action = str(args.get("action", "browser.session"))
     payload = dict(args.get("payload") or {})
     tool_name = str(args.get("tool_name") or "browser_computer").strip() or "browser_computer"
     payload = _payload_with_sequence_defaults(payload, context, args)
+    tool_arguments = args.get("tool_arguments")
+    if not isinstance(tool_arguments, dict) or not tool_arguments:
+        tool_arguments = _tool_arguments_from_run_args(args)
     artifact_root = None
     workspace = context.get("conversation_workspace_dir") if isinstance(context, dict) else None
     if isinstance(workspace, str) and workspace:
@@ -40,17 +43,18 @@ def run(context, args):
         payload,
         context if isinstance(context, dict) else None,
         tool_name=tool_name,
+        tool_arguments=tool_arguments,
         artifact_root=artifact_root,
         yolo_mode=yolo_mode,
     )
-    summary = "browser_computer {} completed".format(result.get("action", "action"))
+    summary = "{} {} completed".format(tool_name, result.get("action", "action"))
     if result.get("is_error"):
-        summary = "browser_computer {} failed".format(result.get("action", "action"))
+        summary = "{} {} failed".format(tool_name, result.get("action", "action"))
         if result.get("reason"):
             summary += ": {}".format(result.get("reason"))
     if result.get("path"):
         summary += "; artifact: {}".format(result.get("path"))
-    return tool_result(summary, widget={"type": "browser_computer", **result}, is_error=bool(result.get("is_error")))
+    return tool_result(summary, widget={"type": tool_name, **result}, is_error=bool(result.get("is_error")))
 
 
 def _payload_with_context_defaults(action, payload, context):
@@ -72,6 +76,16 @@ def _payload_with_context_defaults(action, payload, context):
         if isinstance(target_title, str) and target_title.strip():
             payload.setdefault("title", target_title.strip())
     return payload
+
+
+def _tool_arguments_from_run_args(args):
+    if not isinstance(args, dict):
+        return {}
+    return {
+        key: value
+        for key, value in args.items()
+        if key not in {"tool_name", "tool_arguments"}
+    }
 
 
 def _payload_with_sequence_defaults(payload, context, args):

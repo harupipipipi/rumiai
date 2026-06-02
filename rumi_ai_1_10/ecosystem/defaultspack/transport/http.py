@@ -108,8 +108,8 @@ class DefaultsHttpServer:
         Otherwise the hard-coded fallback list is used for backward
         compatibility.
 
-        Each entry in ``self._routes`` is a 5-tuple:
-            (method, compiled_regex, handler, source, path_inject)
+        Each entry in ``self._routes`` is a 6-tuple:
+            (method, compiled_regex, handler, source, path_inject, pattern)
 
         *source* is ``"registry"`` or ``"fallback"``.
         *path_inject* is a dict mapping URL param names to request_data keys
@@ -165,8 +165,12 @@ class DefaultsHttpServer:
                         key=lambda item: http_route_sort_key(item[0], item[1], item[4]),
                     ):
                         compiled = compile_http_route_pattern(pattern)
+                        try:
+                            setattr(handler, "__rumi_route_pattern__", pattern)
+                        except Exception:
+                            pass
                         registry_routes.append(
-                            (method, compiled, handler, "registry", path_inject)
+                            (method, compiled, handler, "registry", path_inject, pattern)
                         )
             except Exception as exc:
                 print(
@@ -205,16 +209,71 @@ class DefaultsHttpServer:
     def _match_route(self, method, path):
         """Match *method* + *path* against the route table.
 
-        Returns ``(handler, path_params, source, path_inject)`` or
-        ``(None, None, None, None)`` when nothing matches.
+        Returns ``(handler, path_params, source, path_inject, pattern)`` or
+        ``(None, None, None, None, None)`` when nothing matches.
         """
-        for route_method, compiled, handler, source, path_inject in self._routes:
+        for route in self._routes:
+            if len(route) >= 6:
+                route_method, compiled, handler, source, path_inject, pattern = route[:6]
+            else:
+                route_method, compiled, handler, source, path_inject = route
+                pattern = getattr(handler, "__rumi_route_pattern__", getattr(compiled, "pattern", path))
             if route_method != method:
                 continue
             m = compiled.match(path)
             if m is not None:
-                return handler, m.groupdict(), source, path_inject
-        return None, None, None, None
+                return handler, m.groupdict(), source, path_inject, pattern
+        return None, None, None, None, None
+
+    def _active_profile_policy(self):
+        try:
+            from core_runtime.profile_paths import active_profile_id
+            from core_runtime.profile_workspace import ProfileWorkspaceManager
+        except Exception:
+            return None, {}
+        profile_id = str(active_profile_id() or "").strip()
+        if not profile_id:
+            return None, {}
+        try:
+            profile = ProfileWorkspaceManager().load_profile_yaml(profile_id)
+        except Exception:
+            return profile_id, {}
+        policy = profile.get("policy") if isinstance(profile, dict) and isinstance(profile.get("policy"), dict) else {}
+        return profile_id, policy
+
+    def _route_allowed_by_active_profile(self, method, pattern):
+        profile_id, policy = self._active_profile_policy()
+        if not profile_id or not isinstance(policy, dict):
+            return True
+        if not bool(policy.get("enforce_api_route_allowlist", False)):
+            return True
+        allowlist = policy.get("api_route_allowlist")
+        if isinstance(allowlist, str):
+            allowlist = [item.strip() for item in allowlist.split(",") if item.strip()]
+        if not isinstance(allowlist, list):
+            allowlist = []
+        route_key = f"{str(method or '').upper()} {str(pattern or '').strip()}"
+        return route_key in {str(item).strip() for item in allowlist if str(item or '').strip()}
+
+    def _record_profile_blocked_route(self, method, pattern):
+        profile_id, _policy = self._active_profile_policy()
+        if not profile_id:
+            return
+        try:
+            from core_runtime.ai_input_trace_store import AiInputTraceStore
+
+            AiInputTraceStore().append_blocked_event(
+                profile_id,
+                {
+                    "event": "api_route_blocked",
+                    "method": str(method or "").upper(),
+                    "route": str(pattern or "").strip(),
+                    "reason": "not_in_api_route_allowlist",
+                    "source": "defaultspack.transport.http",
+                },
+            )
+        except Exception:
+            pass
 
     def _build_context(self):
         return {
@@ -1010,9 +1069,22 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
                             return
                     request_data.update(body_data)
 
-            handler, path_params, source, path_inject = self.server_ref._match_route(method, path)
+            handler, path_params, source, path_inject, route_pattern = self.server_ref._match_route(method, path)
             if handler is None:
                 self._send_json(404, error("not found: " + method + " " + path))
+                return
+            if route_pattern and not self.server_ref._route_allowed_by_active_profile(method, route_pattern):
+                self.server_ref._record_profile_blocked_route(method, route_pattern)
+                self._send_json(
+                    403,
+                    error(
+                        "API route is blocked by the active profile policy: "
+                        + method
+                        + " "
+                        + str(route_pattern),
+                        "API_ROUTE_NOT_ALLOWED",
+                    ),
+                )
                 return
             sensitive_error = self._sensitive_request_error(method, path)
             if sensitive_error:

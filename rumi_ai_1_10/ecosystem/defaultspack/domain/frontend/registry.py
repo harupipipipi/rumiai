@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
+from core_runtime.profile_graph_models import normalize_profile_graph_selected
+from core_runtime.profile_workspace import ProfileWorkspaceManager
 from domain.ai_client.client import AIClient
 from domain.ai_client.api_key_store import provider_key_status, set_provider_api_key
 from domain.ai_client.model_runtime_settings import ModelRuntimeSettingsService
@@ -36,13 +38,17 @@ class FrontendRegistry:
         self._shell_path = self._pack_root / "user_data" / "shared" / "frontend_shell.json"
         self._settings_path = self._pack_root / "user_data" / "shared" / "frontend_settings.json"
 
-    def build_catalog(self) -> dict[str, Any]:
+    def build_catalog(self, profile_id: str | None = None) -> dict[str, Any]:
         self._load_diagnostics: list[dict[str, Any]] = []
         extensions = self._load_extensions()
         ui_surfaces = self._load_ui_surfaces()
-        shell = self._shell(ui_surfaces, extensions)
-        parts = self._parts(ui_surfaces, extensions)
-        component_bindings = self._component_bindings(ui_surfaces, extensions)
+        selected_frontend_ids = self._profile_frontend_selection(profile_id)
+        shell = self._filter_shell(self._shell(ui_surfaces, extensions), selected_frontend_ids)
+        parts = self._filter_frontend_items(self._parts(ui_surfaces, extensions), selected_frontend_ids)
+        component_bindings = self._filter_frontend_items(self._component_bindings(ui_surfaces, extensions), selected_frontend_ids)
+        sidebar_items = self._filter_frontend_items(self._sidebar_items(ui_surfaces, extensions), selected_frontend_ids)
+        settings_sections = self._filter_frontend_items(self._settings_sections(ui_surfaces, extensions), selected_frontend_ids)
+        chat_renderers = self._filter_frontend_items(self._chat_renderers(ui_surfaces, extensions), selected_frontend_ids)
         return {
             "app": self._app_metadata(ui_surfaces),
             "agent_service": CapabilityCatalog(self._pack_root).manifest(),
@@ -51,14 +57,14 @@ class FrontendRegistry:
             "component_bindings": component_bindings,
             "sidebar": {
                 "filters": self._sidebar_filters(),
-                "items": self._sidebar_items(ui_surfaces, extensions),
+                "items": sidebar_items,
             },
             "settings": {
-                "sections": self._settings_sections(ui_surfaces, extensions),
+                "sections": settings_sections,
                 "values": self._read_settings(),
             },
             "chat_rendering": {
-                "renderers": self._chat_renderers(ui_surfaces, extensions),
+                "renderers": chat_renderers,
             },
             "skills": self._skill_items(),
             "routes": self._route_metadata(),
@@ -368,6 +374,53 @@ class FrontendRegistry:
         bindings.extend(self._config_list(ui_surfaces, "component_bindings"))
         bindings.extend(self._config_list(extensions, "component_bindings"))
         return self._dedupe_by_key(bindings, "part_id")
+
+    def _profile_frontend_selection(self, profile_id: str | None) -> set[str]:
+        candidate = str(profile_id or "").strip()
+        if not candidate:
+            return set()
+        try:
+            profile = ProfileWorkspaceManager().load_profile_yaml(candidate)
+        except Exception:
+            return set()
+        metadata = profile.get("metadata") if isinstance(profile, dict) and isinstance(profile.get("metadata"), dict) else {}
+        selected = normalize_profile_graph_selected(metadata.get("selected"))
+        return {
+            item_id
+            for item_id in (selected.get("frontend") if isinstance(selected.get("frontend"), list) else [])
+            if isinstance(item_id, str) and item_id.strip()
+        }
+
+    def _filter_shell(self, shell: dict[str, Any], selected_frontend_ids: set[str]) -> dict[str, Any]:
+        if not selected_frontend_ids:
+            return shell
+        filtered = deepcopy(shell)
+        layout = filtered.get("layout")
+        if isinstance(layout, dict) and isinstance(layout.get("regions"), list):
+            layout["regions"] = self._filter_frontend_items(layout.get("regions") or [], selected_frontend_ids)
+        if isinstance(filtered.get("renderers"), list):
+            filtered["renderers"] = self._filter_frontend_items(filtered.get("renderers") or [], selected_frontend_ids)
+        return filtered
+
+    def _filter_frontend_items(self, items: list[dict[str, Any]], selected_frontend_ids: set[str]) -> list[dict[str, Any]]:
+        if not selected_frontend_ids:
+            return items
+        filtered: list[dict[str, Any]] = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            visibility = item.get("profile_visibility") if isinstance(item.get("profile_visibility"), dict) else {}
+            selected_ids = visibility.get("selected_frontend_ids")
+            if isinstance(selected_ids, list):
+                normalized = {
+                    str(value).strip()
+                    for value in selected_ids
+                    if isinstance(value, str) and value.strip()
+                }
+                if normalized and not (normalized & selected_frontend_ids):
+                    continue
+            filtered.append(item)
+        return filtered
 
     def _sidebar_items(
         self,

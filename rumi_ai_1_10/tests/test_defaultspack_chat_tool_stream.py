@@ -427,3 +427,184 @@ def test_chat_run_engine_stops_for_permission_required_tool_result(tmp_path, mon
     assert final_message["raw_text"] == "許可が必要なため、ユーザーが承認するまで待機します。承認後に続行します。"
     assert final_message["metadata"]["pending_approval"]["approval_token"] == "approval-token-1"
     ChatStore._instance = None
+
+
+def test_chat_run_engine_browser_approval_followup_resumes_one_computer_tool_call(tmp_path, monkeypatch):
+    from domain.chat.store import ChatStore
+    from domain.chat.stream_engine import ChatRunEngine
+    from domain.safety import approval
+    from domain.tool.executor import ToolExecutor
+    from types import SimpleNamespace
+
+    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
+    ChatStore._instance = None
+    approval.reset_approval_state_for_tests()
+
+    router_calls: list[dict[str, object]] = []
+
+    def fake_router(action, payload, context=None, *, tool_name="computer_use", tool_arguments=None, artifact_root=None, yolo_mode=False):
+        router_calls.append(
+            {
+                "action": action,
+                "payload": dict(payload),
+                "context": dict(context or {}),
+                "tool_name": tool_name,
+                "tool_arguments": dict(tool_arguments or {}),
+            }
+        )
+        if not bool((context or {}).get("_tool_server_approved")):
+            request = approval.create_approval_request(
+                f"tool.{tool_name}",
+                "high",
+                dict(tool_arguments or {}),
+                details={"tool_name": tool_name, "action": action, "payload": dict(payload)},
+            )
+            return {
+                "action": action,
+                "tool_name": tool_name,
+                "payload": dict(payload),
+                "requires_approval": True,
+                "approval_required": True,
+                "approval_request_id": request["request_id"],
+                "request_id": request["request_id"],
+                "risk_level": "high",
+            }
+        return {
+            "action": action,
+            "apps": [{"name": "Google Chrome"}],
+            "is_error": False,
+        }
+
+    monkeypatch.setattr("domain.host_bridge.computer_router.run_computer_action", fake_router)
+    monkeypatch.setattr(ChatRunEngine, "_provider_supports_stream_tool_calls", staticmethod(lambda _model: True))
+    monkeypatch.setattr(
+        ToolExecutor,
+        "_capability_executor",
+        staticmethod(
+            lambda _context: SimpleNamespace(
+                execute=lambda _principal_id, _request: SimpleNamespace(
+                    success=False,
+                    output=None,
+                    error="approval required",
+                    error_type="caller_requires_denied",
+                )
+            )
+        ),
+    )
+
+    class ApprovalClient:
+        def supports_stream(self, model):
+            return True
+
+        def stream(self, model, messages, tools=None, params=None):
+            yield {"type": "tool_call_start", "id": "call_browser_approval", "name": "computer_use"}
+            yield {
+                "type": "tool_call_delta",
+                "id": "call_browser_approval",
+                "name": "computer_use",
+                "arguments_chunk": "{\"action\":\"apps\"}",
+            }
+            yield {"type": "tool_call_end", "id": "call_browser_approval", "name": "computer_use"}
+            yield {"type": "stream_end", "finish_reason": "tool_calls"}
+
+        def complete(self, model, messages, tools=None, params=None):
+            raise AssertionError("complete should not be called")
+
+    class ResumeClient:
+        def __init__(self):
+            self.calls = 0
+
+        def supports_stream(self, model):
+            return True
+
+        def stream(self, model, messages, tools=None, params=None):
+            self.calls += 1
+            if self.calls == 1:
+                yield {"type": "tool_call_start", "id": "call_browser_resume", "name": "computer_use"}
+                yield {
+                    "type": "tool_call_delta",
+                    "id": "call_browser_resume",
+                    "name": "computer_use",
+                    "arguments_chunk": "{\"action\":\"apps\"}",
+                }
+                yield {"type": "tool_call_end", "id": "call_browser_resume", "name": "computer_use"}
+                yield {"type": "stream_end", "finish_reason": "tool_calls"}
+                return
+            if self.calls == 2:
+                yield {"type": "content_delta", "delta": {"type": "text", "text": "resumed"}}
+                yield {"type": "stream_end", "finish_reason": "stop"}
+                return
+            raise AssertionError("resume flow should finish after one approved tool call")
+
+        def complete(self, model, messages, tools=None, params=None):
+            raise AssertionError("complete should not be called")
+
+    store = ChatStore()
+    conversation = store.create_conversation(model="openai/gpt-5.4")
+    tool_schema = {
+        "type": "function",
+        "function": {
+            "name": "computer_use",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    }
+
+    first_events = list(
+        ChatRunEngine(client=ApprovalClient()).stream(
+            {
+                "conversation_id": conversation["id"],
+                "message": {"role": "user", "content": "show apps"},
+                "tools": [tool_schema],
+            },
+            {},
+            stream_mode=True,
+        )
+    )
+
+    approval_event = next(event for event in first_events if event["type"] == "approval_requested")
+    request_id = approval_event["data"]["approval_request_id"]
+    decision = approval.approve(request_id)
+    assert decision["approved"] is True
+
+    resume_client = ResumeClient()
+    resumed_events = list(
+        ChatRunEngine(client=resume_client).stream(
+            {
+                "conversation_id": conversation["id"],
+                "message": {
+                    "role": "user",
+                    "content": "ユーザーが許可しました。承認済みの操作を続行してください。",
+                    "metadata": {
+                        "approval_followup": {
+                            "tool_name": "computer_use",
+                            "action": "computer.apps",
+                            "operation": "computer.apps",
+                            "approval_token": decision["token"],
+                            "request_id": request_id,
+                        },
+                        "runtime_content": (
+                            "The user approved the pending computer/browser operation.\n"
+                            "Continue by calling the exact pending tool once with the approved arguments below.\n"
+                            "Tool: computer_use\n"
+                            "Operation: computer.apps\n"
+                            "Approved arguments JSON:\n"
+                            "{\n  \"action\": \"computer.apps\"\n}"
+                        ),
+                    },
+                },
+                "tools": [tool_schema],
+            },
+            {},
+            stream_mode=True,
+        )
+    )
+
+    assert len(router_calls) == 1
+    assert router_calls[0]["context"]["_tool_server_approved"] is True
+    assert router_calls[0]["payload"]["approval_token"] == decision["token"]
+    assert router_calls[0]["tool_arguments"] == {"action": "apps"}
+    assert resume_client.calls == 2
+    final_message = [event["data"]["message"] for event in resumed_events if event["type"] == "done"][-1]
+    assert final_message["raw_text"] == "resumed"
+    ChatStore._instance = None

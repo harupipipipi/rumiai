@@ -28,7 +28,7 @@ class TestDefaultspackApiRoutes(unittest.TestCase):
         class _Registry:
             packs = {"defaultspack": _PackInfo()}
 
-        count = PackAPIHandler.load_api_routes(_Registry())
+        count = PackAPIHandler.load_api_routes(_Registry(), pack_ids={"defaultspack"})
         self.assertEqual(count, 16)
         self.assertIn(("GET", "/api/defaultspack/modules"), PackAPIHandler._api_route_exact)
         self.assertIn(("GET", "/api/defaultspack/pack-requests"), PackAPIHandler._api_route_exact)

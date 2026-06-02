@@ -369,7 +369,13 @@ class PackAPIHandler(
 
 
     @classmethod
-    def load_api_routes(cls, registry) -> int:
+    def load_api_routes(
+        cls,
+        registry,
+        pack_ids: Optional[set[str]] = None,
+        *,
+        include_builtin_core_control_panel: bool = False,
+    ) -> int:
         """Registry から全 Pack の api_routes を読み込み、ルーティングテーブルを構築する。
 
         完全一致ルートは dict で O(1) ルックアップ。
@@ -380,10 +386,13 @@ class PackAPIHandler(
         if registry is None:
             return 0
         count = 0
-        for pack_id, pack_info in registry.packs.items():
-            routes = pack_info.ecosystem.get("api_routes")
+        loaded_pack_ids: set[str] = set()
+
+        def _register_routes(pack_id: str, ecosystem: dict[str, Any]) -> int:
+            routes = ecosystem.get("api_routes")
             if not routes or not isinstance(routes, list):
-                continue
+                return 0
+            route_count = 0
             for route in routes:
                 if not isinstance(route, dict):
                     continue
@@ -400,6 +409,7 @@ class PackAPIHandler(
                     "function_id": function_id,
                     "pack_id": pack_id,
                     "pass_body": route.get("pass_body", False),
+                    "pass_query": route.get("pass_query", False),
                     "response_mode": route.get("response_mode", "result"),
                     "args": dict(route.get("args") or {}),
                     "path_param_map": dict(route.get("path_param_map") or {}),
@@ -411,10 +421,34 @@ class PackAPIHandler(
                         cls._api_route_patterns.append(
                             (method, pattern, param_names, entry)
                         )
-                        count += 1
+                        route_count += 1
                 elif "path" in route:
                     cls._api_route_exact[(method, route["path"])] = entry
-                    count += 1
+                    route_count += 1
+            return route_count
+
+        for pack_id, pack_info in registry.packs.items():
+            if pack_ids is not None and pack_id not in pack_ids:
+                continue
+            count += _register_routes(pack_id, pack_info.ecosystem)
+            loaded_pack_ids.add(pack_id)
+
+        should_include_control_panel = include_builtin_core_control_panel and (
+            pack_ids is None or "core_control_panel" in pack_ids
+        )
+        if should_include_control_panel and "core_control_panel" not in loaded_pack_ids:
+            fallback_path = (
+                Path(__file__).resolve().parent
+                / "core_pack"
+                / "core_control_panel"
+                / "ecosystem.json"
+            )
+            try:
+                fallback_ecosystem = json.loads(fallback_path.read_text(encoding="utf-8"))
+            except Exception:
+                logger.warning("Failed to load builtin core_control_panel api routes", exc_info=True)
+            else:
+                count += _register_routes("core_control_panel", fallback_ecosystem)
         logger.info("Loaded %d api_route entries", count)
         return count
 
@@ -458,6 +492,7 @@ class PackAPIHandler(
         method: str,
         path: str,
         body: Optional[dict[str, Any]] = None,
+        query: Optional[dict[str, Any]] = None,
     ) -> bool:
         """api_routes テーブルからルートをディスパッチする。
 
@@ -499,6 +534,7 @@ class PackAPIHandler(
 
         handler_name = entry["handler"]
         pass_body = entry.get("pass_body", False)
+        pass_query = entry.get("pass_query", False)
         response_mode = entry.get("response_mode", "result")
 
         # パスパラメータのバリデーション
@@ -544,6 +580,8 @@ class PackAPIHandler(
                     args.extend(path_params.values())
                 if pass_body:
                     args.append(body if body is not None else {})
+                elif pass_query:
+                    args.append(dict(query or {}))
 
                 result = handler(*args)
 
@@ -1415,11 +1453,16 @@ class PackAPIHandler(
         
         parsed = urlparse(self.path)
         path = parsed.path
+        query = {
+            key: values[-1]
+            for key, values in parse_qs(parsed.query, keep_blank_values=True).items()
+            if values
+        }
         result: Any = None
         
         try:
             # --- api_routes テーブルディスパッチ (施策3) ---
-            if self._dispatch_api_route("GET", path):
+            if self._dispatch_api_route("GET", path, query=query):
                 return
             if self._dispatch_defaultspack_http_route("GET", path):
                 return
@@ -1624,10 +1667,16 @@ class PackAPIHandler(
             body = self._parse_body()
             if body is None:
                 return  # レスポンス送信済み（サイズ超過 or JSONパース失敗）
-            path = urlparse(self.path).path
+            parsed = urlparse(self.path)
+            path = parsed.path
+            query = {
+                key: values[-1]
+                for key, values in parse_qs(parsed.query, keep_blank_values=True).items()
+                if values
+            }
 
             # --- api_routes テーブルディスパッチ (施策3) ---
-            if self._dispatch_api_route("POST", path, body):
+            if self._dispatch_api_route("POST", path, body, query=query):
                 return
             if self._dispatch_defaultspack_http_route("POST", path, body):
                 return
@@ -2052,10 +2101,16 @@ class PackAPIHandler(
             body = self._parse_body()
             if body is None:
                 return  # レスポンス送信済み
-            path = urlparse(self.path).path
+            parsed = urlparse(self.path)
+            path = parsed.path
+            query = {
+                key: values[-1]
+                for key, values in parse_qs(parsed.query, keep_blank_values=True).items()
+                if values
+            }
 
             # --- api_routes テーブルディスパッチ (施策3) ---
-            if self._dispatch_api_route("PUT", path, body):
+            if self._dispatch_api_route("PUT", path, body, query=query):
                 return
             if self._dispatch_defaultspack_http_route("PUT", path, body):
                 return
@@ -2086,8 +2141,15 @@ class PackAPIHandler(
         path = urlparse(self.path).path
         
         try:
+            parsed = urlparse(self.path)
+            path = parsed.path
+            query = {
+                key: values[-1]
+                for key, values in parse_qs(parsed.query, keep_blank_values=True).items()
+                if values
+            }
             # --- api_routes テーブルディスパッチ (施策3) ---
-            if self._dispatch_api_route("DELETE", path):
+            if self._dispatch_api_route("DELETE", path, query=query):
                 return
             if self._dispatch_defaultspack_http_route("DELETE", path):
                 return
@@ -2230,7 +2292,12 @@ class PackAPIServer:
             reg = get_registry()
             PackAPIHandler.load_web_mounts(reg, pack_ids={"core_control_panel"})
             PackAPIHandler.load_pre_auth_routes(reg, pack_ids={"core_control_panel"})
-            logger.info("Preloaded control panel shell routes before runtime-ready")
+            PackAPIHandler.load_api_routes(
+                reg,
+                pack_ids={"core_control_panel"},
+                include_builtin_core_control_panel=True,
+            )
+            logger.info("Preloaded control panel shell and API routes before runtime-ready")
         except Exception as e:
             logger.warning("Failed to preload control panel shell routes: %s", e)
         try:
@@ -2245,7 +2312,10 @@ class PackAPIServer:
                                 PackAPIHandler.load_pack_routes(reg)
                                 PackAPIHandler.load_web_mounts(reg)
                                 PackAPIHandler.load_pre_auth_routes(reg)
-                                PackAPIHandler.load_api_routes(reg)
+                                PackAPIHandler.load_api_routes(
+                                    reg,
+                                    include_builtin_core_control_panel=True,
+                                )
                                 logger.info("Pack routes loaded (deferred after system.ready)")
                             except Exception as e:
                                 logger.warning("Failed to load pack routes (deferred): %s", e)
@@ -2258,7 +2328,10 @@ class PackAPIServer:
                     PackAPIHandler.load_pack_routes(reg)
                     PackAPIHandler.load_web_mounts(reg)
                     PackAPIHandler.load_pre_auth_routes(reg)
-                    PackAPIHandler.load_api_routes(reg)
+                    PackAPIHandler.load_api_routes(
+                        reg,
+                        include_builtin_core_control_panel=True,
+                    )
                     self._routes_loaded = True
                 except Exception as e:
                     logger.warning("Failed to load pack routes: %s", e)

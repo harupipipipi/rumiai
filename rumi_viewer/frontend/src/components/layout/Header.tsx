@@ -15,6 +15,8 @@ export function Header() {
     if (location.pathname === panelRoutes.flows) return t('nav.flows');
     if (location.pathname === panelRoutes.nodes) return t('nav.nodes');
     if (location.pathname === panelRoutes.graphEditor) return 'Graphs';
+    if (location.pathname === panelRoutes.profileGraph) return 'Profile Graph';
+    if (location.pathname === panelRoutes.apiMap) return 'API Map';
     if (location.pathname === panelRoutes.profileWorkspace) return 'Profile Workspace';
     if (location.pathname === panelRoutes.settings) return t('nav.settings');
     return '';
