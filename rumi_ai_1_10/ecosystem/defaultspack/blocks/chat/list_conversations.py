@@ -3,6 +3,7 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 from blocks._common import ok, error, gen_id, timestamp
 
+from domain.chat.public_metadata import compact_conversation_for_response
 from domain.chat.store import ChatStore
 
 
@@ -77,4 +78,6 @@ def run(input_data, context):
         query=_blank_to_none(params.get("query")),
         include_messages=_bool_with_default(params.get("include_messages"), False),
     )
+    if _bool_with_default(params.get("include_messages"), False):
+        conversations = [compact_conversation_for_response(conversation) for conversation in conversations]
     return ok({"conversations": conversations, "total": total})

@@ -22,6 +22,7 @@ from domain.chat.ir import RumiChatIR
 from domain.chat.ir_blocks import IR_SCHEMA_VERSION
 from domain.chat.ir_legacy_adapter import ir_to_legacy_standard_messages, legacy_standard_messages_to_ir, stored_messages_to_ir
 from domain.chat.modality_detector import detect_modalities
+from domain.chat.public_metadata import compact_tool_filter_entries
 from domain.chat.store import ChatStore
 from domain.vision.image_bridge import (
     apply_vision_bridge_to_messages,
@@ -284,12 +285,14 @@ def prepare_chat_run(input_data: dict[str, Any], context: dict[str, Any] | None 
     )
     raw_tools = list(eligibility_result.get("allowed_tools") or [])
     provider_tools = adapt_tool_definitions(raw_tools)
-    tool_context["tool_filter_result"] = list(eligibility_result.get("entries") or [])
+    filter_entries = list(eligibility_result.get("entries") or [])
+    compact_filter_entries = compact_tool_filter_entries(filter_entries)
+    tool_context["tool_filter_result"] = filter_entries
     tool_context["runtime_capability_snapshot"] = runtime_snapshot.as_dict()
-    request_context["tool_filter_result"] = list(eligibility_result.get("entries") or [])
+    request_context["tool_filter_result"] = filter_entries
     request_context["runtime_capability_snapshot"] = runtime_snapshot.as_dict()
     if isinstance(metadata, dict):
-        metadata["tool_filter_result"] = list(eligibility_result.get("entries") or [])
+        metadata["tool_filter_result"] = compact_filter_entries
         metadata["runtime_capability_snapshot"] = runtime_snapshot.as_dict()
         store.update_message(conversation_id, user_message["id"], {"metadata": metadata})
     if provider_tools and not selected_capabilities.get("supports_tool_calling") and not request_context.get("user_requested_computer_use"):
@@ -302,7 +305,7 @@ def prepare_chat_run(input_data: dict[str, Any], context: dict[str, Any] | None 
         tool_context["tool_filter_result"] = marked_entries
         request_context["tool_filter_result"] = marked_entries
         if isinstance(metadata, dict):
-            metadata["tool_filter_result"] = marked_entries
+            metadata["tool_filter_result"] = compact_tool_filter_entries(marked_entries)
             store.update_message(conversation_id, user_message["id"], {"metadata": metadata})
         tool_context["tool_suggestion_context"] = {
             "message": "Selected model does not support provider tool calling; tools were not attached.",

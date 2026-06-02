@@ -1099,6 +1099,10 @@ function clampNumber(value: unknown, min: number, max: number, fallback: number)
   return Math.max(min, Math.min(max, numeric));
 }
 
+export function shouldAutoCompactHistory(width: number): boolean {
+  return width < 760;
+}
+
 function writeJsonLocalStorage<T>(key: string, value: T) {
   try {
     localStorage.setItem(key, JSON.stringify(value));
@@ -2100,6 +2104,16 @@ export default function App() {
     () => activeConversation ? orderConversationMessages(activeConversation.messages) : [],
     [activeConversation?.messages],
   );
+  const latestActiveMessage = activeConversation?.messages[activeConversation.messages.length - 1];
+  const latestActiveMetadata = latestActiveMessage?.metadata && typeof latestActiveMessage.metadata === "object"
+    ? latestActiveMessage.metadata as Record<string, unknown>
+    : {};
+  const latestActiveThinking = latestActiveMetadata.thinking && typeof latestActiveMetadata.thinking === "object"
+    ? latestActiveMetadata.thinking as Record<string, unknown>
+    : {};
+  const latestActivePendingSignature = latestActiveMessage
+    ? `${latestActiveMessage.id}:${latestActiveMessage.role}:${latestActiveMessage.finish_reason ?? ""}:${String(latestActiveThinking.state ?? "")}`
+    : "";
   const messages = orderedMessages.map((message) => toUiMessage(message, activeProfile));
   const activeChatTitle = activeConversation?.title ?? "New Conversation";
   const isNewConversation = activeConversation === null || activeConversation.messages.length === 0;
@@ -2286,6 +2300,19 @@ export default function App() {
     },
     [activityPreviewWidthPx, setActivityPreviewWidth],
   );
+
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
+    const media = window.matchMedia("(max-width: 759px)");
+    const applyMobileHistoryLayout = () => {
+      if (shouldAutoCompactHistory(window.innerWidth)) {
+        setIsHistoryMinimized(true);
+      }
+    };
+    applyMobileHistoryLayout();
+    media.addEventListener("change", applyMobileHistoryLayout);
+    return () => media.removeEventListener("change", applyMobileHistoryLayout);
+  }, [setIsHistoryMinimized]);
 
   useEffect(() => {
     const validIds = new Set(composerExtensions.map((tool) => tool.id));
@@ -2552,7 +2579,7 @@ export default function App() {
     if (!conversationId) {
       setActiveConversationId(null);
       setActiveConversation(null);
-      await refreshPreview(null);
+      void refreshPreview(null);
       if (updateUrl) replaceChatIdInUrl(null, false);
       return;
     }
@@ -2560,7 +2587,7 @@ export default function App() {
     setActiveConversationId(conversationId);
     setActiveConversation(conversation);
     if (updateUrl) replaceChatIdInUrl(conversationId);
-    await refreshPreview(conversationId);
+    void refreshPreview(conversationId);
   }
 
   async function refreshConversations(preferredId?: string | null) {
@@ -2571,7 +2598,7 @@ export default function App() {
     if (!targetId) {
       setActiveConversationId(null);
       setActiveConversation(null);
-      await refreshPreview(null);
+      void refreshPreview(null);
       return;
     }
 
@@ -2588,21 +2615,25 @@ export default function App() {
 
     async function bootstrap() {
       setIsLoading(true);
+      const pendingConversationId = chatIdFromLocation();
+      if (pendingConversationId && isPendingInLocation()) {
+        rememberPendingRequest({
+          conversationId: pendingConversationId,
+          startedAt: Date.now(),
+          status: "Processing...",
+          toolNames: [],
+          recoveredFromLocation: true,
+        });
+      }
+      const shellBootstrap = Promise.all([refreshHealth(), refreshCatalog()])
+        .then(([, nextCatalog]) => {
+          if (cancelled || !hasOperationsProfile(nextCatalog)) return;
+          return refreshOperationsStatus();
+        })
+        .catch((shellError) => {
+          if (!cancelled) console.error(shellError);
+        });
       try {
-        const [, nextCatalog] = await Promise.all([refreshHealth(), refreshCatalog()]);
-        if (hasOperationsProfile(nextCatalog)) {
-          await refreshOperationsStatus();
-        }
-        const pendingConversationId = chatIdFromLocation();
-        if (pendingConversationId && isPendingInLocation()) {
-          rememberPendingRequest({
-            conversationId: pendingConversationId,
-            startedAt: Date.now(),
-            status: "Processing...",
-            toolNames: [],
-            recoveredFromLocation: true,
-          });
-        }
         if (!cancelled) {
           await refreshConversations(null);
         }
@@ -2619,6 +2650,7 @@ export default function App() {
           setIsLoading(false);
         }
       }
+      void shellBootstrap;
     }
 
     void bootstrap();
@@ -2698,9 +2730,16 @@ export default function App() {
 
   useEffect(() => {
     if (!activeConversationId || !isConversationPending) return;
+    const latestKnown = latestActiveMessage;
+    if (shouldClearPendingAfterConversationRefresh(latestKnown, pendingRequest, Date.now())) {
+      forgetPendingRequest(activeConversationId);
+      replaceChatIdInUrl(activeConversationId, false);
+      setIsGenerating(false);
+      return;
+    }
     if (streamingConversationIdRef.current === activeConversationId) return;
     setIsGenerating(true);
-    const interval = window.setInterval(() => {
+    const pollPendingConversation = () => {
       void api.getConversation(activeConversationId).then((conversation) => {
         setActiveConversation(conversation);
         const latest = conversation.messages[conversation.messages.length - 1];
@@ -2717,9 +2756,11 @@ export default function App() {
         setIsGenerating(false);
         setError(pollError instanceof Error ? pollError.message : "stream 状態の確認に失敗しました。");
       });
-    }, 1500);
+    };
+    pollPendingConversation();
+    const interval = window.setInterval(pollPendingConversation, 1500);
     return () => window.clearInterval(interval);
-  }, [activeConversationId, isConversationPending, pendingRequest]);
+  }, [activeConversationId, isConversationPending, latestActivePendingSignature, pendingRequest]);
 
   useEffect(() => {
     const staleIds = Object.entries(pendingRequests)

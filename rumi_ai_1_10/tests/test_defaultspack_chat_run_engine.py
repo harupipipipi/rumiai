@@ -674,6 +674,10 @@ def test_stream_engine_provider_trace_metadata(tmp_path, monkeypatch):
     assert Path(trace["trace_path"]).exists()
     assert stored["metadata"]["ir"]["schema_version"] == "rumi.chat.ir.v2"
     assert "provider_planning" in stored["metadata"]
+    planning = stored["metadata"]["provider_planning"]
+    assert planning["provider_tool_count"] == 1
+    assert planning["provider_tools"][0]["name"] == "lookup"
+    assert "parameters" not in str(planning["provider_tools"][0])
     ChatStore._instance = None
 
 

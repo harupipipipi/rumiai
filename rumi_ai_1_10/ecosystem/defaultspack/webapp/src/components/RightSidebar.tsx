@@ -81,6 +81,7 @@ function cn(...inputs: ClassValue[]) {
 const RAIL_BUTTON_CLASS = "relative flex h-9 min-h-9 w-9 min-w-9 shrink-0 items-center justify-center overflow-visible rounded-md transition-colors";
 const PANEL_WIDTH_STORAGE_KEY = "rumi-right-sidebar-panel-width";
 const PLACEMENT_PANEL_PREFIX = "__placement__:";
+const DEFAULT_TOOL_GROUP_RAIL_LIMIT = 8;
 
 function clampPanelWidth(value: unknown): number {
   const numeric = typeof value === "number" ? value : Number(value);
@@ -809,7 +810,7 @@ export function RightSidebar({
   onPanelAction?: (item: SidebarItem, action: SidebarAction) => void;
 }) {
   const [activePanel, setActivePanel] = useState<string | null>(null);
-  const [categoryFilter, setCategoryFilter] = useState<"all" | SidebarCategory>("all");
+  const [categoryFilter, setCategoryFilter] = useState<"all" | SidebarCategory>("tool");
   const [searchQuery, setSearchQuery] = useState("");
   const [toolManagerSearchQuery, setToolManagerSearchQuery] = useState("");
   const [isToolManagerSearchOpen, setIsToolManagerSearchOpen] = useState(false);
@@ -1121,6 +1122,17 @@ export function RightSidebar({
   const isCodingPanelActive = activePanel === "__coding_widget__" && Boolean(codingPanel);
   const isPlacementPanelActive = Boolean(activePlacementManifest);
   const activeToolGroupId = activeItem?.category === "tool" ? toolGroupFor(activeItem).id : null;
+  const shouldCompactToolRail = categoryFilter === "tool" && !searchQuery.trim() && !activeTagFilter && !showStarredOnly;
+  const railToolGroups = useMemo(() => {
+    if (!showToolGroups) return [];
+    if (!shouldCompactToolRail || toolGroups.length <= DEFAULT_TOOL_GROUP_RAIL_LIMIT) return toolGroups;
+    const visible = toolGroups.slice(0, DEFAULT_TOOL_GROUP_RAIL_LIMIT);
+    if (!activeToolGroupId || visible.some((group) => group.id === activeToolGroupId)) return visible;
+    const activeGroup = toolGroups.find((group) => group.id === activeToolGroupId);
+    if (!activeGroup) return visible;
+    return [...visible.slice(0, DEFAULT_TOOL_GROUP_RAIL_LIMIT - 1), activeGroup];
+  }, [activeToolGroupId, shouldCompactToolRail, showToolGroups, toolGroups]);
+  const hiddenToolGroupCount = showToolGroups ? Math.max(0, toolGroups.length - new Set(railToolGroups.map((group) => group.id)).size) : 0;
   const pinnedRightSidebarPlacements = useMemo(
     () => pinnedPlacements
       .filter((placement) => placement.surface === "right_sidebar")
@@ -2039,7 +2051,7 @@ export function RightSidebar({
 
           {showToolGroups && (
             <div ref={toolGroupMenuRef} className="flex flex-col items-center gap-px w-full">
-              {toolGroups.map((group) => {
+              {railToolGroups.map((group) => {
                 const isGroupActive = activeToolGroupId === group.id;
                 const isGroupOpen = openToolGroupMenu === group.id;
                         return (
@@ -2151,6 +2163,32 @@ export function RightSidebar({
                 </div>
               );
               })}
+              {hiddenToolGroupCount > 0 && (
+                <button
+                  type="button"
+                  tabIndex={buttonTabIndex}
+                  onClick={() => {
+                    setActivePanel((current) => (current === "__tool_manager__" ? null : "__tool_manager__"));
+                    setOpenToolGroupMenu(null);
+                  }}
+                  className={cn(
+                    RAIL_BUTTON_CLASS,
+                    "group/btn",
+                    isToolManagerActive
+                      ? "bg-zinc-800 text-zinc-100 ring-1 ring-zinc-600/70"
+                      : "text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50",
+                  )}
+                  title={`More tools (${hiddenToolGroupCount} groups)`}
+                >
+                  <MoreVertical size={17} className="h-[17px] w-[17px] shrink-0" />
+                  <span className="absolute -top-0.5 -right-0.5 text-[7px] bg-zinc-700 text-zinc-300 px-0.5 rounded-full leading-tight">
+                    {hiddenToolGroupCount}
+                  </span>
+                  <span className="absolute right-full mr-2 px-2 py-1 bg-zinc-800 text-zinc-200 text-[10px] rounded-md opacity-0 group-hover/btn:opacity-100 pointer-events-none transition-opacity whitespace-nowrap border border-zinc-700 shadow-lg rumi-layer-global-overlay">
+                    More tools
+                  </span>
+                </button>
+              )}
             </div>
           )}
 

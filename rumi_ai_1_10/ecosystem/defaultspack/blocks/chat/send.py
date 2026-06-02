@@ -36,6 +36,7 @@ _SECRET_KEY_RE = re.compile(
     r"(api[_-]?key|authorization|bearer|credential|password|secret|token)",
     re.IGNORECASE,
 )
+_SECRET_VALUE_RE = re.compile(r"\b(AIza[0-9A-Za-z_-]{20,}|sk-[0-9A-Za-z_-]{20,}|gh[pousr]_[0-9A-Za-z_]{20,})\b")
 _PROMPT_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 _TRANSIENT_AI_ERROR_RE = re.compile(
     r"\b(429|500|502|503|504)\b|temporary|temporarily|timeout|timed out|try again|rate limit|internal error",
@@ -195,8 +196,123 @@ def _call_ai_complete_with_retry(model, messages, tools, params, call_handler, e
     raise RuntimeError(last_error)
 
 
+def _redact_error_text(value):
+    text = str(value or "AI request failed")
+    text = _SECRET_VALUE_RE.sub("[redacted]", text)
+    text = re.sub(
+        r"(?i)\b(api[_-]?key|authorization|bearer|credential|password|secret|token)(\s*[:=]\s*)[^\s,}]+",
+        r"\1\2[redacted]",
+        text,
+    )
+    return text
+
+
+def _clip_error_text(value, limit=900):
+    text = _redact_error_text(value).strip()
+    if len(text) <= limit:
+        return text
+    return text[:limit].rstrip() + "... (truncated)"
+
+
+def _extract_provider_error(message):
+    raw = _redact_error_text(message)
+    lower = raw.lower()
+    provider = "Google" if "google api error" in lower else "AI provider"
+    status_match = re.search(r"\b(?:google|openai|anthropic)?\s*api error\s+(\d{3})\b", raw, re.IGNORECASE)
+    status_code = int(status_match.group(1)) if status_match else None
+    payload = None
+    json_start = raw.find("{")
+    if json_start >= 0:
+        candidate = raw[json_start:].strip()
+        try:
+            payload = json.loads(candidate)
+        except Exception:
+            json_end = candidate.rfind("}")
+            if json_end >= 0:
+                try:
+                    payload = json.loads(candidate[: json_end + 1])
+                except Exception:
+                    payload = None
+    error_payload = payload.get("error") if isinstance(payload, dict) and isinstance(payload.get("error"), dict) else payload
+    code = None
+    status = None
+    provider_message = None
+    if isinstance(error_payload, dict):
+        if status_code is None and isinstance(error_payload.get("code"), int):
+            status_code = error_payload.get("code")
+        code = error_payload.get("code")
+        status = error_payload.get("status") or error_payload.get("type")
+        provider_message = error_payload.get("message")
+    return {
+        "provider": provider,
+        "status_code": status_code,
+        "code": code,
+        "status": status,
+        "message": str(provider_message or raw),
+        "raw": raw,
+    }
+
+
+def _compact_provider_error_message(message, limit=520):
+    text = _redact_error_text(message).strip()
+    lines = [line.strip().lstrip("*").strip() for line in text.splitlines() if line.strip()]
+    if len(lines) > 1:
+        unique = []
+        for line in lines:
+            if line not in unique:
+                unique.append(line)
+            if len(unique) == 3:
+                break
+        suffix = ""
+        if len(lines) > len(unique):
+            suffix = " (ほか {} 件)".format(len(lines) - len(unique))
+        return _clip_error_text("; ".join(unique) + suffix, limit)
+    return _clip_error_text(re.sub(r"\s+", " ", text), limit)
+
+
+def _ai_error_hint(status_code, provider_message):
+    lower = str(provider_message or "").lower()
+    if status_code == 400 and "function_declarations" in lower and "missing field" in lower:
+        return "Google/Gemma が tool 定義の schema を拒否しました。tool の配列 schema を補正したうえで再試行してください。"
+    if status_code == 400:
+        return "リクエスト形式、モデル設定、添付ファイル、tool 選択の組み合わせを確認してください。"
+    if status_code in {401, 403}:
+        return "APIキー、OAuth、モデル利用権限、またはローカル承認が拒否されています。設定と承認カードを確認してください。"
+    if status_code == 404:
+        return "指定モデルまたはエンドポイントが見つかりません。モデル名と provider 設定を確認してください。"
+    if status_code == 409:
+        return "同時実行や状態の衝突が起きています。少し待ってから再送信してください。"
+    if status_code == 429:
+        return "レート制限またはクォータ上限です。時間を置くか、別のAPIキーまたはモデルを選んでください。"
+    if status_code and status_code >= 500:
+        return "provider 側またはバックエンド側の一時的な障害です。少し待って再試行してください。"
+    return "同じ入力で再発する場合は、モデル、APIキー、選択中の tool を順に切り分けてください。"
+
+
+def _format_terminal_ai_error_message(model, message):
+    info = _extract_provider_error(message)
+    status_code = info["status_code"]
+    provider = info["provider"]
+    code = info["code"]
+    provider_status = info["status"]
+    compact_message = _compact_provider_error_message(info["message"])
+    raw_message = _clip_error_text(info["raw"], 1200)
+    status_label = "HTTP {}".format(status_code) if status_code else "provider error"
+    code_bits = [str(item) for item in (provider_status, code) if item not in (None, "", status_code)]
+    code_suffix = " ({})".format(", ".join(code_bits)) if code_bits else ""
+    lines = [
+        "APIエラーでこのタスクを終了しました。",
+        "",
+        "- モデル: {}".format(model or "unknown"),
+        "- 原因: {} {}{}".format(provider, status_label, code_suffix),
+        "- 内容: {}".format(compact_message),
+        "- 次に試すこと: {}".format(_ai_error_hint(status_code, info["message"])),
+    ]
+    return "\n".join(lines), raw_message
+
+
 def _ai_error_response(model, message, params, events=None):
-    text = "APIエラーでこのタスクを終了しました。\n\n{}".format(str(message or "AI request failed"))
+    text, raw_message = _format_terminal_ai_error_message(model, message)
     return {
         "content": [{"type": "text", "text": text}],
         "finish_reason": "error",
@@ -211,7 +327,8 @@ def _ai_error_response(model, message, params, events=None):
             "thinking_level": params.get("thinking_level") if isinstance(params, dict) else None,
             "error": {
                 "type": "AI_ERROR",
-                "message": str(message or "AI request failed"),
+                "message": text,
+                "raw_message": raw_message,
                 "terminal": True,
             },
         },

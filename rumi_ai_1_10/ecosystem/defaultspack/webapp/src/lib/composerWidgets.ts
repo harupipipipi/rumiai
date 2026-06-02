@@ -45,6 +45,13 @@ export function filterComposerToolMentions(items: ComposerExtensionItem[], query
   return candidates.filter((item) => composerToolSearchText(item).includes(q)).slice(0, limit);
 }
 
+export function composerToolMentionDisplay(item: ComposerExtensionItem): { label: string; description?: string } {
+  const label = item.ui?.composer_label ?? item.label ?? item.id;
+  const description = item.ui?.composer_description ?? item.description;
+  const details = [item.id, description && description !== label ? description : undefined].filter(Boolean).join(" - ");
+  return { label, description: details || undefined };
+}
+
 export function composerToolMentionWidget(item: ComposerExtensionItem): DroppedWidget {
   const label = item.ui?.composer_label ?? item.label ?? item.id;
   const description = item.ui?.composer_description ?? item.description;
@@ -91,6 +98,12 @@ export function filterComposerSkillMentions(items: ComposerSkillItem[], query: s
   const q = query.trim().toLowerCase();
   if (!q) return items.slice(0, limit);
   return items.filter((item) => composerSkillSearchText(item).includes(q)).slice(0, limit);
+}
+
+export function composerSkillMentionDisplay(item: ComposerSkillItem): { label: string; description?: string } {
+  const label = item.label || item.id;
+  const details = [item.id, item.description && item.description !== label ? item.description : undefined].filter(Boolean).join(" - ");
+  return { label, description: details || undefined };
 }
 
 export function composerSkillMentionWidget(item: ComposerSkillItem): DroppedWidget {

@@ -3,7 +3,9 @@ import assert from "node:assert/strict";
 
 import {
   canExecuteComposerEndpointAction,
+  composerSkillMentionDisplay,
   composerSkillMentionWidget,
+  composerToolMentionDisplay,
   filterComposerSkillMentions,
   isSafeLocalEndpoint,
   skillMentionIdsFromText,
@@ -70,5 +72,25 @@ test("composer skill mentions resolve aliases and create prompt widgets", () => 
         aliases: ["reality"],
       },
     },
+  });
+});
+
+test("composer mention display prefers human labels and keeps ids visible", () => {
+  assert.deepEqual(composerToolMentionDisplay({
+    id: "coding_file_read",
+    label: "Read File",
+    category: "tool",
+    description: "Read a workspace file.",
+  }), {
+    label: "Read File",
+    description: "coding_file_read - Read a workspace file.",
+  });
+  assert.deepEqual(composerSkillMentionDisplay({
+    id: "feedback/live-review",
+    label: "Live Review",
+    description: "Require evidence-backed verification.",
+  }), {
+    label: "Live Review",
+    description: "feedback/live-review - Require evidence-backed verification.",
   });
 });

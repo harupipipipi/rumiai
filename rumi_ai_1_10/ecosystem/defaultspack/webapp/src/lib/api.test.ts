@@ -1,8 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { api, defaultspackApiHeaders, normalizeChatStreamEvent, normalizeBrowserComputerApprovalAction, usesBrowserComputerApprovalEndpoint } from "./api";
+import { api, defaultspackApiHeaders, explainDefaultspackApiError, normalizeChatStreamEvent, normalizeBrowserComputerApprovalAction, usesBrowserComputerApprovalEndpoint } from "./api";
 import type { ComposerCommandItem } from "./api";
 import { frontendCommandArgs, keepSelectedToolsAfterSend, parseCommandBoolean, parseSlashCommandInput, resolveUltraYoloModeState, resolvedFrontendCommandArgs } from "../App";
+import { shouldAutoCompactHistory } from "../App";
 
 test("frontend command args prefer backend-coerced values", () => {
   assert.deepEqual(
@@ -74,6 +75,12 @@ test("ultra yolo restore state returns to the previous yolo mode", () => {
   );
 });
 
+test("history sidebar auto-compacts on narrow screens", () => {
+  assert.equal(shouldAutoCompactHistory(390), true);
+  assert.equal(shouldAutoCompactHistory(759), true);
+  assert.equal(shouldAutoCompactHistory(760), false);
+});
+
 test("executeUiCommand preserves model candidate results", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (async () => new Response(JSON.stringify({
@@ -123,6 +130,18 @@ test("executeUiCommand preserves model candidate results", async () => {
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+test("defaultspack API errors include status and recovery context", () => {
+  const message = explainDefaultspackApiError(403, {
+    code: "FORBIDDEN",
+    message: "tool approval denied",
+  }, "Forbidden");
+
+  assert.match(message, /HTTP 403 Forbidden/);
+  assert.match(message, /FORBIDDEN/);
+  assert.match(message, /tool approval denied/);
+  assert.match(message, /権限|承認/);
 });
 
 test("selected tools are kept after send unless settings opt out", () => {

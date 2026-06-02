@@ -1161,6 +1161,38 @@ export function defaultspackApiFetch(input: RequestInfo | URL, init: RequestInit
   });
 }
 
+function truncateApiErrorDetail(value: string, limit = 700): string {
+  const text = value.trim().replace(/\s+/g, " ");
+  if (text.length <= limit) return text;
+  return `${text.slice(0, limit).trim()}...`;
+}
+
+function defaultspackApiStatusHint(status: number): string {
+  if (status === 400) return "リクエスト形式、モデル設定、添付ファイル、または選択中の tool が backend と噛み合っていません。";
+  if (status === 401) return "認証が必要です。ログイン状態、APIキー、OAuth 接続を確認してください。";
+  if (status === 403) return "権限または承認で拒否されました。承認カード、CSRF、APIキーの利用権限、モデルアクセス権を確認してください。";
+  if (status === 404) return "対象の会話、モデル、ファイル、または endpoint が見つかりません。";
+  if (status === 409) return "同時実行や状態の衝突が起きています。画面を更新して再試行してください。";
+  if (status === 429) return "レート制限またはクォータ上限です。少し待つか、別のキー/モデルに切り替えてください。";
+  if (status >= 500) return "backend または provider 側の障害です。少し待って再試行してください。";
+  return "backend からエラーが返りました。詳細を確認して再試行してください。";
+}
+
+export function explainDefaultspackApiError(
+  status: number,
+  error?: { code?: string; message?: string },
+  statusText?: string,
+): string {
+  const label = status ? `HTTP ${status}${statusText ? ` ${statusText}` : ""}` : "defaultspack API error";
+  const code = error?.code ? ` (${error.code})` : "";
+  const detail = error?.message ? truncateApiErrorDetail(error.message) : "";
+  return [
+    `${label}${code}`,
+    defaultspackApiStatusHint(status),
+    detail ? `詳細: ${detail}` : "",
+  ].filter(Boolean).join("\n");
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await defaultspackApiFetch(path, {
     ...init,
@@ -1170,15 +1202,18 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   try {
     payload = (await response.json()) as ApiEnvelope<T>;
   } catch {
+    if (!response.ok) {
+      throw new Error(explainDefaultspackApiError(response.status, undefined, response.statusText));
+    }
     throw new Error("defaultspack API returned an invalid JSON response");
   }
 
   if (!response.ok || payload.status === "error") {
-    const message =
-      payload.status === "error"
-        ? payload.error.message
-        : `Request failed with status ${response.status}`;
-    throw new Error(message);
+    throw new Error(explainDefaultspackApiError(
+      response.status,
+      payload.status === "error" ? payload.error : undefined,
+      response.statusText,
+    ));
   }
 
   return payload.data;
@@ -1392,10 +1427,13 @@ export const api = {
       try {
         payload = (await response.json()) as ApiEnvelope<ChatMessage>;
       } catch {
-        throw new Error(`Request failed with status ${response.status}`);
+        throw new Error(explainDefaultspackApiError(response.status, undefined, response.statusText));
       }
       if (payload.status === "error") {
-        throw new Error(payload.error.message);
+        throw new Error(explainDefaultspackApiError(response.status, payload.error, response.statusText));
+      }
+      if (!response.ok) {
+        throw new Error(explainDefaultspackApiError(response.status, undefined, response.statusText));
       }
       handlers?.onMessage?.(payload.data);
       return payload.data;

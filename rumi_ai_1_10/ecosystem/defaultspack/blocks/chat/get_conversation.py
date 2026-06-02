@@ -3,6 +3,7 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 from blocks._common import ok, error, gen_id, timestamp
 
+from domain.chat.public_metadata import compact_conversation_for_response
 from domain.chat.store import ChatStore
 
 
@@ -14,4 +15,4 @@ def run(input_data, context):
     conv = store.get_conversation(conversation_id)
     if conv is None:
         return error("Conversation not found", "NOT_FOUND")
-    return ok(conv)
+    return ok(compact_conversation_for_response(conv))
