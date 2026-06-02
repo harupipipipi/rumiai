@@ -73,6 +73,7 @@
         "tool_call_type": "openai",
         "reasoning_content_roundtrip_required_with_tool_calls": true,
         "native_multimodal": true,
+        "vision_verified": true,
         "request_defaults": {
           "top_p": 0.95
         },
@@ -148,6 +149,7 @@
         "tool_call_type": "openai",
         "reasoning_content_roundtrip_required_with_tool_calls": true,
         "native_multimodal": true,
+        "vision_verified": true,
         "request_defaults": {
           "top_p": 0.95
         },
