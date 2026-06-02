@@ -333,11 +333,14 @@ def verify_execution_token(
         )
     expected_pack_id = str(pack_id or "")
     token_pack_id = str(payload.get("pack_id") or "")
-    if (expected_pack_id or token_pack_id) and token_pack_id != expected_pack_id:
+    # Scope checks stay strict for real execution paths that pass an expected
+    # pack/conversation, but status probes may omit them when they only need to
+    # inspect whether a one-shot token is still valid or already consumed.
+    if expected_pack_id and token_pack_id != expected_pack_id:
         return TokenVerification(False, "APPROVAL_PACK_MISMATCH", "approval token pack mismatch")
     expected_conversation_id = str(conversation_id or "")
     token_conversation_id = str(payload.get("conversation_id") or "")
-    if (expected_conversation_id or token_conversation_id) and token_conversation_id != expected_conversation_id:
+    if expected_conversation_id and token_conversation_id != expected_conversation_id:
         return TokenVerification(
             False,
             "APPROVAL_CONVERSATION_MISMATCH",
