@@ -66,6 +66,17 @@ _SAFE_BUILTINS = {
     #               property, object, __build_class__
 }
 
+_STALE_APPROVAL_TOKEN_CODES = {
+    "APPROVAL_ARGUMENTS_CHANGED",
+    "APPROVAL_OPERATION_MISMATCH",
+    "APPROVAL_PACK_MISMATCH",
+    "APPROVAL_CONVERSATION_MISMATCH",
+    "APPROVAL_TOKEN_USED",
+    "APPROVAL_EXPIRED",
+    "APPROVAL_NOT_APPROVED",
+    "APPROVAL_REQUEST_MISSING",
+}
+
 
 def json_dumps(value):
     return json.dumps(value, ensure_ascii=False)
@@ -158,6 +169,9 @@ class ToolExecutor:
             return self._mcp_client.invoke(server_name, mcp_tool_name, arguments)
 
         if exec_type == "rumi_function":
+            approval = _preflight_user_requested_computer_approval(tool_name, tool_def, arguments, context)
+            if approval is not None:
+                return approval
             return self._execute_rumi_function(tool_def, arguments, context)
 
         if exec_type == "capability":
@@ -260,7 +274,8 @@ class ToolExecutor:
             return None
         if bool(getattr(response, "success", False)):
             return None
-        if getattr(response, "error_type", "") not in {"caller_requires_denied", "pack_not_approved", "requires_denied"}:
+        error_type = getattr(response, "error_type", "")
+        if error_type not in {"caller_requires_denied", "pack_not_approved", "requires_denied"}:
             return None
         qualified_name = str(request.get("qualified_name") or "")
         pack_id, _, function_id = qualified_name.partition(":")
@@ -268,6 +283,8 @@ class ToolExecutor:
         if local_tool not in {"browser_computer", "browser_use", "computer_use"}:
             return None
         if _requires_approval(tool_def) and not _context_has_tool_server_approval(context):
+            if error_type == "pack_not_approved":
+                return _approval_required_tool_response(tool_def, request.get("args") or {}, context)
             return None
         return self._execute_local_with_tool_def(local_tool, request.get("args") or {}, context, tool_def)
 
@@ -473,7 +490,7 @@ class ToolExecutor:
         error = getattr(response, "error", None)
         if not success:
             if (
-                getattr(response, "error_type", None) in {"caller_requires_denied", "pack_not_approved", "requires_denied"}
+                getattr(response, "error_type", None) in {"caller_requires_denied", "requires_denied"}
                 and isinstance(tool_def, dict)
                 and _requires_approval(tool_def)
             ):
@@ -967,6 +984,8 @@ def _browser_computer_action_payload(tool_name, arguments):
             "session": "browser.session",
             "open_url": "browser.open_url",
             "open": "browser.open_url",
+            "context/apps/windows": "computer.context",
+            "context_apps_windows": "computer.context",
             "context": "computer.context",
             "app_context": "computer.context",
             "state": "computer.context",
@@ -1072,6 +1091,10 @@ def _browser_computer_action_payload(tool_name, arguments):
     else:
         action_map = {
             "": "computer.screenshot",
+            "open_url": "browser.open_url",
+            "open": "browser.open_url",
+            "context/apps/windows": "computer.context",
+            "context_apps_windows": "computer.context",
             "context": "computer.context",
             "app_context": "computer.context",
             "state": "computer.context",
@@ -1323,20 +1346,40 @@ def _approval_token_from_context(context, tool_def, arguments=None, *extra_keys)
     tokens = context.get("tool_approval_tokens")
     if not isinstance(tokens, dict):
         return ""
-    keys = [
-        _tool_approval_tool_name(tool_def),
-        _tool_approval_operation(tool_def),
-    ]
-    if isinstance(arguments, dict):
-        scoped_operation, _ = _tool_approval_scope(tool_def, arguments)
-        if scoped_operation:
-            keys.append(scoped_operation)
-    keys.extend(str(key or "").strip() for key in extra_keys if str(key or "").strip())
+    tool_name = _tool_approval_tool_name(tool_def)
+    scoped_operation, _ = _tool_approval_scope(tool_def, arguments if isinstance(arguments, dict) else {})
+    if tool_name in {"browser_computer", "browser_use", "computer_use"}:
+        keys = [
+            scoped_operation,
+            *[str(key or "").strip() for key in extra_keys if str(key or "").strip()],
+            tool_name,
+            _tool_approval_operation(tool_def),
+        ]
+    else:
+        keys = [
+            tool_name,
+            _tool_approval_operation(tool_def),
+            scoped_operation,
+            *[str(key or "").strip() for key in extra_keys if str(key or "").strip()],
+        ]
     for key in keys:
         token = str(tokens.get(key) or "").strip()
         if token:
             return token
     return ""
+
+def _preflight_user_requested_computer_approval(tool_name, tool_def, arguments, context):
+    if tool_name not in {"browser_computer", "browser_use", "computer_use"}:
+        return None
+    if not isinstance(context, dict) or not context.get("user_requested_computer_use"):
+        return None
+    if not isinstance(tool_def, dict) or not _requires_approval(tool_def):
+        return None
+    if _context_has_tool_server_approval(context):
+        return None
+    if _approval_token_from_context(context, tool_def, arguments) or _approval_token_from_arguments(arguments):
+        return None
+    return _approval_required_tool_response(tool_def, arguments or {}, context)
 
 
 def _context_with_tool_approval_token(context, tool_def, arguments, *extra_lookup_keys):
@@ -1345,12 +1388,7 @@ def _context_with_tool_approval_token(context, tool_def, arguments, *extra_looku
         return next_context, None
     if _context_has_tool_server_approval(next_context):
         return next_context, None
-    token = _approval_token_from_arguments(arguments) or _approval_token_from_context(
-        context,
-        tool_def,
-        arguments,
-        *extra_lookup_keys,
-    )
+    token = _approval_token_from_context(context, tool_def, arguments, *extra_lookup_keys) or _approval_token_from_arguments(arguments)
     if not token:
         return next_context, None
     approval = _approval_module()
@@ -1386,6 +1424,8 @@ def _context_with_tool_approval_token(context, tool_def, arguments, *extra_looku
         next_context["_tool_server_approved"] = True
         next_context["_tool_server_approval_token_valid"] = True
         return next_context, None
+    if verification.code in _STALE_APPROVAL_TOKEN_CODES:
+        return next_context, _approval_required_tool_response(tool_def, arguments, next_context)
     return next_context, {
         "result": verification.message or "approval token is invalid",
         "is_error": True,

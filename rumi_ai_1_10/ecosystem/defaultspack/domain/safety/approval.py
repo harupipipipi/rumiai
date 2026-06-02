@@ -179,7 +179,7 @@ def create_approval_request(
         request_id="apr_" + uuid.uuid4().hex,
         operation=str(operation),
         risk_level=str(risk_level or "high"),
-        args_hash=hash_arguments(args or details or {}),
+        args_hash=hash_arguments(args if args is not None else (details or {})),
         details=dict(details or {}),
         created_at=now,
         expires_at=now + max(1, int(expires_in or _DEFAULT_EXPIRES_IN_SECONDS)),

@@ -1420,12 +1420,13 @@ def test_browser_computer_screenshot_falls_back_to_window_capture_when_rect_capt
     )
     calls = []
 
-    def fake_run(command, check):
+    def fake_run(command, check, **kwargs):
         del check
         calls.append(command)
         if "-R" in command:
             raise CalledProcessError(1, command)
         assert "-l" in command
+        assert "timeout" in kwargs
         return None
 
     monkeypatch.setattr(browser_computer.subprocess, "run", fake_run)
@@ -5444,6 +5445,7 @@ def test_computer_click_falls_back_to_swift_on_macos(tmp_path, monkeypatch):
     assert calls[0][0][0] == sys.executable
     assert calls[0][0][1] == "-c"
     assert calls[1][0][0] == "/usr/bin/swift"
+    assert calls[1][1]["timeout"] == browser_computer._DARWIN_CGEVENT_TIMEOUT_SECONDS
     assert "leftMouseDown" in calls[1][0][2]
     assert "CGPoint(x: 120, y: 240)" in calls[1][0][2]
 
@@ -5582,6 +5584,9 @@ def test_browser_open_url_uses_managed_profile_launch_plan(tmp_path):
     assert result["launch"]["command"][0] == str(fake_browser)
     assert "--user-data-dir=" in result["launch"]["command"][1]
     assert "--disk-cache-dir=" in result["launch"]["command"][2]
+    assert "--no-first-run" in result["launch"]["command"]
+    assert "--no-default-browser-check" in result["launch"]["command"]
+    assert "--disable-sync" in result["launch"]["command"]
     assert result["launch"]["command"][-1] == "https://example.test"
 
 

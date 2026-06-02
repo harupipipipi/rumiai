@@ -149,6 +149,74 @@ def _should_emit_model_routing_status(model_routing: dict[str, Any] | None) -> b
     return bool(selected and original and selected != original)
 
 
+def _normalize_tool_call_name_and_arguments(
+    tool_name: str,
+    arguments: dict[str, Any],
+) -> tuple[str, dict[str, Any]]:
+    name = str(tool_name or "").strip()
+    if ":" not in name:
+        return name, arguments
+    base, suffix = name.split(":", 1)
+    base = base.strip()
+    suffix = suffix.strip()
+    if base not in {"browser_computer", "browser_use", "computer_use"}:
+        return name, arguments
+    normalized_args = dict(arguments or {})
+    action = str(normalized_args.get("action") or "").strip()
+    if suffix and not action:
+        normalized_args["action"] = suffix
+    return base, normalized_args
+
+
+def _approval_followup_tool_use(metadata: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(metadata, dict):
+        return None
+    followup = metadata.get("approval_followup")
+    if not isinstance(followup, dict):
+        return None
+    token = str(followup.get("approval_token") or followup.get("token") or "").strip()
+    tool_name = str(followup.get("tool_name") or "").strip()
+    if not token or not tool_name:
+        return None
+    payload = followup.get("payload") if isinstance(followup.get("payload"), dict) else None
+    if payload is None:
+        payload = followup.get("arguments") if isinstance(followup.get("arguments"), dict) else {}
+    arguments = dict(payload or {})
+    raw_action = str(followup.get("action") or "").strip()
+    operation = str(followup.get("operation") or "").strip()
+    action = operation if raw_action.startswith("tool.") and operation else raw_action or operation
+    if tool_name in {"browser_computer", "browser_use", "computer_use"} and action and not arguments.get("action"):
+        arguments["action"] = action
+    tool_name, arguments = _normalize_tool_call_name_and_arguments(tool_name, arguments)
+    token_map = {tool_name: token}
+    request_id = str(followup.get("request_id") or followup.get("approval_request_id") or "").strip()
+    for key in (action, operation, request_id):
+        if key:
+            token_map[key] = token
+    if tool_name in {"computer_use", "browser_use", "browser_computer"}:
+        for alias in ("computer_use", "browser_use", "browser_computer"):
+            token_map[alias] = token
+    return {
+        "id": str(followup.get("tool_call_id") or followup.get("request_id") or gen_id()).strip(),
+        "name": tool_name,
+        "input": arguments,
+        "approval_context": {"tool_approval_tokens": token_map},
+    }
+
+
+def _merge_tool_context(base: dict[str, Any] | None, extra: dict[str, Any] | None) -> dict[str, Any]:
+    merged = dict(base or {})
+    if not isinstance(extra, dict):
+        return merged
+    for key, value in extra.items():
+        if key == "tool_approval_tokens" and isinstance(value, dict):
+            existing = merged.get(key) if isinstance(merged.get(key), dict) else {}
+            merged[key] = {**existing, **value}
+        else:
+            merged[key] = value
+    return merged
+
+
 def _approval_request_from_tool_result(
     tool_name: str,
     tool_call_id: str,
@@ -187,14 +255,19 @@ def _approval_request_from_tool_result(
         requires_approval = bool(root.get("requires_approval") or root.get("approval_required"))
         if not requires_approval:
             continue
-        payload = root.get("payload")
+        payload = root.get("arguments")
         if not isinstance(payload, dict):
-            payload = root.get("arguments") if isinstance(root.get("arguments"), dict) else arguments
+            root_payload = root.get("payload")
+            if isinstance(root_payload, dict) and not root_payload.get("args_hash"):
+                payload = root_payload
+            else:
+                payload = arguments
         action = str(root.get("action") or arguments.get("action") or tool_name).strip()
         return {
             "tool_name": tool_name,
             "tool_call_id": tool_call_id,
             "action": action,
+            "operation": str(root.get("operation") or action).strip(),
             "payload": dict(payload or {}),
             "requires_approval": True,
             "approval_required": True,
@@ -755,6 +828,114 @@ class ChatRunEngine:
             )
             return []
 
+    def _execute_tool_use(
+        self,
+        prepared: PreparedChatRun,
+        working_messages: list[dict[str, Any]],
+        working_ir: Any,
+        draft: _AssistantDraft | None,
+        block: dict[str, Any],
+    ) -> Iterator[dict[str, Any]]:
+        self._raise_if_cancelled()
+        tool_name = str(block.get("name") or block.get("tool_name") or "").strip()
+        if not tool_name:
+            return None
+        tool_call_id = str(block.get("id") or block.get("tool_call_id") or gen_id()).strip()
+        arguments = self._tool_arguments(block)
+        tool_name, arguments = _normalize_tool_call_name_and_arguments(tool_name, arguments)
+        if tool_call_id not in self._started_tool_call_ids:
+            self._started_tool_call_ids.add(tool_call_id)
+            display_payload = _tool_display_payload(tool_name, arguments, status="running")
+            event = self._emit(
+                "tool_call_started",
+                data={"tool_name": tool_name, "tool_call_id": tool_call_id, "arguments": arguments, **display_payload},
+                message=display_payload["display_text"],
+                phase="tool_call_started",
+                tool_name=tool_name,
+                tool_call_id=tool_call_id,
+                arguments=arguments,
+            )
+            self._sync_draft(draft, force=True)
+            yield event
+        for event in self._before_tool_call(prepared, tool_name, tool_call_id, arguments):
+            yield event
+        approval_context = block.get("approval_context") if isinstance(block.get("approval_context"), dict) else None
+        original_tool_context = prepared.tool_context
+        if approval_context:
+            prepared.tool_context = _merge_tool_context(prepared.tool_context, approval_context)
+        try:
+            result = self._execute_tool(prepared, tool_name, tool_call_id, arguments)
+        finally:
+            if approval_context:
+                prepared.tool_context = original_tool_context
+        self._raise_if_cancelled()
+        summary = _tool_result_summary(tool_name, result)
+        artifacts = _tool_result_artifacts(result)
+        status = "failed" if _tool_result_is_error(result) else "completed"
+        display_payload = _tool_display_payload(tool_name, arguments, status=status, summary=summary)
+        for event in self._after_tool_call(prepared, tool_name, tool_call_id, arguments, result):
+            yield event
+        completed_event = self._emit(
+            "tool_call_completed",
+            data={
+                "tool_name": tool_name,
+                "tool_call_id": tool_call_id,
+                "is_error": _tool_result_is_error(result),
+                "recovery_kind": _tool_result_recovery_kind(result),
+                "result_summary": summary,
+                "summary": summary,
+                **display_payload,
+                "result": _bounded_compact_tool_result(result, summary, artifacts),
+                "artifacts": artifacts,
+                "artifact_paths": [artifact.get("path") for artifact in artifacts if artifact.get("path")],
+            },
+            message=display_payload["display_text"],
+            phase="tool_call_completed",
+            tool_name=tool_name,
+            tool_call_id=tool_call_id,
+            is_error=_tool_result_is_error(result),
+        )
+        self._sync_draft(draft, force=True)
+        yield completed_event
+        approval_request = _approval_request_from_tool_result(tool_name, tool_call_id, arguments, result)
+        if approval_request is not None:
+            approval_event = self._emit(
+                "approval_requested",
+                data=approval_request,
+                message=_APPROVAL_WAITING_TEXT,
+                phase="approval_requested",
+                tool_name=tool_name,
+                tool_call_id=tool_call_id,
+                requires_approval=True,
+            )
+            self._sync_draft(draft, force=True)
+            yield approval_event
+            return _approval_waiting_response(
+                prepared.model,
+                approval_request,
+                prepared.params,
+                events=list(self._activity_events),
+            )
+        _append_tool_result_message(working_messages, tool_name, result, tool_call_id, model=prepared.model)
+        try:
+            append_tool_result_to_ir(working_ir, tool_name, result, tool_call_id, model=prepared.model)
+        except Exception:
+            pass
+
+        recovery_kind = _tool_result_recovery_kind(result)
+        if recovery_kind in {"visible_window_required", "focus_required"}:
+            blocked_response = _tool_blocked_response(tool_name, result)
+            yield self._emit(
+                "status",
+                data={"tool_name": tool_name, "tool_call_id": tool_call_id, "recovery_kind": recovery_kind},
+                message="可視画面外の tool 実行要求のため停止しました",
+                phase="tool_blocked",
+                tool_name=tool_name,
+                tool_call_id=tool_call_id,
+            )
+            return blocked_response
+        return None
+
     def _execute(self, prepared: PreparedChatRun, draft: _AssistantDraft | None) -> Iterator[dict[str, Any]]:
         working_messages = list(prepared.standard_messages)
         working_ir = prepared.provider_chat_ir or prepared.chat_ir
@@ -769,6 +950,24 @@ class ChatRunEngine:
         if tool_limit is None:
             tool_limit = int(prepared.params.get("max_tool_calls", 4) or 4)
         tool_limit = _default_tool_limit_for_connected_tools(tool_limit, prepared.connected_tool_names)
+
+        approval_followup = _approval_followup_tool_use(prepared.user_message.get("metadata"))
+        if approval_followup is not None:
+            _append_assistant_tool_use_message(working_messages, [approval_followup])
+            try:
+                append_assistant_tool_use_to_ir(working_ir, [approval_followup])
+            except Exception:
+                pass
+            blocked_response = yield from self._execute_tool_use(
+                prepared,
+                working_messages,
+                working_ir,
+                draft,
+                approval_followup,
+            )
+            if blocked_response is not None:
+                response = blocked_response
+                return response
 
         for step_index in range(max(1, tool_limit + 1)):
             self._raise_if_cancelled()
@@ -816,95 +1015,14 @@ class ChatRunEngine:
             except Exception:
                 pass
             for block in tool_uses:
-                self._raise_if_cancelled()
-                tool_name = str(block.get("name") or block.get("tool_name") or "").strip()
-                if not tool_name:
-                    continue
-                tool_call_id = str(block.get("id") or block.get("tool_call_id") or gen_id()).strip()
-                arguments = self._tool_arguments(block)
-                if tool_call_id not in self._started_tool_call_ids:
-                    self._started_tool_call_ids.add(tool_call_id)
-                    display_payload = _tool_display_payload(tool_name, arguments, status="running")
-                    event = self._emit(
-                        "tool_call_started",
-                        data={"tool_name": tool_name, "tool_call_id": tool_call_id, "arguments": arguments, **display_payload},
-                        message=display_payload["display_text"],
-                        phase="tool_call_started",
-                        tool_name=tool_name,
-                        tool_call_id=tool_call_id,
-                        arguments=arguments,
-                    )
-                    self._sync_draft(draft, force=True)
-                    yield event
-                for event in self._before_tool_call(prepared, tool_name, tool_call_id, arguments):
-                    yield event
-                result = self._execute_tool(prepared, tool_name, tool_call_id, arguments)
-                self._raise_if_cancelled()
-                summary = _tool_result_summary(tool_name, result)
-                artifacts = _tool_result_artifacts(result)
-                status = "failed" if _tool_result_is_error(result) else "completed"
-                display_payload = _tool_display_payload(tool_name, arguments, status=status, summary=summary)
-                for event in self._after_tool_call(prepared, tool_name, tool_call_id, arguments, result):
-                    yield event
-                completed_event = self._emit(
-                    "tool_call_completed",
-                    data={
-                        "tool_name": tool_name,
-                        "tool_call_id": tool_call_id,
-                        "is_error": _tool_result_is_error(result),
-                        "recovery_kind": _tool_result_recovery_kind(result),
-                        "result_summary": summary,
-                        "summary": summary,
-                        **display_payload,
-                        "result": _bounded_compact_tool_result(result, summary, artifacts),
-                        "artifacts": artifacts,
-                        "artifact_paths": [artifact.get("path") for artifact in artifacts if artifact.get("path")],
-                    },
-                    message=display_payload["display_text"],
-                    phase="tool_call_completed",
-                    tool_name=tool_name,
-                    tool_call_id=tool_call_id,
-                    is_error=_tool_result_is_error(result),
+                blocked_response = yield from self._execute_tool_use(
+                    prepared,
+                    working_messages,
+                    working_ir,
+                    draft,
+                    block,
                 )
-                self._sync_draft(draft, force=True)
-                yield completed_event
-                approval_request = _approval_request_from_tool_result(tool_name, tool_call_id, arguments, result)
-                if approval_request is not None:
-                    approval_event = self._emit(
-                        "approval_requested",
-                        data=approval_request,
-                        message=_APPROVAL_WAITING_TEXT,
-                        phase="approval_requested",
-                        tool_name=tool_name,
-                        tool_call_id=tool_call_id,
-                        requires_approval=True,
-                    )
-                    self._sync_draft(draft, force=True)
-                    yield approval_event
-                    blocked_response = _approval_waiting_response(
-                        prepared.model,
-                        approval_request,
-                        prepared.params,
-                        events=list(self._activity_events),
-                    )
-                    break
-                _append_tool_result_message(working_messages, tool_name, result, tool_call_id, model=prepared.model)
-                try:
-                    append_tool_result_to_ir(working_ir, tool_name, result, tool_call_id, model=prepared.model)
-                except Exception:
-                    pass
-
-                recovery_kind = _tool_result_recovery_kind(result)
-                if recovery_kind in {"visible_window_required", "focus_required"}:
-                    blocked_response = _tool_blocked_response(tool_name, result)
-                    yield self._emit(
-                        "status",
-                        data={"tool_name": tool_name, "tool_call_id": tool_call_id, "recovery_kind": recovery_kind},
-                        message="可視画面外の tool 実行要求のため停止しました",
-                        phase="tool_blocked",
-                        tool_name=tool_name,
-                        tool_call_id=tool_call_id,
-                    )
+                if blocked_response is not None:
                     break
             if blocked_response is not None:
                 response = blocked_response

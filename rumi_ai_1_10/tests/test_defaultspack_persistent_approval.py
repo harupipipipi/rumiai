@@ -77,6 +77,27 @@ def test_one_shot_token_replay_is_rejected_after_restart(tmp_path, monkeypatch):
     assert replay.code == "APPROVAL_TOKEN_USED"
 
 
+def test_empty_approval_args_hash_empty_payload_not_details(tmp_path, monkeypatch):
+    approval = _fresh_approval_module(monkeypatch, tmp_path / "approval.sqlite3")
+    approval.reset_approval_state_for_tests()
+
+    request = approval.create_approval_request(
+        "computer.context",
+        "high",
+        {},
+        details={"function_id": "computer.context", "conversation_id": "conv-empty"},
+    )
+    decision = approval.approve(request["request_id"])
+
+    assert request["args_hash"] == approval.hash_arguments({})
+    assert approval.verify_execution_token(
+        decision["token"],
+        "computer.context",
+        approval.hash_arguments({}),
+        conversation_id="conv-empty",
+    ).valid is True
+
+
 def test_json_only_pending_is_listed_for_recovery_and_sqlite_wins_conflicts(tmp_path, monkeypatch):
     approval = _fresh_approval_module(monkeypatch, tmp_path / "approval.sqlite3")
     approval.reset_approval_state_for_tests()

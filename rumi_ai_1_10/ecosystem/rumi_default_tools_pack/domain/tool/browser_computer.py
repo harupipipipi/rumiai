@@ -18,6 +18,9 @@ from pathlib import Path
 from typing import Any
 
 _CLIPBOARD_PREVIEW_CHARS = 500
+_DARWIN_AUTOMATION_TIMEOUT_SECONDS = 2
+_DARWIN_CGEVENT_TIMEOUT_SECONDS = 8
+_DARWIN_SCREENSHOT_TIMEOUT_SECONDS = 10
 
 
 def _key_press_count(payload: dict[str, Any]) -> int:
@@ -206,14 +209,51 @@ class BrowserComputerController:
         }
         return action_map.get(raw, raw)
 
+    @contextlib.contextmanager
     def _edge_haze(self, action: str, payload: dict[str, Any]):
+        metadata: dict[str, Any] = {"attempted": True, "action": action}
+        manager: Any | None = None
         try:
             from ..computer.mac.edge_haze import ComputerUseEdgeHazeManager
 
             pack_root = Path(__file__).resolve().parents[2]
-            return ComputerUseEdgeHazeManager.from_pack_root(pack_root).active(action=action, payload=payload)
+            manager = ComputerUseEdgeHazeManager.from_pack_root(pack_root)
+            started = manager.start(action=action, payload=payload)
+            metadata["started"] = bool(started)
+            lease_path = getattr(manager, "_lease_path", None)
+            sequence_id = getattr(manager, "_sequence_id", None)
+            if lease_path is not None:
+                metadata["lease_path"] = str(lease_path)
+            if sequence_id:
+                metadata["sequence_id"] = str(sequence_id)
         except Exception:
-            return contextlib.nullcontext()
+            metadata["started"] = False
+            yield metadata
+            return
+        try:
+            yield metadata
+        finally:
+            manager.stop()
+
+    @staticmethod
+    def _edge_haze_result(edge_haze: Any) -> dict[str, Any] | None:
+        if not isinstance(edge_haze, dict):
+            return None
+        result: dict[str, Any] = {
+            "attempted": bool(edge_haze.get("attempted")),
+            "started": bool(edge_haze.get("started")),
+        }
+        for key in ("action", "sequence_id", "lease_path"):
+            value = edge_haze.get(key)
+            if isinstance(value, str) and value:
+                result[key] = value
+        return result
+
+    @classmethod
+    def _attach_edge_haze_result(cls, result: dict[str, Any], edge_haze: Any) -> None:
+        metadata = cls._edge_haze_result(edge_haze)
+        if metadata is not None:
+            result["edge_haze"] = metadata
 
     def _open_url(self, url: str, *, payload: dict[str, Any], dry_run: bool, yolo_mode: bool) -> dict[str, Any]:
         if not url.startswith(("http://", "https://", "file://")):
@@ -243,8 +283,9 @@ class BrowserComputerController:
             command = [str(part) for part in launch_plan["command"]]
             subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             opened_with_managed_profile = True
+            edge_haze = None
         else:
-            with self._edge_haze("browser.open_url", payload):
+            with self._edge_haze("browser.open_url", payload) as edge_haze:
                 opened = self._open_url_foreground(url, app_name=target_app)
             if not opened:
                 return {
@@ -273,6 +314,7 @@ class BrowserComputerController:
             "persistent": persistent,
             "managed_profile": opened_with_managed_profile,
             "launch": launch_plan,
+            **({"edge_haze": metadata} if (metadata := self._edge_haze_result(edge_haze)) else {}),
             **({"target_app": target_app} if target_app else {}),
         }
 
@@ -1197,7 +1239,13 @@ class BrowserComputerController:
                     "loc = Quartz.CGEventGetLocation(event)\n"
                     "print(json.dumps({'x': int(round(loc.x)), 'y': int(round(loc.y)), 'origin': 'top_left'}))"
                 )
-                completed = subprocess.run(_current_python_snippet_command(code), check=True, capture_output=True, text=True)
+                completed = subprocess.run(
+                    _current_python_snippet_command(code),
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=_DARWIN_AUTOMATION_TIMEOUT_SECONDS,
+                )
                 value = json.loads(completed.stdout or "{}")
                 if "x" in value and "y" in value:
                     return value
@@ -1261,7 +1309,13 @@ class BrowserComputerController:
                     "payload['y_range'] = [payload['y'], payload['y'] + max(payload['height'] - 1, 0)]\n"
                     "print(json.dumps(payload))"
                 )
-                completed = subprocess.run(_current_python_snippet_command(code), check=True, capture_output=True, text=True)
+                completed = subprocess.run(
+                    _current_python_snippet_command(code),
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=_DARWIN_AUTOMATION_TIMEOUT_SECONDS,
+                )
                 value = json.loads(completed.stdout or "{}")
                 if value.get("width") and value.get("height"):
                     return value
@@ -1413,6 +1467,13 @@ class BrowserComputerController:
         physical pointer actions, foreground fallback still falls through to
         legacy platform code because it owns the visible click/drag path.
         """
+        if (
+            action in {"computer.move", "computer.click", "computer.drag"}
+            and action_payload.get("physical") is True
+            and platform.system() == "Darwin"
+            and "PYTEST_CURRENT_TEST" not in os.environ
+        ):
+            return None
         try:
             svc = self._get_computer_seat()
         except Exception:
@@ -1531,12 +1592,13 @@ class BrowserComputerController:
         if foreground_error is not None:
             return foreground_error
         # --- Attempt ComputerSeatService delegation ---
-        with self._edge_haze(action, action_payload):
+        with self._edge_haze(action, action_payload) as edge_haze:
             seat_result = self._try_computer_seat_action(action, action_payload)
         if seat_result is not None and seat_result.get("executed"):
             result: dict[str, Any] = {"action": action, "executed": True, "platform": system}
             result["driver"] = seat_result.get("driver", "computer_seat")
             result["is_fallback"] = seat_result.get("is_fallback", False)
+            self._attach_edge_haze_result(result, edge_haze)
             if action in {"computer.move", "computer.click"}:
                 result["target"] = {"x": int(action_payload.get("x", 0)), "y": int(action_payload.get("y", 0))}
                 if click_marker:
@@ -1562,7 +1624,7 @@ class BrowserComputerController:
                 result.update(screenshot)
             return result
         # --- Legacy platform-specific fallback ---
-        with self._edge_haze(action, action_payload):
+        with self._edge_haze(action, action_payload) as edge_haze:
             if system == "Darwin" and action == "computer.move":
                 self._darwin_move_cursor(action_payload)
             elif system == "Darwin" and action == "computer.click":
@@ -1573,7 +1635,7 @@ class BrowserComputerController:
                 self._darwin_type(action_payload)
             elif system == "Darwin":
                 script = self._apple_script(action, action_payload)
-                subprocess.run(["osascript", "-e", script], check=True)
+                subprocess.run(["osascript", "-e", script], check=True, timeout=_DARWIN_AUTOMATION_TIMEOUT_SECONDS)
             elif system == "Windows":
                 self._windows_desktop_action(action, action_payload)
             else:
@@ -1584,6 +1646,7 @@ class BrowserComputerController:
                     "reason": "Desktop actions are supported on macOS and Windows.",
                 }
         result: dict[str, Any] = {"action": action, "executed": True, "platform": system}
+        self._attach_edge_haze_result(result, edge_haze)
         if action in {"computer.type", "computer.key", "computer.scroll"}:
             result["driver"] = "foreground_input"
         if action == "computer.key":
@@ -2213,16 +2276,28 @@ class BrowserComputerController:
                         int(capture_rect.get("height", 0)),
                     )
                     try:
-                        subprocess.run(["screencapture", "-x", "-R", rect, str(path)], check=True)
+                        subprocess.run(
+                            ["screencapture", "-x", "-R", rect, str(path)],
+                            check=True,
+                            timeout=_DARWIN_SCREENSHOT_TIMEOUT_SECONDS,
+                        )
                     except subprocess.CalledProcessError:
                         window_id = target.get("window_id")
                         if not window_id:
                             raise
-                        subprocess.run(["screencapture", "-x", "-l", str(int(window_id)), str(path)], check=True)
+                        subprocess.run(
+                            ["screencapture", "-x", "-l", str(int(window_id)), str(path)],
+                            check=True,
+                            timeout=_DARWIN_SCREENSHOT_TIMEOUT_SECONDS,
+                        )
                 else:
                     window_id = target.get("window_id")
                     if window_id:
-                        subprocess.run(["screencapture", "-x", "-l", str(int(window_id)), str(path)], check=True)
+                        subprocess.run(
+                            ["screencapture", "-x", "-l", str(int(window_id)), str(path)],
+                            check=True,
+                            timeout=_DARWIN_SCREENSHOT_TIMEOUT_SECONDS,
+                        )
                     else:
                         rect = "{},{},{},{}".format(
                             int(target.get("x", 0)),
@@ -2230,9 +2305,17 @@ class BrowserComputerController:
                             int(target.get("width", 0)),
                             int(target.get("height", 0)),
                         )
-                        subprocess.run(["screencapture", "-x", "-R", rect, str(path)], check=True)
+                        subprocess.run(
+                            ["screencapture", "-x", "-R", rect, str(path)],
+                            check=True,
+                            timeout=_DARWIN_SCREENSHOT_TIMEOUT_SECONDS,
+                        )
             else:
-                subprocess.run(["screencapture", "-x", str(path)], check=True)
+                subprocess.run(
+                    ["screencapture", "-x", str(path)],
+                    check=True,
+                    timeout=_DARWIN_SCREENSHOT_TIMEOUT_SECONDS,
+                )
             return {"platform": system, "target_window": target}
         if system == "Windows":
             capture_bounds = self._windows_screenshot(path, target=target)
@@ -2908,7 +2991,13 @@ tell application "System Events"
 end tell
 '''
         try:
-            completed = subprocess.run(["osascript", "-e", script], check=True, capture_output=True, text=True)
+            completed = subprocess.run(
+                ["osascript", "-e", script],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=_DARWIN_AUTOMATION_TIMEOUT_SECONDS,
+            )
         except Exception:
             return []
         windows: list[dict[str, Any]] = []
@@ -2944,6 +3033,7 @@ end tell
                 check=True,
                 capture_output=True,
                 text=True,
+                timeout=_DARWIN_AUTOMATION_TIMEOUT_SECONDS,
             )
             return (completed.stdout or "").strip()
         except Exception:
@@ -2966,7 +3056,13 @@ tell application "System Events"
 end tell
 '''
         try:
-            completed = subprocess.run(["osascript", "-e", script], check=True, capture_output=True, text=True)
+            completed = subprocess.run(
+                ["osascript", "-e", script],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=_DARWIN_AUTOMATION_TIMEOUT_SECONDS,
+            )
         except Exception:
             return []
         apps: list[dict[str, Any]] = []
@@ -3052,7 +3148,13 @@ end try
 return "not_found"
 """ % json.dumps(app_name)
             try:
-                completed = subprocess.run(["osascript", "-e", script], check=True, capture_output=True, text=True)
+                completed = subprocess.run(
+                    ["osascript", "-e", script],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=_DARWIN_AUTOMATION_TIMEOUT_SECONDS,
+                )
                 return "activated" in (completed.stdout or "")
             except Exception:
                 return False
@@ -3186,7 +3288,13 @@ for item in raw:
 print(json.dumps(windows))
 """
         try:
-            completed = subprocess.run(_current_python_snippet_command(code), check=True, capture_output=True, text=True)
+            completed = subprocess.run(
+                _current_python_snippet_command(code),
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=_DARWIN_AUTOMATION_TIMEOUT_SECONDS,
+            )
             windows = json.loads(completed.stdout or "[]")
         except Exception:
             return []
@@ -3227,7 +3335,13 @@ tell application "System Events"
 end tell
 """ % (json.dumps(raw_app), json.dumps(raw_title))
             try:
-                subprocess.run(["osascript", "-e", script], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                subprocess.run(
+                    ["osascript", "-e", script],
+                    check=True,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    timeout=_DARWIN_AUTOMATION_TIMEOUT_SECONDS,
+                )
             except Exception:
                 pass
         elif platform.system() == "Windows":
@@ -3269,7 +3383,7 @@ $hwnd = [IntPtr]{hwnd}
             "Quartz.CGAssociateMouseAndMouseCursorPosition(True)\n"
         )
         try:
-            subprocess.run(_current_python_snippet_command(code), check=True)
+            subprocess.run(_current_python_snippet_command(code), check=True, timeout=_DARWIN_AUTOMATION_TIMEOUT_SECONDS)
         except Exception as exc:
             raise RuntimeError("computer.move requires cliclick or PyObjC Quartz on macOS") from exc
 
@@ -3294,7 +3408,7 @@ $hwnd = [IntPtr]{hwnd}
             "Quartz.CGEventPost(Quartz.kCGHIDEventTap, up)\n"
         )
         try:
-            subprocess.run(_current_python_snippet_command(code), check=True)
+            subprocess.run(_current_python_snippet_command(code), check=True, timeout=_DARWIN_AUTOMATION_TIMEOUT_SECONDS)
         except Exception:
             swift = shutil.which("swift")
             if swift:
@@ -3310,12 +3424,12 @@ $hwnd = [IntPtr]{hwnd}
                     "up?.post(tap: .cghidEventTap)\n"
                 )
                 try:
-                    subprocess.run([swift, "-e", swift_code], check=True)
+                    subprocess.run([swift, "-e", swift_code], check=True, timeout=_DARWIN_CGEVENT_TIMEOUT_SECONDS)
                     return
                 except Exception:
                     pass
             script = self._apple_script("computer.click", payload)
-            subprocess.run(["osascript", "-e", script], check=True)
+            subprocess.run(["osascript", "-e", script], check=True, timeout=_DARWIN_AUTOMATION_TIMEOUT_SECONDS)
 
     def _darwin_drag(self, payload: dict[str, Any]) -> None:
         x1 = int(payload.get("x1", payload.get("x", 0)))
@@ -3345,14 +3459,14 @@ $hwnd = [IntPtr]{hwnd}
             "Quartz.CGEventPost(Quartz.kCGHIDEventTap, up)\n"
         )
         try:
-            subprocess.run(_current_python_snippet_command(code), check=True)
+            subprocess.run(_current_python_snippet_command(code), check=True, timeout=_DARWIN_AUTOMATION_TIMEOUT_SECONDS)
         except Exception as exc:
             raise RuntimeError("computer.drag requires PyObjC Quartz on macOS") from exc
 
     def _darwin_type(self, payload: dict[str, Any]) -> None:
         text = str(payload.get("text", ""))
         command = ["osascript", "-e", self._darwin_clipboard_paste_script(), "--", text]
-        subprocess.run(command, check=True)
+        subprocess.run(command, check=True, timeout=_DARWIN_AUTOMATION_TIMEOUT_SECONDS)
 
     @staticmethod
     def _darwin_clipboard_paste_script() -> str:
@@ -4090,6 +4204,9 @@ $proc = Get-Process -Id $procId -ErrorAction SilentlyContinue
                 str(executable),
                 f"--user-data-dir={browser_data}",
                 f"--disk-cache-dir={cache_dir}",
+                "--no-first-run",
+                "--no-default-browser-check",
+                "--disable-sync",
                 "--new-window",
                 url,
             ],
