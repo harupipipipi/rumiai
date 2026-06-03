@@ -30,6 +30,8 @@ Last reviewed: June 3, 2026
 |---|---|---|---|---|---|
 | TBD | GitHub Issue / Discussion / external post | TBD | TBD | TBD | TBD |
 
+Preferred first-run reports should use the [setup feedback issue template](../.github/ISSUE_TEMPLATE/setup_feedback.yml). Count both successful and failed setup reports when they include a public link, environment, commands tried, and a clear outcome.
+
 ### Downstream Use
 
 | Date | Project | Link | Integration type | Maintainer-confirmed? | Notes |
@@ -84,6 +86,12 @@ Feedback request:
 
 ```text
 I am looking for concrete setup feedback on Rumi AI. The smallest useful test is cloning the repo, installing the runtime requirements, and running `python -m rumi_ai --health`. If it fails, please share OS/runtime versions and the smallest log excerpt with secrets removed.
+```
+
+Issue-based feedback request:
+
+```text
+I added a setup feedback issue template for Rumi AI. If you are willing to try the first-run check, please run `python -m rumi_ai --health` and file the outcome here: https://github.com/harupipipipi/rumiai/issues/new?template=setup_feedback.yml
 ```
 
 Security-review request:

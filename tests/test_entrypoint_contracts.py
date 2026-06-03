@@ -59,15 +59,21 @@ def test_public_readiness_docs_keep_adoption_evidence_visible():
     launch_text = _read(ROOT / "docs" / "community-launch-plan.md")
     evidence_text = _read(ROOT / "docs" / "adoption-evidence.md")
     demo_text = _read(ROOT / "docs" / "demo-script.md")
+    setup_template_text = _read(ROOT / ".github" / "ISSUE_TEMPLATE" / "setup_feedback.yml")
 
     assert "docs/adoption-evidence.md" in readme_text
     assert "docs/demo-script.md" in readme_text
+    assert "setup_feedback.yml" in readme_text
     assert "adoption-evidence.md" in launch_text
     assert "demo-script.md" in launch_text
+    assert "setup_feedback.yml" in launch_text
+    assert "setup_feedback.yml" in evidence_text
     assert "Do not count:" in evidence_text
     assert "Bought stars" in evidence_text or "bought stars" in evidence_text
     assert "python -m rumi_ai --health" in demo_text
     assert "python scripts/verify_oss_readiness.py" in demo_text
+    assert "python -m rumi_ai --health" in setup_template_text
+    assert "remove secrets" in setup_template_text.lower()
 
 
 def test_oss_readiness_verifier_passes():

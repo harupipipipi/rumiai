@@ -165,6 +165,7 @@ Rumi AI is early but actively maintained. The best places to help are:
 - Review approval, audit, and capability-boundary changes carefully.
 
 See [CONTRIBUTING.md](./CONTRIBUTING.md) for the contribution flow and [SECURITY.md](./SECURITY.md) for private vulnerability reports.
+If you try the first-run health check, please share the outcome with a [setup feedback issue](https://github.com/harupipipipi/rumiai/issues/new?template=setup_feedback.yml).
 For launch and release work, see [docs/community-launch-plan.md](./docs/community-launch-plan.md).
 For adoption evidence tracking, see [docs/adoption-evidence.md](./docs/adoption-evidence.md).
 For a short public demo outline, see [docs/demo-script.md](./docs/demo-script.md).

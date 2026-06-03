@@ -51,6 +51,7 @@ Release checklist:
 - Publish the GitHub Release only after artifacts and notes are correct.
 - Add a short screenshot or demo link if available.
 - Use [demo-script.md](./demo-script.md) for a short, honest first public demo.
+- Ask first-time users to report setup results with the [setup feedback issue template](../.github/ISSUE_TEMPLATE/setup_feedback.yml).
 
 ## Good First Issue Backlog
 
@@ -138,6 +139,7 @@ Not allowed:
 
 - Public releases and artifact download counts.
 - Real issues and PRs from users who tried the project.
+- Setup feedback issues with OS, commands tried, and health-check output.
 - Downstream repos or packs that depend on Rumi AI.
 - Articles, demos, videos, or community threads with real discussion.
 - Package downloads only if packages are published and supportable.

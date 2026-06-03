@@ -43,6 +43,7 @@ def main() -> int:
         ".github/SUPPORT.md",
         ".github/ISSUE_TEMPLATE/bug_report.yml",
         ".github/ISSUE_TEMPLATE/feature_request.yml",
+        ".github/ISSUE_TEMPLATE/setup_feedback.yml",
         "docs/first-run-check.md",
         "docs/community-launch-plan.md",
         "docs/adoption-evidence.md",
@@ -65,6 +66,7 @@ def main() -> int:
     evidence = read("docs/adoption-evidence.md")
     demo = read("docs/demo-script.md")
     readiness = read("docs/oss-program-readiness.md")
+    setup_template = read(".github/ISSUE_TEMPLATE/setup_feedback.yml")
 
     results.extend(
         [
@@ -77,11 +79,23 @@ def main() -> int:
             ),
             check("adoption-evidence.md" in launch, "launch plan links evidence tracker"),
             check("demo-script.md" in launch, "launch plan links demo script"),
+            check(
+                "setup_feedback.yml" in launch and "setup_feedback.yml" in evidence,
+                "launch and evidence docs link setup feedback template",
+            ),
             check("Do not count:" in evidence, "evidence tracker has anti-inflation rules"),
             check("python -m rumi_ai --health" in demo, "demo script uses health check"),
             check(
                 "python scripts/verify_oss_readiness.py" in demo,
                 "demo script uses readiness verifier",
+            ),
+            check(
+                "python -m rumi_ai --health" in setup_template,
+                "setup feedback template asks for health check",
+            ),
+            check(
+                "remove secrets" in setup_template.lower(),
+                "setup feedback template asks users to remove secrets",
             ),
             check(
                 re.search(r"buy|bought|star-for-star|fake", evidence, re.IGNORECASE)
