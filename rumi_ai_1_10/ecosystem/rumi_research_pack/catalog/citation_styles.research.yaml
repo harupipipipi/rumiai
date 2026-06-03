@@ -1,0 +1,25 @@
+catalog_id: rumi_research_pack.citation_styles
+version: 1.0.0
+styles:
+  inline_source_cards:
+    display: Inline source cards
+    best_for: interactive_research_reports
+    required_fields: [citation_id, title, locator]
+  footnote_like:
+    display: Footnote-like citations
+    best_for: narrative_reports
+    required_fields: [citation_id, display_text, locator]
+  table_trace:
+    display: Claim trace table
+    best_for: decision_briefs_and_audits
+    required_fields: [claim_id, evidence_id, source_id, confidence]
+traceability_rules:
+  every_major_claim_has_citation: true
+  evidence_cards_link_to_source_manifest: true
+  quote_text_kept_short: true
+  paraphrase_marked_when_no_quote: true
+  retrieved_at_required_for_network_sources: true
+handoff_defaults:
+  include_source_manifest: true
+  include_evidence_index: true
+  include_limitations: true

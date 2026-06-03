@@ -1,0 +1,20 @@
+task:
+  title: Citation audit
+  preset: rumi_research_pack.citation_audit
+  goal: Review a draft report for unsupported claims and citation quality.
+  inputs:
+    draft_report: workspace/drafts/vendor_comparison.md
+    evidence_cards: workspace/research/vendor_evidence_cards.yaml
+    source_manifest: workspace/research/vendor_source_manifest.yaml
+  output:
+    folder: workspace/research_outputs/vendor_audit
+    artifacts:
+      - type: audit_findings
+        path: citation_audit.md
+      - type: unsupported_claims
+        path: unsupported_claims.yaml
+      - type: citation_repairs
+        path: citation_repairs.yaml
+  workflow: evidence_audit
+  review:
+    checks: [unsupported_claims_block_final, weak_sources_marked]
