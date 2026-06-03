@@ -206,6 +206,7 @@ TOOL_FUNCTIONS: tuple[FunctionSpec, ...] = tuple(
         ("tool_calculator", "Run the default calculator tool.", ("tool", "math"), "low"),
         ("tool_file_reader", "Run the default file reader tool.", ("tool", "file"), "low"),
         ("tool_todo", "Run the default todo tool.", ("tool", "planning"), "medium"),
+        ("tool_kanban", "Run the default Kanban task-board tool.", ("tool", "planning", "kanban"), "medium"),
         ("tool_subagent", "Run the default subagent tool.", ("tool", "agent"), "medium"),
         ("browser_session", "Open or inspect a browser session.", ("tool", "browser"), "high"),
         ("browser_open_url", "Open a URL in a browser session.", ("tool", "browser"), "high"),
