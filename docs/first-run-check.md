@@ -77,6 +77,20 @@ just oss-readiness
 
 This check is local only. It verifies that contribution, security, release, first-run, adoption-evidence, and application-draft materials are present before public outreach or program applications.
 
+For release packaging confidence, run the wheel smoke check. It builds a wheel,
+installs it into a fresh virtualenv, changes to a directory outside the checkout,
+and verifies both public health entrypoints:
+
+```bash
+python scripts/check_package_install.py
+```
+
+If `just` is installed:
+
+```bash
+just package-smoke
+```
+
 ## 5. Next Steps
 
 - Runtime architecture: `rumi_ai_1_10/README.md`

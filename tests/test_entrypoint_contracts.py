@@ -28,6 +28,8 @@ def test_root_pyproject_installs_stable_entrypoint_package():
     contributing_text = _read(ROOT / "CONTRIBUTING.md")
     workflow_text = _read(ROOT / ".github" / "workflows" / "test.yml")
     first_run_text = _read(ROOT / "docs" / "first-run-check.md")
+    justfile_text = _read(ROOT / "justfile")
+    package_smoke_text = _read(ROOT / "scripts" / "check_package_install.py")
 
     assert 'name = "rumi-ai"' in root_pyproject
     assert '"rumi_ai*"' in root_pyproject
@@ -40,6 +42,11 @@ def test_root_pyproject_installs_stable_entrypoint_package():
     assert 'cd "$RUNNER_TEMP"' in workflow_text
     assert "python -m rumi_ai --health" in workflow_text
     assert "rumi-ai --health" in workflow_text
+    assert "python scripts/check_package_install.py" in first_run_text
+    assert "just package-smoke" in first_run_text
+    assert "package-smoke:" in justfile_text
+    assert '"pip", "wheel"' in package_smoke_text
+    assert "outside-checkout" in package_smoke_text
 
 
 def test_version_contract_matches_package_version():
@@ -96,6 +103,7 @@ def test_public_readiness_docs_keep_adoption_evidence_visible():
     assert "python -m rumi_ai --health" in demo_text
     assert "rumi-ai --health" in demo_text
     assert "python scripts/verify_oss_readiness.py" in demo_text
+    assert "python scripts/check_package_install.py" in demo_text
     assert "python -m rumi_ai --health" in setup_template_text
     assert "remove secrets" in setup_template_text.lower()
 

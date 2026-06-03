@@ -51,6 +51,7 @@ def main() -> int:
         "docs/demo-script.md",
         "docs/oss-program-readiness.md",
         "docs/releases/v0.2.0.md",
+        "scripts/check_package_install.py",
     ]
 
     results: list[dict[str, Any]] = []
@@ -66,10 +67,12 @@ def main() -> int:
     release_workflow = read(".github/workflows/release.yml")
     test_workflow = read(".github/workflows/test.yml")
     first_run = read("docs/first-run-check.md")
+    justfile = read("justfile")
     launch = read("docs/community-launch-plan.md")
     evidence = read("docs/adoption-evidence.md")
     demo = read("docs/demo-script.md")
     readiness = read("docs/oss-program-readiness.md")
+    package_smoke = read("scripts/check_package_install.py")
     setup_template = read(".github/ISSUE_TEMPLATE/setup_feedback.yml")
 
     results.extend(
@@ -102,6 +105,22 @@ def main() -> int:
                 "rumi-ai --health" in test_workflow,
                 "CI checks console script outside repository",
             ),
+            check(
+                "python scripts/check_package_install.py" in first_run
+                and "just package-smoke" in first_run,
+                "first-run guide documents package smoke check",
+            ),
+            check(
+                "package-smoke:" in justfile
+                and "python scripts/check_package_install.py" in justfile,
+                "justfile exposes package smoke check",
+            ),
+            check(
+                "\"pip\", \"wheel\"" in package_smoke
+                and "rumi-ai" in package_smoke
+                and "outside-checkout" in package_smoke,
+                "package smoke builds wheel and checks public entrypoints outside checkout",
+            ),
             check("draft: true" in release_workflow, "release workflow creates draft releases"),
             check(
                 "python -m rumi_ai --health" in first_run
@@ -121,6 +140,10 @@ def main() -> int:
             check(
                 "python scripts/verify_oss_readiness.py" in demo,
                 "demo script uses readiness verifier",
+            ),
+            check(
+                "python scripts/check_package_install.py" in demo,
+                "demo script uses package smoke verifier",
             ),
             check(
                 "python -m rumi_ai --health" in setup_template,

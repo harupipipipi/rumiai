@@ -30,6 +30,7 @@ pip install -e .
 
    ```bash
    python scripts/verify_oss_readiness.py
+   python scripts/check_package_install.py
    ```
 
 5. Show `status: pass`.

@@ -42,3 +42,7 @@ integrity:
 # Verify OSS program readiness docs and release safety checks.
 oss-readiness:
     python scripts/verify_oss_readiness.py
+
+# Build the Python wheel, install it into a fresh venv, and verify public entrypoints.
+package-smoke:
+    python scripts/check_package_install.py
