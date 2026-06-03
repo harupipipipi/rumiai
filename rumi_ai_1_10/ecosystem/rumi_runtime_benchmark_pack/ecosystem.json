@@ -1,0 +1,111 @@
+{
+  "pack_id": "rumi_runtime_benchmark_pack",
+  "pack_identity": "rumi:ecosystem/rumi_runtime_benchmark_pack",
+  "display_name": "Rumi Runtime Benchmark Pack",
+  "description": "Declarative runtime benchmark, latency, cost, reproducibility, sampling, environment-capture, and tool-loop measurement pack.",
+  "version": "0.1.0",
+  "license": "MIT",
+  "vocabulary": {
+    "types": [
+      "catalog",
+      "schema",
+      "spec",
+      "policy",
+      "coordination",
+      "profile",
+      "prompt",
+      "preset",
+      "example"
+    ]
+  },
+  "dependencies": {
+    "defaultspack": ">=2.0.0"
+  },
+  "components": {},
+  "load_order": [],
+  "required_secrets": [],
+  "required_network": [],
+  "metadata": {
+    "runtime_type": "declarative_pack",
+    "network_policy": "none_by_default",
+    "executable_code": false,
+    "required_secrets": [],
+    "owner_surfaces": [
+      "latency_measurement",
+      "cost_snapshot",
+      "tool_loop_reproducibility",
+      "runtime_comparison",
+      "sampling_plan",
+      "environment_capture",
+      "multi_pass_specialist_review"
+    ],
+    "optional_integrations": [
+      {
+        "pack_id": "rumi_model_evals_pack",
+        "reason": "Model evals pack owns model-quality scoring beyond runtime measurement."
+      },
+      {
+        "pack_id": "rumi_observability_pack",
+        "reason": "Observability pack owns production telemetry and run-event logging."
+      },
+      {
+        "pack_id": "rumi_sandbox_runtime_pack",
+        "reason": "Sandbox runtime pack owns isolated execution environment provisioning."
+      },
+      {
+        "pack_id": "rumi_devops_release_pack",
+        "reason": "DevOps release pack owns release-gate and deployment evidence reporting."
+      }
+    ],
+    "asset_index": {
+      "catalog": [
+        "catalog/runtime_benchmark_matrix.yaml",
+        "catalog/environment_capture_schema.json",
+        "catalog/latency_cost_sampling_matrix.yaml",
+        "catalog/reproducibility_ledger.yaml",
+        "catalog/release_gate_thresholds.yaml"
+      ],
+      "schemas": [
+        "schemas/metric_record.schema.json"
+      ],
+      "specs": [
+        "specs/environment_descriptor.yaml"
+      ],
+      "policies": [
+        "policies/benchmark_reproducibility.policy.yaml",
+        "policies/environment_capture.policy.yaml",
+        "policies/warm_cold_start.policy.yaml",
+        "policies/sample_size_confidence.policy.yaml"
+      ],
+      "coordination": [
+        "coordination/subagent_benchmark_review_roster.yaml"
+      ],
+      "profiles": [
+        "profiles/runtime_benchmark_reviewer.profile.yaml"
+      ],
+      "prompts": [
+        "prompts/runtime_benchmark_reviewer.system.md",
+        "prompts/reproducible_latency_cost_reviewer.system.md"
+      ],
+      "presets": [
+        "presets/safe_default.preset.yaml",
+        "presets/handoff_review.preset.yaml",
+        "presets/quality_gate.preset.yaml"
+      ],
+      "examples": [
+        "examples/latency_cost_snapshot.example.yaml",
+        "examples/runtime_comparison.example.yaml",
+        "examples/tool_loop_replay.example.yaml",
+        "examples/environment_capture_review.example.yaml",
+        "examples/sampling_latency_cost_review.example.yaml"
+      ],
+      "docs": [
+        "README.md",
+        "docs/README.md",
+        "docs/architecture.md",
+        "docs/interfaces.md",
+        "docs/operations.md"
+      ]
+    }
+  }
+}
