@@ -1,0 +1,15 @@
+catalog_id: rumi_browser_automation.playbooks
+schema_version: 1
+playbooks:
+  - playbook_id: browser_form_completion
+    phases: [observe, locate_fields, fill, review, submit, verify]
+    evidence_required: [before_snapshot, field_map, after_snapshot, confirmation]
+  - playbook_id: authenticated_ui_qa
+    phases: [observe_context, run_checklist, capture_regressions, summarize]
+    evidence_required: [current_account_signal, screenshots, issue_list]
+  - playbook_id: browser_data_collection
+    phases: [scope, collect_visible_items, normalize, cite_page_state]
+    evidence_required: [url, timestamp, extracted_rows, screenshots]
+  - playbook_id: visual_regression_review
+    phases: [baseline, current_capture, compare, classify, handoff]
+    evidence_required: [baseline_image, current_image, diff_notes]

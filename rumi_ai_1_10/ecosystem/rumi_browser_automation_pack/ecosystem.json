@@ -1,0 +1,41 @@
+{
+  "pack_id": "rumi_browser_automation_pack",
+  "pack_identity": "rumi:ecosystem/rumi_browser_automation_pack",
+  "display_name": "Rumi Browser Automation Pack",
+  "version": "0.1.0",
+  "runtime": {
+    "type": "declarative_pack"
+  },
+  "depends_on": [
+    {
+      "pack_id": "defaultspack",
+      "version": ">=2.0.0"
+    },
+    {
+      "pack_id": "rumi_default_tools_pack",
+      "version": ">=1.0.0"
+    }
+  ],
+  "optional_integrations": [
+    {
+      "pack_id": "rumi_browser_element_pack",
+      "reason": "Use semantic DOM v2 selectors when installed."
+    },
+    {
+      "pack_id": "rumi_agent_services_pack",
+      "reason": "Expose browser operator workflows to service directors."
+    }
+  ],
+  "components": {},
+  "load_order": [],
+  "metadata": {
+    "required_secrets": [],
+    "network_policy": "none_by_default",
+    "executable_code": false,
+    "owner_surfaces": [
+      "browser_playbooks",
+      "browser_evidence",
+      "visual_regression_steps"
+    ]
+  }
+}
