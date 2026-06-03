@@ -1,0 +1,43 @@
+name: Feature request
+description: Propose a focused improvement.
+title: "[Feature]: "
+labels: ["enhancement", "needs-triage"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What workflow is hard or missing today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: What should change?
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Runtime
+        - Defaultspack
+        - Viewer
+        - Mobile
+        - Pack authoring
+        - Security / approval
+        - Documentation
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: security
+    attributes:
+      label: Security and approval impact
+      description: Does this touch files, terminal, git, browser, computer, secrets, network, or pack installation?
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered

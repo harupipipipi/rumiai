@@ -1,0 +1,71 @@
+# OSS Program Readiness
+
+This note tracks truthful evidence for OSS support programs such as Codex for Open Source and Claude for Open Source. It is not a substitute for the program terms. Keep the application honest and evidence-backed.
+
+## Current Public Evidence
+
+- Repository: `https://github.com/harupipipipi/rumiai`
+- License: MIT
+- Public activity: active pushes and PRs in June 2026
+- Maintainer activity: commits, PR merges, and CI maintenance within the last three months
+- CI coverage: Python, frontend, Rust, Windows, macOS, installer, and dependency-audit lanes
+- Release artifacts: release workflow exists, but no public GitHub Releases were found during the June 3, 2026 review
+- Discovery metadata: topics and homepage were empty during the June 3, 2026 review
+- Adoption evidence: stars and forks are currently low; no public downstream dependency evidence was found during the June 3, 2026 review
+
+## Eligibility Gap
+
+Claude for Open Source Maintainer Track requires a public GitHub repository with at least 5,000 stars or 1M+ monthly NPM downloads, plus merge access and recent activity. Rumi AI does not currently meet the public usage threshold.
+
+OpenAI Codex for Open Source is broader, but still asks for usage, adoption, ecosystem importance, and maintainer status. Rumi AI currently has stronger maintenance evidence than adoption evidence.
+
+## 24-Hour Readiness Work
+
+These tasks improve public credibility without inflating metrics:
+
+- Add contribution and security policies.
+- Add bug and feature issue templates.
+- Improve README positioning for first-time users.
+- Add repository topics and a concise GitHub description.
+- Publish a first GitHub Release with installer artifacts or a source release.
+- Create issues labeled `good first issue` for docs, examples, setup testing, and small pack examples.
+- Add a short demo video or screenshots to the README or release notes.
+- Publish a package only if the install path is tested and supportable.
+- Collect real usage evidence: downstream repos, user installs, community links, articles, demos, or integrations.
+
+## OpenAI Draft
+
+Role:
+
+Core maintainer / primary maintainer, if the applicant has write or admin access to `harupipipipi/rumiai`.
+
+Why this repository should qualify:
+
+Rumi AI is an actively maintained MIT-licensed local-first AI runtime for modular packs, approval-aware host capabilities, audit paths, and cross-surface AI tooling. The project includes Python runtime code, Tauri desktop viewer, Flutter mobile client, example packs, security-focused approval and capability tests, and GitHub Actions coverage across Python, frontend, Rust, Windows, macOS, installer, and dependency-audit lanes. The strongest current evidence is active maintenance and security-oriented architecture; public adoption evidence is still emerging.
+
+API credit use:
+
+API credits would be used for maintainer workflows: PR review, regression triage, release notes, security-oriented code review, documentation improvements, and test generation around approval, pack installation, browser/computer control, terminal, git, and secret-handling paths. Credits would not be used to scan third-party repositories without authorization.
+
+Additional note:
+
+The repository is early-stage and does not yet have large public adoption metrics. The application should be positioned as an ecosystem-impact or emerging-maintainer request unless stronger downstream usage evidence is collected.
+
+## Claude Draft
+
+Track:
+
+Ecosystem Impact Track only, unless the repository reaches the published Maintainer Track threshold or the applicant becomes a maintainer of another qualifying project.
+
+Explanation:
+
+Rumi AI is an MIT-licensed local-first AI runtime focused on modular packs, explicit approval boundaries, capability trust, auditability, and desktop/mobile surfaces for AI tooling. It is actively maintained with recent commits and PRs, includes CI coverage for Python, frontend, Rust, Windows, macOS, installer, and dependency-audit paths, and is designed around security-sensitive maintainer workflows. Current public adoption is limited, so the application should be submitted only if the maintainer can truthfully explain why the project is becoming important to downstream users or a specific developer community.
+
+## Do Not Do
+
+- Do not buy stars, followers, installs, or reviews.
+- Do not run star-for-star or follow-for-follow campaigns.
+- Do not create fake accounts, fake users, fake dependents, or fake downloads.
+- Do not claim ecosystem dependence without evidence.
+- Do not submit another maintainer's repository without authorization.
+- Do not submit forms with inaccurate role, access, adoption, or download claims.

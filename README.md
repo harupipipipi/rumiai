@@ -2,7 +2,23 @@
 
 Rumi AI is a modular AI runtime and tooling workspace.
 
+![Test](https://github.com/harupipipipi/rumiai/actions/workflows/test.yml/badge.svg)
+![Release](https://github.com/harupipipipi/rumiai/actions/workflows/release.yml/badge.svg)
+![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)
+
 The repository keeps the runtime implementation under `rumi_ai_1_10/`, while `rumi_ai/` provides a version-stable Python entrypoint. The canonical control panel frontend source lives in `rumi_viewer/frontend`; the kernel serves its built artifact at `/panel/`.
+
+## Why Rumi AI
+
+Rumi AI is a local-first runtime for building modular AI tools with explicit approval, audit, and pack boundaries. It is designed for workflows where users need AI-assisted coding, chat, browser/computer control, and custom tools without treating every extension as trusted code.
+
+Key properties:
+
+- Pack-based extensibility: application behavior lives in ecosystem packs, not in a privileged monolith.
+- Approval-aware execution: host, file, terminal, browser, computer, git, and secret-handling paths are guarded.
+- Auditability: security-sensitive paths are designed to leave operational traces.
+- Cross-surface clients: Python runtime, Tauri desktop viewer, and Flutter mobile client live in one workspace.
+- CI coverage: Python, frontend, Rust, Windows, macOS, installer, and security-audit lanes are represented in GitHub Actions.
 
 ## Read This When...
 
@@ -20,6 +36,7 @@ The repository keeps the runtime implementation under `rumi_ai_1_10/`, while `ru
 | API キーや secrets の扱いを知りたい | [`rumi_ai_1_10/docs/operations.md`](./rumi_ai_1_10/docs/operations.md) の Secrets 節 | `user_data/secrets/` と API 経路の説明があります |
 | Pack の作り方を知りたい | [`rumi_ai_1_10/docs/pack-development.md`](./rumi_ai_1_10/docs/pack-development.md) | ecosystem.json, routes, permissions の作法をまとめています |
 | 運用・監査の考え方を知りたい | [`rumi_ai_1_10/docs/quality_pack/philosophy_memo.md`](./rumi_ai_1_10/docs/quality_pack/philosophy_memo.md) | 継続開発と回帰確認の前提を整理しています |
+| 参加・報告・セキュリティ連絡をしたい | [`CONTRIBUTING.md`](./CONTRIBUTING.md) / [`SECURITY.md`](./SECURITY.md) | Issue、PR、脆弱性報告の入口です |
 
 ## Repository Layout
 
@@ -135,3 +152,14 @@ For architecture and runtime details, see [rumi_ai_1_10/README.md](./rumi_ai_1_1
 
 For Codex OSS-inspired coding-tool conventions, see [AGENTS.md](./AGENTS.md) and
 [rumi_ai_1_10/docs/codex_oss_reference.md](./rumi_ai_1_10/docs/codex_oss_reference.md).
+
+## Community
+
+Rumi AI is early but actively maintained. The best places to help are:
+
+- Reproduce and minimize setup, viewer, or pack-runtime issues.
+- Add small example packs that exercise one capability at a time.
+- Improve docs for first-time users and pack authors.
+- Review approval, audit, and capability-boundary changes carefully.
+
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for the contribution flow and [SECURITY.md](./SECURITY.md) for private vulnerability reports.

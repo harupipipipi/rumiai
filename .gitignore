@@ -3,6 +3,10 @@
 !.gitignore
 !/.github/
 !/AGENTS.md
+!/CONTRIBUTING.md
+!/SECURITY.md
+!/docs/
+!/docs/**
 !/justfile
 !/rumi_ai_1_10/
 !/rumi_viewer/
