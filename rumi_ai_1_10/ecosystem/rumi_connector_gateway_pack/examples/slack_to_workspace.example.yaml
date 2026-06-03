@@ -1,0 +1,6 @@
+example_id: rumi_connector_gateway.slack_to_workspace
+request: Turn a Slack thread into a workspace report draft.
+expected_handoff:
+  connector_id: slack
+  trust_label: untrusted_inbound
+  delivery_target: rumi_workspace_pack

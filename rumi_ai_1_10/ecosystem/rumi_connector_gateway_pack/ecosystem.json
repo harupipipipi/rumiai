@@ -1,0 +1,41 @@
+{
+  "pack_id": "rumi_connector_gateway_pack",
+  "pack_identity": "rumi:ecosystem/rumi_connector_gateway_pack",
+  "display_name": "Rumi Connector Gateway Pack",
+  "version": "0.1.0",
+  "runtime": {
+    "type": "declarative_pack"
+  },
+  "depends_on": [
+    {
+      "pack_id": "defaultspack",
+      "version": ">=2.0.0"
+    }
+  ],
+  "optional_integrations": [
+    {
+      "pack_id": "rumi_agent_services_pack",
+      "reason": "Route connector-backed work into service workflows."
+    },
+    {
+      "pack_id": "rumi_workflow_scheduler_pack",
+      "reason": "Deliver recurring connector summaries and wakeups."
+    },
+    {
+      "pack_id": "rumi_security_review_pack",
+      "reason": "Review connector scopes and inbound prompt risks."
+    }
+  ],
+  "components": {},
+  "load_order": [],
+  "metadata": {
+    "required_secrets": [],
+    "network_policy": "none_by_default",
+    "executable_code": false,
+    "owner_surfaces": [
+      "connector_namespace_policy",
+      "channel_handoff_contracts",
+      "scope_review_cards"
+    ]
+  }
+}

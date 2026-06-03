@@ -1,0 +1,6 @@
+example_id: rumi_connector_gateway.github_pr_triage
+request: Route a PR review request to the right Rumi pack.
+expected_handoff:
+  connector_id: github
+  delivery_target: rumi_agent_services_pack
+  inbound_risk: mixed
