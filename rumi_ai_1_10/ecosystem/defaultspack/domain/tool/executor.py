@@ -988,6 +988,15 @@ class ToolExecutor:
                 "is_error": False,
                 "widget": {"type": "todo", **result},
             }
+        elif tool_name in {"kanban", "tool_kanban"}:
+            from domain.tool.kanban import KanbanController
+
+            result = KanbanController().run(arguments, context if isinstance(context, dict) else {})
+            return {
+                "result": result.get("summary", "kanban updated"),
+                "is_error": False,
+                "widget": {"type": "kanban", **result},
+            }
         elif tool_name == "subagent":
             from ecosystem.rumi_default_tools_pack.domain.tool.subagent import SubagentController
 

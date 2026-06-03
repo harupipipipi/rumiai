@@ -1,0 +1,150 @@
+{
+  "id": "tool_kanban",
+  "description": "Maintain a local per-workspace Kanban task board.",
+  "config": {
+    "tool_id": "tool_kanban",
+    "name": "tool_kanban",
+    "summary": "Kanban task board",
+    "tool_category": "planning",
+    "action_type": "update",
+    "write_action": true,
+    "requires_approval": false,
+    "risk": "medium",
+    "tags": [
+      "planning",
+      "kanban",
+      "task_board",
+      "workspace"
+    ],
+    "metadata": {
+      "keywords": [
+        "kanban",
+        "task board",
+        "cards",
+        "columns",
+        "planning"
+      ]
+    },
+    "ui": {
+      "group_id": "planning",
+      "group_label": "Planning",
+      "group_icon": "columns",
+      "item_icon": "columns",
+      "widget_kind": "tool_toggle",
+      "drop_capabilities": [
+        "composer.toggle_chip"
+      ],
+      "composer_label": "Kanban",
+      "composer_description": "Maintain local task-board cards and columns.",
+      "composer_icon": "columns"
+    },
+    "schema": {
+      "parameters": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "list",
+              "create",
+              "update",
+              "move",
+              "delete",
+              "configure",
+              "clear"
+            ],
+            "default": "list"
+          },
+          "title": {
+            "type": "string"
+          },
+          "task": {
+            "type": "string"
+          },
+          "card_id": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "column_id": {
+            "type": "string"
+          },
+          "target_column_id": {
+            "type": "string"
+          },
+          "column": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "position": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "notes": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "priority": {
+            "type": "string",
+            "enum": [
+              "low",
+              "normal",
+              "high"
+            ]
+          },
+          "assignee": {
+            "type": "string"
+          },
+          "due_at": {
+            "type": "string"
+          },
+          "labels": {
+            "oneOf": [
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "columns": {
+            "type": "array",
+            "items": {
+              "oneOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        },
+        "required": []
+      }
+    },
+    "execution": {
+      "type": "local",
+      "handler": "domain.tool.kanban:tool_kanban"
+    }
+  }
+}
