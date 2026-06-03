@@ -1,0 +1,55 @@
+{
+  "catalog_id": "rumi_memory_knowledge_pack.capabilities",
+  "version": "1.0.0",
+  "description": "Memory and knowledge capability names for local-first Rumi implementations.",
+  "capabilities": [
+    {
+      "id": "memory.recall.session",
+      "label": "Recall session context",
+      "inputs": ["query", "session_scope", "recency_window", "evidence_requirement"],
+      "outputs": ["recall_results", "evidence_links", "confidence_notes"],
+      "expected_grants": ["memory.read_session", "memory.search_session"],
+      "risk_level": "low"
+    },
+    {
+      "id": "memory.profile.propose_update",
+      "label": "Propose user profile memory update",
+      "inputs": ["observation", "evidence_links", "sensitivity_label", "user_intent"],
+      "outputs": ["profile_update_proposal", "approval_prompt", "retention_hint"],
+      "expected_grants": ["memory.propose_update"],
+      "risk_level": "medium"
+    },
+    {
+      "id": "knowledge.project.propose_update",
+      "label": "Propose project knowledge update",
+      "inputs": ["project_id", "observation", "source_context", "expiry_hint"],
+      "outputs": ["project_knowledge_proposal", "source_links", "conflict_notes"],
+      "expected_grants": ["knowledge.read_project", "knowledge.propose_update"],
+      "risk_level": "medium"
+    },
+    {
+      "id": "memory.hygiene.review",
+      "label": "Review memory hygiene",
+      "inputs": ["memory_records", "hygiene_policy", "project_scope"],
+      "outputs": ["dedupe_candidates", "stale_candidates", "sensitivity_flags", "archive_proposals"],
+      "expected_grants": ["memory.review_update"],
+      "risk_level": "medium"
+    },
+    {
+      "id": "memory.recall.verify_evidence",
+      "label": "Verify recall evidence",
+      "inputs": ["recall_results", "evidence_policy", "source_context"],
+      "outputs": ["verified_recall", "unsupported_recall", "confidence_updates"],
+      "expected_grants": ["memory.read_session", "memory.review_update"],
+      "risk_level": "low"
+    },
+    {
+      "id": "memory.skill.propose",
+      "label": "Propose skill learning",
+      "inputs": ["task_trace", "repeatability_signal", "failure_or_success_pattern", "user_value"],
+      "outputs": ["skill_learning_proposal", "review_checklist", "safety_notes"],
+      "expected_grants": ["skill.propose"],
+      "risk_level": "medium"
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+policy_id: rumi_memory_knowledge_pack.skill_learning
+version: 1.0.0
+defaults:
+  proposals_only: true
+  user_review_required: true
+  install_or_edit_skill_allowed: false
+  network_required: false
+proposal_triggers:
+  repeated_successful_workflow: true
+  repeated_failure_pattern: true
+  user_requested_playbook: true
+  high_value_project_convention: true
+anti_triggers:
+  one_off_task: reject
+  sensitive_private_context: require_extra_review
+  insufficient_evidence: needs_more_evidence
+review_checklist:
+  - repeatability
+  - user_value
+  - safety_boundary
+  - inputs_outputs_clear
+  - maintenance_owner
+  - archive_policy
+curation:
+  stale_proposals_review_days: 60
+  rejected_proposals_keep_reason: true
+  approved_proposals_do_not_auto_install: true

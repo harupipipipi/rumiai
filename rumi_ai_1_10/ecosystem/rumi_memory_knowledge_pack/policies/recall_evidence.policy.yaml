@@ -1,0 +1,28 @@
+policy_id: rumi_memory_knowledge_pack.recall_evidence
+version: 1.0.0
+defaults:
+  evidence_required_for_specific_recall: true
+  label_uncertain_recall: true
+  include_source_locator: true
+  avoid_overconfident_personalization: true
+confidence_rules:
+  high:
+    requires: [direct_evidence, current_or_not_time_sensitive]
+  medium:
+    requires: [direct_or_correlated_evidence]
+  low:
+    requires: [weak_or_old_evidence]
+  unresolved:
+    requires: [contradiction_or_missing_evidence]
+unsupported_recall:
+  allowed_in_final_answer: false
+  remediation: ask_clarifying_question_or_mark_unknown
+source_priority:
+  - explicit_user_statement
+  - approved_profile_memory
+  - project_knowledge_with_evidence
+  - session_summary_with_links
+  - inferred_pattern
+privacy:
+  disclose_sensitive_recall_source: minimal
+  avoid_surprising_user_with_sensitive_detail: true
