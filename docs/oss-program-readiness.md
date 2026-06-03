@@ -35,6 +35,40 @@ These tasks improve public credibility without inflating metrics:
 
 See [community-launch-plan.md](./community-launch-plan.md) for concrete release notes, repository metadata, and issue drafts.
 
+## Pull Request Draft
+
+Title:
+
+`docs: add OSS readiness and community launch materials`
+
+Body:
+
+```markdown
+## Summary
+
+- Add contributor, security, support, code-of-conduct, and issue-template materials for public OSS onboarding.
+- Add an OSS program readiness note with truthful OpenAI/Claude application drafts and explicit anti-metric-inflation guidance.
+- Add a community launch plan, first release notes draft, and draft-release workflow safety so the first public release can be reviewed before publishing.
+
+## Impact
+
+- Makes the repo easier for real users and contributors to evaluate.
+- Gives maintainers concrete release, metadata, good-first-issue, and application copy to use.
+- Keeps public claims honest about the current adoption gap.
+
+## Validation
+
+- [x] Parsed workflow and issue-template YAML locally.
+- [x] Checked OpenAI application copy is under 500 characters per field.
+- [x] Ran `git diff --check`.
+
+## Security / Approval Notes
+
+- [x] This change does not bypass local guard, approval, workspace jail, capability trust, or audit paths.
+- [x] New write, terminal, git, browser, computer, or secret-handling behavior is approval-aware.
+- [x] Release workflow now creates draft releases for review before public publishing.
+```
+
 ## OpenAI Draft
 
 Role:
