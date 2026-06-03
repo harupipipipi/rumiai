@@ -1,0 +1,28 @@
+reviewer_handoff_checklist:
+  id: rumi_subagent_pr_manager_pack.reviewer_handoff
+  required_checks:
+    - id: scope_guard
+      question: Did the PR candidate touch only owned pack paths and its contract test?
+      evidence: changed_file_manifest
+      blocking: true
+    - id: subagent_repetition
+      question: Does each routing lane include owner, reviewer, and fallback subagents?
+      evidence: subagent_routing_matrix
+      blocking: true
+    - id: acceptance_rubric
+      question: Did the reviewer apply the merge-readiness rubric?
+      evidence: pr_acceptance_rubric
+      blocking: true
+    - id: no_runtime_code
+      question: Are all additions declarative assets or tests?
+      evidence: changed_file_manifest
+      blocking: true
+    - id: verification
+      question: Is the focused test command and result recorded?
+      evidence: pr_evidence_ledger
+      blocking: true
+  reviewer_decisions:
+    - ready_for_commit
+    - needs_asset_depth
+    - needs_scope_cleanup
+    - blocked_by_external_owner
