@@ -1,0 +1,6 @@
+preset_id: rumi_knowledge_marketplace.safe_default
+profile: rumi_knowledge_marketplace.marketplace_curator
+features:
+  local_first: true
+  evidence_required: true
+  owner_boundary_check: true

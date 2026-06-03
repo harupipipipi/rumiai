@@ -1,0 +1,46 @@
+{
+  "pack_id": "rumi_knowledge_marketplace_pack",
+  "display_name": "Rumi Knowledge Marketplace Pack",
+  "description": "Declarative marketplace and skill-library pack for curated capabilities, install candidates, and trust review.",
+  "target_pack_id": "rumi_knowledge_marketplace_pack",
+  "version": "0.1.0",
+  "recommended": false,
+  "risk_level": "medium",
+  "supports_all_ok": false,
+  "depends_on": [
+    {
+      "pack_id": "defaultspack",
+      "version": ">=2.0.0"
+    }
+  ],
+  "conflicts_with": [],
+  "overlap_policy": {
+    "bundle_catalog": "handoff_to_rumi_pack_suite_pack",
+    "trust_review": "handoff_to_rumi_security_review_pack",
+    "learned_skills": "handoff_to_rumi_memory_knowledge_pack",
+    "connector_cards": "handoff_to_rumi_connector_gateway_pack"
+  },
+  "defaultspack_promotion": {
+    "eligible": false,
+    "criteria": [
+      "contract_tests_pass",
+      "overlap_policy_reviewed",
+      "maintainer_runtime_evidence_required"
+    ]
+  },
+  "marketplace": {
+    "id": "rumi.knowledge_marketplace_pack",
+    "channel": "experimental"
+  },
+  "signing": {
+    "mode": "repository_reviewed"
+  },
+  "security_notes": [
+    "No secrets are bundled.",
+    "No executable code is included.",
+    "Network is none by default."
+  ],
+  "conflict_notes": [
+    "This pack declares owner boundaries and handoff policy instead of overriding runtime tools."
+  ]
+}

@@ -1,0 +1,6 @@
+example_id: rumi_knowledge_marketplace.template_catalog_entry
+request: Example workflow for template catalog entry.
+expected_outputs:
+  - plan
+  - evidence
+  - handoff

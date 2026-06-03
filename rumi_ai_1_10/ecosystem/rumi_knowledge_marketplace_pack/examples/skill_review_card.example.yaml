@@ -1,0 +1,6 @@
+example_id: rumi_knowledge_marketplace.skill_review_card
+request: Example workflow for skill review card.
+expected_outputs:
+  - plan
+  - evidence
+  - handoff

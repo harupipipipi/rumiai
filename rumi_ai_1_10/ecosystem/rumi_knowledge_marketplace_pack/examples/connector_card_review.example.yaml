@@ -1,0 +1,6 @@
+example_id: rumi_knowledge_marketplace.connector_card_review
+request: Example workflow for connector card review.
+expected_outputs:
+  - plan
+  - evidence
+  - handoff
