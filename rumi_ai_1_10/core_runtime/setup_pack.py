@@ -73,6 +73,34 @@ def _normalize_dependency_specs(value: Any) -> List[Dict[str, str]]:
     return result
 
 
+def _normalize_pack_ref_specs(value: Any) -> List[Dict[str, str]]:
+    raw_items = value if isinstance(value, list) else []
+    if isinstance(value, dict):
+        raw_items = [
+            {"pack_id": key, **spec} if isinstance(spec, dict) else {"pack_id": key}
+            for key, spec in value.items()
+        ]
+    result: List[Dict[str, str]] = []
+    seen: set[str] = set()
+    for item in raw_items:
+        if isinstance(item, str):
+            spec = {"pack_id": item}
+        elif isinstance(item, dict):
+            pack_id = item.get("pack_id") or item.get("id") or item.get("name")
+            if not pack_id:
+                continue
+            spec = {"pack_id": str(pack_id)}
+            for key in ("reason", "resolution", "scope"):
+                if item.get(key):
+                    spec[key] = str(item[key])
+        else:
+            continue
+        if spec["pack_id"] not in seen:
+            seen.add(spec["pack_id"])
+            result.append(spec)
+    return result
+
+
 def _current_python_version() -> str:
     return "{}.{}.{}".format(sys.version_info.major, sys.version_info.minor, sys.version_info.micro)
 
@@ -103,6 +131,9 @@ class SetupPackDefinition:
     # source in that fork rather than crossing a runtime trust boundary.
     supports_all_ok: bool = False
     depends_on: List[Dict[str, str]] = field(default_factory=list)
+    conflicts_with: List[Dict[str, str]] = field(default_factory=list)
+    overlap_policy: Dict[str, Any] = field(default_factory=dict)
+    defaultspack_promotion: Dict[str, Any] = field(default_factory=dict)
     compatibility: Dict[str, Any] = field(default_factory=dict)
     marketplace: Dict[str, Any] = field(default_factory=dict)
     signing: Dict[str, Any] = field(default_factory=dict)
@@ -155,6 +186,9 @@ class SetupPackManager:
                 depends_on=_normalize_dependency_specs(
                     raw.get("depends_on", raw.get("dependencies", []))
                 ),
+                conflicts_with=_normalize_pack_ref_specs(raw.get("conflicts_with", [])),
+                overlap_policy=_as_dict(raw.get("overlap_policy")),
+                defaultspack_promotion=_as_dict(raw.get("defaultspack_promotion")),
                 compatibility=compatibility,
                 marketplace=_as_dict(raw.get("marketplace")),
                 signing=_as_dict(raw.get("signing")),
@@ -190,6 +224,9 @@ class SetupPackManager:
                 "risk_level": item.risk_level,
                 "supports_all_ok": item.supports_all_ok,
                 "depends_on": list(item.depends_on),
+                "conflicts_with": list(item.conflicts_with),
+                "overlap_policy": dict(item.overlap_policy),
+                "defaultspack_promotion": dict(item.defaultspack_promotion),
                 "compatibility": dict(item.compatibility),
                 "marketplace": dict(item.marketplace),
                 "signing": dict(item.signing),
@@ -437,6 +474,24 @@ class SetupPackManager:
             location = locations.get(definition.target_pack_id)
             if location is not None:
                 issues.extend(self._validate_compatibility_contract(definition, location))
+        selected_ids = {definition.pack_id for definition in definitions}
+        selected_target_ids = {definition.target_pack_id for definition in definitions}
+        for definition in definitions:
+            for conflict in definition.conflicts_with:
+                conflict_id = str(conflict.get("pack_id") or "")
+                if conflict_id not in selected_ids and conflict_id not in selected_target_ids:
+                    continue
+                issues.append(
+                    {
+                        "setup_pack_id": definition.pack_id,
+                        "target_pack_id": definition.target_pack_id,
+                        "reason": "setup_pack_conflict",
+                        "conflicts_with": conflict_id,
+                        "conflict": conflict,
+                        "resolution": conflict.get("resolution") or "choose_one_pack",
+                        "error": "Selected setup packs declare overlapping responsibility",
+                    }
+                )
         return issues
 
     @staticmethod
