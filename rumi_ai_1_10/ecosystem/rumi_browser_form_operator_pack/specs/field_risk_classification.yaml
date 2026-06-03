@@ -1,0 +1,30 @@
+spec_id: rumi.browser_form_operator.field_risk_classification.v1
+owner: rumi_browser_form_operator_pack
+purpose: Declarative field risk taxonomy for safe form filling and review.
+network_default: none
+risk_levels:
+  low:
+    examples: [display_name, company_name, comment_body, search_query]
+    default_policy: allow_staging_with_review
+  medium:
+    examples: [email_address, phone_number, mailing_address, date_of_birth]
+    default_policy: require_user_confirmation_before_fill
+  high:
+    examples: [payment_card, bank_account, government_id, tax_id, health_information]
+    default_policy: handoff_to_security_review_before_fill
+  irreversible:
+    examples: [purchase_submit, account_closure, legal_acceptance, public_post, application_submit]
+    default_policy: explicit_user_confirmation_required_before_submit
+classification_rules:
+  - id: label_and_name_match
+    description: Use visible label, aria-label, name, id, autocomplete, and placeholder evidence.
+  - id: autocomplete_sensitive
+    description: Treat payment, identity, credential, and address autocomplete values as at least medium risk.
+  - id: hidden_field_caution
+    description: Hidden fields are not editable targets unless a separate owner pack reviews them.
+  - id: consent_text_detection
+    description: Terms, privacy, subscription, marketing, and legal consent controls require review notes.
+outputs:
+  - field_risk_map
+  - confirmation_requirements
+  - handoff_recommendation
