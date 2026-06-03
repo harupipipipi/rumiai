@@ -164,6 +164,47 @@ def test_mentions_create_queued_tasks_and_dispatches_agent_runs(tmp_path, monkey
     assert len(all_mentions["data"]["resolved_agent_ids"]) == 9
 
 
+def test_company_runs_include_agent_model_and_result_preview(tmp_path, monkeypatch):
+    from blocks.company import runs
+    from domain.agent_runtime.models import AgentRun
+    from domain.agent_runtime.run_store import AgentRunStore
+    from domain.company.runtime_store import CompanyRuntimeStore
+
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_COMPANY_RUNTIME_DB_PATH", str(tmp_path / "company_runtime.db"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_AGENT_RUNTIME_DIR", str(tmp_path / "agent_runtime"))
+    _reset_company_store()
+
+    AgentRunStore().upsert_run(
+        AgentRun(
+            run_id="agent_preview",
+            session_key="company:acme",
+            agent_id="minimax_worker",
+            task="Smoke",
+            status="completed",
+            model="opencode-zen/minimax-m3-free",
+            result_json=[
+                {"type": "thinking", "thinking": "hidden chain"},
+                {"type": "text", "text": "Visible MiniMax result"},
+            ],
+        )
+    )
+    CompanyRuntimeStore().record_agent_run(
+        "acme",
+        agent_id="minimax_worker",
+        run_id="agent_preview",
+        task_id="task_preview",
+        status="completed",
+    )
+
+    result = runs.run({"company_id": "acme"}, {})
+
+    assert result["status"] == "ok"
+    agent_run = result["data"]["runs"][0]["agent_run"]
+    assert agent_run["model"] == "opencode-zen/minimax-m3-free"
+    assert agent_run["status"] == "completed"
+    assert agent_run["result_preview"] == "Visible MiniMax result"
+
+
 def test_inbound_routes_ingest_message_and_queue_task(tmp_path, monkeypatch):
     from blocks.company import bootstrap, inbound_routes, messages
 

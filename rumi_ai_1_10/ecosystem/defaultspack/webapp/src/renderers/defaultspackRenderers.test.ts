@@ -4,6 +4,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import { CompanyAgentList } from "../components/company/CompanyAgentList";
+import { CompanyTaskBoard } from "../components/company/CompanyTaskBoard";
 import { defaultspackRendererIds, defaultspackRenderers, resolveDefaultspackRenderers } from "./defaultspackRenderers";
 
 test("defaultspack renderer registry covers visible shell regions", () => {
@@ -75,4 +76,114 @@ test("company agent list renders operational role details", () => {
 
   assert.match(html, /Reviewer/);
   assert.match(html, /@review/);
+});
+
+test("company task board renders dispatched completed runs", () => {
+  const html = renderToStaticMarkup(
+    createElement(CompanyTaskBoard, {
+      agents: [{ agent_id: "minimax_worker", role_key: "minimax_worker" }],
+      tasks: [
+        {
+          id: "task-1",
+          company_id: "operations-company",
+          title: "Live MiniMax smoke",
+          target_agent_ids: ["minimax_worker"],
+          status: "completed",
+        },
+      ],
+      runs: [
+        {
+          link_id: "link-1",
+          company_id: "operations-company",
+          task_id: "task-1",
+          agent_id: "minimax_worker",
+          run_id: "agent-1",
+          status: "completed",
+          agent_run: {
+            status: "completed",
+            model: "opencode-zen/minimax-m3-free",
+            result_preview: "Visible MiniMax result",
+          },
+        },
+      ],
+      onDispatchTask: () => {},
+    }),
+  );
+
+  assert.match(html, /Live MiniMax smoke/);
+  assert.match(html, /minimax_worker/);
+  assert.match(html, /completed/);
+  assert.match(html, /opencode-zen\/minimax-m3-free/);
+  assert.match(html, /Visible MiniMax result/);
+});
+
+test("company task board renders agent run errors", () => {
+  const html = renderToStaticMarkup(
+    createElement(CompanyTaskBoard, {
+      agents: [{ agent_id: "stub_worker", role_key: "stub_worker" }],
+      tasks: [
+        {
+          id: "task-err",
+          company_id: "operations-company",
+          title: "Stub fallback smoke",
+          target_agent_ids: ["stub_worker"],
+          status: "blocked",
+        },
+      ],
+      runs: [
+        {
+          link_id: "link-err",
+          company_id: "operations-company",
+          task_id: "task-err",
+          agent_id: "stub_worker",
+          run_id: "agent-err",
+          status: "error",
+          agent_run: {
+            status: "error",
+            model: "stub/default",
+            error: "stub: provider is not configured",
+          },
+        },
+      ],
+    }),
+  );
+
+  assert.match(html, /Stub fallback smoke/);
+  assert.match(html, /stub\/default/);
+  assert.match(html, /stub: provider is not configured/);
+});
+
+test("company agent list renders latest agent run errors", () => {
+  const html = renderToStaticMarkup(
+    createElement(CompanyAgentList, {
+      agents: [
+        {
+          agent_id: "stub_worker",
+          display_name: "Stub Worker",
+          role_key: "stub_worker",
+          model: "stub/default",
+          allowed_tools: [],
+        },
+      ],
+      runs: [
+        {
+          link_id: "link-err",
+          company_id: "operations-company",
+          task_id: "task-err",
+          agent_id: "stub_worker",
+          run_id: "agent-err",
+          status: "error",
+          agent_run: {
+            status: "error",
+            model: "stub/default",
+            error: "stub: provider is not configured",
+          },
+        },
+      ],
+    }),
+  );
+
+  assert.match(html, /Stub Worker/);
+  assert.match(html, /error/);
+  assert.match(html, /stub: provider is not configured/);
 });
