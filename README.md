@@ -36,7 +36,7 @@ Key properties:
 | API キーや secrets の扱いを知りたい | [`rumi_ai_1_10/docs/operations.md`](./rumi_ai_1_10/docs/operations.md) の Secrets 節 | `user_data/secrets/` と API 経路の説明があります |
 | Pack の作り方を知りたい | [`rumi_ai_1_10/docs/pack-development.md`](./rumi_ai_1_10/docs/pack-development.md) | ecosystem.json, routes, permissions の作法をまとめています |
 | 運用・監査の考え方を知りたい | [`rumi_ai_1_10/docs/quality_pack/philosophy_memo.md`](./rumi_ai_1_10/docs/quality_pack/philosophy_memo.md) | 継続開発と回帰確認の前提を整理しています |
-| 参加・報告・セキュリティ連絡をしたい | [`CONTRIBUTING.md`](./CONTRIBUTING.md) / [`SECURITY.md`](./SECURITY.md) | Issue、PR、脆弱性報告の入口です |
+| 参加・報告・セキュリティ連絡をしたい | [`CONTRIBUTING.md`](./CONTRIBUTING.md) / [`CODE_OF_CONDUCT.md`](./CODE_OF_CONDUCT.md) / [`SECURITY.md`](./SECURITY.md) | Issue、PR、脆弱性報告の入口です |
 
 ## Repository Layout
 
@@ -163,3 +163,4 @@ Rumi AI is early but actively maintained. The best places to help are:
 - Review approval, audit, and capability-boundary changes carefully.
 
 See [CONTRIBUTING.md](./CONTRIBUTING.md) for the contribution flow and [SECURITY.md](./SECURITY.md) for private vulnerability reports.
+For launch and release work, see [docs/community-launch-plan.md](./docs/community-launch-plan.md).

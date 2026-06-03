@@ -33,6 +33,8 @@ These tasks improve public credibility without inflating metrics:
 - Publish a package only if the install path is tested and supportable.
 - Collect real usage evidence: downstream repos, user installs, community links, articles, demos, or integrations.
 
+See [community-launch-plan.md](./community-launch-plan.md) for concrete release notes, repository metadata, and issue drafts.
+
 ## OpenAI Draft
 
 Role:
