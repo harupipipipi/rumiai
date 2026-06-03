@@ -1949,7 +1949,6 @@ export function HistoryBoard({
           >
             <WarmActionIcon kind="calendar" size="sm" />
             <span className="truncate">Calendar</span>
-            <span className="ml-auto text-[10px] text-zinc-600">{chatItems.length}</span>
           </button>
           <ConversationSearchBar value={searchQuery} resultCount={visibleChatCount} onChange={setSearchQuery} />
           <ConversationTagFilter tags={allTags} activeTag={activeTag} onChange={setActiveTag} />
