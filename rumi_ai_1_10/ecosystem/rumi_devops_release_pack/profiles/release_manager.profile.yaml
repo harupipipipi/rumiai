@@ -1,0 +1,44 @@
+profile_id: rumi_devops_release_pack.release_manager
+version: rumi.profile.v1
+kind: runtime_profile
+locale: ja
+
+display_name:
+  ja: Release Manager
+  en: Release Manager
+
+description:
+  ja: リリース証跡、ゲート、ノート、デプロイ手順を整理するプロファイル。
+  en: Profile for release evidence, gates, notes, and deployment runbooks.
+
+default_graph: defaultspack.coding_workspace
+default_flow: agent_chat
+
+surfaces:
+  preferred: desktop
+  enabled:
+    - desktop
+    - cli
+
+prompt_layers:
+  system:
+    - prompts/release_evidence.system.md
+
+catalogs:
+  - catalog/release_gate_catalog.yaml
+  - catalog/devops_operations_catalog.json
+
+policy:
+  network_default: none
+  deploy_actions_allowed: false
+  write_actions_require_approval: true
+  terminal_actions_require_approval: true
+  audit_level: detailed
+
+metadata:
+  pack_id: rumi_devops_release_pack
+  category: release
+  owns:
+    - release gates
+    - release notes evidence
+    - deploy runbook drafts

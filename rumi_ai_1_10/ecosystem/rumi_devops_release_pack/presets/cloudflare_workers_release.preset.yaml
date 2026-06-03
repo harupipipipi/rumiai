@@ -1,0 +1,23 @@
+id: rumi_devops_release_pack.cloudflare_workers_release
+name: Cloudflare Workers Release
+profile: rumi_devops_release_pack.release_manager
+intent: Review Workers release readiness and rollback posture without deploying.
+platform_awareness:
+  - cloudflare_workers
+network_default: none
+evidence_inputs:
+  - wrangler configuration
+  - worker entrypoint path
+  - build or test evidence
+  - runbook draft
+  - rollback reference
+outputs:
+  - release gate status
+  - deploy runbook
+  - verification checklist
+  - rollback plan
+approval_required_for:
+  - live Cloudflare dashboard inspection
+  - tail logs
+  - deploy action
+  - rollback action
