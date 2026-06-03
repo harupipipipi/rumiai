@@ -1,0 +1,6 @@
+example_id: rumi_observability.cost_latency_snapshot
+request: Example workflow for cost latency snapshot.
+expected_outputs:
+  - plan
+  - evidence
+  - handoff

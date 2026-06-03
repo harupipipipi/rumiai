@@ -1,0 +1,6 @@
+example_id: rumi_observability.agent_run_summary
+request: Example workflow for agent run summary.
+expected_outputs:
+  - plan
+  - evidence
+  - handoff

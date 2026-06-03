@@ -1,0 +1,11 @@
+catalog_id: rumi_observability.events
+schema_version: 1
+event_classes:
+  - class_id: agent_run
+    fields: [run_id, objective, pack_ids, status, evidence_refs]
+  - class_id: tool_call
+    fields: [tool_name, owner_pack, approval_state, result_summary]
+  - class_id: model_call
+    fields: [provider, model, latency_ms, token_estimate, outcome]
+  - class_id: incident
+    fields: [trigger, blast_radius, root_cause, followups]

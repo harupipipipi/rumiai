@@ -1,0 +1,6 @@
+example_id: rumi_observability.tool_call_postmortem
+request: Example workflow for tool call postmortem.
+expected_outputs:
+  - plan
+  - evidence
+  - handoff

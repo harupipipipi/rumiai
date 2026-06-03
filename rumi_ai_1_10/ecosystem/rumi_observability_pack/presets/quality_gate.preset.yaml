@@ -1,0 +1,6 @@
+preset_id: rumi_observability.quality_gate
+profile: rumi_observability.observability_reviewer
+features:
+  local_first: true
+  evidence_required: true
+  owner_boundary_check: true
