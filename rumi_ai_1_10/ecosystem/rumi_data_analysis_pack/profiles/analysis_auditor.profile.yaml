@@ -1,0 +1,24 @@
+profile_id: rumi_data_analysis.analysis_auditor
+version: rumi.profile.v1
+kind: runtime_profile
+locale: ja
+display_name:
+  ja: 分析監査役
+  en: Analysis Auditor
+description:
+  ja: データ来歴、変換、検証、制約、再現性を納品前に確認するレビュー役。
+  en: Review profile for provenance, transformations, validation, limitations, and reproducibility.
+surfaces:
+  preferred: desktop
+  enabled: [desktop, cli]
+extends: defaultspack.local_agent
+enabled_capabilities: [analysis_audit, review, source_inventory, safety]
+prompt_set: analysis_auditor
+policy:
+  network_default: none
+  write_actions_require_approval: true
+  terminal_actions_require_approval: true
+  notebook_execution_requires_approval: true
+  sql_execution_requires_approval: true
+  audit_level: strict
+  local_first: true

@@ -1,0 +1,26 @@
+recipe_id: rumi.data_analysis.recipes.sql_analysis
+version: rumi.recipe.v1
+purpose: Plan SQL analysis against local schemas or user-provided table descriptions.
+inputs:
+  accepted_shapes: [schema_description, local_sqlite_snapshot, exported_table]
+  required_context: [question, tables, join_keys, metric_definitions]
+steps:
+  - id: inspect_schema
+    action: list tables, columns, keys, grain, and candidate filters
+  - id: define_metric
+    action: write metric formula in plain language before SQL
+  - id: plan_joins
+    action: state join type, key cardinality, and duplicate risk
+  - id: draft_query
+    action: produce query text or pseudocode without credentials
+  - id: validation_query
+    action: define row count, null, duplicate, and total checks
+  - id: result_interpretation
+    action: explain findings, caveats, and chart candidates
+outputs:
+  - query_plan
+  - query_text_optional
+  - validation_checks
+  - result_summary
+network: none
+execution: approval_required_if_runtime_runs_query
