@@ -1,0 +1,46 @@
+{
+  "pack_id": "rumi_voice_mobile_pack",
+  "pack_identity": "rumi:ecosystem/rumi_voice_mobile_pack",
+  "display_name": "Rumi Voice Mobile Pack",
+  "version": "0.1.0",
+  "runtime": {
+    "type": "declarative_pack"
+  },
+  "depends_on": [
+    {
+      "pack_id": "defaultspack",
+      "version": ">=2.0.0"
+    }
+  ],
+  "optional_integrations": [
+    {
+      "pack_id": "rumi_connector_gateway_pack",
+      "reason": "Complementary owner surface for this pack."
+    },
+    {
+      "pack_id": "rumi_workflow_scheduler_pack",
+      "reason": "Complementary owner surface for this pack."
+    },
+    {
+      "pack_id": "rumi_multimodal_media_pack",
+      "reason": "Complementary owner surface for this pack."
+    },
+    {
+      "pack_id": "rumi_computer_control_pack",
+      "reason": "Complementary owner surface for this pack."
+    }
+  ],
+  "components": {},
+  "load_order": [],
+  "metadata": {
+    "required_secrets": [],
+    "network_policy": "none_by_default",
+    "executable_code": false,
+    "owner_surfaces": [
+      "voice_memo_contracts",
+      "mobile_notification_handoffs",
+      "speech_command_safety",
+      "on_the_go_briefings"
+    ]
+  }
+}

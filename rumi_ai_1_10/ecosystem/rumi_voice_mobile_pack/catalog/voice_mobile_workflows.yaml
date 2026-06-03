@@ -1,0 +1,11 @@
+catalog_id: rumi_voice_mobile.workflows
+schema_version: 1
+workflows:
+  - workflow_id: voice_memo_to_task
+    phases: [transcribe, classify_intent, extract_deadlines, confirm]
+  - workflow_id: morning_mobile_brief
+    phases: [collect_sources, summarize, risk_check, deliver]
+  - workflow_id: speech_driven_desktop_fix
+    phases: [capture_command, confirm_scope, route_to_computer_control, report]
+  - workflow_id: mobile_followup_ping
+    phases: [schedule, context_pack, deliver, record_ack]

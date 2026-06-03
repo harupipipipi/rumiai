@@ -1,0 +1,6 @@
+example_id: rumi_voice_mobile.morning_brief
+request: Example workflow for morning brief.
+expected_outputs:
+  - plan
+  - evidence
+  - handoff

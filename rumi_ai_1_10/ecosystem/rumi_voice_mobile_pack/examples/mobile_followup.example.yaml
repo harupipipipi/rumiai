@@ -1,0 +1,6 @@
+example_id: rumi_voice_mobile.mobile_followup
+request: Example workflow for mobile followup.
+expected_outputs:
+  - plan
+  - evidence
+  - handoff

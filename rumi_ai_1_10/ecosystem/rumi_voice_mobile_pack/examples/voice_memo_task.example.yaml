@@ -1,0 +1,6 @@
+example_id: rumi_voice_mobile.voice_memo_task
+request: Example workflow for voice memo task.
+expected_outputs:
+  - plan
+  - evidence
+  - handoff
