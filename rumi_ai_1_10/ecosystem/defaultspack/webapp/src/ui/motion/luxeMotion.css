@@ -1,0 +1,269 @@
+/*
+ * Luxe motion system
+ * -------------------
+ * Smooth, spring-feel animations applied to the entire defaultspack luxe shell.
+ * All utilities respect prefers-reduced-motion and degrade to instant states.
+ *
+ * Design tokens:
+ *   --rumi-ease-out:    smooth deceleration curve
+ *   --rumi-ease-spring: overshoot-and-settle curve (used for entrances)
+ *   --rumi-ease-in-out: symmetric ease
+ *   --rumi-dur-fast:    140ms (micro-interactions: color, opacity, transform)
+ *   --rumi-dur-base:    220ms (default UI: hover, focus, panels)
+ *   --rumi-dur-slow:    420ms (layout shifts, mount animations)
+ *
+ * Naming:
+ *   .rumi-anim-*  → entrance / exit / state change animations (auto-play on mount)
+ *   .rumi-hover-* → interaction transitions applied on hover/focus/active
+ *   .rumi-stagger > * → cascade entrance for children (1..12)
+ */
+
+:root {
+  --rumi-ease-out: cubic-bezier(0.2, 0.82, 0.2, 1);
+  --rumi-ease-spring: cubic-bezier(0.18, 0.9, 0.22, 1);
+  --rumi-ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+  --rumi-dur-fast: 140ms;
+  --rumi-dur-base: 220ms;
+  --rumi-dur-slow: 420ms;
+}
+
+/* ------------------------------------------------------------------ */
+/* Universal smooth interactions                                       */
+/* ------------------------------------------------------------------ */
+
+/* Default transition for common interactive surfaces. Existing
+   transition-* utility classes still win because they appear later in
+   the cascade. The values target the most-used properties so color,
+   opacity, transform and background all glide. */
+#root button,
+#root a,
+#root input,
+#root textarea,
+#root select,
+#root summary,
+#root [role="button"],
+#root [role="tab"],
+#root [role="option"],
+#root [role="menuitem"],
+#root label,
+#root [data-interactive="true"] {
+  transition:
+    background-color var(--rumi-dur-base) var(--rumi-ease-out),
+    border-color var(--rumi-dur-base) var(--rumi-ease-out),
+    color var(--rumi-dur-base) var(--rumi-ease-out),
+    box-shadow var(--rumi-dur-base) var(--rumi-ease-out),
+    opacity var(--rumi-dur-base) var(--rumi-ease-out),
+    transform var(--rumi-dur-base) var(--rumi-ease-out),
+    filter var(--rumi-dur-base) var(--rumi-ease-out);
+}
+
+#root button:not(:disabled):active,
+#root [role="button"]:not([aria-disabled="true"]):active,
+#root summary:active {
+  transform: translateY(0.5px) scale(0.985);
+  transition-duration: var(--rumi-dur-fast);
+}
+
+#root button:not(:disabled):hover,
+#root [role="button"]:not([aria-disabled="true"]):hover,
+#root a:hover {
+  filter: brightness(1.04);
+}
+
+/* ------------------------------------------------------------------ */
+/* Entrance / mount animations                                         */
+/* ------------------------------------------------------------------ */
+
+@keyframes rumi-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes rumi-fade-up {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes rumi-fade-down {
+  from { opacity: 0; transform: translateY(-10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes rumi-fade-left {
+  from { opacity: 0; transform: translateX(-14px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes rumi-fade-right {
+  from { opacity: 0; transform: translateX(14px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes rumi-scale-in {
+  from { opacity: 0; transform: scale(0.965); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+@keyframes rumi-pop-in {
+  0%   { opacity: 0; transform: scale(0.92); }
+  60%  { opacity: 1; transform: scale(1.02); }
+  100% { opacity: 1; transform: scale(1); }
+}
+
+@keyframes rumi-blur-in {
+  from { opacity: 0; filter: blur(8px); transform: translateY(4px); }
+  to   { opacity: 1; filter: blur(0);   transform: translateY(0); }
+}
+
+@keyframes rumi-shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position:  200% 0; }
+}
+
+@keyframes rumi-breathe {
+  0%, 100% { opacity: 0.85; }
+  50%      { opacity: 1; }
+}
+
+@keyframes rumi-pulse-ring {
+  0%   { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.45); }
+  70%  { box-shadow: 0 0 0 10px rgba(59, 130, 246, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0); }
+}
+
+/* Utility classes (auto-play on mount) */
+.rumi-anim-fade-in {
+  animation: rumi-fade-in var(--rumi-dur-slow) var(--rumi-ease-out) both;
+}
+.rumi-anim-fade-up {
+  animation: rumi-fade-up var(--rumi-dur-slow) var(--rumi-ease-out) both;
+}
+.rumi-anim-fade-down {
+  animation: rumi-fade-down var(--rumi-dur-slow) var(--rumi-ease-out) both;
+}
+.rumi-anim-fade-left {
+  animation: rumi-fade-left var(--rumi-dur-slow) var(--rumi-ease-spring) both;
+}
+.rumi-anim-fade-right {
+  animation: rumi-fade-right var(--rumi-dur-slow) var(--rumi-ease-spring) both;
+}
+.rumi-anim-scale-in {
+  animation: rumi-scale-in var(--rumi-dur-slow) var(--rumi-ease-spring) both;
+  transform-origin: center;
+}
+.rumi-anim-pop-in {
+  animation: rumi-pop-in var(--rumi-dur-slow) var(--rumi-ease-spring) both;
+}
+.rumi-anim-blur-in {
+  animation: rumi-blur-in var(--rumi-dur-slow) var(--rumi-ease-out) both;
+}
+
+/* Staggered entrance: each child gets a small delay so the list
+   glides in instead of popping all at once. */
+.rumi-stagger > * {
+  animation: rumi-fade-up var(--rumi-dur-slow) var(--rumi-ease-out) both;
+}
+.rumi-stagger > *:nth-child(1)  { animation-delay:   0ms; }
+.rumi-stagger > *:nth-child(2)  { animation-delay:  35ms; }
+.rumi-stagger > *:nth-child(3)  { animation-delay:  70ms; }
+.rumi-stagger > *:nth-child(4)  { animation-delay: 105ms; }
+.rumi-stagger > *:nth-child(5)  { animation-delay: 140ms; }
+.rumi-stagger > *:nth-child(6)  { animation-delay: 175ms; }
+.rumi-stagger > *:nth-child(7)  { animation-delay: 210ms; }
+.rumi-stagger > *:nth-child(8)  { animation-delay: 245ms; }
+.rumi-stagger > *:nth-child(9)  { animation-delay: 280ms; }
+.rumi-stagger > *:nth-child(10) { animation-delay: 315ms; }
+.rumi-stagger > *:nth-child(11) { animation-delay: 350ms; }
+.rumi-stagger > *:nth-child(12) { animation-delay: 385ms; }
+.rumi-stagger > *:nth-child(n+13) { animation-delay: 420ms; }
+
+/* Tighter cadence for dense lists. */
+.rumi-stagger-tight > * {
+  animation: rumi-fade-up var(--rumi-dur-base) var(--rumi-ease-out) both;
+}
+.rumi-stagger-tight > *:nth-child(1)  { animation-delay:   0ms; }
+.rumi-stagger-tight > *:nth-child(2)  { animation-delay:  18ms; }
+.rumi-stagger-tight > *:nth-child(3)  { animation-delay:  36ms; }
+.rumi-stagger-tight > *:nth-child(4)  { animation-delay:  54ms; }
+.rumi-stagger-tight > *:nth-child(5)  { animation-delay:  72ms; }
+.rumi-stagger-tight > *:nth-child(6)  { animation-delay:  90ms; }
+.rumi-stagger-tight > *:nth-child(7)  { animation-delay: 108ms; }
+.rumi-stagger-tight > *:nth-child(8)  { animation-delay: 126ms; }
+.rumi-stagger-tight > *:nth-child(9)  { animation-delay: 144ms; }
+.rumi-stagger-tight > *:nth-child(10) { animation-delay: 162ms; }
+.rumi-stagger-tight > *:nth-child(11) { animation-delay: 180ms; }
+.rumi-stagger-tight > *:nth-child(12) { animation-delay: 198ms; }
+.rumi-stagger-tight > *:nth-child(n+13) { animation-delay: 216ms; }
+
+/* ------------------------------------------------------------------ */
+/* Continuous / state animations                                       */
+/* ------------------------------------------------------------------ */
+
+.rumi-anim-breathe {
+  animation: rumi-breathe 2.4s var(--rumi-ease-in-out) infinite;
+}
+
+.rumi-anim-pulse-ring {
+  animation: rumi-pulse-ring 1.8s var(--rumi-ease-out) infinite;
+}
+
+/* Skeleton / shimmer placeholder. Apply to a rectangular element. */
+.rumi-anim-shimmer {
+  background: linear-gradient(
+    90deg,
+    rgba(63, 63, 70, 0.18) 0%,
+    rgba(82, 82, 91, 0.45) 50%,
+    rgba(63, 63, 70, 0.18) 100%
+  );
+  background-size: 200% 100%;
+  animation: rumi-shimmer 1.6s linear infinite;
+}
+
+/* ------------------------------------------------------------------ */
+/* Smooth layout / region transitions                                  */
+/* ------------------------------------------------------------------ */
+
+/* Apply to a container whose children change size / position so
+   the layout interpolates instead of jumping. */
+.rumi-anim-layout {
+  transition:
+    height var(--rumi-dur-slow) var(--rumi-ease-spring),
+    width var(--rumi-dur-slow) var(--rumi-ease-spring),
+    padding var(--rumi-dur-slow) var(--rumi-ease-spring),
+    margin var(--rumi-dur-slow) var(--rumi-ease-spring),
+    gap var(--rumi-dur-slow) var(--rumi-ease-spring);
+}
+
+/* Collapse/expand helper used by accordions. */
+.rumi-collapse {
+  display: grid;
+  grid-template-rows: 1fr;
+  transition:
+    grid-template-rows var(--rumi-dur-slow) var(--rumi-ease-spring),
+    opacity var(--rumi-dur-base) var(--rumi-ease-out);
+  opacity: 1;
+}
+.rumi-collapse.is-collapsed {
+  grid-template-rows: 0fr;
+  opacity: 0;
+}
+.rumi-collapse > .rumi-collapse-inner {
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* ------------------------------------------------------------------ */
+/* Accessibility                                                       */
+/* ------------------------------------------------------------------ */
+
+@media (prefers-reduced-motion: reduce) {
+  #root *,
+  #root *::before,
+  #root *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}

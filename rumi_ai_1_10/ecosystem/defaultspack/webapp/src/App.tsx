@@ -4555,7 +4555,7 @@ export default function App() {
 
       <div className="flex flex-1 min-h-0">
         {showRegion("history") && !isHistoryMinimized && (
-          <div className="w-[286px] max-w-[30vw] min-w-[240px] flex-shrink-0 overflow-hidden border-r border-zinc-800/60 animate-in slide-in-from-left-2 fade-in duration-200 ease-out max-[900px]:w-[260px]">
+          <div className="w-[286px] max-w-[30vw] min-w-[240px] flex-shrink-0 overflow-hidden border-r border-zinc-800/60 animate-in slide-in-from-left-2 fade-in duration-200 ease-out max-[900px]:w-[260px] rumi-anim-fade-left">
             <Renderers.historyBoard
               activeChatId={activeConversationId}
               chatItems={chatItems}
@@ -4580,7 +4580,7 @@ export default function App() {
         )}
 
         {showRegion("history") && isHistoryMinimized && (
-          <div className="rumi-history-rail w-14 flex-shrink-0 overflow-visible border-r border-zinc-800/60 animate-in slide-in-from-left-1 fade-in duration-150 ease-out">
+          <div className="rumi-history-rail w-14 flex-shrink-0 overflow-visible border-r border-zinc-800/60 animate-in slide-in-from-left-1 fade-in duration-150 ease-out rumi-anim-fade-left">
             <Renderers.historyBoard
               activeChatId={activeConversationId}
               chatItems={chatItems}
@@ -4609,7 +4609,7 @@ export default function App() {
           className={cn("rumi-workspace-main flex-1 flex min-w-0 bg-[#09090b] relative", isActivityPreviewVisible && "has-activity-preview")}
           style={{ "--rumi-activity-preview-width": `${activityPreviewWidthPx}px` } as CSSProperties}
         >
-          <div className={cn("rumi-chat-pane flex-1 flex flex-col min-w-0", isActivityPreviewVisible && "border-r border-zinc-800/40")}>
+          <div className={cn("rumi-chat-pane flex-1 flex flex-col min-w-0 rumi-anim-fade-up", isActivityPreviewVisible && "border-r border-zinc-800/40")}>
             {showRegion("chat_header") && !isCalendarMode && (
               <Renderers.chatHeader
                 title={activeChatTitle}
@@ -4786,7 +4786,7 @@ export default function App() {
           )}
 
           {isActivityPreviewVisible && (
-            <aside className="rumi-activity-preview-pane" aria-label="Activity preview">
+            <aside className="rumi-activity-preview-pane rumi-anim-fade-right" aria-label="Activity preview">
               <Renderers.toolPreviewPanel
                 previews={canvasPreviews}
                 showPreview={effectiveShowPreview}
@@ -4802,6 +4802,7 @@ export default function App() {
         </main>
 
         {showRegion("right_sidebar") && (
+          <div className="rumi-anim-fade-right">
           <Renderers.rightSidebar
             items={sidebarItems}
             activeItemId={activeSidebarItemId ? `${activeSidebarItemId}:${sidebarSelectionTick}` : null}
@@ -4830,6 +4831,7 @@ export default function App() {
             onToolBatchSet={handleToolBatchSet}
             onPanelAction={handlePanelAction}
           />
+          </div>
         )}
       </div>
 
