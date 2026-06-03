@@ -25,7 +25,7 @@ use anyhow::{anyhow, bail, Context, Result as AnyResult};
 use log::{error, info, warn};
 use rand::{distributions::Alphanumeric, Rng};
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter, Manager, Url};
 
 use config::AppConfig;
 use host_broker::HostBrokerRuntime;
@@ -51,6 +51,17 @@ struct ApiEnvelope<T> {
     success: bool,
     data: Option<T>,
     error: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct TauriConfigEnv {
+    build: Option<TauriBuildConfigEnv>,
+}
+
+#[derive(Debug, Deserialize)]
+struct TauriBuildConfigEnv {
+    #[serde(rename = "devUrl")]
+    dev_url: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -316,6 +327,34 @@ fn set_allowed_navigation_ports(state: &Arc<Mutex<Vec<u16>>>, ports: Vec<u16>) {
     }
 }
 
+fn dev_server_port_from_tauri_config(raw_config: &str) -> Option<u16> {
+    serde_json::from_str::<TauriConfigEnv>(raw_config)
+        .ok()
+        .and_then(|config| config.build)
+        .and_then(|build| build.dev_url)
+        .and_then(|dev_url| Url::parse(&dev_url).ok())
+        .filter(|url| url.scheme() == "http")
+        .filter(|url| matches!(url.host_str(), Some("localhost") | Some("127.0.0.1")))
+        .and_then(|url| url.port_or_known_default())
+}
+
+#[cfg(debug_assertions)]
+fn tauri_dev_server_port() -> Option<u16> {
+    option_env!("TAURI_CONFIG").and_then(dev_server_port_from_tauri_config)
+}
+
+#[cfg(not(debug_assertions))]
+fn tauri_dev_server_port() -> Option<u16> {
+    None
+}
+
+fn navigation_ports_with_tauri_dev_server(mut ports: Vec<u16>) -> Vec<u16> {
+    if let Some(port) = tauri_dev_server_port() {
+        ports.push(port);
+    }
+    ports
+}
+
 fn navigation_is_allowed(
     scheme: &str,
     host: &str,
@@ -328,6 +367,42 @@ fn navigation_is_allowed(
     scheme == "http"
         && (host == "localhost" || host == "127.0.0.1")
         && port.is_some_and(|candidate| allowed_ports.contains(&candidate))
+}
+
+fn panel_session_url_for_current(
+    current: Option<&Url>,
+    port: u16,
+    panel_code: &str,
+) -> Result<Url, tauri::Error> {
+    if let Some(current_url) = current {
+        let is_current_panel = current_url.scheme() == "http"
+            && matches!(
+                current_url.host_str(),
+                Some("localhost") | Some("127.0.0.1")
+            )
+            && current_url.port_or_known_default() == Some(port)
+            && current_url.path().starts_with("/panel");
+
+        if is_current_panel {
+            let mut next = current_url.clone();
+            let mut query_pairs = next
+                .query_pairs()
+                .filter(|(key, _)| key != "code")
+                .map(|(key, value)| (key.into_owned(), value.into_owned()))
+                .collect::<Vec<_>>();
+            query_pairs.push(("code".to_string(), panel_code.to_string()));
+
+            next.set_query(None);
+            next.query_pairs_mut().extend_pairs(query_pairs);
+            return Ok(next);
+        }
+    }
+
+    Url::parse_with_params(
+        &format!("http://127.0.0.1:{port}/panel/"),
+        [("code", panel_code)],
+    )
+    .map_err(tauri::Error::InvalidUrl)
 }
 
 fn ensure_kernel_ready_for_panel_auth(
@@ -372,40 +447,9 @@ fn navigate_window_to_panel_session(
     port: u16,
     panel_code: &str,
 ) -> Result<(), tauri::Error> {
-    let panel_code = serde_json::to_string(panel_code).unwrap_or_else(|_| "\"\"".into());
-    let loopback_origin = serde_json::to_string(&format!("http://127.0.0.1:{port}"))
-        .unwrap_or_else(|_| "\"\"".into());
-    let localhost_origin = serde_json::to_string(&format!("http://localhost:{port}"))
-        .unwrap_or_else(|_| "\"\"".into());
-
-    let js = format!(
-        r#"
-(() => {{
-  const code = {panel_code};
-  const loopbackOrigin = {loopback_origin};
-  const localhostOrigin = {localhost_origin};
-  let nextUrl = `${{loopbackOrigin}}/panel/?code=${{encodeURIComponent(code)}}`;
-
-  try {{
-    const current = new URL(window.location.href);
-    const isPanelRoute =
-      (current.origin === loopbackOrigin || current.origin === localhostOrigin) &&
-      current.pathname.startsWith('/panel');
-
-    if (isPanelRoute) {{
-      current.searchParams.set('code', code);
-      nextUrl = current.pathname + current.search + current.hash;
-    }}
-  }} catch (_error) {{
-    // Fall back to the default panel entrypoint.
-  }}
-
-  window.location.replace(nextUrl);
-}})();
-"#
-    );
-
-    window.eval(&js)
+    let current_url = window.url().ok();
+    let panel_url = panel_session_url_for_current(current_url.as_ref(), port, panel_code)?;
+    window.navigate(panel_url)
 }
 
 pub(crate) fn refresh_panel_session_for_window(app: &AppHandle, window_label: &str) {
@@ -766,7 +810,10 @@ fn start_kernel_and_bootstrap(
 pub fn run() {
     env_logger::init();
 
-    let allowed_navigation_ports = Arc::new(Mutex::new(vec![8765]));
+    let allowed_navigation_ports =
+        Arc::new(Mutex::new(navigation_ports_with_tauri_dev_server(vec![
+            8765,
+        ])));
     let allowed_navigation_ports_for_plugin = Arc::clone(&allowed_navigation_ports);
     let allowed_navigation_ports_for_setup = Arc::clone(&allowed_navigation_ports);
 
@@ -822,7 +869,10 @@ pub fn run() {
             config.kernel_port = resolve_available_kernel_port(&config, &panel_bootstrap_secret);
             set_allowed_navigation_ports(
                 &allowed_navigation_ports_for_setup,
-                vec![config.kernel_port, DEFAULTSPACK_RESERVED_PORT],
+                navigation_ports_with_tauri_dev_server(vec![
+                    config.kernel_port,
+                    DEFAULTSPACK_RESERVED_PORT,
+                ]),
             );
             app.manage(AllowedNavigationPorts(Arc::clone(
                 &allowed_navigation_ports_for_setup,
@@ -1120,6 +1170,58 @@ mod tests {
             Some(8767),
             &allowed_ports
         ));
+    }
+
+    #[test]
+    fn detects_tauri_dev_server_port_from_cli_config() {
+        assert_eq!(
+            dev_server_port_from_tauri_config(r#"{"build":{"devUrl":"http://127.0.0.1:1430"}}"#),
+            Some(1430)
+        );
+        assert_eq!(
+            dev_server_port_from_tauri_config(r#"{"build":{"devUrl":"https://127.0.0.1:1430"}}"#),
+            None
+        );
+        assert_eq!(
+            dev_server_port_from_tauri_config(r#"{"build":{"devUrl":"http://example.com:1430"}}"#),
+            None
+        );
+    }
+
+    #[test]
+    fn panel_navigation_url_starts_at_panel_entrypoint() {
+        let url = panel_session_url_for_current(None, 8765, "code with space").unwrap();
+
+        assert_eq!(url.scheme(), "http");
+        assert_eq!(url.host_str(), Some("127.0.0.1"));
+        assert_eq!(url.port_or_known_default(), Some(8765));
+        assert_eq!(url.path(), "/panel/");
+        assert_eq!(
+            url.query_pairs()
+                .find(|(key, _)| key == "code")
+                .map(|(_, value)| value.into_owned()),
+            Some("code with space".into())
+        );
+    }
+
+    #[test]
+    fn panel_navigation_url_preserves_existing_panel_route() {
+        let current =
+            Url::parse("http://localhost:8765/panel/packs?foo=bar&code=old#section").unwrap();
+        let url = panel_session_url_for_current(Some(&current), 8765, "new").unwrap();
+
+        assert_eq!(
+            url.as_str(),
+            "http://localhost:8765/panel/packs?foo=bar&code=new#section"
+        );
+    }
+
+    #[test]
+    fn panel_navigation_url_escapes_blank_or_dev_page() {
+        let current = Url::parse("http://127.0.0.1:1430/").unwrap();
+        let url = panel_session_url_for_current(Some(&current), 8765, "fresh").unwrap();
+
+        assert_eq!(url.as_str(), "http://127.0.0.1:8765/panel/?code=fresh");
     }
 
     #[test]

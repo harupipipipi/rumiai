@@ -15,6 +15,15 @@ control panel frontend の source は `rumi_viewer/frontend` が所有し、kern
 repo ルートで次を実行します。
 
 ```bash
+cd rumi_viewer/frontend
+npm install
+cd ..
+cargo tauri dev
+```
+
+2 回目以降、`rumi_viewer/frontend/node_modules` が残っている場合は次だけで起動できます。
+
+```bash
 cd rumi_viewer
 cargo tauri dev
 ```
