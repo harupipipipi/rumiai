@@ -37,19 +37,7 @@ Release title:
 
 Release notes draft:
 
-```markdown
-Rumi AI v0.2.0 is an early local-first runtime preview for modular AI tooling.
-
-Highlights:
-
-- Pack-based runtime architecture.
-- Approval-aware paths for host, file, terminal, git, browser, computer, and secret-sensitive behavior.
-- Defaultspack control panel and Tauri desktop viewer.
-- Flutter mobile client for trusted-LAN workflows.
-- CI lanes for Python, frontend, Rust, Windows, macOS, installers, and dependency audits.
-
-This is still an early project. Please start with the README quickstart, report setup issues with exact OS/runtime versions, and use private vulnerability reporting for approval or secret-handling bypasses.
-```
+Use [releases/v0.2.0.md](./releases/v0.2.0.md) as the base release notes.
 
 Release checklist:
 
@@ -57,7 +45,8 @@ Release checklist:
 - Confirm CI is green on `master`.
 - Create or update a changelog section.
 - Tag `v0.2.0`.
-- Let the release workflow produce artifacts.
+- Let the release workflow produce draft release artifacts.
+- Review generated artifacts and release notes.
 - Publish the GitHub Release only after artifacts and notes are correct.
 - Add a short screenshot or demo link if available.
 
