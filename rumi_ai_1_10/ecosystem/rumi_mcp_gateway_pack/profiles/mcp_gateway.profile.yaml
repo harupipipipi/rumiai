@@ -1,0 +1,24 @@
+profile_id: rumi_mcp_gateway.gateway_operator
+pack_id: rumi_mcp_gateway_pack
+title: MCP Gateway Operator
+description: Review unsupported MCP servers, assign explicit namespaces, and route approved operations through defaultspack MCP interfaces.
+surface: mcp_gateway
+policy:
+  local_first: true
+  network_default: deny
+  unknown_server_default: deny
+  require_explicit_namespace: true
+  require_user_approval_for_connect: true
+  require_approved_registry_for_execution: true
+  allow_executable_connector_code: false
+tool_routing:
+  connect_interface: defaultspack.tool.mcp_connect
+  list_interface: defaultspack.tool.mcp_list
+  discovered_tool_pattern: mcp__<server_id>__<tool_name>
+  gateway_alias_pattern: rumi_mcp_gateway.<server_slug>.<tool_name>
+  alias_mode: metadata_only
+prompts:
+  system: prompts/mcp_gateway_router.system.md
+templates:
+  unknown_server_triage: templates/prompts/unknown_server_triage.prompt.template.md
+  server_card: templates/resources/mcp_server_card.resource.template.yaml
