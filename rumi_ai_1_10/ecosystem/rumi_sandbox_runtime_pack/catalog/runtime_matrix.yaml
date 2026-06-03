@@ -1,0 +1,18 @@
+catalog_id: rumi_sandbox_runtime.runtime_matrix
+schema_version: 1
+runtimes:
+  - runtime_id: local_shell
+    isolation: host
+    default_decision: needs_review
+  - runtime_id: container
+    isolation: filesystem_process_network_boundary
+    default_decision: prefer_for_untrusted_code
+  - runtime_id: ssh_remote
+    isolation: remote_host
+    default_decision: require_scope_card
+  - runtime_id: ephemeral_cloud
+    isolation: disposable_environment
+    default_decision: require_budget_and_data_review
+  - runtime_id: browser_sandbox
+    isolation: web_origin
+    default_decision: route_to_browser_packs

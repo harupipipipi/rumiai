@@ -1,0 +1,46 @@
+{
+  "pack_id": "rumi_sandbox_runtime_pack",
+  "pack_identity": "rumi:ecosystem/rumi_sandbox_runtime_pack",
+  "display_name": "Rumi Sandbox Runtime Pack",
+  "version": "0.1.0",
+  "runtime": {
+    "type": "declarative_pack"
+  },
+  "depends_on": [
+    {
+      "pack_id": "defaultspack",
+      "version": ">=2.0.0"
+    }
+  ],
+  "optional_integrations": [
+    {
+      "pack_id": "rumi_code_ide_pack",
+      "reason": "Complementary owner surface for this pack."
+    },
+    {
+      "pack_id": "rumi_computer_control_pack",
+      "reason": "Complementary owner surface for this pack."
+    },
+    {
+      "pack_id": "rumi_security_review_pack",
+      "reason": "Complementary owner surface for this pack."
+    },
+    {
+      "pack_id": "rumi_devops_release_pack",
+      "reason": "Complementary owner surface for this pack."
+    }
+  ],
+  "components": {},
+  "load_order": [],
+  "metadata": {
+    "required_secrets": [],
+    "network_policy": "none_by_default",
+    "executable_code": false,
+    "owner_surfaces": [
+      "sandbox_contracts",
+      "runtime_isolation_matrix",
+      "execution_evidence",
+      "artifact_job_boundaries"
+    ]
+  }
+}

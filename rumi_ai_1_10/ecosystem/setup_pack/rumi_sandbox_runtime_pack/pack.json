@@ -1,0 +1,46 @@
+{
+  "pack_id": "rumi_sandbox_runtime_pack",
+  "display_name": "Rumi Sandbox Runtime Pack",
+  "description": "Declarative sandbox/runtime pack for safe code execution, isolated terminals, containers, and artifact-producing jobs.",
+  "target_pack_id": "rumi_sandbox_runtime_pack",
+  "version": "0.1.0",
+  "recommended": false,
+  "risk_level": "high",
+  "supports_all_ok": false,
+  "depends_on": [
+    {
+      "pack_id": "defaultspack",
+      "version": ">=2.0.0"
+    }
+  ],
+  "conflicts_with": [],
+  "overlap_policy": {
+    "code_execution": "requires_defaultspack_tool_grants",
+    "desktop_control": "handoff_to_rumi_computer_control_pack",
+    "security_review": "handoff_to_rumi_security_review_pack",
+    "release_jobs": "handoff_to_rumi_devops_release_pack"
+  },
+  "defaultspack_promotion": {
+    "eligible": false,
+    "criteria": [
+      "contract_tests_pass",
+      "overlap_policy_reviewed",
+      "maintainer_runtime_evidence_required"
+    ]
+  },
+  "marketplace": {
+    "id": "rumi.sandbox_runtime_pack",
+    "channel": "experimental"
+  },
+  "signing": {
+    "mode": "repository_reviewed"
+  },
+  "security_notes": [
+    "No secrets are bundled.",
+    "No executable code is included.",
+    "Network is none by default."
+  ],
+  "conflict_notes": [
+    "This pack declares owner boundaries and handoff policy instead of overriding runtime tools."
+  ]
+}

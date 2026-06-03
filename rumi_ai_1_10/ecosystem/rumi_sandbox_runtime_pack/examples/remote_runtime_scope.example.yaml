@@ -1,0 +1,6 @@
+example_id: rumi_sandbox_runtime.remote_runtime_scope
+request: Example workflow for remote runtime scope.
+expected_outputs:
+  - plan
+  - evidence
+  - handoff

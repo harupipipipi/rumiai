@@ -1,0 +1,6 @@
+example_id: rumi_sandbox_runtime.container_test_run
+request: Example workflow for container test run.
+expected_outputs:
+  - plan
+  - evidence
+  - handoff

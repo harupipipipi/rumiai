@@ -1,0 +1,6 @@
+example_id: rumi_sandbox_runtime.host_command_review
+request: Example workflow for host command review.
+expected_outputs:
+  - plan
+  - evidence
+  - handoff
