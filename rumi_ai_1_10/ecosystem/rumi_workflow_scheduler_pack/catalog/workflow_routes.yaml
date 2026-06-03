@@ -1,0 +1,70 @@
+route_catalog_id: rumi_workflow_scheduler.workflow_routes
+version: 1
+pack_id: rumi_workflow_scheduler_pack
+purpose: Route schedule contracts to owner surfaces without implementing execution.
+owner_boundary:
+  schedule_contract_owner: rumi_workflow_scheduler_pack
+  automation_execution_owner: app_automation_or_defaultspack
+  namespace_is_permission_boundary: false
+routes:
+  - route_id: app_automation_tool
+    display_name: App Automation Tool
+    when_available: true
+    owns:
+      - reminder_creation
+      - monitor_registration
+      - thread_wakeup
+      - recurring_automation_install
+    scheduler_pack_role: produce_contract_and_review_evidence
+    approval_behavior: defer_to_app_tool
+  - route_id: defaultspack_scheduler
+    display_name: Defaultspack Scheduler Surface
+    when_available: true
+    owns:
+      - runtime_schedule_execution
+      - approval_enforcement
+      - audit_events
+    scheduler_pack_role: route_hint_only
+    approval_behavior: defer_to_defaultspack
+  - route_id: rumi_agent_services_pack
+    display_name: Agent Services Pack
+    when_available: optional
+    owns:
+      - service_handoff
+      - recurring_agent_cadence
+      - followup_task_context
+    scheduler_pack_role: cadence_and_stop_condition_contract
+    approval_behavior: defer_to_agent_service_owner
+  - route_id: rumi_connector_gateway_pack
+    display_name: Connector Gateway Pack
+    when_available: optional
+    owns:
+      - connector_discovery
+      - delivery_channel_routing
+      - external_audience_policy
+    scheduler_pack_role: delivery_handoff_contract_only
+    approval_behavior: defer_to_connector_gateway
+  - route_id: rumi_devops_release_pack
+    display_name: DevOps Release Pack
+    when_available: optional
+    owns:
+      - release_gates
+      - deployment_policy
+      - release_signoff_workflow
+    scheduler_pack_role: release_wakeup_and_reminder_contract
+    approval_behavior: defer_to_release_owner
+conflict_resolution:
+  defaultspack:
+    rule: do_not_override
+    reason: Defaultspack or app automation tools own actual schedule execution.
+  duplicate_schedule_id:
+    rule: require_user_resolution
+    reason: Duplicate recurring work can spam delivery channels.
+  delivery_without_owner:
+    rule: block_until_owner_route_selected
+    reason: This pack does not deliver messages.
+audit_labels:
+  - workflow_scheduler.contract_created
+  - workflow_scheduler.owner_route_selected
+  - workflow_scheduler.stop_condition_recorded
+  - workflow_scheduler.delivery_handoff_requested
