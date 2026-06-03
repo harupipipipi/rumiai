@@ -1,0 +1,6 @@
+example_id: rumi_frontend_design.component_brief
+request: Example workflow for component brief.
+expected_outputs:
+  - plan
+  - evidence
+  - handoff

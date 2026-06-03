@@ -1,0 +1,6 @@
+preset_id: rumi_frontend_design.safe_default
+profile: rumi_frontend_design.frontend_design_reviewer
+features:
+  local_first: true
+  evidence_required: true
+  owner_boundary_check: true

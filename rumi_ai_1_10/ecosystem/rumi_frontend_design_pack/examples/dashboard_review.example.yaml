@@ -1,0 +1,6 @@
+example_id: rumi_frontend_design.dashboard_review
+request: Example workflow for dashboard review.
+expected_outputs:
+  - plan
+  - evidence
+  - handoff

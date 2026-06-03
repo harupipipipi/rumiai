@@ -1,0 +1,6 @@
+example_id: rumi_frontend_design.mobile_visual_qa
+request: Example workflow for mobile visual qa.
+expected_outputs:
+  - plan
+  - evidence
+  - handoff
