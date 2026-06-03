@@ -32,6 +32,7 @@ These tasks improve public credibility without inflating metrics:
 - Publish a first GitHub Release with installer artifacts or a source release.
 - Create issues labeled `good first issue` for docs, examples, setup testing, and small pack examples.
 - Add a short demo video or screenshots to the README or release notes.
+- Add a demo script for a truthful first public walkthrough.
 - Publish a package only if the install path is tested and supportable.
 - Collect real usage evidence: downstream repos, user installs, community links, articles, demos, or integrations.
 

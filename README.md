@@ -167,3 +167,4 @@ Rumi AI is early but actively maintained. The best places to help are:
 See [CONTRIBUTING.md](./CONTRIBUTING.md) for the contribution flow and [SECURITY.md](./SECURITY.md) for private vulnerability reports.
 For launch and release work, see [docs/community-launch-plan.md](./docs/community-launch-plan.md).
 For adoption evidence tracking, see [docs/adoption-evidence.md](./docs/adoption-evidence.md).
+For a short public demo outline, see [docs/demo-script.md](./docs/demo-script.md).

@@ -46,6 +46,7 @@ def main() -> int:
         "docs/first-run-check.md",
         "docs/community-launch-plan.md",
         "docs/adoption-evidence.md",
+        "docs/demo-script.md",
         "docs/oss-program-readiness.md",
         "docs/releases/v0.2.0.md",
     ]
@@ -62,6 +63,7 @@ def main() -> int:
     first_run = read("docs/first-run-check.md")
     launch = read("docs/community-launch-plan.md")
     evidence = read("docs/adoption-evidence.md")
+    demo = read("docs/demo-script.md")
     readiness = read("docs/oss-program-readiness.md")
 
     results.extend(
@@ -74,7 +76,13 @@ def main() -> int:
                 "first-run guide documents health check",
             ),
             check("adoption-evidence.md" in launch, "launch plan links evidence tracker"),
+            check("demo-script.md" in launch, "launch plan links demo script"),
             check("Do not count:" in evidence, "evidence tracker has anti-inflation rules"),
+            check("python -m rumi_ai --health" in demo, "demo script uses health check"),
+            check(
+                "python scripts/verify_oss_readiness.py" in demo,
+                "demo script uses readiness verifier",
+            ),
             check(
                 re.search(r"buy|bought|star-for-star|fake", evidence, re.IGNORECASE)
                 is not None,

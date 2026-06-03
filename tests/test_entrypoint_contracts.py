@@ -58,11 +58,16 @@ def test_public_readiness_docs_keep_adoption_evidence_visible():
     readme_text = _read(ROOT / "README.md")
     launch_text = _read(ROOT / "docs" / "community-launch-plan.md")
     evidence_text = _read(ROOT / "docs" / "adoption-evidence.md")
+    demo_text = _read(ROOT / "docs" / "demo-script.md")
 
     assert "docs/adoption-evidence.md" in readme_text
+    assert "docs/demo-script.md" in readme_text
     assert "adoption-evidence.md" in launch_text
+    assert "demo-script.md" in launch_text
     assert "Do not count:" in evidence_text
     assert "Bought stars" in evidence_text or "bought stars" in evidence_text
+    assert "python -m rumi_ai --health" in demo_text
+    assert "python scripts/verify_oss_readiness.py" in demo_text
 
 
 def test_oss_readiness_verifier_passes():

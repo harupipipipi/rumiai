@@ -28,6 +28,21 @@ Include:
 - Workspace jail, path normalization, and archive extraction.
 - Audit logging and tamper resistance.
 
+## Maintainer Review Checklist
+
+Use this checklist for any PR that touches security-sensitive paths:
+
+- Does the change introduce a new write, terminal, git, browser, computer, network, or secret-handling path?
+- Does every privileged path still require server-side approval, grant, or trust validation?
+- Can a client-supplied flag, profile, pack, or request body bypass a local guard?
+- Are paths normalized before filesystem access, archive extraction, or workspace boundary checks?
+- Are secrets excluded from logs, screenshots, issue templates, traces, and audit payloads?
+- Does the change preserve audit records for approval-sensitive behavior?
+- Is there a focused regression test for the boundary being changed?
+- If the behavior relies on platform APIs, has Windows/macOS/Linux behavior been considered separately?
+
+If any answer is uncertain, keep the change small and request maintainer review before merging.
+
 ## Disclosure
 
 The maintainer will aim to acknowledge valid reports promptly, investigate privately, and publish a fix before public disclosure when the impact warrants it.

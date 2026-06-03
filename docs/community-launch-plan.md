@@ -50,6 +50,7 @@ Release checklist:
 - Review generated artifacts and release notes.
 - Publish the GitHub Release only after artifacts and notes are correct.
 - Add a short screenshot or demo link if available.
+- Use [demo-script.md](./demo-script.md) for a short, honest first public demo.
 
 ## Good First Issue Backlog
 

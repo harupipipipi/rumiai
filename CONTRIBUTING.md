@@ -47,6 +47,7 @@ cargo test
 - Do not bypass approval, workspace jail, local guard, capability trust, audit, or secret-handling paths.
 - Treat browser, computer, terminal, git, file-write, and integration behavior as security-sensitive.
 - Prefer tests that describe the contract being protected.
+- For security-sensitive changes, include the relevant checks from `SECURITY.md` in the PR notes.
 
 ## Issue Guidelines
 
