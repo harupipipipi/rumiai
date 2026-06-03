@@ -139,3 +139,5 @@ Not allowed:
 - Downstream repos or packs that depend on Rumi AI.
 - Articles, demos, videos, or community threads with real discussion.
 - Package downloads only if packages are published and supportable.
+
+Track evidence in [adoption-evidence.md](./adoption-evidence.md). Keep it public-link based where possible and avoid private user data.

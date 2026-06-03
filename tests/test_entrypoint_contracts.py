@@ -49,3 +49,14 @@ def test_first_run_docs_keep_health_check_contract_visible():
     assert "python -m rumi_ai --health" in first_run_text
     assert "just health" in first_run_text
     assert "tests/test_entrypoint_contracts.py" in first_run_text
+
+
+def test_public_readiness_docs_keep_adoption_evidence_visible():
+    readme_text = _read(ROOT / "README.md")
+    launch_text = _read(ROOT / "docs" / "community-launch-plan.md")
+    evidence_text = _read(ROOT / "docs" / "adoption-evidence.md")
+
+    assert "docs/adoption-evidence.md" in readme_text
+    assert "adoption-evidence.md" in launch_text
+    assert "Do not count:" in evidence_text
+    assert "Bought stars" in evidence_text or "bought stars" in evidence_text

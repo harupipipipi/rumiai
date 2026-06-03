@@ -35,6 +35,7 @@ These tasks improve public credibility without inflating metrics:
 - Collect real usage evidence: downstream repos, user installs, community links, articles, demos, or integrations.
 
 See [community-launch-plan.md](./community-launch-plan.md) for concrete release notes, repository metadata, and issue drafts.
+See [adoption-evidence.md](./adoption-evidence.md) for a truthful evidence tracker and outreach copy drafts.
 
 ## Pull Request Draft
 
@@ -50,11 +51,13 @@ Body:
 - Add contributor, security, support, code-of-conduct, and issue-template materials for public OSS onboarding.
 - Add an OSS program readiness note with truthful OpenAI/Claude application drafts and explicit anti-metric-inflation guidance.
 - Add a community launch plan, first release notes draft, and draft-release workflow safety so the first public release can be reviewed before publishing.
+- Add first-run and adoption-evidence docs so setup feedback and real usage can be collected without inflating metrics.
 
 ## Impact
 
 - Makes the repo easier for real users and contributors to evaluate.
 - Gives maintainers concrete release, metadata, good-first-issue, and application copy to use.
+- Adds a place to record public evidence for downstream use, real users, releases, and community feedback.
 - Keeps public claims honest about the current adoption gap.
 
 ## Validation
