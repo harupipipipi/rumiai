@@ -25,6 +25,9 @@ jobs:
         run: |
           pip install pytest
 
+      - name: Run OSS readiness verifier
+        run: python scripts/verify_oss_readiness.py
+
       - name: Run root pytest
         id: root_pytest
         run: |
