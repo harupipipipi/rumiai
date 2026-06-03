@@ -41,17 +41,17 @@ Role:
 
 Core maintainer / primary maintainer, if the applicant has write or admin access to `harupipipipi/rumiai`.
 
-Why this repository should qualify:
+Why this repository should qualify (500 chars max):
 
-Rumi AI is an actively maintained MIT-licensed local-first AI runtime for modular packs, approval-aware host capabilities, audit paths, and cross-surface AI tooling. The project includes Python runtime code, Tauri desktop viewer, Flutter mobile client, example packs, security-focused approval and capability tests, and GitHub Actions coverage across Python, frontend, Rust, Windows, macOS, installer, and dependency-audit lanes. The strongest current evidence is active maintenance and security-oriented architecture; public adoption evidence is still emerging.
+Rumi AI is an actively maintained MIT-licensed local-first AI runtime for modular packs, approval-aware host capabilities, audit paths, and cross-surface AI tooling. It includes Python runtime code, a Tauri desktop viewer, Flutter mobile client, example packs, and CI for Python, frontend, Rust, Windows, macOS, installers, and dependency audits. Adoption is early; the strongest evidence is active maintenance and security-focused architecture.
 
-API credit use:
+API credit use (500 chars max):
 
-API credits would be used for maintainer workflows: PR review, regression triage, release notes, security-oriented code review, documentation improvements, and test generation around approval, pack installation, browser/computer control, terminal, git, and secret-handling paths. Credits would not be used to scan third-party repositories without authorization.
+API credits would support maintainer workflows: PR review, regression triage, release notes, security-oriented code review, documentation, and test generation around approval, pack installation, browser/computer control, terminal, git, and secret-handling paths. Credits would be used only for Rumi AI and authorized related maintenance, not to scan third-party repositories without permission.
 
-Additional note:
+Additional note (500 chars max):
 
-The repository is early-stage and does not yet have large public adoption metrics. The application should be positioned as an ecosystem-impact or emerging-maintainer request unless stronger downstream usage evidence is collected.
+Rumi AI is early-stage and does not yet have large public adoption metrics. I am applying on the strength of active maintenance, security-focused local-first architecture, and the project’s relevance to AI developer tooling. I am also improving public contribution, security, issue-template, release, and community onboarding materials.
 
 ## Claude Draft
 
@@ -59,9 +59,9 @@ Track:
 
 Ecosystem Impact Track only, unless the repository reaches the published Maintainer Track threshold or the applicant becomes a maintainer of another qualifying project.
 
-Explanation:
+Explanation (Claude "Other info"):
 
-Rumi AI is an MIT-licensed local-first AI runtime focused on modular packs, explicit approval boundaries, capability trust, auditability, and desktop/mobile surfaces for AI tooling. It is actively maintained with recent commits and PRs, includes CI coverage for Python, frontend, Rust, Windows, macOS, installer, and dependency-audit paths, and is designed around security-sensitive maintainer workflows. Current public adoption is limited, so the application should be submitted only if the maintainer can truthfully explain why the project is becoming important to downstream users or a specific developer community.
+Rumi AI is an MIT-licensed local-first AI runtime focused on modular packs, explicit approval boundaries, capability trust, auditability, and desktop/mobile surfaces for AI tooling. It is actively maintained with recent commits and PRs, includes CI coverage for Python, frontend, Rust, Windows, macOS, installer, and dependency-audit paths, and is designed around security-sensitive maintainer workflows. Current public adoption is limited, so this should be submitted under the discretionary Ecosystem Impact Track rather than the 5,000-star Maintainer Track.
 
 ## Do Not Do
 
