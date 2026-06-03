@@ -38,3 +38,7 @@ frontend-check:
 # Run the defaultspack integrity scan used by CI.
 integrity:
     cd rumi_ai_1_10 && python scripts/quality/scan_defaultspack_integrity.py
+
+# Verify OSS program readiness docs and release safety checks.
+oss-readiness:
+    python scripts/verify_oss_readiness.py

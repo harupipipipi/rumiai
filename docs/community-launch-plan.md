@@ -42,6 +42,7 @@ Use [releases/v0.2.0.md](./releases/v0.2.0.md) as the base release notes.
 Release checklist:
 
 - Merge the OSS readiness PR.
+- Run `python scripts/verify_oss_readiness.py`.
 - Confirm CI is green on `master`.
 - Create or update a changelog section.
 - Tag `v0.2.0`.

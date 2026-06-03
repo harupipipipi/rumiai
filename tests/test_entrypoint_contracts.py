@@ -1,4 +1,7 @@
 import re
+import json
+import subprocess
+import sys
 from pathlib import Path
 
 
@@ -60,3 +63,17 @@ def test_public_readiness_docs_keep_adoption_evidence_visible():
     assert "adoption-evidence.md" in launch_text
     assert "Do not count:" in evidence_text
     assert "Bought stars" in evidence_text or "bought stars" in evidence_text
+
+
+def test_oss_readiness_verifier_passes():
+    proc = subprocess.run(
+        [sys.executable, "scripts/verify_oss_readiness.py"],
+        cwd=ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    payload = json.loads(proc.stdout)
+    assert payload["status"] == "pass"

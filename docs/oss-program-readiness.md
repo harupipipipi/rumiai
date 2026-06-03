@@ -27,6 +27,7 @@ These tasks improve public credibility without inflating metrics:
 - Add bug and feature issue templates.
 - Improve README positioning for first-time users.
 - Add a first-run health-check guide so new users can verify a checkout quickly.
+- Add a local readiness verifier for contribution, release, adoption-evidence, and application-draft materials.
 - Add repository topics and a concise GitHub description.
 - Publish a first GitHub Release with installer artifacts or a source release.
 - Create issues labeled `good first issue` for docs, examples, setup testing, and small pack examples.
@@ -63,6 +64,7 @@ Body:
 ## Validation
 
 - [x] Parsed workflow and issue-template YAML locally.
+- [x] Added a local OSS readiness verifier.
 - [x] Checked OpenAI application copy is under 500 characters per field.
 - [x] Ran `git diff --check`.
 
