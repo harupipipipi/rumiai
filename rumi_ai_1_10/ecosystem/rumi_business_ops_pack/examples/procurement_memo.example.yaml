@@ -1,0 +1,6 @@
+example_id: rumi_business_ops.procurement_memo
+request: Example workflow for procurement memo.
+expected_outputs:
+  - plan
+  - evidence
+  - handoff

@@ -1,0 +1,46 @@
+{
+  "pack_id": "rumi_business_ops_pack",
+  "display_name": "Rumi Business Ops Pack",
+  "description": "Declarative business operations pack for sales, support, marketing, procurement, and admin workflows.",
+  "target_pack_id": "rumi_business_ops_pack",
+  "version": "0.1.0",
+  "recommended": false,
+  "risk_level": "medium",
+  "supports_all_ok": false,
+  "depends_on": [
+    {
+      "pack_id": "defaultspack",
+      "version": ">=2.0.0"
+    }
+  ],
+  "conflicts_with": [],
+  "overlap_policy": {
+    "connectors": "handoff_to_rumi_connector_gateway_pack",
+    "scheduled_followups": "handoff_to_rumi_workflow_scheduler_pack",
+    "final_artifacts": "handoff_to_rumi_workspace_pack",
+    "research_evidence": "handoff_to_rumi_research_pack"
+  },
+  "defaultspack_promotion": {
+    "eligible": false,
+    "criteria": [
+      "contract_tests_pass",
+      "overlap_policy_reviewed",
+      "maintainer_runtime_evidence_required"
+    ]
+  },
+  "marketplace": {
+    "id": "rumi.business_ops_pack",
+    "channel": "experimental"
+  },
+  "signing": {
+    "mode": "repository_reviewed"
+  },
+  "security_notes": [
+    "No secrets are bundled.",
+    "No executable code is included.",
+    "Network is none by default."
+  ],
+  "conflict_notes": [
+    "This pack declares owner boundaries and handoff policy instead of overriding runtime tools."
+  ]
+}

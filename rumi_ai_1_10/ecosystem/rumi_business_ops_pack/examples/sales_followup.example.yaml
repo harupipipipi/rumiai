@@ -1,0 +1,6 @@
+example_id: rumi_business_ops.sales_followup
+request: Example workflow for sales followup.
+expected_outputs:
+  - plan
+  - evidence
+  - handoff

@@ -1,0 +1,6 @@
+example_id: rumi_business_ops.support_triage
+request: Example workflow for support triage.
+expected_outputs:
+  - plan
+  - evidence
+  - handoff

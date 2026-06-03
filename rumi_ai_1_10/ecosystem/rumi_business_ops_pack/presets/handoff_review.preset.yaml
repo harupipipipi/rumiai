@@ -1,0 +1,6 @@
+preset_id: rumi_business_ops.handoff_review
+profile: rumi_business_ops.business_ops_operator
+features:
+  local_first: true
+  evidence_required: true
+  owner_boundary_check: true
