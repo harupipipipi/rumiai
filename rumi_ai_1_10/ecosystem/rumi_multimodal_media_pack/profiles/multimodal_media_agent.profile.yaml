@@ -1,0 +1,8 @@
+profile_id: rumi_multimodal_media.agent
+pack_id: rumi_multimodal_media_pack
+purpose: Plan and review media workflows with provenance, rights, and privacy notes.
+policy:
+  local_first: true
+  network_default: deny
+  require_asset_ledger: true
+  require_rights_context: true

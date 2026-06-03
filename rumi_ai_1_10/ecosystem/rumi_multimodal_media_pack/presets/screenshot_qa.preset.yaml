@@ -1,0 +1,6 @@
+preset_id: rumi_multimodal_media.screenshot_qa
+profile: rumi_multimodal_media.visual_qa
+workflow: screenshot_to_issue_report
+features:
+  redact_before_external_handoff: true
+  require_issue_locations: true
