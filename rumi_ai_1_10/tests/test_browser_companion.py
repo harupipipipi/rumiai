@@ -169,6 +169,44 @@ def test_browser_companion_extension_focus_semantics_are_explicit():
     assert "can_parallel_user_work: false" in capture_body
 
 
+def test_browser_companion_extension_semantic_dom_and_highlight_contract():
+    extension_root = ROOT.parent / "browser_extensions" / "rumi_browser_companion"
+    content = (extension_root / "content_script.js").read_text(encoding="utf-8")
+    background = (extension_root / "background.js").read_text(encoding="utf-8")
+    tool_manifest = (
+        ROOT
+        / "ecosystem"
+        / "rumi_default_tools_pack"
+        / "tools"
+        / "browser_companion"
+        / "manifest.json"
+    ).read_text(encoding="utf-8")
+
+    for needle in (
+        'schema_version: "semantic_dom_v2"',
+        "semantic_id:",
+        "accessible_name:",
+        "labels,",
+        "nearby_text:",
+        "action_hints:",
+        "recognition_confidence:",
+        "xpath_hint:",
+        "function highlightElement",
+        "function clearHighlights",
+    ):
+        assert needle in content
+
+    for needle in (
+        "semantic_dom: true",
+        "accessible_labels: true",
+        '"highlight"',
+        '"clear_highlight"',
+        'case "page.highlight"',
+        'case "page.clear_highlight"',
+    ):
+        assert needle in background or needle in tool_manifest
+
+
 def test_browser_companion_bridge_routes_support_batch_results(tmp_path, monkeypatch):
     from blocks.tool import browser_companion_bridge as route_module
     from ecosystem.rumi_default_tools_pack.domain.tool.browser_companion_bridge import BrowserCompanionBridgeStore

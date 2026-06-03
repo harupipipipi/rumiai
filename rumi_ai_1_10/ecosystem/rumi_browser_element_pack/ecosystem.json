@@ -1,0 +1,16 @@
+{
+  "pack_id": "rumi_browser_element_pack",
+  "pack_identity": "rumi:ecosystem/rumi_browser_element_pack",
+  "version": "1.0.0",
+  "metadata": {
+    "name": "Rumi Browser Element Pack",
+    "description": "Semantic DOM and browser-use style element recognition profiles for the Rumi Browser Companion extension.",
+    "author": "Rumi AI Team",
+    "license": "MIT"
+  },
+  "vocabulary": {
+    "types": ["browser", "vision", "tool", "agent"]
+  },
+  "components": {},
+  "load_order": []
+}

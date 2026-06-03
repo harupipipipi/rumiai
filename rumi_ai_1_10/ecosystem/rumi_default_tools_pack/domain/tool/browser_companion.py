@@ -61,6 +61,10 @@ class BrowserCompanionController:
             return self._run_remote("page.press", payload, context, timeout_seconds=20.0)
         if normalized == "page.scroll":
             return self._run_remote("page.scroll", payload, context, timeout_seconds=20.0)
+        if normalized == "page.highlight":
+            return self._run_remote("page.highlight", payload, context, timeout_seconds=20.0)
+        if normalized == "page.clear_highlight":
+            return self._run_remote("page.clear_highlight", payload, context, timeout_seconds=20.0)
         raise ValueError(f"Unsupported browser companion action: {action}")
 
     @staticmethod
@@ -81,6 +85,8 @@ class BrowserCompanionController:
             "type": "page.type",
             "press": "page.press",
             "scroll": "page.scroll",
+            "highlight": "page.highlight",
+            "clear_highlight": "page.clear_highlight",
         }
         return aliases.get(raw, raw)
 
@@ -112,9 +118,11 @@ class BrowserCompanionController:
             "capabilities": {
                 "multi_browser": True,
                 "dom_snapshot": True,
+                "semantic_dom": True,
+                "accessible_labels": True,
                 "user_session_cookies": True,
                 "browser_tab_capture": True,
-                "element_actions": True,
+                "element_actions": ["click", "type", "press", "scroll", "extract", "highlight", "clear_highlight"],
             },
         }
 
@@ -269,6 +277,8 @@ class BrowserCompanionController:
             "page.press",
             "page.scroll",
             "page.extract",
+            "page.highlight",
+            "page.clear_highlight",
         }:
             return {
                 "requires_foreground": False,
@@ -315,6 +325,11 @@ class BrowserCompanionController:
             "timeout_ms",
             "format",
             "quality",
+            "duration_ms",
+            "color",
+            "label",
+            "clear_existing",
+            "include_semantics",
         }
         return {key: value for key, value in payload.items() if key in allowed and value is not None}
 

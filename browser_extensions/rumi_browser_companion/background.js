@@ -208,7 +208,9 @@ async function buildClientMetadata(settings, clientId) {
       navigate: true,
       capture_visible_tab: true,
       dom_snapshot: true,
-      element_actions: ["click", "type", "press", "scroll", "extract"]
+      semantic_dom: true,
+      accessible_labels: true,
+      element_actions: ["click", "type", "press", "scroll", "extract", "highlight", "clear_highlight"]
     },
     generated_at: new Date().toISOString()
   };
@@ -319,7 +321,9 @@ function actionResultSemantics(action, result) {
     action === "page.type" ||
     action === "page.press" ||
     action === "page.scroll" ||
-    action === "page.extract"
+    action === "page.extract" ||
+    action === "page.highlight" ||
+    action === "page.clear_highlight"
   ) {
     return { requires_foreground: false, can_parallel_user_work: true };
   }
@@ -345,6 +349,8 @@ async function dispatchCommand(command) {
     case "page.press":
     case "page.scroll":
     case "page.extract":
+    case "page.highlight":
+    case "page.clear_highlight":
       return sendElementCommand(action, payload);
     default:
       throw new Error(`Unsupported command action: ${action}`);
