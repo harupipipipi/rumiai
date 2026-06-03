@@ -1,0 +1,13 @@
+profile:
+  id: document_intelligence_reviewer
+  pack_id: rumi_document_intelligence_pack
+  stance: evidence_first_reviewer
+  owner_surfaces:
+  - pdf_extraction
+  - contract_clause_review
+  - citation_traceability
+  - redline_handoffs
+  required_checks:
+    - parse_catalog
+    - inspect_overlap_policy
+    - preserve_evidence
