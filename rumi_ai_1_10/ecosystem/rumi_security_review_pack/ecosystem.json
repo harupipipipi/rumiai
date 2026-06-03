@@ -1,0 +1,63 @@
+{
+  "pack_id": "rumi_security_review_pack",
+  "pack_identity": "rumi:ecosystem/rumi_security_review_pack",
+  "version": "1.0.0",
+  "metadata": {
+    "name": "Rumi Security Review Pack",
+    "description": "Declarative local-first security and privacy review pack for threat modeling, secret scanning review, permission review, MCP/browser risk, dependency review, and release signoff.",
+    "author": "Rumi AI Team",
+    "license": "MIT",
+    "tags": ["security", "privacy", "review", "threat-modeling", "release-signoff"],
+    "runtime_type": "declarative_pack",
+    "network_policy": "none_by_default",
+    "required_secrets": [],
+    "executable_code": false,
+    "grant_override": false,
+    "asset_index": {
+      "catalogs": [
+        "catalog/review_controls.yaml",
+        "catalog/risk_taxonomy.yaml",
+        "catalog/finding_schema.json"
+      ],
+      "profiles": [
+        "profiles/security_reviewer.profile.yaml"
+      ],
+      "prompts": [
+        "prompts/security_reviewer.system.md",
+        "prompts/release_signoff.system.md"
+      ],
+      "presets": [
+        "presets/threat_model_review.preset.yaml",
+        "presets/permission_grant_review.preset.yaml",
+        "presets/mcp_browser_risk_review.preset.yaml",
+        "presets/dependency_release_signoff.preset.yaml"
+      ],
+      "examples": [
+        "examples/pack_security_review.example.yaml",
+        "examples/release_signoff.example.yaml"
+      ],
+      "docs": [
+        "README.md",
+        "docs/README.md",
+        "docs/architecture.md",
+        "docs/interfaces.md",
+        "docs/operations.md"
+      ]
+    }
+  },
+  "vocabulary": {
+    "types": [
+      "security_review",
+      "privacy_review",
+      "risk_catalog",
+      "profile",
+      "prompt",
+      "preset",
+      "example"
+    ]
+  },
+  "components": {},
+  "load_order": [],
+  "required_secrets": [],
+  "required_network": []
+}
