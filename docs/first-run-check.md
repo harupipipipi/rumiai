@@ -23,10 +23,11 @@ From the repository root:
 
 ```bash
 python -m rumi_ai --health
+rumi-ai --health
 ```
 
-After `pip install -e .`, this command should also work from a directory outside
-the repository. That verifies the public entrypoint is installed, not just
+After `pip install -e .`, both commands should also work from a directory outside
+the repository. That verifies the public entrypoints are installed, not just
 available because the current shell is inside the checkout.
 
 If `just` is installed, this is equivalent:

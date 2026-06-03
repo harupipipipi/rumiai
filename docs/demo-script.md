@@ -22,6 +22,7 @@ pip install -e .
 
    ```bash
    python -m rumi_ai --health
+   rumi-ai --health
    ```
 
 3. Show the `status: UP` JSON shape.

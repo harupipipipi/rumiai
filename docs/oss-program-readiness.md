@@ -27,7 +27,7 @@ These tasks improve public credibility without inflating metrics:
 - Add bug and feature issue templates.
 - Improve README positioning for first-time users.
 - Add a first-run health-check guide so new users can verify a checkout quickly.
-- Add a root editable install path so `python -m rumi_ai --health` works outside the checkout after installation.
+- Add a root editable install path so `python -m rumi_ai --health` and `rumi-ai --health` work outside the checkout after installation.
 - Add a local readiness verifier for contribution, release, adoption-evidence, and application-draft materials.
 - Add repository topics and a concise GitHub description.
 - Publish a first GitHub Release with installer artifacts or a source release.
@@ -55,7 +55,7 @@ Body:
 - Add an OSS program readiness note with truthful OpenAI/Claude application drafts and explicit anti-metric-inflation guidance.
 - Add a community launch plan, first release notes draft, and draft-release workflow safety so the first public release can be reviewed before publishing.
 - Add first-run and adoption-evidence docs so setup feedback and real usage can be collected without inflating metrics.
-- Add root package metadata and CI coverage for the installed `rumi_ai` entrypoint outside the repository checkout.
+- Add root package metadata and CI coverage for the installed `rumi_ai` and `rumi-ai` entrypoints outside the repository checkout.
 
 ## Impact
 
@@ -70,6 +70,7 @@ Body:
 - [x] Parsed workflow and issue-template YAML locally.
 - [x] Added a local OSS readiness verifier.
 - [x] Verified a fresh virtualenv can run `pip install -e .`, then `python -m rumi_ai --health` from outside the checkout.
+- [x] Verified a built wheel can be installed into a fresh virtualenv and run both `python -m rumi_ai --health` and `rumi-ai --health`.
 - [x] Checked OpenAI application copy is under 500 characters per field.
 - [x] Ran `git diff --check`.
 

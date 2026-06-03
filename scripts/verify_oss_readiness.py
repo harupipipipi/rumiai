@@ -82,6 +82,10 @@ def main() -> int:
                 "root pyproject includes stable and runtime packages",
             ),
             check(
+                'rumi-ai = "rumi_ai.cli:main"' in root_pyproject,
+                "root pyproject exposes rumi-ai console script",
+            ),
+            check(
                 'pip install -e "."' not in readme and 'pip install -e ".[dev]"' in readme,
                 "README documents root editable install",
             ),
@@ -94,9 +98,14 @@ def main() -> int:
                 and "python -m rumi_ai --health" in test_workflow,
                 "CI checks installed entrypoint outside repository",
             ),
+            check(
+                "rumi-ai --health" in test_workflow,
+                "CI checks console script outside repository",
+            ),
             check("draft: true" in release_workflow, "release workflow creates draft releases"),
             check(
                 "python -m rumi_ai --health" in first_run
+                and "rumi-ai --health" in first_run
                 and "just health" in first_run
                 and "pip install -e ." in first_run,
                 "first-run guide documents health check",

@@ -30,6 +30,7 @@ jobs:
         run: |
           cd "$RUNNER_TEMP"
           python -m rumi_ai --health
+          rumi-ai --health
 
       - name: Run OSS readiness verifier
         run: python scripts/verify_oss_readiness.py

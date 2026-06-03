@@ -37,6 +37,9 @@ Homepage = "https://github.com/harupipipipi/rumiai"
 Repository = "https://github.com/harupipipipi/rumiai"
 Issues = "https://github.com/harupipipipi/rumiai/issues"
 
+[project.scripts]
+rumi-ai = "rumi_ai.cli:main"
+
 [tool.setuptools]
 include-package-data = true
 

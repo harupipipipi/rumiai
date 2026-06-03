@@ -14,8 +14,11 @@ def _read(path: Path) -> str:
 
 def test_root_entrypoint_targets_legacy_app_main():
     entrypoint = _read(ROOT / "rumi_ai" / "__main__.py")
-    assert "_LEGACY_ROOT" in entrypoint
-    assert "from rumi_ai_1_10.app import main" in entrypoint
+    cli_text = _read(ROOT / "rumi_ai" / "cli.py")
+
+    assert "from .cli import main" in entrypoint
+    assert 'runtime_root = repo_root / "rumi_ai_1_10"' in cli_text
+    assert "from rumi_ai_1_10.app import main as runtime_main" in cli_text
     assert 'if __name__ == "__main__":' in entrypoint
 
 
@@ -29,11 +32,14 @@ def test_root_pyproject_installs_stable_entrypoint_package():
     assert 'name = "rumi-ai"' in root_pyproject
     assert '"rumi_ai*"' in root_pyproject
     assert '"rumi_ai_1_10*"' in root_pyproject
+    assert 'rumi-ai = "rumi_ai.cli:main"' in root_pyproject
     assert 'pip install -e ".[dev]"' in readme_text
     assert 'pip install -e ".[dev]"' in contributing_text
     assert "pip install -e ." in first_run_text
+    assert "rumi-ai --health" in first_run_text
     assert 'cd "$RUNNER_TEMP"' in workflow_text
     assert "python -m rumi_ai --health" in workflow_text
+    assert "rumi-ai --health" in workflow_text
 
 
 def test_version_contract_matches_package_version():
@@ -88,6 +94,7 @@ def test_public_readiness_docs_keep_adoption_evidence_visible():
     assert "Do not count:" in evidence_text
     assert "Bought stars" in evidence_text or "bought stars" in evidence_text
     assert "python -m rumi_ai --health" in demo_text
+    assert "rumi-ai --health" in demo_text
     assert "python scripts/verify_oss_readiness.py" in demo_text
     assert "python -m rumi_ai --health" in setup_template_text
     assert "remove secrets" in setup_template_text.lower()

@@ -78,11 +78,12 @@ cd ../..
 ```bash
 source .venv/bin/activate
 python -m rumi_ai --health
+rumi-ai --health
 python -m rumi_ai
 ```
 
 `--health` はシステムボリューム使用率も確認します。`disk` probe が `DEGRADED` / `DOWN` の場合は、コード不具合ではなく空き容量不足の可能性があります。
-The editable install is rooted at the repository, so `python -m rumi_ai --health` also works from outside the checkout after installation.
+The editable install is rooted at the repository, so both `python -m rumi_ai --health` and `rumi-ai --health` work from outside the checkout after installation.
 For first-run validation on a new machine, see [docs/first-run-check.md](./docs/first-run-check.md).
 
 ## Common Tasks
@@ -101,6 +102,7 @@ just integrity
 
 ```bash
 python -m rumi_ai --health
+rumi-ai --health
 ```
 
 ### Runtime startup
