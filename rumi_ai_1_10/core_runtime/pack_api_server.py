@@ -785,7 +785,7 @@ class PackAPIHandler(
                 registry_routes = []
             adapter_facade = facade if registry_routes else None
             adapter = DefaultsHttpServer(adapter_facade)
-            handler, path_params, source, path_inject = adapter._match_route(
+            handler, path_params, source, path_inject, _pattern = adapter._match_route(
                 method.upper(),
                 path,
             )

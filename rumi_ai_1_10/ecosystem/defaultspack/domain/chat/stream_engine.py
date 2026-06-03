@@ -180,7 +180,9 @@ def _approval_followup_tool_use(metadata: dict[str, Any] | None) -> dict[str, An
         return None
     payload = followup.get("payload") if isinstance(followup.get("payload"), dict) else None
     if payload is None:
-        payload = followup.get("arguments") if isinstance(followup.get("arguments"), dict) else {}
+        payload = followup.get("arguments") if isinstance(followup.get("arguments"), dict) else None
+    if payload is None:
+        return None
     arguments = dict(payload or {})
     raw_action = str(followup.get("action") or "").strip()
     operation = str(followup.get("operation") or "").strip()
@@ -1020,7 +1022,8 @@ class ChatRunEngine:
         tool_limit = _default_tool_limit_for_connected_tools(tool_limit, prepared.connected_tool_names)
 
         approval_followup = _approval_followup_tool_use(prepared.user_message.get("metadata"))
-        if approval_followup is not None:
+        approval_replayed = bool(isinstance(prepared.tool_context, dict) and prepared.tool_context.get("approval_replayed"))
+        if approval_followup is not None and not approval_replayed:
             _append_assistant_tool_use_message(working_messages, [approval_followup])
             try:
                 append_assistant_tool_use_to_ir(working_ir, [approval_followup])

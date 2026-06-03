@@ -73,7 +73,6 @@ _STALE_APPROVAL_TOKEN_CODES = {
     "APPROVAL_OPERATION_MISMATCH",
     "APPROVAL_PACK_MISMATCH",
     "APPROVAL_CONVERSATION_MISMATCH",
-    "APPROVAL_TOKEN_USED",
     "APPROVAL_EXPIRED",
     "APPROVAL_NOT_APPROVED",
     "APPROVAL_REQUEST_MISSING",
@@ -365,7 +364,13 @@ class ToolExecutor:
             return None
         if str(request.get("type") or "").strip() == "function.call":
             qualified_name = str(request.get("qualified_name") or "").strip()
-            pack_id, _, _ = qualified_name.partition(":")
+            pack_id, _, function_id = qualified_name.partition(":")
+            if (
+                self._first_party_browser_computer_tool_for_function(pack_id, function_id)
+                in {"browser_computer", "browser_use", "computer_use"}
+            ):
+                context["_tool_server_approved"] = True
+                return None
             if pack_id:
                 approved, reason = self._function_call_pack_approval_status(capability_executor, pack_id)
                 if not approved and self._dev_auto_approve_pack(pack_id, capability_executor):
@@ -398,9 +403,11 @@ class ToolExecutor:
         local_tool = self._first_party_browser_computer_tool_for_function(pack_id, function_id)
         if local_tool not in {"browser_computer", "browser_use", "computer_use"}:
             return None
+        if error_type == "pack_not_approved" and not (
+            isinstance(context, dict) and context.get("_tool_server_approval_token_valid") is True
+        ):
+            return None
         if _requires_approval(tool_def) and not _context_has_tool_server_approval(context):
-            if error_type == "pack_not_approved":
-                return _approval_required_tool_response(tool_def, request.get("args") or {}, context)
             return None
         return self._execute_local_with_tool_def(local_tool, request.get("args") or {}, context, tool_def)
 
@@ -452,9 +459,17 @@ class ToolExecutor:
             return None
         local_tool = ToolExecutor._first_party_local_tool_for_function(pack_id, function_id)
         if local_tool:
+            if (
+                error_type == "pack_not_approved"
+                and _requires_approval(tool_def)
+                and not _context_has_tool_server_approval(context)
+            ):
+                return None
             if _requires_approval(tool_def) and not _context_has_tool_server_approval(context):
                 return None
             return ToolExecutor()._execute_local_with_tool_def(local_tool, request.get("args") or {}, context, tool_def)
+        if error_type == "pack_not_approved" and not _context_has_tool_server_approval(context):
+            return None
         if not ToolExecutor._allows_direct_first_party_function_fallback(pack_id, function_id):
             return None
         try:
@@ -624,6 +639,31 @@ class ToolExecutor:
         output = getattr(response, "output", None)
         error = getattr(response, "error", None)
         if not success:
+            if getattr(response, "error_type", None) == "pack_not_approved":
+                tool_name = _tool_approval_tool_name(tool_def) if isinstance(tool_def, dict) else ""
+                if (
+                    isinstance(tool_def, dict)
+                    and _requires_approval(tool_def)
+                    and not _context_has_tool_server_approval(context)
+                    and not (
+                        tool_name in {"browser_computer", "browser_use", "computer_use"}
+                        and isinstance(context, dict)
+                        and context.get("user_requested_computer_use")
+                    )
+                ):
+                    return _approval_required_tool_response(tool_def, arguments or {}, context)
+                result = {
+                    "result": str(error or "Pack not approved"),
+                    "is_error": True,
+                    "widget": None,
+                }
+                if tool_name not in {"browser_computer", "browser_use", "computer_use"}:
+                    result["widget"] = {
+                        "type": "tool_execution_denied",
+                        "tool_name": tool_name or "tool",
+                        "reason": str(error or "Pack not approved"),
+                    }
+                return result
             if (
                 getattr(response, "error_type", None) in {"caller_requires_denied", "requires_denied"}
                 and isinstance(tool_def, dict)
@@ -1479,10 +1519,7 @@ def _browser_computer_request_arguments(tool_name, action, payload):
             "action": str(action or "browser.session"),
             "payload": dict(payload or {}),
         }
-    return {
-        "action": str(action or ""),
-        **dict(payload or {}),
-    }
+    return dict(payload or {})
 
 
 def _tool_approval_risk_level(tool_def):
@@ -1512,19 +1549,21 @@ def _approval_token_from_context(context, tool_def, arguments=None, *extra_keys)
         return ""
     tool_name = _tool_approval_tool_name(tool_def)
     scoped_operation, _ = _tool_approval_scope(tool_def, arguments if isinstance(arguments, dict) else {})
+    extra = [str(key or "").strip() for key in extra_keys if str(key or "").strip()]
     if tool_name in {"browser_computer", "browser_use", "computer_use"}:
-        keys = [
-            scoped_operation,
-            *[str(key or "").strip() for key in extra_keys if str(key or "").strip()],
-            tool_name,
-            _tool_approval_operation(tool_def),
-        ]
+        keys = [scoped_operation, *extra]
+        has_action_scoped_token = any(
+            str(key or "").strip().startswith(("browser.", "computer."))
+            for key in tokens
+        )
+        if not has_action_scoped_token:
+            keys.extend([tool_name, _tool_approval_operation(tool_def)])
     else:
         keys = [
             tool_name,
             _tool_approval_operation(tool_def),
             scoped_operation,
-            *[str(key or "").strip() for key in extra_keys if str(key or "").strip()],
+            *extra,
         ]
     for key in keys:
         token = str(tokens.get(key) or "").strip()
@@ -1558,48 +1597,61 @@ def _context_with_tool_approval_token(context, tool_def, arguments, *extra_looku
         return next_context, None
     if _context_has_tool_server_approval(next_context):
         return next_context, None
-    token = _approval_token_from_context(context, tool_def, arguments, *extra_lookup_keys) or _approval_token_from_arguments(arguments)
+    token = _approval_token_from_context(next_context, tool_def, arguments, *extra_lookup_keys) or _approval_token_from_arguments(arguments)
     if not token:
         return next_context, None
     approval = _approval_module()
     operation, approval_args = _tool_approval_scope(tool_def, arguments)
+    pack_id = str(next_context.get("owner_pack") or next_context.get("pack_id") or next_context.get("_source_pack_id") or "defaultspack")
+    conversation_id = str(next_context.get("conversation_id") or next_context.get("conversation_turn_id") or "")
     args_hash = approval.hash_arguments(approval_args)
-    verification = approval.verify_execution_token(
-        token,
-        operation,
-        args_hash,
-        pack_id=str(next_context.get("owner_pack") or next_context.get("pack_id") or next_context.get("_source_pack_id") or "defaultspack"),
-        conversation_id=str(next_context.get("conversation_id") or next_context.get("conversation_turn_id") or ""),
-        consume=False,
-    )
+    candidates = [(operation, args_hash, pack_id, conversation_id)]
     if (
-        not verification.valid
-        and _tool_approval_tool_name(tool_def) in {"browser_computer", "browser_use", "computer_use"}
+        _tool_approval_tool_name(tool_def) in {"browser_computer", "browser_use", "computer_use"}
         and isinstance(arguments, dict)
     ):
-        verification = approval.verify_execution_token(
-            token,
-            _tool_approval_operation(tool_def),
-            approval.hash_arguments(dict(arguments or {})),
-            pack_id=str(next_context.get("owner_pack") or next_context.get("pack_id") or next_context.get("_source_pack_id") or "defaultspack"),
-            conversation_id=str(next_context.get("conversation_id") or next_context.get("conversation_turn_id") or ""),
-        )
-        if not verification.valid:
-            verification = approval.verify_execution_token(
-                token,
-                _tool_approval_operation(tool_def),
-                approval.hash_arguments(dict(arguments or {})),
-                pack_id="",
-                conversation_id="",
+        if str(operation or "").startswith(("browser.", "computer.")):
+            candidates.append(
+                (
+                    operation,
+                    approval.hash_arguments({"action": operation}),
+                    pack_id,
+                    conversation_id,
+                )
             )
+        legacy_args_hash = approval.hash_arguments(_approval_replayable_arguments(arguments))
+        legacy_operation = _tool_approval_operation(tool_def)
+        candidates.extend(
+            [
+                (legacy_operation, legacy_args_hash, pack_id, conversation_id),
+                (legacy_operation, legacy_args_hash, "", ""),
+            ]
+        )
+    verification = None
+    verified_operation = operation
+    verified_args_hash = args_hash
+    for candidate_operation, candidate_args_hash, candidate_pack_id, candidate_conversation_id in candidates:
+        candidate_verification = approval.verify_execution_token(
+            token,
+            candidate_operation,
+            candidate_args_hash,
+            pack_id=candidate_pack_id,
+            conversation_id=candidate_conversation_id,
+            consume=False,
+        )
+        if candidate_verification.valid:
+            verification = candidate_verification
+            verified_operation = candidate_operation
+            verified_args_hash = candidate_args_hash
+            break
+        if verification is None:
+            verification = candidate_verification
     if verification.valid:
-        pack_id = str(next_context.get("owner_pack") or next_context.get("pack_id") or next_context.get("_source_pack_id") or "defaultspack")
-        conversation_id = str(next_context.get("conversation_id") or next_context.get("conversation_turn_id") or "")
         next_context["_tool_server_approved"] = True
         next_context["_tool_server_approval_token_valid"] = True
         next_context["_tool_server_approval_token"] = token
-        next_context["_tool_server_approval_operation"] = operation
-        next_context["_tool_server_approval_args_hash"] = args_hash
+        next_context["_tool_server_approval_operation"] = verified_operation
+        next_context["_tool_server_approval_args_hash"] = verified_args_hash
         next_context["_tool_server_approval_pack_id"] = pack_id
         next_context["_tool_server_approval_conversation_id"] = conversation_id
         return next_context, None
