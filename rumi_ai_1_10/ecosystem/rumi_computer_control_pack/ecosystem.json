@@ -1,0 +1,102 @@
+{
+  "pack_id": "rumi_computer_control_pack",
+  "pack_identity": "rumi:ecosystem/rumi_computer_control_pack",
+  "version": "1.0.0",
+  "metadata": {
+    "name": "Rumi Computer Control Pack",
+    "description": "Declarative local-first computer and desktop control playbooks for screenshots, keyboard/mouse workflows, foreground app context, terminal observation, sandbox/host boundaries, and evidence-before-action safety.",
+    "author": "Rumi AI Team",
+    "license": "MIT",
+    "runtime_type": "declarative_pack",
+    "network_policy": "none_by_default",
+    "required_secrets": [],
+    "executable_code": false,
+    "grant_override": false,
+    "tags": ["computer-control", "desktop", "macos", "screenshots", "keyboard", "mouse", "terminal-observation", "local-first"]
+  },
+  "vocabulary": {
+    "types": ["computer_control", "desktop_workflow", "profile", "prompt", "preset", "policy", "catalog", "evidence_contract"]
+  },
+  "depends_on": [
+    {
+      "pack_id": "defaultspack",
+      "version": ">=2.0.0",
+      "reason": "Uses defaultspack grants, approvals, audit, prompt/profile conventions, and core tool routing."
+    },
+    {
+      "pack_id": "rumi_default_tools_pack",
+      "version": ">=1.0.0",
+      "reason": "References existing computer/browser/file/terminal tools and does not replace their implementations."
+    }
+  ],
+  "optional_integrations": [
+    {
+      "pack_id": "rumi_browser_automation_pack",
+      "reason": "Browser pack owns browser-specific navigation and DOM playbooks; this pack owns host desktop context and evidence contracts."
+    },
+    {
+      "pack_id": "rumi_security_review_pack",
+      "reason": "Security pack reviews grant and privacy risk; this pack records control safety policy and evidence boundaries."
+    },
+    {
+      "pack_id": "rumi_agent_services_pack",
+      "reason": "Agent services pack may route multi-agent work; this pack defines single-seat host-control playbooks and handoff evidence."
+    }
+  ],
+  "assets": {
+    "catalog": [
+      "catalog/control_surface_catalog.yaml",
+      "catalog/local_gateway_evidence.json"
+    ],
+    "specs": [
+      "specs/session_observation_spec.json"
+    ],
+    "policies": [
+      "policies/evidence_first_control.policy.yaml",
+      "policies/sandbox_host_boundary.policy.yaml"
+    ],
+    "profiles": [
+      "profiles/macos_desktop_operator.profile.yaml",
+      "profiles/local_testing_observer.profile.yaml",
+      "profiles/terminal_session_monitor.profile.yaml"
+    ],
+    "prompts": [
+      "prompts/desktop_control.system.md",
+      "prompts/evidence_before_action.system.md",
+      "prompts/sandbox_host_boundary.system.md"
+    ],
+    "presets": [
+      "presets/macos_app_workflow.preset.yaml",
+      "presets/foreground_app_context.preset.yaml",
+      "presets/terminal_observation.preset.yaml",
+      "presets/unrestricted_local_testing_contract.preset.yaml"
+    ],
+    "examples": [
+      "examples/macos_app_navigation.example.yaml",
+      "examples/screenshot_keyboard_mouse.example.yaml",
+      "examples/terminal_sandbox_observation.example.yaml"
+    ],
+    "metadata": [
+      "metadata/overlap_promotion.yaml"
+    ],
+    "docs": [
+      "README.md",
+      "docs/README.md",
+      "docs/architecture.md",
+      "docs/interfaces.md",
+      "docs/operations.md"
+    ]
+  },
+  "network_policy": {
+    "default": "none",
+    "allowed_when_explicitly_requested": [
+      "user asks to inspect a remote browser or hosted app",
+      "approved connector or tool requires network for current state",
+      "documentation lookup is explicitly requested"
+    ]
+  },
+  "components": {},
+  "load_order": [],
+  "required_secrets": [],
+  "required_network": []
+}
