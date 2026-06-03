@@ -78,7 +78,7 @@ function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-const RAIL_BUTTON_CLASS = "relative flex h-9 min-h-9 w-9 min-w-9 shrink-0 items-center justify-center overflow-visible rounded-md transition-colors";
+const RAIL_BUTTON_CLASS = "relative flex h-9 min-h-9 w-9 min-w-9 shrink-0 items-center justify-center overflow-visible rounded-md transition-all duration-200 ease-out hover:scale-[1.06] active:scale-[0.94]";
 const PANEL_WIDTH_STORAGE_KEY = "rumi-right-sidebar-panel-width";
 const PLACEMENT_PANEL_PREFIX = "__placement__:";
 const DEFAULT_TOOL_GROUP_RAIL_LIMIT = 8;
@@ -1899,7 +1899,7 @@ export function RightSidebar({
 
               <div className="w-12 flex flex-col flex-shrink-0 overflow-visible">
                 <div
-                  className="flex-1 flex flex-col items-center gap-1 overflow-x-visible overflow-y-auto w-full py-1.5 scrollbar-none"
+                  className="flex-1 flex flex-col items-center gap-1 overflow-x-visible overflow-y-auto w-full py-1.5 scrollbar-none rumi-stagger-tight"
                   onDragOver={(event) => {
                     if (event.dataTransfer.types.includes("application/rumi-sidebar-shortcut")) {
                       event.preventDefault();
@@ -1909,7 +1909,7 @@ export function RightSidebar({
                   onDrop={handleShortcutDrop}
                 >
           {(pinnedRailItems.length > 0 || pinnedRightSidebarPlacements.length > 0) && (
-            <div className="flex w-full flex-col items-center gap-1">
+            <div className="flex w-full flex-col items-center gap-1 rumi-stagger-tight">
               {pinnedRailItems.map((item) => renderRailItemButton(item, true))}
               {pinnedRightSidebarPlacements.map((placement) => renderPinnedPlacementButton(placement.id))}
               <div className="w-5 h-px bg-sky-500/20 my-0.5" />
