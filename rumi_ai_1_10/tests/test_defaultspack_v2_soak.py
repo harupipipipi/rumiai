@@ -43,6 +43,87 @@ def test_soak_records_hourly_summary(tmp_path):
     state = json.loads((tmp_path / "soak.json").read_text(encoding="utf-8"))
     assert len(state["hourly_summaries"]) == 2
     assert state["hourly_summaries"][0]["summary"]["hour"] == 1
+    assert state["heartbeat_count"] == 2
+    assert state["last_heartbeat_at"]
+
+
+def test_soak_claims_tasks_with_lease_and_consumes_completed_queue(tmp_path):
+    from domain.agent.self_improvement_runtime import create_mimo_profile
+    from domain.agent.soak_test_runner import SoakTestRunner
+
+    runtime = create_mimo_profile(workspace_root=tmp_path, state_path=tmp_path / "si.json")
+    runtime.bootstrap()
+
+    runner = SoakTestRunner(runtime, state_path=tmp_path / "soak.json")
+    tasks = runner.load_task_queue()[:2]
+    runner.save_task_queue(tasks)
+
+    claimed = runner.claim_next_task(lease_seconds=30, now_epoch=1000)
+    assert claimed is not None
+    assert claimed["task_id"] == tasks[0]["task_id"]
+    assert claimed["lease_expires_epoch"] == 1030
+
+    runner.record_task_result(
+        claimed["task_id"],
+        status="completed",
+        tools_used=["coding_file_read"],
+    )
+
+    state = json.loads((tmp_path / "soak.json").read_text(encoding="utf-8"))
+    assert state["active_task"] is None
+    assert [task["task_id"] for task in state["task_queue"]] == [tasks[1]["task_id"]]
+
+
+def test_soak_health_detects_stale_heartbeat_and_failed_run(tmp_path):
+    from domain.agent.self_improvement_runtime import create_mimo_profile
+    from domain.agent.soak_test_runner import SoakTestRunner
+
+    runtime = create_mimo_profile(workspace_root=tmp_path, state_path=tmp_path / "si.json")
+    runtime.bootstrap()
+
+    runner = SoakTestRunner(
+        runtime,
+        state_path=tmp_path / "soak.json",
+        heartbeat_interval_seconds=10,
+        stale_after_seconds=30,
+    )
+    runner.start_run()
+    runner.record_heartbeat({"cycle": 1})
+    for idx in range(3):
+        runner.record_task_result(
+            f"task_{idx}",
+            status="failed",
+            failures=["model unavailable"],
+            user_friction="model unavailable",
+        )
+
+    health = runner.health_status(now_epoch=10_000_000_000)
+
+    assert health["status"] == "down"
+    assert any("heartbeat" in reason for reason in health["reasons"])
+    assert any("completed" in reason for reason in health["reasons"])
+
+
+def test_soak_records_competitor_comparison_in_final_report(tmp_path):
+    from domain.agent.self_improvement_runtime import create_mimo_profile
+    from domain.agent.soak_test_runner import SoakTestRunner
+
+    runtime = create_mimo_profile(workspace_root=tmp_path, state_path=tmp_path / "si.json")
+    runtime.bootstrap()
+
+    runner = SoakTestRunner(runtime, state_path=tmp_path / "soak.json")
+    runner.record_competitor_comparison(
+        name="OpenClaw",
+        version="2026.5.28",
+        verified_with=["npm view openclaw version", "npm pack openclaw@latest"],
+        strengths=["heartbeat workspace"],
+        gaps_for_rumi=["task lease recovery"],
+    )
+
+    report = runner.generate_final_report()
+
+    assert report["competitor_comparisons"][0]["name"] == "OpenClaw"
+    assert "task lease recovery" in report["competitor_comparisons"][0]["gaps_for_rumi"]
 
 
 def test_soak_final_report_contains_failures_and_friction(tmp_path):

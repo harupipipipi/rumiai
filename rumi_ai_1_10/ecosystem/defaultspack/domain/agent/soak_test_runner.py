@@ -12,6 +12,12 @@ def _timestamp() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
 
+def _timestamp_from_epoch(epoch_seconds: float) -> str:
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(epoch_seconds))
+
+
+SOAK_RESULT_STATUSES = ("completed", "failed", "skipped")
+
 SOAK_TASK_DEFINITIONS: list[dict[str, Any]] = [
     {
         "task_id": "soak_01_read_codebase",
@@ -109,9 +115,13 @@ class SoakTestRunner:
         *,
         duration_hours: float = 24.0,
         state_path: str | Path | None = None,
+        heartbeat_interval_seconds: int = 3600,
+        stale_after_seconds: int = 7200,
     ) -> None:
         self.runtime = runtime
         self.duration_hours = duration_hours
+        self.heartbeat_interval_seconds = heartbeat_interval_seconds
+        self.stale_after_seconds = stale_after_seconds
         self._state_path = Path(state_path) if state_path else self._default_state_path()
         self._task_queue: list[dict[str, Any]] = []
         self._hourly_summaries: list[dict[str, Any]] = []
@@ -130,6 +140,90 @@ class SoakTestRunner:
         state["task_queue"] = tasks
         self._save_state(state)
 
+    def start_run(
+        self,
+        *,
+        duration_hours: float | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        state = self._load_state()
+        now = time.time()
+        state["runner_status"] = "running"
+        state["started_at"] = _timestamp_from_epoch(now)
+        state["started_at_epoch"] = now
+        state["duration_hours"] = (
+            duration_hours if duration_hours is not None else self.duration_hours
+        )
+        state["heartbeat_interval_seconds"] = self.heartbeat_interval_seconds
+        state["stale_after_seconds"] = self.stale_after_seconds
+        state.setdefault("task_queue", list(SOAK_TASK_DEFINITIONS))
+        state.setdefault("results", [])
+        state.setdefault("hourly_summaries", [])
+        state.setdefault("lease_events", [])
+        if metadata:
+            state["metadata"] = metadata
+        self._save_state(state)
+        return state
+
+    def record_heartbeat(self, summary: dict[str, Any] | None = None) -> dict[str, Any]:
+        state = self._load_state()
+        now = time.time()
+        heartbeat = {
+            "summary": summary or {},
+            "timestamp": _timestamp_from_epoch(now),
+            "epoch": now,
+        }
+        state["last_heartbeat_at"] = heartbeat["timestamp"]
+        state["last_heartbeat_epoch"] = heartbeat["epoch"]
+        heartbeats = state.setdefault("heartbeats", [])
+        heartbeats.append(heartbeat)
+        state["heartbeat_count"] = len(heartbeats)
+        self._save_state(state)
+        return heartbeat
+
+    def claim_next_task(
+        self,
+        *,
+        lease_seconds: int = 3600,
+        now_epoch: float | None = None,
+    ) -> dict[str, Any] | None:
+        state = self._load_state()
+        now = time.time() if now_epoch is None else now_epoch
+        active = state.get("active_task")
+        if active and float(active.get("lease_expires_epoch", 0)) > now:
+            return active
+
+        if active:
+            events = state.setdefault("lease_events", [])
+            events.append(
+                {
+                    "kind": "lease_expired",
+                    "task_id": active.get("task_id"),
+                    "timestamp": _timestamp_from_epoch(now),
+                }
+            )
+            state["active_task"] = None
+
+        queue = state.get("task_queue")
+        if queue is None:
+            queue = list(SOAK_TASK_DEFINITIONS)
+            state["task_queue"] = queue
+        if not queue:
+            self._save_state(state)
+            return None
+
+        task = dict(queue[0])
+        task["status"] = "running"
+        task["lease_seconds"] = max(1, int(lease_seconds))
+        task["started_at"] = _timestamp_from_epoch(now)
+        task["started_at_epoch"] = now
+        task["lease_expires_at"] = _timestamp_from_epoch(now + task["lease_seconds"])
+        task["lease_expires_epoch"] = now + task["lease_seconds"]
+        task["attempt"] = int(task.get("attempt", 0)) + 1
+        state["active_task"] = task
+        self._save_state(state)
+        return task
+
     def record_task_result(
         self,
         task_id: str,
@@ -147,6 +241,9 @@ class SoakTestRunner:
         user_friction: str = "",
         next_recommendation: str = "",
     ) -> dict[str, Any]:
+        if status not in SOAK_RESULT_STATUSES:
+            raise ValueError(f"invalid soak task status: {status}")
+
         state = self._load_state()
         results = state.setdefault("results", [])
         result = {
@@ -166,6 +263,12 @@ class SoakTestRunner:
             "recorded_at": _timestamp(),
         }
         results.append(result)
+        queue = state.get("task_queue")
+        if isinstance(queue, list):
+            state["task_queue"] = [task for task in queue if task.get("task_id") != task_id]
+        active = state.get("active_task")
+        if isinstance(active, dict) and active.get("task_id") == task_id:
+            state["active_task"] = None
         self._save_state(state)
         return result
 
@@ -174,6 +277,74 @@ class SoakTestRunner:
         summaries = state.setdefault("hourly_summaries", [])
         summaries.append({"summary": summary, "timestamp": _timestamp()})
         self._save_state(state)
+        self.record_heartbeat(summary)
+
+    def record_competitor_comparison(
+        self,
+        *,
+        name: str,
+        version: str = "",
+        verified_with: list[str] | None = None,
+        strengths: list[str] | None = None,
+        gaps_for_rumi: list[str] | None = None,
+    ) -> dict[str, Any]:
+        state = self._load_state()
+        comparison = {
+            "name": name,
+            "version": version,
+            "verified_with": verified_with or [],
+            "strengths": strengths or [],
+            "gaps_for_rumi": gaps_for_rumi or [],
+            "recorded_at": _timestamp(),
+        }
+        comparisons = state.setdefault("competitor_comparisons", [])
+        comparisons.append(comparison)
+        self._save_state(state)
+        return comparison
+
+    def health_status(self, *, now_epoch: float | None = None) -> dict[str, Any]:
+        state = self._load_state()
+        now = time.time() if now_epoch is None else now_epoch
+        reasons: list[str] = []
+
+        started_at_epoch = state.get("started_at_epoch")
+        heartbeat_epoch = state.get("last_heartbeat_epoch")
+        if (
+            started_at_epoch
+            and not heartbeat_epoch
+            and now - float(started_at_epoch) > self.stale_after_seconds
+        ):
+            reasons.append("no heartbeat recorded after stale threshold")
+        if heartbeat_epoch and now - float(heartbeat_epoch) > self.stale_after_seconds:
+            reasons.append("last heartbeat exceeded stale threshold")
+
+        active = state.get("active_task")
+        if isinstance(active, dict) and float(active.get("lease_expires_epoch", 0)) <= now:
+            reasons.append("active task lease expired")
+
+        results = state.get("results", [])
+        failed = len([item for item in results if item.get("status") == "failed"])
+        completed = len([item for item in results if item.get("status") == "completed"])
+        total = len(results)
+        if total >= 3 and failed / total >= 0.5:
+            reasons.append("failure rate exceeded 50 percent")
+        if total >= 3 and completed == 0:
+            reasons.append("no completed tasks after multiple attempts")
+
+        status = "ok" if not reasons else "degraded"
+        if total >= 3 and completed == 0:
+            status = "down"
+
+        return {
+            "status": status,
+            "reasons": reasons,
+            "completed": completed,
+            "failed": failed,
+            "total_results": total,
+            "active_task": active.get("task_id") if isinstance(active, dict) else None,
+            "last_heartbeat_at": state.get("last_heartbeat_at"),
+            "checked_at": _timestamp_from_epoch(now),
+        }
 
     def generate_final_report(self) -> dict[str, Any]:
         state = self._load_state()
@@ -190,6 +361,8 @@ class SoakTestRunner:
                 for r in friction
             ],
             "hourly_summaries": state.get("hourly_summaries", []),
+            "health": self.health_status(),
+            "competitor_comparisons": state.get("competitor_comparisons", []),
             "generated_at": _timestamp(),
         }
 
