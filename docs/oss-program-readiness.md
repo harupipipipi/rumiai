@@ -26,6 +26,7 @@ These tasks improve public credibility without inflating metrics:
 - Add contribution and security policies.
 - Add bug and feature issue templates.
 - Improve README positioning for first-time users.
+- Add a first-run health-check guide so new users can verify a checkout quickly.
 - Add repository topics and a concise GitHub description.
 - Publish a first GitHub Release with installer artifacts or a source release.
 - Create issues labeled `good first issue` for docs, examples, setup testing, and small pack examples.

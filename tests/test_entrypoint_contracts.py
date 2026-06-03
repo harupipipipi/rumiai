@@ -39,3 +39,13 @@ def test_control_panel_bundle_uses_v3_startup_profile_contract():
     bundle_text = "\n".join(_read(script) for script in scripts)
     assert "base_pack" in bundle_text
     assert "standard_pack_id" not in bundle_text
+
+
+def test_first_run_docs_keep_health_check_contract_visible():
+    readme_text = _read(ROOT / "README.md")
+    first_run_text = _read(ROOT / "docs" / "first-run-check.md")
+
+    assert "docs/first-run-check.md" in readme_text
+    assert "python -m rumi_ai --health" in first_run_text
+    assert "just health" in first_run_text
+    assert "tests/test_entrypoint_contracts.py" in first_run_text
