@@ -1,7 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
-const root = new URL("../src", import.meta.url).pathname;
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../src");
 const offenders = [];
 const importPattern = /import\s+(?!type\b)([\s\S]*?)\s+from\s+["']([^"']+)["']/g;
 

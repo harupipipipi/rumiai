@@ -95,6 +95,9 @@ defaultspack includes local-first building blocks inspired by Codex, Claude Code
 
 Start with `docs/local_agent_implementation_plan.md` for the roadmap and `docs/ui_agent_experience_design.md` for the right-sidebar/widget experience.
 
+For install/onboarding parity checks against Genspark, Manus, Cline, Hermes,
+and OpenClaw, see `docs/competitive_agent_install_eval.md`.
+
 ## defaults が提供しないもの
 
 - **Asset** — 画面に描画される UI ファイル。chat 画面、agent 画面、coding 画面、設定画面は全て user_data 側に配置される。
