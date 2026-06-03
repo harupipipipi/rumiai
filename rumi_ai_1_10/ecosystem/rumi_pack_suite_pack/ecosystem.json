@@ -1,0 +1,93 @@
+{
+  "pack_id": "rumi_pack_suite_pack",
+  "pack_identity": "rumi:ecosystem/rumi_pack_suite_pack",
+  "display_name": "Rumi Pack Suite Pack",
+  "version": "0.1.0",
+  "runtime": {
+    "type": "declarative_pack"
+  },
+  "depends_on": [
+    {
+      "pack_id": "defaultspack",
+      "version": ">=2.0.0"
+    }
+  ],
+  "optional_integrations": [
+    {
+      "pack_id": "rumi_code_ide_pack",
+      "reason": "Included in one or more suite bundles when installed."
+    },
+    {
+      "pack_id": "rumi_workspace_pack",
+      "reason": "Included in one or more suite bundles when installed."
+    },
+    {
+      "pack_id": "rumi_agent_services_pack",
+      "reason": "Included in one or more suite bundles when installed."
+    },
+    {
+      "pack_id": "rumi_browser_element_pack",
+      "reason": "Included in one or more suite bundles when installed."
+    },
+    {
+      "pack_id": "rumi_mcp_gateway_pack",
+      "reason": "Included in one or more suite bundles when installed."
+    },
+    {
+      "pack_id": "rumi_research_pack",
+      "reason": "Included in one or more suite bundles when installed."
+    },
+    {
+      "pack_id": "rumi_data_analysis_pack",
+      "reason": "Included in one or more suite bundles when installed."
+    },
+    {
+      "pack_id": "rumi_devops_release_pack",
+      "reason": "Included in one or more suite bundles when installed."
+    },
+    {
+      "pack_id": "rumi_security_review_pack",
+      "reason": "Included in one or more suite bundles when installed."
+    },
+    {
+      "pack_id": "rumi_browser_automation_pack",
+      "reason": "Included in one or more suite bundles when installed."
+    },
+    {
+      "pack_id": "rumi_multimodal_media_pack",
+      "reason": "Included in one or more suite bundles when installed."
+    },
+    {
+      "pack_id": "rumi_memory_knowledge_pack",
+      "reason": "Included in one or more suite bundles when installed."
+    },
+    {
+      "pack_id": "rumi_model_evals_pack",
+      "reason": "Included in one or more suite bundles when installed."
+    },
+    {
+      "pack_id": "rumi_computer_control_pack",
+      "reason": "Included in one or more suite bundles when installed."
+    },
+    {
+      "pack_id": "rumi_connector_gateway_pack",
+      "reason": "Included in one or more suite bundles when installed."
+    },
+    {
+      "pack_id": "rumi_workflow_scheduler_pack",
+      "reason": "Included in one or more suite bundles when installed."
+    }
+  ],
+  "components": {},
+  "load_order": [],
+  "metadata": {
+    "required_secrets": [],
+    "network_policy": "none_by_default",
+    "executable_code": false,
+    "owner_surfaces": [
+      "pack_bundle_catalog",
+      "defaultspack_promotion_matrix",
+      "overlap_resolution_matrix"
+    ]
+  }
+}

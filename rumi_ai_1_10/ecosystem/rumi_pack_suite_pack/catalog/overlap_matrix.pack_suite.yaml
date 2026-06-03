@@ -1,0 +1,19 @@
+catalog_id: rumi_pack_suite.overlap_matrix
+schema_version: 1
+surfaces:
+  browser_execution: rumi_default_tools_pack
+  browser_semantic_dom: rumi_browser_element_pack
+  browser_task_playbooks: rumi_browser_automation_pack
+  code_edits: rumi_code_ide_pack
+  release_evidence: rumi_devops_release_pack
+  office_artifacts: rumi_workspace_pack
+  research_evidence: rumi_research_pack
+  data_analysis: rumi_data_analysis_pack
+  mcp_namespaces: rumi_mcp_gateway_pack
+  connector_handoffs: rumi_connector_gateway_pack
+  schedules_and_wakeups: rumi_workflow_scheduler_pack
+  memory_policy: rumi_memory_knowledge_pack
+  model_eval_policy: rumi_model_evals_pack
+  security_review: rumi_security_review_pack
+  media_asset_ledgers: rumi_multimodal_media_pack
+  desktop_playbooks: rumi_computer_control_pack

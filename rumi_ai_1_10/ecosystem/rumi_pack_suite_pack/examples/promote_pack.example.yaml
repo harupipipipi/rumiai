@@ -1,0 +1,5 @@
+example_id: rumi_pack_suite.promote_pack
+request: Decide whether browser element recognition should move into defaultspack.
+review:
+  candidate_pack: rumi_browser_element_pack
+  required_evidence: [semantic_dom_contract, chrome_extension_tests, overlap_policy]
