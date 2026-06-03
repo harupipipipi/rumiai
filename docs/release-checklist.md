@@ -1,6 +1,6 @@
-# Community Launch Plan
+# Release Checklist
 
-This plan lists safe, non-manipulative work that can make Rumi AI easier to evaluate for OSS support programs and easier for real users to try.
+This checklist keeps the first public release practical, reviewable, and easy for new users to test.
 
 ## Repository Metadata
 
@@ -41,8 +41,9 @@ Use [releases/v0.2.0.md](./releases/v0.2.0.md) as the base release notes.
 
 Release checklist:
 
-- Merge the OSS readiness PR.
+- Merge the release-readiness PR.
 - Run `python scripts/verify_oss_readiness.py`.
+- Run `python scripts/check_package_install.py`.
 - Confirm CI is green on `master`.
 - Create or update a changelog section.
 - Tag `v0.2.0`.
@@ -50,12 +51,11 @@ Release checklist:
 - Review generated artifacts and release notes.
 - Publish the GitHub Release only after artifacts and notes are correct.
 - Add a short screenshot or demo link if available.
-- Use [demo-script.md](./demo-script.md) for a short, honest first public demo.
 - Ask first-time users to report setup results with the [setup feedback issue template](../.github/ISSUE_TEMPLATE/setup_feedback.yml).
 
 ## Good First Issue Backlog
 
-Create these as public GitHub Issues after the readiness PR is merged.
+Create these as public GitHub Issues after the release-readiness PR is merged.
 
 ### Improve first-run quickstart on Windows
 
@@ -69,6 +69,7 @@ Try the root README quickstart on a fresh Windows machine and report any missing
 Validation:
 
 - `python -m rumi_ai --health` output is documented.
+- `rumi-ai --health` output is documented.
 - Any Windows-specific command differs from the Unix example only where needed.
 ```
 
@@ -118,30 +119,22 @@ Validation:
 - The guidance helps contributors decide when to ask for maintainer review.
 ```
 
-## Outreach Rules
-
-Allowed:
-
-- Announce real releases from the maintainer account.
-- Ask for feedback from communities where the project is relevant.
-- Share demo videos, docs, and reproducible examples.
-- Invite real users to file issues after trying the project.
-
-Not allowed:
-
-- Buying stars, follows, downloads, reviews, or installs.
-- Star-for-star or follow-for-follow campaigns.
-- Fake accounts, fake users, fake dependent packages, or fake testimonials.
-- Posting repetitive promotion into unrelated communities.
-- Claiming adoption metrics without evidence.
-
-## Evidence to Collect
+## Evidence To Collect
 
 - Public releases and artifact download counts.
-- Real issues and PRs from users who tried the project.
 - Setup feedback issues with OS, commands tried, and health-check output.
+- Real issues and PRs from users who tried the project.
 - Downstream repos or packs that depend on Rumi AI.
 - Articles, demos, videos, or community threads with real discussion.
 - Package downloads only if packages are published and supportable.
 
-Track evidence in [adoption-evidence.md](./adoption-evidence.md). Keep it public-link based where possible and avoid private user data.
+Track evidence in [user-feedback-evidence.md](./user-feedback-evidence.md). Keep it public-link based where possible and avoid private user data.
+
+## Boundaries
+
+- Do not buy stars, follows, downloads, reviews, or installs.
+- Do not run star-for-star or follow-for-follow campaigns.
+- Do not create fake accounts, fake users, fake dependent packages, or fake testimonials.
+- Keep feedback collection in GitHub issues, PRs, and release comments.
+- Do not post repetitive messages into unrelated communities.
+- Do not claim adoption metrics without evidence.

@@ -1,15 +1,14 @@
 #!/usr/bin/env python3
-"""Verify local OSS program readiness materials.
+"""Verify local OSS release-readiness materials.
 
 This script intentionally avoids network calls. It checks whether the repository
-has the public-facing docs and release safeguards needed before maintainers ask
-real users for feedback or submit OSS support-program applications.
+has the public-facing docs, packaging checks, and release safeguards needed
+before maintainers publish release artifacts or invite setup feedback.
 """
 
 from __future__ import annotations
 
 import json
-import re
 from pathlib import Path
 from typing import Any
 
@@ -29,11 +28,6 @@ def check(condition: bool, name: str, details: str = "") -> dict[str, Any]:
     }
 
 
-def paragraph_after(text: str, label: str) -> str:
-    start = text.index(label) + len(label)
-    return text[start:].strip().split("\n\n", 1)[0].strip()
-
-
 def main() -> int:
     required_files = [
         "pyproject.toml",
@@ -46,10 +40,10 @@ def main() -> int:
         ".github/ISSUE_TEMPLATE/feature_request.yml",
         ".github/ISSUE_TEMPLATE/setup_feedback.yml",
         "docs/first-run-check.md",
-        "docs/community-launch-plan.md",
-        "docs/adoption-evidence.md",
+        "docs/release-checklist.md",
+        "docs/user-feedback-evidence.md",
         "docs/demo-script.md",
-        "docs/oss-program-readiness.md",
+        "docs/release-readiness.md",
         "docs/releases/v0.2.0.md",
         "scripts/check_package_install.py",
     ]
@@ -68,17 +62,24 @@ def main() -> int:
     test_workflow = read(".github/workflows/test.yml")
     first_run = read("docs/first-run-check.md")
     justfile = read("justfile")
-    launch = read("docs/community-launch-plan.md")
-    evidence = read("docs/adoption-evidence.md")
+    release_checklist = read("docs/release-checklist.md")
+    evidence = read("docs/user-feedback-evidence.md")
     demo = read("docs/demo-script.md")
-    readiness = read("docs/oss-program-readiness.md")
+    readiness = read("docs/release-readiness.md")
     package_smoke = read("scripts/check_package_install.py")
     setup_template = read(".github/ISSUE_TEMPLATE/setup_feedback.yml")
 
     results.extend(
         [
             check("docs/first-run-check.md" in readme, "README links first-run guide"),
-            check("docs/adoption-evidence.md" in readme, "README links adoption evidence"),
+            check(
+                "docs/user-feedback-evidence.md" in readme,
+                "README links feedback evidence",
+            ),
+            check(
+                "docs/release-checklist.md" in readme,
+                "README links release checklist",
+            ),
             check('name = "rumi-ai"' in root_pyproject, "root pyproject names package"),
             check(
                 '"rumi_ai*"' in root_pyproject and '"rumi_ai_1_10*"' in root_pyproject,
@@ -129,11 +130,24 @@ def main() -> int:
                 and "pip install -e ." in first_run,
                 "first-run guide documents health check",
             ),
-            check("adoption-evidence.md" in launch, "launch plan links evidence tracker"),
-            check("demo-script.md" in launch, "launch plan links demo script"),
             check(
-                "setup_feedback.yml" in launch and "setup_feedback.yml" in evidence,
-                "launch and evidence docs link setup feedback template",
+                "user-feedback-evidence.md" in release_checklist,
+                "release checklist links evidence tracker",
+            ),
+            check(
+                "releases/v0.2.0.md" in release_checklist,
+                "release checklist links release notes",
+            ),
+            check(
+                "setup_feedback.yml" in release_checklist and "setup_feedback.yml" in evidence,
+                "release and evidence docs link setup feedback template",
+            ),
+            check("Release Readiness" in readiness, "release readiness note is present"),
+            check(
+                "qualify" not in readiness.lower()
+                and "credit use" not in readiness.lower()
+                and "draft under" not in readiness.lower(),
+                "release readiness note avoids request-specific framing",
             ),
             check("Do not count:" in evidence, "evidence tracker has anti-inflation rules"),
             check("python -m rumi_ai --health" in demo, "demo script uses health check"),
@@ -153,27 +167,9 @@ def main() -> int:
                 "remove secrets" in setup_template.lower(),
                 "setup feedback template asks users to remove secrets",
             ),
-            check(
-                re.search(r"buy|bought|star-for-star|fake", evidence, re.IGNORECASE)
-                is not None,
-                "evidence tracker names invalid metrics",
-            ),
+            check("Bought stars" in evidence, "evidence tracker names invalid metrics"),
         ]
     )
-
-    for label in [
-        "Why this repository should qualify (500 chars max):",
-        "API credit use (500 chars max):",
-        "Additional note (500 chars max):",
-    ]:
-        value = paragraph_after(readiness, label)
-        results.append(
-            check(
-                len(value) <= 500,
-                f"OpenAI draft under 500 chars: {label}",
-                f"{len(value)} chars",
-            )
-        )
 
     failed = [item for item in results if item["status"] != "pass"]
     payload = {

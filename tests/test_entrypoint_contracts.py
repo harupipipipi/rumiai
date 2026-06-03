@@ -84,20 +84,25 @@ def test_first_run_docs_keep_health_check_contract_visible():
     assert "tests/test_entrypoint_contracts.py" in first_run_text
 
 
-def test_public_readiness_docs_keep_adoption_evidence_visible():
+def test_public_readiness_docs_keep_feedback_evidence_visible():
     readme_text = _read(ROOT / "README.md")
-    launch_text = _read(ROOT / "docs" / "community-launch-plan.md")
-    evidence_text = _read(ROOT / "docs" / "adoption-evidence.md")
+    release_checklist_text = _read(ROOT / "docs" / "release-checklist.md")
+    evidence_text = _read(ROOT / "docs" / "user-feedback-evidence.md")
     demo_text = _read(ROOT / "docs" / "demo-script.md")
+    readiness_text = _read(ROOT / "docs" / "release-readiness.md")
     setup_template_text = _read(ROOT / ".github" / "ISSUE_TEMPLATE" / "setup_feedback.yml")
 
-    assert "docs/adoption-evidence.md" in readme_text
+    assert "docs/user-feedback-evidence.md" in readme_text
+    assert "docs/release-checklist.md" in readme_text
     assert "docs/demo-script.md" in readme_text
     assert "setup_feedback.yml" in readme_text
-    assert "adoption-evidence.md" in launch_text
-    assert "demo-script.md" in launch_text
-    assert "setup_feedback.yml" in launch_text
+    assert "user-feedback-evidence.md" in release_checklist_text
+    assert "releases/v0.2.0.md" in release_checklist_text
+    assert "setup_feedback.yml" in release_checklist_text
     assert "setup_feedback.yml" in evidence_text
+    assert "Release Readiness" in readiness_text
+    assert "qualify" not in readiness_text.lower()
+    assert "credit use" not in readiness_text.lower()
     assert "Do not count:" in evidence_text
     assert "Bought stars" in evidence_text or "bought stars" in evidence_text
     assert "python -m rumi_ai --health" in demo_text

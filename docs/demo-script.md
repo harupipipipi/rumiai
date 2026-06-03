@@ -1,6 +1,6 @@
 # Demo Script
 
-Use this script for a short release video, social post, or issue-based feedback request. Keep the demo honest: show the current early state, do not claim large adoption, and remove secrets from the screen.
+Use this script for a short release demo or issue-based feedback request. Keep the demo honest: show the current early state, do not claim large adoption, and remove secrets from the screen.
 
 ## Goal
 
@@ -35,7 +35,7 @@ pip install -e .
 
 5. Show `status: pass`.
 6. Open `SECURITY.md` and highlight the maintainer review checklist.
-7. Open `docs/adoption-evidence.md` and explain that real usage evidence is tracked with public links, not inflated metrics.
+7. Open `docs/user-feedback-evidence.md` and explain that real usage evidence is tracked with public links, not inflated metrics.
 
 ## 60-Second Voiceover
 

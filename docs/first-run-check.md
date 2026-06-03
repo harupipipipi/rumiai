@@ -75,7 +75,7 @@ If `just` is installed, this is equivalent:
 just oss-readiness
 ```
 
-This check is local only. It verifies that contribution, security, release, first-run, adoption-evidence, and application-draft materials are present before public outreach or program applications.
+This check is local only. It verifies that contribution, security, release, first-run, feedback-evidence, and package-readiness materials are present before public release work.
 
 For release packaging confidence, run the wheel smoke check. It builds a wheel,
 installs it into a fresh virtualenv, changes to a directory outside the checkout,
@@ -96,4 +96,5 @@ just package-smoke
 - Runtime architecture: `rumi_ai_1_10/README.md`
 - Pack authoring: `rumi_ai_1_10/docs/pack-development.md`
 - Viewer startup: `rumi_ai_1_10/docs/rumi_viewer_start.md`
-- Community and release work: `docs/community-launch-plan.md`
+- Release work: `docs/release-checklist.md`
+- Feedback evidence: `docs/user-feedback-evidence.md`
