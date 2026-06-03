@@ -69,3 +69,87 @@ def test_task_status_from_running_and_completed_delegate_results():
         )
         == "completed"
     )
+
+
+def test_dispatch_prunes_tools_for_non_tool_calling_agent_model(monkeypatch, tmp_path):
+    from domain.company.run_dispatcher import CompanyRunDispatcher
+    from domain.company.runtime_store import CompanyRuntimeStore
+    from domain.company.service import CompanyService
+    from domain.company.store import CompanyStore
+
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_COMPANY_STORE_PATH", str(tmp_path / "companies"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_COMPANY_RUNTIME_DB_PATH", str(tmp_path / "company_runtime.db"))
+    CompanyStore._instance = None
+    CompanyRuntimeStore._instance = None
+
+    company = CompanyService().bootstrap_default_company()
+    CompanyStore().upsert_agent(
+        company["id"],
+        {
+            "agent_id": "minimax_worker",
+            "display_name": "MiniMax Worker",
+            "model": "opencode-zen/minimax-m3-free",
+            "allowed_tools": ["coding_file_read", "coding_git_diff"],
+        },
+    )
+    runtime_store = CompanyRuntimeStore()
+    task = runtime_store.create_task(
+        company["id"],
+        title="Summarize the task",
+        target_agent_ids=["minimax_worker"],
+    )
+    seen = {}
+
+    def fake_dispatch(envelope, context):
+        seen["model"] = envelope.params["model"]
+        seen["tools"] = envelope.tools
+        return {"status": "ok", "delegate": {"execution_id": "run_456", "status": "completed"}, "result": {"status": "completed"}}
+
+    result = CompanyRunDispatcher(runtime_store=runtime_store, dispatcher=fake_dispatch).dispatch_task(
+        company["id"],
+        task["task_id"],
+    )
+
+    assert seen["model"] == "opencode-zen/minimax-m3-free"
+    assert seen["tools"] == []
+    assert result["task"]["status"] == "completed"
+
+
+def test_dispatch_persists_unconfigured_agent_model_error(monkeypatch, tmp_path):
+    from domain.agent_runtime.run_store import AgentRunStore
+    from domain.company.run_dispatcher import CompanyRunDispatcher
+    from domain.company.runtime_store import CompanyRuntimeStore
+    from domain.company.service import CompanyService
+    from domain.company.store import CompanyStore
+
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_COMPANY_STORE_PATH", str(tmp_path / "companies"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_COMPANY_RUNTIME_DB_PATH", str(tmp_path / "company_runtime.db"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_AGENT_RUNTIME_DIR", str(tmp_path / "agent_runtime"))
+    AgentRunStore._instance = None
+    CompanyStore._instance = None
+    CompanyRuntimeStore._instance = None
+
+    company = CompanyService().bootstrap_default_company()
+    CompanyStore().upsert_agent(
+        company["id"],
+        {
+            "agent_id": "stub_worker",
+            "display_name": "Stub Worker",
+            "model": "stub/default",
+            "allowed_tools": [],
+        },
+    )
+    runtime_store = CompanyRuntimeStore()
+    task = runtime_store.create_task(
+        company["id"],
+        title="Show fallback model state",
+        target_agent_ids=["stub_worker"],
+    )
+
+    result = CompanyRunDispatcher(runtime_store=runtime_store).dispatch_task(company["id"], task["task_id"])
+
+    assert result["task"]["status"] == "blocked"
+    assert result["run_links"][0]["status"] == "error"
+    run = AgentRunStore().get_run(result["run_links"][0]["run_id"])
+    assert run["status"] == "error"
+    assert "provider is not configured" in run["error"]

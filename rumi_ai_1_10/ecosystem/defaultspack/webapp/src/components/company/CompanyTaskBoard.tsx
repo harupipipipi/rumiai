@@ -1,22 +1,26 @@
-import { ClipboardList, Plus } from "lucide-react";
+import { Check, ClipboardList, Plus, Send } from "lucide-react";
 import { useMemo, useState } from "react";
 
-import type { CompanyAgent, CompanyTask } from "../../lib/api";
+import type { CompanyAgent, CompanyRunLink, CompanyTask } from "../../lib/api";
 
-const STATUSES = ["queued", "running", "blocked", "done"] as const;
+const STATUSES = ["queued", "running", "waiting_approval", "blocked", "completed", "done"] as const;
 
 export function CompanyTaskBoard({
   tasks,
   agents,
+  runs = [],
   busy = false,
   onCreateTask,
   onUpdateTask,
+  onDispatchTask,
 }: {
   tasks: CompanyTask[];
   agents: CompanyAgent[];
+  runs?: CompanyRunLink[];
   busy?: boolean;
   onCreateTask?: (title: string, targetAgentIds: string[]) => void;
   onUpdateTask?: (taskId: string, updates: Partial<CompanyTask>) => void;
+  onDispatchTask?: (taskId: string) => void;
 }) {
   const [title, setTitle] = useState("");
   const [targetAgentId, setTargetAgentId] = useState("");
@@ -28,6 +32,18 @@ export function CompanyTaskBoard({
     }
     return map;
   }, [tasks]);
+  const latestRunByTaskId = useMemo(() => {
+    const map = new Map<string, CompanyRunLink>();
+    for (const run of runs) {
+      const taskId = String(run.task_id || "");
+      if (taskId && !map.has(taskId)) map.set(taskId, run);
+    }
+    return map;
+  }, [runs]);
+  const visibleStatuses = useMemo(
+    () => [...STATUSES, ...[...grouped.keys()].filter((status) => !(STATUSES as readonly string[]).includes(status))],
+    [grouped],
+  );
 
   return (
     <section className="space-y-2 p-2">
@@ -79,7 +95,7 @@ export function CompanyTaskBoard({
       )}
 
       <div className="space-y-2">
-        {STATUSES.map((status) => {
+        {visibleStatuses.map((status) => {
           const items = grouped.get(status) ?? [];
           if (items.length === 0) return null;
           return (
@@ -89,26 +105,59 @@ export function CompanyTaskBoard({
                 <span>{status}</span>
                 <span>{items.length}</span>
               </div>
-              {items.map((task) => (
-                <div key={task.id} className="rounded-md border border-zinc-800/70 bg-zinc-950/40 px-2 py-1.5">
-                  <div className="flex items-start justify-between gap-2">
-                    <p className="min-w-0 flex-1 text-[12px] font-medium leading-snug text-zinc-200">{task.title}</p>
-                    {onUpdateTask && status !== "done" && (
-                      <button
-                        type="button"
-                        onClick={() => onUpdateTask(task.id, { status: "done" })}
-                        disabled={busy}
-                        className="flex-shrink-0 rounded border border-zinc-800 px-1.5 py-0.5 text-[10px] text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200 disabled:opacity-40"
-                      >
-                        done
-                      </button>
+              {items.map((task) => {
+                const latestRun = latestRunByTaskId.get(task.id);
+                const latestRunMessage = latestRun?.agent_run?.result_preview || latestRun?.agent_run?.error;
+                const latestRunMessageTone = latestRun?.agent_run?.result_preview ? "text-zinc-400" : "text-rose-300";
+                return (
+                  <div key={task.id} className="rounded-md border border-zinc-800/70 bg-zinc-950/40 px-2 py-1.5">
+                    <div className="flex items-start justify-between gap-2">
+                      <p className="min-w-0 flex-1 text-[12px] font-medium leading-snug text-zinc-200">{task.title}</p>
+                      <div className="flex flex-shrink-0 items-center gap-1">
+                        {onDispatchTask && status === "queued" && (
+                          <button
+                            type="button"
+                            onClick={() => onDispatchTask(task.id)}
+                            disabled={busy}
+                            className="flex h-6 w-6 items-center justify-center rounded border border-sky-500/30 text-sky-300 hover:bg-sky-500/10 disabled:opacity-40"
+                            title="Dispatch task to agent"
+                          >
+                            <Send size={11} />
+                          </button>
+                        )}
+                        {onUpdateTask && status !== "done" && status !== "completed" && (
+                          <button
+                            type="button"
+                            onClick={() => onUpdateTask(task.id, { status: "completed" })}
+                            disabled={busy}
+                            className="flex h-6 w-6 items-center justify-center rounded border border-zinc-800 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200 disabled:opacity-40"
+                            title="Mark complete"
+                          >
+                            <Check size={11} />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                    {task.target_agent_ids && task.target_agent_ids.length > 0 && (
+                      <p className="mt-1 truncate text-[10px] text-zinc-500">{task.target_agent_ids.join(", ")}</p>
+                    )}
+                    {latestRun && (
+                      <div className="mt-1 flex items-center justify-between gap-2 text-[10px] text-zinc-500">
+                        <span className="truncate">{latestRun.agent_id}</span>
+                        <span className="flex-shrink-0 rounded border border-zinc-800 px-1 py-0.5">{latestRun.agent_run?.status ?? latestRun.status}</span>
+                      </div>
+                    )}
+                    {latestRun?.agent_run?.model && (
+                      <p className="mt-1 truncate font-mono text-[10px] text-zinc-600">{latestRun.agent_run.model}</p>
+                    )}
+                    {latestRunMessage && (
+                      <p className={`mt-1 line-clamp-3 whitespace-pre-wrap text-[10px] leading-relaxed ${latestRunMessageTone}`}>
+                        {latestRunMessage}
+                      </p>
                     )}
                   </div>
-                  {task.target_agent_ids && task.target_agent_ids.length > 0 && (
-                    <p className="mt-1 truncate text-[10px] text-zinc-500">{task.target_agent_ids.join(", ")}</p>
-                  )}
-                </div>
-              ))}
+                );
+              })}
             </div>
           );
         })}

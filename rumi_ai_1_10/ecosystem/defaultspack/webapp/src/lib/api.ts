@@ -230,6 +230,7 @@ export type CompanyAgent = {
   allowed_tools?: string[];
   context_limit?: number;
   aliases?: string[];
+  system_prompt?: string;
   status?: string;
   metadata?: Record<string, unknown>;
   created_at?: string;
@@ -284,6 +285,44 @@ export type CompanyTask = {
   source?: string;
   status?: string;
   dispatches?: Array<Record<string, unknown>>;
+  metadata?: Record<string, unknown>;
+  created_at?: string;
+  updated_at?: string;
+};
+
+export type CompanyRunLink = {
+  link_id: string;
+  company_id: string;
+  task_id?: string | null;
+  thread_id?: string | null;
+  message_id?: string | null;
+  agent_id: string;
+  run_id: string;
+  status: string;
+  heartbeat_at?: string | null;
+  agent_run?: {
+    status?: string | null;
+    model?: string | null;
+    result_preview?: string;
+    error?: string | null;
+    updated_at?: string | null;
+  };
+  metadata?: Record<string, unknown>;
+  created_at?: string;
+  updated_at?: string;
+};
+
+export type CompanyInboxItem = {
+  inbox_id: string;
+  company_id: string;
+  agent_id: string;
+  message_id?: string | null;
+  task_id?: string | null;
+  run_id?: string | null;
+  kind: string;
+  status: string;
+  priority?: string;
+  content: string;
   metadata?: Record<string, unknown>;
   created_at?: string;
   updated_at?: string;
@@ -1992,6 +2031,24 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ company_id: companyId, task_id: taskId, policy }),
     });
+  },
+
+  listCompanyRuns(companyId: string, options?: { agent_id?: string; task_id?: string; status?: string; limit?: number }) {
+    return request<{ runs: CompanyRunLink[]; total: number }>(
+      withQuery(`/api/company/${encodeURIComponent(companyId)}/runs`, { company_id: companyId, ...options }),
+      { cache: "no-store" },
+    );
+  },
+
+  listCompanyAgentInbox(companyId: string, agentId: string, options?: { status?: string; kind?: string; limit?: number }) {
+    return request<{ inbox: CompanyInboxItem[]; total: number }>(
+      withQuery(`/api/company/${encodeURIComponent(companyId)}/agents/${encodeURIComponent(agentId)}/inbox`, {
+        company_id: companyId,
+        agent_id: agentId,
+        ...options,
+      }),
+      { cache: "no-store" },
+    );
   },
 
   listCompanyInboundRoutes(companyId: string) {

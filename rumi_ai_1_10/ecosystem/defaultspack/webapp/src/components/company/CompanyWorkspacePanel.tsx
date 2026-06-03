@@ -4,9 +4,11 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type {
   CompanyAgent,
   CompanyChannel,
+  CompanyInboxItem,
   CompanyInboundRoute,
   CompanyMessage,
   CompanyRecord,
+  CompanyRunLink,
   CompanyTask,
   P2PIdentity,
   P2PPeer,
@@ -40,6 +42,8 @@ export function CompanyWorkspacePanel() {
   const [channels, setChannels] = useState<CompanyChannel[]>([]);
   const [messages, setMessages] = useState<CompanyMessage[]>([]);
   const [tasks, setTasks] = useState<CompanyTask[]>([]);
+  const [runs, setRuns] = useState<CompanyRunLink[]>([]);
+  const [inboxItems, setInboxItems] = useState<CompanyInboxItem[]>([]);
   const [routes, setRoutes] = useState<CompanyInboundRoute[]>([]);
   const [p2pStatus, setP2PStatus] = useState<P2PStatusResponse | null>(null);
   const [p2pIdentity, setP2PIdentity] = useState<P2PIdentity | null>(null);
@@ -78,24 +82,35 @@ export function CompanyWorkspacePanel() {
       if (peersResult.status === "fulfilled") setPeers(peersResult.value.peers);
 
       if (selectedId) {
-        const [agentResult, channelResult, taskResult, routeResult, messageResult] = await Promise.allSettled([
+        const [agentResult, channelResult, taskResult, routeResult, messageResult, runResult] = await Promise.allSettled([
           companyResources.listCompanyAgents(selectedId),
           companyResources.listCompanyChannels(selectedId),
           companyResources.listCompanyTasks(selectedId),
           companyResources.listCompanyInboundRoutes(selectedId),
-          companyResources.listCompanyMessages(selectedId, { channel_id: activeChannelId ?? undefined, limit: 80 }),
+          companyResources.listCompanyMessages(selectedId, { limit: 80 }),
+          companyResources.listCompanyRuns(selectedId, { limit: 80 }),
         ]);
-        setAgents(agentResult.status === "fulfilled" ? agentResult.value.agents : arrayFromRecord(statusCompany?.agents));
+        const nextAgents = agentResult.status === "fulfilled" ? agentResult.value.agents : arrayFromRecord(statusCompany?.agents);
+        setAgents(nextAgents);
         const nextChannels = channelResult.status === "fulfilled" ? channelResult.value.channels : arrayFromRecord(statusCompany?.channels);
         setChannels(nextChannels);
         setActiveChannelId((current) => current ?? nextChannels[0]?.id ?? "ops-company");
         setTasks(taskResult.status === "fulfilled" ? taskResult.value.tasks : arrayFromRecord(statusCompany?.tasks));
         setRoutes(routeResult.status === "fulfilled" ? routeResult.value.routes : arrayFromRecord(statusCompany?.inbound_routes));
         setMessages(messageResult.status === "fulfilled" ? messageResult.value.messages : arrayFromRecord(statusCompany?.messages));
+        setRuns(runResult.status === "fulfilled" ? runResult.value.runs : []);
+        const inboxResults = await Promise.allSettled(
+          nextAgents.map((agent) => companyResources.listCompanyAgentInbox(selectedId, agent.agent_id, { limit: 20 })),
+        );
+        setInboxItems(
+          inboxResults.flatMap((result) => result.status === "fulfilled" ? result.value.inbox : []),
+        );
       } else {
         setAgents([]);
         setChannels([]);
         setTasks([]);
+        setRuns([]);
+        setInboxItems([]);
         setRoutes([]);
         setMessages([]);
       }
@@ -149,7 +164,15 @@ export function CompanyWorkspacePanel() {
           />
         );
       case "agents":
-        return <CompanyAgentList agents={agents} />;
+        return (
+          <CompanyAgentList
+            agents={agents}
+            runs={runs}
+            inboxItems={inboxItems}
+            busy={busy}
+            onUpsertAgent={(agent) => activeCompanyId && void run(() => companyResources.upsertCompanyAgent(activeCompanyId, agent))}
+          />
+        );
       case "routes":
         return (
           <CompanyInboundRoutesPanel
@@ -184,9 +207,11 @@ export function CompanyWorkspacePanel() {
           <CompanyTaskBoard
             tasks={tasks}
             agents={agents}
+            runs={runs}
             busy={busy}
             onCreateTask={(title, targetAgentIds) => activeCompanyId && void run(() => companyResources.createCompanyTask(activeCompanyId, { title, target_agent_ids: targetAgentIds }))}
             onUpdateTask={(taskId, updates) => activeCompanyId && void run(() => companyResources.updateCompanyTask(activeCompanyId, taskId, updates))}
+            onDispatchTask={(taskId) => activeCompanyId && void run(() => companyResources.dispatchCompanyTask(activeCompanyId, taskId))}
           />
         );
     }
