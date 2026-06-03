@@ -19,8 +19,7 @@ cd rumiai
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
-pip install -r rumi_ai_1_10/requirements.txt -r rumi_ai_1_10/requirements-dev.txt
-pip install -e ./rumi_ai_1_10
+pip install -e ".[dev]"
 ```
 
 For frontend work:

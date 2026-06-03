@@ -12,7 +12,7 @@ Show that a fresh checkout can run the lightweight health path and that the proj
 git clone https://github.com/harupipipipi/rumiai.git
 cd rumiai
 python -m pip install --upgrade pip
-pip install -r rumi_ai_1_10/requirements.txt
+pip install -e .
 ```
 
 ## Demo Flow

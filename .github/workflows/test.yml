@@ -24,6 +24,12 @@ jobs:
       - name: Install dependencies
         run: |
           pip install pytest
+          pip install -e .
+
+      - name: Run installed entrypoint health check outside repository
+        run: |
+          cd "$RUNNER_TEMP"
+          python -m rumi_ai --health
 
       - name: Run OSS readiness verifier
         run: python scripts/verify_oss_readiness.py

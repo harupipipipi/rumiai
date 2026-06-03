@@ -8,13 +8,13 @@ From the repository root:
 
 ```bash
 python -m pip install --upgrade pip
-pip install -r rumi_ai_1_10/requirements.txt
+pip install -e .
 ```
 
 For development and tests:
 
 ```bash
-pip install -r rumi_ai_1_10/requirements-dev.txt
+pip install -e ".[dev]"
 ```
 
 ## 2. Run Health Check
@@ -24,6 +24,10 @@ From the repository root:
 ```bash
 python -m rumi_ai --health
 ```
+
+After `pip install -e .`, this command should also work from a directory outside
+the repository. That verifies the public entrypoint is installed, not just
+available because the current shell is inside the checkout.
 
 If `just` is installed, this is equivalent:
 

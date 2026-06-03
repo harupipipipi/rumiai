@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rumi-ai"
+version = "1.10.0"
+description = "Local-first modular AI runtime with approval-aware packs and audit paths."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [
+  { name = "Rumi AI maintainers" },
+]
+dependencies = [
+  "cryptography>=42.0.0",
+  "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=7.0",
+  "pytest-asyncio>=0.23.0",
+  "ruff>=0.6.0",
+  "mypy>=1.11.0",
+]
+computer-windows = [
+  "Pillow>=10.0",
+  "pywinauto>=0.6.8",
+]
+browser-cdp = [
+  "websocket-client>=1.8.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/harupipipipi/rumiai"
+Repository = "https://github.com/harupipipipi/rumiai"
+Issues = "https://github.com/harupipipipi/rumiai/issues"
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["rumi_ai*", "rumi_ai_1_10*"]
+namespaces = true

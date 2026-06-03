@@ -19,6 +19,23 @@ def test_root_entrypoint_targets_legacy_app_main():
     assert 'if __name__ == "__main__":' in entrypoint
 
 
+def test_root_pyproject_installs_stable_entrypoint_package():
+    root_pyproject = _read(ROOT / "pyproject.toml")
+    readme_text = _read(ROOT / "README.md")
+    contributing_text = _read(ROOT / "CONTRIBUTING.md")
+    workflow_text = _read(ROOT / ".github" / "workflows" / "test.yml")
+    first_run_text = _read(ROOT / "docs" / "first-run-check.md")
+
+    assert 'name = "rumi-ai"' in root_pyproject
+    assert '"rumi_ai*"' in root_pyproject
+    assert '"rumi_ai_1_10*"' in root_pyproject
+    assert 'pip install -e ".[dev]"' in readme_text
+    assert 'pip install -e ".[dev]"' in contributing_text
+    assert "pip install -e ." in first_run_text
+    assert 'cd "$RUNNER_TEMP"' in workflow_text
+    assert "python -m rumi_ai --health" in workflow_text
+
+
 def test_version_contract_matches_package_version():
     init_text = _read(ROOT / "rumi_ai" / "__init__.py")
     pyproject_text = _read(ROOT / "rumi_ai_1_10" / "pyproject.toml")

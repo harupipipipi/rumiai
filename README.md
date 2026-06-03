@@ -66,8 +66,7 @@ cd rumiai
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
-pip install -r rumi_ai_1_10/requirements.txt -r rumi_ai_1_10/requirements-dev.txt
-pip install -e ./rumi_ai_1_10
+pip install -e ".[dev]"
 
 cd rumi_viewer/frontend
 npm install
@@ -83,6 +82,7 @@ python -m rumi_ai
 ```
 
 `--health` はシステムボリューム使用率も確認します。`disk` probe が `DEGRADED` / `DOWN` の場合は、コード不具合ではなく空き容量不足の可能性があります。
+The editable install is rooted at the repository, so `python -m rumi_ai --health` also works from outside the checkout after installation.
 For first-run validation on a new machine, see [docs/first-run-check.md](./docs/first-run-check.md).
 
 ## Common Tasks

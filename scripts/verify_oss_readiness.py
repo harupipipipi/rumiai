@@ -36,6 +36,7 @@ def paragraph_after(text: str, label: str) -> str:
 
 def main() -> int:
     required_files = [
+        "pyproject.toml",
         "README.md",
         "CONTRIBUTING.md",
         "CODE_OF_CONDUCT.md",
@@ -59,8 +60,11 @@ def main() -> int:
             check(path.is_file() and bool(path.read_text(encoding="utf-8").strip()), rel_path)
         )
 
+    root_pyproject = read("pyproject.toml")
     readme = read("README.md")
+    contributing = read("CONTRIBUTING.md")
     release_workflow = read(".github/workflows/release.yml")
+    test_workflow = read(".github/workflows/test.yml")
     first_run = read("docs/first-run-check.md")
     launch = read("docs/community-launch-plan.md")
     evidence = read("docs/adoption-evidence.md")
@@ -72,9 +76,29 @@ def main() -> int:
         [
             check("docs/first-run-check.md" in readme, "README links first-run guide"),
             check("docs/adoption-evidence.md" in readme, "README links adoption evidence"),
+            check('name = "rumi-ai"' in root_pyproject, "root pyproject names package"),
+            check(
+                '"rumi_ai*"' in root_pyproject and '"rumi_ai_1_10*"' in root_pyproject,
+                "root pyproject includes stable and runtime packages",
+            ),
+            check(
+                'pip install -e "."' not in readme and 'pip install -e ".[dev]"' in readme,
+                "README documents root editable install",
+            ),
+            check(
+                'pip install -e ".[dev]"' in contributing,
+                "CONTRIBUTING documents root editable install",
+            ),
+            check(
+                "cd \"$RUNNER_TEMP\"" in test_workflow
+                and "python -m rumi_ai --health" in test_workflow,
+                "CI checks installed entrypoint outside repository",
+            ),
             check("draft: true" in release_workflow, "release workflow creates draft releases"),
             check(
-                "python -m rumi_ai --health" in first_run and "just health" in first_run,
+                "python -m rumi_ai --health" in first_run
+                and "just health" in first_run
+                and "pip install -e ." in first_run,
                 "first-run guide documents health check",
             ),
             check("adoption-evidence.md" in launch, "launch plan links evidence tracker"),

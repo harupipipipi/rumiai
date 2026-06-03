@@ -9,6 +9,7 @@
 !/docs/
 !/docs/**
 !/justfile
+!/pyproject.toml
 !/rumi_ai_1_10/
 !/rumi_viewer/
 !/pack-shell/
