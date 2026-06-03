@@ -1,0 +1,12 @@
+preset_id: routing_fit_matrix
+name: Model Fit Matrix and Routing Evidence
+profile: rumi_model_evals.routing_fit_analyst
+inspired_by: [Hermes routing, OpenClaw provider selection]
+enabled_capabilities: [model_fit_matrix, pass_k_metrics, flakiness_review, cost_latency_evidence]
+ui_panels: [chat, fit_matrix, metric_sets, consumer_notes]
+behavior: [task_family_rows, caveats_visible, no_catalog_mutation]
+policy:
+  network_default: none
+task_defaults:
+  output:
+    type: model_fit_matrix

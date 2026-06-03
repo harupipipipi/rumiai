@@ -1,0 +1,51 @@
+catalog_id: rumi.model_evals.capabilities
+version: rumi.catalog.v1
+description: Local-first model evaluation and routing evidence capability bundles.
+local_first: true
+network_default: none
+capabilities:
+  eval_intake:
+    description: Capture model, provider, route, task family, budget, and evidence goals.
+    requires: [chat_context, provider_catalog_reference]
+    provided_by: [defaultspack, rumi_local_agent_pack]
+  contract_eval_design:
+    description: Define interface-level eval cases for schemas, streaming, errors, refusals, and tool calls.
+    requires: [layered_eval_contract]
+    provided_by: [rumi_model_evals_pack]
+  provider_smoke:
+    description: Define tiny provider checks for auth, model id, latency, response envelope, and safety baseline.
+    requires: [external_runtime_credentials, explicit_approval]
+    provided_by: [rumi_model_evals_pack]
+  e2e_eval_design:
+    description: Define workflow evals for coding, agent services, data analysis, research, and tool use.
+    requires: [task_fixture, expected_observables, grader_policy]
+    provided_by: [rumi_model_evals_pack]
+  pass_k_metrics:
+    description: Track pass@k, pass^k, sample count, seeds, independence assumptions, and confidence.
+    requires: [metrics_schema, run_set]
+    provided_by: [rumi_model_evals_pack]
+  flakiness_review:
+    description: Track retries, nondeterminism, time window, provider incidents, and quarantine decisions.
+    requires: [run_history, retry_policy]
+    provided_by: [rumi_model_evals_pack]
+  model_fit_matrix:
+    description: Map evidence to task family routing suitability and caveats.
+    requires: [fit_matrix_schema, promotion_gate_review]
+    provided_by: [rumi_model_evals_pack]
+  cost_latency_evidence:
+    description: Record price units, observed latency percentiles, token counts, and capture window.
+    requires: [metrics_schema, provider_rate_notes]
+    provided_by: [rumi_model_evals_pack]
+  promotion_gate_review:
+    description: Decide recommend, hold, quarantine, demote, or gather_more_evidence status.
+    requires: [promotion_gate_schema, fit_matrix]
+    provided_by: [rumi_model_evals_pack]
+guardrails:
+  no_embedded_secrets: true
+  network_default: none
+  approval_required_for:
+    - provider_network_call
+    - cost_bearing_eval
+    - file_write
+    - terminal_execution
+    - defaultspack_catalog_change

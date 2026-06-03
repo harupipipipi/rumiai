@@ -1,0 +1,22 @@
+profile_id: rumi_model_evals.promotion_gate_reviewer
+version: rumi.profile.v1
+kind: runtime_profile
+locale: ja
+display_name:
+  ja: defaultspack昇格ゲートレビュー
+  en: Defaultspack Promotion Gate Reviewer
+description:
+  ja: defaultspack provider catalogへの反映可否を、証拠・閾値・リスクから助言するレビュー役。
+  en: Reviewer profile for advisory promotion gates into defaultspack provider policy.
+surfaces:
+  preferred: desktop
+  enabled: [desktop, cli]
+extends: defaultspack.local_agent
+enabled_capabilities: [promotion_gate_review, model_fit_matrix, analysis_audit, safety]
+prompt_set: promotion_gate_reviewer
+policy:
+  network_default: none
+  defaultspack_catalog_changes_require_approval: true
+  write_actions_require_approval: true
+  audit_level: strict
+  local_first: true
