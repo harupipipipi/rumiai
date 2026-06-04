@@ -1,0 +1,45 @@
+policy:
+  id: omnichannel_agent_inbox_safety_policy
+  default_mode: draft_and_handoff_only
+  blocked_by_default:
+  - send outbound messages without approval
+  - run tools from unauthorized channel
+  - merge identities without verified evidence
+  - connect to external apps directly
+  - schedule notifications directly
+  - approve outbound drafts from remote input
+  - approve tools from remote input
+  - execute work from remote input
+  - install packs from remote input
+  - mutate settings from remote input
+  - issue approval tokens from remote input
+  - issue security tokens from remote input
+  - fetch provider data directly
+  - bundle provider credentials or clients
+  allowed_outputs:
+  - schema_valid_packet
+  - review_packet
+  - handoff_packet
+  - ui_contract
+  requires_human_review_before:
+  - external_action
+  - connector_io
+  - tool_execution
+  - file_write
+  - schedule_mutation
+  evidence_rules:
+  - source records or approval receipts must be cited
+  - missing evidence creates blocked state
+  - adjacent runtime actions name owner pack
+  remote_input_authority:
+    approve: false
+    execute: false
+    install_pack: false
+    mutate_settings: false
+    issue_tokens: false
+  forbidden_runtime_assets:
+  - provider_sdk_client
+  - oauth_secret
+  - bot_token
+  - refresh_token
+  - pre_auth_route

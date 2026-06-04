@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rumi.local/schemas/outbound_draft.schema.json",
+  "title": "Outbound Draft",
+  "description": "Outbound message remains draft until approved.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "draft_id",
+    "thread_id",
+    "channel",
+    "body_summary",
+    "approval_state",
+    "delivery_owner",
+    "approval_receipt",
+    "body_hash",
+    "approval_expires_at",
+    "pack_send_allowed"
+  ],
+  "properties": {
+    "draft_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "thread_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "channel": {
+      "type": "string",
+      "enum": [
+        "slack",
+        "gmail",
+        "sms",
+        "voice",
+        "web",
+        "discord",
+        "manual"
+      ]
+    },
+    "body_summary": {
+      "type": "string",
+      "minLength": 1
+    },
+    "approval_state": {
+      "type": "string",
+      "enum": [
+        "draft",
+        "pending",
+        "approved",
+        "denied",
+        "expired"
+      ]
+    },
+    "delivery_owner": {
+      "type": "string",
+      "const": "rumi_connector_gateway_pack"
+    },
+    "body_hash": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "approval_expires_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "pack_send_allowed": {
+      "type": "boolean",
+      "const": false
+    },
+    "approval_receipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "approved_by",
+        "approved_at",
+        "scope"
+      ],
+      "properties": {
+        "approved_by": {
+          "type": "string",
+          "minLength": 1
+        },
+        "approved_at": {
+          "type": "string",
+          "minLength": 1
+        },
+        "scope": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  }
+}

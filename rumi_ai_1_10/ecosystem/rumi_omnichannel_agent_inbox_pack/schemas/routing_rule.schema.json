@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rumi.local/schemas/routing_rule.schema.json",
+  "title": "Routing Rule",
+  "description": "Thread-to-agent routing rule.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "routing_rule_id",
+    "conditions",
+    "target_agent",
+    "required_acl_state",
+    "handoff_owner"
+  ],
+  "properties": {
+    "routing_rule_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "conditions": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "field",
+          "operator",
+          "value"
+        ],
+        "properties": {
+          "field": {
+            "type": "string",
+            "minLength": 1
+          },
+          "operator": {
+            "type": "string",
+            "minLength": 1
+          },
+          "value": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "target_agent": {
+      "type": "string",
+      "minLength": 1
+    },
+    "required_acl_state": {
+      "type": "string",
+      "enum": [
+        "draft_only",
+        "handoff_only",
+        "approved"
+      ]
+    },
+    "handoff_owner": {
+      "type": "string",
+      "const": "rumi_agent_services_pack"
+    }
+  }
+}

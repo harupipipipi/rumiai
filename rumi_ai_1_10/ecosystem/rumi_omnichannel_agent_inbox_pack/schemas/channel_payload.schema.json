@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rumi.local/schemas/channel_payload.schema.json",
+  "title": "Channel Payload",
+  "description": "Provider-neutral channel payload contract.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "payload_id",
+    "channel",
+    "provider_message_ref",
+    "sender_ref",
+    "idempotency_key",
+    "redaction_state",
+    "connector_owner",
+    "raw_payload_policy",
+    "secret_material_allowed"
+  ],
+  "properties": {
+    "payload_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "channel": {
+      "type": "string",
+      "enum": [
+        "slack",
+        "gmail",
+        "sms",
+        "voice",
+        "web",
+        "discord",
+        "manual"
+      ]
+    },
+    "provider_message_ref": {
+      "type": "string",
+      "minLength": 1
+    },
+    "sender_ref": {
+      "type": "string",
+      "minLength": 1
+    },
+    "idempotency_key": {
+      "type": "string",
+      "minLength": 1
+    },
+    "redaction_state": {
+      "type": "string",
+      "enum": [
+        "redacted",
+        "raw_blocked",
+        "not_applicable"
+      ]
+    },
+    "connector_owner": {
+      "type": "string",
+      "const": "rumi_connector_gateway_pack"
+    },
+    "raw_payload_policy": {
+      "type": "string",
+      "const": "redacted_metadata_only"
+    },
+    "secret_material_allowed": {
+      "type": "boolean",
+      "const": false
+    }
+  }
+}

@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rumi.local/schemas/channel_acl.schema.json",
+  "title": "Channel ACL",
+  "description": "ACL gate for channel-originated work.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "acl_id",
+    "identity_id",
+    "channel",
+    "allowed_intents",
+    "tool_access",
+    "review_owner",
+    "default_effect",
+    "remote_input_can_elevate",
+    "sensitive_action_policy"
+  ],
+  "properties": {
+    "acl_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "identity_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "channel": {
+      "type": "string",
+      "enum": [
+        "slack",
+        "gmail",
+        "sms",
+        "voice",
+        "web",
+        "discord",
+        "manual"
+      ]
+    },
+    "allowed_intents": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "tool_access": {
+      "type": "string",
+      "enum": [
+        "none",
+        "draft_only",
+        "handoff_only",
+        "approved"
+      ]
+    },
+    "review_owner": {
+      "type": "string",
+      "const": "rumi_security_review_pack"
+    },
+    "default_effect": {
+      "type": "string",
+      "const": "deny"
+    },
+    "remote_input_can_elevate": {
+      "type": "boolean",
+      "const": false
+    },
+    "sensitive_action_policy": {
+      "type": "string",
+      "enum": [
+        "deny",
+        "handoff_to_security_review"
+      ]
+    }
+  }
+}

@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rumi.local/schemas/connector_handoff.schema.json",
+  "title": "Connector Handoff",
+  "description": "Connector handoff contract; no provider SDK execution.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "handoff_id",
+    "channel",
+    "owner_pack",
+    "operation",
+    "payload_ref",
+    "approval_receipt_id",
+    "send_allowed",
+    "secrets_included",
+    "provider_client_included"
+  ],
+  "properties": {
+    "handoff_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "channel": {
+      "type": "string",
+      "minLength": 1
+    },
+    "owner_pack": {
+      "type": "string",
+      "const": "rumi_connector_gateway_pack"
+    },
+    "operation": {
+      "type": "string",
+      "enum": [
+        "fetch",
+        "send",
+        "sync",
+        "subscribe"
+      ]
+    },
+    "payload_ref": {
+      "type": "string",
+      "minLength": 1
+    },
+    "approval_receipt_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "send_allowed": {
+      "type": "boolean"
+    },
+    "secrets_included": {
+      "type": "boolean",
+      "const": false
+    },
+    "provider_client_included": {
+      "type": "boolean",
+      "const": false
+    }
+  }
+}

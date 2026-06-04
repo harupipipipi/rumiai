@@ -1,0 +1,85 @@
+{
+  "pack_id": "rumi_omnichannel_agent_inbox_pack",
+  "display_name": "Rumi Omnichannel Agent Inbox Pack",
+  "description": "Declarative omnichannel agent inbox contracts for channel payloads, identity mapping, ACL gates, thread routing, outbound draft approvals, notification preferences, and inbox UI review.",
+  "target_pack_id": "rumi_omnichannel_agent_inbox_pack",
+  "version": "0.1.0",
+  "recommended": false,
+  "risk_level": "medium",
+  "supports_all_ok": false,
+  "depends_on": [
+    {
+      "pack_id": "defaultspack",
+      "version": ">=2.0.0"
+    }
+  ],
+  "conflicts_with": [],
+  "compatibility": {
+    "python": ">=3.9",
+    "platforms": [
+      "macos",
+      "linux",
+      "windows"
+    ]
+  },
+  "overlap_policy": {
+    "actual_app_connectors": "handoff_to_rumi_connector_gateway_pack",
+    "slack_gmail_mobile_clients": "handoff_to_connector_or_channel_owner",
+    "work_execution": "handoff_to_rumi_agent_services_pack",
+    "schedule_execution": "handoff_to_rumi_workflow_scheduler_pack",
+    "security_policy_review": "handoff_to_rumi_security_review_pack",
+    "message_sending": "handoff_to_rumi_connector_gateway_pack",
+    "identity_mapping": "owned_by_rumi_omnichannel_agent_inbox_pack",
+    "outbound_draft_approval": "owned_by_rumi_omnichannel_agent_inbox_pack",
+    "tool_aliases": "prefer_explicit_pack_namespace"
+  },
+  "defaultspack_promotion": {
+    "eligible": false,
+    "reason": "Rumi Omnichannel Agent Inbox Pack is declarative and cannot enter defaultspack until owner-pack integration, audit receipts, and real success cases prove it should be default.",
+    "criteria": [
+      "contract_tests_pass",
+      "overlap_policy_reviewed",
+      "maintainer_runtime_evidence_required",
+      "promotion_requires_real_world_success_cases",
+      "human_review_required_before_external_action"
+    ],
+    "promotion_blockers": [
+      "requires_channel_identity_registry",
+      "requires_external_message_approval_tokens",
+      "connector_io_owned_elsewhere",
+      "security_acl_review_required",
+      "must_prove_outbound_draft_gate",
+      "must_prove_remote_input_has_no_authority",
+      "must_prove_route_idempotency"
+    ],
+    "promotion_evidence_required": [
+      "cross_channel_identity_cases",
+      "channel_acl_denial_cases",
+      "outbound_draft_approval_cases",
+      "thread_routing_cases",
+      "notification_preference_cases"
+    ]
+  },
+  "marketplace": {
+    "id": "rumi.omnichannel_agent_inbox_pack",
+    "registry": "bundled",
+    "publisher": "rumi-ai",
+    "status": "verified",
+    "category": "omnichannel-agent-inbox",
+    "channel": "experimental"
+  },
+  "signing": {
+    "mode": "repository_reviewed",
+    "verified": true
+  },
+  "security_notes": [
+    "No credentials are bundled.",
+    "No executable code is included.",
+    "Network is none by default.",
+    "Remote input cannot approve, execute, install packs, mutate settings, or issue tokens."
+  ],
+  "conflict_notes": [
+    "The pack owns contracts and review packets only.",
+    "Adjacent runtime actions are explicit handoffs to owner packs."
+  ]
+}

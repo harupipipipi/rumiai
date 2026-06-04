@@ -1,0 +1,30 @@
+taxonomy:
+  domains:
+  - omnichannel-agent-inbox
+  - local_first_contracts
+  - handoff_review
+  artifact_types:
+  - channel_message
+  - identity_map
+  - channel_acl
+  - inbox_thread
+  - routing_rule
+  - outbound_draft
+  - notification_preference
+  - inbox_ui_view
+  handoff_targets:
+  - rumi_connector_gateway_pack
+  - rumi_agent_services_pack
+  - rumi_workflow_scheduler_pack
+  - rumi_security_review_pack
+  - rumi_business_ops_pack
+  - rumi_voice_mobile_pack
+  forbidden_ownership:
+  - actual app connectors
+  - Slack client
+  - Gmail client
+  - mobile client
+  - work execution
+  - schedule execution
+  - security policy review
+  - message sending
