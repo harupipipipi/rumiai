@@ -103,7 +103,7 @@ export function CompanyWorkspacePanel() {
       const firstError = [companyListResult, statusResult]
         .find((result) => result.status === "rejected") as PromiseRejectedResult | undefined;
       if (firstError) {
-        setError(firstError.reason instanceof Error ? firstError.reason.message : "Company APIs are unavailable.");
+        setError(firstError.reason instanceof Error ? firstError.reason.message : "Team workspace APIs are unavailable.");
       }
     } finally {
       setBusy(false);
@@ -123,7 +123,7 @@ export function CompanyWorkspacePanel() {
       await work();
       await loadCompany(activeCompanyId);
     } catch (actionError) {
-      setError(actionError instanceof Error ? actionError.message : "Company action failed.");
+      setError(actionError instanceof Error ? actionError.message : "Team workspace action failed.");
     } finally {
       setBusy(false);
     }
@@ -131,7 +131,7 @@ export function CompanyWorkspacePanel() {
 
   const renderTab = () => {
     if (!activeCompanyId && activeTab !== "p2p") {
-      return <div className="p-3 text-[12px] text-zinc-500">Bootstrap or select a company workspace.</div>;
+      return <div className="p-3 text-[12px] text-zinc-500">Bootstrap or select a team workspace.</div>;
     }
     switch (activeTab) {
       case "channels":
@@ -195,8 +195,8 @@ export function CompanyWorkspacePanel() {
   return (
     <div className="flex h-full min-h-0 flex-col bg-[#0a0a0c] text-zinc-300">
       <div className="border-b border-zinc-800/60 px-3 py-2">
-        <p className="truncate text-[13px] font-medium text-zinc-100">Company Workspace</p>
-        <p className="truncate text-[10px] text-zinc-600">{activeCompany?.name ?? "local company operations"}</p>
+        <p className="truncate text-[13px] font-medium text-zinc-100">Team Workspace</p>
+        <p className="truncate text-[10px] text-zinc-600">{activeCompany?.name ?? "local team operations"}</p>
       </div>
 
       {error && (

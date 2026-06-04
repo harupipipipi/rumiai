@@ -11,6 +11,7 @@
 | やりたいこと | まず読む場所 | どこまで分かるか |
 |---|---|---|
 | 目的別にドキュメントを辿りたい | [`docs/README.md`](./docs/README.md) | 「何をしたいか→どのドキュメントか」を一枚で辿れる |
+| 用語の意味を揃えたい | [`docs/terminology.md`](./docs/terminology.md) | `rule`, `skill`, `team workspace`, `delegation` の使い分けを確認できる |
 | まず起動したい | ルートの [`README.md`](../README.md) | 最短の起動コマンドと repo の入口 |
 | まず手を動かして確認したい | [`docs/tutorials/runtime-quickstart.md`](./docs/tutorials/runtime-quickstart.md) | `--health` から `/panel/` までの最短チュートリアル |
 | コードを読まずに runtime の仕組みを理解したい | [`docs/concepts/system-mechanism.md`](./docs/concepts/system-mechanism.md) | 起動・Flow・承認・Grant・viewer 連携の実行経路 |
