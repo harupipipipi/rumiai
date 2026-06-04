@@ -16,3 +16,7 @@ runtimes:
   - runtime_id: browser_sandbox
     isolation: web_origin
     default_decision: route_to_browser_packs
+boundary_matrix_ref: specs/execution_boundary_matrix.yaml
+receipt_schema_ref: specs/runtime_receipt.schema.yaml
+secret_mount_policy_ref: policies/secret_mount.policy.yaml
+reproducibility_checklist_ref: checklists/reproducibility_checklist.yaml

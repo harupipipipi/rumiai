@@ -22,18 +22,36 @@
   },
   "defaultspack_promotion": {
     "eligible": false,
+    "reason": "Sandbox Runtime is a high-risk declarative boundary and evidence pack; defaultspack promotion is blocked until runtime execution owners prove isolation, secret handling, and receipt evidence outside this pack.",
     "criteria": [
       "contract_tests_pass",
       "overlap_policy_reviewed",
       "maintainer_runtime_evidence_required"
+    ],
+    "promotion_blockers": [
+      "no_executable_runtime_code",
+      "runtime_execution_owned_by_defaultspack_tools",
+      "secret_mounts_require_security_review",
+      "release_jobs_owned_by_rumi_devops_release_pack"
+    ],
+    "promotion_evidence_required": [
+      "execution_boundary_matrix_review_cases",
+      "secret_mount_policy_review_cases",
+      "runtime_receipt_schema_cases",
+      "reproducibility_checklist_cases"
     ]
   },
   "marketplace": {
     "id": "rumi.sandbox_runtime_pack",
+    "registry": "bundled",
+    "publisher": "rumi-ai",
+    "status": "experimental",
+    "category": "runtime-safety",
     "channel": "experimental"
   },
   "signing": {
-    "mode": "repository_reviewed"
+    "mode": "repository_reviewed",
+    "verified": true
   },
   "security_notes": [
     "No secrets are bundled.",

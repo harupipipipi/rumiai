@@ -1,6 +1,10 @@
 example_id: rumi_sandbox_runtime.host_command_review
-request: Example workflow for host command review.
+request: Review a proposed host command that writes files and installs dependencies, then block execution until security review and explicit user confirmation.
+boundary_classification: local_host_mutating
+secret_mount_request: inherited_host_environment
+approval_required: explicit_user_confirmation_required
 expected_outputs:
-  - plan
-  - evidence
-  - handoff
+  - host_mutation_risk_summary
+  - security_review_handoff
+  - secret_mount_rejection
+  - blocked_runtime_receipt

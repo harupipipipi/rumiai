@@ -1,6 +1,10 @@
 example_id: rumi_sandbox_runtime.remote_runtime_scope
-request: Example workflow for remote runtime scope.
+request: Prepare a remote SSH scope card for a staging log inspection without executing the remote command in this pack.
+boundary_classification: remote_ssh
+network_state: approved_scoped_required
+approval_required: remote_scope_card_required
 expected_outputs:
-  - plan
-  - evidence
-  - handoff
+  - remote_scope_card
+  - allowed_command_shape
+  - data_egress_notes
+  - handoff_to_rumi_devops_release_pack
