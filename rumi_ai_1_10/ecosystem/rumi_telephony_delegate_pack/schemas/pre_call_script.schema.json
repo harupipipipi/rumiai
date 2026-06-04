@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rumi.local/schemas/pre_call_script.schema.json",
+  "title": "Pre Call Script",
+  "description": "Contract schema for Pre Call Script.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "pre_call_script_id",
+    "opening_disclosure",
+    "consent_question",
+    "consent_decline_instruction",
+    "allowed_topics",
+    "forbidden_topics",
+    "takeover_triggers",
+    "script_hash"
+  ],
+  "properties": {
+    "pre_call_script_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "opening_disclosure": {
+      "type": "string",
+      "minLength": 10
+    },
+    "consent_question": {
+      "type": "string",
+      "minLength": 10
+    },
+    "consent_decline_instruction": {
+      "type": "string",
+      "const": "abort_and_escalate"
+    },
+    "allowed_topics": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string"
+      }
+    },
+    "forbidden_topics": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string"
+      }
+    },
+    "takeover_triggers": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "trigger",
+          "handoff_owner",
+          "abort_required"
+        ],
+        "properties": {
+          "trigger": {
+            "type": "string",
+            "enum": [
+              "recipient_requests_human",
+              "user_requests_human",
+              "consent_declined",
+              "disallowed_intent",
+              "emergency_services",
+              "payment_or_purchase",
+              "policy_boundary_violation"
+            ]
+          },
+          "handoff_owner": {
+            "type": "string",
+            "enum": [
+              "human_user",
+              "rumi_security_review_pack",
+              "rumi_business_ops_pack"
+            ]
+          },
+          "abort_required": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    "script_hash": {
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}

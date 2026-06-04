@@ -1,0 +1,28 @@
+taxonomy:
+  domains:
+  - telephony_delegation
+  - approval_gates
+  - transcript_redaction
+  artifact_types:
+  - call_task
+  - pre_call_script
+  - dial_approval
+  - call_session
+  - transcript_redaction
+  - never_call_entry
+  - escalation_record
+  handoff_targets:
+  - rumi_voice_mobile_pack
+  - rumi_multimodal_media_pack
+  - rumi_connector_gateway_pack
+  - rumi_meeting_intelligence_pack
+  - rumi_security_review_pack
+  - rumi_business_ops_pack
+  forbidden_ownership:
+  - actual dialing
+  - ASR/TTS runtime
+  - contact lookup
+  - calendar mutation
+  - payment execution
+  - external connector writes
+  - emergency services

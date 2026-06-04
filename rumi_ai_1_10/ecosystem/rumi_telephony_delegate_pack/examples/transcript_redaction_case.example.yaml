@@ -1,0 +1,17 @@
+example:
+  id: transcript_redaction_case
+  user_request: Redact phone and email before handoff
+  input_state: local_artifacts_supplied
+  expected_result: redaction_handoff_packet
+  must_include:
+  - evidence_ids
+  - uncertainty_or_limitations
+  - handoff_owner
+  - redaction_rules
+  - redacted_segments
+  - pii_classes
+  must_not:
+  - external_action
+  - unredacted_pii
+  - uncited_claim
+  - credential_requirement

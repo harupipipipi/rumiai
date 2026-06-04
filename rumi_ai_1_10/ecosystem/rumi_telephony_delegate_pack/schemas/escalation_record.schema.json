@@ -1,0 +1,91 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rumi.local/schemas/escalation_record.schema.json",
+  "title": "Escalation Record",
+  "description": "Contract schema for Escalation Record.",
+  "type": "object",
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "trigger": {
+            "enum": [
+              "consent_declined",
+              "disallowed_intent",
+              "never_call_active",
+              "emergency_services",
+              "payment_or_purchase",
+              "policy_boundary_violation"
+            ]
+          }
+        },
+        "required": [
+          "trigger"
+        ]
+      },
+      "then": {
+        "properties": {
+          "abort_required": {
+            "const": true
+          }
+        }
+      }
+    }
+  ],
+  "required": [
+    "escalation_id",
+    "call_task_id",
+    "trigger",
+    "takeover_owner",
+    "abort_required",
+    "reason",
+    "evidence_ids"
+  ],
+  "properties": {
+    "escalation_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "call_task_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "trigger": {
+      "type": "string",
+      "enum": [
+        "recipient_requests_human",
+        "user_requests_human",
+        "consent_declined",
+        "disallowed_intent",
+        "never_call_active",
+        "emergency_services",
+        "payment_or_purchase",
+        "unknown_identity",
+        "policy_boundary_violation"
+      ]
+    },
+    "takeover_owner": {
+      "type": "string",
+      "enum": [
+        "human_user",
+        "rumi_security_review_pack",
+        "rumi_business_ops_pack"
+      ]
+    },
+    "abort_required": {
+      "type": "boolean"
+    },
+    "reason": {
+      "type": "string",
+      "minLength": 1
+    },
+    "evidence_ids": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string"
+      }
+    }
+  }
+}

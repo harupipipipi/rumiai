@@ -1,0 +1,16 @@
+example:
+  id: never_call_blocked_case
+  user_request: Block active never-call alias
+  input_state: local_artifacts_supplied
+  expected_result: blocked_call_handoff_packet
+  must_include:
+  - evidence_ids
+  - uncertainty_or_limitations
+  - handoff_owner
+  - never_call_entry
+  - blocked_reason
+  must_not:
+  - external_action
+  - actual_dialing
+  - uncited_claim
+  - credential_requirement

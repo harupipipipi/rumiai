@@ -1,0 +1,16 @@
+handoff_policy:
+  default: do_not_execute_adjacent_runtime_action
+  overlap_policy:
+    actual_dialing: blocked_handoff_to_connector_gateway_or_voice_owner
+    asr_tts_runtime: handoff_to_rumi_voice_mobile_pack
+    media_transcript_runtime: handoff_to_rumi_multimodal_media_pack
+    contact_or_calendar_lookup: handoff_to_rumi_connector_gateway_pack
+    meeting_recap: handoff_to_rumi_meeting_intelligence_pack
+    external_business_action: handoff_to_rumi_business_ops_pack
+    real_world_action_risk_review: handoff_to_rumi_security_review_pack
+    telephony_contract: owned_by_rumi_telephony_delegate_pack
+    tool_aliases: prefer_explicit_pack_namespace
+  conflict_resolution:
+  - If an action mutates external state, stop and emit a handoff packet.
+  - If evidence is missing, mark uncertainty instead of fabricating details.
+  - If pack ownership is ambiguous, prefer the narrower owner surface and require human review.

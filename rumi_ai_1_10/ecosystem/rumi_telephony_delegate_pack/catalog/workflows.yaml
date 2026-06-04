@@ -1,0 +1,106 @@
+workflows:
+  default_execution: no_runtime_action
+  ownership:
+    owned:
+    - call_task_contract
+    - pre_call_script
+    - dial_approval_gate
+    - consent_disclosure_script
+    - call_session_state
+    - takeover_escalation
+    - transcript_redaction_contract
+    - never_call_list
+    - mock_dial_readiness
+    handoff:
+    - actual dialing
+    - ASR/TTS runtime
+    - contact lookup
+    - calendar mutation
+    - payment or purchase execution
+    - external connector writes
+    - emergency services
+  items:
+  - id: pre_call_script_review
+    purpose: Review disclosure, consent question, allowed topics, forbidden topics, and takeover triggers.
+    inputs:
+    - call_task
+    - pre_call_script
+    produces:
+    - script_review_packet
+    blocking_gates:
+    - script_present
+    - consent_disclosure_present
+    - consent_decline_aborts
+    - forbidden_topics_present
+    handoffs:
+    - rumi_security_review_pack
+    execution: declarative_only
+  - id: never_call_screen
+    purpose: Block any task whose phone target alias is active in the never-call list.
+    inputs:
+    - call_task
+    - never_call_entry
+    produces:
+    - block_or_continue_decision
+    blocking_gates:
+    - never_call_checked
+    - active_block_enforced
+    handoffs: []
+    execution: declarative_only
+  - id: mock_dial_approval
+    purpose: Declare provider-ready handoff only after human approval of number alias and script ID.
+    inputs:
+    - call_task
+    - dial_approval
+    produces:
+    - provider_handoff_packet
+    blocking_gates:
+    - approval_state_approved
+    - approved_number_matches
+    - approved_script_matches
+    - disallowed_intent_aborts
+    handoffs:
+    - rumi_connector_gateway_pack
+    - rumi_voice_mobile_pack
+    execution: declarative_only
+  - id: call_session_handoff
+    purpose: Represent call session state without owning actual dialing or ASR/TTS.
+    inputs:
+    - call_session
+    produces:
+    - session_state_packet
+    blocking_gates:
+    - state_is_handoff_not_dial
+    - consent_decline_aborts
+    - takeover_triggers_named
+    handoffs:
+    - rumi_voice_mobile_pack
+    - rumi_multimodal_media_pack
+    execution: declarative_only
+  - id: transcript_redaction_review
+    purpose: Redact transcript PII classes before any meeting or business handoff.
+    inputs:
+    - transcript_redaction
+    produces:
+    - redacted_transcript_packet
+    blocking_gates:
+    - pii_classes_configured
+    - review_state_not_blocked
+    handoffs:
+    - rumi_meeting_intelligence_pack
+    - rumi_business_ops_pack
+    execution: declarative_only
+  - id: escalation_takeover
+    purpose: Abort or hand off when user, recipient, or policy requires takeover.
+    inputs:
+    - escalation_record
+    produces:
+    - takeover_packet
+    blocking_gates:
+    - takeover_owner_present
+    - abort_required_respected
+    - takeover_abort_required
+    handoffs:
+    - rumi_security_review_pack
+    - rumi_business_ops_pack
+    execution: declarative_only

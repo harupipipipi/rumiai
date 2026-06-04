@@ -1,0 +1,83 @@
+{
+  "pack_id": "rumi_telephony_delegate_pack",
+  "display_name": "Rumi Telephony Delegate Pack",
+  "description": "Declarative provider-neutral call task, dial approval, consent script, transcript redaction, escalation, and never-call policy pack.",
+  "target_pack_id": "rumi_telephony_delegate_pack",
+  "version": "0.1.0",
+  "recommended": false,
+  "risk_level": "high",
+  "supports_all_ok": false,
+  "depends_on": [
+    {
+      "pack_id": "defaultspack",
+      "version": ">=2.0.0"
+    }
+  ],
+  "conflicts_with": [],
+  "compatibility": {
+    "python": ">=3.9",
+    "platforms": [
+      "macos",
+      "linux",
+      "windows"
+    ]
+  },
+  "overlap_policy": {
+    "actual_dialing": "blocked_handoff_to_connector_gateway_or_voice_owner",
+    "asr_tts_runtime": "handoff_to_rumi_voice_mobile_pack",
+    "media_transcript_runtime": "handoff_to_rumi_multimodal_media_pack",
+    "contact_or_calendar_lookup": "handoff_to_rumi_connector_gateway_pack",
+    "meeting_recap": "handoff_to_rumi_meeting_intelligence_pack",
+    "external_business_action": "handoff_to_rumi_business_ops_pack",
+    "real_world_action_risk_review": "handoff_to_rumi_security_review_pack",
+    "telephony_contract": "owned_by_rumi_telephony_delegate_pack",
+    "tool_aliases": "prefer_explicit_pack_namespace"
+  },
+  "defaultspack_promotion": {
+    "eligible": false,
+    "reason": "Rumi Telephony Delegate Pack is a declarative setup pack. Promotion requires owner-pack integration evidence, local-first audit receipts, and real-world success cases before any defaultspack inclusion.",
+    "criteria": [
+      "contract_tests_pass",
+      "overlap_policy_reviewed",
+      "maintainer_runtime_evidence_required",
+      "promotion_requires_real_world_success_cases",
+      "human_review_required_before_external_action"
+    ],
+    "promotion_blockers": [
+      "no_actual_dialing_runtime",
+      "requires_external_real_world_action_approval_class",
+      "requires_never_call_policy",
+      "requires_redactable_transcript_storage",
+      "must_pass_disallowed_intent_abort_cases"
+    ],
+    "promotion_evidence_required": [
+      "mock_dial_approval_cases",
+      "never_call_block_cases",
+      "transcript_redaction_cases",
+      "takeover_escalation_cases",
+      "security_review_acceptance_cases",
+      "provider_handoff_acceptance_cases"
+    ]
+  },
+  "marketplace": {
+    "id": "rumi.telephony_delegate_pack",
+    "registry": "bundled",
+    "publisher": "rumi-ai",
+    "status": "verified",
+    "category": "telephony-delegation",
+    "channel": "experimental"
+  },
+  "signing": {
+    "mode": "repository_reviewed",
+    "verified": true
+  },
+  "security_notes": [
+    "No credentials are bundled.",
+    "No executable code is included.",
+    "Network is none by default."
+  ],
+  "conflict_notes": [
+    "This pack declares owner boundaries and handoff policy instead of overriding runtime tools.",
+    "When two packs can handle a request, Rumi should prefer the owner surface declared here and hand off adjacent runtime actions."
+  ]
+}
