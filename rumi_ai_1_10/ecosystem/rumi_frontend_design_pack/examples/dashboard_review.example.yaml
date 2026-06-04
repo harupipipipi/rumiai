@@ -1,6 +1,7 @@
 example_id: rumi_frontend_design.dashboard_review
-request: Example workflow for dashboard review.
+request: Review an operations dashboard for scan density, chart hierarchy, table ergonomics, empty/loading/error states, and handoff-ready defects.
 expected_outputs:
-  - plan
-  - evidence
-  - handoff
+  - app_surface_review_notes
+  - design_system_fit_rubric_result
+  - defect_list_by_owner_pack
+  - browser_qa_handoff_requirements

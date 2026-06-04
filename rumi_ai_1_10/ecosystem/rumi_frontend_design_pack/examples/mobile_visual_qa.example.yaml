@@ -1,6 +1,7 @@
 example_id: rumi_frontend_design.mobile_visual_qa
-request: Example workflow for mobile visual qa.
+request: Define responsive QA for a mobile-first intake flow across 360px, 390px, 768px, and 1440px viewports with screenshot evidence requirements.
 expected_outputs:
-  - plan
-  - evidence
-  - handoff
+  - responsive_qa_matrix_rows
+  - screenshot_evidence_plan
+  - layout_risk_notes
+  - browser_automation_handoff

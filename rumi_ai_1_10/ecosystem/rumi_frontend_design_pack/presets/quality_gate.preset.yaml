@@ -4,3 +4,7 @@ features:
   local_first: true
   evidence_required: true
   owner_boundary_check: true
+purpose: Apply design-system fit and responsive QA gates before implementation is considered ready.
+required_assets:
+  - catalog/design_system_fit_rubric.yaml
+  - catalog/responsive_qa_matrix.yaml

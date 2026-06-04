@@ -4,3 +4,7 @@ features:
   local_first: true
   evidence_required: true
   owner_boundary_check: true
+purpose: Start frontend design work with local evidence, explicit owner boundaries, and no code edits by this pack.
+required_assets:
+  - catalog/frontend_workflows.yaml
+  - policies/frontend_quality.policy.yaml
