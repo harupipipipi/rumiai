@@ -93,12 +93,21 @@ python -m rumi_ai
 ### Viewer development
 
 ```bash
-cd rumi_viewer/src-tauri
+cd rumi_viewer/frontend
+npm install
+cd ..
+cargo tauri dev
+```
+
+2 回目以降、`rumi_viewer/frontend/node_modules` が残っている場合は次だけで起動できます。
+
+```bash
+cd rumi_viewer
 cargo tauri dev
 ```
 
 開発用 viewer は repo 内の `rumi_ai_1_10/` を自動検出して kernel を起動します。
-起動後は Home の `Open Defaultspack` から、managed current pointer で選択されている `Defaultspack v2` UI まで進めます。
+`Open Defaultspack` は開発起動では repo 同梱の `defaultspack` を優先して開きます。
 起動時の詰まり方を含めたガイドは [`rumi_ai_1_10/docs/rumi_viewer_start.md`](./rumi_ai_1_10/docs/rumi_viewer_start.md) を参照してください。
 
 ## Development
