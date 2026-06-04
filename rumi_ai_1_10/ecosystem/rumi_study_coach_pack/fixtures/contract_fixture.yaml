@@ -1,0 +1,50 @@
+contract_fixture:
+  positive_cases:
+  - id: math_notes_quiz_positive
+    given:
+      learner_profile:
+        learner_id: learner_local_01
+        preferred_explanation_style: worked_then_socratic
+        constraints:
+        - fifteen_minute_sessions
+      study_goal:
+        study_goal_id: goal_factoring_01
+        target_outcome: Factor simple quadratics from class notes.
+        success_criteria:
+        - Correctly identify two integers whose product is c and sum is b.
+      source_notes:
+      - note_id: note_alg_01
+        title: Algebra notebook, factoring section
+        spans:
+        - span_id: alg_01_s1
+          text: For x^2 + bx + c, find integers m and n where m+n=b and mn=c.
+        - span_id: alg_01_s2
+          text: x^2 + 5x + 6 factors as (x + 2)(x + 3).
+    expected:
+      artifact_type: practice_session
+      source_note_ids:
+      - note_alg_01
+      quiz_items:
+      - quiz_id: quiz_factoring_01
+        question: Which pair of integers supports factoring x^2 + 5x + 6?
+        answer: 2 and 3, because 2 + 3 = 5 and 2 * 3 = 6.
+        source_note_ids:
+        - note_alg_01
+        source_span_ids:
+        - alg_01_s1
+        - alg_01_s2
+        uncertainty: low
+      feedback_contract:
+        cite_note_ids: true
+        show_answer_after_attempt: true
+      uncertainty: low
+    semantic_checks:
+    - all_answers_cite_local_note_ids
+    - uncertainty_is_low_only_when_local_notes_cover_answer
+    - no_external_fact_invention
+  minimum_expected:
+  - schema_valid
+  - evidence_linked
+  - handoff_scoped
+  - local_note_citations_present
+  - uncertainty_recorded_when_notes_are_insufficient
