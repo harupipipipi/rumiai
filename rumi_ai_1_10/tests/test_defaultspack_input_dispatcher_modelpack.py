@@ -517,6 +517,67 @@ def test_model_pack_fallback_chain(monkeypatch, tmp_path):
     assert response["metadata"]["model_pack"]["pack_id"] == "fallback-pack"
 
 
+def test_model_pack_review_chain_uses_isolated_reviewer(monkeypatch, tmp_path):
+    settings_path = tmp_path / "frontend_settings.json"
+    settings_path.write_text(
+        json.dumps(
+            {
+                "models": {
+                    "model_packs": [
+                        {
+                            "id": "review-pack",
+                            "mode": "review_chain",
+                            "members": [
+                                {"model": "demo/generator", "metadata": {"role": "generator", "thinking_level": "medium"}},
+                                {"model": "demo/reviewer", "metadata": {"role": "reviewer", "thinking_level": "medium"}},
+                            ],
+                            "budget": {"max_review_rounds": 2},
+                        }
+                    ]
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(AIClient, "_settings_path", lambda self: settings_path)
+
+    class DemoProvider:
+        def __init__(self):
+            self.calls = []
+
+        def complete(self, model_name, messages, tools, params):
+            self.calls.append({"model": model_name, "messages": messages, "tools": tools, "params": params})
+            if model_name == "generator":
+                return {"content": [{"type": "text", "text": "RUMI_REASONING_BRIEF: concise\nDRAFT_RESPONSE: draft ok"}]}
+            if model_name == "reviewer":
+                payload = messages[-1]["content"]
+                assert "draft ok" in payload
+                assert "reviewer_context_rule" in payload
+                assert tools == []
+                return {"content": [{"type": "text", "text": "APPROVED: yes\nNo changes required."}]}
+            raise AssertionError(model_name)
+
+    provider = DemoProvider()
+
+    def fake_resolve(self, model):
+        if model.startswith("demo/"):
+            return provider, model.split("/", 1)[1]
+        raise AssertionError(model)
+
+    monkeypatch.setattr(AIClient, "resolve_provider", fake_resolve)
+
+    response = AIClient().complete("modelpack/review-pack", [{"role": "user", "content": "implement a larger change"}], [], {})
+    process = response["metadata"]["rumi_process"]
+
+    assert response["content"][0]["text"] == "draft ok"
+    assert response["finish_reason"] == "stop"
+    assert process["review"]["approved"] is True
+    assert [event["phase"] for event in process["events"]] == ["generator", "reviewer"]
+    assert [call["model"] for call in provider.calls] == ["generator", "reviewer"]
+    assert provider.calls[0]["params"]["thinking_level"] == "medium"
+    assert provider.calls[1]["tools"] == []
+
+
 def test_model_call_uses_required_capabilities(monkeypatch):
     seen: dict[str, object] = {}
 

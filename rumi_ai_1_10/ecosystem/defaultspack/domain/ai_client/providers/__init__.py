@@ -326,8 +326,8 @@ _CURATED_PROVIDER_METADATA: Dict[str, Dict[str, Any]] = {
         "base_url_envs": [],
         "catalog_only": False,
         "supports_invoke": True,
-        "default_model": "default",
-        "capabilities": ["chat", "routing", "meta"],
+        "default_model": "rumi",
+        "capabilities": ["chat", "routing", "meta", "review_chain", "tool_calls", "thinking"],
     },
 }
 
@@ -336,6 +336,24 @@ _CURATED_PROVIDER_MODELS: Dict[str, List[Dict[str, Any]]] = {
         {"model_id": "default", "name": "Stub Default Model", "type": "chat"},
         {"model_id": "fast", "name": "Stub Fast Model", "type": "chat"},
         {"model_id": "large", "name": "Stub Large Model", "type": "chat"},
+    ],
+    "rumi": [
+        {
+            "model_id": "rumi",
+            "name": "Rumi",
+            "display_name": "Rumi",
+            "type": "chat",
+            "supports_thinking": True,
+            "thinking_levels": ["low", "medium", "high", "xhigh"],
+            "default_thinking_level": "medium",
+            "capabilities": ["chat", "routing", "review_chain", "tool_calls", "thinking"],
+            "metadata": {
+                "process_model": True,
+                "model_pack_ref": "modelpack/rumi",
+                "base_model": "xiaomi-token-plan-sgp/mimo-v2.5-pro",
+                "notes": "Rumi process model built on MiMo V2.5 Pro with explicit reasoning brief, review chain, freshness, trace, watchdog, and escalation policy.",
+            },
+        },
     ],
     "groq": [
         {"model_id": "openai/gpt-oss-120b", "name": "GPT OSS 120B via Groq", "type": "reasoning"},
@@ -458,7 +476,7 @@ _BEST_MODEL_BY_PROVIDER = {
     "vllm": "deepseek-r1",
     "llamacpp": "local-gguf",
     "openai_compatible": "custom-model",
-    "rumi": "default",
+    "rumi": "rumi",
 }
 
 

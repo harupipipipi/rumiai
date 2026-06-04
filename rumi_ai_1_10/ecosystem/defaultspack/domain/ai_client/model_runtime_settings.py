@@ -18,6 +18,7 @@ from domain.ai_client.model_roles import (
     normalize_utility_model_policy,
     normalize_utility_models,
 )
+from domain.ai_client.rumi_process import ensure_default_rumi_model_pack
 
 
 VALID_THINKING_LEVELS = {"none", "low", "medium", "high", "xhigh"}
@@ -306,10 +307,10 @@ class ModelRuntimeSettingsService:
         if "api_bound_profiles" in sanitized:
             sanitized["api_bound_profiles"] = self._normalize_api_bound_profiles(sanitized.get("api_bound_profiles"))
         if "model_packs" in sanitized:
-            sanitized["model_packs"] = normalize_model_packs(
+            sanitized["model_packs"] = ensure_default_rumi_model_pack(normalize_model_packs(
                 sanitized.get("model_packs"),
                 composite_models=sanitized.get("composite_models"),
-            )
+            ))
         if "composite_models" in sanitized:
             sanitized["composite_models"] = self._normalize_composite_models(sanitized.get("composite_models"))
         if "model_notes" in sanitized:
@@ -374,10 +375,10 @@ class ModelRuntimeSettingsService:
         models["api_routes"] = self._normalize_api_routes(models.get("api_routes"))
         models["api_bound_profiles"] = self._normalize_api_bound_profiles(models.get("api_bound_profiles"))
         models["composite_models"] = self._normalize_composite_models(models.get("composite_models"))
-        models["model_packs"] = normalize_model_packs(
+        models["model_packs"] = ensure_default_rumi_model_pack(normalize_model_packs(
             models.get("model_packs"),
             composite_models=models.get("composite_models"),
-        )
+        ))
         models["model_notes"] = self._normalize_model_notes(models.get("model_notes"))
         models["preferred_model_group"] = str(models.get("preferred_model_group") or "default").strip() or "default"
         models["auto_route_within_group"] = bool(models.get("auto_route_within_group", True))
@@ -519,7 +520,7 @@ class ModelRuntimeSettingsService:
                 continue
             composite_id = str(item.get("id") or item.get("profile_id") or item.get("name") or "").strip()
             mode = str(item.get("mode") or item.get("type") or "fallback_chain").strip()
-            if not composite_id or composite_id in seen or mode not in {"fallback_chain", "ensemble"}:
+            if not composite_id or composite_id in seen or mode not in {"fallback_chain", "ensemble", "review_chain"}:
                 continue
             raw_members = item.get("members", item.get("models", item.get("chain", [])))
             if isinstance(raw_members, str):
@@ -651,10 +652,10 @@ class ModelRuntimeSettingsService:
                     },
                 }
             )
-        for model_pack in normalize_model_packs(
+        for model_pack in ensure_default_rumi_model_pack(normalize_model_packs(
             settings.get("model_packs"),
             composite_models=settings.get("composite_models"),
-        ):
+        )):
             profile_id = "modelpack/{}".format(str(model_pack.get("id") or "").strip())
             if not profile_id or profile_id == "modelpack/":
                 continue

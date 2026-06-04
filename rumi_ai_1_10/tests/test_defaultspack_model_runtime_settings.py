@@ -10,6 +10,7 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(DEFAULTSPACK_ROOT))
 
 from domain.ai_client.model_runtime_settings import ModelRuntimeSettingsService  # noqa: E402
+from domain.ai_client.rumi_process import RUMI_BASE_MODEL, RUMI_MODEL_PACK_REF  # noqa: E402
 
 
 def _profile(
@@ -68,6 +69,23 @@ def test_model_runtime_settings_utility_models_and_groups(tmp_path):
     assert settings["utility_models"]["tool_selector"] == "google/gemini-2.5-flash"
     assert settings["utility_models"]["vision_ocr"] == ""
     assert settings["model_groups"]["custom"]["allowed_models"] == ["stub/default"]
+
+
+def test_model_runtime_settings_includes_builtin_rumi_model_pack(tmp_path):
+    service = ModelRuntimeSettingsService(tmp_path)
+
+    settings = service.get_settings()
+    rumi_pack = next(pack for pack in settings["model_packs"] if pack["id"] == "rumi")
+    profiles = service.runtime_defined_profiles(settings)
+    rumi_profile = next(profile for profile in profiles if profile["profile_id"] == RUMI_MODEL_PACK_REF)
+
+    assert rumi_pack["display_name"] == "Rumi"
+    assert rumi_pack["mode"] == "review_chain"
+    assert [member["model"] for member in rumi_pack["members"]] == [RUMI_BASE_MODEL, RUMI_BASE_MODEL]
+    assert rumi_pack["metadata"]["base_model"] == RUMI_BASE_MODEL
+    assert rumi_pack["safety"]["pre_action_assumption_block_required"] is True
+    assert rumi_profile["provider_id"] == "modelpack"
+    assert rumi_profile["metadata"]["mode"] == "review_chain"
 
 
 def test_model_runtime_settings_normalizes_model_api_routes(tmp_path):

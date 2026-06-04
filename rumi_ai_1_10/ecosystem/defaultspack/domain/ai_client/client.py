@@ -11,6 +11,7 @@ from domain.ai_client.model_pack_router import select_model_pack
 from domain.ai_client.model_pack_store import ModelPackStore
 from domain.ai_client.api_key_store import provider_api_metadata, provider_has_api_key, provider_named_api_keys, read_provider_api_key
 from domain.ai_client.capabilities.registry import get_model_provider_capabilities
+from domain.ai_client import rumi_process
 from domain.ai_client.providers import (
     _cloud_runtime_enabled,
     build_profile_catalog,
@@ -628,12 +629,22 @@ class AIClient:
         )
         if selection is None or not selection.ordered_members:
             raise RuntimeError("model pack has no runnable members")
+        pack_mode = str(getattr(model_pack, "mode", "fallback_chain") or "fallback_chain")
+        composite_mode = pack_mode if pack_mode in {"ensemble", "review_chain"} else "fallback_chain"
         composite = {
             "id": selection.pack_id,
-            "mode": "ensemble" if getattr(model_pack, "mode", "fallback_chain") == "ensemble" else "fallback_chain",
+            "mode": composite_mode,
             "members": selection.ordered_members,
         }
         metadata = getattr(model_pack, "metadata", {}) if model_pack is not None else {}
+        if isinstance(metadata, dict):
+            composite["metadata"] = dict(metadata)
+        budget = getattr(model_pack, "budget", {}) if model_pack is not None else {}
+        if isinstance(budget, dict):
+            composite["budget"] = dict(budget)
+        safety = getattr(model_pack, "safety", {}) if model_pack is not None else {}
+        if isinstance(safety, dict):
+            composite["safety"] = dict(safety)
         merge_model = str(metadata.get("merge_model") or "").strip() if isinstance(metadata, dict) else ""
         if merge_model:
             composite["merge_model"] = merge_model
@@ -653,6 +664,8 @@ class AIClient:
             raise RuntimeError("composite model has no members")
         if mode == "ensemble":
             return self._complete_ensemble(composite, members, messages, tools, params)
+        if mode == "review_chain":
+            return self._complete_review_chain(composite, members, messages, tools, params)
         return self._complete_fallback_chain(members, messages, tools, params)
 
     def _member_model(self, member):
@@ -870,6 +883,187 @@ class AIClient:
             "finish_reason": "ensemble",
             "usage": {},
             "metadata": {"ensemble": {"members": [item["model"] for item in responses], "errors": errors}},
+        }
+
+    def _complete_review_chain(self, composite, members, messages, tools=None, params=None):
+        params = dict(params or {})
+        runnable_members = [
+            member
+            for member in members
+            if self._member_model(member) and self._member_conditions_match(member, messages, tools, params)
+        ]
+        if not runnable_members:
+            raise RuntimeError("review_chain composite has no runnable members")
+
+        generator_member = self._review_chain_member(
+            runnable_members,
+            {"generator", "primary", "drafter", "planner"},
+            default_index=0,
+        )
+        reviewer_member = self._review_chain_member(
+            runnable_members,
+            {"reviewer", "judge", "critic"},
+            default_index=1 if len(runnable_members) > 1 else 0,
+        )
+        generator_model = self._member_model(generator_member)
+        reviewer_model = self._member_model(reviewer_member)
+        context = rumi_process.context_for_request(messages, tools or [], params)
+        composite_metadata = composite.get("metadata") if isinstance(composite.get("metadata"), dict) else {}
+        budget = composite.get("budget") if isinstance(composite.get("budget"), dict) else {}
+        max_reviews = self._positive_int(
+            params.get("max_review_rounds")
+            or budget.get("max_review_rounds")
+            or composite_metadata.get("max_review_rounds"),
+            default=2,
+            upper=5,
+        )
+        process = {
+            "trace_id": rumi_process.trace_id(),
+            "process_version": rumi_process.RUMI_PROCESS_VERSION,
+            "mode": context["mode"],
+            "base_model": generator_model,
+            "reviewer_model": reviewer_model,
+            "events": [],
+            "watchdog": {
+                "max_review_rounds": max_reviews,
+                "quarantine_on_exhaustion": True,
+            },
+            "criteria": list(rumi_process.RUMI_CRITERIA),
+            "action_preflight_required": bool(context.get("action_preflight_required")),
+        }
+
+        if context["mode"] == "simple":
+            simple_messages = rumi_process.build_simple_messages(messages, context)
+            response = self.complete(
+                generator_model,
+                simple_messages,
+                tools or [],
+                self._review_chain_params(generator_member, params, context),
+            )
+            text = self._response_text(response)
+            process["events"].append(rumi_process.phase_event("simple", generator_model, output=text))
+            if rumi_process.response_has_tool_calls(response):
+                process["review"] = {"deferred": True, "reason": "generator_returned_tool_calls"}
+                return rumi_process.attach_rumi_metadata(response, process)
+            return self._rumi_text_response(
+                rumi_process.extract_draft_response(text),
+                "stop",
+                process,
+            )
+
+        draft = ""
+        review_text = ""
+        for review_index in range(max_reviews):
+            phase = "generator" if review_index == 0 else "revision"
+            if review_index == 0:
+                phase_messages = rumi_process.build_generator_messages(messages, context)
+            else:
+                phase_messages = rumi_process.build_revision_messages(messages, draft, review_text, context)
+            response = self.complete(
+                generator_model,
+                phase_messages,
+                tools or [],
+                self._review_chain_params(generator_member, params, context),
+            )
+            generated_text = self._response_text(response)
+            process["events"].append(rumi_process.phase_event(phase, generator_model, output=generated_text))
+            if rumi_process.response_has_tool_calls(response):
+                process["review"] = {
+                    "deferred": True,
+                    "reason": "generator_returned_tool_calls",
+                    "review_round": review_index + 1,
+                }
+                return rumi_process.attach_rumi_metadata(response, process)
+            draft = rumi_process.extract_draft_response(generated_text)
+
+            try:
+                review_response = self.complete(
+                    reviewer_model,
+                    rumi_process.build_review_messages(messages, draft, context),
+                    [],
+                    self._review_chain_params(reviewer_member, params, context),
+                )
+            except Exception as exc:
+                process["events"].append(
+                    rumi_process.phase_event(
+                        "reviewer_error",
+                        reviewer_model,
+                        output=str(exc),
+                        metadata={"error_kind": self._error_kind(exc)},
+                    )
+                )
+                process["review"] = {
+                    "approved": False,
+                    "quarantined": True,
+                    "reason": "reviewer_failed",
+                }
+                return self._rumi_text_response(draft, "review_quarantine", process)
+
+            review_text = self._response_text(review_response)
+            approved = rumi_process.review_approved(review_text)
+            process["events"].append(
+                rumi_process.phase_event(
+                    "reviewer",
+                    reviewer_model,
+                    output=review_text,
+                    metadata={"approved": approved, "review_round": review_index + 1},
+                )
+            )
+            if approved:
+                process["review"] = {
+                    "approved": True,
+                    "review_round": review_index + 1,
+                    "reviewer_context_excluded_personalization": True,
+                }
+                return self._rumi_text_response(draft, "stop", process)
+
+        process["review"] = {
+            "approved": False,
+            "quarantined": True,
+            "reason": "watchdog_max_review_rounds",
+            "last_review": review_text[:1000],
+        }
+        return self._rumi_text_response(draft, "review_quarantine", process)
+
+    @staticmethod
+    def _review_chain_member(members, roles, default_index=0):
+        for member in members:
+            metadata = member.get("metadata") if isinstance(member, dict) and isinstance(member.get("metadata"), dict) else {}
+            role_value = ""
+            if isinstance(member, dict):
+                role_value = metadata.get("role") or member.get("role") or ""
+            role = str(role_value).strip().casefold()
+            if role in roles:
+                return member
+        index = min(max(0, int(default_index or 0)), len(members) - 1)
+        return members[index]
+
+    @staticmethod
+    def _positive_int(value, *, default=1, upper=10):
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError):
+            parsed = default
+        return max(1, min(int(upper), parsed))
+
+    @staticmethod
+    def _review_chain_params(member, params, context):
+        next_params = dict(params or {})
+        next_params["_composite_depth"] = int(next_params.get("_composite_depth", 0) or 0) + 1
+        next_params.setdefault("rumi_mode", context.get("mode", "deep"))
+        metadata = member.get("metadata") if isinstance(member, dict) and isinstance(member.get("metadata"), dict) else {}
+        thinking_level = str(metadata.get("thinking_level") or context.get("default_thinking_level") or "").strip()
+        if thinking_level and not next_params.get("thinking_level"):
+            next_params["thinking_level"] = thinking_level
+        return next_params
+
+    @staticmethod
+    def _rumi_text_response(text, finish_reason, process):
+        return {
+            "content": [{"type": "text", "text": str(text or "").strip()}],
+            "finish_reason": finish_reason,
+            "usage": {},
+            "metadata": {"rumi_process": process},
         }
 
     @staticmethod

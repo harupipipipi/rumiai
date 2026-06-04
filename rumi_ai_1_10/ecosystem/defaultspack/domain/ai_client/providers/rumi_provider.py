@@ -13,6 +13,7 @@ Pipeline 経由でデフォルトパイプラインを実行する。
 """
 
 from domain.ai_client.base_provider import BaseProvider
+from domain.ai_client.rumi_process import RUMI_BASE_MODEL, RUMI_MODEL_PACK_REF
 
 
 class RumiProvider(BaseProvider):
@@ -25,6 +26,24 @@ class RumiProvider(BaseProvider):
     """
 
     KNOWN_MODELS = [
+        {
+            "id": "rumi/rumi",
+            "model_id": "rumi",
+            "name": "Rumi",
+            "display_name": "Rumi",
+            "provider": "rumi",
+            "provider_id": "rumi",
+            "type": "chat",
+            "supports_thinking": True,
+            "thinking_levels": ["low", "medium", "high", "xhigh"],
+            "default_thinking_level": "medium",
+            "capabilities": ["chat", "routing", "review_chain", "tool_calls", "thinking"],
+            "metadata": {
+                "model_pack_ref": RUMI_MODEL_PACK_REF,
+                "process_model": True,
+                "base_model": RUMI_BASE_MODEL,
+            },
+        },
         {"id": "rumi/default", "name": "Rumi Default", "provider": "rumi", "type": "chat"},
         {"id": "rumi/fast", "name": "Rumi Fast", "provider": "rumi", "type": "chat"},
         {"id": "rumi/quality", "name": "Rumi Quality", "provider": "rumi", "type": "chat"},
@@ -80,6 +99,8 @@ class RumiProvider(BaseProvider):
         パイプライン定義があれば Pipeline 経由で実行。
         なければフォールバックプロバイダーに委譲。
         """
+        if self._is_rumi_process_model(model):
+            return self._client.complete(RUMI_MODEL_PACK_REF, messages, tools, params)
         if self._has_pipeline():
             return self._pipeline.execute(
                 self._pipeline_name, messages, tools, params
@@ -94,6 +115,8 @@ class RumiProvider(BaseProvider):
         パイプライン定義があれば Pipeline.stream() 経由で実行。
         なければフォールバックプロバイダーに委譲。
         """
+        if self._is_rumi_process_model(model):
+            return self._client.stream(RUMI_MODEL_PACK_REF, messages, tools, params)
         if self._has_pipeline():
             return self._pipeline.stream(
                 self._pipeline_name, messages, tools, params
@@ -101,6 +124,13 @@ class RumiProvider(BaseProvider):
 
         fallback_model = self._resolve_fallback_model()
         return self._client.stream(fallback_model, messages, tools, params)
+
+    @staticmethod
+    def _is_rumi_process_model(model):
+        model_id = str(model or "").strip()
+        if "/" in model_id:
+            model_id = model_id.split("/", 1)[1]
+        return model_id in {"rumi", "default", "rumi-mimo-v2.5-pro"}
 
     def embed(self, model, input_text):
         """フォールバック: 利用可能な embed 対応プロバイダーに委譲。"""
