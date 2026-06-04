@@ -6,6 +6,7 @@ from pathlib import Path
 
 import yaml
 
+from backend_core.ecosystem.spec.schema.validator import validate_ecosystem
 from ecosystem.setup_pack.pack_selector import PackSelector
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -18,7 +19,23 @@ def read_json(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def test_pack_required_assets_and_metadata() -> None:
+def _asset_index_paths(ecosystem: dict) -> set[str]:
+    index = ecosystem["metadata"]["asset_index"]
+    result: set[str] = set()
+    for value in index.values():
+        result.update(value)
+    return result
+
+
+def _meaningful_pack_assets() -> set[str]:
+    return {
+        str(path.relative_to(PACK_DIR))
+        for path in PACK_DIR.rglob("*")
+        if path.is_file() and path.name != "ecosystem.json"
+    }
+
+
+def test_pack_required_assets_metadata_and_schema_validity() -> None:
     required = [
         "README.md",
         "docs/README.md",
@@ -28,6 +45,11 @@ def test_pack_required_assets_and_metadata() -> None:
         "ecosystem.json",
         "catalog/voice_mobile_workflows.yaml",
         "policies/voice_mobile_safety.policy.yaml",
+        "policies/transcription_notification_consent.policy.yaml",
+        "specs/intent_taxonomy.yaml",
+        "specs/handoff_receipt.schema.yaml",
+        "checklists/mobile_action_safety_checklist.yaml",
+        "templates/mobile_handoff_receipt.template.yaml",
         "profiles/voice_mobile_operator.profile.yaml",
         "prompts/voice_mobile_operator.system.md",
         "presets/safe_default.preset.yaml",
@@ -36,12 +58,20 @@ def test_pack_required_assets_and_metadata() -> None:
         "examples/voice_memo_task.example.yaml",
     ]
     assert [path for path in required if not (PACK_DIR / path).is_file()] == []
+
     ecosystem = read_json(PACK_DIR / "ecosystem.json")
+    assert validate_ecosystem(ecosystem, raise_on_error=False) == []
     assert ecosystem["pack_identity"] == f"rumi:ecosystem/{PACK_ID}"
-    assert ecosystem["metadata"]["required_secrets"] == []
+    assert ecosystem["vocabulary"]["types"]
+    assert ecosystem["dependencies"] == {"defaultspack": ">=2.0.0"}
+    assert "depends_on" not in ecosystem
+    assert "optional_integrations" not in ecosystem
+    assert ecosystem["required_secrets"] == []
+    assert ecosystem["required_network"] == []
     assert ecosystem["metadata"]["network_policy"] == "none_by_default"
     assert ecosystem["metadata"]["executable_code"] is False
-    assert ecosystem["metadata"]["owner_surfaces"]
+    assert ecosystem["metadata"]["registers_tools"] is False
+    assert _asset_index_paths(ecosystem) == _meaningful_pack_assets()
 
 
 def test_pack_yaml_json_assets_parse() -> None:
@@ -51,20 +81,64 @@ def test_pack_yaml_json_assets_parse() -> None:
         assert isinstance(json.loads(path.read_text(encoding="utf-8")), dict), path
 
 
-def test_pack_setup_discoverable_and_overlap_scoped() -> None:
+def test_pack_setup_discoverable_and_validates_dependencies() -> None:
     setup = read_json(SETUP_PACK_JSON)
-    candidate = {item.pack_id: item for item in PackSelector(ROOT / "ecosystem").scan_candidates()}[PACK_ID]
+    selector = PackSelector(ROOT / "ecosystem")
+    candidate = {item.pack_id: item for item in selector.scan_candidates()}[PACK_ID]
+
     assert setup["supports_all_ok"] is False
     assert setup["risk_level"] == "medium"
-    assert candidate.depends_on == [{'pack_id': 'defaultspack', 'version': '>=2.0.0'}]
+    assert candidate.depends_on == [{"pack_id": "defaultspack", "version": ">=2.0.0"}]
     assert candidate.overlap_policy["connector_delivery"] == "handoff_to_rumi_connector_gateway_pack"
     assert candidate.defaultspack_promotion["eligible"] is False
+    assert "Voice Mobile" in candidate.defaultspack_promotion["reason"]
+    assert "no_voice_capture_runtime" in candidate.defaultspack_promotion["promotion_blockers"]
+    assert "handoff_receipt_schema_cases" in candidate.defaultspack_promotion["promotion_evidence_required"]
+    assert candidate.marketplace["registry"] == "bundled"
+    assert candidate.marketplace["publisher"] == "rumi-ai"
+    assert candidate.marketplace["status"] == "experimental"
+    assert candidate.marketplace["category"] == "voice-mobile"
+    assert candidate.signing["verified"] is True
+
+    issues = selector.validate_candidates(
+        installed_packs={"defaultspack": {"version": "2.0.0"}},
+        platform_name="macos",
+        python_version="3.13.0",
+    )
+    assert [issue for issue in issues if issue["pack_id"] == PACK_ID] == []
 
 
-def test_pack_docs_no_secrets_and_explain_boundaries() -> None:
-    docs = "\n".join((PACK_DIR / path).read_text(encoding="utf-8") for path in ["README.md", "docs/interfaces.md", "docs/operations.md"])
-    for expected in ["Required Secrets", "None", "defaultspack", "handoff", "evidence"]:
+def test_voice_mobile_assets_have_real_semantics() -> None:
+    taxonomy = yaml.safe_load((PACK_DIR / "specs/intent_taxonomy.yaml").read_text(encoding="utf-8"))
+    consent = yaml.safe_load((PACK_DIR / "policies/transcription_notification_consent.policy.yaml").read_text(encoding="utf-8"))
+    checklist = yaml.safe_load((PACK_DIR / "checklists/mobile_action_safety_checklist.yaml").read_text(encoding="utf-8"))
+    receipt = yaml.safe_load((PACK_DIR / "specs/handoff_receipt.schema.yaml").read_text(encoding="utf-8"))
+    template = yaml.safe_load((PACK_DIR / "templates/mobile_handoff_receipt.template.yaml").read_text(encoding="utf-8"))
+
+    assert {"voice_memo_to_task", "notification_brief", "scheduled_briefing", "speech_device_action"} <= set(taxonomy["intent_classes"])
+    assert taxonomy["intent_classes"]["speech_device_action"]["risk"] == "high"
+    assert "transcript_required_for_voice_commands" in [rule["id"] for rule in taxonomy["classification_rules"]]
+    assert consent["consent_surfaces"]["transcription"]["required"] is True
+    assert consent["consent_surfaces"]["notification_delivery"]["evidence"] == ["channel", "recipient", "delivery_window", "quiet_hours"]
+    assert "destructive_or_external_send_flagged" in checklist["required_items"]
+    assert checklist["approval_rules"]["device_or_desktop_action"] == "explicit_confirmation_required"
+    assert "consent_refs" in receipt["required_fields"]
+    assert "no_transport_credentials_recorded" in receipt["quality_gates"]
+    assert "no_delivery_tokens" in template["template_rules"]
+
+
+def test_pack_docs_no_placeholders_no_secrets_and_explain_boundaries() -> None:
+    docs = "\n".join(
+        (PACK_DIR / path).read_text(encoding="utf-8")
+        for path in ["README.md", "docs/interfaces.md", "docs/operations.md"]
+    )
+    for expected in ["Required Secrets", "None", "defaultspack", "handoff", "evidence", "consent"]:
         assert expected in docs
+
+    all_text = "\n".join(p.read_text(encoding="utf-8") for p in PACK_DIR.rglob("*") if p.is_file())
+    for forbidden in ["Example workflow", "sample user request", "reviewer_ready_plan", "placeholder"]:
+        assert forbidden not in all_text
+
     pattern = re.compile(
         r"(?i)(api[_-]?key|secret|token|password)\s*[:=]\s*[\'\"]?[A-Za-z0-9_\-]{12,}"
     )
