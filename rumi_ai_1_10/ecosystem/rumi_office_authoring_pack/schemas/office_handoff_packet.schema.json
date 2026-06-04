@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rumi.local/schemas/office_handoff_packet.schema.json",
+  "title": "Office Handoff Packet",
+  "description": "Office authoring contract schema.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "packet_id",
+    "artifact_contract_ids",
+    "owner_pack_handoffs",
+    "review_gate_id",
+    "export_plan_ids",
+    "status",
+    "external_action",
+    "render_owner",
+    "analysis_owner",
+    "citation_owner",
+    "document_understanding_owner"
+  ],
+  "properties": {
+    "packet_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "artifact_contract_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "owner_pack_handoffs": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "review_gate_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "export_plan_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "status": {
+      "type": "string",
+      "minLength": 1
+    },
+    "external_action": {
+      "const": "handoff_only"
+    },
+    "render_owner": {
+      "const": "rumi_workspace_pack"
+    },
+    "analysis_owner": {
+      "const": "rumi_data_analysis_pack"
+    },
+    "citation_owner": {
+      "const": "rumi_evidence_dossier_pack"
+    },
+    "document_understanding_owner": {
+      "const": "rumi_document_intelligence_pack"
+    }
+  }
+}

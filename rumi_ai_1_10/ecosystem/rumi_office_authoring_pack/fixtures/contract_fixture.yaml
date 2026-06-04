@@ -1,0 +1,7 @@
+fixture:
+  suite_id: office_suite_qbr_001
+  deck_contract: deck:qbr
+  workbook_contract: workbook:qbr-model
+  doc_contract: doc:qbr-brief
+  review_gate: office_gate:qbr
+  handoff_owner: rumi_workspace_pack
