@@ -1,0 +1,9 @@
+fixture:
+  trace_id: trace_checkout_drift_001
+  redaction_state: redacted
+  evidence_bundle_refs:
+  - dom:checkout:v2
+  - shot:checkout:v2
+  handoff_targets:
+  - rumi_browser_automation_pack
+  - rumi_browser_element_pack

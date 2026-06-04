@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rumi.local/schemas/browser_event_evidence.schema.json",
+  "title": "Browser Event Evidence",
+  "description": "Browser session replay contract schema.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "event_id",
+    "trace_id",
+    "event_type",
+    "observed_at",
+    "page_ref",
+    "evidence_refs",
+    "execution_effect",
+    "event_payload_redacted",
+    "owner_pack_id"
+  ],
+  "properties": {
+    "event_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "trace_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "event_type": {
+      "type": "string",
+      "enum": [
+        "navigation_observed",
+        "dom_mutation_observed",
+        "input_observed_redacted",
+        "console_observed",
+        "network_observed_redacted",
+        "screenshot_captured",
+        "selector_matched",
+        "selector_missed"
+      ]
+    },
+    "observed_at": {
+      "type": "string",
+      "minLength": 1
+    },
+    "page_ref": {
+      "type": "string",
+      "minLength": 1
+    },
+    "evidence_refs": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "execution_effect": {
+      "const": "observation_only"
+    },
+    "event_payload_redacted": {
+      "type": "string",
+      "minLength": 1
+    },
+    "owner_pack_id": {
+      "const": "rumi_browser_session_replay_pack"
+    }
+  }
+}
