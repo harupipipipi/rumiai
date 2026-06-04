@@ -25,6 +25,8 @@ from domain.external.source_store import ExternalSourceStore  # noqa: E402
 from domain.external.response import RumiResponse  # noqa: E402
 from domain.external.response_planner import ResponsePlanner  # noqa: E402
 from domain.external.targeting import origin_from_external_event  # noqa: E402
+from domain.integrations.store import IntegrationConversationStore  # noqa: E402
+from domain.chat.store import ChatStore  # noqa: E402
 from domain.webhook.endpoint_store import WebhookEndpointStore  # noqa: E402
 
 
@@ -89,6 +91,29 @@ def _remember_line_group(monkeypatch, tmp_path, *, group_id: str = "Cgroup", all
     store = ExternalSourceStore()
     store.record_origin(origin, verified=True)
     store.update_source("line", "group", group_id, enabled=True, allow_push=allow_push)
+
+
+def _seed_line_group_conversation(monkeypatch, tmp_path, *, group_id: str = "Cgroup", assistant_text: str = "Which option should I use?") -> dict[str, Any]:
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(tmp_path / "chat" / "conversations.json"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_INTEGRATIONS_STORE_PATH", str(tmp_path / "integrations" / "conversations.json"))
+    chat_store = ChatStore()
+    conversation = IntegrationConversationStore().get_or_create_conversation(
+        provider="line",
+        external_key=f"line:group:{group_id}",
+        title=f"line {group_id}",
+        metadata={"seed": True},
+        chat_store=chat_store,
+        model="stub/default",
+    )
+    chat_store.add_message(
+        conversation["id"],
+        {
+            "role": "assistant",
+            "content": [{"type": "text", "text": assistant_text}],
+            "raw_text": assistant_text,
+        },
+    )
+    return conversation
 
 
 def test_line_route_uses_endpoint_enabled_flag(monkeypatch, tmp_path):
@@ -896,7 +921,7 @@ def test_line_background_processing_flag_does_not_affect_normal_line_mode(monkey
     assert "background_processing" not in result["data"]["events"][0]
 
 
-def test_line_computer_use_group_message_requires_bot_mention(monkeypatch, tmp_path):
+def test_line_computer_use_group_message_ignores_unaddressed_text(monkeypatch, tmp_path):
     from blocks.integrations import line as line_block  # noqa: E402
 
     _install_line_endpoint(
@@ -925,13 +950,15 @@ def test_line_computer_use_group_message_requires_bot_mention(monkeypatch, tmp_p
     result = line_block.run(_signed_line_payload(payload), {})
 
     event_result = result["data"]["events"][0]
-    assert event_result["status"] == "denied"
-    assert event_result["policy"]["reason"] == "mention required"
+    assert event_result["status"] == "ignored"
+    assert event_result["reason"] == "LINE group/room message was not addressed to Rumi"
+    assert event_result["line_addressing"]["addressed"] is False
     assert event_result["event"]["metadata"]["line_mention"]["mentioned"] is False
+    assert event_result["event"]["metadata"]["line_mention"]["addressed"] is False
     assert event_result["event"]["metadata"]["line_mention"]["require_group_mention"] is True
 
 
-def test_line_default_group_message_requires_bot_mention(monkeypatch, tmp_path):
+def test_line_default_group_message_ignores_unaddressed_text(monkeypatch, tmp_path):
     from blocks.integrations import line as line_block  # noqa: E402
 
     _install_line_endpoint(monkeypatch, tmp_path, enabled=True, input_profile_id="line.default")
@@ -958,9 +985,100 @@ def test_line_default_group_message_requires_bot_mention(monkeypatch, tmp_path):
     result = line_block.run(_signed_line_payload(payload), {})
 
     event_result = result["data"]["events"][0]
-    assert event_result["status"] == "denied"
-    assert event_result["policy"]["reason"] == "mention required"
+    assert event_result["status"] == "ignored"
+    assert event_result["line_addressing"]["addressed"] is False
+    assert event_result["event"]["metadata"]["line_mention"]["addressed"] is False
     assert event_result["event"]["metadata"]["line_mention"]["require_group_mention"] is True
+
+
+def test_line_default_group_message_dispatches_when_alias_names_rumi(monkeypatch, tmp_path):
+    from blocks.integrations import line as line_block  # noqa: E402
+
+    _install_line_endpoint(monkeypatch, tmp_path, enabled=True, input_profile_id="line.default")
+    monkeypatch.setattr(line_block.AudiencePolicyRegistry, "resolve", lambda self, policy_id, event=None: {"default": "allow"})
+    captured: dict[str, Any] = {}
+
+    def fake_dispatch(event, *, input_profile_id, audience_policy, audience_decision, context, send_response, mentioned=False):
+        captured["event"] = event
+        captured["mentioned"] = mentioned
+        captured["context"] = context
+        captured["audience_decision"] = audience_decision
+        return {
+            "status": "ok",
+            "assistant_text": "done",
+            "response_plan": {"provider": "line", "messages": []},
+        }
+
+    monkeypatch.setattr(line_block, "dispatch_external_event", fake_dispatch)
+    monkeypatch.setattr(LineResponseAdapter, "send", lambda self, plan, event=None, context=None: {"sent": False})
+    payload = {
+        "destination": "Udestination",
+        "events": [
+            {
+                "type": "message",
+                "mode": "active",
+                "webhookEventId": "evt-default-group-alias",
+                "replyToken": "reply-default-group-alias",
+                "source": {"type": "group", "groupId": "Cgroup", "userId": "Uactor"},
+                "message": {"id": "m1", "type": "text", "text": "rumi, \u4eca\u65e5\u306e\u8981\u7d04\u3057\u3066"},
+            }
+        ],
+    }
+
+    result = line_block.run(_signed_line_payload(payload), {})
+
+    assert result["data"]["events"][0]["status"] == "ok"
+    assert captured["mentioned"] is True
+    assert captured["audience_decision"].allowed is True
+    assert captured["event"].metadata["line_addressing"]["addressed"] is True
+    assert captured["event"].metadata["line_addressing"]["signals"] == ["alias"]
+    assert captured["event"].metadata["line_mention"]["mentioned"] is False
+    assert captured["event"].metadata["line_mention"]["addressed"] is True
+    assert captured["context"]["line_reply_deadline_seconds"] == 60
+    assert "LINE reply tokens expire about 1 minute" in captured["context"]["external_prompt_suffix"]
+
+
+def test_line_group_message_dispatches_for_recent_rumi_context(monkeypatch, tmp_path):
+    from blocks.integrations import line as line_block  # noqa: E402
+
+    _install_line_endpoint(monkeypatch, tmp_path, enabled=True, input_profile_id="line.default")
+    _seed_line_group_conversation(monkeypatch, tmp_path, assistant_text="Which option should I use?")
+    monkeypatch.setattr(line_block.AudiencePolicyRegistry, "resolve", lambda self, policy_id, event=None: {"default": "allow"})
+    captured: dict[str, Any] = {}
+
+    def fake_dispatch(event, *, input_profile_id, audience_policy, audience_decision, context, send_response, mentioned=False):
+        captured["event"] = event
+        captured["mentioned"] = mentioned
+        captured["audience_decision"] = audience_decision
+        return {
+            "status": "ok",
+            "assistant_text": "done",
+            "response_plan": {"provider": "line", "messages": []},
+        }
+
+    monkeypatch.setattr(line_block, "dispatch_external_event", fake_dispatch)
+    monkeypatch.setattr(LineResponseAdapter, "send", lambda self, plan, event=None, context=None: {"sent": False})
+    payload = {
+        "destination": "Udestination",
+        "events": [
+            {
+                "type": "message",
+                "mode": "active",
+                "webhookEventId": "evt-default-group-followup",
+                "replyToken": "reply-default-group-followup",
+                "source": {"type": "group", "groupId": "Cgroup", "userId": "Uactor"},
+                "message": {"id": "m1", "type": "text", "text": "option A please"},
+            }
+        ],
+    }
+
+    result = line_block.run(_signed_line_payload(payload), {})
+
+    assert result["data"]["events"][0]["status"] == "ok"
+    assert captured["mentioned"] is True
+    assert captured["audience_decision"].allowed is True
+    assert captured["event"].metadata["line_addressing"]["signals"] == ["conversation_context"]
+    assert captured["event"].metadata["line_addressing"]["context"]["matched"] is True
 
 
 def test_line_direct_user_message_still_dispatches_without_mention(monkeypatch, tmp_path):

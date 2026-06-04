@@ -21,10 +21,12 @@ metadata:
     source: "$.source"
     message: "$.message"
 params:
+  request_timeout: 55
+  line_reply_deadline_seconds: 60
   external_input:
     default_response:
       mode: same_response
       include_source_context: true
-      source_context_format: "${provider}から来た入力です。"
+      source_context_format: "${provider} source message"
 response_prompt:
   enabled: false

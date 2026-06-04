@@ -23,12 +23,18 @@ from domain.external.source_store import ExternalSourceStore
 from domain.external.targeting import origin_from_external_event
 from domain.integrations.http_client import post_json
 from domain.integrations.secrets import get_integration_secret, load_integration_secrets_into_env
+from domain.integrations.line.addressing import decide_line_addressing
 from domain.webhook.endpoint import WebhookEndpoint
 from domain.webhook.endpoint_resolver import ProviderEndpointResolver
 
 
 _LOGGER = logging.getLogger(__name__)
 _LINE_WEBHOOK_ACK_TEXT = "\u5c4a\u3044\u305f\u3088\uff01"
+_LINE_REPLY_DEADLINE_SECONDS = 60
+_LINE_REPLY_DEADLINE_PROMPT = (
+    "LINE reply tokens expire about 1 minute after the webhook event. "
+    "Keep the answer concise, finish within that deadline, and use the LINE reply response path when available."
+)
 
 
 def run(input_data, context):
@@ -87,10 +93,19 @@ def _handle_event(
         external_event.metadata["model"] = model
     mentioned = _line_message_mentions_bot(event, destination=destination)
     require_group_mention = _require_line_group_mention(endpoint, external_event)
+    addressing = decide_line_addressing(
+        event,
+        external_event,
+        endpoint=endpoint,
+        mentioned=mentioned,
+    )
+    addressed = bool(addressing.get("addressed"))
     external_event.metadata["line_mention"] = {
         "mentioned": mentioned,
         "require_group_mention": require_group_mention,
+        "addressed": addressed,
     }
+    external_event.metadata["line_addressing"] = addressing
     origin = origin_from_external_event(external_event)
     source_record = ExternalSourceStore().record_origin(origin, verified=verified)
     external_event.metadata["origin"] = origin.as_dict()
@@ -103,11 +118,14 @@ def _handle_event(
     runtime_context.setdefault("conversation", dict(endpoint.conversation))
     runtime_context.setdefault("source_record", source_record)
     runtime_context = _apply_endpoint_response_context(runtime_context, endpoint)
+    runtime_context = _apply_line_reply_deadline_context(runtime_context, origin)
     policy = AudiencePolicyRegistry().resolve(endpoint.audience_policy_id, event=external_event)
+    if require_group_mention and not addressed:
+        return _line_addressing_ignored_result(external_event, addressing)
     if require_group_mention:
         policy = _require_audience_mention(policy)
         policy = _allow_current_scope(policy, external_event)
-    decision = AudiencePolicy(policy).evaluate(external_event, mentioned=mentioned)
+    decision = AudiencePolicy(policy).evaluate(external_event, mentioned=addressed if require_group_mention else mentioned)
     if not decision.allowed:
         return _policy_denied_result(external_event, decision)
     acknowledgement = _send_line_webhook_acknowledgement(event, endpoint=endpoint)
@@ -119,7 +137,7 @@ def _handle_event(
             audience_policy=policy,
             audience_decision=decision,
             context=runtime_context,
-            mentioned=mentioned,
+            mentioned=addressed if require_group_mention else mentioned,
         ), acknowledgement)
     return _with_line_acknowledgement(_dispatch_line_event(
         external_event,
@@ -127,7 +145,7 @@ def _handle_event(
         audience_policy=policy,
         audience_decision=decision,
         context=runtime_context,
-        mentioned=mentioned,
+        mentioned=addressed if require_group_mention else mentioned,
     ), acknowledgement)
 
 
@@ -238,8 +256,7 @@ def _apply_external_output_context(runtime_context: dict[str, Any]) -> None:
 
 
 def _frontend_external_output_settings() -> dict[str, Any]:
-    override = os.environ.get("RUMI_DEFAULTSPACK_FRONTEND_SETTINGS_PATH", "").strip()
-    path = Path(override) if override else Path(__file__).resolve().parents[2] / "user_data" / "shared" / "frontend_settings.json"
+    path = _frontend_settings_path()
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
@@ -250,6 +267,11 @@ def _frontend_external_output_settings() -> dict[str, Any]:
     return dict(output)
 
 
+def _frontend_settings_path() -> Path:
+    override = os.environ.get("RUMI_DEFAULTSPACK_FRONTEND_SETTINGS_PATH", "").strip()
+    return Path(override) if override else Path(__file__).resolve().parents[3] / "user_data" / "shared" / "frontend_settings.json"
+
+
 def _policy_denied_result(external_event, decision) -> Dict[str, Any]:
     return {
         "status": "denied",
@@ -257,6 +279,17 @@ def _policy_denied_result(external_event, decision) -> Dict[str, Any]:
         "policy": decision.as_dict(),
         "event": external_event.as_dict(),
         "reply": {"sent": False, "reason": "audience policy denied"},
+    }
+
+
+def _line_addressing_ignored_result(external_event, addressing: dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "status": "ignored",
+        "assistant_text": "",
+        "reason": "LINE group/room message was not addressed to Rumi",
+        "event": external_event.as_dict(),
+        "line_addressing": dict(addressing or {}),
+        "reply": {"sent": False, "reason": "message not addressed to Rumi"},
     }
 
 
@@ -399,6 +432,24 @@ def _apply_endpoint_response_context(runtime_context: dict[str, Any], endpoint: 
     return updated
 
 
+def _apply_line_reply_deadline_context(runtime_context: dict[str, Any], origin) -> dict[str, Any]:
+    updated = dict(runtime_context or {})
+    if not getattr(origin, "can_reply", False):
+        return updated
+    updated.setdefault("line_reply_deadline_seconds", _LINE_REPLY_DEADLINE_SECONDS)
+    expires_at = getattr(origin, "reply_expires_at_ms", None)
+    if isinstance(expires_at, int):
+        updated.setdefault("line_reply_expires_at_ms", expires_at)
+    existing_suffix = str(updated.get("external_prompt_suffix") or "").strip()
+    if _LINE_REPLY_DEADLINE_PROMPT not in existing_suffix:
+        updated["external_prompt_suffix"] = (
+            existing_suffix + "\n" + _LINE_REPLY_DEADLINE_PROMPT
+            if existing_suffix
+            else _LINE_REPLY_DEADLINE_PROMPT
+        )
+    return updated
+
+
 def _should_process_line_event_in_background(endpoint: WebhookEndpoint) -> bool:
     response = endpoint.response if isinstance(endpoint.response, dict) else {}
     if not response:
@@ -517,8 +568,7 @@ def _require_line_group_mention(endpoint: WebhookEndpoint, external_event) -> bo
 
 def _line_mention_policy_default() -> Any:
     try:
-        override = os.environ.get("RUMI_DEFAULTSPACK_FRONTEND_SETTINGS_PATH")
-        path = Path(override) if override else Path(__file__).resolve().parents[3] / "user_data" / "shared" / "frontend_settings.json"
+        path = _frontend_settings_path()
         data = json.loads(path.read_text(encoding="utf-8"))
     except Exception:
         return True

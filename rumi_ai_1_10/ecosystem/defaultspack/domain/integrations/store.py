@@ -189,6 +189,14 @@ class IntegrationConversationStore:
             self._save()
         self.release_event_claim(provider, event_id)
 
+    def get_conversation_id(self, provider: str, external_key: str) -> str:
+        with self._path_lock():
+            self._reload()
+            existing = self._data["connections"].get(self.connection_key(provider, external_key))
+            if not isinstance(existing, dict):
+                return ""
+            return str(existing.get("conversation_id") or "").strip()
+
     def get_or_create_conversation(
         self,
         *,

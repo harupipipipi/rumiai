@@ -32,6 +32,8 @@ def test_line_default_profile_maps_text_message_to_user_input():
     assert envelope.input == "hello"
     assert envelope.source["provider"] == "line"
     assert envelope.metadata["line"]["reply_token"] == "reply"
+    assert envelope.params["request_timeout"] == 55
+    assert envelope.params["line_reply_deadline_seconds"] == 60
 
 
 def test_line_default_profile_fallbacks_non_text_message():
@@ -67,6 +69,7 @@ def test_line_computer_use_profile_attaches_browser_tools_and_prompt_policy():
     assert envelope.input == "open chrome"
     assert envelope.params["thinking_level"] == "high"
     assert envelope.params["request_timeout"] == 45
+    assert envelope.params["line_reply_deadline_seconds"] == 60
     assert envelope.params["retry"]["max_attempts"] == 5
     assert envelope.params["retry"]["delays"] == [5, 15, 30, 60]
     assert envelope.tools == ["computer_use", "browser_computer"]
