@@ -1,0 +1,136 @@
+{
+  "pack_id": "rumi_sop_mining_pack",
+  "pack_identity": "rumi:ecosystem/rumi_sop_mining_pack",
+  "display_name": "Rumi SOP Mining Pack",
+  "version": "0.1.0",
+  "description": "Declarative trace-to-SOP, checklist, runbook, and human-approved workflow recipe pack.",
+  "vocabulary": {
+    "types": [
+      "catalog",
+      "schema",
+      "policy",
+      "runbook",
+      "checklist",
+      "ledger",
+      "template",
+      "profile",
+      "prompt",
+      "preset",
+      "example"
+    ]
+  },
+  "dependencies": {
+    "defaultspack": ">=2.0.0"
+  },
+  "components": {},
+  "load_order": [],
+  "required_secrets": [],
+  "required_network": [],
+  "host_execution": false,
+  "metadata": {
+    "required_secrets": [],
+    "network_policy": "none_by_default",
+    "executable_code": false,
+    "declarative_only": true,
+    "optional_integrations": [
+      {
+        "pack_id": "rumi_observability_pack",
+        "reason": "Adjacent owner for rumi_observability_pack handoff; this pack keeps declarative evidence only."
+      },
+      {
+        "pack_id": "rumi_agentic_qa_pack",
+        "reason": "Adjacent owner for rumi_agentic_qa_pack handoff; this pack keeps declarative evidence only."
+      },
+      {
+        "pack_id": "rumi_security_review_pack",
+        "reason": "Adjacent owner for rumi_security_review_pack handoff; this pack keeps declarative evidence only."
+      },
+      {
+        "pack_id": "rumi_workflow_scheduler_pack",
+        "reason": "Adjacent owner for rumi_workflow_scheduler_pack handoff; this pack keeps declarative evidence only."
+      },
+      {
+        "pack_id": "rumi_computer_control_pack",
+        "reason": "Adjacent owner for rumi_computer_control_pack handoff; this pack keeps declarative evidence only."
+      }
+    ],
+    "owner_surfaces": [
+      "trace_redaction_contract",
+      "trace_schema",
+      "sop_extraction",
+      "assumption_log",
+      "runbook_template",
+      "human_approval_gate",
+      "source_consent_review",
+      "non_execution_boundary_review"
+    ],
+    "excluded_surfaces": [
+      "automation_execution",
+      "browser_control",
+      "computer_control",
+      "schedule_creation",
+      "scheduled_jobs",
+      "tool_creation_or_invocation",
+      "live_trace_capture",
+      "long_term_run_ledger_storage",
+      "external_message_delivery"
+    ],
+    "asset_index": {
+      "readme": [
+        "README.md"
+      ],
+      "docs": [
+        "docs/README.md",
+        "docs/architecture.md",
+        "docs/interfaces.md",
+        "docs/operations.md"
+      ],
+      "catalog": [
+        "catalog/sop_mining_workflows.yaml",
+        "catalog/sop_mining_quality_matrix.yaml",
+        "catalog/approval_state_machine.yaml",
+        "catalog/sop_step_taxonomy.yaml"
+      ],
+      "schema": [
+        "schemas/trace_evidence_record.schema.json",
+        "schemas/sop_mining_record.schema.json",
+        "schemas/workflow_recipe.schema.json",
+        "schemas/sop_trace.schema.json"
+      ],
+      "policy": [
+        "policies/sop_mining_safety.policy.yaml",
+        "policies/trace_redaction.policy.yaml"
+      ],
+      "checklist": [
+        "checklists/sop_mining_review.checklist.yaml"
+      ],
+      "ledger": [
+        "ledgers/sop_mining_evidence_ledger.schema.yaml"
+      ],
+      "runbook": [
+        "runbooks/sop_mining_runbook.template.yaml"
+      ],
+      "template": [
+        "templates/sop_mining_handoff.template.md",
+        "templates/assumption_log.template.md",
+        "templates/runbook.template.md"
+      ],
+      "profiles": [
+        "profiles/process_cartographer.profile.yaml"
+      ],
+      "prompts": [
+        "prompts/sop_extractor.system.md"
+      ],
+      "presets": [
+        "presets/safe_default.preset.yaml",
+        "presets/handoff_review.preset.yaml",
+        "presets/quality_gate.preset.yaml"
+      ],
+      "example": [
+        "examples/bug_triage_trace.example.yaml",
+        "examples/support_macro_trace.example.yaml",
+        "examples/release_checklist_trace.example.yaml"
+      ]
+    }
+  }
+}

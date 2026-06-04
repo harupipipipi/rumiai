@@ -1,0 +1,56 @@
+policy:
+  id: rumi_sop_mining_pack.safety
+  mode: extraction_only
+  blocked_by_default:
+  - raw secrets in trace evidence
+  - unreviewed personal data
+  - unredacted external account identifiers
+  - opaque shell commands as SOP steps
+  - automation execution
+  - browser control
+  - computer control
+  - schedule creation
+  - live trace capture
+  - long-term run ledger storage
+  - tool creation or invocation
+  allowed_without_network:
+  - draft_record
+  - review_checklist
+  - handoff_packet
+  redaction_required_before:
+  - sop_draft_export
+  - runbook_promotion
+  - human_approval
+  sensitive_data_classes:
+  - id: credential_values
+    action: remove_value_and_record_class_only
+  - id: personal_identifiers
+    action: replace_with_role_or_hash
+  - id: private_workspace_paths
+    action: trim_to_reviewable_relative_reference
+  - id: customer_content
+    action: summarize_without_verbatim_payload
+  approval_gate:
+    promotion_requires:
+    - redaction_complete
+    - human_owner_approved
+    - approver_identity_recorded
+    - approved_at_recorded
+    - owner_handoff_named
+    - non_execution_boundary_confirmed
+    blocked_states:
+    - draft
+    - needs_review
+    - rejected
+  requires_human_review:
+  - external_action
+  - low_confidence_evidence
+  - adjacent_owner_execution
+  owner_handoffs:
+    automation_execution: runtime_owner_pack
+    browser_control: rumi_browser_automation_pack
+    computer_control: rumi_computer_control_pack
+    schedule_creation: rumi_workflow_scheduler_pack
+    live_trace_capture: rumi_observability_pack
+    run_ledger_storage: rumi_observability_pack
+    tool_creation_or_invocation: rumi_default_tools_pack
