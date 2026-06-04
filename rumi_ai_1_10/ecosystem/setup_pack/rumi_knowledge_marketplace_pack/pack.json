@@ -22,18 +22,40 @@
   },
   "defaultspack_promotion": {
     "eligible": false,
+    "reason": "Marketplace curation stays optional because install review, provenance ledgers, and blacklist decisions are advanced governance flows beyond defaultspack's baseline grants.",
     "criteria": [
       "contract_tests_pass",
       "overlap_policy_reviewed",
+      "trust_rubric_reviewed",
       "maintainer_runtime_evidence_required"
+    ],
+    "promotion_blockers": [
+      "would_auto_install_unreviewed_content",
+      "would_duplicate_security_or_connector_owner_surfaces",
+      "requires_network_or_secret_access",
+      "lacks_provenance_ledger_review"
+    ],
+    "promotion_evidence_required": [
+      "schema_valid_ecosystem_manifest",
+      "asset_index_covers_all_pack_assets",
+      "marketplace_card_schema_review",
+      "trust_rubric_review",
+      "install_review_workflow_review",
+      "promotion_blacklist_policy_review"
     ]
   },
   "marketplace": {
     "id": "rumi.knowledge_marketplace_pack",
+    "registry": "rumi_local_pack_registry",
+    "publisher": "rumi-ai",
+    "status": "verified",
+    "category": "knowledge-marketplace",
     "channel": "experimental"
   },
   "signing": {
-    "mode": "repository_reviewed"
+    "mode": "repository_reviewed",
+    "verified": true,
+    "verification_scope": "declarative_assets_only"
   },
   "security_notes": [
     "No secrets are bundled.",

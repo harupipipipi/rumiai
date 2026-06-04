@@ -1,6 +1,32 @@
 example_id: rumi_knowledge_marketplace.template_catalog_entry
-request: Example workflow for template catalog entry.
-expected_outputs:
-  - plan
-  - evidence
-  - handoff
+scenario: Promote a reviewed local template entry into a curated catalog without making it default.
+request: Review release-note-template.weekly for catalog inclusion and record promotion blockers.
+marketplace_card:
+  card_id: template.release_note_weekly.v3
+  capability_type: template
+  source:
+    source_ref: local_repo:templates/release-note-weekly.md
+    content_digest: sha256:c3cf400e0199c1cb51ff6b9e0c4dc465ab3f5b5dbbf7823902ae1224189922c1
+  publisher: rumi-templates
+  trust_status: trusted
+  permission_summary:
+    required_permissions:
+      - read_template
+      - write_generated_document
+    network_requirement: none
+    secret_requirement: none
+    host_execution_requirement: false
+install_review:
+  decision: allow_install
+  explicit_user_approval_required: true
+  reviewer: local-marketplace-curator
+  reason: stable local template with no network or secret requirements
+promotion_review:
+  eligible_for_defaultspack: false
+  blockers:
+    - marketplace_governance_is_optional
+    - template_catalog_is_domain_specific
+  blacklist_status: clear
+expected_handoff:
+  target_pack: rumi_pack_suite_pack
+  reason: suite composition decides whether the template is bundled with other packs

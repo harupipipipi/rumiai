@@ -1,6 +1,32 @@
 example_id: rumi_knowledge_marketplace.skill_review_card
-request: Example workflow for skill review card.
-expected_outputs:
-  - plan
-  - evidence
-  - handoff
+scenario: Review a local skill candidate before it is made install-ready.
+request: Create a marketplace card review for skill local-doc-redline-helper without installing it.
+marketplace_card:
+  card_id: skill.local_doc_redline_helper.v1
+  capability_type: skill
+  source:
+    source_ref: local_repo:skills/document-redline-helper
+    content_digest: sha256:7b52c5d0a6f0d42b8d6a5e1e6d23c2f31c12b2d36c4e0a110f4a4142b5f8d901
+  publisher: rumi-internal
+  trust_status: repository_reviewed
+  permission_summary:
+    required_permissions:
+      - read_local_documents
+      - write_review_notes
+    network_requirement: none
+    secret_requirement: none
+    host_execution_requirement: false
+install_review:
+  decision: allow_with_warning
+  explicit_user_approval_required: true
+  reviewer: local-marketplace-curator
+  reason: writes review notes and should stay opt-in
+expected_ledger_entry:
+  trust_status: repository_reviewed
+  blacklist_status: clear
+  promotion_blockers_checked:
+    - excessive_permissions_without_justification
+    - suspicious_network_endpoint
+  handoff:
+    target_pack: rumi_memory_knowledge_pack
+    reason: learned skill retention belongs to memory and knowledge ownership
