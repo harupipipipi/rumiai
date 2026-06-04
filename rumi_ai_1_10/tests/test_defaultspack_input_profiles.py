@@ -65,6 +65,8 @@ def test_line_computer_use_profile_attaches_browser_tools_and_prompt_policy():
     envelope = InputProfileEngine(profile).to_envelope(event)
 
     assert envelope.input == "open chrome"
+    assert envelope.chat["model"] == "google/gemma-4-31b-it"
+    assert envelope.params["model"] == "google/gemma-4-31b-it"
     assert envelope.params["thinking_level"] == "high"
     assert envelope.params["request_timeout"] == 45
     assert envelope.params["retry"]["max_attempts"] == 5
