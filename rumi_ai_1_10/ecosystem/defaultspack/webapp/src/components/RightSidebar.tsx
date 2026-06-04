@@ -73,6 +73,7 @@ import { buildBuiltinPlacementManifests, filterPlacementCandidates, normalizePin
 import { compareToolUiItems, sortedToolGroups, sortedToolUiItems, supportedComposerDropKind, supportsComposerDrop, toolGroupFor } from "../lib/toolUi";
 import { PlacementHtmlRenderer } from "./PlacementHtmlRenderer";
 import { ToolFilterLogWidget, ToolManagerWidget } from "./ToolStatusWidgets";
+import { WorkspaceTabRailPanel, type WorkspaceTab, type WorkspaceTabKind } from "./WorkspaceTabs";
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -781,10 +782,15 @@ export function RightSidebar({
   toolFilterEntries = [],
   runtimeCapabilitySnapshot = null,
   yoloMode = false,
+  workspaceTabs = [],
+  activeWorkspaceTabId = null,
   onSettingChange,
   onOpenSettings,
   onOpenSettingsSection,
   onToggleYolo,
+  onWorkspaceTabSelect,
+  onWorkspaceTabClose,
+  onWorkspaceTabCreate,
   onToolToggle,
   onToolBatchSet,
   onPanelAction,
@@ -801,10 +807,15 @@ export function RightSidebar({
   toolFilterEntries?: ToolFilterEntry[];
   runtimeCapabilitySnapshot?: RuntimeCapabilitySnapshot | null;
   yoloMode?: boolean;
+  workspaceTabs?: WorkspaceTab[];
+  activeWorkspaceTabId?: string | null;
   onSettingChange: (sectionId: string, fieldId: string, value: unknown) => void;
   onOpenSettings: () => void;
   onOpenSettingsSection?: (sectionId: string) => void;
   onToggleYolo?: () => void;
+  onWorkspaceTabSelect?: (tabId: string) => void;
+  onWorkspaceTabClose?: (tabId: string) => void;
+  onWorkspaceTabCreate?: (kind: WorkspaceTabKind) => void;
   onToolToggle?: (item: SidebarItem) => void;
   onToolBatchSet?: (toolIds: string[], enabled: boolean) => void;
   onPanelAction?: (item: SidebarItem, action: SidebarAction) => void;
@@ -904,7 +915,15 @@ export function RightSidebar({
 
   useEffect(() => {
     const requestedId = activeItemId?.split(":").slice(0, -1).join(":") || activeItemId;
-    if (requestedId && items.some((item) => item.id === requestedId)) {
+    const specialPanelIds = new Set([
+      "__tool_manager__",
+      "__tool_filter_log__",
+      "__runtime_status__",
+      "__company_workspace__",
+      "__coding_widget__",
+      "__workspace_tabs__",
+    ]);
+    if (requestedId && (items.some((item) => item.id === requestedId) || specialPanelIds.has(requestedId))) {
       setActivePanel(requestedId);
     }
   }, [activeItemId, items]);
@@ -916,21 +935,22 @@ export function RightSidebar({
     if (activePanel === "__runtime_status__") return;
     if (activePanel === "__company_workspace__" && companyPanel) return;
     if (activePanel === "__coding_widget__" && codingPanel) return;
+    if (activePanel === "__workspace_tabs__" && workspaceTabs.length > 0) return;
     if (activePanel.startsWith(PLACEMENT_PANEL_PREFIX) && placementManifestMap.has(activePanel.slice(PLACEMENT_PANEL_PREFIX.length))) {
       return;
     }
     if (!items.some((item) => item.id === activePanel)) {
       setActivePanel(null);
     }
-  }, [activePanel, codingPanel, companyPanel, items, placementManifestMap]);
+  }, [activePanel, codingPanel, companyPanel, items, placementManifestMap, workspaceTabs.length]);
 
   useEffect(() => {
     if (!activePanel || categoryFilter === "all") return;
     const active = items.find((item) => item.id === activePanel);
-    if (active && active.category !== categoryFilter) {
+    if (active && active.category !== categoryFilter && !pinnedItemIdSet.has(active.id)) {
       setActivePanel(null);
     }
-  }, [activePanel, categoryFilter, items]);
+  }, [activePanel, categoryFilter, items, pinnedItemIdSet]);
 
   useEffect(() => {
     if (!openToolGroupMenu) return;
@@ -1037,7 +1057,7 @@ export function RightSidebar({
     [hiddenToolIdSet, items, searchQuery, tagMap],
   );
   useEffect(() => {
-    if (!activePanel || activePanel === "__tool_manager__" || activePanel === "__tool_filter_log__" || activePanel === "__runtime_status__" || activePanel === "__company_workspace__" || activePanel === "__coding_widget__" || !searchQuery.trim()) return;
+    if (!activePanel || activePanel === "__tool_manager__" || activePanel === "__tool_filter_log__" || activePanel === "__runtime_status__" || activePanel === "__company_workspace__" || activePanel === "__coding_widget__" || activePanel === "__workspace_tabs__" || !searchQuery.trim()) return;
     if (!searchFilteredItems.some((item) => item.id === activePanel)) {
       setActivePanel(null);
     }
@@ -1120,6 +1140,7 @@ export function RightSidebar({
   const isRuntimeStatusActive = activePanel === "__runtime_status__";
   const isCompanyPanelActive = activePanel === "__company_workspace__" && Boolean(companyPanel);
   const isCodingPanelActive = activePanel === "__coding_widget__" && Boolean(codingPanel);
+  const isWorkspaceTabsActive = activePanel === "__workspace_tabs__" && workspaceTabs.length > 0;
   const isPlacementPanelActive = Boolean(activePlacementManifest);
   const activeToolGroupId = activeItem?.category === "tool" ? toolGroupFor(activeItem).id : null;
   const shouldCompactToolRail = categoryFilter === "tool" && !searchQuery.trim() && !activeTagFilter && !showStarredOnly;
@@ -1468,7 +1489,7 @@ export function RightSidebar({
 
   return (
     <aside className="flex-shrink-0 border-l border-zinc-800/60 bg-[#09090b] hidden md:flex h-full transition-[width,opacity] duration-200 ease-out">
-      {(activeItem || isPlacementPanelActive || isToolManagerActive || isToolFilterLogActive || isRuntimeStatusActive || isCompanyPanelActive || isCodingPanelActive) && (
+      {(activeItem || isPlacementPanelActive || isToolManagerActive || isToolFilterLogActive || isRuntimeStatusActive || isCompanyPanelActive || isCodingPanelActive || isWorkspaceTabsActive) && (
         <div
           className="relative flex flex-col border-r border-zinc-800/40 bg-[#0a0a0c] animate-in slide-in-from-right-2 duration-200"
           style={{ width: panelWidthPx }}
@@ -1482,8 +1503,8 @@ export function RightSidebar({
           />
           <div className="h-10 flex items-center justify-between px-2.5 border-b border-zinc-800/60 flex-shrink-0">
             <div className="flex items-center gap-2 min-w-0 overflow-hidden">
-              <div className={cn("w-1.5 h-1.5 rounded-full flex-shrink-0", activeItem ? categoryColor(activeItem.category, "bg") : isPlacementPanelActive ? "bg-violet-300" : isCompanyPanelActive ? "bg-sky-400" : isCodingPanelActive ? "bg-zinc-300" : isToolFilterLogActive ? "bg-amber-300" : isRuntimeStatusActive ? "bg-sky-300" : "bg-emerald-500")} />
-              <h3 className="text-[13px] font-medium text-zinc-100 truncate">{activeItem?.label ?? activePlacementManifest?.label ?? (isCompanyPanelActive ? "Company Workspace" : isCodingPanelActive ? "Coding widget" : isToolFilterLogActive ? "Tool filter log" : isRuntimeStatusActive ? "Runtime status" : "Tool manager")}</h3>
+              <div className={cn("w-1.5 h-1.5 rounded-full flex-shrink-0", activeItem ? categoryColor(activeItem.category, "bg") : isPlacementPanelActive ? "bg-violet-300" : isCompanyPanelActive ? "bg-sky-400" : isCodingPanelActive ? "bg-zinc-300" : isWorkspaceTabsActive ? "bg-emerald-300" : isToolFilterLogActive ? "bg-amber-300" : isRuntimeStatusActive ? "bg-sky-300" : "bg-emerald-500")} />
+              <h3 className="text-[13px] font-medium text-zinc-100 truncate">{activeItem?.label ?? activePlacementManifest?.label ?? (isCompanyPanelActive ? "Company Workspace" : isCodingPanelActive ? "Coding widget" : isWorkspaceTabsActive ? "Workspace tabs" : isToolFilterLogActive ? "Tool filter log" : isRuntimeStatusActive ? "Runtime status" : "Tool manager")}</h3>
               {activeItem?.badge && (
                 <span className="text-[8px] bg-emerald-500/20 text-emerald-400 px-1 py-0.5 rounded-full font-bold flex-shrink-0">
                   {activeItem.badge}
@@ -1583,6 +1604,14 @@ export function RightSidebar({
               companyPanel
             ) : isCodingPanelActive ? (
               codingPanel
+            ) : isWorkspaceTabsActive ? (
+              <WorkspaceTabRailPanel
+                tabs={workspaceTabs}
+                activeTabId={activeWorkspaceTabId ?? ""}
+                onSelect={(tabId) => onWorkspaceTabSelect?.(tabId)}
+                onClose={(tabId) => onWorkspaceTabClose?.(tabId)}
+                onCreate={(kind) => onWorkspaceTabCreate?.(kind)}
+              />
             ) : isPlacementPanelActive && activePlacementManifest ? (
               renderPlacementPanel(activePlacementManifest.id)
             ) : isToolFilterLogActive ? (
@@ -1908,6 +1937,27 @@ export function RightSidebar({
             </div>
           )}
                   <CategorySwitcher active={categoryFilter} counts={counts} keyboardButtonNavigation={keyboardButtonNavigation} onChange={(id) => { setCategoryFilter(id); setOpenToolGroupMenu(null); }} />
+                  {workspaceTabs.length > 0 && (
+                    <button
+                      type="button"
+                      tabIndex={buttonTabIndex}
+                      onClick={() => setActivePanel((current) => (current === "__workspace_tabs__" ? null : "__workspace_tabs__"))}
+                      className={cn(
+                        RAIL_BUTTON_CLASS,
+                        isWorkspaceTabsActive
+                          ? "bg-emerald-500/15 text-emerald-200 ring-1 ring-emerald-500/30"
+                          : "text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50",
+                      )}
+                      title="Workspace tabs"
+                      aria-label="Workspace tabs"
+                      aria-pressed={isWorkspaceTabsActive}
+                    >
+                      <LayoutGrid size={17} className="h-[17px] w-[17px] shrink-0" />
+                      <span className="absolute -top-0.5 -right-0.5 rounded-full bg-emerald-500 px-0.5 text-[7px] font-bold leading-tight text-black">
+                        {workspaceTabs.length}
+                      </span>
+                    </button>
+                  )}
                   <SidebarSearchControl
                     query={searchQuery}
                     resultCount={searchFilteredItems.length}

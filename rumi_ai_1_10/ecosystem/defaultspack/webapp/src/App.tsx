@@ -4,6 +4,16 @@ import { CompanyWorkspacePanel } from "./components/company/CompanyWorkspacePane
 import { CodingCockpit } from "./components/coding/CodingCockpit";
 import { ConversationSpotlight } from "./components/ConversationSpotlight";
 import { WarmActionIcon } from "./components/WarmActionIcon";
+import {
+  DEFAULT_WORKSPACE_TAB_ID,
+  WORKSPACE_TAB_CREATE_OPTIONS,
+  WorkspaceLaunchpad,
+  WorkspaceTabBar,
+  createWorkspaceTab,
+  workspaceTabDisplayTitle,
+  type WorkspaceTab,
+  type WorkspaceTabKind,
+} from "./components/WorkspaceTabs";
 import type { ChatItem, HistoryBoardNewTaskOptions } from "./components/HistoryBoard";
 import type { ToolPreviewItem, ToolPreviewMode } from "./components/ToolPreview";
 import { buildToolPreviewDisplayItems, hasCanvasItems } from "./components/ToolPreview";
@@ -31,8 +41,6 @@ type ComposerCandidateMenuState = {
   query: string;
   candidates: ModelCommandCandidate[];
 } | null;
-
-type WorkspacePanelMode = "composer" | "calendar";
 
 type PendingNewTaskContext = {
   groupId?: string;
@@ -1240,6 +1248,7 @@ function toUiMessage(message: ChatMessage, profile?: ModelProfile | null): ChatU
   return {
     id: message.id,
     conversationId: message.conversation_id,
+    createdAt: message.created_at,
     role: isUser ? "user" : "agent",
     content: normalizeBlocks(message),
     rawText: messageToText(message),
@@ -1547,7 +1556,7 @@ function getNewConversationPlaceholder(): string {
 }
 
 function getNewConversationGreeting(): string {
-  return "Defaults Console";
+  return "rumi DP";
 }
 
 function findProfile(profiles: ModelProfile[], modelId: string): ModelProfile | null {
@@ -2056,7 +2065,10 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showPreview, setShowPreview] = useLocalStorage("rumi-show-preview", false);
-  const [workspacePanelMode, setWorkspacePanelMode] = useState<WorkspacePanelMode>("composer");
+  const [workspaceTabs, setWorkspaceTabs] = useState<WorkspaceTab[]>(() => [
+    createWorkspaceTab("chat", { id: DEFAULT_WORKSPACE_TAB_ID, title: "New Conversation" }),
+  ]);
+  const [activeWorkspaceTabId, setActiveWorkspaceTabId] = useState(DEFAULT_WORKSPACE_TAB_ID);
   const [isHistoryMinimized, setIsHistoryMinimized] = useLocalStorage("rumi-history-minimized", false);
   const [isNewChatLaunching, setIsNewChatLaunching] = useState(false);
   const [modelSteerStatus, setModelSteerStatus] = useState<string | null>(null);
@@ -2127,7 +2139,25 @@ export default function App() {
     : "";
   const messages = orderedMessages.map((message) => toUiMessage(message, activeProfile));
   const activeChatTitle = activeConversation?.title ?? "New Conversation";
+  const activeWorkspaceTab = workspaceTabs.find((tab) => tab.id === activeWorkspaceTabId) ?? workspaceTabs[0] ?? null;
+  const activeWorkspaceKind = activeWorkspaceTab?.kind ?? "chat";
+  const isChatWorkspace = activeWorkspaceKind === "chat";
+  const isCodingWorkspace = activeWorkspaceKind === "coding";
+  const isCanvasWorkspace = activeWorkspaceKind === "canvas";
+  const isToolsWorkspace = activeWorkspaceKind === "tools";
   const isNewConversation = activeConversation === null || activeConversation.messages.length === 0;
+  useEffect(() => {
+    setWorkspaceTabs((current) => current.map((tab) => {
+      if (tab.id !== activeWorkspaceTabId || tab.kind !== "chat") return tab;
+      const nextTitle = activeConversationId ? activeChatTitle : "New Conversation";
+      if (tab.conversationId === activeConversationId && tab.title === nextTitle) return tab;
+      return {
+        ...tab,
+        conversationId: activeConversationId,
+        title: nextTitle,
+      };
+    }));
+  }, [activeChatTitle, activeConversationId, activeWorkspaceTabId]);
   const placeholder = String(settingsValues.general?.composer_placeholder ?? "メッセージを入力...");
   const locale = normalizeLocale(settingsValues.general?.language);
   const keyboardButtonNavigation = parseCommandBoolean(settingsValues.general?.keyboard_button_navigation, false);
@@ -2284,7 +2314,7 @@ export default function App() {
   const showWidgets = settingsValues.chat_rendering?.show_widgets !== false;
   const showActivityInMessages = settingsValues.general?.show_activity_in_messages !== false;
   const showRegion = (regionId: string) => !catalog?.shell || hasShellRegion(catalog, regionId);
-  const isActivityPreviewVisible = showRegion("activity_preview") && effectiveShowPreview;
+  const isActivityPreviewVisible = showRegion("activity_preview") && effectiveShowPreview && !isCanvasWorkspace;
   const activityPreviewWidthPx = clampNumber(activityPreviewWidth, 220, 720, 340);
   const operationsProfileAvailable = hasOperationsProfile(catalog);
 
@@ -2791,6 +2821,9 @@ export default function App() {
 
   const handleNewTask = (options?: HistoryBoardNewTaskOptions) => {
     const nextContext = workspaceContextFromHistoryOptions(options);
+    const nextTab = createWorkspaceTab("chat", { title: "New Conversation" });
+    setWorkspaceTabs((current) => [...current, nextTab]);
+    setActiveWorkspaceTabId(nextTab.id);
     setPendingNewTaskContext(nextContext);
     if (nextContext?.workspaceId) {
       setMode("coding");
@@ -2802,7 +2835,6 @@ export default function App() {
     setIsGenerating(false);
     setAttachedFiles([]);
     setDroppedWidgets([]);
-    setWorkspacePanelMode("composer");
     replaceChatIdInUrl(null, false);
   };
 
@@ -2824,7 +2856,14 @@ export default function App() {
   const handleHistoryClick = (conversationId: string) => {
     setError(null);
     setPendingNewTaskContext(null);
-    setWorkspacePanelMode("composer");
+    const activeTab = workspaceTabs.find((tab) => tab.id === activeWorkspaceTabId);
+    if (activeTab?.kind === "chat") {
+      setWorkspaceTabs((current) => current.map((tab) => tab.id === activeWorkspaceTabId ? { ...tab, conversationId } : tab));
+    } else {
+      const nextTab = createWorkspaceTab("chat", { conversationId, title: "AI Chat" });
+      setWorkspaceTabs((current) => [...current, nextTab]);
+      setActiveWorkspaceTabId(nextTab.id);
+    }
     void loadConversation(conversationId);
   };
 
@@ -3466,6 +3505,57 @@ export default function App() {
       else url.searchParams.delete("chat");
       url.searchParams.delete("pending");
       window.history.pushState({ mode: newMode, conversationId: activeConversationId }, "", `${url.pathname}${url.search}${url.hash}`);
+    }
+  };
+
+  const activateWorkspaceTab = (tab: WorkspaceTab) => {
+    setActiveWorkspaceTabId(tab.id);
+    setError(null);
+    if (tab.kind === "chat") {
+      handleModeChange("agent");
+      void loadConversation(tab.conversationId ?? null);
+      return;
+    }
+    if (tab.kind === "coding") {
+      handleModeChange("coding");
+      return;
+    }
+    handleModeChange("agent");
+    if (tab.kind === "calendar") {
+      return;
+    }
+    if (tab.kind === "canvas") {
+      setShowPreview(true);
+    }
+    if (tab.kind === "tools") {
+      setActiveSidebarItemId("__tool_manager__");
+      setSidebarSelectionTick((value) => value + 1);
+    }
+  };
+
+  const handleWorkspaceTabSelect = (tabId: string) => {
+    const tab = workspaceTabs.find((candidate) => candidate.id === tabId);
+    if (tab) activateWorkspaceTab(tab);
+  };
+
+  const handleWorkspaceTabCreate = (kind: WorkspaceTabKind) => {
+    const option = WORKSPACE_TAB_CREATE_OPTIONS.find((candidate) => candidate.kind === kind);
+    if (option?.disabled) return;
+    const tab = createWorkspaceTab(kind, {
+      title: kind === "chat" ? "New Conversation" : option?.label,
+    });
+    setWorkspaceTabs((current) => [...current, tab]);
+    activateWorkspaceTab(tab);
+  };
+
+  const handleWorkspaceTabClose = (tabId: string) => {
+    if (workspaceTabs.length <= 1) return;
+    const closedIndex = workspaceTabs.findIndex((tab) => tab.id === tabId);
+    const nextTabs = workspaceTabs.filter((tab) => tab.id !== tabId);
+    setWorkspaceTabs(nextTabs);
+    if (activeWorkspaceTabId === tabId) {
+      const nextTab = nextTabs[Math.max(0, closedIndex - 1)] ?? nextTabs[0];
+      if (nextTab) activateWorkspaceTab(nextTab);
     }
   };
 
@@ -4339,9 +4429,16 @@ export default function App() {
       onWorkspacesRefresh={() => void loadCodingWorkspaces()}
     />
   ) : null;
-  const isCalendarMode = workspacePanelMode === "calendar";
+  const isCalendarMode = activeWorkspaceKind === "calendar";
   const calendarSettings = parseCalendarSettings(settingsValues.calendar);
-  const handleCalendarModeToggle = () => setWorkspacePanelMode((current) => current === "calendar" ? "composer" : "calendar");
+  const handleCalendarModeToggle = () => {
+    const existingCalendarTab = workspaceTabs.find((tab) => tab.kind === "calendar");
+    if (existingCalendarTab) {
+      activateWorkspaceTab(existingCalendarTab);
+      return;
+    }
+    handleWorkspaceTabCreate("calendar");
+  };
   const renderComposer = (isCentered = false) => (
     <Renderers.composer
       input={input}
@@ -4469,9 +4566,17 @@ export default function App() {
           style={{ "--rumi-activity-preview-width": `${activityPreviewWidthPx}px` } as CSSProperties}
         >
           <div className={cn("rumi-chat-pane flex-1 flex flex-col min-w-0", isActivityPreviewVisible && "border-r border-zinc-800/40")}>
-            {showRegion("chat_header") && !isCalendarMode && (
+            <WorkspaceTabBar
+              tabs={workspaceTabs}
+              activeTabId={activeWorkspaceTabId}
+              onSelect={handleWorkspaceTabSelect}
+              onClose={handleWorkspaceTabClose}
+              onCreate={handleWorkspaceTabCreate}
+            />
+
+            {showRegion("chat_header") && isChatWorkspace && !isCalendarMode && (
               <Renderers.chatHeader
-                title={activeChatTitle}
+                title={activeWorkspaceTab ? workspaceTabDisplayTitle(activeWorkspaceTab) : activeChatTitle}
                 showPreview={effectiveShowPreview}
                 canShowPreview={showRegion("activity_preview") && canShowCanvas}
                 canOpenSettings={showRegion("settings_modal")}
@@ -4491,6 +4596,44 @@ export default function App() {
                   settings={calendarSettings}
                 />
               </div>
+            ) : isCodingWorkspace ? (
+              <div className="flex min-h-0 flex-1 p-1.5">
+                <CodingCockpit
+                  variant="sidebar"
+                  workspaces={codingWorkspaces}
+                  selectedWorkspaceId={effectiveWorkspaceId}
+                  consoleScopeKey={effectiveConsoleKey}
+                  onWorkspaceSelect={handleCodingWorkspaceSelect}
+                  onWorkspacesRefresh={() => void loadCodingWorkspaces()}
+                />
+              </div>
+            ) : isCanvasWorkspace ? (
+              <div className="flex min-h-0 flex-1 p-1.5">
+                <div className="min-w-0 flex-1 overflow-hidden rounded-lg border border-zinc-800/70 bg-[#0a0a0c]">
+                  <Renderers.toolPreviewPanel
+                    previews={canvasPreviews}
+                    showPreview
+                    onClose={() => {
+                      const chatTab = workspaceTabs.find((tab) => tab.kind === "chat") ?? workspaceTabs[0];
+                      if (chatTab) activateWorkspaceTab(chatTab);
+                    }}
+                    previewMode={previewMode}
+                    onModeChange={setPreviewMode}
+                    activePreviewId={activePreviewId}
+                    memo={canvasMemo}
+                    onMemoChange={setCanvasMemo}
+                  />
+                </div>
+              </div>
+            ) : isToolsWorkspace ? (
+              <WorkspaceLaunchpad
+                sidebarItems={sidebarItems}
+                onCreate={handleWorkspaceTabCreate}
+                onOpenSidebarItem={(itemId) => {
+                  setActiveSidebarItemId(itemId);
+                  setSidebarSelectionTick((value) => value + 1);
+                }}
+              />
             ) : isNewConversation && !isLoading ? (
               <div className={cn("rumi-new-chat-stage flex flex-1 items-center justify-center px-5 pb-[10vh]", isNewChatLaunching && "is-launching")}>
                 <div className="w-full">
@@ -4524,7 +4667,7 @@ export default function App() {
               />
             )}
 
-            {showRegion("composer") && !isNewConversation && !isCalendarMode && (
+            {showRegion("composer") && isChatWorkspace && !isNewConversation && !isCalendarMode && (
               <div className="relative">
                 {showRegion("activity_preview") && !effectiveShowPreview && canShowCanvas && (
                   <CanvasPeek
@@ -4674,10 +4817,15 @@ export default function App() {
             toolFilterEntries={toolFilterEntries}
             runtimeCapabilitySnapshot={runtimeCapabilitySnapshot}
             yoloMode={yoloMode}
+            workspaceTabs={workspaceTabs}
+            activeWorkspaceTabId={activeWorkspaceTabId}
             onSettingChange={handleSettingChange}
             onOpenSettings={() => setIsSettingsOpen(true)}
             onOpenSettingsSection={openSettingsSection}
             onToggleYolo={() => setYoloMode((value) => !value)}
+            onWorkspaceTabSelect={handleWorkspaceTabSelect}
+            onWorkspaceTabClose={handleWorkspaceTabClose}
+            onWorkspaceTabCreate={handleWorkspaceTabCreate}
             onToolToggle={(item) => toggleSelectedTool({
               id: item.id,
               label: item.label,

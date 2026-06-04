@@ -239,7 +239,7 @@ const settingsValues = {
     show_widgets: true,
   },
   sidebar: {
-    pinned_item_ids: ["web_search"],
+    pinned_item_ids: ["web_search", "scheduler"],
     starred_item_ids: [],
     custom_tool_tags: {},
   },
@@ -563,16 +563,18 @@ test("composer at mention selects tools and skills and sends mention metadata", 
   await composer.fill("Use @web");
   const mentions = page.getByTestId("composer-at-mention-candidates");
   await expect(mentions).toBeVisible();
-  await expect(mentions).toContainText("@web_search");
+  await expect(mentions).toContainText("@Web Search");
+  await expect(mentions).toContainText("web_search - Search the web.");
 
-  await page.getByRole("option", { name: /@web_search/ }).click();
+  await page.getByRole("option", { name: /@Web Search/ }).click();
   await expect(composer).toHaveValue("Use @web_search ");
   await expect(page.locator(".rumi-composer-frame")).toContainText("Web Search");
 
   await composer.pressSequentially("@live");
   await expect(mentions).toBeVisible();
-  await expect(mentions).toContainText("@feedback/live-review");
-  await page.getByRole("option", { name: /@feedback\/live-review/ }).click();
+  await expect(mentions).toContainText("@Live Review");
+  await expect(mentions).toContainText("feedback/live-review - Require evidence-backed verification.");
+  await page.getByRole("option", { name: /@Live Review/ }).click();
   await expect(composer).toHaveValue("Use @web_search @feedback/live-review ");
   await expect(page.locator(".rumi-composer-frame")).toContainText("Live Review");
 
@@ -711,7 +713,7 @@ test("calendar mode opens quick add and renders new tasks in blue", async ({ pag
   await page.getByLabel("今日").click();
   await page.getByTestId(`calendar-day-${dayKey}`).click();
   await expect(page.getByRole("dialog", { name: `${dayLabel}に追加` })).toBeVisible();
-  await page.getByTestId(`calendar-day-${nextDayKey}`).click();
+  await page.keyboard.press("Escape");
   await expect(page.getByRole("dialog", { name: `${dayLabel}に追加` })).toBeHidden();
   await expect(page.getByRole("dialog", { name: `${nextDayLabel}に追加` })).toBeHidden();
   await page.getByTestId(`calendar-day-${nextDayKey}`).click();

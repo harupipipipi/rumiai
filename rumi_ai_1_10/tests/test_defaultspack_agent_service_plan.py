@@ -1413,7 +1413,7 @@ def test_browser_computer_screenshot_falls_back_to_window_capture_when_rect_capt
         "_capture_target",
         lambda payload: {
             "app": "Google Chrome",
-            "title": "defaultspack luxe shell",
+            "title": "rumi DP",
             "window_id": 3023,
             "capture_rect": {"x": 0, "y": 37, "width": 1470, "height": 919},
         },

@@ -7,12 +7,14 @@ import type { ChatItem, HistoryBoardNewTaskOptions } from "../components/History
 import type { ToolPreviewItem, ToolPreviewMode } from "../components/ToolPreview";
 import type { LocaleSetting } from "../lib/i18n";
 import type { RuntimeCapabilitySnapshot, ToolFilterEntry } from "../lib/toolStatus";
+import type { WorkspaceTab, WorkspaceTabKind } from "../components/WorkspaceTabs";
 
 export type { ComposerCommandItem } from "../lib/api";
 
 export type ChatUiMessage = {
   id: string;
   conversationId?: string;
+  createdAt?: number;
   role: "user" | "agent";
   content: ChatContentBlock[];
   rawText: string;
@@ -217,10 +219,15 @@ export type RightSidebarRendererProps = {
   toolFilterEntries?: ToolFilterEntry[];
   runtimeCapabilitySnapshot?: RuntimeCapabilitySnapshot | null;
   yoloMode?: boolean;
+  workspaceTabs?: WorkspaceTab[];
+  activeWorkspaceTabId?: string | null;
   onSettingChange: SettingChangeHandler;
   onOpenSettings: () => void;
   onOpenSettingsSection?: (sectionId: string) => void;
   onToggleYolo?: () => void;
+  onWorkspaceTabSelect?: (tabId: string) => void;
+  onWorkspaceTabClose?: (tabId: string) => void;
+  onWorkspaceTabCreate?: (kind: WorkspaceTabKind) => void;
   onToolToggle?: (item: SidebarItem) => void;
   onToolBatchSet?: (toolIds: string[], enabled: boolean) => void;
   onPanelAction?: (item: SidebarItem, action: SidebarAction) => void;

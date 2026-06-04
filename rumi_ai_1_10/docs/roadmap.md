@@ -9,7 +9,7 @@
 
 **インストーラーの中身（ユーザーに配布されるもの）:**
 
-1. **Rumi Console**（rumi-launcher, Rust）— トレイ常駐。Kernel プロセス管理。ユーザーは普段意識しない。
+1. **rumi DP**（rumi-launcher, Rust）— トレイ常駐。Kernel プロセス管理。ユーザーは普段意識しない。
 2. **Rumi Viewer**（Tauri）— Pack のフロントエンドを表示する汎用 WebView アプリ。ユーザーが日常使うメインアプリ。
 3. **bundled/uv** — Python 環境構築用。
 4. **app/**（rumi_ai_1_10/）— Kernel ソースコード。
@@ -32,7 +32,7 @@
 **ユーザー体験:**
 1. ユーザーがインストーラー（.dmg / .exe）でインストール
 2. Rumi Viewer をダブルクリック
-3. Rumi Console が自動起動 → Kernel が裏で起動
+3. rumi DP が自動起動 → Kernel が裏で起動
 4. Viewer に Control Panel が表示される
 5. Pack をインストール → Pack の AI チャット等のフロントエンドが Viewer 内に表示される
 6. ターミナルを一切触らない
@@ -41,21 +41,21 @@
 ```
 Rumi Viewer 起動
   → Kernel ヘルスチェック（localhost:8765/health）
-  → 未起動なら Rumi Console を自動起動
+  → 未起動なら rumi DP を自動起動
   → Kernel ready を待機
   → Viewer が localhost:8765/panel/ を WebView に表示
   → ユーザーが Pack を選択 → Pack のフロントエンドに遷移
 ```
 
 **競合・エラー処理:**
-- 競合、起動時エラーは Rumi Console（トレイアイコン）で表示・対処
+- 競合、起動時エラーは rumi DP（トレイアイコン）で表示・対処
 - Viewer はあくまで「表示するだけ」
 
 ### TODO（実装順）
 
 **Phase V-1: Rumi Viewer（Tauri）新規作成** [最重要・最優先]
 - [ ] `rumi_viewer/` Tauri プロジェクト新規作成
-- [ ] Kernel ヘルスチェック + 自動起動（Rumi Console 経由）
+- [ ] Kernel ヘルスチェック + 自動起動（rumi DP 経由）
 - [ ] WebView で localhost:8765/panel/ を表示
 - [ ] Pack 切替 UI（Viewer 内のナビゲーション）
 - [ ] Kernel API へのリクエストのみ許可（外部 URL ブロック）
@@ -70,7 +70,7 @@ Rumi Viewer 起動
 **Phase V-3: インストーラー統合**
 - [ ] Packager.toml に Rumi Viewer を追加
 - [ ] release.yml 更新（Viewer のビルドを追加）
-- [ ] インストーラーに Rumi Console + Rumi Viewer + bundled/uv + app/ を全て含める
+- [ ] インストーラーに rumi DP + Rumi Viewer + bundled/uv + app/ を全て含める
 - [ ] macOS: .dmg に両方のアプリを含める
 - [ ] Windows: NSIS で両方インストール + スタートメニュー登録
 

@@ -103,3 +103,31 @@ test("YOLO switch and Model Manager can be pinned", () => {
   assert.match(html, /title="YOLO Switch"/);
   assert.match(html, /title="Model Manager"/);
 });
+
+test("right sidebar exposes workspace tabs as a vertical switcher widget", () => {
+  const html = renderToStaticMarkup(
+    createElement(RightSidebar, {
+      items: [],
+      settingsValues: {
+        sidebar: { pinned_item_ids: [], starred_item_ids: [], custom_tool_tags: {}, ui_placements: [] },
+        tools: { disabled_tool_ids: [], hidden_tool_ids: [] },
+      },
+      settingsSections: [],
+      selectedToolIds: [],
+      workspaceTabs: [
+        { id: "tab-chat", kind: "chat", title: "Planning", conversationId: "conv-1", createdAt: 1 },
+        { id: "tab-calendar", kind: "calendar", title: "Calendar", createdAt: 2 },
+      ],
+      activeWorkspaceTabId: "tab-chat",
+      onSettingChange: noop,
+      onOpenSettings: noop,
+      onWorkspaceTabSelect: noop,
+      onWorkspaceTabClose: noop,
+      onWorkspaceTabCreate: noop,
+    }),
+  );
+
+  assert.match(html, /title="Workspace tabs"/);
+  assert.match(html, /aria-label="Workspace tabs"/);
+  assert.match(html, />2</);
+});

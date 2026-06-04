@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { compactLogPreviewText, hasRunningToolActivityGroups, isCompactLogLikeMessageText, messageCopyText, shouldRenderImageBlockInChat, shouldShowEmptyResponseWarning, streamedBrowserScreenshots, summarizePendingToolNames, summarizeToolActivityGroups } from "./ChatMessagesRenderer";
+import { compactLogPreviewText, formatMessageTimestamp, hasRunningToolActivityGroups, isCompactLogLikeMessageText, messageCopyText, shouldRenderImageBlockInChat, shouldShowEmptyResponseWarning, streamedBrowserScreenshots, summarizePendingToolNames, summarizeToolActivityGroups } from "./ChatMessagesRenderer";
 import type { ChatUiMessage } from "./types";
 
 function message(overrides: Partial<ChatUiMessage>): ChatUiMessage {
@@ -25,6 +25,16 @@ test("message copy text includes visible text and code blocks", () => {
 
 test("message copy text falls back to raw text", () => {
   assert.equal(messageCopyText(message({ rawText: "fallback text" })), "fallback text");
+});
+
+test("formatMessageTimestamp shows the conversation day and time", () => {
+  const label = formatMessageTimestamp(Date.UTC(2026, 5, 4, 3, 5));
+
+  assert.match(label, /2026/);
+  assert.match(label, /06/);
+  assert.match(label, /04/);
+  assert.match(label, /03|12/);
+  assert.match(label, /05/);
 });
 
 test("pending tool summary shows two names and the remaining count", () => {

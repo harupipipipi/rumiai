@@ -129,7 +129,7 @@ class FrontendRegistry:
     def _app_metadata(self, ui_surfaces: list[dict[str, Any]]) -> dict[str, Any]:
         app: dict[str, Any] = {
             "id": "defaultspack",
-            "name": "Console",
+            "name": "rumi DP",
             "icon": "/static/assets/icons/defaultspack-icon.png",
             "account": self._rumi_account_metadata(),
         }

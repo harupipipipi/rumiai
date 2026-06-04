@@ -666,6 +666,11 @@ function SortableChatItem({ chat, activeChatId, onChatSelect, onRename, onToggle
             isActive ? "text-zinc-100" : "text-zinc-300 group-hover/chat:text-zinc-100"
           )}>{chat.title}</span>
         )}
+        {!isEditing && chat.date && (
+          <span className="ml-auto hidden shrink-0 font-mono text-[10px] leading-none text-zinc-600 opacity-0 transition-opacity group-hover/chat:inline group-hover/chat:opacity-100 group-focus-within/chat:inline group-focus-within/chat:opacity-100">
+            {chat.date}
+          </span>
+        )}
         <ConversationPinStarMenu
           isPinned={chat.isPinned}
           isStarred={chat.isStarred}
@@ -1899,7 +1904,7 @@ export function HistoryBoard({
         {/* Top action bar */}
         <div className="flex flex-col gap-1 px-4 py-4 flex-shrink-0">
           <div className="flex h-8 items-center justify-between gap-2 px-2.5">
-            <span className="text-xs font-semibold tracking-wide text-zinc-400">Console</span>
+            <span className="text-xs font-semibold tracking-wide text-zinc-400">rumi DP</span>
             {onMinimize && (
               <button
                 type="button"
