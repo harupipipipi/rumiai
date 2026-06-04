@@ -45,7 +45,7 @@
     "id": "rumi.sandbox_runtime_pack",
     "registry": "bundled",
     "publisher": "rumi-ai",
-    "status": "experimental",
+    "status": "verified",
     "category": "runtime-safety",
     "channel": "experimental"
   },
