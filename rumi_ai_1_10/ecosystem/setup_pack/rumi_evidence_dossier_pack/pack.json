@@ -1,0 +1,86 @@
+{
+  "pack_id": "rumi_evidence_dossier_pack",
+  "display_name": "Rumi Evidence Dossier Pack",
+  "description": "Declarative evidence dossier contracts for source registry, claim graphs, evidence links, contradiction review, citation ledgers, reviewer queues, quality labels, and export manifests.",
+  "target_pack_id": "rumi_evidence_dossier_pack",
+  "version": "0.1.0",
+  "recommended": false,
+  "risk_level": "medium",
+  "supports_all_ok": false,
+  "depends_on": [
+    {
+      "pack_id": "defaultspack",
+      "version": ">=2.0.0"
+    }
+  ],
+  "conflicts_with": [],
+  "compatibility": {
+    "python": ">=3.10",
+    "platforms": [
+      "macos",
+      "linux",
+      "windows"
+    ]
+  },
+  "overlap_policy": {
+    "source_retrieval": "handoff_to_rumi_research_pack",
+    "connector_access": "handoff_to_rumi_connector_gateway_pack",
+    "data_transformation": "handoff_to_rumi_data_analysis_pack",
+    "document_rendering": "handoff_to_rumi_document_intelligence_pack",
+    "workspace_export": "handoff_to_rumi_workspace_pack",
+    "model_eval_scoring": "handoff_to_rumi_model_evals_pack",
+    "claim_evidence_graph": "owned_by_rumi_evidence_dossier_pack",
+    "citation_ledger": "owned_by_rumi_evidence_dossier_pack",
+    "tool_aliases": "prefer_explicit_pack_namespace"
+  },
+  "defaultspack_promotion": {
+    "eligible": false,
+    "reason": "Rumi Evidence Dossier Pack is declarative and cannot enter defaultspack until owner-pack integration, audit receipts, and real success cases prove it should be default.",
+    "criteria": [
+      "contract_tests_pass",
+      "overlap_policy_reviewed",
+      "maintainer_runtime_evidence_required",
+      "promotion_requires_real_world_success_cases",
+      "human_review_required_before_external_action"
+    ],
+    "promotion_blockers": [
+      "requires_shared_source_provenance_object",
+      "requires_citation_required_response_mode",
+      "retrieval_owned_elsewhere",
+      "connector_access_owned_elsewhere",
+      "data_transforms_owned_elsewhere",
+      "document_rendering_owned_elsewhere",
+      "workspace_render_export_owned_elsewhere",
+      "model_eval_scoring_owned_elsewhere",
+      "must_prove_contradiction_blocking_cases"
+    ],
+    "promotion_evidence_required": [
+      "claim_with_source_anchor_cases",
+      "uncited_claim_block_cases",
+      "contradiction_review_cases",
+      "source_quality_label_cases",
+      "export_manifest_review_cases"
+    ]
+  },
+  "marketplace": {
+    "id": "rumi.evidence_dossier_pack",
+    "registry": "bundled",
+    "publisher": "rumi-ai",
+    "status": "verified",
+    "category": "evidence-dossier",
+    "channel": "experimental"
+  },
+  "signing": {
+    "mode": "repository_reviewed",
+    "verified": true
+  },
+  "security_notes": [
+    "No credentials are bundled.",
+    "No executable code is included.",
+    "Network is none by default."
+  ],
+  "conflict_notes": [
+    "The pack owns contracts and review packets only.",
+    "Adjacent runtime actions are explicit handoffs to owner packs."
+  ]
+}

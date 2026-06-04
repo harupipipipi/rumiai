@@ -1,0 +1,106 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rumi.local/schemas/citation_ledger.schema.json",
+  "title": "Citation Ledger",
+  "description": "Ledger that gates citation completeness.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "ledger_id",
+    "claim_ids",
+    "citation_style",
+    "missing_claim_ids",
+    "completion_state",
+    "gate_policy",
+    "verified_export_allowed",
+    "claim_citation_map"
+  ],
+  "properties": {
+    "ledger_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "claim_ids": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "citation_style": {
+      "type": "string",
+      "enum": [
+        "source_id_anchor",
+        "footnote",
+        "inline",
+        "workspace_reference"
+      ]
+    },
+    "missing_claim_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "completion_state": {
+      "type": "string",
+      "enum": [
+        "complete",
+        "missing_citations",
+        "blocked"
+      ]
+    },
+    "gate_policy": {
+      "type": "string",
+      "const": "block_verified_export_when_missing_citations"
+    },
+    "verified_export_allowed": {
+      "type": "boolean"
+    },
+    "claim_citation_map": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "claim_id",
+          "evidence_ids",
+          "source_ids",
+          "anchor_refs"
+        ],
+        "properties": {
+          "claim_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "evidence_ids": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "source_ids": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "anchor_refs": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      }
+    }
+  }
+}

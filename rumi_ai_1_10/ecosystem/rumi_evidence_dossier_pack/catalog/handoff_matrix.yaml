@@ -1,0 +1,21 @@
+handoff_matrix:
+  pack_boundary_rule: owner_surface_wins_then_explicit_handoff
+  items:
+  - surface: source_retrieval
+    resolution: handoff_to_rumi_research_pack
+    requires_human_review: true
+  - surface: connector_access
+    resolution: handoff_to_rumi_connector_gateway_pack
+    requires_human_review: true
+  - surface: data_transformation
+    resolution: handoff_to_rumi_data_analysis_pack
+    requires_human_review: true
+  - surface: document_rendering
+    resolution: handoff_to_rumi_document_intelligence_pack
+    requires_human_review: true
+  - surface: workspace_export
+    resolution: handoff_to_rumi_workspace_pack
+    requires_human_review: true
+  - surface: model_eval_scoring
+    resolution: handoff_to_rumi_model_evals_pack
+    requires_human_review: true

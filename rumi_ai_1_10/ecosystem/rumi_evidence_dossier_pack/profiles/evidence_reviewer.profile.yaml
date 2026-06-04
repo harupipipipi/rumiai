@@ -1,0 +1,29 @@
+profile:
+  id: evidence_dossier
+  pack_id: rumi_evidence_dossier_pack
+  mode: local_first_declarative
+  default_presets:
+  - safe_default
+  - handoff_review
+  - quality_gate
+  owned_surfaces:
+  - source_registry
+  - source_quality_label
+  - claim_evidence_graph
+  - evidence_link_contract
+  - contradiction_review_contract
+  - citation_ledger
+  - reviewer_queue
+  - dossier_export_manifest
+  handoff_surfaces:
+  - source retrieval
+  - connector access
+  - data transformation
+  - document rendering
+  - workspace export
+  - model eval scoring
+  - web browsing
+  review_contract:
+    external_actions: handoff_only
+    evidence_required: true
+    human_review_required: true
