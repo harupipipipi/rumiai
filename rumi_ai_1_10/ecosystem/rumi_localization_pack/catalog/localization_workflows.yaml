@@ -1,0 +1,72 @@
+workflows:
+  default_execution: no_runtime_action
+  evidence_policy:
+    source_segments_required: true
+    target_segments_required: true
+    protected_terms_checked: true
+    adjacent_owner_actions_require_handoff: true
+  items:
+  - id: glossary_guarded_review
+    purpose: Compare source and target segments against approved glossary terms.
+    inputs:
+    - local_evidence
+    - glossary
+    - protected_terms_policy
+    outputs:
+    - review_record
+    - locale_issue_record
+    - handoff_packet
+    execution: declarative_only
+    owner_pack: rumi_localization_pack
+  - id: locale_issue_triage
+    purpose: Classify localization issues by severity, category, evidence, and owner.
+    inputs:
+    - local_evidence
+    - locale_issue_schema
+    outputs:
+    - review_record
+    - locale_issue_record
+    - handoff_packet
+    execution: declarative_only
+    owner_pack: rumi_localization_pack
+  - id: app_string_locale_qa
+    purpose: Review UI strings for terminology, placeholders, tone, and expansion risk without changing UI layout.
+    inputs:
+    - local_evidence
+    - locale_qa_matrix
+    outputs:
+    - review_record
+    - handoff_packet
+    execution: declarative_only
+    owner_pack: rumi_localization_pack
+    handoff_when:
+    - layout_change_required
+    - screenshot_or_browser_replay_required
+  - id: docs_localization_review
+    purpose: Review documentation translation quality without parsing or mutating documents.
+    inputs:
+    - local_evidence
+    - glossary
+    outputs:
+    - review_record
+    - locale_issue_record
+    - handoff_packet
+    execution: declarative_only
+    owner_pack: rumi_localization_pack
+    handoff_when:
+    - source_extraction_required
+    - document_export_required
+  - id: support_copy_tone_review
+    purpose: Review localized support macros for tone, commitments, protected terms, and escalation language.
+    inputs:
+    - local_evidence
+    - locale_qa_matrix
+    outputs:
+    - review_record
+    - locale_issue_record
+    - handoff_packet
+    execution: declarative_only
+    owner_pack: rumi_localization_pack
+    handoff_when:
+    - connector_send_requested
+    - support_policy_commitment_changed
