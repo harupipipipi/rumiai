@@ -45,7 +45,7 @@ export function CompanyAgentList({
   return (
     <section className="space-y-2 p-2">
       <div className="flex items-center justify-between gap-2">
-        <h4 className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Agents</h4>
+        <h4 className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Employees</h4>
         <span className="text-[10px] text-zinc-600">{agents.length}</span>
       </div>
       {onUpsertAgent && (
@@ -63,7 +63,7 @@ export function CompanyAgentList({
               model: newAgentModel.trim() || "stub/default",
               allowed_tools: [],
               system_prompt:
-                "You are an AI worker inside Rumi's local Company Workspace task board. Treat assigned tasks as direct user instructions. Do not infer external employment, credentials, or authorization from the workspace label.",
+                "You are an employee delegated by the president in the main Rumi chat. Treat assigned tasks as direct user instructions. Do not infer external employment, credentials, or authorization from the team label.",
             });
             setNewAgentId("");
           }}
@@ -72,7 +72,7 @@ export function CompanyAgentList({
             value={newAgentId}
             onChange={(event) => setNewAgentId(event.target.value)}
             disabled={busy}
-            placeholder="agent id"
+            placeholder="employee id"
             className="h-8 min-w-0 rounded-md border border-zinc-800 bg-zinc-950 px-2 text-[12px] text-zinc-200 outline-none placeholder:text-zinc-600 focus:border-zinc-600"
           />
           <input
@@ -86,7 +86,8 @@ export function CompanyAgentList({
             type="submit"
             disabled={busy || !newAgentId.trim()}
             className="flex h-8 w-8 items-center justify-center rounded-md bg-zinc-100 text-zinc-950 hover:bg-white disabled:opacity-30"
-            title="Create agent"
+            title="Create employee"
+            aria-label="Create employee"
           >
             <Plus size={13} />
           </button>
@@ -128,6 +129,7 @@ export function CompanyAgentList({
                       onClick={() => onUpsertAgent({ ...agent, model: modelDraft.trim() })}
                       className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded border border-zinc-800 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200 disabled:opacity-30"
                       title="Save agent model"
+                      aria-label={`Save model for ${agent.agent_id}`}
                     >
                       <Save size={11} />
                     </button>
@@ -165,7 +167,7 @@ export function CompanyAgentList({
         })}
         {agents.length === 0 && (
           <div className="rounded-md border border-zinc-800/70 bg-zinc-950/40 px-2 py-2 text-[11px] text-zinc-500">
-            No agents configured.
+            No employees configured.
           </div>
         )}
       </div>

@@ -19,6 +19,7 @@ export const companyResources = {
   upsertCompanyInboundRoute: api.upsertCompanyInboundRoute,
   deleteCompanyInboundRoute: api.deleteCompanyInboundRoute,
   updateCompanySettings: api.updateCompanySettings,
+  webSearch: api.webSearch,
   startP2PPairing: api.startP2PPairing,
   sendP2PMessage: api.sendP2PMessage,
   createCompanyTask: api.createCompanyTask,

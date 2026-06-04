@@ -71,6 +71,29 @@ def test_task_status_from_running_and_completed_delegate_results():
     )
 
 
+def test_task_prompt_frames_employee_delegation_from_president_chat():
+    from domain.company.run_dispatcher import _task_prompt
+
+    prompt = _task_prompt(
+        {"id": "chat-team", "name": "Executive Team"},
+        {
+            "title": "Research the latest local-first agent patterns",
+            "description": "Use the provided sources and report uncertainty.",
+            "metadata": {
+                "conversation_id": "chat-main-1",
+                "source_message": "Deepresearch local-first agent patterns.",
+            },
+        },
+        {"agent_id": "research_specialist", "display_name": "Research Specialist"},
+    )
+
+    assert "president in the main Rumi chat" in prompt
+    assert "does not perform specialist work directly" in prompt
+    assert "Parent chat id: chat-main-1" in prompt
+    assert "Original president request" in prompt
+    assert "Company Workspace UI" not in prompt
+
+
 def test_dispatch_prunes_tools_for_non_tool_calling_agent_model(monkeypatch, tmp_path):
     from domain.company.run_dispatcher import CompanyRunDispatcher
     from domain.company.runtime_store import CompanyRuntimeStore

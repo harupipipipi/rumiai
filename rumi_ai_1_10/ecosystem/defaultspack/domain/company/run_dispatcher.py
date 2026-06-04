@@ -229,19 +229,27 @@ def _agent_tools_for_dispatch(agent: dict[str, Any]) -> list[Any]:
 
 
 def _task_prompt(company: dict[str, Any], task: dict[str, Any], agent: dict[str, Any]) -> str:
+    metadata = task.get("metadata") if isinstance(task.get("metadata"), dict) else {}
+    conversation_id = str(metadata.get("conversation_id") or "").strip()
+    source_message = str(metadata.get("source_message") or "").strip()
     parts = [
-        "You are receiving a task from Rumi's local Company Workspace UI.",
-        "This workspace is an internal task board and does not claim any external employment, identity, credential, or authorization.",
+        "You are receiving a delegated task from the president in the main Rumi chat.",
+        "The president manages employees and does not perform specialist work directly.",
+        "This is a local internal team workspace and does not claim external employment, identity, credential, or authorization.",
         "Handle the task as a normal user instruction for "
         + str(agent.get("display_name") or agent.get("agent_id") or "agent")
         + ".",
         "",
-        "Company: " + str(company.get("name") or company.get("id") or ""),
+        "Team: " + str(company.get("name") or company.get("id") or ""),
         "Task: " + str(task.get("title") or ""),
     ]
+    if conversation_id:
+        parts.append("Parent chat id: " + conversation_id)
     description = str(task.get("description") or "").strip()
     if description:
         parts.extend(["", description])
+    if source_message and source_message != description:
+        parts.extend(["", "Original president request:", source_message])
     parts.extend(
         [
             "",

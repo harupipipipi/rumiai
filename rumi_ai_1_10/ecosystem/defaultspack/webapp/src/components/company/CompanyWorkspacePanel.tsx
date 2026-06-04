@@ -28,13 +28,46 @@ type CompanyTab = "tasks" | "channels" | "agents" | "routes" | "settings" | "p2p
 const TABS: Array<{ id: CompanyTab; label: string; icon: typeof ClipboardList }> = [
   { id: "tasks", label: "Tasks", icon: ClipboardList },
   { id: "channels", label: "Channels", icon: MessageSquare },
-  { id: "agents", label: "Agents", icon: Bot },
+  { id: "agents", label: "Employees", icon: Bot },
   { id: "routes", label: "Routes", icon: Route },
   { id: "settings", label: "Settings", icon: Settings },
   { id: "p2p", label: "P2P", icon: Share2 },
 ];
 
-export function CompanyWorkspacePanel() {
+function textValue(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function researchSources(value: unknown): Array<Record<string, unknown>> {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === "object" && !Array.isArray(item))).slice(0, 5);
+}
+
+function researchTaskDescription(query: string, sources: Array<Record<string, unknown>>): string {
+  const lines = [
+    "Deep research request delegated from the president chat.",
+    `Search query: ${query}`,
+  ];
+  if (sources.length > 0) {
+    lines.push("", "DuckDuckGo sources:");
+    sources.forEach((source, index) => {
+      lines.push(`${index + 1}. ${textValue(source.title) || textValue(source.url) || "Untitled source"}`);
+      if (textValue(source.url)) lines.push(`   ${textValue(source.url)}`);
+      if (textValue(source.summary)) lines.push(`   ${textValue(source.summary)}`);
+    });
+  } else {
+    lines.push("", "DuckDuckGo returned no sources. Continue with explicit uncertainty.");
+  }
+  return lines.join("\n");
+}
+
+export function CompanyWorkspacePanel({
+  activeConversationId = null,
+  activeConversationTitle = null,
+}: {
+  activeConversationId?: string | null;
+  activeConversationTitle?: string | null;
+}) {
   const [companies, setCompanies] = useState<CompanyRecord[]>([]);
   const [activeCompanyId, setActiveCompanyId] = useState<string | null>(null);
   const [company, setCompany] = useState<CompanyRecord | null>(null);
@@ -62,9 +95,14 @@ export function CompanyWorkspacePanel() {
     setBusy(true);
     setError(null);
     try {
+      const statusTarget = requestedCompanyId
+        ? requestedCompanyId
+        : activeConversationId
+          ? { conversationId: activeConversationId, bootstrap: true }
+          : activeCompanyId ?? undefined;
       const [companyListResult, statusResult, p2pStatusResult, p2pIdentityResult, peersResult] = await Promise.allSettled([
         companyResources.listCompanies(),
-        companyResources.getCompanyStatus(requestedCompanyId ?? activeCompanyId ?? undefined),
+        companyResources.getCompanyStatus(statusTarget),
         companyResources.getP2PStatus(),
         companyResources.getP2PIdentity(),
         companyResources.listP2PPeers(),
@@ -123,11 +161,12 @@ export function CompanyWorkspacePanel() {
     } finally {
       setBusy(false);
     }
-  }, [activeChannelId, activeCompanyId]);
+  }, [activeCompanyId, activeConversationId]);
 
   useEffect(() => {
+    setActiveCompanyId(null);
     void loadCompany();
-  }, []);
+  }, [activeConversationId]);
 
   const activeCompany = company ?? effectiveCompanies.find((item) => item.id === activeCompanyId) ?? null;
 
@@ -146,7 +185,7 @@ export function CompanyWorkspacePanel() {
 
   const renderTab = () => {
     if (!activeCompanyId && activeTab !== "p2p") {
-      return <div className="p-3 text-[12px] text-zinc-500">Bootstrap or select a company workspace.</div>;
+      return <div className="p-3 text-[12px] text-zinc-500">Start or select a chat to create its employee group.</div>;
     }
     switch (activeTab) {
       case "channels":
@@ -209,7 +248,34 @@ export function CompanyWorkspacePanel() {
             agents={agents}
             runs={runs}
             busy={busy}
-            onCreateTask={(title, targetAgentIds) => activeCompanyId && void run(() => companyResources.createCompanyTask(activeCompanyId, { title, target_agent_ids: targetAgentIds }))}
+            onCreateTask={(title, targetAgentIds) => activeCompanyId && void run(() => companyResources.createCompanyTask(activeCompanyId, {
+              title,
+              target_agent_ids: targetAgentIds,
+              source: "president",
+              metadata: {
+                ...(activeConversationId ? { conversation_id: activeConversationId } : {}),
+                ...(activeConversationTitle ? { source_chat_title: activeConversationTitle } : {}),
+                source_message: title,
+              },
+            }))}
+            onCreateResearchTask={(query, targetAgentIds) => activeCompanyId && void run(async () => {
+              const searchResult = await companyResources.webSearch(query, true);
+              const sources = researchSources(searchResult.sources);
+              return companyResources.createCompanyTask(activeCompanyId, {
+                title: `Deep research: ${query}`,
+                description: researchTaskDescription(query, sources),
+                target_agent_ids: targetAgentIds.length > 0 ? targetAgentIds : ["research_specialist"],
+                source: "president_deep_research",
+                metadata: {
+                  ...(activeConversationId ? { conversation_id: activeConversationId } : {}),
+                  ...(activeConversationTitle ? { source_chat_title: activeConversationTitle } : {}),
+                  source_message: query,
+                  research_query: query,
+                  search_provider: textValue(searchResult.provider) || "external_web",
+                  sources,
+                },
+              });
+            })}
             onUpdateTask={(taskId, updates) => activeCompanyId && void run(() => companyResources.updateCompanyTask(activeCompanyId, taskId, updates))}
             onDispatchTask={(taskId) => activeCompanyId && void run(() => companyResources.dispatchCompanyTask(activeCompanyId, taskId))}
           />
@@ -220,8 +286,10 @@ export function CompanyWorkspacePanel() {
   return (
     <div className="flex h-full min-h-0 flex-col bg-[#0a0a0c] text-zinc-300">
       <div className="border-b border-zinc-800/60 px-3 py-2">
-        <p className="truncate text-[13px] font-medium text-zinc-100">Company Workspace</p>
-        <p className="truncate text-[10px] text-zinc-600">{activeCompany?.name ?? "local company operations"}</p>
+        <p className="truncate text-[13px] font-medium text-zinc-100">Employees</p>
+        <p className="truncate text-[10px] text-zinc-600">
+          {activeConversationTitle || activeConversationId || activeCompany?.name || "select or start a chat"}
+        </p>
       </div>
 
       {error && (
@@ -236,7 +304,14 @@ export function CompanyWorkspacePanel() {
         activeCompanyId={activeCompanyId}
         busy={busy}
         onSelect={(companyId) => void loadCompany(companyId)}
-        onBootstrap={() => void run(() => companyResources.bootstrapCompanyWorkspace({ source: "webapp" }))}
+        onBootstrap={() => void run(() => companyResources.bootstrapCompanyWorkspace(
+          {
+            source: "webapp",
+            name: "Executive Team",
+            ...(activeConversationId ? { conversation_id: activeConversationId, scope: "conversation" } : {}),
+          },
+          activeConversationId ? { conversationId: activeConversationId, scope: "conversation" } : undefined,
+        ))}
         onRefresh={() => void loadCompany(activeCompanyId)}
       />
 

@@ -4846,7 +4846,7 @@ export default function App() {
             settingsValues={settingsValues}
             settingsSections={settingsSections}
             selectedToolIds={selectedToolIds}
-            companyPanel={<CompanyWorkspacePanel />}
+            companyPanel={<CompanyWorkspacePanel activeConversationId={activeConversationId} activeConversationTitle={activeChatTitle} />}
             codingPanel={codingSidebarPanel}
             keyboardButtonNavigation={keyboardButtonNavigation}
             selectedProfile={activeProfile}

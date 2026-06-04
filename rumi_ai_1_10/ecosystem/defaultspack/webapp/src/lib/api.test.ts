@@ -1010,6 +1010,9 @@ test("company and p2p helpers target frontend workspace routes", async () => {
     let data: unknown = { companies: [], total: 0 };
     if (path.includes("/p2p/status")) data = { p2p: { enabled: false }, peer_count: 0, approved_peer_count: 0 };
     if (path.includes("/p2p/messages/send")) data = { envelope: {}, peer: { peer_id: "peer-a" } };
+    if (path.includes("/company/status")) data = { bootstrapped: true, company_id: "chat-team-c1", conversation_id: "c1", company: null };
+    if (path.includes("/company/bootstrap")) data = { bootstrapped: true, company: { id: "chat-team-c1", name: "Executive Team" } };
+    if (path.includes("/research/web-search")) data = { provider: "external_web", sources: [] };
     if (path.includes("/company/operations-company/runs")) data = { runs: [], total: 0 };
     if (path.includes("/company/operations-company/agents/reviewer/inbox")) data = { inbox: [], total: 0 };
     if (path.includes("/company/operations-company/agents") && init?.method === "POST") {
@@ -1022,6 +1025,9 @@ test("company and p2p helpers target frontend workspace routes", async () => {
 
   try {
     await api.listCompanies({ limit: 10 });
+    await api.getCompanyStatus({ conversationId: "c1", bootstrap: true });
+    await api.bootstrapCompanyWorkspace({ conversation_id: "c1", source: "webapp" }, { conversationId: "c1", scope: "conversation" });
+    await api.webSearch("deep research", true);
     await api.upsertCompanyAgent("operations-company", { agent_id: "reviewer", model: "opencode-zen/minimax-m3-free" });
     await api.createCompanyTask("operations-company", { title: "Ship it", target_agent_ids: ["reviewer"] });
     await api.dispatchCompanyTask("operations-company", "task-1");
@@ -1034,7 +1040,18 @@ test("company and p2p helpers target frontend workspace routes", async () => {
   }
 
   assert.equal(seen[0].input, "/api/company?limit=10");
-  assert.deepEqual(seen[1], {
+  assert.equal(seen[1].input, "/api/company/status?conversation_id=c1&bootstrap=true");
+  assert.deepEqual(seen[2], {
+    input: "/api/company/bootstrap",
+    method: "POST",
+    body: { metadata: { conversation_id: "c1", source: "webapp" }, conversation_id: "c1", scope: "conversation" },
+  });
+  assert.deepEqual(seen[3], {
+    input: "/api/research/web-search",
+    method: "POST",
+    body: { query: "deep research", allow_network: true, limit: 5 },
+  });
+  assert.deepEqual(seen[4], {
     input: "/api/company/operations-company/agents",
     method: "POST",
     body: {
@@ -1046,7 +1063,7 @@ test("company and p2p helpers target frontend workspace routes", async () => {
       },
     },
   });
-  assert.deepEqual(seen[2], {
+  assert.deepEqual(seen[5], {
     input: "/api/company/operations-company/tasks",
     method: "POST",
     body: {
@@ -1056,15 +1073,15 @@ test("company and p2p helpers target frontend workspace routes", async () => {
       target_agent_ids: ["reviewer"],
     },
   });
-  assert.deepEqual(seen[3], {
+  assert.deepEqual(seen[6], {
     input: "/api/company/operations-company/dispatch",
     method: "POST",
     body: { company_id: "operations-company", task_id: "task-1" },
   });
-  assert.equal(seen[4].input, "/api/company/operations-company/runs?company_id=operations-company&task_id=task-1&limit=5");
-  assert.equal(seen[5].input, "/api/company/operations-company/agents/reviewer/inbox?company_id=operations-company&agent_id=reviewer&limit=5");
-  assert.equal(seen[6].input, "/api/p2p/status");
-  assert.deepEqual(seen[7], {
+  assert.equal(seen[7].input, "/api/company/operations-company/runs?company_id=operations-company&task_id=task-1&limit=5");
+  assert.equal(seen[8].input, "/api/company/operations-company/agents/reviewer/inbox?company_id=operations-company&agent_id=reviewer&limit=5");
+  assert.equal(seen[9].input, "/api/p2p/status");
+  assert.deepEqual(seen[10], {
     input: "/api/p2p/messages/send",
     method: "POST",
     body: { peer_id: "peer-a", text: "hello" },

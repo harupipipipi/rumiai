@@ -371,7 +371,9 @@ export type CompanyRecord = {
 export type CompanyStatusResponse = {
   bootstrapped: boolean;
   company_id: string;
+  conversation_id?: string;
   company?: CompanyRecord | null;
+  runtime?: Record<string, number>;
   storage_file?: string;
 };
 
@@ -1932,17 +1934,28 @@ export const api = {
     });
   },
 
-  getCompanyStatus(companyId?: string) {
+  getCompanyStatus(options?: string | { companyId?: string | null; conversationId?: string | null; bootstrap?: boolean }) {
+    const query = typeof options === "string"
+      ? { company_id: options }
+      : {
+          company_id: options?.companyId,
+          conversation_id: options?.conversationId,
+          bootstrap: options?.bootstrap,
+        };
     return request<CompanyStatusResponse>(
-      withQuery("/api/company/status", { company_id: companyId }),
+      withQuery("/api/company/status", query),
       { cache: "no-store" },
     );
   },
 
-  bootstrapCompanyWorkspace(metadata?: Record<string, unknown>) {
+  bootstrapCompanyWorkspace(metadata?: Record<string, unknown>, options?: { conversationId?: string | null; scope?: "conversation" | "default" }) {
     return request<{ bootstrapped: boolean; company: CompanyRecord }>("/api/company/bootstrap", {
       method: "POST",
-      body: JSON.stringify(metadata ? { metadata } : {}),
+      body: JSON.stringify({
+        ...(metadata ? { metadata } : {}),
+        ...(options?.conversationId ? { conversation_id: options.conversationId } : {}),
+        ...(options?.scope ? { scope: options.scope } : {}),
+      }),
     });
   },
 
