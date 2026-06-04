@@ -86,6 +86,80 @@ class KanbanController:
             self._write(path, board)
             return self._result("update", board, changed=card)
 
+        if action in {"block", "unblock"}:
+            card = _find_card(board["cards"], _card_id(arguments))
+            if card is None:
+                raise ValueError("card_id not found")
+            if action == "block":
+                blockers = _string_list(
+                    arguments.get("blocked_by")
+                    if "blocked_by" in arguments
+                    else arguments.get("blockers")
+                )
+                if not blockers and arguments.get("depends_on") is not None:
+                    blockers = _string_list(arguments.get("depends_on"))
+                card["blocked_by"] = _without_self(blockers, str(card["id"]))
+                card["blocker_reason"] = str(arguments.get("blocker_reason") or arguments.get("reason") or "")
+            else:
+                card["blocked_by"] = []
+                card["blocker_reason"] = ""
+            card["updated_at"] = _now_ms()
+            self._write(path, board)
+            return self._result(action, board, changed=card)
+
+        if action in {"subtask_add", "add_subtask"}:
+            card = _find_card(board["cards"], _card_id(arguments))
+            if card is None:
+                raise ValueError("card_id not found")
+            title = str(arguments.get("title") or arguments.get("task") or "").strip()
+            if not title:
+                raise ValueError("'title' is required for kanban.subtask_add")
+            subtask = {
+                "id": str(arguments.get("subtask_id") or uuid.uuid4()),
+                "title": title,
+                "done": False,
+                "status": "todo",
+                "created_at": _now_ms(),
+                "updated_at": _now_ms(),
+            }
+            if arguments.get("assignee") is not None:
+                subtask["assignee"] = str(arguments.get("assignee"))
+            card["subtasks"] = _normalize_subtasks(card.get("subtasks")) + [subtask]
+            card["updated_at"] = _now_ms()
+            self._write(path, board)
+            return self._result("subtask_add", board, changed=card)
+
+        if action in {"subtask_update", "subtask_complete", "subtask_remove", "remove_subtask"}:
+            card = _find_card(board["cards"], _card_id(arguments))
+            if card is None:
+                raise ValueError("card_id not found")
+            subtasks = _normalize_subtasks(card.get("subtasks"))
+            subtask_id = str(arguments.get("subtask_id") or arguments.get("task_id") or "").strip()
+            subtask = _find_subtask(subtasks, subtask_id)
+            if subtask is None:
+                raise ValueError("subtask_id not found")
+            if action in {"subtask_remove", "remove_subtask"}:
+                card["subtasks"] = [item for item in subtasks if item.get("id") != subtask_id]
+            else:
+                for key in ("title", "assignee", "notes"):
+                    if key in arguments and arguments[key] is not None:
+                        subtask[key] = str(arguments[key])
+                if action == "subtask_complete":
+                    subtask["done"] = True
+                    subtask["status"] = "done"
+                    subtask["completed_at"] = _now_ms()
+                elif "done" in arguments:
+                    subtask["done"] = bool(arguments.get("done"))
+                    subtask["status"] = "done" if subtask["done"] else str(arguments.get("status") or "todo")
+                elif "status" in arguments and arguments["status"] is not None:
+                    subtask["status"] = str(arguments["status"])
+                    subtask["done"] = subtask["status"].lower() in {"done", "complete", "completed"}
+                subtask["updated_at"] = _now_ms()
+                card["subtasks"] = subtasks
+            card["updated_at"] = _now_ms()
+            self._write(path, board)
+            return self._result(action, board, changed=card)
+
         if action == "move":
             card = _find_card(board["cards"], _card_id(arguments))
             if card is None:
@@ -164,6 +238,11 @@ class KanbanController:
         }
         open_count = len([card for card in cards if card.get("column_id") not in done_ids])
         summary = f"{len(cards)} cards across {len(board['columns'])} columns ({open_count} open)"
+        relations = _relation_summary(cards)
+        if relations["dependency_counts"]["cards_blocked"]:
+            summary += f"; {relations['dependency_counts']['cards_blocked']} blocked"
+        if relations["dependency_counts"]["total_dependencies"]:
+            summary += f"; {relations['dependency_counts']['total_dependencies']} dependencies"
         if changed and changed.get("title"):
             summary = f"{action}: {changed['title']}; {summary}"
         return {
@@ -171,6 +250,8 @@ class KanbanController:
             "summary": summary,
             "columns": columns,
             "cards": cards,
+            "blocked_cards": relations["blocked_cards"],
+            "dependency_counts": relations["dependency_counts"],
             "changed": changed,
         }
 
@@ -228,6 +309,10 @@ def _normalize_cards(value: Any) -> list[dict[str, Any]]:
         card["position"] = _int_or_default(card.get("position"), index)
         card["created_at"] = _int_or_default(card.get("created_at"), _now_ms())
         card["updated_at"] = _int_or_default(card.get("updated_at"), card["created_at"])
+        card["depends_on"] = _without_self(_string_list(card.get("depends_on")), card["id"])
+        card["blocked_by"] = _without_self(_string_list(card.get("blocked_by")), card["id"])
+        card["blocker_reason"] = str(card.get("blocker_reason") or "")
+        card["subtasks"] = _normalize_subtasks(card.get("subtasks"))
         cards.append(card)
     return cards
 
@@ -328,6 +413,112 @@ def _copy_optional_card_fields(card: dict[str, Any], arguments: dict[str, Any]) 
     metadata = arguments.get("metadata")
     if isinstance(metadata, dict):
         card["metadata"] = metadata
+    if "depends_on" in arguments or "dependencies" in arguments:
+        card["depends_on"] = _without_self(
+            _string_list(arguments.get("depends_on") if "depends_on" in arguments else arguments.get("dependencies")),
+            str(card.get("id") or ""),
+        )
+    if "blocked_by" in arguments or "blockers" in arguments:
+        card["blocked_by"] = _without_self(
+            _string_list(arguments.get("blocked_by") if "blocked_by" in arguments else arguments.get("blockers")),
+            str(card.get("id") or ""),
+        )
+    if "blocker_reason" in arguments or "reason" in arguments:
+        card["blocker_reason"] = str(arguments.get("blocker_reason") or arguments.get("reason") or "")
+    if "subtasks" in arguments:
+        card["subtasks"] = _normalize_subtasks(arguments.get("subtasks"))
+
+
+def _string_list(value: Any) -> list[str]:
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    if isinstance(value, str):
+        return [part.strip() for part in value.split(",") if part.strip()]
+    return []
+
+
+def _without_self(values: list[str], card_id: str) -> list[str]:
+    return [value for value in values if value and value != card_id]
+
+
+def _normalize_subtasks(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    subtasks: list[dict[str, Any]] = []
+    for index, item in enumerate(value):
+        if isinstance(item, str):
+            title = item.strip()
+            if not title:
+                continue
+            subtask = {"id": str(uuid.uuid4()), "title": title}
+        elif isinstance(item, dict):
+            subtask = dict(item)
+            title = str(subtask.get("title") or subtask.get("task") or "").strip()
+            if not title:
+                continue
+            subtask["title"] = title
+            subtask["id"] = str(subtask.get("id") or subtask.get("subtask_id") or uuid.uuid4())
+        else:
+            continue
+        done = bool(subtask.get("done")) or str(subtask.get("status") or "").lower() in {"done", "complete", "completed"}
+        subtask["done"] = done
+        subtask["status"] = "done" if done else str(subtask.get("status") or "todo")
+        subtask["position"] = _int_or_default(subtask.get("position"), index)
+        subtask["created_at"] = _int_or_default(subtask.get("created_at"), _now_ms())
+        subtask["updated_at"] = _int_or_default(subtask.get("updated_at"), subtask["created_at"])
+        subtasks.append(subtask)
+    return sorted(subtasks, key=lambda item: (_int_or_default(item.get("position"), 0), str(item.get("id") or "")))
+
+
+def _find_subtask(subtasks: list[dict[str, Any]], subtask_id: str) -> dict[str, Any] | None:
+    if not subtask_id:
+        return None
+    for subtask in subtasks:
+        if subtask.get("id") == subtask_id:
+            return subtask
+    return None
+
+
+def _relation_summary(cards: list[dict[str, Any]]) -> dict[str, Any]:
+    blocked_cards = []
+    cards_with_dependencies = 0
+    total_dependencies = 0
+    total_blockers = 0
+    open_subtasks = 0
+    completed_subtasks = 0
+    for card in cards:
+        depends_on = _string_list(card.get("depends_on"))
+        blocked_by = _string_list(card.get("blocked_by"))
+        subtasks = _normalize_subtasks(card.get("subtasks"))
+        if depends_on:
+            cards_with_dependencies += 1
+            total_dependencies += len(depends_on)
+        if blocked_by or str(card.get("blocker_reason") or "").strip():
+            total_blockers += len(blocked_by)
+            blocked_cards.append(
+                {
+                    "id": card.get("id"),
+                    "title": card.get("title"),
+                    "blocked_by": blocked_by,
+                    "blocker_reason": str(card.get("blocker_reason") or ""),
+                }
+            )
+        for subtask in subtasks:
+            if subtask.get("done"):
+                completed_subtasks += 1
+            else:
+                open_subtasks += 1
+    return {
+        "blocked_cards": blocked_cards,
+        "dependency_counts": {
+            "cards_with_dependencies": cards_with_dependencies,
+            "cards_blocked": len(blocked_cards),
+            "total_dependencies": total_dependencies,
+            "total_blockers": total_blockers,
+            "open_subtasks": open_subtasks,
+            "completed_subtasks": completed_subtasks,
+        },
+    }
 
 
 def _slugify(value: str) -> str:
