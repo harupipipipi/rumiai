@@ -305,11 +305,19 @@ export type CompanyRunLink = {
     model?: string | null;
     result_preview?: string;
     error?: string | null;
+    conversation?: CompanyRunConversationMessage[];
     updated_at?: string | null;
   };
   metadata?: Record<string, unknown>;
   created_at?: string;
   updated_at?: string;
+};
+
+export type CompanyRunConversationMessage = {
+  role: string;
+  label?: string;
+  content: string;
+  is_error?: boolean;
 };
 
 export type CompanyInboxItem = {

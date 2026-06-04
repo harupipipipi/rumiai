@@ -2,6 +2,7 @@ import { Bot, Plus, Save, Wrench } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import type { CompanyAgent, CompanyInboxItem, CompanyRunLink } from "../../lib/api";
+import { CompanyRunConversation } from "./CompanyRunConversation";
 
 export function CompanyAgentList({
   agents,
@@ -98,7 +99,6 @@ export function CompanyAgentList({
           const modelDraft = modelDrafts[agent.agent_id] ?? agent.model ?? "stub/default";
           const modelChanged = modelDraft !== (agent.model ?? "stub/default");
           const activityMessage = activity?.latestRun?.agent_run?.result_preview || activity?.latestRun?.agent_run?.error;
-          const activityMessageTone = activity?.latestRun?.agent_run?.result_preview ? "text-zinc-400" : "text-rose-300";
           return (
             <div key={agent.agent_id} className="rounded-md border border-zinc-800/70 bg-zinc-950/40 px-2 py-1.5">
               <div className="flex items-center justify-between gap-2">
@@ -146,11 +146,11 @@ export function CompanyAgentList({
                   <span className="flex-shrink-0 rounded border border-zinc-800 px-1 py-0.5">inbox {activity.openInboxCount}</span>
                 </div>
               )}
-              {activityMessage && (
-                <p className={`mt-1 line-clamp-2 whitespace-pre-wrap text-[10px] leading-relaxed ${activityMessageTone}`}>
-                  {activityMessage}
-                </p>
-              )}
+              <CompanyRunConversation
+                messages={activity?.latestRun?.agent_run?.conversation}
+                fallback={activityMessage}
+                fallbackError={Boolean(activity?.latestRun?.agent_run?.error && !activity?.latestRun?.agent_run?.result_preview)}
+              />
               {agent.aliases && agent.aliases.length > 0 && (
                 <div className="mt-1 flex flex-wrap gap-1">
                   {agent.aliases.slice(0, 4).map((alias) => (
