@@ -118,7 +118,9 @@ test("company task board renders dispatched completed runs", () => {
           },
         },
       ],
+      onCreateTask: () => {},
       onDispatchTask: () => {},
+      onCreateResearchTask: () => {},
     }),
   );
 
@@ -126,7 +128,8 @@ test("company task board renders dispatched completed runs", () => {
   assert.match(html, /minimax_worker/);
   assert.match(html, /completed/);
   assert.match(html, /opencode-zen\/minimax-m3-free/);
-  assert.match(html, /Conversation/);
+  assert.match(html, /Employee Conversation/);
+  assert.match(html, /Deep research with DuckDuckGo/);
   assert.match(html, /Run a real MiniMax task through Company Workspace/);
   assert.match(html, /Agent reply/);
   assert.match(html, /Visible MiniMax result/);
@@ -228,7 +231,7 @@ test("company agent list renders latest agent run errors", () => {
 
   assert.match(html, /Stub Worker/);
   assert.match(html, /error/);
-  assert.match(html, /Conversation/);
+  assert.match(html, /Employee Conversation/);
   assert.match(html, /Try the same task with stub\/default/);
   assert.match(html, /stub: provider is not configured/);
 });

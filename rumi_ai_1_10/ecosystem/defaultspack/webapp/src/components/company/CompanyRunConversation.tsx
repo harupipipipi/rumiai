@@ -41,10 +41,10 @@ export function CompanyRunConversation({
   if (visibleMessages.length === 0) return null;
 
   return (
-    <div className="mt-2 border-t border-zinc-800/70 pt-2" aria-label="Agent conversation">
+    <div className="mt-2 border-t border-zinc-800/70 pt-2" aria-label="Employee conversation">
       <div className="mb-1.5 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-zinc-500">
         <MessageSquareText size={11} />
-        <span>Conversation</span>
+        <span>Employee Conversation</span>
       </div>
       <div className="space-y-2">
         {visibleMessages.map((message, index) => {

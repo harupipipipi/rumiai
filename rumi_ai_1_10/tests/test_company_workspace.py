@@ -95,6 +95,53 @@ def test_company_blocks_return_ok_error_envelopes(tmp_path, monkeypatch):
     assert deleted["data"]["deleted"] is True
 
 
+def test_company_status_bootstraps_employee_group_for_conversation(tmp_path, monkeypatch):
+    from blocks.company import bootstrap, status
+
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_COMPANY_STORE_PATH", str(tmp_path / "companies"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_COMPANY_RUNTIME_DB_PATH", str(tmp_path / "company_runtime.db"))
+    _reset_company_store()
+
+    first = status.run({"conversation_id": "chat-main-1", "bootstrap": True}, {})
+    second = status.run({"conversation_id": "chat-main-1"}, {})
+    default = bootstrap.run({}, {})
+    scoped = bootstrap.run(
+        {
+            "conversation_id": "chat-main-2",
+            "scope": "conversation",
+            "metadata": {"conversation_id": "chat-main-2", "source": "webapp"},
+        },
+        {},
+    )
+
+    assert first["status"] == "ok"
+    assert first["data"]["bootstrapped"] is True
+    assert first["data"]["company_id"].startswith("chat-team-chat-main-1")
+    assert first["data"]["company"]["metadata"]["conversation_id"] == "chat-main-1"
+    assert first["data"]["company"]["agents"]["client_manager"]["display_name"] == "President"
+    assert second["data"]["company_id"] == first["data"]["company_id"]
+    assert default["data"]["company"]["id"] == "operations-company"
+    assert scoped["data"]["company"]["id"].startswith("chat-team-chat-main-2")
+
+
+def test_conversation_employee_group_inherits_main_chat_model(tmp_path, monkeypatch):
+    from blocks.company import status
+    from domain.chat.store import ChatStore
+
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(tmp_path / "chat" / "conversations.json"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_COMPANY_STORE_PATH", str(tmp_path / "companies"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_COMPANY_RUNTIME_DB_PATH", str(tmp_path / "company_runtime.db"))
+    _reset_defaultspack_singletons()
+
+    conversation = ChatStore().create_conversation(model="opencode-zen/minimax-m3-free")
+    result = status.run({"conversation_id": conversation["id"], "bootstrap": True}, {})
+
+    assert result["status"] == "ok"
+    assert result["data"]["company"]["metadata"]["employee_model"] == "opencode-zen/minimax-m3-free"
+    assert result["data"]["company"]["agents"]["research_specialist"]["model"] == "opencode-zen/minimax-m3-free"
+    assert result["data"]["company"]["agents"]["coding_engineer"]["model"] == "opencode-zen/minimax-m3-free"
+
+
 def test_mentions_create_queued_tasks_and_dispatches_agent_runs(tmp_path, monkeypatch):
     from blocks.company import bootstrap, dispatch, mention, tasks
 

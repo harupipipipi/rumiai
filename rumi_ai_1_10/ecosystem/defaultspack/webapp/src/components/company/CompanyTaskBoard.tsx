@@ -1,4 +1,4 @@
-import { Check, ClipboardList, Plus, Send } from "lucide-react";
+import { Check, ClipboardList, Plus, Search, Send } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import type { CompanyAgent, CompanyRunLink, CompanyTask } from "../../lib/api";
@@ -12,6 +12,7 @@ export function CompanyTaskBoard({
   runs = [],
   busy = false,
   onCreateTask,
+  onCreateResearchTask,
   onUpdateTask,
   onDispatchTask,
 }: {
@@ -20,6 +21,7 @@ export function CompanyTaskBoard({
   runs?: CompanyRunLink[];
   busy?: boolean;
   onCreateTask?: (title: string, targetAgentIds: string[]) => void;
+  onCreateResearchTask?: (query: string, targetAgentIds: string[]) => void;
   onUpdateTask?: (taskId: string, updates: Partial<CompanyTask>) => void;
   onDispatchTask?: (taskId: string) => void;
 }) {
@@ -49,13 +51,13 @@ export function CompanyTaskBoard({
   return (
     <section className="space-y-2 p-2">
       <div className="flex items-center justify-between gap-2">
-        <h4 className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Tasks</h4>
+        <h4 className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Delegated Tasks</h4>
         <span className="text-[10px] text-zinc-600">{tasks.length}</span>
       </div>
 
       {onCreateTask && (
         <form
-          className="grid grid-cols-[minmax(0,1fr)_92px_28px] gap-1.5"
+          className={onCreateResearchTask ? "grid grid-cols-[minmax(0,1fr)_92px_28px_28px] gap-1.5" : "grid grid-cols-[minmax(0,1fr)_92px_28px] gap-1.5"}
           onSubmit={(event) => {
             event.preventDefault();
             const cleanTitle = title.trim();
@@ -68,7 +70,7 @@ export function CompanyTaskBoard({
             value={title}
             onChange={(event) => setTitle(event.target.value)}
             disabled={busy}
-            placeholder="New task"
+            placeholder="Ask an employee"
             className="h-8 min-w-0 rounded-md border border-zinc-800 bg-zinc-950 px-2 text-[12px] text-zinc-200 outline-none placeholder:text-zinc-600 focus:border-zinc-600"
           />
           <select
@@ -77,7 +79,7 @@ export function CompanyTaskBoard({
             disabled={busy}
             className="h-8 rounded-md border border-zinc-800 bg-zinc-950 px-1.5 text-[11px] text-zinc-300 outline-none"
           >
-            <option value="">anyone</option>
+            <option value="">employee</option>
             {agents.map((agent) => (
               <option key={agent.agent_id} value={agent.agent_id}>
                 {agent.role_key || agent.agent_id}
@@ -92,6 +94,22 @@ export function CompanyTaskBoard({
           >
             <Plus size={13} />
           </button>
+          {onCreateResearchTask && (
+            <button
+              type="button"
+              disabled={busy || !title.trim()}
+              onClick={() => {
+                const query = title.trim();
+                if (!query) return;
+                onCreateResearchTask(query, targetAgentId ? [targetAgentId] : []);
+                setTitle("");
+              }}
+              className="flex h-8 w-8 items-center justify-center rounded-md border border-sky-500/30 text-sky-300 hover:bg-sky-500/10 disabled:opacity-30"
+              title="Deep research with DuckDuckGo"
+            >
+              <Search size={13} />
+            </button>
+          )}
         </form>
       )}
 
@@ -163,7 +181,7 @@ export function CompanyTaskBoard({
         })}
         {tasks.length === 0 && (
           <div className="rounded-md border border-zinc-800/70 bg-zinc-950/40 px-2 py-2 text-[11px] text-zinc-500">
-            No company tasks.
+            No delegated tasks.
           </div>
         )}
       </div>
