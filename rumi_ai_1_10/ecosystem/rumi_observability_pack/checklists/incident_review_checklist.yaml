@@ -1,0 +1,42 @@
+version: rumi.observability.incident_review_checklist.v1
+pack_id: rumi_observability_pack
+network_default: none
+
+checklist:
+  - id: incident_trigger
+    question: What event or user report triggered the incident review?
+    required_evidence:
+      - trigger_event_id
+      - observed_symptom
+      - first_seen_at
+  - id: blast_radius
+    question: Which users, runs, tools, packs, or workflows may be affected?
+    required_evidence:
+      - affected_run_ids
+      - affected_pack_ids
+      - user_visible_impact
+  - id: redaction_review
+    question: Are logs, prompts, connector payloads, and cost records safe to share?
+    required_evidence:
+      - privacy_class
+      - redaction_state
+      - redaction_summary
+  - id: cost_latency_review
+    question: Did latency, retry, or cost behavior contribute to the incident?
+    required_evidence:
+      - latency_summary
+      - retry_count
+      - estimated_cost_summary
+  - id: handoff
+    question: Which owner pack should handle remediation or release follow-up?
+    required_evidence:
+      - target_pack
+      - reason_for_handoff
+      - followup_owner_role
+
+completion_gate:
+  required_items:
+    - root_cause_or_unknown_status
+    - followup_actions
+    - redaction_review_complete
+    - owner_pack_boundary_confirmed

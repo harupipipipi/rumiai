@@ -1,6 +1,34 @@
 example_id: rumi_observability.agent_run_summary
-request: Example workflow for agent run summary.
-expected_outputs:
-  - plan
-  - evidence
-  - handoff
+scenario: Summarize a local coding-agent run after focused tests passed with one retrying tool call.
+request: Produce a redacted run ledger summary for run rumi-run-2026-06-04T090512Z before handing model-quality questions to the evals pack.
+input_evidence:
+  run_id: rumi-run-2026-06-04T090512Z
+  objective: tighten observability pack contract tests
+  involved_pack_ids:
+    - rumi_observability_pack
+    - defaultspack
+  event_refs:
+    - event-001-agent-run-start
+    - event-006-tool-call-retry
+    - event-011-focused-pytest-pass
+  raw_log_policy: summarize_only
+expected_run_ledger:
+  status: done
+  privacy_class: internal_review
+  redaction_state: redacted
+  cost_summary:
+    unit: estimated_usd
+    amount: 0.42
+    pricing_source: local_estimate
+  latency_summary:
+    unit: ms
+    p50_ms: 1180
+    p95_ms: 4310
+  tool_call_count: 11
+  model_call_count: 4
+  evidence_refs:
+    - event-011-focused-pytest-pass
+  handoff:
+    target_pack: rumi_model_evals_pack
+    reason: model-quality scoring is outside observability ownership
+    status: ready

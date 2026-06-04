@@ -2,10 +2,14 @@ catalog_id: rumi_observability.events
 schema_version: 1
 event_classes:
   - class_id: agent_run
-    fields: [run_id, objective, pack_ids, status, evidence_refs]
+    fields: [run_id, objective, pack_ids, status, privacy_class, redaction_state, evidence_refs]
   - class_id: tool_call
-    fields: [tool_name, owner_pack, approval_state, result_summary]
+    fields: [run_id, tool_name, owner_pack, approval_state, latency_ms, result_summary, evidence_refs]
   - class_id: model_call
-    fields: [provider, model, latency_ms, token_estimate, outcome]
+    fields: [run_id, provider, model, latency_ms, token_estimate, pricing_source, outcome]
+  - class_id: cost_latency
+    fields: [run_id, estimated_usd, cost_unit, latency_ms, latency_unit, sample_count, pricing_source]
   - class_id: incident
-    fields: [trigger, blast_radius, root_cause, followups]
+    fields: [trigger_event_id, blast_radius, root_cause, followups, redaction_state]
+  - class_id: handoff
+    fields: [run_id, source_pack, target_pack, reason, required_evidence, status]

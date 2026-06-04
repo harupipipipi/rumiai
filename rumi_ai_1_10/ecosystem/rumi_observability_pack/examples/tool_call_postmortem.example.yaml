@@ -1,6 +1,28 @@
 example_id: rumi_observability.tool_call_postmortem
-request: Example workflow for tool call postmortem.
-expected_outputs:
-  - plan
-  - evidence
-  - handoff
+scenario: Review a failed local tool call before routing remediation to the pack that owns the runtime surface.
+request: Draft a privacy-safe postmortem for event evt-tool-rollback-009 after a release evidence collector timed out.
+incident_record:
+  incident_id: inc-obs-2026-06-04-01
+  trigger_event_id: evt-tool-rollback-009
+  owner_pack: rumi_observability_pack
+  affected_pack_ids:
+    - rumi_devops_release_pack
+    - defaultspack
+  first_seen_at: "2026-06-04T10:41:22Z"
+  user_visible_impact: release gate stayed in needs_review for 18 minutes
+  privacy_class: internal_review
+  redaction_state: redacted
+required_postmortem_sections:
+  - summary
+  - timeline
+  - redaction_state
+  - cost_latency_summary
+  - owner_pack_handoff
+expected_handoff:
+  target_pack: rumi_devops_release_pack
+  status: ready
+  reason: deployment gate and rollback remediation belong to the devops release pack
+followups:
+  - add retry evidence to the run ledger
+  - verify no raw connector payloads remain in incident notes
+  - record latency_ms and retry_count in the final incident event

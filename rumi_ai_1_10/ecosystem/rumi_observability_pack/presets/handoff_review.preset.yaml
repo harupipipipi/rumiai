@@ -4,3 +4,32 @@ features:
   local_first: true
   evidence_required: true
   owner_boundary_check: true
+handoff_targets:
+  model_metrics:
+    owner_pack: rumi_model_evals_pack
+    required_evidence:
+      - model_call_event_ids
+      - latency_summary_ms
+      - token_estimate_with_source
+  security_findings:
+    owner_pack: rumi_security_review_pack
+    required_evidence:
+      - redaction_state
+      - suspicious_event_ids
+      - privacy_class
+  release_incidents:
+    owner_pack: rumi_devops_release_pack
+    required_evidence:
+      - incident_event_id
+      - blast_radius
+      - rollback_or_gate_context
+  service_run_summaries:
+    owner_pack: rumi_agent_services_pack
+    required_evidence:
+      - agent_service_run_id
+      - tool_call_count
+      - unresolved_followups
+review_steps:
+  - confirm the current pack only owns evidence, summaries, and templates
+  - attach run_ledger_contract fields before naming the target owner pack
+  - mark status needs_review when any required evidence is absent

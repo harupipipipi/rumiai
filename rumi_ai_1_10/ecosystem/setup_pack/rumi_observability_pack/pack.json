@@ -22,18 +22,39 @@
   },
   "defaultspack_promotion": {
     "eligible": false,
+    "reason": "Observability belongs as an optional advanced pack because run ledgers, cost traces, and incident review contracts add operational weight beyond defaultspack's basic grants.",
     "criteria": [
       "contract_tests_pass",
       "overlap_policy_reviewed",
+      "privacy_redaction_policy_reviewed",
       "maintainer_runtime_evidence_required"
+    ],
+    "promotion_blockers": [
+      "would_expand_default_log_retention",
+      "would_duplicate_release_or_security_owner_surfaces",
+      "requires_runtime_telemetry_backend",
+      "requires_network_or_secret_access"
+    ],
+    "promotion_evidence_required": [
+      "schema_valid_ecosystem_manifest",
+      "asset_index_covers_all_pack_assets",
+      "run_ledger_contract_review",
+      "privacy_cost_redaction_review",
+      "incident_review_checklist_review"
     ]
   },
   "marketplace": {
     "id": "rumi.observability_pack",
+    "registry": "rumi_local_pack_registry",
+    "publisher": "rumi-ai",
+    "status": "verified",
+    "category": "observability",
     "channel": "experimental"
   },
   "signing": {
-    "mode": "repository_reviewed"
+    "mode": "repository_reviewed",
+    "verified": true,
+    "verification_scope": "declarative_assets_only"
   },
   "security_notes": [
     "No secrets are bundled.",

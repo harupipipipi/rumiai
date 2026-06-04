@@ -4,3 +4,33 @@ features:
   local_first: true
   evidence_required: true
   owner_boundary_check: true
+quality_gates:
+  - gate_id: schema_valid_event
+    pass_when:
+      - event_id_present
+      - event_class_declared
+      - privacy_class_declared
+      - evidence_refs_nonempty
+  - gate_id: ledger_complete
+    pass_when:
+      - started_at_recorded
+      - completed_at_or_status_recorded
+      - cost_summary_has_units
+      - latency_summary_has_units
+      - owner_pack_boundaries_recorded
+  - gate_id: redaction_complete
+    pass_when:
+      - no_secret_like_values
+      - account_identifiers_removed
+      - private_prompt_text_summarized
+      - connector_payloads_summarized
+  - gate_id: incident_ready
+    pass_when:
+      - trigger_event_linked
+      - blast_radius_stated
+      - followup_owner_named
+      - unresolved_incidents_have_followups
+failure_status:
+  missing_evidence: needs_review
+  privacy_risk: unsafe
+  owner_boundary_unclear: needs_handoff_review

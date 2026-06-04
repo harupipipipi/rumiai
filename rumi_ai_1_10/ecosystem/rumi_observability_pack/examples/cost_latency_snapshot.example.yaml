@@ -1,6 +1,42 @@
 example_id: rumi_observability.cost_latency_snapshot
-request: Example workflow for cost latency snapshot.
-expected_outputs:
-  - plan
-  - evidence
-  - handoff
+scenario: Build a local cost and latency snapshot from redacted model and tool events.
+request: Prepare a cost/latency summary for run rumi-run-2026-06-04T100733Z without exposing account IDs or raw prompts.
+source_events:
+  - event_id: evt-model-001
+    event_class: model_call
+    owner_pack: rumi_observability_pack
+    privacy_class: internal_review
+    redaction_state: summarized
+    latency:
+      duration_ms: 1642
+      queue_ms: 120
+    cost:
+      unit: estimated_usd
+      amount: 0.18
+      pricing_source: model_card_estimate
+  - event_id: evt-tool-004
+    event_class: tool_call
+    owner_pack: defaultspack
+    privacy_class: internal_review
+    redaction_state: redacted
+    latency:
+      duration_ms: 912
+      tool_wait_ms: 730
+summary_contract:
+  currency: USD
+  cost_kind: estimated
+  latency_unit: ms
+  sample_count: 2
+  allowed_fields:
+    - event_id
+    - event_class
+    - owner_pack
+    - duration_ms
+    - estimated_usd
+    - pricing_source
+  disallowed_fields:
+    - account_identifier
+    - invoice_id
+    - raw_prompt_text
+expected_status: needs_review
+review_reason: sample_count is below the release-quality threshold and should not be used as a trend.
