@@ -49,6 +49,7 @@ OPENAI_CHAT_MODELS = [
 ]
 
 ANTHROPIC_MESSAGES_MODELS = ["minimax-m2.7", "minimax-m2.5"]
+TOOL_CALL_MODELS = {"mimo-v2.5-pro", "mimo-v2.5"}
 
 
 class _FakeSseResponse:
@@ -99,6 +100,15 @@ def test_opencode_go_catalog_includes_all_models():
     assert experimental["metadata"]["experimental"] is True
     assert experimental["metadata"]["vision_unverified"] is True
 
+    for model_id in TOOL_CALL_MODELS:
+        model_entry = models[f"opencode-go/{model_id}"]
+        assert "tool_calls" in model_entry["capabilities"]
+        assert model_entry["metadata"]["capabilities"]["tool_calls"] is True
+        assert model_entry["metadata"]["tool_calls_verified"] is True
+        assert model_entry["supports_thinking"] is True
+        assert model_entry["metadata"]["capabilities"]["reasoning"] is True
+        assert model_entry["metadata"]["reasoning_effort_verified"] is True
+
     from ecosystem.defaultspack.backend.ai_client.provider_catalog import list_model_catalog
 
     legacy_models = {item["id"]: item for item in list_model_catalog("opencode-go")}
@@ -140,9 +150,14 @@ def test_opencode_go_uses_chat_completions_for_openai_compatible_models(monkeypa
     assert captured["body"]["model"] == model
     assert captured["body"]["max_tokens"] == 8
     assert captured["body"]["temperature"] == 0
-    assert "tools" not in captured["body"]
-    assert "tool_choice" not in captured["body"]
-    assert "reasoning_effort" not in captured["body"]
+    if model in TOOL_CALL_MODELS:
+        assert captured["body"]["tools"] == [{"type": "function", "function": {"name": "noop"}}]
+        assert captured["body"]["tool_choice"] == "auto"
+        assert captured["body"]["reasoning_effort"] == "high"
+    else:
+        assert "tools" not in captured["body"]
+        assert "tool_choice" not in captured["body"]
+        assert "reasoning_effort" not in captured["body"]
     assert "thinking" not in captured["body"]
     assert result["content"] == [{"type": "text", "text": "OK"}]
 

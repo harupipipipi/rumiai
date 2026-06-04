@@ -150,15 +150,23 @@ _OPENCODE_GO_MODEL_SPECS: List[Dict[str, Any]] = [
         "experimental": True,
     },
 ]
+_OPENCODE_GO_TOOL_CALL_MODELS = {"mimo-v2.5", "mimo-v2.5-pro"}
+_OPENCODE_GO_REASONING_MODELS = {"mimo-v2.5", "mimo-v2.5-pro"}
 
 
 def _known_model_entry(spec: Dict[str, Any]) -> Dict[str, Any]:
     defaults = dict(spec.get("defaults", {}))
+    tool_calls = spec["model_id"] in _OPENCODE_GO_TOOL_CALL_MODELS
+    reasoning = spec["model_id"] in _OPENCODE_GO_REASONING_MODELS
     metadata = {
         "transport": spec["transport"],
         "endpoint_path": spec["endpoint_path"],
         "source": spec["source"],
     }
+    if tool_calls:
+        metadata["tool_calls_verified"] = True
+    if reasoning:
+        metadata["reasoning_effort_verified"] = True
     for key in ("experimental", "vision_unverified"):
         if spec.get(key):
             metadata[key] = True
@@ -178,10 +186,13 @@ def _known_model_entry(spec: Dict[str, Any]) -> Dict[str, Any]:
         "capabilities": {
             "chat": True,
             "streaming": True,
-            "tool_calls": False,
+            "tool_calls": tool_calls,
             "vision": bool(defaults.get("vision")),
-            "reasoning": False,
+            "reasoning": reasoning,
         },
+        "supports_thinking": reasoning,
+        "thinking_levels": ["low", "medium", "high"] if reasoning else [],
+        "default_thinking_level": "medium" if reasoning else None,
         "metadata": metadata,
     }
 
@@ -211,6 +222,7 @@ class OpencodeGoProvider(OpenAICompatibleProvider):
     }
     ANTHROPIC_MESSAGES_MODELS = {"minimax-m2.7", "minimax-m2.5"}
     MODEL_IDS = OPENAI_CHAT_MODELS | ANTHROPIC_MESSAGES_MODELS
+    TOOL_CALL_MODELS = set(_OPENCODE_GO_TOOL_CALL_MODELS)
     KNOWN_MODELS = [_known_model_entry(spec) for spec in _OPENCODE_GO_MODEL_SPECS]
     _OPENAI_CHAT_PARAM_KEYS = {
         "temperature",
@@ -220,6 +232,8 @@ class OpencodeGoProvider(OpenAICompatibleProvider):
         "stop",
         "response_format",
         "stream_options",
+        "tool_choice",
+        "reasoning_effort",
     }
     _MESSAGES_PARAM_KEYS = {
         "temperature",
@@ -403,20 +417,36 @@ class OpencodeGoProvider(OpenAICompatibleProvider):
         finally:
             resp.close()
 
+    @staticmethod
+    def _model_params(params, *, supports_tools: bool, supports_reasoning: bool):
+        filtered = dict(params or {})
+        if not supports_tools:
+            filtered.pop("tool_choice", None)
+            filtered.pop("parallel_tool_calls", None)
+        if not supports_reasoning:
+            filtered.pop("reasoning_effort", None)
+        return filtered
+
     def complete(self, model, messages, tools, params):
-        del tools
         model_id = self._assert_supported_model(model)
         if model_id in self.ANTHROPIC_MESSAGES_MODELS:
             return self._complete_messages(model_id, messages, params)
-        return super().complete(model_id, messages, [], params)
+        supports_tools = model_id in self.TOOL_CALL_MODELS
+        supports_reasoning = model_id in _OPENCODE_GO_REASONING_MODELS
+        forward_tools = tools if supports_tools else []
+        forward_params = self._model_params(params, supports_tools=supports_tools, supports_reasoning=supports_reasoning)
+        return super().complete(model_id, messages, forward_tools, forward_params)
 
     def stream(self, model, messages, tools, params):
-        del tools
         model_id = self._assert_supported_model(model)
         if model_id in self.ANTHROPIC_MESSAGES_MODELS:
             yield from self._stream_messages(model_id, messages, params)
             return
-        yield from super().stream(model_id, messages, [], params)
+        supports_tools = model_id in self.TOOL_CALL_MODELS
+        supports_reasoning = model_id in _OPENCODE_GO_REASONING_MODELS
+        forward_tools = tools if supports_tools else []
+        forward_params = self._model_params(params, supports_tools=supports_tools, supports_reasoning=supports_reasoning)
+        yield from super().stream(model_id, messages, forward_tools, forward_params)
 
     def embed(self, model, input_text):
         raise NotImplementedError("OpenCode Go does not support embeddings.")

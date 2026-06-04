@@ -72,6 +72,6 @@ def test_line_computer_use_profile_attaches_browser_tools_and_prompt_policy():
     assert envelope.params["line_reply_deadline_seconds"] == 60
     assert envelope.params["retry"]["max_attempts"] == 5
     assert envelope.params["retry"]["delays"] == [5, 15, 30, 60]
-    assert envelope.tools == ["computer_use", "browser_computer"]
+    assert envelope.tools == ["computer_use", "browser_computer", "web_search"]
     assert profile.spec["policy"]["max_tool_calls"] == 30
     assert profile.spec["response_prompt"]["enabled"] is True

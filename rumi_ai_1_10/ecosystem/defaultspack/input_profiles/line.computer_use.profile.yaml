@@ -35,6 +35,7 @@ params:
 tools:
   - computer_use
   - browser_computer
+  - web_search
 policy:
   max_tool_calls: 30
 response_prompt:
