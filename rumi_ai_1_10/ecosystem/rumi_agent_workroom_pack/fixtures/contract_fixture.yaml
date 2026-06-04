@@ -1,0 +1,15 @@
+contract_fixture:
+  positive_cases:
+  - id: checkpoint_resume
+    given: Resume a paused agent run from a sealed checkpoint
+    expected: checkpoint_resume_handoff_packet
+  - id: redirect_running_plan
+    given: Redirect future task steps after user instruction
+    expected: intervention_handoff_packet
+  - id: run_board_review
+    given: Render run-board lanes for review
+    expected: run_board_handoff_packet
+  minimum_expected:
+  - schema_valid
+  - evidence_linked
+  - handoff_scoped
