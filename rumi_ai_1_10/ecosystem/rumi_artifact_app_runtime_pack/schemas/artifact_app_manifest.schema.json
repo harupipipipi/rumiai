@@ -1,0 +1,225 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rumi.local/schemas/artifact_app_manifest.schema.json",
+  "title": "Artifact App Manifest",
+  "description": "Manifest for a runnable Rumi artifact app.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "app_id",
+    "artifact_id",
+    "name",
+    "schema_version",
+    "entrypoint",
+    "content_ref",
+    "permissions",
+    "state_schema_id",
+    "version_id",
+    "network_default",
+    "renderer",
+    "storage_selector",
+    "approval_policy",
+    "export_share",
+    "error_boundary"
+  ],
+  "properties": {
+    "app_id": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9_.-]+$"
+    },
+    "artifact_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "schema_version": {
+      "type": "string",
+      "const": "rumi.artifact_app_manifest.v1"
+    },
+    "entrypoint": {
+      "type": "string",
+      "minLength": 1
+    },
+    "content_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_owner",
+        "ref",
+        "checksum"
+      ],
+      "properties": {
+        "source_owner": {
+          "type": "string",
+          "enum": [
+            "defaultspack",
+            "rumi_workspace_pack"
+          ]
+        },
+        "ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "checksum": {
+          "type": "string",
+          "minLength": 8
+        }
+      }
+    },
+    "permissions": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "enum": [
+          "read_local_state",
+          "write_local_state",
+          "request_tool_call",
+          "export_package"
+        ]
+      }
+    },
+    "state_schema_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "version_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "network_default": {
+      "type": "string",
+      "const": "deny"
+    },
+    "renderer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "contract_schema_id",
+        "sandbox_id",
+        "trusted",
+        "module_policy"
+      ],
+      "properties": {
+        "contract_schema_id": {
+          "type": "string",
+          "const": "renderer_sandbox_contract.schema.json"
+        },
+        "sandbox_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "trusted": {
+          "type": "boolean",
+          "const": false
+        },
+        "module_policy": {
+          "type": "string",
+          "enum": [
+            "same_origin_static_only",
+            "inline_srcdoc_only"
+          ]
+        }
+      }
+    },
+    "storage_selector": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "selector_schema_id",
+        "read_only",
+        "allowed_sources"
+      ],
+      "properties": {
+        "selector_schema_id": {
+          "type": "string",
+          "const": "storage_version_selector.schema.json"
+        },
+        "read_only": {
+          "type": "boolean",
+          "const": true
+        },
+        "allowed_sources": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "enum": [
+              "defaultspack_artifact_index",
+              "defaultspack_chat_workspace",
+              "trusted_workspace_record"
+            ]
+          }
+        }
+      }
+    },
+    "approval_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "defaultspack_shape_required",
+        "client_supplied_approved_trusted",
+        "execution_owner"
+      ],
+      "properties": {
+        "defaultspack_shape_required": {
+          "type": "boolean",
+          "const": true
+        },
+        "client_supplied_approved_trusted": {
+          "type": "boolean",
+          "const": false
+        },
+        "execution_owner": {
+          "type": "string",
+          "const": "defaultspack"
+        }
+      }
+    },
+    "export_share": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "package_contract_only",
+        "file_persistence_owner",
+        "share_link_owner"
+      ],
+      "properties": {
+        "package_contract_only": {
+          "type": "boolean",
+          "const": true
+        },
+        "file_persistence_owner": {
+          "type": "string",
+          "const": "rumi_workspace_pack"
+        },
+        "share_link_owner": {
+          "type": "string",
+          "const": "defaultspack"
+        }
+      }
+    },
+    "error_boundary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "error_schema_id",
+        "raw_stack_included"
+      ],
+      "properties": {
+        "error_schema_id": {
+          "type": "string",
+          "const": "artifact_app_error.schema.json"
+        },
+        "raw_stack_included": {
+          "type": "boolean",
+          "const": false
+        }
+      }
+    }
+  }
+}

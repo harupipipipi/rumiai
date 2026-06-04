@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rumi.local/schemas/runtime_error_boundary.schema.json",
+  "title": "Runtime Error Boundary",
+  "description": "Error boundary contract for artifact runtime.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "boundary_id",
+    "artifact_id",
+    "error_class",
+    "safe_fallback",
+    "captured_event_ids",
+    "handoff_owner",
+    "error_envelope_schema_id",
+    "raw_stack_included",
+    "fallback_mode"
+  ],
+  "properties": {
+    "boundary_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "artifact_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "error_class": {
+      "type": "string",
+      "enum": [
+        "render_error",
+        "state_error",
+        "approval_error",
+        "sandbox_error",
+        "unknown"
+      ]
+    },
+    "safe_fallback": {
+      "type": "string",
+      "minLength": 1
+    },
+    "captured_event_ids": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "handoff_owner": {
+      "type": "string",
+      "enum": [
+        "rumi_frontend_design_pack",
+        "rumi_sandbox_runtime_pack",
+        "rumi_workspace_pack",
+        "none"
+      ]
+    },
+    "error_envelope_schema_id": {
+      "type": "string",
+      "const": "artifact_app_error.schema.json"
+    },
+    "raw_stack_included": {
+      "type": "boolean",
+      "const": false
+    },
+    "fallback_mode": {
+      "type": "string",
+      "enum": [
+        "safe_message",
+        "blocked_handoff",
+        "render_disabled"
+      ]
+    }
+  }
+}

@@ -1,0 +1,123 @@
+workflows:
+  default_execution: no_runtime_action
+  ownership:
+    owned:
+    - artifact_app_manifest
+    - sandbox_renderer_contract
+    - artifact_state_snapshot
+    - artifact_version_selector
+    - tool_mcp_approval_prompt
+    - runtime_error_boundary
+    - share_export_manifest
+    - artifact_runtime_ui_contract
+    handoff:
+    - frontend design generation
+    - file persistence
+    - sandbox isolation runtime
+    - MCP execution
+    - API execution
+    - media transforms
+    - browser automation
+  items:
+  - id: manifest_validation
+    purpose: Validate artifact app manifest and deny network by default.
+    inputs:
+    - local_records
+    - evidence_ids
+    produces:
+    - review_packet
+    - handoff_packet
+    blocking_gates:
+    - evidence_present
+    - owner_boundary_checked
+    - human_review_before_external_action
+    handoffs:
+    - handoff_to_rumi_frontend_design_pack
+    - handoff_to_rumi_workspace_pack
+    - handoff_to_rumi_sandbox_runtime_pack
+    execution: declarative_only
+  - id: sandbox_render_contract
+    purpose: Produce renderer sandbox policy without running code.
+    inputs:
+    - local_records
+    - evidence_ids
+    produces:
+    - review_packet
+    - handoff_packet
+    blocking_gates:
+    - evidence_present
+    - owner_boundary_checked
+    - human_review_before_external_action
+    handoffs:
+    - handoff_to_rumi_frontend_design_pack
+    - handoff_to_rumi_workspace_pack
+    - handoff_to_rumi_sandbox_runtime_pack
+    execution: declarative_only
+  - id: state_snapshot_versioning
+    purpose: Create state snapshots and version records for rollback.
+    inputs:
+    - local_records
+    - evidence_ids
+    produces:
+    - review_packet
+    - handoff_packet
+    blocking_gates:
+    - evidence_present
+    - owner_boundary_checked
+    - human_review_before_external_action
+    handoffs:
+    - handoff_to_rumi_frontend_design_pack
+    - handoff_to_rumi_workspace_pack
+    - handoff_to_rumi_sandbox_runtime_pack
+    execution: declarative_only
+  - id: tool_mcp_approval_gate
+    purpose: Block first MCP/API/tool call until approval receipt exists.
+    inputs:
+    - local_records
+    - evidence_ids
+    produces:
+    - review_packet
+    - handoff_packet
+    blocking_gates:
+    - evidence_present
+    - owner_boundary_checked
+    - human_review_before_external_action
+    handoffs:
+    - handoff_to_rumi_frontend_design_pack
+    - handoff_to_rumi_workspace_pack
+    - handoff_to_rumi_sandbox_runtime_pack
+    execution: declarative_only
+  - id: error_boundary_review
+    purpose: Capture runtime error class and safe fallback owner.
+    inputs:
+    - local_records
+    - evidence_ids
+    produces:
+    - review_packet
+    - handoff_packet
+    blocking_gates:
+    - evidence_present
+    - owner_boundary_checked
+    - human_review_before_external_action
+    handoffs:
+    - handoff_to_rumi_frontend_design_pack
+    - handoff_to_rumi_workspace_pack
+    - handoff_to_rumi_sandbox_runtime_pack
+    execution: declarative_only
+  - id: export_package_build
+    purpose: Build reviewed export manifest with workspace handoff.
+    inputs:
+    - local_records
+    - evidence_ids
+    produces:
+    - review_packet
+    - handoff_packet
+    blocking_gates:
+    - evidence_present
+    - owner_boundary_checked
+    - human_review_before_external_action
+    handoffs:
+    - handoff_to_rumi_frontend_design_pack
+    - handoff_to_rumi_workspace_pack
+    - handoff_to_rumi_sandbox_runtime_pack
+    execution: declarative_only

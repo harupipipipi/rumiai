@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rumi.local/schemas/share_package.schema.json",
+  "title": "Share Package",
+  "description": "Share package contract without upload or link creation.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "share_id",
+    "artifact_id",
+    "version_id",
+    "visibility",
+    "permission_scope",
+    "checksum",
+    "workspace_handoff",
+    "share_contract_only",
+    "link_creation_owner",
+    "file_persistence_owner",
+    "token_creation_allowed"
+  ],
+  "properties": {
+    "share_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "artifact_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "version_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "visibility": {
+      "type": "string",
+      "enum": [
+        "private",
+        "workspace",
+        "public_review_required"
+      ]
+    },
+    "permission_scope": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "checksum": {
+      "type": "string",
+      "minLength": 1
+    },
+    "workspace_handoff": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "owner_pack",
+        "artifact_path"
+      ],
+      "properties": {
+        "owner_pack": {
+          "type": "string",
+          "const": "rumi_workspace_pack"
+        },
+        "artifact_path": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "share_contract_only": {
+      "type": "boolean",
+      "const": true
+    },
+    "link_creation_owner": {
+      "type": "string",
+      "const": "defaultspack"
+    },
+    "file_persistence_owner": {
+      "type": "string",
+      "const": "rumi_workspace_pack"
+    },
+    "token_creation_allowed": {
+      "type": "boolean",
+      "const": false
+    }
+  }
+}

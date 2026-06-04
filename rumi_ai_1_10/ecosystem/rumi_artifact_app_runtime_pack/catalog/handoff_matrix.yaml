@@ -1,0 +1,36 @@
+handoff_matrix:
+  pack_boundary_rule: owner_surface_wins_then_explicit_handoff
+  items:
+  - surface: frontend_design_generation
+    resolution: handoff_to_rumi_frontend_design_pack
+    requires_human_review: true
+  - surface: file_persistence
+    resolution: handoff_to_rumi_workspace_pack
+    requires_human_review: true
+  - surface: sandbox_isolation_runtime
+    resolution: handoff_to_rumi_sandbox_runtime_pack
+    requires_human_review: true
+  - surface: mcp_execution
+    resolution: handoff_to_rumi_mcp_gateway_pack
+    requires_human_review: true
+  - surface: api_execution
+    resolution: handoff_to_rumi_api_toolsmith_pack
+    requires_human_review: true
+  - surface: media_transform
+    resolution: handoff_to_rumi_multimodal_media_pack
+    requires_human_review: true
+  - surface: defaultspack_artifact_store
+    resolution: do_not_override
+    requires_human_review: true
+  - surface: defaultspack_chat_artifact_file
+    resolution: read_only_selector_only
+    requires_human_review: true
+  - surface: defaultspack_share_links
+    resolution: do_not_override
+    requires_human_review: true
+  - surface: defaultspack_tool_execution
+    resolution: do_not_override
+    requires_human_review: true
+  - surface: defaultspack_mcp_execution
+    resolution: do_not_override
+    requires_human_review: true

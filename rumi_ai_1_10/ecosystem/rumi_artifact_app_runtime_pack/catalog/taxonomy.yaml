@@ -1,0 +1,28 @@
+taxonomy:
+  domains:
+  - artifact-app-runtime
+  - local_first_contracts
+  - handoff_review
+  artifact_types:
+  - artifact_app_manifest
+  - renderer_sandbox_contract
+  - artifact_state_snapshot
+  - tool_approval_prompt
+  - version_record
+  - runtime_error_boundary
+  - export_package
+  handoff_targets:
+  - rumi_frontend_design_pack
+  - rumi_workspace_pack
+  - rumi_sandbox_runtime_pack
+  - rumi_mcp_gateway_pack
+  - rumi_api_toolsmith_pack
+  - rumi_multimodal_media_pack
+  forbidden_ownership:
+  - frontend design generation
+  - file persistence
+  - sandbox isolation runtime
+  - MCP execution
+  - API execution
+  - media transforms
+  - browser automation

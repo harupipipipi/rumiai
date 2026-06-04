@@ -1,0 +1,97 @@
+{
+  "pack_id": "rumi_artifact_app_runtime_pack",
+  "display_name": "Rumi Artifact App Runtime Pack",
+  "description": "Declarative runnable artifact app contracts for manifests, sandbox render policy, state snapshots, versioning, approval-gated tool calls, error boundaries, and export packages.",
+  "target_pack_id": "rumi_artifact_app_runtime_pack",
+  "version": "0.1.0",
+  "recommended": false,
+  "risk_level": "medium",
+  "supports_all_ok": false,
+  "depends_on": [
+    {
+      "pack_id": "defaultspack",
+      "version": ">=2.0.0"
+    }
+  ],
+  "conflicts_with": [],
+  "compatibility": {
+    "python": ">=3.9",
+    "platforms": [
+      "macos",
+      "linux",
+      "windows"
+    ]
+  },
+  "overlap_policy": {
+    "frontend_design_generation": "handoff_to_rumi_frontend_design_pack",
+    "file_persistence": "handoff_to_rumi_workspace_pack",
+    "sandbox_isolation_runtime": "handoff_to_rumi_sandbox_runtime_pack",
+    "mcp_execution": "handoff_to_rumi_mcp_gateway_pack",
+    "api_execution": "handoff_to_rumi_api_toolsmith_pack",
+    "media_transform": "handoff_to_rumi_multimodal_media_pack",
+    "defaultspack_artifact_store": "do_not_override",
+    "defaultspack_chat_artifact_file": "read_only_selector_only",
+    "defaultspack_share_links": "do_not_override",
+    "defaultspack_tool_execution": "do_not_override",
+    "defaultspack_mcp_execution": "do_not_override",
+    "rumi_mcp_gateway_pack": "catalog_handoff_only",
+    "artifact_manifest_contract": "owned_by_rumi_artifact_app_runtime_pack",
+    "tool_approval_prompt": "owned_by_rumi_artifact_app_runtime_pack",
+    "tool_aliases": "prefer_explicit_pack_namespace"
+  },
+  "defaultspack_promotion": {
+    "eligible": false,
+    "reason": "Rumi Artifact App Runtime Pack is declarative and cannot enter defaultspack until owner-pack integration, audit receipts, and real success cases prove it should be default.",
+    "criteria": [
+      "contract_tests_pass",
+      "overlap_policy_reviewed",
+      "maintainer_runtime_evidence_required",
+      "promotion_requires_real_world_success_cases",
+      "human_review_required_before_external_action"
+    ],
+    "promotion_blockers": [
+      "no_renderer_registry_runtime",
+      "no_per_artifact_storage_runtime",
+      "sandbox_execution_owned_elsewhere",
+      "mcp_api_execution_owned_elsewhere",
+      "approval_receipts_required_for_tool_calls",
+      "supports_all_ok_false_required",
+      "no_file_persistence_owner",
+      "no_media_transform_owner",
+      "no_mcp_api_execution_owner",
+      "client_supplied_approved_never_trusted",
+      "schema_contracts_only"
+    ],
+    "promotion_evidence_required": [
+      "sample_app_manifest_cases",
+      "tool_approval_denial_cases",
+      "version_rollback_cases",
+      "error_boundary_cases",
+      "export_manifest_cases",
+      "sandbox_token_cases",
+      "storage_selector_cases",
+      "share_export_checksum_cases"
+    ]
+  },
+  "marketplace": {
+    "id": "rumi.artifact_app_runtime_pack",
+    "registry": "bundled",
+    "publisher": "rumi-ai",
+    "status": "verified",
+    "category": "artifact-app-runtime",
+    "channel": "experimental"
+  },
+  "signing": {
+    "mode": "repository_reviewed",
+    "verified": true
+  },
+  "security_notes": [
+    "No credentials are bundled.",
+    "No executable code is included.",
+    "Network is none by default."
+  ],
+  "conflict_notes": [
+    "The pack owns contracts and review packets only.",
+    "Adjacent runtime actions are explicit handoffs to owner packs."
+  ]
+}
