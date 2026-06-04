@@ -1,6 +1,7 @@
 example_id: rumi_business_ops.support_triage
-request: Example workflow for support triage.
+request: Triage a support inbox sample into severity, owner team, response draft, evidence notes, and connector-safe next actions.
 expected_outputs:
-  - plan
-  - evidence
-  - handoff
+  - support_priority_queue
+  - customer_response_draft_needing_approval
+  - risk_matrix_result
+  - connector_gateway_handoff

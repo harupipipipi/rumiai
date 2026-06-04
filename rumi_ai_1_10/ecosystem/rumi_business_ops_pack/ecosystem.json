@@ -3,44 +3,104 @@
   "pack_identity": "rumi:ecosystem/rumi_business_ops_pack",
   "display_name": "Rumi Business Ops Pack",
   "version": "0.1.0",
-  "runtime": {
-    "type": "declarative_pack"
+  "description": "Declarative business operations pack for sales, support, marketing, procurement, CRM hygiene, and admin workflows.",
+  "vocabulary": {
+    "types": [
+      "business_ops",
+      "catalog",
+      "policy",
+      "profile",
+      "prompt",
+      "preset",
+      "example",
+      "checklist",
+      "ledger",
+      "template"
+    ]
   },
-  "depends_on": [
-    {
-      "pack_id": "defaultspack",
-      "version": ">=2.0.0"
-    }
-  ],
-  "optional_integrations": [
-    {
-      "pack_id": "rumi_connector_gateway_pack",
-      "reason": "Complementary owner surface for this pack."
-    },
-    {
-      "pack_id": "rumi_workflow_scheduler_pack",
-      "reason": "Complementary owner surface for this pack."
-    },
-    {
-      "pack_id": "rumi_workspace_pack",
-      "reason": "Complementary owner surface for this pack."
-    },
-    {
-      "pack_id": "rumi_research_pack",
-      "reason": "Complementary owner surface for this pack."
-    }
-  ],
+  "dependencies": {
+    "defaultspack": ">=2.0.0"
+  },
   "components": {},
   "load_order": [],
   "metadata": {
     "required_secrets": [],
     "network_policy": "none_by_default",
     "executable_code": false,
+    "declarative_only": true,
+    "optional_integrations": [
+      {
+        "pack_id": "rumi_connector_gateway_pack",
+        "reason": "Owns sending messages, CRM updates, mailbox actions, and connector-authenticated business operations."
+      },
+      {
+        "pack_id": "rumi_workflow_scheduler_pack",
+        "reason": "Owns scheduled follow-ups, reminders, recurring reports, and automation execution."
+      },
+      {
+        "pack_id": "rumi_workspace_pack",
+        "reason": "Owns exportable briefs, memos, comparison tables, and workspace artifacts."
+      },
+      {
+        "pack_id": "rumi_research_pack",
+        "reason": "Owns evidence collection and source-backed claims for procurement, market, and account research."
+      }
+    ],
     "owner_surfaces": [
       "sales_support_workflows",
       "marketing_briefs",
       "procurement_decision_memos",
-      "crm_hygiene_contracts"
-    ]
+      "crm_hygiene_contracts",
+      "workflow_taxonomy",
+      "approval_risk_matrix",
+      "business_ops_handoff_ledger",
+      "operator_handoff_checklist"
+    ],
+    "asset_index": {
+      "manifest": [
+        "ecosystem.json"
+      ],
+      "readme": [
+        "README.md"
+      ],
+      "docs": [
+        "docs/README.md",
+        "docs/architecture.md",
+        "docs/interfaces.md",
+        "docs/operations.md"
+      ],
+      "catalog": [
+        "catalog/business_ops_workflows.yaml",
+        "catalog/workflow_taxonomy.yaml"
+      ],
+      "policy": [
+        "policies/business_ops_safety.policy.yaml",
+        "policies/approval_risk_matrix.policy.yaml"
+      ],
+      "profile": [
+        "profiles/business_ops_operator.profile.yaml"
+      ],
+      "prompt": [
+        "prompts/business_ops_operator.system.md"
+      ],
+      "preset": [
+        "presets/safe_default.preset.yaml",
+        "presets/handoff_review.preset.yaml",
+        "presets/quality_gate.preset.yaml"
+      ],
+      "example": [
+        "examples/procurement_memo.example.yaml",
+        "examples/sales_followup.example.yaml",
+        "examples/support_triage.example.yaml"
+      ],
+      "schema": [],
+      "checklist": [
+        "checklists/operator_handoff.checklist.yaml"
+      ],
+      "ledger": [
+        "ledgers/business_ops_handoff_ledger.schema.yaml"
+      ],
+      "template": []
+    }
   }
 }

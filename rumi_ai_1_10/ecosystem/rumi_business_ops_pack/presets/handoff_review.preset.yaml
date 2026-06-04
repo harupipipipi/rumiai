@@ -4,3 +4,7 @@ features:
   local_first: true
   evidence_required: true
   owner_boundary_check: true
+purpose: Convert a business ops plan into a connector, scheduler, workspace, or research handoff ledger.
+required_assets:
+  - ledgers/business_ops_handoff_ledger.schema.yaml
+  - checklists/operator_handoff.checklist.yaml
