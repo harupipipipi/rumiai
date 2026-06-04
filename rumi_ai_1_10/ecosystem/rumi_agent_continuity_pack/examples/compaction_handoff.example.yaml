@@ -1,0 +1,18 @@
+example:
+  id: compaction_handoff
+  pack_id: rumi_agent_continuity_pack
+  scenario: A pre-compaction anchor and post-compaction summary preserve must-keep
+    decisions and lost-context risks.
+  input_refs:
+  - workspace_ref:case-file
+  evidence_refs:
+  - evidence:review-note
+  - evidence:source-fragment
+  handoff_owner: defaultspack
+  review_gate: all_blocking_checks
+  expected_result: reviewed_handoff_packet
+  must_not:
+  - external_action
+  - runtime_execution
+  - secret_material
+  status: ready_for_owner_handoff

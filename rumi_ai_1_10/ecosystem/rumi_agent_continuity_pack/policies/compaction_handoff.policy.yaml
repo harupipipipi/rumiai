@@ -1,0 +1,21 @@
+policy:
+  pack_id: rumi_agent_continuity_pack
+  requires_before_after_evidence: true
+  requires_human_readable_restart_note: true
+  lost_context_risks_required: true
+  required_sections:
+  - pre_compaction_anchor
+  - post_compaction_summary
+  - lost_context_risks
+  - must_preserve
+  - resume_instructions
+  - owner_boundary_review
+  forbidden_effects:
+  - deleting_or_rewriting_source_messages
+  - claiming_runtime_compaction_authority
+  - writing_memory_from_summary
+  - recording_metrics_from_summary
+  owner_handoffs:
+    conversation_compaction_runtime: defaultspack
+    run_events_and_checkpoints: rumi_agent_workroom_pack
+    durable_memory: rumi_memory_knowledge_pack
