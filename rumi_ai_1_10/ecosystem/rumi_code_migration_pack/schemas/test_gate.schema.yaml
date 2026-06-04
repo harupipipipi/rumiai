@@ -1,0 +1,49 @@
+$schema: https://json-schema.org/draft/2020-12/schema
+$id: https://rumi.local/schemas/test_gate.schema.json
+title: Test Gate
+description: Code migration planning contract schema.
+type: object
+additionalProperties: false
+required:
+- gate_id
+- static_checks
+- unit_tests
+- integration_tests
+- e2e_tests
+- migration_smoke_tests
+- fixture_coverage
+- flake_policy
+- pass_fail_evidence
+properties:
+  gate_id:
+    type: string
+    minLength: 1
+  static_checks:
+    type: array
+    items:
+      type: string
+  unit_tests:
+    type: array
+    items:
+      type: string
+  integration_tests:
+    type: array
+    items:
+      type: string
+  e2e_tests:
+    type: array
+    items:
+      type: string
+  migration_smoke_tests:
+    type: array
+    items:
+      type: string
+  fixture_coverage:
+    type: string
+    minLength: 1
+  flake_policy:
+    type: string
+    minLength: 1
+  pass_fail_evidence:
+    type: string
+    minLength: 1

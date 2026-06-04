@@ -1,0 +1,45 @@
+$schema: https://json-schema.org/draft/2020-12/schema
+$id: https://rumi.local/schemas/codemod_plan.schema.json
+title: Codemod Plan
+description: Code migration planning contract schema.
+type: object
+additionalProperties: false
+required:
+- codemod_plan_id
+- transform_intent
+- matcher_strategy
+- dry_run_requirements
+- manual_review_buckets
+- generated_file_exclusions
+- idempotency_checks
+- validation_commands
+properties:
+  codemod_plan_id:
+    type: string
+    minLength: 1
+  transform_intent:
+    type: string
+    minLength: 1
+  matcher_strategy:
+    type: string
+    minLength: 1
+  dry_run_requirements:
+    type: array
+    items:
+      type: string
+  manual_review_buckets:
+    type: array
+    items:
+      type: string
+  generated_file_exclusions:
+    type: array
+    items:
+      type: string
+  idempotency_checks:
+    type: array
+    items:
+      type: string
+  validation_commands:
+    type: array
+    items:
+      type: string
