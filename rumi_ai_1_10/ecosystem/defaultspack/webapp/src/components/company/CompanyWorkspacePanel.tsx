@@ -85,16 +85,36 @@ export function CompanyWorkspacePanel({
   const [activeTab, setActiveTab] = useState<CompanyTab>("tasks");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const hasActiveConversation = Boolean(activeConversationId);
 
   const effectiveCompanies = useMemo(() => {
+    if (activeConversationId) return company ? [company] : [];
     if (!company) return companies;
     return [company, ...companies.filter((item) => item.id !== company.id)];
-  }, [companies, company]);
+  }, [activeConversationId, companies, company]);
 
   const loadCompany = useCallback(async (requestedCompanyId?: string | null) => {
     setBusy(true);
     setError(null);
     try {
+      if (!requestedCompanyId && !activeConversationId) {
+        setCompanies([]);
+        setActiveCompanyId(null);
+        setCompany(null);
+        setAgents([]);
+        setChannels([]);
+        setTasks([]);
+        setRuns([]);
+        setInboxItems([]);
+        setRoutes([]);
+        setMessages([]);
+        setP2PStatus(null);
+        setP2PIdentity(null);
+        setPeers([]);
+        setActiveChannelId(null);
+        return;
+      }
+
       const statusTarget = requestedCompanyId
         ? requestedCompanyId
         : activeConversationId
@@ -110,8 +130,8 @@ export function CompanyWorkspacePanel({
 
       const listedCompanies = companyListResult.status === "fulfilled" ? companyListResult.value.companies : [];
       const statusCompany = statusResult.status === "fulfilled" ? statusResult.value.company ?? null : null;
-      const selectedId = requestedCompanyId ?? statusCompany?.id ?? activeCompanyId ?? listedCompanies[0]?.id ?? null;
-      setCompanies(listedCompanies);
+      const selectedId = requestedCompanyId ?? statusCompany?.id ?? (activeConversationId ? null : activeCompanyId ?? listedCompanies[0]?.id ?? null);
+      setCompanies(activeConversationId ? (statusCompany ? [statusCompany] : []) : listedCompanies);
       setActiveCompanyId(selectedId);
       setCompany(statusCompany);
 
@@ -185,7 +205,7 @@ export function CompanyWorkspacePanel({
 
   const renderTab = () => {
     if (!activeCompanyId && activeTab !== "p2p") {
-      return <div className="p-3 text-[12px] text-zinc-500">Start or select a chat to create its employee group.</div>;
+      return <div className="p-3 text-[12px] text-zinc-500">Start or send a chat message to create its employee group.</div>;
     }
     switch (activeTab) {
       case "channels":
@@ -288,7 +308,7 @@ export function CompanyWorkspacePanel({
       <div className="border-b border-zinc-800/60 px-3 py-2">
         <p className="truncate text-[13px] font-medium text-zinc-100">Employees</p>
         <p className="truncate text-[10px] text-zinc-600">
-          {activeConversationTitle || activeConversationId || activeCompany?.name || "select or start a chat"}
+          {activeConversationTitle || activeConversationId || activeCompany?.name || "start a chat to create employees"}
         </p>
       </div>
 
@@ -303,15 +323,16 @@ export function CompanyWorkspacePanel({
         companies={effectiveCompanies}
         activeCompanyId={activeCompanyId}
         busy={busy}
+        emptyMessage={hasActiveConversation ? "No employee group loaded." : "Start or send a chat message to create its employee group."}
         onSelect={(companyId) => void loadCompany(companyId)}
-        onBootstrap={() => void run(() => companyResources.bootstrapCompanyWorkspace(
+        onBootstrap={hasActiveConversation ? () => void run(() => companyResources.bootstrapCompanyWorkspace(
           {
             source: "webapp",
             name: "Executive Team",
             ...(activeConversationId ? { conversation_id: activeConversationId, scope: "conversation" } : {}),
           },
           activeConversationId ? { conversationId: activeConversationId, scope: "conversation" } : undefined,
-        ))}
+        )) : undefined}
         onRefresh={() => void loadCompany(activeCompanyId)}
       />
 

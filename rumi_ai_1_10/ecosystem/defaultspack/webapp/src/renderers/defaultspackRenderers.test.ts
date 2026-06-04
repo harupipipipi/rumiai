@@ -5,6 +5,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 import { CompanyAgentList } from "../components/company/CompanyAgentList";
 import { CompanyTaskBoard } from "../components/company/CompanyTaskBoard";
+import { CompanyWorkspacePanel } from "../components/company/CompanyWorkspacePanel";
 import { defaultspackRendererIds, defaultspackRenderers, resolveDefaultspackRenderers } from "./defaultspackRenderers";
 
 test("defaultspack renderer registry covers visible shell regions", () => {
@@ -133,6 +134,20 @@ test("company task board renders dispatched completed runs", () => {
   assert.match(html, /Run a real MiniMax task through Company Workspace/);
   assert.match(html, /Agent reply/);
   assert.match(html, /Visible MiniMax result/);
+});
+
+test("company workspace renders a visible empty state before a chat exists", () => {
+  const html = renderToStaticMarkup(
+    createElement(CompanyWorkspacePanel, {
+      activeConversationId: null,
+      activeConversationTitle: "New Conversation",
+    }),
+  );
+
+  assert.match(html, /Employees/);
+  assert.match(html, /Employee Group/);
+  assert.match(html, /Start or send a chat message to create its employee group/);
+  assert.doesNotMatch(html, /Rumi Operations Company/);
 });
 
 test("company task board renders agent run errors", () => {

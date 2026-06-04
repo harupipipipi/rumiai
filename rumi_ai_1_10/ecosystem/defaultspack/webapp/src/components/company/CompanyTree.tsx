@@ -7,6 +7,7 @@ export function CompanyTree({
   activeCompanyId,
   activeTaskCount,
   busy = false,
+  emptyMessage = "No employee group loaded.",
   onSelect,
   onBootstrap,
   onRefresh,
@@ -15,6 +16,7 @@ export function CompanyTree({
   activeCompanyId?: string | null;
   activeTaskCount?: number;
   busy?: boolean;
+  emptyMessage?: string;
   onSelect?: (companyId: string) => void;
   onBootstrap?: () => void;
   onRefresh?: () => void;
@@ -79,7 +81,7 @@ export function CompanyTree({
         })}
         {companies.length === 0 && (
           <div className="rounded-md border border-zinc-800/70 bg-zinc-950/40 px-2 py-2 text-[11px] text-zinc-500">
-            No employee group loaded.
+            {emptyMessage}
           </div>
         )}
       </div>
