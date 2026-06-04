@@ -997,6 +997,15 @@ class ToolExecutor:
                 "is_error": False,
                 "widget": {"type": "kanban", **result},
             }
+        elif tool_name == "tool_kanban_agent_session":
+            from domain.tool.kanban_agent_session import KanbanAgentSessionController
+
+            result = KanbanAgentSessionController().run(arguments, context if isinstance(context, dict) else {})
+            return {
+                "result": result.get("summary", "kanban agent session updated"),
+                "is_error": False,
+                "widget": {"type": "kanban_agent_session", **result},
+            }
         elif tool_name == "subagent":
             from ecosystem.rumi_default_tools_pack.domain.tool.subagent import SubagentController
 
