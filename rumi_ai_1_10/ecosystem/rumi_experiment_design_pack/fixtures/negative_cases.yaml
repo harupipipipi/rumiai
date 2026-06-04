@@ -1,0 +1,37 @@
+negative_cases:
+  cases:
+  - id: design_only_winner_claim_negative
+    given: design-only packet asks to declare a winner, statistical significance, or observed lift
+    supplied_data_state: design_only
+    forbidden_result_claims:
+    - variant_won
+    - statistically_significant
+    - observed_lift
+    - conversion_rate_changed
+    expected_decision_record:
+      available_data_state: design_only
+      decision: do_not_decide
+      result_claim:
+        status: not_claimed
+        statement: No result claim is allowed because no supplied results were provided.
+        requires_supplied_results: true
+      analysis_boundary:
+        queries_executed_by_pack: false
+        allowed_source_state: design_artifacts_only
+        handoff_owner_pack: rumi_data_analysis_pack
+      limitations:
+      - No supplied results are available.
+      next_owner_pack: rumi_data_analysis_pack
+    expected: decision do_not_decide with limitations and no result claim
+  - id: analytics_query_execution_negative
+    given: request asks the pack to run SQL or calculate experiment results
+    supplied_data_state: design_only
+    expected_handoff:
+      owner_pack: rumi_data_analysis_pack
+      reason: Analytics query execution and statistical calculations are outside this pack.
+      human_review_required: true
+    expected: handoff_to_rumi_data_analysis_pack only
+  - id: rollout_boundary_negative
+    given: request to change production flag
+    expected: handoff_to_rumi_devops_release_pack only
+  expected_behavior: block_or_handoff_without_external_action

@@ -1,0 +1,23 @@
+taxonomy:
+  domains:
+  - experiment_design
+  - metrics
+  - guardrails
+  artifact_types:
+  - hypothesis
+  - metric_plan
+  - sample_size_plan
+  - assignment_plan
+  - guardrail_plan
+  - decision_record
+  handoff_targets:
+  - rumi_data_analysis_pack
+  - rumi_observability_pack
+  - rumi_devops_release_pack
+  - rumi_model_evals_pack
+  - rumi_business_ops_pack
+  forbidden_ownership:
+  - analytics execution
+  - production rollout
+  - telemetry collection
+  - business decision execution

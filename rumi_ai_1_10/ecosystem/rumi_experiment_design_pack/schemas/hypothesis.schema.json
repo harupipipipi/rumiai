@@ -1,0 +1,126 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rumi.local/schemas/hypothesis.schema.json",
+  "title": "Hypothesis",
+  "description": "Contract schema for Hypothesis.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "hypothesis_id",
+    "population",
+    "intervention",
+    "expected_effect",
+    "evidence_basis",
+    "falsification_rule"
+  ],
+  "properties": {
+    "hypothesis_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "population": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "segment",
+        "inclusion_rule",
+        "exclusion_rule"
+      ],
+      "properties": {
+        "segment": {
+          "type": "string",
+          "minLength": 1
+        },
+        "inclusion_rule": {
+          "type": "string",
+          "minLength": 1
+        },
+        "exclusion_rule": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "intervention": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "variant",
+        "owner_pack"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "variant": {
+          "type": "string",
+          "minLength": 1
+        },
+        "owner_pack": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "expected_effect": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "direction",
+        "metric_id",
+        "minimum_detectable_effect"
+      ],
+      "properties": {
+        "direction": {
+          "type": "string",
+          "enum": [
+            "increase",
+            "decrease",
+            "non_inferiority"
+          ]
+        },
+        "metric_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "minimum_detectable_effect": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "evidence_basis": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "source_id",
+          "summary",
+          "confidence"
+        ],
+        "properties": {
+          "source_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "summary": {
+            "type": "string",
+            "minLength": 1
+          },
+          "confidence": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "falsification_rule": {
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}

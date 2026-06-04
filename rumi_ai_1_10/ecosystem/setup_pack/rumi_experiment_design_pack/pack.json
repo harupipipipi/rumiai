@@ -1,0 +1,81 @@
+{
+  "pack_id": "rumi_experiment_design_pack",
+  "display_name": "Rumi Experiment Design Pack",
+  "description": "Declarative hypothesis, metric, sample-size, assignment, guardrail, instrumentation, and decision-record design pack.",
+  "target_pack_id": "rumi_experiment_design_pack",
+  "version": "0.1.0",
+  "recommended": false,
+  "risk_level": "medium",
+  "supports_all_ok": false,
+  "depends_on": [
+    {
+      "pack_id": "defaultspack",
+      "version": ">=2.0.0"
+    }
+  ],
+  "conflicts_with": [],
+  "compatibility": {
+    "python": ">=3.9",
+    "platforms": [
+      "macos",
+      "linux",
+      "windows"
+    ]
+  },
+  "overlap_policy": {
+    "analytics_query_execution": "handoff_to_rumi_data_analysis_pack",
+    "runtime_telemetry": "handoff_to_rumi_observability_pack",
+    "production_rollout": "handoff_to_rumi_devops_release_pack",
+    "model_benchmarking": "handoff_to_rumi_model_evals_pack",
+    "business_decision_execution": "handoff_to_rumi_business_ops_pack",
+    "feature_flag_mutation": "handoff_to_rumi_devops_release_pack",
+    "experiment_design_contract": "owned_by_rumi_experiment_design_pack",
+    "tool_aliases": "prefer_explicit_pack_namespace"
+  },
+  "defaultspack_promotion": {
+    "eligible": false,
+    "reason": "Rumi Experiment Design Pack is a declarative setup pack. Promotion requires owner-pack integration evidence, local-first audit receipts, and real-world success cases before any defaultspack inclusion.",
+    "criteria": [
+      "contract_tests_pass",
+      "overlap_policy_reviewed",
+      "maintainer_runtime_evidence_required",
+      "promotion_requires_real_world_success_cases",
+      "human_review_required_before_external_action"
+    ],
+    "promotion_blockers": [
+      "does_not_run_analytics_queries",
+      "does_not_claim_results_without_supplied_data",
+      "rollout_owned_by_devops_release_pack",
+      "telemetry_owned_by_observability_pack",
+      "must_validate_guardrail_and_rollback_assumptions"
+    ],
+    "promotion_evidence_required": [
+      "hypothesis_metric_alignment_cases",
+      "sample_size_assumption_cases",
+      "guardrail_decision_cases",
+      "quasi_experiment_bias_cases",
+      "handoff_acceptance_by_data_observability_devops"
+    ]
+  },
+  "marketplace": {
+    "id": "rumi.experiment_design_pack",
+    "registry": "bundled",
+    "publisher": "rumi-ai",
+    "status": "verified",
+    "category": "experiment-design",
+    "channel": "experimental"
+  },
+  "signing": {
+    "mode": "repository_reviewed",
+    "verified": true
+  },
+  "security_notes": [
+    "No credentials are bundled.",
+    "No executable code is included.",
+    "Network is none by default."
+  ],
+  "conflict_notes": [
+    "This pack declares owner boundaries and handoff policy instead of overriding runtime tools.",
+    "When two packs can handle a request, Rumi should prefer the owner surface declared here and hand off adjacent runtime actions."
+  ]
+}

@@ -1,0 +1,97 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rumi.local/schemas/metric_plan.schema.json",
+  "title": "Metric Plan",
+  "description": "Contract schema for Metric Plan.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "metric_id",
+    "primary_metric",
+    "guardrail_metrics",
+    "instrumentation_owner",
+    "data_availability_state",
+    "analysis_handoff"
+  ],
+  "properties": {
+    "metric_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "primary_metric": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "definition",
+        "direction",
+        "unit"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "definition": {
+          "type": "string",
+          "minLength": 1
+        },
+        "direction": {
+          "type": "string",
+          "enum": [
+            "increase",
+            "decrease",
+            "neutral"
+          ]
+        },
+        "unit": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "guardrail_metrics": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "threshold",
+          "stop_condition"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "threshold": {
+            "type": "string",
+            "minLength": 1
+          },
+          "stop_condition": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "instrumentation_owner": {
+      "type": "string",
+      "const": "rumi_observability_pack"
+    },
+    "data_availability_state": {
+      "type": "string",
+      "enum": [
+        "already_instrumented",
+        "needs_instrumentation",
+        "unknown"
+      ]
+    },
+    "analysis_handoff": {
+      "type": "string",
+      "const": "rumi_data_analysis_pack"
+    }
+  }
+}
