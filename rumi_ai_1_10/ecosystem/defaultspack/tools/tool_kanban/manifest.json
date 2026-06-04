@@ -52,6 +52,12 @@
               "move",
               "delete",
               "configure",
+              "block",
+              "unblock",
+              "subtask_add",
+              "subtask_update",
+              "subtask_complete",
+              "subtask_remove",
               "clear"
             ],
             "default": "list"
@@ -116,6 +122,83 @@
                 "type": "string"
               }
             ]
+          },
+          "depends_on": {
+            "oneOf": [
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "dependencies": {
+            "oneOf": [
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "blocked_by": {
+            "oneOf": [
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "blockers": {
+            "oneOf": [
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "blocker_reason": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "subtasks": {
+            "type": "array",
+            "items": {
+              "oneOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "object"
+                }
+              ]
+            }
+          },
+          "subtask_id": {
+            "type": "string"
+          },
+          "done": {
+            "type": "boolean"
           },
           "columns": {
             "type": "array",
