@@ -103,6 +103,18 @@ test("company task board renders dispatched completed runs", () => {
             status: "completed",
             model: "opencode-zen/minimax-m3-free",
             result_preview: "Visible MiniMax result",
+            conversation: [
+              {
+                role: "user",
+                label: "Assignment",
+                content: "Run a real MiniMax task through Company Workspace.",
+              },
+              {
+                role: "assistant",
+                label: "Agent reply",
+                content: "Visible MiniMax result",
+              },
+            ],
           },
         },
       ],
@@ -114,6 +126,9 @@ test("company task board renders dispatched completed runs", () => {
   assert.match(html, /minimax_worker/);
   assert.match(html, /completed/);
   assert.match(html, /opencode-zen\/minimax-m3-free/);
+  assert.match(html, /Conversation/);
+  assert.match(html, /Run a real MiniMax task through Company Workspace/);
+  assert.match(html, /Agent reply/);
   assert.match(html, /Visible MiniMax result/);
 });
 
@@ -142,6 +157,19 @@ test("company task board renders agent run errors", () => {
             status: "error",
             model: "stub/default",
             error: "stub: provider is not configured",
+            conversation: [
+              {
+                role: "user",
+                label: "Assignment",
+                content: "Try the same task with stub/default.",
+              },
+              {
+                role: "error",
+                label: "Agent error",
+                content: "stub: provider is not configured",
+                is_error: true,
+              },
+            ],
           },
         },
       ],
@@ -150,6 +178,8 @@ test("company task board renders agent run errors", () => {
 
   assert.match(html, /Stub fallback smoke/);
   assert.match(html, /stub\/default/);
+  assert.match(html, /Try the same task with stub\/default/);
+  assert.match(html, /Agent error/);
   assert.match(html, /stub: provider is not configured/);
 });
 
@@ -177,6 +207,19 @@ test("company agent list renders latest agent run errors", () => {
             status: "error",
             model: "stub/default",
             error: "stub: provider is not configured",
+            conversation: [
+              {
+                role: "user",
+                label: "Assignment",
+                content: "Try the same task with stub/default.",
+              },
+              {
+                role: "error",
+                label: "Agent error",
+                content: "stub: provider is not configured",
+                is_error: true,
+              },
+            ],
           },
         },
       ],
@@ -185,5 +228,7 @@ test("company agent list renders latest agent run errors", () => {
 
   assert.match(html, /Stub Worker/);
   assert.match(html, /error/);
+  assert.match(html, /Conversation/);
+  assert.match(html, /Try the same task with stub\/default/);
   assert.match(html, /stub: provider is not configured/);
 });

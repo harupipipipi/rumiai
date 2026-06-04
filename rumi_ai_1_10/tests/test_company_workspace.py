@@ -174,7 +174,8 @@ def test_company_runs_include_agent_model_and_result_preview(tmp_path, monkeypat
     monkeypatch.setenv("RUMI_DEFAULTSPACK_AGENT_RUNTIME_DIR", str(tmp_path / "agent_runtime"))
     _reset_company_store()
 
-    AgentRunStore().upsert_run(
+    run_store = AgentRunStore()
+    run_store.upsert_run(
         AgentRun(
             run_id="agent_preview",
             session_key="company:acme",
@@ -182,11 +183,20 @@ def test_company_runs_include_agent_model_and_result_preview(tmp_path, monkeypat
             task="Smoke",
             status="completed",
             model="opencode-zen/minimax-m3-free",
+            current_transcript_id="tr_agent_preview",
             result_json=[
                 {"type": "thinking", "thinking": "hidden chain"},
                 {"type": "text", "text": "Visible MiniMax result"},
             ],
         )
+    )
+    run_store.replace_messages(
+        "agent_preview",
+        "tr_agent_preview",
+        [
+            {"role": "user", "content": "Please confirm the Company Workspace task is actually delegated."},
+            {"role": "assistant", "content": [{"type": "text", "text": "Visible MiniMax result"}]},
+        ],
     )
     CompanyRuntimeStore().record_agent_run(
         "acme",
@@ -203,6 +213,18 @@ def test_company_runs_include_agent_model_and_result_preview(tmp_path, monkeypat
     assert agent_run["model"] == "opencode-zen/minimax-m3-free"
     assert agent_run["status"] == "completed"
     assert agent_run["result_preview"] == "Visible MiniMax result"
+    assert agent_run["conversation"] == [
+        {
+            "role": "user",
+            "label": "Assignment",
+            "content": "Please confirm the Company Workspace task is actually delegated.",
+        },
+        {
+            "role": "assistant",
+            "label": "Agent reply",
+            "content": "Visible MiniMax result",
+        },
+    ]
 
 
 def test_inbound_routes_ingest_message_and_queue_task(tmp_path, monkeypatch):

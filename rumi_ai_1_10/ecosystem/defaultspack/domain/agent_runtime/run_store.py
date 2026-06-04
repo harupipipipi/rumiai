@@ -473,6 +473,24 @@ class AgentRunStore:
                     ),
                 )
 
+    def list_messages(self, run_id: str, limit: int = 100) -> list[dict[str, Any]]:
+        clean_limit = max(1, min(int(limit or 100), 1000))
+        rows = self.conn.execute(
+            """
+            SELECT * FROM agent_messages
+            WHERE run_id = ?
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            (str(run_id), clean_limit),
+        ).fetchall()
+        result: list[dict[str, Any]] = []
+        for row in reversed(rows):
+            data = dict(row)
+            data["content_json"] = json_loads(data.get("content_json"), {})
+            result.append(data)
+        return result
+
     def record_tool_call(
         self,
         run_id: str,

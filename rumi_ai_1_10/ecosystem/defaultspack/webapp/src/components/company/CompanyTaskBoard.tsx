@@ -2,6 +2,7 @@ import { Check, ClipboardList, Plus, Send } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import type { CompanyAgent, CompanyRunLink, CompanyTask } from "../../lib/api";
+import { CompanyRunConversation } from "./CompanyRunConversation";
 
 const STATUSES = ["queued", "running", "waiting_approval", "blocked", "completed", "done"] as const;
 
@@ -108,7 +109,6 @@ export function CompanyTaskBoard({
               {items.map((task) => {
                 const latestRun = latestRunByTaskId.get(task.id);
                 const latestRunMessage = latestRun?.agent_run?.result_preview || latestRun?.agent_run?.error;
-                const latestRunMessageTone = latestRun?.agent_run?.result_preview ? "text-zinc-400" : "text-rose-300";
                 return (
                   <div key={task.id} className="rounded-md border border-zinc-800/70 bg-zinc-950/40 px-2 py-1.5">
                     <div className="flex items-start justify-between gap-2">
@@ -150,11 +150,11 @@ export function CompanyTaskBoard({
                     {latestRun?.agent_run?.model && (
                       <p className="mt-1 truncate font-mono text-[10px] text-zinc-600">{latestRun.agent_run.model}</p>
                     )}
-                    {latestRunMessage && (
-                      <p className={`mt-1 line-clamp-3 whitespace-pre-wrap text-[10px] leading-relaxed ${latestRunMessageTone}`}>
-                        {latestRunMessage}
-                      </p>
-                    )}
+                    <CompanyRunConversation
+                      messages={latestRun?.agent_run?.conversation}
+                      fallback={latestRunMessage}
+                      fallbackError={Boolean(latestRun?.agent_run?.error && !latestRun?.agent_run?.result_preview)}
+                    />
                   </div>
                 );
               })}
