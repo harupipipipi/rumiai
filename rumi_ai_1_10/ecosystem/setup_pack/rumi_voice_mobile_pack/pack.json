@@ -45,7 +45,7 @@
     "id": "rumi.voice_mobile_pack",
     "registry": "bundled",
     "publisher": "rumi-ai",
-    "status": "experimental",
+    "status": "verified",
     "category": "voice-mobile",
     "channel": "experimental"
   },

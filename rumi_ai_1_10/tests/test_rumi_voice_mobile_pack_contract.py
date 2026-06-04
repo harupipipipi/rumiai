@@ -96,7 +96,7 @@ def test_pack_setup_discoverable_and_validates_dependencies() -> None:
     assert "handoff_receipt_schema_cases" in candidate.defaultspack_promotion["promotion_evidence_required"]
     assert candidate.marketplace["registry"] == "bundled"
     assert candidate.marketplace["publisher"] == "rumi-ai"
-    assert candidate.marketplace["status"] == "experimental"
+    assert candidate.marketplace["status"] == "verified"
     assert candidate.marketplace["category"] == "voice-mobile"
     assert candidate.signing["verified"] is True
 
