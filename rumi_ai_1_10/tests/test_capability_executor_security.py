@@ -41,8 +41,8 @@ class _MockFunctionEntry:
     pack_id: str = "test_pack"
     function_id: str = "test_func"
     qualified_name: str = "test_pack.test_func"
-    function_dir: Optional[str] = "/tmp/test_func_dir"
-    main_py_path: Optional[str] = "/tmp/test_func_dir/main.py"
+    function_dir: Optional[str] = str(Path(__file__).resolve().parent)
+    main_py_path: Optional[str] = str(Path(__file__).resolve())
     main_binary_path: Optional[str] = None
     entrypoint: Optional[str] = "main.py:run"
     calling_convention: Optional[str] = None
@@ -260,6 +260,23 @@ class TestCommandFunctionPathTraversal:
         assert not resp.success
         assert resp.error_type == "security_violation"
         assert "escapes" in resp.error.lower()
+
+    def test_command_requires_absolute_executable_path(self, monkeypatch):
+        monkeypatch.setenv("RUMI_ALLOW_HOST_EXECUTION", "true")
+        executor = _make_test_executor()
+        entry = _MockFunctionEntry(command=["bash", "-lc", "echo hi"])
+
+        resp = executor._execute_command_function(
+            principal_id="test_principal",
+            entry=entry,
+            args={},
+            request_id="req_004b",
+            start_time=time.time(),
+        )
+
+        assert not resp.success
+        assert resp.error_type == "security_violation"
+        assert "absolute executable path" in resp.error.lower()
 
 
 # ===========================================================================

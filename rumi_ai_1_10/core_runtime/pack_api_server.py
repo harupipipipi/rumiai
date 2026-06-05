@@ -41,6 +41,8 @@ from .api.route_handlers import _compile_template_path, _is_safe_path_param
 from .api.api_response import APIResponse
 
 from .api import (
+    APIRouteTableMixin,
+    AuthGateMixin,
     PackHandlersMixin,
     ContainerHandlersMixin,
     NetworkHandlersMixin,
@@ -61,6 +63,9 @@ from .api import (
     OAuthHandlersMixin,
     ViewerHandlersMixin,
     DesktopHandlersMixin,
+    RequestBodyMixin,
+    ResponseWriterMixin,
+    WebMountMixin,
 )
 from .api._helpers import _log_internal_error, _SAFE_ERROR_MSG
 
@@ -180,6 +185,11 @@ class _PackThreadingHTTPServer(ThreadingHTTPServer):
 
 
 class PackAPIHandler(
+    ResponseWriterMixin,
+    AuthGateMixin,
+    WebMountMixin,
+    APIRouteTableMixin,
+    RequestBodyMixin,
     PackHandlersMixin,
     ContainerHandlersMixin,
     NetworkHandlersMixin,
@@ -253,6 +263,18 @@ class PackAPIHandler(
     def _is_safe_id(value: str) -> bool:
         """汎用 ID バリデーション。staging_id, privilege_id, flow_id 等に使用する。"""
         return _v_is_safe_id(value)
+
+    def _api_units_list(self, query: dict[str, str]) -> Any:
+        return self._units_list(query.get("store_id", ""))
+
+    def _api_capability_grants(self, query: dict[str, str]) -> Any:
+        return self._capability_grants_list(query.get("principal_id", ""))
+
+    def _api_capability_requests(self, query: dict[str, str]) -> Any:
+        return self._capability_list_requests(query.get("status", "all"))
+
+    def _api_pip_requests(self, query: dict[str, str]) -> Any:
+        return self._pip_list_requests(query.get("status", "all"))
 
 
     # --- テーブル駆動: web_mount / pre_auth_routes ---
@@ -376,81 +398,12 @@ class PackAPIHandler(
         *,
         include_builtin_core_control_panel: bool = False,
     ) -> int:
-        """Registry から全 Pack の api_routes を読み込み、ルーティングテーブルを構築する。
-
-        完全一致ルートは dict で O(1) ルックアップ。
-        パスパラメータ付きルートは正規表現でマッチ（route_handlers.py のパターンを踏襲）。
-        """
-        cls._api_route_exact = {}
-        cls._api_route_patterns = []
-        if registry is None:
-            return 0
-        count = 0
-        loaded_pack_ids: set[str] = set()
-
-        def _register_routes(pack_id: str, ecosystem: dict[str, Any]) -> int:
-            routes = ecosystem.get("api_routes")
-            if not routes or not isinstance(routes, list):
-                return 0
-            route_count = 0
-            for route in routes:
-                if not isinstance(route, dict):
-                    continue
-                method = route.get("method", "").upper()
-                handler_name = route.get("handler", "")
-                function_id = route.get("function_id", route.get("function", ""))
-                if not method or not (handler_name or function_id):
-                    continue
-                if handler_name and not HANDLER_NAME_RE.match(handler_name):
-                    logger.warning("Invalid handler name in api_routes: %s", handler_name)
-                    continue
-                entry = {
-                    "handler": handler_name,
-                    "function_id": function_id,
-                    "pack_id": pack_id,
-                    "pass_body": route.get("pass_body", False),
-                    "pass_query": route.get("pass_query", False),
-                    "response_mode": route.get("response_mode", "result"),
-                    "args": dict(route.get("args") or {}),
-                    "path_param_map": dict(route.get("path_param_map") or {}),
-                }
-                if "path_pattern" in route:
-                    compiled = _compile_template_path(route["path_pattern"])
-                    if compiled is not None:
-                        pattern, param_names = compiled
-                        cls._api_route_patterns.append(
-                            (method, pattern, param_names, entry)
-                        )
-                        route_count += 1
-                elif "path" in route:
-                    cls._api_route_exact[(method, route["path"])] = entry
-                    route_count += 1
-            return route_count
-
-        for pack_id, pack_info in registry.packs.items():
-            if pack_ids is not None and pack_id not in pack_ids:
-                continue
-            count += _register_routes(pack_id, pack_info.ecosystem)
-            loaded_pack_ids.add(pack_id)
-
-        should_include_control_panel = include_builtin_core_control_panel and (
-            pack_ids is None or "core_control_panel" in pack_ids
+        return APIRouteTableMixin.load_api_routes.__func__(
+            cls,
+            registry,
+            pack_ids,
+            include_builtin_core_control_panel=include_builtin_core_control_panel,
         )
-        if should_include_control_panel and "core_control_panel" not in loaded_pack_ids:
-            fallback_path = (
-                Path(__file__).resolve().parent
-                / "core_pack"
-                / "core_control_panel"
-                / "ecosystem.json"
-            )
-            try:
-                fallback_ecosystem = json.loads(fallback_path.read_text(encoding="utf-8"))
-            except Exception:
-                logger.warning("Failed to load builtin core_control_panel api routes", exc_info=True)
-            else:
-                count += _register_routes("core_control_panel", fallback_ecosystem)
-        logger.info("Loaded %d api_route entries", count)
-        return count
 
     def _is_pre_auth_route(self, method: str, path: str) -> bool:
         """method + path が pre_auth_table にマッチするか判定する。"""
@@ -1134,6 +1087,90 @@ class PackAPIHandler(
             ),
             extra_headers=[("Set-Cookie", session_cookie)],
         )
+
+    def _handle_builtin_public_get(self, path: str) -> bool:
+        if path == "/health":
+            alm = self.__class__.app_lifecycle_manager
+            if alm is not None:
+                health = alm.get_health()
+            else:
+                health = {"status": "ok", "needs_setup": True}
+            self._send_response(APIResponse(True, data=health))
+            return True
+
+        if path == "/":
+            try:
+                self.send_response(302)
+                self.send_header("Location", "/panel/")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+            except self._CLIENT_DISCONNECT_EXCEPTIONS:
+                self.close_connection = True
+            return True
+
+        return False
+
+    def _handle_web_mount_get(self, path: str, web_mount: dict[str, Any]) -> None:
+        if web_mount.get("auth_required", True):
+            if self._check_web_mount_auth("GET", web_mount):
+                self._serve_static_file(path, web_mount)
+                return
+            if self._allows_public_bootstrap_page(path, web_mount):
+                self._serve_panel_bootstrap_page()
+                return
+            self._send_response(APIResponse(False, error="Unauthorized"), 401)
+            return
+        self._serve_static_file(path, web_mount)
+
+    def _handle_pre_auth_get(self, path: str) -> bool:
+        if path == "/api/setup/status":
+            alm = self.__class__.app_lifecycle_manager
+            if alm is not None:
+                setup_status = alm.check_setup_status()
+            else:
+                setup_status = {
+                    "needs_setup": True,
+                    "reason": "lifecycle_manager_unavailable",
+                }
+            self._send_response(APIResponse(True, data=setup_status))
+            return True
+
+        if path == "/api/setup/oauth/start":
+            try:
+                oauth_start_result = self._oauth_start()
+                self._send_response(APIResponse(True, data=oauth_start_result))
+            except Exception as exc:
+                _log_internal_error("oauth_start", exc)
+                self._send_response(APIResponse(False, error=_SAFE_ERROR_MSG), 500)
+            return True
+
+        if path == "/callback":
+            try:
+                callback_query = parse_qs(urlparse(self.path).query)
+                callback_result = self._oauth_callback(callback_query)
+                if callback_result is None:
+                    self._oauth_send_result_page(
+                        "Rumi account connected",
+                        "Sign-in completed successfully.",
+                        success=True,
+                    )
+                else:
+                    err_msg = callback_result.get("error", "unknown_error")
+                    self._oauth_send_result_page(
+                        "Rumi account connection failed",
+                        err_msg,
+                        success=False,
+                    )
+            except Exception as exc:
+                _log_internal_error("oauth_callback", exc)
+                self._oauth_send_result_page(
+                    "Rumi account connection failed",
+                    "internal_error",
+                    success=False,
+                )
+            return True
+
+        return False
     
     def _read_raw_body(self) -> Optional[bytes]:
         """リクエストボディを読み取り、インスタンスに保持して返す。
@@ -1349,144 +1386,38 @@ class PackAPIHandler(
 
     
     def do_GET(self) -> None:
-        _pre_auth_path = urlparse(self.path).path
-        if not self._check_rate_limit(_pre_auth_path):
+        path = urlparse(self.path).path
+        if not self._check_rate_limit(path):
             return
         self._request_auth_mode = None
         self._panel_session = None
         self._panel_session_cookie = None
 
-        # --- システムルート（テーブル化対象外）---
-        if _pre_auth_path == "/health":
-            _alm = self.__class__.app_lifecycle_manager
-            if _alm is not None:
-                _health = _alm.get_health()
-            else:
-                _health = {"status": "ok", "needs_setup": True}
-            self._send_response(APIResponse(True, data=_health))
+        if self._handle_builtin_public_get(path):
             return
 
-        if _pre_auth_path == "/":
-            try:
-                self.send_response(302)
-                self.send_header("Location", "/panel/")
-                self.send_header("Content-Length", "0")
-                self.end_headers()
-            except self._CLIENT_DISCONNECT_EXCEPTIONS:
-                self.close_connection = True
+        web_mount = self._match_web_mount(path)
+        if web_mount is not None:
+            self._handle_web_mount_get(path, web_mount)
             return
 
-        # --- テーブル駆動: 静的配信 (web_mount) ---
-        _wm = self._match_web_mount(_pre_auth_path)
-        if _wm is not None:
-            if _wm.get("auth_required", True):
-                if self._check_web_mount_auth("GET", _wm):
-                    self._serve_static_file(_pre_auth_path, _wm)
-                    return
-                if self._allows_public_bootstrap_page(_pre_auth_path, _wm):
-                    self._serve_panel_bootstrap_page()
-                    return
-                self._send_response(APIResponse(False, error="Unauthorized"), 401)
-                return
-            self._serve_static_file(_pre_auth_path, _wm)
+        is_pre_auth = self._is_pre_auth_route("GET", path)
+        if is_pre_auth and self._handle_pre_auth_get(path):
             return
 
-        # --- テーブル駆動: pre-auth API ルート ---
-        _is_pre_auth = self._is_pre_auth_route("GET", _pre_auth_path)
-
-        if _is_pre_auth:
-            # 認証不要ルート: ビジネスロジックはここで処理
-            if _pre_auth_path == "/api/setup/status":
-                _alm = self.__class__.app_lifecycle_manager
-                if _alm is not None:
-                    _setup_status = _alm.check_setup_status()
-                else:
-                    _setup_status = {"needs_setup": True, "reason": "lifecycle_manager_unavailable"}
-                self._send_response(APIResponse(True, data=_setup_status))
-                return
-
-            # --- OAuth 2.1: 認可開始 (認証不要) ---
-            if _pre_auth_path == "/api/setup/oauth/start":
-                try:
-                    oauth_start_result = self._oauth_start()
-                    self._send_response(APIResponse(True, data=oauth_start_result))
-                except Exception as e:
-                    _log_internal_error("oauth_start", e)
-                    self._send_response(APIResponse(False, error=_SAFE_ERROR_MSG), 500)
-                return
-
-            # --- OAuth 2.1: コールバック (認証不要) ---
-            if _pre_auth_path == "/callback":
-                try:
-                    from urllib.parse import urlparse as _urlparse, parse_qs as _parse_qs
-                    _cb_query = _parse_qs(_urlparse(self.path).query)
-                    callback_result = self._oauth_callback(_cb_query)
-                    if callback_result is None:
-                        self._oauth_send_result_page(
-                            "Rumi account connected",
-                            "Sign-in completed successfully.",
-                            success=True,
-                        )
-                    else:
-                        _err_msg = callback_result.get("error", "unknown_error")
-                        self._oauth_send_result_page(
-                            "Rumi account connection failed",
-                            _err_msg,
-                            success=False,
-                        )
-                except Exception as e:
-                    _log_internal_error("oauth_callback", e)
-                    self._oauth_send_result_page(
-                        "Rumi account connection failed",
-                        "internal_error",
-                        success=False,
-                    )
-                return
-
-            # pre-auth テーブルにマッチしたが上記に該当しない場合
-            # → 認証スキップして通常ルーティングへ通過
-
-        # --- 認証チェック（pre-auth ルート以外）---
-        if not _is_pre_auth and not self._check_auth("GET", _pre_auth_path):
+        if not is_pre_auth and not self._check_auth("GET", path):
             self._send_response(APIResponse(False, error="Unauthorized"), 401)
             return
-        
-        parsed = urlparse(self.path)
-        path = parsed.path
-        query = {
-            key: values[-1]
-            for key, values in parse_qs(parsed.query, keep_blank_values=True).items()
-            if values
-        }
-        result: Any = None
-        
+
+        query = self._parse_query()
+
         try:
-            # --- api_routes テーブルディスパッチ (施策3) ---
             if self._dispatch_api_route("GET", path, query=query):
                 return
             if self._dispatch_defaultspack_http_route("GET", path):
                 return
 
-            if path == "/api/packs":
-                result = self._get_all_packs()
-                self._send_result(result)
-            
-            elif path == "/api/packs/pending":
-                result = self._get_pending_packs()
-                self._send_result(result)
-            
-            elif path.startswith("/api/packs/") and path.endswith("/status"):
-                pack_id = path.split("/")[3]
-                if not self._validate_pack_id(pack_id):
-                    self._send_response(APIResponse(False, error="Invalid pack_id"), 400)
-                    return
-                result = self._get_pack_status(pack_id)
-                if result:
-                    self._send_result(result)
-                else:
-                    self._send_response(APIResponse(False, error="Pack not found"), 404)
-            
-            elif path.startswith("/api/packs/") and path.endswith("/dependencies"):
+            if path.startswith("/api/packs/") and path.endswith("/dependencies"):
                 pack_id = path.split("/")[3]
                 if not self._validate_pack_id(pack_id):
                     self._send_response(APIResponse(False, error="Invalid pack_id"), 400)
@@ -1496,26 +1427,6 @@ class PackAPIHandler(
 
             elif path == "/api/runtime/available":
                 result = self._get_available_runtimes()
-                self._send_result(result)
-
-            elif path == "/api/containers":
-                result = self._get_containers()
-                self._send_result(result)
-            
-            elif path == "/api/privileges":
-                result = self._get_privileges()
-                self._send_result(result)
-            
-            elif path == "/api/docker/status":
-                result = self._get_docker_status()
-                self._send_result(result)
-
-            elif path == "/api/network/list":
-                result = self._network_list()
-                self._send_result(result)
-
-            elif path == "/api/secrets":
-                result = self._secrets_list()
                 self._send_result(result)
 
             # --- W19-B: Secret Grant GET endpoints ---
@@ -1536,61 +1447,6 @@ class PackAPIHandler(
                     self._send_result(result)
                 else:
                     self._send_response(APIResponse(False, error="Not found"), 404)
-
-
-            elif path == "/api/stores":
-                result = self._stores_list()
-                self._send_result(result)
-
-
-            elif path == "/api/stores/shared":
-                result = self._stores_shared_list()
-                self._send_result(result)
-
-            elif path == "/api/units":
-                query = parse_qs(urlparse(self.path).query)
-                store_id = query.get("store_id", [""])[0]
-                result = self._units_list(store_id)
-                self._send_result(result)
-
-            elif path == "/api/capability/blocked":
-                result = self._capability_list_blocked()
-                self._send_result(result)
-
-            elif path == "/api/capability/grants":
-                # GET /api/capability/grants?principal_id=xxx
-                query = parse_qs(urlparse(self.path).query)
-                principal_id = query.get("principal_id", [""])[0]
-                result = self._capability_grants_list(principal_id)
-                self._send_result(result)
-
-            elif path == "/api/capability/requests":
-                # GET /api/capability/requests?status=pending
-                query = parse_qs(urlparse(self.path).query)
-                status_filter = query.get("status", ["all"])[0]
-                result = self._capability_list_requests(status_filter)
-                self._send_result(result)
-
-            elif path == "/api/pip/blocked":
-                result = self._pip_list_blocked()
-                self._send_result(result)
-
-            elif path == "/api/pip/requests":
-                # GET /api/pip/requests?status=pending
-                query = parse_qs(urlparse(self.path).query)
-                status_filter = query.get("status", ["all"])[0]
-                result = self._pip_list_requests(status_filter)
-                self._send_result(result)
-
-            # --- Flow execution API ---
-            elif path == "/api/flows":
-                result = self._get_flow_list()
-                self._send_result(result)
-
-            # --- Pack custom routes (GET) ---
-            elif path == "/api/routes":
-                result = self._get_registered_routes()
-                self._send_result(result)
 
             else:
                 match = self._match_pack_route(path, "GET")
@@ -2213,6 +2069,55 @@ class PackAPIHandler(
         except Exception as e:
             _log_internal_error("do_DELETE", e)
             self._send_response(APIResponse(False, error=_SAFE_ERROR_MSG), 500)
+
+
+_PACK_API_HANDLER_CLASSMETHOD_MIXINS = (
+    (WebMountMixin, "load_web_mounts"),
+    (WebMountMixin, "load_pre_auth_routes"),
+    (APIRouteTableMixin, "load_api_routes"),
+)
+
+
+def _rebind_mixin_descriptor(target_cls, mixin_cls, method_name: str) -> None:
+    descriptor = mixin_cls.__dict__[method_name]
+    if isinstance(descriptor, classmethod):
+        rebound = classmethod(descriptor.__func__)
+    elif isinstance(descriptor, staticmethod):
+        rebound = staticmethod(descriptor.__func__)
+    else:
+        rebound = descriptor
+    setattr(target_cls, method_name, rebound)
+
+
+for _mixin_cls, _method_name in _PACK_API_HANDLER_CLASSMETHOD_MIXINS:
+    _rebind_mixin_descriptor(PackAPIHandler, _mixin_cls, _method_name)
+
+_PACK_API_HANDLER_METHOD_MIXINS = (
+    (WebMountMixin, "_match_web_mount"),
+    (WebMountMixin, "_serve_static_file"),
+    (APIRouteTableMixin, "_dispatch_api_route"),
+    (ResponseWriterMixin, "_send_response"),
+    (ResponseWriterMixin, "_send_raw_json"),
+    (ResponseWriterMixin, "_send_sse"),
+    (ResponseWriterMixin, "_send_defaultspack_http_result"),
+    (ResponseWriterMixin, "_send_result"),
+    (ResponseWriterMixin, "_sse_events_from_result"),
+    (AuthGateMixin, "_check_bearer_auth"),
+    (AuthGateMixin, "_parse_cookie_header"),
+    (AuthGateMixin, "_build_set_cookie"),
+    (AuthGateMixin, "_check_panel_origin"),
+    (AuthGateMixin, "_check_panel_session"),
+    (AuthGateMixin, "_check_auth"),
+    (AuthGateMixin, "_check_web_mount_auth"),
+    (RequestBodyMixin, "_read_raw_body"),
+    (RequestBodyMixin, "_parse_body"),
+    (RequestBodyMixin, "_discard_request_body"),
+    (RequestBodyMixin, "_parse_query"),
+)
+for _mixin_cls, _method_name in _PACK_API_HANDLER_METHOD_MIXINS:
+    _rebind_mixin_descriptor(PackAPIHandler, _mixin_cls, _method_name)
+PackAPIHandler._MIME_TYPES = WebMountMixin._MIME_TYPES
+
 class PackAPIServer:
     
     def __init__(
