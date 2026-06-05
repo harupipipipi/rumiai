@@ -28,5 +28,7 @@ params:
       mode: same_response
       include_source_context: true
       source_context_format: "${provider} source message"
+tools:
+  - web_search
 response_prompt:
   enabled: false

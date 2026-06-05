@@ -34,6 +34,7 @@ def test_line_default_profile_maps_text_message_to_user_input():
     assert envelope.metadata["line"]["reply_token"] == "reply"
     assert envelope.params["request_timeout"] == 55
     assert envelope.params["line_reply_deadline_seconds"] == 60
+    assert envelope.tools == ["web_search"]
 
 
 def test_line_default_profile_fallbacks_non_text_message():
