@@ -58,9 +58,12 @@ def test_prepare_chat_run_creates_message_chain_ir_and_context(tmp_path, monkeyp
 
     assert prepared.user_message["content"] == [{"type": "text", "text": "new"}]
     assert prepared.standard_messages[0] == {"role": "system", "content": "System prompt"}
+    assert prepared.standard_messages[1]["role"] == "system"
+    assert "Current date/time:" in prepared.standard_messages[1]["content"]
     assert prepared.standard_messages[-1] == {"role": "user", "content": "new"}
     assert prepared.chat_ir.schema_version == "rumi.chat.ir.v2"
     assert prepared.provider_planning["model"] == "stub/default"
+    assert prepared.request_context["current_date"]
     assert prepared.request_context["conversation_workspace_dir"]
     assert prepared.tool_context["history_json_path"].endswith("history.json")
     assert prepared.request_context["chat_references"]["conversation_id"] == conv["id"]

@@ -149,6 +149,82 @@ def _coding_write_tool_def(tool_name="coding_file_create"):
     }
 
 
+def _trusted_read_only_function_tool_def():
+    return {
+        "tool_id": "web_search",
+        "name": "web_search",
+        "risk": "medium",
+        "requires_approval": False,
+        "category": "network",
+        "action_type": "read",
+        "write_action": False,
+        "capability_grants": ["network.read"],
+        "trusted": True,
+        "source_pack_id": "rumi_default_tools_pack",
+        "metadata": {
+            "source_pack_id": "rumi_default_tools_pack",
+            "trusted": True,
+            "requires_approval": False,
+            "action_type": "read",
+            "category": "network",
+        },
+        "execution": {
+            "type": "rumi_function",
+            "qualified_name": "defaultspack:tool_web_search",
+        },
+    }
+
+
+def test_tool_executor_trusted_read_only_function_bypasses_pack_approval_gate(monkeypatch):
+    from domain.tool.executor import ToolExecutor
+
+    capability_executor = _success_executor()
+    monkeypatch.setattr(
+        ToolExecutor,
+        "_function_call_pack_approval_status",
+        staticmethod(lambda capability_executor, pack_id: (False, "not_approved")),
+    )
+
+    result = ToolExecutor()._execute_rumi_function(
+        _trusted_read_only_function_tool_def(),
+        {"query": "today's news", "limit": 5},
+        {
+            "principal_id": "defaultspack",
+            "capability_executor": capability_executor,
+            "_tool_server_approval_token_valid": True,
+        },
+    )
+
+    assert result["is_error"] is False
+    assert result["result"] == "done"
+    capability_executor.execute.assert_called_once()
+
+
+def test_tool_executor_trusted_web_search_pack_not_approved_falls_back_locally(monkeypatch):
+    from domain.tool.executor import ToolExecutor
+
+    capability_executor = _pack_not_approved_executor()
+    captured = {}
+
+    def fake_execute_local(self, tool_name, arguments, context):
+        captured["tool_name"] = tool_name
+        captured["arguments"] = dict(arguments or {})
+        return {"result": "local search ok", "is_error": False, "widget": {"type": "research_sources"}}
+
+    monkeypatch.setattr(ToolExecutor, "_execute_local", fake_execute_local)
+
+    result = ToolExecutor()._execute_rumi_function(
+        _trusted_read_only_function_tool_def(),
+        {"query": "today's news", "limit": 5},
+        {"principal_id": "defaultspack", "capability_executor": capability_executor},
+    )
+
+    assert result["is_error"] is False
+    assert result["result"] == "local search ok"
+    assert captured["tool_name"] == "web_search"
+    assert captured["arguments"] == {"query": "today's news", "limit": 5}
+
+
 def test_tool_executor_denied_browser_computer_without_approval_returns_approval_request(monkeypatch):
     from domain.tool.executor import ToolExecutor
 
