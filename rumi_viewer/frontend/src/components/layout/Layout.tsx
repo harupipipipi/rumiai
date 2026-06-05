@@ -2,6 +2,7 @@ import { Outlet, Navigate } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
 import { Header } from './Header';
 import { useAppStore } from '@/src/store';
+import { describeRuntimeBanner } from '@/src/lib/runtimeHealth';
 import { panelRoutes } from '@/src/lib/routes';
 
 export function Layout() {
@@ -9,10 +10,20 @@ export function Layout() {
   const runtimeReady = useAppStore(state => state.runtimeReady);
   const runtimeStatus = useAppStore(state => state.runtimeStatus);
   const runtimeError = useAppStore(state => state.runtimeError);
+  const runtimeDisconnected = useAppStore(state => state.runtimeDisconnected);
+  const lastRuntimeHealthyAt = useAppStore(state => state.lastRuntimeHealthyAt);
 
   if (!isSetupDone) {
     return <Navigate to={panelRoutes.setup} replace />;
   }
+
+  const runtimeBanner = describeRuntimeBanner({
+    runtimeReady,
+    runtimeStatus,
+    runtimeError,
+    runtimeDisconnected,
+    lastRuntimeHealthyAt,
+  });
 
   return (
     <div className="flex h-screen overflow-hidden bg-bg-main text-text-main">
@@ -24,17 +35,16 @@ export function Layout() {
             <div
               role="alert"
               className={`flex items-center gap-3 border-b px-6 py-3 text-sm ${
-                runtimeStatus === 'error'
+                runtimeBanner.tone === 'danger'
                   ? 'border-red-200 bg-red-50 text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-300'
                   : 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900/30 dark:bg-amber-950/20 dark:text-amber-300'
               }`}
             >
-              <div className={`h-2 w-2 rounded-full ${runtimeStatus === 'error' ? 'bg-red-500' : 'bg-amber-500 animate-pulse'}`} />
-              <span>
-                {runtimeStatus === 'error'
-                  ? runtimeError || 'Runtime startup failed. Open Settings or restart the kernel to recover.'
-                  : 'Runtime is warming up in the background…'}
-              </span>
+              <div className={`mt-1 h-2 w-2 shrink-0 rounded-full ${runtimeBanner.tone === 'danger' ? 'bg-red-500' : 'bg-amber-500 animate-pulse'}`} />
+              <div className="min-w-0">
+                <p className="font-medium">{runtimeBanner.title}</p>
+                <p className="text-xs opacity-80">{runtimeBanner.detail}</p>
+              </div>
             </div>
           )}
           <Outlet />
