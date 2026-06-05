@@ -15,6 +15,7 @@ _OPENCODE_ZEN_MODEL_SPECS: List[Dict[str, Any]] = [
         "defaults": {"chat": True, "coding": True, "reasoning": True},
         "context_window": 200000,
         "max_tokens": 32000,
+        "min_output_tokens": 96,
         "transport": "anthropic_messages",
         "endpoint_path": "/v1/messages",
         "source": "opencode_zen_minimax_m3_free",
@@ -39,7 +40,7 @@ def _known_model_entry(spec: Dict[str, Any]) -> Dict[str, Any]:
         "capabilities": {
             "chat": True,
             "streaming": True,
-            "tool_calls": True,
+            "tool_calls": False,
             "vision": True,
             "reasoning": True,
         },
@@ -51,6 +52,8 @@ def _known_model_entry(spec: Dict[str, Any]) -> Dict[str, Any]:
             "endpoint_path": spec["endpoint_path"],
             "source": spec["source"],
             "pricing": "free_promotion_or_account_policy",
+            "min_output_tokens": spec["min_output_tokens"],
+            "token_floor_reason": "MiniMax M3 can emit reasoning before final text; short caps may return thinking-only output.",
         },
     }
 
@@ -102,10 +105,22 @@ class OpencodeZenProvider(AnthropicProvider):
     def list_models(self) -> List[Dict[str, Any]]:
         return [dict(model) for model in self.KNOWN_MODELS]
 
+    @staticmethod
+    def _params_with_token_floor(params: Dict[str, Any] | None) -> Dict[str, Any]:
+        next_params = dict(params or {})
+        try:
+            requested = int(next_params.get("max_tokens", 4096) or 4096)
+        except (TypeError, ValueError):
+            requested = 4096
+        next_params["max_tokens"] = max(requested, 96)
+        return next_params
+
     def complete(self, model, messages, tools, params):
+        del tools
         model_id = self._assert_supported_model(model)
-        return super().complete(model_id, messages, tools, params)
+        return super().complete(model_id, messages, [], self._params_with_token_floor(params))
 
     def stream(self, model, messages, tools, params):
+        del tools
         model_id = self._assert_supported_model(model)
-        yield from super().stream(model_id, messages, tools, params)
+        yield from super().stream(model_id, messages, [], self._params_with_token_floor(params))

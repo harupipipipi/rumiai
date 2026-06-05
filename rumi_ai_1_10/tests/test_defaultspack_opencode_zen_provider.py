@@ -14,6 +14,19 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(DEFAULTSPACK_ROOT))
 
 
+class _FakeSseResponse:
+    def __init__(self, chunks):
+        self._chunks = iter(chunks)
+        self.closed = False
+
+    def read(self, size):
+        del size
+        return next(self._chunks, b"")
+
+    def close(self):
+        self.closed = True
+
+
 def _provider(monkeypatch):
     monkeypatch.setenv("OPENCODE_ZEN_API_KEY", "test-opencode-zen-key")
     from domain.ai_client.providers.opencode_zen_provider import OpencodeZenProvider
@@ -35,6 +48,8 @@ def test_opencode_zen_catalog_includes_minimax_m3_free():
     assert "opencode-zen/minimax-m3-free" in models
     assert models["opencode-zen/minimax-m3-free"]["metadata"]["transport"] == "anthropic_messages"
     assert models["opencode-zen/minimax-m3-free"]["metadata"]["endpoint_path"] == "/v1/messages"
+    assert not models["opencode-zen/minimax-m3-free"]["metadata"]["capabilities"]["tool_calls"]
+    assert models["opencode-zen/minimax-m3-free"]["metadata"]["min_output_tokens"] == 96
 
 
 def test_opencode_zen_complete_uses_anthropic_messages(monkeypatch):
@@ -65,11 +80,48 @@ def test_opencode_zen_complete_uses_anthropic_messages(monkeypatch):
 
     assert captured["path"] == "/v1/messages"
     assert captured["body"]["model"] == "minimax-m3-free"
-    assert captured["body"]["max_tokens"] == 8
+    assert captured["body"]["max_tokens"] == 96
     assert captured["body"]["temperature"] == 0
     assert captured["body"]["system"] == [{"type": "text", "text": "Be terse."}]
-    assert captured["body"]["tools"] == [{"name": "noop", "input_schema": {"type": "object"}}]
+    assert "tools" not in captured["body"]
     assert result["content"] == [{"type": "text", "text": "OK"}]
+
+
+def test_opencode_zen_stream_omits_tools_and_applies_token_floor(monkeypatch):
+    provider = _provider(monkeypatch)
+    captured = {}
+    response = _FakeSseResponse(
+        [
+            b'event: message_start\ndata: {"message":{"usage":{"input_tokens":1}}}\n\n'
+            b'event: content_block_delta\ndata: {"delta":{"type":"text_delta","text":"OK"}}\n\n'
+            b'event: message_delta\ndata: {"delta":{"stop_reason":"end_turn"},'
+            b'"usage":{"output_tokens":1}}\n\n'
+            b"event: message_stop\ndata: {}\n\n",
+        ]
+    )
+
+    def fake_request_stream(path, body):
+        captured["path"] = path
+        captured["body"] = body
+        return response
+
+    with patch.object(provider, "_request_stream", side_effect=fake_request_stream):
+        events = list(
+            provider.stream(
+                "opencode-zen/minimax-m3-free",
+                [{"role": "user", "content": "Say OK"}],
+                [{"name": "noop", "input_schema": {"type": "object"}}],
+                {"max_tokens": 8},
+            )
+        )
+
+    assert captured["path"] == "/v1/messages"
+    assert captured["body"]["model"] == "minimax-m3-free"
+    assert captured["body"]["max_tokens"] == 96
+    assert "tools" not in captured["body"]
+    assert events[0] == {"type": "content_delta", "delta": {"type": "text", "text": "OK"}}
+    assert events[-1]["type"] == "stream_end"
+    assert response.closed is True
 
 
 def test_opencode_zen_secret_keys_and_detection(monkeypatch):
