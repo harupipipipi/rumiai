@@ -5,6 +5,10 @@ from domain.chat.history_editor import (
     replace_range_with_message,
 )
 from domain.chat.message_converter import convert_to_standard
+from blocks.chat._prompt_helpers import (
+    build_summarize_prompt,
+    extract_text as _shared_extract_text,
+)
 
 
 def now_ms():
@@ -44,43 +48,16 @@ def normalize_protect_last_messages(input_data, default=12):
 
 
 def extract_text(response):
-    if isinstance(response, dict) and "data" in response:
-        response = response["data"]
-    if not isinstance(response, dict):
-        return str(response or "")
-    content = response.get("content", [])
-    if isinstance(content, str):
-        return content
-    parts = []
-    for block in content:
-        if isinstance(block, dict) and block.get("type") == "text":
-            parts.append(block.get("text", ""))
-        elif isinstance(block, str):
-            parts.append(block)
-    return "\n".join(parts)
+    return _shared_extract_text(response)
 
 
 def build_summary_prompt(standard_messages, instruction=None):
-    system_text = (
-        "You are a conversation compactor. Summarize this older chat range into "
-        "a compact assistant message. Preserve decisions, requirements, facts, "
-        "tool outcomes, file paths, IDs, and unresolved follow-ups. Omit routine "
-        "back-and-forth and verbose intermediate logs. Output only the summary."
+    return build_summarize_prompt(
+        standard_messages,
+        instruction,
+        persona="compactor",
+        user_prefix="Compact this conversation range:",
     )
-    if instruction:
-        system_text += "\n\nAdditional instruction: " + str(instruction)
-
-    lines = []
-    for msg in standard_messages:
-        role = msg.get("role", "unknown")
-        content = msg.get("content", "")
-        if content:
-            lines.append("[" + role + "]: " + content)
-
-    return [
-        {"role": "system", "content": system_text},
-        {"role": "user", "content": "Compact this conversation range:\n\n" + "\n".join(lines)},
-    ]
 
 
 def call_summary_ai(context, model, range_messages, instruction=None):
