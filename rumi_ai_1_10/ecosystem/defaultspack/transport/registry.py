@@ -293,6 +293,18 @@ _FALLBACK_HTTP_ROUTE_SPECS = [
     HttpRouteSpec("GET", "/api/chat/conversations/{id}/run-results/{run_id}/browser-screenshots", block_module="blocks.chat.browser_screenshots", path_inject={"id": "conversation_id", "run_id": "run_id"}),
     HttpRouteSpec("GET", "/v1/conversations/{id}/run-results/{run_id}/browser-screenshots", block_module="blocks.chat.browser_screenshots", path_inject={"id": "conversation_id", "run_id": "run_id"}),
     HttpRouteSpec("GET", "/api/chat/conversations/{id}/artifact-file", block_module="blocks.chat.artifact_file", path_inject={"id": "conversation_id"}),
+    HttpRouteSpec(
+        "GET",
+        "/api/human-operator/conversations/{conversation_id}/sessions/{session_id}",
+        block_module="blocks.human_operator.page",
+        path_inject={"conversation_id": "conversation_id", "session_id": "session_id"},
+    ),
+    HttpRouteSpec(
+        "POST",
+        "/api/human-operator/conversations/{conversation_id}/sessions/{session_id}/messages",
+        block_module="blocks.human_operator.append_message",
+        path_inject={"conversation_id": "conversation_id", "session_id": "session_id"},
+    ),
     HttpRouteSpec("POST", "/api/chat/group-storage", block_module="blocks.chat.group_storage"),
     HttpRouteSpec("GET", "/api/integrations/secrets", block_module="blocks.integrations.secrets"),
     HttpRouteSpec("POST", "/api/integrations/secrets", block_module="blocks.integrations.secrets"),
