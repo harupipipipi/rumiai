@@ -1523,37 +1523,26 @@ class BrowserComputerController:
             with self._edge_haze(action, action_payload) as edge_haze:
                 seat_result = self._try_computer_seat_action(action, action_payload)
             if seat_result is not None and seat_result.get("executed"):
-                result = self._background_action_success(action, action_payload, seat_result, system)
-                self._attach_edge_haze_result(result, edge_haze)
-                if action in {"computer.move", "computer.click"}:
-                    resolved = {"x": int(action_payload.get("x", 0)), "y": int(action_payload.get("y", 0))}
-                    if "target" in result:
-                        result["resolved_coordinates"] = resolved
-                    else:
-                        result["target"] = resolved
-                    if click_marker:
-                        result["marker"] = click_marker
-                if action == "computer.drag":
-                    result["target"] = {
-                        "from": {"x": int(action_payload.get("x1", 0)), "y": int(action_payload.get("y1", 0))},
-                        "to": {"x": int(action_payload.get("x2", 0)), "y": int(action_payload.get("y2", 0))},
-                    }
-                    if drag_marker:
-                        result["drag_marker"] = drag_marker
-                return result
-            return {
-                "action": action,
-                "executed": False,
-                "is_error": True,
-                "platform": system,
-                "background": True,
-                "reason": "The selected target does not support background automation.",
-                "recovery": {
-                    "kind": "foreground_fallback_available",
-                    "requires_approval": True,
-                    "note": "Retry with fallback='foreground' or physical=true only after explicit approval.",
-                },
-            }
+                if self._seat_result_is_background_safe(seat_result):
+                    result = self._background_action_success(action, action_payload, seat_result, system)
+                    self._attach_edge_haze_result(result, edge_haze)
+                    if action in {"computer.move", "computer.click"}:
+                        resolved = {"x": int(action_payload.get("x", 0)), "y": int(action_payload.get("y", 0))}
+                        if "target" in result:
+                            result["resolved_coordinates"] = resolved
+                        else:
+                            result["target"] = resolved
+                        if click_marker:
+                            result["marker"] = click_marker
+                    if action == "computer.drag":
+                        result["target"] = {
+                            "from": {"x": int(action_payload.get("x1", 0)), "y": int(action_payload.get("y1", 0))},
+                            "to": {"x": int(action_payload.get("x2", 0)), "y": int(action_payload.get("y2", 0))},
+                        }
+                        if drag_marker:
+                            result["drag_marker"] = drag_marker
+                    return result
+            return self._background_visible_window_required(action, action_payload, system)
         if action in {"computer.move", "computer.click", "computer.drag"} and virtual_only:
             self._set_ai_cursor(action_payload)
             result: dict[str, Any] = {"action": action, "executed": True, "platform": system, "virtual_cursor": True}
@@ -1704,6 +1693,51 @@ class BrowserComputerController:
         if action == "computer.scroll":
             result["amount"] = int(action_payload.get("amount", action_payload.get("clicks", 1)))
         return result
+
+    @staticmethod
+    def _seat_result_is_background_safe(seat_result: dict[str, Any]) -> bool:
+        if seat_result.get("uses_physical_input") is True:
+            return False
+        driver = str(seat_result.get("driver") or "").strip()
+        return driver in {
+            "browser_cdp",
+            "linux_x11_virtual",
+            "windows_postmessage",
+            "windows_uia",
+        }
+
+    @staticmethod
+    def _background_visible_window_required(
+        action: str,
+        action_payload: dict[str, Any],
+        system: str,
+    ) -> dict[str, Any]:
+        app = BrowserComputerController._app_name_from_payload(action_payload)
+        visible_target_required = bool(app or action_payload.get("window_id") or action_payload.get("hwnd"))
+        recovery_kind = (
+            "visible_window_required"
+            if visible_target_required
+            else "foreground_fallback_available"
+        )
+        note = (
+            "Show or focus the target app/window, then retry without background."
+            if visible_target_required
+            else "Retry with fallback='foreground' or physical=true only after explicit approval."
+        )
+        return {
+            "action": action,
+            "executed": False,
+            "is_error": True,
+            "platform": system,
+            "background": True,
+            "reason": "Background input is disabled for this target. Use visible windows and foreground approval instead.",
+            "recovery": {
+                "kind": recovery_kind,
+                "requires_approval": True,
+                "note": note,
+            },
+            **({"target_app": app} if app else {}),
+        }
 
     def _clipboard_read(self, payload: dict[str, Any], *, yolo_mode: bool) -> dict[str, Any]:
         include_content = self._truthy(payload.get("include_content")) or self._truthy(payload.get("full_content"))
