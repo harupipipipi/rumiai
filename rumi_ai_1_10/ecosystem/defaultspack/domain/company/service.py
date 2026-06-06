@@ -75,6 +75,19 @@ class CompanyService:
             **(metadata or {}),
         }
         company_id = str(existing.get("id") if existing else _conversation_company_id(conversation_id))
+        if existing:
+            return self.store.ensure_company(
+                company_id=company_id,
+                name=str(existing.get("name") or "Executive Team"),
+                description=str(existing.get("description") or "Employee group delegated from the current chat."),
+                agents=None,
+                metadata=merged_metadata,
+                conversation_group_id=str(
+                    existing.get("conversation_group_id")
+                    or (metadata or {}).get("conversation_group_id")
+                    or "company:" + company_id
+                ),
+            )
         return self.store.ensure_company(
             company_id=company_id,
             name=str((metadata or {}).get("name") or "Executive Team"),
