@@ -62,3 +62,26 @@ def test_tool_kanban_relations_manifest_loads_and_executes(tmp_path):
     assert "subtask_add" in tool["schema"]["parameters"]["properties"]["action"]["enum"]
     assert result["is_error"] is False
     assert result["widget"]["dependency_counts"]["total_dependencies"] == 1
+
+
+def test_kanban_block_action_keeps_dependency_aliases_in_summary(tmp_path):
+    context = {"conversation_workspace_dir": str(tmp_path / "workspace")}
+    controller = KanbanController()
+    root = controller.run({"action": "create", "title": "Root"}, context)["changed"]
+    child = controller.run({"action": "create", "title": "Child"}, context)["changed"]
+
+    blocked = controller.run(
+        {
+            "action": "block",
+            "card_id": child["id"],
+            "dependencies": [root["id"]],
+            "reason": "Waiting on root",
+        },
+        context,
+    )
+    listed = controller.run({"action": "list"}, context)
+
+    assert blocked["changed"]["depends_on"] == [root["id"]]
+    assert blocked["changed"]["blocked_by"] == [root["id"]]
+    assert listed["dependency_counts"]["total_dependencies"] == 1
+    assert listed["blocked_cards"][0]["blocked_by"] == [root["id"]]
