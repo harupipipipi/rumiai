@@ -52,7 +52,9 @@ asset_index:
     - examples/survey_theme_map.example.yaml
   invariants:
     required_secrets: []
-    required_network: []
+    required_network:
+      allowed_domains: []
+      allowed_ports: []
     executable_code: false
     supports_all_ok: false
     external_actions_are_handoffs: true
