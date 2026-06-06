@@ -12,12 +12,9 @@ taxonomy:
   - runtime_error_boundary
   - export_package
   handoff_targets:
-  - rumi_frontend_design_pack
-  - rumi_workspace_pack
-  - rumi_sandbox_runtime_pack
-  - rumi_mcp_gateway_pack
-  - rumi_api_toolsmith_pack
-  - rumi_multimodal_media_pack
+  - defaultspack
+  - rumi_default_tools_pack
+  - rumi_reference_ui_pack
   forbidden_ownership:
   - frontend design generation
   - file persistence

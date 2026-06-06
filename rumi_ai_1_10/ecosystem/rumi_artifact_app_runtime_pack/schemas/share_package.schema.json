@@ -61,7 +61,7 @@
       "properties": {
         "owner_pack": {
           "type": "string",
-          "const": "rumi_workspace_pack"
+          "const": "defaultspack"
         },
         "artifact_path": {
           "type": "string",
@@ -79,7 +79,7 @@
     },
     "file_persistence_owner": {
       "type": "string",
-      "const": "rumi_workspace_pack"
+      "const": "defaultspack"
     },
     "token_creation_allowed": {
       "type": "boolean",

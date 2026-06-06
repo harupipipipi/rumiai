@@ -56,8 +56,7 @@
         "source_owner": {
           "type": "string",
           "enum": [
-            "defaultspack",
-            "rumi_workspace_pack"
+            "defaultspack"
           ]
         },
         "ref": {
@@ -195,7 +194,7 @@
         },
         "file_persistence_owner": {
           "type": "string",
-          "const": "rumi_workspace_pack"
+          "const": "defaultspack"
         },
         "share_link_owner": {
           "type": "string",

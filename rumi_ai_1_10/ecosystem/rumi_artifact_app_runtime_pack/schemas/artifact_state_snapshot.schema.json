@@ -49,7 +49,7 @@
       "properties": {
         "owner_pack": {
           "type": "string",
-          "const": "rumi_workspace_pack"
+          "const": "defaultspack"
         },
         "artifact_path": {
           "type": "string",

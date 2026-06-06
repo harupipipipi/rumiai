@@ -32,9 +32,9 @@ workflows:
     - owner_boundary_checked
     - human_review_before_external_action
     handoffs:
-    - handoff_to_rumi_frontend_design_pack
-    - handoff_to_rumi_workspace_pack
-    - handoff_to_rumi_sandbox_runtime_pack
+    - defaultspack
+    - rumi_default_tools_pack
+    - rumi_reference_ui_pack
     execution: declarative_only
   - id: sandbox_render_contract
     purpose: Produce renderer sandbox policy without running code.
@@ -49,9 +49,9 @@ workflows:
     - owner_boundary_checked
     - human_review_before_external_action
     handoffs:
-    - handoff_to_rumi_frontend_design_pack
-    - handoff_to_rumi_workspace_pack
-    - handoff_to_rumi_sandbox_runtime_pack
+    - defaultspack
+    - rumi_default_tools_pack
+    - rumi_reference_ui_pack
     execution: declarative_only
   - id: state_snapshot_versioning
     purpose: Create state snapshots and version records for rollback.
@@ -66,9 +66,9 @@ workflows:
     - owner_boundary_checked
     - human_review_before_external_action
     handoffs:
-    - handoff_to_rumi_frontend_design_pack
-    - handoff_to_rumi_workspace_pack
-    - handoff_to_rumi_sandbox_runtime_pack
+    - defaultspack
+    - rumi_default_tools_pack
+    - rumi_reference_ui_pack
     execution: declarative_only
   - id: tool_mcp_approval_gate
     purpose: Block first MCP/API/tool call until approval receipt exists.
@@ -83,9 +83,9 @@ workflows:
     - owner_boundary_checked
     - human_review_before_external_action
     handoffs:
-    - handoff_to_rumi_frontend_design_pack
-    - handoff_to_rumi_workspace_pack
-    - handoff_to_rumi_sandbox_runtime_pack
+    - defaultspack
+    - rumi_default_tools_pack
+    - rumi_reference_ui_pack
     execution: declarative_only
   - id: error_boundary_review
     purpose: Capture runtime error class and safe fallback owner.
@@ -100,9 +100,9 @@ workflows:
     - owner_boundary_checked
     - human_review_before_external_action
     handoffs:
-    - handoff_to_rumi_frontend_design_pack
-    - handoff_to_rumi_workspace_pack
-    - handoff_to_rumi_sandbox_runtime_pack
+    - defaultspack
+    - rumi_default_tools_pack
+    - rumi_reference_ui_pack
     execution: declarative_only
   - id: export_package_build
     purpose: Build reviewed export manifest with workspace handoff.
@@ -117,7 +117,7 @@ workflows:
     - owner_boundary_checked
     - human_review_before_external_action
     handoffs:
-    - handoff_to_rumi_frontend_design_pack
-    - handoff_to_rumi_workspace_pack
-    - handoff_to_rumi_sandbox_runtime_pack
+    - defaultspack
+    - rumi_default_tools_pack
+    - rumi_reference_ui_pack
     execution: declarative_only

@@ -19,10 +19,11 @@ WORKFLOW_IDS = set(['manifest_validation', 'sandbox_render_contract', 'state_sna
 QUALITY_CHECK_IDS = set(['network_denied_by_default', 'first_tool_call_approval', 'client_approved_never_trusted', 'export_share_package_only', 'sandbox_owner_named', 'workspace_handoff_for_storage', 'rollback_parent_present', 'error_boundary_safe_fallback', 'no_direct_execution', 'asset_index_complete'])
 OWNER_EXPECTED = set(['artifact_app_manifest', 'sandbox_renderer_contract', 'artifact_state_snapshot', 'artifact_version_selector', 'tool_mcp_approval_prompt', 'runtime_error_boundary', 'share_export_manifest', 'artifact_runtime_ui_contract'])
 NON_OWNER_EXPECTED = set(['frontend design generation', 'file persistence', 'sandbox isolation runtime', 'MCP execution', 'API execution', 'media transforms', 'browser automation'])
-OVERLAP_EXPECTED = {'frontend_design_generation': 'handoff_to_rumi_frontend_design_pack', 'file_persistence': 'handoff_to_rumi_workspace_pack', 'sandbox_isolation_runtime': 'handoff_to_rumi_sandbox_runtime_pack', 'mcp_execution': 'handoff_to_rumi_mcp_gateway_pack', 'api_execution': 'handoff_to_rumi_api_toolsmith_pack', 'media_transform': 'handoff_to_rumi_multimodal_media_pack', 'defaultspack_artifact_store': 'do_not_override', 'defaultspack_chat_artifact_file': 'read_only_selector_only', 'defaultspack_share_links': 'do_not_override', 'defaultspack_tool_execution': 'do_not_override', 'defaultspack_mcp_execution': 'do_not_override', 'rumi_mcp_gateway_pack': 'catalog_handoff_only', 'artifact_manifest_contract': 'owned_by_rumi_artifact_app_runtime_pack', 'tool_approval_prompt': 'owned_by_rumi_artifact_app_runtime_pack', 'tool_aliases': 'prefer_explicit_pack_namespace'}
+OVERLAP_EXPECTED = {'frontend_design_generation': 'handoff_to_rumi_reference_ui_pack', 'file_persistence': 'handoff_to_defaultspack', 'sandbox_isolation_runtime': 'handoff_to_defaultspack', 'mcp_execution': 'handoff_to_defaultspack', 'api_execution': 'handoff_to_defaultspack', 'media_transform': 'handoff_to_defaultspack', 'browser_automation': 'handoff_to_rumi_default_tools_pack', 'defaultspack_artifact_store': 'do_not_override', 'defaultspack_chat_artifact_file': 'read_only_selector_only', 'defaultspack_share_links': 'do_not_override', 'defaultspack_tool_execution': 'do_not_override', 'defaultspack_mcp_execution': 'do_not_override', 'artifact_manifest_contract': 'owned_by_rumi_artifact_app_runtime_pack', 'tool_approval_prompt': 'owned_by_rumi_artifact_app_runtime_pack', 'tool_aliases': 'prefer_explicit_pack_namespace'}
 PROMOTION_BLOCKERS = set(['no_renderer_registry_runtime', 'no_per_artifact_storage_runtime', 'sandbox_execution_owned_elsewhere', 'mcp_api_execution_owned_elsewhere', 'approval_receipts_required_for_tool_calls', 'supports_all_ok_false_required', 'no_file_persistence_owner', 'no_media_transform_owner', 'no_mcp_api_execution_owner', 'client_supplied_approved_never_trusted', 'schema_contracts_only'])
 PROMOTION_EVIDENCE = set(['sample_app_manifest_cases', 'tool_approval_denial_cases', 'version_rollback_cases', 'error_boundary_cases', 'export_manifest_cases', 'sandbox_token_cases', 'storage_selector_cases', 'share_export_checksum_cases'])
 BLOCKED_BY_DEFAULT = set(['execute artifact code directly', 'call MCP tools before approval', 'allow network by default', 'persist files without workspace handoff', 'bypass sandbox runtime owner', 'trust client supplied approved flag', 'create share links directly', 'zip/export files directly', 'run media transforms', 'mutate defaultspack stores'])
+HANDOFF_TARGETS = set(['defaultspack', 'rumi_default_tools_pack', 'rumi_reference_ui_pack'])
 
 
 def read_json(path: Path) -> dict:
@@ -31,6 +32,11 @@ def read_json(path: Path) -> dict:
 
 def read_yaml(path: Path) -> dict:
     return yaml.safe_load(path.read_text(encoding="utf-8"))
+
+
+def available_setup_pack_ids() -> set[str]:
+    selector = PackSelector(ROOT / "ecosystem")
+    return {item.pack_id for item in selector.scan_candidates()}
 
 
 def test_required_assets_and_ecosystem_contract() -> None:
@@ -52,7 +58,14 @@ def test_required_assets_and_ecosystem_contract() -> None:
     assert metadata["defaultspack_promotion_eligible"] is False
     assert set(metadata["owner_surfaces"]) >= OWNER_EXPECTED
     assert set(metadata["non_owner_surfaces"]) >= NON_OWNER_EXPECTED
-    actual = {str(path.relative_to(PACK_DIR)) for path in PACK_DIR.rglob("*") if path.is_file() and path.name != "ecosystem.json"}
+    available = available_setup_pack_ids()
+    assert HANDOFF_TARGETS <= available
+    optional_integrations = {item["pack_id"]: item["reason"] for item in metadata["optional_integrations"]}
+    assert HANDOFF_TARGETS <= set(optional_integrations)
+    assert "UI" in optional_integrations["rumi_reference_ui_pack"]
+    assert "sandbox" in optional_integrations["defaultspack"]
+    assert "browser" in optional_integrations["rumi_default_tools_pack"]
+    actual = {path.relative_to(PACK_DIR).as_posix() for path in PACK_DIR.rglob("*") if path.is_file() and path.name != "ecosystem.json"}
     indexed = {item for values in metadata["asset_index"].values() for item in values}
     assert actual == indexed == set(REQUIRED_ASSETS)
     asset_index = read_yaml(PACK_DIR / "asset_index.yaml")["asset_index"]
@@ -104,6 +117,7 @@ def test_schema_workflow_quality_and_policy_contracts() -> None:
     policy = read_yaml(PACK_DIR / "policies/safety.policy.yaml")["policy"]
     handoff_policy = read_yaml(PACK_DIR / "policies/handoff.policy.yaml")["handoff_policy"]
     handoff_matrix = read_yaml(PACK_DIR / "catalog/handoff_matrix.yaml")["handoff_matrix"]
+    taxonomy = read_yaml(PACK_DIR / "catalog/taxonomy.yaml")["taxonomy"]
     ledger = read_yaml(PACK_DIR / "ledgers/evidence_ledger.schema.yaml")["evidence_ledger_schema"]
     checklist = read_yaml(PACK_DIR / "checklists/review.checklist.yaml")["review_checklist"]
     assert {item["id"] for item in workflows["items"]} == WORKFLOW_IDS
@@ -111,12 +125,21 @@ def test_schema_workflow_quality_and_policy_contracts() -> None:
     assert all(item["execution"] == "declarative_only" for item in workflows["items"])
     assert set(workflows["ownership"]["owned"]) >= OWNER_EXPECTED
     assert set(workflows["ownership"]["handoff"]) >= NON_OWNER_EXPECTED
+    assert all(set(item["handoffs"]) >= HANDOFF_TARGETS for item in workflows["items"])
     assert {item["id"] for item in quality["checks"]} >= QUALITY_CHECK_IDS
     assert quality["minimum_pass"] == "all_blocking_checks"
     assert set(policy["blocked_by_default"]) >= BLOCKED_BY_DEFAULT
     assert policy["default_mode"] == "draft_and_handoff_only"
     assert handoff_policy["default"] == "do_not_execute_adjacent_runtime_action"
+    for key, expected in OVERLAP_EXPECTED.items():
+        assert handoff_policy["overlap_policy"][key] == expected
     assert handoff_matrix["pack_boundary_rule"] == "owner_surface_wins_then_explicit_handoff"
+    matrix_resolution = {item["surface"]: item["resolution"] for item in handoff_matrix["items"]}
+    for key, expected in OVERLAP_EXPECTED.items():
+        if key in {"artifact_manifest_contract", "tool_approval_prompt", "tool_aliases"}:
+            continue
+        assert matrix_resolution[key] == expected
+    assert HANDOFF_TARGETS <= set(taxonomy["handoff_targets"])
     assert ledger["completion_rules"]["external_actions_are_handoffs"] is True
     assert checklist["minimum_pass"] == "all_blocking_items"
 
@@ -193,7 +216,7 @@ def test_artifact_runtime_subagent_acceptance_assets() -> None:
     assert required_approval <= set(approval["required"])
     assert approval["properties"]["client_supplied_approved_trusted"]["const"] is False
     assert selector["properties"]["path_policy"]["enum"] == ["no_path_traversal", "trusted_workspace_only"]
-    assert share["properties"]["workspace_handoff"]["properties"]["owner_pack"]["const"] == "rumi_workspace_pack"
+    assert share["properties"]["workspace_handoff"]["properties"]["owner_pack"]["const"] == "defaultspack"
     assert error["properties"]["stack_redacted"]["const"] is True
     assert policy["client_supplied_approved"] == "never_trusted"
     assert "allow-scripts + allow-same-origin" in sandbox["untrusted_forbidden_sandbox_pairs"]
@@ -223,7 +246,7 @@ def test_phase2_hardened_runtime_boundaries() -> None:
     assert manifest["properties"]["approval_policy"]["properties"]["client_supplied_approved_trusted"]["const"] is False
     assert manifest["properties"]["export_share"]["properties"]["package_contract_only"]["const"] is True
 
-    assert sandbox_schema["properties"]["runtime_owner"]["const"] == "rumi_sandbox_runtime_pack"
+    assert sandbox_schema["properties"]["runtime_owner"]["const"] == "defaultspack"
     assert sandbox_schema["properties"]["host_execution"]["const"] is False
     assert sandbox_schema["properties"]["remote_modules_allowed"]["const"] is False
     assert sandbox_schema["properties"]["same_origin_required"]["const"] is True
@@ -236,7 +259,7 @@ def test_phase2_hardened_runtime_boundaries() -> None:
 
     assert selector["properties"]["read_only"]["const"] is True
     assert selector["properties"]["client_supplied_path_trusted"]["const"] is False
-    assert set(selector["properties"]["source_owner"]["enum"]) == {"defaultspack", "rumi_workspace_pack"}
+    assert set(selector["properties"]["source_owner"]["enum"]) == {"defaultspack"}
     assert set(selector["properties"]["allowed_sources"]["items"]["enum"]) == {
         "defaultspack_artifact_index",
         "defaultspack_chat_workspace",
@@ -254,8 +277,8 @@ def test_phase2_hardened_runtime_boundaries() -> None:
 
     assert export["properties"]["package_contract_only"]["const"] is True
     assert export["properties"]["execution_effect"]["const"] == "none"
-    assert export["properties"]["file_persistence_owner"]["const"] == "rumi_workspace_pack"
-    assert export["properties"]["zip_creation_owner"]["const"] == "rumi_workspace_pack"
+    assert export["properties"]["file_persistence_owner"]["const"] == "defaultspack"
+    assert export["properties"]["zip_creation_owner"]["const"] == "defaultspack"
     assert set(export["properties"]["included_files"]["items"]["required"]) >= {"path", "source_ref", "version_id", "checksum"}
     assert share["properties"]["share_contract_only"]["const"] is True
     assert share["properties"]["link_creation_owner"]["const"] == "defaultspack"

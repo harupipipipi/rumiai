@@ -90,7 +90,7 @@
       "properties": {
         "owner_pack": {
           "type": "string",
-          "const": "rumi_workspace_pack"
+          "const": "defaultspack"
         },
         "artifact_path": {
           "type": "string",
@@ -108,11 +108,11 @@
     },
     "file_persistence_owner": {
       "type": "string",
-      "const": "rumi_workspace_pack"
+      "const": "defaultspack"
     },
     "zip_creation_owner": {
       "type": "string",
-      "const": "rumi_workspace_pack"
+      "const": "defaultspack"
     },
     "execution_effect": {
       "type": "string",

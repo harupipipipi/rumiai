@@ -39,7 +39,7 @@
     },
     "runtime_owner": {
       "type": "string",
-      "const": "rumi_sandbox_runtime_pack"
+      "const": "defaultspack"
     },
     "host_execution": {
       "type": "boolean",

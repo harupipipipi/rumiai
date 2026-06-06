@@ -47,8 +47,7 @@
     "storage_owner": {
       "type": "string",
       "enum": [
-        "defaultspack",
-        "rumi_workspace_pack"
+        "defaultspack"
       ]
     },
     "path_policy": {
@@ -61,8 +60,7 @@
     "source_owner": {
       "type": "string",
       "enum": [
-        "defaultspack",
-        "rumi_workspace_pack"
+        "defaultspack"
       ]
     },
     "source_ref": {

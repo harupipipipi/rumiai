@@ -1,42 +1,39 @@
 # Interfaces
 
-    ## Inputs
+## Inputs
 
-    - Local user-supplied artifacts or records emitted by adjacent owner packs.
-    - Schema IDs listed in `ecosystem.json`.
-    - Evidence IDs, review state, and handoff owner labels.
+- Local user-supplied artifacts or records emitted by adjacent owner packs.
+- Schema IDs listed in `ecosystem.json`.
+- Evidence IDs, review state, and handoff owner labels.
 
-    ## Outputs
+## Outputs
 
-    - Draft packets.
-    - Review checklist packets.
-    - Handoff packets for owner packs.
-    - UI contract templates for host surfaces to render.
-    - Export/share package manifests with version pins and checksums, but no created files, zips, links, uploads, or tokens.
+- Draft packets.
+- Review checklist packets.
+- Handoff packets for owner packs.
+- UI contract templates for host surfaces to render.
+- Export/share package manifests with version pins and checksums, but no created files, zips, links, uploads, or tokens.
 
-    ## Optional Integrations
+## Optional Integrations
 
-    - `rumi_frontend_design_pack`: Generates or audits app UI; this pack only validates runtime contracts.
-- `rumi_workspace_pack`: Persists artifact files and exports.
-- `rumi_sandbox_runtime_pack`: Owns actual isolation and code execution.
-- `rumi_mcp_gateway_pack`: Owns MCP server discovery and execution.
-- `rumi_api_toolsmith_pack`: Owns API tool calls and generated adapters.
-- `rumi_multimodal_media_pack`: Owns media transforms used by artifact apps.
+- `rumi_reference_ui_pack`: Hosts reference UI manifests and review surfaces for artifact runtime UI contracts.
+- `defaultspack`: Owns artifact persistence, sandbox execution, MCP and API execution, share-link creation, and media/runtime delivery.
+- `rumi_default_tools_pack`: Owns browser automation and operator-side inspection tools used around artifact apps.
 
-    ## Required Secrets
+## Required Secrets
 
-    None.
+None.
 
-    ## Does Not Provide
+## Does Not Provide
 
-    - frontend design generation
+- frontend design generation
 - file persistence
 - sandbox isolation runtime
 - MCP execution
 - API execution
 - media transforms
-    - browser automation
+- browser automation
 
-    ## Defaultspack Boundary
+## Defaultspack Boundary
 
-    This pack may reference defaultspack artifact indexes, chat workspaces, share package shapes, approval prompt fields, and tool/MCP execution names. It must not mutate defaultspack stores, create share links, invoke tools, approve itself, or trust client supplied `approved` flags.
+This pack may reference defaultspack artifact indexes, chat workspaces, share package shapes, approval prompt fields, and tool or MCP execution names. It must not mutate defaultspack stores, create share links, invoke tools, approve itself, or trust client supplied `approved` flags.

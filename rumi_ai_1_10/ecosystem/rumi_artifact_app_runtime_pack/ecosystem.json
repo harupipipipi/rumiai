@@ -57,28 +57,16 @@
     ],
     "optional_integrations": [
       {
-        "pack_id": "rumi_frontend_design_pack",
-        "reason": "Generates or audits app UI; this pack only validates runtime contracts."
+        "pack_id": "rumi_reference_ui_pack",
+        "reason": "Hosts reference UI manifests and review surfaces for artifact runtime UI contracts."
       },
       {
-        "pack_id": "rumi_workspace_pack",
-        "reason": "Persists artifact files and exports."
+        "pack_id": "defaultspack",
+        "reason": "Owns artifact persistence, sandbox execution, MCP and API execution, share-link creation, and media/runtime delivery."
       },
       {
-        "pack_id": "rumi_sandbox_runtime_pack",
-        "reason": "Owns actual isolation and code execution."
-      },
-      {
-        "pack_id": "rumi_mcp_gateway_pack",
-        "reason": "Owns MCP server discovery and execution."
-      },
-      {
-        "pack_id": "rumi_api_toolsmith_pack",
-        "reason": "Owns API tool calls and generated adapters."
-      },
-      {
-        "pack_id": "rumi_multimodal_media_pack",
-        "reason": "Owns media transforms used by artifact apps."
+        "pack_id": "rumi_default_tools_pack",
+        "reason": "Owns browser automation and operator-side inspection tools used around artifact apps."
       }
     ],
     "asset_index": {

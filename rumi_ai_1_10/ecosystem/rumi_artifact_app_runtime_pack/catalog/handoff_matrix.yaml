@@ -2,22 +2,25 @@ handoff_matrix:
   pack_boundary_rule: owner_surface_wins_then_explicit_handoff
   items:
   - surface: frontend_design_generation
-    resolution: handoff_to_rumi_frontend_design_pack
+    resolution: handoff_to_rumi_reference_ui_pack
     requires_human_review: true
   - surface: file_persistence
-    resolution: handoff_to_rumi_workspace_pack
+    resolution: handoff_to_defaultspack
     requires_human_review: true
   - surface: sandbox_isolation_runtime
-    resolution: handoff_to_rumi_sandbox_runtime_pack
+    resolution: handoff_to_defaultspack
     requires_human_review: true
   - surface: mcp_execution
-    resolution: handoff_to_rumi_mcp_gateway_pack
+    resolution: handoff_to_defaultspack
     requires_human_review: true
   - surface: api_execution
-    resolution: handoff_to_rumi_api_toolsmith_pack
+    resolution: handoff_to_defaultspack
     requires_human_review: true
   - surface: media_transform
-    resolution: handoff_to_rumi_multimodal_media_pack
+    resolution: handoff_to_defaultspack
+    requires_human_review: true
+  - surface: browser_automation
+    resolution: handoff_to_rumi_default_tools_pack
     requires_human_review: true
   - surface: defaultspack_artifact_store
     resolution: do_not_override
