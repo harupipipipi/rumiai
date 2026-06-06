@@ -22,10 +22,19 @@
   "dependencies": {
     "defaultspack": ">=2.0.0"
   },
+  "connectivity": {
+    "requires": [
+      "defaultspack"
+    ],
+    "provides": []
+  },
   "components": {},
   "load_order": [],
   "required_secrets": [],
-  "required_network": [],
+  "required_network": {
+    "allowed_domains": [],
+    "allowed_ports": []
+  },
   "host_execution": false,
   "metadata": {
     "required_secrets": [],
@@ -46,12 +55,20 @@
         "reason": "Adjacent owner for rumi_security_review_pack handoff; this pack keeps declarative evidence only."
       },
       {
+        "pack_id": "rumi_browser_automation_pack",
+        "reason": "Adjacent owner for rumi_browser_automation_pack handoff; this pack keeps declarative evidence only."
+      },
+      {
         "pack_id": "rumi_workflow_scheduler_pack",
         "reason": "Adjacent owner for rumi_workflow_scheduler_pack handoff; this pack keeps declarative evidence only."
       },
       {
         "pack_id": "rumi_computer_control_pack",
         "reason": "Adjacent owner for rumi_computer_control_pack handoff; this pack keeps declarative evidence only."
+      },
+      {
+        "pack_id": "rumi_default_tools_pack",
+        "reason": "Adjacent owner for rumi_default_tools_pack handoff; this pack keeps declarative evidence only."
       }
     ],
     "owner_surfaces": [

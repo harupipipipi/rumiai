@@ -21,14 +21,21 @@ REQUIRED_ASSETS = [
     "docs/architecture.md",
     "docs/interfaces.md",
     "docs/operations.md",
+    "catalog/approval_state_machine.yaml",
     "catalog/sop_mining_workflows.yaml",
     "catalog/sop_mining_quality_matrix.yaml",
+    "catalog/sop_step_taxonomy.yaml",
     "schemas/trace_evidence_record.schema.json",
     "schemas/sop_mining_record.schema.json",
+    "schemas/workflow_recipe.schema.json",
+    "schemas/sop_trace.schema.json",
     "policies/sop_mining_safety.policy.yaml",
+    "policies/trace_redaction.policy.yaml",
     "checklists/sop_mining_review.checklist.yaml",
     "ledgers/sop_mining_evidence_ledger.schema.yaml",
     "runbooks/sop_mining_runbook.template.yaml",
+    "templates/assumption_log.template.md",
+    "templates/runbook.template.md",
     "templates/sop_mining_handoff.template.md",
     "profiles/process_cartographer.profile.yaml",
     "prompts/sop_extractor.system.md",
@@ -56,12 +63,30 @@ def test_pack_required_assets_and_metadata() -> None:
     assert validate_ecosystem(ecosystem, raise_on_error=False) == []
     assert ecosystem["pack_identity"] == f"rumi:ecosystem/{PACK_ID}"
     assert ecosystem["dependencies"] == {"defaultspack": ">=2.0.0"}
+    assert ecosystem["connectivity"] == {
+        "requires": ["defaultspack"],
+        "provides": [],
+    }
     assert ecosystem["required_secrets"] == []
-    assert ecosystem["required_network"] == []
+    assert ecosystem["required_network"] == {
+        "allowed_domains": [],
+        "allowed_ports": [],
+    }
     assert ecosystem["metadata"]["required_secrets"] == []
     assert ecosystem["metadata"]["network_policy"] == "none_by_default"
     assert ecosystem["metadata"]["executable_code"] is False
     assert ecosystem["metadata"]["declarative_only"] is True
+    assert {
+        item["pack_id"] for item in ecosystem["metadata"]["optional_integrations"]
+    } >= {
+        "rumi_observability_pack",
+        "rumi_agentic_qa_pack",
+        "rumi_security_review_pack",
+        "rumi_browser_automation_pack",
+        "rumi_workflow_scheduler_pack",
+        "rumi_computer_control_pack",
+        "rumi_default_tools_pack",
+    }
 
     assert set(ecosystem["metadata"]["owner_surfaces"]) >= {
         "trace_redaction_contract",
@@ -89,6 +114,12 @@ def test_pack_required_assets_and_metadata() -> None:
         for values in ecosystem["metadata"]["asset_index"].values()
         for item in values
     }
+    all_pack_files = {
+        str(path.relative_to(PACK_DIR)).replace("\\", "/")
+        for path in PACK_DIR.rglob("*")
+        if path.is_file()
+    }
+    assert all_pack_files == set(REQUIRED_ASSETS)
     assert set(REQUIRED_ASSETS) - {"ecosystem.json"} <= indexed
     assert [asset for asset in sorted(indexed) if not (PACK_DIR / asset).is_file()] == []
 
