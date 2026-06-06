@@ -2,12 +2,12 @@ catalog_id: rumi_pack_suite.bundles
 schema_version: 1
 bundles:
   - bundle_id: coding_operator
-    packs: [defaultspack, rumi_default_tools_pack, rumi_code_ide_pack, rumi_model_evals_pack, rumi_devops_release_pack, rumi_security_review_pack]
+    packs: [defaultspack, rumi_default_tools_pack, rumi_local_agent_pack, rumi_model_catalog_pack]
   - bundle_id: research_workspace
-    packs: [defaultspack, rumi_research_pack, rumi_data_analysis_pack, rumi_workspace_pack, rumi_multimodal_media_pack]
+    packs: [defaultspack, rumi_local_agent_pack, rumi_model_catalog_pack, rumi_reference_ui_pack]
   - bundle_id: browser_operator
-    packs: [defaultspack, rumi_default_tools_pack, rumi_browser_element_pack, rumi_browser_automation_pack, rumi_security_review_pack]
+    packs: [defaultspack, rumi_default_tools_pack, rumi_reference_ui_pack]
   - bundle_id: personal_agent_os
-    packs: [defaultspack, rumi_agent_services_pack, rumi_memory_knowledge_pack, rumi_connector_gateway_pack, rumi_workflow_scheduler_pack, rumi_computer_control_pack]
+    packs: [defaultspack, rumi_default_tools_pack, rumi_local_agent_pack, rumi_model_catalog_pack, rumi_reference_ui_pack]
   - bundle_id: integration_gateway
-    packs: [defaultspack, rumi_mcp_gateway_pack, rumi_connector_gateway_pack, rumi_security_review_pack]
+    packs: [defaultspack, rumi_default_tools_pack, rumi_operations_company_pack, rumi_reference_ui_pack]

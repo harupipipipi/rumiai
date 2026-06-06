@@ -32,7 +32,9 @@ def test_pack_suite_required_assets_and_metadata() -> None:
     assert ecosystem["metadata"]["required_secrets"] == []
     assert ecosystem["metadata"]["network_policy"] == "none_by_default"
     assert ecosystem["metadata"]["executable_code"] is False
-    assert len(ecosystem["optional_integrations"]) >= 12
+    available = {item.pack_id for item in PackSelector(ROOT / "ecosystem").scan_candidates()}
+    assert {item["pack_id"] for item in ecosystem["optional_integrations"]} <= available
+    assert len(ecosystem["optional_integrations"]) >= 4
 
 
 def test_pack_suite_yaml_parses_and_has_expected_bundles() -> None:
@@ -41,9 +43,13 @@ def test_pack_suite_yaml_parses_and_has_expected_bundles() -> None:
     bundles = yaml.safe_load((PACK_DIR / "catalog" / "bundles.pack_suite.yaml").read_text(encoding="utf-8"))
     bundle_ids = {bundle["bundle_id"] for bundle in bundles["bundles"]}
     assert {"coding_operator", "research_workspace", "browser_operator", "personal_agent_os", "integration_gateway"} <= bundle_ids
+    available = {item.pack_id for item in PackSelector(ROOT / "ecosystem").scan_candidates()}
+    bundle_pack_ids = {pack_id for bundle in bundles["bundles"] for pack_id in bundle["packs"]}
+    assert bundle_pack_ids <= available
     matrix = yaml.safe_load((PACK_DIR / "catalog" / "overlap_matrix.pack_suite.yaml").read_text(encoding="utf-8"))
-    assert matrix["surfaces"]["browser_semantic_dom"] == "rumi_browser_element_pack"
-    assert matrix["surfaces"]["schedules_and_wakeups"] == "rumi_workflow_scheduler_pack"
+    assert matrix["surfaces"]["browser_semantic_dom"] == "rumi_default_tools_pack"
+    assert matrix["surfaces"]["schedules_and_wakeups"] == "defaultspack"
+    assert set(matrix["surfaces"].values()) <= available
 
 
 def test_pack_suite_setup_pack_discoverable_and_advisory_only() -> None:

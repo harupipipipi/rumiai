@@ -14,68 +14,24 @@
   ],
   "optional_integrations": [
     {
-      "pack_id": "rumi_code_ide_pack",
-      "reason": "Included in one or more suite bundles when installed."
+      "pack_id": "rumi_default_tools_pack",
+      "reason": "Adds concrete browser and computer tool surfaces to curated bundles."
     },
     {
-      "pack_id": "rumi_workspace_pack",
-      "reason": "Included in one or more suite bundles when installed."
+      "pack_id": "rumi_local_agent_pack",
+      "reason": "Adds reusable local agent presets, prompts, and examples."
     },
     {
-      "pack_id": "rumi_agent_services_pack",
-      "reason": "Included in one or more suite bundles when installed."
+      "pack_id": "rumi_model_catalog_pack",
+      "reason": "Adds provider and model catalog data for bundles that need model choice."
     },
     {
-      "pack_id": "rumi_browser_element_pack",
-      "reason": "Included in one or more suite bundles when installed."
+      "pack_id": "rumi_operations_company_pack",
+      "reason": "Adds long-running operations company profiles for ops-heavy bundles."
     },
     {
-      "pack_id": "rumi_mcp_gateway_pack",
-      "reason": "Included in one or more suite bundles when installed."
-    },
-    {
-      "pack_id": "rumi_research_pack",
-      "reason": "Included in one or more suite bundles when installed."
-    },
-    {
-      "pack_id": "rumi_data_analysis_pack",
-      "reason": "Included in one or more suite bundles when installed."
-    },
-    {
-      "pack_id": "rumi_devops_release_pack",
-      "reason": "Included in one or more suite bundles when installed."
-    },
-    {
-      "pack_id": "rumi_security_review_pack",
-      "reason": "Included in one or more suite bundles when installed."
-    },
-    {
-      "pack_id": "rumi_browser_automation_pack",
-      "reason": "Included in one or more suite bundles when installed."
-    },
-    {
-      "pack_id": "rumi_multimodal_media_pack",
-      "reason": "Included in one or more suite bundles when installed."
-    },
-    {
-      "pack_id": "rumi_memory_knowledge_pack",
-      "reason": "Included in one or more suite bundles when installed."
-    },
-    {
-      "pack_id": "rumi_model_evals_pack",
-      "reason": "Included in one or more suite bundles when installed."
-    },
-    {
-      "pack_id": "rumi_computer_control_pack",
-      "reason": "Included in one or more suite bundles when installed."
-    },
-    {
-      "pack_id": "rumi_connector_gateway_pack",
-      "reason": "Included in one or more suite bundles when installed."
-    },
-    {
-      "pack_id": "rumi_workflow_scheduler_pack",
-      "reason": "Included in one or more suite bundles when installed."
+      "pack_id": "rumi_reference_ui_pack",
+      "reason": "Adds visible sidebar and panel references for bundle navigation."
     }
   ],
   "components": {},

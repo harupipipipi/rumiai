@@ -8,4 +8,4 @@ None.
 
 ## Why This Exists
 
-Rumi now has specialized packs for code, workspace artifacts, agent services, browser understanding, MCP, research, data analysis, DevOps, security, browser automation, media, memory, model evals, computer control, connectors, and scheduling. This pack explains how those pieces fit together so users can customize Rumi without guessing which pack owns which surface.
+Rumi already ships a small but meaningful optional-pack layer around defaultspack: concrete tools, local-agent presets, model catalogs, operations-company flows, and reference UI manifests. This pack explains how those pieces fit together today so users can customize Rumi without guessing which available pack owns which surface. As more optional packs land, the same declarative catalogs can expand without changing runtime behavior.
