@@ -102,6 +102,7 @@ def render_session_page(
     }.get(prompt_view, "Original")
     prompt_render = _prompt_variant(selected_prompt_text, prompt_view)
     page_title = str(session.get("title") or conversation.get("title") or "Human Operator Canvas")
+    csrf_token = str(session.get("csrf_token") or "").strip()
     flash_label = {
         "assistant_added": "AI output appended.",
         "user_added": "User input appended.",
@@ -497,6 +498,7 @@ def render_session_page(
             button_class="",
             view=view,
             prompt_view=prompt_view,
+            csrf_token=csrf_token,
         ),
         user_form=_message_form(
             conversation_id,
@@ -508,6 +510,7 @@ def render_session_page(
             button_class=" secondary",
             view=view,
             prompt_view=prompt_view,
+            csrf_token=csrf_token,
         ),
         body=body,
         post_message_script=post_message_script,
@@ -562,6 +565,7 @@ def _message_form(
     button_class: str,
     view: str,
     prompt_view: str,
+    csrf_token: str,
 ) -> str:
     action = (
         "/api/human-operator/conversations/"
@@ -586,6 +590,7 @@ def _message_form(
     <input type="hidden" name="role" value="{role_value}">
     <input type="hidden" name="view" value="{view}">
     <input type="hidden" name="prompt_view" value="{prompt_view}">
+    <input type="hidden" name="csrf_token" value="{csrf_token}">
     <label class="label" for="{role}-format">Content Format</label>
     <select id="{role}-format" name="content_format">
       <option value="text">Plain Text</option>
@@ -604,6 +609,7 @@ def _message_form(
         role_value=html.escape(role),
         view=html.escape(view),
         prompt_view=html.escape(prompt_view),
+        csrf_token=html.escape(csrf_token),
         placeholder=html.escape(placeholder),
         button_class=button_class.strip(),
         button_label=html.escape(button_label),

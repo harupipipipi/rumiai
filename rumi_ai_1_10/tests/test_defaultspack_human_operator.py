@@ -135,6 +135,8 @@ def test_human_operator_tool_creates_session_and_routes_append_messages(isolated
     session = load_session(conversation["id"], "humanop_test")
     assert session is not None
     assert session["launch_snapshot"]["system_prompt"] == "You are a careful reviewer."
+    assert isinstance(session["csrf_token"], str)
+    assert len(session["csrf_token"]) >= 32
 
     page = page_run(
         {
@@ -147,6 +149,21 @@ def test_human_operator_tool_creates_session_and_routes_append_messages(isolated
     )
     assert page["_static"] is True
     assert "Human Operator Canvas" in page["body"]
+    assert 'name="csrf_token"' in page["body"]
+
+    rejected = append_message_run(
+        {
+            "conversation_id": conversation["id"],
+            "session_id": "humanop_test",
+            "role": "assistant",
+            "text": "I should not be appended.",
+            "content_format": "text",
+            "csrf_token": "wrong",
+        },
+        {},
+    )
+    assert rejected["_http_status"] == 403
+    assert rejected["error"]["code"] == "CSRF_REQUIRED"
 
     redirect = append_message_run(
         {
@@ -157,6 +174,7 @@ def test_human_operator_tool_creates_session_and_routes_append_messages(isolated
             "content_format": "text",
             "view": "readable",
             "prompt_view": "original",
+            "csrf_token": session["csrf_token"],
         },
         {},
     )

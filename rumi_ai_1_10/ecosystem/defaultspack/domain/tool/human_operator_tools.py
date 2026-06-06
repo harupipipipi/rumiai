@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import secrets
 import time
 from typing import Any
 
@@ -37,6 +38,7 @@ def human_operator_canvas_open(arguments: dict[str, Any], context: dict[str, Any
         "title": str(arguments.get("note") or "Human Operator Canvas").strip() or "Human Operator Canvas",
         "command": str(arguments.get("command") or "/start").strip() or "/start",
         "note": str(arguments.get("note") or "").strip(),
+        "csrf_token": secrets.token_urlsafe(32),
         "launch_snapshot": redact_sensitive_value(
             {
                 "model": str(arguments.get("model") or invoke_context.get("model") or HUMAN_OPERATOR_MODEL),

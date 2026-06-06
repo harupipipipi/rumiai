@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hmac
+
 from blocks._common import error
 from domain.human_operator.page import append_manual_message
 from domain.human_operator.session_store import load_session, session_route_path
@@ -13,9 +15,16 @@ def run(input_data, context):
         result = error("conversation_id and session_id are required", "INVALID_INPUT")
         result["_http_status"] = 400
         return result
-    if load_session(conversation_id, session_id) is None:
+    session = load_session(conversation_id, session_id)
+    if session is None:
         result = error("Human Operator session not found", "NOT_FOUND")
         result["_http_status"] = 404
+        return result
+    expected_token = str(session.get("csrf_token") or "").strip()
+    provided_token = str((input_data or {}).get("csrf_token") or "").strip()
+    if not expected_token or not provided_token or not hmac.compare_digest(provided_token, expected_token):
+        result = error("Human Operator CSRF token is required", "CSRF_REQUIRED")
+        result["_http_status"] = 403
         return result
     role = str((input_data or {}).get("role") or "user").strip().lower()
     text = str((input_data or {}).get("text") or "")
