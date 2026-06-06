@@ -14,6 +14,15 @@ from ..validation import HANDLER_NAME_RE
 
 logger = logging.getLogger(__name__)
 
+_FUNCTION_ROUTE_FORBIDDEN_ERRORS = {
+    "caller_requires_denied",
+    "grant_denied",
+    "pack_not_approved",
+    "permission_denied",
+    "requires_denied",
+    "trust_denied",
+}
+
 
 class APIRouteTableMixin:
     @classmethod
@@ -151,7 +160,7 @@ class APIRouteTableMixin:
 
         try:
             if entry.get("function_id"):
-                from ..pack_function_runtime import invoke_pack_function
+                from ..capability_executor import get_capability_executor
 
                 call_args = dict(body if pass_body and body is not None else {})
                 call_args.update(entry.get("args") or {})
@@ -162,12 +171,36 @@ class APIRouteTableMixin:
                             call_args[target_key] = path_params[source_key]
                 else:
                     call_args.update(path_params)
-                result = invoke_pack_function(
+                response = get_capability_executor().execute(
                     entry["pack_id"],
-                    entry["function_id"],
-                    call_args,
-                    {"pack_id": entry["pack_id"], "method": method_upper, "path": path},
+                    {
+                        "type": "function.call",
+                        "qualified_name": f"{entry['pack_id']}:{entry['function_id']}",
+                        "args": call_args,
+                        "request_id": f"api-route:{method_upper}:{path}",
+                        "context": {
+                            "pack_id": entry["pack_id"],
+                            "method": method_upper,
+                            "path": path,
+                            "_api_route": True,
+                        },
+                    },
                 )
+                if not getattr(response, "success", False):
+                    error_type = str(getattr(response, "error_type", "") or "")
+                    if error_type == "function_not_found":
+                        return False
+                    status = 403 if error_type in _FUNCTION_ROUTE_FORBIDDEN_ERRORS else 500
+                    if error_type == "invalid_request":
+                        status = 400
+                    elif error_type == "rate_limited":
+                        status = 429
+                    self._send_response(
+                        APIResponse(False, error=str(getattr(response, "error", None) or _SAFE_ERROR_MSG)),
+                        status,
+                    )
+                    return True
+                result = getattr(response, "output", None)
             else:
                 handler = getattr(self, handler_name, None)
                 if handler is None:

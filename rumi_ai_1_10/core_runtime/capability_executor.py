@@ -701,8 +701,63 @@ class CapabilityExecutor:
                 self._audit(principal_id, effective_permission_id, handler_id, resp, args, request_id)
                 return resp
 
+        pack_id = str(getattr(entry, "pack_id", "") or "")
+        pack_root_hint = getattr(entry, "function_dir", None) or getattr(entry, "main_py_path", None)
+        is_core = pack_id.startswith(_CORE_PACK_ID_PREFIX)
+        is_trusted_builtin = self._is_trusted_builtin_pack(pack_id, pack_root_hint=pack_root_hint)
+        if self._approval_manager is not None and not (is_core or is_trusted_builtin):
+            try:
+                approved_result = self._approval_manager.is_pack_approved_and_verified(pack_id)
+                if isinstance(approved_result, tuple):
+                    is_approved, reason = approved_result
+                else:
+                    is_approved = bool(approved_result)
+                    reason = None
+                if not is_approved and self._dev_auto_reapprove_pack(pack_id):
+                    approved_result = self._approval_manager.is_pack_approved_and_verified(pack_id)
+                    if isinstance(approved_result, tuple):
+                        is_approved, reason = approved_result
+                    else:
+                        is_approved = bool(approved_result)
+                        reason = None
+                if not is_approved:
+                    resp = CapabilityResponse(
+                        success=False,
+                        error=f"Pack not approved: {pack_id}",
+                        error_type="pack_not_approved",
+                        latency_ms=(time.time() - start_time) * 1000,
+                    )
+                    self._audit(
+                        principal_id,
+                        effective_permission_id,
+                        handler_id,
+                        resp,
+                        args,
+                        request_id,
+                        detail_reason=f"Pack '{pack_id}' not approved: {reason}",
+                    )
+                    return resp
+            except Exception as exc:
+                logger.error("approval_manager error during permission_id execute for pack '%s': %s", pack_id, exc)
+                resp = CapabilityResponse(
+                    success=False,
+                    error="Approval verification failed",
+                    error_type="approval_check_error",
+                    latency_ms=(time.time() - start_time) * 1000,
+                )
+                self._audit(
+                    principal_id,
+                    effective_permission_id,
+                    handler_id,
+                    resp,
+                    args,
+                    request_id,
+                    detail_reason=f"approval_manager error for pack '{pack_id}': {exc}",
+                )
+                return resp
+
         # 2. Trust チェック
-        is_builtin = entry.pack_id.startswith(_CORE_PACK_ID_PREFIX)
+        is_builtin = is_core or is_trusted_builtin
         builtin_sha256 = None
 
         if is_builtin:
@@ -725,21 +780,50 @@ class CapabilityExecutor:
                             trusted=False, detail_reason=trust_error)
                 return resp
 
-        # 3. Grant チェック（opt-in: grant_config が非 None のときのみ）
-        grant_config = {}
+        # 3. Grant チェック（host/binary/command は manifest grant_config がなくても必須）
+        calling_convention = getattr(entry, "calling_convention", None)
         entry_grant_config = self._entry_grant_config(entry)
-        if entry_grant_config is not None:
-            grant_result = self._grant_manager.check(principal_id, effective_permission_id)
+        grant_required = entry_grant_config is not None or calling_convention in {
+            "python_host",
+            "binary",
+            "command",
+        }
+        grant_config = dict(entry_grant_config or {})
+        if grant_required:
+            if self._grant_manager is None:
+                resp = CapabilityResponse(
+                    success=False,
+                    error="Capability grant manager is not available",
+                    error_type="grant_manager_unavailable",
+                    latency_ms=(time.time() - start_time) * 1000,
+                )
+                self._audit(
+                    principal_id,
+                    effective_permission_id,
+                    handler_id,
+                    resp,
+                    args,
+                    request_id,
+                    trusted=True,
+                    grant_allowed=False,
+                    grant_reason="CapabilityGrantManager not available",
+                )
+                return resp
+            grant_permission_id = permission_id_for_entry(entry)
+            grant_result = self._grant_manager.check(pack_id, grant_permission_id)
+            if not grant_result.allowed and principal_id != pack_id:
+                caller_grant_result = self._grant_manager.check(principal_id, grant_permission_id)
+                if caller_grant_result.allowed:
+                    grant_result = caller_grant_result
             if not grant_result.allowed:
                 resp = CapabilityResponse(success=False, error="Permission denied", error_type="grant_denied",
                                           latency_ms=(time.time() - start_time) * 1000)
                 self._audit(principal_id, effective_permission_id, handler_id, resp, args, request_id,
                             trusted=True, grant_allowed=False, grant_reason=grant_result.reason)
                 return resp
-            grant_config = grant_result.config or {}
+            grant_config.update(grant_result.config or {})
 
         # 4. calling_convention 分岐
-        calling_convention = getattr(entry, "calling_convention", None)
         if calling_convention and calling_convention in _VALID_CALLING_CONVENTIONS:
             resp = self._dispatch_by_calling_convention(
                 calling_convention=calling_convention, entry=entry, principal_id=principal_id,

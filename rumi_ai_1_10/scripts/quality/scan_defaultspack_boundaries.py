@@ -26,6 +26,22 @@ def _domain_name_for_path(path: Path) -> str:
     return rel.parts[0]
 
 
+def _relative_import_domain(py_path: Path, level: int, module: str) -> str | None:
+    if level <= 0:
+        return None
+    try:
+        package_parts = list(py_path.parent.relative_to(DOMAIN_ROOT).parts)
+    except ValueError:
+        return None
+    parent_hops = level - 1
+    if parent_hops > len(package_parts):
+        return None
+    base_parts = package_parts[: len(package_parts) - parent_hops]
+    module_parts = [part for part in str(module or "").split(".") if part]
+    resolved_parts = base_parts + module_parts
+    return resolved_parts[0] if resolved_parts else None
+
+
 def _iter_domain_imports(py_path: Path) -> set[str]:
     imports: set[str] = set()
     try:
@@ -36,6 +52,11 @@ def _iter_domain_imports(py_path: Path) -> set[str]:
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom):
             module = node.module or ""
+            if node.level:
+                target = _relative_import_domain(py_path, node.level, module)
+                if target:
+                    imports.add(target)
+                continue
             if module.startswith("ecosystem.defaultspack.domain."):
                 rest = module.split("ecosystem.defaultspack.domain.", 1)[1]
             elif module.startswith("domain."):

@@ -6,6 +6,7 @@ domains:
     - domain/capabilities
     - domain/chat
     - domain/coding
+    - domain/extensions
     - domain/input
     - domain/tool
     - domain/tool_policy
@@ -16,6 +17,8 @@ domains:
   ai_client:
     may_import:
     - domain/chat
+    - domain/components
+    - domain/extensions
     - domain/tool
     path: domain/ai_client
   api_map:
@@ -47,6 +50,7 @@ domains:
     - domain/capability
     - domain/coding
     - domain/dev
+    - domain/extensions
     - domain/prompt
     - domain/safety
     - domain/skill_trigger
@@ -88,6 +92,7 @@ domains:
     path: domain/extensions
   external:
     may_import:
+    - domain/components
     - domain/input
     - domain/integrations
     - domain/memory2
@@ -153,6 +158,7 @@ domains:
   knowledge:
     may_import:
     - domain/ai_client
+    - domain/extensions
     path: domain/knowledge
   media:
     may_import: []
@@ -172,7 +178,10 @@ domains:
     - domain/external
     path: domain/p2p
   prompt:
-    may_import: []
+    may_import:
+    - domain/capability
+    - domain/components
+    - domain/extensions
     path: domain/prompt
   prompts:
     may_import: []
@@ -214,6 +223,8 @@ domains:
     - domain/capabilities
     - domain/chat
     - domain/coding
+    - domain/components
+    - domain/extensions
     - domain/host_bridge
     - domain/integrations
     - domain/research
@@ -242,6 +253,7 @@ domains:
     path: domain/vision
   webhook:
     may_import:
+    - domain/components
     - domain/external
     - domain/webhook_url_providers
     path: domain/webhook
