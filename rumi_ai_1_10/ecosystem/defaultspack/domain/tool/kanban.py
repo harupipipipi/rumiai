@@ -9,6 +9,7 @@ from typing import Any
 
 
 DEFAULT_COLUMNS = ("Backlog", "Doing", "Review", "Done")
+DONE_COLUMN_TITLES = {"done", "complete", "completed", "closed"}
 
 
 def _now_ms() -> int:
@@ -156,11 +157,11 @@ class KanbanController:
     @staticmethod
     def _result(action: str, board: dict[str, Any], changed: dict[str, Any] | None = None) -> dict[str, Any]:
         columns = _columns_with_cards(board)
-        cards = _sorted_cards(board["cards"])
+        cards = _sorted_cards(board["cards"], board["columns"])
         done_ids = {
             column["id"]
             for column in board["columns"]
-            if str(column.get("title") or "").strip().lower() == "done"
+            if bool(column.get("done"))
         }
         open_count = len([card for card in cards if card.get("column_id") not in done_ids])
         summary = f"{len(cards)} cards across {len(board['columns'])} columns ({open_count} open)"
@@ -186,7 +187,7 @@ def tool_kanban(arguments: dict[str, Any] | None = None, context: dict[str, Any]
 
 def _default_columns() -> list[dict[str, Any]]:
     return [
-        {"id": _slugify(title), "title": title, "position": index}
+        {"id": _slugify(title), "title": title, "position": index, "done": _is_done_column_title(title)}
         for index, title in enumerate(DEFAULT_COLUMNS)
     ]
 
@@ -200,13 +201,23 @@ def _normalize_columns(value: Any) -> list[dict[str, Any]]:
         if isinstance(item, dict):
             title = str(item.get("title") or item.get("name") or item.get("id") or "").strip()
             column_id = str(item.get("id") or item.get("column_id") or "").strip()
+            has_explicit_done = item.get("done") is not None or item.get("is_done") is not None
+            is_done = bool(
+                item.get("done")
+                if item.get("done") is not None
+                else item.get("is_done")
+            )
         else:
             title = str(item or "").strip()
             column_id = ""
+            has_explicit_done = False
+            is_done = False
         if not title:
             title = f"Column {index + 1}"
+        if not has_explicit_done:
+            is_done = _is_done_column_title(title)
         column_id = _unique_id(_slugify(column_id or title) or f"column-{index + 1}", seen)
-        columns.append({"id": column_id, "title": title, "position": index})
+        columns.append({"id": column_id, "title": title, "position": index, "done": is_done})
     return columns or _default_columns()
 
 
@@ -275,7 +286,7 @@ def _place_card(
         return
     target["column_id"] = column_id
     siblings = [card for card in cards if card.get("id") != card_id and card.get("column_id") == column_id]
-    siblings = _sorted_cards(siblings)
+    siblings = _sorted_cards(siblings, columns)
     target_position = len(siblings) if position is None else max(0, min(_int_or_default(position, len(siblings)), len(siblings)))
     ordered = [*siblings[:target_position], target, *siblings[target_position:]]
     for index, card in enumerate(ordered):
@@ -290,7 +301,7 @@ def _compact_positions(cards: list[dict[str, Any]], columns: list[dict[str, Any]
         if card.get("column_id") not in valid_column_ids:
             card["column_id"] = fallback_column_id
     for column in columns:
-        column_cards = _sorted_cards([card for card in cards if card.get("column_id") == column["id"]])
+        column_cards = _sorted_cards([card for card in cards if card.get("column_id") == column["id"]], columns)
         for index, card in enumerate(column_cards):
             card["position"] = index
 
@@ -301,17 +312,24 @@ def _columns_with_cards(board: dict[str, Any]) -> list[dict[str, Any]]:
         columns.append(
             {
                 **column,
-                "cards": _sorted_cards([card for card in board["cards"] if card.get("column_id") == column["id"]]),
+                "cards": _sorted_cards(
+                    [card for card in board["cards"] if card.get("column_id") == column["id"]],
+                    board["columns"],
+                ),
             }
         )
     return columns
 
 
-def _sorted_cards(cards: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _sorted_cards(cards: list[dict[str, Any]], columns: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
+    column_positions = {
+        str(column.get("id") or ""): _int_or_default(column.get("position"), 0)
+        for column in (columns or [])
+    }
     return sorted(
         cards,
         key=lambda card: (
-            str(card.get("column_id") or ""),
+            column_positions.get(str(card.get("column_id") or ""), len(column_positions)),
             _int_or_default(card.get("position"), 0),
             _int_or_default(card.get("created_at"), 0),
             str(card.get("id") or ""),
@@ -328,6 +346,10 @@ def _copy_optional_card_fields(card: dict[str, Any], arguments: dict[str, Any]) 
     metadata = arguments.get("metadata")
     if isinstance(metadata, dict):
         card["metadata"] = metadata
+
+
+def _is_done_column_title(value: str) -> bool:
+    return _slugify(value) in DONE_COLUMN_TITLES
 
 
 def _slugify(value: str) -> str:
