@@ -21,10 +21,19 @@
   "dependencies": {
     "defaultspack": ">=2.0.0"
   },
+  "connectivity": {
+    "requires": [
+      "defaultspack"
+    ],
+    "provides": []
+  },
   "components": {},
   "load_order": [],
   "required_secrets": [],
-  "required_network": [],
+  "required_network": {
+    "allowed_domains": [],
+    "allowed_ports": []
+  },
   "host_execution": false,
   "metadata": {
     "required_secrets": [],
@@ -39,6 +48,10 @@
       {
         "pack_id": "rumi_memory_knowledge_pack",
         "reason": "Adjacent owner for rumi_memory_knowledge_pack handoff; this pack keeps declarative evidence only."
+      },
+      {
+        "pack_id": "rumi_api_toolsmith_pack",
+        "reason": "Adjacent owner for rumi_api_toolsmith_pack handoff; this pack keeps declarative evidence only."
       },
       {
         "pack_id": "rumi_code_ide_pack",

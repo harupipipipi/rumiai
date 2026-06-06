@@ -56,11 +56,27 @@ def test_pack_required_assets_and_metadata() -> None:
     assert validate_ecosystem(ecosystem, raise_on_error=False) == []
     assert ecosystem["pack_identity"] == f"rumi:ecosystem/{PACK_ID}"
     assert ecosystem["dependencies"] == {"defaultspack": ">=2.0.0"}
+    assert ecosystem["connectivity"] == {
+        "requires": ["defaultspack"],
+        "provides": [],
+    }
     assert ecosystem["required_secrets"] == []
-    assert ecosystem["required_network"] == []
+    assert ecosystem["required_network"] == {
+        "allowed_domains": [],
+        "allowed_ports": [],
+    }
     assert ecosystem["metadata"]["required_secrets"] == []
     assert ecosystem["metadata"]["network_policy"] == "none_by_default"
     assert ecosystem["metadata"]["executable_code"] is False
+    assert {
+        item["pack_id"] for item in ecosystem["metadata"]["optional_integrations"]
+    } >= {
+        "rumi_model_evals_pack",
+        "rumi_memory_knowledge_pack",
+        "rumi_api_toolsmith_pack",
+        "rumi_code_ide_pack",
+        "rumi_knowledge_marketplace_pack",
+    }
     assert set(ecosystem["metadata"]["owner_surfaces"]) >= {
         "prompt_artifact_catalog",
         "prompt_lint_rubric",
