@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from functools import lru_cache
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -196,6 +197,7 @@ def _legacy_http_routes_path() -> Path:
     return _defaultspack_root() / "docs" / "legacy_http_routes.yaml"
 
 
+@lru_cache(maxsize=1)
 def load_legacy_http_route_allowlist() -> dict[tuple[str, str, str], dict[str, Any]]:
     data = _read_yaml(_legacy_http_routes_path())
     allowlist: dict[tuple[str, str, str], dict[str, Any]] = {}
