@@ -7,6 +7,7 @@ from pathlib import Path
 import yaml
 
 from backend_core.ecosystem.spec.schema.validator import validate_ecosystem
+from core_runtime.setup_pack import SetupPackManager
 from ecosystem.setup_pack.pack_selector import PackSelector
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -55,7 +56,7 @@ def test_pack_manifest_schema_valid_and_asset_index_complete() -> None:
     assert ecosystem["metadata"]["network_policy"] == "none_by_default"
     assert ecosystem["metadata"]["executable_code"] is False
     assert ecosystem["metadata"]["owner_surfaces"]
-    shipped = {str(path.relative_to(PACK_DIR)) for path in PACK_DIR.rglob("*") if path.is_file()}
+    shipped = {path.relative_to(PACK_DIR).as_posix() for path in PACK_DIR.rglob("*") if path.is_file()}
     assert asset_index_paths(ecosystem) == shipped
 
 
@@ -89,6 +90,22 @@ def test_pack_setup_discoverable_validated_and_overlap_scoped() -> None:
     assert candidate.marketplace["status"] == "verified"
     assert candidate.marketplace["category"] == "observability"
     assert candidate.signing["verified"] is True
+
+
+def test_setup_pack_manager_installs_pack_with_declared_dependencies(tmp_path: Path) -> None:
+    manager = SetupPackManager(
+        root=ROOT / "ecosystem" / "setup_pack",
+        selection_file=tmp_path / "setup_pack_selection.json",
+        ecosystem_dir=ROOT / "ecosystem",
+    )
+    result = manager.install(PACK_ID)
+    assert result["success"] is True
+    assert result["installed_setup_pack_ids"] == ["defaultspack", PACK_ID]
+    assert result["installed_target_pack_ids"] == ["defaultspack", PACK_ID]
+    assert result["active_setup_pack_id"] == "defaultspack"
+    assert result["active_target_pack_id"] == "defaultspack"
+    assert result["granted_all_ok_target_pack_ids"] == ["defaultspack"]
+    assert result["skipped_all_ok_setup_pack_ids"] == [PACK_ID]
 
 
 def test_pack_observability_assets_have_semantic_contracts() -> None:
