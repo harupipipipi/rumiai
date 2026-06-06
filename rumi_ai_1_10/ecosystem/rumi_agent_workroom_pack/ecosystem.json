@@ -59,35 +59,15 @@
     "optional_integrations": [
       {
         "pack_id": "rumi_default_tools_pack",
-        "reason": "Owns concrete tool execution after the workroom emits approved handoff packets."
+        "reason": "Owns concrete tool execution plus browser and desktop actions after the workroom emits approved handoff packets."
       },
       {
-        "pack_id": "rumi_agent_services_pack",
-        "reason": "Owns adjacent agent-service choreography after the workroom emits approved handoff packets."
+        "pack_id": "defaultspack",
+        "reason": "Owns scheduler wakeups, durable run-adjacent persistence, and metrics receipts."
       },
       {
-        "pack_id": "rumi_browser_automation_pack",
-        "reason": "Owns browser operations and page interaction runtime."
-      },
-      {
-        "pack_id": "rumi_computer_control_pack",
-        "reason": "Owns desktop actions and computer seat runtime."
-      },
-      {
-        "pack_id": "rumi_workflow_scheduler_pack",
-        "reason": "Owns timers, reminders, and recurring run wakeups."
-      },
-      {
-        "pack_id": "rumi_workspace_pack",
-        "reason": "Persists files and exports run artifacts."
-      },
-      {
-        "pack_id": "rumi_observability_pack",
-        "reason": "Collects run metrics and traces."
-      },
-      {
-        "pack_id": "rumi_subagent_pr_manager_pack",
-        "reason": "Owns PR orchestration across subagents."
+        "pack_id": "rumi_operations_company_pack",
+        "reason": "Owns adjacent agent-service choreography and cross-worker PR/status orchestration after the workroom emits approved handoff packets."
       },
       {
         "pack_id": "rumi_model_catalog_pack",

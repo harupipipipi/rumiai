@@ -38,14 +38,9 @@
     "target_pack_id": {
       "type": "string",
       "enum": [
+        "defaultspack",
         "rumi_default_tools_pack",
-        "rumi_agent_services_pack",
-        "rumi_browser_automation_pack",
-        "rumi_computer_control_pack",
-        "rumi_workflow_scheduler_pack",
-        "rumi_workspace_pack",
-        "rumi_observability_pack",
-        "rumi_subagent_pr_manager_pack",
+        "rumi_operations_company_pack",
         "rumi_model_catalog_pack"
       ]
     },

@@ -1,12 +1,12 @@
 # Rumi Agent Workroom Pack
 
-    Declarative async agent workroom contracts for run state, plans, progress events, checkpoint/resume, intervention, replay, and run-board review.
+Declarative async agent workroom contracts for run state, plans, progress events, checkpoint/resume, intervention, replay, and run-board review.
 
-    This setup pack makes Rumi more customizable by adding a domain contract that can be selected independently from defaultspack. It is intentionally local-first, declarative, and reviewable: it creates schemas, workflow packets, quality gates, and handoff records instead of executing adjacent runtime actions.
+This setup pack makes Rumi more customizable by adding a domain contract that can be selected independently from defaultspack. It is intentionally local-first, declarative, and reviewable: it creates schemas, workflow packets, quality gates, and handoff records instead of executing adjacent runtime actions.
 
-    ## Provides
+## Provides
 
-    - agent_workroom_session
+- agent_workroom_session
 - run_event_log
 - task_plan_contract
 - progress_event_contract
@@ -15,9 +15,9 @@
 - deterministic_replay_index
 - run_board_ui_contract
 
-    ## Does Not Provide
+## Does Not Provide
 
-    - tool execution
+- tool execution
 - browser action
 - desktop action
 - schedule execution
@@ -26,20 +26,20 @@
 - subagent PR management
 - model routing
 
-    ## Required Secrets
+## Required Secrets
 
-    None. Network is denied by default and the pack contains no executable runtime code.
+None. Network is denied by default and the pack contains no executable runtime code.
 
-    ## Defaultspack Promotion
+## Defaultspack Promotion
 
-    Not eligible by default. Promotion requires:
+Not eligible by default. Promotion requires:
 
-    - no_durable_run_event_bus
+- no_durable_run_event_bus
 - no_signed_interrupt_tokens
 - tool_execution_owned_elsewhere
-- metrics_owned_by_observability_pack
-- file_persistence_owned_by_workspace_pack
+- metrics_owned_by_defaultspack
+- file_persistence_owned_by_defaultspack
 
-    ## Overlap Rule
+## Overlap Rule
 
-    If another pack can perform a step, Rumi should prefer the narrower owner surface. This pack emits a Handoff packet whenever the request crosses into runtime execution, connector IO, persistence, scheduling, security review, or media transformation.
+If another pack can perform a step, Rumi should prefer the narrower owner surface. This pack emits a Handoff packet whenever the request crosses into runtime execution, connector IO, persistence, scheduling, or multi-agent orchestration.

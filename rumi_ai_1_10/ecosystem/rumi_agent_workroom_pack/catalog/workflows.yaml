@@ -33,15 +33,10 @@ workflows:
     - owner_boundary_checked
     - human_review_before_external_action
     handoffs:
-    - handoff_to_rumi_default_tools_pack
-    - handoff_to_rumi_agent_services_pack
-    - handoff_to_rumi_browser_automation_pack
-    - handoff_to_rumi_computer_control_pack
-    - handoff_to_rumi_workflow_scheduler_pack
-    - handoff_to_rumi_workspace_pack
-    - handoff_to_rumi_observability_pack
-    - handoff_to_rumi_subagent_pr_manager_pack
-    - handoff_to_rumi_model_catalog_pack
+    - defaultspack
+    - rumi_default_tools_pack
+    - rumi_operations_company_pack
+    - rumi_model_catalog_pack
     execution: declarative_only
   - id: task_plan_progression
     purpose: Advance plan state from events without executing tools.
@@ -56,15 +51,10 @@ workflows:
     - owner_boundary_checked
     - human_review_before_external_action
     handoffs:
-    - handoff_to_rumi_default_tools_pack
-    - handoff_to_rumi_agent_services_pack
-    - handoff_to_rumi_browser_automation_pack
-    - handoff_to_rumi_computer_control_pack
-    - handoff_to_rumi_workflow_scheduler_pack
-    - handoff_to_rumi_workspace_pack
-    - handoff_to_rumi_observability_pack
-    - handoff_to_rumi_subagent_pr_manager_pack
-    - handoff_to_rumi_model_catalog_pack
+    - defaultspack
+    - rumi_default_tools_pack
+    - rumi_operations_company_pack
+    - rumi_model_catalog_pack
     execution: declarative_only
   - id: checkpoint_resume
     purpose: Seal checkpoint and produce a reviewed resume packet.
@@ -79,15 +69,10 @@ workflows:
     - owner_boundary_checked
     - human_review_before_external_action
     handoffs:
-    - handoff_to_rumi_default_tools_pack
-    - handoff_to_rumi_agent_services_pack
-    - handoff_to_rumi_browser_automation_pack
-    - handoff_to_rumi_computer_control_pack
-    - handoff_to_rumi_workflow_scheduler_pack
-    - handoff_to_rumi_workspace_pack
-    - handoff_to_rumi_observability_pack
-    - handoff_to_rumi_subagent_pr_manager_pack
-    - handoff_to_rumi_model_catalog_pack
+    - defaultspack
+    - rumi_default_tools_pack
+    - rumi_operations_company_pack
+    - rumi_model_catalog_pack
     execution: declarative_only
   - id: interrupt_redirect_cancel
     purpose: Apply human intervention to future events only.
@@ -102,15 +87,10 @@ workflows:
     - owner_boundary_checked
     - human_review_before_external_action
     handoffs:
-    - handoff_to_rumi_default_tools_pack
-    - handoff_to_rumi_agent_services_pack
-    - handoff_to_rumi_browser_automation_pack
-    - handoff_to_rumi_computer_control_pack
-    - handoff_to_rumi_workflow_scheduler_pack
-    - handoff_to_rumi_workspace_pack
-    - handoff_to_rumi_observability_pack
-    - handoff_to_rumi_subagent_pr_manager_pack
-    - handoff_to_rumi_model_catalog_pack
+    - defaultspack
+    - rumi_default_tools_pack
+    - rumi_operations_company_pack
+    - rumi_model_catalog_pack
     execution: declarative_only
   - id: deterministic_replay
     purpose: Rebuild run state from ordered events and checkpoints.
@@ -125,15 +105,10 @@ workflows:
     - owner_boundary_checked
     - human_review_before_external_action
     handoffs:
-    - handoff_to_rumi_default_tools_pack
-    - handoff_to_rumi_agent_services_pack
-    - handoff_to_rumi_browser_automation_pack
-    - handoff_to_rumi_computer_control_pack
-    - handoff_to_rumi_workflow_scheduler_pack
-    - handoff_to_rumi_workspace_pack
-    - handoff_to_rumi_observability_pack
-    - handoff_to_rumi_subagent_pr_manager_pack
-    - handoff_to_rumi_model_catalog_pack
+    - defaultspack
+    - rumi_default_tools_pack
+    - rumi_operations_company_pack
+    - rumi_model_catalog_pack
     execution: declarative_only
   - id: run_board_review_packet
     purpose: Render a run-board UI contract for human review.
@@ -148,13 +123,8 @@ workflows:
     - owner_boundary_checked
     - human_review_before_external_action
     handoffs:
-    - handoff_to_rumi_default_tools_pack
-    - handoff_to_rumi_agent_services_pack
-    - handoff_to_rumi_browser_automation_pack
-    - handoff_to_rumi_computer_control_pack
-    - handoff_to_rumi_workflow_scheduler_pack
-    - handoff_to_rumi_workspace_pack
-    - handoff_to_rumi_observability_pack
-    - handoff_to_rumi_subagent_pr_manager_pack
-    - handoff_to_rumi_model_catalog_pack
+    - defaultspack
+    - rumi_default_tools_pack
+    - rumi_operations_company_pack
+    - rumi_model_catalog_pack
     execution: declarative_only
