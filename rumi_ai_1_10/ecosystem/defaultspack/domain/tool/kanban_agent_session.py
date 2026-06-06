@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import time
 from typing import Any
 
@@ -8,6 +9,13 @@ from domain.tool.kanban import KanbanController
 
 def _now_ms() -> int:
     return int(time.time() * 1000)
+
+
+_STAGE_COLUMN_ALIASES = {
+    "Doing": ("doing", "active", "in-progress", "inprogress", "working", "wip"),
+    "Review": ("review", "qa-review", "qa", "code-review", "ready-for-review", "ready-review"),
+    "Done": ("done", "completed", "complete", "closed", "applied", "merged"),
+}
 
 
 class KanbanAgentSessionController:
@@ -74,6 +82,7 @@ class KanbanAgentSessionController:
             context,
             session_link,
             column=_default_column(card, arguments, "Doing"),
+            explicit_column=_has_explicit_column(arguments),
         )
         return self._result("start", updated_card, session_link, data)
 
@@ -122,6 +131,7 @@ class KanbanAgentSessionController:
             context,
             session_link,
             column=_default_column(card, arguments, "Review"),
+            explicit_column=_has_explicit_column(arguments),
         )
         return self._result("merge_report", updated_card, session_link, data)
 
@@ -138,6 +148,7 @@ class KanbanAgentSessionController:
             context,
             session_link,
             column=_default_column(card, arguments, "Review"),
+            explicit_column=_has_explicit_column(arguments),
         )
         return self._result("mark_ready", updated_card, session_link, {})
 
@@ -163,6 +174,7 @@ class KanbanAgentSessionController:
             context,
             session_link,
             column=_default_column(card, arguments, default_column) if default_column else None,
+            explicit_column=_has_explicit_column(arguments),
         )
         return self._result(terminal_state, updated_card, session_link, {})
 
@@ -200,6 +212,7 @@ class KanbanAgentSessionController:
         session_link: dict[str, Any],
         *,
         column: str | None = None,
+        explicit_column: bool = False,
     ) -> dict[str, Any]:
         metadata = _metadata(card)
         metadata["agent_session"] = session_link
@@ -214,16 +227,33 @@ class KanbanAgentSessionController:
             "card_id": card["id"],
             "metadata": metadata,
         }
-        if column:
-            update_args["column"] = column
-        try:
-            updated = self._kanban.run(update_args, context)
-        except ValueError:
-            if "column" not in update_args:
-                raise
-            update_args.pop("column", None)
-            updated = self._kanban.run(update_args, context)
+        target_column = self._resolve_target_column(card, context, column, explicit_column=explicit_column)
+        if target_column:
+            update_args["column"] = target_column
+        updated = self._kanban.run(update_args, context)
         return dict(updated["changed"])
+
+    def _resolve_target_column(
+        self,
+        card: dict[str, Any],
+        context: dict[str, Any],
+        column: str | None,
+        *,
+        explicit_column: bool,
+    ) -> str | None:
+        if not column:
+            return None
+        board = self._kanban.run({"action": "list"}, context)
+        columns = list(board.get("columns") if isinstance(board.get("columns"), list) else [])
+        exact = _find_column(columns, str(column))
+        if exact is not None:
+            return exact
+        if explicit_column:
+            raise ValueError(f"Unknown kanban column: {column}")
+        semantic = _find_stage_column(columns, str(column), current_column_id=str(card.get("column_id") or ""))
+        if semantic is not None:
+            return semantic
+        return None
 
     @staticmethod
     def _result(action: str, card: dict[str, Any], session_link: dict[str, Any], data: dict[str, Any]) -> dict[str, Any]:
@@ -280,6 +310,10 @@ def _default_column(card: dict[str, Any], arguments: dict[str, Any], fallback_ti
     return fallback_title
 
 
+def _has_explicit_column(arguments: dict[str, Any]) -> bool:
+    return any(arguments.get(key) for key in ("column", "column_id", "move_to"))
+
+
 def _error_message(output: dict[str, Any], fallback: str) -> str:
     error = output.get("error")
     if isinstance(error, dict):
@@ -287,3 +321,52 @@ def _error_message(output: dict[str, Any], fallback: str) -> str:
     if isinstance(error, str) and error:
         return error
     return fallback
+
+
+def _find_column(columns: list[dict[str, Any]], value: str) -> str | None:
+    candidate = str(value).strip()
+    if not candidate:
+        return None
+    normalized = _slugify(candidate)
+    for column in columns:
+        column_id = str(column.get("id") or "").strip()
+        title = str(column.get("title") or "").strip()
+        if candidate == column_id or candidate.lower() == title.lower():
+            return column_id
+        if normalized and (normalized == _slugify(column_id) or normalized == _slugify(title)):
+            return column_id
+    return None
+
+
+def _find_stage_column(columns: list[dict[str, Any]], stage: str, *, current_column_id: str) -> str | None:
+    current_column_id = str(current_column_id or "")
+    stage_aliases = set(_STAGE_COLUMN_ALIASES.get(stage, ()))
+    if stage == "Done":
+        for column in columns:
+            if bool(column.get("done")):
+                return str(column.get("id") or "")
+    for alias in stage_aliases:
+        resolved = _find_column(columns, alias)
+        if resolved is not None:
+            return resolved
+    if stage == "Done":
+        return None
+    current_position = 0
+    for column in columns:
+        if str(column.get("id") or "") == current_column_id:
+            current_position = int(column.get("position") or 0)
+            break
+    for column in columns:
+        column_id = str(column.get("id") or "")
+        if column_id == current_column_id:
+            continue
+        if bool(column.get("done")):
+            continue
+        if int(column.get("position") or 0) > current_position:
+            return column_id
+    return None
+
+
+def _slugify(value: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", str(value or "").strip().lower())
+    return slug.strip("-")
