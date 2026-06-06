@@ -20,6 +20,7 @@ from domain.webhook.endpoint_store import WebhookEndpointStore  # noqa: E402
 from domain.webhook.inbound import handle_inbound_webhook  # noqa: E402
 from domain.ai_client.model_call import call_model  # noqa: E402
 from domain.ai_client.model_pack_store import ModelPackStore  # noqa: E402
+from domain.ai_client.model_runtime_settings import ModelRuntimeSettingsService  # noqa: E402
 from domain.ai_client.model_router import ModelRoutingDecision, ModelRoutingRequest, route_model_request  # noqa: E402
 from domain.ai_client.client import AIClient  # noqa: E402
 
@@ -576,6 +577,57 @@ def test_model_pack_review_chain_uses_isolated_reviewer(monkeypatch, tmp_path):
     assert [call["model"] for call in provider.calls] == ["generator", "reviewer"]
     assert provider.calls[0]["params"]["thinking_level"] == "medium"
     assert provider.calls[1]["tools"] == []
+
+
+def test_builtin_rumi_model_pack_uses_available_runtime_model(monkeypatch, tmp_path):
+    settings_path = tmp_path / "frontend_settings.json"
+    settings_path.write_text(json.dumps({"models": {}}), encoding="utf-8")
+    monkeypatch.setattr(AIClient, "_settings_path", lambda self: settings_path)
+
+    class DemoProvider:
+        def __init__(self):
+            self.calls = []
+
+        def complete(self, model_name, messages, tools, params):
+            self.calls.append({"model": model_name, "messages": messages, "tools": tools, "params": params})
+            return {"content": [{"type": "text", "text": "DRAFT_RESPONSE: runtime ok"}]}
+
+    provider = DemoProvider()
+    client = AIClient()
+    client._providers = {"stub": object(), "google": provider}
+
+    monkeypatch.setattr(
+        AIClient,
+        "list_models",
+        lambda self: [{"id": "google/gemini-2.5-flash", "provider": "google", "configured": True}],
+    )
+
+    def fake_resolve(self, model):
+        if model == "google/gemini-2.5-flash":
+            return provider, "gemini-2.5-flash"
+        raise AssertionError(model)
+
+    monkeypatch.setattr(AIClient, "resolve_provider", fake_resolve)
+
+    response = client.complete("modelpack/rumi", [{"role": "user", "content": "hello"}], [], {})
+
+    assert response["content"][0]["text"] == "runtime ok"
+    assert response["metadata"]["rumi_process"]["base_model"] == "google/gemini-2.5-flash"
+    assert [call["model"] for call in provider.calls] == ["gemini-2.5-flash"]
+
+
+def test_model_pack_store_materializes_builtin_rumi_with_runtime_base_model(monkeypatch):
+    monkeypatch.setattr(
+        ModelRuntimeSettingsService,
+        "_runtime_rumi_base_model",
+        lambda self, settings=None: "google/gemini-2.5-flash",
+    )
+
+    pack = ModelPackStore({"model_packs": [], "composite_models": []}).get("modelpack/rumi")
+
+    assert pack is not None
+    assert [member.model for member in pack.members] == ["google/gemini-2.5-flash", "google/gemini-2.5-flash"]
+    assert pack.metadata["base_model"] == "google/gemini-2.5-flash"
 
 
 def test_model_call_uses_required_capabilities(monkeypatch):

@@ -907,6 +907,8 @@ class AIClient:
         )
         generator_model = self._member_model(generator_member)
         reviewer_model = self._member_model(reviewer_member)
+        generator_model = self._resolve_rumi_member_model(generator_model)
+        reviewer_model = self._resolve_rumi_member_model(reviewer_model)
         context = rumi_process.context_for_request(messages, tools or [], params)
         composite_metadata = composite.get("metadata") if isinstance(composite.get("metadata"), dict) else {}
         budget = composite.get("budget") if isinstance(composite.get("budget"), dict) else {}
@@ -1045,6 +1047,23 @@ class AIClient:
         except (TypeError, ValueError):
             parsed = default
         return max(1, min(int(upper), parsed))
+
+    def _resolve_rumi_member_model(self, model):
+        model_id = str(model or "").strip()
+        if model_id != rumi_process.RUMI_BASE_MODEL:
+            return model
+        available_models: list[str] = []
+        for profile in self.list_models():
+            if not isinstance(profile, dict):
+                continue
+            for key in ("id", "profile_id", "qualified_model_id", "model_ref"):
+                value = str(profile.get(key) or "").strip()
+                if value:
+                    available_models.append(value)
+        return rumi_process.resolve_rumi_base_model(
+            available_models,
+            available_providers=set(self._providers.keys()),
+        )
 
     @staticmethod
     def _review_chain_params(member, params, context):

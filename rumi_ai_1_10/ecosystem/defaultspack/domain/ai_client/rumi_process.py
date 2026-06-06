@@ -14,6 +14,12 @@ RUMI_BASE_MODEL = "xiaomi-token-plan-sgp/mimo-v2.5-pro"
 RUMI_DISPLAY_NAME = "Rumi"
 RUMI_PROCESS_VERSION = "2026-06-04"
 RUMI_DEFAULT_THINKING_LEVEL = "medium"
+RUMI_BASE_MODEL_CANDIDATES = [
+    RUMI_BASE_MODEL,
+    "anthropic/claude-sonnet-4-0",
+    "openai/gpt-4o",
+    "google/gemini-2.5-flash",
+]
 
 _ACTION_TOOL_IDS = {
     "todo",
@@ -45,14 +51,40 @@ RUMI_CRITERIA = [
 ]
 
 
-def default_rumi_model_pack() -> dict[str, Any]:
+def resolve_rumi_base_model(
+    available_models: Any = None,
+    *,
+    available_providers: Any = None,
+) -> str:
+    model_ids = {
+        str(item or "").strip()
+        for item in (available_models if isinstance(available_models, (list, tuple, set)) else [])
+        if str(item or "").strip()
+    }
+    provider_ids = {
+        str(item or "").strip()
+        for item in (available_providers if isinstance(available_providers, (list, tuple, set)) else [])
+        if str(item or "").strip()
+    }
+    for candidate in RUMI_BASE_MODEL_CANDIDATES:
+        if candidate in model_ids:
+            return candidate
+    for candidate in RUMI_BASE_MODEL_CANDIDATES:
+        provider_id, _, _ = candidate.partition("/")
+        if provider_id and provider_id in provider_ids:
+            return candidate
+    return RUMI_BASE_MODEL
+
+
+def default_rumi_model_pack(*, base_model: str | None = None) -> dict[str, Any]:
+    resolved_base_model = str(base_model or RUMI_BASE_MODEL).strip() or RUMI_BASE_MODEL
     return {
         "id": RUMI_MODEL_PACK_ID,
         "display_name": RUMI_DISPLAY_NAME,
         "mode": "review_chain",
         "members": [
             {
-                "model": RUMI_BASE_MODEL,
+                "model": resolved_base_model,
                 "label": "Rumi generator",
                 "fallback_on": ["rate_limit", "quota", "provider_error", "timeout"],
                 "metadata": {
@@ -62,7 +94,7 @@ def default_rumi_model_pack() -> dict[str, Any]:
                 },
             },
             {
-                "model": RUMI_BASE_MODEL,
+                "model": resolved_base_model,
                 "label": "Rumi reviewer",
                 "fallback_on": ["rate_limit", "quota", "provider_error", "timeout"],
                 "metadata": {
@@ -89,7 +121,7 @@ def default_rumi_model_pack() -> dict[str, Any]:
         "metadata": {
             "builtin": True,
             "process_version": RUMI_PROCESS_VERSION,
-            "base_model": RUMI_BASE_MODEL,
+            "base_model": resolved_base_model,
             "model_limit_summary": {
                 "positioning": "MiMo V2.5 Pro is capable but not a frontier ceiling.",
                 "known_stronger_model_classes": ["Claude Sonnet", "Claude Opus", "GPT"],
@@ -115,11 +147,22 @@ def default_rumi_model_pack() -> dict[str, Any]:
     }
 
 
-def ensure_default_rumi_model_pack(model_packs: Any) -> list[dict[str, Any]]:
+def ensure_default_rumi_model_pack(model_packs: Any, *, base_model: str | None = None) -> list[dict[str, Any]]:
     packs = [dict(pack) for pack in model_packs if isinstance(pack, dict)] if isinstance(model_packs, list) else []
-    seen = {str(pack.get("id") or "").strip() for pack in packs}
-    if RUMI_MODEL_PACK_ID not in seen:
-        packs.insert(0, default_rumi_model_pack())
+    materialized = default_rumi_model_pack(base_model=base_model)
+    replaced = False
+    for index, pack in enumerate(packs):
+        pack_id = str(pack.get("id") or "").strip()
+        if pack_id != RUMI_MODEL_PACK_ID:
+            continue
+        metadata = pack.get("metadata") if isinstance(pack.get("metadata"), dict) else {}
+        aliases = pack.get("aliases") if isinstance(pack.get("aliases"), list) else []
+        if metadata.get("builtin") or RUMI_MODEL_PACK_REF in aliases or RUMI_MODEL_PACK_ID in aliases:
+            packs[index] = materialized
+        replaced = True
+        break
+    if not replaced:
+        packs.insert(0, materialized)
     return packs
 
 
