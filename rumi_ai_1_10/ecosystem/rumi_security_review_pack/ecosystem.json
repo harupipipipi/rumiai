@@ -59,5 +59,8 @@
   "components": {},
   "load_order": [],
   "required_secrets": [],
-  "required_network": []
+  "required_network": {
+    "allowed_domains": [],
+    "allowed_ports": []
+  }
 }

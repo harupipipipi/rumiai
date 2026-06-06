@@ -61,7 +61,10 @@ def test_security_review_pack_required_docs_and_assets_exist_and_parse() -> None
     assert ecosystem["components"] == {}
     assert ecosystem["load_order"] == []
     assert ecosystem["required_secrets"] == []
-    assert ecosystem["required_network"] == []
+    assert ecosystem["required_network"] == {
+        "allowed_domains": [],
+        "allowed_ports": [],
+    }
     assert ecosystem["metadata"]["network_policy"] == "none_by_default"
     assert ecosystem["metadata"]["executable_code"] is False
     assert ecosystem["metadata"]["grant_override"] is False
