@@ -12,12 +12,9 @@ taxonomy:
   - never_call_entry
   - escalation_record
   handoff_targets:
-  - rumi_voice_mobile_pack
-  - rumi_multimodal_media_pack
-  - rumi_connector_gateway_pack
-  - rumi_meeting_intelligence_pack
-  - rumi_security_review_pack
-  - rumi_business_ops_pack
+  - defaultspack
+  - rumi_local_agent_pack
+  - rumi_operations_company_pack
   forbidden_ownership:
   - actual dialing
   - ASR/TTS runtime

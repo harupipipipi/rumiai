@@ -33,7 +33,7 @@ workflows:
     - consent_decline_aborts
     - forbidden_topics_present
     handoffs:
-    - rumi_security_review_pack
+    - rumi_operations_company_pack
     execution: declarative_only
   - id: never_call_screen
     purpose: Block any task whose phone target alias is active in the never-call list.
@@ -60,8 +60,7 @@ workflows:
     - approved_script_matches
     - disallowed_intent_aborts
     handoffs:
-    - rumi_connector_gateway_pack
-    - rumi_voice_mobile_pack
+    - defaultspack
     execution: declarative_only
   - id: call_session_handoff
     purpose: Represent call session state without owning actual dialing or ASR/TTS.
@@ -74,8 +73,7 @@ workflows:
     - consent_decline_aborts
     - takeover_triggers_named
     handoffs:
-    - rumi_voice_mobile_pack
-    - rumi_multimodal_media_pack
+    - defaultspack
     execution: declarative_only
   - id: transcript_redaction_review
     purpose: Redact transcript PII classes before any meeting or business handoff.
@@ -87,8 +85,8 @@ workflows:
     - pii_classes_configured
     - review_state_not_blocked
     handoffs:
-    - rumi_meeting_intelligence_pack
-    - rumi_business_ops_pack
+    - rumi_local_agent_pack
+    - rumi_operations_company_pack
     execution: declarative_only
   - id: escalation_takeover
     purpose: Abort or hand off when user, recipient, or policy requires takeover.
@@ -101,6 +99,5 @@ workflows:
     - abort_required_respected
     - takeover_abort_required
     handoffs:
-    - rumi_security_review_pack
-    - rumi_business_ops_pack
+    - rumi_operations_company_pack
     execution: declarative_only

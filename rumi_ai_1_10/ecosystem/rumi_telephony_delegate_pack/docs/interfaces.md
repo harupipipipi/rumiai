@@ -22,12 +22,9 @@
 
 ## Handoff Owners
 
-- `rumi_voice_mobile_pack`: Owns mobile voice capture, ASR/TTS, and user-device voice surfaces.
-- `rumi_multimodal_media_pack`: Owns media transcript processing and audio artifacts.
-- `rumi_connector_gateway_pack`: Owns contact lookup and provider connectors.
-- `rumi_meeting_intelligence_pack`: Owns meeting recap and action extraction after a transcript exists.
-- `rumi_security_review_pack`: Reviews real-world action risk, fraud, and policy edge cases.
-- `rumi_business_ops_pack`: Owns downstream business workflow execution after human approval.
+- `defaultspack`: Owns provider and tooling handoffs for dialing, ASR/TTS-adjacent runtime, transcript/media handling, and contact or calendar lookup outside this pack.
+- `rumi_local_agent_pack`: Can consume redacted transcript packets for recap, note-taking, and other local-first follow-up artifacts.
+- `rumi_operations_company_pack`: Owns approval-aware escalation, real-world action risk review, and downstream business workflow execution after human approval.
 
 ## Required Secrets
 

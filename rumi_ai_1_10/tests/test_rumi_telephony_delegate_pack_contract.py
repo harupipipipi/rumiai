@@ -20,9 +20,9 @@ WORKFLOW_IDS = set(['pre_call_script_review', 'never_call_screen', 'mock_dial_ap
 QUALITY_CHECK_IDS = set(['script_present', 'consent_disclosure_present', 'never_call_checked', 'approval_state_approved', 'approved_number_matches', 'disallowed_intent_aborts', 'consent_decline_aborts', 'transcript_pii_redacted', 'takeover_owner_present', 'takeover_abort_required'])
 OWNER_EXPECTED = set(['call_task_contract', 'pre_call_script', 'dial_approval_gate', 'consent_disclosure_script', 'call_session_state', 'takeover_escalation', 'transcript_redaction_contract', 'never_call_list', 'mock_dial_readiness'])
 NON_OWNER_EXPECTED = set(['actual dialing', 'ASR/TTS runtime', 'contact lookup', 'calendar mutation', 'payment or purchase execution', 'external connector writes', 'emergency services'])
-OVERLAP_EXPECTED = {'actual_dialing': 'blocked_handoff_to_connector_gateway_or_voice_owner', 'asr_tts_runtime': 'handoff_to_rumi_voice_mobile_pack', 'media_transcript_runtime': 'handoff_to_rumi_multimodal_media_pack', 'contact_or_calendar_lookup': 'handoff_to_rumi_connector_gateway_pack', 'meeting_recap': 'handoff_to_rumi_meeting_intelligence_pack', 'external_business_action': 'handoff_to_rumi_business_ops_pack', 'real_world_action_risk_review': 'handoff_to_rumi_security_review_pack', 'telephony_contract': 'owned_by_rumi_telephony_delegate_pack', 'tool_aliases': 'prefer_explicit_pack_namespace'}
+OVERLAP_EXPECTED = {'actual_dialing': 'blocked_handoff_to_defaultspack_tool_runtime', 'asr_tts_runtime': 'handoff_to_defaultspack_tool_runtime', 'media_transcript_runtime': 'handoff_to_defaultspack_tool_runtime', 'contact_or_calendar_lookup': 'handoff_to_defaultspack_tool_runtime', 'meeting_recap': 'handoff_to_rumi_local_agent_pack', 'external_business_action': 'handoff_to_rumi_operations_company_pack', 'real_world_action_risk_review': 'handoff_to_rumi_operations_company_pack', 'telephony_contract': 'owned_by_rumi_telephony_delegate_pack', 'tool_aliases': 'prefer_explicit_pack_namespace'}
 PROMOTION_BLOCKERS = set(['no_actual_dialing_runtime', 'requires_external_real_world_action_approval_class', 'requires_never_call_policy', 'requires_redactable_transcript_storage', 'must_pass_disallowed_intent_abort_cases'])
-PROMOTION_EVIDENCE = set(['mock_dial_approval_cases', 'never_call_block_cases', 'transcript_redaction_cases', 'takeover_escalation_cases', 'security_review_acceptance_cases', 'provider_handoff_acceptance_cases'])
+PROMOTION_EVIDENCE = set(['mock_dial_approval_cases', 'never_call_block_cases', 'transcript_redaction_cases', 'takeover_escalation_cases', 'operations_company_takeover_acceptance_cases', 'provider_handoff_acceptance_cases'])
 BLOCKED_BY_DEFAULT = set(['dial without human approval', 'call numbers on the never-call list', 'continue after consent is declined', 'continue after disallowed intent is detected', 'perform payment or purchase execution', 'handle emergency services', 'mask actual dialing as a mock handoff', 'store unredacted transcript PII in a handoff packet', 'use raw phone numbers instead of target aliases'])
 NEGATIVE_CASE_IDS = set(['pending_approval_negative', 'never_call_negative', 'consent_declined_negative', 'disallowed_intent_negative', 'unredacted_transcript_negative', 'takeover_abort_negative'])
 
@@ -56,6 +56,8 @@ def test_pack_required_assets_and_ecosystem_contract() -> None:
     assert ecosystem["metadata"]["defaultspack_promotion_eligible"] is False
     assert set(ecosystem["metadata"]["owner_surfaces"]) >= OWNER_EXPECTED
     assert set(ecosystem["metadata"]["non_owner_surfaces"]) >= NON_OWNER_EXPECTED
+    available = {item.pack_id for item in PackSelector(ROOT / "ecosystem").scan_candidates()}
+    assert {item["pack_id"] for item in ecosystem["metadata"]["optional_integrations"]} <= available
 
     metadata_indexed = {item for values in ecosystem["metadata"]["asset_index"].values() for item in values}
     actual = {str(path.relative_to(PACK_DIR)) for path in PACK_DIR.rglob("*") if path.is_file() and path.name != "ecosystem.json"}
@@ -120,6 +122,7 @@ def test_pack_setup_discoverable_and_overlap_scoped() -> None:
 
 
 def test_schema_required_fields_are_domain_specific() -> None:
+    available = {item.pack_id for item in PackSelector(ROOT / "ecosystem").scan_candidates()}
     for rel_path, expected_required in SCHEMA_EXPECTATIONS.items():
         schema = read_json(PACK_DIR / rel_path)
         assert schema["$schema"].endswith("2020-12/schema")
@@ -139,6 +142,7 @@ def test_schema_required_fields_are_domain_specific() -> None:
     trigger_item = pre_call_script["properties"]["takeover_triggers"]["items"]
     assert "abort_required" in trigger_item["required"]
     assert "disallowed_intent" in trigger_item["properties"]["trigger"]["enum"]
+    assert set(trigger_item["properties"]["handoff_owner"]["enum"]) - {"human_user"} <= available
 
     dial_approval = read_json(PACK_DIR / "schemas/dial_approval.schema.json")
     human_confirmation = dial_approval["properties"]["human_confirmation"]
@@ -158,11 +162,13 @@ def test_schema_required_fields_are_domain_specific() -> None:
     redaction = read_json(PACK_DIR / "schemas/transcript_redaction.schema.json")
     segment_pii_enum = redaction["properties"]["redacted_segments"]["items"]["properties"]["pii_class"]["enum"]
     assert {"phone", "email", "payment", "address", "account_id"} <= set(segment_pii_enum)
+    assert redaction["properties"]["handoff_owner"]["const"] in available
 
     escalation = read_json(PACK_DIR / "schemas/escalation_record.schema.json")
     abort_triggers = escalation["allOf"][0]["if"]["properties"]["trigger"]["enum"]
     assert {"consent_declined", "disallowed_intent", "never_call_active"} <= set(abort_triggers)
     assert escalation["allOf"][0]["then"]["properties"]["abort_required"]["const"] is True
+    assert set(escalation["properties"]["takeover_owner"]["enum"]) - {"human_user"} <= available
 
 
 def test_workflows_quality_policy_and_handoffs_are_scoped() -> None:

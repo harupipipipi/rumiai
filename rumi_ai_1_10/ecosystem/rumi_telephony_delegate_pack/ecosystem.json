@@ -58,28 +58,16 @@
     ],
     "optional_integrations": [
       {
-        "pack_id": "rumi_voice_mobile_pack",
-        "reason": "Owns mobile voice capture, ASR/TTS, and user-device voice surfaces."
+        "pack_id": "defaultspack",
+        "reason": "Provide provider and tooling handoffs for dialing, ASR/TTS-adjacent runtime, transcript/media handling, and contact or calendar lookup outside this pack."
       },
       {
-        "pack_id": "rumi_multimodal_media_pack",
-        "reason": "Owns media transcript processing and audio artifacts."
+        "pack_id": "rumi_local_agent_pack",
+        "reason": "Consume redacted transcript packets for recap, note-taking, and other local-first follow-up artifacts."
       },
       {
-        "pack_id": "rumi_connector_gateway_pack",
-        "reason": "Owns contact lookup and provider connectors."
-      },
-      {
-        "pack_id": "rumi_meeting_intelligence_pack",
-        "reason": "Owns meeting recap and action extraction after a transcript exists."
-      },
-      {
-        "pack_id": "rumi_security_review_pack",
-        "reason": "Reviews real-world action risk, fraud, and policy edge cases."
-      },
-      {
-        "pack_id": "rumi_business_ops_pack",
-        "reason": "Owns downstream business workflow execution after human approval."
+        "pack_id": "rumi_operations_company_pack",
+        "reason": "Own approval-aware escalation, real-world action risk review, and downstream business workflow execution after human approval."
       }
     ],
     "asset_index": {
