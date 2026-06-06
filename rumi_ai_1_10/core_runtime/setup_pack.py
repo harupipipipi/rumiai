@@ -607,6 +607,34 @@ class SetupPackManager:
             logger.debug("Failed to switch active_pack_identity during setup_pack install", exc_info=True)
             return None
 
+    def _expand_requested_setup_pack_ids(
+        self,
+        requested_ids: List[str],
+        definitions: Dict[str, SetupPackDefinition],
+    ) -> List[str]:
+        expanded_ids: List[str] = []
+        seen: set[str] = set()
+        visiting: set[str] = set()
+
+        def visit(setup_pack_id: str) -> None:
+            if setup_pack_id in seen or setup_pack_id in visiting:
+                return
+            definition = definitions.get(setup_pack_id)
+            if definition is None:
+                return
+            visiting.add(setup_pack_id)
+            for dependency in definition.depends_on:
+                dependency_id = str(dependency.get("pack_id") or "").strip()
+                if dependency_id and dependency_id in definitions:
+                    visit(dependency_id)
+            visiting.remove(setup_pack_id)
+            seen.add(setup_pack_id)
+            expanded_ids.append(setup_pack_id)
+
+        for setup_pack_id in requested_ids:
+            visit(setup_pack_id)
+        return expanded_ids
+
     def install(self, setup_pack_ids: str | List[str]) -> Dict[str, Any]:
         definitions = self._load_definitions()
         requested_ids = self._normalize_setup_pack_ids(setup_pack_ids)
@@ -620,10 +648,14 @@ class SetupPackManager:
         locations = {
             loc.pack_id: loc for loc in discover_pack_locations(str(self.ecosystem_dir))
         }
+        expanded_requested_ids = self._expand_requested_setup_pack_ids(
+            requested_ids,
+            definitions,
+        )
 
         ordered_definitions = [
             definitions[pack_id]
-            for pack_id in requested_ids
+            for pack_id in expanded_requested_ids
             if pack_id in definitions
         ]
         errors: List[Dict[str, Any]] = []
