@@ -1016,7 +1016,7 @@ test("company and p2p helpers target frontend workspace routes", async () => {
     if (path.includes("/company/operations-company/runs")) data = { runs: [], total: 0 };
     if (path.includes("/company/operations-company/agents/reviewer/inbox")) data = { inbox: [], total: 0 };
     if (path.includes("/company/operations-company/agents") && init?.method === "POST") {
-      data = { id: "reviewer", agent_id: "reviewer", model: "opencode-zen/minimax-m3-free" };
+      data = { id: "reviewer", agent_id: "reviewer", model: "stub/default" };
     }
     if (path.includes("/company/operations-company/dispatch")) data = { dispatch: { status: "completed" }, run_links: [] };
     if (path.includes("/company/operations-company/tasks")) data = { id: "task-1", company_id: "operations-company", title: "Ship it" };
@@ -1028,7 +1028,7 @@ test("company and p2p helpers target frontend workspace routes", async () => {
     await api.getCompanyStatus({ conversationId: "c1", bootstrap: true });
     await api.bootstrapCompanyWorkspace({ conversation_id: "c1", source: "webapp" }, { conversationId: "c1", scope: "conversation" });
     await api.webSearch("deep research", true);
-    await api.upsertCompanyAgent("operations-company", { agent_id: "reviewer", model: "opencode-zen/minimax-m3-free" });
+    await api.upsertCompanyAgent("operations-company", { agent_id: "reviewer", model: "stub/default" });
     await api.createCompanyTask("operations-company", { title: "Ship it", target_agent_ids: ["reviewer"] });
     await api.dispatchCompanyTask("operations-company", "task-1");
     await api.listCompanyRuns("operations-company", { task_id: "task-1", limit: 5 });
@@ -1059,7 +1059,7 @@ test("company and p2p helpers target frontend workspace routes", async () => {
       action: "upsert",
       agent: {
         agent_id: "reviewer",
-        model: "opencode-zen/minimax-m3-free",
+        model: "stub/default",
       },
     },
   });

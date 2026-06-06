@@ -133,13 +133,13 @@ def test_conversation_employee_group_inherits_main_chat_model(tmp_path, monkeypa
     monkeypatch.setenv("RUMI_DEFAULTSPACK_COMPANY_RUNTIME_DB_PATH", str(tmp_path / "company_runtime.db"))
     _reset_defaultspack_singletons()
 
-    conversation = ChatStore().create_conversation(model="opencode-zen/minimax-m3-free")
+    conversation = ChatStore().create_conversation(model="stub/default")
     result = status.run({"conversation_id": conversation["id"], "bootstrap": True}, {})
 
     assert result["status"] == "ok"
-    assert result["data"]["company"]["metadata"]["employee_model"] == "opencode-zen/minimax-m3-free"
-    assert result["data"]["company"]["agents"]["research_specialist"]["model"] == "opencode-zen/minimax-m3-free"
-    assert result["data"]["company"]["agents"]["coding_engineer"]["model"] == "opencode-zen/minimax-m3-free"
+    assert result["data"]["company"]["metadata"]["employee_model"] == "stub/default"
+    assert result["data"]["company"]["agents"]["research_specialist"]["model"] == "stub/default"
+    assert result["data"]["company"]["agents"]["coding_engineer"]["model"] == "stub/default"
 
 
 def test_mentions_create_queued_tasks_and_dispatches_agent_runs(tmp_path, monkeypatch):
@@ -229,7 +229,7 @@ def test_company_runs_include_agent_model_and_result_preview(tmp_path, monkeypat
             agent_id="minimax_worker",
             task="Smoke",
             status="completed",
-            model="opencode-zen/minimax-m3-free",
+            model="stub/default",
             current_transcript_id="tr_agent_preview",
             result_json=[
                 {"type": "thinking", "thinking": "hidden chain"},
@@ -257,7 +257,7 @@ def test_company_runs_include_agent_model_and_result_preview(tmp_path, monkeypat
 
     assert result["status"] == "ok"
     agent_run = result["data"]["runs"][0]["agent_run"]
-    assert agent_run["model"] == "opencode-zen/minimax-m3-free"
+    assert agent_run["model"] == "stub/default"
     assert agent_run["status"] == "completed"
     assert agent_run["result_preview"] == "Visible MiniMax result"
     assert agent_run["conversation"] == [

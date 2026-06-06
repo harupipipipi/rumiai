@@ -111,7 +111,7 @@ def test_dispatch_prunes_tools_for_non_tool_calling_agent_model(monkeypatch, tmp
         {
             "agent_id": "minimax_worker",
             "display_name": "MiniMax Worker",
-            "model": "opencode-zen/minimax-m3-free",
+            "model": "stub/default",
             "allowed_tools": ["coding_file_read", "coding_git_diff"],
         },
     )
@@ -133,7 +133,7 @@ def test_dispatch_prunes_tools_for_non_tool_calling_agent_model(monkeypatch, tmp
         task["task_id"],
     )
 
-    assert seen["model"] == "opencode-zen/minimax-m3-free"
+    assert seen["model"] == "stub/default"
     assert seen["tools"] == []
     assert result["task"]["status"] == "completed"
 
