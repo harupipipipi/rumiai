@@ -9,9 +9,6 @@
 !/pack-shell/
 !/rumi_mobile/
 !/tests/
-!/browser_extensions/
-!/browser_extensions/rumi_browser_companion/
-!/browser_extensions/rumi_browser_companion/**
 
 # 整理退避用ディレクトリは Git 管理しない
 /others/
