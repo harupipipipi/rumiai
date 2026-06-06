@@ -91,14 +91,26 @@ class KanbanController:
             if card is None:
                 raise ValueError("card_id not found")
             if action == "block":
+                dependencies = _without_self(
+                    _string_list(
+                        arguments.get("depends_on")
+                        if "depends_on" in arguments
+                        else arguments.get("dependencies")
+                    ),
+                    str(card["id"]),
+                )
                 blockers = _string_list(
                     arguments.get("blocked_by")
                     if "blocked_by" in arguments
                     else arguments.get("blockers")
                 )
-                if not blockers and arguments.get("depends_on") is not None:
-                    blockers = _string_list(arguments.get("depends_on"))
-                card["blocked_by"] = _without_self(blockers, str(card["id"]))
+                if blockers:
+                    blockers = _without_self(blockers, str(card["id"]))
+                elif dependencies:
+                    blockers = list(dependencies)
+                if dependencies:
+                    card["depends_on"] = dependencies
+                card["blocked_by"] = blockers
                 card["blocker_reason"] = str(arguments.get("blocker_reason") or arguments.get("reason") or "")
             else:
                 card["blocked_by"] = []
