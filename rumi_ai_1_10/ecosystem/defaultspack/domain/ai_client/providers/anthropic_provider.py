@@ -1,12 +1,11 @@
-import sys
-import os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", ".."))
-
 import json
-import urllib.request
-import urllib.error
-import base64
+import os
 import ssl
+import sys
+import urllib.error
+import urllib.request
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 
 from ..base_provider import BaseProvider
 
@@ -28,8 +27,6 @@ class AnthropicProvider(BaseProvider):
         self._api_key = os.environ.get("ANTHROPIC_API_KEY", "")
         self._ssl_ctx = ssl.create_default_context()
 
-    # ── internal helpers ────────────────────────────────────────────────
-
     def _headers(self):
         return {
             "x-api-key": self._api_key,
@@ -44,11 +41,11 @@ class AnthropicProvider(BaseProvider):
         try:
             with urllib.request.urlopen(req, context=self._ssl_ctx, timeout=120) as resp:
                 raw_bytes = resp.read().decode("utf-8")
-        except urllib.error.HTTPError as e:
-            err_body = e.read().decode("utf-8", errors="replace")
-            raise RuntimeError("Anthropic API error {}: {}".format(e.code, err_body))
-        except urllib.error.URLError as e:
-            raise RuntimeError("Anthropic API connection error: {}".format(e.reason))
+        except urllib.error.HTTPError as exc:
+            err_body = exc.read().decode("utf-8", errors="replace")
+            raise RuntimeError("Anthropic API error {}: {}".format(exc.code, err_body))
+        except urllib.error.URLError as exc:
+            raise RuntimeError("Anthropic API connection error: {}".format(exc.reason))
         try:
             return json.loads(raw_bytes)
         except (json.JSONDecodeError, ValueError):
@@ -61,16 +58,16 @@ class AnthropicProvider(BaseProvider):
         req = urllib.request.Request(url, data=data, headers=self._headers(), method="POST")
         try:
             resp = urllib.request.urlopen(req, context=self._ssl_ctx, timeout=120)
-        except urllib.error.HTTPError as e:
-            err_body = e.read().decode("utf-8", errors="replace")
-            raise RuntimeError("Anthropic API error {}: {}".format(e.code, err_body))
-        except urllib.error.URLError as e:
-            raise RuntimeError("Anthropic API connection error: {}".format(e.reason))
+        except urllib.error.HTTPError as exc:
+            err_body = exc.read().decode("utf-8", errors="replace")
+            raise RuntimeError("Anthropic API error {}: {}".format(exc.code, err_body))
+        except urllib.error.URLError as exc:
+            raise RuntimeError("Anthropic API connection error: {}".format(exc.reason))
         return resp
 
     @staticmethod
     def _parse_sse(resp):
-        """HTTPResponse から SSE の event/data ペアを yield"""
+        """Yield SSE event/data pairs from an HTTPResponse."""
         buf = b""
         current_event = ""
         for chunk in iter(lambda: resp.read(4096), b""):
@@ -86,82 +83,153 @@ class AnthropicProvider(BaseProvider):
                 elif line == "":
                     pass
 
-    # ── build_request / parse_response ──────────────────────────────────
+    @staticmethod
+    def _anthropic_role(role):
+        return "assistant" if role == "assistant" else "user"
+
+    @staticmethod
+    def _tool_use_parts(tool_calls):
+        parts = []
+        for tool_call in tool_calls or []:
+            if not isinstance(tool_call, dict):
+                continue
+            function_def = tool_call.get("function") if isinstance(tool_call.get("function"), dict) else {}
+            tool_name = str(function_def.get("name") or tool_call.get("name") or "").strip()
+            if not tool_name:
+                continue
+            arguments = function_def.get("arguments", tool_call.get("input", {}))
+            if isinstance(arguments, str):
+                try:
+                    arguments = json.loads(arguments)
+                except json.JSONDecodeError:
+                    arguments = {"value": arguments}
+            elif not isinstance(arguments, dict):
+                arguments = {"value": arguments}
+            parts.append(
+                {
+                    "type": "tool_use",
+                    "id": str(tool_call.get("id") or tool_call.get("tool_call_id") or "").strip(),
+                    "name": tool_name,
+                    "input": arguments,
+                }
+            )
+        return parts
+
+    @staticmethod
+    def _tool_result_part(message):
+        content = message.get("content", "")
+        if isinstance(content, list):
+            result_content = []
+            for part in content:
+                if isinstance(part, dict) and part.get("type") == "text":
+                    text = str(part.get("text", ""))
+                else:
+                    text = json.dumps(part, ensure_ascii=False)
+                if text:
+                    result_content.append({"type": "text", "text": text})
+        else:
+            result_content = str(content or "")
+        return {
+            "type": "tool_result",
+            "tool_use_id": str(message.get("tool_call_id") or message.get("id") or "").strip(),
+            "content": result_content,
+        }
+
+    @staticmethod
+    def _content_parts(content):
+        if isinstance(content, str):
+            return [{"type": "text", "text": content}] if content else []
+        if not isinstance(content, list):
+            if content in (None, ""):
+                return []
+            return [{"type": "text", "text": str(content)}]
+        parts = []
+        for part in content:
+            if part.get("type") == "text":
+                parts.append({"type": "text", "text": part.get("text", "")})
+            elif part.get("type") == "image" and part.get("source"):
+                parts.append(
+                    {
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": part["source"].get("media_type", "image/png"),
+                            "data": part["source"].get("data", ""),
+                        },
+                    }
+                )
+            elif part.get("type") == "image_url":
+                img_url = part.get("image_url", {}).get("url", "")
+                if img_url.startswith("data:"):
+                    header, b64 = img_url.split(",", 1) if "," in img_url else ("", img_url)
+                    media = "image/png"
+                    if "image/jpeg" in header:
+                        media = "image/jpeg"
+                    elif "image/gif" in header:
+                        media = "image/gif"
+                    elif "image/webp" in header:
+                        media = "image/webp"
+                    parts.append(
+                        {
+                            "type": "image",
+                            "source": {"type": "base64", "media_type": media, "data": b64},
+                        }
+                    )
+                else:
+                    parts.append({"type": "image", "source": {"type": "url", "url": img_url}})
+            elif part.get("type") in {"tool_result", "tool_use"}:
+                parts.append(part)
+            else:
+                parts.append(part)
+        return parts
 
     def build_request(self, messages):
-        """StandardMessage → Anthropic 形式に変換。system を分離する。"""
+        """Translate standard messages to Anthropic Messages payload shape."""
         system_parts = []
         converted = []
         for msg in messages:
             role = msg.get("role", "user")
             content = msg.get("content", "")
+            anthropic_role = self._anthropic_role(role)
             if role == "system":
                 if isinstance(content, str):
                     system_parts.append({"type": "text", "text": content})
                 elif isinstance(content, list):
                     system_parts.extend(content)
                 continue
+            if role == "tool":
+                converted.append({"role": "user", "content": [self._tool_result_part(msg)]})
+                continue
+            tool_use_parts = self._tool_use_parts(msg.get("tool_calls"))
+            if tool_use_parts:
+                parts = self._content_parts(content)
+                parts.extend(tool_use_parts)
+                converted.append({"role": "assistant", "content": parts})
+                continue
             if isinstance(content, str):
-                converted.append({"role": role, "content": content})
+                converted.append({"role": anthropic_role, "content": content})
             elif isinstance(content, list):
-                parts = []
-                for c in content:
-                    if c.get("type") == "text":
-                        parts.append({"type": "text", "text": c.get("text", "")})
-                    elif c.get("type") == "image" and c.get("source"):
-                        parts.append({
-                            "type": "image",
-                            "source": {
-                                "type": "base64",
-                                "media_type": c["source"].get("media_type", "image/png"),
-                                "data": c["source"].get("data", ""),
-                            },
-                        })
-                    elif c.get("type") == "image_url":
-                        img_url = c.get("image_url", {}).get("url", "")
-                        if img_url.startswith("data:"):
-                            header, b64 = img_url.split(",", 1) if "," in img_url else ("", img_url)
-                            media = "image/png"
-                            if "image/jpeg" in header:
-                                media = "image/jpeg"
-                            elif "image/gif" in header:
-                                media = "image/gif"
-                            elif "image/webp" in header:
-                                media = "image/webp"
-                            parts.append({
-                                "type": "image",
-                                "source": {"type": "base64", "media_type": media, "data": b64},
-                            })
-                        else:
-                            parts.append({
-                                "type": "image",
-                                "source": {"type": "url", "url": img_url},
-                            })
-                    elif c.get("type") == "tool_result":
-                        parts.append(c)
-                    elif c.get("type") == "tool_use":
-                        parts.append(c)
-                    else:
-                        parts.append(c)
-                converted.append({"role": role, "content": parts})
+                converted.append({"role": anthropic_role, "content": self._content_parts(content)})
             else:
-                converted.append({"role": role, "content": content})
+                converted.append({"role": anthropic_role, "content": content})
         return system_parts, converted
 
     def parse_response(self, raw):
-        """Anthropic messages JSON → StandardResponse"""
+        """Translate Anthropic Messages JSON to the standard response shape."""
         content_blocks = raw.get("content", [])
         content = []
         for block in content_blocks:
             if block.get("type") == "text":
                 content.append({"type": "text", "text": block.get("text", "")})
             elif block.get("type") == "tool_use":
-                content.append({
-                    "type": "tool_use",
-                    "id": block.get("id", ""),
-                    "name": block.get("name", ""),
-                    "input": block.get("input", {}),
-                })
+                content.append(
+                    {
+                        "type": "tool_use",
+                        "id": block.get("id", ""),
+                        "name": block.get("name", ""),
+                        "input": block.get("input", {}),
+                    }
+                )
             else:
                 content.append(block)
         stop = raw.get("stop_reason", "end_turn") or "end_turn"
@@ -179,8 +247,6 @@ class AnthropicProvider(BaseProvider):
             "usage": usage,
             "raw_extra": {"id": raw.get("id", ""), "model": raw.get("model", "")},
         }
-
-    # ── 9 required methods ──────────────────────────────────────────────
 
     @staticmethod
     def _translate_params(params):
@@ -200,9 +266,9 @@ class AnthropicProvider(BaseProvider):
 
     @staticmethod
     def _copy_chat_params(body, params):
-        for k in ("temperature", "top_p", "top_k", "stop_sequences", "thinking"):
-            if k in params:
-                body[k] = params[k]
+        for key in ("temperature", "top_p", "top_k", "stop_sequences", "thinking"):
+            if key in params:
+                body[key] = params[key]
         if "metadata" in params:
             body["metadata"] = params["metadata"]
 
@@ -237,16 +303,16 @@ class AnthropicProvider(BaseProvider):
                     continue
                 if event_type == "message_start":
                     msg = obj.get("message", {})
-                    u = msg.get("usage", {})
-                    usage_accum["input_tokens"] = u.get("input_tokens", 0)
+                    usage = msg.get("usage", {})
+                    usage_accum["input_tokens"] = usage.get("input_tokens", 0)
                 elif event_type == "content_block_delta":
                     delta = obj.get("delta", {})
                     if delta.get("type") == "text_delta":
                         yield {"type": "content_delta", "delta": {"type": "text", "text": delta.get("text", "")}}
                 elif event_type == "message_delta":
                     delta = obj.get("delta", {})
-                    u = obj.get("usage", {})
-                    usage_accum["output_tokens"] = u.get("output_tokens", 0)
+                    usage = obj.get("usage", {})
+                    usage_accum["output_tokens"] = usage.get("output_tokens", 0)
                     stop = delta.get("stop_reason", "end_turn") or "end_turn"
                     finish_map = {"end_turn": "stop", "max_tokens": "length", "stop_sequence": "stop", "tool_use": "tool_calls"}
                     finish = finish_map.get(stop, stop)
@@ -271,7 +337,7 @@ class AnthropicProvider(BaseProvider):
         raise NotImplementedError("Anthropic does not support image generation. Use openai/dall-e-3 instead.")
 
     def image_analyze(self, model, image, prompt):
-        """Claude の vision 機能で画像解析"""
+        """Analyze an image with an Anthropic vision model."""
         if image.startswith("data:"):
             header, b64 = image.split(",", 1) if "," in image else ("", image)
             media = "image/png"
@@ -282,10 +348,15 @@ class AnthropicProvider(BaseProvider):
             elif "image/webp" in header:
                 media = "image/webp"
         elif image.startswith("http"):
-            messages = [{"role": "user", "content": [
-                {"type": "image", "source": {"type": "url", "url": image}},
-                {"type": "text", "text": prompt},
-            ]}]
+            messages = [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "image", "source": {"type": "url", "url": image}},
+                        {"type": "text", "text": prompt},
+                    ],
+                }
+            ]
             body = {"model": model, "messages": messages, "max_tokens": 4096}
             raw = self._request_json("/v1/messages", body)
             text = ""
@@ -296,10 +367,15 @@ class AnthropicProvider(BaseProvider):
         else:
             b64 = image
             media = "image/png"
-        messages = [{"role": "user", "content": [
-            {"type": "image", "source": {"type": "base64", "media_type": media, "data": b64}},
-            {"type": "text", "text": prompt},
-        ]}]
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "image", "source": {"type": "base64", "media_type": media, "data": b64}},
+                    {"type": "text", "text": prompt},
+                ],
+            }
+        ]
         body = {"model": model, "messages": messages, "max_tokens": 4096}
         raw = self._request_json("/v1/messages", body)
         text = ""

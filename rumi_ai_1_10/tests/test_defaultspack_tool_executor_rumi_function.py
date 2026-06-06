@@ -241,6 +241,28 @@ def test_tool_executor_denied_coding_function_returns_actionable_approval_reques
     assert str(result["widget"]["approval_request_id"]).startswith("apr_")
 
 
+def test_tool_executor_git_status_stays_read_only_without_approval():
+    from domain.tool.executor import ToolExecutor
+
+    capability_executor = MagicMock()
+    capability_executor.execute.return_value = SimpleNamespace(
+        success=True,
+        output={"status": "ok", "data": {"branch": "main", "clean": True}},
+        error=None,
+        error_type=None,
+    )
+
+    result = ToolExecutor().execute(
+        "coding_git_status",
+        {"workspace_root": "."},
+        {"principal_id": "defaultspack", "capability_executor": capability_executor},
+    )
+
+    assert result["is_error"] is False
+    assert result["widget"] == {"branch": "main", "clean": True}
+    capability_executor.execute.assert_called_once()
+
+
 def test_tool_executor_approval_token_marks_rumi_function_context_server_approved():
     from domain.safety import approval
     from domain.tool.executor import ToolExecutor

@@ -435,6 +435,8 @@ const API_KEY_PROVIDER_IDS = new Set([
   "groq",
   "longcat",
   "mistral",
+  "opencode-go",
+  "opencode-zen",
   "openai",
   "openai_compatible",
   "openrouter",
