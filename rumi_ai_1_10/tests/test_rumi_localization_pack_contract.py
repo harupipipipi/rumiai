@@ -53,11 +53,28 @@ def test_pack_required_assets_and_metadata() -> None:
     assert validate_ecosystem(ecosystem, raise_on_error=False) == []
     assert ecosystem["pack_identity"] == f"rumi:ecosystem/{PACK_ID}"
     assert ecosystem["dependencies"] == {"defaultspack": ">=2.0.0"}
+    assert ecosystem["connectivity"] == {
+        "requires": ["defaultspack"],
+        "provides": [],
+    }
     assert ecosystem["required_secrets"] == []
-    assert ecosystem["required_network"] == []
+    assert ecosystem["required_network"] == {
+        "allowed_domains": [],
+        "allowed_ports": [],
+    }
     assert ecosystem["metadata"]["required_secrets"] == []
     assert ecosystem["metadata"]["network_policy"] == "none_by_default"
     assert ecosystem["metadata"]["executable_code"] is False
+    assert {
+        item["pack_id"] for item in ecosystem["metadata"]["optional_integrations"]
+    } >= {
+        "rumi_document_intelligence_pack",
+        "rumi_frontend_design_pack",
+        "rumi_workspace_pack",
+        "rumi_connector_gateway_pack",
+        "rumi_agentic_qa_pack",
+        "rumi_model_evals_pack",
+    }
     assert set(ecosystem["metadata"]["owner_surfaces"]) >= {
         "locale_qa_matrix",
         "terminology_glossary",
@@ -76,7 +93,7 @@ def test_pack_required_assets_and_metadata() -> None:
     assert set(required) - {"ecosystem.json"} <= indexed
     assert all((PACK_DIR / path).is_file() for path in indexed)
     pack_files = {
-        str(path.relative_to(PACK_DIR))
+        str(path.relative_to(PACK_DIR)).replace("\\", "/")
         for path in PACK_DIR.rglob("*")
         if path.is_file()
     }
