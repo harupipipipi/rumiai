@@ -228,6 +228,10 @@ class OpencodeGoProvider(OpenAICompatibleProvider):
         "stop_sequences",
         "metadata",
     }
+    _anthropic_role = staticmethod(AnthropicProvider._anthropic_role)
+    _tool_use_parts = staticmethod(AnthropicProvider._tool_use_parts)
+    _tool_result_part = staticmethod(AnthropicProvider._tool_result_part)
+    _content_parts = staticmethod(AnthropicProvider._content_parts)
 
     def __init__(self) -> None:
         super().__init__(
