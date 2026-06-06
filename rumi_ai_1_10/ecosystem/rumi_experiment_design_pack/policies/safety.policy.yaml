@@ -26,4 +26,4 @@ policy:
   claim_rules:
   - design-only decision records must set result_claim.status to not_claimed
   - supplied result claims must come from user-supplied artifacts, not pack-executed queries
-  - SQL, analytics queries, and statistical calculations hand off to rumi_data_analysis_pack
+  - SQL, analytics queries, and statistical calculations hand off to defaultspack runtime tooling

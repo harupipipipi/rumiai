@@ -68,7 +68,7 @@
           },
           "owner_pack": {
             "type": "string",
-            "const": "rumi_devops_release_pack"
+            "const": "defaultspack"
           },
           "action_label": {
             "type": "string",
@@ -79,7 +79,7 @@
     },
     "monitoring_owner": {
       "type": "string",
-      "const": "rumi_observability_pack"
+      "const": "defaultspack"
     },
     "stop_rules": {
       "type": "array",

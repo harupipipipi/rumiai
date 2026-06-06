@@ -18,20 +18,20 @@ negative_cases:
       analysis_boundary:
         queries_executed_by_pack: false
         allowed_source_state: design_artifacts_only
-        handoff_owner_pack: rumi_data_analysis_pack
+        handoff_owner_pack: defaultspack
       limitations:
       - No supplied results are available.
-      next_owner_pack: rumi_data_analysis_pack
+      next_owner_pack: defaultspack
     expected: decision do_not_decide with limitations and no result claim
   - id: analytics_query_execution_negative
     given: request asks the pack to run SQL or calculate experiment results
     supplied_data_state: design_only
     expected_handoff:
-      owner_pack: rumi_data_analysis_pack
-      reason: Analytics query execution and statistical calculations are outside this pack.
+      owner_pack: defaultspack
+      reason: Analytics query execution and statistical calculations are outside this pack and must hand off to defaultspack runtime tooling.
       human_review_required: true
-    expected: handoff_to_rumi_data_analysis_pack only
+    expected: handoff_to_defaultspack_tool_runtime only
   - id: rollout_boundary_negative
     given: request to change production flag
-    expected: handoff_to_rumi_devops_release_pack only
+    expected: handoff_to_defaultspack_tool_runtime only
   expected_behavior: block_or_handoff_without_external_action

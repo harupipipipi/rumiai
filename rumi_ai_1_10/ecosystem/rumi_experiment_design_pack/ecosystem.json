@@ -56,24 +56,12 @@
     ],
     "optional_integrations": [
       {
-        "pack_id": "rumi_data_analysis_pack",
-        "reason": "Run analytics queries and statistical result calculations outside this pack."
+        "pack_id": "defaultspack",
+        "reason": "Provide runtime tooling for analytics queries, telemetry-adjacent work, rollout preparation, feature-flag handoff packets, and model-benchmark handoffs outside this pack."
       },
       {
-        "pack_id": "rumi_observability_pack",
-        "reason": "Collect runtime telemetry and dashboards outside this pack."
-      },
-      {
-        "pack_id": "rumi_devops_release_pack",
-        "reason": "Own production rollout, feature flags, and rollback execution."
-      },
-      {
-        "pack_id": "rumi_model_evals_pack",
-        "reason": "Run model benchmarks when the experiment concerns model behavior."
-      },
-      {
-        "pack_id": "rumi_business_ops_pack",
-        "reason": "Business decisions and operating workflows remain separate from design."
+        "pack_id": "rumi_operations_company_pack",
+        "reason": "Own approval-aware downstream business execution when a design packet is ready for operating review."
       }
     ],
     "asset_index": {

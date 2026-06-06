@@ -56,11 +56,11 @@
     },
     "observability_owner": {
       "type": "string",
-      "const": "rumi_observability_pack"
+      "const": "defaultspack"
     },
     "data_analysis_owner": {
       "type": "string",
-      "const": "rumi_data_analysis_pack"
+      "const": "defaultspack"
     },
     "privacy_review_state": {
       "type": "string",

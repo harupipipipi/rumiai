@@ -92,7 +92,7 @@
         },
         "handoff_owner_pack": {
           "type": "string",
-          "const": "rumi_data_analysis_pack"
+          "const": "defaultspack"
         }
       }
     },
@@ -113,10 +113,8 @@
     "next_owner_pack": {
       "type": "string",
       "enum": [
-        "rumi_data_analysis_pack",
-        "rumi_observability_pack",
-        "rumi_devops_release_pack",
-        "rumi_business_ops_pack",
+        "defaultspack",
+        "rumi_operations_company_pack",
         "none"
       ]
     }

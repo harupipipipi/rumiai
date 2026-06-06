@@ -32,8 +32,7 @@ workflows:
     - hypothesis_metric_alignment
     - sample_size_assumptions
     handoffs:
-    - rumi_data_analysis_pack
-    - rumi_observability_pack
+    - defaultspack
     execution: declarative_only
   - id: quasi_experiment_design
     purpose: Design non-randomized comparison while naming bias risks and limitations.
@@ -47,7 +46,7 @@ workflows:
     - assignment_bias_risk
     - limitations_present
     handoffs:
-    - rumi_data_analysis_pack
+    - defaultspack
     execution: declarative_only
   - id: rollout_guardrail_plan
     purpose: Define monitoring, stop rules, and rollback thresholds without mutating production.
@@ -61,8 +60,7 @@ workflows:
     - guardrail_metric_present
     - rollback_owner_named
     handoffs:
-    - rumi_observability_pack
-    - rumi_devops_release_pack
+    - defaultspack
     execution: declarative_only
   - id: instrumentation_requirements
     purpose: Create an event and metric request for observability and analysis owners.
@@ -74,8 +72,7 @@ workflows:
     - data_source_state_declared
     - privacy_review_state_declared
     handoffs:
-    - rumi_observability_pack
-    - rumi_data_analysis_pack
+    - defaultspack
     execution: declarative_only
   - id: decision_ready_packet
     purpose: Record whether a design can run, needs instrumentation, needs analysis, or must not decide.
@@ -89,6 +86,6 @@ workflows:
     - no_result_claim_without_data
     - limitations_present
     handoffs:
-    - rumi_business_ops_pack
-    - rumi_devops_release_pack
+    - defaultspack
+    - rumi_operations_company_pack
     execution: declarative_only

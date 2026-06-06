@@ -23,12 +23,12 @@
     ]
   },
   "overlap_policy": {
-    "analytics_query_execution": "handoff_to_rumi_data_analysis_pack",
-    "runtime_telemetry": "handoff_to_rumi_observability_pack",
-    "production_rollout": "handoff_to_rumi_devops_release_pack",
-    "model_benchmarking": "handoff_to_rumi_model_evals_pack",
-    "business_decision_execution": "handoff_to_rumi_business_ops_pack",
-    "feature_flag_mutation": "handoff_to_rumi_devops_release_pack",
+    "analytics_query_execution": "handoff_to_defaultspack_tool_runtime",
+    "runtime_telemetry": "handoff_to_defaultspack_tool_runtime",
+    "production_rollout": "handoff_to_defaultspack_tool_runtime",
+    "model_benchmarking": "handoff_to_defaultspack_tool_runtime",
+    "business_decision_execution": "handoff_to_rumi_operations_company_pack",
+    "feature_flag_mutation": "handoff_to_defaultspack_tool_runtime",
     "experiment_design_contract": "owned_by_rumi_experiment_design_pack",
     "tool_aliases": "prefer_explicit_pack_namespace"
   },
@@ -45,8 +45,8 @@
     "promotion_blockers": [
       "does_not_run_analytics_queries",
       "does_not_claim_results_without_supplied_data",
-      "rollout_owned_by_devops_release_pack",
-      "telemetry_owned_by_observability_pack",
+      "rollout_handoff_owned_by_defaultspack",
+      "telemetry_handoff_owned_by_defaultspack",
       "must_validate_guardrail_and_rollback_assumptions"
     ],
     "promotion_evidence_required": [
@@ -54,7 +54,7 @@
       "sample_size_assumption_cases",
       "guardrail_decision_cases",
       "quasi_experiment_bias_cases",
-      "handoff_acceptance_by_data_observability_devops"
+      "handoff_acceptance_by_defaultspack_and_operations_company"
     ]
   },
   "marketplace": {

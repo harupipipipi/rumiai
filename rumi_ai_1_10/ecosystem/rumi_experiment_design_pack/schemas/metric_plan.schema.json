@@ -79,7 +79,7 @@
     },
     "instrumentation_owner": {
       "type": "string",
-      "const": "rumi_observability_pack"
+      "const": "defaultspack"
     },
     "data_availability_state": {
       "type": "string",
@@ -91,7 +91,7 @@
     },
     "analysis_handoff": {
       "type": "string",
-      "const": "rumi_data_analysis_pack"
+      "const": "defaultspack"
     }
   }
 }

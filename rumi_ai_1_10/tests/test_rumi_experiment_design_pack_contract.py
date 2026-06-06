@@ -20,9 +20,9 @@ WORKFLOW_IDS = set(['ab_test_design', 'quasi_experiment_design', 'rollout_guardr
 QUALITY_CHECK_IDS = set(['hypothesis_metric_alignment', 'guardrail_metric_present', 'sample_size_assumptions', 'assignment_bias_risk', 'no_result_claim_without_data', 'no_analytics_query_execution', 'data_source_state_declared', 'rollback_owner_named', 'privacy_review_state_declared'])
 OWNER_EXPECTED = set(['hypothesis_contract', 'metric_plan', 'sample_size_plan', 'assignment_plan', 'guardrail_plan', 'instrumentation_requirements', 'decision_record', 'experiment_readiness_packet'])
 NON_OWNER_EXPECTED = set(['analytics query execution', 'production rollout', 'runtime telemetry collection', 'model benchmark execution', 'business decision execution', 'feature flag mutation'])
-OVERLAP_EXPECTED = {'analytics_query_execution': 'handoff_to_rumi_data_analysis_pack', 'runtime_telemetry': 'handoff_to_rumi_observability_pack', 'production_rollout': 'handoff_to_rumi_devops_release_pack', 'model_benchmarking': 'handoff_to_rumi_model_evals_pack', 'business_decision_execution': 'handoff_to_rumi_business_ops_pack', 'feature_flag_mutation': 'handoff_to_rumi_devops_release_pack', 'experiment_design_contract': 'owned_by_rumi_experiment_design_pack', 'tool_aliases': 'prefer_explicit_pack_namespace'}
-PROMOTION_BLOCKERS = set(['does_not_run_analytics_queries', 'does_not_claim_results_without_supplied_data', 'rollout_owned_by_devops_release_pack', 'telemetry_owned_by_observability_pack', 'must_validate_guardrail_and_rollback_assumptions'])
-PROMOTION_EVIDENCE = set(['hypothesis_metric_alignment_cases', 'sample_size_assumption_cases', 'guardrail_decision_cases', 'quasi_experiment_bias_cases', 'handoff_acceptance_by_data_observability_devops'])
+OVERLAP_EXPECTED = {'analytics_query_execution': 'handoff_to_defaultspack_tool_runtime', 'runtime_telemetry': 'handoff_to_defaultspack_tool_runtime', 'production_rollout': 'handoff_to_defaultspack_tool_runtime', 'model_benchmarking': 'handoff_to_defaultspack_tool_runtime', 'business_decision_execution': 'handoff_to_rumi_operations_company_pack', 'feature_flag_mutation': 'handoff_to_defaultspack_tool_runtime', 'experiment_design_contract': 'owned_by_rumi_experiment_design_pack', 'tool_aliases': 'prefer_explicit_pack_namespace'}
+PROMOTION_BLOCKERS = set(['does_not_run_analytics_queries', 'does_not_claim_results_without_supplied_data', 'rollout_handoff_owned_by_defaultspack', 'telemetry_handoff_owned_by_defaultspack', 'must_validate_guardrail_and_rollback_assumptions'])
+PROMOTION_EVIDENCE = set(['hypothesis_metric_alignment_cases', 'sample_size_assumption_cases', 'guardrail_decision_cases', 'quasi_experiment_bias_cases', 'handoff_acceptance_by_defaultspack_and_operations_company'])
 BLOCKED_BY_DEFAULT = set(['declare a winner without supplied data', 'claim statistical significance or lift without supplied results', 'ignore guardrail metrics', 'run analytics queries', 'mutate feature flags or production rollout', 'hide sample-size assumptions'])
 
 
@@ -63,6 +63,8 @@ def test_pack_required_assets_and_ecosystem_contract() -> None:
     assert ecosystem["metadata"]["defaultspack_promotion_eligible"] is False
     assert set(ecosystem["metadata"]["owner_surfaces"]) >= OWNER_EXPECTED
     assert set(ecosystem["metadata"]["non_owner_surfaces"]) >= NON_OWNER_EXPECTED
+    available = {item.pack_id for item in PackSelector(ROOT / "ecosystem").scan_candidates()}
+    assert {item["pack_id"] for item in ecosystem["metadata"]["optional_integrations"]} <= available
 
     metadata_indexed = {item for values in ecosystem["metadata"]["asset_index"].values() for item in values}
     actual = {str(path.relative_to(PACK_DIR)) for path in PACK_DIR.rglob("*") if path.is_file() and path.name != "ecosystem.json"}
@@ -145,7 +147,10 @@ def test_decision_contract_blocks_design_only_result_claims() -> None:
     assert result_claim["properties"]["status"]["enum"] == ["not_claimed", "supplied_results_claim"]
     assert result_claim["properties"]["requires_supplied_results"]["const"] is True
     assert analysis_boundary["properties"]["queries_executed_by_pack"]["const"] is False
-    assert analysis_boundary["properties"]["handoff_owner_pack"]["const"] == "rumi_data_analysis_pack"
+    assert analysis_boundary["properties"]["handoff_owner_pack"]["const"] == "defaultspack"
+    next_owners = set(schema["properties"]["next_owner_pack"]["enum"]) - {"none"}
+    available = {item.pack_id for item in PackSelector(ROOT / "ecosystem").scan_candidates()}
+    assert next_owners <= available
 
     design_only = decision_rule_for(schema, "design_only")
     insufficient = decision_rule_for(schema, "insufficient_data")
@@ -176,7 +181,7 @@ def test_decision_contract_blocks_design_only_result_claims() -> None:
         assert forbidden not in json.dumps(expected).lower()
 
     analytics_case = cases["analytics_query_execution_negative"]
-    assert analytics_case["expected_handoff"]["owner_pack"] == "rumi_data_analysis_pack"
+    assert analytics_case["expected_handoff"]["owner_pack"] == "defaultspack"
     assert analytics_case["expected_handoff"]["human_review_required"] is True
 
 
