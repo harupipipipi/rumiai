@@ -1936,6 +1936,12 @@ def _context_with_tool_approval_token(context, tool_def, arguments, *extra_looku
         return next_context, None
     if _tool_approval_tool_name(tool_def) in {"browser_computer", "browser_use", "computer_use"}:
         return next_context, _approval_required_tool_response(tool_def, arguments, next_context)
+    if verification.code == "APPROVAL_TOKEN_USED":
+        return next_context, {
+            "result": verification.message or "approval token has already been used",
+            "is_error": True,
+            "widget": None,
+        }
     if verification.code in _STALE_APPROVAL_TOKEN_CODES:
         return next_context, _approval_required_tool_response(tool_def, arguments, next_context)
     return next_context, {
