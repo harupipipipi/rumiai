@@ -202,7 +202,10 @@ class DefaultspackBridge:
         }
         if timeout_seconds is not None:
             request["timeout_seconds"] = timeout_seconds
-        response = executor.execute(self._principal_id, request)
+        response = executor.execute(
+            self._execution_principal_for(qualified_name),
+            request,
+        )
         if not getattr(response, "success", False):
             error_type = str(getattr(response, "error_type", None) or "FUNCTION_CALL_FAILED").upper()
             return {
@@ -216,6 +219,12 @@ class DefaultspackBridge:
         if isinstance(output, dict):
             return output if output.get("status") in {"ok", "error"} else {"status": "ok", "data": output}
         return {"status": "ok", "data": output}
+
+    def _execution_principal_for(self, qualified_name: str) -> str:
+        target_pack = _pack_id_from_name(qualified_name)
+        if target_pack == "defaultspack":
+            return target_pack
+        return self._principal_id
 
     def _invoke_ok(
         self,
