@@ -376,6 +376,40 @@ class TestSetupPackManager(unittest.TestCase):
             self.assertEqual(result["errors"][0]["reason"], "dependency_missing")
             self.assertEqual(fake_grants.batch_calls, [])
 
+    def test_install_accepts_available_dependency_targets_before_grants(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            root = base / "setup_pack"
+            self._write_pack(
+                root,
+                "addon",
+                "addon",
+                True,
+                depends_on=[{"pack_id": "defaultspack", "version": ">=2.0.0"}],
+            )
+            manager = SetupPackManager(root=root, selection_file=base / "selection.json")
+
+            ctx = self._install_context(
+                base,
+                [
+                    self._target(base, "addon", "rumi:ecosystem/addon"),
+                    self._target(
+                        base,
+                        "defaultspack",
+                        "rumi:ecosystem/defaultspack",
+                        version="2.0.0",
+                    ),
+                ],
+            )
+            _, fake_grants, *patches = ctx
+            with patches[0], patches[1], patches[2], patches[3]:
+                result = manager.install("addon")
+
+            self.assertTrue(result["success"])
+            self.assertEqual(result["installed_setup_pack_ids"], ["addon"])
+            self.assertEqual(result["installed_target_pack_ids"], ["addon"])
+            self.assertEqual(len(fake_grants.batch_calls), 1)
+
     def test_install_rejects_target_version_mismatch_before_grants(self):
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
