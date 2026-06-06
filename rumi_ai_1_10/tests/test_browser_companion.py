@@ -207,6 +207,25 @@ def test_browser_companion_extension_semantic_dom_and_highlight_contract():
         assert needle in background or needle in tool_manifest
 
 
+def test_browser_companion_snapshot_forwards_snapshot_options_to_content_script():
+    background = (ROOT.parent / "browser_extensions" / "rumi_browser_companion" / "background.js").read_text(
+        encoding="utf-8"
+    )
+    capture_body = background[
+        background.index("async function captureDomSnapshot") : background.index("async function sendElementCommand")
+    ]
+
+    for needle in (
+        "snapshotRequest.options = snapshotOptions",
+        "snapshotOptions.includeHidden",
+        "snapshotOptions.includeHtml",
+        "snapshotOptions.includeAttributes",
+        "snapshotOptions.attributeNames",
+        "snapshotOptions.includeSemantics",
+    ):
+        assert needle in capture_body
+
+
 def test_browser_companion_bridge_routes_support_batch_results(tmp_path, monkeypatch):
     from blocks.tool import browser_companion_bridge as route_module
     from ecosystem.rumi_default_tools_pack.domain.tool.browser_companion_bridge import BrowserCompanionBridgeStore
