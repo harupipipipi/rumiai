@@ -102,6 +102,10 @@ def test_dispatch_prunes_tools_for_non_tool_calling_agent_model(monkeypatch, tmp
 
     monkeypatch.setenv("RUMI_DEFAULTSPACK_COMPANY_STORE_PATH", str(tmp_path / "companies"))
     monkeypatch.setenv("RUMI_DEFAULTSPACK_COMPANY_RUNTIME_DB_PATH", str(tmp_path / "company_runtime.db"))
+    monkeypatch.setattr(
+        "domain.company.run_dispatcher.get_model_capabilities",
+        lambda _model: {"supports_tool_calling": False},
+    )
     CompanyStore._instance = None
     CompanyRuntimeStore._instance = None
 
