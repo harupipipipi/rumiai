@@ -33,17 +33,17 @@ def test_defaultspack_catalog_exposes_minimax_m3_free_capability_metadata():
     assert profile["qualified_model_id"] == MINIMAX_PROFILE_ID
 
     for item in (model, profile):
-        assert item["supports_tool_calling"] is True
+        assert item["supports_tool_calling"] is False
         assert item["supports_thinking"] is True
         assert item["supports_vision"] is True
-        assert item["metadata"]["supports_tool_calling"] is True
+        assert item["metadata"]["supports_tool_calling"] is False
         assert item["metadata"]["supports_thinking"] is True
         assert item["metadata"]["supports_vision"] is True
-        assert item["model_capabilities"]["capabilities"]["tool_calling"] is True
+        assert item["model_capabilities"]["capabilities"]["tool_calling"] is False
         assert item["model_capabilities"]["capabilities"]["thinking"] is True
         assert item["model_capabilities"]["capabilities"]["vision"] is True
 
-    assert {"tools", "thinking", "vision"}.issubset(model["capability_tags"])
+    assert {"thinking", "vision"}.issubset(model["capability_tags"])
     assert {"deep_reasoning", "vision_ocr"}.issubset(profile["recommended_roles"])
 
 
@@ -55,13 +55,13 @@ def test_defaultspack_model_search_returns_minimax_m3_free_for_capability_query(
         {
             "query": "minimax m3 free",
             "provider_id": "opencode-zen",
-            "requires": {"tool_calling": True, "thinking": True, "vision": True},
+            "requires": {"thinking": True, "vision": True},
             "max_results": 10,
         },
         profiles=list_profile_catalog(),
     )
 
     assert [item["profile_id"] for item in result["models"]] == [MINIMAX_PROFILE_ID]
-    assert result["models"][0]["supports_tool_calling"] is True
+    assert result["models"][0]["supports_tool_calling"] is False
     assert result["models"][0]["supports_thinking"] is True
     assert result["models"][0]["supports_vision"] is True
