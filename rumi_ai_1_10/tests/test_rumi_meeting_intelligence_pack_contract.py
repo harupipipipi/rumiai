@@ -29,10 +29,13 @@ REQUIRED_ASSETS = [
     "docs/operations.md",
     "catalog/meeting_intelligence_workflows.yaml",
     "catalog/meeting_intelligence_quality_matrix.yaml",
+    "catalog/participant_consent_matrix.yaml",
+    "schemas/action_item.schema.json",
     "schemas/meeting_intelligence_record.schema.json",
     "policies/meeting_intelligence_safety.policy.yaml",
     "checklists/meeting_intelligence_review.checklist.yaml",
     "ledgers/meeting_intelligence_evidence_ledger.schema.yaml",
+    "templates/followup_email.template.md",
     "templates/meeting_intelligence_handoff.template.md",
     "profiles/meeting_chief.profile.yaml",
     "prompts/meeting_recap_scribe.system.md",
@@ -52,8 +55,15 @@ def test_pack_required_assets_and_metadata() -> None:
     assert validate_ecosystem(ecosystem, raise_on_error=False) == []
     assert ecosystem["pack_identity"] == f"rumi:ecosystem/{PACK_ID}"
     assert ecosystem["dependencies"] == {"defaultspack": ">=2.0.0"}
+    assert ecosystem["connectivity"] == {
+        "requires": ["defaultspack"],
+        "provides": [],
+    }
     assert ecosystem["required_secrets"] == []
-    assert ecosystem["required_network"] == []
+    assert ecosystem["required_network"] == {
+        "allowed_domains": [],
+        "allowed_ports": [],
+    }
     assert ecosystem["metadata"]["required_secrets"] == []
     assert ecosystem["metadata"]["network_policy"] == "none_by_default"
     assert ecosystem["metadata"]["executable_code"] is False
@@ -93,7 +103,10 @@ def test_pack_required_assets_and_metadata() -> None:
     assert set(REQUIRED_ASSETS) - {"ecosystem.json"} <= indexed_file_assets
     assert asset_index["invariants"] == {
         "required_secrets": [],
-        "required_network": [],
+        "required_network": {
+            "allowed_domains": [],
+            "allowed_ports": [],
+        },
         "executable_code": False,
         "supports_all_ok": False,
         "external_actions_are_handoffs": True,
