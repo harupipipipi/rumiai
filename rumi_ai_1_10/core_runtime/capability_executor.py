@@ -438,10 +438,10 @@ class CapabilityExecutor:
             get_by_permission_id = getattr(fr, "get_by_permission_id", None)
             if callable(get_by_permission_id):
                 entry = get_by_permission_id(permission_id)
-                if entry is not None and isinstance(getattr(entry, "qualified_name", None), str):
+                if self._looks_like_function_entry(entry):
                     return entry
             entry = fr.resolve_by_alias(permission_id)
-            if entry is not None:
+            if self._looks_like_function_entry(entry):
                 return entry
         except Exception:
             logger.debug("FunctionRegistry lookup failed for '%s'", permission_id, exc_info=True)
@@ -454,13 +454,17 @@ class CapabilityExecutor:
                 logger.debug("Legacy handler registry fallback failed for '%s'", permission_id, exc_info=True)
         return None
 
+    @staticmethod
+    def _looks_like_function_entry(entry) -> bool:
+        return entry is not None and isinstance(getattr(entry, "qualified_name", None), str)
+
     def _coerce_legacy_entry(self, candidate, permission_id: str):
         """旧 handler registry の定義を FunctionEntry 互換の最小 shape に寄せる。"""
         if candidate is None:
             return None
         handler_id = getattr(candidate, "handler_id", None)
         entrypoint = getattr(candidate, "entrypoint", None)
-        if not isinstance(handler_id, str) or not isinstance(getattr(candidate, "permission_id", None), str):
+        if not isinstance(handler_id, str):
             return None
         if entrypoint is not None and not isinstance(entrypoint, str):
             return None
@@ -468,14 +472,28 @@ class CapabilityExecutor:
         handler_py_path = getattr(candidate, "handler_py_path", None)
         is_builtin = bool(getattr(candidate, "is_builtin", False))
         pack_id = getattr(candidate, "pack_id", None)
+        if not isinstance(pack_id, str):
+            pack_id = None
         if not pack_id:
             pack_id = f"{_CORE_PACK_ID_PREFIX}legacy" if is_builtin else "legacy_pack"
-        main_py_path = getattr(candidate, "main_py_path", None) or handler_py_path
-        grant_config = getattr(candidate, "grant_config", {})
-        qualified_name = getattr(candidate, "qualified_name", None) or handler_id
+        main_py_path = getattr(candidate, "main_py_path", None)
+        if not isinstance(main_py_path, (str, Path)):
+            main_py_path = handler_py_path
+        grant_config = getattr(candidate, "grant_config", None)
+        if not isinstance(grant_config, dict):
+            grant_config = None
+        qualified_name = getattr(candidate, "qualified_name", None)
+        if not isinstance(qualified_name, str):
+            qualified_name = handler_id
         calling_convention = getattr(candidate, "calling_convention", None)
-        function_dir = getattr(candidate, "function_dir", None) or handler_dir
-        vocab_aliases = getattr(candidate, "vocab_aliases", None) or [permission_id]
+        if not isinstance(calling_convention, str):
+            calling_convention = None
+        function_dir = getattr(candidate, "function_dir", None)
+        if not isinstance(function_dir, (str, Path)):
+            function_dir = handler_dir
+        vocab_aliases = getattr(candidate, "vocab_aliases", None)
+        if not isinstance(vocab_aliases, list):
+            vocab_aliases = [permission_id]
         return types.SimpleNamespace(
             qualified_name=qualified_name,
             pack_id=pack_id,
@@ -486,6 +504,7 @@ class CapabilityExecutor:
             function_dir=function_dir,
             is_builtin=is_builtin,
             vocab_aliases=vocab_aliases,
+            legacy_grant_required=True,
         )
 
     @staticmethod
@@ -783,11 +802,13 @@ class CapabilityExecutor:
         # 3. Grant チェック（host/binary/command は manifest grant_config がなくても必須）
         calling_convention = getattr(entry, "calling_convention", None)
         entry_grant_config = self._entry_grant_config(entry)
-        grant_required = entry_grant_config is not None or calling_convention in {
+        host_grant_required = calling_convention in {
             "python_host",
             "binary",
             "command",
         }
+        legacy_grant_required = bool(getattr(entry, "legacy_grant_required", False))
+        grant_required = entry_grant_config is not None or host_grant_required or legacy_grant_required
         grant_config = dict(entry_grant_config or {})
         if grant_required:
             if self._grant_manager is None:
@@ -809,12 +830,19 @@ class CapabilityExecutor:
                     grant_reason="CapabilityGrantManager not available",
                 )
                 return resp
-            grant_permission_id = permission_id_for_entry(entry)
-            grant_result = self._grant_manager.check(pack_id, grant_permission_id)
-            if not grant_result.allowed and principal_id != pack_id:
-                caller_grant_result = self._grant_manager.check(principal_id, grant_permission_id)
-                if caller_grant_result.allowed:
-                    grant_result = caller_grant_result
+            grant_permission_id = (
+                permission_id_for_entry(entry)
+                if isinstance(getattr(entry, "permission_id", None), str)
+                else effective_permission_id
+            )
+            if host_grant_required:
+                grant_result = self._grant_manager.check(pack_id, grant_permission_id)
+                if not grant_result.allowed and principal_id != pack_id:
+                    caller_grant_result = self._grant_manager.check(principal_id, grant_permission_id)
+                    if caller_grant_result.allowed:
+                        grant_result = caller_grant_result
+            else:
+                grant_result = self._grant_manager.check(principal_id, grant_permission_id)
             if not grant_result.allowed:
                 resp = CapabilityResponse(success=False, error="Permission denied", error_type="grant_denied",
                                           latency_ms=(time.time() - start_time) * 1000)
