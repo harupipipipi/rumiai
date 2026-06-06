@@ -156,6 +156,88 @@ class TestApiRouteTableBuild(unittest.TestCase):
         entry = PackAPIHandler._api_route_exact[("POST", "/api/panel/kernel/restart")]
         self.assertEqual(entry["response_mode"], "raw")
 
+    def test_dispatch_response_mode_raw_uses_raw_json_payload(self):
+        from core_runtime.pack_api_server import PackAPIHandler
+
+        PackAPIHandler._api_route_exact = {
+            ("POST", "/api/panel/kernel/restart"): {
+                "pack_id": "test_pack",
+                "handler": "_panel_restart_kernel",
+                "function_id": "",
+                "pass_body": False,
+                "response_mode": "raw",
+                "args": {},
+                "path_param_map": {},
+            }
+        }
+        PackAPIHandler._api_route_patterns = []
+        handler = PackAPIHandler.__new__(PackAPIHandler)
+        handler._panel_restart_kernel = lambda: {
+            "restarting": True,
+            "message": "Kernel restart requested",
+        }
+        handler._send_raw_json = MagicMock()
+        handler._send_result = MagicMock()
+        handler._send_response = MagicMock()
+        handler._send_sse = MagicMock()
+
+        dispatched = handler._dispatch_api_route(
+            "POST",
+            "/api/panel/kernel/restart",
+        )
+
+        self.assertTrue(dispatched)
+        handler._send_raw_json.assert_called_once_with(
+            {
+                "restarting": True,
+                "message": "Kernel restart requested",
+            },
+            status=200,
+        )
+        handler._send_result.assert_not_called()
+        handler._send_response.assert_not_called()
+
+    def test_dispatch_response_mode_raw_preserves_explicit_status_code(self):
+        from core_runtime.pack_api_server import PackAPIHandler
+
+        PackAPIHandler._api_route_exact = {
+            ("POST", "/api/panel/kernel/restart"): {
+                "pack_id": "test_pack",
+                "handler": "_panel_restart_kernel",
+                "function_id": "",
+                "pass_body": False,
+                "response_mode": "raw",
+                "args": {},
+                "path_param_map": {},
+            }
+        }
+        PackAPIHandler._api_route_patterns = []
+        handler = PackAPIHandler.__new__(PackAPIHandler)
+        handler._panel_restart_kernel = lambda: {
+            "error": "Restart rate limited",
+            "status_code": 429,
+        }
+        handler._send_raw_json = MagicMock()
+        handler._send_result = MagicMock()
+        handler._send_response = MagicMock()
+        handler._send_sse = MagicMock()
+
+        dispatched = handler._dispatch_api_route(
+            "POST",
+            "/api/panel/kernel/restart",
+        )
+
+        self.assertTrue(dispatched)
+        handler._send_raw_json.assert_called_once_with(
+            {
+                "error": "Restart rate limited",
+                "status_code": 429,
+            },
+            status=429,
+        )
+        handler._send_result.assert_not_called()
+        handler._send_response.assert_not_called()
+
     def test_none_registry(self):
         """registry が None の場合は 0 を返す"""
         from core_runtime.pack_api_server import PackAPIHandler

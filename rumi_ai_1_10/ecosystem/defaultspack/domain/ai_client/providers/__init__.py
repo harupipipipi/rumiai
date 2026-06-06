@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib
 import os
+import sys
 from typing import Any, Dict, Iterable, List, Optional
 
 from ...extensions.loading import import_entrypoint
@@ -1238,9 +1239,21 @@ def _instantiate_manifest_provider(manifest: Dict[str, Any]):
             model_manifests=_load_model_manifests(provider_id),
         )
     if entrypoint:
-        provider_cls = import_entrypoint(entrypoint)
+        provider_cls = _import_provider_entrypoint(entrypoint)
         return provider_cls()
     return None
+
+
+def _import_provider_entrypoint(entrypoint: str):
+    raw = str(entrypoint or "").strip()
+    if ":" not in raw:
+        return import_entrypoint(raw)
+    module_name, attr_name = raw.split(":", 1)
+    if module_name.startswith("domain.ai_client.providers."):
+        legacy_module = sys.modules.get(module_name)
+        if legacy_module is not None and hasattr(legacy_module, attr_name):
+            return getattr(legacy_module, attr_name)
+    return import_entrypoint(raw)
 
 
 def detect_available_providers():

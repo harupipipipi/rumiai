@@ -141,26 +141,50 @@ class TestCompleteSetup:
         assert result["success"] is True
 
     def test_setup_status_no_auth_required(self):
-        """/api/setup/status は認証不要であること"""
-        import inspect
+        """/api/setup/status は認証前に処理されること。"""
         from core_runtime.pack_api_server import PackAPIHandler
 
-        source = inspect.getsource(PackAPIHandler.do_GET)
-        setup_pos = source.find('"/api/setup/status"')
-        auth_pos = source.find('_check_auth("GET", _pre_auth_path)')
-        assert setup_pos != -1, "/api/setup/status not found in do_GET"
-        assert setup_pos < auth_pos, "/api/setup/status must appear before _check_auth"
+        handler = object.__new__(PackAPIHandler)
+        handler.path = "/api/setup/status"
+        handler.client_address = ("198.51.100.7", 12345)
+        handler._send_response = MagicMock()
+        handler._check_auth = MagicMock(side_effect=AssertionError("auth should not run"))
+        handler._match_web_mount = MagicMock(return_value=None)
+        handler._check_rate_limit = MagicMock(return_value=True)
+        handler._is_pre_auth_route = MagicMock(return_value=True)
+        PackAPIHandler.app_lifecycle_manager = MagicMock()
+        PackAPIHandler.app_lifecycle_manager.check_setup_status.return_value = {
+            "needs_setup": True,
+        }
+
+        PackAPIHandler.do_GET(handler)
+
+        handler._send_response.assert_called_once()
+        handler._check_auth.assert_not_called()
 
     def test_setup_complete_no_auth_required(self):
-        """/api/setup/complete は認証不要であること"""
-        import inspect
+        """/api/setup/complete は認証前に処理されること。"""
         from core_runtime.pack_api_server import PackAPIHandler
 
-        source = inspect.getsource(PackAPIHandler.do_POST)
-        complete_pos = source.find('"/api/setup/complete"')
-        auth_pos = source.find('_check_auth("POST", _pre_auth_path_post)')
-        assert complete_pos != -1, "/api/setup/complete not found in do_POST"
-        assert complete_pos < auth_pos, "/api/setup/complete must appear before _check_auth"
+        handler = object.__new__(PackAPIHandler)
+        handler.path = "/api/setup/complete"
+        handler.client_address = ("198.51.100.7", 12345)
+        handler._send_response = MagicMock()
+        handler._check_auth = MagicMock(side_effect=AssertionError("auth should not run"))
+        handler._check_rate_limit = MagicMock(return_value=True)
+        handler._is_pre_auth_route = MagicMock(return_value=True)
+        handler._parse_body = MagicMock(return_value={"username": "testuser", "language": "ja"})
+        PackAPIHandler.app_lifecycle_manager = MagicMock()
+        PackAPIHandler.app_lifecycle_manager.complete_setup.return_value = {
+            "success": True,
+            "errors": [],
+        }
+        PackAPIHandler.kernel = None
+
+        PackAPIHandler.do_POST(handler)
+
+        handler._send_response.assert_called_once()
+        handler._check_auth.assert_not_called()
 
 
 class TestHealthPayload:

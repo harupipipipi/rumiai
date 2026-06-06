@@ -65,6 +65,7 @@ except ImportError:
 # crypto_utils: compute_file_sha256 (Phase D: D0-3 依存解消)
 # def compute_file_sha256 is provided by core_runtime.crypto_utils and re-exported here.
 from .crypto_utils import compute_file_sha256
+from .pack_function_policy import permission_id_for_entry
 from .rate_limit_store import PersistentRateLimitStore
 
 from typing import Any, Dict, List, Optional
@@ -497,6 +498,76 @@ class CapabilityExecutor:
         return grant_config
 
     @staticmethod
+    def _entry_requires_trust(entry) -> bool:
+        manifest = getattr(entry, "manifest", None)
+        if not isinstance(manifest, dict):
+            manifest = {}
+        calling_convention = str(getattr(entry, "calling_convention", "") or "").strip()
+        return bool(
+            getattr(entry, "handler_py_sha256", None)
+            or (
+                getattr(entry, "main_py_path", None) is not None
+                and calling_convention not in {"binary", "command"}
+            )
+            or calling_convention in {"python_host", "binary", "command"}
+            or bool(manifest.get("trust_required"))
+        )
+
+    @staticmethod
+    def _entry_trust_path(entry) -> Path | None:
+        calling_convention = str(getattr(entry, "calling_convention", "") or "").strip()
+        if calling_convention == "binary":
+            binary_path = getattr(entry, "main_binary_path", None)
+            return Path(binary_path) if binary_path else None
+        if calling_convention == "command":
+            command = getattr(entry, "command", None) or []
+            if command and isinstance(command[0], str) and command[0]:
+                command_path = Path(command[0])
+                if not command_path.is_absolute():
+                    raise PermissionError(
+                        "Command entrypoints must use an absolute executable path"
+                    )
+                return command_path
+            return None
+
+        main_py_path = getattr(entry, "main_py_path", None)
+        if main_py_path:
+            return Path(main_py_path)
+
+        function_dir = getattr(entry, "function_dir", None)
+        entrypoint = getattr(entry, "entrypoint", None) or "main.py:run"
+        entrypoint_file = entrypoint.rsplit(":", 1)[0] if ":" in entrypoint else entrypoint
+        if function_dir:
+            return Path(function_dir) / entrypoint_file
+        return None
+
+    def _check_entry_trust(self, entry, permission_id: str) -> str | None:
+        if not self._entry_requires_trust(entry):
+            return None
+        try:
+            trust_path = self._entry_trust_path(entry)
+        except PermissionError as exc:
+            return str(exc)
+        if trust_path is None:
+            return "Executable path not available for trust verification"
+        try:
+            resolved_path = trust_path.resolve()
+        except OSError:
+            resolved_path = trust_path
+        if not resolved_path.is_file():
+            return "Executable path not found for trust verification"
+        try:
+            actual_sha256 = compute_file_sha256(resolved_path)
+        except Exception:
+            return "Failed to compute handler sha256 at execution time"
+        qualified_name = getattr(entry, "qualified_name", None)
+        trust_id = qualified_name.strip() if isinstance(qualified_name, str) and qualified_name.strip() else permission_id
+        trust_result = self._trust_store.is_trusted(trust_id, actual_sha256)
+        if trust_result.trusted:
+            return None
+        return trust_result.reason
+
+    @staticmethod
     def _is_bundled_builtin_pack_dir(pack_dir: Path, pack_id: str | None = None) -> bool:
         try:
             resolved = pack_dir.resolve()
@@ -635,32 +706,23 @@ class CapabilityExecutor:
         builtin_sha256 = None
 
         if is_builtin:
-            if entry.main_py_path and Path(entry.main_py_path).is_file():
+            trust_path = self._entry_trust_path(entry)
+            if trust_path is not None and Path(trust_path).is_file():
                 try:
-                    builtin_sha256 = compute_file_sha256(Path(entry.main_py_path))
+                    builtin_sha256 = compute_file_sha256(Path(trust_path))
                 except Exception:
                     builtin_sha256 = "compute_failed"
         else:
-            if not entry.main_py_path or not Path(entry.main_py_path).is_file():
+            trust_permission_id = (
+                getattr(entry, "permission_id", None)
+                or getattr(entry, "qualified_name", handler_id)
+            )
+            trust_error = self._check_entry_trust(entry, trust_permission_id)
+            if trust_error:
                 resp = CapabilityResponse(success=False, error="Permission denied", error_type="trust_denied",
                                           latency_ms=(time.time() - start_time) * 1000)
                 self._audit(principal_id, effective_permission_id, handler_id, resp, args, request_id,
-                            trusted=False, detail_reason="main_py_path not found for trust verification")
-                return resp
-            try:
-                actual_sha256 = compute_file_sha256(Path(entry.main_py_path))
-            except Exception:
-                resp = CapabilityResponse(success=False, error="Permission denied", error_type="trust_denied",
-                                          latency_ms=(time.time() - start_time) * 1000)
-                self._audit(principal_id, effective_permission_id, handler_id, resp, args, request_id,
-                            trusted=False, detail_reason="Failed to compute handler sha256 at execution time")
-                return resp
-            trust_result = self._trust_store.is_trusted(handler_id, actual_sha256)
-            if not trust_result.trusted:
-                resp = CapabilityResponse(success=False, error="Permission denied", error_type="trust_denied",
-                                          latency_ms=(time.time() - start_time) * 1000)
-                self._audit(principal_id, effective_permission_id, handler_id, resp, args, request_id,
-                            trusted=False, detail_reason=trust_result.reason)
+                            trusted=False, detail_reason=trust_error)
                 return resp
 
         # 3. Grant チェック（opt-in: grant_config が非 None のときのみ）
@@ -731,17 +793,46 @@ class CapabilityExecutor:
                                                      request_id=request_id, start_time=start_time,
                                                      request_context=request_context)
         if calling_convention == "python_host":
-            return self._execute_host_function(principal_id=principal_id, entry=entry, args=args,
-                                                request_id=request_id, start_time=start_time)
+            return self._execute_host_function(
+                principal_id=principal_id,
+                entry=entry,
+                args=args,
+                request_id=request_id,
+                start_time=start_time,
+                grant_config=grant_config,
+                request_context=request_context,
+            )
         if calling_convention == "python_docker":
-            return self._execute_user_function(principal_id=principal_id, entry=entry, args=args,
-                                                request_id=request_id, start_time=start_time)
+            return self._execute_user_function(
+                principal_id=principal_id,
+                entry=entry,
+                args=args,
+                request_id=request_id,
+                start_time=start_time,
+                grant_config=grant_config,
+                request_context=request_context,
+                force_docker=True,
+            )
         if calling_convention == "binary":
-            return self._execute_binary_function(principal_id=principal_id, entry=entry, args=args,
-                                                  request_id=request_id, start_time=start_time)
+            return self._execute_binary_function(
+                principal_id=principal_id,
+                entry=entry,
+                args=args,
+                request_id=request_id,
+                start_time=start_time,
+                grant_config=grant_config,
+                request_context=request_context,
+            )
         if calling_convention == "command":
-            return self._execute_command_function(principal_id=principal_id, entry=entry, args=args,
-                                                   request_id=request_id, start_time=start_time)
+            return self._execute_command_function(
+                principal_id=principal_id,
+                entry=entry,
+                args=args,
+                request_id=request_id,
+                start_time=start_time,
+                grant_config=grant_config,
+                request_context=request_context,
+            )
         return CapabilityResponse(success=False, error=f"Unknown calling_convention: {calling_convention}",
                                   error_type="invalid_calling_convention", latency_ms=(time.time() - start_time) * 1000)
 
@@ -821,7 +912,13 @@ class CapabilityExecutor:
         principal_is_trusted_builtin = self._is_trusted_builtin_pack(principal_id)
         if not principal_is_trusted_builtin and principal_id == pack_id:
             principal_is_trusted_builtin = is_trusted_builtin
-        if self._approval_manager is not None:
+        if (
+            not principal_is_trusted_builtin
+            and is_trusted_builtin
+            and principal_id in TRUSTED_BUILTIN_PACK_IDS
+        ):
+            principal_is_trusted_builtin = True
+        if self._approval_manager is not None and not (is_core or is_trusted_builtin):
             try:
                 approved_result = self._approval_manager.is_pack_approved_and_verified(pack_id)
                 if isinstance(approved_result, tuple):
@@ -852,6 +949,25 @@ class CapabilityExecutor:
                     self._audit(principal_id, "function.call", None, resp, args, request_id,
                                 detail_reason=f"approval_manager error for pack '{pack_id}': {exc}")
                     return resp
+        if not (is_core or is_trusted_builtin):
+            trust_error = self._check_entry_trust(entry, permission_id_for_entry(entry))
+            if trust_error:
+                resp = CapabilityResponse(
+                    success=False,
+                    error="Permission denied",
+                    error_type="trust_denied",
+                    latency_ms=(time.time() - start_time) * 1000,
+                )
+                self._audit(
+                    principal_id,
+                    "function.call",
+                    None,
+                    resp,
+                    args,
+                    request_id,
+                    detail_reason=f"Function trust denied for '{qualified_name}': {trust_error}",
+                )
+                return resp
         if not (is_core or is_trusted_builtin) and entry.requires:
             for req_perm in entry.requires:
                 if not self._has_permission_via_runtime_or_grant(pack_id, req_perm):
@@ -891,7 +1007,58 @@ class CapabilityExecutor:
                             detail_reason=f"Principal '{principal_id}' does not meet caller_requires: {entry.caller_requires}")
                 return resp
         calling_convention = getattr(entry, "calling_convention", None)
-        dispatch_grant_config = dict(self._entry_grant_config(entry) or {})
+        entry_grant_config = self._entry_grant_config(entry)
+        grant_required = entry_grant_config is not None or calling_convention in {
+            "python_host",
+            "binary",
+            "command",
+        }
+        dispatch_grant_config = dict(entry_grant_config or {})
+        if grant_required:
+            if self._grant_manager is None:
+                resp = CapabilityResponse(
+                    success=False,
+                    error="Capability grant manager is not available",
+                    error_type="grant_manager_unavailable",
+                    latency_ms=(time.time() - start_time) * 1000,
+                )
+                self._audit(
+                    principal_id,
+                    "function.call",
+                    None,
+                    resp,
+                    args,
+                    request_id,
+                    detail_reason="CapabilityGrantManager not available",
+                )
+                return resp
+            permission_id = permission_id_for_entry(entry)
+            grant_result = self._grant_manager.check(pack_id, permission_id)
+            if not grant_result.allowed and principal_id != pack_id:
+                caller_grant_result = self._grant_manager.check(principal_id, permission_id)
+                if caller_grant_result.allowed:
+                    grant_result = caller_grant_result
+            if not grant_result.allowed:
+                resp = CapabilityResponse(
+                    success=False,
+                    error="Permission denied",
+                    error_type="grant_denied",
+                    latency_ms=(time.time() - start_time) * 1000,
+                )
+                self._audit(
+                    principal_id,
+                    "function.call",
+                    None,
+                    resp,
+                    args,
+                    request_id,
+                    detail_reason=(
+                        f"Neither pack '{pack_id}' nor principal '{principal_id}' "
+                        f"has grant for '{permission_id}': {grant_result.reason}"
+                    ),
+                )
+                return resp
+            dispatch_grant_config.update(grant_result.config or {})
         if calling_convention and calling_convention in _VALID_CALLING_CONVENTIONS:
             resp = self._dispatch_by_calling_convention(
                 calling_convention=calling_convention,
@@ -912,11 +1079,25 @@ class CapabilityExecutor:
                                                  grant_config=dispatch_grant_config,
                                                  timeout_seconds=request.get("timeout_seconds", DEFAULT_FUNCTION_TIMEOUT))
         elif entry.host_execution:
-            resp = self._execute_host_function(principal_id=principal_id, entry=entry, args=args,
-                                                request_id=request_id, start_time=start_time)
+            resp = self._execute_host_function(
+                principal_id=principal_id,
+                entry=entry,
+                args=args,
+                request_id=request_id,
+                start_time=start_time,
+                grant_config=dispatch_grant_config,
+                request_context=request_context,
+            )
         else:
-            resp = self._execute_user_function(principal_id=principal_id, entry=entry, args=args,
-                                                request_id=request_id, start_time=start_time)
+            resp = self._execute_user_function(
+                principal_id=principal_id,
+                entry=entry,
+                args=args,
+                request_id=request_id,
+                start_time=start_time,
+                grant_config=dispatch_grant_config,
+                request_context=request_context,
+            )
         self._audit(principal_id, "function.call", None, resp, args, request_id,
                     extra_details={"qualified_name": qualified_name, "pack_id": pack_id, "is_core": is_core, "calling_convention": calling_convention})
         return resp
@@ -1034,15 +1215,25 @@ class CapabilityExecutor:
             t = DEFAULT_FUNCTION_TIMEOUT
         return min(max(t, 1.0), MAX_TIMEOUT)
 
-    def _execute_user_function(self, principal_id, entry, args, request_id, start_time):
+    def _execute_user_function(
+        self,
+        principal_id,
+        entry,
+        args,
+        request_id,
+        start_time,
+        grant_config=None,
+        request_context=None,
+        force_docker=False,
+    ):
         runtime = getattr(entry, 'runtime', 'python')
         if entry.host_execution and runtime != "python":
             return CapabilityResponse(success=False, error=f"runtime='{runtime}' requires Docker execution (host_execution must be false)",
                                       error_type="security_violation", latency_ms=(time.time() - start_time) * 1000)
         if runtime == "binary":
-            return self._execute_binary_function(principal_id=principal_id, entry=entry, args=args, request_id=request_id, start_time=start_time)
+            return self._execute_binary_function(principal_id=principal_id, entry=entry, args=args, request_id=request_id, start_time=start_time, grant_config=grant_config, request_context=request_context)
         elif runtime == "command":
-            return self._execute_command_function(principal_id=principal_id, entry=entry, args=args, request_id=request_id, start_time=start_time)
+            return self._execute_command_function(principal_id=principal_id, entry=entry, args=args, request_id=request_id, start_time=start_time, grant_config=grant_config, request_context=request_context)
         pack_id, function_id = entry.pack_id, entry.function_id
         function_dir, main_py_path = entry.function_dir, entry.main_py_path
         timeout = self._get_function_timeout(entry)
@@ -1053,9 +1244,11 @@ class CapabilityExecutor:
         if main_py_path is None or not Path(main_py_path).is_file():
             return CapabilityResponse(success=False, error=f"main.py not found: {main_py_path}", error_type="main_py_not_found", latency_ms=(time.time() - start_time) * 1000)
         if self._is_docker_available() and _DockerRunBuilder is not None:
-            return self._execute_user_function_docker(principal_id=principal_id, entry=entry, args=args, request_id=request_id, start_time=start_time, timeout=timeout)
+            return self._execute_user_function_docker(principal_id=principal_id, entry=entry, args=args, request_id=request_id, start_time=start_time, timeout=timeout, grant_config=grant_config, request_context=request_context)
         else:
             logger.warning("Docker not available for user function %s:%s.", pack_id, function_id)
+            if force_docker:
+                return CapabilityResponse(success=False, error="Docker is not available for python_docker function execution.", error_type="docker_unavailable", latency_ms=(time.time() - start_time) * 1000)
             security_mode = os.environ.get("RUMI_SECURITY_MODE", "").strip().lower()
             function_docker_policy = os.environ.get("RUMI_FUNCTION_DOCKER_POLICY", "").strip().lower()
             if security_mode == "strict" or function_docker_policy == "strict":
@@ -1063,14 +1256,15 @@ class CapabilityExecutor:
             allow_fallback = os.environ.get("RUMI_ALLOW_HOST_FALLBACK", "").lower()
             if allow_fallback not in ("1", "true"):
                 return CapabilityResponse(success=False, error="Docker is not available and host fallback is disabled. Set RUMI_ALLOW_HOST_FALLBACK=1 to enable.", error_type="docker_unavailable", latency_ms=(time.time() - start_time) * 1000)
-            return self._execute_user_function_host(principal_id=principal_id, entry=entry, args=args, request_id=request_id, start_time=start_time, timeout=timeout)
+            return self._execute_user_function_host(principal_id=principal_id, entry=entry, args=args, request_id=request_id, start_time=start_time, timeout=timeout, grant_config=grant_config, request_context=request_context)
 
-    def _execute_user_function_docker(self, principal_id, entry, args, request_id, start_time, timeout):
+    def _execute_user_function_docker(self, principal_id, entry, args, request_id, start_time, timeout, grant_config=None, request_context=None):
         pack_id, function_id = entry.pack_id, entry.function_id
         function_dir = Path(entry.function_dir)
         container_name = f"rumi-func-{pack_id}-{function_id}-{uuid.uuid4().hex[:8]}"
         runtime_root = Path(__file__).resolve().parent.parent
-        context = {"principal_id": principal_id, "pack_id": pack_id, "function_id": function_id, "request_id": request_id, "ts": self._now_ts()}
+        context = dict(request_context or {}) if isinstance(request_context, dict) else {}
+        context.update({"principal_id": principal_id, "pack_id": pack_id, "function_id": function_id, "request_id": request_id, "ts": self._now_ts(), "grant_config": dict(grant_config or {})})
         input_json = self._build_runner_payload("/function/main.py", "run", context, args)
         input_file = None
         try:
@@ -1102,8 +1296,9 @@ class CapabilityExecutor:
         finally:
             self._cleanup_temp_file(input_file, "Docker function input file")
 
-    def _execute_user_function_host(self, principal_id, entry, args, request_id, start_time, timeout):
-        context = {"principal_id": principal_id, "pack_id": entry.pack_id, "function_id": entry.function_id, "request_id": request_id, "ts": self._now_ts()}
+    def _execute_user_function_host(self, principal_id, entry, args, request_id, start_time, timeout, grant_config=None, request_context=None):
+        context = dict(request_context or {}) if isinstance(request_context, dict) else {}
+        context.update({"principal_id": principal_id, "pack_id": entry.pack_id, "function_id": entry.function_id, "request_id": request_id, "ts": self._now_ts(), "grant_config": dict(grant_config or {})})
         input_json = self._build_runner_payload(str(entry.main_py_path), "run", context, args)
         try:
             return self._run_runner_on_host(
@@ -1118,7 +1313,7 @@ class CapabilityExecutor:
         except Exception as e:
             return CapabilityResponse(success=False, error=f"Function execution error: {e}", error_type="internal_error", latency_ms=(time.time() - start_time) * 1000)
 
-    def _execute_host_function(self, principal_id, entry, args, request_id, start_time):
+    def _execute_host_function(self, principal_id, entry, args, request_id, start_time, grant_config=None, request_context=None):
         function_dir, main_py_path = entry.function_dir, entry.main_py_path
         if function_dir is None and main_py_path is None:
             return CapabilityResponse(success=False, error="Host function execution is not configured", error_type="not_implemented", latency_ms=(time.time() - start_time) * 1000)
@@ -1130,7 +1325,8 @@ class CapabilityExecutor:
             return CapabilityResponse(success=False, error=f"function_dir not found: {function_dir}", error_type="function_dir_not_found", latency_ms=(time.time() - start_time) * 1000)
         if main_py_path is None or not Path(main_py_path).is_file():
             return CapabilityResponse(success=False, error=f"main.py not found: {main_py_path}", error_type="main_py_not_found", latency_ms=(time.time() - start_time) * 1000)
-        context = {"principal_id": principal_id, "pack_id": entry.pack_id, "function_id": entry.function_id, "request_id": request_id, "ts": self._now_ts()}
+        context = dict(request_context or {}) if isinstance(request_context, dict) else {}
+        context.update({"principal_id": principal_id, "pack_id": entry.pack_id, "function_id": entry.function_id, "request_id": request_id, "ts": self._now_ts(), "grant_config": dict(grant_config or {})})
         input_json = self._build_runner_payload(str(main_py_path), "run", context, args)
         try:
             return self._run_runner_on_host(
@@ -1258,7 +1454,7 @@ class CapabilityExecutor:
                                       error_type=self._core_function_error_type(result), latency_ms=latency_ms)
         return CapabilityResponse(success=True, output=result, latency_ms=latency_ms)
 
-    def _execute_binary_function(self, principal_id, entry, args, request_id, start_time):
+    def _execute_binary_function(self, principal_id, entry, args, request_id, start_time, grant_config=None, request_context=None):
         binary_path = entry.main_binary_path
         if binary_path is None or not Path(binary_path).is_file():
             return CapabilityResponse(success=False, error=f"Binary not found: {binary_path}", error_type="binary_not_found", latency_ms=(time.time() - start_time) * 1000)
@@ -1266,7 +1462,8 @@ class CapabilityExecutor:
         if not Path(binary_path).resolve().is_relative_to(func_dir):
             return CapabilityResponse(success=False, error="Binary path escapes function directory", error_type="security_violation", latency_ms=(time.time() - start_time) * 1000)
         timeout = self._get_function_timeout(entry)
-        context = {"principal_id": principal_id, "pack_id": entry.pack_id, "function_id": entry.function_id, "request_id": request_id, "ts": self._now_ts()}
+        context = dict(request_context or {}) if isinstance(request_context, dict) else {}
+        context.update({"principal_id": principal_id, "pack_id": entry.pack_id, "function_id": entry.function_id, "request_id": request_id, "ts": self._now_ts(), "grant_config": dict(grant_config or {})})
         input_json = json.dumps({"context": context, "args": args}, ensure_ascii=False, default=str)
         try:
             proc = subprocess.run([str(binary_path)], input=input_json, capture_output=True, text=True, timeout=timeout, cwd=str(func_dir))
@@ -1285,7 +1482,7 @@ class CapabilityExecutor:
         except Exception as e:
             return CapabilityResponse(success=False, error=f"Execution error: {e}", error_type="internal_error", latency_ms=(time.time() - start_time) * 1000)
 
-    def _execute_command_function(self, principal_id, entry, args, request_id, start_time):
+    def _execute_command_function(self, principal_id, entry, args, request_id, start_time, grant_config=None, request_context=None):
         command = getattr(entry, 'command', [])
         if not command or not isinstance(command, list):
             return CapabilityResponse(success=False, error="No command defined for runtime=command", error_type="invalid_config", latency_ms=(time.time() - start_time) * 1000)
@@ -1300,8 +1497,11 @@ class CapabilityExecutor:
             interpreter_path = Path(sys.executable).resolve()
             if command_path != interpreter_path and not command_path.is_relative_to(func_dir):
                 return CapabilityResponse(success=False, error="Command path escapes function directory", error_type="security_violation", latency_ms=(time.time() - start_time) * 1000)
+        elif not Path(command[0]).is_absolute():
+            return CapabilityResponse(success=False, error="Command entrypoints must use an absolute executable path", error_type="security_violation", latency_ms=(time.time() - start_time) * 1000)
         timeout = self._get_function_timeout(entry)
-        context = {"principal_id": principal_id, "pack_id": entry.pack_id, "function_id": entry.function_id, "request_id": request_id, "ts": self._now_ts()}
+        context = dict(request_context or {}) if isinstance(request_context, dict) else {}
+        context.update({"principal_id": principal_id, "pack_id": entry.pack_id, "function_id": entry.function_id, "request_id": request_id, "ts": self._now_ts(), "grant_config": dict(grant_config or {})})
         input_json = json.dumps({"context": context, "args": args}, ensure_ascii=False, default=str)
         func_dir = Path(entry.function_dir).resolve() if entry.function_dir else None
         try:
@@ -1382,7 +1582,10 @@ class CapabilityExecutor:
         return CapabilityResponse(success=True, output=result, latency_ms=latency_ms)
 
     def _execute_handler_subprocess(self, handler_def, principal_id, permission_id, grant_config, args, timeout_seconds, request_id, start_time, request_context=None):
-        ep_file, ep_func = handler_def.entrypoint.rsplit(":", 1)
+        entrypoint = handler_def.entrypoint or "main.py:run"
+        ep_file, ep_func = (
+            entrypoint.rsplit(":", 1) if ":" in entrypoint else (entrypoint, "run")
+        )
         handler_py_path = handler_def.handler_dir / ep_file
         context = dict(request_context or {}) if isinstance(request_context, dict) else {}
         context.update({"principal_id": principal_id, "permission_id": permission_id, "handler_id": handler_def.handler_id, "grant_config": grant_config, "request_id": request_id, "ts": self._now_ts()})
