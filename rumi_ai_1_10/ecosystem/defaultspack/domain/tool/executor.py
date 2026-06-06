@@ -766,6 +766,14 @@ class ToolExecutor:
         next_context, approval_error = _context_with_tool_approval_token(context, tool_def, next_arguments)
         if approval_error is not None:
             return approval_error
+
+        def finish_handler_result(result):
+            if isinstance(result, dict) and not result.get("is_error"):
+                consume_error = self._consume_deferred_tool_approval(next_context)
+                if consume_error is not None:
+                    return consume_error
+            return result
+
         if _truthy(policy.get("yolo_mode")):
             next_context["_tool_server_approved"] = True
         elif _is_policy_allow_context(context):
@@ -788,14 +796,14 @@ class ToolExecutor:
             }
 
         if not isinstance(result, dict):
-            return {"result": str(result), "is_error": False, "widget": None}
+            return finish_handler_result({"result": str(result), "is_error": False, "widget": None})
 
         if "result" in result or "is_error" in result or "widget" in result:
-            return {
+            return finish_handler_result({
                 "result": result.get("result", ""),
                 "is_error": bool(result.get("is_error", False)),
                 "widget": result.get("widget"),
-            }
+            })
 
         if result.get("status") == "error":
             error_info = result.get("error", {})
@@ -808,11 +816,11 @@ class ToolExecutor:
         data = result.get("data", result)
         result_text = data if isinstance(data, str) else json.dumps(data, ensure_ascii=False)
         is_approval = isinstance(data, dict) and bool(data.get("approval_required"))
-        return {
+        return finish_handler_result({
             "result": result_text,
             "is_error": False,
             "widget": {"type": "approval_request", **data} if is_approval else result,
-        }
+        })
 
     def _execute_local_with_tool_def(self, tool_name, arguments, context, tool_def):
         had_previous = hasattr(self, "_current_local_tool_def")

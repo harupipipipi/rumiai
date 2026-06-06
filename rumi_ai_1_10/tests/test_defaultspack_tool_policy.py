@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import types
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -380,6 +381,59 @@ def test_tool_executor_profile_allow_attaches_safe_auto_approval_token(monkeypat
     assert seen["context"]["_tool_server_approval_token_valid"] is True
     assert seen["context"]["_tool_permission_policy_approved"] is True
     assert "danger" in seen["context"]["tool_approval_tokens"]
+    consumed_token = seen["context"]["tool_approval_tokens"]["danger"]
+
+    replay = executor.execute(
+        "danger",
+        {"path": "app.py"},
+        {
+            "profile_policy": {"tool_permission_policy": {"tools": {"danger": "ask"}}},
+            "tool_approval_tokens": {"danger": consumed_token},
+        },
+    )
+
+    assert seen["calls"] == 1
+    assert replay["widget"]["type"] == "approval_request"
+    assert replay["widget"]["stale_approval_token"] is True
+
+
+def test_tool_executor_profile_allow_consumes_handler_auto_approval_token(monkeypatch):
+    from domain.safety import approval
+
+    approval.reset_approval_state_for_tests()
+    seen = {}
+
+    module = types.ModuleType("test_defaultspack_policy_handler")
+
+    def fake_handler(arguments, context):
+        seen["calls"] = seen.get("calls", 0) + 1
+        seen["context"] = context
+        return {"result": "handled", "is_error": False, "widget": None}
+
+    module.fake_handler = fake_handler
+    monkeypatch.setitem(sys.modules, module.__name__, module)
+
+    class Registry:
+        def get(self, name):
+            return {
+                "tool_id": name,
+                "name": name,
+                "requires_approval": True,
+                "execution": {"type": "handler", "handler": "{}:fake_handler".format(module.__name__)},
+                "metadata": {"source_pack_id": "defaultspack"},
+            }
+
+    executor = ToolExecutor()
+    executor._registry = Registry()
+
+    result = executor.execute(
+        "danger",
+        {"path": "app.py"},
+        {"profile_policy": {"tool_permission_policy": {"tools": {"danger": "allow"}}}},
+    )
+
+    assert result["is_error"] is False
+    assert seen["context"]["_tool_server_approval_token_valid"] is True
     consumed_token = seen["context"]["tool_approval_tokens"]["danger"]
 
     replay = executor.execute(
