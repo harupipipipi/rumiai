@@ -49,7 +49,8 @@
       "connectivity": {
         "provides": [
           "rumi.memory.object_schema",
-          "rumi.memory.evidence_schema"
+          "rumi.memory.evidence_schema",
+          "rumi.memory.skill_learning_proposal_schema"
         ],
         "requires": []
       }

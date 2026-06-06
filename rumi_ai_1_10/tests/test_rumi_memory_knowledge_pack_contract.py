@@ -18,6 +18,7 @@ def _repo_root() -> Path:
 def test_rumi_memory_knowledge_pack_required_docs_assets_and_json_are_valid() -> None:
     repo_root = _repo_root()
     pack_root = repo_root / "ecosystem" / PACK_ID
+    ecosystem_json = pack_root / "ecosystem.json"
 
     required_files = [
         pack_root / "README.md",
@@ -55,6 +56,7 @@ def test_rumi_memory_knowledge_pack_required_docs_assets_and_json_are_valid() ->
 
     for path in sorted(pack_root.rglob("*.json")):
         json.loads(path.read_text(encoding="utf-8"))
+    ecosystem = json.loads(ecosystem_json.read_text(encoding="utf-8"))
     json.loads(
         (repo_root / "ecosystem" / "setup_pack" / PACK_ID / "pack.json").read_text(
             encoding="utf-8"
@@ -63,6 +65,9 @@ def test_rumi_memory_knowledge_pack_required_docs_assets_and_json_are_valid() ->
 
     for path in sorted(pack_root.rglob("*.yaml")):
         assert yaml.safe_load(path.read_text(encoding="utf-8")) is not None
+
+    provides = ecosystem["components"]["knowledge_specs"]["connectivity"]["provides"]
+    assert "rumi.memory.skill_learning_proposal_schema" in provides
 
 
 def test_rumi_memory_knowledge_pack_is_discoverable_by_setup_selector() -> None:
