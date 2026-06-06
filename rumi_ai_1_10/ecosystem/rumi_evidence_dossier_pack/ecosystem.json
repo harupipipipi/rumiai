@@ -60,28 +60,12 @@
     ],
     "optional_integrations": [
       {
-        "pack_id": "rumi_research_pack",
-        "reason": "Retrieves public sources and research context."
+        "pack_id": "defaultspack",
+        "reason": "Retrieves sources, handles connector access, transforms datasets, renders documents, exports dossiers, and performs model-scoring handoffs."
       },
       {
-        "pack_id": "rumi_connector_gateway_pack",
-        "reason": "Retrieves private connector sources."
-      },
-      {
-        "pack_id": "rumi_data_analysis_pack",
-        "reason": "Transforms datasets and computes statistics."
-      },
-      {
-        "pack_id": "rumi_document_intelligence_pack",
-        "reason": "Parses and renders documents."
-      },
-      {
-        "pack_id": "rumi_workspace_pack",
-        "reason": "Exports dossier files."
-      },
-      {
-        "pack_id": "rumi_model_evals_pack",
-        "reason": "Scores model answers against dossiers."
+        "pack_id": "rumi_default_tools_pack",
+        "reason": "Supports manual browser review when a human needs to inspect visible source pages before accepting evidence."
       }
     ],
     "asset_index": {

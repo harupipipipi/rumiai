@@ -74,8 +74,7 @@
     "access_owner": {
       "type": "string",
       "enum": [
-        "rumi_research_pack",
-        "rumi_connector_gateway_pack",
+        "defaultspack",
         "user_supplied"
       ]
     },

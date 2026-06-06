@@ -13,12 +13,8 @@ taxonomy:
   - reviewer_queue
   - dossier_export_manifest
   handoff_targets:
-  - rumi_research_pack
-  - rumi_connector_gateway_pack
-  - rumi_data_analysis_pack
-  - rumi_document_intelligence_pack
-  - rumi_workspace_pack
-  - rumi_model_evals_pack
+  - defaultspack
+  - rumi_default_tools_pack
   forbidden_ownership:
   - source retrieval
   - connector access

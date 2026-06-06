@@ -62,7 +62,7 @@
     },
     "render_owner": {
       "type": "string",
-      "const": "rumi_workspace_pack"
+      "const": "defaultspack"
     },
     "requires_citation_ledger_complete": {
       "type": "boolean",

@@ -1,12 +1,12 @@
 handoff_policy:
   default: do_not_execute_adjacent_runtime_action
   overlap_policy:
-    source_retrieval: handoff_to_rumi_research_pack
-    connector_access: handoff_to_rumi_connector_gateway_pack
-    data_transformation: handoff_to_rumi_data_analysis_pack
-    document_rendering: handoff_to_rumi_document_intelligence_pack
-    workspace_export: handoff_to_rumi_workspace_pack
-    model_eval_scoring: handoff_to_rumi_model_evals_pack
+    source_retrieval: handoff_to_defaultspack
+    connector_access: handoff_to_defaultspack
+    data_transformation: handoff_to_defaultspack
+    document_rendering: handoff_to_defaultspack
+    workspace_export: handoff_to_defaultspack
+    model_eval_scoring: handoff_to_defaultspack
     claim_evidence_graph: owned_by_rumi_evidence_dossier_pack
     citation_ledger: owned_by_rumi_evidence_dossier_pack
     tool_aliases: prefer_explicit_pack_namespace

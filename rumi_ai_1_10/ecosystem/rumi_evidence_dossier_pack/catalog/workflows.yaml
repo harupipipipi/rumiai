@@ -32,9 +32,8 @@ workflows:
     - owner_boundary_checked
     - human_review_before_external_action
     handoffs:
-    - handoff_to_rumi_research_pack
-    - handoff_to_rumi_connector_gateway_pack
-    - handoff_to_rumi_data_analysis_pack
+    - handoff_to_defaultspack
+    - handoff_to_rumi_default_tools_pack
     execution: declarative_only
   - id: claim_evidence_graph
     purpose: Build claim/evidence graph with source anchors.
@@ -49,9 +48,8 @@ workflows:
     - owner_boundary_checked
     - human_review_before_external_action
     handoffs:
-    - handoff_to_rumi_research_pack
-    - handoff_to_rumi_connector_gateway_pack
-    - handoff_to_rumi_data_analysis_pack
+    - handoff_to_defaultspack
+    - handoff_to_rumi_default_tools_pack
     execution: declarative_only
   - id: contradiction_review
     purpose: Detect and review conflicting evidence edges.
@@ -66,9 +64,8 @@ workflows:
     - owner_boundary_checked
     - human_review_before_external_action
     handoffs:
-    - handoff_to_rumi_research_pack
-    - handoff_to_rumi_connector_gateway_pack
-    - handoff_to_rumi_data_analysis_pack
+    - handoff_to_defaultspack
+    - handoff_to_rumi_default_tools_pack
     execution: declarative_only
   - id: citation_completeness_gate
     purpose: Block dossiers with uncited claims.
@@ -83,9 +80,8 @@ workflows:
     - owner_boundary_checked
     - human_review_before_external_action
     handoffs:
-    - handoff_to_rumi_research_pack
-    - handoff_to_rumi_connector_gateway_pack
-    - handoff_to_rumi_data_analysis_pack
+    - handoff_to_defaultspack
+    - handoff_to_rumi_default_tools_pack
     execution: declarative_only
   - id: reviewer_queue_triage
     purpose: Queue unresolved contradictions and quality label gaps.
@@ -100,9 +96,8 @@ workflows:
     - owner_boundary_checked
     - human_review_before_external_action
     handoffs:
-    - handoff_to_rumi_research_pack
-    - handoff_to_rumi_connector_gateway_pack
-    - handoff_to_rumi_data_analysis_pack
+    - handoff_to_defaultspack
+    - handoff_to_rumi_default_tools_pack
     execution: declarative_only
   - id: dossier_export_manifest
     purpose: Emit export manifest after citations and contradictions are reviewed.
@@ -117,7 +112,6 @@ workflows:
     - owner_boundary_checked
     - human_review_before_external_action
     handoffs:
-    - handoff_to_rumi_research_pack
-    - handoff_to_rumi_connector_gateway_pack
-    - handoff_to_rumi_data_analysis_pack
+    - handoff_to_defaultspack
+    - handoff_to_rumi_default_tools_pack
     execution: declarative_only

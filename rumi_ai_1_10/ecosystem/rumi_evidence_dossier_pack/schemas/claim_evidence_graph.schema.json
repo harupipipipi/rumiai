@@ -91,7 +91,7 @@
         },
         "render_owner": {
           "type": "string",
-          "const": "rumi_workspace_pack"
+          "const": "defaultspack"
         }
       }
     }

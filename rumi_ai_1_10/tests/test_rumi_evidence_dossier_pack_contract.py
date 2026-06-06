@@ -19,10 +19,12 @@ WORKFLOW_IDS = set(['source_intake_registry', 'claim_evidence_graph', 'contradic
 QUALITY_CHECK_IDS = set(['source_provenance_present', 'claim_has_evidence', 'source_anchor_present', 'contradiction_blocks_export', 'citation_ledger_complete', 'no_retrieval_execution', 'reviewer_queue_blocking', 'quality_label_present'])
 OWNER_EXPECTED = set(['source_registry', 'source_quality_label', 'claim_evidence_graph', 'evidence_link_contract', 'contradiction_review_contract', 'citation_ledger', 'reviewer_queue', 'dossier_export_manifest'])
 NON_OWNER_EXPECTED = set(['source retrieval', 'connector access', 'data transformation', 'document rendering', 'workspace export', 'model eval scoring', 'web browsing'])
-OVERLAP_EXPECTED = {'source_retrieval': 'handoff_to_rumi_research_pack', 'connector_access': 'handoff_to_rumi_connector_gateway_pack', 'data_transformation': 'handoff_to_rumi_data_analysis_pack', 'document_rendering': 'handoff_to_rumi_document_intelligence_pack', 'workspace_export': 'handoff_to_rumi_workspace_pack', 'model_eval_scoring': 'handoff_to_rumi_model_evals_pack', 'claim_evidence_graph': 'owned_by_rumi_evidence_dossier_pack', 'citation_ledger': 'owned_by_rumi_evidence_dossier_pack', 'tool_aliases': 'prefer_explicit_pack_namespace'}
+OVERLAP_EXPECTED = {'source_retrieval': 'handoff_to_defaultspack', 'connector_access': 'handoff_to_defaultspack', 'data_transformation': 'handoff_to_defaultspack', 'document_rendering': 'handoff_to_defaultspack', 'workspace_export': 'handoff_to_defaultspack', 'model_eval_scoring': 'handoff_to_defaultspack', 'claim_evidence_graph': 'owned_by_rumi_evidence_dossier_pack', 'citation_ledger': 'owned_by_rumi_evidence_dossier_pack', 'tool_aliases': 'prefer_explicit_pack_namespace'}
 PROMOTION_BLOCKERS = set(['requires_shared_source_provenance_object', 'requires_citation_required_response_mode', 'retrieval_owned_elsewhere', 'connector_access_owned_elsewhere', 'data_transforms_owned_elsewhere', 'document_rendering_owned_elsewhere', 'workspace_render_export_owned_elsewhere', 'model_eval_scoring_owned_elsewhere', 'must_prove_contradiction_blocking_cases'])
 PROMOTION_EVIDENCE = set(['claim_with_source_anchor_cases', 'uncited_claim_block_cases', 'contradiction_review_cases', 'source_quality_label_cases', 'export_manifest_review_cases'])
 BLOCKED_BY_DEFAULT = set(['export verified dossier with uncited claims', 'hide unresolved contradictions', 'retrieve sources directly', 'render final documents directly', 'score model outputs directly'])
+HANDOFF_TARGETS = set(['defaultspack', 'rumi_default_tools_pack'])
+WORKFLOW_HANDOFFS = set(['handoff_to_defaultspack', 'handoff_to_rumi_default_tools_pack'])
 FORBIDDEN_EXECUTION_SURFACES = {
     "backend",
     "blocks",
@@ -56,6 +58,11 @@ def read_yaml(path: Path) -> dict:
     return yaml.safe_load(path.read_text(encoding="utf-8"))
 
 
+def available_setup_pack_ids() -> set[str]:
+    selector = PackSelector(ROOT / "ecosystem")
+    return {item.pack_id for item in selector.scan_candidates()}
+
+
 def test_required_assets_and_ecosystem_contract() -> None:
     assert [path for path in REQUIRED_ASSETS if not (PACK_DIR / path).is_file()] == []
     ecosystem = read_json(PACK_DIR / "ecosystem.json")
@@ -78,7 +85,13 @@ def test_required_assets_and_ecosystem_contract() -> None:
     assert metadata["defaultspack_promotion_eligible"] is False
     assert set(metadata["owner_surfaces"]) >= OWNER_EXPECTED
     assert set(metadata["non_owner_surfaces"]) >= NON_OWNER_EXPECTED
-    actual = {str(path.relative_to(PACK_DIR)) for path in PACK_DIR.rglob("*") if path.is_file() and path.name != "ecosystem.json"}
+    available = available_setup_pack_ids()
+    assert HANDOFF_TARGETS <= available
+    optional_integrations = {item["pack_id"]: item["reason"] for item in metadata["optional_integrations"]}
+    assert set(optional_integrations) == HANDOFF_TARGETS
+    assert "connector access" in optional_integrations["defaultspack"]
+    assert "browser" in optional_integrations["rumi_default_tools_pack"].lower()
+    actual = {path.relative_to(PACK_DIR).as_posix() for path in PACK_DIR.rglob("*") if path.is_file() and path.name != "ecosystem.json"}
     indexed = {item for values in metadata["asset_index"].values() for item in values}
     assert actual == indexed == set(REQUIRED_ASSETS)
     asset_index = read_yaml(PACK_DIR / "asset_index.yaml")["asset_index"]
@@ -131,6 +144,7 @@ def test_schema_workflow_quality_and_policy_contracts() -> None:
     policy = read_yaml(PACK_DIR / "policies/safety.policy.yaml")["policy"]
     handoff_policy = read_yaml(PACK_DIR / "policies/handoff.policy.yaml")["handoff_policy"]
     handoff_matrix = read_yaml(PACK_DIR / "catalog/handoff_matrix.yaml")["handoff_matrix"]
+    taxonomy = read_yaml(PACK_DIR / "catalog/taxonomy.yaml")["taxonomy"]
     ledger = read_yaml(PACK_DIR / "ledgers/evidence_ledger.schema.yaml")["evidence_ledger_schema"]
     checklist = read_yaml(PACK_DIR / "checklists/review.checklist.yaml")["review_checklist"]
     graph_schema = read_json(PACK_DIR / "schemas/claim_evidence_graph.schema.json")
@@ -144,28 +158,38 @@ def test_schema_workflow_quality_and_policy_contracts() -> None:
     assert all(item["execution"] == "declarative_only" for item in workflows["items"])
     assert set(workflows["ownership"]["owned"]) >= OWNER_EXPECTED
     assert set(workflows["ownership"]["handoff"]) >= NON_OWNER_EXPECTED
+    assert all(set(item["handoffs"]) >= WORKFLOW_HANDOFFS for item in workflows["items"])
     assert {item["id"] for item in quality["checks"]} >= QUALITY_CHECK_IDS
     assert quality["minimum_pass"] == "all_blocking_checks"
     assert set(policy["blocked_by_default"]) >= BLOCKED_BY_DEFAULT
     assert policy["default_mode"] == "draft_and_handoff_only"
     assert handoff_policy["default"] == "do_not_execute_adjacent_runtime_action"
+    for key, expected in OVERLAP_EXPECTED.items():
+        assert handoff_policy["overlap_policy"][key] == expected
     assert handoff_matrix["pack_boundary_rule"] == "owner_surface_wins_then_explicit_handoff"
+    matrix_resolution = {item["surface"]: item["resolution"] for item in handoff_matrix["items"]}
+    for key, expected in OVERLAP_EXPECTED.items():
+        if key in {"claim_evidence_graph", "citation_ledger", "tool_aliases"}:
+            continue
+        assert matrix_resolution[key] == expected
+    assert HANDOFF_TARGETS <= set(taxonomy["handoff_targets"])
     assert ledger["completion_rules"]["external_actions_are_handoffs"] is True
     assert ledger["completion_rules"]["verified_export_requires_complete_citation_ledger"] is True
     assert ledger["completion_rules"]["verified_export_requires_no_unresolved_contradictions"] is True
     assert ledger["completion_rules"]["render_and_file_outputs_are_manifest_handoffs"] is True
     assert checklist["minimum_pass"] == "all_blocking_items"
-    assert graph_schema["properties"]["export_gate"]["properties"]["render_owner"]["const"] == "rumi_workspace_pack"
+    assert graph_schema["properties"]["export_gate"]["properties"]["render_owner"]["const"] == "defaultspack"
     assert citation_schema["properties"]["gate_policy"]["const"] == "block_verified_export_when_missing_citations"
     assert contradiction_contract["properties"]["model_scoring_allowed"]["const"] is False
     assert contradiction_contract["properties"]["runtime_execution"]["const"] == "not_owned_by_this_pack"
     assert contradiction_contract["properties"]["detection_output_only"]["const"] is True
     assert export_manifest["properties"]["manifest_only"]["const"] is True
-    assert export_manifest["properties"]["render_owner"]["const"] == "rumi_workspace_pack"
+    assert export_manifest["properties"]["render_owner"]["const"] == "defaultspack"
     assert export_manifest["properties"]["requires_citation_ledger_complete"]["const"] is True
     assert export_manifest["properties"]["requires_no_unresolved_contradictions"]["const"] is True
     assert source_registry["properties"]["raw_secret_material_allowed"]["const"] is False
     assert source_registry["properties"]["retrieval_mode"]["enum"] == ["pre_supplied_reference", "owner_pack_handoff"]
+    assert source_registry["properties"]["access_owner"]["enum"] == ["defaultspack", "user_supplied"]
     assert source_quality_labels["allowed_use"] == "review_label_only"
     assert source_quality_labels["numeric_score_allowed"] is False
     assert source_quality_labels["ranking_allowed"] is False
@@ -241,5 +265,5 @@ def test_evidence_dossier_subagent_acceptance_assets() -> None:
     assert [path for path in PACK_DIR.rglob("*.sh")] == []
     assert [path for path in PACK_DIR.rglob("*") if path.name in FORBIDDEN_RUNTIME_FILENAMES] == []
     docs = (PACK_DIR / "docs/overlap_policy.md").read_text(encoding="utf-8")
-    for owner in ["rumi_research_pack", "rumi_connector_gateway_pack", "rumi_data_analysis_pack", "rumi_workspace_pack", "rumi_model_evals_pack"]:
+    for owner in ["defaultspack", "rumi_default_tools_pack"]:
         assert owner in docs
