@@ -84,6 +84,71 @@ class AnthropicProvider(BaseProvider):
                     pass
 
     @staticmethod
+    def _anthropic_stream_tool_call_events(event_type, obj, state):
+        """Translate Anthropic Messages tool_use SSE blocks into stream tool-call events."""
+        if event_type == "content_block_start":
+            block = obj.get("content_block") if isinstance(obj.get("content_block"), dict) else {}
+            if block.get("type") != "tool_use":
+                return
+            index = str(obj.get("index", len(state)))
+            current = state.setdefault(index, {"id": "", "name": "", "started": False, "ended": False})
+            if block.get("id"):
+                current["id"] = str(block.get("id"))
+            if block.get("name"):
+                current["name"] = str(block.get("name"))
+            call_id = current["id"] or "tool_call_" + index
+            if not current["id"]:
+                current["id"] = call_id
+            if not current["started"]:
+                current["started"] = True
+                yield {"type": "tool_call_start", "id": call_id, "name": current["name"]}
+            input_value = block.get("input")
+            if input_value not in (None, "", {}):
+                yield {
+                    "type": "tool_call_delta",
+                    "id": call_id,
+                    "name": current["name"],
+                    "arguments_chunk": json.dumps(input_value, ensure_ascii=False)
+                    if not isinstance(input_value, str)
+                    else input_value,
+                }
+            return
+        if event_type == "content_block_delta":
+            delta = obj.get("delta") if isinstance(obj.get("delta"), dict) else {}
+            if delta.get("type") != "input_json_delta":
+                return
+            index = str(obj.get("index", len(state)))
+            current = state.setdefault(index, {"id": "", "name": "", "started": False, "ended": False})
+            call_id = current["id"] or "tool_call_" + index
+            if not current["id"]:
+                current["id"] = call_id
+            if not current["started"]:
+                current["started"] = True
+                yield {"type": "tool_call_start", "id": call_id, "name": current["name"]}
+            chunk = delta.get("partial_json")
+            if chunk not in (None, ""):
+                yield {
+                    "type": "tool_call_delta",
+                    "id": call_id,
+                    "name": current["name"],
+                    "arguments_chunk": str(chunk),
+                }
+            return
+        if event_type == "content_block_stop":
+            index = str(obj.get("index", ""))
+            current = state.get(index)
+            if current and current.get("started") and not current.get("ended"):
+                current["ended"] = True
+                yield {"type": "tool_call_end", "id": current.get("id", ""), "name": current.get("name", "")}
+
+    @staticmethod
+    def _anthropic_stream_tool_call_end_events(state):
+        for current in state.values():
+            if current.get("started") and not current.get("ended"):
+                current["ended"] = True
+                yield {"type": "tool_call_end", "id": current.get("id", ""), "name": current.get("name", "")}
+
+    @staticmethod
     def _anthropic_role(role):
         return "assistant" if role == "assistant" else "user"
 
@@ -295,6 +360,7 @@ class AnthropicProvider(BaseProvider):
         self._copy_chat_params(body, params)
         resp = self._request_stream("/v1/messages", body)
         usage_accum = {"input_tokens": 0, "output_tokens": 0}
+        tool_call_state = {}
         try:
             for event_type, data_str in self._parse_sse(resp):
                 try:
@@ -305,10 +371,15 @@ class AnthropicProvider(BaseProvider):
                     msg = obj.get("message", {})
                     usage = msg.get("usage", {})
                     usage_accum["input_tokens"] = usage.get("input_tokens", 0)
+                elif event_type == "content_block_start":
+                    yield from self._anthropic_stream_tool_call_events(event_type, obj, tool_call_state)
                 elif event_type == "content_block_delta":
                     delta = obj.get("delta", {})
                     if delta.get("type") == "text_delta":
                         yield {"type": "content_delta", "delta": {"type": "text", "text": delta.get("text", "")}}
+                    yield from self._anthropic_stream_tool_call_events(event_type, obj, tool_call_state)
+                elif event_type == "content_block_stop":
+                    yield from self._anthropic_stream_tool_call_events(event_type, obj, tool_call_state)
                 elif event_type == "message_delta":
                     delta = obj.get("delta", {})
                     usage = obj.get("usage", {})
@@ -316,6 +387,7 @@ class AnthropicProvider(BaseProvider):
                     stop = delta.get("stop_reason", "end_turn") or "end_turn"
                     finish_map = {"end_turn": "stop", "max_tokens": "length", "stop_sequence": "stop", "tool_use": "tool_calls"}
                     finish = finish_map.get(stop, stop)
+                    yield from self._anthropic_stream_tool_call_end_events(tool_call_state)
                     yield {
                         "type": "stream_end",
                         "finish_reason": finish,
