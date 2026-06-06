@@ -30,7 +30,7 @@ capabilities:
     provided_by: [rumi_model_evals_pack]
   model_fit_matrix:
     description: Map evidence to task family routing suitability and caveats.
-    requires: [fit_matrix_schema, promotion_gate_review]
+    requires: [fit_matrix_schema, metric_sets, provider_catalog_reference]
     provided_by: [rumi_model_evals_pack]
   cost_latency_evidence:
     description: Record price units, observed latency percentiles, token counts, and capture window.

@@ -58,6 +58,7 @@
         "provides": [
           "rumi.model_evals.layered_eval_contract",
           "rumi.model_evals.metrics_schema",
+          "rumi.model_evals.fit_matrix_schema",
           "rumi.model_evals.promotion_gate_schema"
         ]
       }
