@@ -268,12 +268,15 @@ def _approval_waiting_response(
 
 
 class _InlineThoughtFilter:
-    _open_tag = "<thought>"
-    _close_tag = "</thought>"
+    _tag_pairs = (
+        ("<thought>", "</thought>"),
+        ("<think>", "</think>"),
+    )
 
     def __init__(self) -> None:
         self._buffer = ""
         self._in_thought = False
+        self._active_close_tag = ""
         self._thought_parts: list[str] = []
         self._streamed_thought_len = 0
 
@@ -282,21 +285,24 @@ class _InlineThoughtFilter:
         visible = []
         while self._buffer:
             if self._in_thought:
-                close_index = self._buffer.find(self._close_tag)
+                close_index = self._buffer.find(self._active_close_tag)
                 if close_index == -1:
                     self._thought_parts.append(self._buffer)
                     self._buffer = ""
                     break
                 self._thought_parts.append(self._buffer[:close_index])
-                self._buffer = self._buffer[close_index + len(self._close_tag):]
+                self._buffer = self._buffer[close_index + len(self._active_close_tag):]
                 self._in_thought = False
+                self._active_close_tag = ""
                 continue
 
-            open_index = self._buffer.find(self._open_tag)
-            if open_index != -1:
+            tag_match = self._next_open_tag(self._buffer)
+            if tag_match is not None:
+                open_index, open_tag, close_tag = tag_match
                 visible.append(self._buffer[:open_index])
-                self._buffer = self._buffer[open_index + len(self._open_tag):]
+                self._buffer = self._buffer[open_index + len(open_tag):]
                 self._in_thought = True
+                self._active_close_tag = close_tag
                 continue
 
             keep = self._partial_open_tag_suffix_len(self._buffer)
@@ -330,11 +336,25 @@ class _InlineThoughtFilter:
 
     @classmethod
     def _partial_open_tag_suffix_len(cls, text: str) -> int:
-        max_len = min(len(text), len(cls._open_tag) - 1)
-        for size in range(max_len, 0, -1):
-            if cls._open_tag.startswith(text[-size:]):
-                return size
-        return 0
+        keep = 0
+        for open_tag, _ in cls._tag_pairs:
+            max_len = min(len(text), len(open_tag) - 1)
+            for size in range(max_len, 0, -1):
+                if open_tag.startswith(text[-size:]):
+                    keep = max(keep, size)
+                    break
+        return keep
+
+    @classmethod
+    def _next_open_tag(cls, text: str) -> tuple[int, str, str] | None:
+        best: tuple[int, str, str] | None = None
+        for open_tag, close_tag in cls._tag_pairs:
+            index = text.find(open_tag)
+            if index == -1:
+                continue
+            if best is None or index < best[0]:
+                best = (index, open_tag, close_tag)
+        return best
 
 
 class _AssistantDraft:
@@ -1169,6 +1189,8 @@ class ChatRunEngine:
                 seal=sealed.seal,
             )
             if check.ok:
+                if check.thinking_transcript and not "".join(self._thinking_transcript_parts).strip():
+                    self._thinking_transcript_parts.append(check.thinking_transcript)
                 response = self._run_seal_success_response(
                     response,
                     seal=sealed.seal,
@@ -1176,6 +1198,7 @@ class ChatRunEngine:
                     compacted=compacted,
                     visible_text=check.visible_text,
                     had_interior_seal=check.had_interior_seal,
+                    thinking_transcript=check.thinking_transcript,
                 )
                 if self._stream_mode and check.visible_text:
                     self._text_parts.append(check.visible_text)
@@ -1887,9 +1910,22 @@ class ChatRunEngine:
         compacted: bool,
         visible_text: str,
         had_interior_seal: bool,
+        thinking_transcript: str,
     ) -> dict[str, Any]:
         updated = apply_visible_text_to_response(response, visible_text)
         metadata = dict(updated.get("metadata") or {})
+        if thinking_transcript:
+            existing_thinking = metadata.get("thinking") if isinstance(metadata.get("thinking"), dict) else {}
+            existing_transcript = str(existing_thinking.get("transcript") or "").strip()
+            combined_transcript = existing_transcript or thinking_transcript
+            if existing_transcript and thinking_transcript not in existing_transcript:
+                combined_transcript = existing_transcript + "\n\n" + thinking_transcript
+            metadata["thinking"] = {
+                **existing_thinking,
+                "state": "completed",
+                "transcript": combined_transcript,
+                "source": str(existing_thinking.get("source") or "inline_reasoning_tag"),
+            }
         metadata["run_seal"] = {
             "enabled": True,
             "ok": True,
@@ -1898,6 +1934,7 @@ class ChatRunEngine:
             "system_hash": getattr(seal, "system_hash", ""),
             "finish_reason": updated.get("finish_reason"),
             "had_interior_seal": had_interior_seal,
+            "had_inline_reasoning": bool(thinking_transcript),
         }
         updated["metadata"] = metadata
         return updated

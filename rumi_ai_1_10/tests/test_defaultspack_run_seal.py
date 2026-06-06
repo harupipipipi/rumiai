@@ -99,6 +99,19 @@ def test_run_seal_service_sanitizes_leaked_marker_in_visible_text():
     assert result.had_interior_seal is True
 
 
+def test_run_seal_service_strips_inline_reasoning_tags_from_visible_text():
+    from domain.ai_client.run_seal import RunSealService
+
+    service = RunSealService("secret")
+    seal = service.create(run_id="run_1", system_prompt="system")
+
+    result = service.verify_and_strip(text="<think>private plan</think>OK\n" + seal.marker, seal=seal)
+
+    assert result.ok is True
+    assert result.visible_text == "OK"
+    assert result.thinking_transcript == "private plan"
+
+
 def test_chat_run_engine_run_seal_strips_suffix_and_records_metadata():
     from domain.chat.stream_engine import ChatRunEngine
 
@@ -132,6 +145,37 @@ def test_chat_run_engine_run_seal_strips_suffix_and_records_metadata():
     assert response["content"] == [{"type": "text", "text": "sealed reply"}]
     assert response["metadata"]["run_seal"]["ok"] is True
     assert response["metadata"]["run_seal"]["attempts"] == 1
+    assert [event["type"] for event in events] == ["content_delta"]
+
+
+def test_chat_run_engine_run_seal_hides_inline_reasoning_tags():
+    from domain.chat.stream_engine import ChatRunEngine
+
+    class Gateway:
+        def complete(self, request):
+            seal = _extract_seal(request["messages"])
+            return {
+                "content": [{"type": "text", "text": "<think>private chain</think>OK\n" + seal}],
+                "finish_reason": "stop",
+                "metadata": {},
+            }
+
+    engine = ChatRunEngine(store=object(), gateway=Gateway())
+    engine._run_id = "run-seal-think"
+    prepared = _prepared_chat_run()
+
+    (response, tool_uses), events = _drain(
+        engine._model_turn(
+            prepared,
+            [{"role": "system", "content": "Be terse."}, {"role": "user", "content": "hello"}],
+            None,
+        )
+    )
+
+    assert tool_uses == []
+    assert response["content"] == [{"type": "text", "text": "OK"}]
+    assert response["metadata"]["thinking"]["transcript"] == "private chain"
+    assert response["metadata"]["run_seal"]["had_inline_reasoning"] is True
     assert [event["type"] for event in events] == ["content_delta"]
 
 

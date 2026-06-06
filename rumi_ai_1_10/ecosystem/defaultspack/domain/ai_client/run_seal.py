@@ -8,6 +8,8 @@ import re
 import secrets
 from typing import Any
 
+from domain.ai_client.inline_reasoning import split_inline_reasoning
+
 
 _DEFAULT_MAX_RETRIES = 1
 _DEFAULT_STREAM_TAIL = 768
@@ -33,6 +35,7 @@ class SealCheckResult:
     visible_text: str
     reason: str | None = None
     had_interior_seal: bool = False
+    thinking_transcript: str = ""
 
 
 @dataclass(frozen=True)
@@ -149,17 +152,21 @@ class RunSealService:
         if trimmed.endswith(seal.marker):
             visible = trimmed[: -len(seal.marker)].rstrip()
             sanitized = _SEAL_PATTERN.sub("", visible).rstrip()
+            thinking_parts, visible_text = split_inline_reasoning(sanitized)
             return SealCheckResult(
                 ok=True,
-                visible_text=sanitized,
+                visible_text=visible_text,
                 had_interior_seal=sanitized != visible,
+                thinking_transcript="\n\n".join(thinking_parts),
             )
         sanitized = _SEAL_PATTERN.sub("", raw).rstrip()
+        thinking_parts, visible_text = split_inline_reasoning(sanitized)
         return SealCheckResult(
             ok=False,
-            visible_text=sanitized,
+            visible_text=visible_text,
             reason="missing_final_seal",
             had_interior_seal=sanitized != raw.rstrip(),
+            thinking_transcript="\n\n".join(thinking_parts),
         )
 
     @staticmethod

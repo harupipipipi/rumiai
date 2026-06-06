@@ -11,6 +11,8 @@ import errno
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
+
+from domain.ai_client.inline_reasoning import split_inline_reasoning
 from domain.chat.icon_matcher import match_icon
 
 DEFAULT_CHAT_MODEL = "stub/default"
@@ -992,13 +994,8 @@ class ChatStore:
                     continue
                 text = str(block.get("text") or "")
 
-                def collect(match):
-                    value = str(match.group(1) or "").strip()
-                    if value:
-                        thoughts.append(value)
-                    return ""
-
-                cleaned = re.sub(r"<thought>(.*?)</thought>", collect, text, flags=re.DOTALL).strip()
+                extracted, cleaned = split_inline_reasoning(text)
+                thoughts.extend(extracted)
                 if cleaned != text:
                     block["text"] = cleaned
             if thoughts:
