@@ -33,10 +33,9 @@ from .validation import (
     PACK_ID_RE,
     SAFE_ID_RE,
     MAX_REQUEST_BODY_BYTES,
-    HANDLER_NAME_RE,
 )
 
-from .api.route_handlers import _compile_template_path, _is_safe_path_param
+from .api.route_handlers import _is_safe_path_param
 
 from .api.api_response import APIResponse
 

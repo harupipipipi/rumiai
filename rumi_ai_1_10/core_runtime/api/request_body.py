@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Optional
+from typing import Optional
 from urllib.parse import parse_qs, urlparse
 
 from .api_response import APIResponse
