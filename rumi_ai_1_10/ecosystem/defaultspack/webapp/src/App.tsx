@@ -7,10 +7,10 @@ import { WarmActionIcon } from "./components/WarmActionIcon";
 import type { ChatItem, HistoryBoardNewTaskOptions } from "./components/HistoryBoard";
 import type { ToolPreviewItem, ToolPreviewMode } from "./components/ToolPreview";
 import { buildToolPreviewDisplayItems, hasCanvasItems } from "./components/ToolPreview";
-import { api, defaultspackApiFetch, type ChatActivityEvent, type ChatContentBlock, type ChatMessage, type ChatStreamEvent, type ChatToolStreamEvent, type CodingWorkspaceRecord, type ComposerCommandExecuteResult, type ComposerCommandItem, type ComposerCommandMode, type ComposerWidgetAction, type Conversation, type ConversationSearchResult, type ConversationSteerItem, type MimoCodingCompanyStatus, type ModelCommandCandidate, type ModelProfile, type OperationsCompanyStatus, type SettingsSection, type SidebarAction, type SidebarItem, type UICatalog } from "./lib/api";
+import { ChatStreamInterruptedError, api, defaultspackApiFetch, type ChatActivityEvent, type ChatContentBlock, type ChatMessage, type ChatStreamEvent, type ChatToolStreamEvent, type CodingWorkspaceRecord, type ComposerCommandExecuteResult, type ComposerCommandItem, type ComposerCommandMode, type ComposerWidgetAction, type Conversation, type ConversationSearchResult, type ConversationSteerItem, type MimoCodingCompanyStatus, type ModelCommandCandidate, type ModelProfile, type OperationsCompanyStatus, type SettingsSection, type SidebarAction, type SidebarItem, type UICatalog } from "./lib/api";
 import { browserApprovalRuntimeContent, pendingBrowserApproval, pendingRuntimeApproval, staleRuntimeApproval, type BrowserApproval, type RuntimeApproval, type StaleRuntimeApproval } from "./lib/browserApproval";
 import { reduceBrowserStateFromEvents } from "./lib/browserState";
-import { deriveConversationTitle, formatRelativeTime, messageToText, orderConversationMessages } from "./lib/chat";
+import { deriveConversationTitle, formatRelativeTime, inspectConversationIntegrity, messageToText, orderConversationMessages } from "./lib/chat";
 import { cn } from "./lib/cn";
 import { canExecuteComposerEndpointAction, composerSkillMentionWidget, composerToolMentionWidget, isSafeLocalEndpoint, skillMentionIdsFromText, toolMentionIdsFromText } from "./lib/composerWidgets";
 import { conversationMatchesSpotlightFilter, conversationToSearchResult, type SpotlightFilter } from "./lib/conversationSpotlight";
@@ -18,6 +18,7 @@ import { boundedDurationLabel } from "./lib/duration";
 import { fetchDesktopSystemInfo, type DesktopSystemInfo } from "./lib/desktopSystemInfo";
 import { normalizeLocale } from "./lib/i18n";
 import { PENDING_CHAT_REQUEST_TTL_MS, shouldClearPendingAfterConversationRefresh, type PendingChatRequest } from "./lib/pendingChat";
+import { reportClientDiagnostic } from "./lib/clientDiagnostics";
 import { isRecord, toolPreviewsFromMessages, upsertStreamActivityEvent } from "./lib/toolPreviews";
 import { extractLatestToolFilterContext } from "./lib/toolStatus";
 import { hasShellRegion } from "./lib/uiShell";
@@ -33,6 +34,7 @@ type ComposerCandidateMenuState = {
 } | null;
 
 type WorkspacePanelMode = "composer" | "calendar";
+type BackendConnectionState = "online" | "degraded" | "offline";
 
 type PendingNewTaskContext = {
   groupId?: string;
@@ -97,6 +99,41 @@ type CalendarDragState = {
   startKey: string;
   startedAt: number;
 };
+
+function formatLastHealthyLabel(timestamp: number | null): string | null {
+  if (!timestamp) return null;
+  return new Intl.DateTimeFormat("ja-JP", {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  }).format(timestamp);
+}
+
+function backendConnectionCopy(
+  state: BackendConnectionState,
+  lastHealthyAt: number | null,
+  note: string | null,
+): { title: string; detail: string } {
+  if (state === "offline") {
+    return {
+      title: "backend との接続が切れても、ここまでの表示は守ります。",
+      detail: note || "再接続を試しながら、いま見えている会話と操作面を保持しています。",
+    };
+  }
+  if (state === "degraded") {
+    const lastHealthy = formatLastHealthyLabel(lastHealthyAt);
+    return {
+      title: "接続は揺れていますが、画面は崩さず受け止めます。",
+      detail: lastHealthy
+        ? `最後に backend を確認できたのは ${lastHealthy} です。いまは再接続を試しながら静かに保護運転へ切り替えています。`
+        : "いまは再接続を試しながら静かに保護運転へ切り替えています。",
+    };
+  }
+  return {
+    title: "",
+    detail: "",
+  };
+}
 
 const dangerShieldSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
   <rect width="100" height="100" rx="20" fill="#2d2e2f"/>
@@ -2059,6 +2096,8 @@ export default function App() {
   const [previews, setPreviews] = useState<ToolPreviewItem[]>([]);
   const [settledRuntimeApprovalIds, setSettledRuntimeApprovalIds] = useState<string[]>([]);
   const [health, setHealth] = useState<{ status: string; pack: string; ts: string } | null>(null);
+  const [backendConnectionState, setBackendConnectionState] = useState<BackendConnectionState>("online");
+  const [backendConnectionNote, setBackendConnectionNote] = useState<string | null>(null);
   const [operationsStatus, setOperationsStatus] = useState<OperationsCompanyStatus | null>(null);
   const [operationsBusy, setOperationsBusy] = useState(false);
   const [mimoCodingStatus, setMimoCodingStatus] = useState<MimoCodingCompanyStatus | null>(null);
@@ -2084,6 +2123,8 @@ export default function App() {
   const currentAbortControllerRef = useRef<AbortController | null>(null);
   const streamingConversationIdRef = useRef<string | null>(null);
   const activeRuntimeApprovalActionRef = useRef<string | null>(null);
+  const lastHealthyAtRef = useRef<number | null>(null);
+  const consecutiveHealthFailuresRef = useRef(0);
 
   useEffect(() => {
     if (mode === "chat") {
@@ -2107,6 +2148,29 @@ export default function App() {
     () => activeConversation ? orderConversationMessages(activeConversation.messages) : [],
     [activeConversation?.messages],
   );
+  const conversationIntegrity = useMemo(
+    () => activeConversation
+      ? inspectConversationIntegrity(activeConversation.messages)
+      : {
+          collapsedCount: 0,
+          duplicateIdCount: 0,
+          duplicateSequenceCount: 0,
+          duplicateKeys: [],
+        },
+    [activeConversation?.messages],
+  );
+  useEffect(() => {
+    if (!activeConversationId || conversationIntegrity.collapsedCount === 0) return;
+    void reportClientDiagnostic({
+      source: "webapp",
+      category: "conversation_integrity",
+      level: "warning",
+      message: "Frontend collapsed duplicate conversation messages before rendering.",
+      fingerprint: `conversation-integrity:${activeConversationId}:${conversationIntegrity.duplicateKeys.join("|")}`,
+      conversationId: activeConversationId,
+      detail: conversationIntegrity,
+    });
+  }, [activeConversationId, conversationIntegrity]);
   const latestActiveMessage = activeConversation?.messages[activeConversation.messages.length - 1];
   const latestActiveMetadata = latestActiveMessage?.metadata && typeof latestActiveMessage.metadata === "object"
     ? latestActiveMessage.metadata as Record<string, unknown>
@@ -2118,6 +2182,11 @@ export default function App() {
     ? `${latestActiveMessage.id}:${latestActiveMessage.role}:${latestActiveMessage.finish_reason ?? ""}:${String(latestActiveThinking.state ?? "")}`
     : "";
   const messages = orderedMessages.map((message) => toUiMessage(message, activeProfile));
+  const backendConnectionBanner = backendConnectionCopy(
+    backendConnectionState,
+    lastHealthyAtRef.current,
+    backendConnectionNote,
+  );
   const activeChatTitle = activeConversation?.title ?? "New Conversation";
   const isNewConversation = activeConversation === null || activeConversation.messages.length === 0;
   const placeholder = String(settingsValues.general?.composer_placeholder ?? "メッセージを入力...");
@@ -2457,13 +2526,70 @@ export default function App() {
     };
   }, [isSettingsOpen]);
 
-  async function refreshHealth() {
+  const refreshHealth = useCallback(async (reason: "bootstrap" | "poll" | "focus" = "poll") => {
     try {
-      setHealth(await api.health());
+      const nextHealth = await api.health();
+      consecutiveHealthFailuresRef.current = 0;
+      lastHealthyAtRef.current = Date.now();
+      setHealth(nextHealth);
+      setBackendConnectionState("online");
+      setBackendConnectionNote(null);
     } catch (healthError) {
       console.error(healthError);
+      consecutiveHealthFailuresRef.current += 1;
+      const hadHealthyConnection = lastHealthyAtRef.current !== null;
+      const nextState: BackendConnectionState = hadHealthyConnection && consecutiveHealthFailuresRef.current < 3
+        ? "degraded"
+        : "offline";
+      const message = healthError instanceof Error ? healthError.message : "backend connection lost";
+      setBackendConnectionState(nextState);
+      setBackendConnectionNote(
+        hadHealthyConnection
+          ? `最後に安定していた backend から切れました。再接続を試しています。${message}`
+          : `backend の応答をまだ確認できていません。${message}`,
+      );
+      if (reason !== "poll" || nextState === "offline") {
+        void reportClientDiagnostic({
+          source: "webapp",
+          category: "backend_connection",
+          level: nextState === "offline" ? "error" : "warning",
+          message: nextState === "offline"
+            ? "The frontend lost its backend connection and entered offline protection."
+            : "The frontend detected backend instability and entered degraded mode.",
+          fingerprint: `backend-connection:${nextState}:${message}`,
+          conversationId: activeConversationId,
+          detail: {
+            reason,
+            error: message,
+            consecutiveFailures: consecutiveHealthFailuresRef.current,
+            lastHealthyAt: lastHealthyAtRef.current,
+          },
+        });
+      }
     }
-  }
+  }, [activeConversationId]);
+
+  useEffect(() => {
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === "visible") {
+        void refreshHealth("focus");
+      }
+    };
+    const interval = window.setInterval(() => {
+      if (document.visibilityState === "visible") {
+        void refreshHealth("poll");
+      }
+    }, backendConnectionState === "online" ? 15_000 : 4_000);
+    window.addEventListener("focus", refreshWhenVisible);
+    window.addEventListener("online", refreshWhenVisible);
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener("focus", refreshWhenVisible);
+      window.removeEventListener("online", refreshWhenVisible);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+    };
+  }, [backendConnectionState, refreshHealth]);
 
   function mergeProviderOAuthStatus(providerId: string, oauthStatus: Record<string, unknown>) {
     setSettingsValues((current) => {
@@ -2637,7 +2763,7 @@ export default function App() {
           recoveredFromLocation: true,
         });
       }
-      const shellBootstrap = Promise.all([refreshHealth(), refreshCatalog()])
+      const shellBootstrap = Promise.all([refreshHealth("bootstrap"), refreshCatalog()])
         .then(([, nextCatalog]) => {
           if (cancelled) return;
           const statusRefreshes: Array<Promise<unknown>> = [];
@@ -4108,6 +4234,8 @@ export default function App() {
       ?? null;
     const rumiDataPathForSubmit = pendingNewTaskContext?.rumiDataPath ?? activeContextForSubmit.rumiDataPath ?? null;
     const isCodingWorkspaceSubmit = mode === "coding" || Boolean(workspaceIdForSubmit);
+    let submittedConversationRuntimeId: string | null = null;
+    let markInterruptedAssistant: ((streamError: ChatStreamInterruptedError) => void) | null = null;
 
     try {
       let conversation = activeConversation;
@@ -4136,6 +4264,7 @@ export default function App() {
       const isOperationsMode = isOperationsConversation(conversation);
       const isMimoCodingMode = isMimoCodingConversation(conversation);
       submittedConversationId = conversation.id;
+      submittedConversationRuntimeId = conversation.id;
       const requestStartedAt = Date.now();
       rememberPendingRequest({
         conversationId: conversation.id,
@@ -4338,6 +4467,54 @@ export default function App() {
         replaceChatIdInUrl(conversation.id, false);
         setIsGenerating(false);
       };
+      markInterruptedAssistant = (streamError: ChatStreamInterruptedError) => {
+        const completedAt = Date.now();
+        setActiveConversation((current) => {
+          if (!current || current.id !== conversation.id) return current;
+          const existing = current.messages.find((message) => message.id === assistantDraft.id);
+          const existingMetadata = existing?.metadata && typeof existing.metadata === "object"
+            ? existing.metadata as Record<string, unknown>
+            : {};
+          const existingThinking = existingMetadata.thinking && typeof existingMetadata.thinking === "object"
+            ? existingMetadata.thinking as Record<string, unknown>
+            : {};
+          const nextText = String(existing?.raw_text ?? "") || streamError.partialText;
+          const nextTranscript = `${String(existingThinking.transcript ?? "")}${streamError.thinkingText}`;
+          const interruptedMessage: ChatMessage = {
+            ...(existing ?? assistantDraft),
+            content: nextText ? [{ type: "text", text: nextText }] : existing?.content ?? assistantDraft.content,
+            raw_text: nextText,
+            finish_reason: "interrupted",
+            metadata: {
+              ...existingMetadata,
+              thinking: {
+                ...existingThinking,
+                state: "interrupted",
+                transcript: nextTranscript || undefined,
+              },
+              transport: {
+                status: "interrupted",
+                reason: streamError.message,
+                saw_activity: streamError.sawActivity,
+              },
+              timing: {
+                ...((existingMetadata.timing && typeof existingMetadata.timing === "object") ? existingMetadata.timing as Record<string, unknown> : {}),
+                thinking_started_at: requestStartedAt,
+                completed_at: completedAt,
+                thinking_duration_ms: completedAt - requestStartedAt,
+                thinking_duration_label: boundedDurationLabel(requestStartedAt, completedAt),
+              },
+            },
+          };
+          const hasExisting = current.messages.some((message) => message.id === assistantDraft.id);
+          return {
+            ...current,
+            messages: hasExisting
+              ? current.messages.map((message) => message.id === assistantDraft.id ? interruptedMessage : message)
+              : [...current.messages, interruptedMessage],
+          };
+        });
+      };
 
       const operationsModelAllowlist = settingList(settingsValues.operations_company?.model_allowlist);
       const operationsToolDenylist = settingList(settingsValues.operations_company?.tool_denylist);
@@ -4448,11 +4625,54 @@ export default function App() {
         setError(null);
         return;
       }
+      if (submitError instanceof ChatStreamInterruptedError) {
+        const interruptedConversationId = submittedConversationId ?? submittedConversationRuntimeId;
+        markInterruptedAssistant?.(submitError);
+        if (interruptedConversationId) {
+          forgetPendingRequest(interruptedConversationId);
+          replaceChatIdInUrl(interruptedConversationId, false);
+        }
+        setBackendConnectionState("degraded");
+        setBackendConnectionNote("応答 stream が途中で閉じました。ここまで届いた内容を保持しつつ、backend の回復を待っています。");
+        void reportClientDiagnostic({
+          source: "webapp",
+          category: "stream_interrupted",
+          level: "warning",
+          message: "The frontend preserved a partial assistant response after the stream was interrupted.",
+          fingerprint: `stream-interrupted:${interruptedConversationId ?? "new"}:${submitError.message}`,
+          conversationId: interruptedConversationId,
+          detail: {
+            error: submitError.message,
+            partialTextLength: submitError.partialText.length,
+            thinkingTextLength: submitError.thinkingText.length,
+            sawActivity: submitError.sawActivity,
+          },
+        });
+        setError(
+          submitError.partialText.trim()
+            ? "応答ストリームが途中で切れたため、ここまで届いた内容を保護して着地しました。"
+            : "応答ストリームが途中で切れました。画面は保護したまま、再接続の余地を残しています。",
+        );
+        setIsNewChatLaunching(false);
+        return;
+      }
       if (submittedConversationId && !isUnloadingRef.current && document.visibilityState !== "hidden") {
         forgetPendingRequest(submittedConversationId);
         replaceChatIdInUrl(submittedConversationId, false);
         await refreshConversations(submittedConversationId).catch(console.error);
       }
+      void reportClientDiagnostic({
+        source: "webapp",
+        category: "chat_submit_error",
+        level: "error",
+        message: submitError instanceof Error ? submitError.message : "Message submission failed.",
+        fingerprint: `chat-submit:${submittedConversationId ?? "new"}:${submitError instanceof Error ? submitError.message : "unknown"}`,
+        conversationId: submittedConversationId,
+        detail: {
+          mode,
+          hadAttachments: submittedAttachments.length > 0,
+        },
+      });
       setInput(userText);
       setAttachedFiles(submittedAttachments);
       setError(
@@ -4621,6 +4841,38 @@ export default function App() {
                 }}
                 onOpenSettings={() => setIsSettingsOpen(true)}
               />
+            )}
+
+            {backendConnectionState !== "online" && (
+              <div
+                role="status"
+                className={cn(
+                  "mx-3 mt-3 rounded-2xl border px-4 py-3",
+                  backendConnectionState === "offline"
+                    ? "border-red-500/20 bg-red-500/10 text-red-100"
+                    : "border-amber-500/20 bg-amber-500/10 text-amber-100",
+                )}
+              >
+                <div className="flex items-start gap-3">
+                  <div
+                    className={cn(
+                      "mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full",
+                      backendConnectionState === "offline" ? "bg-red-400" : "bg-amber-300 animate-pulse",
+                    )}
+                  />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium">{backendConnectionBanner.title}</p>
+                    <p className="mt-1 text-xs leading-5 opacity-90">{backendConnectionBanner.detail}</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => void refreshHealth("focus")}
+                    className="shrink-0 rounded-xl border border-current/20 px-3 py-1.5 text-[11px] font-semibold text-current transition hover:bg-white/5"
+                  >
+                    いま確認
+                  </button>
+                </div>
+              </div>
             )}
 
             {isCalendarMode ? (

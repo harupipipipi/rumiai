@@ -38,6 +38,27 @@ export type ChatAttachment = {
   sourcePath?: string;
 };
 
+export class ChatStreamInterruptedError extends Error {
+  partialText: string;
+  thinkingText: string;
+  sawActivity: boolean;
+
+  constructor(
+    message: string,
+    details: {
+      partialText?: string;
+      thinkingText?: string;
+      sawActivity?: boolean;
+    } = {},
+  ) {
+    super(message);
+    this.name = "ChatStreamInterruptedError";
+    this.partialText = details.partialText ?? "";
+    this.thinkingText = details.thinkingText ?? "";
+    this.sawActivity = details.sawActivity === true;
+  }
+}
+
 export type BrowserScreenshot = {
   id: string;
   run_id: string;
@@ -1290,6 +1311,9 @@ async function readStreamEvents(
   const decoder = new TextDecoder();
   let buffer = "";
   let finalMessage: ChatMessage | null = null;
+  let partialText = "";
+  let thinkingText = "";
+  let sawActivity = false;
 
   const streamErrorMessage = (value: ChatStreamError | undefined): string => {
     if (typeof value === "string" && value.trim()) return value;
@@ -1320,8 +1344,10 @@ async function readStreamEvents(
     }
     handlers.onEvent?.(event);
     if (event.type === "delta") {
+      partialText += event.delta;
       handlers.onDelta?.(event.delta);
     } else if (event.type === "thinking_delta") {
+      thinkingText += event.delta;
       handlers.onThinkingDelta?.(event.delta);
     } else if (event.type === "user_message" && event.message) {
       handlers.onUserMessage?.(event.message);
@@ -1330,24 +1356,43 @@ async function readStreamEvents(
       handlers.onMessage?.(event.message);
     } else if (event.type === "error") {
       throw new Error(streamErrorMessage(event.error));
+    } else {
+      sawActivity = true;
     }
   };
 
-  while (true) {
-    const { value, done } = await reader.read();
-    buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done });
-    const packets = buffer.split(/\r?\n\r?\n/);
-    buffer = packets.pop() ?? "";
-    for (const packet of packets) {
-      consumePacket(packet);
+  const interruptionError = (message: string): Error => {
+    if (partialText.trim() || thinkingText.trim() || sawActivity) {
+      return new ChatStreamInterruptedError(message, {
+        partialText,
+        thinkingText,
+        sawActivity,
+      });
     }
-    if (done) break;
+    return new Error(message);
+  };
+
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done });
+      const packets = buffer.split(/\r?\n\r?\n/);
+      buffer = packets.pop() ?? "";
+      for (const packet of packets) {
+        consumePacket(packet);
+      }
+      if (done) break;
+    }
+    if (buffer.trim()) {
+      consumePacket(buffer);
+    }
+  } catch (errorValue) {
+    if (errorValue instanceof ChatStreamInterruptedError) throw errorValue;
+    throw interruptionError(errorValue instanceof Error ? errorValue.message : "defaultspack stream failed");
   }
-  if (buffer.trim()) {
-    consumePacket(buffer);
-  }
+
   if (!finalMessage) {
-    throw new Error("defaultspack stream ended before a final response arrived");
+    throw interruptionError("defaultspack stream ended before a final response arrived");
   }
   return finalMessage;
 }
@@ -1524,6 +1569,21 @@ export const api = {
     return request<{ written: boolean }>("/api/ui/clipboard", {
       method: "POST",
       body: JSON.stringify({ content }),
+    });
+  },
+
+  reportClientEvent(payload: {
+    source?: string;
+    category?: string;
+    level?: string;
+    message: string;
+    fingerprint?: string;
+    conversation_id?: string;
+    detail?: unknown;
+  }) {
+    return request<{ recorded: boolean; diagnostic_id?: string }>("/api/ui/client-events", {
+      method: "POST",
+      body: JSON.stringify(payload),
     });
   },
 
