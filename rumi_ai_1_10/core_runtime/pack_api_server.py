@@ -1281,7 +1281,7 @@ class PackAPIHandler(
             if origin:
                 self.send_header('Access-Control-Allow-Origin', origin)
                 self.send_header('Vary', 'Origin')
-            self.send_header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+            self.send_header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS')
             self.send_header('Access-Control-Allow-Headers', 'Authorization, Content-Type, X-Rumi-CSRF, X-Rumi-Desktop-Bootstrap')
             self.end_headers()
         except self._CLIENT_DISCONNECT_EXCEPTIONS:
@@ -2125,6 +2125,10 @@ class PackAPIHandler(
         except Exception as e:
             _log_internal_error("do_PUT", e)
             self._send_response(APIResponse(False, error=_SAFE_ERROR_MSG), 500)
+
+    def do_PATCH(self) -> None:
+        return self.do_PUT()
+
     def do_DELETE(self) -> None:
         _pre_auth_path_del = urlparse(self.path).path
         if not self._check_rate_limit(_pre_auth_path_del):

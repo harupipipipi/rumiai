@@ -12,6 +12,7 @@ from domain.tool.executor import ToolExecutor  # noqa: E402
 from domain.tool.registry import ToolRegistry  # noqa: E402
 from domain.tool_policy.orchestrator import ToolOrchestrator  # noqa: E402
 from domain.tool_policy.policy import decide_tool_policy  # noqa: E402
+from domain.tool_policy.profile_permission import resolve_profile_tool_permission  # noqa: E402
 from domain.tool_policy.risk import resolve_tool_risk  # noqa: E402
 from backend.tool.permission_policy import ToolPermissionPolicyStore  # noqa: E402
 
@@ -258,6 +259,179 @@ def test_rumi_function_tool_uses_supplied_capability_executor():
     assert seen["principal_id"] == "defaultspack"
     assert seen["request"]["type"] == "function.call"
     assert seen["request"]["qualified_name"] == "defaultspack:fn"
+
+
+def test_profile_tool_permission_policy_resolves_action_overrides():
+    policy = {
+        "tool_permission_policy": {
+            "default_mode": "ask",
+            "tools": {
+                "computer_use": {
+                    "mode": "ask",
+                    "actions": {
+                        "screenshot": "allow",
+                        "click": "deny",
+                    },
+                }
+            },
+        }
+    }
+    tool = {"tool_id": "computer_use", "name": "computer_use", "category": "computer"}
+
+    screenshot = resolve_profile_tool_permission(tool, "computer_use", {"action": "screenshot"}, policy)
+    click = resolve_profile_tool_permission(tool, "computer_use", {"action": "click"}, policy)
+
+    assert screenshot["status"] == "allowed"
+    assert screenshot["matched_by"] == "tool_action"
+    assert screenshot["action"] == "computer.screenshot"
+    assert click["status"] == "denied"
+    assert click["matched_value"] == "click"
+
+
+def test_tool_executor_denies_profile_tool_permission(monkeypatch):
+    class Registry:
+        def get(self, name):
+            return {
+                "tool_id": name,
+                "name": name,
+                "execution": {"type": "local"},
+                "metadata": {"source_pack_id": "defaultspack"},
+            }
+
+    executor = ToolExecutor()
+    executor._registry = Registry()
+    monkeypatch.setattr(
+        executor,
+        "_execute_local",
+        lambda *args, **kwargs: {"result": "ran", "is_error": False, "widget": None},
+    )
+
+    result = executor.execute(
+        "danger",
+        {},
+        {"profile_policy": {"tool_permission_policy": {"tools": {"danger": "deny"}}}},
+    )
+
+    assert result["is_error"] is True
+    assert result["rejected_by_tool_permission_policy"] is True
+
+
+def test_tool_executor_dry_run_profile_tool_permission(monkeypatch):
+    class Registry:
+        def get(self, name):
+            return {
+                "tool_id": name,
+                "name": name,
+                "execution": {"type": "local"},
+                "metadata": {"source_pack_id": "defaultspack"},
+            }
+
+    executor = ToolExecutor()
+    executor._registry = Registry()
+    monkeypatch.setattr(
+        executor,
+        "_execute_local",
+        lambda *args, **kwargs: {"result": "ran", "is_error": False, "widget": None},
+    )
+
+    result = executor.execute(
+        "danger",
+        {"path": "app.py"},
+        {"profile_policy": {"tool_permission_policy": {"tools": {"danger": "dry_run"}}}},
+    )
+
+    assert result["is_error"] is False
+    assert result["dry_run"] is True
+    assert result["widget"]["status"] == "dry_run"
+
+
+def test_tool_executor_profile_allow_attaches_safe_auto_approval_token(monkeypatch):
+    from domain.safety import approval
+
+    approval.reset_approval_state_for_tests()
+    seen = {}
+
+    class Registry:
+        def get(self, name):
+            return {
+                "tool_id": name,
+                "name": name,
+                "requires_approval": True,
+                "execution": {"type": "local"},
+                "metadata": {"source_pack_id": "defaultspack"},
+            }
+
+    def fake_execute_local(tool_name, arguments, context, *extra):
+        seen["calls"] = seen.get("calls", 0) + 1
+        seen["context"] = context
+        return {"result": "ran", "is_error": False, "widget": None}
+
+    executor = ToolExecutor()
+    executor._registry = Registry()
+    monkeypatch.setattr(executor, "_execute_local", fake_execute_local)
+
+    result = executor.execute(
+        "danger",
+        {"path": "app.py"},
+        {"profile_policy": {"tool_permission_policy": {"tools": {"danger": "allow"}}}},
+    )
+
+    assert result["is_error"] is False
+    assert seen["context"]["_tool_server_approval_token_valid"] is True
+    assert seen["context"]["_tool_permission_policy_approved"] is True
+    assert "danger" in seen["context"]["tool_approval_tokens"]
+    consumed_token = seen["context"]["tool_approval_tokens"]["danger"]
+
+    replay = executor.execute(
+        "danger",
+        {"path": "app.py"},
+        {
+            "profile_policy": {"tool_permission_policy": {"tools": {"danger": "ask"}}},
+            "tool_approval_tokens": {"danger": consumed_token},
+        },
+    )
+
+    assert seen["calls"] == 1
+    assert replay["widget"]["type"] == "approval_request"
+    assert replay["widget"]["stale_approval_token"] is True
+
+
+def test_tool_executor_profile_ask_rejects_stale_approval_token(monkeypatch):
+    from domain.safety import approval
+
+    approval.reset_approval_state_for_tests()
+    seen = {"ran": False}
+
+    class Registry:
+        def get(self, name):
+            return {
+                "tool_id": name,
+                "name": name,
+                "requires_approval": True,
+                "execution": {"type": "local"},
+                "metadata": {"source_pack_id": "defaultspack"},
+            }
+
+    def fake_execute_local(*args, **kwargs):
+        seen["ran"] = True
+        return {"result": "ran", "is_error": False, "widget": None}
+
+    executor = ToolExecutor()
+    executor._registry = Registry()
+    monkeypatch.setattr(executor, "_execute_local", fake_execute_local)
+    context = {"profile_policy": {"tool_permission_policy": {"tools": {"danger": "ask"}}}}
+    first = executor.execute("danger", {"path": "old.py"}, context)
+    token = approval.approve(first["widget"]["approval_request_id"])["token"]
+
+    stale = executor.execute(
+        "danger",
+        {"path": "new.py"},
+        {**context, "tool_approval_tokens": {"danger": token}},
+    )
+
+    assert seen["ran"] is False
+    assert stale["widget"]["type"] == "approval_request"
+    assert stale["widget"]["stale_approval_token"] is True
 
 
 def test_tool_executor_does_not_trust_forged_internal_permission(tmp_path, monkeypatch):
