@@ -206,6 +206,18 @@
     },
     {
       "method": "GET",
+      "path": "/api/coding/rumi-log",
+      "flow_id": "transport_direct",
+      "description": "List local .rumi coding history"
+    },
+    {
+      "method": "POST",
+      "path": "/api/coding/rumi-log",
+      "flow_id": "transport_direct",
+      "description": "Append or seed local .rumi coding history"
+    },
+    {
+      "method": "GET",
       "path": "/api/coding/approvals",
       "flow_id": "transport_direct",
       "description": "List coding approval requests"

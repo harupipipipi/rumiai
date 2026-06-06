@@ -457,6 +457,8 @@ _FALLBACK_HTTP_ROUTE_SPECS = [
     HttpRouteSpec("GET", "/api/coding/git/branch", block_module="blocks.coding.git_branch"),
     HttpRouteSpec("POST", "/api/coding/git/branch", block_module="blocks.coding.git_branch"),
     HttpRouteSpec("POST", "/api/coding/git/commit", block_module="blocks.coding.git_commit"),
+    HttpRouteSpec("GET", "/api/coding/rumi-log", block_module="blocks.coding.rumi_log", path_inject={"_method": "GET"}),
+    HttpRouteSpec("POST", "/api/coding/rumi-log", block_module="blocks.coding.rumi_log", path_inject={"_method": "POST"}),
     HttpRouteSpec("GET", "/api/coding/checkpoints", block_module="blocks.coding.file_checkpoint", path_inject={"_method": "GET"}),
     HttpRouteSpec("POST", "/api/coding/checkpoints", block_module="blocks.coding.file_checkpoint", path_inject={"_method": "POST"}),
     HttpRouteSpec("GET", "/api/coding/approvals", block_module="blocks.coding.approval_list"),
@@ -575,6 +577,7 @@ _ALWAYS_AVAILABLE_HTTP_ROUTE_SPECS = [
     HttpRouteSpec("GET", "/api/desktop-system-info", handler_name="_handle_desktop_system_info"),
     HttpRouteSpec("GET", "/", handler_name="_handle_chat_redirect"),
     HttpRouteSpec("GET", "/chat", handler_name="_handle_static"),
+    HttpRouteSpec("GET", "/coding", handler_name="_handle_static"),
     HttpRouteSpec("GET", "/static/{path}", handler_name="_handle_static_file"),
 ]
 
