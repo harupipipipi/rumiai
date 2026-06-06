@@ -71,6 +71,7 @@ export async function reportClientDiagnostic(input: ClientDiagnosticInput): Prom
     await api.reportClientEvent(normalized);
     return true;
   } catch {
+    sentDiagnostics.delete(normalized.fingerprint);
     return false;
   }
 }
