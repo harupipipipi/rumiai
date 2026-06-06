@@ -29,15 +29,28 @@ def append_manual_message(
     role: str,
     raw_text: str,
     content_format: str,
+    operator_id: str,
+    operator_marker: str,
+    reason: str,
+    command: str,
 ) -> dict[str, Any]:
     normalized_role = "assistant" if str(role or "").strip().lower() == "assistant" else "user"
     content = parse_manual_message_content(raw_text, content_format)
     if not content:
         raise ValueError("message text is required")
+    timestamp_ms = int(time.time() * 1000)
     metadata = {
+        "source": "human_operator",
         "human_operator": {
+            "source": "human_operator",
+            "conversation_id": str(conversation_id or ""),
             "session_id": str(session_id or ""),
-            "source": "canvas",
+            "operator_id": str(operator_id or "").strip(),
+            "operator_marker": str(operator_marker or "").strip() or "local_human_operator",
+            "inserted_role": normalized_role,
+            "timestamp_ms": timestamp_ms,
+            "reason": str(reason or "").strip(),
+            "command": str(command or "").strip(),
         }
     }
     message = ChatStore().add_message(

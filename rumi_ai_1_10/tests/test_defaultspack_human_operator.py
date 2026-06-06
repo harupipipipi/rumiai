@@ -184,6 +184,15 @@ def test_human_operator_tool_creates_session_and_routes_append_messages(isolated
     assert updated is not None
     assert updated["messages"][-1]["role"] == "assistant"
     assert updated["messages"][-1]["raw_text"] == "I am acting as the AI now."
+    metadata = updated["messages"][-1]["metadata"]["human_operator"]
+    assert updated["messages"][-1]["metadata"]["source"] == "human_operator"
+    assert metadata["source"] == "human_operator"
+    assert metadata["conversation_id"] == conversation["id"]
+    assert metadata["session_id"] == "humanop_test"
+    assert metadata["operator_marker"] == "local_human_operator"
+    assert metadata["inserted_role"] == "assistant"
+    assert metadata["command"] == "/start"
+    assert isinstance(metadata["timestamp_ms"], int)
 
 
 def test_human_operator_routes_are_registered():

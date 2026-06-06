@@ -38,6 +38,11 @@ def human_operator_canvas_open(arguments: dict[str, Any], context: dict[str, Any
         "title": str(arguments.get("note") or "Human Operator Canvas").strip() or "Human Operator Canvas",
         "command": str(arguments.get("command") or "/start").strip() or "/start",
         "note": str(arguments.get("note") or "").strip(),
+        "operator_id": str(arguments.get("operator_id") or invoke_context.get("operator_id") or "").strip(),
+        "operator_marker": (
+            str(arguments.get("operator_marker") or invoke_context.get("operator_marker") or "").strip()
+            or "local_human_operator"
+        ),
         "csrf_token": secrets.token_urlsafe(32),
         "launch_snapshot": redact_sensitive_value(
             {

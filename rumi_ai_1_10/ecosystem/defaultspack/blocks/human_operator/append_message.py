@@ -31,6 +31,7 @@ def run(input_data, context):
     content_format = str((input_data or {}).get("content_format") or "text").strip().lower()
     view = str((input_data or {}).get("view") or "readable").strip().lower()
     prompt_view = str((input_data or {}).get("prompt_view") or "original").strip().lower()
+    reason = str((input_data or {}).get("reason") or "").strip()
     try:
         append_manual_message(
             conversation_id,
@@ -38,6 +39,10 @@ def run(input_data, context):
             role=role,
             raw_text=text,
             content_format=content_format,
+            operator_id=str(session.get("operator_id") or "").strip(),
+            operator_marker=str(session.get("operator_marker") or "").strip() or "local_human_operator",
+            reason=reason,
+            command=str(session.get("command") or "").strip(),
         )
     except ValueError as exc:
         result = error(str(exc), "INVALID_INPUT")
