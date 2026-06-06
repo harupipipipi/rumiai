@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import os
 import sys
 from pathlib import Path
 
@@ -29,6 +30,10 @@ class _Manager:
 def _setup_store(tmp_path, monkeypatch):
     from domain.chat.store import ChatStore
 
+    configured_user_data = os.environ.get("RUMI_USER_DATA")
+    configured_path = Path(configured_user_data) if configured_user_data else None
+    if configured_path is None or not (configured_path == tmp_path or tmp_path in configured_path.parents):
+        monkeypatch.setenv("RUMI_USER_DATA", str(tmp_path / "user_data"))
     monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(tmp_path / "user_data" / "shared" / "chat" / "conversations.json"))
     ChatStore._instance = None
     store = ChatStore()
