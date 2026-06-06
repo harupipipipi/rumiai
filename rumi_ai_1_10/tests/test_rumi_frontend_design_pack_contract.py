@@ -7,6 +7,7 @@ from pathlib import Path
 import yaml
 
 from backend_core.ecosystem.spec.schema.validator import validate_ecosystem
+from core_runtime.setup_pack import SetupPackManager
 from ecosystem.setup_pack.pack_selector import PackSelector
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -84,7 +85,7 @@ def test_pack_required_assets_and_metadata() -> None:
     }
     indexed_assets = {asset for assets in asset_index.values() for asset in assets}
     actual_assets = {
-        str(path.relative_to(PACK_DIR))
+        path.relative_to(PACK_DIR).as_posix()
         for path in PACK_DIR.rglob("*")
         if path.is_file()
     }
@@ -104,7 +105,7 @@ def test_pack_setup_discoverable_and_overlap_scoped() -> None:
     candidate = {item.pack_id: item for item in selector.scan_candidates()}[PACK_ID]
     assert setup["supports_all_ok"] is False
     assert setup["risk_level"] == "medium"
-    assert candidate.depends_on == [{'pack_id': 'defaultspack', 'version': '>=2.0.0'}]
+    assert candidate.depends_on == []
     issues = selector.validate_candidates(
         installed_packs={"defaultspack": {"version": "2.0.0"}},
         platform_name="linux",
@@ -132,6 +133,21 @@ def test_pack_setup_discoverable_and_overlap_scoped() -> None:
     assert candidate.marketplace["status"] == "verified"
     assert candidate.marketplace["category"] == "frontend"
     assert candidate.signing["verified"] is True
+
+
+def test_setup_pack_manager_installs_pack_without_selection_dependencies(tmp_path: Path) -> None:
+    manager = SetupPackManager(
+        root=ROOT / "ecosystem" / "setup_pack",
+        selection_file=tmp_path / "setup_pack_selection.json",
+        ecosystem_dir=ROOT / "ecosystem",
+    )
+    result = manager.install(PACK_ID)
+    assert result["success"] is True
+    assert result["installed_setup_pack_ids"] == [PACK_ID]
+    assert result["installed_target_pack_ids"] == [PACK_ID]
+    assert result["active_setup_pack_id"] == PACK_ID
+    assert result["active_target_pack_id"] == PACK_ID
+    assert result["skipped_all_ok_setup_pack_ids"] == [PACK_ID]
 
 
 def test_pack_specific_quality_assets_are_semantic() -> None:

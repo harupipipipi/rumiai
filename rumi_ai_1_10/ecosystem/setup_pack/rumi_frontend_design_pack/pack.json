@@ -7,12 +7,6 @@
   "recommended": false,
   "risk_level": "medium",
   "supports_all_ok": false,
-  "depends_on": [
-    {
-      "pack_id": "defaultspack",
-      "version": ">=2.0.0"
-    }
-  ],
   "conflicts_with": [],
   "overlap_policy": {
     "code_edits": "handoff_to_rumi_code_ide_pack",
