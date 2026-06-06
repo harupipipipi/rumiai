@@ -102,7 +102,7 @@ test("company task board renders dispatched completed runs", () => {
           status: "completed",
           agent_run: {
             status: "completed",
-            model: "opencode-zen/minimax-m3-free",
+            model: "stub/default",
             result_preview: "Visible MiniMax result",
             conversation: [
               {
@@ -128,7 +128,7 @@ test("company task board renders dispatched completed runs", () => {
   assert.match(html, /Live MiniMax smoke/);
   assert.match(html, /minimax_worker/);
   assert.match(html, /completed/);
-  assert.match(html, /opencode-zen\/minimax-m3-free/);
+  assert.match(html, /stub\/default/);
   assert.match(html, /Employee Conversation/);
   assert.match(html, /Deep research with DuckDuckGo/);
   assert.match(html, /Run a real MiniMax task through Company Workspace/);

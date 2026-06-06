@@ -19,7 +19,7 @@ export function CompanyAgentList({
 }) {
   const [modelDrafts, setModelDrafts] = useState<Record<string, string>>({});
   const [newAgentId, setNewAgentId] = useState("");
-  const [newAgentModel, setNewAgentModel] = useState("opencode-zen/minimax-m3-free");
+  const [newAgentModel, setNewAgentModel] = useState("stub/default");
 
   useEffect(() => {
     setModelDrafts(Object.fromEntries(agents.map((agent) => [agent.agent_id, agent.model ?? "stub/default"])));
