@@ -56,6 +56,33 @@ def test_kanban_controller_configures_columns_and_rehomes_removed_column_cards(t
     assert configured["cards"][0]["column_id"] == "inbox"
 
 
+def test_kanban_controller_preserves_board_order_and_done_count_for_custom_terminal_columns(tmp_path):
+    workspace = tmp_path / "workspace"
+    controller = KanbanController()
+
+    controller.run(
+        {
+            "action": "configure",
+            "columns": [
+                {"title": "Inbox"},
+                {"title": "Active"},
+                {"title": "Completed"},
+            ],
+        },
+        {"conversation_workspace_dir": str(workspace)},
+    )
+    controller.run({"action": "create", "title": "First", "column": "Inbox"}, {"conversation_workspace_dir": str(workspace)})
+    controller.run({"action": "create", "title": "Second", "column": "Active"}, {"conversation_workspace_dir": str(workspace)})
+    listed = controller.run(
+        {"action": "create", "title": "Third", "column": "Completed"},
+        {"conversation_workspace_dir": str(workspace)},
+    )
+
+    assert listed["summary"].endswith("(2 open)")
+    assert [card["title"] for card in listed["cards"]] == ["First", "Second", "Third"]
+    assert [column["done"] for column in listed["columns"]] == [False, False, True]
+
+
 def test_tool_registry_and_executor_invoke_manifest_backed_kanban(tmp_path):
     ToolRegistry._instance = None
     registry = ToolRegistry()
@@ -73,6 +100,7 @@ def test_tool_registry_and_executor_invoke_manifest_backed_kanban(tmp_path):
 
     assert tool is not None
     assert tool["execution"]["handler"] == "domain.tool.kanban:tool_kanban"
+    assert "done" in tool["schema"]["parameters"]["properties"]["columns"]["items"]["oneOf"][1]["properties"]
     assert result["is_error"] is False
     assert result["widget"]["type"] == "kanban"
     assert result["widget"]["cards"][0]["title"] == "Exercise ToolExecutor"

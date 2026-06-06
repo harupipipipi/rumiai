@@ -132,6 +132,12 @@
                     },
                     "title": {
                       "type": "string"
+                    },
+                    "done": {
+                      "type": "boolean"
+                    },
+                    "is_done": {
+                      "type": "boolean"
                     }
                   }
                 }
