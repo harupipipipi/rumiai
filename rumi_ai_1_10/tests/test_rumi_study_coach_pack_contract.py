@@ -42,8 +42,15 @@ def test_pack_required_assets_and_ecosystem_contract() -> None:
     assert validate_ecosystem(ecosystem, raise_on_error=False) == []
     assert ecosystem["pack_identity"] == f"rumi:ecosystem/{PACK_ID}"
     assert ecosystem["dependencies"] == {"defaultspack": ">=2.0.0"}
+    assert ecosystem["connectivity"] == {
+        "requires": ["defaultspack"],
+        "provides": [],
+    }
     assert ecosystem["required_secrets"] == []
-    assert ecosystem["required_network"] == []
+    assert ecosystem["required_network"] == {
+        "allowed_domains": [],
+        "allowed_ports": [],
+    }
     assert ecosystem["host_execution"] is False
     assert ecosystem["metadata"]["runtime_type"] == "declarative_setup_pack"
     assert ecosystem["metadata"]["required_secrets"] == []
@@ -57,7 +64,7 @@ def test_pack_required_assets_and_ecosystem_contract() -> None:
     assert set(ecosystem["metadata"]["non_owner_surfaces"]) >= NON_OWNER_EXPECTED
 
     metadata_indexed = {item for values in ecosystem["metadata"]["asset_index"].values() for item in values}
-    actual = {str(path.relative_to(PACK_DIR)) for path in PACK_DIR.rglob("*") if path.is_file() and path.name != "ecosystem.json"}
+    actual = {str(path.relative_to(PACK_DIR)).replace("\\", "/") for path in PACK_DIR.rglob("*") if path.is_file() and path.name != "ecosystem.json"}
     assert metadata_indexed == actual
     assert set(REQUIRED_ASSETS) == actual
 
@@ -66,7 +73,10 @@ def test_pack_required_assets_and_ecosystem_contract() -> None:
     assert indexed_file_assets == actual
     assert asset_index["invariants"] == {
         "required_secrets": [],
-        "required_network": [],
+        "required_network": {
+            "allowed_domains": [],
+            "allowed_ports": [],
+        },
         "executable_code": False,
         "supports_all_ok": False,
         "external_actions_are_handoffs": True,

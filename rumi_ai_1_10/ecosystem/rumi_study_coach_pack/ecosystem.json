@@ -22,10 +22,19 @@
   "dependencies": {
     "defaultspack": ">=2.0.0"
   },
+  "connectivity": {
+    "requires": [
+      "defaultspack"
+    ],
+    "provides": []
+  },
   "components": {},
   "load_order": [],
   "required_secrets": [],
-  "required_network": [],
+  "required_network": {
+    "allowed_domains": [],
+    "allowed_ports": []
+  },
   "host_execution": false,
   "metadata": {
     "runtime_type": "declarative_setup_pack",
