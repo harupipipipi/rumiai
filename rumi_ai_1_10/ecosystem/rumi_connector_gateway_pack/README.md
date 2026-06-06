@@ -8,8 +8,7 @@ None.
 
 ## Overlap Policy
 
-- `defaultspack` owns approvals, grants, provider keys, and active pack selection.
+- `defaultspack` owns approvals, grants, provider keys, active pack selection, scheduler routes, and MCP registry actions.
 - Installed connector plugins own Slack, Gmail, Google Drive, GitHub, Notion, and similar transport execution.
-- `rumi_mcp_gateway_pack` owns MCP server namespace and unsupported MCP classification.
-- `rumi_workflow_scheduler_pack` owns recurring schedule contracts and wakeups.
+- `rumi_local_agent_pack` can consume normalized connector handoffs when a reusable local agent preset is the best owner.
 - This pack owns connector scope review cards, channel handoff envelopes, and inbound prompt-risk classification.

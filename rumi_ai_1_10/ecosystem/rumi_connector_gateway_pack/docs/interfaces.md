@@ -6,7 +6,7 @@
 - `source_channel`: Where the request arrived.
 - `data_class`: Message, file, calendar event, issue, PR, spreadsheet, doc, or attachment.
 - `scope_card`: Requested OAuth/API scope and reason.
-- `handoff_target`: Agent service, workspace artifact, scheduler, security review, or user reply.
+- `handoff_target`: Local agent preset, workspace artifact, defaultspack scheduler, approval review, or user reply.
 
 ## Outputs
 

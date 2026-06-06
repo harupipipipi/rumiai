@@ -14,16 +14,8 @@
   ],
   "optional_integrations": [
     {
-      "pack_id": "rumi_agent_services_pack",
-      "reason": "Route connector-backed work into service workflows."
-    },
-    {
-      "pack_id": "rumi_workflow_scheduler_pack",
-      "reason": "Deliver recurring connector summaries and wakeups."
-    },
-    {
-      "pack_id": "rumi_security_review_pack",
-      "reason": "Review connector scopes and inbound prompt risks."
+      "pack_id": "rumi_local_agent_pack",
+      "reason": "Route normalized connector handoffs into reusable local agent presets."
     }
   ],
   "components": {},

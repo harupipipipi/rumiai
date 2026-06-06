@@ -32,6 +32,8 @@ def test_connector_gateway_required_assets_and_metadata() -> None:
     assert ecosystem["metadata"]["required_secrets"] == []
     assert ecosystem["metadata"]["network_policy"] == "none_by_default"
     assert ecosystem["metadata"]["executable_code"] is False
+    available = {item.pack_id for item in PackSelector(ROOT / "ecosystem").scan_candidates()}
+    assert {item["pack_id"] for item in ecosystem["optional_integrations"]} <= available
 
 
 def test_connector_gateway_yaml_parses_and_routes_to_owners() -> None:
@@ -39,8 +41,8 @@ def test_connector_gateway_yaml_parses_and_routes_to_owners() -> None:
         assert isinstance(yaml.safe_load(path.read_text(encoding="utf-8")), dict), path
     policy = yaml.safe_load((PACK_DIR / "policies" / "connector_scope_policy.yaml").read_text(encoding="utf-8"))
     decisions = {rule["id"]: rule["decision"] for rule in policy["rules"]}
-    assert decisions["unsupported_server_routes_to_mcp_gateway"] == "handoff_to_rumi_mcp_gateway_pack"
-    assert decisions["recurring_connector_task_needs_schedule_owner"] == "handoff_to_rumi_workflow_scheduler_pack"
+    assert decisions["unsupported_server_routes_to_mcp_gateway"] == "handoff_to_defaultspack_mcp_registry"
+    assert decisions["recurring_connector_task_needs_schedule_owner"] == "handoff_to_defaultspack_scheduler"
 
 
 def test_connector_gateway_setup_pack_discoverable_and_overlap_scoped() -> None:
@@ -50,7 +52,8 @@ def test_connector_gateway_setup_pack_discoverable_and_overlap_scoped() -> None:
     assert setup["risk_level"] == "medium"
     assert candidate.depends_on == [{"pack_id": "defaultspack", "version": ">=2.0.0"}]
     assert candidate.overlap_policy["connector_execution"] == "do_not_override_installed_connector_tools"
-    assert candidate.overlap_policy["mcp_gateway"] == "mcp_servers_use_rumi_mcp_gateway_pack"
+    assert candidate.overlap_policy["mcp_gateway"] == "mcp_servers_use_defaultspack_mcp_registry"
+    assert candidate.overlap_policy["workflow_delivery"] == "handoff_schedules_to_defaultspack_scheduler"
     assert candidate.defaultspack_promotion["eligible"] is False
 
 
@@ -59,7 +62,7 @@ def test_connector_gateway_docs_no_secrets_and_boundary_notes() -> None:
         (PACK_DIR / path).read_text(encoding="utf-8")
         for path in ["README.md", "docs/interfaces.md", "docs/operations.md"]
     )
-    for expected in ["Required Secrets", "None", "defaultspack", "rumi_mcp_gateway_pack", "rumi_workflow_scheduler_pack", "untrusted"]:
+    for expected in ["Required Secrets", "None", "defaultspack", "rumi_local_agent_pack", "scheduler", "untrusted"]:
         assert expected in docs
     pattern = re.compile(
         r"(?i)(api[_-]?key|secret|token|password)\s*[:=]\s*['\"]?[A-Za-z0-9_\-]{12,}"

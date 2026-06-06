@@ -9,6 +9,6 @@ rules:
   - id: sensitive_scope_needs_review_card
     decision: require
   - id: recurring_connector_task_needs_schedule_owner
-    decision: handoff_to_rumi_workflow_scheduler_pack
+    decision: handoff_to_defaultspack_scheduler
   - id: unsupported_server_routes_to_mcp_gateway
-    decision: handoff_to_rumi_mcp_gateway_pack
+    decision: handoff_to_defaultspack_mcp_registry

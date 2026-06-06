@@ -7,6 +7,6 @@ policy:
   require_source_provenance: true
   require_scope_card_for_sensitive_actions: true
 routing:
-  mcp_servers: rumi_mcp_gateway_pack
-  recurring_tasks: rumi_workflow_scheduler_pack
-  security_review: rumi_security_review_pack
+  mcp_servers: defaultspack.mcp_registry
+  recurring_tasks: defaultspack.scheduler
+  security_review: defaultspack.approvals

@@ -16,8 +16,8 @@
   "conflicts_with": [],
   "overlap_policy": {
     "connector_execution": "do_not_override_installed_connector_tools",
-    "mcp_gateway": "mcp_servers_use_rumi_mcp_gateway_pack",
-    "workflow_delivery": "handoff_schedules_to_rumi_workflow_scheduler_pack",
+    "mcp_gateway": "mcp_servers_use_defaultspack_mcp_registry",
+    "workflow_delivery": "handoff_schedules_to_defaultspack_scheduler",
     "tool_aliases": "prefer_explicit_pack_namespace"
   },
   "defaultspack_promotion": {
