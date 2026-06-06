@@ -76,6 +76,13 @@ def _dry_or_commands(
         data["exit_code"] = results[-1]["exit_code"]
         data["stdout"] = results[-1]["stdout"]
         data["stderr"] = results[-1]["stderr"]
+        if any(result.get("exit_code") for result in results):
+            message = str(data["stderr"] or data["stdout"] or f"{label} command failed").strip()
+            return err(
+                message,
+                "COMMAND_FAILED",
+                data=data,
+            )
     return ok(data)
 
 

@@ -11,6 +11,7 @@ sys.path.insert(0, str(DEFAULTSPACK_ROOT))
 
 from domain.tool.executor import ToolExecutor  # noqa: E402
 from domain.tool.external_connector_tools import (  # noqa: E402
+    _dry_or_commands,
     github_issue_list,
     github_issue_update,
     jira_issue_sync,
@@ -165,3 +166,15 @@ def test_issue_sync_executor_requires_approval_then_returns_dry_run_when_approve
     )
     assert executed["is_error"] is False
     assert executed["widget"]["data"]["dry_run"] is True
+
+
+def test_connector_command_execution_surfaces_nonzero_exit_as_error():
+    result = _dry_or_commands(
+        {"execute": True, "timeout": 15},
+        [[sys.executable, "-c", "import sys; print('boom', file=sys.stderr); sys.exit(3)"]],
+        "github_issue_list",
+    )
+
+    assert result["is_error"] is True
+    assert result["widget"]["error"]["code"] == "COMMAND_FAILED"
+    assert result["widget"]["error"]["data"]["exit_code"] == 3
