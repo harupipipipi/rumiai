@@ -129,7 +129,7 @@ def _line_trigger_match(text: str, triggers: list[str]) -> str:
             if re.search(pattern, normalized):
                 return candidate
             continue
-        if candidate in text:
+        if folded in normalized:
             return candidate
     return ""
 

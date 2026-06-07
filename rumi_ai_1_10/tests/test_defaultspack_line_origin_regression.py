@@ -1073,6 +1073,53 @@ def test_line_default_group_message_dispatches_for_hash_trigger(monkeypatch, tmp
     assert "LINE reply tokens expire about 1 minute" in captured["context"]["external_prompt_suffix"]
 
 
+def test_line_default_group_message_dispatches_for_multiword_trigger_case_insensitively(monkeypatch, tmp_path):
+    from blocks.integrations import line as line_block  # noqa: E402
+
+    _install_line_endpoint(
+        monkeypatch,
+        tmp_path,
+        enabled=True,
+        input_profile_id="line.default",
+        metadata={"line_trigger_words": ["rumi bot"]},
+    )
+    monkeypatch.setattr(line_block.AudiencePolicyRegistry, "resolve", lambda self, policy_id, event=None: {"default": "allow"})
+    captured: dict[str, Any] = {}
+
+    def fake_dispatch(event, *, input_profile_id, audience_policy, audience_decision, context, send_response, mentioned=False):
+        captured["mentioned"] = mentioned
+        captured["event"] = event
+        return {
+            "status": "ok",
+            "assistant_text": "done",
+            "response_plan": {"provider": "line", "messages": []},
+        }
+
+    monkeypatch.setattr(line_block, "dispatch_external_event", fake_dispatch)
+    monkeypatch.setattr(LineResponseAdapter, "send", lambda self, plan, event=None, context=None: {"sent": False})
+    payload = {
+        "destination": "Udestination",
+        "events": [
+            {
+                "type": "message",
+                "mode": "active",
+                "webhookEventId": "evt-default-group-trigger-multiword",
+                "replyToken": "reply-default-group-trigger-multiword",
+                "source": {"type": "group", "groupId": "Cgroup", "userId": "Uactor"},
+                "message": {"id": "m1", "type": "text", "text": "RUMI BOT summarize this"},
+            }
+        ],
+    }
+
+    result = line_block.run(_signed_line_payload(payload), {})
+
+    assert result["data"]["events"][0]["status"] == "ok"
+    assert captured["mentioned"] is True
+    assert captured["event"].metadata["line_addressing"]["addressed"] is True
+    assert captured["event"].metadata["line_addressing"]["trigger"] == "rumi bot"
+    assert captured["event"].metadata["line_mention"]["addressed"] is True
+
+
 def test_line_group_message_ignores_recent_rumi_context_without_trigger(monkeypatch, tmp_path):
     from blocks.integrations import line as line_block  # noqa: E402
 
