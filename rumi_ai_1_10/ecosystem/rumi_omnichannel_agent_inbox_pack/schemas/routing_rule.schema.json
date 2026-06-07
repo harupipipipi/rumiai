@@ -58,7 +58,7 @@
     },
     "handoff_owner": {
       "type": "string",
-      "const": "rumi_agent_services_pack"
+      "const": "external_agent_services_owner"
     }
   }
 }

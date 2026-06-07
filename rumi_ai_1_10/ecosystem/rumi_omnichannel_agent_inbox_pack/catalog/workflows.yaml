@@ -34,9 +34,9 @@ workflows:
     - remote_input_authority_denied
     - human_review_before_external_action
     handoffs:
-    - handoff_to_rumi_connector_gateway_pack
+    - handoff_to_external_connector_gateway_owner
     - handoff_to_connector_or_channel_owner
-    - handoff_to_rumi_agent_services_pack
+    - handoff_to_external_agent_services_owner
     execution: declarative_only
   - id: identity_linking
     purpose: Map sender refs to one identity with evidence.
@@ -52,9 +52,9 @@ workflows:
     - remote_input_authority_denied
     - human_review_before_external_action
     handoffs:
-    - handoff_to_rumi_connector_gateway_pack
+    - handoff_to_external_connector_gateway_owner
     - handoff_to_connector_or_channel_owner
-    - handoff_to_rumi_agent_services_pack
+    - handoff_to_external_agent_services_owner
     execution: declarative_only
   - id: channel_acl_gate
     purpose: Deny unauthorized channel-originated work.
@@ -71,9 +71,9 @@ workflows:
     - remote_input_authority_denied
     - human_review_before_external_action
     handoffs:
-    - handoff_to_rumi_connector_gateway_pack
+    - handoff_to_external_connector_gateway_owner
     - handoff_to_connector_or_channel_owner
-    - handoff_to_rumi_agent_services_pack
+    - handoff_to_external_agent_services_owner
     execution: declarative_only
   - id: thread_to_agent_routing
     purpose: Route approved threads to agent service owner.
@@ -90,9 +90,9 @@ workflows:
     - remote_input_authority_denied
     - human_review_before_external_action
     handoffs:
-    - handoff_to_rumi_connector_gateway_pack
+    - handoff_to_external_connector_gateway_owner
     - handoff_to_connector_or_channel_owner
-    - handoff_to_rumi_agent_services_pack
+    - handoff_to_external_agent_services_owner
     execution: declarative_only
   - id: outbound_draft_approval
     purpose: Keep outbound messages draft until approval receipt exists.
@@ -110,10 +110,10 @@ workflows:
     - remote_input_authority_denied
     - human_review_before_external_action
     handoffs:
-    - handoff_to_rumi_connector_gateway_pack
+    - handoff_to_external_connector_gateway_owner
     - handoff_to_connector_or_channel_owner
-    - handoff_to_rumi_workflow_scheduler_pack
-    - handoff_to_rumi_agent_services_pack
+    - handoff_to_external_workflow_scheduler_owner
+    - handoff_to_external_agent_services_owner
     execution: declarative_only
   - id: notification_preference_handoff
     purpose: Send scheduling windows to workflow scheduler owner.
@@ -128,7 +128,7 @@ workflows:
     - owner_boundary_checked
     - human_review_before_external_action
     handoffs:
-    - handoff_to_rumi_connector_gateway_pack
+    - handoff_to_external_connector_gateway_owner
     - handoff_to_connector_or_channel_owner
-    - handoff_to_rumi_agent_services_pack
+    - handoff_to_external_agent_services_owner
     execution: declarative_only

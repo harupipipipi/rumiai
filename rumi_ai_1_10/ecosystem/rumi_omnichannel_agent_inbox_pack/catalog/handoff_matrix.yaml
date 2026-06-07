@@ -2,20 +2,20 @@ handoff_matrix:
   pack_boundary_rule: owner_surface_wins_then_explicit_handoff
   items:
   - surface: actual_app_connectors
-    resolution: handoff_to_rumi_connector_gateway_pack
+    resolution: handoff_to_external_connector_gateway_owner
     requires_human_review: true
   - surface: slack_gmail_mobile_clients
     resolution: handoff_to_connector_or_channel_owner
     requires_human_review: true
   - surface: work_execution
-    resolution: handoff_to_rumi_agent_services_pack
+    resolution: handoff_to_external_agent_services_owner
     requires_human_review: true
   - surface: schedule_execution
-    resolution: handoff_to_rumi_workflow_scheduler_pack
+    resolution: handoff_to_external_workflow_scheduler_owner
     requires_human_review: true
   - surface: security_policy_review
-    resolution: handoff_to_rumi_security_review_pack
+    resolution: handoff_to_external_security_review_owner
     requires_human_review: true
   - surface: message_sending
-    resolution: handoff_to_rumi_connector_gateway_pack
+    resolution: handoff_to_external_connector_gateway_owner
     requires_human_review: true

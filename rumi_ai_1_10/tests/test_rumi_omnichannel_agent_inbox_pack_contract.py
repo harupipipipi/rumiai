@@ -19,10 +19,11 @@ WORKFLOW_IDS = set(['channel_ingress_normalization', 'identity_linking', 'channe
 QUALITY_CHECK_IDS = set(['identity_merge_evidence', 'acl_denies_unauthorized_tools', 'outbound_draft_until_approved', 'connector_owner_named', 'routing_requires_acl', 'notification_scheduler_handoff', 'security_review_for_risky_acl', 'inbox_ui_readable', 'acl_default_deny', 'remote_input_no_authority', 'route_idempotency', 'draft_hash_expiry', 'no_provider_clients_or_secrets'])
 OWNER_EXPECTED = set(['channel_payload_contract', 'identity_mapping', 'channel_acl', 'thread_to_agent_routing', 'outbound_draft_approval', 'notification_preferences', 'inbox_thread_state', 'inbox_ui_contract'])
 NON_OWNER_EXPECTED = set(['actual app connectors', 'Slack client', 'Gmail client', 'mobile client', 'work execution', 'schedule execution', 'security policy review', 'message sending'])
-OVERLAP_EXPECTED = {'actual_app_connectors': 'handoff_to_rumi_connector_gateway_pack', 'slack_gmail_mobile_clients': 'handoff_to_connector_or_channel_owner', 'work_execution': 'handoff_to_rumi_agent_services_pack', 'schedule_execution': 'handoff_to_rumi_workflow_scheduler_pack', 'security_policy_review': 'handoff_to_rumi_security_review_pack', 'message_sending': 'handoff_to_rumi_connector_gateway_pack', 'identity_mapping': 'owned_by_rumi_omnichannel_agent_inbox_pack', 'outbound_draft_approval': 'owned_by_rumi_omnichannel_agent_inbox_pack', 'tool_aliases': 'prefer_explicit_pack_namespace'}
+OVERLAP_EXPECTED = {'actual_app_connectors': 'handoff_to_external_connector_gateway_owner', 'slack_gmail_mobile_clients': 'handoff_to_connector_or_channel_owner', 'work_execution': 'handoff_to_external_agent_services_owner', 'schedule_execution': 'handoff_to_external_workflow_scheduler_owner', 'security_policy_review': 'handoff_to_external_security_review_owner', 'message_sending': 'handoff_to_external_connector_gateway_owner', 'identity_mapping': 'owned_by_rumi_omnichannel_agent_inbox_pack', 'outbound_draft_approval': 'owned_by_rumi_omnichannel_agent_inbox_pack', 'tool_aliases': 'prefer_explicit_pack_namespace'}
 PROMOTION_BLOCKERS = set(['requires_channel_identity_registry', 'requires_external_message_approval_tokens', 'connector_io_owned_elsewhere', 'security_acl_review_required', 'must_prove_outbound_draft_gate'])
 PROMOTION_EVIDENCE = set(['cross_channel_identity_cases', 'channel_acl_denial_cases', 'outbound_draft_approval_cases', 'thread_routing_cases', 'notification_preference_cases'])
 BLOCKED_BY_DEFAULT = set(['send outbound messages without approval', 'run tools from unauthorized channel', 'merge identities without verified evidence', 'connect to external apps directly', 'schedule notifications directly', 'approve outbound drafts from remote input', 'approve tools from remote input', 'execute work from remote input', 'install packs from remote input', 'mutate settings from remote input', 'issue approval tokens from remote input'])
+OPTIONAL_OWNER_REFS = set(['external_connector_gateway_owner', 'external_agent_services_owner', 'external_workflow_scheduler_owner', 'external_security_review_owner', 'external_business_ops_owner', 'external_voice_mobile_owner'])
 
 
 def read_json(path: Path) -> dict:
@@ -56,7 +57,9 @@ def test_required_assets_and_ecosystem_contract() -> None:
     assert metadata["secrets_policy"] == "no_provider_tokens_or_secrets"
     assert set(metadata["owner_surfaces"]) >= OWNER_EXPECTED
     assert set(metadata["non_owner_surfaces"]) >= NON_OWNER_EXPECTED
-    actual = {str(path.relative_to(PACK_DIR)) for path in PACK_DIR.rglob("*") if path.is_file() and path.name != "ecosystem.json"}
+    assert {item["owner_ref"] for item in metadata["optional_integrations"]} == OPTIONAL_OWNER_REFS
+    assert all("pack_id" not in item for item in metadata["optional_integrations"])
+    actual = {path.relative_to(PACK_DIR).as_posix() for path in PACK_DIR.rglob("*") if path.is_file() and path.name != "ecosystem.json"}
     indexed = {item for values in metadata["asset_index"].values() for item in values}
     assert actual == indexed == set(REQUIRED_ASSETS)
     asset_index = read_yaml(PACK_DIR / "asset_index.yaml")["asset_index"]
@@ -156,6 +159,14 @@ def test_pack_body_has_no_credentials_or_skeleton_phrases() -> None:
     assert re.search(generated_key_pattern, combined) is None
 
 
+def test_pack_bundle_references_only_existing_local_pack_ids() -> None:
+    known_pack_ids = {path.name for path in (ROOT / "ecosystem").iterdir() if (path / "ecosystem.json").is_file()}
+    checked = [path for path in PACK_DIR.rglob("*") if path.is_file()] + [SETUP_PACK_JSON]
+    combined = "\n".join(path.read_text(encoding="utf-8") for path in checked)
+    referenced = set(re.findall(r"\brumi_[a-z0-9_]+_pack\b", combined))
+    assert referenced <= known_pack_ids
+
+
 def _resolve_identity(sender_refs: list[dict]) -> tuple[str, str]:
     verified = [item for item in sender_refs if item["verification_state"] == "verified"]
     if len({item["identity_id"] for item in verified}) == 1 and len(verified) >= 2:
@@ -242,7 +253,7 @@ def test_route_idempotency_hash_expiry_and_no_provider_clients() -> None:
     assert handoff["properties"]["provider_client_included"]["const"] is False
     assert preference["properties"]["notification_execution"]["const"] == "handoff_only"
     assert preference["properties"]["remote_input_can_schedule"]["const"] is False
-    assert preference["properties"]["notification_owner"]["const"] == "rumi_workflow_scheduler_pack"
+    assert preference["properties"]["notification_owner"]["const"] == "external_workflow_scheduler_owner"
     assert ecosystem["metadata"]["provider_clients"] == []
     assert ecosystem["metadata"]["pre_auth_routes"] == []
     assert list(PACK_DIR.rglob("*.py")) == []
@@ -262,7 +273,7 @@ def test_omnichannel_subagent_acceptance_assets() -> None:
     assert "idempotency_key" in channel_payload["required"]
     assert "idempotency_key" in route["required"]
     assert approval["properties"]["remote_input_can_approve"]["const"] is False
-    assert handoff["properties"]["owner_pack"]["const"] == "rumi_connector_gateway_pack"
+    assert handoff["properties"]["owner_pack"]["const"] == "external_connector_gateway_owner"
     assert {"send_message", "fetch_provider", "issue_approval_token", "run_tool"} <= set(ui["forbidden_actions"])
     migration = (PACK_DIR / "docs/migration.md").read_text(encoding="utf-8")
     for forbidden in ["approve tools", "install packs", "mutate settings", "issue approval tokens"]:

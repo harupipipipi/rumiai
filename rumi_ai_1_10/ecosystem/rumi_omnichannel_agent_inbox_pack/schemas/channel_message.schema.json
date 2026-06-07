@@ -45,7 +45,7 @@
     },
     "ingress_owner": {
       "type": "string",
-      "const": "rumi_connector_gateway_pack"
+      "const": "external_connector_gateway_owner"
     },
     "received_at_state": {
       "type": "string",

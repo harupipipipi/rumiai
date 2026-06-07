@@ -170,3 +170,35 @@ def test_validate_candidates_reports_installed_pack_conflict(tmp_path):
             "severity": "error",
         }
     ]
+
+
+def test_validate_candidates_ignores_conflict_candidates_that_are_not_installed(tmp_path):
+    ecosystem = tmp_path / "eco"
+    setup_pack_root = ecosystem / "setup_pack"
+    setup_pack_root.mkdir(parents=True)
+
+    workspace = setup_pack_root / "workspace"
+    workspace.mkdir()
+    (workspace / "pack.json").write_text(
+        json.dumps(
+            {
+                "pack_id": "workspace",
+                "conflicts_with": [
+                    {
+                        "pack_id": "legacy_workspace",
+                        "reason": "Both own generated office artifacts.",
+                        "resolution": "prefer_workspace",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    legacy = setup_pack_root / "legacy_workspace"
+    legacy.mkdir()
+    (legacy / "pack.json").write_text(json.dumps({"pack_id": "legacy_workspace"}), encoding="utf-8")
+
+    issues = PackSelector(setup_pack_root).validate_candidates(installed_packs={})
+
+    assert issues == []

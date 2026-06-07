@@ -23,12 +23,12 @@
     ]
   },
   "overlap_policy": {
-    "actual_app_connectors": "handoff_to_rumi_connector_gateway_pack",
+    "actual_app_connectors": "handoff_to_external_connector_gateway_owner",
     "slack_gmail_mobile_clients": "handoff_to_connector_or_channel_owner",
-    "work_execution": "handoff_to_rumi_agent_services_pack",
-    "schedule_execution": "handoff_to_rumi_workflow_scheduler_pack",
-    "security_policy_review": "handoff_to_rumi_security_review_pack",
-    "message_sending": "handoff_to_rumi_connector_gateway_pack",
+    "work_execution": "handoff_to_external_agent_services_owner",
+    "schedule_execution": "handoff_to_external_workflow_scheduler_owner",
+    "security_policy_review": "handoff_to_external_security_review_owner",
+    "message_sending": "handoff_to_external_connector_gateway_owner",
     "identity_mapping": "owned_by_rumi_omnichannel_agent_inbox_pack",
     "outbound_draft_approval": "owned_by_rumi_omnichannel_agent_inbox_pack",
     "tool_aliases": "prefer_explicit_pack_namespace"

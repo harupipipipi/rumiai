@@ -19,12 +19,12 @@ Outbound draft approvals must include a `sha256` body hash, expiry, local approv
 
 ## Optional Integrations
 
-- `rumi_connector_gateway_pack`: Owns connector authentication and external channel IO.
-- `rumi_agent_services_pack`: Executes routed work after inbox approval.
-- `rumi_workflow_scheduler_pack`: Schedules notification windows and follow-ups.
-- `rumi_security_review_pack`: Reviews channel ACL and risky outbound policies.
-- `rumi_business_ops_pack`: Owns business workflow actions after inbox routing.
-- `rumi_voice_mobile_pack`: Owns mobile voice and notification surfaces.
+- `external_connector_gateway_owner`: Owns connector authentication and external channel IO.
+- `external_agent_services_owner`: Executes routed work after inbox approval.
+- `external_workflow_scheduler_owner`: Schedules notification windows and follow-ups.
+- `external_security_review_owner`: Reviews channel ACL and risky outbound policies.
+- `external_business_ops_owner`: Owns business workflow actions after inbox routing.
+- `external_voice_mobile_owner`: Owns mobile voice and notification surfaces.
 
 ## Required Secrets
 

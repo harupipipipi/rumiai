@@ -62,27 +62,27 @@
     ],
     "optional_integrations": [
       {
-        "pack_id": "rumi_connector_gateway_pack",
+        "owner_ref": "external_connector_gateway_owner",
         "reason": "Owns connector authentication and external channel IO."
       },
       {
-        "pack_id": "rumi_agent_services_pack",
+        "owner_ref": "external_agent_services_owner",
         "reason": "Executes routed work after inbox approval."
       },
       {
-        "pack_id": "rumi_workflow_scheduler_pack",
+        "owner_ref": "external_workflow_scheduler_owner",
         "reason": "Schedules notification windows and follow-ups."
       },
       {
-        "pack_id": "rumi_security_review_pack",
+        "owner_ref": "external_security_review_owner",
         "reason": "Reviews channel ACL and risky outbound policies."
       },
       {
-        "pack_id": "rumi_business_ops_pack",
+        "owner_ref": "external_business_ops_owner",
         "reason": "Owns business workflow actions after inbox routing."
       },
       {
-        "pack_id": "rumi_voice_mobile_pack",
+        "owner_ref": "external_voice_mobile_owner",
         "reason": "Owns mobile voice and notification surfaces."
       }
     ],

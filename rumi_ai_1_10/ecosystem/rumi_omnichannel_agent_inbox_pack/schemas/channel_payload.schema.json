@@ -55,7 +55,7 @@
     },
     "connector_owner": {
       "type": "string",
-      "const": "rumi_connector_gateway_pack"
+      "const": "external_connector_gateway_owner"
     },
     "raw_payload_policy": {
       "type": "string",

@@ -60,7 +60,7 @@
     },
     "scheduler_handoff": {
       "type": "string",
-      "const": "rumi_workflow_scheduler_pack"
+      "const": "external_workflow_scheduler_owner"
     },
     "state": {
       "type": "string",
@@ -80,7 +80,7 @@
     },
     "notification_owner": {
       "type": "string",
-      "const": "rumi_workflow_scheduler_pack"
+      "const": "external_workflow_scheduler_owner"
     }
   }
 }

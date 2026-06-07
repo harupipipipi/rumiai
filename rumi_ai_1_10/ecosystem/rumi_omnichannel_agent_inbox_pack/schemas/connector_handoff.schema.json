@@ -27,7 +27,7 @@
     },
     "owner_pack": {
       "type": "string",
-      "const": "rumi_connector_gateway_pack"
+      "const": "external_connector_gateway_owner"
     },
     "operation": {
       "type": "string",

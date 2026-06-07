@@ -56,7 +56,7 @@
     },
     "review_owner": {
       "type": "string",
-      "const": "rumi_security_review_pack"
+      "const": "external_security_review_owner"
     },
     "default_effect": {
       "type": "string",
