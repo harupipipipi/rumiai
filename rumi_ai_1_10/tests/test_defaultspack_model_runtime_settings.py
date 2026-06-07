@@ -77,6 +77,9 @@ def test_model_runtime_settings_utility_models_and_groups(tmp_path):
 def test_model_runtime_settings_includes_builtin_rumi_model_pack(tmp_path):
     service = ModelRuntimeSettingsService(tmp_path)
     service._runtime_rumi_base_model = lambda settings=None: RUMI_BASE_MODEL
+    # This assertion targets the unresolved built-in pack shape, so keep it
+    # isolated from any configured provider catalog state introduced elsewhere.
+    service._base_profile_catalog = lambda settings=None: []
 
     settings = service.get_settings()
     rumi_pack = next(pack for pack in settings["model_packs"] if pack["id"] == "rumi")
