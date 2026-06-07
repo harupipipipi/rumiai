@@ -74,6 +74,30 @@ def test_soak_claims_tasks_with_lease_and_consumes_completed_queue(tmp_path):
     assert [task["task_id"] for task in state["task_queue"]] == [tasks[1]["task_id"]]
 
 
+def test_soak_reclaims_expired_task_with_incremented_attempt(tmp_path):
+    from domain.agent.self_improvement_runtime import create_mimo_profile
+    from domain.agent.soak_test_runner import SoakTestRunner
+
+    runtime = create_mimo_profile(workspace_root=tmp_path, state_path=tmp_path / "si.json")
+    runtime.bootstrap()
+
+    runner = SoakTestRunner(runtime, state_path=tmp_path / "soak.json")
+    runner.save_task_queue(runner.load_task_queue()[:1])
+
+    first = runner.claim_next_task(lease_seconds=30, now_epoch=1000)
+    second = runner.claim_next_task(lease_seconds=30, now_epoch=1031)
+
+    state = json.loads((tmp_path / "soak.json").read_text(encoding="utf-8"))
+
+    assert first is not None
+    assert second is not None
+    assert first["attempt"] == 1
+    assert second["attempt"] == 2
+    assert state["task_queue"][0]["attempt"] == 2
+    assert state["active_task"]["attempt"] == 2
+    assert state["lease_events"][0]["kind"] == "lease_expired"
+
+
 def test_soak_health_detects_stale_heartbeat_and_failed_run(tmp_path):
     from domain.agent.self_improvement_runtime import create_mimo_profile
     from domain.agent.soak_test_runner import SoakTestRunner
@@ -102,6 +126,28 @@ def test_soak_health_detects_stale_heartbeat_and_failed_run(tmp_path):
     assert health["status"] == "down"
     assert any("heartbeat" in reason for reason in health["reasons"])
     assert any("completed" in reason for reason in health["reasons"])
+
+
+def test_soak_health_marks_all_failed_results_degraded_before_three_attempts(tmp_path):
+    from domain.agent.self_improvement_runtime import create_mimo_profile
+    from domain.agent.soak_test_runner import SoakTestRunner
+
+    runtime = create_mimo_profile(workspace_root=tmp_path, state_path=tmp_path / "si.json")
+    runtime.bootstrap()
+
+    runner = SoakTestRunner(runtime, state_path=tmp_path / "soak.json")
+    runner.start_run()
+    runner.record_task_result(
+        "task_1",
+        status="failed",
+        failures=["tool timeout"],
+        user_friction="tool timeout",
+    )
+
+    health = runner.health_status()
+
+    assert health["status"] == "degraded"
+    assert any("all recorded tasks failed" in reason for reason in health["reasons"])
 
 
 def test_soak_records_competitor_comparison_in_final_report(tmp_path):

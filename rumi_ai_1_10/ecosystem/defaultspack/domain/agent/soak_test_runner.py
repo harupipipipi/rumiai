@@ -220,6 +220,8 @@ class SoakTestRunner:
         task["lease_expires_at"] = _timestamp_from_epoch(now + task["lease_seconds"])
         task["lease_expires_epoch"] = now + task["lease_seconds"]
         task["attempt"] = int(task.get("attempt", 0)) + 1
+        if isinstance(queue, list) and queue:
+            queue[0] = task
         state["active_task"] = task
         self._save_state(state)
         return task
@@ -326,6 +328,8 @@ class SoakTestRunner:
         failed = len([item for item in results if item.get("status") == "failed"])
         completed = len([item for item in results if item.get("status") == "completed"])
         total = len(results)
+        if total > 0 and completed == 0 and failed == total:
+            reasons.append("all recorded tasks failed")
         if total >= 3 and failed / total >= 0.5:
             reasons.append("failure rate exceeded 50 percent")
         if total >= 3 and completed == 0:
