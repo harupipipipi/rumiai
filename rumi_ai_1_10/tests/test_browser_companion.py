@@ -19,6 +19,17 @@ _PNG_DATA_URL = (
 )
 
 
+def _browser_companion_extension_root() -> Path:
+    candidates = [
+        DEFAULTSPACK_ROOT / "browser_extensions" / "rumi_browser_companion",
+        ROOT.parent / "browser_extensions" / "rumi_browser_companion",
+    ]
+    for candidate in candidates:
+        if (candidate / "content_script.js").is_file() and (candidate / "background.js").is_file():
+            return candidate
+    return candidates[0]
+
+
 def test_browser_companion_candidate_urls_match_defaultspack_default_port():
     from ecosystem.rumi_default_tools_pack.domain.tool.browser_companion_bridge import candidate_base_urls
 
@@ -149,7 +160,7 @@ def test_browser_companion_controller_marks_dom_actions_parallel_safe(tmp_path):
 
 
 def test_browser_companion_extension_focus_semantics_are_explicit():
-    background = (ROOT.parent / "browser_extensions" / "rumi_browser_companion" / "background.js").read_text(encoding="utf-8")
+    background = (_browser_companion_extension_root() / "background.js").read_text(encoding="utf-8")
     send_element_body = background[
         background.index("async function sendElementCommand") : background.index("async function sendToTab")
     ]
@@ -170,7 +181,7 @@ def test_browser_companion_extension_focus_semantics_are_explicit():
 
 
 def test_browser_companion_extension_semantic_dom_and_highlight_contract():
-    extension_root = ROOT.parent / "browser_extensions" / "rumi_browser_companion"
+    extension_root = _browser_companion_extension_root()
     content = (extension_root / "content_script.js").read_text(encoding="utf-8")
     background = (extension_root / "background.js").read_text(encoding="utf-8")
     tool_manifest = (
@@ -208,9 +219,7 @@ def test_browser_companion_extension_semantic_dom_and_highlight_contract():
 
 
 def test_browser_companion_snapshot_forwards_snapshot_options_to_content_script():
-    background = (ROOT.parent / "browser_extensions" / "rumi_browser_companion" / "background.js").read_text(
-        encoding="utf-8"
-    )
+    background = (_browser_companion_extension_root() / "background.js").read_text(encoding="utf-8")
     capture_body = background[
         background.index("async function captureDomSnapshot") : background.index("async function sendElementCommand")
     ]
