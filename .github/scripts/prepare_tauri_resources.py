@@ -177,7 +177,7 @@ def stage_pack_shell(repo_root: Path, source_root: Path, target: str) -> Path:
     return dest
 
 
-def download_to_temp(url: str, attempts: int = 8) -> Path:
+def download_to_temp(url: str, attempts: int = 15) -> Path:
     suffix = ".zip" if url.endswith(".zip") else ".tar.gz"
     last_error: Exception | None = None
     for attempt in range(1, attempts + 1):

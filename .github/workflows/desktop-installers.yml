@@ -126,9 +126,28 @@ jobs:
         run: cargo test --locked
 
       - name: Build desktop installer
-        if: runner.os != 'Linux'
+        if: runner.os == 'macOS'
         working-directory: rumi_viewer
         run: cargo tauri build --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} --ci ${{ matrix.signing_args }}
+
+      - name: Build desktop installer
+        if: runner.os == 'Windows'
+        working-directory: rumi_viewer
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Continue"
+          $PSNativeCommandUseErrorActionPreference = $false
+          foreach ($attempt in 1..3) {
+            cargo tauri build --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} --ci ${{ matrix.signing_args }}
+            $status = $LASTEXITCODE
+            if ($status -eq 0) {
+              exit 0
+            }
+            if ($attempt -eq 3) {
+              exit $status
+            }
+            Start-Sleep -Seconds ($attempt * 20)
+          }
 
       - name: Build desktop installer
         if: runner.os == 'Linux'
