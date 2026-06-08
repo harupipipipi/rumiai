@@ -263,22 +263,12 @@ def parse_sha256_manifest(text: str, expected_filename: str) -> str:
 
 
 def verify_uv_archive_checksum(archive_path: Path, *, target: str, version: str, url: str) -> None:
-    expected_filename = Path(url).name
     pinned_sha256 = expected_uv_sha256(target, version).lower()
-    upstream_sha256 = parse_sha256_manifest(
-        download_text(f"{url}.sha256"),
-        expected_filename,
-    )
-    if upstream_sha256 != pinned_sha256:
-        raise RuntimeError(
-            "Pinned uv SHA256 does not match upstream checksum manifest for "
-            f"{expected_filename}: pinned={pinned_sha256} upstream={upstream_sha256}"
-        )
     actual_sha256 = compute_sha256(archive_path).lower()
     if actual_sha256 != pinned_sha256:
         raise RuntimeError(
             "uv archive SHA256 mismatch for "
-            f"{expected_filename}: expected {pinned_sha256}, got {actual_sha256}"
+            f"{Path(url).name}: expected {pinned_sha256}, got {actual_sha256}"
         )
 
 
