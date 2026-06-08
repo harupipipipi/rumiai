@@ -149,7 +149,14 @@ def test_browser_companion_controller_marks_dom_actions_parallel_safe(tmp_path):
 
 
 def test_browser_companion_extension_focus_semantics_are_explicit():
-    background = (ROOT.parent / "browser_extensions" / "rumi_browser_companion" / "background.js").read_text(encoding="utf-8")
+    background = (
+        ROOT
+        / "ecosystem"
+        / "defaultspack"
+        / "browser_extensions"
+        / "rumi_browser_companion"
+        / "background.js"
+    ).read_text(encoding="utf-8")
     send_element_body = background[
         background.index("async function sendElementCommand") : background.index("async function sendToTab")
     ]

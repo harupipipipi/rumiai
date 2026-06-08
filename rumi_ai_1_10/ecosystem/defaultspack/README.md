@@ -78,6 +78,7 @@ defaults 単体で既存の AI サービス（ChatGPT / Claude / Cursor / Devin�
 | capability/profile/preset を使いたい | `capabilities/`, `profiles/local_agent.profile.yaml`, `presets/local_only_safe.preset.yaml` |
 | frontend の次タスクを見たい | `docs/frontend_todo.md` |
 | ブラウザに返す実ファイルの置き場を見たい | `ui/` |
+| Browser Companion extension を見たい | `browser_extensions/rumi_browser_companion/` |
 | HTTP エンドポイントを見たい | `docs/chat.md`, `transport/http.py` |
 | viewer 経由の起動フローを知りたい | `../../docs/rumi_viewer_start.md` |
 
