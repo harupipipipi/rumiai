@@ -18,7 +18,7 @@ import { boundedDurationLabel } from "./lib/duration";
 import { fetchDesktopSystemInfo, type DesktopSystemInfo } from "./lib/desktopSystemInfo";
 import { normalizeLocale } from "./lib/i18n";
 import { PENDING_CHAT_REQUEST_TTL_MS, shouldClearPendingAfterConversationRefresh, type PendingChatRequest } from "./lib/pendingChat";
-import { isRecord, toolPreviewsFromMessages, upsertStreamActivityEvent } from "./lib/toolPreviews";
+import { isHumanOperatorCanvasPreview, isRecord, toolPreviewsFromMessages, upsertStreamActivityEvent } from "./lib/toolPreviews";
 import { extractLatestToolFilterContext } from "./lib/toolStatus";
 import { hasShellRegion } from "./lib/uiShell";
 import { hasWorkspaceAttachment, workspaceFileToAttachment } from "./lib/workspaceAttachments";
@@ -2093,6 +2093,7 @@ export default function App() {
   const [pendingRequests, setPendingRequests] = useLocalStorage<Record<string, PendingChatRequest>>(pendingStorageKey, {});
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const isUnloadingRef = useRef(false);
+  const humanOperatorAutoOpenedPreviewRef = useRef<string | null>(null);
   const currentAbortControllerRef = useRef<AbortController | null>(null);
   const streamingConversationIdRef = useRef<string | null>(null);
   const activeRuntimeApprovalActionRef = useRef<string | null>(null);
@@ -2265,6 +2266,19 @@ export default function App() {
   }, [messageToolPreviews, previews]);
   const canShowCanvas = hasCanvasItems(canvasPreviews, canvasMemo) || liveBrowserState.state_revision >= 0;
   const effectiveShowPreview = showPreview && canShowCanvas;
+
+  useEffect(() => {
+    const preview = canvasPreviews.find(isHumanOperatorCanvasPreview);
+    if (!preview) {
+      humanOperatorAutoOpenedPreviewRef.current = null;
+      return;
+    }
+    if (humanOperatorAutoOpenedPreviewRef.current === preview.id) return;
+    humanOperatorAutoOpenedPreviewRef.current = preview.id;
+    setActivePreviewId(preview.id);
+    setShowPreview(true);
+  }, [canvasPreviews]);
+
   const composerCommands = useMemo(() => {
     const showAdvanced = settingsValues.commands?.show_advanced_commands === true;
     const fastCandidate = fastCandidateForProfile(activeProfile, selectableModelProfiles);
@@ -2428,6 +2442,18 @@ export default function App() {
       if (event.origin !== window.location.origin) return;
       const payload = event.data;
       if (!payload || typeof payload !== "object") return;
+      if ((payload as Record<string, unknown>).type === "rumi_human_operator_sync") {
+        const conversationId = String((payload as Record<string, unknown>).conversation_id ?? "").trim();
+        if (conversationId && conversationId === activeConversationId) {
+          void api.getConversation(conversationId)
+            .then((conversation) => {
+              setActiveConversation(conversation);
+              void refreshPreview(conversationId);
+            })
+            .catch(console.error);
+        }
+        return;
+      }
       if ((payload as Record<string, unknown>).type !== "rumi_provider_oauth") return;
       const providerId = String((payload as Record<string, unknown>).provider_id ?? "").trim();
       if (providerId) {
@@ -2440,7 +2466,7 @@ export default function App() {
     return () => {
       window.removeEventListener("message", handleOauthMessage);
     };
-  }, []);
+  }, [activeConversationId]);
 
   useEffect(() => {
     if (mode === "coding") {
