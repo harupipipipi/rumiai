@@ -68,7 +68,7 @@ def test_rumi_computer_control_pack_required_docs_and_assets_exist():
     assert ecosystem["pack_identity"] == "rumi:ecosystem/rumi_computer_control_pack"
     assert ecosystem["components"] == {}
     assert ecosystem["load_order"] == []
-    assert ecosystem["network_policy"]["default"] == "none"
+    assert ecosystem["metadata"]["network_policy_details"]["default"] == "none"
     assert ecosystem["required_secrets"] == []
 
 
