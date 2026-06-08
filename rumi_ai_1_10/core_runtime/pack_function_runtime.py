@@ -6,7 +6,86 @@ import importlib.util
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from .paths import BASE_DIR, is_path_within
+from .paths import (
+    BASE_DIR,
+    CORE_PACK_DIR,
+    CORE_PACK_ID_PREFIX,
+    ECOSYSTEM_DIR,
+    is_path_within,
+)
+
+
+TRUSTED_IN_PROCESS_PACK_IDS = frozenset({"defaultspack", "rumi_default_tools_pack"})
+
+
+def _find_pack_root(path_hint: Any) -> Optional[Path]:
+    try:
+        candidate = Path(path_hint).resolve()
+    except (OSError, TypeError):
+        return None
+    if candidate.is_file():
+        candidate = candidate.parent
+    for current in (candidate, *candidate.parents):
+        if (current / "ecosystem.json").is_file():
+            return current
+    return candidate
+
+
+def _is_pack_root_under(pack_root: Path, allowed_root: Path, pack_id: str) -> bool:
+    try:
+        resolved_pack = pack_root.resolve()
+    except OSError:
+        resolved_pack = pack_root
+    try:
+        resolved_allowed = allowed_root.resolve()
+    except OSError:
+        resolved_allowed = allowed_root
+    try:
+        relative = resolved_pack.relative_to(resolved_allowed)
+    except ValueError:
+        return False
+    return bool(relative.parts) and relative.parts[0] == pack_id
+
+
+def is_pack_function_in_process_allowed(
+    pack_id: str,
+    pack_root_hint: Any = None,
+) -> bool:
+    """Return True only for first-party pack functions allowed in this process."""
+    normalized_pack_id = str(pack_id or "").strip()
+    if not normalized_pack_id:
+        return False
+
+    pack_root = _find_pack_root(pack_root_hint) if pack_root_hint is not None else None
+
+    if normalized_pack_id.startswith(CORE_PACK_ID_PREFIX):
+        if pack_root is None:
+            pack_root = Path(CORE_PACK_DIR) / normalized_pack_id
+            if not pack_root.is_dir():
+                return False
+        return _is_pack_root_under(
+            pack_root,
+            Path(CORE_PACK_DIR),
+            normalized_pack_id,
+        )
+
+    if normalized_pack_id not in TRUSTED_IN_PROCESS_PACK_IDS:
+        return False
+
+    if pack_root is None:
+        pack_root = Path(ECOSYSTEM_DIR) / normalized_pack_id
+        if not pack_root.is_dir():
+            return False
+    if _is_pack_root_under(pack_root, Path(ECOSYSTEM_DIR), normalized_pack_id):
+        return True
+
+    try:
+        resolved = pack_root.resolve()
+    except OSError:
+        resolved = pack_root
+    if resolved.name != normalized_pack_id or resolved.parent.name != "ecosystem":
+        return False
+    return resolved.parent.parent.name == "app"
 
 
 def invoke_pack_function(
@@ -23,6 +102,10 @@ def invoke_pack_function(
     entry = get_container().get("function_registry").get(qualified_name)
     if entry is None:
         raise KeyError(f"Function not found: {qualified_name}")
+    if not is_pack_function_in_process_allowed(entry.pack_id, entry.function_dir):
+        raise PermissionError(
+            f"In-process pack function execution is not allowed: {qualified_name}"
+        )
 
     entrypoint = entry.entrypoint or "main.py:run"
     module_rel, callable_name = (

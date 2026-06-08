@@ -21,9 +21,12 @@ class TestDefaultspackApiRoutes(unittest.TestCase):
             / "ecosystem.json"
         )
         data = json.loads(ecosystem_path.read_text(encoding="utf-8"))
+        pack_root = ecosystem_path.parent
 
         class _PackInfo:
             ecosystem = data
+            path = pack_root
+            subdir = pack_root
 
         class _Registry:
             packs = {"defaultspack": _PackInfo()}
@@ -48,12 +51,40 @@ class TestDefaultspackApiRoutes(unittest.TestCase):
         )
         self.assertEqual(len(PackAPIHandler._api_route_patterns), 9)
 
+    def test_api_route_blocks_untrusted_pack_function_dispatch(self):
+        from core_runtime.pack_api_server import PackAPIHandler
+
+        PackAPIHandler._api_route_exact = {
+            ("POST", "/api/evil/run"): {
+                "pack_id": "evil_pack",
+                "handler": "",
+                "function_id": "run",
+                "pass_body": True,
+                "response_mode": "result",
+                "args": {},
+                "path_param_map": {},
+            }
+        }
+        PackAPIHandler._api_route_patterns = []
+        handler = PackAPIHandler.__new__(PackAPIHandler)
+        sent = []
+        handler._send_response = lambda response, status_code=200: sent.append((status_code, response))
+
+        with patch("core_runtime.pack_function_runtime.invoke_pack_function") as mocked:
+            dispatched = handler._dispatch_api_route(
+                "POST", "/api/evil/run", {"input": "hello"}
+            )
+
+        self.assertTrue(dispatched)
+        mocked.assert_not_called()
+        self.assertEqual(sent[0][0], 403)
+
     def test_api_route_dispatches_pack_function(self):
         from core_runtime.pack_api_server import PackAPIHandler
 
         PackAPIHandler._api_route_exact = {
-            ("POST", "/api/example/run"): {
-                "pack_id": "example",
+            ("POST", "/api/defaultspack/run"): {
+                "pack_id": "defaultspack",
                 "handler": "",
                 "function_id": "run",
                 "pass_body": True,
@@ -72,15 +103,15 @@ class TestDefaultspackApiRoutes(unittest.TestCase):
             return_value={"ok": True},
         ) as mocked:
             dispatched = handler._dispatch_api_route(
-                "POST", "/api/example/run", {"input": "hello"}
+                "POST", "/api/defaultspack/run", {"input": "hello"}
             )
 
         self.assertTrue(dispatched)
         mocked.assert_called_once_with(
-            "example",
+            "defaultspack",
             "run",
             {"mode": "fast", "input": "hello"},
-            {"pack_id": "example", "method": "POST", "path": "/api/example/run"},
+            {"pack_id": "defaultspack", "method": "POST", "path": "/api/defaultspack/run"},
         )
         self.assertEqual(sent, [{"ok": True}])
 

@@ -254,6 +254,27 @@ class PackAPIHandler(
         """汎用 ID バリデーション。staging_id, privilege_id, flow_id 等に使用する。"""
         return _v_is_safe_id(value)
 
+    @staticmethod
+    def _pack_root_hint(pack_info: Any) -> Optional[Any]:
+        for attr in ("subdir", "path", "pack_dir"):
+            value = getattr(pack_info, attr, None)
+            if isinstance(value, (str, Path)):
+                return value
+        return None
+
+    @classmethod
+    def _pack_allows_in_process_api_metadata(
+        cls,
+        pack_id: str,
+        pack_info: Any = None,
+    ) -> bool:
+        from .pack_function_runtime import is_pack_function_in_process_allowed
+
+        hint = cls._pack_root_hint(pack_info) if pack_info is not None else None
+        if pack_info is not None and hint is None:
+            return False
+        return is_pack_function_in_process_allowed(pack_id, hint)
+
 
     # --- テーブル駆動: web_mount / pre_auth_routes ---
 
@@ -304,27 +325,34 @@ class PackAPIHandler(
         for pack_id, pack_info in registry.packs.items():
             if pack_ids is not None and pack_id not in pack_ids:
                 continue
+            allow_pre_auth = cls._pack_allows_in_process_api_metadata(pack_id, pack_info)
             # 1. 明示的な pre_auth_routes
             routes = pack_info.ecosystem.get("pre_auth_routes")
             if routes and isinstance(routes, list):
-                for route in routes:
-                    if not isinstance(route, dict):
-                        continue
-                    method = route.get("method", "").upper()
-                    if not method:
-                        continue
-                    entry = {"method": method, "pack_id": pack_id}
-                    if "path" in route:
-                        entry["path"] = route["path"]
-                    if "path_prefix" in route:
-                        entry["path_prefix"] = route["path_prefix"]
-                    cls._pre_auth_table.append(entry)
-                    count += 1
+                if not allow_pre_auth:
+                    logger.warning(
+                        "Ignoring pre_auth_routes from non-first-party pack: %s",
+                        pack_id,
+                    )
+                else:
+                    for route in routes:
+                        if not isinstance(route, dict):
+                            continue
+                        method = route.get("method", "").upper()
+                        if not method:
+                            continue
+                        entry = {"method": method, "pack_id": pack_id}
+                        if "path" in route:
+                            entry["path"] = route["path"]
+                        if "path_prefix" in route:
+                            entry["path_prefix"] = route["path_prefix"]
+                        cls._pre_auth_table.append(entry)
+                        count += 1
             # 2. web_mount で auth_required=false のパスも pre-auth に追加
             wm = pack_info.ecosystem.get("web_mount")
             if wm and isinstance(wm, dict) and not wm.get("auth_required", True):
                 prefix = wm.get("path_prefix", "")
-                if prefix:
+                if prefix and allow_pre_auth:
                     for m in ("GET", "POST", "PUT", "DELETE"):
                         cls._pre_auth_table.append({
                             "method": m,
@@ -333,6 +361,11 @@ class PackAPIHandler(
                             "_source": "web_mount",
                         })
                     count += 4
+                elif prefix:
+                    logger.warning(
+                        "Ignoring unauthenticated web_mount pre-auth expansion from non-first-party pack: %s",
+                        pack_id,
+                    )
         logger.info("Loaded %d pre_auth_route entries", count)
         return count
 
@@ -388,7 +421,11 @@ class PackAPIHandler(
         count = 0
         loaded_pack_ids: set[str] = set()
 
-        def _register_routes(pack_id: str, ecosystem: dict[str, Any]) -> int:
+        def _register_routes(
+            pack_id: str,
+            ecosystem: dict[str, Any],
+            pack_info: Any = None,
+        ) -> int:
             routes = ecosystem.get("api_routes")
             if not routes or not isinstance(routes, list):
                 return 0
@@ -400,6 +437,13 @@ class PackAPIHandler(
                 handler_name = route.get("handler", "")
                 function_id = route.get("function_id", route.get("function", ""))
                 if not method or not (handler_name or function_id):
+                    continue
+                if function_id and not cls._pack_allows_in_process_api_metadata(pack_id, pack_info):
+                    logger.warning(
+                        "Ignoring function api_route from non-first-party pack: %s:%s",
+                        pack_id,
+                        function_id,
+                    )
                     continue
                 if handler_name and not HANDLER_NAME_RE.match(handler_name):
                     logger.warning("Invalid handler name in api_routes: %s", handler_name)
@@ -430,7 +474,7 @@ class PackAPIHandler(
         for pack_id, pack_info in registry.packs.items():
             if pack_ids is not None and pack_id not in pack_ids:
                 continue
-            count += _register_routes(pack_id, pack_info.ecosystem)
+            count += _register_routes(pack_id, pack_info.ecosystem, pack_info)
             loaded_pack_ids.add(pack_id)
 
         should_include_control_panel = include_builtin_core_control_panel and (
@@ -548,7 +592,19 @@ class PackAPIHandler(
         # ハンドラ呼び出し
         try:
             if entry.get("function_id"):
-                from .pack_function_runtime import invoke_pack_function
+                from .pack_function_runtime import (
+                    invoke_pack_function,
+                    is_pack_function_in_process_allowed,
+                )
+
+                if not is_pack_function_in_process_allowed(entry["pack_id"]):
+                    logger.warning(
+                        "Blocked function api_route dispatch for non-first-party pack: %s:%s",
+                        entry["pack_id"],
+                        entry["function_id"],
+                    )
+                    self._send_response(APIResponse(False, error=_SAFE_ERROR_MSG), 403)
+                    return True
 
                 call_args = dict(body if pass_body and body is not None else {})
                 # Route-level args define the contract for fixed endpoints such as
