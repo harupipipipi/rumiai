@@ -1510,7 +1510,9 @@ export const api = {
   },
 
   listModelProfiles() {
-    return request<{ profiles: ModelProfile[]; count: number }>("/api/ai/profiles");
+    return request<{ profiles: ModelProfile[]; count: number }>("/api/ai/profiles", {
+      cache: "no-store",
+    });
   },
 
   searchModels(filters: Record<string, unknown>) {

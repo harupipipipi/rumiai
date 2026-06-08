@@ -944,7 +944,14 @@ function CalendarComposerPanel({
           aria-label={`${calendarRangeLabel(activeEditor.startKey, activeEditor.endKey)}に追加`}
           className="rumi-calendar-popover absolute rumi-layer-global-overlay w-[min(320px,calc(100%-24px))] rounded-2xl border border-zinc-700 bg-zinc-950/95 p-3 text-left shadow-[0_24px_70px_rgba(0,0,0,0.65)] backdrop-blur"
           style={popoverStyle}
-          onPointerDown={(event) => event.stopPropagation()}
+          onPointerDown={(event) => {
+            const target = event.target as HTMLElement | null;
+            if (target?.closest("button, input, textarea, label, [role='listbox'], [role='option']")) {
+              event.stopPropagation();
+              return;
+            }
+            dismissActiveEditorForSelection(true);
+          }}
           onClick={(event) => event.stopPropagation()}
           onSubmit={submitDraft}
         >
@@ -1594,6 +1601,8 @@ const API_KEY_PROVIDER_IDS = new Set([
   "groq",
   "longcat",
   "mistral",
+  "opencode-go",
+  "opencode-zen",
   "openai",
   "openai_compatible",
   "openrouter",
@@ -1625,13 +1634,16 @@ function isUserFacingModelProfile(profile: ModelProfile, preferredModel: string)
   const providerId = String(profile.provider_id ?? "").trim();
   const modelId = String(profile.model_id ?? "").trim();
   const profileId = profile.profile_id || profile.qualified_model_id || `${providerId}/${modelId}`;
+  const availabilityStatus = String(profile.availability?.status ?? "").trim().toLowerCase();
 
   if (profileId === preferredModel) return true;
   if (!profileIsChatSelectable(profile)) return false;
   if (providerId === "rumi") return false;
   if (providerId === "stub") return modelId === "default";
   if (profile.local || profile.availability?.local || profile.availability?.offline || LOCAL_MODEL_PROVIDER_IDS.has(providerId)) return true;
-  return isConfiguredProfile(profile);
+  if (isConfiguredProfile(profile)) return true;
+  if (availabilityStatus === "route_required") return true;
+  return profileNeedsApiKey(profile);
 }
 
 function modelProfileSortKey(profile: ModelProfile): [number, number, string] {
