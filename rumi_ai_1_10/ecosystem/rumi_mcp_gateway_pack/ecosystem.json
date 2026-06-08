@@ -7,10 +7,56 @@
     "description": "Optional declarative catalog and gateway profile for unsupported MCP server discovery, namespace routing, templates, registry metadata, and safety policy.",
     "author": "Rumi AI Team",
     "license": "MIT",
-    "tags": ["mcp", "gateway", "connector-discovery", "tool-routing", "local-first"],
+    "tags": [
+      "mcp",
+      "gateway",
+      "connector-discovery",
+      "tool-routing",
+      "local-first"
+    ],
     "required_secrets": [],
     "network_policy": "none_by_default",
-    "executable_connector_code": false
+    "executable_connector_code": false,
+    "dependency_notes": {
+      "defaultspack": "Uses defaultspack MCP connect/list, registry, approval, and tool execution as the executable boundary."
+    },
+    "optional_integrations": [
+      {
+        "pack_id": "rumi_default_tools_pack",
+        "version": ">=1.0.0",
+        "reason": "Can be used by tool catalog surfaces, but this pack does not require or duplicate concrete tools."
+      }
+    ],
+    "asset_index": {
+      "catalogs": [
+        "catalog/connector_catalog.yaml",
+        "catalog/namespace_routes.yaml",
+        "catalog/marketplace_registry.yaml"
+      ],
+      "policies": [
+        "policies/unsupported_server_safety.yaml"
+      ],
+      "profiles": [
+        "profiles/mcp_gateway.profile.yaml"
+      ],
+      "prompts": [
+        "prompts/mcp_gateway_router.system.md",
+        "templates/prompts/unknown_server_triage.prompt.template.md"
+      ],
+      "resource_templates": [
+        "templates/resources/mcp_server_card.resource.template.yaml"
+      ],
+      "examples": [
+        "examples/register_unknown_server.example.yaml"
+      ],
+      "docs": [
+        "README.md",
+        "docs/README.md",
+        "docs/architecture.md",
+        "docs/interfaces.md",
+        "docs/operations.md"
+      ]
+    }
   },
   "vocabulary": {
     "types": [
@@ -24,49 +70,8 @@
       "policy"
     ]
   },
-  "depends_on": [
-    {
-      "pack_id": "defaultspack",
-      "version": ">=2.0.0",
-      "reason": "Uses defaultspack MCP connect/list, registry, approval, and tool execution as the executable boundary."
-    }
-  ],
-  "optional_integrations": [
-    {
-      "pack_id": "rumi_default_tools_pack",
-      "version": ">=1.0.0",
-      "reason": "Can be used by tool catalog surfaces, but this pack does not require or duplicate concrete tools."
-    }
-  ],
-  "assets": {
-    "catalogs": [
-      "catalog/connector_catalog.yaml",
-      "catalog/namespace_routes.yaml",
-      "catalog/marketplace_registry.yaml"
-    ],
-    "policies": [
-      "policies/unsupported_server_safety.yaml"
-    ],
-    "profiles": [
-      "profiles/mcp_gateway.profile.yaml"
-    ],
-    "prompts": [
-      "prompts/mcp_gateway_router.system.md",
-      "templates/prompts/unknown_server_triage.prompt.template.md"
-    ],
-    "resource_templates": [
-      "templates/resources/mcp_server_card.resource.template.yaml"
-    ],
-    "examples": [
-      "examples/register_unknown_server.example.yaml"
-    ],
-    "docs": [
-      "README.md",
-      "docs/README.md",
-      "docs/architecture.md",
-      "docs/interfaces.md",
-      "docs/operations.md"
-    ]
+  "dependencies": {
+    "defaultspack": ">=2.0.0"
   },
   "components": {},
   "load_order": []
