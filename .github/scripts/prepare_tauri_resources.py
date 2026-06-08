@@ -177,7 +177,7 @@ def stage_pack_shell(repo_root: Path, source_root: Path, target: str) -> Path:
     return dest
 
 
-def download_to_temp(url: str, attempts: int = 3) -> Path:
+def download_to_temp(url: str, attempts: int = 8) -> Path:
     suffix = ".zip" if url.endswith(".zip") else ".tar.gz"
     last_error: Exception | None = None
     for attempt in range(1, attempts + 1):
@@ -195,12 +195,13 @@ def download_to_temp(url: str, attempts: int = 3) -> Path:
             temp_path.unlink(missing_ok=True)
             last_error = exc
             if attempt < attempts:
-                time.sleep(2 * attempt)
+                print(f"Download failed for {url} (attempt {attempt}/{attempts}): {exc}", file=sys.stderr)
+                time.sleep(min(30, 2 * attempt))
     assert last_error is not None
     raise last_error
 
 
-def download_text(url: str, attempts: int = 3) -> str:
+def download_text(url: str, attempts: int = 5) -> str:
     last_error: Exception | None = None
     for attempt in range(1, attempts + 1):
         try:
@@ -211,7 +212,8 @@ def download_text(url: str, attempts: int = 3) -> str:
         except Exception as exc:  # pragma: no cover - network retry path
             last_error = exc
             if attempt < attempts:
-                time.sleep(2 * attempt)
+                print(f"Download failed for {url} (attempt {attempt}/{attempts}): {exc}", file=sys.stderr)
+                time.sleep(min(30, 2 * attempt))
     assert last_error is not None
     raise last_error
 

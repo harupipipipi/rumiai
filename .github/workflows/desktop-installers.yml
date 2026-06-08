@@ -126,8 +126,26 @@ jobs:
         run: cargo test --locked
 
       - name: Build desktop installer
+        if: runner.os != 'Linux'
         working-directory: rumi_viewer
         run: cargo tauri build --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} --ci ${{ matrix.signing_args }}
+
+      - name: Build desktop installer
+        if: runner.os == 'Linux'
+        working-directory: rumi_viewer
+        shell: bash
+        run: |
+          for attempt in 1 2 3; do
+            if cargo tauri build --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} --ci ${{ matrix.signing_args }}; then
+              exit 0
+            else
+              status=$?
+            fi
+            if [ "$attempt" -eq 3 ]; then
+              exit "$status"
+            fi
+            sleep $((attempt * 20))
+          done
 
       - name: Upload desktop installer
         uses: actions/upload-artifact@v4
