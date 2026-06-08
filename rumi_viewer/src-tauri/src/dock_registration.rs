@@ -729,8 +729,8 @@ fn spawn_defaultspack_local_server(
     metadata: &DefaultspackDesktopMetadata,
 ) -> AnyResult<Child> {
     let pack_shell = config
-        .pack_shell_path()
-        .context("pack-shell binary not found. Build it with `cargo build` in pack-shell/")?;
+        .ensure_pack_shell_path()
+        .context("pack-shell binary is required to launch Defaultspack")?;
     let api_token = read_desktop_api_token_from_config(config)?;
     let kernel_command = kernel_command_for_python(&config.venv_python());
     let path = append_path_prefix(&venv_bin_dir(&config.venv_dir), std::env::var_os("PATH"))?;
@@ -785,8 +785,8 @@ fn ensure_defaultspack_app_bundle(config: &AppConfig) -> AnyResult<PathBuf> {
     }
 
     let pack_shell = config
-        .pack_shell_path()
-        .context("pack-shell binary not found. Build it with `cargo build` in pack-shell/")?;
+        .ensure_pack_shell_path()
+        .context("pack-shell binary is required to register Defaultspack")?;
 
     let metadata = read_defaultspack_desktop_metadata(config)?;
 
