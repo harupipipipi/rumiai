@@ -33,8 +33,8 @@ def test_pack_suite_required_assets_and_metadata() -> None:
     assert ecosystem["metadata"]["network_policy"] == "none_by_default"
     assert ecosystem["metadata"]["executable_code"] is False
     available = {item.pack_id for item in PackSelector(ROOT / "ecosystem").scan_candidates()}
-    assert {item["pack_id"] for item in ecosystem["optional_integrations"]} <= available
-    assert len(ecosystem["optional_integrations"]) >= 4
+    assert {item["pack_id"] for item in ecosystem["metadata"]["optional_integrations"]} <= available
+    assert len(ecosystem["metadata"]["optional_integrations"]) >= 4
 
 
 def test_pack_suite_yaml_parses_and_has_expected_bundles() -> None:
