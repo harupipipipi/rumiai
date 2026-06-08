@@ -33,7 +33,7 @@ def test_connector_gateway_required_assets_and_metadata() -> None:
     assert ecosystem["metadata"]["network_policy"] == "none_by_default"
     assert ecosystem["metadata"]["executable_code"] is False
     available = {item.pack_id for item in PackSelector(ROOT / "ecosystem").scan_candidates()}
-    assert {item["pack_id"] for item in ecosystem["optional_integrations"]} <= available
+    assert {item["pack_id"] for item in ecosystem["metadata"]["optional_integrations"]} <= available
 
 
 def test_connector_gateway_yaml_parses_and_routes_to_owners() -> None:

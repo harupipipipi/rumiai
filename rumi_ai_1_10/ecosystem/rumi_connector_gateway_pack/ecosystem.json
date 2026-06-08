@@ -6,20 +6,6 @@
   "runtime": {
     "type": "declarative_pack"
   },
-  "depends_on": [
-    {
-      "pack_id": "defaultspack",
-      "version": ">=2.0.0"
-    }
-  ],
-  "optional_integrations": [
-    {
-      "pack_id": "rumi_local_agent_pack",
-      "reason": "Route normalized connector handoffs into reusable local agent presets."
-    }
-  ],
-  "components": {},
-  "load_order": [],
   "metadata": {
     "required_secrets": [],
     "network_policy": "none_by_default",
@@ -28,6 +14,28 @@
       "connector_namespace_policy",
       "channel_handoff_contracts",
       "scope_review_cards"
+    ],
+    "optional_integrations": [
+      {
+        "pack_id": "rumi_local_agent_pack",
+        "reason": "Route normalized connector handoffs into reusable local agent presets."
+      }
     ]
-  }
+  },
+  "vocabulary": {
+    "types": [
+      "catalog",
+      "policy",
+      "profile",
+      "prompt",
+      "preset",
+      "example",
+      "documentation"
+    ]
+  },
+  "dependencies": {
+    "defaultspack": ">=2.0.0"
+  },
+  "components": {},
+  "load_order": []
 }
