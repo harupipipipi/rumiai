@@ -51,11 +51,6 @@ def test_stage_uv_extracts_only_after_pinned_checksum_verification(tmp_path, mon
     monkeypatch.setattr(module, "UV_PINNED_VERSION", version)
     monkeypatch.setattr(module, "UV_SHA256_BY_TARGET", {target: checksum})
     monkeypatch.setattr(module, "download_to_temp", lambda url, attempts=3: archive_path)
-    monkeypatch.setattr(
-        module,
-        "download_text",
-        lambda url, attempts=3: f"{checksum} *uv-{target}.zip\n",
-    )
 
     staged = module.stage_uv(tmp_path / "app", target, version)
 
@@ -70,19 +65,13 @@ def test_stage_uv_fails_on_checksum_mismatch_before_extract(tmp_path, monkeypatc
     payload = b"tampered uv binary"
     archive_path = tmp_path / "uv.tar.gz"
     _write_linux_uv_archive(archive_path, target=target, payload=payload)
-    actual_checksum = _sha256(archive_path.read_bytes())
     wrong_checksum = "0" * 64
 
     monkeypatch.setattr(module, "UV_PINNED_VERSION", version)
     monkeypatch.setattr(module, "UV_SHA256_BY_TARGET", {target: wrong_checksum})
     monkeypatch.setattr(module, "download_to_temp", lambda url, attempts=3: archive_path)
-    monkeypatch.setattr(
-        module,
-        "download_text",
-        lambda url, attempts=3: f"{actual_checksum}  uv-{target}.tar.gz\n",
-    )
 
-    with pytest.raises(RuntimeError, match="Pinned uv SHA256 does not match upstream checksum manifest"):
+    with pytest.raises(RuntimeError, match="uv archive SHA256 mismatch"):
         module.stage_uv(tmp_path / "app", target, version)
 
     assert not (tmp_path / "app" / "bundled" / "uv").exists()
