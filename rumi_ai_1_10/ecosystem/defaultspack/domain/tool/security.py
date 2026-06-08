@@ -25,7 +25,6 @@ _UNSAFE_CATEGORIES = {
     "desktop",
     "file_write",
     "filesystem_write",
-    "git",
     "shell",
 }
 _UNSAFE_TEXT_MARKERS = (

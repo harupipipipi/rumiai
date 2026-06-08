@@ -132,6 +132,34 @@ test("executeUiCommand preserves model candidate results", async () => {
   }
 });
 
+test("listModelProfiles bypasses browser cache", async () => {
+  let requestUrl = "";
+  let requestCache: RequestCache | undefined;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    requestUrl = String(input);
+    requestCache = init?.cache;
+    return new Response(JSON.stringify({
+      status: "ok",
+      data: {
+        profiles: [],
+        count: 0,
+      },
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }) as typeof fetch;
+
+  try {
+    const result = await api.listModelProfiles();
+    assert.equal(result.count, 0);
+    assert.deepEqual(result.profiles, []);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.equal(requestUrl, "/api/ai/profiles");
+  assert.equal(requestCache, "no-store");
+});
+
 test("defaultspack API errors include status and recovery context", () => {
   const message = explainDefaultspackApiError(403, {
     code: "FORBIDDEN",

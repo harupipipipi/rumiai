@@ -452,6 +452,29 @@ def test_git_status_filters_restricted_renames_and_keeps_visible_space_paths(tmp
     assert "public name.txt" in status["modified"]
 
 
+def test_git_status_from_nested_workspace_allows_enclosing_repo_and_filters_outside_paths(tmp_path):
+    from domain.coding.git_ops import GitOps
+
+    _init_git_repo(tmp_path)
+    workspace = tmp_path / "rumi_ai_1_10" / "ecosystem" / "defaultspack"
+    workspace.mkdir(parents=True)
+    (workspace / "inside.txt").write_text("clean\n", encoding="utf-8")
+    (tmp_path / "outside.txt").write_text("clean\n", encoding="utf-8")
+    _git_commit_all(tmp_path)
+
+    (workspace / "inside.txt").write_text("dirty\n", encoding="utf-8")
+    (tmp_path / "outside.txt").write_text("dirty\n", encoding="utf-8")
+
+    status = GitOps(workspace).status()
+    branch = GitOps(workspace).branch()
+
+    assert status["branch"]
+    assert "inside.txt" in status["modified"]
+    assert "outside.txt" not in status["modified"]
+    assert "outside.txt" not in status["porcelain"]
+    assert branch["branch"] == status["branch"]
+
+
 def test_terminal_blocks_low_risk_reads_of_restricted_workspace_paths(tmp_path):
     from domain.coding.terminal import Terminal
 

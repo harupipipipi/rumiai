@@ -164,6 +164,23 @@ class ApprovalManager:
             resolved = pack_dir.resolve()
         except OSError:
             resolved = pack_dir
+        ecosystem_root = None
+        if ECOSYSTEM_DIR:
+            try:
+                ecosystem_root = Path(ECOSYSTEM_DIR).resolve()
+            except OSError:
+                ecosystem_root = Path(ECOSYSTEM_DIR)
+        if ecosystem_root is not None:
+            try:
+                relative = resolved.relative_to(ecosystem_root)
+            except ValueError:
+                relative = None
+            if relative is not None:
+                if not relative.parts:
+                    return False
+                if pack_id and relative.parts[0] != pack_id:
+                    return False
+                return True
         if pack_id and resolved.name != pack_id:
             return False
         if resolved.parent.name != "ecosystem":

@@ -13,6 +13,7 @@ sys.path.insert(0, str(DEFAULTSPACK_ROOT))
 
 from domain.tool.executor import ToolExecutor, _context_with_tool_approval_token, _tool_approval_scope  # noqa: E402
 from domain.tool.registry import ToolRegistry  # noqa: E402
+from domain.tool.security import requires_approval_for_security  # noqa: E402
 
 
 def test_computer_use_context_apps_windows_alias_is_canonicalized_for_approval_scope():
@@ -398,6 +399,19 @@ def test_tool_registry_exposes_capability_grants_for_manifest_facades():
     assert read_tool["capability_grants"] == ["file.read"]
     assert write_tool["capability_grants"] == ["file.write"]
     assert write_tool["approval_policy"] == "ask"
+
+
+def test_git_read_tools_remain_low_risk_without_security_approval():
+    ToolRegistry._instance = None
+    registry = ToolRegistry()
+
+    git_status_tool = registry.get("coding_git_status")
+    git_diff_tool = registry.get("coding_git_diff")
+    git_commit_tool = registry.get("coding_git_commit")
+
+    assert requires_approval_for_security(git_status_tool) is False
+    assert requires_approval_for_security(git_diff_tool) is False
+    assert requires_approval_for_security(git_commit_tool) is True
 
 
 def test_migrated_coding_function_does_not_fall_back_to_direct_local_tool():

@@ -228,6 +228,10 @@ class OpencodeGoProvider(OpenAICompatibleProvider):
         "stop_sequences",
         "metadata",
     }
+    _anthropic_role = staticmethod(AnthropicProvider._anthropic_role)
+    _tool_use_parts = staticmethod(AnthropicProvider._tool_use_parts)
+    _tool_result_part = staticmethod(AnthropicProvider._tool_result_part)
+    _content_parts = staticmethod(AnthropicProvider._content_parts)
 
     def __init__(self) -> None:
         super().__init__(
@@ -362,6 +366,7 @@ class OpencodeGoProvider(OpenAICompatibleProvider):
         body = self._messages_body(model_id, messages, params)
         resp = self._request_messages_stream("/messages", body)
         usage_accum = {"input_tokens": 0, "output_tokens": 0}
+        tool_call_state = {}
         try:
             for event_type, data_str in AnthropicProvider._parse_sse(resp):
                 try:
@@ -372,6 +377,8 @@ class OpencodeGoProvider(OpenAICompatibleProvider):
                     msg = obj.get("message", {})
                     usage = msg.get("usage", {})
                     usage_accum["input_tokens"] = usage.get("input_tokens", 0)
+                elif event_type == "content_block_start":
+                    yield from AnthropicProvider._anthropic_stream_tool_call_events(event_type, obj, tool_call_state)
                 elif event_type == "content_block_delta":
                     delta = obj.get("delta", {})
                     if delta.get("type") == "text_delta":
@@ -379,6 +386,9 @@ class OpencodeGoProvider(OpenAICompatibleProvider):
                             "type": "content_delta",
                             "delta": {"type": "text", "text": delta.get("text", "")},
                         }
+                    yield from AnthropicProvider._anthropic_stream_tool_call_events(event_type, obj, tool_call_state)
+                elif event_type == "content_block_stop":
+                    yield from AnthropicProvider._anthropic_stream_tool_call_events(event_type, obj, tool_call_state)
                 elif event_type == "message_delta":
                     delta = obj.get("delta", {})
                     usage = obj.get("usage", {})
@@ -391,6 +401,7 @@ class OpencodeGoProvider(OpenAICompatibleProvider):
                         "tool_use": "tool_calls",
                     }
                     finish = finish_map.get(stop, stop)
+                    yield from AnthropicProvider._anthropic_stream_tool_call_end_events(tool_call_state)
                     yield {
                         "type": "stream_end",
                         "finish_reason": finish,
