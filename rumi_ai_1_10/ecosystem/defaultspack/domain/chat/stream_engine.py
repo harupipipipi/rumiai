@@ -180,7 +180,9 @@ def _approval_followup_tool_use(metadata: dict[str, Any] | None) -> dict[str, An
         return None
     payload = followup.get("payload") if isinstance(followup.get("payload"), dict) else None
     if payload is None:
-        payload = followup.get("arguments") if isinstance(followup.get("arguments"), dict) else {}
+        payload = followup.get("arguments") if isinstance(followup.get("arguments"), dict) else None
+    if payload is None:
+        return None
     arguments = dict(payload or {})
     raw_action = str(followup.get("action") or "").strip()
     operation = str(followup.get("operation") or "").strip()
