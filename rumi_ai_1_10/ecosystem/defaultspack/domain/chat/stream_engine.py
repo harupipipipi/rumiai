@@ -1643,7 +1643,12 @@ class ChatRunEngine:
         # to replay it. ``invoke_args`` (with token) is only handed to the
         # actual tool executor below.
         display_args = {k: v for k, v in invoke_args.items() if k != "approval_token"}
-        tool_call_id = "replay_" + gen_id()
+        tool_call_id = str(
+            followup.get("tool_call_id")
+            or details.get("tool_call_id")
+            or request_id
+            or gen_id()
+        ).strip()
 
         # Mark we have started this synthetic tool call before emitting any event
         # so subsequent hooks treat it as a single deterministic execution.
