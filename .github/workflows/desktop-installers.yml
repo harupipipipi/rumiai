@@ -16,6 +16,8 @@ permissions:
 
 env:
   UV_VERSION: "0.11.14"
+  CARGO_HTTP_MULTIPLEXING: "false"
+  CARGO_NET_RETRY: "10"
 
 jobs:
   build-installer:
@@ -81,7 +83,19 @@ jobs:
           targets: ${{ matrix.target }}
 
       - name: Install Tauri CLI
-        run: cargo install tauri-cli --version "^2" --locked
+        shell: bash
+        run: |
+          for attempt in 1 2 3; do
+            if cargo install tauri-cli --version "^2" --locked; then
+              exit 0
+            else
+              status=$?
+            fi
+            if [ "$attempt" -eq 3 ]; then
+              exit "$status"
+            fi
+            sleep $((attempt * 20))
+          done
 
       - name: Set up Node
         uses: actions/setup-node@v4
