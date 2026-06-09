@@ -28,7 +28,7 @@ type CompanyTab = "tasks" | "channels" | "agents" | "routes" | "settings" | "p2p
 const TABS: Array<{ id: CompanyTab; label: string; icon: typeof ClipboardList }> = [
   { id: "tasks", label: "Tasks", icon: ClipboardList },
   { id: "channels", label: "Channels", icon: MessageSquare },
-  { id: "agents", label: "Employees", icon: Bot },
+  { id: "agents", label: "Agents", icon: Bot },
   { id: "routes", label: "Routes", icon: Route },
   { id: "settings", label: "Settings", icon: Settings },
   { id: "p2p", label: "P2P", icon: Share2 },
