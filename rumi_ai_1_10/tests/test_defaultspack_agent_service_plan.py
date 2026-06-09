@@ -594,6 +594,24 @@ def test_discord_ping_and_agent_engine_queue_multiple_tool_calls(monkeypatch):
     assert [call["tool_name"] for call in execution.queued_tool_calls] == ["todo"]
 
 
+def test_agent_engine_extracts_text_from_thinking_content_blocks():
+    from domain.agent.engine import AgentEngine
+
+    parsed = AgentEngine()._parse_ai_response(
+        {
+            "status": "ok",
+            "data": {
+                "content": [
+                    {"type": "thinking", "thinking": "hidden chain"},
+                    {"type": "text", "text": "社員レポート本文"},
+                ]
+            },
+        }
+    )
+
+    assert parsed == {"type": "text", "content": "社員レポート本文"}
+
+
 def test_chat_stream_uses_provider_stream_and_persists_message(tmp_path, monkeypatch):
     from domain.chat.store import ChatStore
     from blocks.chat.stream import run
@@ -4106,6 +4124,26 @@ def test_research_providers_use_shared_source_schema():
     assert reddit_result.sources[0]["type"] == "reddit_post"
     assert reddit_result.sources[0]["provider"] == "reddit"
     assert reddit.search("hello", allow_network=False).network_enabled is False
+
+
+def test_external_web_provider_parses_duckduckgo_lite_results():
+    from domain.research.providers import ExternalWebProvider
+
+    seen_urls = []
+    html = """
+    <html>
+      <a rel="nofollow" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Fdocs&amp;rut=abc" class='result-link'>Example Docs</a>
+      <td class='result-snippet'>Useful docs snippet.</td>
+    </html>
+    """
+    provider = ExternalWebProvider(fetcher=lambda url, timeout: seen_urls.append(url) or html)
+
+    result = provider.search("example docs", allow_network=True)
+
+    assert "/lite/?" in seen_urls[0]
+    assert result.sources[0]["title"] == "Example Docs"
+    assert result.sources[0]["url"] == "https://example.com/docs"
+    assert result.sources[0]["summary"] == "Useful docs snippet."
 
 
 def test_external_web_provider_rejects_private_network_urls():

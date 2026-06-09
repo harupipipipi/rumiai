@@ -1064,7 +1064,7 @@ export function ToolPreviewPanel({
   };
 
   return (
-    <div className="flex flex-col h-full border-l border-zinc-800/60 bg-[#0a0a0c] w-full">
+    <div className="flex flex-col h-full border-l border-zinc-800/60 bg-[#0a0a0c] w-full rumi-anim-fade-right">
       <div className="relative flex min-h-11 items-center gap-1.5 border-b border-zinc-800/60 bg-zinc-950/60 px-2">
         <div className="flex shrink-0 items-center gap-1.5 px-1 text-[11px] font-semibold text-zinc-300">
           <Layers size={13} className="text-zinc-500" />
