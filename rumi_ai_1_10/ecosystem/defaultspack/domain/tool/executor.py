@@ -382,6 +382,9 @@ class ToolExecutor:
                 if self._first_party_browser_computer_tool_for_function(pack_id, function_id):
                     context["_tool_server_approved"] = True
                     return None
+                if is_trusted_pack_id(pack_id) and not _requires_approval(tool_def):
+                    context["_tool_server_approved"] = True
+                    return None
                 approved, reason = self._function_call_pack_approval_status(capability_executor, pack_id)
                 if not approved and self._dev_auto_approve_pack(pack_id, capability_executor):
                     approved, reason = self._function_call_pack_approval_status(capability_executor, pack_id)
@@ -470,6 +473,8 @@ class ToolExecutor:
             return None
         local_tool = ToolExecutor._first_party_local_tool_for_function(pack_id, function_id)
         if local_tool:
+            if local_tool in {"web_search", "reddit_search"} and error_type != "pack_not_approved":
+                return None
             if (
                 error_type == "pack_not_approved"
                 and _requires_approval(tool_def)
@@ -507,6 +512,8 @@ class ToolExecutor:
         if pack_id == "defaultspack":
             return {
                 "tool_calculator": "calculator",
+                "tool_web_search": "web_search",
+                "tool_reddit_search": "reddit_search",
                 "tool_subagent": "subagent",
                 "tool_todo": "todo",
             }.get(function_id)
@@ -516,6 +523,13 @@ class ToolExecutor:
     def _allows_direct_first_party_function_fallback(pack_id, function_id):
         return (pack_id, function_id) in {
             ("defaultspack", "tool_calculator"),
+            ("defaultspack", "coding_file_create"),
+            ("defaultspack", "coding_file_write"),
+            ("defaultspack", "knowledge_create"),
+            ("defaultspack", "knowledge_get"),
+            ("defaultspack", "knowledge_list"),
+            ("defaultspack", "knowledge_search"),
+            ("defaultspack", "knowledge_update"),
             ("rumi_default_tools_pack", "calculator"),
             ("rumi_default_tools_pack", "rumi_api"),
         }

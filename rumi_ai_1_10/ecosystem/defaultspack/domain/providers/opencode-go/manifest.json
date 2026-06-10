@@ -19,6 +19,8 @@
   "capabilities": {
     "chat": true,
     "streaming": true,
+    "tool_calls": true,
+    "reasoning": true,
     "vision": true,
     "openai_compatible": true,
     "anthropic_compatible": true
@@ -42,7 +44,7 @@
       "reasoning": "mimo-v2.5-pro",
       "vision": "mimo-v2-omni"
     },
-    "capabilities": ["chat", "streaming", "vision", "openai_compatible", "anthropic_compatible"]
+    "capabilities": ["chat", "streaming", "tool_calls", "reasoning", "vision", "openai_compatible", "anthropic_compatible"]
   },
   "provider_manifest": {
     "id": "opencode-go",
@@ -71,7 +73,8 @@
       "vision": "mimo-v2-omni"
     },
     "capabilities": {
-      "native_tool_calling": false,
+      "native_tool_calling": true,
+      "reasoning": true,
       "structured_outputs": false,
       "vision": true,
       "embeddings": false,

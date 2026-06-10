@@ -35,6 +35,7 @@ from domain.vision.image_bridge import (
 from domain.chat.tool_recommender import effective_tool_assist_mode, recommend_tool_ids, tool_assist_limit
 from domain.prompt.manager import get_manager
 from domain.skill_trigger import RuntimeSkillTriggerService
+from domain.temporal_context import add_temporal_context_message, current_datetime_context
 from domain.tool.registry import ToolRegistry
 from domain.tool.eligibility import filter_tool_definitions_by_eligibility
 from domain.tool.schema_adapter import (
@@ -270,6 +271,16 @@ def prepare_chat_run(input_data: dict[str, Any], context: dict[str, Any] | None 
     if effective_system_prompt:
         system_prompt = effective_system_prompt
         _replace_system_prompt_message(standard_messages, effective_system_prompt)
+    temporal_context = current_datetime_context(request_context)
+    request_context["current_datetime_context"] = temporal_context
+    request_context.setdefault("current_datetime", temporal_context["iso"])
+    request_context.setdefault("current_date", temporal_context["date"])
+    request_context.setdefault("current_time_zone", temporal_context["timezone"])
+    add_temporal_context_message(
+        standard_messages,
+        request_context,
+        temporal_context=temporal_context,
+    )
 
     raw_tools, provider_tools, tool_context = _available_tools(request_context, prepared_input, user_text=user_text)
     modalities = detect_modalities(content, metadata)

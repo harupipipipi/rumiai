@@ -26,6 +26,7 @@ params:
   model: google/gemma-4-31b-it
   thinking_level: high
   request_timeout: 45
+  line_reply_deadline_seconds: 60
   retry:
     max_attempts: 5
     delays: [5, 15, 30, 60]
@@ -37,6 +38,7 @@ params:
 tools:
   - computer_use
   - browser_computer
+  - web_search
 policy:
   max_tool_calls: 30
 response_prompt:
