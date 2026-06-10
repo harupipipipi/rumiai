@@ -5,7 +5,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from functions._tool_common import RUMI_ROOT  # noqa: F401 - imported for sys.path setup
-from domain.host_bridge.computer_router import run_computer_action
+
+try:
+    from ecosystem.defaultspack.domain.host_bridge.computer_router import run_computer_action
+except ImportError:  # pragma: no cover - direct function execution fallback
+    from domain.host_bridge.computer_router import run_computer_action
 
 
 def run(context, args):

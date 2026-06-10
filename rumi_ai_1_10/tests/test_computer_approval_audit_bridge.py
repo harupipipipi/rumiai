@@ -90,6 +90,28 @@ def test_dry_run_does_not_execute_driver(controller):
     controller._computer_seat.click.assert_not_called()
 
 
+def test_pid_event_function_requires_approval_before_service(tmp_path, monkeypatch):
+    """The standalone subprocess function must not dispatch PID input without approval."""
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+    from ecosystem.rumi_default_tools_pack.functions import _computer_approval
+    from ecosystem.rumi_default_tools_pack.functions.computer_pid_event import main
+
+    approval_controller = BrowserComputerController(artifact_root=tmp_path / "artifacts")
+    approval_controller._approval_path = tmp_path / "shared" / "approvals.json"
+    monkeypatch.setattr(_computer_approval, "BrowserComputerController", lambda: approval_controller)
+    monkeypatch.setattr(
+        main,
+        "_get_service",
+        lambda: (_ for _ in ()).throw(AssertionError("service must not be used before approval")),
+    )
+
+    result = main.run({}, {"pid": 123, "action": "type_text", "text": "blocked"})
+
+    assert result["action"] == "computer.pid_event"
+    assert result["requires_approval"] is True
+    assert "approval_token" not in result
+
+
 # --- Permission model tests ---
 
 def test_click_is_high_risk():
