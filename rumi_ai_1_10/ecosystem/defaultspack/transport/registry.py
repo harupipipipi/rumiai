@@ -662,6 +662,7 @@ _FALLBACK_HTTP_ROUTE_SPECS = [
     HttpRouteSpec("GET", "/api/ui/commands", block_module="blocks.ui.commands"),
     HttpRouteSpec("POST", "/api/ui/commands/execute", block_module="blocks.ui.commands"),
     HttpRouteSpec("POST", "/api/ui/clipboard", block_module="blocks.ui.clipboard"),
+    HttpRouteSpec("POST", "/api/ui/client-events", block_module="blocks.ui.client_events"),
     HttpRouteSpec("GET", "/api/ui/conversations/{id}/preview", block_module="blocks.ui.conversation_preview", path_inject={"id": "conversation_id"}),
     HttpRouteSpec("POST", "/api/ui/select-directory", block_module="blocks.ui.select_directory"),
 ]

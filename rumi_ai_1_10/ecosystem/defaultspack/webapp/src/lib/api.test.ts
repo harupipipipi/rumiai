@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { api, defaultspackApiHeaders, explainDefaultspackApiError, normalizeChatStreamEvent, normalizeBrowserComputerApprovalAction, usesBrowserComputerApprovalEndpoint } from "./api";
+import { ChatStreamInterruptedError, api, defaultspackApiHeaders, explainDefaultspackApiError, normalizeChatStreamEvent, normalizeBrowserComputerApprovalAction, usesBrowserComputerApprovalEndpoint } from "./api";
 import type { ComposerCommandItem } from "./api";
 import { frontendCommandArgs, keepSelectedToolsAfterSend, parseCommandBoolean, parseSlashCommandInput, resolveUltraYoloModeState, resolvedFrontendCommandArgs } from "../App";
 import { shouldAutoCompactHistory } from "../App";
@@ -669,8 +669,34 @@ test("streamMessage rejects streams without a final message", async () => {
   try {
     await assert.rejects(
       api.streamMessage("c1", "hello"),
-      /ended before a final response/,
+      (error) => error instanceof ChatStreamInterruptedError && error.partialText === "partial",
     );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("reportClientEvent posts diagnostics to the UI contract endpoint", async () => {
+  const originalFetch = globalThis.fetch;
+  let requestUrl = "";
+  let requestBody = "";
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    requestUrl = String(input);
+    requestBody = String(init?.body ?? "");
+    return new Response(JSON.stringify({
+      status: "ok",
+      data: { recorded: true, diagnostic_id: "diag-1" },
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }) as typeof fetch;
+
+  try {
+    const result = await api.reportClientEvent({
+      category: "window_error",
+      message: "Renderer crashed",
+    });
+    assert.equal(requestUrl, "/api/ui/client-events");
+    assert.match(requestBody, /Renderer crashed/);
+    assert.equal(result.recorded, true);
   } finally {
     globalThis.fetch = originalFetch;
   }

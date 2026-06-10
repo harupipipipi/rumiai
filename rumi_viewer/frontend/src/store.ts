@@ -171,6 +171,8 @@ interface AppState {
   runtimeReady: boolean;
   runtimeStatus: RuntimeStatus;
   runtimeError: string | null;
+  runtimeDisconnected: boolean;
+  lastRuntimeHealthyAt: number | null;
   setRuntimeHealth: (health: { status?: 'ok' | 'error'; panel_ready?: boolean; runtime_ready?: boolean; runtime_status?: RuntimeStatus; runtime_error?: string | null }) => void;
   refreshRuntimeHealth: () => Promise<void>;
 
@@ -295,6 +297,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   runtimeReady: false,
   runtimeStatus: 'starting',
   runtimeError: null,
+  runtimeDisconnected: false,
+  lastRuntimeHealthyAt: null,
   setRuntimeHealth: (health) =>
     set((state) => ({
       runtimeReady: Boolean(health.runtime_ready),
@@ -308,6 +312,8 @@ export const useAppStore = create<AppState>((set, get) => ({
               ? 'panel_ready'
               : state.runtimeStatus),
       runtimeError: health.runtime_error ?? null,
+      runtimeDisconnected: false,
+      lastRuntimeHealthyAt: health.runtime_ready ? Date.now() : state.lastRuntimeHealthyAt,
     })),
   refreshRuntimeHealth: async () => {
     try {
@@ -315,11 +321,12 @@ export const useAppStore = create<AppState>((set, get) => ({
       get().setRuntimeHealth(health);
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Failed to read runtime health';
-      get().setRuntimeHealth({
-        status: 'error',
-        runtime_status: 'error',
-        runtime_error: msg,
-      });
+      set((state) => ({
+        runtimeReady: false,
+        runtimeStatus: 'error',
+        runtimeError: msg,
+        runtimeDisconnected: state.lastRuntimeHealthyAt !== null,
+      }));
     }
   },
 
