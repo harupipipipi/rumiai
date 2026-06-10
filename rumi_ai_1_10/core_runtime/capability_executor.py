@@ -609,6 +609,7 @@ class CapabilityExecutor:
             effective_permission_id = entry.qualified_name
 
         args = request.get("args", {})
+        request_context = request.get("context") if isinstance(request.get("context"), dict) else None
         timeout_seconds = min(float(request.get("timeout_seconds", DEFAULT_TIMEOUT)), MAX_TIMEOUT)
         request_id = request.get("request_id", "")
         handler_id = entry.qualified_name
@@ -663,7 +664,50 @@ class CapabilityExecutor:
                             trusted=False, detail_reason=trust_result.reason)
                 return resp
 
-        # 3. Grant チェック（opt-in: grant_config が非 None のときのみ）
+        # 3. Function manifest requirement checks
+        pack_id = getattr(entry, "pack_id", "")
+        pack_root_hint = getattr(entry, "function_dir", None) or getattr(entry, "main_py_path", None)
+        is_trusted_builtin = self._is_trusted_builtin_pack(pack_id, pack_root_hint=pack_root_hint)
+        principal_is_trusted_builtin = self._is_trusted_builtin_pack(principal_id)
+        if not principal_is_trusted_builtin and principal_id == pack_id:
+            principal_is_trusted_builtin = is_trusted_builtin
+
+        requires = getattr(entry, "requires", None) or []
+        if not (is_builtin or is_trusted_builtin) and requires:
+            for req_perm in requires:
+                if not self._has_permission_via_runtime_or_grant(pack_id, req_perm):
+                    resp = CapabilityResponse(success=False,
+                                              error=f"Function requires permission '{req_perm}' not granted to pack '{pack_id}'",
+                                              error_type="requires_denied", latency_ms=(time.time() - start_time) * 1000)
+                    self._audit(principal_id, effective_permission_id, handler_id, resp, args, request_id,
+                                trusted=True, detail_reason=f"Pack '{pack_id}' lacks required permission '{req_perm}'")
+                    return resp
+
+        caller_requires = getattr(entry, "caller_requires", None) or []
+        if caller_requires:
+            caller_ok = False
+            high_risk_approval_only = self._caller_requires_high_risk_approval_only(caller_requires)
+            if (
+                not high_risk_approval_only
+                and self._permission_manager is not None
+                and hasattr(self._permission_manager, "check_caller_requires")
+            ):
+                caller_ok = self._permission_manager.check_caller_requires(principal_id, caller_requires)
+            if not caller_ok and self._request_context_satisfies_caller_requires(
+                principal_id,
+                caller_requires,
+                request_context,
+                principal_is_trusted_builtin=principal_is_trusted_builtin,
+            ):
+                caller_ok = True
+            if not caller_ok:
+                resp = CapabilityResponse(success=False, error="Caller does not meet caller_requires",
+                                          error_type="caller_requires_denied", latency_ms=(time.time() - start_time) * 1000)
+                self._audit(principal_id, effective_permission_id, handler_id, resp, args, request_id,
+                            trusted=True, detail_reason=f"Principal '{principal_id}' does not meet caller_requires: {caller_requires}")
+                return resp
+
+        # 4. Grant チェック（opt-in: grant_config が非 None のときのみ）
         grant_config = {}
         entry_grant_config = self._entry_grant_config(entry)
         if entry_grant_config is not None:
@@ -676,7 +720,7 @@ class CapabilityExecutor:
                 return resp
             grant_config = grant_result.config or {}
 
-        # 4. calling_convention 分岐
+        # 5. calling_convention 分岐
         calling_convention = getattr(entry, "calling_convention", None)
         if calling_convention and calling_convention in _VALID_CALLING_CONVENTIONS:
             resp = self._dispatch_by_calling_convention(
@@ -689,7 +733,7 @@ class CapabilityExecutor:
                 grant_config=grant_config, args=args, timeout_seconds=timeout_seconds,
                 request_id=request_id, start_time=start_time)
 
-        # 5. 監査
+        # 6. 監査
         extra = {"unified_path": True}
         if is_builtin:
             extra["builtin_sha256"] = builtin_sha256
