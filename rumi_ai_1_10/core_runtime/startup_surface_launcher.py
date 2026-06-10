@@ -11,6 +11,7 @@ from .surface_launch_target import (
     surface_env,
 )
 from .runtime_port import resolve_runtime_port
+from .capability_grant_manager import get_capability_grant_manager
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +64,16 @@ def launch_pending_startup_profile_surface(
             result["reason"] = "desktop_capability_unavailable"
             return result
 
+        grant_result = get_capability_grant_manager().check(target_pack, "desktop_app.execute")
+        if not grant_result.allowed:
+            result["reason"] = "desktop_app_execute_not_granted"
+            result["error"] = f"desktop_app.execute not granted for pack: {target_pack}"
+            result["status_code"] = 403
+            return result
+
+        grant_config = dict(grant_result.config or {})
+        grant_config["port"] = resolve_runtime_port()
+
         env = surface_env(mode)
         env.update(dict(launch_target.get("env") or {}))
         launch = handler.handle_execute(
@@ -72,10 +83,7 @@ def launch_pending_startup_profile_surface(
                 "action": "launch",
                 "env": env,
             },
-            grant_config={
-                "allowed_packs": [target_pack],
-                "port": resolve_runtime_port(),
-            },
+            grant_config=grant_config,
         )
         result["launch"] = launch
         app = launch.get("app") if isinstance(launch, dict) else None
