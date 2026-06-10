@@ -738,6 +738,40 @@ def _tool_limit_message(limit, tool_uses):
     )
 
 
+def _unconnected_tool_call_response(tool_name, tool_call_id, connected_names):
+    connected = sorted(str(name) for name in connected_names if name)
+    return {
+        "content": [
+            {
+                "type": "text",
+                "text": (
+                    f"{tool_name} はこの会話に接続されていないため実行しませんでした。"
+                    "接続済みの tool だけを使用してください。"
+                ),
+            }
+        ],
+        "finish_reason": "tool_call_rejected",
+        "usage": {},
+        "metadata": {
+            "tool_call_rejected": True,
+            "rejected_tool_name": tool_name,
+            "rejected_tool_call_id": tool_call_id,
+            "connected_tools": connected,
+        },
+    }
+
+
+def _reject_unconnected_tool_use(tool_uses, connected_names):
+    allowed = {str(name) for name in connected_names if name}
+    for block in tool_uses:
+        tool_name = str(block.get("name") or block.get("tool_name") or "").strip()
+        if not tool_name or tool_name in allowed:
+            continue
+        tool_call_id = str(block.get("id") or block.get("tool_call_id") or "")
+        return tool_name, tool_call_id
+    return None
+
+
 def _tool_result_data(result):
     if not isinstance(result, dict):
         return {}
@@ -1602,6 +1636,24 @@ def _complete_with_tools(model, messages, tools, context, call_handler, params):
             )
             break
         if not tool_uses:
+            break
+
+        rejected_tool_call = _reject_unconnected_tool_use(tool_uses, connected_names)
+        if rejected_tool_call is not None:
+            rejected_tool_name, rejected_tool_call_id = rejected_tool_call
+            response = _unconnected_tool_call_response(rejected_tool_name, rejected_tool_call_id, connected_names)
+            _append_event(
+                events,
+                context,
+                _event(
+                    "tool_call_rejected",
+                    "接続されていない tool call を拒否しました",
+                    phase="tool_call_rejected",
+                    tool_name=rejected_tool_name,
+                    tool_call_id=rejected_tool_call_id,
+                    connected_tools=sorted(str(name) for name in connected_names if name),
+                )
+            )
             break
 
         _append_assistant_tool_use_message(working_messages, tool_uses)
