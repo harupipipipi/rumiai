@@ -127,7 +127,8 @@ fn send_to_background(app: AppHandle) -> Result<(), String> {
 
 #[tauri::command]
 fn show_app_window(app: AppHandle) -> Result<(), String> {
-    show_primary_window(&app)
+    // Renderer-invoked window restore must not mint or inject fresh panel auth material.
+    restore_primary_window(&app, false)
 }
 
 #[tauri::command]
@@ -486,7 +487,7 @@ pub(crate) fn primary_window_label(has_panel: bool, has_main: bool) -> Option<&'
     }
 }
 
-pub(crate) fn show_primary_window(app: &AppHandle) -> Result<(), String> {
+fn restore_primary_window(app: &AppHandle, refresh_panel_session: bool) -> Result<(), String> {
     let target = primary_window_label(
         app.get_webview_window("panel").is_some(),
         app.get_webview_window("main").is_some(),
@@ -496,7 +497,9 @@ pub(crate) fn show_primary_window(app: &AppHandle) -> Result<(), String> {
         return Err("no Rumi window is available".into());
     };
 
-    refresh_panel_session_for_window(app, label);
+    if refresh_panel_session {
+        refresh_panel_session_for_window(app, label);
+    }
     if let Some(window) = app.get_webview_window(label) {
         window
             .unminimize()
@@ -510,6 +513,10 @@ pub(crate) fn show_primary_window(app: &AppHandle) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+pub(crate) fn show_primary_window(app: &AppHandle) -> Result<(), String> {
+    restore_primary_window(app, true)
 }
 
 pub(crate) fn send_app_to_background(app: &AppHandle) -> Result<(), String> {
