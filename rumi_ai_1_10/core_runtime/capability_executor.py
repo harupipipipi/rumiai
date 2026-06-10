@@ -527,29 +527,27 @@ class CapabilityExecutor:
         if normalized_pack_id not in TRUSTED_BUILTIN_PACK_IDS:
             return False
 
+        if pack_root_hint is not None:
+            try:
+                candidate_path = Path(pack_root_hint).resolve()
+                if candidate_path.is_file():
+                    candidate_path = candidate_path.parent
+                return self._is_bundled_builtin_pack_dir(candidate_path, normalized_pack_id)
+            except (OSError, TypeError):
+                return False
+
         approval_manager = getattr(self, "_approval_manager", None)
         helper = getattr(approval_manager, "_is_trusted_builtin_pack", None)
         if callable(helper):
             try:
-                if bool(helper(normalized_pack_id)):
-                    return True
+                return bool(helper(normalized_pack_id))
             except Exception:
                 logger.debug(
                     "approval_manager trusted builtin lookup failed for '%s'",
                     normalized_pack_id,
                     exc_info=True,
                 )
-
-        if pack_root_hint is None:
-            return False
-
-        try:
-            candidate_path = Path(pack_root_hint).resolve()
-            if candidate_path.is_file():
-                candidate_path = candidate_path.parent
-            return self._is_bundled_builtin_pack_dir(candidate_path, normalized_pack_id)
-        except (OSError, TypeError):
-            return False
+        return False
 
     def _dev_auto_reapprove_pack(self, pack_id: str) -> bool:
         if str(os.environ.get("RUMI_ENVIRONMENT", "")).lower() not in {"development", "dev"}:
@@ -821,6 +819,23 @@ class CapabilityExecutor:
         principal_is_trusted_builtin = self._is_trusted_builtin_pack(principal_id)
         if not principal_is_trusted_builtin and principal_id == pack_id:
             principal_is_trusted_builtin = is_trusted_builtin
+        if pack_id in TRUSTED_BUILTIN_PACK_IDS and not is_trusted_builtin:
+            resp = CapabilityResponse(
+                success=False,
+                error=f"Built-in pack path is not trusted: {pack_id}",
+                error_type="pack_not_approved",
+                latency_ms=(time.time() - start_time) * 1000,
+            )
+            self._audit(
+                principal_id,
+                "function.call",
+                None,
+                resp,
+                args,
+                request_id,
+                detail_reason=f"Pack '{pack_id}' used a reserved built-in id from a non-canonical path",
+            )
+            return resp
         if self._approval_manager is not None:
             try:
                 approved_result = self._approval_manager.is_pack_approved_and_verified(pack_id)

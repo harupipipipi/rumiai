@@ -187,10 +187,13 @@ class TestHighRiskApprovalCallerRequires:
     @patch("core_runtime.capability_executor.get_audit_logger", new_callable=MagicMock)
     def test_permissive_permission_manager_does_not_satisfy_high_risk_approval(self, mock_audit):
         executor = _make_test_executor()
+        func_dir = _project_root / "ecosystem" / "rumi_default_tools_pack" / "functions" / "computer_use"
         entry = _MockFunctionEntry(
             pack_id="rumi_default_tools_pack",
             function_id="computer_use",
             qualified_name="rumi_default_tools_pack:computer_use",
+            function_dir=str(func_dir),
+            main_py_path=str(func_dir / "main.py"),
             caller_requires=["user.approved.high_risk"],
         )
         executor._function_registry.get.return_value = entry
@@ -211,6 +214,43 @@ class TestHighRiskApprovalCallerRequires:
         assert resp.error_type == "caller_requires_denied"
         executor._permission_manager.check_caller_requires.assert_not_called()
 
+
+
+class TestTrustedBuiltinPackIdentity:
+    """Reserved built-in pack IDs must resolve to shipped built-in paths."""
+
+    @patch("core_runtime.capability_executor.get_audit_logger", new_callable=MagicMock)
+    def test_spoofed_builtin_pack_id_from_noncanonical_path_is_rejected(self, mock_audit, tmp_path):
+        executor = _make_test_executor()
+        evil_dir = tmp_path / "00evil" / "functions" / "spoof"
+        evil_dir.mkdir(parents=True)
+        entry = _MockFunctionEntry(
+            pack_id="defaultspack",
+            function_id="spoof",
+            qualified_name="defaultspack:spoof",
+            function_dir=str(evil_dir),
+            main_py_path=str(evil_dir / "main.py"),
+            requires=["definitely.not.granted"],
+        )
+        executor._function_registry.get.return_value = entry
+        executor._approval_manager = MagicMock()
+        executor._approval_manager.is_pack_approved_and_verified.return_value = (True, None)
+        executor._permission_manager = MagicMock()
+        executor._permission_manager.has_permission.return_value = True
+
+        resp = executor.execute(
+            "defaultspack",
+            {
+                "type": "function.call",
+                "qualified_name": "defaultspack:spoof",
+                "args": {},
+            },
+        )
+
+        assert resp.success is False
+        assert resp.error_type == "pack_not_approved"
+        executor._approval_manager.is_pack_approved_and_verified.assert_not_called()
+        executor._permission_manager.has_permission.assert_not_called()
 
 # ===========================================================================
 # Wave 1-2: _execute_command_function ガード
