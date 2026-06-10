@@ -604,6 +604,67 @@ class CapabilityExecutor:
                 )
         return False
 
+    @staticmethod
+    def _core_docker_permission_id(function_id: str) -> Optional[str]:
+        method_name = f"handle_{function_id}"
+        for permission_id, mapped_method in DOCKER_METHOD_MAP.items():
+            if mapped_method == method_name:
+                return permission_id
+        return None
+
+    def _authorized_core_dispatch_config(
+        self,
+        principal_id: str,
+        entry,
+        start_time: float,
+    ) -> tuple[bool, Optional[CapabilityResponse], Dict[str, Any]]:
+        """Authorize privileged in-process core dispatch and return signed grant config."""
+        if entry.pack_id != "core_docker_capability":
+            return True, None, dict(self._entry_grant_config(entry) or {})
+
+        permission_id = self._core_docker_permission_id(entry.function_id)
+        if permission_id is None:
+            return True, None, {}
+
+        grant_manager = getattr(self, "_grant_manager", None)
+        if grant_manager is None:
+            resp = CapabilityResponse(
+                success=False,
+                error="Permission denied",
+                error_type="grant_denied",
+                latency_ms=(time.time() - start_time) * 1000,
+            )
+            return False, resp, {}
+
+        try:
+            grant_result = grant_manager.check(principal_id, permission_id)
+        except Exception:
+            logger.debug(
+                "grant_manager.check failed for function.call core dispatch '%s' / '%s'",
+                principal_id,
+                permission_id,
+                exc_info=True,
+            )
+            resp = CapabilityResponse(
+                success=False,
+                error="Permission denied",
+                error_type="grant_denied",
+                latency_ms=(time.time() - start_time) * 1000,
+            )
+            return False, resp, {}
+
+        if not getattr(grant_result, "allowed", False):
+            resp = CapabilityResponse(
+                success=False,
+                error="Permission denied",
+                error_type="grant_denied",
+                latency_ms=(time.time() - start_time) * 1000,
+            )
+            return False, resp, {}
+
+        config = getattr(grant_result, "config", None)
+        return True, None, dict(config) if isinstance(config, dict) else {}
+
     # ------------------------------------------------------------------
     # _unified_execute
     # ------------------------------------------------------------------
@@ -964,7 +1025,13 @@ class CapabilityExecutor:
                             detail_reason=f"Principal '{principal_id}' does not meet caller_requires: {entry.caller_requires}")
                 return resp
         calling_convention = getattr(entry, "calling_convention", None)
-        dispatch_grant_config = dict(self._entry_grant_config(entry) or {})
+        authorized, auth_resp, dispatch_grant_config = self._authorized_core_dispatch_config(
+            principal_id, entry, start_time
+        )
+        if not authorized:
+            self._audit(principal_id, "function.call", None, auth_resp, args, request_id,
+                        detail_reason=f"Missing signed grant for core function '{entry.qualified_name}'")
+            return auth_resp
         allow_manifest_calling_convention = is_core or is_trusted_builtin
         if (
             allow_manifest_calling_convention
