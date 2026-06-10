@@ -30,10 +30,10 @@ def controller(tmp_path):
 
 
 def test_click_requires_approval_without_yolo(controller):
-    """click without yolo_mode or approval_token should require approval."""
+    """click without yolo_mode or a trusted approval token should require approval."""
     result = controller.run("computer.click", {"x": 50, "y": 50})
     assert result.get("requires_approval") is True
-    assert "approval_token" in result
+    assert "approval_token" not in result
 
 
 def test_click_executes_with_yolo(controller):
