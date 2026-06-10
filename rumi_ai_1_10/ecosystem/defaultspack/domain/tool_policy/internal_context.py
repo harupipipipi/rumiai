@@ -20,9 +20,15 @@ SENSITIVE_TOOL_CONTEXT_KEYS = {
 }
 
 UNTRUSTED_TOOL_CONTEXT_KEYS = SENSITIVE_TOOL_CONTEXT_KEYS | {
+    "active_startup_profile_id",
+    "artifact_root",
     "effective_tool_allowlist",
+    "profile_id",
     "profile_policy",
+    "rootPath",
     "runtime_profile",
+    "workspaceRoot",
+    "workspace_root",
     "_tool_server_approved",
     "_tool_server_approval_token_valid",
 }
