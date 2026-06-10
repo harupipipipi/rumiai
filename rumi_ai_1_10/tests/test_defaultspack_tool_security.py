@@ -855,6 +855,47 @@ def test_computer_use_pack_not_approved_does_not_fall_back_after_tool_server_app
     assert "Pack not approved" in result["result"]
 
 
+def test_browser_computer_pack_not_approved_does_not_fall_back_after_tool_server_approval(monkeypatch):
+    class FakeCapabilityExecutor:
+        def execute(self, principal_id, request):
+            return SimpleNamespace(
+                success=False,
+                error_type="pack_not_approved",
+                error="Pack not approved: rumi_default_tools_pack",
+            )
+
+    def fail_local(*args, **kwargs):
+        raise AssertionError("browser_computer must not bypass pack approval")
+
+    monkeypatch.setattr(ToolExecutor, "_execute_local_with_tool_def", fail_local)
+
+    result = ToolExecutor()._execute_rumi_function(
+        {
+            "tool_id": "browser_computer",
+            "name": "browser_computer",
+            "execution": {
+                "type": "rumi_function",
+                "qualified_name": "rumi_default_tools_pack:browser_computer",
+            },
+            "risk": "high",
+            "requires_approval": True,
+            "capability_grants": ["browser.control", "computer.control"],
+            "metadata": {"source_pack_id": "rumi_default_tools_pack"},
+        },
+        {"action": "computer.screenshot", "payload": {}},
+        {
+            "_tool_server_approved": True,
+            "_tool_server_approval_token_valid": True,
+            "pack_id": "defaultspack",
+            "capability_executor": FakeCapabilityExecutor(),
+        },
+    )
+
+    assert result["is_error"] is True
+    assert result["error_type"] == "pack_not_approved"
+    assert "Pack not approved" in result["result"]
+
+
 def test_prefocus_computer_target_window_does_not_execute_without_approval(monkeypatch):
     class FakeCapabilityExecutor:
         def execute(self, principal_id, request):

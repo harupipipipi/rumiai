@@ -405,10 +405,11 @@ class ToolExecutor:
         if local_tool not in {"browser_computer", "browser_use", "computer_use"}:
             return None
         if error_type == "pack_not_approved":
-            if isinstance(context, dict) and context.get("user_requested_computer_use"):
-                return _pack_not_approved_tool_response(tool_def, response, include_widget=False)
-            if _requires_approval(tool_def) and not _context_has_tool_server_approval(context):
-                return _approval_required_tool_response(tool_def, request.get("args") or {}, context)
+            return _pack_not_approved_tool_response(
+                tool_def,
+                response,
+                include_widget=not (isinstance(context, dict) and context.get("user_requested_computer_use")),
+            )
         if _requires_approval(tool_def) and not _context_has_tool_server_approval(context):
             return None
         return self._execute_local_with_tool_def(local_tool, request.get("args") or {}, context, tool_def)
