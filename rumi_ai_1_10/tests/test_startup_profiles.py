@@ -39,15 +39,20 @@ class _FakeActiveEcosystem:
 
 
 class _FakeApprovalManager:
-    def __init__(self, *, reason_by_pack: dict[str, str | None]) -> None:
+    def __init__(self, *, reason_by_pack: dict[str, str | None], approve_unknown: bool = False) -> None:
         self.reason_by_pack = reason_by_pack
+        self.approve_unknown = approve_unknown
 
     def get_approval(self, pack_id: str):
-        if pack_id not in self.reason_by_pack:
+        if pack_id not in self.reason_by_pack and not self.approve_unknown:
             return None
         return object()
 
     def is_pack_approved_and_verified(self, pack_id: str):
+        if pack_id not in self.reason_by_pack:
+            if self.approve_unknown:
+                return (True, None)
+            return (False, "not_found")
         reason = self.reason_by_pack.get(pack_id)
         return (reason is None, reason)
 
@@ -56,7 +61,7 @@ class _FakeApprovalManager:
 def _stub_approval_manager(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(
         "core_runtime.approval_manager.get_approval_manager",
-        lambda: _FakeApprovalManager(reason_by_pack={}),
+        lambda: _FakeApprovalManager(reason_by_pack={}, approve_unknown=True),
     )
 
 
@@ -273,6 +278,26 @@ def test_create_profile_rejects_unavailable_base_pack(tmp_path: Path):
     assert "not available" in result["error"]
 
 
+def test_create_profile_rejects_base_pack_without_approval_record(tmp_path: Path):
+    eco_root = tmp_path / "ecosystem"
+    _write_pack(
+        eco_root, "unapprovedpack",
+        graphs=[_startup_graph("unapprovedpack")],
+        nodes=["agent", "ai_client", "tool", "memory", "frontend"],
+    )
+    locations = _discover_locations(eco_root, ["unapprovedpack"])
+    manager = StartupProfileManager(
+        storage_path=tmp_path / "startup_profiles.json",
+        approval_manager=_FakeApprovalManager(reason_by_pack={}),
+    )
+
+    with patch("core_runtime.startup_profiles.discover_pack_locations", return_value=locations):
+        result = manager.create_profile({"base_pack": "unapprovedpack", "name": "Test"})
+
+    assert result["status_code"] == 400
+    assert "not available" in result["error"]
+
+
 def test_create_profile_with_base_pack(tmp_path: Path):
     eco_root = tmp_path / "ecosystem"
     _write_pack(
@@ -441,6 +466,29 @@ def test_add_pack_to_profile(tmp_path: Path):
 
     assert result["pack_added"] == "helperpack"
     assert "helperpack" in result["profile"]["packs"]
+
+
+def test_add_pack_to_profile_rejects_pack_without_approval_record(tmp_path: Path):
+    eco_root = tmp_path / "ecosystem"
+    _write_pack(
+        eco_root, "defaultspack",
+        graphs=[_startup_graph("defaultspack")],
+        nodes=["agent", "ai_client", "tool", "memory", "frontend"],
+    )
+    _write_pack(eco_root, "unapprovedpack", nodes=["ai_client"])
+    locations = _discover_locations(eco_root, ["defaultspack", "unapprovedpack"])
+    manager = StartupProfileManager(
+        storage_path=tmp_path / "startup_profiles.json",
+        approval_manager=_FakeApprovalManager(reason_by_pack={"defaultspack": None}),
+    )
+
+    with patch("core_runtime.startup_profiles.discover_pack_locations", return_value=locations):
+        created = manager.create_profile({"base_pack": "defaultspack", "name": "Test"})
+        profile_id = created["profile"]["profile_id"]
+        result = manager.add_pack_to_profile(profile_id, "unapprovedpack")
+
+    assert result["status_code"] == 400
+    assert "not available" in result["error"]
 
 
 def test_add_duplicate_pack_rejected(tmp_path: Path):
