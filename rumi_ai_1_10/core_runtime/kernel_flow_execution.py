@@ -408,12 +408,19 @@ class KernelFlowExecutionMixin:
     ) -> Dict[str, Any]:
         if timeout:
             try:
+                if trusted_context is None:
+                    return await asyncio.wait_for(
+                        self._execute_flow_internal(flow_id, context),
+                        timeout=timeout,
+                    )
                 return await asyncio.wait_for(
                     self._execute_flow_internal(flow_id, context, trusted_context=trusted_context),
                     timeout=timeout,
                 )
             except asyncio.TimeoutError:
                 return {"_error": f"Flow '{flow_id}' timed out after {timeout}s", "_flow_timeout": True}
+        if trusted_context is None:
+            return await self._execute_flow_internal(flow_id, context)
         return await self._execute_flow_internal(flow_id, context, trusted_context=trusted_context)
 
     def execute_flow_sync(
@@ -430,7 +437,10 @@ class KernelFlowExecutionMixin:
         Python 3.9+ 互換のパターンに変更。
         """
         effective_timeout = timeout or 300
-        coro = self.execute_flow(flow_id, context, timeout, trusted_context=trusted_context)
+        if trusted_context is None:
+            coro = self.execute_flow(flow_id, context, timeout)
+        else:
+            coro = self.execute_flow(flow_id, context, timeout, trusted_context=trusted_context)
 
         # S-4: ループの状態を安全に判定
         try:
