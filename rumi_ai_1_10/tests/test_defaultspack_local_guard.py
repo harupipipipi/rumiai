@@ -169,6 +169,57 @@ def test_self_improvement_routes_are_guarded_as_sensitive_local_routes():
     handler.headers = {"Origin": "http://localhost:8766", "X-Rumi-CSRF": "1"}
     assert handler._sensitive_request_error("POST", "/api/agent/self-improvement/status") is None
 
+
+def test_memory_memo_routes_are_guarded_from_cross_origin_access():
+    from domain.safety.local_guard import require_local_guard
+    from transport.http import (
+        _RequestHandler,
+        _is_sensitive_http_path,
+        _requires_sensitive_http_auth,
+    )
+
+    memo_paths = [
+        "/api/memory/memo/folders",
+        "/api/memory/memo/folders/personalization",
+        "/api/memory/memo/notes",
+        "/api/memory/memo/notes/note-1",
+    ]
+    for path in memo_paths:
+        assert _is_sensitive_http_path(path) is True
+        assert _requires_sensitive_http_auth("GET", path) is False
+
+    assert require_local_guard(
+        "/api/memory/memo/notes",
+        "GET",
+        {"Origin": "https://example.test"},
+        ("127.0.0.1", 54321),
+    ) == (
+        403,
+        "origin not allowed for sensitive local route",
+        "ORIGIN_DENIED",
+    )
+    assert require_local_guard(
+        "/api/memory/memo/notes",
+        "POST",
+        {"Origin": "http://localhost:8766"},
+        ("127.0.0.1", 54321),
+    ) == (
+        403,
+        "CSRF header required for sensitive local mutation",
+        "CSRF_REQUIRED",
+    )
+
+    handler = _RequestHandler.__new__(_RequestHandler)
+    sent_headers = []
+    handler.path = "/api/memory/memo/notes"
+    handler.headers = {"Origin": "https://example.test"}
+    handler.send_header = lambda name, value: sent_headers.append((name, value))
+
+    handler._send_cors_headers()
+
+    assert "Access-Control-Allow-Origin" not in dict(sent_headers)
+
+
 def test_non_sensitive_cors_allows_generated_csrf_header():
     from transport.http import _RequestHandler
 
