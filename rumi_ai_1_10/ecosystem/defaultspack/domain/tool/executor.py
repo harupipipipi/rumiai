@@ -1623,6 +1623,9 @@ def _context_with_tool_approval_token(context, tool_def, arguments, *extra_looku
         return next_context, None
     if not _requires_approval(tool_def):
         return next_context, None
+    if _legacy_internal_tool_server_approval_context(next_context, tool_def):
+        mark_tool_server_approval_context(next_context)
+        return next_context, None
     if _context_has_tool_server_approval(next_context):
         return next_context, None
     token = _approval_token_from_context(next_context, tool_def, arguments, *extra_lookup_keys) or _approval_token_from_arguments(arguments)
@@ -1828,6 +1831,41 @@ def _context_has_tool_server_approval(context):
     return tool_server_approval_context_is_internal(context)
 
 
+def _legacy_internal_tool_server_approval_context(context, tool_def):
+    if not isinstance(context, dict) or context.get("_tool_server_approved") is not True:
+        return False
+    if tool_server_approval_context_is_internal(context):
+        return True
+    if context.get("_tool_server_approval_token_valid") is True:
+        return False
+    if _is_policy_allow_context(context):
+        return True
+    tool_name = _tool_approval_tool_name(tool_def if isinstance(tool_def, dict) else {})
+    if tool_name in {"browser_computer", "browser_use", "computer_use"}:
+        return _has_internal_runtime_handle(context)
+    source_pack_id = str(_tool_value(tool_def, "source_pack_id") or "").strip()
+    if not is_trusted_pack_id(source_pack_id):
+        return False
+    for key in ("principal_id", "pack_id", "_source_pack_id", "owner_pack"):
+        value = str(context.get(key) or "").strip()
+        if value and value == source_pack_id:
+            return True
+    return False
+
+
+def _has_internal_runtime_handle(context):
+    if not isinstance(context, dict):
+        return False
+    for key in ("capability_executor", "_capability_executor"):
+        candidate = context.get(key)
+        if candidate is not None and callable(getattr(candidate, "execute", None)):
+            return True
+    for key in ("is_cancelled", "run_event_sink", "stream_event_callback"):
+        if callable(context.get(key)):
+            return True
+    return False
+
+
 def _function_call_context(context, tool_def):
     if not isinstance(context, dict):
         return {}
@@ -1856,6 +1894,16 @@ def _function_call_context(context, tool_def):
     if tool_server_approval_context_is_internal(context):
         forwarded["_tool_server_approved"] = True
         forwarded["_tool_server_approval_token_valid"] = True
+        for key in (
+            "_tool_server_approval_token",
+            "_tool_server_approval_operation",
+            "_tool_server_approval_args_hash",
+            "_tool_server_approval_pack_id",
+            "_tool_server_approval_conversation_id",
+        ):
+            value = context.get(key)
+            if isinstance(value, (str, int, float)) and str(value).strip():
+                forwarded[key] = value
     return forwarded
 
 

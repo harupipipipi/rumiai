@@ -1009,3 +1009,45 @@ def test_browser_computer_pack_ignores_forged_server_approval_for_yolo(monkeypat
     assert captured["yolo_mode"] is False
     assert result["is_error"] is False
     assert result["widget"]["requires_approval"] is True
+
+
+def test_browser_computer_router_accepts_forwarded_signed_server_approval_token(monkeypatch):
+    from domain.host_bridge.computer_router import run_computer_action
+    from domain.safety import approval
+
+    monkeypatch.setenv("RUMI_COMPUTER_HOST_INTERNAL", "1")
+    approval.reset_approval_state_for_tests()
+    request = approval.create_approval_request(
+        "computer.screenshot",
+        "high",
+        {},
+        details={"pack_id": "defaultspack", "conversation_id": "conv-router-token"},
+    )
+    decision = approval.approve(request["request_id"])
+    captured = {}
+
+    class FakeController:
+        def __init__(self, artifact_root=None):
+            self.artifact_root = artifact_root
+
+        def run(self, action, payload, *, yolo_mode=False):
+            captured["action"] = action
+            captured["payload"] = payload
+            captured["yolo_mode"] = yolo_mode
+            return {"action": action, "ok": True}
+
+    result = run_computer_action(
+        "computer.screenshot",
+        {},
+        {
+            "_tool_server_approval_token": decision["token"],
+            "_tool_server_approval_operation": "computer.screenshot",
+            "_tool_server_approval_args_hash": request["args_hash"],
+            "_tool_server_approval_pack_id": "defaultspack",
+            "_tool_server_approval_conversation_id": "conv-router-token",
+        },
+        controller_cls=FakeController,
+    )
+
+    assert result["ok"] is True
+    assert captured["yolo_mode"] is True
