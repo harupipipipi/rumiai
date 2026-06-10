@@ -5,7 +5,6 @@ import json
 import os
 import platform
 import re
-import secrets
 import shutil
 import struct
 import subprocess
@@ -4358,13 +4357,11 @@ $proc = Get-Process -Id $procId -ErrorAction SilentlyContinue
             return False
 
     def _approval_required(self, action: str, payload: dict[str, Any]) -> dict[str, Any]:
-        token = self._issue_approval(action, payload)
         response = {
             "action": action,
             "requires_approval": True,
-            "approval_token": token,
             "approval_expires_in_seconds": 300,
-            "approval_hint": "Repeat the same action with payload.approval_token after an explicit user confirmation.",
+            "approval_hint": "Approve the pending request in a trusted Rumi UI, then retry with the signed approval token.",
             "payload": payload,
         }
         warning = self._approval_warning(action, payload)
@@ -4386,33 +4383,30 @@ $proc = Get-Process -Id $procId -ErrorAction SilentlyContinue
             )
         return ""
 
-    def _issue_approval(self, action: str, payload: dict[str, Any]) -> str:
-        approvals = self._read_approvals()
-        token = secrets.token_urlsafe(24)
-        approvals[token] = {
-            "action": action,
-            "payload": payload,
-            "expires_at": time.time() + 300,
-        }
-        self._write_approvals(approvals)
-        return token
-
     def _consume_approval(self, payload: dict[str, Any], action: str, expected_payload: dict[str, Any]) -> bool:
-        token = str(payload.get("approval_token") or "")
+        token = str(payload.get("approval_token") or "").strip()
         if not token:
             return False
-        approvals = self._read_approvals()
-        record = approvals.pop(token, None)
-        self._write_approvals(approvals)
-        if not isinstance(record, dict):
+        approval = self._approval_module()
+        if approval is None:
             return False
-        if record.get("action") != action:
-            return False
-        if record.get("payload") != expected_payload:
-            return False
-        if float(record.get("expires_at") or 0) < time.time():
-            return False
-        return True
+        expected_args = {"action": action, "payload": expected_payload}
+        verification = approval.verify_execution_token(
+            token,
+            action,
+            approval.hash_arguments(expected_args),
+            pack_id="defaultspack",
+        )
+        return bool(getattr(verification, "valid", False))
+
+    @staticmethod
+    def _approval_module():
+        try:
+            from domain.safety import approval
+
+            return approval
+        except Exception:
+            return None
 
     def _read_approvals(self) -> dict[str, Any]:
         try:
