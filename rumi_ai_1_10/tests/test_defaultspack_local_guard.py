@@ -14,13 +14,30 @@ sys.path.insert(0, str(DEFAULTSPACK_ROOT))
 def test_sensitive_coding_http_path_uses_local_guard():
     from transport.http import _RequestHandler, _is_sensitive_http_path
 
-    assert _is_sensitive_http_path("/api/coding/files/write") is True
+    for path in (
+        "/api/coding/files",
+        "/api/coding/files/read",
+        "/api/coding/files/search",
+        "/api/coding/files/diff",
+        "/api/coding/files/write",
+    ):
+        assert _is_sensitive_http_path(path) is True
 
     handler = _RequestHandler.__new__(_RequestHandler)
     handler.headers = {"Origin": "https://example.test"}
     handler.client_address = ("127.0.0.1", 54321)
 
     assert handler._sensitive_request_error("POST", "/api/coding/files/write") == (
+        403,
+        "origin not allowed for sensitive local route",
+        "ORIGIN_DENIED",
+    )
+    assert handler._sensitive_request_error("POST", "/api/coding/files/read") == (
+        403,
+        "origin not allowed for sensitive local route",
+        "ORIGIN_DENIED",
+    )
+    assert handler._sensitive_request_error("GET", "/api/coding/files") == (
         403,
         "origin not allowed for sensitive local route",
         "ORIGIN_DENIED",
