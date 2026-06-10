@@ -948,6 +948,8 @@ _SENSITIVE_INTEGRATION_PATHS = {
     "/api/integrations/secrets",
     "/api/external/tokens",
     "/api/external/sources",
+    "/api/recording/devices",
+    "/api/recording/capture",
 }
 _SENSITIVE_INTEGRATION_METHOD_PATHS = {
     "/api/external/templates": {"POST", "PUT", "DELETE"},

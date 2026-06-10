@@ -315,6 +315,15 @@ def test_external_webhook_admin_routes_require_sensitive_http_auth():
     assert not http._requires_sensitive_http_auth("POST", "/api/webhooks/inbound/test-webhook")
 
 
+def test_recording_routes_require_sensitive_http_auth_and_cors():
+    from transport import http
+
+    assert http._requires_sensitive_http_auth("GET", "/api/recording/devices")
+    assert http._requires_sensitive_http_auth("POST", "/api/recording/capture")
+    assert http._is_sensitive_http_path("/api/recording/devices")
+    assert http._is_sensitive_http_path("/api/recording/capture")
+
+
 def test_external_webhook_admin_routes_are_sensitive_for_cors():
     from transport import http
 
