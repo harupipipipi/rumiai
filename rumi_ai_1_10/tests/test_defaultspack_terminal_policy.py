@@ -23,12 +23,42 @@ def test_terminal_policy_marks_common_read_and_test_commands_low_risk(tmp_path):
         "python -m pytest",
         "npm test",
         "ruff check core_runtime",
-        "cargo check",
     ):
         result = classify_command(command, workspace_root=tmp_path)
         assert result["classification"] == "low"
         assert result["risk_level"] == "low"
         assert result["approval_required"] is False
+
+
+def test_terminal_policy_requires_approval_for_cargo_commands(tmp_path):
+    from domain.coding.terminal_policy import classify_command
+
+    for command in (
+        "cargo check",
+        "cargo test",
+        "cargo nextest run",
+    ):
+        result = classify_command(command, workspace_root=tmp_path)
+        assert result["approval_required"] is True
+        assert result["classification"] == "medium"
+        assert "command_execution" in result["risk_reasons"]
+
+
+def test_unapproved_cargo_command_is_not_executed(tmp_path, monkeypatch):
+    from domain.coding import terminal as terminal_module
+    from domain.coding.terminal import Terminal
+
+    def fail_run(*args, **kwargs):
+        raise AssertionError("unapproved cargo command reached subprocess.run")
+
+    monkeypatch.setattr(terminal_module.subprocess, "run", fail_run)
+
+    result = Terminal(tmp_path).execute("cargo check", approved=False)
+
+    assert result["approval_required"] is True
+    assert result["exit_code"] is None
+    assert result["classification"] == "medium"
+    assert "command_execution" in result["risk_reasons"]
 
 
 def test_terminal_policy_keeps_read_commands_sensitive_when_shell_escape_or_outside_path(tmp_path):

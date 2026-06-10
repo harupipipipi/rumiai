@@ -37,9 +37,6 @@ LOW_RISK_PREFIXES = {
     "npm run lint",
     "ruff check",
     "mypy",
-    "cargo check",
-    "cargo test",
-    "cargo nextest run",
 }
 
 INSTALL_COMMANDS = {
