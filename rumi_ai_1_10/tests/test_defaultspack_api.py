@@ -230,10 +230,10 @@ class TestDefaultspackApiRoutes(unittest.TestCase):
         from core_runtime.pack_api_server import PackAPIHandler
 
         PackAPIHandler._api_route_exact = {
-            ("POST", "/api/example/run"): {
-                "pack_id": "example",
+            ("POST", "/api/defaultspack/missing"): {
+                "pack_id": "defaultspack",
                 "handler": "",
-                "function_id": "run",
+                "function_id": "missing",
                 "pass_body": True,
                 "response_mode": "result",
                 "args": {},
@@ -246,7 +246,7 @@ class TestDefaultspackApiRoutes(unittest.TestCase):
         execute = MagicMock(
             return_value=SimpleNamespace(
                 success=False,
-                error="Function not found: example:run",
+                error="Function not found: defaultspack:missing",
                 error_type="function_not_found",
             )
         )
@@ -255,7 +255,7 @@ class TestDefaultspackApiRoutes(unittest.TestCase):
             "core_runtime.capability_executor.get_capability_executor",
             return_value=SimpleNamespace(execute=execute),
         ):
-            dispatched = handler._dispatch_api_route("POST", "/api/example/run", {"input": "hello"})
+            dispatched = handler._dispatch_api_route("POST", "/api/defaultspack/missing", {"input": "hello"})
 
         self.assertFalse(dispatched)
         handler._send_response.assert_not_called()

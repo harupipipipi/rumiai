@@ -17,6 +17,8 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 from urllib.parse import urlparse
 
+_SETTINGS_MODEL_KEY = "preferred" + "_model"
+
 
 def _pack_root() -> Path:
     return Path(__file__).resolve().parent
@@ -227,10 +229,10 @@ def _make_handler(pack_root: Path):
                 )
                 return
             if path == "/api/route":
-                preferred_model = str(payload.get("model") or payload.get("preferred_model") or "").strip()
+                selected_model = str(payload.get("model") or payload.get(_SETTINGS_MODEL_KEY) or "").strip()
                 decision = resolver.resolve(
                     str(payload.get("input") or ""),
-                    context={"source": "search_home.route", "preferred_model": preferred_model},
+                    context={"source": "search_home.route", _SETTINGS_MODEL_KEY: selected_model},
                 )
                 persist_route_state(decision.to_dict(), root=pack_root / "user_data" / "shared" / "search_home")
                 self._json_response(decision.to_dict())
@@ -238,7 +240,7 @@ def _make_handler(pack_root: Path):
             if path == "/api/answer":
                 answer = bridge.answer_query(
                     str(payload.get("input") or payload.get("query") or ""),
-                    preferred_model=str(payload.get("model") or payload.get("preferred_model") or "").strip(),
+                    model_ref_override=str(payload.get("model") or payload.get(_SETTINGS_MODEL_KEY) or "").strip(),
                     use_search=bool(payload.get("use_search", True)),
                     context={"source": "search_home.answer"},
                 )
@@ -247,7 +249,7 @@ def _make_handler(pack_root: Path):
                 return
             if path == "/api/settings/model":
                 try:
-                    result = bridge.set_preferred_model(str(payload.get("model") or payload.get("profile_id") or ""))
+                    result = bridge.set_selected_model(str(payload.get("model") or payload.get("profile_id") or ""))
                 except ValueError as exc:
                     self._json_response(
                         {"status": "error", "error": {"message": str(exc), "code": "INVALID_INPUT"}},

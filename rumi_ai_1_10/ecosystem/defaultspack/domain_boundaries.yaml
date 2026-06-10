@@ -19,6 +19,8 @@ domains:
     - domain/chat
     - domain/components
     - domain/extensions
+    - domain/human_operator
+    - domain/temporal_context
     - domain/tool
     path: domain/ai_client
   api_map:
@@ -49,12 +51,15 @@ domains:
     - domain/capabilities
     - domain/capability
     - domain/coding
+    - domain/context_engine
     - domain/dev
     - domain/extensions
+    - domain/human_operator
     - domain/prompt
     - domain/safety
     - domain/skill_trigger
     - domain/stream
+    - domain/temporal_context
     - domain/tool
     - domain/vision
     path: domain/chat
@@ -67,6 +72,8 @@ domains:
   company:
     may_import:
     - domain/agent_runtime
+    - domain/ai_client
+    - domain/chat
     - domain/input
     path: domain/company
   components:
@@ -140,6 +147,12 @@ domains:
     may_import:
     - domain/safety
     path: domain/host_bridge
+  human_operator:
+    may_import:
+    - domain/ai_client
+    - domain/chat
+    - domain/prompt
+    path: domain/human_operator
   input:
     may_import:
     - domain/ai_client
@@ -226,7 +239,9 @@ domains:
     - domain/components
     - domain/extensions
     - domain/host_bridge
+    - domain/human_operator
     - domain/integrations
+    - domain/prompt
     - domain/research
     - domain/runtime_config
     - domain/safety

@@ -52,25 +52,32 @@ class WebMountMixin:
         for pack_id, pack_info in registry.packs.items():
             if pack_ids is not None and pack_id not in pack_ids:
                 continue
+            allow_pre_auth = cls._pack_allows_in_process_api_metadata(pack_id, pack_info)
             routes = pack_info.ecosystem.get("pre_auth_routes")
             if routes and isinstance(routes, list):
-                for route in routes:
-                    if not isinstance(route, dict):
-                        continue
-                    method = route.get("method", "").upper()
-                    if not method:
-                        continue
-                    entry = {"method": method, "pack_id": pack_id}
-                    if "path" in route:
-                        entry["path"] = route["path"]
-                    if "path_prefix" in route:
-                        entry["path_prefix"] = route["path_prefix"]
-                    cls._pre_auth_table.append(entry)
-                    count += 1
+                if not allow_pre_auth:
+                    logger.warning(
+                        "Ignoring pre_auth_routes from non-first-party pack: %s",
+                        pack_id,
+                    )
+                else:
+                    for route in routes:
+                        if not isinstance(route, dict):
+                            continue
+                        method = route.get("method", "").upper()
+                        if not method:
+                            continue
+                        entry = {"method": method, "pack_id": pack_id}
+                        if "path" in route:
+                            entry["path"] = route["path"]
+                        if "path_prefix" in route:
+                            entry["path_prefix"] = route["path_prefix"]
+                        cls._pre_auth_table.append(entry)
+                        count += 1
             wm = pack_info.ecosystem.get("web_mount")
             if wm and isinstance(wm, dict) and not wm.get("auth_required", True):
                 prefix = wm.get("path_prefix", "")
-                if prefix:
+                if prefix and allow_pre_auth:
                     for method in ("GET", "POST", "PUT", "DELETE"):
                         cls._pre_auth_table.append(
                             {
@@ -81,6 +88,11 @@ class WebMountMixin:
                             }
                         )
                     count += 4
+                elif prefix:
+                    logger.warning(
+                        "Ignoring unauthenticated web_mount pre-auth expansion from non-first-party pack: %s",
+                        pack_id,
+                    )
         logger.info("Loaded %d pre_auth_route entries", count)
         return count
 
