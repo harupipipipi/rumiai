@@ -3818,7 +3818,8 @@ public class RumiDpi {
             self._run_powershell("\n".join(prelude + [f"[System.Windows.Forms.SendKeys]::SendWait('{text}')"]))
             return
         if action == "computer.key":
-            key = self._windows_send_key(_key_combo_from_payload({**payload, "key": payload.get("key", "ENTER")}), None)
+            key_combo = _key_combo_from_payload({**payload, "key": payload.get("key", "ENTER")})
+            key = self._ps_single(self._windows_send_key(key_combo, None))
             count = _key_press_count(payload)
             self._run_powershell(
                 "\n".join(
