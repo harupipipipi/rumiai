@@ -475,6 +475,35 @@ def test_git_status_from_nested_workspace_allows_enclosing_repo_and_filters_outs
     assert branch["branch"] == status["branch"]
 
 
+def test_git_diff_from_nested_workspace_disables_ancestor_external_diff(tmp_path):
+    from domain.coding.git_ops import GitOps
+
+    _init_git_repo(tmp_path)
+    workspace = tmp_path / "nested_ws"
+    workspace.mkdir()
+    (workspace / "inside.txt").write_text("clean\n", encoding="utf-8")
+    _git_commit_all(tmp_path)
+
+    marker = tmp_path / "external-diff-ran.txt"
+    payload = tmp_path / "external_diff_payload.sh"
+    payload.write_text(
+        "#!/bin/sh\n"
+        f"printf ran > {marker}\n"
+        "exit 0\n",
+        encoding="utf-8",
+    )
+    payload.chmod(0o755)
+    subprocess.run(["git", "config", "diff.external", str(payload)], cwd=tmp_path, check=True)
+    (workspace / "inside.txt").write_text("dirty\n", encoding="utf-8")
+
+    diff = GitOps(workspace).diff()
+
+    assert diff["files"] == ["inside.txt"]
+    assert "-clean" in diff["diff"]
+    assert "+dirty" in diff["diff"]
+    assert not marker.exists()
+
+
 def test_terminal_blocks_low_risk_reads_of_restricted_workspace_paths(tmp_path):
     from domain.coding.terminal import Terminal
 
