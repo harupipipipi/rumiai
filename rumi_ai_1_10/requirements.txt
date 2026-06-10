@@ -1,12 +1,21 @@
 # Rumi AI OS - Core Dependencies
-pyyaml>=6.0
+#
+# The desktop viewer installs these requirements with `uv pip install
+# --require-hashes`. Keep every artifact exact-pinned and SHA-256 hashed so the
+# automatic local bootstrap cannot execute a mutable package artifact.
+--no-binary :all:
+
+pyyaml==6.0.2 --hash=sha256:d584d9ec91ad65861cc08d42e834324ef890a082e591037abe114850ff7bbc3e
 
 # Secret at-rest encryption (required)
-cryptography>=41.0.0
+cryptography==45.0.3 --hash=sha256:ec21313dd335c51d7877baf2972569f40a4291b76a0ce51391523ae358d05899
+cffi==1.17.1 --hash=sha256:1c39c6016c32bc48dd54561950ebd6836e1670f2ae46128f67cf49e789c52824
+pycparser==2.22 --hash=sha256:491c8be9c040f5390f5bf44a5b07752bd07f56edf992381b05c701439eec10f6
 
 # Optional: Enhanced secret key storage (recommended for production)
-# keyring>=24.0.0
+# keyring and its transitive dependencies must be pinned with hashes before
+# being added to this automatically installed requirements file.
 
 # Note: Flask, python-dotenv are NOT required by core.
 # If you need HTTP server, install a Pack that provides io.http.server
-# and add flask to your Pack's dependencies.
+# and add flask to a hashed Pack-specific dependency lock.
