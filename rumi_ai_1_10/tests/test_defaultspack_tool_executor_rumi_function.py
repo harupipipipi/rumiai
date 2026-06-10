@@ -853,3 +853,63 @@ def test_connector_dry_run_redacts_secret_arguments_after_internal_approval(tmp_
     assert message["bot_token"] == "[redacted]"
     assert message["nested"]["api_key"] == "[redacted]"
     assert "xoxb-secret" not in result["result"]
+
+
+def test_rumi_api_manifest_and_executor_require_approval():
+    import json
+    from domain.tool.executor import ToolExecutor
+
+    manifest_path = ROOT / "ecosystem" / "rumi_default_tools_pack" / "tools" / "rumi_api" / "manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    assert manifest["config"]["requires_approval"] is True
+
+    result = ToolExecutor().execute(
+        "rumi_api",
+        {"action": "request", "method": "GET", "path": "/api/chat/conversations"},
+        {},
+    )
+
+    assert result["is_error"] is False
+    assert result["widget"]["type"] == "approval_request"
+    assert result["widget"]["tool_name"] == "rumi_api"
+    assert result["widget"]["approval_required"] is True
+
+
+def test_rumi_api_request_action_requires_approved_context(monkeypatch):
+    from rumi_ai_1_10.ecosystem.rumi_default_tools_pack.domain.tool import rumi_api
+
+    def fail_request(method, path, body):
+        raise AssertionError("rumi_api must not call local HTTP API without approval")
+
+    monkeypatch.setattr(rumi_api, "_request", fail_request)
+
+    result = rumi_api.run(
+        {"action": "request", "method": "GET", "path": "/api/chat/conversations"},
+        {},
+    )
+
+    assert result["status"] == "ok"
+    assert result["data"]["approval_required"] is True
+    assert result["data"]["tool_name"] == "rumi_api"
+
+
+def test_rumi_api_request_action_allows_internal_approved_context(monkeypatch):
+    from rumi_ai_1_10.ecosystem.rumi_default_tools_pack.domain.tool import rumi_api
+
+    seen = {}
+
+    def fake_request(method, path, body):
+        seen["method"] = method
+        seen["path"] = path
+        seen["body"] = body
+        return {"ok": True}
+
+    monkeypatch.setattr(rumi_api, "_request", fake_request)
+
+    result = rumi_api.run(
+        {"action": "request", "method": "GET", "path": "/api/health"},
+        {"_tool_server_approved": True, "principal_id": "defaultspack"},
+    )
+
+    assert result == {"status": "ok", "data": {"ok": True}}
+    assert seen == {"method": "GET", "path": "/api/health", "body": None}

@@ -213,6 +213,8 @@ class ToolExecutor:
         approved_context, approval_error = _context_with_tool_approval_token(context, tool_def, arguments)
         if approval_error is not None:
             return approval_error
+        if _requires_rumi_api_request_approval(tool_def, arguments) and not _context_has_tool_server_approval(approved_context):
+            return _approval_required_tool_response(tool_def, arguments or {}, approved_context)
         forwarded_context = _function_call_context(approved_context, tool_def)
         if forwarded_context:
             request["context"] = forwarded_context
@@ -1482,6 +1484,21 @@ def _tool_value(tool_def, key):
 
 def _requires_approval(tool_def):
     return requires_approval_for_security(tool_def)
+
+
+def _requires_rumi_api_request_approval(tool_def, arguments):
+    if not isinstance(tool_def, dict) or not _requires_approval(tool_def):
+        return False
+    if _tool_approval_tool_name(tool_def) != "rumi_api":
+        return False
+    execution = tool_def.get("execution")
+    if not isinstance(execution, dict):
+        return False
+    if str(execution.get("qualified_name") or "").strip() != "rumi_default_tools_pack:rumi_api":
+        return False
+    if not isinstance(arguments, dict):
+        return False
+    return str(arguments.get("action") or "list_routes").strip() == "request"
 
 
 def _tool_has_autonomous_internal_approval(tool_def, arguments, context):
