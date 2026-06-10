@@ -366,7 +366,6 @@ exec "$PACK_SHELL" run "defaultspack" \
   --port {kernel_port} \
   --kernel-cmd "$KERNEL_COMMAND" \
   --working-dir "$APP_WORKING_DIR" \
-  --api-token "$RUMI_API_TOKEN" \
   --timeout 120
 "#,
         rumi_home = shell_quote_path(rumi_home),
@@ -757,8 +756,6 @@ fn spawn_defaultspack_local_server(
         .arg(&metadata.app_working_dir)
         .arg("--timeout")
         .arg("120")
-        .arg("--api-token")
-        .arg(&api_token)
         .env("PATH", path)
         .env("RUMI_HOME", &config.rumi_home)
         .env("RUMI_APP_DIR", &config.app_dir)
@@ -911,7 +908,7 @@ mod tests {
         assert!(script.contains("DESKTOP_COMMAND='python -c \"print('\\''hello'\\'')\"'"));
         assert!(script.contains("KERNEL_COMMAND=''\\''/tmp/venv dir/bin/python3'\\'' -m app'"));
         assert!(script.contains("exec \"$PACK_SHELL\" run \"defaultspack\""));
-        assert!(script.contains("--api-token \"$RUMI_API_TOKEN\""));
+        assert!(!script.contains("--api-token"));
         assert!(script.contains("export RUMI_DEFAULTSPACK_SURFACE='webview'"));
         assert!(!script.contains(".defaultspack_launch_request"));
         assert!(!script.contains("open -a \"Rumi AI\""));
@@ -959,7 +956,7 @@ mod tests {
         assert!(script.contains("exec \"$PACK_SHELL\" run \"defaultspack\""));
         assert!(script.contains("--working-dir \"$APP_WORKING_DIR\""));
         assert!(script.contains("--kernel-cmd \"$KERNEL_COMMAND\""));
-        assert!(script.contains("--api-token \"$RUMI_API_TOKEN\""));
+        assert!(!script.contains("--api-token"));
 
         assert!(!script.contains("SIGNAL_FILE"));
         assert!(!script.contains("Rumi AI"));
