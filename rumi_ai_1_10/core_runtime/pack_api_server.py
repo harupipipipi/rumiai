@@ -8,6 +8,7 @@ pip依存ライブラリ管理のHTTP APIを提供。
 from __future__ import annotations
 
 import hmac
+import hashlib
 import json
 import logging
 import os
@@ -1363,6 +1364,14 @@ class PackAPIHandler(
                 _health = _alm.get_health()
             else:
                 _health = {"status": "ok", "needs_setup": True}
+            _challenge = self.headers.get("X-Rumi-Desktop-Health-Challenge", "")
+            _bootstrap_secret = os.environ.get("RUMI_PANEL_BOOTSTRAP_SECRET", "")
+            if _challenge and _bootstrap_secret:
+                _health["desktop_challenge_response"] = hmac.new(
+                    _bootstrap_secret.encode("utf-8"),
+                    _challenge.encode("utf-8"),
+                    hashlib.sha256,
+                ).hexdigest()
             self._send_response(APIResponse(True, data=_health))
             return
 
