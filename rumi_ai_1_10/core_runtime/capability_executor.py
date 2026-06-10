@@ -853,18 +853,18 @@ class CapabilityExecutor:
                             trusted=True, detail_reason=f"Principal '{principal_id}' does not meet caller_requires: {caller_requires}")
                 return resp
 
-        # 4. Grant チェック（opt-in: grant_config が非 None のときのみ）
-        grant_config = {}
-        entry_grant_config = self._entry_grant_config(entry)
-        if entry_grant_config is not None:
-            grant_result = self._grant_manager.check(principal_id, effective_permission_id)
-            if not grant_result.allowed:
-                resp = CapabilityResponse(success=False, error="Permission denied", error_type="grant_denied",
-                                          latency_ms=(time.time() - start_time) * 1000)
-                self._audit(principal_id, effective_permission_id, handler_id, resp, args, request_id,
-                            trusted=True, grant_allowed=False, grant_reason=grant_result.reason)
-                return resp
-            grant_config = grant_result.config or {}
+        # 4. Grant チェック
+        # FunctionRegistry entries must preserve the legacy capability boundary:
+        # every principal × permission execution requires an explicit grant, even
+        # when the function manifest omits optional grant_config schema metadata.
+        grant_result = self._grant_manager.check(principal_id, effective_permission_id)
+        if not grant_result.allowed:
+            resp = CapabilityResponse(success=False, error="Permission denied", error_type="grant_denied",
+                                      latency_ms=(time.time() - start_time) * 1000)
+            self._audit(principal_id, effective_permission_id, handler_id, resp, args, request_id,
+                        trusted=True, grant_allowed=False, grant_reason=grant_result.reason)
+            return resp
+        grant_config = grant_result.config or {}
 
         # 5. calling_convention 分岐
         calling_convention = getattr(entry, "calling_convention", None)
