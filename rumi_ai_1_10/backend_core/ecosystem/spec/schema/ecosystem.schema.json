@@ -352,7 +352,7 @@
         "static_root": {
           "type": "string",
           "description": "静的ファイルのルートディレクトリ (Pack subdir からの相対パス)",
-          "pattern": "^[a-zA-Z0-9_./\\\\-]+$"
+          "pattern": "^(?![\\\\/])(?!.*(?:^|[\\\\/])\\.\\.(?:[\\\\/]|$))[a-zA-Z0-9_./\\\\-]+$"
         },
         "spa_fallback": {
           "type": "boolean",
