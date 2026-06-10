@@ -46,6 +46,16 @@ def run(arguments: dict[str, Any], context: dict[str, Any] | None = None):
         return error("path must start with /api/ or /v1/", "INVALID_PATH")
     if any(path.startswith(prefix) for prefix in DENIED_PREFIXES):
         return error("path is not callable through rumi_api tool: " + path, "PATH_DENIED")
+    if not _request_allowed(context or {}):
+        return ok(
+            {
+                "approval_required": True,
+                "tool_name": "rumi_api",
+                "method": method,
+                "path": path,
+                "reason": "local API requests require an approved/yolo tool context",
+            }
+        )
     if method != "GET" and not _mutation_allowed(path, arguments, context or {}):
         return ok(
             {
@@ -114,6 +124,20 @@ def _pack_route_catalog() -> list[dict[str, str]]:
             if method and path:
                 routes.append({"method": method, "path": path, "block_module": str(route.get("block_module") or "")})
     return routes
+
+
+def _request_allowed(context: dict[str, Any]) -> bool:
+    if internal_tool_decision_allows(context):
+        return True
+    policy = context.get("profile_policy") if isinstance(context.get("profile_policy"), dict) else {}
+    if bool(policy.get("yolo_mode")):
+        return True
+    if context.get("_tool_server_approval_token_valid") is True:
+        return True
+    return bool(
+        context.get("_tool_server_approved")
+        and any(str(context.get(key) or "").strip() for key in ("principal_id", "pack_id", "_source_pack_id"))
+    )
 
 
 def _mutation_allowed(path: str, arguments: dict[str, Any], context: dict[str, Any]) -> bool:

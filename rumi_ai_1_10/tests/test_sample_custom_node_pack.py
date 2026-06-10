@@ -69,7 +69,8 @@ def test_external_pack_nodes_from_nodes_and_components_are_discovered() -> None:
     assert "sample_toolpack.write_guard" in nodes
 
 
-def test_external_pack_binding_registration_and_compile_to_default_agent() -> None:
+def test_external_pack_binding_registration_and_compile_to_default_agent(monkeypatch) -> None:
+    monkeypatch.setenv("RUMI_ALLOW_HOST_EXECUTION", "true")
     interface_registry = InterfaceRegistry()
     registry = _registry()
     approval = FakeApprovalManager({"defaultspack", "sample_toolpack"})
@@ -111,7 +112,8 @@ def test_external_pack_binding_registration_and_compile_to_default_agent() -> No
     assert interface_registry.get(runtime_profile["registry_key"]) is runtime_profile
 
 
-def test_draft_graph_compile_registers_custom_pack_bindings_through_api_handler() -> None:
+def test_draft_graph_compile_registers_custom_pack_bindings_through_api_handler(monkeypatch) -> None:
+    monkeypatch.setenv("RUMI_ALLOW_HOST_EXECUTION", "true")
     interface_registry = InterfaceRegistry()
     registry = _registry()
     approval = FakeApprovalManager({"defaultspack", "sample_toolpack"})
@@ -176,7 +178,8 @@ def test_nodes_components_duplicate_detection_accepts_windows_style_paths() -> N
     assert _is_nodes_components_duplicate(existing, candidate) is True
 
 
-def test_external_node_disabled_by_profile_is_rejected() -> None:
+def test_external_node_disabled_by_profile_is_rejected(monkeypatch) -> None:
+    monkeypatch.setenv("RUMI_ALLOW_HOST_EXECUTION", "true")
     interface_registry = InterfaceRegistry()
     registry = _registry()
     approval = FakeApprovalManager({"defaultspack", "sample_toolpack"})
@@ -210,6 +213,49 @@ def test_external_node_disabled_by_profile_is_rejected() -> None:
 
     assert result.ok is False
     assert any(item["code"] == "profile_node_unavailable" for item in result.diagnostics)
+
+
+def test_approved_pack_binding_without_host_execution_is_not_imported(tmp_path) -> None:
+    pack_dir = tmp_path / "ecosystem" / "maliciouspack"
+    pack_dir.mkdir(parents=True)
+    marker = tmp_path / "imported.txt"
+    (pack_dir / "ecosystem.json").write_text(
+        '{"pack_id":"maliciouspack","capability_bindings":{"register":"maliciouspack.capability_bindings.register"}}',
+        encoding="utf-8",
+    )
+    (pack_dir / "__init__.py").write_text("", encoding="utf-8")
+    (pack_dir / "capability_bindings.py").write_text(
+        "from pathlib import Path\n"
+        f"Path({str(marker)!r}).write_text('imported', encoding='utf-8')\n"
+        "def register(interface_registry):\n"
+        "    return {'registered': ['malicious']}\n",
+        encoding="utf-8",
+    )
+    registry = SimpleNamespace(
+        packs={
+            "maliciouspack": PackInfo(
+                "maliciouspack",
+                pack_dir,
+                pack_dir,
+                pack_dir / "ecosystem.json",
+            )
+        }
+    )
+
+    result = register_pack_binding_handlers(
+        interface_registry=InterfaceRegistry(),
+        registry=registry,
+        approval_manager=FakeApprovalManager({"maliciouspack"}),
+    )
+
+    assert result.ok is True
+    assert result.registered == []
+    assert "maliciouspack" in result.skipped
+    assert not marker.exists()
+    assert any(
+        item["code"] == "binding_registration_host_execution_required"
+        for item in result.diagnostics
+    )
 
 
 def test_unapproved_pack_binding_registration_is_skipped() -> None:

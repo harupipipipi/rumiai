@@ -2,14 +2,13 @@
 kernel_variable_resolver.py - 変数解決ロジック
 
 kernel_core.py から抽出。
-$flow., $ctx., $env. パターンマッチによる変数解決を提供する。
+$flow., $ctx. パターンマッチによる変数解決を提供する。
 
 K-1: kernel_core.py 責務分割の一環
 """
 
 from __future__ import annotations
 
-import os
 import re
 from typing import Any, Dict
 
@@ -17,14 +16,14 @@ from typing import Any, Dict
 MAX_RESOLVE_DEPTH = 20
 
 # --- $variable pattern ---
-_VAR_REF_RE = re.compile(r'\$(?:flow|ctx|env)\.[a-zA-Z0-9_.]+')
+_VAR_REF_RE = re.compile(r'\$(?:flow|ctx)\.[a-zA-Z0-9_.]+')
 
 
 class VariableResolver:
     """
     Flow 変数解決エンジン
 
-    $flow.<key>, $ctx.<key>, $env.<key> 形式の変数参照を
+    $flow.<key>, $ctx.<key> 形式の変数参照を
     コンテキスト辞書から解決する。
     dict / list の再帰解決にも対応。
     """
@@ -36,7 +35,7 @@ class VariableResolver:
         """
         値を解決する。
 
-        - str: $flow.x / $ctx.x / $env.x を展開
+        - str: $flow.x / $ctx.x を展開
         - dict: 各 value を再帰解決
         - list: 各要素を再帰解決
         - その他: そのまま返す
@@ -93,8 +92,6 @@ class VariableResolver:
 
         $flow.<key>  → ctx["<key>"]
         $ctx.<key>   → ctx["<key>"]
-        $env.<key>   → os.environ["<key>"]
-
         ドット区切りのネストアクセスに対応:
         $ctx.a.b.c → ctx["a"]["b"]["c"]
 
@@ -104,19 +101,17 @@ class VariableResolver:
             return ref
 
         # $ を除去してプレフィックスとパスに分割
-        body = ref[1:]  # "flow.key.sub" or "ctx.key" or "env.KEY"
+        body = ref[1:]  # "flow.key.sub" or "ctx.key"
         parts = body.split(".")
 
         if len(parts) < 2:
             return ref
 
-        prefix = parts[0]  # "flow" | "ctx" | "env"
+        prefix = parts[0]  # "flow" | "ctx"
         path = parts[1:]   # ["key", "sub", ...]
 
-        if prefix == "env":
-            # 環境変数: ドット区切りを結合してキーとする
-            env_key = ".".join(path)
-            return os.environ.get(env_key, ref)
+        if prefix not in {"flow", "ctx"}:
+            return ref
 
         # flow / ctx → ctx 辞書を参照
         current: Any = ctx

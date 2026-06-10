@@ -12,7 +12,7 @@ import { browserApprovalRuntimeContent, pendingBrowserApproval, pendingRuntimeAp
 import { reduceBrowserStateFromEvents } from "./lib/browserState";
 import { deriveConversationTitle, formatRelativeTime, messageToText, orderConversationMessages } from "./lib/chat";
 import { cn } from "./lib/cn";
-import { canExecuteComposerEndpointAction, composerSkillMentionWidget, composerToolMentionWidget, isSafeLocalEndpoint, skillMentionIdsFromText, toolMentionIdsFromText } from "./lib/composerWidgets";
+import { canExecuteComposerEndpointAction, composerSkillMentionWidget, composerToolMentionWidget, isSafeLocalEndpoint, skillMentionIdsFromText, toolMentionIdsFromText, trustedComposerActionForWidget } from "./lib/composerWidgets";
 import { conversationMatchesSpotlightFilter, conversationToSearchResult, type SpotlightFilter } from "./lib/conversationSpotlight";
 import { boundedDurationLabel } from "./lib/duration";
 import { fetchDesktopSystemInfo, type DesktopSystemInfo } from "./lib/desktopSystemInfo";
@@ -3664,7 +3664,8 @@ export default function App() {
   };
 
   const handleWidgetAction = (widget: DroppedWidget) => {
-    const action = widget.action;
+    const trustedAction = trustedComposerActionForWidget(widget, composerExtensions);
+    const action = trustedAction ?? (widget.action?.type === "call_endpoint" ? undefined : widget.action);
 
     if (!action) {
       const target = widget.sourceItemId || widget.id;
@@ -4425,7 +4426,7 @@ export default function App() {
           ...(shouldSendExplicitToolSelection ? { selected_tools: submittedToolIds } : {}),
         },
         attachments: submittedAttachments,
-        tools: shouldSendExplicitToolSelection ? submittedToolIds : undefined,
+        tools: submittedToolIds,
         metadata: {
           mode: isOperationsMode ? "operations_company" : isMimoCodingMode ? "mimo_coding_company" : isCodingWorkspaceSubmit ? "coding" : mode,
           ...(groupIdForSubmit ? { group_id: groupIdForSubmit } : {}),
@@ -4593,7 +4594,7 @@ export default function App() {
 
       <div className="flex flex-1 min-h-0">
         {showRegion("history") && !isHistoryMinimized && (
-          <div className="w-[286px] max-w-[30vw] min-w-[240px] flex-shrink-0 overflow-hidden border-r border-zinc-800/60 animate-in slide-in-from-left-2 fade-in duration-200 ease-out max-[900px]:w-[260px]">
+          <div className="w-[286px] max-w-[30vw] min-w-[240px] flex-shrink-0 overflow-hidden border-r border-zinc-800/60 animate-in slide-in-from-left-2 fade-in duration-200 ease-out max-[900px]:w-[260px] rumi-anim-fade-left">
             <Renderers.historyBoard
               activeChatId={activeConversationId}
               chatItems={chatItems}
@@ -4618,7 +4619,7 @@ export default function App() {
         )}
 
         {showRegion("history") && isHistoryMinimized && (
-          <div className="rumi-history-rail w-14 flex-shrink-0 overflow-visible border-r border-zinc-800/60 animate-in slide-in-from-left-1 fade-in duration-150 ease-out">
+          <div className="rumi-history-rail w-14 flex-shrink-0 overflow-visible border-r border-zinc-800/60 animate-in slide-in-from-left-1 fade-in duration-150 ease-out rumi-anim-fade-left">
             <Renderers.historyBoard
               activeChatId={activeConversationId}
               chatItems={chatItems}
@@ -4647,7 +4648,7 @@ export default function App() {
           className={cn("rumi-workspace-main flex-1 flex min-w-0 bg-[#09090b] relative", isActivityPreviewVisible && "has-activity-preview")}
           style={{ "--rumi-activity-preview-width": `${activityPreviewWidthPx}px` } as CSSProperties}
         >
-          <div className={cn("rumi-chat-pane flex-1 flex flex-col min-w-0", isActivityPreviewVisible && "border-r border-zinc-800/40")}>
+          <div className={cn("rumi-chat-pane flex-1 flex flex-col min-w-0 rumi-anim-fade-up", isActivityPreviewVisible && "border-r border-zinc-800/40")}>
             {showRegion("chat_header") && !isCalendarMode && (
               <Renderers.chatHeader
                 title={activeChatTitle}
@@ -4824,7 +4825,7 @@ export default function App() {
           )}
 
           {isActivityPreviewVisible && (
-            <aside className="rumi-activity-preview-pane" aria-label="Activity preview">
+            <aside className="rumi-activity-preview-pane rumi-anim-fade-right" aria-label="Activity preview">
               <Renderers.toolPreviewPanel
                 previews={canvasPreviews}
                 showPreview={effectiveShowPreview}
@@ -4840,13 +4841,14 @@ export default function App() {
         </main>
 
         {showRegion("right_sidebar") && (
+          <div className="rumi-anim-fade-right">
           <Renderers.rightSidebar
             items={sidebarItems}
             activeItemId={activeSidebarItemId ? `${activeSidebarItemId}:${sidebarSelectionTick}` : null}
             settingsValues={settingsValues}
             settingsSections={settingsSections}
             selectedToolIds={selectedToolIds}
-            companyPanel={<CompanyWorkspacePanel />}
+            companyPanel={<CompanyWorkspacePanel activeConversationId={activeConversationId} activeConversationTitle={activeChatTitle} />}
             codingPanel={codingSidebarPanel}
             keyboardButtonNavigation={keyboardButtonNavigation}
             selectedProfile={activeProfile}
@@ -4868,6 +4870,7 @@ export default function App() {
             onToolBatchSet={handleToolBatchSet}
             onPanelAction={handlePanelAction}
           />
+          </div>
         )}
       </div>
 

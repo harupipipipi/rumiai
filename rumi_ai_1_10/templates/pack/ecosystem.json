@@ -6,5 +6,6 @@
   },
   "capability_bindings": {
     "register": "example_pack.capability_bindings.register_example_pack_binding_handlers"
-  }
+  },
+  "host_execution": true
 }

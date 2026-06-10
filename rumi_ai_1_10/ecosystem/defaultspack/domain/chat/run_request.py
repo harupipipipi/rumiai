@@ -924,22 +924,8 @@ def _replace_current_user_content_for_model(
 
 
 def _conversation_system_prompt(conv: dict[str, Any], manager: Any) -> str:
-    prompt_id = str((conv or {}).get("system_prompt_id") or "").strip()
-    if not prompt_id:
-        return manager.get_system_prompt()
-    prompt = manager.get_prompt(prompt_id) or manager.get_prompt_by_name(prompt_id)
-    if isinstance(prompt, dict):
-        body = prompt.get("body") or prompt.get("content")
-        if body:
-            return str(body)
-    if _PROMPT_ID_RE.match(prompt_id):
-        prompt_path = Path(__file__).resolve().parents[2] / "prompts" / (prompt_id + ".system.md")
-        try:
-            if prompt_path.is_file():
-                return prompt_path.read_text(encoding="utf-8")
-        except OSError:
-            pass
-    return manager.get_system_prompt()
+    from blocks.chat._prompt_helpers import resolve_conversation_system_prompt
+    return resolve_conversation_system_prompt(conv, manager)
 
 
 def _load_active_startup_profile() -> dict[str, Any]:
