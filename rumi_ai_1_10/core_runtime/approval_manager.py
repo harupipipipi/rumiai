@@ -41,6 +41,7 @@ from .paths import (
     LOCAL_PACK_DIR,
     ECOSYSTEM_DIR,
     GRANTS_DIR,
+    CORE_PACK_DIR,
     CORE_PACK_ID_PREFIX,
     discover_pack_locations,
     check_pack_id_mismatch,
@@ -143,8 +144,41 @@ class ApprovalManager:
         return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
     def _is_core_pack(self, pack_id: str) -> bool:
-        """core_pack かどうかを判定する（pack_id が CORE_PACK_ID_PREFIX で始まるか）"""
-        return pack_id.startswith(CORE_PACK_ID_PREFIX)
+        """Return True only for shipped core packs in the trusted core_pack dir."""
+        normalized_pack_id = str(pack_id or "").strip()
+        if not normalized_pack_id.startswith(CORE_PACK_ID_PREFIX):
+            return False
+
+        trusted_core_dir = self._resolve_core_pack_dir(normalized_pack_id)
+        if trusted_core_dir is None:
+            return False
+
+        # A pack with the same core-looking ID under the user/imported pack
+        # search root must not inherit trust from the shipped core_pack copy.
+        user_pack_dir = self._resolve_pack_dir(normalized_pack_id)
+        if user_pack_dir is None:
+            return True
+
+        try:
+            return user_pack_dir.resolve() == trusted_core_dir.resolve()
+        except OSError:
+            return False
+
+    def _resolve_core_pack_dir(self, pack_id: str) -> Optional[Path]:
+        """Resolve a core pack only if it is inside CORE_PACK_DIR."""
+        core_root = Path(CORE_PACK_DIR)
+        try:
+            core_root_resolved = core_root.resolve()
+            candidate = (core_root / pack_id).resolve()
+            candidate.relative_to(core_root_resolved)
+        except (OSError, ValueError):
+            return None
+
+        if not candidate.is_dir():
+            return None
+        if not (candidate / "ecosystem.json").is_file():
+            return None
+        return candidate
 
     def _is_trusted_builtin_pack(self, pack_id: str) -> bool:
         """Bundled runtime packs are trusted only at their canonical shipped location."""
