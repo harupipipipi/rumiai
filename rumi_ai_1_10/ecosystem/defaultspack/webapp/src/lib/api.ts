@@ -143,6 +143,17 @@ export type CodingApprovalDecision = {
   reason?: string;
 };
 
+export type AuthorityApprovalDecision = {
+  request_id: string;
+  approved: boolean;
+  scope: string;
+  token?: string;
+  expires_at?: string | null;
+  principal_id?: string;
+  permission_id?: string;
+  config?: Record<string, unknown>;
+};
+
 export type CodingCheckpoint = {
   snapshot_id: string;
   path?: string;
@@ -2383,6 +2394,31 @@ export const api = {
     return request<Record<string, unknown>>("/api/coding/approvals/deny", {
       method: "POST",
       body: JSON.stringify({ approval_request_id: requestId, reason }),
+    });
+  },
+
+  approveAuthorityApproval(
+    requestId: string,
+    options?: {
+      scope?: "once" | "conversation" | "profile" | "node" | "global";
+      config?: Record<string, unknown>;
+      expires_in_seconds?: number;
+    },
+  ) {
+    return request<AuthorityApprovalDecision>(`/api/authority/requests/${encodeURIComponent(requestId)}/approve`, {
+      method: "POST",
+      body: JSON.stringify({
+        scope: options?.scope ?? "once",
+        config: options?.config,
+        expires_in_seconds: options?.expires_in_seconds,
+      }),
+    });
+  },
+
+  denyAuthorityApproval(requestId: string, reason?: string, persist?: boolean) {
+    return request<Record<string, unknown>>(`/api/authority/requests/${encodeURIComponent(requestId)}/deny`, {
+      method: "POST",
+      body: JSON.stringify({ reason, persist: Boolean(persist) }),
     });
   },
 

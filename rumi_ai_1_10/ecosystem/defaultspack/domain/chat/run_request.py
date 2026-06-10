@@ -12,6 +12,7 @@ from typing import Any
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from blocks._common import gen_id
+from core_runtime.authority.principal import build_principal_id
 from domain.ai_client.capabilities.registry import get_model_provider_capabilities
 from blocks.chat._context_helpers import enrich_messages, extract_user_text
 from domain.capability.catalog import CapabilityCatalog
@@ -270,6 +271,14 @@ def prepare_chat_run(input_data: dict[str, Any], context: dict[str, Any] | None 
     if effective_system_prompt:
         system_prompt = effective_system_prompt
         _replace_system_prompt_message(standard_messages, effective_system_prompt)
+
+    _apply_authority_context(
+        request_context,
+        metadata,
+        conversation_id=conversation_id,
+        request_id=request_id,
+        active_profile=active_startup_profile,
+    )
 
     raw_tools, provider_tools, tool_context = _available_tools(request_context, prepared_input, user_text=user_text)
     modalities = detect_modalities(content, metadata)
@@ -887,6 +896,72 @@ def _approval_followup_tool_context(metadata: dict[str, Any] | None) -> dict[str
         for alias in ("computer_use", "browser_use", "browser_computer"):
             token_map[alias] = token
     return {"tool_approval_tokens": token_map}
+
+
+def _apply_authority_context(
+    request_context: dict[str, Any],
+    metadata: dict[str, Any] | None,
+    *,
+    conversation_id: str,
+    request_id: str,
+    active_profile: dict[str, Any] | None,
+) -> None:
+    profile_id = str(
+        request_context.get("profile_id")
+        or request_context.get("active_startup_profile_id")
+        or ((active_profile or {}).get("profile_id") if isinstance(active_profile, dict) else "")
+        or ""
+    ).strip()
+    graph_id = str(
+        request_context.get("graph_id")
+        or request_context.get("capability_graph_id")
+        or request_context.get("default_graph")
+        or ((active_profile or {}).get("default_graph") if isinstance(active_profile, dict) else "")
+        or ""
+    ).strip()
+    node_id = str(request_context.get("node_id") or request_context.get("runtime_node_id") or "").strip()
+    authority_principal_id = build_principal_id(
+        profile_id=profile_id,
+        graph_id=graph_id,
+        node_id=node_id,
+        conversation_id=conversation_id,
+    )
+    if profile_id:
+        request_context.setdefault("profile_id", profile_id)
+    if graph_id:
+        request_context.setdefault("graph_id", graph_id)
+    if node_id:
+        request_context.setdefault("node_id", node_id)
+
+    followup = {}
+    if isinstance(metadata, dict):
+        raw_followup = metadata.get("authority_followup")
+        if not isinstance(raw_followup, dict):
+            raw_followup = metadata.get("approval_followup")
+        if isinstance(raw_followup, dict):
+            permission_id = str(raw_followup.get("permission_id") or "").strip()
+            if permission_id in {"model.invoke", "api_key.use"} or metadata.get("authority_followup") is raw_followup:
+                followup = {
+                    "approval_token": str(raw_followup.get("approval_token") or raw_followup.get("token") or "").strip(),
+                    "request_id": str(raw_followup.get("request_id") or raw_followup.get("approval_request_id") or "").strip(),
+                    "permission_id": permission_id or "model.invoke",
+                }
+
+    authority_context = {
+        "principal_id": authority_principal_id,
+        "profile_id": profile_id or None,
+        "graph_id": graph_id or None,
+        "node_id": node_id or None,
+        "conversation_id": conversation_id,
+        "request_id": followup.get("request_id") or request_id,
+        "run_request_id": request_id,
+    }
+    if followup.get("approval_token"):
+        authority_context["approval_token"] = followup["approval_token"]
+    if followup.get("permission_id"):
+        authority_context["permission_id"] = followup["permission_id"]
+    request_context["authority_principal_id"] = authority_principal_id
+    request_context["authority"] = authority_context
 
 
 def _consume_turn_model_route_override(

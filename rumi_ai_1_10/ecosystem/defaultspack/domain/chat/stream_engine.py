@@ -39,7 +39,7 @@ from domain.ai_client.run_seal import (
 )
 from domain.ai_client.provider_compiler.registry import compile_complete, compiler_for_api_family
 from domain.ai_client.provider_trace import redact_sensitive_value, write_provider_trace
-from domain.ai_client.client import AIClient
+from domain.ai_client.client import AIClient, AuthorityApprovalRequired
 from domain.ai_client.gateway import LLMGateway
 from domain.chat.cancellation import get_chat_cancellation_registry
 from domain.chat.ir_legacy_adapter import (
@@ -64,6 +64,7 @@ class _ChatCancelled(Exception):
 
 
 _APPROVAL_WAITING_TEXT = "許可が必要なため、ユーザーが承認するまで待機します。承認後に続行します。"
+_AUTHORITY_WAITING_TEXT = "モデル/API の使用許可が必要です。承認後に続行します。"
 
 
 def _tool_display_group(tool_name: str) -> dict[str, str]:
@@ -345,6 +346,25 @@ def _approval_waiting_response(
         "metadata": {
             "model": model,
             "pending_approval": approval_request,
+            "thinking_level": params.get("thinking_level"),
+        },
+        "events": list(events),
+    }
+
+
+def _authority_waiting_response(
+    model: str,
+    approval_request: dict[str, Any],
+    params: dict[str, Any],
+    events: list[dict[str, Any]],
+) -> dict[str, Any]:
+    return {
+        "content": [{"type": "text", "text": _AUTHORITY_WAITING_TEXT}],
+        "finish_reason": "authority_approval_required",
+        "usage": {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0},
+        "metadata": {
+            "model": model,
+            "pendingAuthorityApproval": approval_request,
             "thinking_level": params.get("thinking_level"),
         },
         "events": list(events),
@@ -1088,7 +1108,27 @@ class ChatRunEngine:
             self._raise_if_cancelled()
             for event in self._inject_conversation_steer(prepared.conversation_id, working_messages):
                 yield event
-            response, tool_uses = yield from self._model_turn(prepared, working_messages, draft)
+            try:
+                response, tool_uses = yield from self._model_turn(prepared, working_messages, draft)
+            except AuthorityApprovalRequired as exc:
+                approval_request = exc.decision.to_approval_event()
+                approval_event = self._emit(
+                    "approval_requested",
+                    data=approval_request,
+                    message=_AUTHORITY_WAITING_TEXT,
+                    phase="approval_requested",
+                    requires_approval=True,
+                    authority=True,
+                )
+                self._sync_draft(draft, force=True)
+                yield approval_event
+                response = _authority_waiting_response(
+                    prepared.model,
+                    approval_request,
+                    prepared.params,
+                    events=list(self._activity_events),
+                )
+                tool_uses = []
             if tool_uses and step_index >= tool_limit:
                 response = {
                     "content": [{"type": "text", "text": _tool_limit_message(tool_limit, tool_uses)}],
@@ -1209,6 +1249,7 @@ class ChatRunEngine:
                         "messages": messages,
                         "tools": prepared.provider_tools,
                         "params": prepared.params,
+                        "authority_context": prepared.request_context.get("authority", {}),
                     }
                 )
                 self._raise_if_cancelled()
@@ -1276,6 +1317,8 @@ class ChatRunEngine:
                         finish_reason = str(chunk.get("finish_reason") or "stop")
                         usage = chunk.get("usage", usage) if isinstance(chunk.get("usage"), dict) else usage
                 break
+            except AuthorityApprovalRequired:
+                raise
             except Exception as exc:
                 self._raise_if_cancelled()
                 message_text = "AI request failed: " + str(exc)
@@ -1460,7 +1503,10 @@ class ChatRunEngine:
                     prepared.params,
                     prepared.call_handler,
                     allow_retry=True,
+                    authority_context=prepared.request_context.get("authority", {}),
                 )
+        except AuthorityApprovalRequired:
+            raise
         except RuntimeError as exc:
             if self._tool_logs:
                 response = _ai_error_after_tool_use_response(str(exc))
@@ -1485,6 +1531,7 @@ class ChatRunEngine:
                     retry_params,
                     prepared.call_handler,
                     allow_retry=False,
+                    authority_context=prepared.request_context.get("authority", {}),
                 )
                 if isinstance(retry_response, dict) and (
                     self._response_text(retry_response).strip() or _tool_use_blocks(retry_response)
@@ -1504,6 +1551,7 @@ class ChatRunEngine:
                 prepared.params,
                 prepared.call_handler,
                 allow_retry=True,
+                authority_context=prepared.request_context.get("authority", {}),
             )
         provider, model_name = self._gateway.resolve_provider(prepared.model)
         caps = dict(prepared.provider_capabilities or {})
@@ -1517,7 +1565,13 @@ class ChatRunEngine:
         api_family = str(caps.get("api_family") or "")
         if compiler_for_api_family(api_family) is None or not callable(getattr(provider, "_request_json", None)):
             return self._gateway.complete(
-                {"model": prepared.model, "messages": messages, "tools": prepared.provider_tools, "params": prepared.params}
+                {
+                    "model": prepared.model,
+                    "messages": messages,
+                    "tools": prepared.provider_tools,
+                    "params": prepared.params,
+                    "authority_context": prepared.request_context.get("authority", {}),
+                }
             )
         planned = PlannedProviderRequest(
             ir=legacy_standard_messages_to_ir(messages, prepared.conversation_id),
@@ -1528,6 +1582,7 @@ class ChatRunEngine:
             metadata=dict(prepared.provider_planning.get("metadata") or {}),
         )
         compiled = compile_complete(planned)
+        self._check_authority_for_compiled_provider(prepared, provider_id=str(caps.get("provider_id") or ""), model_name=model_name)
         raw = provider._request_json(compiled.path, compiled.body)
         parser = compiler_for_api_family(compiled.api_family)
         response_ir = parser.parse_response(raw, compiled)
@@ -1540,6 +1595,44 @@ class ChatRunEngine:
         }
         response["metadata"] = metadata
         return response
+
+    @staticmethod
+    def _check_authority_for_compiled_provider(prepared: PreparedChatRun, *, provider_id: str, model_name: str) -> None:
+        provider_id = str(provider_id or "").strip()
+        if provider_id in {"", "stub", "rumi"}:
+            return
+        try:
+            from domain.ai_client.api_key_store import provider_has_api_key
+            provider_may_have_api_key = provider_has_api_key(provider_id)
+        except Exception:
+            provider_may_have_api_key = True
+        if not provider_may_have_api_key:
+            return
+        from core_runtime.authority import get_authority_service
+
+        context = prepared.request_context.get("authority") if isinstance(prepared.request_context, dict) else {}
+        context = dict(context) if isinstance(context, dict) else {}
+        decision = get_authority_service().check(
+            principal_id=str(context.get("principal_id") or "defaultspack"),
+            permission_id="model.invoke",
+            resource={
+                "kind": "model",
+                "provider_id": provider_id,
+                "api_id": "legacy",
+                "model_id": str(model_name or ""),
+                "model_ref": prepared.model,
+                "stream": False,
+            },
+            reason="Model invocation: {}/{}".format(provider_id, model_name),
+            conversation_id=context.get("conversation_id"),
+            profile_id=context.get("profile_id"),
+            node_id=context.get("node_id"),
+            graph_id=context.get("graph_id"),
+            request_id=context.get("request_id"),
+            approval_token=context.get("approval_token"),
+        )
+        if not decision.allowed:
+            raise AuthorityApprovalRequired(decision)
 
     def _replay_approval_followup_if_present(
         self,
@@ -1817,7 +1910,6 @@ class ChatRunEngine:
                 "request_id": request_id,
             }
         return None
-
     def _execute_tool(
         self,
         prepared: PreparedChatRun,
@@ -2088,6 +2180,7 @@ class ChatRunEngine:
         call_handler: Any,
         *,
         allow_retry: bool,
+        authority_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         attempts = _ai_retry_attempts(params) if allow_retry else 1
         last_error = "AI request failed"
@@ -2110,8 +2203,16 @@ class ChatRunEngine:
                         return response.get("data", {})
                     return response
                 return self._gateway.complete(
-                    {"model": model, "messages": messages, "tools": tools or [], "params": params or {}}
+                    {
+                        "model": model,
+                        "messages": messages,
+                        "tools": tools or [],
+                        "params": params or {},
+                        "authority_context": authority_context or {},
+                    }
                 )
+            except AuthorityApprovalRequired:
+                raise
             except Exception as exc:
                 last_error = str(exc)
                 if attempt_index >= attempts - 1 or not _is_retryable_ai_error(last_error):
@@ -2311,8 +2412,11 @@ class ChatRunEngine:
                         "messages": messages,
                         "tools": tools,
                         "params": _params_without_thinking(prepared.params),
+                        "authority_context": prepared.request_context.get("authority", {}),
                     }
                 )
+            except AuthorityApprovalRequired:
+                raise
             except Exception:
                 continue
             if not isinstance(response, dict):

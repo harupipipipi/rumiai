@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
 
 import { CompanyWorkspacePanel } from "./components/company/CompanyWorkspacePanel";
+import { AuthorityApprovalCard } from "./components/AuthorityApprovalCard";
 import { CodingCockpit } from "./components/coding/CodingCockpit";
 import { ConversationSpotlight } from "./components/ConversationSpotlight";
 import { WarmActionIcon } from "./components/WarmActionIcon";
@@ -8,6 +9,7 @@ import type { ChatItem, HistoryBoardNewTaskOptions } from "./components/HistoryB
 import type { ToolPreviewItem, ToolPreviewMode } from "./components/ToolPreview";
 import { buildToolPreviewDisplayItems, hasCanvasItems } from "./components/ToolPreview";
 import { api, defaultspackApiFetch, type ChatActivityEvent, type ChatContentBlock, type ChatMessage, type ChatStreamEvent, type ChatToolStreamEvent, type CodingWorkspaceRecord, type ComposerCommandExecuteResult, type ComposerCommandItem, type ComposerCommandMode, type ComposerWidgetAction, type Conversation, type ConversationSearchResult, type ConversationSteerItem, type MimoCodingCompanyStatus, type ModelCommandCandidate, type ModelProfile, type OperationsCompanyStatus, type SettingsSection, type SidebarAction, type SidebarItem, type UICatalog } from "./lib/api";
+import { authorityApprovalRuntimeContent, pendingAuthorityApproval, type AuthorityApproval } from "./lib/authorityApproval";
 import { browserApprovalRuntimeContent, pendingBrowserApproval, pendingRuntimeApproval, staleRuntimeApproval, type BrowserApproval, type RuntimeApproval, type StaleRuntimeApproval } from "./lib/browserApproval";
 import { reduceBrowserStateFromEvents } from "./lib/browserState";
 import { deriveConversationTitle, formatRelativeTime, messageToText, orderConversationMessages } from "./lib/chat";
@@ -1431,6 +1433,29 @@ function runtimeApprovalRuntimeContent(approval: RuntimeApproval, token?: string
   ].join("\n");
 }
 
+type AuthorityApprovalScope = "once" | "conversation" | "profile" | "node";
+
+function authorityApprovalConfig(approval: AuthorityApproval): Record<string, unknown> {
+  const resource = approval.resource ?? {};
+  const config: Record<string, unknown> = {};
+  const providerId = typeof resource.provider_id === "string" ? resource.provider_id.trim() : "";
+  const apiId = typeof resource.api_id === "string" ? resource.api_id.trim() : "";
+  const modelId = typeof resource.model_id === "string" ? resource.model_id.trim() : "";
+  if (providerId) config.provider_ids = [providerId];
+  if (apiId) config.api_ids = [apiId];
+  if (modelId) config.model_ids = [modelId];
+  if (resource.stream === true) config.allow_stream = true;
+  return config;
+}
+
+function authorityApprovalTitle(approval: AuthorityApproval): string {
+  const resource = approval.resource ?? {};
+  const provider = typeof resource.provider_id === "string" ? resource.provider_id : "";
+  const api = typeof resource.api_id === "string" ? resource.api_id : "";
+  const model = typeof resource.model_id === "string" ? resource.model_id : "";
+  return [provider, api, model].filter(Boolean).join(" / ") || approval.permissionId;
+}
+
 function staleRuntimeApprovalTitle(approval: StaleRuntimeApproval): string {
   const label = approval.operation || approval.toolName || "tool";
   return `${label} は再実行が必要です`;
@@ -2097,6 +2122,7 @@ export default function App() {
   const currentAbortControllerRef = useRef<AbortController | null>(null);
   const streamingConversationIdRef = useRef<string | null>(null);
   const activeRuntimeApprovalActionRef = useRef<string | null>(null);
+  const activeAuthorityApprovalActionRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (mode === "chat") {
@@ -2180,8 +2206,12 @@ export default function App() {
     pendingRequest && Date.now() - pendingRequest.startedAt < PENDING_CHAT_REQUEST_TTL_MS,
   );
   const browserApproval = pendingBrowserApproval(messages);
+  const rawAuthorityApproval = pendingAuthorityApproval(messages);
   const rawRuntimeApproval = pendingRuntimeApproval(messages);
   const settledRuntimeApprovalIdSet = useMemo(() => new Set(settledRuntimeApprovalIds), [settledRuntimeApprovalIds]);
+  const authorityApproval = !ultraYoloMode && rawAuthorityApproval && !settledRuntimeApprovalIdSet.has(rawAuthorityApproval.requestId)
+    ? rawAuthorityApproval
+    : null;
   const runtimeApproval = !ultraYoloMode && rawRuntimeApproval && !settledRuntimeApprovalIdSet.has(rawRuntimeApproval.requestId)
     ? rawRuntimeApproval
     : null;
@@ -3855,6 +3885,74 @@ export default function App() {
     }
   };
 
+  const approveAuthorityAction = async (scope: AuthorityApprovalScope) => {
+    if (!authorityApproval) return;
+    if (!activeConversationId) return;
+    if (activeAuthorityApprovalActionRef.current === authorityApproval.requestId) return;
+    activeAuthorityApprovalActionRef.current = authorityApproval.requestId;
+    setError(null);
+    setIsGenerating(true);
+    rememberPendingRequest({
+      conversationId: activeConversationId,
+      startedAt: Date.now(),
+      status: "モデル/API 承認をAIへ伝えています",
+      toolNames: [],
+    });
+    try {
+      const decision = await api.approveAuthorityApproval(authorityApproval.requestId, {
+        scope,
+        config: authorityApprovalConfig(authorityApproval),
+      });
+      if (!decision.approved) {
+        throw new Error("authority approval failed");
+      }
+      setSettledRuntimeApprovalIds((ids) => (
+        ids.includes(authorityApproval.requestId) ? ids : [...ids, authorityApproval.requestId].slice(-50)
+      ));
+      await api.sendMessage(activeConversationId, "ユーザーがモデル/API の使用を許可しました。承認済みのリクエストとして続行してください。", {
+        metadata: {
+          mode,
+          authority_followup: {
+            approval_token: decision.token,
+            request_id: authorityApproval.requestId,
+            permission_id: authorityApproval.permissionId,
+          },
+          runtime_content: authorityApprovalRuntimeContent(authorityApproval, decision.token),
+        },
+      });
+      forgetPendingRequest(activeConversationId);
+      replaceChatIdInUrl(activeConversationId, false);
+      await loadConversation(activeConversationId, false);
+      await refreshConversations(activeConversationId);
+    } catch (approvalError) {
+      forgetPendingRequest(activeConversationId);
+      setError(approvalError instanceof Error ? approvalError.message : "authority 承認に失敗しました。");
+    } finally {
+      activeAuthorityApprovalActionRef.current = null;
+      setIsGenerating(false);
+    }
+  };
+
+  const denyAuthorityAction = async () => {
+    if (!authorityApproval) return;
+    if (!activeConversationId) return;
+    if (activeAuthorityApprovalActionRef.current === authorityApproval.requestId) return;
+    activeAuthorityApprovalActionRef.current = authorityApproval.requestId;
+    setError(null);
+    try {
+      await api.denyAuthorityApproval(authorityApproval.requestId, "Denied from chat authority card");
+      setSettledRuntimeApprovalIds((ids) => (
+        ids.includes(authorityApproval.requestId) ? ids : [...ids, authorityApproval.requestId].slice(-50)
+      ));
+      await loadConversation(activeConversationId, false);
+      await refreshConversations(activeConversationId);
+    } catch (approvalError) {
+      setError(approvalError instanceof Error ? approvalError.message : "authority 承認の拒否に失敗しました。");
+    } finally {
+      activeAuthorityApprovalActionRef.current = null;
+    }
+  };
+
   const pushActionPreview = (action: SidebarAction, title: string, data: unknown) => {
     const preview = previewFromAction(action, title, data);
     setPreviews((current) => [preview, ...current].slice(0, 30));
@@ -4555,7 +4653,7 @@ export default function App() {
       steerBusy={modelSteerBusy}
       steerQueuedCount={steerItems.filter((item) => item.status === "queued").length}
       steerPreviewItems={isCentered ? [] : activeComposerSteerItems(steerItems, isGenerating || isConversationPending)}
-      suppressPopovers={Boolean(visibleBrowserApproval || runtimeApproval || staleRuntimeApprovalNotice)}
+      suppressPopovers={Boolean(visibleBrowserApproval || authorityApproval || runtimeApproval || staleRuntimeApprovalNotice)}
       onOpenModelManager={() => openSettingsSection("models")}
       onOpenToolSettings={() => openSettingsSection("tools")}
       onSwitchToVisionModel={handleSwitchToVisionModel}
@@ -4736,7 +4834,15 @@ export default function App() {
                     </div>
                   </div>
                 )}
-                {!visibleBrowserApproval && runtimeApproval && (
+                {!visibleBrowserApproval && authorityApproval && (
+                  <AuthorityApprovalCard
+                    approval={authorityApproval}
+                    title={authorityApprovalTitle(authorityApproval)}
+                    onApprove={(scope) => void approveAuthorityAction(scope)}
+                    onDeny={() => void denyAuthorityAction()}
+                  />
+                )}
+                {!visibleBrowserApproval && !authorityApproval && runtimeApproval && (
                   <div className="pointer-events-auto absolute bottom-full left-1/2 rumi-layer-modal mb-2 w-[min(560px,calc(100vw-32px))] -translate-x-1/2 rounded-xl border border-amber-500/30 bg-zinc-950 p-3 shadow-2xl">
                     <div className="flex items-center justify-between gap-3">
                       <div className="min-w-0">
