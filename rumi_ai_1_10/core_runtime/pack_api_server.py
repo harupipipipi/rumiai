@@ -593,20 +593,6 @@ class PackAPIHandler(
         # ハンドラ呼び出し
         try:
             if entry.get("function_id"):
-                from .pack_function_runtime import (
-                    invoke_pack_function,
-                    is_pack_function_in_process_allowed,
-                )
-
-                if not is_pack_function_in_process_allowed(entry["pack_id"]):
-                    logger.warning(
-                        "Blocked function api_route dispatch for non-first-party pack: %s:%s",
-                        entry["pack_id"],
-                        entry["function_id"],
-                    )
-                    self._send_response(APIResponse(False, error=_SAFE_ERROR_MSG), 403)
-                    return True
-
                 call_args = dict(body if pass_body and body is not None else {})
                 # Route-level args define the contract for fixed endpoints such as
                 # /approve and /reject, so body values must not override them.
@@ -618,7 +604,7 @@ class PackAPIHandler(
                             call_args[target_key] = path_params[source_key]
                 else:
                     call_args.update(path_params)
-                result = invoke_pack_function(
+                result = self._execute_api_route_pack_function(
                     entry["pack_id"],
                     entry["function_id"],
                     call_args,
@@ -649,11 +635,62 @@ class PackAPIHandler(
                 self._send_response(APIResponse(True, data=result))
             else:
                 self._send_result(result)
+        except PermissionError as e:
+            logger.warning("api_route denied: %s", e)
+            self._send_response(APIResponse(False, error="Forbidden"), 403)
         except Exception as e:
             _log_internal_error(f"api_route:{handler_name}", e)
             self._send_response(APIResponse(False, error=_SAFE_ERROR_MSG), 500)
 
         return True
+
+    def _execute_api_route_pack_function(
+        self,
+        pack_id: str,
+        function_id: str,
+        args: dict[str, Any],
+        context: dict[str, Any],
+    ) -> Any:
+        """Execute a pack-backed API route through the capability boundary.
+
+        Pack-declared HTTP routes are externally triggerable, so they must not
+        import and execute pack code in the API server process. Route function
+        calls go through ``CapabilityExecutor`` to preserve approval/hash, grant,
+        audit, and sandbox/subprocess dispatch semantics.
+        """
+        from .capability_executor import get_capability_executor
+
+        qualified_name = (
+            function_id if ":" in function_id else f"{pack_id}:{function_id}"
+        )
+        request = {
+            "type": "function.call",
+            "qualified_name": qualified_name,
+            "args": dict(args or {}),
+            "context": dict(context or {}),
+        }
+        response = get_capability_executor().execute(pack_id, request)
+        if response.success:
+            return response.output
+
+        error_type = getattr(response, "error_type", None) or "function_call_failed"
+        if error_type in {
+            "pack_not_approved",
+            "approval_check_error",
+            "permission_denied",
+            "requires_denied",
+            "caller_requires_denied",
+        }:
+            logger.warning(
+                "api_route pack function denied: pack_id=%s function_id=%s error_type=%s",
+                pack_id,
+                function_id,
+                error_type,
+            )
+            raise PermissionError(
+                getattr(response, "error", None) or "Pack function denied"
+            )
+        raise RuntimeError(getattr(response, "error", None) or "Pack function failed")
 
     def _send_response(
         self,
