@@ -7,7 +7,7 @@ use clap::Parser;
 use log::{error, info};
 use std::process::{Command, Stdio};
 
-use crate::client::KernelClient;
+use crate::client::{DesktopToken, KernelClient};
 use crate::config::{Cli, Commands, PackShellConfig};
 use crate::kernel::KernelProcess;
 
@@ -104,18 +104,7 @@ fn run(config: PackShellConfig) -> Result<i32> {
     let program = &parts[0];
     let args = &parts[1..];
 
-    let mut cmd = Command::new(program);
-    cmd.args(args)
-        .env("RUMI_TOKEN", &token_response.token)
-        .env("RUMI_PORT", token_response.port.to_string())
-        .env("RUMI_PACK_ID", &config.pack_id)
-        .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit())
-        .stdin(Stdio::inherit());
-
-    if let Some(ref dir) = config.working_dir {
-        cmd.current_dir(dir);
-    }
+    let mut cmd = build_app_command(program, args, &token_response, &config);
 
     let mut child = cmd
         .spawn()
@@ -127,4 +116,67 @@ fn run(config: PackShellConfig) -> Result<i32> {
     info!("App exited with code: {}", exit_code);
 
     Ok(exit_code)
+}
+
+fn build_app_command(
+    program: &str,
+    args: &[String],
+    token_response: &DesktopToken,
+    config: &PackShellConfig,
+) -> Command {
+    let mut cmd = Command::new(program);
+    cmd.args(args)
+        .env("RUMI_TOKEN", &token_response.token)
+        .env("RUMI_PORT", token_response.port.to_string())
+        .env("RUMI_PACK_ID", &config.pack_id)
+        .env_remove("RUMI_API_TOKEN")
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .stdin(Stdio::inherit());
+
+    if let Some(ref dir) = config.working_dir {
+        cmd.current_dir(dir);
+    }
+
+    cmd
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::ffi::OsStr;
+
+    #[test]
+    fn app_command_removes_admin_api_token_from_child_environment() {
+        let token_response = DesktopToken {
+            token: "desktop-token".to_string(),
+            port: 8765,
+            expires_in: 60,
+        };
+        let config = PackShellConfig {
+            pack_id: "test-pack".to_string(),
+            port: 8765,
+            kernel_cmd: "python -m rumi_ai".to_string(),
+            api_token: "admin-token".to_string(),
+            timeout: 60,
+            command: "echo ok".to_string(),
+            working_dir: None,
+        };
+
+        let cmd = build_app_command("echo", &["ok".to_string()], &token_response, &config);
+        let envs: Vec<_> = cmd.get_envs().collect();
+
+        assert!(envs
+            .iter()
+            .any(|(key, value)| { *key == OsStr::new("RUMI_API_TOKEN") && value.is_none() }));
+        assert!(envs.iter().any(|(key, value)| {
+            *key == OsStr::new("RUMI_TOKEN") && value == &Some(OsStr::new("desktop-token"))
+        }));
+        assert!(envs.iter().any(|(key, value)| {
+            *key == OsStr::new("RUMI_PORT") && value == &Some(OsStr::new("8765"))
+        }));
+        assert!(envs.iter().any(|(key, value)| {
+            *key == OsStr::new("RUMI_PACK_ID") && value == &Some(OsStr::new("test-pack"))
+        }));
+    }
 }
