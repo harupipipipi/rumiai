@@ -198,7 +198,7 @@ def test_tool_executor_denied_computer_use_without_user_request_still_requires_a
     assert str(result["widget"]["approval_request_id"]).startswith("apr_")
 
 
-def test_tool_executor_pack_not_approved_computer_use_without_approval_requires_approval(monkeypatch):
+def test_tool_executor_pack_not_approved_computer_use_without_approval_returns_pack_error(monkeypatch):
     from domain.tool.executor import ToolExecutor
 
     capability_executor = _pack_not_approved_executor()
@@ -214,10 +214,11 @@ def test_tool_executor_pack_not_approved_computer_use_without_approval_requires_
         {"principal_id": "defaultspack", "capability_executor": capability_executor},
     )
 
-    assert result["is_error"] is False
-    assert result["widget"]["type"] == "approval_request"
+    assert result["is_error"] is True
+    assert result["error_type"] == "pack_not_approved"
+    assert result["widget"]["type"] == "tool_execution_denied"
     assert result["widget"]["tool_name"] == "computer_use"
-    assert str(result["widget"]["approval_request_id"]).startswith("apr_")
+    assert "Pack not approved" in result["result"]
 
 
 def test_tool_executor_denied_coding_function_returns_actionable_approval_request():
@@ -592,7 +593,7 @@ def test_tool_executor_falls_back_to_local_browser_computer_with_server_approval
     assert captured["arguments"] == {"action": "computer.windows"}
 
 
-def test_tool_executor_pack_not_approved_computer_use_uses_approved_local_fallback(monkeypatch):
+def test_tool_executor_pack_not_approved_computer_use_does_not_use_approved_local_fallback(monkeypatch):
     from domain.safety import approval
     from domain.tool.executor import ToolExecutor
 
@@ -601,13 +602,9 @@ def test_tool_executor_pack_not_approved_computer_use_uses_approved_local_fallba
     arguments = {"action": "apps"}
     request = approval.create_approval_request("tool.computer_use", "high", arguments)
     decision = approval.approve(request["request_id"])
-    captured = {}
 
     def fake_execute_local(self, tool_name, arguments, context):
-        captured["tool_name"] = tool_name
-        captured["arguments"] = dict(arguments or {})
-        captured["context"] = dict(context or {})
-        return {"result": "computer_use computer.apps completed", "is_error": False, "widget": {"type": tool_name}}
+        raise AssertionError("computer_use must not bypass pack approval")
 
     monkeypatch.setattr(ToolExecutor, "_execute_local", fake_execute_local)
 
@@ -621,11 +618,11 @@ def test_tool_executor_pack_not_approved_computer_use_uses_approved_local_fallba
         },
     )
 
-    assert result["is_error"] is False
-    assert captured["tool_name"] == "computer_use"
-    assert captured["arguments"] == arguments
-    assert captured["context"]["_tool_server_approved"] is True
-    assert captured["context"]["_tool_server_approval_token_valid"] is True
+    assert result["is_error"] is True
+    assert result["error_type"] == "pack_not_approved"
+    assert result["widget"]["type"] == "tool_execution_denied"
+    assert result["widget"]["tool_name"] == "computer_use"
+    assert "Pack not approved" in result["result"]
 
 
 def test_tool_executor_falls_back_to_local_computer_use_with_yolo_policy(monkeypatch):
