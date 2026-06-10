@@ -146,6 +146,7 @@ class ControlPanelHandlersMixin:
             "flows": {"total": 0},
             "kernel": {"status": "running", "uptime": None},
             "profile": None,
+            "supervisor": None,
         }
 
         # --- Pack 情報 ---
@@ -188,6 +189,14 @@ class ControlPanelHandlersMixin:
                 }
         except Exception as e:
             _log_internal_error("panel_dashboard.profile", e)
+
+        # --- Supervisor / runtime router snapshot ---
+        try:
+            from ..supervisor_dashboard import build_supervisor_dashboard_snapshot
+
+            result["supervisor"] = build_supervisor_dashboard_snapshot()
+        except Exception as e:
+            _log_internal_error("panel_dashboard.supervisor", e)
 
         return result
 

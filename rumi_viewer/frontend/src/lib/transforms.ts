@@ -89,6 +89,7 @@ export function transformDashboard(api: ApiDashboard): DashboardData {
     activePacks: api.packs.enabled,
     registeredFlows: api.flows.total,
     activities: [],
+    supervisor: api.supervisor ?? null,
   };
 }
 
