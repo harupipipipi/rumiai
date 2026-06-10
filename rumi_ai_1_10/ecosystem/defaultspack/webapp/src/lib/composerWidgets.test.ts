@@ -12,6 +12,7 @@ import {
   skillMentionIdsFromText,
   trustedComposerActionForWidget,
 } from "./composerWidgets";
+import type { ComposerExtensionItem } from "../renderers/types";
 
 test("composer endpoint actions are limited to safe local non-approval APIs", () => {
   assert.equal(isSafeLocalEndpoint("/api/coding/git/status"), true);
@@ -66,7 +67,7 @@ test("composer widget drops rebuild actions from trusted catalog items", () => {
         },
       },
     },
-  ];
+  ] satisfies ComposerExtensionItem[];
 
   const action = resolveComposerWidgetDrop({
     id: "coding_git_status",
