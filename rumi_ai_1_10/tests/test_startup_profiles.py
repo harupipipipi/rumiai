@@ -152,6 +152,24 @@ def _write_pack(
     return eco_path
 
 
+def _copy_defaultspack_with_host_registration(
+    source: Path,
+    destination: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    shutil.copytree(source, destination)
+    manifest_path = destination / "ecosystem.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    # A tmp-copied built-in pack is not trusted by install location, so the
+    # host-side binding registration approval must be explicit in the fixture.
+    manifest["host_execution"] = True
+    manifest_path.write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("RUMI_ALLOW_HOST_EXECUTION", "true")
+
+
 def _write_frontendpack(root: Path, *, component_node: bool = True) -> Path:
     pack_dir = root / "frontendpack"
     pack_dir.mkdir(parents=True, exist_ok=True)
@@ -872,10 +890,17 @@ def test_launch_profile_with_node_override(tmp_path: Path):
     assert active.overrides["ai_client"] == "coolpack:ai_client:ai_client"
 
 
-def test_launch_profile_compiles_capability_graph_when_opted_in(tmp_path: Path):
+def test_launch_profile_compiles_capability_graph_when_opted_in(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
     repo_defaultspack = Path(__file__).resolve().parents[1] / "ecosystem" / "defaultspack"
     eco_root = tmp_path / "ecosystem"
-    shutil.copytree(repo_defaultspack, eco_root / "defaultspack")
+    _copy_defaultspack_with_host_registration(
+        repo_defaultspack,
+        eco_root / "defaultspack",
+        monkeypatch,
+    )
     interface_registry = InterfaceRegistry()
     manager = StartupProfileManager(
         storage_path=tmp_path / "startup_profiles.json",
@@ -904,10 +929,17 @@ def test_launch_profile_compiles_capability_graph_when_opted_in(tmp_path: Path):
     assert capability_graph["ok"] is True
 
 
-def test_launch_profile_persists_graph_surface_launch_target(tmp_path: Path):
+def test_launch_profile_persists_graph_surface_launch_target(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
     repo_defaultspack = Path(__file__).resolve().parents[1] / "ecosystem" / "defaultspack"
     eco_root = tmp_path / "ecosystem"
-    shutil.copytree(repo_defaultspack, eco_root / "defaultspack")
+    _copy_defaultspack_with_host_registration(
+        repo_defaultspack,
+        eco_root / "defaultspack",
+        monkeypatch,
+    )
     _write_frontendpack(eco_root, component_node=True)
     manager = StartupProfileManager(
         storage_path=tmp_path / "startup_profiles.json",
@@ -942,10 +974,17 @@ def test_launch_profile_persists_graph_surface_launch_target(tmp_path: Path):
     assert active.metadata["startup_capability_graph"]["surface_launch_target"]["pack_id"] == "frontendpack"
 
 
-def test_compile_profile_preview_uses_draft_node_overrides(tmp_path: Path):
+def test_compile_profile_preview_uses_draft_node_overrides(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
     repo_defaultspack = Path(__file__).resolve().parents[1] / "ecosystem" / "defaultspack"
     eco_root = tmp_path / "ecosystem"
-    shutil.copytree(repo_defaultspack, eco_root / "defaultspack")
+    _copy_defaultspack_with_host_registration(
+        repo_defaultspack,
+        eco_root / "defaultspack",
+        monkeypatch,
+    )
     _write_frontendpack(eco_root, component_node=True)
     manager = StartupProfileManager(
         storage_path=tmp_path / "startup_profiles.json",
@@ -972,10 +1011,17 @@ def test_compile_profile_preview_uses_draft_node_overrides(tmp_path: Path):
     assert result["capability_graph"]["runtime_profile"]["launch"]["surface"]["pack_id"] == "frontendpack"
 
 
-def test_compile_profile_preview_does_not_register_runtime_profile(tmp_path: Path):
+def test_compile_profile_preview_does_not_register_runtime_profile(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
     repo_defaultspack = Path(__file__).resolve().parents[1] / "ecosystem" / "defaultspack"
     eco_root = tmp_path / "ecosystem"
-    shutil.copytree(repo_defaultspack, eco_root / "defaultspack")
+    _copy_defaultspack_with_host_registration(
+        repo_defaultspack,
+        eco_root / "defaultspack",
+        monkeypatch,
+    )
     registry = InterfaceRegistry()
     manager = StartupProfileManager(
         storage_path=tmp_path / "startup_profiles.json",
