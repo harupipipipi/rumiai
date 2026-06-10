@@ -638,6 +638,8 @@ class PackAPIHandler(
         try:
             if entry.get("function_id"):
                 call_args = dict(body if pass_body and body is not None else {})
+                if pass_query:
+                    call_args.update(dict(query or {}))
                 # Route-level args define the contract for fixed endpoints such as
                 # /approve and /reject, so body values must not override them.
                 call_args.update(entry.get("args") or {})

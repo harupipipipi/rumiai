@@ -33,11 +33,13 @@ class TestDefaultspackApiRoutes(unittest.TestCase):
             packs = {"defaultspack": _PackInfo()}
 
         count = PackAPIHandler.load_api_routes(_Registry(), pack_ids={"defaultspack"})
-        self.assertEqual(count, 16)
+        self.assertEqual(count, len(data["api_routes"]))
         self.assertIn(("GET", "/api/defaultspack/modules"), PackAPIHandler._api_route_exact)
         self.assertIn(("GET", "/api/defaultspack/pack-requests"), PackAPIHandler._api_route_exact)
         self.assertIn(("GET", "/api/tools/mcp"), PackAPIHandler._api_route_exact)
         self.assertIn(("POST", "/api/tools/mcp/connect"), PackAPIHandler._api_route_exact)
+        self.assertIn(("POST", "/api/remote/tasks"), PackAPIHandler._api_route_exact)
+        self.assertIn(("GET", "/api/remote/host/status"), PackAPIHandler._api_route_exact)
         self.assertEqual(
             PackAPIHandler._api_route_exact[("GET", "/api/defaultspack/modules")]["function_id"],
             "list_modules",
@@ -50,7 +52,10 @@ class TestDefaultspackApiRoutes(unittest.TestCase):
             PackAPIHandler._api_route_exact[("POST", "/api/tools/mcp/connect")]["function_id"],
             "tool_mcp_connect",
         )
-        self.assertEqual(len(PackAPIHandler._api_route_patterns), 9)
+        patterns = [entry[3]["function_id"] for entry in PackAPIHandler._api_route_patterns]
+        self.assertIn("remote_task_get", patterns)
+        self.assertIn("remote_task_events", patterns)
+        self.assertIn("remote_task_cancel", patterns)
 
     def test_api_route_blocks_untrusted_pack_function_dispatch(self):
         from core_runtime.pack_api_server import PackAPIHandler
@@ -200,6 +205,65 @@ class TestDefaultspackApiRoutes(unittest.TestCase):
                     "pack_id": "defaultspack",
                     "method": "POST",
                     "path": "/api/defaultspack/pack-requests/123/approve",
+                },
+            },
+        )
+
+    def test_api_route_passes_query_to_pack_function(self):
+        from core_runtime.pack_api_server import PackAPIHandler
+
+        route_entry = {
+            "pack_id": "defaultspack",
+            "handler": "",
+            "function_id": "remote_task_events",
+            "pass_body": False,
+            "pass_query": True,
+            "response_mode": "result",
+            "args": {},
+            "path_param_map": {"task_id": "task_id"},
+        }
+        PackAPIHandler._api_route_exact = {}
+        PackAPIHandler._api_route_patterns = [
+            (
+                "GET",
+                re.compile(r"^/api/remote/tasks/(?P<task_id>[^/]+)/events$"),
+                ["task_id"],
+                route_entry,
+            )
+        ]
+        handler = PackAPIHandler.__new__(PackAPIHandler)
+        handler._send_result = lambda result: None
+
+        executor = SimpleNamespace(
+            execute=Mock(
+                return_value=SimpleNamespace(success=True, output={"ok": True})
+            )
+        )
+        with patch(
+            "core_runtime.capability_executor.get_capability_executor",
+            return_value=executor,
+        ):
+            dispatched = handler._dispatch_api_route(
+                "GET",
+                "/api/remote/tasks/task_123/events",
+                query={"after": "000010", "limit": "25"},
+            )
+
+        self.assertTrue(dispatched)
+        executor.execute.assert_called_once_with(
+            "defaultspack",
+            {
+                "type": "function.call",
+                "qualified_name": "defaultspack:remote_task_events",
+                "args": {
+                    "after": "000010",
+                    "limit": "25",
+                    "task_id": "task_123",
+                },
+                "context": {
+                    "pack_id": "defaultspack",
+                    "method": "GET",
+                    "path": "/api/remote/tasks/task_123/events",
                 },
             },
         )
