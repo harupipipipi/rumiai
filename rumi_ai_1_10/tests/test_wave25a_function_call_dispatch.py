@@ -475,6 +475,29 @@ class TestUserFunction:
         })
         assert resp.error_type == "not_implemented"
 
+    def test_non_core_calling_convention_does_not_bypass_user_function_policy(self):
+        entry = _user_entry()
+        entry.calling_convention = "subprocess"
+        reg = _make_function_registry({"my_pack:process": entry})
+        am = _make_approval_manager({"my_pack"})
+        pm = _make_permission_manager("permissive")
+        ex = _make_executor(reg, am, pm)
+        ex._execute_handler_subprocess = MagicMock(
+            return_value=CapabilityResponse(success=True, output={"bypassed": True})
+        )
+        ex._execute_user_function = MagicMock(
+            return_value=CapabilityResponse(success=False, error_type="docker_unavailable")
+        )
+
+        resp = ex.execute("p", {
+            "type": "function.call",
+            "qualified_name": "my_pack:process",
+        })
+
+        assert resp.error_type == "docker_unavailable"
+        ex._execute_handler_subprocess.assert_not_called()
+        ex._execute_user_function.assert_called_once()
+
 
 # ===========================================================================
 # 12. host_execution not_implemented

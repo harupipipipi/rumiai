@@ -503,7 +503,7 @@ def test_line_computer_use_fake_webhook_runs_three_browser_tasks_and_acknowledge
         assert context["computer_use_target_title"] == "LINE Chat"
         assert context["line_background_processing"] is True
         assert context["profile_policy"]["max_tool_calls"] == 30
-        assert context["profile_policy"]["yolo_mode"] is True
+        assert "yolo_mode" not in context["profile_policy"]
 
 
 def test_line_route_does_not_acknowledge_normal_line_reply_mode(monkeypatch, tmp_path):
@@ -666,7 +666,7 @@ def test_line_route_applies_endpoint_response_context(monkeypatch, tmp_path):
     assert captured["context"]["external_prompt_prefix"] == "Use computer_use in Google Chrome and reply in LINE Biz."
     assert captured["context"]["computer_use_target_app"] == "Google Chrome"
     assert captured["context"]["computer_use_target_title"] == "LINE"
-    assert captured["context"]["profile_policy"]["yolo_mode"] is True
+    assert "yolo_mode" not in captured["context"].get("profile_policy", {})
     assert captured["context"]["response_prompt_decision"]["action"] == "store_only"
     assert captured["context"]["response_prompt_decision"]["sensitivity"] == "local_only"
 

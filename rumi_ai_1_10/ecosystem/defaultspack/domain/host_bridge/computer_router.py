@@ -225,6 +225,7 @@ def _approval_required_response(
         },
     )
     wrapped = dict(result)
+    wrapped.pop("approval_token", None)
     wrapped.update(
         {
             "action": safe_action,

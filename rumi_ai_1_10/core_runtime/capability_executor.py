@@ -522,34 +522,42 @@ class CapabilityExecutor:
             return False
         return resolved.parent.name == "ecosystem"
 
+    def _trusted_builtin_pack_path_verdict(self, pack_id: str, pack_root_hint=None) -> bool | None:
+        """Return True/False for an existing path hint, or None when no path evidence exists."""
+        normalized_pack_id = str(pack_id or "").strip()
+        if normalized_pack_id not in TRUSTED_BUILTIN_PACK_IDS or pack_root_hint is None:
+            return None
+        try:
+            candidate_path = Path(pack_root_hint)
+            if not candidate_path.exists():
+                return None
+            if candidate_path.is_file():
+                candidate_path = candidate_path.parent
+            return self._is_bundled_builtin_pack_dir(candidate_path, normalized_pack_id)
+        except (OSError, TypeError):
+            return None
+
     def _is_trusted_builtin_pack(self, pack_id: str, pack_root_hint=None) -> bool:
         normalized_pack_id = str(pack_id or "").strip()
         if normalized_pack_id not in TRUSTED_BUILTIN_PACK_IDS:
             return False
 
+        path_verdict = self._trusted_builtin_pack_path_verdict(normalized_pack_id, pack_root_hint)
+        if path_verdict is not None:
+            return path_verdict
+
         approval_manager = getattr(self, "_approval_manager", None)
         helper = getattr(approval_manager, "_is_trusted_builtin_pack", None)
         if callable(helper):
             try:
-                if bool(helper(normalized_pack_id)):
-                    return True
+                return bool(helper(normalized_pack_id))
             except Exception:
                 logger.debug(
                     "approval_manager trusted builtin lookup failed for '%s'",
                     normalized_pack_id,
                     exc_info=True,
                 )
-
-        if pack_root_hint is None:
-            return False
-
-        try:
-            candidate_path = Path(pack_root_hint).resolve()
-            if candidate_path.is_file():
-                candidate_path = candidate_path.parent
-            return self._is_bundled_builtin_pack_dir(candidate_path, normalized_pack_id)
-        except (OSError, TypeError):
-            return False
+        return False
 
     def _dev_auto_reapprove_pack(self, pack_id: str) -> bool:
         if str(os.environ.get("RUMI_ENVIRONMENT", "")).lower() not in {"development", "dev"}:
@@ -609,6 +617,7 @@ class CapabilityExecutor:
             effective_permission_id = entry.qualified_name
 
         args = request.get("args", {})
+        request_context = request.get("context") if isinstance(request.get("context"), dict) else None
         timeout_seconds = min(float(request.get("timeout_seconds", DEFAULT_TIMEOUT)), MAX_TIMEOUT)
         request_id = request.get("request_id", "")
         handler_id = entry.qualified_name
@@ -663,7 +672,50 @@ class CapabilityExecutor:
                             trusted=False, detail_reason=trust_result.reason)
                 return resp
 
-        # 3. Grant チェック（opt-in: grant_config が非 None のときのみ）
+        # 3. Function manifest requirement checks
+        pack_id = getattr(entry, "pack_id", "")
+        pack_root_hint = getattr(entry, "function_dir", None) or getattr(entry, "main_py_path", None)
+        is_trusted_builtin = self._is_trusted_builtin_pack(pack_id, pack_root_hint=pack_root_hint)
+        principal_is_trusted_builtin = self._is_trusted_builtin_pack(principal_id)
+        if not principal_is_trusted_builtin and principal_id == pack_id:
+            principal_is_trusted_builtin = is_trusted_builtin
+
+        requires = getattr(entry, "requires", None) or []
+        if not (is_builtin or is_trusted_builtin) and requires:
+            for req_perm in requires:
+                if not self._has_permission_via_runtime_or_grant(pack_id, req_perm):
+                    resp = CapabilityResponse(success=False,
+                                              error=f"Function requires permission '{req_perm}' not granted to pack '{pack_id}'",
+                                              error_type="requires_denied", latency_ms=(time.time() - start_time) * 1000)
+                    self._audit(principal_id, effective_permission_id, handler_id, resp, args, request_id,
+                                trusted=True, detail_reason=f"Pack '{pack_id}' lacks required permission '{req_perm}'")
+                    return resp
+
+        caller_requires = getattr(entry, "caller_requires", None) or []
+        if caller_requires:
+            caller_ok = False
+            high_risk_approval_only = self._caller_requires_high_risk_approval_only(caller_requires)
+            if (
+                not high_risk_approval_only
+                and self._permission_manager is not None
+                and hasattr(self._permission_manager, "check_caller_requires")
+            ):
+                caller_ok = self._permission_manager.check_caller_requires(principal_id, caller_requires)
+            if not caller_ok and self._request_context_satisfies_caller_requires(
+                principal_id,
+                caller_requires,
+                request_context,
+                principal_is_trusted_builtin=principal_is_trusted_builtin,
+            ):
+                caller_ok = True
+            if not caller_ok:
+                resp = CapabilityResponse(success=False, error="Caller does not meet caller_requires",
+                                          error_type="caller_requires_denied", latency_ms=(time.time() - start_time) * 1000)
+                self._audit(principal_id, effective_permission_id, handler_id, resp, args, request_id,
+                            trusted=True, detail_reason=f"Principal '{principal_id}' does not meet caller_requires: {caller_requires}")
+                return resp
+
+        # 4. Grant チェック（opt-in: grant_config が非 None のときのみ）
         grant_config = {}
         entry_grant_config = self._entry_grant_config(entry)
         if entry_grant_config is not None:
@@ -676,7 +728,7 @@ class CapabilityExecutor:
                 return resp
             grant_config = grant_result.config or {}
 
-        # 4. calling_convention 分岐
+        # 5. calling_convention 分岐
         calling_convention = getattr(entry, "calling_convention", None)
         if calling_convention and calling_convention in _VALID_CALLING_CONVENTIONS:
             resp = self._dispatch_by_calling_convention(
@@ -689,7 +741,7 @@ class CapabilityExecutor:
                 grant_config=grant_config, args=args, timeout_seconds=timeout_seconds,
                 request_id=request_id, start_time=start_time)
 
-        # 5. 監査
+        # 6. 監査
         extra = {"unified_path": True}
         if is_builtin:
             extra["builtin_sha256"] = builtin_sha256
@@ -817,10 +869,31 @@ class CapabilityExecutor:
         pack_id = entry.pack_id
         is_core = pack_id.startswith(_CORE_PACK_ID_PREFIX)
         pack_root_hint = getattr(entry, "function_dir", None) or getattr(entry, "main_py_path", None)
-        is_trusted_builtin = self._is_trusted_builtin_pack(pack_id, pack_root_hint=pack_root_hint)
+        builtin_path_verdict = self._trusted_builtin_pack_path_verdict(pack_id, pack_root_hint)
+        if builtin_path_verdict is None:
+            is_trusted_builtin = self._is_trusted_builtin_pack(pack_id)
+        else:
+            is_trusted_builtin = builtin_path_verdict
         principal_is_trusted_builtin = self._is_trusted_builtin_pack(principal_id)
         if not principal_is_trusted_builtin and principal_id == pack_id:
             principal_is_trusted_builtin = is_trusted_builtin
+        if pack_id in TRUSTED_BUILTIN_PACK_IDS and builtin_path_verdict is False:
+            resp = CapabilityResponse(
+                success=False,
+                error=f"Built-in pack path is not trusted: {pack_id}",
+                error_type="pack_not_approved",
+                latency_ms=(time.time() - start_time) * 1000,
+            )
+            self._audit(
+                principal_id,
+                "function.call",
+                None,
+                resp,
+                args,
+                request_id,
+                detail_reason=f"Pack '{pack_id}' used a reserved built-in id from a non-canonical path",
+            )
+            return resp
         if self._approval_manager is not None:
             try:
                 approved_result = self._approval_manager.is_pack_approved_and_verified(pack_id)
@@ -892,7 +965,12 @@ class CapabilityExecutor:
                 return resp
         calling_convention = getattr(entry, "calling_convention", None)
         dispatch_grant_config = dict(self._entry_grant_config(entry) or {})
-        if calling_convention and calling_convention in _VALID_CALLING_CONVENTIONS:
+        allow_manifest_calling_convention = is_core or is_trusted_builtin
+        if (
+            allow_manifest_calling_convention
+            and calling_convention
+            and calling_convention in _VALID_CALLING_CONVENTIONS
+        ):
             resp = self._dispatch_by_calling_convention(
                 calling_convention=calling_convention,
                 entry=entry,

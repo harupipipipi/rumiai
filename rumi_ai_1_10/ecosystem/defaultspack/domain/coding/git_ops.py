@@ -39,6 +39,16 @@ class GitOps:
             ]
         return command_args
 
+    @staticmethod
+    def _validate_diff_ref(ref):
+        if ref is None or ref == "":
+            return None
+        if not isinstance(ref, str):
+            raise ValueError("git diff ref must be a string")
+        if ref.startswith("-") or "\x00" in ref:
+            raise ValueError("git diff ref is invalid")
+        return ref
+
     def _run_raw(self, args, timeout=30):
         completed = subprocess.run(
             ["git"] + list(args),
@@ -248,6 +258,7 @@ class GitOps:
 
     def diff(self, ref=None):
         """差分を返す。"""
+        ref = self._validate_diff_ref(ref)
         git_root = self.git_root()
         args = ["diff"]
         if ref:

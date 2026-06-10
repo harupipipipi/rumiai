@@ -139,6 +139,55 @@ def test_open_url_function_rejects_forged_server_approval_context(tmp_path, monk
     assert opened == {}
 
 
+def test_browser_computer_approval_response_does_not_self_issue_token(tmp_path):
+    controller = _controller(tmp_path)
+
+    result = controller.run("browser.open_url", {"url": "https://example.test", "persistent": False})
+
+    assert result["requires_approval"] is True
+    assert "approval_token" not in result
+    assert result["payload"]["url"] == "https://example.test"
+
+
+def test_browser_computer_accepts_only_signed_trusted_approval_token(tmp_path, monkeypatch):
+    from domain.safety import approval
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+
+    controller = _controller(tmp_path)
+    approval.reset_approval_state_for_tests()
+    opened = {}
+
+    def fake_open(url, *, app_name=""):
+        opened["url"] = url
+        opened["app_name"] = app_name
+        return True
+
+    monkeypatch.setattr(BrowserComputerController, "_open_url_foreground", staticmethod(fake_open))
+
+    initial = controller.run("browser.open_url", {"url": "https://example.test", "persistent": False})
+    bogus = controller.run(
+        "browser.open_url",
+        {**initial["payload"], "approval_token": "self-issued-or-attacker-token"},
+    )
+    assert bogus["requires_approval"] is True
+    assert opened == {}
+
+    request = approval.create_approval_request(
+        "browser.open_url",
+        "high",
+        {"action": "browser.open_url", "payload": initial["payload"]},
+        details={"tool_name": "browser_computer", "action": "browser.open_url", "pack_id": "defaultspack"},
+    )
+    decision = approval.approve(request["request_id"])
+    result = controller.run(
+        "browser.open_url",
+        {**initial["payload"], "approval_token": decision["token"]},
+    )
+
+    assert result["opened"] is True
+    assert opened["url"] == "https://example.test"
+
+
 def test_local_browser_computer_rejects_forged_server_approval_context(tmp_path, monkeypatch):
     from domain.tool import executor as executor_module
     from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
@@ -259,6 +308,19 @@ def test_windows_sendkeys_escapes_literals_and_supports_modifiers():
     assert BrowserComputerController._windows_send_key("back") == "{BACKSPACE}"
     assert BrowserComputerController._windows_send_key("back", ["alt"]) == "%{LEFT}"
     assert BrowserComputerController._windows_send_key("alt+back") == "%{LEFT}"
+
+
+def test_windows_key_action_escapes_powershell_string_literals(tmp_path, monkeypatch):
+    controller = _controller(tmp_path)
+    scripts = []
+    monkeypatch.setattr(controller, "_run_powershell", scripts.append)
+
+    controller._windows_desktop_action("computer.key", {"key": "'); Start-Process calc; #"})
+
+    assert len(scripts) == 1
+    assert "$key = '{''); START-PROCESS CALC; #}'" in scripts[0]
+    assert "$key = '{'); START-PROCESS CALC; #}'" not in scripts[0]
+    assert "SendWait($key)" in scripts[0]
 
 
 def test_windows_drag_steps_and_scrolls_at_point(tmp_path, monkeypatch):

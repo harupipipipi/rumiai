@@ -129,6 +129,20 @@ def test_desktop_capability_invalid_runtime_port_uses_grant_fallback(monkeypatch
     assert result["port"] == 8770
 
 
+def test_desktop_capability_rejects_invalid_target_pack_id():
+    from core_runtime.desktop_capability import DesktopCapabilityHandler
+
+    handler = DesktopCapabilityHandler()
+    with mock.patch("core_runtime.desktop_app_manager.DesktopAppManager.launch_app_with_env") as mock_launch:
+        result = handler.handle_execute(
+            principal_id="defaultspack",
+            args={"pack_id": "../user_data/evil", "action": "launch"},
+            grant_config={"allowed_packs": ["*"]},
+        )
+
+    assert result == {"error": "Invalid pack_id for desktop app execution: ../user_data/evil"}
+    mock_launch.assert_not_called()
+
 def test_desktop_capability_denies_empty_allowed_packs():
     from core_runtime.desktop_capability import DesktopCapabilityHandler
 

@@ -783,11 +783,17 @@ class ApprovalManager:
 
     # セキュリティクリティカルファイル/ディレクトリ定義
     CRITICAL_FILES = frozenset({
+        "ecosystem.json",
+        "permissions.json",
+        "routes.json",
         "backend/ecosystem.json",
         "backend/permissions.json",
         "backend/routes.json",
     })
     CRITICAL_DIRS = (
+        "flows/",
+        "lib/",
+        "components/",
         "backend/flows/",
         "backend/lib/",
         "backend/components/",

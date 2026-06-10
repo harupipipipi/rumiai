@@ -197,8 +197,8 @@ def test_tool_executor_file_reader_delegates_and_unknown_tools_fail_closed(tmp_p
 
     read = executor._execute_local(
         "file_reader",
-        {"path": "doc.txt", "workspace_root": str(tmp_path)},
-        {},
+        {"path": "doc.txt", "workspace_root": str(tmp_path / "ignored")},
+        {"workspace_root": str(tmp_path)},
     )
     unknown = executor._execute_local("missing_tool", {"x": 1}, {})
 
@@ -501,6 +501,33 @@ def test_git_diff_from_nested_workspace_disables_ancestor_external_diff(tmp_path
     assert diff["files"] == ["inside.txt"]
     assert "-clean" in diff["diff"]
     assert "+dirty" in diff["diff"]
+    assert not marker.exists()
+
+
+def test_git_diff_rejects_option_like_ref_without_external_diff(tmp_path):
+    from domain.coding.git_ops import GitOps
+
+    _init_git_repo(tmp_path)
+    workspace = tmp_path / "nested_ws"
+    workspace.mkdir()
+    (workspace / "inside.txt").write_text("clean\n", encoding="utf-8")
+    _git_commit_all(tmp_path)
+
+    marker = tmp_path / "external-diff-ran.txt"
+    payload = tmp_path / "external_diff_payload.sh"
+    payload.write_text(
+        "#!/bin/sh\n"
+        f"printf ran > {marker}\n"
+        "exit 0\n",
+        encoding="utf-8",
+    )
+    payload.chmod(0o755)
+    subprocess.run(["git", "config", "diff.external", str(payload)], cwd=tmp_path, check=True)
+    (workspace / "inside.txt").write_text("dirty\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="git diff ref is invalid"):
+        GitOps(workspace).diff(ref="--ext-diff")
+
     assert not marker.exists()
 
 

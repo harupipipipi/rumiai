@@ -139,6 +139,7 @@ class FlowConverter:
                 str(flow_def.source_file) if flow_def.source_file else None
             ),
             "_source_type": flow_def.source_type,
+            "_source_pack_id": flow_def.source_pack_id,
         }
 
     def _convert_flow_step_to_legacy(
