@@ -9,9 +9,18 @@ SENSITIVE_TOOL_CONTEXT_KEYS = {
     "tool_policy_decision",
     "_tool_permission_decision",
     "_tool_permission_internal",
+    "_tool_server_approved",
+    "_tool_server_approval_token_valid",
+    "_tool_server_approval_internal",
+    "_tool_server_approval_token",
+    "_tool_server_approval_operation",
+    "_tool_server_approval_args_hash",
+    "_tool_server_approval_pack_id",
+    "_tool_server_approval_conversation_id",
 }
 
 _INTERNAL_TOOL_PERMISSION = object()
+_TOOL_SERVER_APPROVAL_INTERNAL = object()
 
 
 def sanitize_tool_context(context: dict[str, Any] | None) -> dict[str, Any]:
@@ -26,6 +35,19 @@ def seal_tool_context(context: dict[str, Any] | None, decision: dict[str, Any]) 
     sealed["_tool_permission_decision"] = dict(decision or {})
     sealed["_tool_permission_internal"] = _INTERNAL_TOOL_PERMISSION
     return sealed
+
+
+def mark_tool_server_approval_context(context: dict[str, Any]) -> dict[str, Any]:
+    context["_tool_server_approved"] = True
+    context["_tool_server_approval_token_valid"] = True
+    context["_tool_server_approval_internal"] = _TOOL_SERVER_APPROVAL_INTERNAL
+    return context
+
+
+def tool_server_approval_context_is_internal(context: dict[str, Any] | None) -> bool:
+    if not isinstance(context, dict):
+        return False
+    return context.get("_tool_server_approval_internal") is _TOOL_SERVER_APPROVAL_INTERNAL
 
 
 def internal_tool_decision(context: dict[str, Any] | None) -> dict[str, Any] | None:

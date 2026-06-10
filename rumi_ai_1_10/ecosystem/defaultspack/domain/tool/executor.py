@@ -5,7 +5,11 @@ from .autonomy import autonomous_tool_execution_allowed
 from .eligibility import rejection_result
 from .schema_adapter import is_tool_rejected_by_policy, policy_from_context
 from .security import is_trusted_pack_id, requires_approval_for_security, unsupported_execution_reason
-from domain.tool_policy.internal_context import internal_tool_decision_allows
+from domain.tool_policy.internal_context import (
+    internal_tool_decision_allows,
+    mark_tool_server_approval_context,
+    tool_server_approval_context_is_internal,
+)
 from pathlib import Path
 import inspect
 import json
@@ -253,7 +257,7 @@ class ToolExecutor:
             response = executor.execute(principal_id, request)
             if (
                 isinstance(context, dict)
-                and context.get("_tool_server_approval_token_valid") is True
+                and tool_server_approval_context_is_internal(context)
                 and getattr(response, "error_type", "") == "pack_not_approved"
                 and str(request.get("type") or "").strip() == "function.call"
             ):
@@ -360,7 +364,7 @@ class ToolExecutor:
         }
 
     def _prepare_deferred_tool_approval(self, tool_def, request, context, capability_executor):
-        if not isinstance(context, dict) or context.get("_tool_server_approval_token_valid") is not True:
+        if not tool_server_approval_context_is_internal(context):
             return None
         if str(request.get("type") or "").strip() == "function.call":
             qualified_name = str(request.get("qualified_name") or "").strip()
@@ -921,7 +925,7 @@ class ToolExecutor:
             router_kwargs = {
                 "tool_name": tool_name,
                 "artifact_root": _conversation_tool_artifact_root(next_context),
-                "yolo_mode": _truthy(policy.get("yolo_mode")),
+                "yolo_mode": _truthy(policy.get("yolo_mode")) or _context_has_tool_server_approval(next_context),
             }
             if (
                 isinstance(current_tool_def, dict)
@@ -1597,8 +1601,7 @@ def _context_with_tool_approval_token(context, tool_def, arguments, *extra_looku
     if not isinstance(tool_def, dict):
         return next_context, None
     if _tool_has_autonomous_internal_approval(tool_def, arguments, next_context):
-        next_context["_tool_server_approved"] = True
-        next_context["_tool_server_approval_token_valid"] = True
+        mark_tool_server_approval_context(next_context)
         return next_context, None
     if not _requires_approval(tool_def):
         return next_context, None
@@ -1677,8 +1680,7 @@ def _context_with_tool_approval_token(context, tool_def, arguments, *extra_looku
         if verification is None:
             verification = candidate_verification
     if verification.valid:
-        next_context["_tool_server_approved"] = True
-        next_context["_tool_server_approval_token_valid"] = True
+        mark_tool_server_approval_context(next_context)
         next_context["_tool_server_approval_token"] = token
         next_context["_tool_server_approval_operation"] = verified_operation
         next_context["_tool_server_approval_args_hash"] = verified_args_hash
@@ -1814,12 +1816,7 @@ def _context_has_tool_server_approval(context):
     policy = policy_from_context(context)
     if _truthy(policy.get("yolo_mode")) or _is_policy_allow_context(context):
         return True
-    if context.get("_tool_server_approval_token_valid") is True:
-        return True
-    return bool(
-        context.get("_tool_server_approved")
-        and any(str(context.get(key) or "").strip() for key in ("principal_id", "pack_id", "_source_pack_id"))
-    )
+    return tool_server_approval_context_is_internal(context)
 
 
 def _function_call_context(context, tool_def):
@@ -1847,11 +1844,9 @@ def _function_call_context(context, tool_def):
     policy = policy_from_context(context)
     if _truthy(policy.get("yolo_mode")) or _is_policy_allow_context(context):
         forwarded["_tool_server_approved"] = True
-    if context.get("_tool_server_approval_token_valid") is True:
+    if tool_server_approval_context_is_internal(context):
         forwarded["_tool_server_approved"] = True
         forwarded["_tool_server_approval_token_valid"] = True
-    if _requires_approval(tool_def) and bool(context.get("_tool_server_approved")):
-        forwarded["_tool_server_approved"] = True
     return forwarded
 
 

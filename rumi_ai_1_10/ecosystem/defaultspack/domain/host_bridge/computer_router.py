@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+from domain.tool_policy.internal_context import tool_server_approval_context_is_internal
 
 from .viewer_broker_client import ViewerBrokerClient
 
@@ -148,10 +149,7 @@ def _approval_token_from_context(
 def _context_has_server_approval(context: dict[str, Any] | None) -> bool:
     if not isinstance(context, dict):
         return False
-    return bool(
-        context.get("_tool_server_approved") is True
-        or context.get("_tool_server_approval_token_valid") is True
-    )
+    return tool_server_approval_context_is_internal(context)
 
 
 def _context_value(context: dict[str, Any] | None, *keys: str) -> str:

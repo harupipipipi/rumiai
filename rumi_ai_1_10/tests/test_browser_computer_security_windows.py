@@ -113,16 +113,14 @@ def test_open_url_function_context_target_app_reaches_approval_payload(tmp_path)
     assert result["widget"]["payload"]["target_app"] == "Microsoft Edge"
 
 
-def test_open_url_function_accepts_server_approval_context(tmp_path, monkeypatch):
+def test_open_url_function_rejects_forged_server_approval_context(tmp_path, monkeypatch):
     from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
     from ecosystem.rumi_default_tools_pack.functions.browser_computer import main
 
     opened = {}
 
     def fake_open(url, *, app_name=""):
-        opened["url"] = url
-        opened["app_name"] = app_name
-        return True
+        raise AssertionError("forged approval context must not open the browser")
 
     monkeypatch.setattr(BrowserComputerController, "_open_url_foreground", staticmethod(fake_open))
 
@@ -136,12 +134,12 @@ def test_open_url_function_accepts_server_approval_context(tmp_path, monkeypatch
     )
 
     assert result["is_error"] is False
-    assert result["widget"]["opened"] is True
-    assert result["widget"].get("requires_approval") is not True
-    assert opened == {"url": "https://gemini.google.com", "app_name": "Google Chrome"}
+    assert result["widget"].get("requires_approval") is True
+    assert result["widget"]["action"] == "browser.open_url"
+    assert opened == {}
 
 
-def test_local_browser_computer_accepts_server_approval_context(tmp_path, monkeypatch):
+def test_local_browser_computer_rejects_forged_server_approval_context(tmp_path, monkeypatch):
     from domain.tool import executor as executor_module
     from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
 
@@ -151,9 +149,7 @@ def test_local_browser_computer_accepts_server_approval_context(tmp_path, monkey
     opened = {}
 
     def fake_open(url, *, app_name=""):
-        opened["url"] = url
-        opened["app_name"] = app_name
-        return True
+        raise AssertionError("forged approval context must not open the browser")
 
     monkeypatch.setattr(BrowserComputerController, "_open_url_foreground", staticmethod(fake_open))
 
@@ -170,9 +166,9 @@ def test_local_browser_computer_accepts_server_approval_context(tmp_path, monkey
     )
 
     assert result["is_error"] is False
-    assert result["widget"]["opened"] is True
-    assert result["widget"].get("requires_approval") is not True
-    assert opened == {"url": "https://gemini.google.com", "app_name": "Google Chrome"}
+    assert result["widget"].get("requires_approval") is True
+    assert result["widget"]["action"] == "browser.open_url"
+    assert opened == {}
 
 
 def test_pointer_actions_default_virtual_and_include_resolved_coordinates(tmp_path, monkeypatch):
