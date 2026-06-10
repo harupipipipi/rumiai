@@ -1,3 +1,7 @@
+<!-- docs-i18n-links:start -->
+[EN](./migration_agent_runtime.md) | [JP](./i18n/ja/migration_agent_runtime.md) | [KR](./i18n/ko/migration_agent_runtime.md) | [CN](./i18n/zh-cn/migration_agent_runtime.md)
+<!-- docs-i18n-links:end -->
+
 # Agent Runtime Migration
 
 No existing public agent or chat API was removed.

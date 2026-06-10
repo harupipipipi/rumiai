@@ -1,3 +1,7 @@
+<!-- docs-i18n-links:start -->
+[EN](./pr53_manual_verification.md) | [JP](./i18n/ja/pr53_manual_verification.md) | [KR](./i18n/ko/pr53_manual_verification.md) | [CN](./i18n/zh-cn/pr53_manual_verification.md)
+<!-- docs-i18n-links:end -->
+
 # PR #53 Follow-up Manual Verification
 
 Use the browser UI after starting the defaultspack webapp.

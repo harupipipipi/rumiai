@@ -1,21 +1,25 @@
-# Memory 機能ガイド
+<!-- docs-i18n-links:start -->
+[EN](./memory.md) | [JP](./i18n/ja/memory.md) | [KR](./i18n/ko/memory.md) | [CN](./i18n/zh-cn/memory.md)
+<!-- docs-i18n-links:end -->
 
-## 1. 概要
+# Memory function guide
 
-memory モジュールは defaults の `domain/memory/` に配置されるドメインコードであり、長期メモリの保存・検索、プロジェクトコンテキストの管理、ベクトルストアの操作を handler として提供する。
+## 1. Overview
 
-メモリには2種類ある。プロジェクトメモリはワークスペース単位の永続メモリで、`workspace/.rumi/memory/project.md` にマークダウン形式で保存される。ユーザーメモリはユーザー単位の永続メモリで、`user_data/memory/user.md` に保存される。
+The memory module is a domain code placed in `domain/memory/` of defaults, and provides long-term memory storage and retrieval, project context management, and vector store operations as a handler.
 
-短期メモリ（セッション中の会話履歴）は chat モジュールと agent モジュールが管理する。memory モジュールの対象外である。
+There are two types of memory. Project memory is persistent memory for each workspace and is saved in markdown format in `workspace/.rumi/memory/project.md`. User memory is persistent memory for each user and is stored in `user_data/memory/user.md`.
+
+Short-term memory (conversation history during a session) is managed by the chat and agent modules. It is not covered by the memory module.
 
 
 ## 2. store
 
 ### defaults.memory.store
 
-メモリにコンテンツを保存する。
+Store content in memory.
 
-権限: `memory.long.write`
+Permissions: `memory.long.write`
 
 input_data:
 ```json
@@ -27,9 +31,9 @@ input_data:
 }
 ```
 
-`memory_type` は `"project"` または `"user"`。`merge_strategy` は `"append"`（末尾に追加）、`"replace"`（全置換）、`"smart"`（AI で既存内容とマージ）から選択。
+`memory_type` is `"project"` or `"user"`. For `merge_strategy`, select from `"append"` (add to end), `"replace"` (complete replacement), `"smart"` (merge with existing content using AI).
 
-戻り値:
+Return value:
 ```json
 {
   "success": true,
@@ -44,9 +48,9 @@ input_data:
 
 ### defaults.memory.recall
 
-メモリからコンテンツを取得する。
+Retrieve content from memory.
 
-権限: `memory.long.read`, `memory.long.search`
+Authority: `memory.long.read`, `memory.long.search`
 
 input_data:
 ```json
@@ -57,9 +61,9 @@ input_data:
 }
 ```
 
-`query` が空文字の場合はメモリ全文を返す。`query` が指定された場合はメモリ内から関連部分を抽出して返す。
+If `query` is an empty string, return the entire memory. If `query` is specified, extract the relevant part from memory and return it.
 
-戻り値:
+Return value:
 ```json
 {
   "content": "## 認証の実装方針\nOAuth 2.0 を採用し...",
@@ -69,16 +73,16 @@ input_data:
 }
 ```
 
-`full_content` は全文を返したか部分抽出かを示す。
+`full_content` indicates whether the full text or partial extraction is returned.
 
 
 ## 4. project context
 
 ### defaults.memory.project_context
 
-プロジェクトメモリの全文を取得する。recall の `query` 空文字版のショートカット。
+Get the entire project memory. `query` Empty text version shortcut for recall.
 
-権限: `memory.project.read`
+Permissions: `memory.project.read`
 
 input_data:
 ```json
@@ -87,7 +91,7 @@ input_data:
 }
 ```
 
-戻り値:
+Return value:
 ```json
 {
   "content": "# Project Memory\n\n## 技術スタック\nPython + FastAPI...\n\n## 設計方針\n...",
@@ -102,9 +106,9 @@ input_data:
 
 ### defaults.memory.vector_store
 
-テキストをベクトル化してベクトルストアに保存する。
+Vectorize the text and save it to the vector store.
 
-権限: `memory.vector.store`
+Permissions: `memory.vector.store`
 
 input_data:
 ```json
@@ -121,9 +125,9 @@ input_data:
 }
 ```
 
-`content` は自動的にチャンク分割される。`collection` はベクトルストアのコレクション名。`chunk_size` / `chunk_overlap` はチャンク分割のパラメータ。
+`content` is automatically chunked. `collection` is the vector store collection name. `chunk_size` / `chunk_overlap` are parameters for chunk division.
 
-戻り値:
+Return value:
 ```json
 {
   "success": true,
@@ -135,9 +139,9 @@ input_data:
 
 ### defaults.memory.vector_query
 
-ベクトル検索でクエリに類似するチャンクを取得する。
+Get chunks similar to a query with vector search.
 
-権限: `memory.vector.query`
+Permissions: `memory.vector.query`
 
 input_data:
 ```json
@@ -150,9 +154,9 @@ input_data:
 }
 ```
 
-`top_k` は返す結果の最大数。`threshold` は類似度の閾値（0.0〜1.0）。`filter` はメタデータによるフィルタ。
+`top_k` is the maximum number of results to return. `threshold` is the similarity threshold (0.0 to 1.0). `filter` is a filter based on metadata.
 
-戻り値:
+Return value:
 ```json
 {
   "matches": [
@@ -181,9 +185,9 @@ input_data:
 
 ## 6. Memory2 durable backend
 
-このPRでは `domain/memory2` を追加し、既存 `MemoryStore` APIを壊さずにSQLite + Markdownへミラーする。
+This PR adds `domain/memory2` and mirrors it to SQLite + Markdown without breaking the existing `MemoryStore` API.
 
-追加保存先:
+Additional save destination:
 
 ```text
 user_data/shared/memory/state.db
@@ -194,7 +198,7 @@ user_data/shared/memory/DREAMS.md
 user_data/shared/memory/wiki/
 ```
 
-追加blocks:
+Additional blocks:
 
 ```text
 defaults.memory.add

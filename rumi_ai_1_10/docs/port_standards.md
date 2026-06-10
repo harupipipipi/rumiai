@@ -1,3 +1,7 @@
+<!-- docs-i18n-links:start -->
+[EN](./port_standards.md) | [JP](./i18n/ja/port_standards.md) | [KR](./i18n/ko/port_standards.md) | [CN](./i18n/zh-cn/port_standards.md)
+<!-- docs-i18n-links:end -->
+
 # Port Standards
 
 Port standards are string identifiers used to decide whether two ports can connect.

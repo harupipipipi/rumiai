@@ -1,13 +1,17 @@
+<!-- docs-i18n-links:start -->
+[EN](./README.md) | [JP](../../i18n/ja/examples/viewer_hello_pack/README.md) | [KR](../../i18n/ko/examples/viewer_hello_pack/README.md) | [CN](../../i18n/zh-cn/examples/viewer_hello_pack/README.md)
+<!-- docs-i18n-links:end -->
+
 # Viewer Hello Pack
 
-Rumi AI OS の **viewer:display** capability を使うサンプル Pack です。
-Rumi Viewer 内に Hello World フロントエンドを表示します。
+This is a sample pack that uses Rumi AI OS's **viewer:display** capability.
+Display the Hello World frontend inside Rumi Viewer.
 
-Pack 開発者がコピーして改造できるテンプレートとしても機能します。
+Pack also serves as a template that developers can copy and modify.
 
 ---
 
-## ディレクトリ構成
+## Directory structure
 
 ```
 viewer_hello_pack/
@@ -20,59 +24,59 @@ viewer_hello_pack/
 
 ---
 
-## viewer:display capability とは
+## What is viewer:display capability?
 
-`viewer:display` は Rumi AI OS の core capability の一つで、Pack が Rumi Viewer（Tauri ベースのデスクトップ UI）にフロントエンドを表示するための権限です。
+`viewer:display` is one of the core capabilities of Rumi AI OS, and is the permission for Pack to display the front end in Rumi Viewer (Tauri-based desktop UI).
 
-この capability を持つ Pack は:
+Packs with this capability:
 
-1. `web_mount` で指定したディレクトリの静的ファイルが Viewer から配信される
-2. Kernel が短期トークンを発行し、Viewer がそのトークンで認証する
-3. フロントエンドから Kernel API（`localhost:8765`）を呼び出せる
+1. Static files in the directory specified in `web_mount` are distributed from the Viewer.
+2. Kernel issues a short-term token and Viewer authenticates with that token
+3. Kernel API (`localhost:8765`) can be called from the front end
 
-capability の定義は `core_runtime/core_pack/core_viewer_capability/` にあります。
+The definition of capability is in `core_runtime/core_pack/core_viewer_capability/`.
 
 ---
 
-## 使い方
+## How to use
 
-### 1. Pack を配置する
+### 1. Place the pack
 
-このディレクトリを `ecosystem/` にコピーします:
+Copy this directory to `ecosystem/`:
 
 ```bash
 cp -r docs/examples/viewer_hello_pack/ ecosystem/viewer_hello_pack/
 ```
 
-### 2. Kernel を起動する
+### 2. Start Kernel
 
 ```bash
 python -m rumi_ai
 ```
 
-Kernel が起動すると `ecosystem/viewer_hello_pack/ecosystem.json` を自動でスキャンします。
+When Kernel starts, it automatically scans `ecosystem/viewer_hello_pack/ecosystem.json`.
 
-### 3. Pack を承認する
+### 3. Approve the pack
 
-ecosystem Pack は初回で承認が必要です（core_pack と異なり自動承認されません）。
-Kernel の API または管理画面から Pack を承認してください。
+ecosystem packs require approval the first time (unlike core_packs, they are not automatically approved).
+Please approve the pack from the Kernel API or management screen.
 
-### 4. Grant を取得する
+### 4. Get a Grant
 
-`viewer.display` permission の Grant が必要です。
-以下の手順で Grant を設定します:
+`viewer.display` Permission grant is required.
+Configure the grant as follows:
 
-- Kernel の GrantManager に `viewer_hello_pack` への `viewer.display` Grant を追加
-- Grant が設定されると、viewer:display function を通じてフロントエンドが表示可能になります
+- Added `viewer.display` Grant to `viewer_hello_pack` to Kernel GrantManager
+- Once the grant is set, the frontend will be visible through the viewer:display function
 
-### 5. Viewer で表示する
+### 5. Display with Viewer
 
-Rumi Viewer を起動すると、承認・Grant 済みの Pack のフロントエンドが表示されます。
-`web/index.html` が Viewer 内にレンダリングされ、Kernel API との通信デモが動作します。
+When you start Rumi Viewer, you will see the front end of approved/granted packs.
+`web/index.html` is rendered in the Viewer and the communication demo with the Kernel API works.
 
 ---
 
-## ecosystem.json の解説
+## Explanation of ecosystem.json
 
 ```json
 {
@@ -82,16 +86,16 @@ Rumi Viewer を起動すると、承認・Grant 済みの Pack のフロント�
 }
 ```
 
-| フィールド | 説明 |
+| Field | Description |
 |-----------|------|
-| `capabilities` | 要求する capability のリスト。`viewer.display` を指定すると Viewer 表示が可能になる |
-| `web_mount` | 静的ファイルを配信するディレクトリ。Pack ルートからの相対パス |
+| `capabilities` | List of requested capabilities. Specifying `viewer.display` enables Viewer display |
+| `web_mount` | Directory to serve static files. Path relative to Pack root |
 
 ---
 
-## Kernel API 通信
+## Kernel API communication
 
-`web/app.js` に Kernel API への fetch サンプルが含まれています。
+`web/app.js` contains a fetch sample to the Kernel API.
 
 ```javascript
 fetch("http://localhost:8765/api/health", {
@@ -102,22 +106,22 @@ fetch("http://localhost:8765/api/health", {
   .then(data => console.log(data));
 ```
 
-Kernel API のデフォルトポートは `8765` です。
+The default port for the Kernel API is `8765`.
 
 ---
 
-## カスタマイズのヒント
+## Customization Tips
 
-- **UI を変更する**: `web/index.html` の HTML/CSS を編集します。外部 CSS フレームワークを追加することも可能です
-- **API 呼び出しを追加する**: `web/app.js` に新しい fetch 呼び出しを追加します
-- **Functions を追加する**: `ecosystem.json` の `functions` セクションと `functions/` ディレクトリに Function を追加すると、バックエンド処理も実装できます
-- **複数ページ**: `web/` ディレクトリにページを追加し、SPA ルーティングや複数 HTML ファイルで対応できます
-- **Pack 名を変更する**: `ecosystem.json` の `pack_id` と `pack_identity` を変更してください
+- **Change UI**: Edit HTML/CSS of `web/index.html`. It is also possible to add external CSS frameworks
+- **Add API call**: Add new fetch call to `web/app.js`
+- **Add Functions**: You can also implement backend processing by adding Functions to the `functions` section of `ecosystem.json` and the `functions/` directory
+- **Multiple Pages**: Add pages to the `web/` directory and support them with SPA routing and multiple HTML files
+- **Change Pack name**: Please change `pack_id` and `pack_identity` of `ecosystem.json`
 
 ---
 
-## 関連ドキュメント
+## Related documents
 
-- [Pack 開発ガイド](../../pack-development.md)
-- [多言語 Pack 開発ガイド](../../multilang_pack_guide.md)
+- [Pack Development Guide](../../pack-development.md)
+- [Multilingual Pack Development Guide](../../multilang_pack_guide.md)
 - [core_viewer_capability](../../../core_runtime/core_pack/core_viewer_capability/)

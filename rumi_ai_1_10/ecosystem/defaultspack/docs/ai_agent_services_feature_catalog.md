@@ -1,6 +1,10 @@
+<!-- docs-i18n-links:start -->
+[EN](./ai_agent_services_feature_catalog.md) | [JP](./i18n/ja/ai_agent_services_feature_catalog.md) | [KR](./i18n/ko/ai_agent_services_feature_catalog.md) | [CN](./i18n/zh-cn/ai_agent_services_feature_catalog.md)
+<!-- docs-i18n-links:end -->
+
 # AI Agent Services Feature Catalog
 
-defaultspack の標準語彙として、現代 AI agent 系サービスの機能をローカル優先で整理する。
+As defaultspack's standard vocabulary, functions of modern AI agent-based services are organized with local priority.
 
 | id | category | inspired_by | local | api | priority | status | defaultspack target |
 |---|---|---|---:|---:|---|---|---|

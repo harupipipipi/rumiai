@@ -1,43 +1,47 @@
+<!-- docs-i18n-links:start -->
+[EN](./roadmap.md) | [JP](./i18n/ja/roadmap.md) | [KR](./i18n/ko/roadmap.md) | [CN](./i18n/zh-cn/roadmap.md)
+<!-- docs-i18n-links:end -->
+
 # Rumi AI OS — Roadmap
 
-## 🚀 Phase V: Rumi Viewer + Pack デスクトップアプリ化 [最重要・最優先]
+## 🚀 Phase V: Rumi Viewer + Pack Desktop application [Most important/top priority]
 
-> **このフェーズは全ての他タスクに優先する。**
-> Rumi を「ターミナル不要のデスクトップアプリ」として配布可能にするための最重要マイルストーン。
+> **This phase takes precedence over all other tasks. **
+> Most important milestone to enable Rumi to be distributed as a "terminal-free desktop app".
 
-### アーキテクチャ概要
+### Architecture Overview
 
-**インストーラーの中身（ユーザーに配布されるもの）:**
+**Contents of the installer (distributed to users):**
 
-1. **Rumi Console**（rumi-launcher, Rust）— トレイ常駐。Kernel プロセス管理。ユーザーは普段意識しない。
-2. **Rumi Viewer**（Tauri）— Pack のフロントエンドを表示する汎用 WebView アプリ。ユーザーが日常使うメインアプリ。
-3. **bundled/uv** — Python 環境構築用。
-4. **app/**（rumi_ai_1_10/）— Kernel ソースコード。
+1. **Rumi Console** (rumi-launcher, Rust)—Resident in tray. Kernel process management. Users are usually not aware of this.
+2. **Rumi Viewer** (Tauri) — A general-purpose WebView app that displays the Pack front end. The main app that users use on a daily basis.
+3. **bundled/uv** — For building a Python environment.
+4. **app/** (rumi_ai_1_10/) — Kernel source code.
 
-**Rumi Viewer とは:**
-- Tauri で作った汎用 WebView アプリ
-- Pack が `web_mount` で宣言したフロントエンド（HTML/CSS/JS）を表示する
-- Kernel API（localhost:8765）にのみ接続可能。外部サイトには行けない
-- Pack はフロントエンドファイルを渡すだけ。ホスト環境には触れない（sandbox WebView）
-- Pack のバックエンドは Docker コンテナ内で隔離されて動く
-- 「フロントエンド = sandbox WebView」+「バックエンド = Docker 隔離」で二重隔離
+**What is Rumi Viewer:**
+- General-purpose WebView application created with Tauri
+- Display the frontend (HTML/CSS/JS) declared by Pack in `web_mount`
+- Can only connect to Kernel API (localhost:8765). I can't go to external sites
+- Pack just passes the front end file. Do not touch the host environment (sandbox WebView)
+- Pack backend runs isolated in a Docker container
+- Double isolation with "frontend = sandbox WebView" + "backend = Docker isolation"
 
-**セキュリティモデル:**
-- Viewer に何かを表示するには `viewer:display` capability が必要（capability ベースの権限管理）
-- 権限さえあればどの Pack でも Viewer を使える
-- `core_viewer_capability` は `core_docker_capability` や `core_communication_capability` と同じ位置づけ
-- Pack が独自のデスクトップアプリ（Tauri/Electron 等）を提供することも可能だが、それは「危険な権限」（`desktop_app.execute`）として扱われ、明示的なユーザー承認が必要
-- ほとんどの Pack は安全な Viewer 経由を使うはず
+**Security model:**
+- `viewer:display` capability is required to display something in the Viewer (capability-based permission management)
+- Viewer can be used in any pack as long as you have the privileges
+- `core_viewer_capability` has the same position as `core_docker_capability` and `core_communication_capability`
+- It is possible for Packs to provide their own desktop apps (Tauri/Electron, etc.), but this will be treated as a "risky permission" (`desktop_app.execute`) and will require explicit user approval.
+- Most Packs should use the secure Viewer route.
 
-**ユーザー体験:**
-1. ユーザーがインストーラー（.dmg / .exe）でインストール
-2. Rumi Viewer をダブルクリック
-3. Rumi Console が自動起動 → Kernel が裏で起動
-4. Viewer に Control Panel が表示される
-5. Pack をインストール → Pack の AI チャット等のフロントエンドが Viewer 内に表示される
-6. ターミナルを一切触らない
+**User Experience:**
+1. User installs with installer (.dmg/.exe)
+2. Double-click Rumi Viewer
+3. Rumi Console starts automatically → Kernel starts in the background
+4. Control Panel is displayed in Viewer
+5. Install the Pack → Pack's front end such as AI chat will be displayed in the Viewer.
+6. Don't touch the terminal at all
 
-**起動フロー:**
+**Startup flow:**
 ```
 Rumi Viewer 起動
   → Kernel ヘルスチェック（localhost:8765/health）
@@ -47,377 +51,377 @@ Rumi Viewer 起動
   → ユーザーが Pack を選択 → Pack のフロントエンドに遷移
 ```
 
-**競合・エラー処理:**
-- 競合、起動時エラーは Rumi Console（トレイアイコン）で表示・対処
-- Viewer はあくまで「表示するだけ」
+**Conflict/Error Handling:**
+- Conflicts and startup errors can be displayed and dealt with using Rumi Console (tray icon)
+- Viewer is only for displaying
 
-### TODO（実装順）
+### TODO (in order of implementation)
 
-**Phase V-1: Rumi Viewer（Tauri）新規作成** [最重要・最優先]
-- [ ] `rumi_viewer/` Tauri プロジェクト新規作成
-- [ ] Kernel ヘルスチェック + 自動起動（Rumi Console 経由）
-- [ ] WebView で localhost:8765/panel/ を表示
-- [ ] Pack 切替 UI（Viewer 内のナビゲーション）
-- [ ] Kernel API へのリクエストのみ許可（外部 URL ブロック）
-- [ ] ウィンドウ管理（複数 Pack を同時に開ける）
+**Phase V-1: Create new Rumi Viewer (Tauri)** [Most important/top priority]
+- [ ] `rumi_viewer/` Create a new Tauri project
+- [ ] Kernel health check + autostart (via Rumi Console)
+- [ ] Display localhost:8765/panel/ in WebView
+- [ ] Pack switching UI (navigation in Viewer)
+- [ ] Allow only requests to Kernel API (external URL block)
+- [ ] Window management (multiple packs can be opened at the same time)
 
-**Phase V-2: core_viewer_capability 新規作成**
-- [ ] `core_runtime/core_pack/core_viewer_capability/` 新規作成
-- [ ] `viewer:display` capability 定義
-- [ ] Pack が Viewer にフロントエンドを表示するための Grant 管理
-- [ ] Viewer 用の pack_token 発行 API（`/api/viewer/token`）
+**Phase V-2: core_viewer_capability new creation**
+- [ ] `core_runtime/core_pack/core_viewer_capability/` Create new
+- [ ] `viewer:display` capability definition
+- [ ] Grant management for Pack to display frontend in Viewer
+- [ ] pack_token issuance API for Viewer (`/api/viewer/token`)
 
-**Phase V-3: インストーラー統合**
-- [ ] Packager.toml に Rumi Viewer を追加
-- [ ] release.yml 更新（Viewer のビルドを追加）
-- [ ] インストーラーに Rumi Console + Rumi Viewer + bundled/uv + app/ を全て含める
-- [ ] macOS: .dmg に両方のアプリを含める
-- [ ] Windows: NSIS で両方インストール + スタートメニュー登録
+**Phase V-3: Installer integration**
+- [ ] Add Rumi Viewer to Packager.toml
+- [ ] update release.yml (add viewer build)
+- [ ] Include all Rumi Console + Rumi Viewer + bundled/uv + app/ in the installer
+- [ ] macOS: Include both apps in .dmg
+- [ ] Windows: Install both with NSIS + Start menu registration
 
-**Phase V-4: Pack デスクトップアプリ対応（オプション）**
-- [ ] ecosystem.json に `desktop_app` セクション追加
-- [ ] `desktop_app.command` で任意コマンドを宣言可能
-- [ ] `desktop_app.execute` capability（危険な権限、明示的承認必要）
-- [ ] pack-shell バイナリ（Kernel 自動起動 + token 取得 + コマンド実行）
-- [ ] .app / .lnk 生成（PackAppRegistrar）
+**Phase V-4: Pack desktop app compatible (optional)**
+- [ ] Added `desktop_app` section to ecosystem.json
+- [ ] Arbitrary commands can be declared with `desktop_app.command`
+- [ ] `desktop_app.execute` capability (dangerous authority, requires explicit authorization)
+- [ ] pack-shell binary (Kernel auto-start + token acquisition + command execution)
+- [ ] .app / .lnk generation (PackAppRegistrar)
 
-**Phase V-5: ドキュメント + テンプレート**
-- [ ] `docs/pack_desktop_app_guide.md` 新規作成
-- [ ] Tauri Pack テンプレートプロジェクト
-- [ ] サンプル Pack（AI チャットフロントエンド）
-
----
-
-
-最終更新: 2026-02-24
-
-設計思想・過去案を含む完全版ロードマップです。設計の全体像は [architecture.md](architecture.md) を参照してください。
+**Phase V-5: Documents + Templates**
+- [ ] `docs/pack_desktop_app_guide.md` Create new
+- [ ] Tauri Pack template project
+- [ ] Sample Pack (AI chat front end)
 
 ---
 
-## 0. 北極星（Vision）
 
-- **基盤のない基盤**: 公式はドメイン概念（チャット / ツール / プロンプト / UI 等）を一切持たず、「実行・承認・隔離・監査・権限」という OS 的な仕組みのみを提供する。
-- ecosystem は第三者が作る前提（悪意前提）で、**承認必須**・**Docker 隔離（strict 推奨）**・**Fail-soft**・**監査ログ**が中核。
+Last updated: 2026-02-24
+
+This is a complete roadmap that includes design concepts and past plans. See [architecture.md](./architecture.md) for the complete design.
 
 ---
 
-## 1. 設計原則（Principles）
+## 0. North Star (Vision)
 
-### 1.1 No Favoritism（贔屓なし）
+- **Foundation without infrastructure**: The official version has no domain concept (chat/tools/prompts/UI, etc.) and only provides OS-like mechanisms such as "execution, approval, isolation, audit, and authority."
+- The ecosystem is assumed to be created by a third party (malicious assumption), and the core is **Approval required**, **Docker isolation (strict recommended)**, **Fail-soft**, and **Audit log**.
 
-公式コアは「API key」「tool」「chat」等の意味を解釈しない。公式が提供するのは汎用機構: Flow 実行、承認ゲート（hash 検証）、隔離実行（Docker / UDS）、Trust + Grant（capability）、監査ログ。
+---
 
-### 1.2 悪意前提（Threat model）
+## 1. Design Principles
 
-Pack 作者に悪意がある可能性を常に想定。Pack 実行は原則 Docker `--network=none`。外部通信やホスト特権は capability（Trust + Grant）に寄せる。
+### 1.1 No Favoritism
+
+The official core does not interpret the meaning of "API key", "tool", "chat", etc. Officially provided generic mechanisms: Flow execution, authorization gate (hash validation), isolated execution (Docker/UDS), Trust + Grant (capability), audit log.
+
+### 1.2 Malice premise (Threat model)
+
+Pack Always assume the possibility that the author has malicious intent. Pack execution is basically Docker `--network=none`. External communication and host privileges are assigned to capability (Trust + Grant).
 
 ### 1.3 Fail-soft
 
-一部が壊れても OS 全体は止めない。診断（Diagnostics）と監査（Audit）で可視化し継続する。
+Even if one part breaks, the entire OS does not stop. Visualize and continue with diagnostics and audits.
 
-### 1.4 ホスト権限の単一入口
+### 1.4 Single entry point for host privileges
 
-ホストで危険なこと（外部通信、ファイルアクセス、更新適用、ターミナル等）は、Pack から直接やらせず capability で仲介し、許可がない限り動かない。
+Dangerous things on the host (external communication, file access, update application, terminal, etc.) are not done directly by Pack, but are mediated by capabilities, and cannot be done without permission.
 
 ---
 
-## 2. コンセプト整理
+## 2. Concept organization
 
 ### 2.1 Pack / principal / capability
 
-- **principal**: 権限判断の主体。v1 は運用を簡単にするため pack_id 単位を基本とする。
-- capability は `permission_id` で要求し、Trust（sha256）と Grant（principal × permission）で許可。
+- **principal**: Subject of authority determination. v1 is based on pack_id units to simplify operation.
+- Capability is requested with `permission_id` and granted with Trust (sha256) and Grant (principal × permission).
 
-### 2.2 pack in pack（階層化）
+### 2.2 pack in pack (layering)
 
-`parent__child` のように階層を pack_id で表現し、上位が下位を制限する（上位が許可しないと下位は動かない）を実現。
+As in `parent__child`, the hierarchy is expressed by pack_id, and the higher level restricts the lower level (the lower level will not move unless the higher level allows it).
 
-目的: bundle 配布、運用の一括管理、権限の親子制約。
+Purpose: Bundle distribution, integrated management of operations, parent-child permission constraints.
 
-> 注意: ディレクトリ階層 ≠ セキュリティ境界。強制力は「ホスト側のゲート（capability / 実行器）」で担保する。
+> Note: Directory hierarchy ≠ security boundary. Enforcement power is ensured by the ``host side gate (capability / execution device)''.
 
-### 2.3 Store / Unit（共有領域と再利用単位）
+### 2.3 Store / Unit (shared area and reuse unit)
 
-ユーザー / ecosystem が任意に作れる共有領域（Store）と、その中の再利用単位（Unit）は汎用基盤として価値がある。Unit は `data / python / binary` 等を取りうる。実行系 Unit は Pack 承認 + Unit Trust（sha256 allowlist）を基本とする。
+A shared area (Store) that users/ecosystems can create arbitrarily and a reusable unit (Unit) within that area are valuable as a general-purpose platform. Unit can be `data / python / binary` etc. The execution unit is based on Pack approval + Unit Trust (sha256 allowlist).
 
-実行モードは権限に応じて選べる（矯正しない）: pack container、host capability、dedicated sandbox（将来）。
-
----
-
-## 3. 公式コアの土台一覧
-
-### 3.1 依存（pip）導入
-
-Pack が `requirements.lock` を同梱。wheel-only がデフォルト（sdist は例外承認）。builder コンテナで download → install（install は offline）。実行時は site-packages を RO マウント + PYTHONPATH で見せる（コンテナは network=none 維持）。
-
-### 3.2 capability handler 候補導入（承認ワークフロー）
-
-ecosystem に候補を同梱。scan → pending → approve/reject → blocked（3 回 reject）。approve で Trust 登録 + コピー + registry reload。cooldown 1h、blocked は unblock まで通知しない。
-
-### 3.3 Secrets（API key の保存）
-
-`.env` を避ける（事故率低減）。`user_data/secrets/` に格納、ログに値を出さない。Pack に秘密ファイルを見せない。取得は capability（例: `secrets.get`）経由が基本。
-
-### 3.4 Pack 配布形式
-
-入力 3 形態: フォルダ / `.zip` / `.rumipack`（zip 互換）。推奨: トップに pack root 1 つ。将来的に multi-pack archive（pack in pack）にも拡張可能。
-
-### 3.5 更新適用（auto update 禁止）
-
-公式はオートアップデートしない。取得 → staging → 適用の分離。apply は危険なので capability（`pack.update`）へ寄せたい（v1 は運用 API でも可）。単一 pack_id の適用から開始。
-
-### 3.6 実行（Python / バイナリ）
-
-Pack の通常実行は Docker 隔離で成立するので、ホストに Python が無くても（Docker さえあれば）OK。ホストで動くもの（capability handler 等）は、将来的に Rumi 本体を単一実行ファイル化（Python 同梱）するか handler を OS 別バイナリにするかのどちらかが必要になる（両対応も可）。
+Execution modes can be selected (not corrected) depending on privileges: pack container, host capability, dedicated sandbox (in the future).
 
 ---
 
-## 4. 実装ステータス
+## 3. List of official core foundations
 
-このロードマップでは、各項目を以下の状態で管理します。
+### 3.1 Dependency (pip) introduction
 
-| 記号 | 意味 |
+Pack includes `requirements.lock`. wheel-only is the default (sdist is approved as an exception). In the builder container, download → install (install is offline). At runtime, show site-packages with RO mount + PYTHONPATH (container maintains network=none).
+
+### 3.2 capability handler candidate introduction (approval workflow)
+
+Candidates are included in the ecosystem. scan → pending → approve/reject → blocked (rejected 3 times). approve Trust registration + copy + registry reload. cooldown 1h, blocked is not notified until unblocked.
+
+### 3.3 Secrets (Save API key)
+
+Avoid `.env` (reduce accident rate). Store in `user_data/secrets/`, do not output value to log. Don't show your secret files to Pack. Acquisition is basically via capability (e.g. `secrets.get`).
+
+### 3.4 Pack distribution format
+
+Input 3 format: Folder / `.zip` / `.rumipack` (zip compatible). Recommended: one pack root on top. Can be expanded to multi-pack archive (pack in pack) in the future.
+
+### 3.5 Update application (auto update prohibited)
+
+The official version does not auto-update. Get → staging → apply separation. Since apply is dangerous, I would like to move it to capability (`pack.update`) (v1 can also be used as an operational API). Start by applying a single pack_id.
+
+### 3.6 Execution (Python/Binary)
+
+Normal execution of Pack is established in Docker isolation, so it is OK even if the host does not have Python (as long as it has Docker). For things that run on the host (capability handler, etc.), in the future it will be necessary to either make Rumi itself a single executable file (Python included) or to make handler a binary for each OS (both are possible).
+
+---
+
+## 4. Implementation status
+
+In this roadmap, each item is managed in the following states.
+
+| Symbol | Meaning |
 |------|------|
-| ✅ | Done（実装済み・運用可能） |
-| 🟡 | Partial（基盤はある / 改善が必要） |
-| 🧩 | Planned（設計済み・未実装） |
-| 🧪 | Experimental（実験・後で仕様固め） |
+| ✅ | Done (implemented/operational) |
+| 🟡 | Partial (foundation is present/improvement required) |
+| 🧩 | Planned (planned/not implemented) |
+| 🧪 | Experimental (experiment/firm specifications later) |
 
-> 注: 実リポジトリ状態の自動検証はここでは行っていません。必要なら後でチェックリスト化します。
+> Note: Automatic verification of the real repository state is not performed here. Make a checklist later if necessary.
 
 ---
 
-## 5. v1（現在〜直近）: 運用できる OS の完成（公式コア）
+## 5. v1 (current to recent): Completion of an operational OS (official core)
 
-### 5.1 セキュア実行・承認・監査（基盤）
+### 5.1 Secure execution/approval/audit (foundation)
 
-- ✅ Pack 承認（hash 検証、modified 検出、blocked）
-- ✅ 監査ログ（カテゴリ別 jsonl）
-- ✅ Docker 隔離（strict 推奨、permissive は警告）
+- ✅ Pack approval (hash verification, modified detection, blocked)
+- ✅ Audit log (jsonl by category)
+- ✅ Docker isolation (strict recommended, permissive is a warning)
 
-### 5.2 pip 依存導入（requirements.lock）
+### 5.2 pip dependency introduction (requirements.lock)
 
-- ✅ scan → approve → builder で download/install
-- ✅ site-packages RO マウント + PYTHONPATH
-- 🟡 sdist 例外（allow_sdist）運用の監査明確化（継続改善）
+- ✅ scan → approve → download/install with builder
+- ✅ site-packages RO mount + PYTHONPATH
+- 🟡 Audit clarification of sdist exception (allow_sdist) operation (continuous improvement)
 
-### 5.3 capability（Trust + Grant + 候補導入）
+### 5.3 capability (Trust + Grant + Candidate introduction)
 
-- ✅ 候補導入フロー（pending / approve / reject / blocked / cooldown）
+- ✅ Candidate introduction flow (pending / approve / reject / blocked / cooldown)
 - ✅ Trust store / Grant manager / Executor / Proxy（UDS）
-- ✅ principal 単位の grant 管理（HMAC 署名）
-- 🟡 マルチプラットフォームバイナリ（trust の拡張）は中期
+- ✅ Grant management by principal (HMAC signature)
+- 🟡 Multiplatform binaries (trust extensions) are mid-term
 
-### 5.4 Secrets（平文で OK、事故率低減）
+### 5.4 Secrets (plain text OK, accident rate reduction)
 
 - ✅ user_data/secrets（1 key = 1 file、tombstone、journal）
-- ✅ API は list(mask) / set / delete のみ（再表示なし）
-- ✅ ログに値を出さない（監査・診断とも）
-- ✅ `secrets.get` の rate_limit=60（事故防止）
-- ✅ get_secret() ヘルパー関数（rumi_capability.py）— Wave 2 #32
-- 🧩 v1.1: OS keychain（keyring / DPAPI 等）は後回し
+- ✅ API is only list(mask) / set / delete (no redisplay)
+- ✅ Do not output values to logs (both auditing and diagnostics)
+- ✅ `secrets.get` rate_limit=60 (accident prevention)
+- ✅ get_secret() helper function (rumi_capability.py) — Wave 2 #32
+- 🧩 v1.1: OS keychain (keyring / DPAPI etc.) will be postponed
 
-### 5.5 Pack import（フォルダ / zip / rumipack）
+### 5.5 Pack import (folder / zip / rumipack)
 
-- ✅ フォルダ / zip / rumipack 取り込み
-- ✅ zip 構造は「トップ単一ディレクトリ必須」
-- ✅ zip slip / サイズ制限等の防御
-- ✅ staging → apply（バックアップ付き）
-- ✅ pack_identity mismatch 置換防止（事故防止）
+- ✅ Import folder/zip/rumipack
+- ✅ Zip structure requires "top single directory"
+- ✅ Protection against zip slip / size restrictions etc.
+- ✅ staging → apply (with backup)
+- ✅ pack_identity mismatch replacement prevention (accident prevention)
 
-### 5.6 階層権限（host > parent > child）
+### 5.6 Hierarchical permissions (host > parent > child)
 
-- ✅ pack_id `parent__child` を前提に parent chain を解決
-- ✅ 子が許可されても親が許可されないと拒否
-- ✅ 親の config が子に上限（intersection）
+- ✅ Resolve parent chain assuming pack_id `parent__child`
+- ✅ Even if the child is allowed, it will be rejected if the parent is not allowed.
+- ✅ Intersection of parent config to child
 
-### 5.7 Flow 実行の整合
+### 5.7 Flow Execution Alignment
 
-- ✅ async 経路と pipeline 経路の `kernel:*` 解決統一
-- ✅ startup flow の packs_dir 等の整合修正
-- ✅ _eval_condition パーサー改善（値内の == / != 対応）— Wave 1 #16
-- ✅ _resolve_value 再帰深度制限（MAX_RESOLVE_DEPTH=20）— Wave 1 #70
-- ✅ Flow チェーン深度制限（MAX_FLOW_CHAIN_DEPTH=10）— Wave 1 #58
+- ✅ Unified resolution of `kernel:*` for async routes and pipeline routes
+- ✅ Corrected consistency of packs_dir etc. in startup flow
+- ✅ _eval_condition parser improvements (supports == / != in values) — Wave 1 #16
+- ✅ _resolve_value Recursion depth limit (MAX_RESOLVE_DEPTH=20) — Wave 1 #70
+- ✅ Flow Chain Depth Limit (MAX_FLOW_CHAIN_DEPTH=10) — Wave 1 #58
 
-### 5.8 セキュリティ強化（Wave 1）
+### 5.8 Security enhancement (Wave 1)
 
-- ✅ cryptography 必須化（base64フォールバック削除）— #1
-- ✅ API サーバー バインドアドレス制限（デフォルト 127.0.0.1）— #3
-- ✅ ホスト実行タイムアウト（ThreadPoolExecutor, 120s）— #4
-- ✅ pack_id バリデーション統一（^[a-zA-Z0-9_-]{1,64}$）— #9
-- ✅ Store root_path パストラバーサル防止 — #5, #12
-- ✅ コンテナ名 UUID 化（衝突回避）— #10
-- ✅ Docker stdout サイズ制限（4MB）— #14
-- ✅ Docker 可用性キャッシュ（60s TTL）— #17
-- ✅ DNS rebinding 緩和（egress_proxy）— #13
-- ✅ egress_proxy ThreadPool 化 — #33
-- ✅ HMAC 署名ロジック統合（HMACSigner）— #65
-- ✅ HMAC 鍵ファイル atomic write — #34
-- ✅ ワイルドカードドメイン警告 — #31
-- ✅ API エラーメッセージ秘匿 — #35
-- ✅ ファイル名バリデーション（secure_executor）— #57
-- ✅ pack_import パストラバーサル防止 — #30
-- ✅ DELETE ルート衝突解決 — #59
+- ✅ Require cryptography (remove base64 fallback) — #1
+- ✅ API Server Bind Address Limit (default 127.0.0.1) — #3
+- ✅ Host execution timeout (ThreadPoolExecutor, 120s) — #4
+- ✅ Unified pack_id validation (^[a-zA-Z0-9_-]{1,64}$) — #9
+- ✅ Store root_path path traversal prevention — #5, #12
+- ✅ Container name UUID (collision avoidance) — #10
+- ✅ Docker stdout size limit (4MB) — #14
+- ✅ Docker availability cache (60s TTL) — #17
+- ✅ DNS rebinding mitigation (egress_proxy) — #13
+- ✅ egress_proxy ThreadPool — #33
+- ✅ HMAC Signature Logic Integration (HMACSigner) — #65
+- ✅ HMAC key file atomic write — #34
+- ✅ Wildcard domain warning — #31
+- ✅ API error message concealment — #35
+- ✅ File name validation (secure_executor) — #57
+- ✅ pack_import path traversal prevention — #30
+- ✅ DELETE route conflict resolution — #59
 
-### 5.9 エコシステム基盤強化（Wave 1）
+### 5.9 Strengthening ecosystem infrastructure (Wave 1)
 
-- ✅ Flow Modifier ワイルドカード警告・dry-run モード — #7, #40
-- ✅ Modifier phase 未指定時のデフォルト動作 — #8
-- ✅ 重複 pack_id 検出 — #15
-- ✅ connectivity requires 未充足警告 — #20
-- ✅ ワイルドカード Modifier 監査ログ — #61
-- ✅ No Favoritism: dead code 削除（initializer.py）、docstring 中性化 — NF1-3
+- ✅ Flow Modifier wildcard warning/dry-run mode — #7, #40
+- ✅ Default behavior when Modifier phase is not specified — #8
+- ✅ Duplicate pack_id detected — #15
+- ✅ connectivity requires unsatisfied warning — #20
+- ✅ Wildcard Modifier Audit Log — #61
+- ✅ No Favoritism: Delete dead code (initializer.py), neutralize docstring — NF1-3
 
-### 5.10 内部品質・開発基盤（Wave 12〜14）
+### 5.10 Internal quality/development platform (Wave 12-14)
 
-- ✅ テスト充実: test_egress_proxy(91+), test_capability_installer(44+), test_flow_modifier_regression(32+), test_pack_api_server(53+), test_store_registry(49+) — Wave 12
-- ✅ egress_proxy 強化（レート制限・ドメイン制御・細粒度タイムアウト）— Wave 12
-- ✅ validation.py（共通バリデーション基盤）— Wave 12
-- ✅ logging_utils.py（構造化ログ: StructuredFormatter, StructuredLogger, CorrelationContext, get_structured_logger, configure_logging）— Wave 12
-- ✅ egress モジュール分割: egress_ip.py, egress_protocol.py, egress_rate_limiter.py, egress_domain_controller.py — Wave 13
-- ✅ capability/modifier モジュール分割: capability_models.py, flow_modifier_models.py, flow_modifier_loader.py — Wave 13
-- ✅ health.py（HealthChecker: disk_space / memory / file_writable プローブ）— Wave 13
-- ✅ metrics.py（MetricsCollector: カウンター / ゲージ / ヒストグラム / タイマー）— Wave 13
-- ✅ error_messages.py（ErrorCode, RumiError, エラーコード体系 RUMI-{CAT}-{NNN}）— Wave 13
-- ✅ egress_proxy.py 重複除去 + テスト patch 修正 — Wave 14
-- ✅ profiling.py（Profiler: コンテキストマネージャ / デコレータ, p50/p95/p99, メモリ制限）— Wave 14
+- ✅ Test enrichment: test_egress_proxy(91+), test_capability_installer(44+), test_flow_modifier_regression(32+), test_pack_api_server(53+), test_store_registry(49+) — Wave 12
+- ✅ egress_proxy enhancement (rate limiting/domain control/fine-grained timeout) — Wave 12
+- ✅ validation.py (common validation platform) — Wave 12
+- ✅ logging_utils.py (Structured logging: StructuredFormatter, StructuredLogger, CorrelationContext, get_structured_logger, configure_logging) — Wave 12
+- ✅ egress module division: egress_ip.py, egress_protocol.py, egress_rate_limiter.py, egress_domain_controller.py — Wave 13
+- ✅ capability/modifier module division: capability_models.py, flow_modifier_models.py, flow_modifier_loader.py — Wave 13
+- ✅ health.py (HealthChecker: disk_space / memory / file_writable probe) — Wave 13
+- ✅ metrics.py (MetricsCollector: Counter / Gauge / Histogram / Timer) — Wave 13
+- ✅ error_messages.py (ErrorCode, RumiError, error code system RUMI-{CAT}-{NNN}) — Wave 13
+- ✅ egress_proxy.py duplicate removal + test patch fix — Wave 14
+- ✅ profiling.py (Profiler: context manager/decorator, p50/p95/p99, memory limitations) — Wave 14
 - ✅ types.py + py.typed（NewType: PackId / FlowId / CapabilityName / HandlerKey / StoreKey, Result Generic, Severity enum, PEP 561）— Wave 14
-- ✅ pack_scaffold.py（PackScaffold CLI: 4テンプレート minimal/capability/flow/full, validation.py 連携）— Wave 14
-- ✅ deprecation.py（deprecated デコレータ, DeprecationRegistry, deprecated_class, RUMI_DEPRECATION_LEVEL 環境変数）— Wave 14
+- ✅ pack_scaffold.py (PackScaffold CLI: 4 template minimal/capability/flow/full, validation.py integration) — Wave 14
+- ✅ deprecation.py (deprecated decorator, DeprecationRegistry, deprecated_class, RUMI_DEPRECATION_LEVEL environment variable) — Wave 14
 
-### 5.11 Kernel 統合・DI 拡張（Wave 15）
+### 5.11 Kernel integration/DI extension (Wave 15)
 
-- ✅ kernel_core.py: logging→get_structured_logger, deprecated 適用, types.py 適用
-- ✅ kernel_flow_execution.py: logging→get_structured_logger, Profiler で Flow 計測, MetricsCollector でステップ計測
-- ✅ kernel_handlers_system.py: logging→get_structured_logger, MetricsCollector 計測追加
-- ✅ kernel_handlers_runtime.py: logging→get_structured_logger, MetricsCollector 計測追加
-- ✅ di_container.py: health_checker / metrics_collector / profiler のファクトリ登録（計32サービス）
-- ✅ app.py: configure_logging() 呼び出し, --health フラグ追加
+- ✅ kernel_core.py: logging→get_structured_logger, deprecated applied, types.py applied
+- ✅ kernel_flow_execution.py: logging→get_structured_logger, Flow measurement with Profiler, step measurement with MetricsCollector
+- ✅ kernel_handlers_system.py: logging→get_structured_logger, MetricsCollector measurement addition
+- ✅ kernel_handlers_runtime.py: logging→get_structured_logger, MetricsCollector measurement addition
+- ✅ di_container.py: Factory registration of health_checker / metrics_collector / profiler (32 services in total)
+- ✅ app.py: configure_logging() call, --health flag added
 
-> 新環境変数: RUMI_LOG_LEVEL, RUMI_LOG_FORMAT, RUMI_DEPRECATION_LEVEL。新 CLI フラグ: --health, --validate。
-
----
-
-## 6. v1.5〜v2（中期）: 拡張しても壊れないための発展
-
-### 6.1 Store / Unit（共有領域と再利用単位）
-
-- ✅ Store registry（複数 store、パス固定しない）— `core_runtime/store_registry.py` 実装済み
-- ✅ Unit registry（data / python / binary）— `core_runtime/unit_registry.py` 実装済み
-- ✅ Unit trust store（sha256 allowlist）— `core_runtime/unit_trust_store.py` 実装済み
-- 🟡 Unit execution gate（host_capability モードのみ実装済み。pack container / sandbox は未実装）— `core_runtime/unit_executor.py`
-- ✅ Store Compare-And-Swap（store.cas）— fcntl.flock ベース — Wave 2 #6
-- ✅ store.list ページネーション（limit / cursor / prefix）— Wave 2 #18
-- ✅ store.batch_get（最大100キー、900KB制限）— Wave 2 #19
-- ✅ 宣言的 Store 作成（ecosystem.json の stores フィールド）— Wave 2 #62
-- ✅ Pack 間 Store 共有（SharedStoreManager、手動承認）— Wave 2 #21
-- 🧩 「Pack 承認は必須、Unit 個別承認はユニット設定次第（pack が要求可能）」の運用整備
-
-> ここは「assets」という語は使わない。ecosystem が「互換再利用のためのストア」を作ればそれは成立する。
-
-### 6.2 capability のバイナリ対応強化（Python 無し運用の現実化）
-
-- 🧩 handler.json の artifacts（os / arch 別）対応
-- 🧩 trust store の拡張（handler_id → 複数 sha256）
-- 🧩 executor の直接バイナリ実行（stdin JSON / stdout JSON）
-- 🧩 「Rumi 本体を単一実行ファイル化」との比較検討（UX / 運用）
-
-### 6.3 更新適用の完全 capability 化
-
-- 🧩 `pack.update` permission の標準化（公式は意味を解釈しないが「危険操作の枠」として）
-- 🧩 apply 操作は capability 経由に寄せ、API 直叩きは最小化
-- 🧩 バージョン履歴・ロールバック（staging / backup の標準運用）
-
-### 6.4 Capability 拡張（Wave 2）
-
-- ✅ flow.run Capability（同期 Flow-to-Flow 呼び出し、循環検出、深度制限）— Wave 2 #5
-- ✅ バッチ Capability Grant（最大50件、best-effort）— Wave 2 #63
-- ✅ スケジューラ タイムゾーン対応（zoneinfo、UTC フォールバック）— Wave 2 #60
-
-### 6.5 vocab による component 出力キー正規化（Pack 互換レイヤー）
-
-- 🧩 component type 単位での出力キー自動正規化
-- 🧩 vocab_registry の synonym グループ + converter を Flow 実行パスに統合
-- 🧩 正規化タイミングの標準化（ctx 格納前 vs 参照時）
-- 🧩 Pack 側の vocab.txt による synonym 宣言の推奨パターン整備
-
-#### 背景
-
-サードパーティ Pack の開発で判明した問題。kernel_core の _execute_handler_step_async は Flow ステップの return 値をそのまま ctx[step["output"]] に格納する。つまり default Pack が {"content": "...", "model": "gpt-4"} を返す構造で Flow が ${ctx.ai_response.content} を参照していると、別の Pack のように {"text": "...", "model_name": "..."} を返す Pack に差し替えた瞬間、全ての Flow ステップで content が null になり壊れる。
-
-vocab_registry はこの問題を解決する仕組みを既に持つが、「Flow 実行パスでの自動適用」が欠けている。
-
-#### 提案する実装案
-
-**方式 A（格納時正規化 — 推奨）**: kernel_core の ctx 格納前に vocab_registry で preferred term に変換。数行の変更で既存の仕組みが活きる。
-
-**方式 B（参照時正規化）**: _resolve_value で synonym フォールバック。格納データは変更しないが解決パスが複雑。
-
-**方式 C（opt-in 正規化）**: Flow ステップに normalize: true フラグ、または component manifest で output_vocab_group を宣言。既存影響ゼロだが Pack 作者が意識する必要あり。
-
-### 6.6 内部リファクタリング（P3 保留）
-
-- 🟡 グローバルシングルトン → DI コンテナ移行（kernel 統合・32サービス登録済み）— Wave 15
-- 🧩 Store バックエンド SQLite 化（ファイルベースからの移行オプション）
-- 🧩 pack_api_server.py の大規模ハンドラ分割（現在 ~80KB）
-- 🧩 Docker 実行ロジック共通化（python_file_executor / secure_executor の統合）
+> New environment variables: RUMI_LOG_LEVEL, RUMI_LOG_FORMAT, RUMI_DEPRECATION_LEVEL. New CLI flags: --health, --validate.
 
 ---
 
-## 7. v3（長期）: ecosystem で実現すべき外側
+## 6. v1.5 to v2 (mid-term): Development to prevent breakage even when expanded
 
-> v3 の項目は公式コアが実装すべきものではなく、ecosystem（Pack）として
-> 第三者が提供すべきものです。公式はこれらの機能を実現するための
-> 汎用的な仕組み（API サーバー、Store、Capability 等）を提供済みです。
+### 6.1 Store / Unit (shared area and reuse unit)
 
-### 7.1 管理 UI
-- 管理 UI は Pack として実装可能（pack_api_server の API を呼ぶフロントエンド Pack）
-- 公式は HTTP API を提供済み。UI は ecosystem の領域
+- ✅ Store registry (multiple stores, no fixed path) — `core_runtime/store_registry.py` Implemented
+- ✅ Unit registry (data / python / binary) — `core_runtime/unit_registry.py` Implemented
+- ✅ Unit trust store (sha256 allowlist) — `core_runtime/unit_trust_store.py` Implemented
+- 🟡 Unit execution gate (only host_capability mode is implemented. pack container / sandbox is not implemented) — `core_runtime/unit_executor.py`
+- ✅ Store Compare-And-Swap (store.cas) — fcntl.flock based — Wave 2 #6
+- ✅ store.list pagination (limit / cursor / prefix) — Wave 2 #18
+- ✅ store.batch_get (maximum 100 keys, 900KB limit) — Wave 2 #19
+- ✅ Declarative Store creation (stores field in ecosystem.json) — Wave 2 #62
+- ✅ Store sharing between packs (SharedStoreManager, manual approval) — Wave 2 #21
+- 🧩 Operational maintenance of "Pack approval is required, unit individual approval depends on unit setting (pack can be requested)"
 
-### 7.2 外部認証連携
-- Supabase 等の認証は Pack が Secrets + capability 経由で実現可能
-- 公式は認証の仕組みを強制しない
+> The word "assets" is not used here. If an ecosystem creates a ``store for compatible reuse,'' it will be established.
+
+### 6.2 Enhancement of binary support for capability (realization of operation without Python)
+
+- 🧩 handler.json supports artifacts (by OS/arch)
+- 🧩 Trust store extension (handler_id → multiple sha256)
+- 🧩 Direct binary execution of executor (stdin JSON / stdout JSON)
+- 🧩 Comparison study with “Converting Rumi itself to a single executable file” (UX/Operation)
+
+### 6.3 Full update application capability
+
+- 🧩 `pack.update` Standardization of permission (though the meaning is not officially interpreted, but as a "frame for dangerous operations")
+- 🧩 Apply operation via capability and minimize direct access to API
+- 🧩 Version history/rollback (staging/backup standard operation)
+
+### 6.4 Capability Expansion (Wave 2)
+
+- ✅ flow.run Capability (synchronous Flow-to-Flow calls, cycle detection, depth limits) — Wave 2 #5
+- ✅ Batch Capability Grant (up to 50, best-effort) — Wave 2 #63
+- ✅ Scheduler time zone support (zoneinfo, UTC fallback) — Wave 2 #60
+
+### 6.5 component output key normalization with vocab (Pack compatibility layer)
+
+- 🧩 Output key automatic normalization by component type
+- 🧩 Integrate synonym group + converter in vocab_registry into Flow execution path
+- 🧩 Standardization of normalization timing (before storing ctx vs when referencing)
+- 🧩 Developing recommended patterns for synonym declaration using vocab.txt on the Pack side
+
+#### Background
+
+Issues discovered in third-party pack development. _execute_handler_step_async of kernel_core stores the return value of the Flow step as is in ctx[step["output"]]. In other words, if the default Pack has a structure that returns {"content": "...", "model": "gpt-4"} and the Flow references ${ctx.ai_response.content}, the moment you replace it with a Pack that returns {"text": "...", "model_name": "..."} like another Pack, content becomes null in all Flow steps and breaks.
+
+vocab_registry already has a mechanism to solve this problem, but it lacks "automatic application in the Flow execution path".
+
+#### Proposed implementation plan
+
+**Method A (normalization during storage - recommended)**: Convert to preferred term in vocab_registry before storing ctx in kernel_core. Existing mechanisms can be utilized by changing a few lines.
+
+**Method B (normalization on reference)**: Synonym fallback with _resolve_value. The stored data is not changed, but the resolution path is complicated.
+
+**Method C (opt-in normalization)**: Normalize: true flag in Flow step or declare output_vocab_group in component manifest. There is no impact on existing products, but Pack authors need to be aware of this.
+
+### 6.6 Internal refactoring (P3 pending)
+
+- 🟡 Global singleton → DI container migration (kernel integration/32 services registered) — Wave 15
+- 🧩 Store backend to SQLite (migration option from file-based)
+- 🧩 large-scale handler split of pack_api_server.py (currently ~80KB)
+- 🧩 Docker execution logic commonality (python_file_executor / secure_executor integration)
 
 ---
 
-## 8. Addon（廃止済み）
+## 7. v3 (long-term): Outside that should be realized in the ecosystem
 
-`backend_core/ecosystem/addon_manager.py` に存在していた JSON Patch ベースの addon 機構は削除済みです。Flow Modifier がその役割を代替します。
+> Items in v3 are not to be implemented in the official core, but as an ecosystem (Pack).
+> Must be provided by a third party. The formula is to realize these functions.
+> We have already provided general-purpose mechanisms (API server, Store, Capability, etc.).
 
----
+### 7.1 Management UI
+- Management UI can be implemented as a Pack (front-end Pack that calls the pack_api_server API)
+- Officially provided HTTP API. UI is an ecosystem area
 
-## 9. ルール・運用（Runbook 要点）
-
-- strict が本番推奨（Docker 必須）
-- secrets は value を一切ログに出さない
-- capability は Trust + Grant の二段構え
-- pip 依存は wheel-only が基本、sdist は例外承認
-- 更新は自動適用しない（ユーザー操作が必須）
-- スキップ / 拒否は audit + diagnostics で追跡
-
----
-
-## 10. 今後の論点（未確定を明文化）
-
-- Store / Unit の運用整備をどこまで公式が標準化するか（枠だけ vs もう少し厚く）
-- Unit の個別承認の UX（pending が増えすぎない設計）
-- Unit execution gate の pack container / sandbox モード実装
-- Python 無し配布の最短ルート（本体単一化 vs handler バイナリ化）
-- 階層権限の config 上限（intersection の定義: list は積集合、ports は最小等）
-- vocab による出力キー正規化の適用範囲（全ステップ vs opt-in vs component type 限定）
-- vocab synonym の衝突解決（Pack A が content = 本文、Pack B が content = HTML全体 の場合）
-- converter の実行セキュリティ（任意 Python が走るため Trust が必要か）
-- provides パターンの統一（schema は ^[a-z][a-z0-9_]*$ だが pack-development.md の例は ai.client とドット区切り — どちらを正とするか）
-- defaults_pack 統合（別チームが進行中）
-- コンパイル→アプリ化（単一実行ファイル配布）
-- ドキュメント整備（Wave 16 で進行中）
+### 7.2 External authentication linkage
+- Authentication for Supabase etc. can be achieved by Pack via Secrets + capability
+- Officials do not enforce authentication mechanisms
 
 ---
 
-## 付録: 重要なアンチパターン（やらない）
+## 8. Addon (obsolete)
 
-- secrets をコンテナにマウントして Pack に読ませる（即 NG）
-- 公式が tool / chat 等を固定概念として持つ（No Favoritism 違反）
-- auto update（ユーザーの明示操作無しに ecosystem を書き換える）
-- 監査ログに秘密値や復号可能情報を出す
+The JSON Patch-based addon mechanism that existed in `backend_core/ecosystem/addon_manager.py` has been removed. Flow Modifier takes over that role.
+
+---
+
+## 9. Rules/Operations (Runbook Key Points)
+
+- strict is recommended for production (Docker required)
+- secrets never logs value
+- capability is a two-tier combination of Trust + Grant
+- pip dependency is basically wheel-only, sdist is exception approval
+- Updates are not applied automatically (user interaction required)
+- Track skips/denials with audit + diagnostics
+
+---
+
+## 10. Future issues (clarify undecided matters)
+
+- To what extent will the official standardize the operation and maintenance of Store / Unit (just a frame vs. a little thicker)?
+- Unit's individual approval UX (designed to avoid too many pending items)
+- Pack container / sandbox mode implementation of Unit execution gate
+- Shortest route for distribution without Python (unification of main body vs. binaryization of handler)
+- config upper limit of hierarchical authority (definition of intersection: list is intersection set, ports is minimum, etc.)
+- Scope of output key normalization using vocab (all steps vs opt-in vs component type only)
+- vocab synonym conflict resolution (Pack A is content = body, Pack B is content = entire HTML)
+- Execution security of converter (Does Trust need to be set because arbitrary Python runs?)
+- Provides uniformity of patterns (schema is ^[a-z][a-z0-9_]*$, but pack-development.md example is ai.client and dot-separated — which is correct?)
+- defaults_pack integration (in progress by another team)
+- Compilation → Application (single executable file distribution)
+- Documentation maintenance (in progress in Wave 16)
+
+---
+
+## Appendix: Important anti-patterns (don't do it)
+
+- Mount secrets on the container and have Pack read it (immediately NG)
+- Officials have fixed concepts such as tool / chat (violation of No Favoritism)
+- auto update (rewrites the ecosystem without explicit user operation)
+- Emit secret values and decryptable information in audit logs

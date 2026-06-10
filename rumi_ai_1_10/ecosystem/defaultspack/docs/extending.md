@@ -1,14 +1,18 @@
-# defaults Pack 拡張ガイド
+<!-- docs-i18n-links:start -->
+[EN](./extending.md) | [JP](./i18n/ja/extending.md) | [KR](./i18n/ko/extending.md) | [CN](./i18n/zh-cn/extending.md)
+<!-- docs-i18n-links:end -->
 
-defaults Pack に新機能を追加する手順を解説する。
+#defaults pack extension guide
+
+Explaining the procedure for adding new features to defaults pack.
 
 ---
 
-## 新しい block の追加手順
+## Steps to add new block
 
-block は defaults Pack の最小実行単位である。各 block は `blocks/<category>/<name>.py` に配置され、`def run(input_data, context)` 関数をエクスポートする。
+block is the minimum execution unit of defaults pack. Each block is placed in `blocks/<category>/<name>.py` and exports `def run(input_data, context)` functions.
 
-### 1. ファイルを作成する
+### 1. Create a file
 
 ```
 blocks/
@@ -17,7 +21,7 @@ blocks/
     <name>.py        # 新しい block
 ```
 
-### 2. block のコードを書く
+### 2. Write block code
 
 ```python
 import sys
@@ -45,17 +49,17 @@ def run(input_data, context):
     return ok(result)
 ```
 
-### 3. 命名規則
+### 3. Naming convention
 
-block ファイル名はスネークケースで、handler 名の最後の部分に対応する。例えば `defaults.chat.send` handler は `blocks/chat/send.py` の `run()` を呼び出す。
+The block file name is snake case and corresponds to the last part of the handler name. For example, `defaults.chat.send` handler calls `run()` of `blocks/chat/send.py`.
 
 ---
 
-## 新しい domain モジュールの追加手順
+## Steps to add new domain module
 
-domain モジュールは block から呼び出されるビジネスロジック層である。
+The domain module is the business logic layer called by block.
 
-### 1. ディレクトリを作成する
+### 1. Create a directory
 
 ```
 domain/
@@ -64,11 +68,11 @@ domain/
     <main_class>.py
 ```
 
-### 2. パターンの選択
+### 2. Pattern selection
 
-domain モジュールは以下のパターンのいずれかに従う（詳細は `docs/internals/domain-patterns.md` を参照）:
+The domain module follows one of the following patterns (see `docs/internals/domain-patterns.md` for details):
 
-**シングルトンパターン** — 状態を持つグローバルインスタンス:
+**Singleton pattern** — global instance with state:
 
 ```python
 class MyService:
@@ -87,7 +91,7 @@ class MyService:
         # 初期化処理
 ```
 
-**ストアパターン** — インメモリデータ管理:
+**Store pattern** — In-memory data management:
 
 ```python
 class MyStore:
@@ -100,9 +104,9 @@ class MyStore:
         return cls._instance
 ```
 
-### 3. import パス
+### 3. import path
 
-domain モジュールを block から利用する場合は相対パスではなく、`sys.path.insert` 済みのパックルートからの絶対パスでインポートする:
+When using the domain module from block, import it using the absolute path from the `sys.path.insert`-completed pack root instead of the relative path:
 
 ```python
 from domain.<module>.<file> import ClassName
@@ -110,11 +114,11 @@ from domain.<module>.<file> import ClassName
 
 ---
 
-## ecosystem.json の更新方法
+## How to update ecosystem.json
 
-新しいコンポーネントを追加した場合、`ecosystem.json` を更新する必要がある。
+If you add new components, you will need to update `ecosystem.json`.
 
-### 1. vocabulary.types にタイプを追加
+### 1. Add types to vocabulary.types
 
 ```json
 {
@@ -124,7 +128,7 @@ from domain.<module>.<file> import ClassName
 }
 ```
 
-### 2. components にエントリを追加
+### 2. Add entry to components
 
 ```json
 {
@@ -144,9 +148,9 @@ from domain.<module>.<file> import ClassName
 }
 ```
 
-### 3. load_order を更新
+### 3. Update load_order
 
-依存関係に応じた順序で `load_order` 配列にエントリを追加する:
+Add entries to the `load_order` array in order according to dependencies:
 
 ```json
 {
@@ -159,27 +163,27 @@ from domain.<module>.<file> import ClassName
 }
 ```
 
-`frontend` は常に最後に配置する。
+`frontend` is always placed last.
 
 ---
 
-## transport/http.py へのルート追加方法
+## How to add route to transport/http.py
 
-### 1. _setup_routes にルートを追加
+### 1. Add route to _setup_routes
 
-`DefaultsHttpServer._setup_routes()` メソッド内のルート配列に新しいエントリを追加する:
+Add a new entry to the root array in the `DefaultsHttpServer._setup_routes()` method:
 
 ```python
 ("POST", "/api/new_module/action", self._handle_new_action),
 ```
 
-パスパラメータが必要な場合は `{param}` 形式を使用する:
+If a path parameter is required, use the `{param}` format:
 
 ```python
 ("GET", "/api/new_module/{id}/detail", self._handle_new_detail),
 ```
 
-### 2. ハンドラメソッドを追加
+### 2. Add handler method
 
 ```python
 def _handle_new_action(self, request_data, path_params):
@@ -194,15 +198,15 @@ def _handle_new_detail(self, request_data, path_params):
     return handler_run(request_data, context)
 ```
 
-### 3. stdio/UDS transport にも追加する場合
+### 3. When also adding to stdio/UDS transport
 
-`transport/stdio.py` と `transport/uds.py` の `_ROUTE_MAP` と `_ID_INJECT_MAP` に同じルートを追加する。
+Add the same route to `_ROUTE_MAP` and `_ID_INJECT_MAP` of `transport/stdio.py` and `transport/uds.py`.
 
 ---
 
-## テストの方法
+## How to test
 
-### HTTP 経由でのテスト
+### Testing over HTTP
 
 ```bash
 # ヘルスチェック
@@ -219,13 +223,13 @@ curl -X POST http://127.0.0.1:8766/api/chat/conversations/{id}/messages \
   -d '{"message": {"role": "user", "content": "Hello"}}'
 ```
 
-### stdio 経由でのテスト
+### Testing via stdio
 
 ```bash
 echo '{"method":"GET","path":"/api/health"}' | python -m transport.stdio
 ```
 
-### block の単体テスト
+### Unit test for block
 
 ```python
 from blocks.new_module.action import run

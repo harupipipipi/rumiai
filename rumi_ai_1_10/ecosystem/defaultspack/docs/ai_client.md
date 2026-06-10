@@ -1,3 +1,7 @@
+<!-- docs-i18n-links:start -->
+[EN](./ai_client.md) | [JP](./i18n/ja/ai_client.md) | [KR](./i18n/ko/ai_client.md) | [CN](./i18n/zh-cn/ai_client.md)
+<!-- docs-i18n-links:end -->
+
 # AI Client Design
 
 The defaultspack AI client is the boundary between flows and model providers. It

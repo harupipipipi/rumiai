@@ -1,6 +1,10 @@
+<!-- docs-i18n-links:start -->
+[EN](./dependency-resolution.md) | [JP](../i18n/ja/capability/dependency-resolution.md) | [KR](../i18n/ko/capability/dependency-resolution.md) | [CN](../i18n/zh-cn/capability/dependency-resolution.md)
+<!-- docs-i18n-links:end -->
+
 ---
 
-ファイル名: **`docs/capability/external-dependency.md`**
+File name: **`docs/capability/external-dependency.md`**
 
 ```markdown
 # External Dependency Resolution
@@ -78,12 +82,12 @@ private リポジトリの場合は `Authorization: token {GITHUB_TOKEN}` ヘッ
 
 ```
 user_data/packs/
-├── my_coding_assistant/          # ユーザーが導入した Pack
+├── my_coding_assistant/ # User-introduced Pack
 │   ├── pack.json
 │   ├── tools/
 │   └── flows/
 │
-├── rumi-shell-capability/        # 依存として自動取得
+├── rumi-shell-capability/ # Automatically obtained as a dependency
 │   ├── pack.json
 │   ├── capabilities/
 │   │   └── shell_exec/
@@ -91,7 +95,7 @@ user_data/packs/
 │   │       └── handler.py
 │   └── .pack_meta.json
 │
-└── rumi-browser-tools/           # 依存として自動取得
+└── rumi-browser-tools/ # Automatically acquired as a dependency
     ├── pack.json
     ├── tools/
     └── .pack_meta.json
@@ -141,36 +145,36 @@ user_data/packs/
 ## 解決フロー
 
 ```
-Pack 導入リクエスト
+Pack introduction request
 │
-├─ 1. pack.json を先読み（zipball から pack.json のみ抽出）
+├─ 1. Read ahead pack.json (extract only pack.json from zipball)
 │
-├─ 2. dependencies を解析
-│   ├─ 各依存を再帰的に解決（依存の依存も辿る）
-│   ├─ 既にインストール済みかつバージョン適合 → スキップ
-│   ├─ バージョン衝突 → エラー報告
-│   └─ 循環依存を検出 → エラー報告
+├─ 2. Analyze dependencies
+│ ├─ Solve each dependency recursively (also trace dependencies)
+│ ├─ Already installed and version compatible → Skip
+│ ├─ Version conflict → Error report
+│ └─ Detect circular dependencies → Error reporting
 │
-├─ 3. Marketplace レジストリ照合
-│   ├─ 検証済み → ✅
-│   ├─ 未検証 → ❓ + 警告
-│   └─ ブラックリスト → 🚫 ブロック
+├─ 3. Marketplace registry verification
+│ ├─ Verified → ✅
+│ ├─ Not tested → ❓ + Warning
+│ └─ Blacklist → 🚫 Block
 │
-├─ 4. ユーザー承認
-│   ├─ 依存一覧・検証状態・リスクレベルを表示
-│   ├─ capability を含む場合はコード確認オプション
-│   └─ 承認 or キャンセル
+├─ 4. User approval
+│ ├─ Display dependency list, verification status, and risk level
+│ ├─ Code confirmation option if capability is included
+│ └─ Approve or Cancel
 │
-├─ 5. ダウンロード・配置
-│   ├─ 全依存 Pack を zipball で取得
-│   ├─ user_data/packs/ に配置
-│   ├─ ハッシュ記録
-│   └─ .pack_meta.json 生成
+├─ 5. Download/Deployment
+│ ├─ Get all dependent packs with zipball
+│ ├─ Placed in user_data/packs/
+│ ├─ Hash record
+│ └─ .pack_meta.json generation
 │
-└─ 6. ロード
-    ├─ capability → ホスト側に登録
-    ├─ tool → loader に登録
-    └─ flow → 利用可能に
+└─ 6. Load
+    ├─ capability → registered on host side
+    ├─ Register to tool → loader
+    └─ flow → available
 ```
 
 ネットワーク不可時は、既にインストール済みの依存はそのまま使用する。未インストールの依存がある場合はエラーとし、接続回復後に再試行を促す。
@@ -220,29 +224,29 @@ Pack 導入時にこのレジストリを取得（24 時間キャッシュ）し
 検証済みの場合:
 
 ```
-Pack「my_coding_assistant」を導入します。
+Introduce the pack “my_coding_assistant”.
 
-依存関係:
-  ✅ rumi-shell-capability v1.2.0 (Rumi 検証済み)
-     ⚠️ ホスト側 capability 追加: shell_exec (高リスク)
+Dependencies:
+  ✅ rumi-shell-capability v1.2.0 (Rumi verified)
+     ⚠️ Host-side capability added: shell_exec (high risk)
 
-  ✅ rumi-browser-tools v2.0.0 (Rumi 検証済み)
-     ⚠️ ホスト側 capability 追加: browser_control (高リスク)
+  ✅ rumi-browser-tools v2.0.0 (Rumi verified)
+     ⚠️ Host-side capability added: browser_control (high risk)
 
-[全て許可] [個別に確認] [キャンセル]
+[Allow all] [Confirm individually] [Cancel]
 ```
 
 未検証の場合:
 
 ```
-Pack「experimental_pack」を導入します。
+Introduce the pack "experimental_pack".
 
-依存関係:
-  ❓ unknown/custom-thing v0.1.0 (未検証)
-     ⚠️ ホスト側 capability 追加: custom_thing (高リスク)
-     ⚠️ Rumi Marketplace で検証されていません
+Dependencies:
+❓ unknown/custom-thing v0.1.0 (untested)
+     ⚠️ Added host-side capability: custom_thing (high risk)
+     ⚠️ Not verified on Rumi Marketplace
 
-[コードを確認] [信頼して許可] [キャンセル]
+[Verify Code] [Trust and Allow] [Cancel]
 ```
 
 ---
@@ -284,10 +288,10 @@ Pack「experimental_pack」を導入します。
 
 ```
 ecosystem/default/backend/blocks/pack/
-├── downloader.py    # GitHub API zipball ダウンロード
-├── resolver.py      # 依存解決・semver マッチング・循環検出
-├── installer.py     # 配置・ハッシュ記録・.pack_meta.json 生成
-├── verifier.py      # Marketplace レジストリ照合
-└── updater.py       # アップデートチェック
+├── downloader.py # GitHub API zipball download
+├── resolver.py # Dependency resolution/semver matching/cycle detection
+├── installer.py # Placement, hash record, .pack_meta.json generation
+├── verifier.py # Marketplace registry verification
+└── updater.py # Update check
 ```
 ```

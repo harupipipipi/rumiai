@@ -1,63 +1,66 @@
-# Runtime Mechanism (コード不要版)
+<!-- docs-i18n-links:start -->
+[EN](./system-mechanism.md) | [JP](../i18n/ja/concepts/system-mechanism.md) | [KR](../i18n/ko/concepts/system-mechanism.md) | [CN](../i18n/zh-cn/concepts/system-mechanism.md)
+<!-- docs-i18n-links:end -->
 
-このドキュメントは「Rumi AI がどう動くか」を、コードを読まなくても追えるように整理したものです。
+# Runtime Mechanism (code-free version)
 
-## 1. 起動時に何が起きるか
+This document is organized so that you can follow "how Rumi AI works" without reading the code.
 
-1. `python -m rumi_ai` が `rumi_ai_1_10/app.py` を起動する。
-2. `flows/00_startup.flow.yaml` の順序で Kernel ハンドラが実行される。
-3. セキュリティ初期化・Pack スキャン・API サーバー初期化が完了すると `system.ready` が発行される。
+## 1. What happens at startup
 
-起動フローは `init -> security -> ecosystem -> finalize` の4フェーズです。
+1. `python -m rumi_ai` starts `rumi_ai_1_10/app.py`.
+2. Kernel handlers are executed in the order of `flows/00_startup.flow.yaml`.
+3. When security initialization, pack scan, and API server initialization are completed, `system.ready` will be issued.
 
-## 2. Flow と Modifier の読み込み順
+The startup flow has four phases: `init -> security -> ecosystem -> finalize`.
 
-Flow は次の順序で読み込まれます（上ほど優先）。
+## 2. Loading order of Flow and Modifier
 
-1. `flows/`（公式）
-2. `user_data/shared/flows/`（共有）
-3. `ecosystem/<pack_id>/.../flows/`（Pack 提供）
-4. `ecosystem/flows/`（互換 legacy）
+Flows are loaded in the following order (higher priority):
 
-Modifier も同様に読み込まれ、対象 Flow へ `inject_before / inject_after / append / replace / remove` を適用します。
+1. `flows/` (Official)
+2. `user_data/shared/flows/` (Sharing)
+3. `ecosystem/<pack_id>/.../flows/` (provided by Pack)
+4. `ecosystem/flows/` (compatible legacy)
 
-## 3. Pack 実行が許可される条件
+Modifier is loaded in the same way and applies `inject_before / inject_after / append / replace / remove` to the target Flow.
 
-Pack 実行には次の3段階が必要です。
+## 3. Conditions for allowing Pack execution
 
-1. **Approve**: Pack が承認済みであること
-2. **Trust**: 承認時ハッシュと現在ハッシュが一致すること
-3. **Grant**: capability 実行権限が principal に付与されていること
+Pack execution requires the following three steps:
 
-どれか1つでも欠けると実行されません。ファイル変更が入った Pack は `modified` 扱いで再承認が必要です。
+1. **Approve**: Pack is approved
+2. **Trust**: Approval hash and current hash must match
+3. **Grant**: capability execution privilege is granted to principal
 
-## 4. API サーバーの位置づけ
+If any one of them is missing, it will not be executed. Packs with file changes are treated as `modified` and require re-approval.
 
-- Kernel は `127.0.0.1:8765` で API を公開します。
-- Pack 管理、Flow 実行、secrets、grant、desktop token などはこの API が入口です。
-- ルートはコア API に加えて Pack 側 `api_routes` を読み込んで拡張されます。
+## 4. Positioning of API server
 
-## 5. viewer と runtime の関係
+- Kernel exposes an API in `127.0.0.1:8765`.
+- This API is the gateway for pack management, flow execution, secrets, grants, desktop tokens, etc.
+- Routes are extended by loading the Pack side `api_routes` in addition to the core API.
 
-`rumi_viewer` は「Kernel を起動して panel へ接続する shell」です。
+## 5. Relationship between viewer and runtime
 
-1. viewer が Python / venv / runtime パスを解決
-2. `python -m app` で Kernel を起動
-3. `/panel/` に bootstrap して UI を表示
+`rumi_viewer` is a "shell that starts Kernel and connects to panel".
 
-`defaultspack` の独立 frontend (`8766`) と panel (`8765/panel`) は別導線です。
+1. viewer resolves Python / venv / runtime path
+2. Start Kernel with `python -m app`
+3. Bootstrap to `/panel/` and display the UI
 
-## 6. Pack 配布の実行経路（Import/Apply）
+The independent frontend (`8766`) and panel (`8765/panel`) of `defaultspack` are separate conductors.
 
-1. PackImporter が zip/folder を staging 展開（Zip Slip・爆弾対策）
-2. ecosystem.json を検証
-3. PackApplier が backup を作って `ecosystem/<pack_id>/` に反映
-4. 反映後は `modified` 扱いになるため再承認フローへ
+## 6. Pack distribution execution path (Import/Apply)
 
-## 7. どこを読めば深掘りできるか
+1. PackImporter stages and deploys zip/folder (Zip Slip/Bomb protection)
+2. Validate ecosystem.json
+3. PackApplier creates a backup and reflects it in `ecosystem/<pack_id>/`
+4. After reflection, it will be treated as `modified`, so go to re-approval flow
 
-- 設計全体: [../architecture.md](../architecture.md)
-- 運用/API: [../operations.md](../operations.md)
-- viewer 起動経路: [../rumi_viewer_start.md](../rumi_viewer_start.md)
-- Pack 開発: [../pack-development.md](../pack-development.md)
+## 7. Where can I read to dig deeper?
 
+- Overall design: [../architecture.md](../architecture.md)
+- Operation/API: [../operations.md](../operations.md)
+- viewer launch path: [../rumi_viewer_start.md](../rumi_viewer_start.md)
+- Pack development: [../pack-development.md](../pack-development.md)

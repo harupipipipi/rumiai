@@ -1,3 +1,7 @@
+<!-- docs-i18n-links:start -->
+[EN](./prompt_authoring.md) | [JP](./i18n/ja/prompt_authoring.md) | [KR](./i18n/ko/prompt_authoring.md) | [CN](./i18n/zh-cn/prompt_authoring.md)
+<!-- docs-i18n-links:end -->
+
 # Prompt Authoring
 
 Prompts are passive text resources. They describe behavior for an AI request, but

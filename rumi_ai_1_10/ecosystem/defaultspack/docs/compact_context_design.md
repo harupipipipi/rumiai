@@ -1,3 +1,7 @@
+<!-- docs-i18n-links:start -->
+[EN](./compact_context_design.md) | [JP](./i18n/ja/compact_context_design.md) | [KR](./i18n/ko/compact_context_design.md) | [CN](./i18n/zh-cn/compact_context_design.md)
+<!-- docs-i18n-links:end -->
+
 # Compact Context Design
 
 Compact stores a small continuation packet:

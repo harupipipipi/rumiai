@@ -1,3 +1,7 @@
+<!-- docs-i18n-links:start -->
+[EN](./flow_spec.md) | [JP](./i18n/ja/flow_spec.md) | [KR](./i18n/ko/flow_spec.md) | [CN](./i18n/zh-cn/flow_spec.md)
+<!-- docs-i18n-links:end -->
+
 # Flow Spec
 
 A flow document has `flow_id`, optional `version` and `description`, `inputs`, `outputs`, and ordered `steps`.

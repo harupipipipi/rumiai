@@ -1,20 +1,24 @@
+<!-- docs-i18n-links:start -->
+[EN](./writing-tools.md) | [JP](./i18n/ja/writing-tools.md) | [KR](./i18n/ko/writing-tools.md) | [CN](./i18n/zh-cn/writing-tools.md)
+<!-- docs-i18n-links:end -->
+
 # Writing Tools
 
-defaults Pack で動的ツールを作成・管理するためのガイドです。ツール関連の handler は `blocks/tool/` に、ドメインロジックは `domain/tool/registry.py`（ToolRegistry）と `domain/tool/builder.py` に実装されています。
+A guide to creating and managing dynamic tools with defaults pack. Tool-related handlers are implemented in `blocks/tool/`, and domain logic is implemented in `domain/tool/registry.py` (ToolRegistry) and `domain/tool/builder.py`.
 
-## tool の概念
+## Tool concept
 
-tool はエージェントが AI の判断に基づいて呼び出す機能の単位です。各ツールは JSON Schema によるパラメータ定義と、Python コードによる実行ロジック（handler_code）を持ちます。
+A tool is a unit of functionality that the agent calls based on the AI's judgment. Each tool has parameter definitions using JSON Schema and execution logic (handler_code) using Python code.
 
-ツールには2種類あります。
+There are two types of tools.
 
-**ビルトインツール**（`execution.type: "local"`）は `ToolRegistry._register_defaults()` で自動登録されるデモ用ツールです。`web_search`、`calculator`、`file_reader` の3つが登録されます。
+**Built-in tool** (`execution.type: "local"`) is a demonstration tool that is automatically registered with `ToolRegistry._register_defaults()`. Three items will be registered: `web_search`, `calculator`, and `file_reader`.
 
-**動的ツール**（`execution.type: "dynamic"`）は API 経由で作成・更新・削除できるユーザー定義ツールです。`user_data/shared/tools/` ディレクトリに `.tool.json`（定義）と `.handler.py`（実行コード）として永続化されます。
+**Dynamic Tools** (`execution.type: "dynamic"`) are user-defined tools that can be created, updated, and deleted via the API. It is persisted in the `user_data/shared/tools/` directory as `.tool.json` (definition) and `.handler.py` (execution code).
 
-## tool 定義 JSON のフォーマット
+## tool definition JSON format
 
-ツール定義は以下の構造を持ちます。
+The tool definition has the following structure.
 
 ```json
 {
@@ -37,20 +41,20 @@ tool はエージェントが AI の判断に基づいて呼び出す機能の�
 }
 ```
 
-| フィールド | 型 | 説明 |
+| Field | Type | Description |
 |---|---|---|
-| `tool_id` | `string` | ツールの一意識別子。通常は `name` と同じ |
-| `name` | `string` | ツール名 |
-| `summary` | `string` | ツールの説明。AI がツール選択時に参照する |
-| `tags` | `string[]` | タグ。フィルタリングに使用 |
-| `schema.parameters` | `object` | JSON Schema 形式のパラメータ定義 |
-| `execution.type` | `string` | authorable tool は `"rumi_function"` または `"capability"`。`"local"`, `"dynamic"`, `"prompt"` は trusted first-party compatibility path のみ |
-| `created_at` | `string` | 作成日時（ISO 8601） |
-| `updated_at` | `string` | 更新日時（ISO 8601）。更新時に自動付与 |
+| `tool_id` | `string` | Unique identifier for the tool. Usually the same as `name` |
+| `name` | `string` | Tool name |
+| `summary` | `string` | Tool description. Referenced by AI when selecting tools |
+| `tags` | `string[]` | Tag. Used for filtering |
+| `schema.parameters` | `object` | Parameter definition in JSON Schema format |
+| `execution.type` | `string` | Authorable tool is `"rumi_function"` or `"capability"`. `"local"`, `"dynamic"`, `"prompt"` are only trusted first-party compatibility paths |
+| `created_at` | `string` | Creation date and time (ISO 8601) |
+| `updated_at` | `string` | Date and time of update (ISO 8601). Automatically granted upon renewal |
 
-## handler_code の書き方
+## How to write handler_code
 
-handler_code は以下のシグネチャを持つ `handler` 関数として記述します。
+handler_code is written as a `handler` function with the following signature.
 
 ```python
 def handler(arguments, context):
@@ -72,78 +76,78 @@ def handler(arguments, context):
     }
 ```
 
-**引数**: `arguments` は API 呼び出し時に渡されたパラメータの dict です。`context` は handler の実行コンテキストで、`call_handler`、`emit_event` 等の関数が含まれる場合があります。
+**Arguments**: `arguments` is a dict of parameters passed during the API call. `context` is the execution context of handler and may contain functions such as `call_handler`, `emit_event`, etc.
 
-**戻り値**: `result`（文字列）、`is_error`（bool）、`widget`（dict or None）の3つのキーを持つ dict を返します。
+**Return value**: Returns a dict with three keys: `result` (string), `is_error` (bool), `widget` (dict or None).
 
-**制限**: handler_code は `domain/tool/builder.py` の `generate_handler_code_with_ai()` で AI 生成される場合があります。`handler_code` が `None` の場合に AI が自動生成し、AI が利用不可の場合は `generate_skeleton()` でスケルトンコードが生成されます。
+**Limitations**: handler_code may be AI-generated in `generate_handler_code_with_ai()` of `domain/tool/builder.py`. If `handler_code` is `None`, AI will automatically generate it, and if AI is unavailable, skeleton code will be generated in `generate_skeleton()`.
 
-## API 経由での CRUD
+## CRUD via API
 
-### ツール作成
+### Tool creation
 
 **HTTP**: `POST /api/tools/create`（`blocks/tool/create.py`）
 
 **input_data**:
 
-| フィールド | 型 | 必須 | 説明 |
+| Field | Type | Required | Description |
 |---|---|---|---|
-| `name` | `string` | Yes | ツール名 |
-| `description` | `string` | No | 説明文 |
-| `parameters` | `object` | Yes | JSON Schema 形式のパラメータ定義 |
-| `handler_code` | `string` | No | Python コード。`None` の場合は AI が自動生成 |
-| `tags` | `string[]` | No | タグ。デフォルト `["dynamic", "user-created"]` |
-| `model` | `string` | No | handler_code 自動生成に使う AI モデル |
+| `name` | `string` | Yes | Tool name |
+| `description` | `string` | No | Explanation |
+| `parameters` | `object` | Yes | JSON Schema format parameter definition |
+| `handler_code` | `string` | No | Python code. In case of `None`, AI automatically generates |
+| `tags` | `string[]` | No | Tag. Default `["dynamic", "user-created"]` |
+| `model` | `string` | No | handler_code AI model used for automatic generation |
 
-同名のツールが既に存在する場合は `ALREADY_EXISTS` エラーが返されます。
+If a tool with the same name already exists, a `ALREADY_EXISTS` error will be returned.
 
-**戻り値**: `ok({"tool_id": "...", "name": "...", "summary": "...", "handler_code": "...", "created_at": "..."})`
+**Return value**: `ok({"tool_id": "...", "name": "...", "summary": "...", "handler_code": "...", "created_at": "..."})`
 
-### ツール更新
+### Tool update
 
 **HTTP**: `PUT /api/tools/{name}`（`blocks/tool/update.py`）
 
 **input_data**:
 
-| フィールド | 型 | 必須 | 説明 |
+| Field | Type | Required | Description |
 |---|---|---|---|
-| `name` | `string` | Yes | ツール名（URL パスから自動注入） |
-| `updates` | `dict` | Yes | 更新するフィールド。`name` と `tool_id` の変更は禁止 |
+| `name` | `string` | Yes | Tool name (automatically injected from URL path) |
+| `updates` | `dict` | Yes | Field to update. Changes to `name` and `tool_id` are prohibited |
 
-動的ツール（`execution.type: "dynamic"`）のみ更新可能です。`updated_at` が自動的に付与されます。
+Only dynamic tools (`execution.type: "dynamic"`) can be updated. `updated_at` will be granted automatically.
 
-**戻り値**: `ok({"tool_id": "...", "name": "...", "summary": "...", "tags": [...], "updated_at": "..."})`
+**Return value**: `ok({"tool_id": "...", "name": "...", "summary": "...", "tags": [...], "updated_at": "..."})`
 
-### ツール削除
+### Delete tools
 
 **HTTP**: `DELETE /api/tools/{name}`（`blocks/tool/delete.py`）
 
 **input_data**:
 
-| フィールド | 型 | 必須 | 説明 |
+| Field | Type | Required | Description |
 |---|---|---|---|
-| `name` | `string` | Yes | ツール名（URL パスから自動注入） |
+| `name` | `string` | Yes | Tool name (automatically injected from URL path) |
 
-動的ツールのみ削除可能です。`user_data/shared/tools/` 内の `.tool.json` と `.handler.py` も削除されます。
+Only dynamic tools can be deleted. `.tool.json` and `.handler.py` within `user_data/shared/tools/` are also removed.
 
-**戻り値**: `ok({"deleted": "tool_name", "tool_id": "..."})`
+**Return value**: `ok({"deleted": "tool_name", "tool_id": "..."})`
 
-### ツールエクスポート
+### Tool Export
 
 **HTTP**: `GET /api/tools/{name}/export`（`blocks/tool/export.py`）
 
 **input_data**:
 
-| フィールド | 型 | 必須 | 説明 |
+| Field | Type | Required | Description |
 |---|---|---|---|
-| `name` | `string` | No | 単一ツール名 |
-| `names` | `string[]` | No | 複数ツール名（`name` と排他） |
+| `name` | `string` | No | Single tool name |
+| `names` | `string[]` | No | Multiple tool names (exclusive with `name`) |
 
-**戻り値**: `ok({"tools": [...], "count": N, "not_found": [...]})`。各ツールは `handler_code` を含む完全な定義です。
+**Return value**: `ok({"tools": [...], "count": N, "not_found": [...]})`. Each tool is a complete definition including `handler_code`.
 
-## 具体例
+## Specific example
 
-### 例1: 計算ツール
+### Example 1: Calculator
 
 ```bash
 curl -X POST http://127.0.0.1:8766/api/tools/create \
@@ -164,7 +168,7 @@ curl -X POST http://127.0.0.1:8766/api/tools/create \
   }'
 ```
 
-### 例2: AI に handler_code を自動生成させる
+### Example 2: Let AI automatically generate handler_code
 
 ```bash
 curl -X POST http://127.0.0.1:8766/api/tools/create \
@@ -183,9 +187,9 @@ curl -X POST http://127.0.0.1:8766/api/tools/create \
   }'
 ```
 
-`handler_code` を省略すると、AI プロバイダーが利用可能なら AI がコードを生成します。利用不可の場合はスケルトンコードが生成されます。
+If you omit `handler_code`, the AI will generate the code if an AI provider is available. If unavailable, skeleton code will be generated.
 
-### 例3: ツールの更新
+### Example 3: Update tools
 
 ```bash
 curl -X PUT http://127.0.0.1:8766/api/tools/unit_converter \
@@ -198,12 +202,12 @@ curl -X PUT http://127.0.0.1:8766/api/tools/unit_converter \
   }'
 ```
 
-## ベストプラクティス
+## Best practices
 
-`name` は短く明確にし、ツールの機能を一言で表す名前にしてください。AI がツール選択時に `name` と `summary` を参照するため、`summary` にはツールの用途を具体的に記述してください。
+Keep your `name` short and clear, with a one-word name that describes the tool's functionality. The AI ​​will refer to `name` and `summary` when selecting tools, so be sure to specifically describe the purpose of the tool in `summary`.
 
-`parameters` の JSON Schema は可能な限り詳細に定義してください。`required` フィールドで必須パラメータを明示し、各プロパティに `type` を正確に指定してください。
+Please define the JSON Schema for `parameters` in as much detail as possible. Be sure to specify the required parameters in the `required` field and specify exactly the `type` for each property.
 
-`handler_code` は常に `{"result": str, "is_error": bool, "widget": None}` の形式の dict を返すようにしてください。予期しない例外が発生した場合は `is_error: true` で結果を返してください。
+`handler_code` should always return a dict of the form `{"result": str, "is_error": bool, "widget": None}`. If an unexpected exception occurs, please return the result with `is_error: true`.
 
-永続化ファイル（`user_data/shared/tools/`）は直接編集せず、API 経由で操作してください。`ToolRegistry` がインメモリキャッシュとファイルの整合性を管理しています。
+Do not edit the persistence file (`user_data/shared/tools/`) directly, but operate it via the API. `ToolRegistry` manages in-memory cache and file consistency.

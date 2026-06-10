@@ -1,0 +1,70 @@
+<!-- docs-i18n-links:start -->
+[EN](../../../tutorials/runtime-quickstart.md) | [JP](./runtime-quickstart.md) | [KR](../../ko/tutorials/runtime-quickstart.md) | [CN](../../zh-cn/tutorials/runtime-quickstart.md)
+<!-- docs-i18n-links:end -->
+
+# Tutorial: Runtime Quickstart
+
+このチュートリアルは **「今のリポジトリで runtime が動くところまで」** を最短で確認する手順です。
+
+## 前提
+
+- repo ルートで作業する
+- Python が使える
+
+## Step 1. ヘルスチェックを実行
+
+```bash
+python -m rumi_ai --health
+```
+
+`status: "UP"` または `status: "DEGRADED"` が返れば runtime は起動可能状態です（`DOWN` は要調査）。
+
+## Step 2. runtime を起動
+
+```bash
+python -m rumi_ai --headless
+```
+
+`[Rumi] startup.success` が出れば起動完了です。
+
+## Step 3. API の疎通確認
+
+別ターミナルで:
+
+```bash
+curl http://127.0.0.1:8765/health
+```
+
+HTTP 200 と JSON が返れば API は利用可能です。
+
+## Step 4. panel ルート確認（任意）
+
+ブラウザで `http://127.0.0.1:8765/panel/` を開き、画面が表示されることを確認します。
+
+## Step 5. 停止
+
+起動したターミナルで `Ctrl+C`。
+
+## 検証スクリーンショット
+
+> 実行確認で取得した画像です。環境により表示は多少変わります。
+
+### /health（ブラウザ表示）
+
+![Runtime health screenshot](../assets/tutorials/runtime-health.png)
+
+### /panel（ブラウザ表示）
+
+![Runtime panel screenshot](../assets/tutorials/runtime-panel.png)
+
+## 実行ログ
+
+実行時の生ログは以下に保存しています。
+
+- [../assets/tutorials/runtime-quickstart.log](../assets/tutorials/runtime-quickstart.log)
+
+## 次に読む
+
+- 仕組みを追う: [../concepts/system-mechanism.md](../concepts/system-mechanism.md)
+- 運用/API 詳細: [../operations.md](../operations.md)
+- viewer 側の起動経路: [../rumi_viewer_start.md](../rumi_viewer_start.md)

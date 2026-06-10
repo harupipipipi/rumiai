@@ -1,37 +1,40 @@
-```markdown
-# flow.md — Rumi AI OS Flow Engine 設計書
+<!-- docs-i18n-links:start -->
+[EN](./flow.md) | [JP](./i18n/ja/flow.md) | [KR](./i18n/ko/flow.md) | [CN](./i18n/zh-cn/flow.md)
+<!-- docs-i18n-links:end -->
 
-## 1. 概要
+# flow.md — Rumi AI OS Flow Engine design document
 
-Flow Engine は defaults が提供する最上位のオーケストレーターである。ユーザーのリクエストから最終レスポンスまでの処理パイプライン全体を制御し、handler をどの順で・どの条件で呼ぶかを定義・実行する。
+## 1. Overview
 
-Flow Engine 自体は汎用の仕組みであり、チャット・エージェント・コーディングといったドメイン知識を持たない。何を実行するかは全て Flow 定義（flow.yaml + handler.py）が決める。defaults はデフォルトの Flow 定義をバッテリーとして同梱するが、user_data の Flow 定義で完全に置き換え可能である。
+Flow Engine is the top-level orchestrator provided by defaults. Controls the entire processing pipeline from the user's request to the final response, and defines and executes handlers in what order and under what conditions.
 
-Flow Engine は 2 層で構成される。
+Flow Engine itself is a general-purpose mechanism and has no domain knowledge such as chat, agent, or coding. What is executed is all determined by the Flow definition (flow.yaml + handler.py). defaults ships with a default Flow definition as a battery, but it can be completely replaced with the Flow definition in user_data.
 
-**Layer 1 — System Flow（handler.py）**: flow.yaml + handler.py のペアで定義される処理パイプライン。handler.py が FlowContext を受け取り、汎用プリミティブ（call_handler, emit_event 等）を使って任意の handler を呼び出す。
+Flow Engine consists of two layers.
 
-**Layer 2 — Custom Flow（ノードグラフ）**: YAML の nodes 定義だけでフローを構築する宣言的な方式。条件分岐、ループ、並列実行、サブフロー呼び出しに対応する。handler.py を書く必要がない。
+**Layer 1 — System Flow (handler.py)**: Processing pipeline defined by the flow.yaml + handler.py pair. handler.py receives FlowContext and calls any handler using general-purpose primitives (call_handler, emit_event, etc.).
 
-## 2. 設計思想
+**Layer 2 — Custom Flow (node graph)**: A declarative method to build a flow using only YAML node definitions. Supports conditional branching, loops, parallel execution, and subflow calls. No need to write handler.py.
 
-**フロー自体がプラグイン**: デフォルトの 3 フローも特別扱いしない。flows/ ディレクトリに flow.yaml + handler.py を置くだけで新しいフローが追加される。Flow Engine はどのフローも同じ方法で読み込み・実行する。
+## 2. Design philosophy
 
-**汎用プリミティブのみ**: FlowContext は call_handler, emit_event, wait_event, data_read, data_write, capability, execute_flow, emit_widget の汎用プリミティブだけを提供する。特定のドメインに特化した API は存在しない。チャット保存も、エージェント実行も、メモリ更新も、全て call_handler で handler を呼ぶだけである。
+**The flow itself is a plugin**: The default 3 flows are not treated specially. A new flow is added by simply placing flow.yaml + handler.py in the flows/ directory. Flow Engine loads and executes all flows in the same way.
 
-**標準語彙（Block 契約）**: defaults は handler の入出力仕様を「標準語彙」として contracts.py に定義する。Pack はこの語彙を前提にできる。しかし契約に登録されていない handler も call_handler で自由に呼べる。標準語彙は制約ではなく共通言語である。
+**Generic primitives only**: FlowContext only provides the following generic primitives: call_handler, emit_event, wait_event, data_read, data_write, capability, execute_flow, emit_widget. There are no domain-specific APIs. Saving a chat, executing an agent, and updating memory are all done by simply calling the handler using call_handler.
 
-**宣言的 + 命令的のハイブリッド**: flow.yaml でメタデータとノード接続を宣言的に定義し、handler.py で実行ロジックを命令的に記述する。シンプルなフローは handler.py だけで完結し、複雑なフローは flow.yaml のノードグラフを engine.py が解釈・実行する。
+**Standard vocabulary (Block contract)**: Defaults defines the input/output specifications of handler as the "standard vocabulary" in contracts.py. Pack can assume this vocabulary. However, handlers that are not registered in the contract can also be called freely using call_handler. Standard vocabulary is a common language, not a constraint.
 
-**段階的に動く**: Layer 1 だけで完全に動作する。Layer 2 は必要になった時に使えばよい。トリガーシステムも user_input と api はすぐ動き、webhook と schedule は基盤が整った段階で有効化される。
+**Declarative + Imperative Hybrid**: Define metadata and node connections declaratively in flow.yaml and write execution logic imperatively in handler.py. A simple flow can be completed with just handler.py, and a complex flow can be completed by engine.py, which interprets and executes the node graph in flow.yaml.
 
-**仕組みだけ提供**: defaults は Flow Engine の仕組み（engine.py, router.py, validator.py, node_executor.py, trigger_manager.py, context.py）を提供する。デフォルトの Flow 定義（simple_chat, agent_chat, planning_agent）はバッテリーとして含むが、user_data/shared/flows/ や user_data/packs/*/flows/ に同一 flow_id の定義を置けば完全に置き換わる。
+**Step-by-step**: Works completely on Layer 1 only. Layer 2 can be used when needed. As for the trigger system, user_input and API will work immediately, and webhook and schedule will be enabled once the infrastructure is in place.
 
-## 3. 公式 rumiai Flow との関係
+**Provides only the mechanism**: Defaults provides the Flow Engine mechanism (engine.py, router.py, validator.py, node_executor.py, trigger_manager.py, context.py). The default Flow definitions (simple_chat, agent_chat, planning_agent) are included as a battery, but they can be completely replaced by placing a definition with the same flow_id in user_data/shared/flows/ or user_data/packs/*/flows/.
 
-公式 rumiai は独自の Flow システム（phases + steps）を持つ。ステップタイプは handler, python_file_call, set, if の 4 種のみである。
+## 3. Relationship with official rumiai Flow
 
-defaults の Flow Engine は公式 Flow の handler ステップとして起動される。公式 Flow の step で `handler: defaults.flow.execute` を呼び出すと、defaults の Flow Engine が動く。
+Official rumiai has its own Flow system (phases + steps). There are only four step types: handler, python_file_call, set, and if.
+
+The defaults Flow Engine is started as a handler step of the official Flow. When you call `handler: defaults.flow.execute` in the official Flow step, the defaults Flow Engine runs.
 
 ```yaml
 # 公式 rumiai の Flow（phases + steps 形式）
@@ -46,11 +49,11 @@ phases:
           trigger_input: "{{ context.user_input }}"
 ```
 
-公式の Flow は rumiai カーネルのセキュア実行基盤（承認、Docker 隔離、Trust + Grant）の上で動く。defaults の Flow Engine はその上の Layer であり、公式 Flow の安全保証を継承する。
+The official Flow runs on the rumiai kernel's secure execution infrastructure (authorization, Docker isolation, Trust + Grant). The defaults Flow Engine is a layer above it and inherits the safety guarantees of the official Flow.
 
-defaults の Flow Engine を使わず、公式の phases + steps だけで全てを組むことも可能である。defaults はそれを強制しない。
+It is also possible to configure everything using just the official phases + steps without using the defaults Flow Engine. defaults doesn't force it.
 
-## 4. アーキテクチャ
+## 4. Architecture
 
 ```
 ユーザー / API / トリガー
@@ -76,9 +79,9 @@ defaults の Flow Engine を使わず、公式の phases + steps だけで全て
 └─────────────────────────────────────────┘
 ```
 
-リクエストが来ると router.py がどのフローを使うか決定し、engine.py がそのフローの handler.py を FlowContext 付きで実行する。handler.py は FlowContext の汎用プリミティブを使って任意の handler を呼び出す。
+When a request comes, router.py decides which flow to use, and engine.py executes handler.py for that flow with FlowContext. handler.py calls any handler using FlowContext's generic primitives.
 
-## 5. ディレクトリ構成
+## 5. Directory structure
 
 ```
 ecosystem/defaults/domain/flow/
@@ -112,13 +115,13 @@ user_data/packs/{pack_id}/flows/   # Pack 提供フロー
     └─ handler.py
 ```
 
-defaults/flows/ にあるデフォルト Flow は user_data で上書き可能である。user_data/shared/flows/ に同一 flow_id の定義があればそちらが優先される。
+The default Flow in defaults/flows/ can be overwritten with user_data. If there is a definition with the same flow_id in user_data/shared/flows/, that one will take precedence.
 
-## 6. Flow Engine コアファイル
+## 6. Flow Engine Core File
 
-### 6.1 engine.py — フロー実行エンジン
+### 6.1 engine.py — Flow execution engine
 
-フローの handler.py をロードし、FlowContext を渡して実行する。handler.py が存在しない場合は flow.yaml の nodes を node_executor.py で実行する。
+Load the flow's handler.py, pass the FlowContext and run it. If handler.py does not exist, execute nodes in flow.yaml with node_executor.py.
 
 ```python
 class FlowEngine:
@@ -138,9 +141,9 @@ class FlowEngine:
         """flow.yaml の nodes を node_executor で順次/並列実行"""
 ```
 
-### 6.2 router.py — フロー選択ルーター
+### 6.2 router.py — Flow selection router
 
-リクエストの明示的指定、agent.json の設定、またはデフォルトに基づきフローを選択する。
+Select a flow based on explicit requests, agent.json settings, or defaults.
 
 ```python
 class FlowRouter:
@@ -153,7 +156,7 @@ class FlowRouter:
         """
 ```
 
-フロー定義の検索順序:
+Flow definition search order:
 
 ```
 1. user_data/shared/flows/（ユーザー定義）
@@ -161,11 +164,11 @@ class FlowRouter:
 3. ecosystem/defaults/flows/（デフォルト）
 ```
 
-同一 flow_id が複数存在する場合はこの順で優先される。競合がある場合はフロントエンドでユーザーに選択を促し、resolutions.json に記録する。
+If there are multiple same flow_id, this order will be prioritized. If there is a conflict, prompt the user to make a selection on the front end and record it in resolutions.json.
 
-### 6.3 contracts.py — handler 標準語彙
+### 6.3 contracts.py — handler standard vocabulary
 
-defaults が定義する handler の入出力仕様。標準語彙であり、Pack はこの仕様を前提にできる。しかし制約ではない。契約に登録されていない handler も call_handler で自由に呼べる。
+The input/output specifications of handler defined by defaults. This is a standard vocabulary, and Pack can rely on this specification. But it's not a constraint. Handlers that are not registered in the contract can also be called freely using call_handler.
 
 ```python
 HANDLER_CONTRACTS = {
@@ -302,7 +305,7 @@ HANDLER_CONTRACTS = {
 }
 ```
 
-Pack は独自の handler 契約を追加できる。
+Packs can add their own handler contracts.
 
 ```python
 # Pack が追加する契約の例
@@ -312,9 +315,9 @@ HANDLER_CONTRACTS["my_pack.custom.process"] = {
 }
 ```
 
-契約はドキュメントであり、validator.py が起動時に検証する。実行時の call_handler は契約を参照しない。call_handler は handler を呼び出して結果を返すだけである。
+A contract is a document that validator.py validates at startup. call_handler at runtime does not reference the contract. call_handler simply calls handler and returns the result.
 
-### 6.4 validator.py — 起動時検証
+### 6.4 validator.py — startup validation
 
 ```python
 class FlowValidator:
@@ -331,7 +334,7 @@ class FlowValidator:
 
 ### 6.5 context.py — FlowContext
 
-handler.py に渡されるコンテキストオブジェクト。tool の context API と同じ汎用プリミティブセットを持つ。
+Context object passed to handler.py. It has the same general purpose primitive set as tool's context API.
 
 ```python
 class FlowContext:
@@ -382,11 +385,11 @@ class FlowContext:
         """キャンセル確認。キャンセル済みなら CancelledError を送出。"""
 ```
 
-FlowContext と tool の context は同じ汎用プリミティブセットを持つ。違いは FlowContext がクラスであること、tool の context が dict であること。API の意味は同一である。
+FlowContext and tool context have the same set of generic primitives. The difference is that FlowContext is a class and the context of tool is a dict. The meaning of API is the same.
 
-## 7. flow.yaml 仕様
+## 7. flow.yaml specification
 
-### 7.1 基本構造
+### 7.1 Basic structure
 
 ```yaml
 flow_id: agent_chat
@@ -424,17 +427,17 @@ metadata:
   icon: "robot"
 ```
 
-### 7.2 handler.py ありの場合（Layer 1）
+### 7.2 With handler.py (Layer 1)
 
-handler.py が存在すれば engine.py は handler の run() を呼び出す。nodes は無視される。handler.py は FlowContext の汎用プリミティブだけを使って処理を組み立てる。
+If handler.py exists, engine.py calls handler's run(). nodes are ignored. handler.py assembles the process using only general-purpose primitives of FlowContext.
 
-### 7.3 handler.py なしの場合（Layer 2）
+### 7.3 Without handler.py (Layer 2)
 
-handler.py が存在しなければ engine.py は flow.yaml の nodes をノードグラフとして解釈し、node_executor.py で実行する。
+If handler.py does not exist, engine.py will interpret nodes in flow.yaml as a node graph and execute it with node_executor.py.
 
-## 8. handler.py 仕様
+## 8. handler.py specification
 
-### 8.1 基本構造
+### 8.1 Basic structure
 
 ```python
 async def run(ctx: FlowContext) -> FlowResult:
@@ -456,9 +459,9 @@ class FlowResult:
     metadata: dict       # 実行統計（所要時間、トークン数、ステップ数等）
 ```
 
-### 8.3 デフォルト Flow 定義
+### 8.3 Default Flow Definition
 
-defaults は 3 つの Flow 定義をバッテリーとして提供する。全て user_data で置き換え可能。
+defaults provides a battery of three Flow definitions. All can be replaced with user_data.
 
 #### simple_chat/handler.py
 
@@ -664,55 +667,55 @@ async def run(ctx: FlowContext) -> FlowResult:
     )
 ```
 
-全ての handler.py が call_handler, emit_event, wait_event の汎用プリミティブだけで構成されている。チャット保存もエージェント実行もメモリ更新も、全て handler 名を指定して呼び出しているだけである。
+All handler.py consists only of general-purpose primitives: call_handler, emit_event, and wait_event. Chat saving, agent execution, and memory updating are all simply called by specifying the handler name.
 
-## 9. カスタムフロー — Layer 2 ノードグラフ
+## 9. Custom flow — Layer 2 node graph
 
-handler.py を書かずに flow.yaml の nodes だけでフローを定義する方式。node_executor.py がノードグラフを解釈し実行する。
+A method of defining a flow using only nodes in flow.yaml without writing handler.py. node_executor.py interprets and executes the node graph.
 
-### 9.1 ノードタイプ一覧
+### 9.1 Node type list
 
-#### 基本ノード
+#### Basic node
 
-| type | 説明 | 入力 | 出力 |
+| type | description | input | output |
 |---|---|---|---|
-| `start` | フロー開始。入力変数を定義 | trigger_input | 定義された変数 |
-| `end` | フロー終了。最終出力を定義 | 任意 | FlowResult |
-| `handler` | 任意の handler を呼び出す | handler_name, params | handler の戻り値 |
-| `prompt` | プロンプトレンダリング | prompt_id, variables | rendered_text |
-| `event_emit` | イベント発行 | event_type, data | なし |
-| `event_wait` | イベント待機 | event_type, timeout, filter | イベントデータ |
-| `data_read` | user_data 読み取り | path | content |
-| `data_write` | user_data 書き込み | path, content | success |
-| `capability` | capability 呼び出し | capability_id, params | result |
-| `flow` | 別フローをサブフローとして呼び出し | flow_id, input | FlowResult |
-| `widget` | Widget 送出 | widget JSON | なし |
+| `start` | Flow start. Define input variables | trigger_input | Defined variables |
+| `end` | Flow ends. Define final output | Any | FlowResult |
+| `handler` | Call any handler | handler_name, params | Return value of handler |
+| `prompt` | Prompt rendering | prompt_id, variables | rendered_text |
+| `event_emit` | Event issue | event_type, data | None |
+| `event_wait` | Waiting for event | event_type, timeout, filter | Event data |
+| `data_read` | user_data read | path | content |
+| `data_write` | user_data write | path, content | success |
+| `capability` | capability call | capability_id, params | result |
+| `flow` | Call another flow as a subflow | flow_id, input | FlowResult |
+| `widget` | Widget sending | widget JSON | None |
 
-#### 制御ノード
+#### Control Node
 
-| type | 説明 |
+| type | description |
 |---|---|
-| `condition` | 条件分岐（if / else） |
-| `switch` | 多分岐（switch / case / default） |
-| `loop` | ループ（for_each / while / count） |
-| `parallel` | 並列実行（全完了待ち or 最速完了） |
-| `wait` | タイマー待機 |
-| `goto` | 指定ノードへジャンプ（循環対応） |
+| `condition` | Conditional branch (if/else) |
+| `switch` | Multi-branch (switch / case / default) |
+| `loop` | Loop (for_each / while / count) |
+| `parallel` | Parallel execution (waiting for all completion or fastest completion) |
+| `wait` | Waiting for timer |
+| `goto` | Jump to specified node (cyclic support) |
 
-#### データノード
+#### Data Node
 
-| type | 説明 |
+| type | description |
 |---|---|
-| `variable` | 変数の設定・更新・削除 |
-| `template` | Jinja2 テンプレートのレンダリング |
-| `code` | Python コード実行（サンドボックス内） |
-| `http` | HTTP リクエスト送信 |
+| `variable` | Setting, updating, and deleting variables |
+| `template` | Jinja2 template rendering |
+| `code` | Python code execution (in sandbox) |
+| `http` | Send HTTP request |
 
-基本ノードの `handler` が全ての鍵である。handler ノードは任意の handler を呼び出す汎用ノードであり、handler_name を変えるだけでチャット操作もエージェント実行もメモリ更新もツール実行も全て行える。
+The basic node `handler` is all keys. The handler node is a general-purpose node that calls any handler, and by simply changing handler_name, you can perform chat operations, agent execution, memory updates, and tool execution.
 
-#### Pack カスタムノード
+#### Pack Custom Node
 
-Pack は node_types/ ディレクトリにカスタムノードタイプを追加可能。
+Packs can add custom node types to the node_types/ directory.
 
 ```
 user_data/packs/my_pack/node_types/
@@ -721,7 +724,7 @@ user_data/packs/my_pack/node_types/
     └─ executor.py
 ```
 
-### 9.2 ノード定義の書き方
+### 9.2 How to write a node definition
 
 ```yaml
 nodes:
@@ -791,23 +794,23 @@ nodes:
     after: notify_ui
 ```
 
-全ての操作が handler ノード + event_emit ノードの汎用ノードで構成されている。
+All operations consist of a general node: handler node + event_emit node.
 
-### 9.3 データフローと変数
+### 9.3 Dataflow and variables
 
-ノード間のデータは `{{ node_id.field }}` で参照する。
+Data between nodes is referenced in `{{ node_id.field }}`.
 
-参照可能なスコープ:
+Visible scopes:
 
-- `{{ start.* }}` — フロー入力
+- `{{ start.* }}` — flow input
 - `{{ config.* }}` — flow_config
-- `{{ trigger_input.* }}` — トリガー入力
-- `{{ node_id.* }}` — 指定ノードの出力
-- `{{ env.* }}` — 環境変数
-- `{{ session.* }}` — セッション情報
-- `{{ flow.* }}` — フロー実行メタデータ
+- `{{ trigger_input.* }}` — Trigger input
+- `{{ node_id.* }}` — Output of specified node
+- `{{ env.* }}` — environment variables
+- `{{ session.* }}` — Session information
+- `{{ flow.* }}` — Flow execution metadata
 
-### 9.4 条件分岐
+### 9.4 Conditional branching
 
 ```yaml
 - id: decide
@@ -828,7 +831,7 @@ nodes:
   default: general_handler
 ```
 
-### 9.5 ループ
+### 9.5 Loop
 
 ```yaml
 # for_each ループ
@@ -869,7 +872,7 @@ nodes:
         params: {}
 ```
 
-### 9.6 並列実行
+### 9.6 Parallel execution
 
 ```yaml
 - id: multi_search
@@ -897,20 +900,20 @@ nodes:
         arguments: { pattern: "{{ start.query }}" }
 ```
 
-## 10. トリガーシステム
+## 10. Trigger system
 
-### 10.1 トリガータイプ
+### 10.1 Trigger Type
 
-| type | 説明 | 状態 |
+| type | description | status |
 |---|---|---|
-| `user_input` | ユーザーがチャットで入力 | 実装対象 |
-| `api` | REST API 呼び出し | 実装対象 |
-| `event` | 内部イベント | 実装対象 |
-| `webhook` | 外部からの HTTP POST 受信 | 要デーモン基盤 |
-| `schedule` | cron 式スケジュール | 要デーモン基盤 |
-| `flow` | 別フローからのサブフロー呼び出し | 実装対象 |
+| `user_input` | User input in chat | Implementation target |
+| `api` | REST API call | Implementation target |
+| `event` | Internal event | Implementation target |
+| `webhook` | Receive HTTP POST from outside | Daemon infrastructure required |
+| `schedule` | cron-style schedule | daemon infrastructure required |
+| `flow` | Subflow call from another flow | Implementation target |
 
-### 10.2 トリガー定義例
+### 10.2 Trigger definition example
 
 ```yaml
 # ユーザー入力トリガー
@@ -951,11 +954,11 @@ trigger:
     events: ["push", "pull_request"]
 ```
 
-### 10.3 event トリガーによるフックパターン
+### 10.3 Hook pattern with event trigger
 
-event トリガーは Flow Engine の最も強力な拡張ポイントである。任意のイベントに反応して Flow を自動起動できる。
+Event triggers are Flow Engine's most powerful extension point. Flow can be automatically started in response to any event.
 
-#### パターン1: ユーザー入力時にナレッジ自動検索
+#### Pattern 1: Automatic knowledge search on user input
 
 ```yaml
 # user_data/shared/flows/knowledge_hook/flow.yaml
@@ -1002,9 +1005,9 @@ nodes:
     after: inject_context
 ```
 
-knowledge_search ツールは user_data/shared/tools/ に配置されるただのツールである。Flow Engine は event トリガーでこのフローを自動起動し、ツールを呼び出し、結果をチャットのコンテキストに注入する。defaults 側の変更はゼロ。
+The knowledge_search tool is just a tool located in user_data/shared/tools/. Flow Engine automatically launches this flow with an event trigger, calls the tool, and injects the results into the chat context. There are zero changes on the defaults side.
 
-#### パターン2: エージェント完了時にメモリ自動更新
+#### Pattern 2: Automatically update memory when agent completes
 
 ```yaml
 flow_id: memory_auto_update
@@ -1048,7 +1051,7 @@ nodes:
     after: save
 ```
 
-#### パターン3: 特定の出力に対して免責ポップアップ
+#### Pattern 3: Disclaimer popup for specific output
 
 ```yaml
 flow_id: consent_check
@@ -1110,7 +1113,7 @@ nodes:
     type: end
 ```
 
-全てのフックパターンが event トリガー + handler ノード + event_emit/event_wait ノードの汎用的な組み合わせで実現されている。defaults に新しい仕組みを追加する必要はない。
+All hook patterns are realized using a generic combination of event trigger + handler node + event_emit/event_wait nodes. There is no need to add any new mechanism to defaults.
 
 ### 10.4 trigger_manager.py
 
@@ -1126,18 +1129,18 @@ class TriggerManager:
         """登録済みトリガー一覧"""
 ```
 
-## 11. エラーハンドリング
+## 11. Error handling
 
-### 11.1 ノードレベル
+### 11.1 Node level
 
-各ノードに on_error を指定可能。
+on_error can be specified for each node.
 
-| on_error | 動作 |
+| on_error | Behavior |
 |---|---|
-| `retry` | max_retries 回リトライ。デフォルト 2 回 |
-| `skip` | ノードをスキップし、default_output で次へ進む |
-| `fallback` | 指定の fallback_node に遷移 |
-| `stop` | フロー全体を停止し、エラー結果を返す |
+| `retry` | Retry max_retries times. Default 2 times |
+| `skip` | Skip node and proceed with default_output |
+| `fallback` | Transition to the specified fallback_node |
+| `stop` | Stops the entire flow and returns an error result |
 
 ```yaml
 - id: api_call
@@ -1157,7 +1160,7 @@ class TriggerManager:
   path: "cache/api_data.json"
 ```
 
-### 11.2 フローレベル
+### 11.2 Flow Level
 
 ```yaml
 error_handling:
@@ -1170,7 +1173,7 @@ error_handling:
     on_timeout: true
 ```
 
-### 11.3 handler.py でのエラーハンドリング
+### 11.3 Error handling in handler.py
 
 ```python
 async def run(ctx: FlowContext) -> FlowResult:
@@ -1196,31 +1199,31 @@ async def run(ctx: FlowContext) -> FlowResult:
                           messages=[], metadata={})
 ```
 
-## 12. バリデーション
+## 12. Validation
 
-### 12.1 起動時検証（validator.py）
+### 12.1 Startup validation (validator.py)
 
-| チェック項目 | 説明 |
+| Check items | Explanation |
 |---|---|
-| flow.yaml 構文 | YAML パース可能か、必須フィールドがあるか |
-| handler 存在確認 | handler.py 内やノードで呼ばれている handler 名が登録済みか |
-| 契約検証 | 契約に登録されている handler の実装が仕様を満たすか |
-| ノードグラフ検証 | ノード間の接続が有効か、到達不能ノードがないか |
-| 循環検出 | フロー間のサブフロー呼び出しに循環がないか |
-| config_schema 検証 | flow_config が config_schema に適合するか |
+| flow.yaml syntax | Is YAML parsable? Are there required fields |
+| Check the existence of handler | Is the handler name called in handler.py or in a node registered? |
+| Contract verification | Does the implementation of the handler registered in the contract meet the specifications |
+| Node graph validation | Is the connection between nodes valid and are there any unreachable nodes |
+| Cycle detection | Is there a cycle in subflow calls between flows |
+| config_schema validation | Does flow_config conform to config_schema |
 
-### 12.2 実行時検証
+### 12.2 Runtime Verification
 
-| チェック項目 | 説明 |
+| Check items | Explanation |
 |---|---|
-| 権限チェック | call_handler 時に呼び出し元の Grant を検証 |
-| 反復回数 | max_total_iterations を超えていないか |
-| タイムアウト | global_timeout_ms を超えていないか |
-| 変数参照 | `{{ node_id.field }}` の参照先が存在するか |
+| Permission check | Validate caller's Grant on call_handler |
+| Number of iterations | Does it exceed max_total_iterations |
+| Timeout | Is global_timeout_ms exceeded |
+| Variable reference | Is there a reference to `{{ node_id.field }}` |
 
-## 13. Pack 連携
+## 13. Pack cooperation
 
-### 13.1 Pack がフローを提供する
+### 13.1 Pack provides flow
 
 ```json
 {
@@ -1229,9 +1232,9 @@ async def run(ctx: FlowContext) -> FlowResult:
 }
 ```
 
-Pack のフローは user_data/packs/{pack_id}/flows/ に配置され、Flow Engine のローダーが自動検出する。
+Pack flows are placed in user_data/packs/{pack_id}/flows/ and are automatically detected by the Flow Engine loader.
 
-### 13.2 Pack が handler を置き換える
+### 13.2 Pack replaces handler
 
 ```json
 {
@@ -1244,9 +1247,9 @@ Pack のフローは user_data/packs/{pack_id}/flows/ に配置され、Flow Eng
 }
 ```
 
-validator.py が契約チェックを行い、問題なければ置き換えを適用する。call_handler で "defaults.agent.execute" を呼ぶと、置き換え後の実装が実行される。
+validator.py checks the contract and applies the replacement if there is no problem. If you call "defaults.agent.execute" in call_handler, the replaced implementation will be executed.
 
-### 13.3 Pack がカスタムノードタイプを提供する
+### 13.3 Pack provides custom node types
 
 ```json
 {
@@ -1255,20 +1258,20 @@ validator.py が契約チェックを行い、問題なければ置き換えを�
 }
 ```
 
-Layer 2 ノードグラフで `type: slack_notify` のように使用可能になる。
+Available in Layer 2 node graphs as `type: slack_notify`.
 
-## 14. フロー間連携
+## 14. Cooperation between flows
 
-### 14.1 サブフロー呼び出し
+### 14.1 Subflow call
 
-handler.py から:
+From handler.py:
 ```python
 sub_result = await ctx.execute_flow("data_processing", {
     "data": some_data
 })
 ```
 
-Layer 2 ノードから:
+From Layer 2 nodes:
 ```yaml
 - id: call_sub
   type: flow
@@ -1277,9 +1280,9 @@ Layer 2 ノードから:
     data: "{{ previous_node.output }}"
 ```
 
-### 14.2 フローチェーン
+### 14.2 Flow Chain
 
-flow.yaml の after_flow で別フローを連続実行:
+Continuously execute another flow using after_flow in flow.yaml:
 
 ```yaml
 flow_id: pipeline_step1
@@ -1290,57 +1293,57 @@ after_flow:
   condition: "{{ result.status == 'completed' }}"
 ```
 
-## 15. セキュリティ
+## 15. Security
 
-| 項目 | 対策 |
+| Item | Measures |
 |---|---|
-| handler.py 実行 | Pack 承認フローで許可されたもののみ実行 |
-| call_handler 権限チェック | 呼び出し元の Grant に含まれる権限のみ実行可能 |
-| code ノード | Docker サンドボックス内で実行 |
-| http ノード | 許可ドメインリストで制限可能 |
-| 変数インジェクション | テンプレート式 `{{ }}` は Jinja2 サンドボックスモードで評価 |
-| 無限ループ | max_total_iterations + global_timeout_ms で強制停止 |
+| Run handler.py | Run only what is allowed by the Pack approval flow |
+| call_handler permission check | Only permissions included in the caller's Grant can be executed |
+| code node | run in Docker sandbox |
+| http node | Can be restricted by allowed domain list |
+| Variable injection | Template expression `{{ }}` evaluated in Jinja2 sandbox mode |
+| Infinite loop | Forced stop at max_total_iterations + global_timeout_ms |
 
-## 16. パフォーマンス
+## 16. Performance
 
-| 項目 | 方針 |
+| Item | Policy |
 |---|---|
-| フロー定義キャッシュ | 起動時にロード、メモリキャッシュ。flow.yaml 変更時は再読み込み |
-| handler 解決キャッシュ | call_handler の handler 名 → 実装のマッピングをキャッシュ |
-| 並列ノード | asyncio.gather で並列実行 |
-| ストリーミング | emit_event / emit_widget で逐次送信 |
-| 大規模フロー | ノード数 100 超のフローでは実行ログを分割保存 |
+| Flow definition cache | Loaded at startup, memory cache. Reload flow.yaml when changing |
+| handler resolution cache | handler name of call_handler → cache implementation mapping |
+| Parallel nodes | Parallel execution with asyncio.gather |
+| Streaming | Sequential transmission with emit_event / emit_widget |
+| Large-scale flows | Execution logs are saved separately for flows with more than 100 nodes |
 
-## 17. イベント一覧
+## 17. Event list
 
-defaults が標準的に発行するイベントの一覧。これらは標準語彙であり、event トリガーや wait_event で使用できる。Pack が独自のイベントを追加することも可能。
+List of events standardly emitted by defaults. These are standard vocabulary and can be used in event triggers and wait_event. Packs can also add their own events.
 
-| イベントタイプ | 発行元 | 説明 |
+| Event type | Publisher | Description |
 |---|---|---|
-| `chat.message.received` | chat handler | ユーザーメッセージ受信時 |
-| `chat.message.new` | chat handler | 新しいメッセージが会話に追加された時 |
-| `chat.message.before_display` | chat handler | メッセージが UI に表示される直前 |
-| `chat.conversation.created` | chat handler | 新しい会話が作成された時 |
-| `agent.execution.started` | agent handler | エージェント実行開始時 |
-| `agent.execution.completed` | agent handler | エージェント実行完了時 |
-| `agent.step.completed` | agent handler | エージェントの 1 ステップ完了時 |
-| `tool.execution.started` | tool handler | ツール実行開始時 |
-| `tool.execution.completed` | tool handler | ツール実行完了時 |
-| `flow.started` | engine.py | フロー実行開始時 |
-| `flow.completed` | engine.py | フロー実行完了時 |
-| `flow.error` | engine.py | フローエラー発生時 |
-| `ui.popup.show` | 任意 | ポップアップ表示要求 |
-| `ui.popup.response` | フロントエンド | ポップアップへのユーザー応答 |
-| `ui.plan.proposed` | 任意 | プラン提示 |
-| `ui.plan.response` | フロントエンド | プランへのユーザー応答 |
+| `chat.message.received` | chat handler | When receiving user message |
+| `chat.message.new` | chat handler | When a new message is added to a conversation |
+| `chat.message.before_display` | chat handler | Just before the message is displayed in the UI |
+| `chat.conversation.created` | chat handler | When a new conversation is created |
+| `agent.execution.started` | agent handler | When agent execution starts |
+| `agent.execution.completed` | agent handler | When agent execution completes |
+| `agent.step.completed` | agent handler | When an agent step completes |
+| `tool.execution.started` | tool handler | When tool execution starts |
+| `tool.execution.completed` | tool handler | When tool execution completes |
+| `flow.started` | engine.py | At the start of flow execution |
+| `flow.completed` | engine.py | When flow execution completes |
+| `flow.error` | engine.py | When a flow error occurs |
+| `ui.popup.show` | Optional | Pop-up display request |
+| `ui.popup.response` | Frontend | User response to popup |
+| `ui.plan.proposed` | Optional | Plan presentation |
+| `ui.plan.response` | Frontend | User responses to plans |
 
-これらのイベントは全て emit_event / wait_event で扱える。event トリガーでフローを自動起動するフックポイントとしても機能する。
+All these events can be handled with emit_event / wait_event. It also functions as a hook point to automatically start a flow with an event trigger.
 
-## 18. 完全な Flow 定義例: ユーザー定義フロー
+## 18. Complete Flow definition example: User-defined flow
 
-user_data に置く Flow 定義の完全な例。defaults の仕組みだけを使い、handler ノードの組み合わせで複雑な処理を実現する。
+A complete example of a Flow definition placed in user_data. Use only the defaults mechanism and implement complex processing by combining handler nodes.
 
-### 例: リサーチ + レポート生成フロー
+### Example: Research + Report Generation Flow
 
 ```
 user_data/shared/flows/research_report/
@@ -1438,5 +1441,4 @@ async def run(ctx: FlowContext) -> FlowResult:
     )
 ```
 
-この Flow は user_data に置かれる。defaults の仕組み（call_handler, emit_event, emit_widget）だけを使い、検索→取得→要約→レポート生成の複雑なパイプラインを実現している。defaults 側の変更はゼロ。
-```
+This Flow is placed in user_data. It uses only the defaults mechanism (call_handler, emit_event, emit_widget) to realize a complex pipeline of search → acquisition → summary → report generation. There are zero changes on the defaults side.

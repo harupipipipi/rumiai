@@ -1,53 +1,57 @@
+<!-- docs-i18n-links:start -->
+[EN](./README.md) | [JP](./i18n/ja/README.md) | [KR](./i18n/ko/README.md) | [CN](./i18n/zh-cn/README.md)
+<!-- docs-i18n-links:end -->
+
 # Rumi Viewer Frontend
 
-Rumi AI のコントロールパネル用フロントエンドアプリケーション。
-このディレクトリが `/panel/` UI の canonical source です。
+Front-end application for Rumi AI's control panel.
+This directory is the canonical source of the `/panel/` UI.
 
-`npm run build` は Vite の成果物を `../../rumi_ai_1_10/core_runtime/core_pack/core_control_panel/web` にコピーします。viewer と browser はどちらも kernel が配信する同じ `/panel/` artifact を使用します。Tauri の `splash` は kernel 起動前の viewer 専用画面で、panel frontend とは別です。
+`npm run build` copies Vite artifacts to `../../rumi_ai_1_10/core_runtime/core_pack/core_control_panel/web`. Both viewer and browser use the same `/panel/` artifact delivered by the kernel. Tauri's `splash` is a viewer-only screen before the kernel starts, and is separate from the panel frontend.
 
-## 技術スタック
+## Technology stack
 
 - React 19 + TypeScript
 - Vite
 - Tailwind CSS v4
-- Zustand (状態管理)
-- React Flow (フローエディタ)
+- Zustand (state management)
+- React Flow (Flow Editor)
 
-## 開発
+## Development
 
-### 前提条件
+### Prerequisites
 
 - Node.js 18+
 - npm
 
-### セットアップ
+### Setup
 
 ```bash
 npm install
 ```
 
-### 開発サーバー起動
+### Start development server
 
 ```bash
 npm run dev
 ```
 
-http://localhost:3000 でアクセスできます。
-バックエンド API（http://localhost:8765）へのリクエストは Vite proxy で自動転送されます。
+It can be accessed at http://localhost:3000.
+Requests to the backend API (`http://localhost:8765`) are automatically forwarded through the Vite proxy.
 
-### ビルド
+### Build
 
 ```bash
 npm run build
 ```
 
-### 型チェック
+### Type checking
 
 ```bash
 npm run lint
 ```
 
-## ディレクトリ構成
+## Directory structure
 
 ```
 src/
@@ -61,12 +65,12 @@ src/
 
 ## Graph Editor Extensions
 
-`Flows` ページの graph editor は、単純な縦並び step 表示から次の拡張に対応しました。
+The graph editor on the `Flows` page now supports the following expansions from simple vertical step display.
 
-- `rumi_start` を起点にした graph 編集
-- ノードごとの複数ポート
-- ポートごとの `contracts`（独自規格タグ）による接続制約
-- `rumi_graph` メタデータとして YAML 内へ editor 状態を保持
-- `basepack` を flow メタデータとして保持
+- Graph editing starting from `rumi_start`
+- Multiple ports per node
+- Connection constraints by `contracts` (proprietary standard tag) for each port
+- `rumi_graph` Keep editor state in YAML as metadata
+- Keep `basepack` as flow metadata
 
-`rumi_graph` はランタイム互換を壊さないための editor 向けメタデータです。既存ランタイムが読める `steps` も同時に出力しつつ、viewer ではポート/接続情報を復元できます。
+`rumi_graph` is metadata for editors to avoid breaking runtime compatibility. The viewer can restore port/connection information while simultaneously outputting `steps` that can be read by the existing runtime.

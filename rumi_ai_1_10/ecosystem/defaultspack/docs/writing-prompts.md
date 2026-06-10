@@ -1,23 +1,27 @@
+<!-- docs-i18n-links:start -->
+[EN](./writing-prompts.md) | [JP](./i18n/ja/writing-prompts.md) | [KR](./i18n/ko/writing-prompts.md) | [CN](./i18n/zh-cn/writing-prompts.md)
+<!-- docs-i18n-links:end -->
+
 # Writing Prompts
 
-defaults Pack でプロンプトテンプレートを作成・管理するためのガイドです。handler は `blocks/prompt/` に、ドメインロジックは `domain/prompt/manager.py`（PromptManager）、`domain/prompt/template.py`（PromptTemplate）、`domain/prompt/renderer.py`（render）に実装されています。
+A guide for creating and managing prompt templates with defaults pack. The handler is implemented in `blocks/prompt/`, and the domain logic is implemented in `domain/prompt/manager.py` (PromptManager), `domain/prompt/template.py` (PromptTemplate), and `domain/prompt/renderer.py` (render).
 
-## prompt の概念
+## prompt concept
 
-prompt はテンプレート変数を含む再利用可能なテキストテンプレートです。`{{variable_name}}` 構文で変数を埋め込み、レンダリング時に実際の値に置換されます。
+prompt is a reusable text template containing template variables. Embed variables with the `{{variable_name}}` syntax and replace them with actual values ​​when rendering.
 
-プロンプトは `PromptManager`（シングルトン）がインメモリ dict + `user_data/shared/prompts/` への JSON ファイル永続化で管理します。起動時に JSON ファイルから自動ロードされます。
+Prompts are managed by `PromptManager` (singleton) with JSON file persistence to in-memory dict + `user_data/shared/prompts/`. Autoloaded from a JSON file on startup.
 
-プロンプトは passive layer です。tool/provider/permission を選択・実行せず、必要なときに flow/function から `defaults.prompt.render` または `defaults.prompt.resolve_for_conversation` を呼びます。
+The prompt is a passive layer. Call `defaults.prompt.render` or `defaults.prompt.resolve_for_conversation` from flow/function when necessary without selecting and executing tool/provider/permission.
 
-## PromptTemplate のフォーマット
+## Format of PromptTemplate
 
-`domain/prompt/template.py` で定義される `PromptTemplate` クラスの構造です。
+Structure of the `PromptTemplate` class defined in `domain/prompt/template.py`.
 
 ```python
 PromptTemplate(
     name="my_prompt",
-    description="プロンプトの説明",
+    description="Prompt description",
     variables=[
         {"name": "user_name", "type": "string", "default": None, "required": True},
         {"name": "language", "type": "string", "default": "Japanese", "required": False},
@@ -27,7 +31,7 @@ PromptTemplate(
 )
 ```
 
-永続化される JSON 形式は以下の通りです（`domain/prompt/manager.py` の `create_prompt()`）:
+The persisted JSON format is as follows (`create_prompt()` of `domain/prompt/manager.py`):
 
 ```json
 {
@@ -46,54 +50,54 @@ PromptTemplate(
 }
 ```
 
-| フィールド | 型 | 説明 |
+| Field | Type | Description |
 |---|---|---|
-| `id` | `string` | 自動生成される8文字の hex ID |
-| `name` | `string` | プロンプト名（一意） |
-| `content` | `string` | テンプレート本文（`body` のエイリアス。後方互換のため両方保持） |
-| `body` | `string` | テンプレート本文 |
-| `description` | `string` | 説明文 |
-| `variables` | `list[dict]` | 変数定義リスト |
-| `metadata` | `dict` | 自由形式のメタデータ |
-| `created_at` | `string` | 作成日時（ISO 8601） |
-| `updated_at` | `string` | 更新日時（ISO 8601） |
+| `id` | `string` | Automatically generated 8-character hex ID |
+| `name` | `string` | Prompt name (unique) |
+| `content` | `string` | Template body (alias of `body`. Keep both for backwards compatibility) |
+| `body` | `string` | Template body |
+| `description` | `string` | Explanation |
+| `variables` | `list[dict]` | Variable definition list |
+| `metadata` | `dict` | Free-form metadata |
+| `created_at` | `string` | Creation date and time (ISO 8601) |
+| `updated_at` | `string` | Updated date and time (ISO 8601) |
 
-variables の各要素は以下のフィールドを持ちます。
+Each element of variables has the following fields.
 
-| フィールド | 型 | 説明 |
+| Field | Type | Description |
 |---|---|---|
-| `name` | `string` | 変数名 |
-| `type` | `string` | 型（`"string"`, `"integer"` 等）。デフォルト `"string"` |
-| `default` | `any` | デフォルト値。`null` の場合はなし |
-| `required` | `bool` | 必須か。デフォルト `false` |
+| `name` | `string` | Variable name |
+| `type` | `string` | type (`"string"`, `"integer"`, etc.). Default `"string"` |
+| `default` | `any` | Default value. None for `null` |
+| `required` | `bool` | Is it required? Default `false` |
 
-旧形式（`variables: ["var1", "var2"]`）もサポートされ、`_normalize_variables()` で新形式に自動変換されます。
+The old format (`variables: ["var1", "var2"]`) is also supported and automatically converted to the new format in `_normalize_variables()`.
 
-## テンプレート変数
+## Template variables
 
-### 通常変数
+### Regular variables
 
-`{{variable_name}}` で記述します。レンダリング時に `variables` dict の値で置換されます。`domain/prompt/renderer.py` の `render()` 関数が `_VARIABLE_PATTERN = re.compile(r"\{\{\s*([\w.]+)\s*\}\}")` を使って1パスで置換します。
+Described in `{{variable_name}}`. Replaced with the value of `variables` dict during rendering. The `render()` function in `domain/prompt/renderer.py` uses `_VARIABLE_PATTERN = re.compile(r"\{\{\s*([\w.]+)\s*\}\}")` to replace in one pass.
 
-存在しない変数はそのまま残されます（エラーにはなりません）。スペースは許容されます（`{{ name }}` も有効）。
+Variables that do not exist are left alone (and do not result in an error). Spaces are allowed (`{{ name }}` is also valid).
 
-### 特殊変数（context 変数）
+### Special variables (context variables)
 
-`domain/prompt/template.py` で定義される `CONTEXT_VARIABLE_KEYS` です。
+`CONTEXT_VARIABLE_KEYS` defined in `domain/prompt/template.py`.
 
-| 変数名 | 型 | 説明 |
+| Variable name | Type | Description |
 |---|---|---|
-| `{{context.total_tokens}}` | `int` | 現在のコンテキストの総トークン数 |
-| `{{context.message_count}}` | `int` | メッセージ数 |
-| `{{context.messages}}` | `string/list` | メッセージ内容。list/dict の場合は JSON 文字列に変換される |
-| `{{context.system_prompt}}` | `string` | システムプロンプト |
-| `{{context.conversation_id}}` | `string` | 会話 ID |
+| `{{context.total_tokens}}` | `int` | Total number of tokens in current context |
+| `{{context.message_count}}` | `int` | Number of messages |
+| `{{context.messages}}` | `string/list` | Message content. For list/dict, it is converted to JSON string |
+| `{{context.system_prompt}}` | `string` | System prompt |
+| `{{context.conversation_id}}` | `string` | Conversation ID |
 
-特殊変数は `PromptManager.inject_context_variables(variables, context)` で自動注入されます。ユーザーが明示的に指定した値は上書きされません。context dict の対応するキー（`total_tokens`, `message_count` 等）から値が取得されます。
+Special variables are auto-injected with `PromptManager.inject_context_variables(variables, context)`. Values ​​explicitly specified by the user are not overwritten. The value is retrieved from the corresponding key in the context dict (`total_tokens`, `message_count`, etc.).
 
-### 変数抽出メソッド
+### Variable extraction method
 
-`PromptTemplate` クラスは body 内の変数を分析するメソッドを提供します。
+The `PromptTemplate` class provides methods to analyze variables within body.
 
 ```python
 template = PromptTemplate(body="Hello {{name}}, tokens: {{context.total_tokens}}")
@@ -102,13 +106,13 @@ template.list_user_variables()      # → ["name"]
 template.list_context_variables()   # → ["context.total_tokens"]
 ```
 
-## API 経由での CRUD
+## CRUD via API
 
-### プロンプト作成
+### Create prompt
 
 **handler**: `defaults.prompt.create`（`blocks/prompt/create.py`）
 
-HTTP transport には直接のプロンプト作成ルートは存在しない。`call_handler` 経由で呼び出す。
+There is no direct prompt creation route for the HTTP transport. Call via `call_handler`.
 
 ```python
 result = context["call_handler"]("defaults.prompt.create", {
@@ -120,29 +124,29 @@ result = context["call_handler"]("defaults.prompt.create", {
 
 **input_data**:
 
-| フィールド | 型 | 必須 | 説明 |
+| Field | Type | Required | Description |
 |---|---|---|---|
-| `name` | `string` | Yes | プロンプト名 |
-| `content` | `string` | Yes | テンプレート本文 |
-| `variables` | `list` | No | 変数定義。`["var1"]` 形式（旧）と `[{"name": "var1", ...}]` 形式（新）の両方可 |
+| `name` | `string` | Yes | Prompt name |
+| `content` | `string` | Yes | Template body |
+| `variables` | `list` | No | Variable definition. Both `["var1"]` format (old) and `[{"name": "var1", ...}]` format (new) are possible |
 
-**戻り値**: `ok({"prompt": {...}})`
+**Return value**: `ok({"prompt": {...}})`
 
-### プロンプト一覧
+### List of prompts
 
 **handler**: `defaults.prompt.list`（`blocks/prompt/list.py`）
 
-HTTP transport には直接のプロンプト一覧ルートは存在しない。`call_handler` 経由で呼び出す。
+There is no direct prompt list route for the HTTP transport. Call via `call_handler`.
 
 ```python
 result = context["call_handler"]("defaults.prompt.list", {})
 ```
 
-**input_data**: `{}`（パラメータなし）
+**input_data**: `{}` (no parameters)
 
-**戻り値**: `ok({"prompts": [...]})`
+**Return value**: `ok({"prompts": [...]})`
 
-### プロンプト更新
+### Prompt update
 
 **handler**: `defaults.prompt.update`（`blocks/prompt/update.py`）
 
@@ -150,16 +154,16 @@ result = context["call_handler"]("defaults.prompt.list", {})
 
 **input_data**:
 
-| フィールド | 型 | 必須 | 説明 |
+| Field | Type | Required | Description |
 |---|---|---|---|
-| `name` | `string` | Yes | 更新対象のプロンプト名（URL パスから自動注入） |
-| `updates` | `dict` | Yes | 更新するフィールド |
+| `name` | `string` | Yes | Prompt name to be updated (automatically injected from URL path) |
+| `updates` | `dict` | Yes | Field to update |
 
-`updates` に指定可能なフィールド: `content`（または `body`）、`description`、`variables`、`metadata`、`name`（名前変更）。名前変更時は旧ファイルの削除とインデックスの更新が自動的に行われます。
+Possible fields for `updates`: `content` (or `body`), `description`, `variables`, `metadata`, `name` (rename). When renaming, old files will be deleted and the index will be updated automatically.
 
-**戻り値**: `ok({"prompt": {...}})`
+**Return value**: `ok({"prompt": {...}})`
 
-### プロンプト削除
+### Delete prompt
 
 **handler**: `defaults.prompt.delete`（`blocks/prompt/delete.py`）
 
@@ -167,17 +171,17 @@ result = context["call_handler"]("defaults.prompt.list", {})
 
 **input_data**:
 
-| フィールド | 型 | 必須 | 説明 |
+| Field | Type | Required | Description |
 |---|---|---|---|
-| `name` | `string` | Yes | プロンプト名（URL パスから自動注入） |
+| `name` | `string` | Yes | Prompt name (auto-injected from URL path) |
 
-**戻り値**: `ok({"deleted": "prompt_name"})`
+**Return value**: `ok({"deleted": "prompt_name"})`
 
-### プロンプトレンダリング
+### Prompt rendering
 
 **handler**: `defaults.prompt.render`（`blocks/prompt/render.py`）
 
-HTTP transport には直接のレンダリングルートは存在しない。`call_handler` 経由で呼び出す。
+There is no direct rendering route for HTTP transport. Call via `call_handler`.
 
 ```python
 result = context["call_handler"]("defaults.prompt.render", {
@@ -188,23 +192,23 @@ result = context["call_handler"]("defaults.prompt.render", {
 
 **input_data**:
 
-| フィールド | 型 | 必須 | 説明 |
+| Field | Type | Required | Description |
 |---|---|---|---|
-| `prompt_id` | `string` | No | プロンプト ID。指定時は PromptManager から取得 |
-| `template` | `string` | No | テンプレート文字列を直接指定。`prompt_id` が優先 |
-| `variables` | `dict` | No | 変数の値 |
+| `prompt_id` | `string` | No | Prompt ID. When specified, retrieved from PromptManager |
+| `template` | `string` | No | Specify template string directly. `prompt_id` takes precedence |
+| `variables` | `dict` | No | Variable value |
 
-**戻り値**: `ok({"rendered": "置換済み文字列", "prompt_id": "..." or null})`
+**Return value**: `ok({"rendered": "rendered string", "prompt_id": "..." or null})`
 
-### システムプロンプト
+### System prompt
 
 **handler**: `defaults.prompt.system`（`blocks/prompt/system.py`）
 
-取得: `{"action": "get"}` → `ok({"content": "..."})`
+Obtain: `{"action": "get"}` → `ok({"content": "..."})`
 
-設定: `{"action": "set", "content": "新しいシステムプロンプト"}` → `ok({"content": "..."})`
+Settings: `{"action": "set", "content": "new system prompt"}` → `ok({"content": "..."})`
 
-### tool ↔ prompt 変換
+### tool ↔ prompt conversion
 
 **handler**: `defaults.prompt.convert`（`blocks/prompt/convert.py`）
 
@@ -212,17 +216,17 @@ result = context["call_handler"]("defaults.prompt.render", {
 
 **input_data**:
 
-| フィールド | 型 | 必須 | 説明 |
+| Field | Type | Required | Description |
 |---|---|---|---|
-| `source_type` | `string` | Yes | `"tool"` または `"prompt"` |
-| `source_name` | `string` | Yes | 変換元の名前 |
-| `target_type` | `string` | Yes | `"tool"` または `"prompt"`（source_type と異なる必要あり） |
+| `source_type` | `string` | Yes | `"tool"` or `"prompt"` |
+| `source_name` | `string` | Yes | Source name |
+| `target_type` | `string` | Yes | `"tool"` or `"prompt"` (must be different from source_type) |
 
-**tool → prompt**: ツールの `parameters` を変数に、`summary` をテンプレート本文のヘッダに変換します。`PromptTemplate.from_tool_schema()` が使われます。
+**tool → prompt**: Convert tool's `parameters` into a variable and `summary` into a template body header. `PromptTemplate.from_tool_schema()` is used.
 
-**prompt → tool**: authoring 経路としては無効です。`execution.type: "prompt"` の tool は作成しません。必要な場合は `defaults.prompt.render` を flow/function から呼び、tool が必要なら `rumi_function` または `capability` facade として別途定義します。
+**prompt → tool**: Invalid as an authoring route. `execution.type: "prompt"` tool will not be created. If necessary, call `defaults.prompt.render` from a flow/function, and if you need a tool, define it separately as a `rumi_function` or `capability` facade.
 
-## コンテキスト取得の例
+## Example of getting context
 
 ```python
 # プロンプトを作成（call_handler 経由）
@@ -233,11 +237,11 @@ result = context["call_handler"]("defaults.prompt.create", {
 })
 ```
 
-レンダリング時に context を渡すと、`inject_context_variables()` が `context.message_count` と `context.conversation_id` を自動注入します。
+When you pass context at render time, `inject_context_variables()` will auto-inject `context.message_count` and `context.conversation_id`.
 
-## 具体例
+## Specific example
 
-### 例1: コードレビュープロンプト
+### Example 1: Code review prompt
 
 ```python
 # call_handler 経由でプロンプトを作成
@@ -253,7 +257,7 @@ result = context["call_handler"]("defaults.prompt.create", {
 })
 ```
 
-### 例2: 翻訳プロンプト
+### Example 2: Translation prompt
 
 ```python
 result = context["call_handler"]("defaults.prompt.create", {
@@ -268,7 +272,7 @@ result = context["call_handler"]("defaults.prompt.create", {
 })
 ```
 
-### 例3: コンテキスト対応の要約プロンプト
+### Example 3: Context-aware summary prompt
 
 ```python
 result = context["call_handler"]("defaults.prompt.create", {
@@ -280,14 +284,14 @@ result = context["call_handler"]("defaults.prompt.create", {
 })
 ```
 
-## ベストプラクティス
+## Best practices
 
-`name` はプロンプトの用途を端的に表す名前にしてください。プロンプト一覧で識別しやすくなります。
+`name` should be a name that clearly describes the purpose of the prompt. This makes it easier to identify them in the list of prompts.
 
-`variables` で `required: true` を適切に設定してください。必須変数が未指定の場合、`{{variable_name}}` がそのまま出力に残ります。
+Please set `required: true` appropriately in `variables`. If a required variable is unspecified, `{{variable_name}}` remains in the output.
 
-`content`（body）には `{{context.*}}` 変数を活用して、実行時のコンテキスト情報を自動的に注入させてください。ユーザーが明示的に値を指定した場合は上書きされないため、テスト時にはモック値を渡すことができます。
+Use the `{{context.*}}` variable to automatically inject context information at runtime into `content` (body). If the user explicitly specifies a value, it will not be overwritten, so you can pass mock values ​​when testing.
 
-プロンプトから tool を自動生成する authoring 経路は無効です。`context.*` 変数は `defaults.prompt.resolve_for_conversation` が受動的に解決し、tool が必要な場合は別途 `rumi_function` / `capability` facade として定義します。
+The authoring route that automatically generates a tool from a prompt is invalid. `context.*` variables are resolved passively by `defaults.prompt.resolve_for_conversation` and are defined separately as a `rumi_function` / `capability` facade if a tool is required.
 
-永続化ファイル（`user_data/shared/prompts/`）は `PromptManager` が管理しています。ファイル名は `_safe_filename(name) + ".json"` で生成され、英数字・ハイフン・アンダースコア以外の文字はアンダースコアに変換されます。
+Persistence files (`user_data/shared/prompts/`) are managed by `PromptManager`. The file name is generated by `_safe_filename(name) + ".json"`, and characters other than alphanumeric characters, hyphens, and underscores are converted to underscores.

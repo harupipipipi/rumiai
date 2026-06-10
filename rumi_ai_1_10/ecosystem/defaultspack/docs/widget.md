@@ -1,32 +1,34 @@
+<!-- docs-i18n-links:start -->
+[EN](./widget.md) | [JP](./i18n/ja/widget.md) | [KR](./i18n/ko/widget.md) | [CN](./i18n/zh-cn/widget.md)
+<!-- docs-i18n-links:end -->
 
-```markdown
-# widget.md — Rumi AI OS Widget System 仕様書
+# widget.md — Rumi AI OS Widget System specifications
 
-## 1. 概要
+## 1. Overview
 
-Widget はバックエンドが「このデータをこう表示してほしい」と宣言するための統一的なデータ形式である。Widget は純粋な JSON データであり、UI ライブラリではない。
+Widget is a unified data format that allows the backend to declare ``I want this data to be displayed like this.'' Widgets are pure JSON data and are not UI libraries.
 
-バックエンドのあらゆるコード（handler、tool の handler.py、prompt、Flow ノード）が Widget JSON を生成し、`emit_widget` で送出する。フロントエンドの Asset がこの JSON を受け取り、テーマに従って描画する。
+Every code in the backend (handler, tool's handler.py, prompt, Flow node) generates Widget JSON and sends it out with `emit_widget`. The front-end Asset receives this JSON and renders it according to the theme.
 
-Widget はドメイン知識を持たない。「チャット用Widget」「エージェント用Widget」は存在しない。テキスト、コードブロック、画像、テーブル、プログレスバーといった汎用的な表示プリミティブのみを定義する。何をどう表示するかは Widget を生成する側（tool、handler 等）が決め、どう見せるかはテーマが決める。
+Widgets have no domain knowledge. There are no "chat widgets" or "agent widgets." Define only general-purpose display primitives such as text, code blocks, images, tables, and progress bars. What and how to display it is decided by the side that generates the widget (tool, handler, etc.), and how it is displayed is decided by the theme.
 
-## 2. 設計思想
+## 2. Design philosophy
 
-**純粋なデータ**: Widget は JSON dict である。レンダリングロジックやイベントハンドラを含まない。描画はフロントエンドの責務。
+**Pure data**: Widget is a JSON dict. Contains no rendering logic or event handlers. Drawing is the responsibility of the front end.
 
-**ドメイン非依存**: Widget の型は「テキスト」「画像」「テーブル」等の汎用表示プリミティブである。特定のドメイン（チャット、エージェント等）に特化した型は存在しない。
+**Domain independent**: Widget types are general-purpose display primitives such as "text", "image", and "table". There are no specialized types for specific domains (chat, agents, etc.).
 
-**ネスト可能**: Widget の中に Widget を入れられる。Card の中に CodeBlock と Text を入れる、Row の中に複数の Button を並べる、等。
+**Nestable**: Widgets can be placed inside Widgets. Put CodeBlock and Text in a Card, arrange multiple Buttons in a Row, etc.
 
-**フォールバック前提**: フロントエンドがある Widget 型を描画できない場合、テキスト表現にフォールバックする。Custom Widget は明示的な fallback Widget を持つ。CLI 環境では全ての Widget がテキスト表現にフォールバックする。
+**Fallback assumption**: If the front end cannot draw a certain Widget type, it will fall back to the text representation. Custom widgets have an explicit fallback widget. In the CLI environment, all widgets fall back to text representation.
 
-**テーマとの分離**: Widget は「何を表示するか」のみを宣言する。「どう見せるか」（色、フォント、アニメーション、角丸、影等）はテーマが決定する。Widget は style_hint でテーマへのヒントを渡せるが、テーマはこれを無視してもよい。
+**Separation from theme**: Widget declares only "what to display". The theme determines how it will be presented (colors, fonts, animations, rounded corners, shadows, etc.). The widget can pass a hint to the theme using style_hint, but the theme can ignore this.
 
-## 3. Widget JSON 仕様
+## 3. Widget JSON specification
 
-### 3.1 基底プロパティ
+### 3.1 Base properties
 
-全ての Widget が持つ共通プロパティ。
+Common properties that all widgets have.
 
 ```json
 {
@@ -37,14 +39,14 @@ Widget はドメイン知識を持たない。「チャット用Widget」「エ�
 }
 ```
 
-| プロパティ | 型 | 必須 | 説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `type` | string | 必須 | Widget の型。後述の型一覧のいずれか |
-| `id` | string | 任意 | Widget の識別子。ストリーミング更新時に特定の Widget を更新するために使用 |
-| `style_hint` | dict | 任意 | テーマへのヒント。テーマが解釈してもしなくてもよい |
-| `meta` | dict | 任意 | 任意のメタデータ。フロントエンドは無視してよい |
+| `type` | string | Required | Widget type. One of the types listed below |
+| `id` | string | optional | Widget identifier. Used to update specific widgets during streaming updates |
+| `style_hint` | dict | optional | hints to the theme. The theme may or may not be interpreted |
+| `meta` | dict | any | any metadata. You can ignore the front end |
 
-### 3.2 JSON 表現例
+### 3.2 JSON expression example
 
 ```json
 {
@@ -69,13 +71,13 @@ Widget はドメイン知識を持たない。「チャット用Widget」「エ�
 }
 ```
 
-## 4. Widget 型一覧
+## 4. Widget type list
 
-### 4.1 表示系（14種）
+### 4.1 Display system (14 types)
 
 #### Text
 
-テキストを表示する。
+Display text.
 
 ```json
 {
@@ -84,15 +86,15 @@ Widget はドメイン知識を持たない。「チャット用Widget」「エ�
 }
 ```
 
-| プロパティ | 型 | 必須 | 説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `text` | string | 必須 | 表示するテキスト |
+| `text` | string | Required | Text to display |
 
-CLI フォールバック: そのまま出力。
+CLI fallback: Output as is.
 
 #### CodeBlock
 
-ソースコードを表示する。
+View source code.
 
 ```json
 {
@@ -104,18 +106,18 @@ CLI フォールバック: そのまま出力。
 }
 ```
 
-| プロパティ | 型 | 必須 | 説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `language` | string | 任意 | プログラミング言語 |
-| `content` | string | 必須 | コード本体 |
-| `filename` | string | 任意 | ファイル名（表示用） |
-| `line_start` | integer | 任意 | 開始行番号。デフォルト 1 |
+| `language` | string | any | programming language |
+| `content` | string | Required | Code body |
+| `filename` | string | Optional | File name (for display) |
+| `line_start` | integer | optional | starting line number. Default 1 |
 
-CLI フォールバック: プレーンテキスト出力。
+CLI fallback: Plain text output.
 
 #### Diff
 
-差分を表示する。
+Show differences.
 
 ```json
 {
@@ -126,17 +128,17 @@ CLI フォールバック: プレーンテキスト出力。
 }
 ```
 
-| プロパティ | 型 | 必須 | 説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `old_content` | string | 必須 | 変更前の内容 |
-| `new_content` | string | 必須 | 変更後の内容 |
-| `filename` | string | 任意 | ファイル名 |
+| `old_content` | string | Required | Contents before change |
+| `new_content` | string | Required | New content |
+| `filename` | string | arbitrary | file name |
 
-CLI フォールバック: unified diff 形式。
+CLI fallback: unified diff format.
 
 #### Image
 
-画像を表示する。
+Display images.
 
 ```json
 {
@@ -148,18 +150,18 @@ CLI フォールバック: unified diff 形式。
 }
 ```
 
-| プロパティ | 型 | 必須 | 説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `src` | string | 必須 | base64 データまたは URL |
-| `alt` | string | 任意 | 代替テキスト |
-| `width` | integer | 任意 | 幅（ピクセル） |
-| `height` | integer | 任意 | 高さ（ピクセル） |
+| `src` | string | Required | base64 data or URL |
+| `alt` | string | any | alternative text |
+| `width` | integer | any | width (pixels) |
+| `height` | integer | arbitrary | height (pixels) |
 
-CLI フォールバック: `[Image: {alt} {width}x{height}]`
+CLI fallback: `[Image: {alt} {width}x{height}]`
 
 #### Screenshot
 
-スクリーンショットを表示する。Image の上位で、URLとタイトルの付加情報を持つ。
+View screenshot. It is above Image and has additional information such as URL and title.
 
 ```json
 {
@@ -170,17 +172,17 @@ CLI フォールバック: `[Image: {alt} {width}x{height}]`
 }
 ```
 
-| プロパティ | 型 | 必須 | 説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `src` | string | 必須 | base64 データ |
-| `url` | string | 任意 | スクリーンショット元の URL |
-| `title` | string | 任意 | ページタイトル |
+| `src` | string | Required | base64 data |
+| `url` | string | Any | Screenshot source URL |
+| `title` | string | optional | page title |
 
-CLI フォールバック: `[Screenshot: {title} - {url}]`
+CLI fallback: `[Screenshot: {title} - {url}]`
 
 #### Progress
 
-進捗を表示する。
+View progress.
 
 ```json
 {
@@ -192,18 +194,18 @@ CLI フォールバック: `[Screenshot: {title} - {url}]`
 }
 ```
 
-| プロパティ | 型 | 必須 | 説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `label` | string | 必須 | 進捗ラベル |
-| `current` | number | 必須 | 現在値 |
-| `total` | number | 必須 | 合計値 |
-| `state` | string | 任意 | `"running"`, `"success"`, `"error"`. デフォルト `"running"` |
+| `label` | string | Required | Progress label |
+| `current` | number | Required | Current value |
+| `total` | number | Required | Total value |
+| `state` | string | Optional | `"running"`, `"success"`, `"error"`. Default `"running"` |
 
-CLI フォールバック: `[████░░░░░░] 30% Reading file...`
+CLI fallback: `[████░░░░░░] 30% Reading file...`
 
 #### Terminal
 
-ターミナル出力を表示する。
+Display terminal output.
 
 ```json
 {
@@ -214,17 +216,17 @@ CLI フォールバック: `[████░░░░░░] 30% Reading file...
 }
 ```
 
-| プロパティ | 型 | 必須 | 説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `command` | string | 任意 | 実行されたコマンド |
-| `output` | string | 必須 | 出力内容 |
-| `exit_code` | integer | 任意 | 終了コード |
+| `command` | string | any | executed command |
+| `output` | string | Required | Output content |
+| `exit_code` | integer | optional | exit code |
 
-CLI フォールバック: `$ {command}\n{output}`
+CLI fallback: `$ {command}\n{output}`
 
 #### Table
 
-テーブルを表示する。
+Show table.
 
 ```json
 {
@@ -237,16 +239,16 @@ CLI フォールバック: `$ {command}\n{output}`
 }
 ```
 
-| プロパティ | 型 | 必須 | 説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `headers` | list[string] | 必須 | 列ヘッダ |
-| `rows` | list[list] | 必須 | 行データ |
+| `headers` | list[string] | Required | Column header |
+| `rows` | list[list] | Required | Row data |
 
-CLI フォールバック: ASCII テーブル。
+CLI fallback: ASCII table.
 
 #### Chart
 
-グラフを表示する。
+Display the graph.
 
 ```json
 {
@@ -257,17 +259,17 @@ CLI フォールバック: ASCII テーブル。
 }
 ```
 
-| プロパティ | 型 | 必須 | 説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `chart_type` | string | 必須 | `"bar"`, `"line"`, `"pie"`, `"scatter"` |
-| `labels` | list[string] | 必須 | ラベル |
-| `data` | list[number] | 必須 | データ |
+| `chart_type` | string | Required | `"bar"`, `"line"`, `"pie"`, `"scatter"` |
+| `labels` | list[string] | Required | Label |
+| `data` | list[number] | Required | Data |
 
-CLI フォールバック: 数値要約テキスト。
+CLI fallback: Numerical summary text.
 
 #### FileTree
 
-ファイルツリーを表示する。
+Show file tree.
 
 ```json
 {
@@ -282,15 +284,15 @@ CLI フォールバック: 数値要約テキスト。
 }
 ```
 
-| プロパティ | 型 | 必須 | 説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `tree` | list[dict] | 必須 | ツリーノード。各ノードは `name`, `type`(`"file"` or `"dir"`), `children`(任意) を持つ |
+| `tree` | list[dict] | required | tree node. Each node has `name`, `type`(`"file"` or `"dir"`), `children` (optional) |
 
-CLI フォールバック: インデント付きテキスト。
+CLI fallback: Indented text.
 
 #### Markdown
 
-Markdown テキストをレンダリングして表示する。
+Render and display Markdown text.
 
 ```json
 {
@@ -299,15 +301,15 @@ Markdown テキストをレンダリングして表示する。
 }
 ```
 
-| プロパティ | 型 | 必須 | 説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `content` | string | 必須 | Markdown テキスト |
+| `content` | string | Required | Markdown text |
 
-CLI フォールバック: プレーンテキスト。
+CLI fallback: Plain text.
 
 #### Audio
 
-音声を再生する。
+Play audio.
 
 ```json
 {
@@ -317,16 +319,16 @@ CLI フォールバック: プレーンテキスト。
 }
 ```
 
-| プロパティ | 型 | 必須 | 説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `src` | string | 必須 | base64 データまたは URL |
-| `duration` | integer | 任意 | 再生時間（ミリ秒） |
+| `src` | string | Required | base64 data or URL |
+| `duration` | integer | arbitrary | playback time (ms) |
 
-CLI フォールバック: `[Audio: {duration}ms]`
+CLI fallback: `[Audio: {duration}ms]`
 
 #### Video
 
-動画を再生する。
+Play the video.
 
 ```json
 {
@@ -336,16 +338,16 @@ CLI フォールバック: `[Audio: {duration}ms]`
 }
 ```
 
-| プロパティ | 型 | 必須 | 説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `src` | string | 必須 | base64 データまたは URL |
-| `duration` | integer | 任意 | 再生時間（ミリ秒） |
+| `src` | string | Required | base64 data or URL |
+| `duration` | integer | arbitrary | playback time (ms) |
 
-CLI フォールバック: `[Video: {duration}ms]`
+CLI fallback: `[Video: {duration}ms]`
 
 #### Map
 
-地図を表示する。
+Show map.
 
 ```json
 {
@@ -356,21 +358,21 @@ CLI フォールバック: `[Video: {duration}ms]`
 }
 ```
 
-| プロパティ | 型 | 必須 | 説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `lat` | number | 必須 | 緯度 |
-| `lng` | number | 必須 | 経度 |
-| `zoom` | integer | 任意 | ズームレベル。デフォルト 13 |
+| `lat` | number | required | latitude |
+| `lng` | number | required | longitude |
+| `zoom` | integer | optional | zoom level. Default 13 |
 
-CLI フォールバック: `[Map: {lat}, {lng}]`
+CLI fallback: `[Map: {lat}, {lng}]`
 
-### 4.2 コントロール系（6種）
+### 4.2 Control system (6 types)
 
-コントロール系 Widget はユーザーからの入力を受け付ける。Asset 内でのみ使用可能。ユーザーの操作結果は Asset の JS が emit_event でバックエンドに送信する。
+Control widgets accept input from the user. Available only within Asset. The user's operation results are sent to the backend by Asset's JS using emit_event.
 
 #### Input
 
-テキスト入力フィールド。
+Text input field.
 
 ```json
 {
@@ -381,15 +383,15 @@ CLI フォールバック: `[Map: {lat}, {lng}]`
 }
 ```
 
-| プロパティ | 型 | 必須 | 説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `placeholder` | string | 任意 | プレースホルダ |
-| `value` | string | 任意 | 初期値 |
-| `multiline` | boolean | 任意 | 複数行。デフォルト false |
+| `placeholder` | string | optional | placeholder |
+| `value` | string | arbitrary | initial value |
+| `multiline` | boolean | any | multiple lines. Default false |
 
 #### Button
 
-ボタン。
+button.
 
 ```json
 {
@@ -400,15 +402,15 @@ CLI フォールバック: `[Map: {lat}, {lng}]`
 }
 ```
 
-| プロパティ | 型 | 必須 | 説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `label` | string | 必須 | ボタンラベル |
-| `action` | string | 必須 | クリック時に発行されるアクション名 |
-| `variant` | string | 任意 | `"primary"`, `"secondary"`, `"danger"`. デフォルト `"primary"` |
+| `label` | string | Required | Button label |
+| `action` | string | Required | Action name issued on click |
+| `variant` | string | Optional | `"primary"`, `"secondary"`, `"danger"`. Default `"primary"` |
 
 #### Select
 
-選択。
+Choice.
 
 ```json
 {
@@ -422,15 +424,15 @@ CLI フォールバック: `[Map: {lat}, {lng}]`
 }
 ```
 
-| プロパティ | 型 | 必須 | 説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `options` | list[dict] | 必須 | 選択肢。各要素は `label`, `value` を持つ |
-| `value` | any | 任意 | 選択中の値 |
-| `multiple` | boolean | 任意 | 複数選択。デフォルト false |
+| `options` | list[dict] | Required | Choices. Each element has `label`, `value` |
+| `value` | any | any | selected value |
+| `multiple` | boolean | Any | Multiple selection. Default false |
 
 #### Toggle
 
-トグルスイッチ。
+toggle switch.
 
 ```json
 {
@@ -440,14 +442,14 @@ CLI フォールバック: `[Map: {lat}, {lng}]`
 }
 ```
 
-| プロパティ | 型 | 必須 | 説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `label` | string | 必須 | ラベル |
-| `value` | boolean | 任意 | 現在の状態。デフォルト false |
+| `label` | string | Required | Label |
+| `value` | boolean | Any | Current state. Default false |
 
 #### Slider
 
-スライダー。
+slider.
 
 ```json
 {
@@ -459,16 +461,16 @@ CLI フォールバック: `[Map: {lat}, {lng}]`
 }
 ```
 
-| プロパティ | 型 | 必須 | 説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `min` | number | 必須 | 最小値 |
-| `max` | number | 必須 | 最大値 |
-| `value` | number | 任意 | 現在値 |
-| `step` | number | 任意 | ステップ。デフォルト 1 |
+| `min` | number | Required | Minimum value |
+| `max` | number | Required | Maximum |
+| `value` | number | arbitrary | current value |
+| `step` | number | any | step. Default 1 |
 
 #### Checkbox
 
-チェックボックス。
+Checkbox.
 
 ```json
 {
@@ -478,18 +480,18 @@ CLI フォールバック: `[Map: {lat}, {lng}]`
 }
 ```
 
-| プロパティ | 型 | 必須 | 説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `label` | string | 必須 | ラベル |
-| `checked` | boolean | 任意 | チェック状態。デフォルト false |
+| `label` | string | Required | Label |
+| `checked` | boolean | Optional | Checked state. Default false |
 
-### 4.3 レイアウト系（6種）
+### 4.3 Layout type (6 types)
 
-Widget 内部でネストを構成するための Widget。
+A Widget for configuring nesting inside a Widget.
 
 #### Container
 
-汎用コンテナ。子 Widget を包む。
+General purpose container. Wraps the child widget.
 
 ```json
 {
@@ -501,13 +503,13 @@ Widget 内部でネストを構成するための Widget。
 }
 ```
 
-| プロパティ | 型 | 必須 | 説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `children` | list[Widget] | 必須 | 子 Widget の配列 |
+| `children` | list[Widget] | Required | Array of child widgets |
 
 #### Row
 
-子 Widget を横に並べる。
+Arrange child widgets horizontally.
 
 ```json
 {
@@ -520,14 +522,14 @@ Widget 内部でネストを構成するための Widget。
 }
 ```
 
-| プロパティ | 型 | 必須 | 説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `children` | list[Widget] | 必須 | 子 Widget |
-| `gap` | integer | 任意 | 子要素間の隙間（ピクセル） |
+| `children` | list[Widget] | Required | Child Widget |
+| `gap` | integer | any | gap between child elements (pixels) |
 
 #### Column
 
-子 Widget を縦に並べる。
+Arrange child widgets vertically.
 
 ```json
 {
@@ -537,14 +539,14 @@ Widget 内部でネストを構成するための Widget。
 }
 ```
 
-| プロパティ | 型 | 必須 | 説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `children` | list[Widget] | 必須 | 子 Widget |
-| `gap` | integer | 任意 | 子要素間の隙間（ピクセル） |
+| `children` | list[Widget] | Required | Child Widget |
+| `gap` | integer | any | gap between child elements (pixels) |
 
 #### Tabs
 
-タブ切り替え。
+Switch tabs.
 
 ```json
 {
@@ -556,13 +558,13 @@ Widget 内部でネストを構成するための Widget。
 }
 ```
 
-| プロパティ | 型 | 必須 | 説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `tabs` | list[dict] | 必須 | 各タブ。`label`(string) と `content`(Widget) を持つ |
+| `tabs` | list[dict] | Required | Each tab. with `label`(string) and `content`(Widget) |
 
 #### Collapsible
 
-折りたたみ。
+Foldable.
 
 ```json
 {
@@ -575,15 +577,15 @@ Widget 内部でネストを構成するための Widget。
 }
 ```
 
-| プロパティ | 型 | 必須 | 説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `label` | string | 必須 | 折りたたみラベル |
-| `default_open` | boolean | 任意 | 初期状態。デフォルト false |
-| `children` | list[Widget] | 必須 | 折りたたみ内の子 Widget |
+| `label` | string | Required | Folding label |
+| `default_open` | boolean | Optional | Initial state. Default false |
+| `children` | list[Widget] | Required | Child Widget in Collapse |
 
 #### Card
 
-ヘッダ・ボディ・フッタの3区画を持つカード。
+A card with three sections: header, body, and footer.
 
 ```json
 {
@@ -594,17 +596,17 @@ Widget 内部でネストを構成するための Widget。
 }
 ```
 
-| プロパティ | 型 | 必須 | 説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `header` | Widget | 任意 | ヘッダ |
-| `body` | Widget | 任意 | ボディ |
-| `footer` | Widget | 任意 | フッタ |
+| `header` | Widget | Optional | Header |
+| `body` | Widget | Any | Body |
+| `footer` | Widget | Optional | Footer |
 
-### 4.4 ストリーミング系（2種）
+### 4.4 Streaming type (2 types)
 
 #### Stream
 
-状態を持つストリーミング表示。AI の思考過程やタスク進行の表示に使う。
+Streaming display with state. Used to display AI's thought process and task progress.
 
 ```json
 {
@@ -617,13 +619,13 @@ Widget 内部でネストを構成するための Widget。
 }
 ```
 
-| プロパティ | 型 | 必須 | 説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `states` | dict[string, dict] | 必須 | 状態名をキーとする定義。各状態は `animation`(string, 任意) と `label`(string) を持つ |
+| `states` | dict[string, dict] | Required | Definition with state name as key. Each state has `animation`(string, optional) and `label`(string) |
 
 #### Indicator
 
-単一の状態インジケータ。
+Single status indicator.
 
 ```json
 {
@@ -634,17 +636,17 @@ Widget 内部でネストを構成するための Widget。
 }
 ```
 
-| プロパティ | 型 | 必須 | 説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `label` | string | 必須 | ラベル |
-| `state` | string | 必須 | `"running"`, `"success"`, `"error"`, `"waiting"` |
-| `animation` | string | 任意 | テーマで定義されたアニメーション名 |
+| `label` | string | Required | Label |
+| `state` | string | Required | `"running"`, `"success"`, `"error"`, `"waiting"` |
+| `animation` | string | Optional | Animation name defined in the theme |
 
-### 4.5 カスタム（1種）
+### 4.5 Custom (1 type)
 
 #### Custom
 
-定義済み型に当てはまらない Widget。フロントエンドに custom_type のレンダラーがあれば専用表示を行い、なければ fallback Widget を表示する。
+Widgets that do not fit any predefined type. If the front end has a custom_type renderer, it will display a dedicated display, and if it does not, it will display a fallback widget.
 
 ```json
 {
@@ -662,13 +664,13 @@ Widget 内部でネストを構成するための Widget。
 }
 ```
 
-| プロパティ | 型 | 必須 | 説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `custom_type` | string | 必須 | カスタム型の識別子 |
-| `fallback` | Widget | 必須 | レンダラーが存在しない場合のフォールバック Widget |
-| `data` | dict | 任意 | カスタムレンダラーに渡すデータ |
+| `custom_type` | string | Required | Custom type identifier |
+| `fallback` | Widget | Required | Fallback Widget if no renderer exists |
+| `data` | dict | Optional | Data to pass to custom renderer |
 
-Custom Widget のレンダラーは `user_data/widget_renderers/` に配置可能。
+Custom Widget renderer can be placed in `user_data/widget_renderers/`.
 
 ```
 user_data/widget_renderers/
@@ -680,7 +682,7 @@ user_data/widget_renderers/
     └── renderer.yaml
 ```
 
-renderer.yaml の構造:
+Structure of renderer.yaml:
 
 ```yaml
 custom_type: "3d_viewer"
@@ -689,11 +691,11 @@ version: "1.0.0"
 entry: "renderer.js"
 ```
 
-## 5. rumi_widgets — Python ヘルパーライブラリ
+## 5. rumi_widgets — Python helper library
 
-defaults が `lib/rumi_widgets/` に配置する Python ヘルパー。handler.py や tool の handler.py 内で import して使える。使用は任意であり、直接 JSON dict を返しても等価。
+Python helper that defaults places in `lib/rumi_widgets/`. You can use it by importing it in handler.py or handler.py of tool. Usage is optional and equivalent to returning a JSON dict directly.
 
-### 5.1 配置場所
+### 5.1 Location
 
 ```
 ecosystem/defaults/lib/rumi_widgets/
@@ -724,9 +726,9 @@ from rumi_widgets import (
 )
 ```
 
-### 5.3 使い方
+### 5.3 How to use
 
-各クラスはコンストラクタで Widget のプロパティを受け取り、`.to_dict()` で JSON dict を返す。`emit_widget` に直接渡す場合は `.to_dict()` の呼び出しは不要（emit_widget が内部で呼ぶ）。
+Each class receives Widget properties in its constructor and returns a JSON dict in `.to_dict()`. If you pass it directly to `emit_widget`, there is no need to call `.to_dict()` (emit_widget calls it internally).
 
 ```python
 # クラスで構築
@@ -745,7 +747,7 @@ widget = {
 }
 ```
 
-### 5.4 全クラスの基底
+### 5.4 Base of all classes
 
 ```python
 class Widget:
@@ -768,9 +770,9 @@ class Widget:
         return result
 ```
 
-## 6. emit_widget による送出
+## 6. Sending by emit_widget
 
-Widget は tool の context API の汎用プリミティブ `emit_widget` で送出する。
+Widgets are sent using the general-purpose primitive `emit_widget` of tool's context API.
 
 ```python
 # tool の handler.py
@@ -796,9 +798,9 @@ def run(params, context):
     }
 ```
 
-emit_widget は途中経過の Widget をリアルタイムにフロントエンドに送出する。return の `widget` フィールドは最終結果として表示される Widget。
+emit_widget sends the partially progressed Widget to the front end in real time. The return `widget` field is the widget that will be displayed as the final result.
 
-emit_widget で送出された Widget は message.stream.data メッセージの data 内に Widget JSON として格納され、フロントエンドに到達する。
+The Widget sent by emit_widget is stored as Widget JSON in the data of message.stream.data message and reaches the front end.
 
 ```json
 {
@@ -816,25 +818,25 @@ emit_widget で送出された Widget は message.stream.data メッセージの
 }
 ```
 
-## 7. フロントエンドでの描画
+## 7. Drawing on the front end
 
-### 7.1 Widget レンダラー
+### 7.1 Widget Renderer
 
-フロントエンドの shell.html が Widget レンダラーを内蔵する。Widget レンダラーは Widget JSON の `type` フィールドを見て対応する描画関数を呼び出す。
+The front end's shell.html has a built-in Widget renderer. The Widget renderer looks at the `type` field of Widget JSON and calls the corresponding drawing function.
 
-描画関数は Asset の iframe 内ではなく、shell レベルで提供される。Asset の JS は `window.renderWidget(widgetJson, targetElement)` を呼び出して Widget を描画する。
+Drawing functions are provided at the shell level, not within the Asset's iframe. Asset's JS calls `window.renderWidget(widgetJson, targetElement)` to draw the widget.
 
-### 7.2 未知の type
+### 7.2 Unknown type
 
-Widget レンダラーが `type` を認識できない場合、以下の順でフォールバックする。
+If the Widget renderer cannot recognize `type`, it will fall back in the following order.
 
-1. `user_data/widget_renderers/` にカスタムレンダラーがあれば使う
-2. type が `"custom"` で `fallback` が存在すれば fallback Widget を描画する
-3. いずれも該当しなければ `[Unknown widget: {type}]` とテキスト表示する
+1. If `user_data/widget_renderers/` has a custom renderer, use it
+2. Draw fallback widget if type is `"custom"` and `fallback` exists
+3. If none of these apply, display text as `[Unknown widget: {type}]`
 
-### 7.3 テーマとの連携
+### 7.3 Cooperation with themes
 
-Widget レンダラーは描画時に現在のテーマ（theme.yaml）を参照する。テーマの `widgets` セクションに Widget 型ごとの描画設定が定義されている。
+The Widget renderer refers to the current theme (theme.yaml) when rendering. The drawing settings for each widget type are defined in the `widgets` section of the theme.
 
 ```yaml
 # theme.yaml の widgets セクション（抜粋）
@@ -861,27 +863,27 @@ widgets:
         padding: "{spacing.sm}"
 ```
 
-Widget の `style_hint` はテーマの variants 等を選択するヒントとして使われる。例えば `style_hint: {"variant": "compact"}` であれば、テーマの `card.variants.compact` が適用される。テーマはこのヒントを無視してもよい。
+Widget's `style_hint` is used as a hint to select theme variants, etc. For example, if it is `style_hint: {"variant": "compact"}`, `card.variants.compact` of the theme will be applied. Theme may ignore this hint.
 
-テーマの詳細は theme.md を参照。
+See theme.md for theme details.
 
-## 8. CLI フォールバック
+## 8. CLI fallback
 
-CLI 環境では全ての Widget がテキスト表現にフォールバックする。各 Widget 型のフォールバック表現は以下の通り。
+In the CLI environment, all widgets fall back to text representation. The fallback expression for each widget type is as follows.
 
-| type | CLI 表現 |
+| type | CLI expression |
 |---|---|
-| `text` | そのまま出力 |
-| `code_block` | プレーンテキスト |
+| `text` | Output as is |
+| `code_block` | Plain text |
 | `diff` | unified diff |
 | `image` | `[Image: {alt} {width}x{height}]` |
 | `screenshot` | `[Screenshot: {title} - {url}]` |
 | `progress` | `[████░░░░░░] 30% {label}` |
 | `terminal` | `$ {command}\n{output}` |
-| `table` | ASCII テーブル |
-| `chart` | 数値要約 |
-| `file_tree` | インデント付きテキスト |
-| `markdown` | プレーンテキスト |
+| `table` | ASCII table |
+| `chart` | Numerical summary |
+| `file_tree` | Indented text |
+| `markdown` | Plain text |
 | `audio` | `[Audio: {duration}ms]` |
 | `video` | `[Video: {duration}ms]` |
 | `map` | `[Map: {lat}, {lng}]` |
@@ -891,15 +893,15 @@ CLI 環境では全ての Widget がテキスト表現にフォールバック�
 | `toggle` | `[{label}: {value}]` |
 | `slider` | `[{min}-{max}: {value}]` |
 | `checkbox` | `[{checked ? "x" : " "}] {label}` |
-| `container` | 子を順に出力 |
-| `row` | 子を `  ` 区切りで横に出力 |
-| `column` | 子を改行区切りで縦に出力 |
-| `tabs` | `--- {label} ---\n{content}` を各タブで出力 |
+| `container` | Output children in order |
+| `row` | Output children horizontally, separated by `  ` |
+| `column` | Output children vertically with line breaks |
+| `tabs` | `--- {label} ---\n{content}` output on each tab |
 | `collapsible` | `▸ {label}\n{children}` |
 | `card` | `[{header}]\n{body}\n{footer}` |
 | `stream` | `[{current_state.label}]` |
 | `indicator` | `[{state}] {label}` |
-| `custom` | fallback Widget の CLI 表現 |
+| `custom` | CLI representation of fallback widget |
 ```
 
 これで完全な widget.md の内容。
@@ -1026,40 +1028,40 @@ widget.md に必要な要素:
 ## 回答: docs/widget.md 完全版
 
 ```markdown
-# widget.md — Widget System 仕様書
+# widget.md — Widget System specifications
 
-## 1. 概要
+## 1. Overview
 
-Widget はバックエンドが「このデータをこう表示してほしい」と宣言するための統一的なデータ形式である。Widget は純粋な JSON データであり、UI ライブラリではない。
+Widget is a unified data format that allows the backend to declare ``I want this data to be displayed like this.'' Widgets are pure JSON data and are not UI libraries.
 
-バックエンドのあらゆるコード（tool の handler.py、handler、Flow ノード）が Widget JSON を生成し、context の `emit_widget` で送出する。フロントエンドがこの JSON を受け取り、テーマに従って描画する。
+Any code in the backend (handler.py in the tool, handler, Flow node) generates Widget JSON and sends it out in the context's `emit_widget`. The front end receives this JSON and renders it according to the theme.
 
-Widget はドメイン知識を持たない。テキスト、コードブロック、画像、テーブル、プログレスバーといった汎用的な表示プリミティブのみを定義する。何をどう表示するかは Widget を生成する側が決め、どう見せるかはテーマが決める。
-
-
-## 2. 設計思想
-
-**純粋なデータ**: Widget は JSON dict である。レンダリングロジック、イベントハンドラ、スタイル定義を含まない。描画はフロントエンドの責務。
-
-**ドメイン非依存**: Widget の型は「テキスト」「画像」「テーブル」等の汎用プリミティブである。「チャットメッセージ Widget」「エージェントステータス Widget」のような特定ドメインに特化した型は存在しない。
-
-**ネスト可能**: Widget の中に Widget を入れられる。Card の body に CodeBlock を入れる、Row の中に複数の Button を並べる、Tabs の各タブに異なる Widget を配置する、等。
-
-**フォールバック前提**: フロントエンドがある Widget 型を描画できない場合、テキスト表現にフォールバックする。Custom Widget は明示的な fallback Widget を持つ。CLI 環境では全ての Widget がテキスト表現にフォールバックする。
-
-**テーマとの分離**: Widget は「何を表示するか」のみを宣言する。「どう見せるか」はテーマが決定する。Widget は `style_hint` でテーマへのヒントを渡せるが、テーマはこれを無視してよい。
+Widgets have no domain knowledge. Define only general-purpose display primitives such as text, code blocks, images, tables, and progress bars. What to display and how to display it is decided by the side that generates the widget, and how to display it is decided by the theme.
 
 
-## 3. 基底プロパティ
+## 2. Design philosophy
 
-全ての Widget が持つ共通プロパティ。
+**Pure data**: Widget is a JSON dict. Contains no rendering logic, event handlers, or style definitions. Drawing is the responsibility of the front end.
 
-| プロパティ | 型 | 必須 | 説明 |
+**Domain independent**: Widget types are general-purpose primitives such as "text", "image", and "table". There are no domain-specific types such as "Chat Message Widget" or "Agent Status Widget."
+
+**Nestable**: Widgets can be placed inside Widgets. Inserting a CodeBlock in the body of a Card, arranging multiple Buttons in a Row, placing a different widget in each tab of Tabs, etc.
+
+**Fallback assumption**: If the front end cannot draw a certain Widget type, it will fall back to the text representation. Custom widgets have an explicit fallback widget. In the CLI environment, all widgets fall back to text representation.
+
+**Separation from theme**: Widget declares only "what to display". The theme determines how it will be presented. The widget can pass a hint to the theme with `style_hint`, but the theme can ignore this.
+
+
+## 3. Base properties
+
+Common properties that all widgets have.
+
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `type` | string | 必須 | Widget の型。セクション4の型一覧のいずれか |
-| `id` | string | 任意 | 識別子。ストリーミング更新時に特定の Widget を差し替えるために使用 |
-| `style_hint` | dict | 任意 | テーマへのヒント。テーマが解釈してもしなくてもよい |
-| `meta` | dict | 任意 | 任意のメタデータ。フロントエンドは無視してよい |
+| `type` | string | Required | Widget type. Any of the types listed in Section 4 |
+| `id` | string | optional | identifier. Used to replace specific widgets during streaming updates |
+| `style_hint` | dict | optional | hints to the theme. The theme may or may not be interpreted |
+| `meta` | dict | any | any metadata. You can ignore the front end |
 
 ```json
 {
@@ -1071,14 +1073,14 @@ Widget はドメイン知識を持たない。テキスト、コードブロッ�
 ```
 
 
-## 4. Widget 型一覧
+## 4. Widget type list
 
-29種。表示系14、コントロール系6、レイアウト系6、ストリーミング系2、カスタム1。
+29 types. 14 display systems, 6 control systems, 6 layout systems, 2 streaming systems, and 1 custom system.
 
 
-### 4.1 表示系（14種）
+### 4.1 Display system (14 types)
 
-データを視覚的に表示する。
+Display data visually.
 
 ---
 
@@ -1088,11 +1090,11 @@ Widget はドメイン知識を持たない。テキスト、コードブロッ�
 { "type": "text", "text": "Hello, world" }
 ```
 
-| プロパティ | 型 | 必須 | 説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `text` | string | 必須 | 表示テキスト |
+| `text` | string | Required | Display text |
 
-CLI: そのまま出力。
+CLI: Output as is.
 
 ---
 
@@ -1108,14 +1110,14 @@ CLI: そのまま出力。
 }
 ```
 
-| プロパティ | 型 | 必須 | 説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `language` | string | 任意 | 言語名 |
-| `content` | string | 必須 | コード本体 |
-| `filename` | string | 任意 | ファイル名 |
-| `line_start` | integer | 任意 | 開始行番号。デフォルト 1 |
+| `language` | string | any | language name |
+| `content` | string | Required | Code body |
+| `filename` | string | arbitrary | file name |
+| `line_start` | integer | optional | starting line number. Default 1 |
 
-CLI: プレーンテキスト。
+CLI: Plain text.
 
 ---
 
@@ -1130,11 +1132,11 @@ CLI: プレーンテキスト。
 }
 ```
 
-| プロパティ | 型 | 必須 | 説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `old_content` | string | 必須 | 変更前 |
-| `new_content` | string | 必須 | 変更後 |
-| `filename` | string | 任意 | ファイル名 |
+| `old_content` | string | Required | Before change |
+| `new_content` | string | Required | After change |
+| `filename` | string | arbitrary | file name |
 
 CLI: unified diff。
 
@@ -1152,12 +1154,12 @@ CLI: unified diff。
 }
 ```
 
-| プロパティ | 型 | 必須 | 説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `src` | string | 必須 | base64 データまたは URL |
-| `alt` | string | 任意 | 代替テキスト |
-| `width` | integer | 任意 | 幅 |
-| `height` | integer | 任意 | 高さ |
+| `src` | string | Required | base64 data or URL |
+| `alt` | string | any | alternative text |
+| `width` | integer | arbitrary | width |
+| `height` | integer | arbitrary | height |
 
 CLI: `[Image: {alt} {width}x{height}]`
 
@@ -1174,11 +1176,11 @@ CLI: `[Image: {alt} {width}x{height}]`
 }
 ```
 
-| プロパティ | 型 | 必須 | 説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `src` | string | 必須 | base64 データ |
-| `url` | string | 任意 | 元 URL |
-| `title` | string | 任意 | タイトル |
+| `src` | string | Required | base64 data |
+| `url` | string | any | original URL |
+| `title` | string | arbitrary | title |
 
 CLI: `[Screenshot: {title} - {url}]`
 
@@ -1196,12 +1198,12 @@ CLI: `[Screenshot: {title} - {url}]`
 }
 ```
 
-| プロパティ | 型 | 必須 | 説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `label` | string | 必須 | ラベル |
-| `current` | number | 必須 | 現在値 |
-| `total` | number | 必須 | 合計値 |
-| `state` | string | 任意 | `"running"` / `"success"` / `"error"`。デフォルト `"running"` |
+| `label` | string | Required | Label |
+| `current` | number | Required | Current value |
+| `total` | number | Required | Total value |
+| `state` | string | optional | `"running"` / `"success"` / `"error"`. Default `"running"` |
 
 CLI: `[████░░░░░░] 30% Reading...`
 
@@ -1218,11 +1220,11 @@ CLI: `[████░░░░░░] 30% Reading...`
 }
 ```
 
-| プロパティ | 型 | 必須 | 説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `command` | string | 任意 | 実行コマンド |
-| `output` | string | 必須 | 出力 |
-| `exit_code` | integer | 任意 | 終了コード |
+| `command` | string | arbitrary | execution command |
+| `output` | string | Required | Output |
+| `exit_code` | integer | optional | exit code |
 
 CLI: `$ {command}\n{output}`
 
@@ -1238,12 +1240,12 @@ CLI: `$ {command}\n{output}`
 }
 ```
 
-| プロパティ | 型 | 必須 | 説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `headers` | list[string] | 必須 | 列ヘッダ |
-| `rows` | list[list] | 必須 | 行データ |
+| `headers` | list[string] | Required | Column header |
+| `rows` | list[list] | Required | Row data |
 
-CLI: ASCII テーブル。
+CLI: ASCII table.
 
 ---
 
@@ -1258,13 +1260,13 @@ CLI: ASCII テーブル。
 }
 ```
 
-| プロパティ | 型 | 必須 | 説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `chart_type` | string | 必須 | `"bar"` / `"line"` / `"pie"` / `"scatter"` |
-| `labels` | list[string] | 必須 | ラベル |
-| `data` | list[number] | 必須 | データ |
+| `chart_type` | string | Required | `"bar"` / `"line"` / `"pie"` / `"scatter"` |
+| `labels` | list[string] | Required | Label |
+| `data` | list[number] | Required | Data |
 
-CLI: 数値要約。
+CLI: Numerical summary.
 
 ---
 
@@ -1282,11 +1284,11 @@ CLI: 数値要約。
 }
 ```
 
-| プロパティ | 型 | 必須 | 説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `tree` | list[dict] | 必須 | ノード配列。各ノードは `name`(string), `type`(`"file"` or `"dir"`), `children`(list, 任意) |
+| `tree` | list[dict] | Required | Node array. Each node is `name`(string), `type`(`"file"` or `"dir"`), `children`(list, optional) |
 
-CLI: インデント付きテキスト。
+CLI: Indented text.
 
 ---
 
@@ -1296,11 +1298,11 @@ CLI: インデント付きテキスト。
 { "type": "markdown", "content": "# Title\n\n**bold**" }
 ```
 
-| プロパティ | 型 | 必須 | 説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `content` | string | 必須 | Markdown テキスト |
+| `content` | string | Required | Markdown text |
 
-CLI: プレーンテキスト。
+CLI: Plain text.
 
 ---
 
@@ -1310,10 +1312,10 @@ CLI: プレーンテキスト。
 { "type": "audio", "src": "base64 or URL", "duration": 5000 }
 ```
 
-| プロパティ | 型 | 必須 | 説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `src` | string | 必須 | base64 or URL |
-| `duration` | integer | 任意 | ミリ秒 |
+| `src` | string | Required | base64 or URL |
+| `duration` | integer | any | milliseconds |
 
 CLI: `[Audio: {duration}ms]`
 
@@ -1325,10 +1327,10 @@ CLI: `[Audio: {duration}ms]`
 { "type": "video", "src": "base64 or URL", "duration": 30000 }
 ```
 
-| プロパティ | 型 | 必須 | 説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `src` | string | 必須 | base64 or URL |
-| `duration` | integer | 任意 | ミリ秒 |
+| `src` | string | Required | base64 or URL |
+| `duration` | integer | any | milliseconds |
 
 CLI: `[Video: {duration}ms]`
 
@@ -1340,18 +1342,18 @@ CLI: `[Video: {duration}ms]`
 { "type": "map", "lat": 35.6812, "lng": 139.7671, "zoom": 15 }
 ```
 
-| プロパティ | 型 | 必須 | 説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `lat` | number | 必須 | 緯度 |
-| `lng` | number | 必須 | 経度 |
-| `zoom` | integer | 任意 | ズームレベル。デフォルト 13 |
+| `lat` | number | required | latitude |
+| `lng` | number | required | longitude |
+| `zoom` | integer | optional | zoom level. Default 13 |
 
 CLI: `[Map: {lat}, {lng}]`
 
 
-### 4.2 コントロール系（6種）
+### 4.2 Control system (6 types)
 
-ユーザー入力を受け付ける。ユーザー操作の結果は Asset の JS が `emit_event` でバックエンドに返す。
+Accept user input. The result of the user operation is returned to the backend by Asset's JS using `emit_event`.
 
 ---
 
@@ -1361,11 +1363,11 @@ CLI: `[Map: {lat}, {lng}]`
 { "type": "input", "placeholder": "Type here...", "value": "", "multiline": false }
 ```
 
-| プロパティ | 型 | 必須 | 説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `placeholder` | string | 任意 | プレースホルダ |
-| `value` | string | 任意 | 初期値 |
-| `multiline` | boolean | 任意 | 複数行。デフォルト false |
+| `placeholder` | string | optional | placeholder |
+| `value` | string | arbitrary | initial value |
+| `multiline` | boolean | any | multiple lines. Default false |
 
 ---
 
@@ -1375,11 +1377,11 @@ CLI: `[Map: {lat}, {lng}]`
 { "type": "button", "label": "Execute", "action": "run_task", "variant": "primary" }
 ```
 
-| プロパティ | 型 | 必須 | 説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `label` | string | 必須 | ラベル |
-| `action` | string | 必須 | クリック時のアクション名 |
-| `variant` | string | 任意 | `"primary"` / `"secondary"` / `"danger"`。デフォルト `"primary"` |
+| `label` | string | Required | Label |
+| `action` | string | Required | Click action name |
+| `variant` | string | optional | `"primary"` / `"secondary"` / `"danger"`. Default `"primary"` |
 
 ---
 
@@ -1394,11 +1396,11 @@ CLI: `[Map: {lat}, {lng}]`
 }
 ```
 
-| プロパティ | 型 | 必須 | 説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `options` | list[dict] | 必須 | 各要素は `label`(string), `value`(any) |
-| `value` | any | 任意 | 現在値 |
-| `multiple` | boolean | 任意 | 複数選択。デフォルト false |
+| `options` | list[dict] | Required | Each element is `label`(string), `value`(any) |
+| `value` | any | any | current value |
+| `multiple` | boolean | Any | Multiple selection. Default false |
 
 ---
 
@@ -1408,10 +1410,10 @@ CLI: `[Map: {lat}, {lng}]`
 { "type": "toggle", "label": "Enable", "value": false }
 ```
 
-| プロパティ | 型 | 必須 | 説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `label` | string | 必須 | ラベル |
-| `value` | boolean | 任意 | デフォルト false |
+| `label` | string | Required | Label |
+| `value` | boolean | Optional | Default false |
 
 ---
 
@@ -1421,12 +1423,12 @@ CLI: `[Map: {lat}, {lng}]`
 { "type": "slider", "min": 0, "max": 100, "value": 50, "step": 1 }
 ```
 
-| プロパティ | 型 | 必須 | 説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `min` | number | 必須 | 最小値 |
-| `max` | number | 必須 | 最大値 |
-| `value` | number | 任意 | 現在値 |
-| `step` | number | 任意 | ステップ。デフォルト 1 |
+| `min` | number | Required | Minimum value |
+| `max` | number | Required | Maximum |
+| `value` | number | arbitrary | current value |
+| `step` | number | any | step. Default 1 |
 
 ---
 
@@ -1436,15 +1438,15 @@ CLI: `[Map: {lat}, {lng}]`
 { "type": "checkbox", "label": "I agree", "checked": false }
 ```
 
-| プロパティ | 型 | 必須 | 説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `label` | string | 必須 | ラベル |
-| `checked` | boolean | 任意 | デフォルト false |
+| `label` | string | Required | Label |
+| `checked` | boolean | Optional | Default false |
 
 
-### 4.3 レイアウト系（6種）
+### 4.3 Layout type (6 types)
 
-Widget 内部のネスト構造を作る。
+Create a nested structure inside the widget.
 
 ---
 
@@ -1454,9 +1456,9 @@ Widget 内部のネスト構造を作る。
 { "type": "container", "children": [{"type": "text", "text": "..."}, {"type": "code_block", "content": "..."}] }
 ```
 
-| プロパティ | 型 | 必須 | 説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `children` | list[Widget] | 必須 | 子 Widget |
+| `children` | list[Widget] | Required | Child Widget |
 
 ---
 
@@ -1466,10 +1468,10 @@ Widget 内部のネスト構造を作る。
 { "type": "row", "children": [...], "gap": 8 }
 ```
 
-| プロパティ | 型 | 必須 | 説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `children` | list[Widget] | 必須 | 子 Widget |
-| `gap` | integer | 任意 | 間隔（px） |
+| `children` | list[Widget] | Required | Child Widget |
+| `gap` | integer | arbitrary | interval (px) |
 
 ---
 
@@ -1479,10 +1481,10 @@ Widget 内部のネスト構造を作る。
 { "type": "column", "children": [...], "gap": 8 }
 ```
 
-| プロパティ | 型 | 必須 | 説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `children` | list[Widget] | 必須 | 子 Widget |
-| `gap` | integer | 任意 | 間隔（px） |
+| `children` | list[Widget] | Required | Child Widget |
+| `gap` | integer | arbitrary | interval (px) |
 
 ---
 
@@ -1498,9 +1500,9 @@ Widget 内部のネスト構造を作る。
 }
 ```
 
-| プロパティ | 型 | 必須 | 説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `tabs` | list[dict] | 必須 | 各要素は `label`(string), `content`(Widget) |
+| `tabs` | list[dict] | Required | Each element is `label`(string), `content`(Widget) |
 
 ---
 
@@ -1515,11 +1517,11 @@ Widget 内部のネスト構造を作る。
 }
 ```
 
-| プロパティ | 型 | 必須 | 説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `label` | string | 必須 | ラベル |
-| `default_open` | boolean | 任意 | デフォルト false |
-| `children` | list[Widget] | 必須 | 子 Widget |
+| `label` | string | Required | Label |
+| `default_open` | boolean | Optional | Default false |
+| `children` | list[Widget] | Required | Child Widget |
 
 ---
 
@@ -1534,20 +1536,20 @@ Widget 内部のネスト構造を作る。
 }
 ```
 
-| プロパティ | 型 | 必須 | 説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `header` | Widget | 任意 | ヘッダ |
-| `body` | Widget | 任意 | ボディ |
-| `footer` | Widget | 任意 | フッタ |
+| `header` | Widget | Optional | Header |
+| `body` | Widget | Any | Body |
+| `footer` | Widget | Optional | Footer |
 
 
-### 4.4 ストリーミング系（2種）
+### 4.4 Streaming type (2 types)
 
 ---
 
 #### Stream
 
-複数の状態を持つストリーミング表示。
+Streaming display with multiple states.
 
 ```json
 {
@@ -1560,15 +1562,15 @@ Widget 内部のネスト構造を作る。
 }
 ```
 
-| プロパティ | 型 | 必須 | 説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `states` | dict[string, dict] | 必須 | 状態名 → `label`(string) + `animation`(string, 任意) |
+| `states` | dict[string, dict] | Required | State name → `label`(string) + `animation`(string, optional) |
 
 ---
 
 #### Indicator
 
-単一の状態インジケータ。
+Single status indicator.
 
 ```json
 {
@@ -1579,18 +1581,18 @@ Widget 内部のネスト構造を作る。
 }
 ```
 
-| プロパティ | 型 | 必須 | 説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `label` | string | 必須 | ラベル |
-| `state` | string | 必須 | `"running"` / `"success"` / `"error"` / `"waiting"` |
-| `animation` | string | 任意 | テーマ定義のアニメーション名 |
+| `label` | string | Required | Label |
+| `state` | string | Required | `"running"` / `"success"` / `"error"` / `"waiting"` |
+| `animation` | string | Optional | Theme-defined animation name |
 
 
-### 4.5 カスタム（1種）
+### 4.5 Custom (1 type)
 
 #### Custom
 
-定義済み型に当てはまらない表示。`user_data/widget_renderers/` にレンダラーがあれば専用描画、なければ `fallback` を描画する。
+Displays that do not fit any predefined type. If `user_data/widget_renderers/` has a renderer, dedicated drawing is done, otherwise `fallback` is drawn.
 
 ```json
 {
@@ -1601,13 +1603,13 @@ Widget 内部のネスト構造を作る。
 }
 ```
 
-| プロパティ | 型 | 必須 | 説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `custom_type` | string | 必須 | カスタム型の識別子 |
-| `fallback` | Widget | 必須 | レンダラー不在時のフォールバック |
-| `data` | dict | 任意 | カスタムレンダラーに渡すデータ |
+| `custom_type` | string | Required | Custom type identifier |
+| `fallback` | Widget | Required | Fallback when renderer is absent |
+| `data` | dict | Optional | Data to pass to custom renderer |
 
-カスタムレンダラーの配置:
+Custom renderer placement:
 
 ```
 user_data/widget_renderers/
@@ -1625,14 +1627,14 @@ version: "1.0.0"
 entry: "renderer.js"
 ```
 
-CLI: fallback Widget の CLI 表現。
+CLI: CLI representation of the fallback widget.
 
 
-## 5. rumi_widgets — Python ヘルパーライブラリ
+## 5. rumi_widgets — Python helper library
 
-defaults が `lib/rumi_widgets/` に配置する。handler.py 内で import して使える。使用は任意。直接 JSON dict を返しても等価。
+defaults is placed in `lib/rumi_widgets/`. It can be used by importing it in handler.py. Use is optional. Equivalent to returning a JSON dict directly.
 
-### 5.1 配置
+### 5.1 Placement
 
 ```
 ecosystem/defaults/lib/rumi_widgets/
@@ -1663,7 +1665,7 @@ from rumi_widgets import (
 )
 ```
 
-### 5.3 基底クラス
+### 5.3 Base class
 
 ```python
 class Widget:
@@ -1698,9 +1700,9 @@ class Widget:
         return result
 ```
 
-### 5.4 使用例
+### 5.4 Usage example
 
-クラス構築と JSON dict は等価。
+Class construction and JSON dict are equivalent.
 
 ```python
 # クラス
@@ -1721,11 +1723,11 @@ widget = {
 ```
 
 
-## 6. 送出
+## 6. Sending
 
 ### 6.1 emit_widget
 
-tool の handler.py 内で `context["emit_widget"]` を呼ぶ。途中経過の Widget をリアルタイムにフロントエンドに送出する。
+Call `context["emit_widget"]` in handler.py of tool. Sends the progressed Widget to the front end in real time.
 
 ```python
 def run(params, context):
@@ -1744,25 +1746,25 @@ def run(params, context):
     }
 ```
 
-`emit_widget` で送出した Widget はストリーミングメッセージとして転送される。return の `widget` フィールドは最終結果 Widget。
+Widgets sent with `emit_widget` are transferred as streaming messages. The `widget` field of return is the final result widget.
 
-### 6.2 通信上の表現
+### 6.2 Communication expressions
 
-emit_widget が送出する Widget は JSON Lines メッセージの data 内に格納される。
+The Widget sent by emit_widget is stored in the data of the JSON Lines message.
 
 ```json
 {"type":"message.stream.data","component":"target_asset","data":{"stream_id":"s1","widget":{"type":"progress","label":"Processing...","current":0,"total":3}}}
 ```
 
-最終結果 Widget は message.send で送信される。
+The final result Widget is sent using message.send.
 
 ```json
 {"type":"message.send","component":"target_asset","data":{"action":"tool_result","widget":{"type":"card","header":{"type":"indicator","label":"task","state":"success"},"body":{"type":"text","text":"done"}}}}
 ```
 
-### 6.3 id による差し替え
+### 6.3 Replacement by id
 
-Widget に `id` を付けて emit すると、フロントエンドは同じ `id` の Widget を上書き描画する。Progress の更新に使う。
+If you add `id` to a widget and emit it, the front end will overwrite and draw the widget with the same `id`. Used to update Progress.
 
 ```python
 context["emit_widget"](Progress(id="p1", label="Step 1", current=1, total=3))
@@ -1772,29 +1774,29 @@ context["emit_widget"](Progress(id="p1", label="Step 2", current=2, total=3))
 ```
 
 
-## 7. フロントエンドでの描画
+## 7. Drawing on the front end
 
-### 7.1 Widget レンダラー
+### 7.1 Widget Renderer
 
-shell が Widget レンダラーを内蔵する。レンダラーは Widget JSON の `type` を見て対応する描画関数を呼び出す。
+The shell has a built-in Widget renderer. The renderer looks at `type` of Widget JSON and calls the corresponding drawing function.
 
-Asset の JS 内からは以下で呼び出す。
+Call it from within Asset's JS as follows.
 
 ```javascript
 window.rumiWidgets.render(widgetJson, targetElement);
 ```
 
-### 7.2 描画フォールバック順序
+### 7.2 Drawing fallback order
 
-1. type が定義済み29種のいずれかであれば、組み込みレンダラーで描画する
-2. type が `"custom"` であれば `user_data/widget_renderers/{custom_type}/` のレンダラーを探す
-3. カスタムレンダラーがあれば専用描画する
-4. なければ `fallback` Widget を組み込みレンダラーで描画する
-5. いずれにも該当しなければ `[Unknown widget: {type}]` とテキスト表示する
+1. If type is one of the 29 predefined types, draw with the built-in renderer.
+2. If type is `"custom"`, search for `user_data/widget_renderers/{custom_type}/` renderer
+3. If you have a custom renderer, use dedicated rendering
+4. If not, `fallback` Draw the widget using the built-in renderer
+5. If none of the above apply, display text as `[Unknown widget: {type}]`
 
-### 7.3 テーマ連携
+### 7.3 Theme collaboration
 
-Widget レンダラーは描画時に現在のテーマ（theme.yaml）の `widgets` セクションを参照する。
+The Widget renderer refers to the `widgets` section of the current theme (theme.yaml) when rendering.
 
 ```yaml
 # theme.yaml 抜粋
@@ -1836,34 +1838,34 @@ widgets:
     height: 4
 ```
 
-Widget の `style_hint` でテーマの variant を選択できる。
+You can select a theme variant with Widget's `style_hint`.
 
 ```json
 {"type": "card", "style_hint": {"variant": "compact"}, "body": {"type": "text", "text": "..."}}
 ```
 
-テーマの `card.variants.compact` が適用される。テーマに該当 variant がなければ `default` が使われる。
+`card.variants.compact` of the theme applies. If the theme does not have a corresponding variant, `default` will be used.
 
-テーマの詳細仕様は theme.md を参照。
+See theme.md for detailed theme specifications.
 
 
-## 8. CLI フォールバック
+## 8. CLI fallback
 
-CLI 環境ではフロントエンドの Widget レンダラーが存在しない。全ての Widget はテキスト表現に変換される。
+There is no front-end widget renderer in the CLI environment. All widgets are converted to text representations.
 
-| type | CLI 表現 |
+| type | CLI expression |
 |---|---|
-| `text` | そのまま出力 |
-| `code_block` | プレーンテキスト |
+| `text` | Output as is |
+| `code_block` | Plain text |
 | `diff` | unified diff |
 | `image` | `[Image: {alt} {width}x{height}]` |
 | `screenshot` | `[Screenshot: {title} - {url}]` |
 | `progress` | `[████░░░░░░] 30% {label}` |
 | `terminal` | `$ {command}\n{output}` |
-| `table` | ASCII テーブル |
-| `chart` | 数値要約 |
-| `file_tree` | インデント付きテキスト |
-| `markdown` | プレーンテキスト |
+| `table` | ASCII table |
+| `chart` | Numerical summary |
+| `file_tree` | Indented text |
+| `markdown` | Plain text |
 | `audio` | `[Audio: {duration}ms]` |
 | `video` | `[Video: {duration}ms]` |
 | `map` | `[Map: {lat}, {lng}]` |
@@ -1873,15 +1875,14 @@ CLI 環境ではフロントエンドの Widget レンダラーが存在しな�
 | `toggle` | `[{label}: {value}]` |
 | `slider` | `[{min}-{max}: {value}]` |
 | `checkbox` | `[{checked ? "x" : " "}] {label}` |
-| `container` | 子を順に出力 |
-| `row` | 子を空白区切りで横に出力 |
-| `column` | 子を改行で縦に出力 |
+| `container` | Output children in order |
+| `row` | Output children horizontally separated by spaces |
+| `column` | Output children vertically with line breaks |
 | `tabs` | `--- {label} ---\n{content}` |
 | `collapsible` | `▸ {label}\n{children}` |
 | `card` | `[{header}]\n{body}\n{footer}` |
 | `stream` | `[{current_state.label}]` |
 | `indicator` | `[{state}] {label}` |
-| `custom` | fallback の CLI 表現 |
+| `custom` | CLI representation of fallback |
 
-CLI フォールバックの実装は `lib/rumi_widgets/` 内の各クラスに `to_cli()` メソッドとして持たせる。transport 層が CLI モードを検出した場合、emit_widget は `to_dict()` の代わりに `to_cli()` の結果を出力する。
-```
+The CLI fallback implementation is provided as a `to_cli()` method in each class in `lib/rumi_widgets/`. If the transport layer detects CLI mode, emit_widget outputs the result of `to_cli()` instead of `to_dict()`.

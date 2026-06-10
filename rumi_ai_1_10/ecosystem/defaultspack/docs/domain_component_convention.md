@@ -1,3 +1,7 @@
+<!-- docs-i18n-links:start -->
+[EN](./domain_component_convention.md) | [JP](./i18n/ja/domain_component_convention.md) | [KR](./i18n/ko/domain_component_convention.md) | [CN](./i18n/zh-cn/domain_component_convention.md)
+<!-- docs-i18n-links:end -->
+
 # Defaultspack Domain Component Convention
 
 Defaultspack is moving toward extension-like domain components: a feature should

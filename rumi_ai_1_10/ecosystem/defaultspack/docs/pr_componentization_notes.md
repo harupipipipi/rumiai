@@ -1,3 +1,7 @@
+<!-- docs-i18n-links:start -->
+[EN](./pr_componentization_notes.md) | [JP](./i18n/ja/pr_componentization_notes.md) | [KR](./i18n/ko/pr_componentization_notes.md) | [CN](./i18n/zh-cn/pr_componentization_notes.md)
+<!-- docs-i18n-links:end -->
+
 # PR Notes: Defaultspack Componentization
 
 ## Summary

@@ -1,68 +1,72 @@
+<!-- docs-i18n-links:start -->
+[EN](./architecture.md) | [JP](./i18n/ja/architecture.md) | [KR](./i18n/ko/architecture.md) | [CN](./i18n/zh-cn/architecture.md)
+<!-- docs-i18n-links:end -->
+
 # Rumi AI OS — Architecture
 
-設計と仕組みの全体像を説明するドキュメントです。Pack 開発者は [pack-development.md](pack-development.md)、運用者は [operations.md](operations.md) も参照してください。
+This is a document that explains the overall design and mechanism. Also see [pack-development.md](./pack-development.md) for Pack developers and [operations.md](./operations.md) for Operators.
 
 ---
 
-## 目次
+## Table of Contents
 
-1. [設計原則](#設計原則)
-2. [Flow システム](#flow-システム)
+1. [Design principles](#design-principles)
+2. [Flow System](#flow-system)
 3. [python_file_call](#python_file_call)
 4. [Flow Modifier](#flow-modifier)
-5. [セキュリティモデル](#セキュリティモデル)
-6. [Pack 承認](#pack-承認)
-7. [ネットワーク権限と Egress Proxy](#ネットワーク権限と-egress-proxy)
-8. [Capability システム（Trust + Grant）](#capability-システムtrust--grant)
-9. [UDS ソケット権限](#uds-ソケット権限)
-10. [階層権限](#階層権限)
+5. [Security Model](#security-model)
+6. [Pack Approval](#pack-approval)
+7. [Network Permissions and Egress Proxy](#network-permissions-and-egress-proxy)
+8. [Capability System (Trust + Grant)](#capability-system-trust-grant)
+9. [UDS Socket Permissions](#uds-socket-permissions)
+10. [Hierarchical authority](#hierarchy-authority)
 11. [Secrets](#secrets)
-12. [共有辞書（Shared Dict）](#共有辞書shared-dict)
-13. [lib システム](#lib-システム)
-14. [pip 依存ライブラリ導入](#pip-依存ライブラリ導入)
+12. [Shared Dict](#shared-dict)
+13. [lib system](#lib-system)
+14. [Introducing pip dependent library](#pip-dependency-library-installation)
 15. [Pack Import / Apply](#pack-import--apply)
-16. [Component 概念](#component-概念)
+16. [Component concept](#component-concept)
 17. [vocab / converter](#vocab--converter)
-18. [監査ログ](#監査ログ)
+18. [Audit Log](#audit-log)
 19. [Pending Export](#pending-export)
-20. [DI コンテナとサービス一覧](#di-コンテナとサービス一覧)
-21. [Kernel Mixin 構成](#kernel-mixin-構成)
-22. [可観測性（Observability）](#可観測性observability)
-23. [共通基盤モジュール](#共通基盤モジュール)
-24. [Pack 開発ツール](#pack-開発ツール)
-25. [Deprecated 機能](#deprecated-機能)
+20. [DI container and service list](#di-container-and-service-list)
+21. [Kernel Mixin configuration](#kernel-mixin-configuration)
+22. [Observability](#observability)
+23. [Common infrastructure module](#common-base-module)
+24. [Pack development tools](#pack-development-tools)
+25. [Deprecated feature](#deprecated-feature)
 
 ---
 
-## 設計原則
+## Design principles
 
-### No Favoritism（贔屓なし）
+### No Favoritism
 
-公式コアはドメイン概念（チャット、ツール、プロンプト、AI クライアント、フロントエンド等）を一切持ちません。公式が提供するのは汎用の実行基盤です。
+The official core has no domain concepts (chat, tools, prompts, AI clients, frontends, etc.). What the official provides is a general-purpose execution platform.
 
-公式が提供する機構は以下に限定されます: Flow 実行、承認ゲート（hash 検証）、隔離実行（Docker / UDS）、Trust + Grant（capability）、監査ログ。
+Officially provided mechanisms are limited to: Flow execution, authorization gate (hash validation), isolated execution (Docker/UDS), Trust + Grant (capability), and audit logs.
 
-### 悪意前提（Threat Model）
+### Malicious Assumption (Threat Model)
 
-Pack 作者に悪意がある可能性を常に想定します。Pack 実行は原則 Docker `--network=none` で隔離されます。外部通信やホスト特権は capability（Trust + Grant）で仲介し、明示的な許可がない限り動作しません。
+Pack Always assume the possibility that the author has malicious intent. Pack execution is generally isolated in Docker `--network=none`. External communication and host privileges are mediated by capability (Trust + Grant) and will not work without explicit permission.
 
 ### Fail-Soft
 
-一部が壊れても OS 全体は停止しません。失敗したコンポーネントは無効化され、Diagnostics と Audit に記録して継続します。
+Even if one part breaks, the entire OS will not stop. Failed components are disabled and logged in Diagnostics and Audit to continue.
 
-### ホスト権限の単一入口
+### Single entry point for host privileges
 
-ホストで危険なこと（外部通信、ファイルアクセス、更新適用等）は、Pack から直接実行させず capability で仲介します。許可がない限り動きません。
+Dangerous things on the host (external communication, file access, update application, etc.) are not executed directly from Pack, but are mediated by capabilities. It won't move unless you give it permission.
 
 ---
 
-## Flow システム
+## Flow System
 
-### 概要
+### Overview
 
-Flow は Pack 間の結線・実行順序を定義する YAML ファイルです。各 Flow は phases（フェーズ）と steps（ステップ）で構成されます。
+Flow is a YAML file that defines the connections and execution order between Packs. Each Flow consists of phases and steps.
 
-### Flow ファイル形式
+### Flow file format
 
 ```yaml
 flow_id: ai_response
@@ -102,39 +106,39 @@ steps:
     output: ai_response
 ```
 
-### Flow 読み込み元
+### Flow source
 
-Flow は以下の順序で読み込まれます。同一 `flow_id` の場合は優先度の高い方が勝ちます（上位ソースの Flow を下位ソースが上書きすることはできません）。
+Flows are loaded in the following order: In the case of the same `flow_id`, the one with higher priority wins (a lower source cannot overwrite the Flow of a higher source).
 
-| 優先度 | パス | 用途 | 承認 |
+| Priority | Path | Usage | Approval |
 |--------|------|------|------|
-| 1 | `flows/` | 公式 Flow（起動・基盤） | 不要 |
-| 2 | `user_data/shared/flows/` | ユーザー/外部ツールが配置する共有 Flow | 不要 |
-| 3 | `ecosystem/<pack_id>/backend/flows/` | Pack 提供の Flow | Pack 承認必須 |
-| 4 | `ecosystem/flows/`（deprecated） | local_pack 互換 Flow | `RUMI_LOCAL_PACK_MODE=require_approval` 時のみ有効。承認必須 |
+| 1 | `flows/` | Official Flow (startup/base) | Not required |
+| 2 | `user_data/shared/flows/` | Shared Flow placed by user/external tool | Not required |
+| 3 | `ecosystem/<pack_id>/backend/flows/` | Flow provided by Pack | Pack approval required |
+| 4 | `ecosystem/flows/` (deprecated) | local_pack compatible Flow | Valid only when `RUMI_LOCAL_PACK_MODE=require_approval`. Approval required |
 
-上書きルール: 公式 Flow は誰も上書きできません。共有 Flow は公式を上書きできませんが、Pack 提供 Flow より優先されます。Pack 提供 Flow は公式・共有いずれも上書きできません。local_pack は最も低い優先度で、他の全てのソースを上書きできません。
+Override rules: Official Flows cannot be overwritten by anyone. Shared Flows cannot override official ones, but they take precedence over Pack-provided Flows. Pack-provided Flows cannot be overwritten, either official or shared. local_pack has the lowest priority and cannot override any other sources.
 
-### ステップタイプ
+### Step type
 
-| type | 説明 |
+| type | description |
 |------|------|
-| `handler` | Kernel ハンドラを呼び出し |
-| `python_file_call` | Pack 内の Python ファイルを実行 |
-| `set` | コンテキストに値を設定 |
-| `if` | 条件分岐（簡易版） |
-| `function` | FunctionRegistry に登録された関数を実行（Wave 27） |
-| `flow` | 別の Flow をサブ Flow として呼び出し |
+| `handler` | Call Kernel handler |
+| `python_file_call` | Run Python file in Pack |
+| `set` | Set value in context |
+| `if` | Conditional branching (simplified version) |
+| `function` | Execute the function registered in FunctionRegistry (Wave 27) |
+| `flow` | Call another Flow as a sub-Flow |
 
-### 実行順序
+### Execution order
 
-ステップは以下の順序で決定的にソートされます:
+Steps are sorted deterministically in the following order:
 
-1. `phase`（`phases` 配列での並び順）
-2. `priority`（昇順。小さいほど先に実行）
-3. `id`（アルファベット順。タイブレーク）
+1. `phase` (`phases` Sort order in array)
+2. `priority` (ascending order; smaller is executed first)
+3. `id` (Alphabetical order. Tie-break)
 
-### 変数参照
+### Variable reference
 
 ```yaml
 input:
@@ -142,17 +146,17 @@ input:
   settings: "${ctx.config}"      # オブジェクト全体
 ```
 
-参照先が存在しない場合は `null` 扱いになります（fail-soft）。
+If the reference destination does not exist, it will be treated as `null` (fail-soft).
 
 ---
 
 ## python_file_call
 
-### 概要
+### Overview
 
-Flow のステップとして Pack 内の Python ファイルを実行します。入力を受け取り、JSON 互換の出力を返す「ブロック」です。
+Run a Python file in a Pack as a step in a Flow. A "block" that takes input and returns JSON-compatible output.
 
-### ブロックファイルの形式
+### Block file format
 
 ```python
 # ecosystem/<pack_id>/backend/blocks/my_block.py
@@ -174,37 +178,37 @@ def run(input_data, context=None):
     return {"message": "Hello from my_block!"}
 ```
 
-### パス解決
+### Path resolution
 
-`python_file_call` の `file` フィールドは pack_subdir を基準に解決されます。以下の候補が順に探索されます:
+The `file` field in `python_file_call` is resolved relative to pack_subdir. The following candidates are searched in order:
 
 1. `<pack_subdir>/blocks/`
 2. `<pack_subdir>/backend/blocks/`
-3. `<pack_subdir>/backend/components/`（互換）
-4. `<pack_subdir>/backend/`（互換: 直置き）
-5. `<pack_subdir>/<file>`（最終フォールバック）
+3. `<pack_subdir>/backend/components/` (compatible)
+4. `<pack_subdir>/backend/` (Compatible: Direct installation)
+5. `<pack_subdir>/<file>` (Final fallback)
 
-全ての候補は pack_subdir boundary 内に制限されます。boundary 外のファイルは実行拒否されます。
+All candidates are restricted within the pack_subdir boundary. Files outside the boundary will be refused execution.
 
-### セキュリティチェック（実行前）
+### Security check (before execution)
 
-1. `owner_pack` が承認済み（approved）であること
-2. `owner_pack` のハッシュが一致すること（modified でないこと）
-3. ファイルパスが pack_subdir boundary 内であること
+1. `owner_pack` is approved
+2. The hashes of `owner_pack` must match (not modified)
+3. The file path must be within the pack_subdir boundary
 
-### principal_id の扱い（v1）
+### Handling of principal_id (v1)
 
-v1 では `principal_id` は常に `owner_pack` に強制上書きされます。Flow 定義で `principal_id` を指定しても、実行時は `owner_pack` が使用されます。これは権限の乱用事故を防ぐための措置です。監査ログには `principal_id_overridden` として警告が記録されます。
+In v1, `principal_id` is always forced to be overwritten by `owner_pack`. Even if you specify `principal_id` in the Flow definition, `owner_pack` will be used at runtime. This is a measure to prevent abuse of authority. A warning is recorded in the audit log as `principal_id_overridden`.
 
 ---
 
 ## Flow Modifier
 
-### 概要
+### Overview
 
-既存 Flow に後からステップを注入・置換・削除できる仕組みです。Pack 同士が互いを知らなくても、Modifier で機能を差し込めます。
+This is a mechanism that allows you to inject, replace, or delete steps into an existing Flow later. Modifiers allow you to plug in functionality even if the packs don't know each other.
 
-### Modifier ファイル形式
+### Modifier file format
 
 ```yaml
 modifier_id: tool_inject
@@ -230,24 +234,24 @@ step:
   output: selected_capabilities
 ```
 
-### Modifier 配置パス
+### Modifier placement path
 
-Modifier は `*.modifier.yaml` のファイル名で以下に配置します:
+The Modifier should be placed below with the file name `*.modifier.yaml`:
 
 - `user_data/shared/flows/modifiers/`
-- `ecosystem/<pack_id>/backend/flows/modifiers/`（Pack 提供の場合）
+- `ecosystem/<pack_id>/backend/flows/modifiers/` (if provided by Pack)
 
-### アクション
+### Action
 
-| action | 説明 | target_step_id | step |
+| action | description | target_step_id | step |
 |--------|------|----------------|------|
-| `inject_before` | 指定ステップの前に挿入 | 必須 | 必須 |
-| `inject_after` | 指定ステップの後に挿入 | 必須 | 必須 |
-| `append` | フェーズの末尾に追加 | 不要 | 必須 |
-| `replace` | 指定ステップを置換 | 必須 | 必須 |
-| `remove` | 指定ステップを削除 | 必須 | 不要 |
+| `inject_before` | Insert before specified step | Required | Required |
+| `inject_after` | Insert after specified step | Required | Required |
+| `append` | Added to the end of the phase | Not required | Required |
+| `replace` | Replace specified step | Required | Required |
+| `remove` | Delete specified step | Required | Not required |
 
-### requires 条件
+### requires condition
 
 ```yaml
 requires:
@@ -257,15 +261,15 @@ requires:
     - "tool_support"        # capability が有効か
 ```
 
-条件が満たされない場合、Modifier はスキップされます（fail-soft）。
+If the condition is not met, the modifier is skipped (fail-soft).
 
-### 適用順序
+### Application order
 
-1. `phase` 順
-2. `priority` 昇順
-3. `modifier_id` 昇順
+1. `phase` order
+2. `priority` Ascending order
+3. `modifier_id` Ascending order
 
-### resolve_target（共有辞書での解決）
+### resolve_target (resolve with shared dictionary)
 
 ```yaml
 modifier_id: compat_modifier
@@ -274,55 +278,55 @@ resolve_target: true              # オプトイン
 resolve_namespace: "flow_id"      # デフォルト
 ```
 
-`resolve_target: true` を指定すると、`target_flow_id` を共有辞書で解決してから適用します。
+If `resolve_target: true` is specified, `target_flow_id` will be resolved in the shared dictionary before being applied.
 
 ---
 
-## セキュリティモデル
+## Security model
 
-### セキュリティモード
+### Security mode
 
-環境変数 `RUMI_SECURITY_MODE` で設定します。
+Set with the environment variable `RUMI_SECURITY_MODE`.
 
-| モード | Docker | 動作 |
+| Mode | Docker | Behavior |
 |--------|--------|------|
-| `strict`（デフォルト） | 必須 | Docker 不可なら実行拒否 |
-| `permissive` | 不要 | 警告付きでホスト実行を許可（開発用） |
+| `strict` (default) | Required | Reject execution if Docker is not available |
+| `permissive` | Not required | Allow host execution with warning (for development) |
 
-### 保護機構一覧
+### List of protection mechanisms
 
-| 機構 | 説明 |
+| Mechanism | Description |
 |------|------|
-| 承認ゲート | 未承認 Pack のコードは一切実行されない |
-| ハッシュ検証 | 承認後にファイル変更されると自動無効化 |
-| HMAC 署名 | Grant ファイルの改ざんを検出 |
-| パス制限 | pack_subdir boundary 外のファイル実行を拒否 |
-| Docker 隔離 | `--network=none`、`--cap-drop=ALL`、`--read-only` |
-| Egress Proxy（UDS） | 外部通信を Pack 別 allowlist で制御 |
-| UDS group-add | ソケット権限を専用 GID で管理 |
-| 監査ログ | 全操作を記録 |
-| requirements.lock 検証 | サプライチェーン攻撃防止 |
-| pack_identity 検証 | Pack 更新時の取り違え防止 |
-| DNS rebinding 対策 | DNS 解決結果の内部 IP 検査 |
+| Approval Gate | No code in unapproved Packs will be executed |
+| Hash verification | Automatic invalidation if file is modified after approval |
+| HMAC signature | Grant file tampering detected |
+| Path restrictions | Deny file execution outside pack_subdir boundary |
+| Docker isolation | `--network=none`, `--cap-drop=ALL`, `--read-only` |
+| Egress Proxy (UDS) | Control external communication with pack-specific allowlist |
+| UDS group-add | Manage socket permissions with dedicated GID |
+| Audit log | Records all operations |
+| requirements.lock verification | Supply chain attack prevention |
+| pack_identity verification | Preventing mix-ups when updating packs |
+| DNS rebinding measures | Internal IP inspection of DNS resolution results |
 
-### 脅威と対策
+### Threats and countermeasures
 
-| 脅威 | 対策 |
+| Threats | Countermeasures |
 |------|------|
-| 悪意あるコード実行 | 承認必須 + Docker 隔離 |
-| ファイル改ざん | SHA-256 ハッシュ検証 |
-| 設定改ざん | HMAC 署名 |
-| 不正な外部通信 | Egress Proxy + allowlist |
-| 権限昇格 | Pack 単位の明示的 Grant |
-| サプライチェーン攻撃 | requirements.lock 構文制限 + wheel-only |
-| Pack 取り違え | pack_identity 比較で拒否 |
-| DNS rebinding | 解決結果の内部 IP 検査 |
+| Malicious code execution | Authorization required + Docker isolation |
+| File Tampering | SHA-256 Hash Verification |
+| Settings tampering | HMAC signature |
+| Invalid external communication | Egress Proxy + allowlist |
+| Privilege Escalation | Explicit Grant by Pack |
+| Supply Chain Attack | requirements.lock syntax restriction + wheel-only |
+| Pack mix-up | Rejected by pack_identity comparison |
+| DNS rebinding | Internal IP inspection of resolution results |
 
 ---
 
-## Pack 承認
+## Pack approval
 
-### 承認フロー
+### Approval flow
 
 ```
 Pack 配置 (ecosystem/<pack_id>/)
@@ -336,38 +340,38 @@ Pack 配置 (ecosystem/<pack_id>/)
 初めてコード実行可能に
 ```
 
-### 承認状態
+### Approval status
 
-| 状態 | コード実行 | 説明 |
+| Status | Code Execution | Description |
 |------|-----------|------|
-| `installed` | ❌ | 配置済み、未承認 |
-| `pending` | ❌ | 承認待ち |
-| `approved` | ✅ | 承認済み |
-| `running` | ✅ | 承認済みかつ実行中 |
-| `modified` | ❌ | 承認後にファイル変更を検出 |
-| `blocked` | ❌ | 拒否済み |
-| `error` | ❌ | エラー発生（承認処理中の失敗等） |
+| `installed` | ❌ | Placed, unapproved |
+| `pending` | ❌ | Waiting for approval |
+| `approved` | ✅ | Approved |
+| `running` | ✅ | Approved and Running |
+| `modified` | ❌ | Detect file changes after approval |
+| `blocked` | ❌ | Rejected |
+| `error` | ❌ | Error occurred (failure during approval process, etc.) |
 
-ファイル変更で `modified` 状態になると、コード実行とネットワーク権限が自動的に無効化されます。再承認が必要です。
+Code execution and network permissions are automatically disabled when a file modification results in a `modified` state. Re-authorization required.
 
-### Pack 格納パス
+### Pack storage path
 
-Pack は以下のいずれかのパスに配置できます。
+Packs can be placed in one of the following paths:
 
-| パス | 種別 | 説明 |
+| Path | Type | Description |
 |------|------|------|
-| `ecosystem/<pack_id>/` | **推奨** | `paths.py` が最優先で探索 |
-| `ecosystem/packs/<pack_id>/` | 互換（legacy） | 推奨パスと重複する場合は無視される |
+| `ecosystem/<pack_id>/` | **Recommended** | `paths.py` is the top priority for exploration |
+| `ecosystem/packs/<pack_id>/` | Legacy | Ignored if it overlaps with the recommended path |
 
-`paths.py` の `discover_pack_locations()` は `ecosystem/*` を先に探索し、次に `ecosystem/packs/*` を互換ルートとして探索します。同一 `pack_id` が両方に存在する場合、`ecosystem/<pack_id>/` が優先されます。
+`discover_pack_locations()` of `paths.py` searches `ecosystem/*` first, and then searches `ecosystem/packs/*` as a compatible route. If the same `pack_id` is present in both, `ecosystem/<pack_id>/` takes precedence.
 
 ---
 
-## ネットワーク権限と Egress Proxy
+## Network permissions and Egress Proxy
 
-### 設計
+### Design
 
-Pack は直接外部通信できません（Docker `--network=none`）。全ての外部通信は UDS ソケット経由で Egress Proxy を通過します。
+Packs cannot communicate directly externally (Docker `--network=none`). All external communication passes through the Egress Proxy via UDS sockets.
 
 ```
 Pack (network=none) → UDS Socket → Egress Proxy → 外部 API
@@ -377,9 +381,9 @@ Pack (network=none) → UDS Socket → Egress Proxy → 外部 API
                                     監査ログ記録
 ```
 
-### UDS ベースの Pack 識別
+### UDS-based Pack Identification
 
-Pack 別に UDS ソケットが作成され、ソケットパスから `pack_id` が確定されます。リクエスト payload の `owner_pack` フィールドは無視されます（セキュリティ上の措置）。
+A UDS socket is created for each pack, and `pack_id` is determined from the socket path. The `owner_pack` field in the request payload is ignored (security measure).
 
 ### Network Grant
 
@@ -394,53 +398,53 @@ Pack 別に UDS ソケットが作成され、ソケットパスから `pack_id`
   "_hmac_signature": "..."
 }
 ```
-ドメインマッチングは完全一致（`api.openai.com`）とワイルドカード（`*.anthropic.com`）に対応します。サブドメインを許可する場合はワイルドカード形式で明示的に指定してください。
+Domain matching supports exact matches (`api.openai.com`) and wildcards (`*.anthropic.com`). If you want to allow subdomains, please specify them explicitly using wildcard format.
 
-### Egress Proxy の防御機構
+### Egress Proxy defense mechanism
 
-内部 IP 禁止（localhost / private / link-local / CGNAT / multicast 等）、DNS rebinding 対策（解決結果が内部 IP なら拒否）、リダイレクト上限（3 ホップ、各ホップで grant 再チェック）、リクエスト / レスポンスサイズ制限（1MB / 4MB）、タイムアウト制限（最大 120 秒）、ヘッダー数 / サイズ制限、メソッド制限（GET, HEAD, POST, PUT, DELETE, PATCH）。
+Internal IP prohibition (localhost / private / link-local / CGNAT / multicast, etc.), DNS rebinding measures (reject if the resolution result is an internal IP), redirect limit (3 hops, recheck grant at each hop), request/response size limit (1MB / 4MB), timeout limit (maximum 120 seconds), header number/size limit, method limit (GET, HEAD, POST, PUT, DELETE, PATCH).
 
-### Wave 12–14 拡張
+### Wave 12–14 Expansion
 
-#### レート制限（egress_rate_limiter.py）
+#### Rate limit (egress_rate_limiter.py)
 
-Wave 12 で追加。Pack 単位のトークンバケットによるリクエストレート制限を提供します。Egress Proxy がリクエストを受け付ける前にバケットを検査し、枯渇時は `429` を返却します。
+Added in Wave 12. Provides request rate limiting with per-pack token buckets. Before the Egress Proxy accepts requests, it inspects the bucket and returns `429` when it is depleted.
 
-#### ドメイン制御（egress_domain_controller.py）
+#### Domain control (egress_domain_controller.py)
 
-Wave 12 で追加。allowlist に加えて、ドメイン単位のきめ細かい制御（ブロックリスト、ワイルドカードパターン）を提供します。
+Added in Wave 12. In addition to allowlist , it provides fine-grained control on a per-domain basis (blocklists, wildcard patterns).
 
-#### 細粒度タイムアウト
+#### Fine-grained timeout
 
-Wave 12 で追加。接続タイムアウト・読み取りタイムアウトをドメイン単位で設定可能にしました。従来のグローバル上限（120 秒）はフォールバックとして維持されます。
+Added in Wave 12. Connection timeout and read timeout can now be set for each domain. The old global cap (120 seconds) is maintained as a fallback.
 
-#### モジュール分割（Wave 13）
+#### Module division (Wave 13)
 
-Wave 13 で Egress Proxy の実装を以下のモジュールに分割しました。セキュリティチェックの実行順序も整理され、IP 検査 → プロトコル検査 → ドメイン検査 → レート制限の順で評価されます。
+In Wave 13, we divided the Egress Proxy implementation into the following modules. The order in which security checks are performed is also organized and evaluated in the following order: IP inspection → Protocol inspection → Domain inspection → Rate limiting.
 
-| モジュール | 責務 |
+| Module | Responsibilities |
 |-----------|------|
-| `egress_ip.py` | 内部 IP 検査、DNS rebinding 対策 |
-| `egress_protocol.py` | プロトコル・メソッド・ヘッダー検査 |
-| `egress_rate_limiter.py` | Pack 単位レート制限 |
-| `egress_domain_controller.py` | ドメイン allowlist / blocklist 制御 |
+| `egress_ip.py` | Internal IP inspection, DNS rebinding measures |
+| `egress_protocol.py` | Protocol method header inspection |
+| `egress_rate_limiter.py` | Pack unit rate limit |
+| `egress_domain_controller.py` | Domain allowlist / blocklist control |
 
-#### 重複コード除去（W14-FIX）
+#### Duplicate code removal (W14-FIX)
 
-Wave 14 で分割後のモジュール間に残存していた重複コード（IP 検査ロジック等）を除去し、単一責任を徹底しました。
+In Wave 14, we removed redundant code (IP inspection logic, etc.) that remained between modules after splitting, and ensured single responsibility.
 
 ---
 
-## Capability システム（Trust + Grant）
+## Capability System (Trust + Grant)
 
-### 概要
+### Overview
 
-Pack が提供する capability handler を承認・実働化し、principal（主体）に対して使用権限（Grant）を付与する仕組みです。Trust と Grant は独立して管理されます。
+This is a mechanism for approving and putting the capability handler provided by the Pack into production, and granting usage rights (grants) to the principal. Trusts and Grants are managed independently.
 
-- **Trust**: `handler_id` + `sha256` の allowlist。handler.py の内容が信頼済みかを判定する
-- **Grant**: `principal_id` × `permission_id` の権限付与。誰がどの capability を使えるかを管理する
+- **Trust**: allowlist of `handler_id` + `sha256`. Determine whether the contents of handler.py are trusted
+- **Grant**: `principal_id` × `permission_id` grant. Manage who can use which capabilities
 
-### 全体フロー
+### Overall flow
 
 ```
 候補配置 (ecosystem/<pack_id>/share/capability_handlers/<slug>/)
@@ -456,88 +460,88 @@ Grant 付与（principal × permission）
 使用可能
 ```
 
-approve は Trust のみを登録します。実際に使用するには別途 Grant の付与が必要です。
+approve only registers Trust. A separate grant is required for actual use.
 
-### 候補の状態遷移
+### Candidate state transition
 
-| 状態 | 説明 |
+| Condition | Description |
 |------|------|
-| `pending` | 候補が検出され承認待ち |
-| `installed` | 承認済み。Trust 登録 + コピー完了 |
-| `rejected` | 却下。クールダウン（1 時間）後に再通知可能 |
-| `blocked` | 3 回 reject でサイレントブロック。unblock まで通知されない |
-| `failed` | approve 処理中にエラー発生 |
+| `pending` | Candidates detected and waiting for approval |
+| `installed` | Approved. Trust registration + copy completed |
+| `rejected` | Rejected. Snooze possible after cooldown (1 hour) |
+| `blocked` | Silent block with 3 rejects. Not notified until unblock |
+| `failed` | Error occurred during approve process |
 
 ### candidate_key
 
-候補の同一性は `candidate_key` で管理されます:
+Candidate identity is managed in `candidate_key`:
 
 ```
 {pack_id}:{slug}:{handler_id}:{sha256}
 ```
 
-sha256 を含めることで、handler.py の内容が変わると別の候補として扱われます。
+By including sha256, if the contents of handler.py change, it will be treated as a different candidate.
 
-### TOCTOU 対策
+### TOCTOU Measures
 
-approve 時に handler.py の sha256 を再計算し、scan 時の値と比較します。不一致の場合は approve が失敗します。
+Recalculate the sha256 of handler.py at approve time and compare it with the value at scan time. If there is a mismatch, approve will fail.
 
-### コピーと上書き
+### Copy and overwrite
 
-approve 時に `ecosystem/` 側の候補が `user_data/capabilities/handlers/<slug>/` にコピーされます。ecosystem 側は配布物として残り、移動されません。コピー先に既に handler が存在し、handler_id または sha256 が異なる場合はエラーになります（自動上書き禁止）。
+At the time of approval, the candidates on the `ecosystem/` side are copied to `user_data/capabilities/handlers/<slug>/`. The ecosystem side remains as a distribution and is not moved. If handler already exists at the copy destination and the handler_id or sha256 is different, an error will occur (automatic overwriting prohibited).
 
-### モジュール分割（Wave 13）
+### Module division (Wave 13)
 
-Wave 13 で Capability 関連のモデルとローダーを以下のモジュールに分割しました。
+In Wave 13, Capability-related models and loaders have been divided into the following modules.
 
-| モジュール | 責務 |
+| Module | Responsibilities |
 |-----------|------|
-| `capability_models.py` | Capability 関連のデータモデル定義 |
-| `flow_modifier_models.py` | Flow Modifier 関連のデータモデル定義 |
-| `flow_modifier_loader.py` | Modifier ファイルの読み込み・パース |
+| `capability_models.py` | Capability-related data model definition |
+| `flow_modifier_models.py` | Flow Modifier related data model definition |
+| `flow_modifier_loader.py` | Modifier file loading/parsing |
 
-### Function システムとの統合（Phase A〜D）
+### Integration with Function systems (Phase A-D)
 
-Phase A〜D で、旧来の `capability_handler_registry.py` を廃止し、`function_registry.py`（`FunctionRegistry`）に統合しました。全ての関数（Kernel ハンドラ、core_pack 関数、Pack 提供関数）が `FunctionRegistry` に登録され、`capability_executor.py` が統一的に実行します。
+In Phases A to D, the old `capability_handler_registry.py` was abolished and integrated into `function_registry.py` (`FunctionRegistry`). All functions (Kernel handler, core_pack function, Pack-provided functions) are registered in `FunctionRegistry`, and `capability_executor.py` executes them uniformly.
 
-#### 主要な変更
+#### Major changes
 
-`capability_handler_registry.py` は削除されました。代替として `core_runtime/function_registry.py` が `FunctionRegistry` クラスと `FunctionEntry` データクラスを定義します。`ManifestRegistry` は `FunctionRegistry` のエイリアスです（設計決定 D-6）。
+`capability_handler_registry.py` has been removed. Alternatively, `core_runtime/function_registry.py` defines the `FunctionRegistry` and `FunctionEntry` data classes. `ManifestRegistry` is an alias for `FunctionRegistry` (Design Decision D-6).
 
-#### FunctionEntry の主要フィールド
+#### Key fields of FunctionEntry
 
-| フィールド | 型 | 説明 |
+| Field | Type | Description |
 |-----------|-----|------|
-| `function_id` | `str` | 関数 ID |
-| `pack_id` | `str` | 所属 Pack ID |
-| `qualified_name` | `str`（プロパティ） | `{pack_id}:{function_id}`（コロン区切り） |
-| `calling_convention` | `Optional[str]` | 実行方式。7 種のいずれか |
-| `permission_id` | `Optional[str]` | 権限 ID（Grant 検証に使用） |
-| `entrypoint` | `Optional[str]` | エントリポイント（例: `main.py:run`） |
-| `risk` | `Optional[str]` | リスクレベル |
-| `is_builtin` | `bool` | ビルトイン関数かどうか |
+| `function_id` | `str` | Function ID |
+| `pack_id` | `str` | Affiliation Pack ID |
+| `qualified_name` | `str` (properties) | `{pack_id}:{function_id}` (colon separated) |
+| `calling_convention` | `Optional[str]` | Execution method. Any of 7 species |
+| `permission_id` | `Optional[str]` | Grant ID (used for Grant validation) |
+| `entrypoint` | `Optional[str]` | Entry point (e.g. `main.py:run`) |
+| `risk` | `Optional[str]` | Risk level |
+| `is_builtin` | `bool` | Is it a built-in function? |
 | `runtime` | `str` | `python` / `binary` / `command` |
-| `handler_py_sha256` | `Optional[str]` | handler.py の SHA-256（Trust 検証用） |
-| `vocab_aliases` | `Optional[List[str]]` | vocab エイリアス（`resolve_by_alias()` で検索可能） |
-| `grant_config` | `Optional[Dict]` | Grant 設定（非 None のとき Grant 検証を実施） |
+| `handler_py_sha256` | `Optional[str]` | SHA-256 in handler.py (for trust verification) |
+| `vocab_aliases` | `Optional[List[str]]` | vocab alias (searchable in `resolve_by_alias()`) |
+| `grant_config` | `Optional[Dict]` | Grant settings (perform Grant verification when non-None) |
 
-#### calling_convention（7 種）
+#### calling_convention (7 types)
 
-| calling_convention | 説明 |
+| calling_convention | Description |
 |-------------------|------|
-| `kernel` | Kernel ハンドラとして直接実行。`capability_executor` 経由では実行不可 |
-| `subprocess` | サブプロセスで実行（entrypoint 指定） |
-| `block` | core_pack の DI サービス経由で実行 |
-| `python_host` | ホスト Python で実行（`RUMI_ALLOW_HOST_EXECUTION=1` が必要） |
-| `python_docker` | Docker コンテナ内で実行（デフォルト） |
-| `binary` | バイナリを直接実行 |
-| `command` | 任意のコマンドを実行 |
+| `kernel` | Run directly as a Kernel handler. Cannot be executed via `capability_executor` |
+| `subprocess` | Execute in subprocess (entrypoint specified) |
+| `block` | Run via core_pack's DI service |
+| `python_host` | Runs in host Python (requires `RUMI_ALLOW_HOST_EXECUTION=1`) |
+| `python_docker` | Runs in a Docker container (default) |
+| `binary` | Run binary directly |
+| `command` | Execute any command |
 
-#### Kernel 関数
+#### Kernel functions
 
-`kernel.py` に `_KERNEL_HANDLER_MANIFESTS` が定義されています。70 個（System 29 + Runtime 41）のハンドラが `register_kernel_function()` で `pack_id="kernel"`, `calling_convention="kernel"` として `FunctionRegistry` に登録されます。
+`kernel.py` defines `_KERNEL_HANDLER_MANIFESTS`. 70 (System 29 + Runtime 41) handlers are registered in `register_kernel_function()`, `pack_id="kernel"`, `calling_convention="kernel"` and `FunctionRegistry`.
 
-#### 実行フロー
+#### Execution flow
 
 ```
 capability_executor.execute(principal_id, request)
@@ -555,102 +559,102 @@ calling_convention で分岐実行
 
 ---
 
-## UDS ソケット権限
+## UDS socket permissions
 
-### 問題
+### Problem
 
-strict モードでは、Pack 実行コンテナは `--user=65534:65534`（nobody）で動作します。UDS ソケットがデフォルトの `0660`（root:root）のままだと、コンテナからソケットに接続できません。
+In strict mode, the Pack execution container runs with `--user=65534:65534` (nobody). If the UDS socket is left at the default `0660` (root:root), the container will not be able to connect to the socket.
 
-### 解決策
+### Solution
 
-専用 GID を設定することで、`0660` を維持しつつ安全に接続を可能にします。
+By setting a dedicated GID, you can securely connect while maintaining `0660`.
 
-| 環境変数 | 説明 | デフォルト |
+| Environment variables | Description | Default |
 |----------|------|-----------|
-| `RUMI_EGRESS_SOCKET_GID` | Egress ソケットの GID | なし |
-| `RUMI_CAPABILITY_SOCKET_GID` | Capability ソケットの GID | なし |
-| `RUMI_EGRESS_SOCKET_MODE` | Egress ソケットのパーミッション | `0660` |
-| `RUMI_CAPABILITY_SOCKET_MODE` | Capability ソケットのパーミッション | `0660` |
+| `RUMI_EGRESS_SOCKET_GID` | Egress socket GID | None |
+| `RUMI_CAPABILITY_SOCKET_GID` | Capability Socket GID | None |
+| `RUMI_EGRESS_SOCKET_MODE` | Egress socket permissions | `0660` |
+| `RUMI_CAPABILITY_SOCKET_MODE` | Capability Socket permissions | `0660` |
 
-GID が設定されている場合、`docker run` 時に `--group-add=<GID>` が自動的に付与されます。
+If a GID is set, `--group-add=<GID>` will be automatically granted at `docker run`.
 
-`RUMI_EGRESS_SOCKET_MODE=0666` / `RUMI_CAPABILITY_SOCKET_MODE=0666` で緩和可能ですが、任意のユーザーがソケットに接続可能になるため非推奨です。
+This can be mitigated with `RUMI_EGRESS_SOCKET_MODE=0666` / `RUMI_CAPABILITY_SOCKET_MODE=0666`, but is deprecated as it allows arbitrary users to connect to the socket.
 
 ---
 
-## 階層権限
+## Hierarchical permissions
 
-### 概要
+### Overview
 
-`pack_id` を `parent__child` の形式にすることで、親子関係を持つ Pack を表現できます。子が許可されても親が許可されていないと実行が拒否されます。
+By changing `pack_id` to `parent__child`, you can express a Pack with a parent-child relationship. If the child is allowed but the parent is not, execution will be denied.
 
-親の config は子に上限（intersection）を設定します。下位だけ許可されても上位が許可していなければ動作しません。
+The parent's config sets an upper limit (intersection) on the child. Even if only the lower level is allowed, it will not work if the higher level does not allow it.
 
 ---
 
 ## Secrets
 
-API key などの秘密値を安全に管理します。
+Securely manage secret values such as API keys.
 
-- `.env` は使用しない（事故率低減）
-- `user_data/secrets/` に格納（1 key = 1 file、tombstone、journal）
-- ログに秘密値を一切出さない（監査・診断とも）
-- Pack に秘密ファイルを直接見せない
-- 取得は capability（例: `secrets.get`）経由
-- API は list（mask 付き）/ set / delete のみ（再表示なし）
-
----
-
-## 共有辞書（Shared Dict）
-
-### 概要
-
-任意の `namespace` / `token` を書き換えできる仕組みです。公式は namespace の意味を解釈しません（ecosystem が自由に決めます）。
-
-### 安全機能
-
-- **循環検出**: A→B→A のような循環は自動的に拒否
-- **衝突検出**: 同じ token に異なる value を登録しようとすると拒否
-- **ホップ上限**: デフォルト 10 ホップで解決を打ち切り
-- **監査ログ**: 全ての操作を記録
-
-### 永続化
-
-`user_data/settings/shared_dict/` に `snapshot.json`（スナップショット）と `journal.jsonl`（ジャーナル）が保存されます。
+- `.env` is not used (accident rate reduction)
+- Stored in `user_data/secrets/` (1 key = 1 file, tombstone, journal)
+- Do not display any secret values in the log (both auditing and diagnostics)
+- Don't show secret files directly to Pack
+- Obtained via capability (e.g. `secrets.get`)
+- API is only list (with mask) / set / delete (no redisplay)
 
 ---
 
-## lib システム
+## Shared Dict
 
-### 概要
+### Overview
 
-Pack の初期化・更新処理を管理します。常駐せず、必要時のみ実行されます。
+This is a mechanism that allows you to rewrite any `namespace` / `token`. Officials do not interpret the meaning of namespace (the ecosystem is free to decide it).
 
-### 実行タイミング
+### Safety features
 
-| 条件 | 実行されるファイル |
+- **Cycle detection**: Automatically reject cycles like A→B→A
+- **Collision detection**: Attempts to register different values for the same token will be rejected
+- **Hop limit**: Abort resolution after default 10 hops
+- **Audit log**: records all operations
+
+### Persistence
+
+`snapshot.json` (snapshot) and `journal.jsonl` (journal) are saved in `user_data/settings/shared_dict/`.
+
+---
+
+## lib system
+
+### Overview
+
+Manages pack initialization and update processing. It is not resident and is executed only when needed.
+
+### Execution timing
+
+| Condition | File to be executed |
 |------|-------------------|
-| 初回導入（記録なし） | `lib/install.py` |
-| ハッシュ変更 | `lib/update.py`（なければ `install.py`） |
-| 変更なし | 実行しない |
+| First introduction (no record) | `lib/install.py` |
+| Change hash | `lib/update.py` (if not `install.py`) |
+| No change | Do not run |
 
-### Docker 隔離
+### Docker isolation
 
-strict モードでは Docker コンテナ内で隔離実行されます。`--network=none`、`--cap-drop=ALL`、`--read-only`、`--memory=256m`。RW マウントは `user_data/packs/{pack_id}/`（コンテナ内: `/data`）のみに限定されます。
+In strict mode, it runs isolated inside a Docker container. `--network=none`, `--cap-drop=ALL`, `--read-only`, `--memory=256m`. RW mounts are limited to `user_data/packs/{pack_id}/` (in containers: `/data`) only.
 
 ---
 
-## pip 依存ライブラリ導入
+## pip dependent library installation
 
-### 概要
+### Overview
 
-Pack が `requirements.lock` を同梱することで、PyPI パッケージへの依存を宣言できます。ユーザーが API で承認すると、ビルダー用 Docker コンテナで安全にダウンロード・インストールされます。ホスト Python 環境は汚れません。
+Packs can declare dependencies on PyPI packages by including `requirements.lock`. Once the user authorizes through the API, it is securely downloaded and installed in the builder's Docker container. The host Python environment is not dirty.
 
-### requirements.lock の規約
+### requirements.lock conventions
 
-`NAME==VERSION` 行のみ許可です（コメント / 空行は可）。以下は禁止されます: `-e`（editable）、`git+` / `http://` / `https://`（URL/VCS 参照）、`file:` / `../` / `/`（ローカル参照）、`--` オプション行、`@` direct reference。
+Only `NAME==VERSION` lines are allowed (comments/blank lines are allowed). The following are prohibited: `-e` (editable), `git+` / `http://` / `https://` (URL/VCS references), `file:` / `../` / `/` (local references), `--` optional lines, `@` direct references.
 
-### 状態遷移
+### State transition
 
 ```
 scan → pending → approve → installed
@@ -658,13 +662,13 @@ scan → pending → approve → installed
                             → 3回 reject → blocked → unblock → pending
 ```
 
-### セキュリティ
+### Security
 
-wheel-only がデフォルト（`--only-binary=:all:`）。sdist が必要な場合は approve 時に `allow_sdist: true` を明示します。ビルダーコンテナ（download）は `--network=bridge` + `--cap-drop=ALL`、ビルダーコンテナ（install）は `--network=none`（完全オフライン）で実行されます。実行コンテナからは site-packages が読み取り専用（`/pip-packages:ro`）でマウントされ、`PYTHONPATH` に追加されます。
+wheel-only is the default (`--only-binary=:all:`). If sdist is required, specify `allow_sdist: true` when approving. The builder container (download) runs in `--network=bridge` + `--cap-drop=ALL`, and the builder container (install) runs in `--network=none` (completely offline). From the execution container, site-packages are mounted read-only (`/pip-packages:ro`) and added to `PYTHONPATH`.
 
-### index_url の制約
+### index_url constraints
 
-`https` スキームのみ許可。hostname が localhost / 127.0.0.1 / ::1 / プライベート IP / link-local の場合は拒否されます。
+`https` Only schemes allowed. Rejected if hostname is localhost / 127.0.0.1 / ::1 / private IP / link-local.
 
 ---
 
@@ -672,23 +676,23 @@ wheel-only がデフォルト（`--only-binary=:all:`）。sdist が必要な場
 
 ### Import
 
-フォルダ / `.zip` / `.rumipack`（zip 互換）から Pack を staging に取り込みます。zip 構造は「トップ単一ディレクトリ必須」、zip slip / サイズ制限等の防御が適用されます。
+Bring the Pack from the folder / `.zip` / `.rumipack` (zip compatible) into staging. Protections such as "requires a single top directory" and zip slip/size restrictions apply to the zip structure.
 
 ### Apply
 
-staging から ecosystem に適用します。バックアップが自動作成されます。apply 時に `pack_id` と `pack_identity`（`ecosystem.json` の `pack_identity` フィールド）の両方を比較し、既存 Pack と不一致の場合は拒否されます。
+Applies from staging to ecosystem. A backup will be created automatically. When applying, both `pack_id` and `pack_identity` (`pack_identity` field of `ecosystem.json`) are compared, and if there is a mismatch with the existing Pack, it will be rejected.
 
 ---
 
-## Component 概念
+## Component Concept
 
-### 概要
+### Overview
 
-`backend_core/ecosystem/registry.py` が `pack_subdir/components/*/manifest.json` を読み込み、`ComponentInfo` を構築します。Component はライフサイクル管理（setup 等）のための単位です。
+`backend_core/ecosystem/registry.py` reads `pack_subdir/components/*/manifest.json` and builds `ComponentInfo`. Component is a unit for lifecycle management (such as setup).
 
-### python_file_call との関係
+### Relationship with python_file_call
 
-`python_file_call` は components を特別扱いして blocks を自動探索する機能を持ちません。`components/{component_id}/blocks/` にあるファイルを実行したい場合は、`file` フィールドに相対パスを明示します。
+`python_file_call` does not have the function to treat components specially and automatically search for blocks. If you want to run a file located in `components/{component_id}/blocks/`, specify the relative path in the `file` field.
 
 ```yaml
 type: python_file_call
@@ -700,18 +704,18 @@ file: components/comp1/blocks/foo.py
 
 ## vocab / converter
 
-> **注意**: この機能は互換性吸収のための高度な機能です。通常の Pack 開発では使用する必要はありません。
+> **Note**: This feature is an advanced feature for compatibility absorption. There is no need to use it in normal Pack development.
 
-### vocab.txt（同義語グループ）
+### vocab.txt (synonym group)
 
 ```
 tool, function_calling, tools, tooluse
 thinking_budget, reasoning_effort
 ```
 
-同じ行に書かれた語は同義として扱われます。
+Words written on the same line are treated as synonyms.
 
-### converters（変換器）
+### converters
 
 ```python
 # ecosystem/<pack_id>/backend/converters/tool_to_function_calling.py
@@ -720,11 +724,11 @@ def convert(data, context=None):
     return transformed_data
 ```
 
-### Converter セキュリティ検査
+### Converter Security Check
 
-#### 問題
+#### Problem
 
-`ConverterASTChecker` は converter スクリプトを AST 解析し、`blocked_imports`（`os`, `subprocess`, `socket` 等）の使用を検出して拒否します。しかし現在の検査は converter ファイル単体のみを対象としています。converter が `from .helper import func` や `import local_module` のようにローカルモジュールを import している場合、import 先のファイルに blocked import が含まれていても検出できません。
+`ConverterASTChecker` performs AST parsing of converter scripts and detects and rejects usage of `blocked_imports` (`os`, `subprocess`, `socket`, etc.). However, the current check only targets converter files. If the converter imports a local module like `from .helper import func` or `import local_module`, it will not be able to detect blocked imports even if the imported file contains blocked imports.
 
 ```
 converter.py          ← 検査される（Level 0）
@@ -732,25 +736,25 @@ converter.py          ← 検査される（Level 0）
      └─ import os     ← blocked import が素通り
 ```
 
-#### 検査レベル定義
+#### Inspection level definition
 
-| レベル | 検査範囲 | メリット | デメリット | 実装コスト |
+| Level | Inspection scope | Advantages | Disadvantages | Implementation cost |
 |--------|---------|----------|-----------|-----------|
-| Level 0（現状） | converter ファイル単体 | 実装済み、高速、副作用なし | ローカル import 経由で blocked import を迂回可能 | なし |
-| Level 1（推奨） | converter + 同一ディレクトリの `.py` を再帰走査 | 最も一般的な迂回パターンを防止。実装がシンプル | 同一ディレクトリ外の依存は未検査 | 低（約 50 行） |
-| Level 2 | import グラフを pack_subdir 全体で再帰走査 | 完全な依存ツリーを検査可能 | 実装が複雑。再帰深度管理・循環検出・パス解決の考慮が必要。パフォーマンスコストあり | 中〜高（約 150 行） |
+| Level 0 (currently) | Single converter file | Implemented, fast, no side effects | Blocked imports can be bypassed via local imports | None |
+| Level 1 (recommended) | converter + recursive traversal of `.py` in the same directory | Prevents the most common bypass patterns. Simple implementation | Dependencies outside the same directory are not checked | Low (about 50 lines) |
+| Level 2 | Recursive traversal of import graph across pack_subdir | Full dependency tree can be inspected | Complex to implement. Recursion depth management, circulation detection, and path resolution must be considered. With performance cost | Medium to high (approximately 150 lines) |
 
-#### 推奨: Level 1
+#### Recommended: Level 1
 
-Level 1 を次 Wave で実装することを推奨します。
+We recommend implementing Level 1 in the next wave.
 
-- converter のローカル依存は通常同一ディレクトリに配置される（`converters/` 配下にヘルパーを置くパターン）
-- 同一ディレクトリ限定であればパス解決が単純で、誤検知リスクが低い
-- Level 2 は converter が複数ディレクトリにまたがる設計を前提とするが、現状の converter 規約ではそのようなケースは稀
+- Local dependencies of converter are usually placed in the same directory (pattern of placing helper under `converters/`)
+- Path resolution is simple if it is limited to the same directory, and the risk of false positives is low.
+- Level 2 assumes that the converter is designed to span multiple directories, but such cases are rare under the current converter rules.
 
-Level 2 はユースケースが確認された時点で検討します。
+Level 2 will be considered once the use case is confirmed.
 
-#### Level 1 疑似コード
+#### Level 1 pseudocode
 
 ```python
 def check_converter_with_locals(
@@ -784,48 +788,48 @@ def check_converter_with_locals(
     return violations
 ```
 
-> `_extract_module_names()` は `ast.Import` / `ast.ImportFrom` ノードからモジュール名文字列のリストを返すヘルパーです。既存の `ConverterASTChecker` のロジックを流用できます。
+> `_extract_module_names()` is a helper that returns a list of module name strings from the `ast.Import` / `ast.ImportFrom` nodes. You can reuse the existing `ConverterASTChecker` logic.
 
-#### テスト計画（Level 1）
+#### Test Plan (Level 1)
 
-| # | シナリオ | 期待結果 |
+| # | Scenario | Expected result |
 |---|---------|---------|
-| 1 | converter 単体に `import subprocess` | 拒否 |
-| 2 | converter → `from .helper import x` → `helper.py` に `import os` | 拒否（ローカル依存経由の blocked import 検出） |
-| 3 | converter → `from .helper import x` → `helper.py` はクリーン | 許可 |
-| 4 | converter → `import requests`（外部パッケージ、ローカルに `.py` なし） | 許可（ローカルファイル不在のためスキップ） |
-| 5 | converter → `helper.py` → `from .utils import y` → `utils.py` に `import socket` | 拒否（再帰走査で検出） |
-| 6 | 循環 import: converter → helper → converter | 無限ループせず正常終了（visited set で防止） |
-| 7 | converter ディレクトリ外への import（`from ..other import z`） | スキップ（Level 1 の検査範囲外。Level 2 で対応） |
+| 1 | converter alone `import subprocess` | Reject |
+| 2 | converter → `from .helper import x` → `helper.py` to `import os` | Reject (blocked import detection via local dependency) |
+| 3 | converter → `from .helper import x` → `helper.py` is clean | allowed |
+| 4 | converter → `import requests` (external package, no `.py` locally) | Allow (skip due to no local file) |
+| 5 | converter → `helper.py` → `from .utils import y` → `utils.py` to `import socket` | Rejection (detected by recursive scan) |
+| 6 | Circular import: converter → helper → converter | Ends normally without infinite loop (prevented by visited set) |
+| 7 | Import outside the converter directory (`from ..other import z`) | Skip (outside the inspection scope of Level 1. Supported in Level 2) |
 
 ---
 
-## 監査ログ
+## Audit log
 
-### 概要
+### Overview
 
-全ての重要な操作が `user_data/audit/` に JSON Lines 形式で記録されます。
+All important operations are recorded in `user_data/audit/` in JSON Lines format.
 
-### カテゴリ
+### Category
 
-| カテゴリ | 内容 |
+| Category | Contents |
 |----------|------|
-| `flow_execution` | Flow 実行 |
-| `modifier_application` | Modifier 適用 |
-| `python_file_call` | ブロック実行 |
-| `approval` | Pack 承認操作 |
-| `permission` | 権限操作（network grant, capability grant 含む） |
-| `network` | ネットワーク通信 |
-| `security` | セキュリティイベント |
-| `system` | システムイベント（lib, pip, pending export 等） |
+| `flow_execution` | Flow execution |
+| `modifier_application` | Apply Modifier |
+| `python_file_call` | Block execution |
+| `approval` | Pack approval operation |
+| `permission` | Authority operations (including network grant, capability grant) |
+| `network` | Network communication |
+| `security` | Security event |
+| `system` | System events (lib, pip, pending export, etc.) |
 
-### ファイル命名
+### File naming
 
 `{category}_{YYYY-MM-DD}.jsonl`
 
-ファイル名の日付はエントリの `ts`（タイムスタンプ）から決定されます。深夜跨ぎでもエントリの `ts` に対応するファイルに振り分けられます。`ts` が不正な場合は書き込み時点の日付にフォールバックします。
+The date in the file name is determined from the entry's `ts` (timestamp). Even if it crosses midnight, it will be sorted into the file corresponding to `ts` of the entry. If `ts` is invalid, it will fall back to the date at the time of writing.
 
-### エントリ構造
+### Entry structure
 
 ```json
 {
@@ -850,11 +854,11 @@ def check_converter_with_locals(
 
 ## Pending Export
 
-### 概要
+### Overview
 
-起動時に `user_data/pending/summary.json` が自動生成されます。外部ツールはこのファイルを読むだけで承認待ち状況を把握できます。公式はこのファイルの消費者を特別扱いしません（No Favoritism）。
+`user_data/pending/summary.json` is automatically generated at startup. External tools can understand the approval status just by reading this file. Officials do not give special treatment to consumers of this file (No Favoritism).
 
-### 出力形式
+### Output format
 
 ```json
 {
@@ -885,37 +889,37 @@ def check_converter_with_locals(
 }
 ```
 
-各モジュールが import できない場合、そのセクションには `"error"` キーが含まれます（fail-soft）。
+If each module cannot be imported, its section will contain a `"error"` key (fail-soft).
 
 ---
 
-## DI コンテナとサービス一覧
+## List of DI containers and services
 
-### 概要
+### Overview
 
-`backend_core/di_container.py` は Rumi AI OS 全体で使用される軽量な DI（Dependency Injection）コンテナです。全てのサービスはコンテナに登録され、名前ベースで取得されます。グローバルシングルトンとして `get_container()` 経由でアクセスします。
+`backend_core/di_container.py` is a lightweight DI (Dependency Injection) container used throughout Rumi AI OS. All services are registered with the container and retrieved by name. Access via `get_container()` as a global singleton.
 
-### DIContainer クラス
+### DIContainer class
 
-| メソッド | 説明 |
+| Method | Description |
 |---------|------|
-| `register(name, factory)` | ファクトリ関数を名前で登録。初回 `get` 時にインスタンス化（遅延生成） |
-| `get(name)` | インスタンスを取得。未登録なら `KeyError` |
-| `get_or_none(name)` | インスタンスを取得。未登録なら `None` |
-| `has(name)` | 登録済みか判定 |
-| `reset()` | 全登録をクリア |
-| `set_instance(name, instance)` | 既存インスタンスを直接登録（テスト用） |
+| `register(name, factory)` | Register factory function by name. Instantiated at first `get` (delayed generation) |
+| `get(name)` | Get instance. If not registered `KeyError` |
+| `get_or_none(name)` | Get instance. If not registered `None` |
+| `has(name)` | Determine whether it is registered |
+| `reset()` | Clear all registrations |
+| `set_instance(name, instance)` | Register an existing instance directly (for testing) |
 
-### グローバルアクセス
+### Global access
 
-| 関数 | 説明 |
+| Function | Description |
 |------|------|
-| `get_container()` | グローバルコンテナを取得（シングルトン） |
-| `reset_container()` | グローバルコンテナをリセット（テスト用） |
+| `get_container()` | Get global container (singleton) |
+| `reset_container()` | Reset global container (for testing) |
 
-### 登録済みサービス一覧（32 サービス）
+### List of registered services (32 services)
 
-| Wave | サービス名 |
+| Wave | Service name |
 |------|-----------|
 | Wave 1 | `audit_logger`, `hmac_key_manager` |
 | Wave 2 | `vocab_registry`, `network_grant_manager`, `store_registry` |
@@ -929,22 +933,22 @@ def check_converter_with_locals(
 
 ---
 
-## Kernel Mixin 構成
+## Kernel mixin configuration
 
-### 概要
+### Overview
 
-`backend_core/kernel.py` は 4 つの Mixin クラスを合成して Kernel を構築します。単一ファイルの肥大化を避けつつ、関心ごとに実装を分離しています。
+`backend_core/kernel.py` constructs a Kernel by composing four Mixin classes. It separates implementations by interest while avoiding single file bloat.
 
-### Mixin 一覧
+### Mixin list
 
-| Mixin クラス | ファイル | 責務 |
+| Mixin class | File | Responsibilities |
 |-------------|---------|------|
-| `KernelCore` | `kernel_core.py` | エンジン本体。Flow 読み込み、コンテキスト構築、shutdown |
-| `KernelFlowExecutionMixin` | `kernel_flow_execution.py` | Flow 実行、`depends_on` 解決、条件評価 |
-| `KernelSystemHandlersMixin` | `kernel_handlers_system.py` | 起動・システム系ハンドラ（init, scan, approve 等） |
-| `KernelRuntimeHandlersMixin` | `kernel_handlers_runtime.py` | 運用・実行系ハンドラ（flow 実行、capability 呼び出し等） |
+| `KernelCore` | `kernel_core.py` | Engine body. Flow loading, context construction, shutdown |
+| `KernelFlowExecutionMixin` | `kernel_flow_execution.py` | Flow execution, `depends_on` resolution, condition evaluation |
+| `KernelSystemHandlersMixin` | `kernel_handlers_system.py` | Startup/system handlers (init, scan, approve, etc.) |
+| `KernelRuntimeHandlersMixin` | `kernel_handlers_runtime.py` | Operation/execution handler (flow execution, capability call, etc.) |
 
-### 合成
+### Synthesis
 
 ```python
 # kernel.py
@@ -957,179 +961,179 @@ class Kernel(
     pass
 ```
 
-MRO（Method Resolution Order）により、Runtime → System → FlowExecution → Core の順で解決されます。各 Mixin は `KernelCore` の属性（`self.container`, `self.context` 等）に依存します。
+MRO (Method Resolution Order) resolves in the order of Runtime → System → FlowExecution → Core. Each mixin depends on the attributes of `KernelCore` (`self.container`, `self.context`, etc.).
 
 ---
 
-## 可観測性（Observability）
+## Observability
 
-### 概要
+### Overview
 
-Wave 15 で追加された 4 つのモジュールにより、構造化ログ・ヘルスチェック・メトリクス・プロファイリングを提供します。
+Four modules added in Wave 15 provide structured logs, health checks, metrics, and profiling.
 
-### 構造化ログ（logging_utils.py）
+### Structured logging (logging_utils.py)
 
-`backend_core/logging_utils.py` は標準 `logging` をラップし、構造化出力とコンテキスト伝搬を提供します。
+`backend_core/logging_utils.py` wraps the standard `logging` and provides structured output and context propagation.
 
-| クラス / 関数 | 説明 |
+| Class/Function | Description |
 |--------------|------|
-| `StructuredFormatter` | JSON 形式またはテキスト形式でログを整形 |
-| `StructuredLogger` | `logging.Logger` ラッパー。`bind()` でキー・バリューのコンテキストを付与 |
-| `CorrelationContext` | スレッドセーフな `correlation_id` 管理。リクエスト単位のトレースに使用 |
-| `get_structured_logger(name)` | キャッシュ付きファクトリ。同一名で呼び出すと同じインスタンスを返す |
-| `configure_logging()` | グローバルログ設定（レベル、フォーマット）を一括適用 |
+| `StructuredFormatter` | Format logs in JSON or text format |
+| `StructuredLogger` | `logging.Logger` Wrapper. Giving key-value context in `bind()` |
+| `CorrelationContext` | Thread-safe `correlation_id` Management. Used for per-request tracing |
+| `get_structured_logger(name)` | Factory with cache. Calling with the same name returns the same instance |
+| `configure_logging()` | Apply global log settings (level, format) at once |
 
-環境変数 `RUMI_LOG_LEVEL`（デフォルト `INFO`）と `RUMI_LOG_FORMAT`（`json` または `text`、デフォルト `text`）で動作を制御します。
+The environment variables `RUMI_LOG_LEVEL` (default `INFO`) and `RUMI_LOG_FORMAT` (`json` or `text`, default `text`) control the behavior.
 
-### ヘルスチェック（health.py）
+### Health check (health.py)
 
-`backend_core/health.py` はプローブベースのヘルスチェック機構を提供します。`app.py --health` から利用されます。
+`backend_core/health.py` provides a probe-based health checking mechanism. Used from `app.py --health`.
 
-| クラス / 関数 | 説明 |
+| Class/Function | Description |
 |--------------|------|
-| `HealthChecker` | プローブを登録し、タイムアウト付きで並行実行、結果を集約 |
-| `HealthStatus` | `UP` / `DOWN` / `DEGRADED` / `UNKNOWN` の 4 状態 |
-| `probe_disk_space` | ディスク空き容量の検査（組み込みプローブ） |
-| `probe_memory` | メモリ使用量の検査（組み込みプローブ） |
-| `probe_file_writable` | ファイル書き込み可否の検査（組み込みプローブ） |
+| `HealthChecker` | Register probes, run in parallel with timeout, and aggregate results |
+| `HealthStatus` | 4 states of `UP` / `DOWN` / `DEGRADED` / `UNKNOWN` |
+| `probe_disk_space` | Checking free disk space (built-in probe) |
+| `probe_memory` | Inspecting memory usage (built-in probe) |
+| `probe_file_writable` | Checking whether a file can be written to (built-in probe) |
 
-全プローブが `UP` なら全体も `UP`、いずれかが `DOWN` なら `DEGRADED`、全て `DOWN` なら `DOWN` と判定されます。
+If all the probes are `UP`, all the probes are also judged as `UP`, if any of them are `DOWN`, it is judged as `DEGRADED`, and if all the probes are `DOWN`, it is judged as `DOWN`.
 
-### メトリクス（metrics.py）
+### Metrics (metrics.py)
 
-`backend_core/metrics.py` はアプリケーションメトリクスの収集基盤を提供します。
+`backend_core/metrics.py` provides the foundation for collecting application metrics.
 
-| メソッド | 説明 |
+| Method | Description |
 |---------|------|
-| `increment(name, labels, value)` | カウンターをインクリメント |
-| `set_gauge(name, labels, value)` | ゲージを設定 |
-| `observe(name, labels, value)` | ヒストグラムに値を記録 |
-| `timer(name, labels)` | コンテキストマネージャ。ブロックの実行時間を自動記録 |
-| `snapshot()` | 全メトリクスの現在値をディクショナリで返却 |
+| `increment(name, labels, value)` | Increment counter |
+| `set_gauge(name, labels, value)` | Set gauge |
+| `observe(name, labels, value)` | Record values in histogram |
+| `timer(name, labels)` | Context manager. Automatically record block execution time |
+| `snapshot()` | Returns the current values of all metrics in a dictionary |
 
-ラベル（ディクショナリ）によりメトリクスを多次元に分類できます。Wave 15 で `kernel_flow_execution.py`（ステップ実行時間）、`kernel_handlers_system.py` / `kernel_handlers_runtime.py`（ハンドラ呼び出し回数・時間）に統合済みです。
+Labels (dictionaries) allow you to categorize metrics into multiple dimensions. In Wave 15, it has been integrated into `kernel_flow_execution.py` (step execution time), `kernel_handlers_system.py` / `kernel_handlers_runtime.py` (handler invocation count/time).
 
-### プロファイリング（profiling.py）
+### Profiling (profiling.py)
 
-`backend_core/profiling.py` は関数・ブロック単位の実行時間プロファイリングを提供します。
+`backend_core/profiling.py` provides execution time profiling for functions and blocks.
 
-| メソッド / デコレータ | 説明 |
+| Method/Decorator | Description |
 |--------------------|------|
-| `profile(name)` | コンテキストマネージャ。ブロックの実行時間を記録 |
-| `profile_func(name)` | 同期関数用デコレータ |
-| `profile_async(name)` | 非同期関数用デコレータ |
-| `summary()` | p50 / p95 / p99 パーセンタイルを含むサマリーを返却 |
+| `profile(name)` | Context manager. Record block execution time |
+| `profile_func(name)` | Decorator for synchronous functions |
+| `profile_async(name)` | Decorator for asynchronous functions |
+| `summary()` | Return summary with p50 / p95 / p99 percentiles |
 
-メモリ制限として `max_samples` を設定でき、上限を超えると古いサンプルが破棄されます。Wave 15 で `kernel_flow_execution.py`（Flow 実行時間、ステップ実行時間）に統合済みです。
+You can set `max_samples` as a memory limit, and older samples will be discarded once the limit is exceeded. It has been integrated into `kernel_flow_execution.py` (Flow execution time, step execution time) in Wave 15.
 
 ---
 
-## 共通基盤モジュール
+## Common base module
 
-### 概要
+### Overview
 
-Wave 12–15 で追加された、パッケージ全体で共有されるユーティリティ群です。
+A set of utilities added in Wave 12–15 that are shared across packages.
 
-### 共通バリデーション（validation.py）
+### Common validation (validation.py)
 
-`backend_core/validation.py` は Pack / Flow / Modifier のバリデーションユーティリティを提供します（Wave 12 追加）。スキーマ検証、必須フィールド検査、値範囲検査などの共通ロジックを集約し、各モジュールでの重複を排除します。
+`backend_core/validation.py` provides validation utilities for Pack / Flow / Modifier (Wave 12 added). Centralize common logic such as schema validation, required field validation, and value range validation to eliminate duplication in each module.
 
-### 統一エラー体系（error_messages.py）
+### Unified error system (error_messages.py)
 
-`backend_core/error_messages.py` は Rumi AI OS 全体で統一されたエラーコード体系を定義します。
+`backend_core/error_messages.py` defines a unified error code system across Rumi AI OS.
 
-| 要素 | 説明 |
+| Element | Description |
 |------|------|
-| `ErrorCode` | frozen dataclass。`RUMI-{CAT}-{NNN}` 形式（例: `RUMI-AUTH-001`） |
-| カテゴリ | `AUTH`（認証）, `NET`（ネットワーク）, `FLOW`（Flow）, `PACK`（Pack）, `CAP`（Capability）, `VAL`（バリデーション）, `SYS`（システム） |
-| `RumiError` | 統一例外クラス。`code`, `message`, `details`, `suggestion` を保持 |
-| `format_error()` | テンプレート展開ヘルパー。メッセージ内のプレースホルダを動的に埋める |
+| `ErrorCode` | frozen dataclass. `RUMI-{CAT}-{NNN}` format (e.g. `RUMI-AUTH-001`) |
+| Category | `AUTH` (Authentication), `NET` (Network), `FLOW` (Flow), `PACK` (Pack), `CAP` (Capability), `VAL` (Validation), `SYS` (System) |
+| `RumiError` | Uniform exception class. Retain `code`, `message`, `details`, `suggestion` |
+| `format_error()` | Template expansion helper. Dynamically fill placeholders in messages |
 
-エラーコードは自動収集レジストリで管理され、モジュールロード時にレジストリへ自動登録されます。
+Error codes are managed in the automatic collection registry and are automatically registered in the registry when the module is loaded.
 
-### 型定義（types.py + py.typed）
+### Type definition (types.py + py.typed)
 
-`backend_core/types.py` はパッケージ全体で使用される型定義を集約します。
+`backend_core/types.py` aggregates type definitions used throughout the package.
 
-| 種別 | 定義 |
+| Type | Definition |
 |------|------|
 | NewType | `PackId`, `FlowId`, `CapabilityName`, `HandlerKey`, `StoreKey` |
-| 型エイリアス | `JsonValue`, `JsonDict` |
-| Generic | `Result[T]`（成功値またはエラーを保持） |
+| Type alias | `JsonValue`, `JsonDict` |
+| Generic | `Result[T]` (retains success value or error) |
 | Enum | `Severity`（`info`, `warn`, `error`, `critical`） |
 
-`py.typed` マーカーファイル（PEP 561）を同梱し、外部ツール（mypy 等）での型チェックを有効化しています。
+`py.typed` Marker file (PEP 561) is included to enable type checking with external tools (mypy etc.).
 
-### 非推奨管理（deprecation.py）
+### Deprecation management (deprecation.py)
 
-`backend_core/deprecation.py` は非推奨 API の管理と警告を提供します。
+`backend_core/deprecation.py` provides management and warnings for deprecated APIs.
 
-| 要素 | 説明 |
+| Element | Description |
 |------|------|
-| `DeprecationInfo` | frozen dataclass。非推奨の対象、バージョン、代替手段を保持 |
-| `DeprecationRegistry` | シングルトン。スレッドセーフに非推奨情報を管理 |
-| `deprecated()` | 関数 / メソッド用デコレータ（async 対応）。呼び出し時に警告を出力 |
-| `deprecated_class()` | クラス用デコレータ。インスタンス生成時に警告を出力 |
+| `DeprecationInfo` | frozen dataclass. Preserve deprecated targets, versions, and alternatives |
+| `DeprecationRegistry` | Singleton. Manage deprecation information thread-safely |
+| `deprecated()` | Decorator for functions/methods (async compatible). Output warning when calling |
+| `deprecated_class()` | Decorator for classes. Output warning when creating instance |
 
-環境変数 `RUMI_DEPRECATION_LEVEL` で動作を制御します: `warn`（デフォルト、警告出力）、`error`（例外送出）、`silent`（無視）、`log`（ログ記録のみ）。
+The environment variables `RUMI_DEPRECATION_LEVEL` control the behavior: `warn` (default, prints a warning), `error` (throws an exception), `silent` (ignore), `log` (logs only).
 
 ---
 
-## Pack 開発ツール
+## Pack Development Tools
 
-### 概要
+### Overview
 
-`backend_core/pack_scaffold.py` は Pack のひな形を生成する CLI ツールです。
+`backend_core/pack_scaffold.py` is a CLI tool that generates Pack templates.
 
-### PackScaffold クラス
+### PackScaffold class
 
-4 種類のテンプレートから Pack のディレクトリ構造とファイルを自動生成します。
+Automatically generates the Pack directory structure and files from four types of templates.
 
-| テンプレート | 説明 |
+| Template | Description |
 |------------|------|
-| `minimal` | 最小構成。`ecosystem.json` + 空の `backend/` のみ |
-| `capability` | Capability handler 付き。`share/capability_handlers/` を含む |
-| `flow` | Flow 付き。`backend/flows/` と `backend/blocks/` を含む |
-| `full` | 全要素を含むフルセット。`lib/`, `converters/`, `modifiers/` 等を含む |
+| `minimal` | Minimal configuration. `ecosystem.json` + empty `backend/` only |
+| `capability` | With Capability handler. Contains `share/capability_handlers/` |
+| `flow` | With Flow. Contains `backend/flows/` and `backend/blocks/` |
+| `full` | Full set including all elements. Including `lib/`, `converters/`, `modifiers/` etc. |
 
-生成されたファイルは `validation.py` で検証され、不正な構造になることを防止します。
+The generated files are validated with `validation.py` to prevent malformed structures.
 
-### CLI エントリポイント
+### CLI entry point
 
 ```bash
 python -m backend_core.pack_scaffold --template full --pack-id my_pack --output ecosystem/my_pack
 ```
 
-`--template`（テンプレート名）、`--pack-id`（Pack ID）、`--output`（出力先パス）を指定します。
+Specify `--template` (template name), `--pack-id` (Pack ID), and `--output` (output path).
 
 ---
 
-## Deprecated 機能
+## Deprecated feature
 
 ### ecosystem/flows/（local_pack）
 
-`ecosystem/flows/` に直接配置された Flow/Modifier を仮想 Pack として扱う互換モードです。デフォルトでは無効（`RUMI_LOCAL_PACK_MODE=off`）です。`RUMI_LOCAL_PACK_MODE=require_approval` で有効化できますが、非推奨です。
+This is a compatibility mode that treats Flow/Modifier placed directly in `ecosystem/flows/` as a virtual Pack. By default it is disabled (`RUMI_LOCAL_PACK_MODE=off`). Can be enabled with `RUMI_LOCAL_PACK_MODE=require_approval`, but is not recommended.
 
-廃止スケジュール: v2.0 で警告付き互換モード維持、v3.0 で削除予定。
+Deprecation schedule: Maintained compatibility mode with warnings in v2.0, scheduled for removal in v3.0.
 
-移行先: Pack 化して `ecosystem/<pack_id>/backend/` に配置するか、`user_data/shared/flows/` に配置してください。
+Migration destination: Make it into a pack and place it in `ecosystem/<pack_id>/backend/` or place it in `user_data/shared/flows/`.
 
 ### addon_manager
 
-`backend_core/ecosystem/addon_manager.py` に JSON Patch ベースの addon 機構が存在していましたが、Phase 2 で削除されました。現在はコードベースに存在しません。
+A JSON Patch-based addon mechanism existed in `backend_core/ecosystem/addon_manager.py`, but was removed in Phase 2. It doesn't currently exist in the codebase.
 
-### flow/ ディレクトリ
+### flow/ directory
 
-旧 `flow/` ディレクトリは非推奨です。`flows/`、`user_data/shared/flows/`、または Pack 内 `flows/` に移行してください。
+The old `flow/` directory is deprecated. Please move to `flows/`, `user_data/shared/flows/`, or `flows/` in a pack.
 
-### 削除済みファイル
+### Deleted files
 
-以下のファイル / ディレクトリは削除済みです。
+The following files/directories have been deleted.
 
-| 削除対象 | 代替 | 理由 |
+| Target for deletion | Replacement | Reason |
 |---------|------|------|
-| `capability_handler_registry.py` | `function_registry.py` | FunctionRegistry に統合（Phase A〜D） |
-| `builtin_capability_handlers/` | `core_pack/` | core_pack に移行 |
+| `capability_handler_registry.py` | `function_registry.py` | Integrated into FunctionRegistry (Phase A to D) |
+| `builtin_capability_handlers/` | `core_pack/` | Migrate to core_pack |
 
 # Defaultspack Function Boundary
 

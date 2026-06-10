@@ -1,33 +1,37 @@
+<!-- docs-i18n-links:start -->
+[EN](./claude_desktop_quality_pack.md) | [JP](../i18n/ja/quality_pack/claude_desktop_quality_pack.md) | [KR](../i18n/ko/quality_pack/claude_desktop_quality_pack.md) | [CN](../i18n/zh-cn/quality_pack/claude_desktop_quality_pack.md)
+<!-- docs-i18n-links:end -->
+
 # Claude Desktop-level quality pack for rumi_ai
 
-このドキュメントは、rumi_ai を継続的に高品質で開発・監査・検証するための実務パックです。  
-**PR1では品質資産のみを追加し、プロダクト挙動は変更しません。**
+This document is a practical pack for continuously developing, auditing, and validating rumi_ai with high quality.  
+**PR1 only adds quality assets and does not change product behavior. **
 
 ---
 
-## 1. パックの目的
+## 1. Purpose of the pack
 
-1. 既存テストと不足領域を一つの運用手順に統合する。
-2. 失敗時の切り分けを短時間で再現可能にする。
-3. README/設計思想（No Favoritism, Fail-Soft, 悪意前提, 最小権限）との整合を機械的に点検する。
+1. Consolidate existing tests and missing areas into one operational procedure.
+2. Make it possible to isolate failures and reproduce them in a short time.
+3. Mechanically check consistency with README/design philosophy (No Favoritism, Fail-Soft, Malicious Assumption, Least Privilege).
 
 ---
 
-## 2. 実行コマンド（推奨順）
+## 2. Execution commands (recommended order)
 
-リポジトリルートから実行:
+Run from repository root:
 
 ```bash
 bash rumi_ai_1_10/scripts/quality_pack/run_claude_quality_pack.sh
 ```
 
-フル監査モード（既存レガシーlint負債まで含める）:
+Full audit mode (including existing legacy lint debt):
 
 ```bash
 RUMI_FULL_QUALITY=1 bash rumi_ai_1_10/scripts/quality_pack/run_claude_quality_pack.sh
 ```
 
-個別実行:
+Individual execution:
 
 ```bash
 # root (version-stable entrypoint) テスト
@@ -59,111 +63,111 @@ cd pack-shell && cargo test && cd ..
 
 ---
 
-## 3. 追加テストの対象領域
+## 3. Areas for additional testing
 
-## 3.1 思想適合チェック
-- 思想メモと品質パック文書の必須セクション存在チェック
-- README/CI定義の契約が崩れていないかを静的検証
+## 3.1 Ideological conformity check
+- Check the existence of required sections in thought memos and quality pack documents
+- Static verification to see if README/CI definition contract is broken
 
-## 3.2 CLI / バックエンド契約
-- root entrypoint (`rumi_ai/__main__.py`) が `rumi_ai_1_10.app` へ接続する契約
-- バージョン整合 (`rumi_ai/__init__.py` と `rumi_ai_1_10/pyproject.toml`)
+## 3.2 CLI/Backend Contract
+- Contract where root entrypoint (`rumi_ai/__main__.py`) connects to `rumi_ai_1_10.app`
+- Version alignment (`rumi_ai/__init__.py` and `rumi_ai_1_10/pyproject.toml`)
 
-## 3.3 UI / Playwright相当（静的契約）
-- Tauri 設定のCSPに `localhost:8765` が含まれること
-- `connect-src` が `https://` や `*` を許可していないこと
-- frontend package に型チェック/ビルドスクリプトが存在すること
+## 3.3 UI/Playwright equivalent (static contract)
+- `localhost:8765` must be included in CSP of Tauri settings
+- `connect-src` does not permit `https://` or `*`
+- Type check/build script must exist in frontend package
 
-## 3.4 設定 / 権限 / 失敗系
-- CI workflow に root pytest / package pytest / cargo test が定義されていること
-- release workflow が `v*` tag trigger と `cargo tauri build` を持つこと
+## 3.4 Settings / Permissions / Failure system
+- Root pytest / package pytest / cargo test must be defined in the CI workflow
+- release workflow has `v*` tag trigger and `cargo tauri build`
 
 ---
 
-## 4. 監査手順
+## 4. Audit Procedures
 
-1. 監査ログ確認
+1. Check audit log
    - `user_data/audit/security_YYYY-MM-DD.jsonl`
    - `user_data/audit/network_YYYY-MM-DD.jsonl`
    - `user_data/audit/permission_YYYY-MM-DD.jsonl`
-2. 承認状態確認
-   - 未承認Packが実行されていないこと
-   - `modified` 状態Packが再承認なしで動いていないこと
-3. 権限確認
-   - capability grant と network grant が最小権限であること
-4. 失敗時記録
-   - 再現コマンド、期待値、実値、影響範囲、回避策、恒久対策候補を残す
+2. Check approval status
+   - No unauthorized packs are running
+   - `modified` Status Pack not running without reauthorization
+3. Check permissions
+   - capability grant and network grant are least privilege
+4. Failure record
+   - Leave reproduction commands, expected values, actual values, scope of impact, workarounds, and permanent countermeasure candidates
 
 ---
 
-## 5. 手動検証手順（最小セット）
+## 5. Manual verification steps (minimum set)
 
-1. 起動安全性
-   - strict 起動: `python app.py`
-   - 開発起動: `python app.py --permissive`（許可条件の確認）
-2. 承認フロー
-   - Pack scan -> pending -> approve/reject -> status 遷移確認
-3. ネットワーク権限
-   - grant 無しで拒否されること
-   - grant 付与後に許可されること
-4. Viewer表示
-   - Viewer が localhost panel を表示できること
-   - 外部URL誘導がCSP/権限で制御されること
-
----
-
-## 6. 回帰確認手順
-
-1. 既存CI相当コマンド（root/package/cargo）を実行
-2. 追加した品質契約テストを実行
-3. lint/typecheck/build を通す
-4. 失敗した場合は「テスト実装問題」か「製品バグ」かを分離する
-   - テスト実装問題: PR1内で修正
-   - 製品バグ: PR2候補へ記録
-   - レガシーlint負債: `RUMI_FULL_QUALITY=1` で検出し、段階的に返済計画を作る
+1. Startup safety
+   - strict startup: `python app.py`
+- Development start: `python app.py --permissive` (Confirm permission conditions)
+2. Approval flow
+   - Pack scan -> pending -> approve/reject -> status Confirm transition
+3. Network permissions
+   - to be rejected without a grant
+   - grant What is granted after granting
+4.Viewer display
+   - Viewer can display localhost panel
+   - External URL guidance is controlled by CSP/authority
 
 ---
 
-## 7. リリース前チェック
+## 6. Regression confirmation procedure
 
-1. `.github/workflows/test.yml` と `release.yml` が現行運用と一致
-2. 追加テストが green
-3. 監査/トラブルシュート手順が最新
-4. セキュリティモード（strict/permissive）の説明が矛盾していない
-5. root README と `rumi_ai_1_10/README.md` のリンクが有効
-
----
-
-## 8. 思想適合チェックリスト
-
-- [ ] 公式コアに特定ドメイン前提ロジックを増やしていない（No Favoritism）
-- [ ] 部分故障時の継続運用（Fail-Soft）を壊していない
-- [ ] 悪意Pack前提の承認・検証・隔離を弱めていない
-- [ ] 外部通信や危険操作をCapability外へ迂回させていない
-- [ ] 監査ログで追跡可能な実装を維持している
+1. Execute command equivalent to existing CI (root/package/cargo)
+2. Run the added quality contract tests
+3. Pass lint/typecheck/build
+4. In case of failure, separate whether it is a “test implementation problem” or “product bug”
+   - Test implementation issue: fixed in PR1
+   - Product bug: Recorded as PR2 candidate
+   - Legacy lint debt: Detect with `RUMI_FULL_QUALITY=1` and create a gradual repayment plan
 
 ---
 
-## 9. 失敗時の切り分け手順
+## 7. Pre-release check
 
-1. どのゲートで失敗したか分類
+1. `.github/workflows/test.yml` and `release.yml` are consistent with current operation
+2. Additional tests are green
+3. Audit/troubleshooting procedures are up to date
+4. Descriptions of security modes (strict/permissive) are consistent.
+5. Root README and `rumi_ai_1_10/README.md` links are valid
+
+---
+
+## 8. Ideology Compatibility Checklist
+
+- [ ] Specific domain prerequisite logic has not been increased in the official core (No Favoritism)
+- [ ] Continuous operation in the event of partial failure (Fail-Soft) is not broken.
+- [ ] Approval, verification, and isolation based on malicious Packs are not weakened.
+- [ ] External communications and dangerous operations are not diverted outside the Capability.
+- [ ] Maintains implementation traceable in audit logs
+
+---
+
+## 9. Isolation procedure in case of failure
+
+1. Classify which gate failed
    - root pytest / package pytest / ruff / mypy / frontend lint-build / cargo test
-2. 最小再現
-   - 単一テストファイルや単一コマンドに縮小
-3. 原因分類
-   - 設定不整合
-   - テスト想定不備
-   - 製品バグ（PR2対象）
-4. 影響評価
-   - 重大度（高/中/低）
-   - 再現性（常時/条件付き）
-   - ユーザー影響（セキュリティ/データ/UX）
+2. Minimum reproduction
+   - Reduced to a single test file or single command
+3. Cause classification
+   - Configuration inconsistency
+   - Inadequate test assumptions
+   - Product bug (for PR2)
+4. Impact assessment
+   - Severity (high/medium/low)
+   - Reproducibility (constant/conditional)
+- User impact (Security/Data/UX)
 
 ---
 
-## 10. AIエージェント運用プロンプト（運用テンプレート）
+## 10. AI agent operation prompt (operation template)
 
-以下を冒頭に付けて運用する:
+Operate by adding the following at the beginning:
 
 ```text
 README・docs・思想メモを先に読み、No Favoritism / Fail-Soft / 悪意前提 / 最小権限を判断基準にする。
@@ -174,7 +178,7 @@ PR1では品質資産のみ、PR2で実害バグを修正する。
 
 ---
 
-## 11. 既知のPR2候補記録テンプレート
+## 11. Known PR2 Candidate Record Template
 
 ```text
 - 事象:

@@ -1,3 +1,7 @@
+<!-- docs-i18n-links:start -->
+[EN](./external-inputs.md) | [JP](./i18n/ja/external-inputs.md) | [KR](./i18n/ko/external-inputs.md) | [CN](./i18n/zh-cn/external-inputs.md)
+<!-- docs-i18n-links:end -->
+
 # External Inputs
 
 External inputs are messages that enter Rumi from systems outside the local UI:

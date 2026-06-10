@@ -1,3 +1,7 @@
+<!-- docs-i18n-links:start -->
+[EN](./MIGRATION.md) | [JP](./i18n/ja/MIGRATION.md) | [KR](./i18n/ko/MIGRATION.md) | [CN](./i18n/zh-cn/MIGRATION.md)
+<!-- docs-i18n-links:end -->
+
 # Migration
 
 This document summarizes the compatibility path from legacy defaults to defaultspack v2.

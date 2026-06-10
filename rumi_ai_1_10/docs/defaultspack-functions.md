@@ -1,3 +1,7 @@
+<!-- docs-i18n-links:start -->
+[EN](./defaultspack-functions.md) | [JP](./i18n/ja/defaultspack-functions.md) | [KR](./i18n/ko/defaultspack-functions.md) | [CN](./i18n/zh-cn/defaultspack-functions.md)
+<!-- docs-i18n-links:end -->
+
 # Defaultspack Functions
 
 Defaultspack exposes its default capabilities as Rumi functions. HTTP routes, AI tools, and Flow nodes should treat functions as the stable public operation contract.

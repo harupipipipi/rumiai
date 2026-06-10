@@ -1,3 +1,7 @@
+<!-- docs-i18n-links:start -->
+[EN](./startup_capability_bridge.md) | [JP](./i18n/ja/startup_capability_bridge.md) | [KR](./i18n/ko/startup_capability_bridge.md) | [CN](./i18n/zh-cn/startup_capability_bridge.md)
+<!-- docs-i18n-links:end -->
+
 # Startup Capability Bridge
 
 Startup Profiles remain the launch-time source of truth for Rumi modes such as

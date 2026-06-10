@@ -1,3 +1,7 @@
+<!-- docs-i18n-links:start -->
+[EN](./capability_graph_pr_plan.md) | [JP](./i18n/ja/capability_graph_pr_plan.md) | [KR](./i18n/ko/capability_graph_pr_plan.md) | [CN](./i18n/zh-cn/capability_graph_pr_plan.md)
+<!-- docs-i18n-links:end -->
+
 # Capability Graph PR Plan
 
 This roadmap keeps Capability Graph work reviewable. Each PR should be small, should preserve existing `.flow.yaml` behavior, and should avoid viewer UI until backend foundations are stable.

@@ -1,3 +1,7 @@
+<!-- docs-i18n-links:start -->
+[EN](./startup_vs_capability_profile.md) | [JP](./i18n/ja/startup_vs_capability_profile.md) | [KR](./i18n/ko/startup_vs_capability_profile.md) | [CN](./i18n/zh-cn/startup_vs_capability_profile.md)
+<!-- docs-i18n-links:end -->
+
 # Startup Profiles vs Capability Profiles
 
 Startup Profiles remain the launch-time source of truth. They select packs,

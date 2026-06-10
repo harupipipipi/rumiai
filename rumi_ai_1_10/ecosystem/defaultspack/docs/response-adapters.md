@@ -1,3 +1,7 @@
+<!-- docs-i18n-links:start -->
+[EN](./response-adapters.md) | [JP](./i18n/ja/response-adapters.md) | [KR](./i18n/ko/response-adapters.md) | [CN](./i18n/zh-cn/response-adapters.md)
+<!-- docs-i18n-links:end -->
+
 # Response Adapters
 
 Response adapters convert Rumi output into provider-specific replies. They are

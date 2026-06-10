@@ -1,3 +1,7 @@
+<!-- docs-i18n-links:start -->
+[EN](./capability_binding_registration.md) | [JP](./i18n/ja/capability_binding_registration.md) | [KR](./i18n/ko/capability_binding_registration.md) | [CN](./i18n/zh-cn/capability_binding_registration.md)
+<!-- docs-i18n-links:end -->
+
 # Capability Binding Registration
 
 Packs register graph binding handlers through explicit manifest metadata:

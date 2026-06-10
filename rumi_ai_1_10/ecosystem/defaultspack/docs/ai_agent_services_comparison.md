@@ -1,3 +1,7 @@
+<!-- docs-i18n-links:start -->
+[EN](./ai_agent_services_comparison.md) | [JP](./i18n/ja/ai_agent_services_comparison.md) | [KR](./i18n/ko/ai_agent_services_comparison.md) | [CN](./i18n/zh-cn/ai_agent_services_comparison.md)
+<!-- docs-i18n-links:end -->
+
 # AI Agent Services Comparison
 
 | Service | Local files | Terminal | Git | Plan | Approval | Memory | Projects | Artifacts | Research | Browser |

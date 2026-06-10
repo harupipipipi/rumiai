@@ -1,3 +1,7 @@
+<!-- docs-i18n-links:start -->
+[EN](./TODO.md) | [JP](./i18n/ja/TODO.md) | [KR](./i18n/ko/TODO.md) | [CN](./i18n/zh-cn/TODO.md)
+<!-- docs-i18n-links:end -->
+
 # Rumi Remote Mobile TODO
 
 ## Done in this PR

@@ -1,3 +1,7 @@
+<!-- docs-i18n-links:start -->
+[EN](./input-profiles.md) | [JP](./i18n/ja/input-profiles.md) | [KR](./i18n/ko/input-profiles.md) | [CN](./i18n/zh-cn/input-profiles.md)
+<!-- docs-i18n-links:end -->
+
 # Input Profiles
 
 An `InputProfile` describes how an allowed `ExternalEvent` becomes runtime input.
@@ -108,4 +112,3 @@ handled later by `ResponsePlanner` and `ResponseAdapter`.
 - use least-privilege model, tool, and agent settings;
 - prefer no response over an unsafe public response;
 - redact metadata before audit or UI display.
-

@@ -1,3 +1,7 @@
+<!-- docs-i18n-links:start -->
+[EN](./tool-prompt-conversion.md) | [JP](./i18n/ja/tool-prompt-conversion.md) | [KR](./i18n/ko/tool-prompt-conversion.md) | [CN](./i18n/zh-cn/tool-prompt-conversion.md)
+<!-- docs-i18n-links:end -->
+
 # Tool / Prompt Reference
 
 Tool and prompt definitions share some vocabulary, but they do not share an

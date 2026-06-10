@@ -1,3 +1,7 @@
+<!-- docs-i18n-links:start -->
+[EN](./capability_graph_editor.md) | [JP](./i18n/ja/capability_graph_editor.md) | [KR](./i18n/ko/capability_graph_editor.md) | [CN](./i18n/zh-cn/capability_graph_editor.md)
+<!-- docs-i18n-links:end -->
+
 # Capability Graph Editor
 
 The panel exposes graph editor APIs under `/api/panel/graphs`.

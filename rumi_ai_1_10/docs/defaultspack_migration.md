@@ -1,3 +1,7 @@
+<!-- docs-i18n-links:start -->
+[EN](./defaultspack_migration.md) | [JP](./i18n/ja/defaultspack_migration.md) | [KR](./i18n/ko/defaultspack_migration.md) | [CN](./i18n/zh-cn/defaultspack_migration.md)
+<!-- docs-i18n-links:end -->
+
 # defaultspack migration notes
 
 ## Legacy compatibility

@@ -1,3 +1,7 @@
+<!-- docs-i18n-links:start -->
+[EN](./model_capabilities.md) | [JP](./i18n/ja/model_capabilities.md) | [KR](./i18n/ko/model_capabilities.md) | [CN](./i18n/zh-cn/model_capabilities.md)
+<!-- docs-i18n-links:end -->
+
 # Model Capabilities
 
 Defaultspack enriches provider and profile catalogs with routing-oriented capability fields. The score is intentionally relative to rumiai routing, not an absolute model ranking.

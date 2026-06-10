@@ -1,3 +1,7 @@
+<!-- docs-i18n-links:start -->
+[EN](./tool_authoring.md) | [JP](./i18n/ja/tool_authoring.md) | [KR](./i18n/ko/tool_authoring.md) | [CN](./i18n/zh-cn/tool_authoring.md)
+<!-- docs-i18n-links:end -->
+
 # Tool Authoring
 
 A tool needs a manifest, callable function or tool entrypoint, risk level, permission requirements, UI metadata, and model compatibility notes.

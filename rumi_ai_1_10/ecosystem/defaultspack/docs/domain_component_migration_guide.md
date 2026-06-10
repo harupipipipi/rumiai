@@ -1,3 +1,7 @@
+<!-- docs-i18n-links:start -->
+[EN](./domain_component_migration_guide.md) | [JP](./i18n/ja/domain_component_migration_guide.md) | [KR](./i18n/ko/domain_component_migration_guide.md) | [CN](./i18n/zh-cn/domain_component_migration_guide.md)
+<!-- docs-i18n-links:end -->
+
 # Defaultspack Domain Component Migration Guide
 
 This guide explains how to add or migrate domain surfaces without growing central registries.

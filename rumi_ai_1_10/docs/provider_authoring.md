@@ -1,3 +1,7 @@
+<!-- docs-i18n-links:start -->
+[EN](./provider_authoring.md) | [JP](./i18n/ja/provider_authoring.md) | [KR](./i18n/ko/provider_authoring.md) | [CN](./i18n/zh-cn/provider_authoring.md)
+<!-- docs-i18n-links:end -->
+
 # Provider Authoring
 
 Provider authoring is manifest-first. An OpenAI-compatible provider must be

@@ -1,3 +1,7 @@
+<!-- docs-i18n-links:start -->
+[EN](./capability_graph.md) | [JP](./i18n/ja/capability_graph.md) | [KR](./i18n/ko/capability_graph.md) | [CN](./i18n/zh-cn/capability_graph.md)
+<!-- docs-i18n-links:end -->
+
 # Capability Graph
 
 Capability Graph is a capability wiring layer that sits beside the existing Execution Flow system.

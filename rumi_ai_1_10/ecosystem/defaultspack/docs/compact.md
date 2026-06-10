@@ -1,3 +1,7 @@
+<!-- docs-i18n-links:start -->
+[EN](./compact.md) | [JP](./i18n/ja/compact.md) | [KR](./i18n/ko/compact.md) | [CN](./i18n/zh-cn/compact.md)
+<!-- docs-i18n-links:end -->
+
 # Compact
 
 Compact keeps long-running work usable by replacing or supplementing verbose

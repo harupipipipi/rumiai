@@ -1,17 +1,21 @@
+<!-- docs-i18n-links:start -->
+[EN](./README.md) | [JP](../../i18n/ja/examples/viewer_pack/README.md) | [KR](../../i18n/ko/examples/viewer_pack/README.md) | [CN](../../i18n/zh-cn/examples/viewer_pack/README.md)
+<!-- docs-i18n-links:end -->
+
 # Viewer Example Pack
 
-`viewer:display` capability を使って Rumi Viewer にフロントエンドを表示する Pack の最小限の例です。
+A minimal example of a Pack that uses the `viewer:display` capability to display a frontend in Rumi Viewer.
 
-## 概要
+## Overview
 
-この Pack は以下を示します:
+This Pack shows:
 
-- `viewer.display` capability の宣言方法（`manifest.json` の `requires` と `vocab_aliases`）
-- `grant_config` による Grant 設定
-- `web_mount` によるフロントエンドの配信
-- `calling_convention: "block"` の Function スタブ
+- `viewer.display` How to declare capability (`manifest.json`, `requires` and `vocab_aliases`)
+- Grant settings by `grant_config`
+- Frontend delivery with `web_mount`
+- Function stub for `calling_convention: "block"`
 
-## ディレクトリ構造
+## Directory structure
 
 ```
 viewer_pack/
@@ -26,53 +30,53 @@ viewer_pack/
 └── README.md                         # このファイル
 ```
 
-## 各ファイルの役割
+## Role of each file
 
 ### ecosystem.json
 
-Pack のマニフェストです。`pack_id`、`metadata`、`web_mount`、`functions` を定義します。
-`web_mount` フィールドにより、`web/` ディレクトリの内容が Rumi Viewer 内で配信されます。
+Pack's manifest. Define `pack_id`, `metadata`, `web_mount`, `functions`.
+The `web_mount` field delivers the contents of the `web/` directory within the Rumi Viewer.
 
 ### functions/request_display/manifest.json
 
-`viewer.display` capability の詳細な宣言です。以下のフィールドが重要です:
+`viewer.display` Detailed declaration of capability. The following fields are important:
 
-- **`requires`**: `["viewer.display"]` — この Function が必要とする capability
-- **`vocab_aliases`**: `["viewer.display"]` — FunctionRegistry でエイリアス解決に使用
-- **`grant_config`**: Grant 設定（`allowed_packs`、`max_token_lifetime`）
-- **`calling_convention`**: `"block"` — Kernel の DI ハンドラ経由で実行
+- **`requires`**: `["viewer.display"]` — capability required by this Function
+- **`vocab_aliases`**: `["viewer.display"]` — Used for alias resolution in FunctionRegistry
+- **`grant_config`**: Grant settings (`allowed_packs`, `max_token_lifetime`)
+- **`calling_convention`**: `"block"` — Executed via Kernel's DI handler
 
 ### functions/request_display/main.py
 
-`calling_convention: "block"` のスタブです。実行時は Kernel の DI ハンドラ
-（`handle_display`）が処理するため、このファイルが直接実行されることはありません。
-Pack 構造の完全性のために存在します。
+This is a stub for `calling_convention: "block"`. Kernel DI handler at runtime
+(`handle_display`), so this file is never executed directly.
+Exists for the integrity of the Pack structure.
 
 ### web/index.html, web/style.css
 
-Pack のフロントエンドです。Rumi Viewer の sandbox WebView 内にロードされます。
-CDN は使用せず、素の HTML/CSS で記述しています。
+This is the front end for Pack. Loaded inside Rumi Viewer's sandbox WebView.
+I don't use CDN and write it in plain HTML/CSS.
 
-## viewer:display capability の仕組み
+## How viewer:display capability works
 
-1. Pack が `viewer.display` capability を要求
-2. `capability_executor` が `FunctionRegistry.resolve_by_alias("viewer.display")` で解決
-3. `grant_config` が設定されている場合、`capability_grant_manager` が Grant を確認
-4. `calling_convention: "block"` → Kernel の DI ハンドラ（`handle_display`）が実行
-5. トークンと `web_mount_url` が返却される
-6. Rumi Viewer が `web_mount_url` を sandbox WebView にロード
+1. Pack requests `viewer.display` capability
+2. `capability_executor` resolved by `FunctionRegistry.resolve_by_alias("viewer.display")`
+3. If `grant_config` is set, `capability_grant_manager` checks Grant
+4. `calling_convention: "block"` → Kernel DI handler (`handle_display`) executes
+5. Token and `web_mount_url` will be returned
+6. Rumi Viewer loads `web_mount_url` into sandbox WebView
 
-## Grant の取得
+## Obtaining a Grant
 
-この Pack が `viewer.display` capability を使用するには、Grant が必要です。
-Grant は `capability_grant_manager` によって管理されます。
+This pack requires a grant to use the `viewer.display` capability.
+The Grant is administered by `capability_grant_manager`.
 
-- **`allowed_packs`**: 空配列 `[]` の場合、全ての Pack からの要求を許可
-- **`max_token_lifetime`**: トークンの最大有効期限（秒）
+- **`allowed_packs`**: If empty array `[]`, allow requests from all Packs
+- **`max_token_lifetime`**: Maximum token expiration time (seconds)
 
-Grant の仕組みの詳細は [Pack 開発ガイド セクション 6](../../pack-development.md) を参照してください。
+For more information on how grants work, see [Pack Development Guide Section 6](../../pack-development.md).
 
-## 関連ドキュメント
+## Related documents
 
-- [Pack 開発ガイド](../../pack-development.md) — Pack の構造、ライフサイクル、Capability の詳細
-- [多言語 Pack 開発ガイド](../../multilang_pack_guide.md) — Python 以外の言語で Pack を開発する方法
+- [Pack Development Guide](../../pack-development.md) — Details of Pack structure, life cycle, and capabilities
+- [Multilingual Pack Development Guide](../../multilang_pack_guide.md) — How to develop Packs in languages other than Python

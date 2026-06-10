@@ -1,3 +1,7 @@
+<!-- docs-i18n-links:start -->
+[EN](./tool-eligibility.md) | [JP](./i18n/ja/tool-eligibility.md) | [KR](./i18n/ko/tool-eligibility.md) | [CN](./i18n/zh-cn/tool-eligibility.md)
+<!-- docs-i18n-links:end -->
+
 # Tool Eligibility And Blocked Reasons
 
 Tool availability is now computed in two places:

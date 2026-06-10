@@ -1,3 +1,7 @@
+<!-- docs-i18n-links:start -->
+[EN](./coding_workspaces.md) | [JP](./i18n/ja/coding_workspaces.md) | [KR](./i18n/ko/coding_workspaces.md) | [CN](./i18n/zh-cn/coding_workspaces.md)
+<!-- docs-i18n-links:end -->
+
 # Coding Workspaces
 
 Coding Workspaces are the defaultspack boundary for local file, terminal, and

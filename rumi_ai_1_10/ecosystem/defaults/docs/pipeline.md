@@ -1,26 +1,30 @@
-# AI パイプライン
+<!-- docs-i18n-links:start -->
+[EN](./pipeline.md) | [JP](./i18n/ja/pipeline.md) | [KR](./i18n/ko/pipeline.md) | [CN](./i18n/zh-cn/pipeline.md)
+<!-- docs-i18n-links:end -->
 
-defaults Pack の AI パイプラインは、複数の AI モデルを組み合わせて最適な応答を生成する仕組みである。`domain/ai_client/` 配下に実装されている。
+# AI pipeline
+
+Defaults Pack's AI pipeline combines multiple AI models to generate the optimal response. Implemented under `domain/ai_client/`.
 
 ---
 
-## 概念
+## Concept
 
-パイプラインは以下の 4 つのコンポーネントで構成される:
+The pipeline consists of four components:
 
-**ParallelCaller** — 複数モデルに同時にリクエストを送信し、結果をまとめて返す。`concurrent.futures.ThreadPoolExecutor` を使用する。
+**ParallelCaller** — Send requests to multiple models simultaneously and return results together. Use `concurrent.futures.ThreadPoolExecutor`.
 
-**Router** — ルールベースで入力を分析し、最適なモデルまたはパイプラインを選択する。
+**Router** — Rule-based analysis of input and selects the best model or pipeline.
 
-**Evaluator** — 複数の応答を比較・評価して最良のものを選ぶ。基本スコアリングと LLM ジャッジを組み合わせる。
+**Evaluator** — Compare and evaluate multiple responses to choose the best one. Combine basic scoring with LLM judges.
 
-**Pipeline** — 上記 3 つを多段レイヤーとして組み合わせて実行する。
+**Pipeline** — Execute a combination of the above three in multiple layers.
 
 ---
 
 ## ParallelCaller (`domain/ai_client/parallel.py`)
 
-### 基本使用法
+### Basic usage
 
 ```python
 from domain.ai_client.client import AIClient
@@ -41,25 +45,25 @@ results = parallel.call(
 # results: {"openai/gpt-4o": StandardResponse, "anthropic/claude-sonnet-4-0": StandardResponse}
 ```
 
-### パラメータ
+### Parameters
 
-`models` — モデル文字列のリスト（例: `["openai/gpt-4o", "anthropic/claude-sonnet-4-0"]`）。
+`models` — List of model strings (e.g. `["openai/gpt-4o", "anthropic/claude-sonnet-4-0"]`).
 
-`messages` — StandardMessage 形式のメッセージリスト。
+`messages` — Message list in StandardMessage format.
 
-`tools` — ツール定義。全モデル共通。
+`tools` — Tool definition. Common to all models.
 
-`params` — 全モデル共通パラメータ。
+`params` — Parameters common to all models.
 
-`per_model_params` — モデルごとの個別パラメータ dict。キーはモデル文字列。
+`per_model_params` — Individual parameter dict for each model. The key is a model string.
 
-`timeout_per_model` — 各モデルの個別タイムアウト秒数。デフォルト 120。
+`timeout_per_model` — Individual timeout seconds for each model. Default 120.
 
-`timeout_total` — 全体のタイムアウト秒数。デフォルト 300。
+`timeout_total` — Overall timeout in seconds. Default 300.
 
-`min_success` — 最低成功数。この数に達したら他の完了を待たずに返す。0 なら全て完了まで待つ。
+`min_success` — Minimum number of successes. When this number is reached, it returns without waiting for other completions. If it is 0, wait until everything is completed.
 
-### フォールバック
+### Fallback
 
 ```python
 result = parallel.call_with_fallback(
@@ -69,13 +73,13 @@ result = parallel.call_with_fallback(
 )
 ```
 
-`call_with_fallback()` はモデルを順に試し、最初に成功したものを返す。
+`call_with_fallback()` tries the models one after the other and returns the first one that succeeds.
 
 ---
 
 ## Router (`domain/ai_client/router.py`)
 
-### 基本使用法
+### Basic usage
 
 ```python
 from domain.ai_client.router import Router
@@ -83,7 +87,7 @@ from domain.ai_client.router import Router
 router = Router(client=client, default_target="openai/gpt-4o")
 ```
 
-### ルール定義
+### Rule definition
 
 ```python
 def is_code_request(messages, tools, params):
@@ -96,9 +100,9 @@ def is_code_request(messages, tools, params):
 router.add_rule("code_routing", is_code_request, "anthropic/claude-sonnet-4-0")
 ```
 
-ルールは `(messages, tools, params) -> bool` のシグネチャを持つ callable である。`True` を返した最初のルールのターゲットが選ばれる。
+A rule is a callable with a signature of `(messages, tools, params) -> bool`. The target of the first rule that returns `True` is chosen.
 
-### ルーティングの実行
+### Routing execution
 
 ```python
 result = router.route(messages, tools, params)
@@ -106,22 +110,22 @@ result = router.route(messages, tools, params)
 # マッチなし: {"target": "openai/gpt-4o", "rule": None}
 ```
 
-### ルール管理
+### Rule management
 
 ```python
 router.list_rules()     # [{"name": "code_routing", "target": "anthropic/..."}]
 router.remove_rule("code_routing")
 ```
 
-### ターゲットの利用可能性チェック
+### Target availability check
 
-ターゲットが `provider/model` 形式の場合、Router は AIClient にそのプロバイダーが登録されているかを確認する。利用不可なら次のルールに進む。パイプライン名（`/` を含まない）は常に利用可能とみなす。
+If the target is in the `provider/model` format, the Router checks to see if the provider is registered in the AIClient. If not available, proceed to the next rule. Pipeline names (not including `/`) are always considered available.
 
 ---
 
 ## Evaluator (`domain/ai_client/evaluator.py`)
 
-### 基本使用法
+### Basic usage
 
 ```python
 from domain.ai_client.evaluator import Evaluator
@@ -129,17 +133,17 @@ from domain.ai_client.evaluator import Evaluator
 evaluator = Evaluator(client=client, judge_model="openai/gpt-4o")
 ```
 
-### 組み込み評価基準
+### Built-in evaluation criteria
 
-Evaluator は初期化時に 3 つの組み込み基準を登録する:
+Evaluator registers three built-in criteria upon initialization:
 
-`non_empty` (weight: 10.0) — テキストが空でないか。空なら 0、テキストがあれば 1。
+`non_empty` (weight: 10.0) — Is the text empty? 0 if empty, 1 if there is text.
 
-`min_length` (weight: 5.0) — 極端に短くないか。0 文字=0.0、10 文字未満=0.3、50 文字未満=0.7、50 文字以上=1.0。
+`min_length` (weight: 5.0) — Isn't it extremely short? 0 characters = 0.0, less than 10 characters = 0.3, less than 50 characters = 0.7, more than 50 characters = 1.0.
 
-`no_error` (weight: 20.0) — エラーレスポンスでないか。エラーなら 0、正常なら 1。
+`no_error` (weight: 20.0) — Is this an error response? 0 if error, 1 if normal.
 
-### カスタム基準の追加
+### Adding custom criteria
 
 ```python
 def check_json(response, original_messages):
@@ -154,17 +158,17 @@ def check_json(response, original_messages):
 evaluator.add_criterion("json_valid", check_json, weight=15.0)
 ```
 
-評価関数は `(response, original_messages) -> float` で、0.0〜1.0 を返す。
+The evaluation function is `(response, original_messages) -> float`, which returns 0.0 to 1.0.
 
-### LLM ジャッジ
+### LLM Judge
 
 ```python
 best_key = evaluator.llm_judge(results_dict, original_messages)
 ```
 
-LLM ジャッジは複数の回答を比較させ、最良のキーを返す。判定不能なら `None`。
+The LLM judge will have multiple answers compared and return the best key. If it cannot be determined, `None`.
 
-### 最良の選択
+### Best choice
 
 ```python
 pick = evaluator.pick_best(
@@ -179,13 +183,13 @@ pick = evaluator.pick_best(
 # }
 ```
 
-`use_llm_judge=True` かつ上位 2 つのスコア差が 0.15 未満の場合、LLM ジャッジが実行される。
+If `use_llm_judge=True` and the difference between the top two scores is less than 0.15, the LLM judge will be performed.
 
 ---
 
 ## Pipeline (`domain/ai_client/pipeline.py`)
 
-### パイプラインの定義
+### Pipeline definition
 
 ```python
 from domain.ai_client.pipeline import Pipeline
@@ -199,9 +203,9 @@ pipeline.define("quality_check", [
 ])
 ```
 
-### レイヤータイプ
+### Layer type
 
-**parallel** — 複数モデルに並列リクエスト:
+**parallel** — Parallel requests to multiple models:
 
 ```python
 {
@@ -213,7 +217,7 @@ pipeline.define("quality_check", [
 }
 ```
 
-**evaluate** — parallel の結果から最良を選択:
+**evaluate** — Select the best of parallel results:
 
 ```python
 {
@@ -222,7 +226,7 @@ pipeline.define("quality_check", [
 }
 ```
 
-**single** — 単一モデルに送信:
+**single** — Send to a single model:
 
 ```python
 {
@@ -231,7 +235,7 @@ pipeline.define("quality_check", [
 }
 ```
 
-**route** — Router でターゲットを決定してから送信:
+**route** — Router determines the target and then sends:
 
 ```python
 {
@@ -239,25 +243,25 @@ pipeline.define("quality_check", [
 }
 ```
 
-route レイヤーは Pipeline の内部 Router インスタンスに委譲する。Router にルールが設定されていなければ `default_target` が使用される。ターゲットがパイプライン名の場合は再帰的にパイプラインを実行する。
+The route layer delegates to the Pipeline's internal Router instance. If no rules are set on the Router, `default_target` will be used. If the target is a pipeline name, execute the pipeline recursively.
 
-### パイプラインの実行
+### Executing the pipeline
 
 ```python
 result = pipeline.execute("quality_check", messages, tools, params)
 # result: StandardResponse
 ```
 
-### ストリーミング実行
+### Streaming execution
 
 ```python
 for chunk in pipeline.stream("quality_check", messages, tools, params):
     print(chunk)
 ```
 
-最終レイヤーが `single` の場合のみネイティブストリーミングに対応する。それ以外の場合は `execute()` の結果を `content_delta` + `stream_end` チャンクとして返す。
+Native streaming is supported only when the final layer is `single`. Otherwise, return the result of `execute()` as `content_delta` + `stream_end` chunks.
 
-### パイプライン管理
+### Pipeline management
 
 ```python
 pipeline.list_pipelines()           # ["quality_check"]
@@ -265,7 +269,7 @@ pipeline.get_definition("quality_check")  # レイヤー定義のリスト
 pipeline.remove("quality_check")
 ```
 
-### 内部コンポーネントへのアクセス
+### Accessing internal components
 
 ```python
 pipeline.router       # Router インスタンス
@@ -275,11 +279,11 @@ pipeline.parallel     # ParallelCaller インスタンス
 
 ---
 
-## RumiProvider との関係
+## Relationship with RumiProvider
 
-`domain/ai_client/providers/rumi_provider.py` の `RumiProvider` は、Pipeline を使用してリクエストを処理するメタプロバイダーである。
+`RumiProvider` of `domain/ai_client/providers/rumi_provider.py` is a meta provider that uses Pipeline to process requests.
 
-`RumiProvider` は初期化時に Pipeline インスタンスを作成し、`rumi_default` パイプラインの定義を確認する。パイプラインが定義されていれば Pipeline 経由で実行し、未定義の場合はフォールバックプロバイダー（Anthropic > OpenAI > Google の優先順）に直接委譲する。
+`RumiProvider` creates a Pipeline instance during initialization, and `rumi_default` checks the pipeline definition. If the pipeline is defined, execute it via Pipeline, otherwise delegate directly to the fallback provider (Anthropic > OpenAI > Google in priority order).
 
 ```
 rumi/default → RumiProvider.complete()
@@ -287,7 +291,7 @@ rumi/default → RumiProvider.complete()
   └── パイプライン定義なし → client.complete("anthropic/claude-sonnet-4-0", ...)
 ```
 
-### カスタムパイプラインの作り方
+### How to create a custom pipeline
 
 ```python
 from domain.ai_client.client import AIClient

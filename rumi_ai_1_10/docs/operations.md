@@ -1,51 +1,54 @@
+<!-- docs-i18n-links:start -->
+[EN](./operations.md) | [JP](./i18n/ja/operations.md) | [KR](./i18n/ko/operations.md) | [CN](./i18n/zh-cn/operations.md)
+<!-- docs-i18n-links:end -->
 
 # Rumi AI OS — Operations Guide
 
-運用者向けのガイドです。設計の全体像は [architecture.md](architecture.md)、Pack 開発は [pack-development.md](pack-development.md) を参照してください。
+A guide for operators. Please refer to [architecture.md](./architecture.md) for the overall design and [pack-development.md](./pack-development.md) for Pack development.
 
 ---
 
-## 目次
+## Table of Contents
 
-1. [セットアップ](#セットアップ)
-2. [起動](#起動)
-3. [セキュリティモード](#セキュリティモード)
-4. [HTTP API 概要](#http-api-概要)
-5. [Pack 承認管理](#pack-承認管理)
-6. [ネットワーク権限管理](#ネットワーク権限管理)
-7. [Capability Handler 承認](#capability-handler-承認)
-8. [Capability Grant 管理](#capability-grant-管理)
-9. [pip 依存ライブラリ管理](#pip-依存ライブラリ管理)
-10. [Secrets 管理](#secrets-管理)
+1. [Setup](#setup)
+2. [Start](#start)
+3. [Security Mode](#security-mode)
+4. [HTTP API Overview](#http-api-overview)
+5. [Pack approval management](#pack-approval-management)
+6. [Network privilege management](#network-privilege-management)
+7. [Capability Handler Approval](#capability-handler-approval)
+8. [Capability Grant Management](#capability-grant-management)
+9. [pip dependent library management](#pip-dependency-library-management)
+10. [Secrets Management](#secrets-management)
 11. [Pack Import / Apply](#pack-import--apply)
-12. [共有ストア管理](#共有ストア管理)
-13. [Docker / コンテナ管理](#docker--コンテナ管理)
-14. [Flow 実行](#flow-実行)
-15. [特権管理（Privileges）](#特権管理privileges)
-16. [UDS ソケット設定](#uds-ソケット設定)
-17. [監査ログの読み方](#監査ログの読み方)
+12. [Shared Store Management](#shared-store-management)
+13. [Docker / Container management](#docker--container-management)
+14. [Flow execution](#flow-execution)
+15. [Privileges management](#privileges-management)
+16. [UDS Socket Settings](#uds-socket-settings)
+17. [How to read the audit log](#how-to-read-audit-logs)
 18. [Pending Export](#pending-export)
-19. [認証トークン](#認証トークン)
-20. [構造化ログ設定](#構造化ログ設定)
-21. [非推奨警告レベル制御](#非推奨警告レベル制御)
-22. [ヘルスチェック運用](#ヘルスチェック運用)
-23. [メトリクス確認](#メトリクス確認)
-24. [Pack テンプレート生成 (scaffold)](#pack-テンプレート生成-scaffold)
-25. [エラーコードリファレンス](#エラーコードリファレンス)
-26. [環境変数リファレンス](#環境変数リファレンス)
-27. [トラブルシューティング](#トラブルシューティング)
+19. [Authentication token](#authentication-token)
+20. [Structured log settings](#structured-log-settings)
+21. [Deprecated warning level control](#deprecation-warning-level-control)
+22. [Health check operation](#health-check-operation)
+23. [Metrics confirmation](#check-metrics)
+24. [Pack template generation (scaffold)](#pack-template-generation-scaffold)
+25. [Error code reference](#error-code-reference)
+26. [Environment variable reference](#environment-variable-reference)
+27. [Troubleshooting](#troubleshooting)
 
 ---
 
-## セットアップ
+## Setup
 
-### 必要条件
+### Requirements
 
 - Python 3.10+
-- Docker（本番環境で必須）
+- Docker (required for production environments)
 - Git
 
-### インストール
+### Installation
 
 ```bash
 git clone https://github.com/harupipipipi/rumiai.git
@@ -58,9 +61,9 @@ python bootstrap.py --cli init
 pip install -r requirements.txt
 ```
 
-### セットアップツール
+### Setup Tool
 
-セットアップツールは CLI と Web の 2 つのインターフェースを提供します。
+The setup tool provides two interfaces: CLI and web.
 
 ```bash
 # CLI モード
@@ -76,11 +79,11 @@ python bootstrap.py --web              # ブラウザ操作（デフォルトポ
 python bootstrap.py --web --port 9000  # ポート指定
 ```
 
-セットアップツールは以下を自動化します: Python / Git / Docker のチェック、仮想環境（.venv）の作成、依存関係のインストール、user_data ディレクトリの初期化、default pack のインストール（オプション）。
+The setup tool automates the following: checks for Python / Git / Docker, creates a virtual environment (.venv), installs dependencies, initializes the user_data directory, and installs the default pack (optional).
 
 ---
 
-## 起動
+## Start
 
 ```bash
 # 本番環境（Docker 必須）
@@ -99,20 +102,20 @@ python app.py --health
 python app.py --validate
 ```
 
-`--health` はヘルスチェックを実行し、結果を JSON で stdout に出力して終了します。status が `"UP"` なら exit code 0、それ以外は exit code 1 です。組み込みプローブとして disk（ディスク空き容量）と writable_tmp（`/tmp` 書き込み可能性）が含まれます。CI/CD やコンテナオーケストレーションのヘルスチェックに利用できます。
+`--health` performs a health check, prints the results in JSON to stdout, and exits. If status is `"UP"`, exit code is 0, otherwise exit code is 1. Built-in probes include disk (disk free space) and writable_tmp (`/tmp` writability). It can be used for health checks of CI/CD and container orchestration.
 
-`--validate` は Pack のバリデーションを実行し、結果を出力して終了します。
+`--validate` executes Pack validation, prints the results, and exits.
 
 ---
 
-## セキュリティモード
+## Security mode
 
-環境変数 `RUMI_SECURITY_MODE` で設定します。
+Set with the environment variable `RUMI_SECURITY_MODE`.
 
-| モード | Docker | 動作 |
+| Mode | Docker | Behavior |
 |--------|--------|------|
-| `strict`（デフォルト） | 必須 | Docker 不可なら実行拒否 |
-| `permissive` | 不要 | 警告付きでホスト実行を許可 |
+| `strict` (default) | Required | Reject execution if Docker is not available |
+| `permissive` | Not required | Allow host execution with warnings |
 
 ```bash
 # 本番
@@ -124,141 +127,141 @@ export RUMI_SECURITY_MODE=permissive
 
 ---
 
-## HTTP API 概要
+## HTTP API Overview
 
-全エンドポイントは `Authorization: Bearer YOUR_TOKEN` が必須です。
+All endpoints require `Authorization: Bearer YOUR_TOKEN`.
 
-### Pack 管理
+### Pack management
 
-| メソッド | パス | 説明 |
+| Method | Path | Description |
 |----------|------|------|
-| GET | `/api/packs` | 全 Pack 一覧 |
-| GET | `/api/packs/pending` | 承認待ち Pack 一覧 |
-| GET | `/api/packs/{pack_id}/status` | Pack 状態取得 |
-| POST | `/api/packs/scan` | Pack スキャン |
-| POST | `/api/packs/{pack_id}/approve` | Pack 承認 |
-| POST | `/api/packs/{pack_id}/reject` | Pack 拒否 |
+| GET | `/api/packs` | List of all Packs |
+| GET | `/api/packs/pending` | List of packs waiting for approval |
+| GET | `/api/packs/{pack_id}/status` | Get Pack status |
+| POST | `/api/packs/scan` | Pack Scan |
+| POST | `/api/packs/{pack_id}/approve` | Pack approval |
+| POST | `/api/packs/{pack_id}/reject` | Pack Rejected |
 | POST | `/api/packs/import` | Pack import |
 | POST | `/api/packs/apply` | Pack apply |
-| DELETE | `/api/packs/{pack_id}` | Pack アンインストール |
+| DELETE | `/api/packs/{pack_id}` | Pack uninstall |
 
-### ネットワーク権限
+### Network permissions
 
-| メソッド | パス | 説明 |
+| Method | Path | Description |
 |----------|------|------|
-| GET | `/api/network/list` | 全 Grant 一覧 |
-| POST | `/api/network/grant` | ネットワーク権限を付与 |
-| POST | `/api/network/revoke` | ネットワーク権限を取り消し |
-| POST | `/api/network/check` | アクセス可否をチェック |
+| GET | `/api/network/list` | List of all grants |
+| POST | `/api/network/grant` | Grant network privileges |
+| POST | `/api/network/revoke` | Revoke network privileges |
+| POST | `/api/network/check` | Check access |
 
-### Capability Handler 候補
+### Capability Handler candidate
 
-| メソッド | パス | 説明 |
+| Method | Path | Description |
 |----------|------|------|
-| POST | `/api/capability/candidates/scan` | 候補スキャン |
-| GET | `/api/capability/requests?status=pending` | 申請一覧 |
-| POST | `/api/capability/requests/{key}/approve` | 承認（Trust + copy） |
-| POST | `/api/capability/requests/{key}/reject` | 却下 |
-| GET | `/api/capability/blocked` | ブロック一覧 |
-| POST | `/api/capability/blocked/{key}/unblock` | ブロック解除 |
+| POST | `/api/capability/candidates/scan` | Candidate scan |
+| GET | `/api/capability/requests?status=pending` | Application list |
+| POST | `/api/capability/requests/{key}/approve` | Authorization (Trust + copy) |
+| POST | `/api/capability/requests/{key}/reject` | Rejected |
+| GET | `/api/capability/blocked` | Block list |
+| POST | `/api/capability/blocked/{key}/unblock` | Unblock |
 
 ### Capability Grant
 
-| メソッド | パス | 説明 |
+| Method | Path | Description |
 |----------|------|------|
-| GET | `/api/capability/grants?principal_id=xxx` | Grant 一覧 |
-| POST | `/api/capability/grants/grant` | Grant を付与 |
-| POST | `/api/capability/grants/revoke` | Grant を取り消し |
-| POST | `/api/capability/grants/batch` | Grant 一括付与（最大 50 件） |
+| GET | `/api/capability/grants?principal_id=xxx` | Grant list |
+| POST | `/api/capability/grants/grant` | Grant |
+| POST | `/api/capability/grants/revoke` | Revoke Grant |
+| POST | `/api/capability/grants/batch` | Bulk grant (up to 50) |
 
-### pip 依存ライブラリ
+### pip dependent library
 
-| メソッド | パス | 説明 |
+| Method | Path | Description |
 |----------|------|------|
-| POST | `/api/pip/candidates/scan` | 候補スキャン |
-| GET | `/api/pip/requests?status=pending` | 申請一覧 |
-| POST | `/api/pip/requests/{key}/approve` | 承認 + インストール |
-| POST | `/api/pip/requests/{key}/reject` | 却下 |
-| GET | `/api/pip/blocked` | ブロック一覧 |
-| POST | `/api/pip/blocked/{key}/unblock` | ブロック解除 |
+| POST | `/api/pip/candidates/scan` | Candidate scan |
+| GET | `/api/pip/requests?status=pending` | Application list |
+| POST | `/api/pip/requests/{key}/approve` | Approval + Installation |
+| POST | `/api/pip/requests/{key}/reject` | Rejected |
+| GET | `/api/pip/blocked` | Block list |
+| POST | `/api/pip/blocked/{key}/unblock` | Unblock |
 
 ### Secrets
 
-| メソッド | パス | 説明 |
+| Method | Path | Description |
 |----------|------|------|
-| GET | `/api/secrets` | キー一覧（値はマスク） |
-| POST | `/api/secrets/set` | 秘密値を設定 |
-| POST | `/api/secrets/delete` | 秘密値を削除 |
+| GET | `/api/secrets` | Key list (value is masked) |
+| POST | `/api/secrets/set` | Set secret value |
+| POST | `/api/secrets/delete` | Delete secret value |
 
-### Flow 実行
+### Flow execution
 
-| メソッド | パス | 説明 |
+| Method | Path | Description |
 |----------|------|------|
-| GET | `/api/flows` | 登録済み Flow 一覧 |
-| POST | `/api/flows/{flow_id}/run` | Flow を実行 |
+| GET | `/api/flows` | Registered Flow list |
+| POST | `/api/flows/{flow_id}/run` | Run Flow |
 
 ### Store
 
-| メソッド | パス | 説明 |
+| Method | Path | Description |
 |----------|------|------|
-| GET | `/api/stores` | Store 一覧 |
-| POST | `/api/stores/create` | Store を作成 |
-| GET | `/api/stores/shared` | 共有ストア一覧 |
-| POST | `/api/stores/shared/approve` | 共有ストア承認 |
-| POST | `/api/stores/shared/revoke` | 共有ストア取消 |
+| GET | `/api/stores` | Store list |
+| POST | `/api/stores/create` | Create Store |
+| GET | `/api/stores/shared` | Shared store list |
+| POST | `/api/stores/shared/approve` | Shared Store Authorization |
+| POST | `/api/stores/shared/revoke` | Shared store cancellation |
 
 ### Unit
 
-| メソッド | パス | 説明 |
+| Method | Path | Description |
 |----------|------|------|
-| GET | `/api/units?store_id=xxx` | Unit 一覧 |
-| POST | `/api/units/publish` | Unit を公開 |
-| POST | `/api/units/execute` | Unit を実行 |
+| GET | `/api/units?store_id=xxx` | Unit list |
+| POST | `/api/units/publish` | Publish Unit |
+| POST | `/api/units/execute` | Run Unit |
 
 ### Privileges
 
-| メソッド | パス | 説明 |
+| Method | Path | Description |
 |----------|------|------|
-| GET | `/api/privileges` | 特権一覧 |
-| POST | `/api/privileges/{pack_id}/grant/{privilege_id}` | 特権付与 |
-| POST | `/api/privileges/{pack_id}/execute/{privilege_id}` | 特権実行 |
+| GET | `/api/privileges` | Privilege list |
+| POST | `/api/privileges/{pack_id}/grant/{privilege_id}` | Privilege grant |
+| POST | `/api/privileges/{pack_id}/execute/{privilege_id}` | Privileged execution |
 
-### Pack 独自ルート
+### Pack original route
 
-| メソッド | パス | 説明 |
+| Method | Path | Description |
 |----------|------|------|
-| GET | `/api/routes` | 登録済みルート一覧 |
-| POST | `/api/routes/reload` | ルートテーブルを再読み込み |
+| GET | `/api/routes` | List of registered routes |
+| POST | `/api/routes/reload` | Reload route table |
 
-### Docker / コンテナ
+### Docker / Container
 
-| メソッド | パス | 説明 |
+| Method | Path | Description |
 |----------|------|------|
-| GET | `/api/docker/status` | Docker 利用可否 |
-| GET | `/api/containers` | コンテナ一覧 |
-| POST | `/api/containers/{pack_id}/start` | コンテナ起動 |
-| POST | `/api/containers/{pack_id}/stop` | コンテナ停止 |
-| DELETE | `/api/containers/{pack_id}` | コンテナ削除 |
+| GET | `/api/docker/status` | Docker availability |
+| GET | `/api/containers` | Container list |
+| POST | `/api/containers/{pack_id}/start` | Starting container |
+| POST | `/api/containers/{pack_id}/stop` | Stop container |
+| DELETE | `/api/containers/{pack_id}` | Container deletion |
 
 ---
 
-## Pack 承認管理
+## Pack Approval Management
 
-### 承認待ちの確認
+### Check pending approval
 
 ```bash
 curl http://localhost:8765/api/packs/pending \
   -H "Authorization: Bearer YOUR_TOKEN"
 ```
 
-### Pack の承認
+### Pack Approval
 
 ```bash
 curl -X POST http://localhost:8765/api/packs/{pack_id}/approve \
   -H "Authorization: Bearer YOUR_TOKEN"
 ```
 
-### Pack の拒否
+### Pack Rejection
 
 ```bash
 curl -X POST http://localhost:8765/api/packs/{pack_id}/reject \
@@ -267,9 +270,9 @@ curl -X POST http://localhost:8765/api/packs/{pack_id}/reject \
   -d '{"reason": "セキュリティ上の懸念"}'
 ```
 
-### 再承認（Modified 状態の Pack）
+### Reauthorization (Pack in Modified state)
 
-ファイル変更でハッシュ不一致になると `modified` 状態になり、自動無効化されます。
+If a file change results in a hash mismatch, it will enter the `modified` state and be automatically disabled.
 
 ```bash
 curl -X POST http://localhost:8765/api/packs/{pack_id}/approve \
@@ -278,9 +281,9 @@ curl -X POST http://localhost:8765/api/packs/{pack_id}/approve \
 
 ---
 
-## ネットワーク権限管理
+## Network permission management
 
-### Grant の付与
+### Grant Grant
 
 ```bash
 curl -X POST http://localhost:8765/api/network/grant \
@@ -293,14 +296,14 @@ curl -X POST http://localhost:8765/api/network/grant \
   }'
 ```
 
-### Grant の一覧
+### List of Grants
 
 ```bash
 curl http://localhost:8765/api/network/list \
   -H "Authorization: Bearer YOUR_TOKEN"
 ```
 
-### アクセスチェック
+### Access check
 
 ```bash
 curl -X POST http://localhost:8765/api/network/check \
@@ -309,7 +312,7 @@ curl -X POST http://localhost:8765/api/network/check \
   -d '{"pack_id": "my_pack", "domain": "api.openai.com", "port": 443}'
 ```
 
-### Grant の取り消し
+### Grant Revocation
 
 ```bash
 curl -X POST http://localhost:8765/api/network/revoke \
@@ -320,14 +323,14 @@ curl -X POST http://localhost:8765/api/network/revoke \
 
 ---
 
-## Capability Handler 承認
+## Capability Handler Authorization
 
-> **注意**: core_pack（store / secrets / flow / communication / docker）が提供する関数は、この候補導入ワークフローを経由せず、kernel 起動時に FunctionRegistry へ自動登録されます。以下の候補導入ワークフロー（scan → approve → Grant）は、ユーザー Pack が同梱するカスタム capability handler に対して適用されるものです。
+> **Note**: Functions provided by core_pack (store / secrets / flow / communication / docker) do not go through this candidate introduction workflow and are automatically registered in FunctionRegistry when the kernel starts. The following candidate introduction workflow (scan → approve → grant) is applied to the custom capability handler included in the user pack.
 
-Capability handler は 2 段階の操作で使用可能になります。
+The Capability handler becomes available in a two-step operation.
 
-1. **Trust 登録**（handler 承認）: scan で検出された候補を approve し、handler のコード（sha256）を信頼済みとして登録
-2. **Grant 付与**（権限付与）: 承認済み handler の permission を Pack に付与
+1. **Trust registration** (handler approval): Approve the candidates detected by scan and register the handler code (sha256) as trusted.
+2. **Grant** (permission grant): Grant permission of approved handler to Pack.
 
 ```
 候補スキャン (scan)
@@ -341,9 +344,9 @@ Grant 付与（principal × permission）
 Pack が capability を使用可能
 ```
 
-候補は scan → pending → approve/reject → blocked の状態遷移を辿ります。
+Candidates follow the state transition: scan → pending → approve/reject → blocked.
 
-### 候補のスキャン
+### Scan for candidates
 
 ```bash
 curl -X POST http://localhost:8765/api/capability/candidates/scan \
@@ -351,16 +354,16 @@ curl -X POST http://localhost:8765/api/capability/candidates/scan \
   -H "Content-Type: application/json"
 ```
 
-### 承認待ち一覧
+### Approval waiting list
 
 ```bash
 curl "http://localhost:8765/api/capability/requests?status=pending" \
   -H "Authorization: Bearer YOUR_TOKEN"
 ```
 
-### scan レスポンス
+### scan response
 
-候補スキャン後のレスポンス例:
+Example response after candidate scan:
 
 ```json
 {
@@ -385,11 +388,11 @@ curl "http://localhost:8765/api/capability/requests?status=pending" \
 }
 ```
 
-`candidate_key` の形式は `{pack_id}:{slug}:{handler_id}:{sha256}` です。sha256 を含めることで handler.py の内容が変わると別の候補として扱われます。
+The format of `candidate_key` is `{pack_id}:{slug}:{handler_id}:{sha256}`. If the contents of handler.py change by including sha256, it will be treated as a different candidate.
 
-### 候補の承認
+### Candidate approval
 
-`candidate_key` に含まれる `:` は URL エンコードが必要です。
+`:` contained in `candidate_key` requires URL encoding.
 
 ```bash
 ENCODED_KEY="my_pack%3Afs_read_v1%3Afs_read_handler%3Aabc123..."
@@ -400,9 +403,9 @@ curl -X POST "http://localhost:8765/api/capability/requests/${ENCODED_KEY}/appro
   -d '{"notes": "Reviewed and approved"}'
 ```
 
-approve は Trust（sha256 allowlist）の登録 + `user_data/capabilities/handlers/` へのコピー + Registry reload を行います。実際に使用するには別途 Grant の付与が必要です。
+approve registers Trust (sha256 allowlist) + copies to `user_data/capabilities/handlers/` + reloads Registry. A separate grant is required for actual use.
 
-### 候補の却下
+### Candidate Rejection
 
 ```bash
 curl -X POST "http://localhost:8765/api/capability/requests/${ENCODED_KEY}/reject" \
@@ -411,9 +414,9 @@ curl -X POST "http://localhost:8765/api/capability/requests/${ENCODED_KEY}/rejec
   -d '{"reason": "不要なファイルシステムアクセス"}'
 ```
 
-1 回目・2 回目は `rejected`（1 時間クールダウン）、3 回目で `blocked` になります。
+The first and second uses have a `rejected` (1 hour cooldown), and the third time has a `blocked`.
 
-### ブロック解除
+### Unblock
 
 ```bash
 curl -X POST "http://localhost:8765/api/capability/blocked/${ENCODED_KEY}/unblock" \
@@ -424,11 +427,11 @@ curl -X POST "http://localhost:8765/api/capability/blocked/${ENCODED_KEY}/unbloc
 
 ---
 
-## Capability Grant 管理
+## Capability Grant Management
 
-capability handler の approve 後、実際に Pack が capability を使用するには Grant（principal × permission）の付与が必要です。
+After the capability handler is approved, a Grant (principal × permission) is required for the Pack to actually use the capability.
 
-### Grant の付与
+### Grant Grant
 
 ```bash
 curl -X POST http://localhost:8765/api/capability/grants/grant \
@@ -437,14 +440,14 @@ curl -X POST http://localhost:8765/api/capability/grants/grant \
   -d '{"principal_id": "my_pack", "permission_id": "fs.read"}'
 ```
 
-### Grant の一覧
+### List of Grants
 
 ```bash
 curl "http://localhost:8765/api/capability/grants?principal_id=my_pack" \
   -H "Authorization: Bearer YOUR_TOKEN"
 ```
 
-### Grant の取り消し
+### Grant Revocation
 
 ```bash
 curl -X POST http://localhost:8765/api/capability/grants/revoke \
@@ -453,9 +456,9 @@ curl -X POST http://localhost:8765/api/capability/grants/revoke \
   -d '{"principal_id": "my_pack", "permission_id": "fs.read"}'
 ```
 
-### Grant の一括付与（バッチ）
+### Grant in bulk (batch)
 
-最大 50 件の Grant を一括で付与します。処理は best-effort（個別の失敗が他の付与を妨げない）です。
+Grant up to 50 grants at once. Processing is best-effort (individual failures do not prevent other grants).
 
 ```bash
 curl -X POST http://localhost:8765/api/capability/grants/batch \
@@ -470,14 +473,14 @@ curl -X POST http://localhost:8765/api/capability/grants/batch \
   }'
 ```
 
-| パラメータ | 必須 | 説明 |
+| Parameter | Required | Description |
 |-----------|------|------|
-| `grants` | ✅ | Grant オブジェクトの配列（最大 50 件） |
-| `grants[].principal_id` | ✅ | 対象 Pack ID |
-| `grants[].permission_id` | ✅ | 権限 ID |
-| `grants[].config` | 任意 | Grant 設定（`allowed_keys` 等） |
+| `grants` | ✅ | Array of Grant objects (up to 50) |
+| `grants[].principal_id` | ✅ | Target Pack ID |
+| `grants[].permission_id` | ✅ | Authorization ID |
+| `grants[].config` | Optional | Grant settings (`allowed_keys` etc.) |
 
-レスポンス例:
+Example response:
 
 ```json
 {
@@ -495,7 +498,7 @@ curl -X POST http://localhost:8765/api/capability/grants/batch \
 }
 ```
 
-### 全体フロー
+### Overall flow
 
 ```
 1. capability handler 候補をスキャン
@@ -512,11 +515,11 @@ curl -X POST http://localhost:8765/api/capability/grants/batch \
 
 ---
 
-## pip 依存ライブラリ管理
+## pip dependent library management
 
-Pack の pip 依存を scan → approve → インストールするワークフローです。
+This is a workflow to scan → approve → install pip dependencies of a pack.
 
-### 候補のスキャン
+### Scan for candidates
 
 ```bash
 curl -X POST http://localhost:8765/api/pip/candidates/scan \
@@ -524,16 +527,16 @@ curl -X POST http://localhost:8765/api/pip/candidates/scan \
   -H "Content-Type: application/json"
 ```
 
-### 承認待ち一覧
+### Approval waiting list
 
 ```bash
 curl "http://localhost:8765/api/pip/requests?status=pending" \
   -H "Authorization: Bearer YOUR_TOKEN"
 ```
 
-### 承認（インストール実行）
+### Approval (installation execution)
 
-`candidate_key` は URL エンコードが必要です。
+`candidate_key` requires URL encoding.
 
 ```bash
 KEY=$(python3 -c "from urllib.parse import quote; print(quote('my_pack:requirements.lock:abc123...', safe=''))")
@@ -544,9 +547,9 @@ curl -X POST "http://localhost:8765/api/pip/requests/${KEY}/approve" \
   -d '{"allow_sdist": false}'
 ```
 
-デフォルトは wheel のみ（`--only-binary=:all:`）。wheel が存在しないパッケージを含む場合は `"allow_sdist": true` を指定してください。
+The default is wheel only (`--only-binary=:all:`). If wheel includes a package that does not exist, please specify `"allow_sdist": true`.
 
-### 却下
+### Rejected
 
 ```bash
 curl -X POST "http://localhost:8765/api/pip/requests/${KEY}/reject" \
@@ -555,9 +558,9 @@ curl -X POST "http://localhost:8765/api/pip/requests/${KEY}/reject" \
   -d '{"reason": "不要なパッケージを含んでいる"}'
 ```
 
-1 回目・2 回目は `rejected`（1 時間クールダウン）、3 回目で `blocked` になります。
+The first and second uses have a `rejected` (1 hour cooldown), and the third time has a `blocked`.
 
-### ブロック解除
+### Unblock
 
 ```bash
 curl -X POST "http://localhost:8765/api/pip/blocked/${KEY}/unblock" \
@@ -566,22 +569,22 @@ curl -X POST "http://localhost:8765/api/pip/blocked/${KEY}/unblock" \
   -d '{"reason": "再評価の結果許可"}'
 ```
 
-### 前提条件
+### Prerequisites
 
-Pack が承認済み（approved 状態）であることが前提です。未承認 Pack の依存導入は strict モードで拒否されます。
+It is assumed that the Pack is in an approved state. Dependent deployments of unapproved Packs are rejected in strict mode.
 
 ---
 
-## Secrets 管理
+## Secrets management
 
-### キー一覧（値はマスク）
+### Key list (value is masked)
 
 ```bash
 curl http://localhost:8765/api/secrets \
   -H "Authorization: Bearer YOUR_TOKEN"
 ```
 
-### 秘密値の設定
+### Setting secret value
 
 ```bash
 curl -X POST http://localhost:8765/api/secrets/set \
@@ -590,7 +593,7 @@ curl -X POST http://localhost:8765/api/secrets/set \
   -d '{"key": "OPENAI_API_KEY", "value": "sk-..."}'
 ```
 
-### 秘密値の削除
+### Delete secret value
 
 ```bash
 curl -X POST http://localhost:8765/api/secrets/delete \
@@ -599,37 +602,37 @@ curl -X POST http://localhost:8765/api/secrets/delete \
   -d '{"key": "OPENAI_API_KEY"}'
 ```
 
-秘密値は `user_data/secrets/` に 1 key = 1 file で格納されます。API で再表示はできません（set と delete のみ）。ログに秘密値は一切出力されません。
+The secret value is stored in `user_data/secrets/` with 1 key = 1 file. It cannot be redisplayed using the API (set and delete only). No secret values ​​are output to the log.
 
-### 暗号化
+### Encryption
 
-秘密値は Fernet（AES-128-CBC + HMAC-SHA256）で暗号化されて保存されます。暗号化鍵は以下の優先順で取得されます。
+The secret value is stored encrypted using Fernet (AES-128-CBC + HMAC-SHA256). Encryption keys are obtained in the following priority order:
 
-1. 環境変数 `RUMI_SECRETS_KEY`（Base64 エンコードされた Fernet 鍵）
-2. `user_data/settings/.secrets_key` ファイル
-3. 上記いずれも存在しない場合、鍵を自動生成して `.secrets_key` に保存
+1. Environment variable `RUMI_SECRETS_KEY` (Base64 encoded Fernet key)
+2. `user_data/settings/.secrets_key` File
+3. If none of the above exist, automatically generate a key and save it in `.secrets_key`
 
-### 鍵のバックアップ
+### Key Backup
 
-暗号化鍵を紛失すると既存の秘密値は復号できなくなります。`user_data/settings/.secrets_key` を安全な場所にバックアップしてください。環境変数 `RUMI_SECRETS_KEY` で鍵を外部管理する場合も同様にバックアップが必要です。
+If the encryption key is lost, the existing secret value cannot be decrypted. Please back up `user_data/settings/.secrets_key` to a safe location. A backup is also required when managing keys externally using the environment variable `RUMI_SECRETS_KEY`.
 
-### 平文モード
+### Plaintext mode
 
-`RUMI_SECRETS_ALLOW_PLAINTEXT` で暗号化なしの保存を制御できます。
+You can control unencrypted storage with `RUMI_SECRETS_ALLOW_PLAINTEXT`.
 
-| 値 | 動作 |
+| Value | Behavior |
 |-----|------|
-| `auto`（デフォルト） | 暗号化鍵が利用可能なら暗号化、なければ平文で保存 |
-| `true` | 常に平文での保存を許可 |
-| `false` | 暗号化鍵が必須。鍵がない場合は秘密値の保存を拒否 |
+| `auto` (default) | Encrypt if encryption key is available, otherwise save as plain text |
+| `true` | Always allow storage in plain text |
+| `false` | Encryption key required. Refuse to store secret value if key is missing |
 
-本番環境では `RUMI_SECRETS_ALLOW_PLAINTEXT=false` を推奨します。
+`RUMI_SECRETS_ALLOW_PLAINTEXT=false` is recommended for production environments.
 
 ---
 
 ## Pack Import / Apply
 
-### Import（staging への取り込み）
+### Import (into staging)
 
 ```bash
 curl -X POST http://localhost:8765/api/packs/import \
@@ -638,9 +641,9 @@ curl -X POST http://localhost:8765/api/packs/import \
   -d '{"path": "/path/to/my_pack.zip"}'
 ```
 
-フォルダ / `.zip` / `.rumipack`（zip 互換）に対応しています。
+Supports folders / `.zip` / `.rumipack` (zip compatible).
 
-### Apply（staging から ecosystem へ適用）
+### Apply (apply from staging to ecosystem)
 
 ```bash
 curl -X POST http://localhost:8765/api/packs/apply \
@@ -649,22 +652,22 @@ curl -X POST http://localhost:8765/api/packs/apply \
   -d '{"staging_id": "abc123"}'
 ```
 
-apply 時にバックアップが自動作成されます。`pack_id` と `pack_identity` が既存 Pack と不一致の場合は拒否されます。
+A backup is automatically created during apply. If `pack_id` and `pack_identity` do not match the existing Pack, it will be rejected.
 
 ---
 
-## 共有ストア管理
+## Shared store management
 
-Pack 間で Store を共有するための管理 API です。共有リクエストは手動承認が必要です（SharedStoreManager）。
+A management API for sharing Stores between Packs. Share requests require manual approval (SharedStoreManager).
 
-### 共有ストア一覧
+### List of shared stores
 
 ```bash
 curl http://localhost:8765/api/stores/shared \
   -H "Authorization: Bearer YOUR_TOKEN"
 ```
 
-レスポンス例:
+Example response:
 
 ```json
 {
@@ -683,7 +686,7 @@ curl http://localhost:8765/api/stores/shared \
 }
 ```
 
-### 共有ストア承認
+### Shared Store Authorization
 
 ```bash
 curl -X POST http://localhost:8765/api/stores/shared/approve \
@@ -696,13 +699,13 @@ curl -X POST http://localhost:8765/api/stores/shared/approve \
   }'
 ```
 
-| パラメータ | 必須 | 説明 |
+| Parameter | Required | Description |
 |-----------|------|------|
-| `store_id` | ✅ | 共有対象の Store ID |
-| `owner_pack` | ✅ | Store の所有 Pack ID |
-| `target_pack` | ✅ | 共有先の Pack ID |
+| `store_id` | ✅ | Store ID to share |
+| `owner_pack` | ✅ | Store Owned Pack ID |
+| `target_pack` | ✅ | Pack ID to share |
 
-レスポンス例:
+Example response:
 
 ```json
 {
@@ -717,7 +720,7 @@ curl -X POST http://localhost:8765/api/stores/shared/approve \
 }
 ```
 
-### 共有ストア取消
+### Shared Store Cancellation
 
 ```bash
 curl -X POST http://localhost:8765/api/stores/shared/revoke \
@@ -730,13 +733,13 @@ curl -X POST http://localhost:8765/api/stores/shared/revoke \
   }'
 ```
 
-| パラメータ | 必須 | 説明 |
+| Parameter | Required | Description |
 |-----------|------|------|
-| `store_id` | ✅ | 対象の Store ID |
-| `owner_pack` | ✅ | Store の所有 Pack ID |
-| `target_pack` | ✅ | 共有を取り消す Pack ID |
+| `store_id` | ✅ | Target Store ID |
+| `owner_pack` | ✅ | Store Owned Pack ID |
+| `target_pack` | ✅ | Cancel sharing Pack ID |
 
-レスポンス例:
+Example response:
 
 ```json
 {
@@ -751,23 +754,23 @@ curl -X POST http://localhost:8765/api/stores/shared/revoke \
 
 ---
 
-## Docker / コンテナ管理
+## Docker / Container management
 
-### Docker 状態確認
+### Check Docker status
 
 ```bash
 curl http://localhost:8765/api/docker/status \
   -H "Authorization: Bearer YOUR_TOKEN"
 ```
 
-### コンテナ一覧
+### Container list
 
 ```bash
 curl http://localhost:8765/api/containers \
   -H "Authorization: Bearer YOUR_TOKEN"
 ```
 
-### コンテナ起動 / 停止
+### Container start/stop
 
 ```bash
 # 起動
@@ -781,16 +784,16 @@ curl -X POST http://localhost:8765/api/containers/{pack_id}/stop \
 
 ---
 
-## Flow 実行
+## Flow execution
 
-### Flow 一覧の取得
+### Get flow list
 
 ```bash
 curl http://localhost:8765/api/flows \
   -H "Authorization: Bearer YOUR_TOKEN"
 ```
 
-### Flow の実行
+### Running a Flow
 
 ```bash
 curl -X POST http://localhost:8765/api/flows/hello/run \
@@ -799,11 +802,11 @@ curl -X POST http://localhost:8765/api/flows/hello/run \
   -d '{"inputs": {"name": "World"}, "timeout": 300}'
 ```
 
-`inputs` は Flow の入力データ（dict）、`timeout` は最大実行時間（秒、デフォルト 300、最大 600）です。
+`inputs` is the Flow input data (dict), `timeout` is the maximum execution time (seconds, default 300, maximum 600).
 
-同時実行数は `RUMI_MAX_CONCURRENT_FLOWS` 環境変数で制限されます（デフォルト 10）。上限に達した場合はステータスコード `429` が返却されます。
+The number of concurrent runs is limited by the `RUMI_MAX_CONCURRENT_FLOWS` environment variable (default 10). If the limit is reached, status code `429` will be returned.
 
-### 成功レスポンス
+### Successful response
 
 ```json
 {
@@ -816,9 +819,9 @@ curl -X POST http://localhost:8765/api/flows/hello/run \
 }
 ```
 
-`result` には Flow の outputs が格納されます。ただし `_` プレフィックスで始まるキー（`_kernel_step_status` 等の内部キー）は自動的に除外されます。
+`result` stores Flow outputs. However, keys starting with the `_` prefix (internal keys such as `_kernel_step_status`) are automatically excluded.
 
-### エラーレスポンス
+### Error response
 
 ```json
 {
@@ -829,32 +832,32 @@ curl -X POST http://localhost:8765/api/flows/hello/run \
 }
 ```
 
-| status_code | 説明 |
+| status_code | description |
 |-------------|------|
-| `404` | 指定された `flow_id` が存在しない |
-| `408` | Flow 実行がタイムアウトした |
-| `429` | 同時実行数上限（`RUMI_MAX_CONCURRENT_FLOWS`）に到達 |
-| `500` | Flow 実行中に予期しないエラーが発生 |
-| `503` | システムが一時的に利用不可（起動中等） |
+| `404` | Specified `flow_id` does not exist |
+| `408` | Flow execution timed out |
+| `429` | Concurrent execution limit (`RUMI_MAX_CONCURRENT_FLOWS`) reached |
+| `500` | An unexpected error occurred while running Flow |
+| `503` | System temporarily unavailable (startup, etc.) |
 
-### レスポンスサイズ制限
+### Response size limit
 
-Flow の実行結果は `RUMI_MAX_RESPONSE_BYTES`（デフォルト 4MB）を超える場合、切り詰められます。切り詰めが発生した場合、レスポンスに `"truncated": true` が付与されます。
+Flow execution results will be truncated if they exceed `RUMI_MAX_RESPONSE_BYTES` (default 4MB). If truncation occurs, the response will be marked with `"truncated": true`.
 
 ---
 
-## 特権管理（Privileges）
+## Privileges management
 
-Pack に対して特権的操作（例: `pack.update`、`system.restart` 等）を許可・実行するための API です。Capability Grant とは独立した仕組みで、ホスト側の危険な操作を明示的に許可するために使用します。
+This is an API for allowing and executing privileged operations (e.g. `pack.update`, `system.restart`, etc.) on Pack. It is a mechanism independent of the Capability Grant, and is used to explicitly permit dangerous operations on the host side.
 
-### 特権一覧
+### Privilege list
 
 ```bash
 curl http://localhost:8765/api/privileges \
   -H "Authorization: Bearer YOUR_TOKEN"
 ```
 
-レスポンス例:
+Example response:
 
 ```json
 {
@@ -876,7 +879,7 @@ curl http://localhost:8765/api/privileges \
 }
 ```
 
-### 特権付与
+### Privilege Grant
 
 ```bash
 curl -X POST http://localhost:8765/api/privileges/{pack_id}/grant/{privilege_id} \
@@ -884,12 +887,12 @@ curl -X POST http://localhost:8765/api/privileges/{pack_id}/grant/{privilege_id}
   -H "Content-Type: application/json"
 ```
 
-| パラメータ | 必須 | 説明 |
+| Parameter | Required | Description |
 |-----------|------|------|
-| `pack_id`（パスパラメータ） | ✅ | 対象 Pack ID |
-| `privilege_id`（パスパラメータ） | ✅ | 付与する特権 ID |
+| `pack_id` (Path parameter) | ✅ | Target Pack ID |
+| `privilege_id` (Path parameter) | ✅ | Privilege ID to be granted |
 
-レスポンス例:
+Example response:
 
 ```json
 {
@@ -902,7 +905,7 @@ curl -X POST http://localhost:8765/api/privileges/{pack_id}/grant/{privilege_id}
 }
 ```
 
-### 特権実行
+### Privileged execution
 
 ```bash
 curl -X POST http://localhost:8765/api/privileges/{pack_id}/execute/{privilege_id} \
@@ -911,13 +914,13 @@ curl -X POST http://localhost:8765/api/privileges/{pack_id}/execute/{privilege_i
   -d '{"args": {"target_pack": "my_pack", "staging_id": "abc123"}}'
 ```
 
-| パラメータ | 必須 | 説明 |
+| Parameter | Required | Description |
 |-----------|------|------|
-| `pack_id`（パスパラメータ） | ✅ | 実行元 Pack ID |
-| `privilege_id`（パスパラメータ） | ✅ | 実行する特権 ID |
-| `args`（ボディ） | 任意 | 特権操作に渡す引数 |
+| `pack_id` (path parameter) | ✅ | Execution source Pack ID |
+| `privilege_id` (path parameter) | ✅ | Privilege ID to execute |
+| `args` (body) | Optional | Arguments to be passed to privileged operations |
 
-レスポンス例:
+Example response:
 
 ```json
 {
@@ -931,45 +934,45 @@ curl -X POST http://localhost:8765/api/privileges/{pack_id}/execute/{privilege_i
 }
 ```
 
-特権が付与されていない Pack からの実行リクエストは `403 Forbidden` で拒否されます。
+Execution requests from unprivileged Packs are rejected with `403 Forbidden`.
 
 ---
 
-## UDS ソケット設定
+## UDS socket settings
 
-strict モードで Pack 実行コンテナから UDS ソケットにアクセスするための設定です。
+Settings for accessing the UDS socket from the Pack execution container in strict mode.
 
-### 環境変数
+### Environment variables
 
-| 環境変数 | 説明 | デフォルト |
+| Environment variables | Description | Default |
 |----------|------|-----------|
-| `RUMI_EGRESS_SOCKET_GID` | Egress ソケットの GID | なし |
-| `RUMI_CAPABILITY_SOCKET_GID` | Capability ソケットの GID | なし |
-| `RUMI_EGRESS_SOCKET_MODE` | Egress ソケットのパーミッション | `0660` |
-| `RUMI_CAPABILITY_SOCKET_MODE` | Capability ソケットのパーミッション | `0660` |
-| `RUMI_EGRESS_SOCK_DIR` | Egress ソケットのベースディレクトリ | `/run/rumi/egress/packs` |
-| `RUMI_CAPABILITY_SOCK_DIR` | Capability ソケットのベースディレクトリ | `/run/rumi/capability/principals` |
+| `RUMI_EGRESS_SOCKET_GID` | Egress socket GID | None |
+| `RUMI_CAPABILITY_SOCKET_GID` | Capability Socket GID | None |
+| `RUMI_EGRESS_SOCKET_MODE` | Egress socket permissions | `0660` |
+| `RUMI_CAPABILITY_SOCKET_MODE` | Capability Socket permissions | `0660` |
+| `RUMI_EGRESS_SOCK_DIR` | Egress socket base directory | `/run/rumi/egress/packs` |
+| `RUMI_CAPABILITY_SOCK_DIR` | Capability Socket base directory | `/run/rumi/capability/principals` |
 
-### 設定手順
+### Configuration steps
 
-1. 専用 GID を決定（例: 1099）
-2. 環境変数を設定:
+1. Determine your dedicated GID (e.g. 1099)
+2. Set environment variables:
    ```bash
    export RUMI_EGRESS_SOCKET_GID=1099
    export RUMI_CAPABILITY_SOCKET_GID=1099
    ```
-3. ソケット作成時に指定 GID の group が自動設定されます
-4. `docker run` 時に `--group-add=1099` が自動付与されます
+3. The group of the specified GID is automatically set when creating the socket.
+4. `--group-add=1099` will be automatically granted when `docker run`
 
-GID が未設定の場合、コンテナ（nobody:65534）からソケットにアクセスできません。
+If the GID is not set, the socket cannot be accessed from the container (nobody:65534).
 
 ---
 
-## 監査ログの読み方
+## How to read audit logs
 
-監査ログは `user_data/audit/` に `{category}_{YYYY-MM-DD}.jsonl` の形式で保存されます。
+Audit logs are stored in `user_data/audit/` in `{category}_{YYYY-MM-DD}.jsonl` format.
 
-### 基本的な読み方
+### Basic reading
 
 ```bash
 # 今日のネットワークログ
@@ -997,24 +1000,24 @@ cat user_data/settings/shared_dict/journal.jsonl | jq .
 cat user_data/settings/shared_dict/journal.jsonl | jq 'select(.result == "cycle_detected")'
 ```
 
-### カテゴリ一覧
+### Category list
 
-| カテゴリ | 内容 |
+| Category | Contents |
 |----------|------|
-| `flow_execution` | Flow 実行 |
-| `modifier_application` | Modifier 適用 |
-| `python_file_call` | ブロック実行 |
-| `approval` | Pack 承認操作 |
-| `permission` | 権限操作 |
-| `network` | ネットワーク通信 |
-| `security` | セキュリティイベント |
-| `system` | システムイベント |
+| `flow_execution` | Flow execution |
+| `modifier_application` | Apply Modifier |
+| `python_file_call` | Block execution |
+| `approval` | Pack approval operation |
+| `permission` | Authority operations |
+| `network` | Network communication |
+| `security` | Security event |
+| `system` | System events |
 
 ---
 
 ## Pending Export
 
-起動時に `user_data/pending/summary.json` が自動生成されます。外部ツールはこのファイルを読むだけで承認待ち状況を把握できます。
+`user_data/pending/summary.json` is automatically generated at startup. External tools can understand the approval status just by reading this file.
 
 ```bash
 cat user_data/pending/summary.json | jq .
@@ -1022,19 +1025,19 @@ cat user_data/pending/summary.json | jq .
 
 ---
 
-## 認証トークン
+## Authentication token
 
-全ての HTTP API エンドポイントは `Authorization: Bearer YOUR_TOKEN` ヘッダーによる認証が必須です。トークンは HMAC 鍵から導出されます。
+All HTTP API endpoints require authentication using the `Authorization: Bearer YOUR_TOKEN` header. The token is derived from the HMAC key.
 
-### トークンの確認
+### Verify token
 
-起動時にトークンがコンソールに表示されます。また、HMAC 鍵ファイル（`user_data/settings/.hmac_key`）から導出されるため、同じ鍵ファイルが存在する限りトークンは不変です。
+The token will be displayed in the console at startup. Additionally, since it is derived from the HMAC key file (`user_data/settings/.hmac_key`), the token is immutable as long as the same key file exists.
 
-鍵ファイルが存在しない場合は初回起動時に自動生成されます。
+If the key file does not exist, it will be automatically generated at the first startup.
 
-### トークンのローテーション
+### Token rotation
 
-HMAC 鍵をローテーション（再生成）することでトークンが変更されます。
+The token changes by rotating (regenerating) the HMAC key.
 
 ```bash
 # HMAC 鍵ローテーションを有効にして起動
@@ -1042,22 +1045,22 @@ export RUMI_HMAC_ROTATE=true
 python app.py
 ```
 
-`RUMI_HMAC_ROTATE=true` を設定すると、次回起動時に既存の HMAC 鍵が新しい鍵で置き換えられます。ローテーション後は以前のトークンは無効になるため、全ての API クライアントの設定を更新してください。
+Setting `RUMI_HMAC_ROTATE=true` will replace the existing HMAC key with the new key on next boot. After rotation, the previous tokens will no longer be valid, so please update the configuration of all API clients.
 
-ローテーションは一度だけ実行されます。ローテーション完了後は `RUMI_HMAC_ROTATE` を `false` に戻すか、環境変数を削除してください。
+Rotation is performed only once. After the rotation is complete, return `RUMI_HMAC_ROTATE` to `false` or delete the environment variable.
 
 ---
 
-## 構造化ログ設定
+## Structured log settings
 
-### 環境変数
+### Environment variables
 
-| 環境変数 | 説明 | デフォルト |
+| Environment variables | Description | Default |
 |----------|------|-----------|
-| `RUMI_LOG_LEVEL` | ログレベル。DEBUG / INFO / WARNING / ERROR / CRITICAL | `INFO` |
-| `RUMI_LOG_FORMAT` | 出力形式。json / text | `json` |
+| `RUMI_LOG_LEVEL` | Log level. DEBUG / INFO / WARNING / ERROR / CRITICAL | `INFO` |
+| `RUMI_LOG_FORMAT` | Output format. json/text | `json` |
 
-### 設定方法
+### How to set up
 
 ```bash
 export RUMI_LOG_LEVEL=DEBUG
@@ -1065,15 +1068,15 @@ export RUMI_LOG_FORMAT=text
 python app.py --headless
 ```
 
-app.py 起動時に `configure_logging()` が自動的に呼ばれ、`rumi.*` 名前空間のロガーに適用されます。
+`configure_logging()` is automatically called when app.py starts and applies to loggers in the `rumi.*` namespace.
 
-### JSON 形式の出力例
+### JSON format output example
 
 ```json
 {"timestamp": "2026-02-24T12:00:00.000000Z", "level": "INFO", "module": "rumi.kernel.core", "message": "Flow loaded", "correlation_id": "req-123"}
 ```
 
-### テキスト形式の出力例
+### Text format output example
 
 ```
 2026-02-24T12:00:00.000000Z [INFO] rumi.kernel.core - Flow loaded (correlation_id=req-123)
@@ -1081,22 +1084,22 @@ app.py 起動時に `configure_logging()` が自動的に呼ばれ、`rumi.*` �
 
 ---
 
-## 非推奨警告レベル制御
+## Deprecation warning level control
 
-### 環境変数
+### Environment variables
 
-| 環境変数 | 説明 | デフォルト |
+| Environment variables | Description | Default |
 |----------|------|-----------|
-| `RUMI_DEPRECATION_LEVEL` | 非推奨 API 呼び出し時の動作 | `warn` |
+| `RUMI_DEPRECATION_LEVEL` | Behavior when calling deprecated API | `warn` |
 
-| 値 | 動作 |
+| Value | Behavior |
 |-----|------|
-| `warn` | `DeprecationWarning` を `warnings.warn` で発行 |
-| `error` | `DeprecationWarning` 例外を送出 |
-| `silent` | 何もしない |
-| `log` | `logging` で WARNING レベル出力 |
+| `warn` | `DeprecationWarning` published as `warnings.warn` |
+| `error` | `DeprecationWarning` Raise exception |
+| `silent` | Do nothing |
+| `log` | WARNING level output at `logging` |
 
-### 設定例
+### Setting example
 
 ```bash
 export RUMI_DEPRECATION_LEVEL=error
@@ -1105,17 +1108,17 @@ python app.py --headless
 
 ---
 
-## ヘルスチェック運用
+## Health check operation
 
-### CLI でのチェック
+### Check with CLI
 
 ```bash
 python app.py --health
 ```
 
-status が `"UP"` なら exit code 0、それ以外は exit code 1 を返します。
+If status is `"UP"`, exit code 0 is returned, otherwise exit code 1 is returned.
 
-### プログラムからの利用
+### Programmatic usage
 
 ```python
 from core_runtime.health import get_health_checker, probe_disk_space
@@ -1125,7 +1128,7 @@ result = checker.aggregate_health()
 # result["status"]: "UP" / "DOWN" / "DEGRADED" / "UNKNOWN"
 ```
 
-### カスタムプローブの追加
+### Adding a custom probe
 
 ```python
 from core_runtime.health import HealthStatus
@@ -1137,9 +1140,9 @@ checker.register_probe("my_service", my_probe)
 
 ---
 
-## メトリクス確認
+## Check metrics
 
-### スナップショットの取得
+### Taking a snapshot
 
 ```python
 from core_runtime.metrics import get_metrics_collector
@@ -1148,43 +1151,43 @@ snapshot = collector.snapshot()
 # snapshot["counters"], snapshot["gauges"], snapshot["histograms"]
 ```
 
-### 自動収集メトリクス
+### Automatically collected metrics
 
-Wave 15 で以下のメトリクスが自動的に収集されます。
+The following metrics are automatically collected in Wave 15:
 
-| メトリクス名 | 種別 | 説明 | labels |
+| Metric name | Type | Description | labels |
 |-------------|------|------|--------|
-| `flow.step.success` | counter | ステップ実行成功カウント | handler |
-| `flow.step.error` | counter | ステップ実行失敗カウント | handler |
-| `flow.execution.complete` | counter | Flow 実行完了カウント | flow_id |
-| `docker.available` | gauge | Docker 利用可否 | — |
-| `container.start.success` | counter | コンテナ起動成功カウント | — |
-| `container.start.failed` | counter | コンテナ起動失敗カウント | — |
-| `flows.registered` | gauge | 登録済み Flow 数 | — |
-| `python_file_call.duration_ms` | histogram | Python ファイル実行時間（ミリ秒） | — |
+| `flow.step.success` | counter | Step execution success count | handler |
+| `flow.step.error` | counter | Step execution failure count | handler |
+| `flow.execution.complete` | counter | Flow execution completion count | flow_id |
+| `docker.available` | gauge | Docker availability | — |
+| `container.start.success` | counter | Container startup success count | — |
+| `container.start.failed` | counter | Container startup failure count | — |
+| `flows.registered` | gauge | Number of registered flows | — |
+| `python_file_call.duration_ms` | histogram | Python file execution time (ms) | — |
 
 ---
 
-## Pack テンプレート生成 (scaffold)
+## Pack template generation (scaffold)
 
-新規 Pack のひな形を生成するコマンドラインツールです。
+A command line tool that generates a new Pack template.
 
-### 使い方
+### How to use
 
 ```bash
 python -m core_runtime.pack_scaffold <pack_id> [--template TEMPLATE] [--output-dir DIR]
 ```
 
-### テンプレート一覧
+### Template list
 
-| テンプレート | 説明 |
+| Template | Description |
 |-------------|------|
-| `minimal`（デフォルト） | 最小構成（ecosystem.json + run.py） |
-| `capability` | Capability Handler 付き |
-| `flow` | Flow 定義付き |
-| `full` | 全部入り |
+| `minimal` (default) | Minimal configuration (ecosystem.json + run.py) |
+| `capability` | With Capability Handler |
+| `flow` | With Flow definition |
+| `full` | All included |
 
-### 実行例
+### Execution example
 
 ```bash
 python -m core_runtime.pack_scaffold my-pack --template full --output-dir ecosystem/
@@ -1192,65 +1195,65 @@ python -m core_runtime.pack_scaffold my-pack --template full --output-dir ecosys
 
 ---
 
-## エラーコードリファレンス
+## Error code reference
 
-エラーコードは `RUMI-{カテゴリ}-{3桁番号}` の形式で体系化されています。各エラーには suggestion（解決策提案）が付属します。
+Error codes are organized in the format `RUMI-{CATEGORY}-{3_DIGIT_NUMBER}`. Each error comes with a suggestion.
 
-### カテゴリ一覧
+### Category list
 
-| カテゴリ | 説明 | 例 |
+| Categories | Description | Examples |
 |---------|------|-----|
-| `AUTH` | 認証・認可 | `RUMI-AUTH-001`（トークン無効） |
-| `NET` | ネットワーク | `RUMI-NET-001`（接続失敗） |
-| `FLOW` | フロー実行 | `RUMI-FLOW-001`（Flow 未発見） |
-| `PACK` | Pack 管理 | `RUMI-PACK-001`（pack_id 無効） |
-| `CAP` | Capability | `RUMI-CAP-001`（Capability 未発見） |
-| `VAL` | バリデーション | `RUMI-VAL-001`（空値） |
-| `SYS` | システム全般 | `RUMI-SYS-001`（内部エラー） |
+| `AUTH` | Authentication/Authorization | `RUMI-AUTH-001` (Token invalid) |
+| `NET` | Network | `RUMI-NET-001` (Connection failure) |
+| `FLOW` | Flow execution | `RUMI-FLOW-001` (Flow not discovered) |
+| `PACK` | Pack management | `RUMI-PACK-001` (pack_id invalid) |
+| `CAP` | Capability | `RUMI-CAP-001` (Capability not discovered) |
+| `VAL` | Validation | `RUMI-VAL-001` (empty value) |
+| `SYS` | System general | `RUMI-SYS-001` (internal error) |
 
 ---
 
-## 環境変数リファレンス
+## Environment variable reference
 
-Rumi AI OS の動作を制御する環境変数の一覧です。
+A list of environment variables that control Rumi AI OS behavior.
 
-| 変数名 | デフォルト | 説明 |
+| Variable name | Default | Description |
 |--------|-----------|------|
-| `RUMI_SECURITY_MODE` | `strict` | セキュリティモード。`strict`（Docker 必須）または `permissive`（Docker 不要、開発用） |
-| `RUMI_LOG_LEVEL` | `INFO` | ログレベル。`DEBUG` / `INFO` / `WARNING` / `ERROR` / `CRITICAL` |
-| `RUMI_LOG_FORMAT` | `json` | ログ出力形式。`json`（構造化 JSON）または `text`（人間向けテキスト） |
-| `RUMI_DEPRECATION_LEVEL` | `warn` | 非推奨 API 呼び出し時の動作。`warn` / `error` / `silent` / `log` |
-| `RUMI_SECRETS_KEY` | なし | Secrets の Fernet 暗号化に使用する鍵（Base64 エンコード）。設定されていない場合は `.secrets_key` ファイルまたは自動生成にフォールバック |
-| `RUMI_SECRETS_ALLOW_PLAINTEXT` | `auto` | 平文シークレットの許可。`auto`（暗号化鍵がなければ平文で保存）、`true`（常に平文を許可）、`false`（暗号化鍵が必須、鍵がなければ保存拒否） |
-| `RUMI_MAX_RESPONSE_BYTES` | `4194304`（4MB） | Flow 実行結果および Egress Proxy レスポンスの最大サイズ（バイト） |
-| `RUMI_MAX_CONCURRENT_FLOWS` | `10` | 同時 Flow 実行数の上限 |
-| `RUMI_MAX_REQUEST_BODY_BYTES` | `1048576`（1MB） | HTTP API が受け付けるリクエストボディの最大サイズ（バイト） |
-| `RUMI_API_BIND_ADDRESS` | `127.0.0.1` | API サーバーのバインドアドレス。外部公開する場合は `0.0.0.0` に変更（非推奨） |
-| `RUMI_CORS_ORIGINS` | なし | CORS 許可オリジンのカンマ区切りリスト（例: `http://localhost:3000,http://localhost:8080`） |
-| `RUMI_HMAC_ROTATE` | `false` | `true` に設定すると次回起動時に HMAC 鍵をローテーション |
-| `RUMI_DIAGNOSTICS_VERBOSE` | `false` | `true` に設定すると診断ログに詳細情報を含める |
-| `RUMI_EGRESS_SOCKET_GID` | なし | Egress UDS ソケットの GID。strict モードでコンテナからソケットにアクセスするために必要 |
-| `RUMI_CAPABILITY_SOCKET_GID` | なし | Capability UDS ソケットの GID。strict モードでコンテナからソケットにアクセスするために必要 |
-| `RUMI_EGRESS_SOCKET_MODE` | `0660` | Egress UDS ソケットのパーミッション |
-| `RUMI_CAPABILITY_SOCKET_MODE` | `0660` | Capability UDS ソケットのパーミッション |
-| `RUMI_EGRESS_SOCK_DIR` | `/run/rumi/egress/packs` | Egress UDS ソケットのベースディレクトリ |
-| `RUMI_CAPABILITY_SOCK_DIR` | `/run/rumi/capability/principals` | Capability UDS ソケットのベースディレクトリ |
-| `RUMI_SECRET_GET_RATE_LIMIT` | `60` | `secrets.get` の rate limit（回/分/Pack、sliding window） |
-| `RUMI_LOCAL_PACK_MODE` | `off` | local_pack 互換モード。`off`（無効）または `require_approval`（承認必須で有効、非推奨） |
+| `RUMI_SECURITY_MODE` | `strict` | Security mode. `strict` (Docker required) or `permissive` (Docker not required, for development) |
+| `RUMI_LOG_LEVEL` | `INFO` | Log level. `DEBUG` / `INFO` / `WARNING` / `ERROR` / `CRITICAL` |
+| `RUMI_LOG_FORMAT` | `json` | Log output format. `json` (Structured JSON) or `text` (Human Text) |
+| `RUMI_DEPRECATION_LEVEL` | `warn` | Behavior when calling deprecated APIs. `warn` / `error` / `silent` / `log` |
+| `RUMI_SECRETS_KEY` | None | Key used for Fernet encryption of Secrets (Base64 encoded). If not set, fallback to `.secrets_key` file or auto-generation |
+| `RUMI_SECRETS_ALLOW_PLAINTEXT` | `auto` | Allowing plaintext secrets. `auto` (Save as plain text if encryption key is not available), `true` (Always allow plain text), `false` (Encryption key required, storage denied without key) |
+| `RUMI_MAX_RESPONSE_BYTES` | `4194304` (4MB) | Maximum size of Flow execution results and Egress Proxy response (bytes) |
+| `RUMI_MAX_CONCURRENT_FLOWS` | `10` | Upper limit on the number of simultaneous Flow executions |
+| `RUMI_MAX_REQUEST_BODY_BYTES` | `1048576` (1MB) | Maximum size of request body accepted by HTTP API (bytes) |
+| `RUMI_API_BIND_ADDRESS` | `127.0.0.1` | API server bind address. If publishing externally, change to `0.0.0.0` (not recommended) |
+| `RUMI_CORS_ORIGINS` | None | Comma-separated list of CORS allowed origins (e.g. `http://localhost:3000,http://localhost:8080`) |
+| `RUMI_HMAC_ROTATE` | `false` | If set to `true`, the HMAC key will be rotated at the next startup |
+| `RUMI_DIAGNOSTICS_VERBOSE` | `false` | Set to `true` to include detailed information in the diagnostic log |
+| `RUMI_EGRESS_SOCKET_GID` | None | GID of the Egress UDS socket. | `RUMI_EGRESS_SOCKET_GID` | None | GID of the Egress UDS socket. Required to access sockets from containers in strict mode |
+| `RUMI_CAPABILITY_SOCKET_GID` | None | Capability UDS socket GID. Required to access sockets from containers in strict mode |
+| `RUMI_EGRESS_SOCKET_MODE` | `0660` | Egress UDS socket permissions |
+| `RUMI_CAPABILITY_SOCKET_MODE` | `0660` | Capability UDS socket permissions |
+| `RUMI_EGRESS_SOCK_DIR` | `/run/rumi/egress/packs` | Egress UDS socket base directory |
+| `RUMI_CAPABILITY_SOCK_DIR` | `/run/rumi/capability/principals` | Capability UDS socket base directory |
+| `RUMI_SECRET_GET_RATE_LIMIT` | `60` | `secrets.get` rate limit (times/min/Pack, sliding window) |
+| `RUMI_LOCAL_PACK_MODE` | `off` | local_pack compatibility mode. `off` (disabled) or `require_approval` (valid with approval required, not recommended) |
 
 ---
 
-## トラブルシューティング
+## Troubleshooting
 
-### Docker が利用できない
+### Docker not available
 
 ```
 Error: Docker is required but not available
 ```
 
-開発時は `--permissive` フラグを使用するか、環境変数 `RUMI_SECURITY_MODE=permissive` を設定してください。
+When developing, please use the `--permissive` flag or set the environment variable `RUMI_SECURITY_MODE=permissive`.
 
-### Pack が承認されない
+### Pack not approved
 
 ```bash
 # 承認待ちを確認
@@ -1262,16 +1265,16 @@ curl -X POST http://localhost:8765/api/packs/{pack_id}/approve \
   -H "Authorization: Bearer YOUR_TOKEN"
 ```
 
-### Pack が無効化された（Modified）
+### Pack Modified
 
-ファイル変更でハッシュ不一致になると自動無効化されます。再承認してください。
+It will be automatically disabled if the hash mismatch occurs due to file changes. Please re-authorize.
 
 ```bash
 curl -X POST http://localhost:8765/api/packs/{pack_id}/approve \
   -H "Authorization: Bearer YOUR_TOKEN"
 ```
 
-### ネットワークアクセスが拒否される
+### Network access is denied
 
 ```bash
 # Grant 状態を確認
@@ -1285,9 +1288,9 @@ curl -X POST http://localhost:8765/api/network/grant \
   -d '{"pack_id": "my_pack", "allowed_domains": ["api.example.com"], "allowed_ports": [443]}'
 ```
 
-### Capability が使えない
+### Capability cannot be used
 
-approve（Trust + copy）だけでは使えません。Grant の付与が必要です。
+You cannot use just approve (Trust + copy). Grant is required.
 
 ```bash
 curl -X POST http://localhost:8765/api/capability/grants/grant \
@@ -1296,31 +1299,31 @@ curl -X POST http://localhost:8765/api/capability/grants/grant \
   -d '{"principal_id": "my_pack", "permission_id": "fs.read"}'
 ```
 
-### Capability Handler の approve が SHA-256 mismatch で失敗する
+### Capability Handler approval fails with SHA-256 mismatch
 
-scan 後に handler.py の内容が変更されています。再度 scan を実行して新しい candidate_key で pending を作り直し、改めて approve してください。
+The contents of handler.py have changed after the scan. Please run scan again, recreate pending with the new candidate_key, and approve again.
 
-### pip 依存のインストールが拒否される
+### Installation of pip dependencies is refused
 
-1. Pack が承認済みか確認してください（strict モードでは必須）
-2. `requirements.lock` の構文が正しいか確認してください（`NAME==VERSION` のみ許可）
-3. `index_url` が https で外部ホストか確認してください
+1. Check if the pack is approved (required in strict mode)
+2. Check that the syntax of `requirements.lock` is correct (only `NAME==VERSION` is allowed)
+3. Check if `index_url` is an external host with https
 
-### UDS ソケットにアクセスできない
+### Unable to access UDS socket
 
-1. `RUMI_EGRESS_SOCKET_GID` / `RUMI_CAPABILITY_SOCKET_GID` が設定されているか確認
-2. ソケットファイルのパーミッションを確認: `ls -la /run/rumi/egress/packs/`
-3. 最終手段: `RUMI_EGRESS_SOCKET_MODE=0666`（非推奨）
+1. Check if `RUMI_EGRESS_SOCKET_GID` / `RUMI_CAPABILITY_SOCKET_GID` are set
+2. Check socket file permissions: `ls -la /run/rumi/egress/packs/`
+3. Last resort: `RUMI_EGRESS_SOCKET_MODE=0666` (not recommended)
 
-### Pack 更新時に identity エラー
+### Identity error when updating pack
 
 ```
 Error: pack_identity mismatch
 ```
 
-既存 Pack と異なる `pack_identity` を持つ Pack で上書きしようとしています。意図的な置換の場合は、先に既存 Pack を削除してから再度 apply してください。
+You are trying to overwrite an existing Pack with a Pack that has a different `pack_identity`. If it is an intentional replacement, first delete the existing Pack and then apply it again.
 
-### lib が実行されない
+### lib is not executed
 
 ```bash
 # 監査ログで確認
@@ -1330,21 +1333,20 @@ cat user_data/audit/system_$(date +%Y-%m-%d).jsonl | jq 'select(.action | contai
 # 記録をクリアして再実行を強制（Kernel ハンドラ kernel:lib.clear_record）
 ```
 
-### Modifier が適用されない
+### Modifier not applied
 
-1. `target_flow_id` が正しいか確認
-2. `phase` が対象 Flow に存在するか確認
-3. `requires` の条件が満たされているか確認
-4. 監査ログで確認:
+1. Check if `target_flow_id` is correct
+2. Check if `phase` exists in the target Flow
+3. Check if the conditions of `requires` are met
+4. Check in audit log:
    ```bash
    cat user_data/audit/modifier_application_$(date +%Y-%m-%d).jsonl | jq .
    ```
 
-### 旧ディレクトリの警告
+### Old directory warning
 
 ```
 WARNING: Using legacy flow path. This is DEPRECATED and will be removed.
 ```
 
-`flow/` や `ecosystem/flows/` から `flows/`、`user_data/shared/flows/`、または Pack 内 `flows/` へ移行してください。
-
+Migrate from `flow/` or `ecosystem/flows/` to `flows/`, `user_data/shared/flows/`, or `flows/` in a pack.

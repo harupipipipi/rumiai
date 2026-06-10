@@ -1,3 +1,7 @@
+<!-- docs-i18n-links:start -->
+[EN](./agent_runtime.md) | [JP](./i18n/ja/agent_runtime.md) | [KR](./i18n/ko/agent_runtime.md) | [CN](./i18n/zh-cn/agent_runtime.md)
+<!-- docs-i18n-links:end -->
+
 # Durable Agent Runtime
 
 defaultspack now records agent executions in `user_data/shared/agent_runtime/state.db`

@@ -1,3 +1,7 @@
+<!-- docs-i18n-links:start -->
+[EN](./p2p_security.md) | [JP](./i18n/ja/p2p_security.md) | [KR](./i18n/ko/p2p_security.md) | [CN](./i18n/zh-cn/p2p_security.md)
+<!-- docs-i18n-links:end -->
+
 # P2P Security
 
 P2P is treated as an optional ingress surface, not a trust boundary and not a

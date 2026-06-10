@@ -1,19 +1,23 @@
-# AI Providers ガイド
+<!-- docs-i18n-links:start -->
+[EN](./ai-providers.md) | [JP](./i18n/ja/ai-providers.md) | [KR](./i18n/ko/ai-providers.md) | [CN](./i18n/zh-cn/ai-providers.md)
+<!-- docs-i18n-links:end -->
 
-## 1. 対応プロバイダー一覧
+# AI Providers Guide
 
-defaults の ai_client モジュールは以下のプロバイダーに対応する。各プロバイダーは `domain/ai_client/providers/` に provider.py として実装される。
+## 1. List of supported providers
 
-| プロバイダー ID | 説明 |
+The defaults ai_client module supports the following providers. Each provider is implemented in `domain/ai_client/providers/` as provider.py.
+
+| Provider ID | Description |
 |---|---|
-| `openai` | OpenAI API（GPT-4o, GPT-4o-mini, o3, o4-mini 等） |
-| `anthropic` | Anthropic API（Claude Opus 4, Sonnet 4, Haiku 3 等） |
-| `google` | Google Gemini API（Gemini 2.5 Pro, Gemini 2.5 Flash 等） |
-| `stub` | テスト用スタブ。固定レスポンスを返す |
-| `rumi` | rumi 独自のメタプロバイダー（パイプライン、ルーティング、評価） |
+| `openai` | OpenAI API (GPT-4o, GPT-4o-mini, o3, o4-mini, etc.) |
+| `anthropic` | Anthropic API (Claude Opus 4, Sonnet 4, Haiku 3, etc.) |
+| `google` | Google Gemini API (Gemini 2.5 Pro, Gemini 2.5 Flash, etc.) |
+| `stub` | Test stub. Return fixed response |
+| `rumi` | rumi's own meta-provider (pipeline, routing, evaluation) |
 
 
-## 2. 各プロバイダーの環境変数設定
+## 2. Environment variable settings for each provider
 
 ### OpenAI
 
@@ -45,7 +49,7 @@ GOOGLE_REGION=us-central1
 
 ### stub
 
-環境変数不要。テスト用。
+No environment variables required. For testing.
 
 ### rumi
 
@@ -54,62 +58,62 @@ GOOGLE_REGION=us-central1
 # rumi 固有の設定は user_data/shared/ai_models/rumi/ に配置。
 ```
 
-環境変数の設定は `user_data/config.json` の `ai.providers` セクション、または OS の環境変数で行う。`config.json` の値が優先される。
+Set environment variables in the `ai.providers` section of `user_data/config.json` or OS environment variables. The value of `config.json` takes precedence.
 
 
-## 3. 各プロバイダーで使えるモデル一覧
+## 3. List of models available for each provider
 
 ### OpenAI
 
-| モデル名 | 特徴 |
+| Model name | Features |
 |---|---|
-| `gpt-4o` | フラグシップ。マルチモーダル対応 |
-| `gpt-4o-mini` | 軽量・高速・低コスト |
-| `o3` | 推論特化（reasoning tokens） |
-| `o4-mini` | 推論特化・軽量版 |
-| `gpt-4.1` | 最新世代（利用可能な場合） |
-| `gpt-4.1-mini` | 最新世代・軽量版 |
-| `gpt-4.1-nano` | 最新世代・最軽量 |
+| `gpt-4o` | Flagship. Multimodal compatible |
+| `gpt-4o-mini` | Lightweight, high speed, low cost |
+| `o3` | Reasoning specialization (reasoning tokens) |
+| `o4-mini` | Inference specialized/light version |
+| `gpt-4.1` | Latest generation (if available) |
+| `gpt-4.1-mini` | Latest generation/lightweight version |
+| `gpt-4.1-nano` | Latest generation and lightest |
 
 ### Anthropic
 
-| モデル名 | 特徴 |
+| Model name | Features |
 |---|---|
-| `claude-opus-4-20250514` | 最高性能。extended thinking 対応 |
-| `claude-sonnet-4-20250514` | バランス型。extended thinking 対応 |
-| `claude-haiku-3-20250307` | 高速・低コスト |
+| `claude-opus-4-20250514` | Best performance. extended thinking correspondence |
+| `claude-sonnet-4-20250514` | Balanced type. extended thinking correspondence |
+| `claude-haiku-3-20250307` | High speed and low cost |
 
 ### Google
 
-| モデル名 | 特徴 |
+| Model name | Features |
 |---|---|
-| `gemini-2.5-pro` | フラグシップ。thinking 対応 |
-| `gemini-2.5-flash` | 高速・低コスト |
-| `gemini-2.0-flash` | 安定版 |
+| `gemini-2.5-pro` | Flagship. thinking correspondence |
+| `gemini-2.5-flash` | High speed and low cost |
+| `gemini-2.0-flash` | Stable version |
 
 ### stub
 
-| モデル名 | 特徴 |
+| Model name | Features |
 |---|---|
-| `stub/echo` | 入力をそのまま返す |
-| `stub/fixed` | 固定テキストを返す |
-| `stub/error` | 常にエラーを返す |
+| `stub/echo` | Return input as is |
+| `stub/fixed` | Return fixed text |
+| `stub/error` | Always returns an error |
 
 ### rumi
 
-| モデル名 | 特徴 |
+| Model name | Features |
 |---|---|
-| `rumi/pipeline` | 複数モデルをパイプライン実行 |
-| `rumi/router` | タスクに応じたモデル自動選択 |
-| `rumi/moa` | Mixture of Agents（複数モデルの合議） |
-| `rumi/eval` | 生成結果の自動評価・リランキング |
+| `rumi/pipeline` | Pipeline execution of multiple models |
+| `rumi/router` | Automatic model selection according to task |
+| `rumi/moa` | Mixture of Agents |
+| `rumi/eval` | Automatic evaluation and reranking of generated results |
 
 
-## 4. モデル指定方法
+## 4. Model specification method
 
-### "provider/model" 形式
+### "provider/model" format
 
-モデルは `"provider/model"` 形式の文字列で指定する。
+Specify the model using a string in the `"provider/model"` format.
 
 ```
 "openai/gpt-4o"
@@ -119,11 +123,11 @@ GOOGLE_REGION=us-central1
 "rumi/router"
 ```
 
-provider を省略した場合、ai_client が既知のモデル名からプロバイダーを自動推定する。`"gpt-4o"` は `"openai/gpt-4o"` に解決される。
+If provider is omitted, ai_client automatically infers the provider from the known model name. `"gpt-4o"` resolves to `"openai/gpt-4o"`.
 
-### プロファイル名
+### Profile name
 
-`user_data/shared/ai_models/` に配置したプロファイル名でも指定できる。
+You can also specify the profile name placed in `user_data/shared/ai_models/`.
 
 ```
 "fast"          → config で定義されたプロファイル
@@ -131,7 +135,7 @@ provider を省略した場合、ai_client が既知のモデル名からプロ�
 "coding"        → config で定義されたプロファイル
 ```
 
-これらは agent.json の `model` セクションで使われる。
+These are used in the `model` section of agent.json.
 
 ```json
 {
@@ -145,9 +149,9 @@ provider を省略した場合、ai_client が既知のモデル名からプロ�
 ```
 
 
-## 5. プロファイルの設定方法
+## 5. How to set up a profile
 
-プロファイルは `user_data/shared/ai_models/{provider_id}/profiles/{profile_name}/` に配置する。
+Place the profile in `user_data/shared/ai_models/{provider_id}/profiles/{profile_name}/`.
 
 ```
 user_data/shared/ai_models/
@@ -173,7 +177,7 @@ user_data/shared/ai_models/
             └── profile.json
 ```
 
-### profile.json の構造
+### Structure of profile.json
 
 ```json
 {
@@ -205,12 +209,12 @@ user_data/shared/ai_models/
 }
 ```
 
-`ui/events.ui.yaml` はストリーミング中のアニメーション Widget を定義する任意ファイルである。詳細は ai_client.md を参照。
+`ui/events.ui.yaml` is an arbitrary file that defines the animation widget being streamed. See ai_client.md for details.
 
 
-## 6. 対応機能マトリクス
+## 6. Compatible function matrix
 
-| 機能 | OpenAI | Anthropic | Google | stub | rumi |
+| Features | OpenAI | Anthropic | Google | stub | rumi |
 |---|---|---|---|---|---|
 | `defaults.ai.complete` | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `defaults.ai.stream` | ✅ | ✅ | ✅ | ✅ | ✅ |
@@ -220,20 +224,20 @@ user_data/shared/ai_models/
 | `defaults.ai.transcribe` | ✅ (Whisper) | ❌ | ✅ | ❌ | ❌ |
 | `defaults.ai.tts` | ✅ | ❌ | ✅ | ❌ | ❌ |
 | tool_calls | ✅ | ✅ | ✅ | ✅ | ✅ |
-| thinking/reasoning | ✅ (o3系) | ✅ (extended thinking) | ✅ (Gemini 2.5) | ❌ | ✅ |
+| thinking/reasoning | ✅ (o3 series) | ✅ (extended thinking) | ✅ (Gemini 2.5) | ❌ | ✅ |
 | vision | ✅ | ✅ | ✅ | ❌ | ✅ |
 | caching | ❌ | ✅ (ephemeral cache) | ✅ (context cache) | ❌ | ❌ |
 | json_mode | ✅ | ✅ | ✅ | ❌ | ✅ |
 | streaming | ✅ | ✅ | ✅ | ✅ | ✅ |
 
 
-## 7. rumi モデルの概要
+## 7. rumi model overview
 
-rumi プロバイダーは他のプロバイダーのモデルを組み合わせるメタプロバイダーである。ai_client から見ると通常のプロバイダーと同じインターフェースを持つが、内部で複数のモデルを呼び出す。
+The rumi provider is a meta-provider that combines models from other providers. From ai_client's perspective, it has the same interface as a normal provider, but calls multiple models internally.
 
-### rumi/pipeline — パイプライン
+### rumi/pipeline — pipeline
 
-複数モデルを直列に実行する。前段の出力を後段の入力に渡す。
+Run multiple models in series. Pass the output of the previous stage to the input of the next stage.
 
 ```json
 {
@@ -247,9 +251,9 @@ rumi プロバイダーは他のプロバイダーのモデルを組み合わせ
 }
 ```
 
-### rumi/router — ルーティング
+### rumi/router — Routing
 
-タスクの種類に応じてモデルを自動選択する。分類にはルーティングモデル（軽量モデル）を使用する。
+Automatically select a model depending on the type of task. A routing model (lightweight model) is used for classification.
 
 ```json
 {
@@ -268,7 +272,7 @@ rumi プロバイダーは他のプロバイダーのモデルを組み合わせ
 
 ### rumi/moa — Mixture of Agents
 
-同一のプロンプトを複数モデルに送信し、結果を合議して最終回答を生成する。
+Send the same prompt to multiple models and collate the results to generate a final answer.
 
 ```json
 {
@@ -284,9 +288,9 @@ rumi プロバイダーは他のプロバイダーのモデルを組み合わせ
 }
 ```
 
-### rumi/eval — 評価
+### rumi/eval — evaluation
 
-生成結果を評価モデルで採点し、最も高スコアの結果を返す。
+The generated results are scored using an evaluation model and the result with the highest score is returned.
 
 ```json
 {
@@ -299,4 +303,4 @@ rumi プロバイダーは他のプロバイダーのモデルを組み合わせ
 }
 ```
 
-rumi プロバイダーの定義は全て `user_data/shared/ai_models/rumi/profiles/` に配置される。defaults は rumi プロバイダーの実行エンジンの仕組みだけを提供し、具体的なパイプライン構成は user_data 側で定義する。
+All rumi provider definitions are placed in `user_data/shared/ai_models/rumi/profiles/`. defaults only provides the execution engine mechanism of the rumi provider, and the specific pipeline configuration is defined on the user_data side.

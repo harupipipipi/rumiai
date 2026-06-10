@@ -1,3 +1,7 @@
+<!-- docs-i18n-links:start -->
+[EN](./README.md) | [JP](./i18n/ja/README.md) | [KR](./i18n/ko/README.md) | [CN](./i18n/zh-cn/README.md)
+<!-- docs-i18n-links:end -->
+
 # Rumi AI
 
 Rumi AI is a modular AI runtime and tooling workspace.
@@ -6,20 +10,20 @@ The repository keeps the runtime implementation under `rumi_ai_1_10/`, while `ru
 
 ## Read This When...
 
-| やりたいこと | まず読む場所 | 補足 |
+| What I want to do | Where to read first | Supplements |
 |---|---|---|
-| 目的別にドキュメントを辿りたい | [`rumi_ai_1_10/docs/README.md`](./rumi_ai_1_10/docs/README.md) | 「何をしたいか」から読む順番を案内します |
-| とにかく起動したい | [`README.md`](./README.md) の `Start` | 最短の起動コマンドだけを載せています |
-| runtime / kernel の全体像を知りたい | [`rumi_ai_1_10/README.md`](./rumi_ai_1_10/README.md) | アーキテクチャと主要ディレクトリの説明があります |
-| コードを読まずに仕組みを理解したい | [`rumi_ai_1_10/docs/concepts/system-mechanism.md`](./rumi_ai_1_10/docs/concepts/system-mechanism.md) | 起動・Flow・承認・Grant の流れを文章で追えます |
-| まず動作確認したい（チュートリアル） | [`rumi_ai_1_10/docs/tutorials/runtime-quickstart.md`](./rumi_ai_1_10/docs/tutorials/runtime-quickstart.md) | `--health` から `/panel/` まで最短手順です |
-| `rumi_viewer` を起動したい / viewer の詰まり方を見たい | [`rumi_ai_1_10/docs/rumi_viewer_start.md`](./rumi_ai_1_10/docs/rumi_viewer_start.md) | 起動手順、`401`, 黒画面, `defaultspack` との関係をまとめています |
-| viewer 側を直したい | [`rumi_viewer/src-tauri/src/config.rs`](./rumi_viewer/src-tauri/src/config.rs) と [`rumi_viewer/src-tauri/src/kernel_manager.rs`](./rumi_viewer/src-tauri/src/kernel_manager.rs) | viewer は Tauri shell、kernel 起動は Rust 側が担当です |
-| pack / defaultspack を触りたい | [`rumi_ai_1_10/ecosystem/defaultspack/README.md`](./rumi_ai_1_10/ecosystem/defaultspack/README.md) | chat, ai_client, tool などの pack 側実装です |
-| defaultspack の frontend 拡張方法を知りたい | [`rumi_ai_1_10/ecosystem/defaultspack/docs/frontend_extensions.md`](./rumi_ai_1_10/ecosystem/defaultspack/docs/frontend_extensions.md) | 右バー追加、設定追加、chat renderer 拡張、preview feed 追加の入り口です |
-| API キーや secrets の扱いを知りたい | [`rumi_ai_1_10/docs/operations.md`](./rumi_ai_1_10/docs/operations.md) の Secrets 節 | `user_data/secrets/` と API 経路の説明があります |
-| Pack の作り方を知りたい | [`rumi_ai_1_10/docs/pack-development.md`](./rumi_ai_1_10/docs/pack-development.md) | ecosystem.json, routes, permissions の作法をまとめています |
-| 運用・監査の考え方を知りたい | [`rumi_ai_1_10/docs/quality_pack/philosophy_memo.md`](./rumi_ai_1_10/docs/quality_pack/philosophy_memo.md) | 継続開発と回帰確認の前提を整理しています |
+| I want to follow the document by purpose | [`rumi_ai_1_10/docs/README.md`](./rumi_ai_1_10/docs/README.md) | We will guide you in the reading order starting from "what you want to do" |
+| I want to start it anyway | `Start` of [`README.md`](./README.md) | Only the shortest startup command is listed |
+| I want to know the overall picture of runtime / kernel | [`rumi_ai_1_10/README.md`](./rumi_ai_1_10/README.md) | There is an explanation of the architecture and main directories |
+| I want to understand the mechanism without reading the code | [`rumi_ai_1_10/docs/concepts/system-mechanism.md`](./rumi_ai_1_10/docs/concepts/system-mechanism.md) | You can follow the flow of startup, flow, approval, and grant in text |
+| I want to check the operation first (tutorial) | [`rumi_ai_1_10/docs/tutorials/runtime-quickstart.md`](./rumi_ai_1_10/docs/tutorials/runtime-quickstart.md) | The shortest steps from `--health` to `/panel/` |
+| I want to start `rumi_viewer` / I want to see how the viewer gets stuck | [`rumi_ai_1_10/docs/rumi_viewer_start.md`](./rumi_ai_1_10/docs/rumi_viewer_start.md) | Summary of startup procedure, `401`, black screen, and relationship with `defaultspack` |
+| I want to fix the viewer side | [`rumi_viewer/src-tauri/src/config.rs`](./rumi_viewer/src-tauri/src/config.rs) and [`rumi_viewer/src-tauri/src/kernel_manager.rs`](./rumi_viewer/src-tauri/src/kernel_manager.rs) | The viewer is the Tauri shell, and the Rust side is responsible for starting the kernel |
+| I want to use pack / defaultspack | [`rumi_ai_1_10/ecosystem/defaultspack/README.md`](./rumi_ai_1_10/ecosystem/defaultspack/README.md) | This is the pack side implementation of chat, ai_client, tool, etc. |
+| I want to know how to extend defaultspack's frontend | [`rumi_ai_1_10/ecosystem/defaultspack/docs/frontend_extensions.md`](./rumi_ai_1_10/ecosystem/defaultspack/docs/frontend_extensions.md) | This is the gateway for adding right bar, adding settings, extending chat renderer, and adding preview feed |
+| I want to know how to handle API keys and secrets | Secrets section of [`rumi_ai_1_10/docs/operations.md`](./rumi_ai_1_10/docs/operations.md) | There is an explanation of `user_data/secrets/` and the API route |
+| I want to know how to create a Pack | [`rumi_ai_1_10/docs/pack-development.md`](./rumi_ai_1_10/docs/pack-development.md) | We have summarized the manners of ecosystem.json, routes, and permissions |
+| I want to know the concept of operation and auditing | [`rumi_ai_1_10/docs/quality_pack/philosophy_memo.md`](./rumi_ai_1_10/docs/quality_pack/philosophy_memo.md) | I am organizing the assumptions for continuous development and regression confirmation |
 
 ## Repository Layout
 
@@ -36,8 +40,8 @@ The repository keeps the runtime implementation under `rumi_ai_1_10/`, while `ru
 - Python 3.10+
 - Node.js 18+
 - npm
-- Rust / Cargo (`rumi_viewer` を触る場合)
-- Flutter SDK (`rumi_mobile` を触る場合)
+- Rust / Cargo (when touching `rumi_viewer`)
+- Flutter SDK (when using `rumi_mobile`)
 
 ### Clone and install
 
@@ -64,7 +68,7 @@ python -m rumi_ai --health
 python -m rumi_ai
 ```
 
-`--health` はシステムボリューム使用率も確認します。`disk` probe が `DEGRADED` / `DOWN` の場合は、コード不具合ではなく空き容量不足の可能性があります。
+`--health` also checks system volume usage. If the `disk` probe is `DEGRADED` / `DOWN`, it may be due to a lack of free space rather than a code problem.
 
 ## Common Tasks
 
@@ -97,9 +101,9 @@ cd rumi_viewer/src-tauri
 cargo tauri dev
 ```
 
-開発用 viewer は repo 内の `rumi_ai_1_10/` を自動検出して kernel を起動します。
-起動後は Home の `Open Defaultspack` から、managed current pointer で選択されている `Defaultspack v2` UI まで進めます。
-起動時の詰まり方を含めたガイドは [`rumi_ai_1_10/docs/rumi_viewer_start.md`](./rumi_ai_1_10/docs/rumi_viewer_start.md) を参照してください。
+The development viewer automatically detects `rumi_ai_1_10/` in the repo and starts the kernel.
+After startup, proceed from `Open Defaultspack` of Home to `Defaultspack v2` UI selected by managed current pointer.
+Please refer to [`rumi_ai_1_10/docs/rumi_viewer_start.md`](./rumi_ai_1_10/docs/rumi_viewer_start.md) for a guide including how to get stuck at startup.
 
 ## Development
 
@@ -111,7 +115,7 @@ python -m pytest tests/test_capability_trust_store.py
 
 ## Quality Pack
 
-継続開発・監査・回帰確認の運用パックは以下を参照:
+See below for operational packs for continuous development, auditing, and regression confirmation:
 
 - `rumi_ai_1_10/docs/quality_pack/philosophy_memo.md`
 - `rumi_ai_1_10/docs/quality_pack/claude_desktop_quality_pack.md`

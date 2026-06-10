@@ -1,3 +1,7 @@
+<!-- docs-i18n-links:start -->
+[EN](./profile_workspace.md) | [JP](./i18n/ja/profile_workspace.md) | [KR](./i18n/ko/profile_workspace.md) | [CN](./i18n/zh-cn/profile_workspace.md)
+<!-- docs-i18n-links:end -->
+
 # Profile Workspace
 
 Profile workspaces live under `<RUMI_USER_DATA>/profiles/<profile_id>/` and isolate per-profile runtime data without removing legacy `settings/startup_profiles.json`.

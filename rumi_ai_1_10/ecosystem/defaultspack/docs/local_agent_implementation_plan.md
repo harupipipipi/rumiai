@@ -1,3 +1,7 @@
+<!-- docs-i18n-links:start -->
+[EN](./local_agent_implementation_plan.md) | [JP](./i18n/ja/local_agent_implementation_plan.md) | [KR](./i18n/ko/local_agent_implementation_plan.md) | [CN](./i18n/zh-cn/local_agent_implementation_plan.md)
+<!-- docs-i18n-links:end -->
+
 # Local Agent Implementation Plan
 
 ## P0

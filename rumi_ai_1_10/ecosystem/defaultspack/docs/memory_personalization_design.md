@@ -1,3 +1,7 @@
+<!-- docs-i18n-links:start -->
+[EN](./memory_personalization_design.md) | [JP](./i18n/ja/memory_personalization_design.md) | [KR](./i18n/ko/memory_personalization_design.md) | [CN](./i18n/zh-cn/memory_personalization_design.md)
+<!-- docs-i18n-links:end -->
+
 # Memory Personalization Design
 
 Memory scopes:

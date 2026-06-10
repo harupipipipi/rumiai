@@ -1,3 +1,7 @@
+<!-- docs-i18n-links:start -->
+[EN](./profile_spec.md) | [JP](./i18n/ja/profile_spec.md) | [KR](./i18n/ko/profile_spec.md) | [CN](./i18n/zh-cn/profile_spec.md)
+<!-- docs-i18n-links:end -->
+
 # Capability Profile Spec
 
 Capability Profiles are runtime or workspace presets for Capability Graph compile. They describe which nodes are available and how a selected graph should run in a particular environment.

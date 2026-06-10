@@ -1,27 +1,30 @@
-```markdown
-# theme.md — Rumi AI OS テーマ仕様書
+<!-- docs-i18n-links:start -->
+[EN](./theme.md) | [JP](./i18n/ja/theme.md) | [KR](./i18n/ko/theme.md) | [CN](./i18n/zh-cn/theme.md)
+<!-- docs-i18n-links:end -->
 
-## 1. 概要
+# theme.md — Rumi AI OS theme specification
 
-テーマは UI の見た目を定義する宣言的ファイルである。色、フォント、スペーシング、アニメーション、Widget ごとの描画スタイルを1つの YAML ファイルにまとめ、フロントエンド全体に適用する。
+## 1. Overview
 
-defaults はテーマの「フォーマット仕様」と「適用メカニズム」を提供する。具体的なテーマファイル（配色やフォント指定）は全て user_data に配置される。テーマはバックエンドに一切影響しない。Widget JSON の生成、handler の実行、Flow の処理はテーマの存在を知らない。テーマが変わっても Asset の HTML/JS コードは変更不要である。CSS 変数を参照しているだけだからである。
+A theme is a declarative file that defines the look of the UI. Combine colors, fonts, spacing, animations, and drawing styles for each widget into a single YAML file and apply it to the entire front end.
 
-
-## 2. 設計思想
-
-**宣言的**: テーマはコードではない。YAML で値を書くだけ。実行ロジックは一切含まない。
-
-**トークンベース**: テーマは色やサイズの値を直接書くのではなく、名前付きトークン（`color.primary`、`spacing.md` 等）として定義する。Asset はトークン名を参照し、テーマが実際の値を解決する。
-
-**バックエンド非依存**: テーマはフロントエンド層（shell.html の Theme Engine）のみが読む。バックエンドの handler、tool、Flow はテーマの存在を知らない。emit_widget で送出された Widget JSON はテーマ非依存のデータであり、描画時に Theme Engine が見た目を適用する。
-
-**完全置換可能**: defaults が初回セットアップ時に配置するデフォルトテーマも、ユーザーや Pack が自由に上書き・差し替えできる。
-
-**継承可能**: テーマは別のテーマを `extends` で継承し、差分だけを定義できる。
+Defaults provide a ``format specification'' and ``enforcement mechanism'' for a theme. All specific theme files (color scheme and font specifications) are placed in user_data. The theme has no effect on the backend. Widget JSON generation, handler execution, and Flow processing do not know the existence of a theme. Even if the theme changes, the Asset HTML/JS code does not need to be changed. This is because it only references CSS variables.
 
 
-## 3. ディレクトリ構成
+## 2. Design philosophy
+
+**Declarative**: Themes are not code. Just write the value in YAML. It does not contain any execution logic.
+
+**Token-based**: Themes are defined as named tokens (`color.primary`, `spacing.md`, etc.) rather than writing color and size values directly. Asset looks up the token name and the theme resolves the actual value.
+
+**Backend independent**: Theme is read only by the frontend layer (Theme Engine in shell.html). Backend handlers, tools, and flows are unaware of the existence of the theme. The Widget JSON sent by emit_widget is theme-independent data, and the Theme Engine applies the appearance when rendering.
+
+**Completely replaceable**: The default theme placed by defaults during initial setup can be freely overwritten or replaced by the user or pack.
+
+**Inheritable**: A theme can inherit another theme with `extends` and define only the differences.
+
+
+## 3. Directory structure
 
 ```
 user_data/themes/
@@ -32,7 +35,7 @@ user_data/themes/
     └── nord.theme.yaml
 ```
 
-テーマの切り替えは `user_data/config.json` の `theme_id` で行う。
+The theme can be switched using `theme_id` of `user_data/config.json`.
 
 ```json
 {
@@ -40,10 +43,10 @@ user_data/themes/
 }
 ```
 
-`theme_id` は theme.yaml 内の `theme_id` フィールドと一致する。
+`theme_id` matches the `theme_id` field in theme.yaml.
 
 
-## 4. theme.yaml 完全仕様
+## 4. theme.yaml complete specification
 
 ```yaml
 # ──────────────────────────────────────────────
@@ -628,39 +631,39 @@ scrollbar:
 ```
 
 
-## 5. トークン体系
+## 5. Token system
 
-### 5.1 トークンの参照構文
+### 5.1 Token reference syntax
 
-テーマ内でトークンを相互参照するには `{category.key}` 構文を使う。
+To cross-reference tokens within a theme, use the `{category.key}` syntax.
 
 ```yaml
 border_focus: "1px solid {color.primary}"    # color.primary の値に展開される
 padding: "{spacing.md}"                       # spacing.md の値に展開される
 ```
 
-参照はテーマファイル内でのみ有効である。循環参照は禁止。Theme Engine が読み込み時に検出し、エラーとする。
+References are only valid within theme files. Circular references are prohibited. Theme Engine detects this when loading and issues an error.
 
-### 5.2 トークンカテゴリ
+### 5.2 Token Categories
 
-**color** — 色の値。CSS の色表現（hex, rgba, hsl）で記述する。セマンティック名（`primary`, `success`, `error` 等）で定義し、具体的な色コードを割り当てる。
+**color** — Color value. Describe using CSS color expression (hex, rgba, hsl). Define with a semantic name (`primary`, `success`, `error`, etc.) and assign a specific color code.
 
-**typography** — フォントに関する値。`font_family` は CSS の font-family 文字列。`font_size_*` は px 単位の整数。`font_weight_*` は CSS の font-weight 数値。`line_height_*` は単位なしの比率。
+**typography** — Font-related values. `font_family` is a CSS font-family string. `font_size_*` is an integer in px. `font_weight_*` is a CSS font-weight value. `line_height_*` is a unitless ratio.
 
-**spacing** — 余白やギャップの値。px 単位の整数。命名は xs, sm, md, lg, xl, 2xl の相対サイズ。
+**spacing** — Margin or gap value. An integer in px. The names are relative sizes: xs, sm, md, lg, xl, 2xl.
 
-**radius** — 角丸の値。px 単位の整数。`full` は 9999px でピル型を表す。
+**radius** — Corner radius value. An integer in px. `full` represents a pill type with 9999px.
 
-**shadow** — ボックスシャドウの値。CSS の box-shadow 文字列。
+**shadow** — Box shadow value. CSS box-shadow string.
 
-**transition** — トランジションの値。CSS の transition 短縮記法文字列。
+**transition** — Transition value. CSS transition shorthand string.
 
-**z_index** — 重なり順の値。整数。
+**z_index** — Stacking order value. integer.
 
 
-## 6. アニメーション定義
+## 6. Animation definition
 
-### 6.1 構造
+### 6.1 Structure
 
 ```yaml
 animations:
@@ -674,11 +677,11 @@ animations:
     iteration: "infinite"
 ```
 
-`keyframes` は CSS の @keyframes ルールをそのまま記述する。`duration` は CSS の animation-duration。`timing` は animation-timing-function。`iteration` は animation-iteration-count。
+`keyframes` describes the CSS @keyframes rule as is. `duration` is CSS animation-duration. `timing` is animation-timing-function. `iteration` is animation-iteration-count.
 
-### 6.2 Widget からの参照
+### 6.2 References from Widgets
 
-Widget の `style_hint.animation` や Widget スタイル定義の `animation` フィールドにアニメーション名を指定する。
+Specify the animation name in the `style_hint.animation` of the widget or the `animation` field of the widget style definition.
 
 ```json
 {
@@ -689,18 +692,18 @@ Widget の `style_hint.animation` や Widget スタイル定義の `animation` �
 }
 ```
 
-Theme Engine は `animations.wave_dots` を参照して CSS アニメーションを適用する。Widget JSON にアニメーション名が指定されていない場合、Widget スタイル定義のデフォルトアニメーション（例: `indicator.states.running.animation`）が使用される。
+Theme Engine applies CSS animations by referring to `animations.wave_dots`. If no animation name is specified in the Widget JSON, the default animation in the Widget style definition (e.g. `indicator.states.running.animation`) is used.
 
-### 6.3 カスタムアニメーション
+### 6.3 Custom animation
 
-テーマファイルの `animations` セクションに追加するだけで新しいアニメーションを定義できる。Asset の JS がアニメーション名を参照していれば適用される。defaults 側の変更は不要。
+You can define new animations by simply adding them to the `animations` section of your theme file. Applies if the Asset JS references the animation name. No changes are required on the defaults side.
 
 
-## 7. Widget スタイル定義
+## 7. Widget style definition
 
-### 7.1 構造
+### 7.1 Structure
 
-`widgets` セクションに Widget 型名をキーとしてスタイルを定義する。
+Define the style in the `widgets` section using the Widget type name as a key.
 
 ```yaml
 widgets:
@@ -711,11 +714,11 @@ widgets:
     ...
 ```
 
-Widget 型名は widget.md に定義された全 Widget 型（text, code_block, diff, image, screenshot, progress, terminal, table, chart, file_tree, markdown, audio, video, map, input, button, select, toggle, slider, checkbox, container, row, column, tabs, collapsible, card, stream, indicator, custom）に対応する。
+Widget type names correspond to all widget types defined in widget.md (text, code_block, diff, image, screenshot, progress, terminal, table, chart, file_tree, markdown, audio, video, map, input, button, select, toggle, slider, checkbox, container, row, column, tabs, collapsible, card, stream, indicator, custom).
 
 ### 7.2 variants
 
-一部の Widget（button, card 等）は `variants` を持つ。Widget JSON の `style_hint.variant` でどの variant を使うか指定する。
+Some Widgets (button, card, etc.) have `variants`. Specify which variant to use in `style_hint.variant` of Widget JSON.
 
 ```json
 {
@@ -733,11 +736,11 @@ button:
     danger: { background: "...", ... }
 ```
 
-`style_hint.variant` が未指定または未知の値の場合、`default` variant が使用される。
+If `style_hint.variant` is unspecified or unknown value, `default` variant is used.
 
-### 7.3 states（indicator 専用）
+### 7.3 states (indicator only)
 
-indicator Widget は `state` フィールドで状態を持つ。テーマは状態ごとの色とアニメーションを定義する。
+The indicator Widget has a state in the `state` field. Themes define colors and animations for each state.
 
 ```yaml
 indicator:
@@ -750,7 +753,7 @@ indicator:
 
 ### 7.4 style_hint
 
-Widget JSON の `style_hint` フィールドはテーマへのヒントである。テーマはこのヒントを解釈してもしなくてもよい。variant 以外にも任意のキーを含められる。
+The `style_hint` field in Widget JSON is a hint to the theme. The theme may or may not interpret this hint. Any key other than variant can be included.
 
 ```json
 {
@@ -760,23 +763,23 @@ Widget JSON の `style_hint` フィールドはテーマへのヒントである
 }
 ```
 
-Theme Engine が `style_hint` を CSS に変換する方法はテーマ側で定義する。defaults の Theme Engine は以下のヒントキーをデフォルトで認識する。
+The theme defines how the Theme Engine converts `style_hint` to CSS. The defaults Theme Engine recognizes the following hint keys by default.
 
-| ヒントキー | 説明 | CSS への変換 |
+| Hint key | Description | Conversion to CSS |
 |---|---|---|
-| `variant` | Widget variant の選択 | variant のスタイルを適用 |
-| `color` | トークン名による色指定 | `color: var(--color-{value})` |
-| `size` | xs/sm/md/lg/xl のサイズ | `font-size: var(--font-size-{value})` |
-| `weight` | フォントウェイト | `font-weight: var(--font-weight-{value})` |
-| `align` | テキスト配置 | `text-align: {value}` |
-| `padding` | トークン名によるパディング | `padding: var(--spacing-{value})` |
-| `hidden` | 非表示 | `display: none` |
+| `variant` | Select Widget variant | Apply variant style |
+| `color` | Color specification by token name | `color: var(--color-{value})` |
+| `size` | Size of xs/sm/md/lg/xl | `font-size: var(--font-size-{value})` |
+| `weight` | Font weight | `font-weight: var(--font-weight-{value})` |
+| `align` | Text alignment | `text-align: {value}` |
+| `padding` | Padding with token name | `padding: var(--spacing-{value})` |
+| `hidden` | Hide | `display: none` |
 
-テーマが独自のヒントキーを追加することも可能。Theme Engine が認識しないキーは無視される。
+It is also possible for themes to add their own hint keys. Keys not recognized by Theme Engine are ignored.
 
-### 7.5 Custom Widget のスタイル
+### 7.5 Custom Widget Styles
 
-`widgets.custom` セクションに Custom Widget の `custom_type` をキーとしてスタイルを定義する。
+Define the style in the `widgets.custom` section using Custom Widget's `custom_type` as the key.
 
 ```yaml
 widgets:
@@ -790,23 +793,23 @@ widgets:
       border: "1px solid {color.border}"
 ```
 
-Custom Widget のレンダラー（`user_data/widget_renderers/` に配置される JS）がこのスタイルを読み取って適用する。
+The Custom Widget's renderer (JS placed in `user_data/widget_renderers/`) reads and applies this style.
 
 
-## 8. スロットスタイル
+## 8. Slot Style
 
-`slots` セクションで shell.html のスロット（header, sidebar, main, panel, statusbar, floating）の見た目を定義する。
+The `slots` section defines the appearance of the shell.html slots (header, sidebar, main, panel, statusbar, floating).
 
-スロットの構造やレイアウト（どの Asset がどのスロットに入るか）はテーマの責務ではない。テーマが定義するのはスロットの背景色、ボーダー、デフォルトサイズ、リサイズハンドルの色のみである。
+The structure and layout of slots (which Asset goes into which slot) is not the responsibility of the theme. Themes only define the slot's background color, border, default size, and resizing handle color.
 
 
-## 9. CSS 変数への変換
+## 9. Convert to CSS variable
 
-### 9.1 変換規則
+### 9.1 Conversion rules
 
-Theme Engine はテーマファイルを CSS 変数に変換し、`:root` に設定する。変換規則は以下の通り。
+Theme Engine converts the theme file into CSS variables and sets them to `:root`. The conversion rules are as follows.
 
-トークン: `tokens.{category}.{key}` → `--{category}-{key}`
+Token: `tokens.{category}.{key}` → `--{category}-{key}`
 
 ```yaml
 tokens:
@@ -826,11 +829,11 @@ tokens:
 }
 ```
 
-数値のトークン（spacing, radius, font_size_*, shadow 以外）には自動的に `px` が付与される。文字列のトークンはそのまま出力される。
+Numerical tokens (other than spacing, radius, font_size_*, shadow) are automatically given `px`. String tokens are output as is.
 
-### 9.2 アニメーションの注入
+### 9.2 Injecting animation
 
-`animations` セクションの全 keyframes を `<style>` 要素として注入する。
+Inject all keyframes of the `animations` section as `<style>` elements.
 
 ```css
 @keyframes wave-dots {
@@ -843,13 +846,13 @@ tokens:
 }
 ```
 
-### 9.3 Widget スタイルの注入
+### 9.3 Widget Style Injection
 
-Widget スタイルは CSS 変数として注入しない。Theme Engine が Widget を描画する際にスタイル定義を直接参照する。理由は Widget スタイルの構造が型ごとに異なり、フラットな CSS 変数では表現しきれないため。
+Widget styles are not injected as CSS variables. The Theme Engine directly references the style definition when drawing the widget. The reason is that the structure of Widget styles differs for each type, and cannot be expressed using flat CSS variables.
 
-### 9.4 Asset からの参照
+### 9.4 Reference from Asset
 
-Asset の HTML/JS は CSS 変数を参照する。
+Asset's HTML/JS refers to CSS variables.
 
 ```css
 /* Asset の CSS */
@@ -864,24 +867,24 @@ Asset の HTML/JS は CSS 変数を参照する。
 }
 ```
 
-テーマが切り替わると CSS 変数の値が変わり、Asset の見た目が自動的に更新される。Asset 側のコード変更は不要。
+When you switch themes, the values of CSS variables change and the look of your Assets is automatically updated. No code changes are required on the Asset side.
 
 
-## 10. テーマの適用メカニズム
+## 10. Theme application mechanism
 
-### 10.1 起動時
+### 10.1 At startup
 
-1. shell.html の Theme Engine が `user_data/config.json` から `theme_id` を読む
-2. `user_data/themes/{theme_id}.theme.yaml` を読み込む
-3. `extends` が指定されていれば親テーマを再帰的に読み込む
-4. トークン参照（`{category.key}`）を展開する
-5. CSS 変数を `:root` に設定する
-6. アニメーション keyframes を注入する
-7. Widget スタイル定義をメモリに保持する
+1. shell.html's Theme Engine reads `user_data/config.json` to `theme_id`
+2. Load `user_data/themes/{theme_id}.theme.yaml`
+3. If `extends` is specified, load the parent theme recursively
+4. Expand token references (`{category.key}`)
+5. Set CSS variable to `:root`
+6. Inject animation keyframes
+7. Keep Widget style definitions in memory
 
-### 10.2 テーマ切り替え
+### 10.2 Theme switching
 
-フロントエンドがテーマ切り替えイベントを受信する。
+The front end receives theme switching events.
 
 ```json
 {
@@ -892,16 +895,16 @@ Asset の HTML/JS は CSS 変数を参照する。
 }
 ```
 
-Theme Engine は新しいテーマファイルを読み込み、CSS 変数を上書きし、アニメーションを再注入する。全ての Asset がリアルタイムに新テーマの見た目に切り替わる。
+The Theme Engine loads the new theme file, overwrites CSS variables, and reinjects animations. All Assets will change to look like the new theme in real time.
 
-テーマ切り替えはバックエンドの `config.write` 権限で `user_data/config.json` の `theme_id` を書き換え、`emit_event("theme.change", {"theme_id": "..."})` でフロントエンドに通知する。
+To change the theme, rewrite `theme_id` of `user_data/config.json` with the backend's `config.write` authority, and notify the frontend with `emit_event("theme.change", {"theme_id": "..."})`.
 
 
-## 11. テーマの継承
+## 11. Theme inheritance
 
 ### 11.1 extends
 
-テーマは `extends` フィールドで別のテーマを継承できる。
+A theme can inherit another theme in the `extends` field.
 
 ```yaml
 theme_id: "dark_blue"
@@ -912,11 +915,11 @@ tokens:
     primary_hover: "#60a5fa"
 ```
 
-この場合、`dark` テーマの全ての値がベースとなり、`dark_blue` で明示的に定義された値だけが上書きされる。`dark` の `color.background`, `typography.*`, `spacing.*` 等は全て継承される。
+In this case, all values in the `dark` theme will be the base, and only the values explicitly defined in `dark_blue` will be overwritten. `dark`, `color.background`, `typography.*`, `spacing.*`, etc. are all inherited.
 
-### 11.2 マージ規則
+### 11.2 Merge rules
 
-マージは深い階層まで再帰的に行われる。
+Merging is done recursively up to a deep level.
 
 ```yaml
 # 親テーマ (dark)
@@ -933,7 +936,7 @@ widgets:
       primary: { background: "#3b82f6" }
 ```
 
-結果:
+Result:
 
 ```yaml
 widgets:
@@ -943,14 +946,14 @@ widgets:
       primary: { background: "#3b82f6", color: "#ffffff" }    # background のみ上書き
 ```
 
-### 11.3 継承チェーン
+### 11.3 Inheritance Chain
 
-多段継承が可能。A extends B extends C の場合、C → B → A の順にマージされる。循環継承は Theme Engine が検出し、エラーとする。
+Multi-level inheritance is possible. If A extends B extends C, merged in the order of C → B → A. Circular inheritance is detected by the Theme Engine and treated as an error.
 
 
-## 12. Pack がテーマを提供する方法
+## 12. How the Pack provides themes
 
-Pack がテーマを提供する場合、Pack のインストール時にテーマファイルが `user_data/themes/installed/` にコピーされる。
+If the Pack provides a theme, the theme files are copied to `user_data/themes/installed/` when the Pack is installed.
 
 ```
 user_data/packs/monokai_theme/
@@ -969,16 +972,16 @@ user_data/packs/monokai_theme/
 }
 ```
 
-インストールフロー: Pack 承認 → `themes/monokai.theme.yaml` を `user_data/themes/installed/monokai.theme.yaml` にコピー → ユーザーが `config.json` の `theme_id` を `monokai` に変更すれば適用される。
+Installation flow: Pack approval → Copy `themes/monokai.theme.yaml` to `user_data/themes/installed/monokai.theme.yaml` → It will be applied if the user changes `theme_id` of `config.json` to `monokai`.
 
-defaults 側の変更はゼロ。
+There are zero changes on the defaults side.
 
 
-## 13. フォールバック
+## 13. Fallback
 
-### 13.1 テーマファイルが見つからない場合
+### 13.1 If the theme file is not found
 
-`config.json` の `theme_id` に対応するテーマファイルが存在しない場合、Theme Engine はハードコードされた最小限のフォールバックテーマを使用する。フォールバックテーマは shell.html に埋め込まれた以下の値のみを持つ。
+If a theme file corresponding to `theme_id` in `config.json` does not exist, the Theme Engine uses a hard-coded minimal fallback theme. The fallback theme only has the following values ​​embedded in shell.html.
 
 ```
 color.background: #000000
@@ -993,26 +996,25 @@ spacing.md: 16
 radius.md: 8
 ```
 
-これは人間が最低限操作可能な画面を提供するためのものである。
+This is to provide a screen that can be operated by humans at the bare minimum.
 
-### 13.2 テーマファイルが壊れている場合
+### 13.2 If the theme file is corrupted
 
-YAML パースに失敗した場合、フォールバックテーマを使用し、statusbar にエラーを表示する。
+If YAML parsing fails, use a fallback theme and display an error in the statusbar.
 
-### 13.3 未定義のトークンが参照された場合
+### 13.3 When an undefined token is referenced
 
-Asset が `var(--color-nonexistent)` を参照した場合、CSS の仕様に従い `initial` 値が使われる。Theme Engine は未定義のトークン参照を検出してコンソールに警告を出す。
+If Asset references `var(--color-nonexistent)`, the `initial` value will be used according to the CSS specifications. Theme Engine detects undefined token references and issues a warning to the console.
 
-### 13.4 Widget スタイルが未定義の場合
+### 13.4 When Widget style is undefined
 
-テーマが特定の Widget 型のスタイルを定義していない場合、Theme Engine はその Widget をブラウザのデフォルトスタイルで描画する。
+If a theme does not define styles for a particular widget type, the Theme Engine renders the widget using the browser's default style.
 
 
-## 14. テーマファイルのバリデーション
+## 14. Validation of theme files
 
-Theme Engine は読み込み時に以下を検証する。
+The Theme Engine verifies the following at load time:
 
-必須フィールド: `theme_id`, `name`, `version`。必須トークン: `color.background`, `color.surface`, `color.text`, `color.border`, `color.primary`, `typography.font_family`, `typography.font_family_mono`, `typography.font_size_base`, `spacing.md`, `radius.md`。循環参照: トークン間の `{category.key}` 参照に循環がないか。循環継承: `extends` チェーンに循環がないか。
+Required fields: `theme_id`, `name`, `version`. Required tokens: `color.background`, `color.surface`, `color.text`, `color.border`, `color.primary`, `typography.font_family`, `typography.font_family_mono`, `typography.font_size_base`, `spacing.md`, `radius.md`. Circular references: Are there any cycles in the `{category.key}` references between tokens? Circular inheritance: `extends` Are there any cycles in the chain?
 
-必須フィールドまたは必須トークンが欠けている場合、フォールバックテーマから欠けている値だけを補完し、警告を出す。テーマ全体を拒否するのではなく、可能な限り動作させる。
-```
+If a required field or token is missing, the fallback theme will only complete the missing value and issue a warning. Instead of rejecting the theme entirely, make it work as much as possible.

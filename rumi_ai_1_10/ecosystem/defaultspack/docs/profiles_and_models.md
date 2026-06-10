@@ -1,3 +1,7 @@
+<!-- docs-i18n-links:start -->
+[EN](./profiles_and_models.md) | [JP](./i18n/ja/profiles_and_models.md) | [KR](./i18n/ko/profiles_and_models.md) | [CN](./i18n/zh-cn/profiles_and_models.md)
+<!-- docs-i18n-links:end -->
+
 # Rumi AI OS Defaults Profiles and Models
 
 This document details how the `defaults` pack manages AI profiles, tool configurations, and user data to fulfill the requirements for extreme flexibility, custom instructions, and advanced model orchestration (like Mixture of Agents).

@@ -1,3 +1,7 @@
+<!-- docs-i18n-links:start -->
+[EN](./company_workspace.md) | [JP](./i18n/ja/company_workspace.md) | [KR](./i18n/ko/company_workspace.md) | [CN](./i18n/zh-cn/company_workspace.md)
+<!-- docs-i18n-links:end -->
+
 # Company Workspace
 
 Company Workspace describes the long-running, company-style agent shape built

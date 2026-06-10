@@ -1,3 +1,7 @@
+<!-- docs-i18n-links:start -->
+[EN](./runtime_policy.md) | [JP](./i18n/ja/runtime_policy.md) | [KR](./i18n/ko/runtime_policy.md) | [CN](./i18n/zh-cn/runtime_policy.md)
+<!-- docs-i18n-links:end -->
+
 # Runtime Policy
 
 Runtime policy is stored on Capability Profiles and copied into compiled runtime
