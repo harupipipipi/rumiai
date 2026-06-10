@@ -340,7 +340,7 @@ class TestCommandFunctionHostExecutionGuard:
         """RUMI_ALLOW_HOST_EXECUTION 未設定 → host_execution_disabled"""
         monkeypatch.delenv("RUMI_ALLOW_HOST_EXECUTION", raising=False)
         executor = _make_test_executor()
-        entry = _MockFunctionEntry(command=["echo", "hello"])
+        entry = _MockFunctionEntry(command=["echo", "hello"], host_execution=True)
         resp = executor._execute_command_function(
             principal_id="test_principal",
             entry=entry,
@@ -367,6 +367,7 @@ class TestCommandFunctionPathTraversal:
         entry = _MockFunctionEntry(
             command=[str(outside_command)],
             function_dir=str(func_dir),
+            host_execution=True,
         )
         resp = executor._execute_command_function(
             principal_id="test_principal",
@@ -390,6 +391,7 @@ class TestCommandFunctionPathTraversal:
         entry = _MockFunctionEntry(
             command=[sys.executable, "-c", "print('pwned')"],
             function_dir=str(func_dir),
+            host_execution=True,
         )
         resp = executor._execute_command_function(
             principal_id="test_principal",
@@ -415,6 +417,7 @@ class TestCommandFunctionPathTraversal:
         entry = _MockFunctionEntry(
             command=[sys.executable, str(outside_script)],
             function_dir=str(func_dir),
+            host_execution=True,
         )
         resp = executor._execute_command_function(
             principal_id="test_principal",
