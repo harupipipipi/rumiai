@@ -51,6 +51,7 @@ METHOD_SENSITIVE_LOCAL_PATHS = {
 
 SENSITIVE_LOCAL_PREFIXES = (
     "/api/container/",
+    "/api/agent/self-improvement/",
 )
 
 METHOD_SENSITIVE_LOCAL_PREFIXES = (
