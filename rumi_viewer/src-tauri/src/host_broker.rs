@@ -484,8 +484,11 @@ fn execute_computer_run(shared: &HostBrokerShared, request: HostBrokerComputerRu
     match helper_result {
         Ok(result) => {
             let result_ok = result.get("ok").and_then(Value::as_bool).unwrap_or(false);
-            let payload = result.get("result").cloned();
+            let mut payload = result.get("result").cloned();
             let payload_requires_approval = helper_payload_requires_approval(payload.as_ref());
+            if payload_requires_approval {
+                payload = payload.map(redact_helper_approval_token);
+            }
             let approval_result = approval_result_for(
                 &function_id,
                 approval_token_present,
@@ -685,6 +688,17 @@ fn helper_payload_requires_approval(payload: Option<&Value>) -> bool {
             .unwrap_or(false)
 }
 
+fn redact_helper_approval_token(payload: Value) -> Value {
+    let Value::Object(mut map) = payload else {
+        return payload;
+    };
+    map.remove("approval_token");
+    if let Some(nested_payload) = map.get_mut("payload") {
+        *nested_payload = strip_approval_fields(nested_payload);
+    }
+    Value::Object(map)
+}
+
 fn approval_result_for(
     function_id: &str,
     approval_token_present: bool,
@@ -711,13 +725,16 @@ fn approval_result_for(
 fn high_risk_function(function_id: &str) -> bool {
     matches!(
         function_id,
-        "computer.click"
+        "computer.screenshot"
+            | "computer.move"
+            | "computer.click"
             | "computer.drag"
             | "computer.type"
             | "computer.key"
             | "computer.scroll"
             | "computer.semantic_action"
             | "computer.pid_event"
+            | "computer.clipboard.read"
             | "computer.clipboard.write"
             | "computer.clipboard.clear"
     )
@@ -1272,7 +1289,9 @@ mod tests {
     #[test]
     fn high_risk_functions_require_approval() {
         assert!(high_risk_function("computer.click"));
-        assert!(!high_risk_function("computer.screenshot"));
+        assert!(high_risk_function("computer.move"));
+        assert!(high_risk_function("computer.screenshot"));
+        assert!(high_risk_function("computer.clipboard.read"));
         assert!(function_allowed("computer.clipboard.clear"));
         assert!(!function_allowed("computer.launch_missiles"));
     }
@@ -1291,6 +1310,27 @@ mod tests {
     }
 
     #[test]
+    fn helper_approval_payload_redaction_removes_harvestable_tokens() {
+        let redacted = redact_helper_approval_token(json!({
+            "action": "computer.clipboard.read",
+            "requires_approval": true,
+            "approval_token": "helper-issued-token",
+            "payload": {
+                "include_content": true,
+                "approval_token": "nested-token",
+                "text": "keep"
+            }
+        }));
+
+        assert!(redacted.get("approval_token").is_none());
+        assert_eq!(
+            redacted.pointer("/payload/text").and_then(Value::as_str),
+            Some("keep")
+        );
+        assert!(redacted.pointer("/payload/approval_token").is_none());
+    }
+
+    #[test]
     fn approval_result_tracks_missing_rejected_and_approved_states() {
         assert_eq!(
             approval_result_for("computer.click", false, false).as_deref(),
@@ -1306,7 +1346,7 @@ mod tests {
         );
         assert_eq!(
             approval_result_for("computer.screenshot", true, true).as_deref(),
-            Some("requires_approval")
+            Some("rejected")
         );
     }
 
