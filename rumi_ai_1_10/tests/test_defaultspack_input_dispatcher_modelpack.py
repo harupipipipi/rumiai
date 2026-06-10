@@ -555,7 +555,7 @@ def test_model_pack_review_chain_uses_isolated_reviewer(monkeypatch, tmp_path):
                 assert "draft ok" in payload
                 assert "reviewer_context_rule" in payload
                 assert tools == []
-                return {"content": [{"type": "text", "text": "APPROVED: yes\nNo changes required."}]}
+                return {"content": [{"type": "text", "text": json.dumps({"pass": True, "score": 96, "issues": [], "required_changes": []})}]}
             raise AssertionError(model_name)
 
     provider = DemoProvider()
@@ -577,6 +577,67 @@ def test_model_pack_review_chain_uses_isolated_reviewer(monkeypatch, tmp_path):
     assert [call["model"] for call in provider.calls] == ["generator", "reviewer"]
     assert provider.calls[0]["params"]["thinking_level"] == "medium"
     assert provider.calls[1]["tools"] == []
+
+
+def test_model_pack_review_chain_quarantines_unmarked_generator_scratch(monkeypatch, tmp_path):
+    settings_path = tmp_path / "frontend_settings.json"
+    settings_path.write_text(
+        json.dumps(
+            {
+                "models": {
+                    "model_packs": [
+                        {
+                            "id": "review-pack",
+                            "mode": "review_chain",
+                            "members": [
+                                {"model": "demo/generator", "metadata": {"role": "generator"}},
+                                {"model": "demo/reviewer", "metadata": {"role": "reviewer"}},
+                            ],
+                            "budget": {"max_review_rounds": 1},
+                        }
+                    ]
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(AIClient, "_settings_path", lambda self: settings_path)
+
+    class DemoProvider:
+        def __init__(self):
+            self.calls = []
+
+        def complete(self, model_name, messages, tools, params):
+            self.calls.append({"model": model_name, "messages": messages, "tools": tools, "params": params})
+            if model_name == "generator":
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": "RUMI_REASONING_BRIEF: private scratch\nscratch text that must never ship",
+                        }
+                    ]
+                }
+            raise AssertionError("reviewer must not run after an unmarked draft")
+
+    provider = DemoProvider()
+
+    def fake_resolve(self, model):
+        if model.startswith("demo/"):
+            return provider, model.split("/", 1)[1]
+        raise AssertionError(model)
+
+    monkeypatch.setattr(AIClient, "resolve_provider", fake_resolve)
+
+    response = AIClient().complete("modelpack/review-pack", [{"role": "user", "content": "implement a larger change"}], [], {})
+    text = response["content"][0]["text"]
+    process = response["metadata"]["rumi_process"]
+
+    assert response["finish_reason"] == "draft_quarantine"
+    assert process["review"]["reason"] == "missing_final_response_marker"
+    assert "RUMI_REASONING_BRIEF" not in text
+    assert "scratch text that must never ship" not in text
+    assert [call["model"] for call in provider.calls] == ["generator"]
 
 
 def test_model_pack_deepthink_chain_selects_harness_tools_separate_from_model_tools(monkeypatch, tmp_path):
@@ -667,6 +728,123 @@ def test_model_pack_deepthink_chain_selects_harness_tools_separate_from_model_to
     assert provider.calls[-1]["tools"] == []
 
 
+def _run_deepthink_json_repair_case(monkeypatch, tmp_path, malformed_phase: str):
+    settings_path = tmp_path / "frontend_settings.json"
+    settings_path.write_text(
+        json.dumps(
+            {
+                "models": {
+                    "model_packs": [
+                        {
+                            "id": "repair-pack",
+                            "mode": "review_chain",
+                            "members": [
+                                {"model": "demo/generator", "metadata": {"role": "generator", "thinking_level": "medium"}},
+                                {"model": "demo/reviewer", "metadata": {"role": "reviewer", "thinking_level": "medium"}},
+                            ],
+                            "budget": {
+                                "deepthink_max_review_iterations": 1,
+                                "deepthink_user_rejection_review_cycles": 0,
+                                "deepthink_max_sections": 1,
+                            },
+                        }
+                    ]
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(AIClient, "_settings_path", lambda self: settings_path)
+
+    class DemoProvider:
+        def __init__(self):
+            self.calls = []
+            self.plan_broken = False
+            self.note_broken = False
+            self.review_broken = False
+
+        def complete(self, model_name, messages, tools, params):
+            self.calls.append({"model": model_name, "messages": messages, "tools": tools, "params": params})
+            system = messages[0]["content"]
+            user = messages[-1]["content"]
+            if "Repair malformed JSON" in system:
+                assert tools == []
+                if '"structure"' in user:
+                    return {"content": [{"type": "text", "text": json.dumps({"structure": ["Repaired"], "key_points": ["k"], "risks": []})}]}
+                if '"thinking"' in user:
+                    return {"content": [{"type": "text", "text": json.dumps({"thinking": "repaired note", "output": "safe note"})}]}
+                if '"pass"' in user:
+                    return {"content": [{"type": "text", "text": json.dumps({"pass": True, "score": 91, "issues": [], "required_changes": []})}]}
+                raise AssertionError(user)
+            if model_name == "generator":
+                if "Plan the response before writing it" in system:
+                    if malformed_phase == "planner" and not self.plan_broken:
+                        self.plan_broken = True
+                        return {"content": [{"type": "text", "text": "{structure: [broken]"}]}
+                    return {"content": [{"type": "text", "text": json.dumps({"structure": ["A"], "key_points": ["k"], "risks": []})}]}
+                if "Write one visible pseudo DeepThinking step" in system:
+                    if malformed_phase == "note" and not self.note_broken:
+                        self.note_broken = True
+                        return {"content": [{"type": "text", "text": "thinking: broken note"}]}
+                    return {"content": [{"type": "text", "text": json.dumps({"thinking": "check", "output": "next"})}]}
+                if "section only" in system:
+                    return {"content": [{"type": "text", "text": "section draft"}]}
+                return {"content": [{"type": "text", "text": "final ok"}]}
+            if model_name == "reviewer":
+                assert tools == []
+                if malformed_phase == "reviewer" and not self.review_broken:
+                    self.review_broken = True
+                    return {"content": [{"type": "text", "text": "pass yes score 91"}]}
+                return {"content": [{"type": "text", "text": json.dumps({"pass": True, "score": 91, "issues": [], "required_changes": []})}]}
+            raise AssertionError(model_name)
+
+    provider = DemoProvider()
+
+    def fake_resolve(self, model):
+        if model.startswith("demo/"):
+            return provider, model.split("/", 1)[1]
+        raise AssertionError(model)
+
+    monkeypatch.setattr(AIClient, "resolve_provider", fake_resolve)
+    response = AIClient().complete(
+        "modelpack/repair-pack",
+        [{"role": "user", "content": "implement a larger change"}],
+        [],
+        {"deepthink_enabled": True},
+    )
+    return response, provider
+
+
+def test_deepthink_repairs_malformed_planner_json(monkeypatch, tmp_path):
+    response, provider = _run_deepthink_json_repair_case(monkeypatch, tmp_path, "planner")
+    process = response["metadata"]["rumi_process"]
+
+    assert response["content"][0]["text"] == "final ok"
+    assert process["deepthink"]["plan"]["structure"] == ["Repaired"]
+    assert any(event["phase"] == "json_repair" and "planner JSON repair" in event["metadata"]["label"] for event in process["events"])
+    assert provider.plan_broken is True
+
+
+def test_deepthink_repairs_malformed_public_note_json(monkeypatch, tmp_path):
+    response, provider = _run_deepthink_json_repair_case(monkeypatch, tmp_path, "note")
+    process = response["metadata"]["rumi_process"]
+
+    assert response["content"][0]["text"] == "final ok"
+    assert {"thinking": "repaired note", "output": "safe note"} in process["deepthink"]["notes"]
+    assert any(event["phase"] == "json_repair" and "public note JSON repair" in event["metadata"]["label"] for event in process["events"])
+    assert provider.note_broken is True
+
+
+def test_deepthink_repairs_malformed_reviewer_json(monkeypatch, tmp_path):
+    response, provider = _run_deepthink_json_repair_case(monkeypatch, tmp_path, "reviewer")
+    process = response["metadata"]["rumi_process"]
+
+    assert response["content"][0]["text"] == "final ok"
+    assert process["review"]["approved"] is True
+    assert any(event["phase"] == "json_repair" and "reviewer JSON repair" in event["metadata"]["label"] for event in process["events"])
+    assert provider.review_broken is True
+
+
 def test_rumi_harness_tool_selection_only_adds_vision_tools_for_model_visible_images():
     from domain.ai_client import rumi_process
 
@@ -715,6 +893,9 @@ def test_builtin_rumi_model_pack_uses_available_runtime_model(monkeypatch, tmp_p
 
     assert response["content"][0]["text"] == "runtime ok"
     assert response["metadata"]["rumi_process"]["base_model"] == "google/gemini-2.5-flash"
+    assert response["metadata"]["rumi_process"]["intended_base_model"] == "xiaomi-token-plan-sgp/mimo-v2.5-pro"
+    assert response["metadata"]["rumi_process"]["resolved_base_model"] == "google/gemini-2.5-flash"
+    assert response["metadata"]["rumi_process"]["fallback_reason"] == "intended_base_model_unavailable_using_active_provider_fallback"
     assert [call["model"] for call in provider.calls] == ["gemini-2.5-flash"]
 
 
@@ -730,6 +911,59 @@ def test_model_pack_store_materializes_builtin_rumi_with_runtime_base_model(monk
     assert pack is not None
     assert [member.model for member in pack.members] == ["google/gemini-2.5-flash", "google/gemini-2.5-flash"]
     assert pack.metadata["base_model"] == "google/gemini-2.5-flash"
+    assert pack.metadata["intended_base_model"] == "xiaomi-token-plan-sgp/mimo-v2.5-pro"
+    assert pack.metadata["resolved_base_model"] == "google/gemini-2.5-flash"
+    assert pack.metadata["fallback_reason"] == "intended_base_model_unavailable_using_active_provider_fallback"
+
+
+def test_rumi_provider_default_is_not_process_model():
+    from domain.ai_client.providers.rumi_provider import RumiProvider
+
+    seen = {}
+
+    class FakeClient:
+        def __init__(self):
+            self._providers = {"openai": object()}
+
+        def complete(self, model, messages, tools, params):
+            seen["model"] = model
+            seen["params"] = params
+            return {"content": [{"type": "text", "text": "fallback"}]}
+
+    provider = RumiProvider(FakeClient())
+
+    assert RumiProvider._is_rumi_process_model("rumi/default") is False
+    assert RumiProvider._is_rumi_process_model("rumi/rumi") is True
+    assert RumiProvider._is_rumi_process_model("rumi/mimo") is True
+
+    response = provider.complete("default", [{"role": "user", "content": "hi"}], [], {})
+
+    assert response["content"][0]["text"] == "fallback"
+    assert seen["model"] == "openai/gpt-4o"
+
+
+def test_rumi_provider_mimo_requires_intended_base_model():
+    from domain.ai_client.providers.rumi_provider import RumiProvider
+
+    seen = {}
+
+    class FakeClient:
+        def __init__(self):
+            self._providers = {}
+
+        def complete(self, model, messages, tools, params):
+            seen["model"] = model
+            seen["params"] = params
+            return {"content": [{"type": "text", "text": "process"}]}
+
+    provider = RumiProvider(FakeClient())
+
+    response = provider.complete("mimo", [{"role": "user", "content": "hi"}], [], {})
+
+    assert response["content"][0]["text"] == "process"
+    assert seen["model"] == "modelpack/rumi"
+    assert seen["params"]["rumi_base_model_override"] == "xiaomi-token-plan-sgp/mimo-v2.5-pro"
+    assert seen["params"]["rumi_require_intended_base_model"] is True
 
 
 def test_model_call_uses_required_capabilities(monkeypatch):

@@ -18,6 +18,9 @@ RUMI_DEEPTHINK_WARNING = "DeepThink is enabled. This task may take several hours
 RUMI_DEEPTHINK_WARNING_JA = "DeepThinkが有効です。タスクには数時間かかる可能性があります。"
 RUMI_DEEPTHINK_SOURCE = "harupipipipi/thinker"
 RUMI_DEEPTHINK_MAX_SECTIONS = 3
+RUMI_QUARANTINE_MESSAGE = (
+    "Rumi quarantined this draft before delivery because the review chain could not verify a marked final response."
+)
 RUMI_BASE_MODEL_CANDIDATES = [
     RUMI_BASE_MODEL,
     "anthropic/claude-sonnet-4-0",
@@ -84,8 +87,21 @@ def resolve_rumi_base_model(
     return RUMI_BASE_MODEL
 
 
+def rumi_base_model_metadata(resolved_base_model: str | None = None) -> dict[str, Any]:
+    resolved = str(resolved_base_model or RUMI_BASE_MODEL).strip() or RUMI_BASE_MODEL
+    fallback_reason = ""
+    if resolved != RUMI_BASE_MODEL:
+        fallback_reason = "intended_base_model_unavailable_using_active_provider_fallback"
+    return {
+        "intended_base_model": RUMI_BASE_MODEL,
+        "resolved_base_model": resolved,
+        "fallback_reason": fallback_reason,
+    }
+
+
 def default_rumi_model_pack(*, base_model: str | None = None) -> dict[str, Any]:
     resolved_base_model = str(base_model or RUMI_BASE_MODEL).strip() or RUMI_BASE_MODEL
+    base_model_metadata = rumi_base_model_metadata(resolved_base_model)
     return {
         "id": RUMI_MODEL_PACK_ID,
         "display_name": RUMI_DISPLAY_NAME,
@@ -133,6 +149,7 @@ def default_rumi_model_pack(*, base_model: str | None = None) -> dict[str, Any]:
             "builtin": True,
             "process_version": RUMI_PROCESS_VERSION,
             "base_model": resolved_base_model,
+            **base_model_metadata,
             "model_limit_summary": {
                 "positioning": "MiMo V2.5 Pro is capable but not a frontier ceiling.",
                 "known_stronger_model_classes": ["Claude Sonnet", "Claude Opus", "GPT"],
@@ -539,23 +556,17 @@ def build_json_repair_messages(schema_hint: str, broken_text: str) -> list[dict[
 
 
 def review_approved(text: str) -> bool:
-    lowered = str(text or "").casefold()
-    if re.search(r"\bapproved\s*:\s*(yes|true|ok)\b", lowered):
-        return True
-    if re.search(r"\b(ok|pass)\s*:\s*(yes|true)\b", lowered):
-        return True
-    if re.search(r"\bapproved\s*:\s*(no|false)\b", lowered):
-        return False
-    return False
+    review = parse_deepthink_review_strict(text)
+    return bool(review and review.get("pass"))
 
 
-def extract_draft_response(text: str) -> str:
+def extract_draft_response(text: str) -> str | None:
     raw = str(text or "")
     for marker in ("FINAL_RESPONSE:", "DRAFT_RESPONSE:", "ANSWER:"):
         index = raw.find(marker)
         if index >= 0:
             return raw[index + len(marker):].strip()
-    return raw.strip()
+    return None
 
 
 def messages_text(messages: list[dict[str, Any]]) -> str:
@@ -639,20 +650,41 @@ def response_has_tool_calls(response: Any) -> bool:
     return False
 
 
+def parse_deepthink_plan_strict(text: str) -> dict[str, Any] | None:
+    value = _parse_jsonish(text, None)
+    plan = sanitize_deepthink_plan(value)
+    if plan["structure"] or plan["key_points"] or plan["risks"]:
+        return plan
+    return None
+
+
 def parse_deepthink_plan(text: str) -> dict[str, Any]:
-    return sanitize_deepthink_plan(_parse_jsonish(text, {}))
+    return parse_deepthink_plan_strict(text) or sanitize_deepthink_plan({})
+
+
+def parse_deepthink_note_strict(text: str) -> dict[str, str] | None:
+    notes = sanitize_deepthink_notes(_parse_jsonish(text, None))
+    if notes:
+        return notes[0]
+    return None
 
 
 def parse_deepthink_note(text: str) -> dict[str, str]:
-    notes = sanitize_deepthink_notes(_parse_jsonish(text, {}))
-    if notes:
-        return notes[0]
-    stripped = str(text or "").strip()
-    return {"thinking": "DeepThink note parse fallback.", "output": stripped[:800]}
+    return parse_deepthink_note_strict(text) or {
+        "thinking": "DeepThink note parse fallback.",
+        "output": "Rumi recorded this step internally but could not parse a safe public note.",
+    }
+
+
+def parse_deepthink_review_strict(text: str) -> dict[str, Any] | None:
+    value = _parse_jsonish(text, None)
+    if not isinstance(value, dict) or "pass" not in value:
+        return None
+    return sanitize_deepthink_review(value)
 
 
 def parse_deepthink_review(text: str) -> dict[str, Any]:
-    return sanitize_deepthink_review(_parse_jsonish(text, {}))
+    return parse_deepthink_review_strict(text) or sanitize_deepthink_review({})
 
 
 def sanitize_deepthink_plan(value: Any) -> dict[str, Any]:
@@ -690,7 +722,7 @@ def sanitize_deepthink_review(value: Any) -> dict[str, Any]:
     except (TypeError, ValueError):
         score = 0
     return {
-        "pass": bool(record.get("pass")),
+        "pass": _coerce_bool(record.get("pass"), default=False),
         "score": score,
         "issues": _string_list(record.get("issues")),
         "required_changes": _string_list(record.get("required_changes")),
@@ -857,7 +889,7 @@ def _simple_system_prompt() -> str:
         "Use a light version of the Rumi process: infer user intent and level, then answer directly. "
         "Do not expose private background speculation unless it helps the user. "
         "If current facts or proper nouns matter and search is available, request freshness before relying on stale memory. "
-        "Return only the useful answer unless an action preflight block is required."
+        "Return FINAL_RESPONSE: followed by only the useful answer unless an action preflight block is required."
     )
 
 
@@ -880,7 +912,8 @@ def _reviewer_system_prompt() -> str:
         "Do not use personalization or private background hypotheses. "
         "Check intent fit, level fit, latest-information handling, action assumptions, todo quality, tool failure awareness, "
         "confidence/escalation, and whether the answer should be quarantined. "
-        "Start with APPROVED: yes or APPROVED: no. Then give concise required fixes."
+        'Return only valid JSON with this exact shape: {"pass": boolean, "score": number, "issues": string[], "required_changes": string[]}. '
+        "Set pass=true only when the draft is safe to deliver unchanged."
     )
 
 

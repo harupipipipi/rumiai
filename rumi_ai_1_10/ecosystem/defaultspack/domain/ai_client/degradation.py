@@ -21,6 +21,8 @@ INTERNAL_RUMI_PARAMS = {
     "deepthink_user_rejection_review_cycles",
     "deepthink_max_sections",
     "deepthink_loop_breaker",
+    "rumi_base_model_override",
+    "rumi_require_intended_base_model",
 }
 
 

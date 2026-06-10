@@ -45,6 +45,8 @@ def test_request_planner_drops_internal_deepthink_params_before_provider_payload
         {
             "deepthink_enabled": True,
             "deepthink_max_review_iterations": 4,
+            "rumi_base_model_override": "xiaomi-token-plan-sgp/mimo-v2.5-pro",
+            "rumi_require_intended_base_model": True,
             "temperature": 0.2,
         },
         {},
