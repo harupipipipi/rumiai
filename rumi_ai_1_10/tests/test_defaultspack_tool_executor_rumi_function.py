@@ -700,6 +700,59 @@ def test_sandbox_exec_runs_only_with_internal_tool_decision(tmp_path, monkeypatc
     assert "--network=none" in captured["args"]
     assert "--read-only" in captured["args"]
     assert f"{tmp_path / '.rumi' / 'artifacts'}:/workspace:rw" in captured["args"]
+    image_index = captured["args"].index(sandbox_tools.DEFAULT_SANDBOX_IMAGE)
+    assert captured["args"][image_index - 1] == "--"
+
+
+def test_sandbox_exec_rejects_client_supplied_image_before_docker(tmp_path, monkeypatch):
+    from domain.tool.executor import ToolExecutor
+    from domain.tool_policy.internal_context import seal_tool_context
+    from domain.tool import sandbox_tools
+
+    def fake_run(*args, **kwargs):
+        raise AssertionError("docker must not run with an invalid image reference")
+
+    monkeypatch.setattr(sandbox_tools.subprocess, "run", fake_run)
+
+    context = seal_tool_context(
+        {"workspace_root": str(tmp_path)},
+        {"action": "allow", "allowed": True},
+    )
+
+    result = ToolExecutor().execute(
+        "sandbox_exec",
+        {"command": "pwd", "image": "python:3.12-slim"},
+        context,
+    )
+
+    assert result["is_error"] is True
+    assert result["widget"]["error"]["code"] == "INVALID_SANDBOX_IMAGE"
+
+
+def test_sandbox_exec_rejects_invalid_configured_image_before_docker(tmp_path, monkeypatch):
+    from domain.tool.executor import ToolExecutor
+    from domain.tool_policy.internal_context import seal_tool_context
+    from domain.tool import sandbox_tools
+
+    def fake_run(*args, **kwargs):
+        raise AssertionError("docker must not run with an invalid image reference")
+
+    monkeypatch.setattr(sandbox_tools, "DEFAULT_SANDBOX_IMAGE", "--privileged")
+    monkeypatch.setattr(sandbox_tools.subprocess, "run", fake_run)
+
+    context = seal_tool_context(
+        {"workspace_root": str(tmp_path)},
+        {"action": "allow", "allowed": True},
+    )
+
+    result = ToolExecutor().execute(
+        "sandbox_exec",
+        {"command": "pwd"},
+        context,
+    )
+
+    assert result["is_error"] is True
+    assert result["widget"]["error"]["code"] == "INVALID_SANDBOX_IMAGE"
 
 
 def test_python_exec_uses_container_python_not_host_interpreter(tmp_path, monkeypatch):

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -16,6 +17,18 @@ DEFAULT_SANDBOX_IMAGE = os.environ.get("RUMI_SANDBOX_IMAGE") or "python:3.11-sli
 DEFAULT_NODE_SANDBOX_IMAGE = os.environ.get("RUMI_NODE_SANDBOX_IMAGE") or "node:22-bookworm-slim"
 MAX_SANDBOX_OUTPUT = 1024 * 1024
 
+_IMAGE_COMPONENT = r"[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*"
+_DOMAIN_COMPONENT = r"(?:[a-z0-9]|[a-z0-9][a-z0-9-]*[a-z0-9])"
+_DOMAIN = rf"{_DOMAIN_COMPONENT}(?:\.{_DOMAIN_COMPONENT})*(?::[0-9]+)?"
+_TAG = r"[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}"
+_DIGEST_ALGORITHM = r"[A-Za-z][A-Za-z0-9]*(?:[+._-][A-Za-z][A-Za-z0-9]*)*"
+_DIGEST = rf"{_DIGEST_ALGORITHM}:[0-9a-fA-F]{{32,}}"
+_DOCKER_IMAGE_REF_RE = re.compile(
+    rf"^(?=.{{1,255}}$)(?:(?:{_DOMAIN})/)?"
+    rf"{_IMAGE_COMPONENT}(?:/{_IMAGE_COMPONENT})*"
+    rf"(?::{_TAG})?(?:@{_DIGEST})?$"
+)
+
 
 def _normalize_command(command: Any) -> list[str]:
     if isinstance(command, str):
@@ -23,6 +36,13 @@ def _normalize_command(command: Any) -> list[str]:
     if isinstance(command, (list, tuple)) and command:
         return [str(part) for part in command]
     raise ValueError("'command' must be a non-empty string or array")
+
+
+def _validate_docker_image_ref(image: Any) -> str:
+    image_ref = str(image or "")
+    if image_ref != image_ref.strip() or not _DOCKER_IMAGE_REF_RE.fullmatch(image_ref):
+        raise ValueError("invalid Docker image reference")
+    return image_ref
 
 
 def _container_workdir(ws: Any, cwd: Any) -> str:
@@ -70,17 +90,19 @@ def _run_in_docker(*, ws: Any, command: Any, cwd: Any, timeout: int, image: str)
     }
 
 
-def sandbox_exec(arguments: dict[str, Any], context: dict[str, Any] | None = None) -> dict[str, Any]:
+def sandbox_exec(arguments: dict[str, Any], context: dict[str, Any] | None = None, *, image: Any | None = None) -> dict[str, Any]:
     command = arguments.get("command")
     if not command:
         return err("'command' is required", "INVALID_INPUT")
+    if image is None and "image" in arguments:
+        return err("'image' is not accepted for sandbox_exec", "INVALID_SANDBOX_IMAGE")
     try:
         ws = workspace(context)
         terminal = Terminal(str(ws.root))
         risk = terminal.classify(command, cwd=arguments.get("cwd"))
         if risk.get("classification") == "blocked":
             return err("command is blocked by terminal policy", "SANDBOX_COMMAND_BLOCKED", risk=risk)
-        image = str(arguments.get("image") or DEFAULT_SANDBOX_IMAGE)
+        image = _validate_docker_image_ref(image or DEFAULT_SANDBOX_IMAGE)
         result = _run_in_docker(
             ws=ws,
             command=command,
@@ -95,6 +117,10 @@ def sandbox_exec(arguments: dict[str, Any], context: dict[str, Any] | None = Non
         return err(str(exc), "SANDBOX_EXEC_FAILED")
     except subprocess.TimeoutExpired:
         return err("sandbox execution timed out", "SANDBOX_TIMEOUT")
+    except ValueError as exc:
+        if str(exc) == "invalid Docker image reference":
+            return err(str(exc), "INVALID_SANDBOX_IMAGE")
+        return err(str(exc), "SANDBOX_EXEC_FAILED")
     except Exception as exc:
         return err(str(exc), "SANDBOX_EXEC_FAILED")
 
@@ -114,8 +140,9 @@ def python_exec(arguments: dict[str, Any], context: dict[str, Any] | None = None
             script_path = ws.relative(ws.resolve(str(script_path), must_exist=True))
         command = ["python", str(script_path)]
         return sandbox_exec(
-            {"command": command, "timeout": arguments.get("timeout") or 30, "image": DEFAULT_SANDBOX_IMAGE},
+            {"command": command, "timeout": arguments.get("timeout") or 30},
             context,
+            image=DEFAULT_SANDBOX_IMAGE,
         )
     except Exception as exc:
         return err(str(exc), "PYTHON_EXEC_FAILED")
@@ -135,8 +162,9 @@ def node_exec(arguments: dict[str, Any], context: dict[str, Any] | None = None) 
         else:
             script_path = ws.relative(ws.resolve(str(script_path), must_exist=True))
         return sandbox_exec(
-            {"command": ["node", str(script_path)], "timeout": arguments.get("timeout") or 30, "image": DEFAULT_NODE_SANDBOX_IMAGE},
+            {"command": ["node", str(script_path)], "timeout": arguments.get("timeout") or 30},
             context,
+            image=DEFAULT_NODE_SANDBOX_IMAGE,
         )
     except Exception as exc:
         return err(str(exc), "NODE_EXEC_FAILED")
