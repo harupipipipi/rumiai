@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -13,6 +14,35 @@ from domain.components.registry import DomainComponentRegistry, build_domain_com
 from domain.external.audience_policy_registry import AudiencePolicyRegistry  # noqa: E402
 from domain.external.input_profile_registry import InputProfileRegistry  # noqa: E402
 from domain.external.output_profile_registry import OutputProfileRegistry  # noqa: E402
+
+
+def _write_json(path: Path, payload: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def _write_external_component(
+    pack_root: Path,
+    category: str,
+    component_id: str,
+    rules: dict,
+    *,
+    aliases: dict | None = None,
+) -> None:
+    component_dir = pack_root / "domain" / category / component_id
+    _write_json(
+        component_dir / "manifest.json",
+        {
+            "id": component_id,
+            "category": category,
+            "kind": "external_component",
+            "version": "1",
+            "status": "stable",
+            "entrypoints": {"rules": "rules.json"},
+            "aliases": aliases or {},
+        },
+    )
+    _write_json(component_dir / "rules.json", rules)
 
 
 def test_external_profiles_and_policies_are_component_discoverable():
@@ -59,3 +89,108 @@ def test_invalid_external_component_manifest_fails_soft(tmp_path):
     assert registry.get("input_profiles", "bad") is None
     assert registry.issues
     assert InputProfileRegistry(pack_root).list_profiles() == []
+
+
+def test_external_registries_ignore_sibling_pack_component_overrides(tmp_path):
+    ecosystem = tmp_path / "ecosystem"
+    pack_root = ecosystem / "defaultspack"
+    evil_root = ecosystem / "evilpack"
+    _write_json(pack_root / "ecosystem.json", {"pack_id": "defaultspack"})
+    _write_json(evil_root / "ecosystem.json", {"pack_id": "evilpack"})
+
+    _write_external_component(
+        pack_root,
+        "audience_policies",
+        "line_production",
+        {"policy": {"id": "line.production", "provider": "line", "default": "deny"}},
+        aliases={"policy_ids": ["line.production"]},
+    )
+    _write_external_component(
+        evil_root,
+        "audience_policies",
+        "zz_attack_line_policy",
+        {
+            "policy": {
+                "id": "line.production",
+                "provider": "line",
+                "default": "allow",
+                "marker": "EVIL_POLICY_FROM_UNAPPROVED_SIBLING",
+            }
+        },
+        aliases={"policy_ids": ["line.production"]},
+    )
+
+    _write_external_component(
+        pack_root,
+        "input_profiles",
+        "line_default",
+        {
+            "profile": {
+                "id": "line.default",
+                "provider": "line",
+                "version": 1,
+                "input": {"content": "trusted"},
+            }
+        },
+        aliases={"profile_ids": ["line.default"]},
+    )
+    _write_external_component(
+        evil_root,
+        "input_profiles",
+        "zz_attack_line_input",
+        {
+            "profile": {
+                "id": "line.default",
+                "provider": "line",
+                "version": 1,
+                "input": {"content": "evil"},
+                "marker": "EVIL_INPUT_PROFILE_FROM_UNAPPROVED_SIBLING",
+            }
+        },
+        aliases={"profile_ids": ["line.default"]},
+    )
+
+    _write_external_component(
+        pack_root,
+        "output_profiles",
+        "line_default",
+        {
+            "profile": {
+                "id": "line.default",
+                "provider": "line",
+                "version": 1,
+                "transport": "line",
+                "output": {"content": "trusted"},
+            }
+        },
+        aliases={"profile_ids": ["line.default"]},
+    )
+    _write_external_component(
+        evil_root,
+        "output_profiles",
+        "zz_attack_line_output",
+        {
+            "profile": {
+                "id": "line.default",
+                "provider": "line",
+                "version": 1,
+                "transport": "line",
+                "output": {"content": "evil"},
+                "marker": "EVIL_OUTPUT_PROFILE_FROM_UNAPPROVED_SIBLING",
+            }
+        },
+        aliases={"profile_ids": ["line.default"]},
+    )
+
+    policy = AudiencePolicyRegistry(pack_root=pack_root).resolve("line.production")
+    input_profile = InputProfileRegistry(pack_root).get("line.default")
+    output_profile = OutputProfileRegistry(pack_root).get("line.default")
+
+    assert policy["default"] == "deny"
+    assert "marker" not in policy
+    assert input_profile is not None
+    assert input_profile.spec["input"] == {"content": "trusted"}
+    assert "marker" not in input_profile.spec
+    assert output_profile is not None
+    assert output_profile.spec["output"] == {"content": "trusted"}
+    assert "marker" not in output_profile.spec
