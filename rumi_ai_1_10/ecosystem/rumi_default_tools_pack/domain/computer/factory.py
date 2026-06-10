@@ -9,6 +9,7 @@ from __future__ import annotations
 import sys
 
 from .audit import AuditLogger
+from .platform_adapters import adapter_for_sys_platform
 from .registry import DriverRegistry
 from .service import ComputerSeatService
 
@@ -20,25 +21,7 @@ def create_default_driver_registry() -> DriverRegistry:
     from .drivers.browser_cdp import BrowserCDPDriver
 
     registry.register(BrowserCDPDriver())
-
-    if sys.platform == "darwin":
-        from .drivers.mac_accessibility import MacAccessibilityDriver
-        from .drivers.mac_apple_events import MacAppleEventsDriver
-        from .drivers.mac_cgevent_pid import MacCGEventPidDriver
-        from .drivers.mac_screen_capture import MacScreenCaptureDriver
-        from .drivers.mac_foreground import MacForegroundFallbackDriver
-
-        registry.register(MacAccessibilityDriver())
-        registry.register(MacAppleEventsDriver())
-        registry.register(MacCGEventPidDriver())
-        registry.register(MacScreenCaptureDriver())
-        registry.register(MacForegroundFallbackDriver())
-    elif sys.platform == "win32":
-        from .drivers.windows_uia import WindowsUIADriver
-        from .drivers.windows_postmessage import WindowsPostMessageDriver
-
-        registry.register(WindowsUIADriver())
-        registry.register(WindowsPostMessageDriver())
+    adapter_for_sys_platform(sys.platform).register_drivers(registry)
 
     # Always register local_visible as a universal fallback
     from .drivers.local_visible import LocalVisibleDesktopDriver

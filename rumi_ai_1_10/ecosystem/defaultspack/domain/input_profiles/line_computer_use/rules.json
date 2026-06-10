@@ -33,7 +33,11 @@
         "message": "$.message"
       }
     },
+    "chat": {
+      "model": "google/gemma-4-31b-it"
+    },
     "params": {
+      "model": "google/gemma-4-31b-it",
       "thinking_level": "high",
       "request_timeout": 45,
       "retry": {
