@@ -503,13 +503,6 @@ class ToolExecutor:
     def _allows_direct_first_party_function_fallback(pack_id, function_id):
         return (pack_id, function_id) in {
             ("defaultspack", "tool_calculator"),
-            ("defaultspack", "coding_file_create"),
-            ("defaultspack", "coding_file_write"),
-            ("defaultspack", "knowledge_create"),
-            ("defaultspack", "knowledge_get"),
-            ("defaultspack", "knowledge_list"),
-            ("defaultspack", "knowledge_search"),
-            ("defaultspack", "knowledge_update"),
             ("rumi_default_tools_pack", "calculator"),
             ("rumi_default_tools_pack", "rumi_api"),
         }

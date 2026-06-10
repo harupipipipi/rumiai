@@ -5,7 +5,8 @@ import re
 import sys
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -97,21 +98,31 @@ class TestDefaultspackApiRoutes(unittest.TestCase):
         handler = PackAPIHandler.__new__(PackAPIHandler)
         sent = []
         handler._send_result = sent.append
+        execute = MagicMock(return_value=SimpleNamespace(success=True, output={"ok": True}))
 
         with patch(
-            "core_runtime.pack_function_runtime.invoke_pack_function",
-            return_value={"ok": True},
-        ) as mocked:
+            "core_runtime.capability_executor.get_capability_executor",
+            return_value=SimpleNamespace(execute=execute),
+        ):
             dispatched = handler._dispatch_api_route(
                 "POST", "/api/defaultspack/run", {"input": "hello"}
             )
 
         self.assertTrue(dispatched)
-        mocked.assert_called_once_with(
+        execute.assert_called_once_with(
             "defaultspack",
-            "run",
-            {"mode": "fast", "input": "hello"},
-            {"pack_id": "defaultspack", "method": "POST", "path": "/api/defaultspack/run"},
+            {
+                "type": "function.call",
+                "qualified_name": "defaultspack:run",
+                "args": {"mode": "fast", "input": "hello"},
+                "request_id": "api-route:POST:/api/defaultspack/run",
+                "context": {
+                    "pack_id": "defaultspack",
+                    "method": "POST",
+                    "path": "/api/defaultspack/run",
+                    "_api_route": True,
+                },
+            },
         )
         self.assertEqual(sent, [{"ok": True}])
 
@@ -138,11 +149,12 @@ class TestDefaultspackApiRoutes(unittest.TestCase):
         ]
         handler = PackAPIHandler.__new__(PackAPIHandler)
         handler._send_result = lambda result: None
+        execute = MagicMock(return_value=SimpleNamespace(success=True, output={"ok": True}))
 
         with patch(
-            "core_runtime.pack_function_runtime.invoke_pack_function",
-            return_value={"ok": True},
-        ) as mocked:
+            "core_runtime.capability_executor.get_capability_executor",
+            return_value=SimpleNamespace(execute=execute),
+        ):
             dispatched = handler._dispatch_api_route(
                 "POST",
                 "/api/defaultspack/pack-requests/123/approve",
@@ -154,20 +166,99 @@ class TestDefaultspackApiRoutes(unittest.TestCase):
             )
 
         self.assertTrue(dispatched)
-        mocked.assert_called_once_with(
+        execute.assert_called_once_with(
             "defaultspack",
-            "review_pack_request",
             {
-                "decision": "approve",
-                "decision_notes": "nope",
-                "request_id": "123",
-            },
-            {
-                "pack_id": "defaultspack",
-                "method": "POST",
-                "path": "/api/defaultspack/pack-requests/123/approve",
+                "type": "function.call",
+                "qualified_name": "defaultspack:review_pack_request",
+                "args": {
+                    "decision": "approve",
+                    "decision_notes": "nope",
+                    "request_id": "123",
+                },
+                "request_id": "api-route:POST:/api/defaultspack/pack-requests/123/approve",
+                "context": {
+                    "pack_id": "defaultspack",
+                    "method": "POST",
+                    "path": "/api/defaultspack/pack-requests/123/approve",
+                    "_api_route": True,
+                },
             },
         )
+
+    def test_api_route_function_permission_denial_sends_forbidden(self):
+        from core_runtime.pack_api_server import PackAPIHandler
+        from core_runtime.api.api_response import APIResponse
+
+        PackAPIHandler._api_route_exact = {
+            ("POST", "/api/tools/mcp/connect"): {
+                "pack_id": "defaultspack",
+                "handler": "",
+                "function_id": "tool_mcp_connect",
+                "pass_body": True,
+                "response_mode": "result",
+                "args": {},
+                "path_param_map": {},
+            }
+        }
+        PackAPIHandler._api_route_patterns = []
+        handler = PackAPIHandler.__new__(PackAPIHandler)
+        sent = []
+        handler._send_response = lambda response, status=200: sent.append((response, status))
+        execute = MagicMock(
+            return_value=SimpleNamespace(
+                success=False,
+                error="Caller does not meet caller_requires",
+                error_type="caller_requires_denied",
+            )
+        )
+
+        with patch(
+            "core_runtime.capability_executor.get_capability_executor",
+            return_value=SimpleNamespace(execute=execute),
+        ):
+            dispatched = handler._dispatch_api_route(
+                "POST",
+                "/api/tools/mcp/connect",
+                {"server_name": "untrusted"},
+            )
+
+        self.assertTrue(dispatched)
+        self.assertEqual(sent, [(APIResponse(False, error="Caller does not meet caller_requires"), 403)])
+
+    def test_api_route_function_not_found_falls_back_to_legacy_route(self):
+        from core_runtime.pack_api_server import PackAPIHandler
+
+        PackAPIHandler._api_route_exact = {
+            ("POST", "/api/example/run"): {
+                "pack_id": "example",
+                "handler": "",
+                "function_id": "run",
+                "pass_body": True,
+                "response_mode": "result",
+                "args": {},
+                "path_param_map": {},
+            }
+        }
+        PackAPIHandler._api_route_patterns = []
+        handler = PackAPIHandler.__new__(PackAPIHandler)
+        handler._send_response = MagicMock()
+        execute = MagicMock(
+            return_value=SimpleNamespace(
+                success=False,
+                error="Function not found: example:run",
+                error_type="function_not_found",
+            )
+        )
+
+        with patch(
+            "core_runtime.capability_executor.get_capability_executor",
+            return_value=SimpleNamespace(execute=execute),
+        ):
+            dispatched = handler._dispatch_api_route("POST", "/api/example/run", {"input": "hello"})
+
+        self.assertFalse(dispatched)
+        handler._send_response.assert_not_called()
 
 
 if __name__ == "__main__":

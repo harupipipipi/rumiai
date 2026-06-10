@@ -88,8 +88,11 @@ def _make_function_entry(
     function_id: str = "test_func",
     requires: Optional[List[str]] = None,
     caller_requires: Optional[List[str]] = None,
+    **extra,
 ):
-    return SimpleNamespace(
+    default_main_py = str(Path(__file__).resolve())
+    default_function_dir = str(Path(default_main_py).parent)
+    entry = SimpleNamespace(
         pack_id=pack_id,
         function_id=function_id,
         qualified_name=f"{pack_id}:{function_id}",
@@ -97,13 +100,16 @@ def _make_function_entry(
         caller_requires=list(caller_requires or []),
         host_execution=False,
         calling_convention=None,
-        function_dir="/fake/function_dir",
-        main_py_path="/fake/function_dir/main.py",
+        function_dir=default_function_dir,
+        main_py_path=default_main_py,
         entrypoint="main.py:run",
         grant_config={},
         manifest={},
         vocab_aliases=[],
     )
+    for key, value in extra.items():
+        setattr(entry, key, value)
+    return entry
 
 
 class TestExecuteMissingPermissionId(unittest.TestCase):
@@ -492,6 +498,7 @@ class TestFunctionCallBuiltinTrustScope(unittest.TestCase):
         grant_manager.check.side_effect = [
             _MockGrantResult(allowed=True),
             _MockGrantResult(allowed=True),
+            _MockGrantResult(allowed=True),
         ]
 
         executor = _make_executor(
@@ -513,6 +520,7 @@ class TestFunctionCallBuiltinTrustScope(unittest.TestCase):
         permission_manager.has_permission.assert_any_call("principal_a", "function.call")
         grant_manager.check.assert_any_call("defaultspack", "tool.write")
         grant_manager.check.assert_any_call("principal_a", "function.call")
+        grant_manager.check.assert_any_call("defaultspack", "defaultspack:test_func")
         mock_exec.assert_called_once()
 
     @patch("core_runtime.capability_executor.get_audit_logger", new_callable=MagicMock)
@@ -548,8 +556,204 @@ class TestFunctionCallBuiltinTrustScope(unittest.TestCase):
 
         self.assertTrue(resp.success)
         permission_manager.has_permission.assert_called_once_with("rumi_default_tools_pack", "function.call")
-        grant_manager.check.assert_called_once_with("rumi_default_tools_pack", "function.call")
+        grant_manager.check.assert_any_call("rumi_default_tools_pack", "function.call")
+        grant_manager.check.assert_any_call("custom_pack", "custom_pack:test_func")
         mock_exec.assert_called_once()
+
+    @patch("core_runtime.capability_executor.get_audit_logger", new_callable=MagicMock)
+    def test_function_call_enforces_function_trust_for_nonbuiltin_packs(self, mock_audit_module):
+        mock_audit_module.return_value = MagicMock()
+        entry = _make_function_entry(
+            "custom_pack",
+            manifest={"trust_required": True},
+        )
+        function_registry = MagicMock()
+        function_registry.get.return_value = entry
+
+        approval_manager = MagicMock()
+        approval_manager.is_pack_approved_and_verified.return_value = (True, None)
+        approval_manager._is_trusted_builtin_pack.return_value = False
+
+        permission_manager = MagicMock()
+        permission_manager.has_permission.return_value = True
+
+        trust_store = MagicMock()
+        trust_store.is_trusted.return_value = _MockTrustResult(
+            trusted=False,
+            reason="not trusted",
+        )
+
+        executor = _make_executor(
+            function_registry=function_registry,
+            approval_manager=approval_manager,
+            permission_manager=permission_manager,
+            trust_store=trust_store,
+        )
+
+        resp = executor.execute(
+            "principal_a",
+            {"type": "function.call", "qualified_name": "custom_pack:test_func"},
+        )
+
+        self.assertFalse(resp.success)
+        self.assertEqual(resp.error_type, "trust_denied")
+
+
+class TestUnifiedExecuteCallingConventionTrust(unittest.TestCase):
+    @patch("core_runtime.capability_executor.get_audit_logger", new_callable=MagicMock)
+    def test_unified_execute_denies_unapproved_pack_before_dispatch(self, mock_audit_module):
+        mock_audit_module.return_value = MagicMock()
+        entry = _make_function_entry("custom_pack", calling_convention="subprocess")
+        approval_manager = MagicMock()
+        approval_manager.is_pack_approved_and_verified.return_value = (False, "hash_mismatch")
+        approval_manager._is_trusted_builtin_pack.return_value = False
+        executor = _make_executor(approval_manager=approval_manager)
+
+        with patch.object(executor, "_dispatch_by_calling_convention") as mock_dispatch:
+            resp = executor._unified_execute(
+                entry,
+                "principal_a",
+                {"args": {}, "request_id": "req-approval"},
+                time.time(),
+            )
+
+        self.assertFalse(resp.success)
+        self.assertEqual(resp.error_type, "pack_not_approved")
+        mock_dispatch.assert_not_called()
+
+    @patch("core_runtime.capability_executor.get_audit_logger", new_callable=MagicMock)
+    def test_unified_execute_host_convention_requires_grant_without_manifest_config(self, mock_audit_module):
+        mock_audit_module.return_value = MagicMock()
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            host_path = tmp_path / "host.py"
+            host_path.write_text("def run(*args): return {'ok': True}", encoding="utf-8")
+            entry = _make_function_entry(
+                "custom_pack",
+                calling_convention="python_host",
+                main_py_path=str(host_path),
+                function_dir=str(tmp_path),
+                grant_config=None,
+            )
+            approval_manager = MagicMock()
+            approval_manager.is_pack_approved_and_verified.return_value = (True, None)
+            approval_manager._is_trusted_builtin_pack.return_value = False
+            trust_store = MagicMock()
+            trust_store.is_trusted.return_value = _MockTrustResult(trusted=True, reason="ok")
+            grant_manager = MagicMock()
+            grant_manager.check.return_value = _MockGrantResult(allowed=False, reason="missing grant")
+            executor = _make_executor(
+                trust_store=trust_store,
+                grant_manager=grant_manager,
+                approval_manager=approval_manager,
+            )
+
+            with patch.object(executor, "_dispatch_by_calling_convention") as mock_dispatch:
+                resp = executor._unified_execute(
+                    entry,
+                    "principal_a",
+                    {"args": {}, "request_id": "req-host"},
+                    time.time(),
+                )
+
+        self.assertFalse(resp.success)
+        self.assertEqual(resp.error_type, "grant_denied")
+        grant_manager.check.assert_any_call("custom_pack", "custom_pack:test_func")
+        mock_dispatch.assert_not_called()
+
+    @patch("core_runtime.capability_executor.get_audit_logger", new_callable=MagicMock)
+    def test_unified_execute_binary_entry_uses_binary_trust_path(self, mock_audit_module):
+        mock_audit_module.return_value = MagicMock()
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            binary_path = tmp_path / "tool.bin"
+            binary_path.write_text("binary", encoding="utf-8")
+            entry = _make_function_entry(
+                "custom_pack",
+                calling_convention="binary",
+                main_py_path=None,
+                main_binary_path=str(binary_path),
+                function_dir=str(tmp_path),
+                grant_config=None,
+            )
+            approval_manager = MagicMock()
+            approval_manager._is_trusted_builtin_pack.return_value = False
+            trust_store = MagicMock()
+            trust_store.is_trusted.return_value = _MockTrustResult(trusted=True, reason="ok")
+            executor = _make_executor(
+                trust_store=trust_store,
+                grant_manager=MagicMock(),
+                approval_manager=approval_manager,
+            )
+            executor._grant_manager.check.return_value = _MockGrantResult(allowed=True)
+            success = CapabilityResponse(success=True, output={"ok": True})
+
+            with patch.object(executor, "_dispatch_by_calling_convention", return_value=success) as mock_dispatch:
+                resp = executor._unified_execute(
+                    entry,
+                    "principal_a",
+                    {"args": {}, "request_id": "req-bin"},
+                    time.time(),
+                )
+
+        self.assertTrue(resp.success)
+        mock_dispatch.assert_called_once()
+
+    @patch("core_runtime.capability_executor.get_audit_logger", new_callable=MagicMock)
+    def test_unified_execute_command_entry_requires_absolute_executable_path(self, mock_audit_module):
+        mock_audit_module.return_value = MagicMock()
+        entry = _make_function_entry(
+            "custom_pack",
+            calling_convention="command",
+            main_py_path=None,
+            command=["bash", "-lc", "echo hi"],
+            grant_config=None,
+        )
+        approval_manager = MagicMock()
+        approval_manager._is_trusted_builtin_pack.return_value = False
+        executor = _make_executor(
+            trust_store=MagicMock(),
+            grant_manager=MagicMock(),
+            approval_manager=approval_manager,
+        )
+
+        resp = executor._unified_execute(
+            entry,
+            "principal_a",
+            {"args": {}, "request_id": "req-cmd"},
+            time.time(),
+        )
+
+        self.assertFalse(resp.success)
+        self.assertEqual(resp.error_type, "trust_denied")
+
+
+class TestHandlerSubprocessEntrypointCompatibility(unittest.TestCase):
+    @patch("core_runtime.capability_executor.get_audit_logger", new_callable=MagicMock)
+    def test_execute_handler_subprocess_defaults_callable_when_entrypoint_has_no_colon(self, mock_audit_module):
+        mock_audit_module.return_value = MagicMock()
+        executor = _make_executor()
+        handler_def = _MockHandlerDef(entrypoint="handler.py")
+        success = CapabilityResponse(success=True, output={"ok": True})
+
+        with patch.object(executor, "_run_runner_on_host", return_value=success) as mock_run:
+            resp = executor._execute_handler_subprocess(
+                handler_def=handler_def,
+                principal_id="principal_a",
+                permission_id="perm.test",
+                grant_config={},
+                args={},
+                timeout_seconds=5,
+                request_id="req-subproc",
+                start_time=time.time(),
+            )
+
+        self.assertTrue(resp.success)
+        mock_run.assert_called_once()
 
 
 def test_get_capability_executor_initializes_cached_container_instance(monkeypatch):
