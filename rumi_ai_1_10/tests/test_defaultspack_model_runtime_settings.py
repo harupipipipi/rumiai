@@ -61,6 +61,20 @@ def test_model_runtime_settings_preferred_model_and_thinking_level(tmp_path):
     assert service.get_thinking_level()["level"] == "high"
 
 
+def test_model_runtime_settings_deepthink_toggle_warns(tmp_path):
+    service = ModelRuntimeSettingsService(tmp_path)
+
+    assert service.get_deepthink_enabled()["enabled"] is False
+    enabled = service.set_deepthink_enabled(True)
+    assert enabled["enabled"] is True
+    assert "数時間" in enabled["message"]
+    assert service.get_settings()["deepthink_enabled"] is True
+
+    disabled = service.set_deepthink_enabled(False)
+    assert disabled["enabled"] is False
+    assert service.get_settings()["deepthink_enabled"] is False
+
+
 def test_model_runtime_settings_utility_models_and_groups(tmp_path):
     service = ModelRuntimeSettingsService(tmp_path)
     settings = service.update_settings(

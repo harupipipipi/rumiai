@@ -1232,6 +1232,7 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
 
         self.assertIn("model", ids)
         self.assertIn("think", ids)
+        self.assertIn("deepthink", ids)
         self.assertIn("compact", ids)
         self.assertIn("commit", ids)
         self.assertEqual(next(command for command in commands if command["id"] == "commit")["risk"], "high")
@@ -1257,6 +1258,26 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
             "google/gemma-4-31b-it",
             "conv-1",
         )
+
+    def test_slash_command_registry_executes_deepthink_toggle_with_warning(self):
+        from domain.frontend.command_registry import SlashCommandRegistry
+
+        registry = SlashCommandRegistry(DEFAULTSPACK_ROOT)
+        with patch("domain.ai_client.model_runtime_settings.ModelRuntimeSettingsService") as service_cls:
+            service = service_cls.return_value
+            service.set_deepthink_enabled.return_value = {
+                "enabled": True,
+                "message": "DeepThinkをONにしました。タスクには数時間かかる可能性があります。",
+            }
+            result = registry.execute(
+                {"command": "deepthink", "mode": "chat", "args": {"enabled": "on"}},
+                {},
+            )
+
+        self.assertEqual(result["status"], "ok")
+        self.assertTrue(result["data"]["executed"])
+        self.assertIn("数時間", result["data"]["message"])
+        service.set_deepthink_enabled.assert_called_once_with(True)
 
     def test_slash_command_registry_model_command_opens_picker_without_query(self):
         from domain.frontend.command_registry import SlashCommandRegistry

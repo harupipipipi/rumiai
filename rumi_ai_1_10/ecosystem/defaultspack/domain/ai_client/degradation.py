@@ -13,6 +13,15 @@ NON_VISION_IMAGE_PLACEHOLDER = (
     "[Image omitted: the selected provider does not support vision input. "
     "Use a vision-capable model or bridge result for image details.]"
 )
+INTERNAL_RUMI_PARAMS = {
+    "deepthink_enabled",
+    "deepthink",
+    "rumi_deepthink",
+    "deepthink_max_review_iterations",
+    "deepthink_user_rejection_review_cycles",
+    "deepthink_max_sections",
+    "deepthink_loop_breaker",
+}
 
 
 def degrade_request(
@@ -27,6 +36,7 @@ def degrade_request(
     caps = dict(provider_capabilities or {})
     working_ir = deepcopy(ir)
     working_params = dict(params or {})
+    _drop_internal_rumi_params(working_params)
     warnings: list[ProviderWarning] = []
     dropped: list[DroppedFeature] = []
     bridges: list[BridgeAction] = []
@@ -204,6 +214,11 @@ def _degrade_reasoning(
         warnings.append(ProviderWarning(code="reasoning_disabled", message="Reasoning controls were disabled for this provider."))
     if has_reasoning_blocks:
         dropped.append(DroppedFeature(feature="reasoning_blocks", reason="Hidden reasoning blocks are not model-visible for this provider.", source="chat_ir"))
+
+
+def _drop_internal_rumi_params(params: dict[str, Any]) -> None:
+    for key in INTERNAL_RUMI_PARAMS:
+        params.pop(key, None)
 
 
 def _first_role(ir: RumiChatIR, role: str) -> RumiIRMessage | None:

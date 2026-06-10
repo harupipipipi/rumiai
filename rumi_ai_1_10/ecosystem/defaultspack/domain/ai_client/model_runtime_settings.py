@@ -29,6 +29,7 @@ VALID_THINKING_LEVELS = {"none", "low", "medium", "high", "xhigh"}
 DEFAULT_MODEL = "stub/default"
 LEGACY_CLOUD_DEFAULT_MODEL = "openrouter/tencent/hy3-preview:free"
 DEFAULT_THINKING_LEVEL = "medium"
+DEFAULT_DEEPTHINK_ENABLED = False
 CEREBRAS_REASONING_MODELS = {"gpt-oss-120b", "zai-glm-4.7"}
 
 
@@ -202,6 +203,33 @@ class ModelRuntimeSettingsService:
             "settings": updated,
         }
 
+    def get_deepthink_enabled(self) -> dict[str, Any]:
+        settings = self.get_settings()
+        return {
+            "enabled": bool(settings.get("deepthink_enabled", DEFAULT_DEEPTHINK_ENABLED)),
+            "warning": "DeepThinkが有効なタスクには数時間かかる可能性があります。",
+        }
+
+    def set_deepthink_enabled(self, enabled: bool | None = None) -> dict[str, Any]:
+        settings = self.get_settings()
+        if enabled is None:
+            next_enabled = not bool(settings.get("deepthink_enabled", DEFAULT_DEEPTHINK_ENABLED))
+        else:
+            next_enabled = self._coerce_bool(enabled, default=DEFAULT_DEEPTHINK_ENABLED)
+        updated = self.update_settings({"deepthink_enabled": next_enabled})
+        message = (
+            "DeepThinkをONにしました。タスクには数時間かかる可能性があります。"
+            if next_enabled
+            else "DeepThinkをOFFにしました。"
+        )
+        return {
+            "enabled": next_enabled,
+            "persisted": True,
+            "message": message,
+            "warning": "タスクには数時間かかる可能性があります。" if next_enabled else "",
+            "settings": updated,
+        }
+
     def get_effective_thinking_level(
         self,
         profile_id: str | None = None,
@@ -273,6 +301,7 @@ class ModelRuntimeSettingsService:
             "model_groups": default_model_groups(),
             "on_switch_to_non_vision_with_images": "auto_bridge",
             "thinking_level": DEFAULT_THINKING_LEVEL,
+            "deepthink_enabled": DEFAULT_DEEPTHINK_ENABLED,
             "favorite_profiles": [DEFAULT_MODEL],
             "thinking_level_by_profile": {DEFAULT_MODEL: DEFAULT_THINKING_LEVEL},
             "thinking_level_by_conversation": {},
@@ -376,6 +405,11 @@ class ModelRuntimeSettingsService:
             sanitized["preferred_model_group"] = str(sanitized.get("preferred_model_group") or "default").strip() or "default"
         if "auto_route_within_group" in sanitized:
             sanitized["auto_route_within_group"] = bool(sanitized.get("auto_route_within_group"))
+        if "deepthink_enabled" in sanitized:
+            sanitized["deepthink_enabled"] = self._coerce_bool(
+                sanitized.get("deepthink_enabled"),
+                default=DEFAULT_DEEPTHINK_ENABLED,
+            )
         if "on_switch_to_non_vision_with_images" in sanitized:
             policy = str(sanitized.get("on_switch_to_non_vision_with_images") or "auto_bridge").strip()
             sanitized["on_switch_to_non_vision_with_images"] = policy if policy in {"auto_bridge", "ask", "block", "ignore"} else "auto_bridge"
@@ -422,6 +456,10 @@ class ModelRuntimeSettingsService:
                     values_by_scope = {}
             models[key] = values_by_scope if isinstance(values_by_scope, dict) else {}
         models["thinking_level"] = self._normalize_level(models.get("thinking_level"))
+        models["deepthink_enabled"] = self._coerce_bool(
+            models.get("deepthink_enabled"),
+            default=DEFAULT_DEEPTHINK_ENABLED,
+        )
         models["model_api_routes"] = self._normalize_model_api_routes(models.get("model_api_routes", ""))
         models["api_routes"] = self._normalize_api_routes(models.get("api_routes"))
         models["api_bound_profiles"] = self._normalize_api_bound_profiles(models.get("api_bound_profiles"))
@@ -636,6 +674,19 @@ class ModelRuntimeSettingsService:
     def _normalize_level(self, value: Any) -> str:
         level = str(value or "").strip()
         return level if level in VALID_THINKING_LEVELS else DEFAULT_THINKING_LEVEL
+
+    @staticmethod
+    def _coerce_bool(value: Any, *, default: bool = False) -> bool:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)) and value in {0, 1}:
+            return bool(value)
+        normalized = str(value or "").strip().lower()
+        if normalized in {"1", "true", "yes", "on", "enabled"}:
+            return True
+        if normalized in {"0", "false", "no", "off", "disabled"}:
+            return False
+        return default
 
     def runtime_defined_profiles(self, settings: dict[str, Any] | None = None) -> list[dict[str, Any]]:
         settings = settings if isinstance(settings, dict) else self.get_settings()

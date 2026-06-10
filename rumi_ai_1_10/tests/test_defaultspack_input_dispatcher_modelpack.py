@@ -579,6 +579,108 @@ def test_model_pack_review_chain_uses_isolated_reviewer(monkeypatch, tmp_path):
     assert provider.calls[1]["tools"] == []
 
 
+def test_model_pack_deepthink_chain_selects_harness_tools_separate_from_model_tools(monkeypatch, tmp_path):
+    settings_path = tmp_path / "frontend_settings.json"
+    settings_path.write_text(
+        json.dumps(
+            {
+                "models": {
+                    "model_packs": [
+                        {
+                            "id": "review-pack",
+                            "mode": "review_chain",
+                            "members": [
+                                {"model": "demo/generator", "metadata": {"role": "generator", "thinking_level": "medium"}},
+                                {"model": "demo/reviewer", "metadata": {"role": "reviewer", "thinking_level": "medium"}},
+                            ],
+                            "budget": {
+                                "deepthink_max_review_iterations": 1,
+                                "deepthink_user_rejection_review_cycles": 0,
+                                "deepthink_max_sections": 2,
+                            },
+                        }
+                    ]
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(AIClient, "_settings_path", lambda self: settings_path)
+
+    class DemoProvider:
+        def __init__(self):
+            self.calls = []
+
+        def complete(self, model_name, messages, tools, params):
+            self.calls.append({"model": model_name, "messages": messages, "tools": tools, "params": params})
+            system = messages[0]["content"]
+            user = messages[-1]["content"]
+            if model_name == "generator":
+                assert params["thinking_level"] == "medium"
+                if "Plan the response before writing it" in system:
+                    return {"content": [{"type": "text", "text": json.dumps({"structure": ["A", "B"], "key_points": ["k"], "risks": ["r"]})}]}
+                if "Write one visible pseudo DeepThinking step" in system:
+                    if "harness tool selection" in user:
+                        assert "web_search" in user
+                        assert "vision_tool_ids" in user
+                    return {"content": [{"type": "text", "text": json.dumps({"thinking": "check", "output": "next"})}]}
+                if "section only" in system:
+                    return {"content": [{"type": "text", "text": "section draft"}]}
+                return {"content": [{"type": "text", "text": "final ok"}]}
+            if model_name == "reviewer":
+                assert tools == []
+                return {"content": [{"type": "text", "text": json.dumps({"pass": True, "score": 92, "issues": [], "required_changes": []})}]}
+            raise AssertionError(model_name)
+
+    provider = DemoProvider()
+
+    def fake_resolve(self, model):
+        if model.startswith("demo/"):
+            return provider, model.split("/", 1)[1]
+        raise AssertionError(model)
+
+    monkeypatch.setattr(
+        "domain.ai_client.model_pack_router.get_model_capabilities",
+        lambda model, profiles=None: {"supports_tool_calling": True, "supports_thinking": True} if str(model).startswith("demo/") else {},
+    )
+    monkeypatch.setattr(AIClient, "resolve_provider", fake_resolve)
+
+    response = AIClient().complete(
+        "modelpack/review-pack",
+        [{"role": "user", "content": "implement a larger change"}],
+        [{"type": "function", "function": {"name": "web_search"}}],
+        {"deepthink_enabled": True},
+    )
+    process = response["metadata"]["rumi_process"]
+
+    assert response["content"][0]["text"] == "final ok"
+    assert response["finish_reason"] == "stop"
+    assert process["mode"] == "deepthink"
+    assert process["deepthink_enabled"] is True
+    assert "数時間" in process["warnings"][0]
+    assert process["tooling"]["model_tool_ids"] == ["web_search"]
+    assert "deepthink_planner" in process["tooling"]["harness_tool_ids"]
+    assert process["tooling"]["vision_tool_ids"] == []
+    assert process["tooling"]["model_tools_are_separate_from_harness_tools"] is True
+    assert any(event["phase"] == "deepthink_notes" and "harness tool selection" in event["metadata"]["label"] for event in process["events"])
+    assert provider.calls[-1]["model"] == "reviewer"
+    assert provider.calls[-1]["tools"] == []
+
+
+def test_rumi_harness_tool_selection_only_adds_vision_tools_for_model_visible_images():
+    from domain.ai_client import rumi_process
+
+    without_images = rumi_process.select_harness_tools([{"role": "user", "content": "hello"}], [])
+    with_images = rumi_process.select_harness_tools(
+        [{"role": "user", "content": [{"type": "image_url", "image_url": {"url": "data:image/png;base64,abc"}}]}],
+        [],
+    )
+
+    assert without_images["vision_tool_ids"] == []
+    assert "vision_zoom" in with_images["vision_tool_ids"]
+    assert with_images["separate_from_model_tools"] is True
+
+
 def test_builtin_rumi_model_pack_uses_available_runtime_model(monkeypatch, tmp_path):
     settings_path = tmp_path / "frontend_settings.json"
     settings_path.write_text(json.dumps({"models": {}}), encoding="utf-8")

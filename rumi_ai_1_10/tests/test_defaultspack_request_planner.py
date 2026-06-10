@@ -33,6 +33,26 @@ def test_request_planner_drops_reasoning_for_non_reasoning_model():
     assert any(item.feature == "reasoning" for item in planned.dropped_features)
 
 
+def test_request_planner_drops_internal_deepthink_params_before_provider_payload():
+    from domain.ai_client.request_planner import plan_model_request
+    from domain.chat.ir_blocks import RumiIRBlock
+
+    planned = plan_model_request(
+        _ir([RumiIRBlock(type="text", text="hi")]),
+        "local/model",
+        {"provider_id": "local", "api_family": "openai_compatible", "supports_reasoning": True, "supported_content_blocks": ["text"]},
+        [],
+        {
+            "deepthink_enabled": True,
+            "deepthink_max_review_iterations": 4,
+            "temperature": 0.2,
+        },
+        {},
+    )
+
+    assert planned.params == {"temperature": 0.2}
+
+
 def test_request_planner_bridges_image_and_developer_role():
     from domain.ai_client.request_planner import plan_model_request
     from domain.chat.ir import RumiChatIR, RumiIRMessage

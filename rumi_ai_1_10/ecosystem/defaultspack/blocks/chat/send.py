@@ -1710,6 +1710,7 @@ def _complete_with_tools(model, messages, tools, context, call_handler, params):
             "attached_tools": [tool_name_from_definition(tool) for tool in tools if tool_name_from_definition(tool)],
             "thinking": {"state": "completed"},
             "thinking_level": params.get("thinking_level"),
+            "deepthink_enabled": bool(params.get("deepthink_enabled")),
         }
     )
     if debug_logs:
