@@ -379,6 +379,54 @@ class TestCommandFunctionPathTraversal:
         assert resp.error_type == "security_violation"
         assert "escapes" in resp.error.lower()
 
+    def test_python_command_cannot_use_inline_code(self, monkeypatch, tmp_path):
+        """sys.executable + -c は function_dir 境界を回避できないこと"""
+        monkeypatch.setenv("RUMI_ALLOW_HOST_EXECUTION", "true")
+        executor = _make_test_executor()
+
+        func_dir = tmp_path / "func"
+        func_dir.mkdir()
+
+        entry = _MockFunctionEntry(
+            command=[sys.executable, "-c", "print('pwned')"],
+            function_dir=str(func_dir),
+        )
+        resp = executor._execute_command_function(
+            principal_id="test_principal",
+            entry=entry,
+            args={},
+            request_id="req_005",
+            start_time=time.time(),
+        )
+        assert not resp.success
+        assert resp.error_type == "security_violation"
+        assert "inside function directory" in resp.error.lower()
+
+    def test_python_command_outside_script_blocked(self, monkeypatch, tmp_path):
+        """sys.executable + function_dir 外のスクリプトは拒否されること"""
+        monkeypatch.setenv("RUMI_ALLOW_HOST_EXECUTION", "true")
+        executor = _make_test_executor()
+
+        func_dir = tmp_path / "func"
+        func_dir.mkdir()
+        outside_script = tmp_path / "outside.py"
+        outside_script.write_text("print('pwned')")
+
+        entry = _MockFunctionEntry(
+            command=[sys.executable, str(outside_script)],
+            function_dir=str(func_dir),
+        )
+        resp = executor._execute_command_function(
+            principal_id="test_principal",
+            entry=entry,
+            args={},
+            request_id="req_006",
+            start_time=time.time(),
+        )
+        assert not resp.success
+        assert resp.error_type == "security_violation"
+        assert "escapes" in resp.error.lower()
+
 
 # ===========================================================================
 # Wave 1-3: _sanitize_error

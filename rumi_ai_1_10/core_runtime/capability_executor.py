@@ -1373,13 +1373,27 @@ class CapabilityExecutor:
         allow_host = os.environ.get("RUMI_ALLOW_HOST_EXECUTION", "").lower()
         if allow_host not in ("1", "true"):
             return CapabilityResponse(success=False, error="Host execution is disabled. Set RUMI_ALLOW_HOST_EXECUTION=1 to enable.", error_type="host_execution_disabled", latency_ms=(time.time() - start_time) * 1000)
-        # Security: path traversal check (symmetric with _execute_binary_function)
+        # Security: path traversal check (symmetric with _execute_binary_function).
+        # The executable and, for interpreter commands, the script target must stay
+        # inside the function directory.  Do not special-case sys.executable without
+        # validating argv: python -c/-m or an out-of-tree script would otherwise let
+        # pack-controlled command entries execute arbitrary host code.
         func_dir = Path(entry.function_dir).resolve() if entry.function_dir else None
-        if func_dir and Path(command[0]).is_absolute():
-            command_path = Path(command[0]).resolve()
-            interpreter_path = Path(sys.executable).resolve()
-            if command_path != interpreter_path and not command_path.is_relative_to(func_dir):
-                return CapabilityResponse(success=False, error="Command path escapes function directory", error_type="security_violation", latency_ms=(time.time() - start_time) * 1000)
+        if func_dir:
+            command_path = Path(command[0])
+            if command_path.is_absolute():
+                resolved_command_path = command_path.resolve()
+                interpreter_path = Path(sys.executable).resolve()
+                if resolved_command_path == interpreter_path:
+                    if len(command) < 2 or str(command[1]).startswith("-"):
+                        return CapabilityResponse(success=False, error="Python command must execute a script inside function directory", error_type="security_violation", latency_ms=(time.time() - start_time) * 1000)
+                    script_path = Path(command[1])
+                    if not script_path.is_absolute():
+                        script_path = func_dir / script_path
+                    if not script_path.resolve().is_relative_to(func_dir):
+                        return CapabilityResponse(success=False, error="Python command script escapes function directory", error_type="security_violation", latency_ms=(time.time() - start_time) * 1000)
+                elif not resolved_command_path.is_relative_to(func_dir):
+                    return CapabilityResponse(success=False, error="Command path escapes function directory", error_type="security_violation", latency_ms=(time.time() - start_time) * 1000)
         timeout = self._get_function_timeout(entry)
         context = {"principal_id": principal_id, "pack_id": entry.pack_id, "function_id": entry.function_id, "request_id": request_id, "ts": self._now_ts()}
         input_json = json.dumps({"context": context, "args": args}, ensure_ascii=False, default=str)
