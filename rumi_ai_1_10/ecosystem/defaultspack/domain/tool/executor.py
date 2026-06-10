@@ -959,10 +959,22 @@ class ToolExecutor:
 
             action = str(arguments.get("action") or "session")
             payload = {key: value for key, value in (arguments or {}).items() if key != "action"}
-            result = BrowserCompanionController(artifact_root=_conversation_browser_companion_artifact_root(context)).run(
+            current_tool_def = explicit_tool_def if isinstance(explicit_tool_def, dict) else {
+                "tool_id": tool_name,
+                "name": tool_name,
+                "requires_approval": True,
+                "risk": "high",
+                "capability_grants": ["browser.control", "computer.control"],
+            }
+            next_context, approval_error = _context_with_tool_approval_token(context, current_tool_def, arguments)
+            if approval_error is not None:
+                return approval_error
+            result = BrowserCompanionController(
+                artifact_root=_conversation_browser_companion_artifact_root(next_context),
+            ).run(
                 action,
                 payload,
-                context=context if isinstance(context, dict) else {},
+                context=next_context if isinstance(next_context, dict) else {},
             )
             is_error = bool(result.get("is_error"))
             summary = "{} {} {}".format(
@@ -1475,13 +1487,41 @@ def _tool_approval_scope(tool_def, arguments):
     if tool_name in {"browser_computer", "browser_use", "computer_use"} and isinstance(arguments, dict):
         action, payload = _browser_computer_action_payload(tool_name, arguments)
         if str(action or "").startswith(("browser.", "computer.")):
-            return str(action), _approval_hash_arguments(_browser_computer_request_arguments(tool_name, action, payload))
+            return str(action), _approval_hash_arguments(
+                _browser_computer_request_arguments(tool_name, action, payload)
+            )
+    if tool_name == "browser_companion" and isinstance(arguments, dict):
+        action = str(arguments.get("action") or "session").strip() or "session"
+        if action.startswith("page.") or action in {
+            "navigate",
+            "snapshot",
+            "capture",
+            "extract",
+            "click",
+            "type",
+            "press",
+            "scroll",
+        }:
+            normalized = {
+                "navigate": "page.navigate",
+                "snapshot": "page.snapshot",
+                "capture": "page.capture",
+                "extract": "page.extract",
+                "click": "page.click",
+                "type": "page.type",
+                "press": "page.press",
+                "scroll": "page.scroll",
+            }.get(action, action)
+            return normalized, _approval_hash_arguments(_approval_replayable_arguments(arguments))
     return _tool_approval_operation(tool_def), _approval_replayable_arguments(arguments)
 
 
 def _tool_approval_display_arguments(tool_def, arguments, approval_args):
     tool_name = _tool_approval_tool_name(tool_def)
-    if tool_name in {"browser_computer", "browser_use", "computer_use"} and isinstance(arguments, dict):
+    if (
+        tool_name in {"browser_computer", "browser_use", "computer_use", "browser_companion"}
+        and isinstance(arguments, dict)
+    ):
         return dict(arguments)
     return approval_args
 
@@ -1491,6 +1531,8 @@ def _tool_approval_display_payload(tool_def, arguments, approval_args):
     if tool_name in {"browser_computer", "browser_use", "computer_use"} and isinstance(arguments, dict):
         _, payload = _browser_computer_action_payload(tool_name, arguments)
         return dict(payload)
+    if tool_name == "browser_companion" and isinstance(arguments, dict):
+        return {key: value for key, value in dict(arguments).items() if key != "action"}
     return approval_args
 
 
