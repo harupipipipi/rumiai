@@ -146,6 +146,7 @@ domains:
   host_bridge:
     may_import:
     - domain/safety
+    - domain/tool_policy
     path: domain/host_bridge
   human_operator:
     may_import:

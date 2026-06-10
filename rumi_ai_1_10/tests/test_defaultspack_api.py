@@ -6,7 +6,7 @@ import sys
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -71,13 +71,27 @@ class TestDefaultspackApiRoutes(unittest.TestCase):
         sent = []
         handler._send_response = lambda response, status_code=200: sent.append((status_code, response))
 
-        with patch("core_runtime.pack_function_runtime.invoke_pack_function") as mocked:
-            dispatched = handler._dispatch_api_route(
-                "POST", "/api/evil/run", {"input": "hello"}
+        executor = SimpleNamespace(
+            execute=Mock(
+                return_value=SimpleNamespace(
+                    success=False,
+                    error="denied",
+                    error_type="permission_denied",
+                )
             )
+        )
+        with patch("core_runtime.pack_function_runtime.invoke_pack_function") as mocked:
+            with patch(
+                "core_runtime.capability_executor.get_capability_executor",
+                return_value=executor,
+            ):
+                dispatched = handler._dispatch_api_route(
+                    "POST", "/api/evil/run", {"input": "hello"}
+                )
 
         self.assertTrue(dispatched)
         mocked.assert_not_called()
+        executor.execute.assert_not_called()
         self.assertEqual(sent[0][0], 403)
 
     def test_api_route_dispatches_pack_function(self):
@@ -100,16 +114,21 @@ class TestDefaultspackApiRoutes(unittest.TestCase):
         handler._send_result = sent.append
         execute = MagicMock(return_value=SimpleNamespace(success=True, output={"ok": True}))
 
+        executor = SimpleNamespace(
+            execute=Mock(
+                return_value=SimpleNamespace(success=True, output={"ok": True})
+            )
+        )
         with patch(
             "core_runtime.capability_executor.get_capability_executor",
-            return_value=SimpleNamespace(execute=execute),
+            return_value=executor,
         ):
             dispatched = handler._dispatch_api_route(
                 "POST", "/api/defaultspack/run", {"input": "hello"}
             )
 
         self.assertTrue(dispatched)
-        execute.assert_called_once_with(
+        executor.execute.assert_called_once_with(
             "defaultspack",
             {
                 "type": "function.call",
@@ -151,9 +170,14 @@ class TestDefaultspackApiRoutes(unittest.TestCase):
         handler._send_result = lambda result: None
         execute = MagicMock(return_value=SimpleNamespace(success=True, output={"ok": True}))
 
+        executor = SimpleNamespace(
+            execute=Mock(
+                return_value=SimpleNamespace(success=True, output={"ok": True})
+            )
+        )
         with patch(
             "core_runtime.capability_executor.get_capability_executor",
-            return_value=SimpleNamespace(execute=execute),
+            return_value=executor,
         ):
             dispatched = handler._dispatch_api_route(
                 "POST",
@@ -166,7 +190,7 @@ class TestDefaultspackApiRoutes(unittest.TestCase):
             )
 
         self.assertTrue(dispatched)
-        execute.assert_called_once_with(
+        executor.execute.assert_called_once_with(
             "defaultspack",
             {
                 "type": "function.call",

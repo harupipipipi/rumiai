@@ -8,6 +8,7 @@ pip依存ライブラリ管理のHTTP APIを提供。
 from __future__ import annotations
 
 import hmac
+import hashlib
 import json
 import logging
 import os
@@ -278,6 +279,48 @@ class PackAPIHandler(
 
     # --- テーブル駆動: web_mount / pre_auth_routes ---
 
+    _TRUSTED_PRE_AUTH_PACKS = {
+        "core_control_panel": "core:rumi/control_panel",
+        "core_setup": "core:rumi/setup",
+    }
+
+    @classmethod
+    def _is_trusted_pre_auth_pack(cls, pack_id: str, pack_info: Any) -> bool:
+        """Only bundled core packs may contribute global pre-auth routes."""
+        expected_identity = cls._TRUSTED_PRE_AUTH_PACKS.get(pack_id)
+        if expected_identity is None:
+            return False
+
+        ecosystem = getattr(pack_info, "ecosystem", {}) or {}
+        if ecosystem.get("pack_id", pack_id) != pack_id:
+            return False
+        if ecosystem.get("pack_identity") != expected_identity:
+            return False
+        if not (ecosystem.get("metadata", {}) or {}).get("is_core_pack", False):
+            return False
+
+        base_dir = Path(
+            str(getattr(pack_info, "subdir", None) or getattr(pack_info, "path", ""))
+        ).resolve()
+        expected_dir = (Path(__file__).resolve().parent / "core_pack" / pack_id).resolve()
+        return base_dir == expected_dir
+
+    @staticmethod
+    def _resolve_pack_static_root(pack_info: Any, static_root_rel: str) -> Optional[Path]:
+        """Resolve a pack static root and reject paths escaping the pack directory."""
+        static_root_text = str(static_root_rel)
+        if Path(static_root_text).is_absolute() or static_root_text.startswith(("/", "\\")):
+            return None
+        if any(part == ".." for part in re.split(r"[\\/]+", static_root_text)):
+            return None
+        base_dir = Path(str(getattr(pack_info, "subdir", None) or pack_info.path)).resolve()
+        web_root = (base_dir / static_root_text).resolve()
+        try:
+            web_root.relative_to(base_dir)
+        except ValueError:
+            return None
+        return web_root
+
     @classmethod
     def load_web_mounts(cls, registry, pack_ids: Optional[set[str]] = None) -> int:
         """Registry から全 Pack の web_mount 情報を読み込み、テーブルを構築する。"""
@@ -295,12 +338,13 @@ class PackAPIHandler(
             static_root_rel = wm.get("static_root", "")
             if not path_prefix or not static_root_rel:
                 continue
-            # subdir が利用可能ならそちらを使う（ecosystem.json の位置基準）
-            base_dir = getattr(pack_info, "subdir", None) or pack_info.path
-            web_root = Path(str(base_dir)) / static_root_rel
+            web_root = cls._resolve_pack_static_root(pack_info, static_root_rel)
+            if web_root is None:
+                logger.warning("Skipping unsafe web_mount static_root for pack %s", pack_id)
+                continue
             cls._web_mounts.append({
                 "path_prefix": path_prefix,
-                "web_root": web_root.resolve(),
+                "web_root": web_root,
                 "spa_fallback": wm.get("spa_fallback", False),
                 "auth_required": wm.get("auth_required", True),
                 "pack_id": pack_id,
@@ -325,7 +369,7 @@ class PackAPIHandler(
         for pack_id, pack_info in registry.packs.items():
             if pack_ids is not None and pack_id not in pack_ids:
                 continue
-            allow_pre_auth = cls._pack_allows_in_process_api_metadata(pack_id, pack_info)
+            allow_pre_auth = cls._is_trusted_pre_auth_pack(pack_id, pack_info)
             # 1. 明示的な pre_auth_routes
             routes = pack_info.ecosystem.get("pre_auth_routes")
             if routes and isinstance(routes, list):
@@ -437,6 +481,7 @@ class PackAPIHandler(
                 "/api/integrations/slack/events",
                 "/api/integrations/discord/interactions",
                 "/api/integrations/discord/events",
+                "/api/integrations/p2p/events",
             }:
                 return True
             if path.startswith("/api/webhooks/inbound/"):
@@ -512,20 +557,6 @@ class PackAPIHandler(
         # ハンドラ呼び出し
         try:
             if entry.get("function_id"):
-                from .pack_function_runtime import (
-                    invoke_pack_function,
-                    is_pack_function_in_process_allowed,
-                )
-
-                if not is_pack_function_in_process_allowed(entry["pack_id"]):
-                    logger.warning(
-                        "Blocked function api_route dispatch for non-first-party pack: %s:%s",
-                        entry["pack_id"],
-                        entry["function_id"],
-                    )
-                    self._send_response(APIResponse(False, error=_SAFE_ERROR_MSG), 403)
-                    return True
-
                 call_args = dict(body if pass_body and body is not None else {})
                 # Route-level args define the contract for fixed endpoints such as
                 # /approve and /reject, so body values must not override them.
@@ -537,7 +568,7 @@ class PackAPIHandler(
                             call_args[target_key] = path_params[source_key]
                 else:
                     call_args.update(path_params)
-                result = invoke_pack_function(
+                result = self._execute_api_route_pack_function(
                     entry["pack_id"],
                     entry["function_id"],
                     call_args,
@@ -568,11 +599,69 @@ class PackAPIHandler(
                 self._send_response(APIResponse(True, data=result))
             else:
                 self._send_result(result)
+        except PermissionError as e:
+            logger.warning("api_route denied: %s", e)
+            self._send_response(APIResponse(False, error="Forbidden"), 403)
         except Exception as e:
             _log_internal_error(f"api_route:{handler_name}", e)
             self._send_response(APIResponse(False, error=_SAFE_ERROR_MSG), 500)
 
         return True
+
+    def _execute_api_route_pack_function(
+        self,
+        pack_id: str,
+        function_id: str,
+        args: dict[str, Any],
+        context: dict[str, Any],
+    ) -> Any:
+        """Execute a pack-backed API route through the capability boundary.
+
+        Pack-declared HTTP routes are externally triggerable, so they must not
+        import and execute pack code in the API server process. Route function
+        calls go through ``CapabilityExecutor`` to preserve approval/hash, grant,
+        audit, and sandbox/subprocess dispatch semantics.
+        """
+        from .capability_executor import get_capability_executor
+
+        qualified_name = (
+            function_id if ":" in function_id else f"{pack_id}:{function_id}"
+        )
+        route_context = dict(context or {})
+        route_context["_api_route"] = True
+        request_id = "api-route:{}:{}".format(
+            route_context.get("method", ""),
+            route_context.get("path", ""),
+        )
+        request = {
+            "type": "function.call",
+            "qualified_name": qualified_name,
+            "args": dict(args or {}),
+            "request_id": request_id,
+            "context": route_context,
+        }
+        response = get_capability_executor().execute(pack_id, request)
+        if response.success:
+            return response.output
+
+        error_type = getattr(response, "error_type", None) or "function_call_failed"
+        if error_type in {
+            "pack_not_approved",
+            "approval_check_error",
+            "permission_denied",
+            "requires_denied",
+            "caller_requires_denied",
+        }:
+            logger.warning(
+                "api_route pack function denied: pack_id=%s function_id=%s error_type=%s",
+                pack_id,
+                function_id,
+                error_type,
+            )
+            raise PermissionError(
+                getattr(response, "error", None) or "Pack function denied"
+            )
+        raise RuntimeError(getattr(response, "error", None) or "Pack function failed")
 
     def _send_response(
         self,
@@ -1118,6 +1207,19 @@ class PackAPIHandler(
                 health = alm.get_health()
             else:
                 health = {"status": "ok", "needs_setup": True}
+            headers = getattr(self, "headers", None)
+            challenge = (
+                headers.get("X-Rumi-Desktop-Health-Challenge", "")
+                if headers is not None
+                else ""
+            )
+            bootstrap_secret = os.environ.get("RUMI_PANEL_BOOTSTRAP_SECRET", "")
+            if challenge and bootstrap_secret:
+                health["desktop_challenge_response"] = hmac.new(
+                    bootstrap_secret.encode("utf-8"),
+                    challenge.encode("utf-8"),
+                    hashlib.sha256,
+                ).hexdigest()
             self._send_response(APIResponse(True, data=health))
             return True
 

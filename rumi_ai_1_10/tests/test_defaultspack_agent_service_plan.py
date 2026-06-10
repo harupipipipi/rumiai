@@ -3864,9 +3864,14 @@ def test_sensitive_routes_do_not_use_wildcard_cors():
     assert _is_sensitive_http_path("/api/browser/artifacts") is True
     assert _is_sensitive_http_path("/api/coding/agent/sessions") is True
     assert _is_sensitive_http_path("/api/integrations/secrets") is True
+    assert _is_sensitive_http_path("/api/agent/self-improvement/status") is True
+    assert _is_sensitive_http_path("/api/agent/self-improvement/run") is True
     assert _is_sensitive_http_path("/v1/conversations/c1/run-results/r1/browser-screenshots") is True
+    assert _is_sensitive_http_path("/api/coding/files") is True
+    assert _is_sensitive_http_path("/api/coding/files/read") is True
+    assert _is_sensitive_http_path("/api/coding/files/search") is True
+    assert _is_sensitive_http_path("/api/coding/files/diff") is True
     assert _is_sensitive_http_path("/api/chat/conversations/c1/run-results/r1/browser-screenshots") is False
-    assert _is_sensitive_http_path("/api/coding/files/read") is False
 
 
 def test_http_signal_wait_continues_after_non_interrupt_signal(monkeypatch):
@@ -4209,7 +4214,7 @@ def test_browser_computer_controller_gates_desktop_actions():
     assert controller.run("computer.move", {"x": 1, "y": 2, "dry_run": True})["requires_approval"] is False
     approval = controller.run("computer.click", {"x": 1, "y": 2})
     assert approval["requires_approval"] is True
-    assert approval["approval_token"]
+    assert "approval_token" not in approval
     assert controller.run("computer.click", {"x": 1, "y": 2, "approved": True})["requires_approval"] is True
 
 
@@ -5170,7 +5175,8 @@ def test_browser_open_url_approval_payload_target_app_runs_foreground(tmp_path, 
 
     result = controller.run(
         "browser.open_url",
-        {**approval["payload"], "approval_token": approval["approval_token"]},
+        dict(approval["payload"]),
+        yolo_mode=True,
     )
 
     assert result["opened"] is True
@@ -5712,7 +5718,8 @@ def test_browser_computer_manages_persistent_profiles_and_cookie_jars(tmp_path):
     assert approval["requires_approval"] is True
     deleted = controller.run(
         "browser.cookies.delete",
-        {"profile_id": "work-login", "name": "sid", "approval_token": approval["approval_token"]},
+        {"profile_id": "work-login", "name": "sid"},
+        yolo_mode=True,
     )
     assert deleted["deleted"] == 1
 
@@ -5768,7 +5775,8 @@ def test_browser_profile_cache_and_cookie_clear_are_approval_gated(tmp_path):
     assert approval["requires_approval"] is True
     cleared = controller.run(
         "browser.profile.clear_cache",
-        {"profile_id": "managed", "approval_token": approval["approval_token"]},
+        {"profile_id": "managed"},
+        yolo_mode=True,
     )
     assert cleared["removed"]
     assert not cache_file.exists()
@@ -5780,8 +5788,8 @@ def test_browser_profile_cache_and_cookie_clear_are_approval_gated(tmp_path):
         {
             "profile_id": "managed",
             "include_managed": True,
-            "approval_token": cookie_approval["approval_token"],
         },
+        yolo_mode=True,
     )
     assert str(cookie_file) in cleared_cookies["removed"]
     assert not cookie_file.exists()

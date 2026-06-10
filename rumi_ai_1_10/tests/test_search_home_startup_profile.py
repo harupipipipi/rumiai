@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import json
 import shutil
 from pathlib import Path
+
+import pytest
 
 from core_runtime.interface_registry import InterfaceRegistry
 from core_runtime.startup_profiles import StartupProfileManager
@@ -21,11 +24,30 @@ class _FakeApprovalManager:
         return (reason is None, reason)
 
 
-def test_search_home_compile_preview_points_surface_launch_target_to_search_home_pack(tmp_path: Path):
+def test_search_home_compile_preview_points_surface_launch_target_to_search_home_pack(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
     repo_root = Path(__file__).resolve().parent.parent
     eco_root = tmp_path / "ecosystem"
-    shutil.copytree(repo_root / "ecosystem" / "defaultspack", eco_root / "defaultspack")
-    shutil.copytree(repo_root / "ecosystem" / "search_home_pack", eco_root / "search_home_pack")
+    shutil.copytree(
+        repo_root / "ecosystem" / "defaultspack",
+        eco_root / "defaultspack",
+        ignore=shutil.ignore_patterns("node_modules", "__pycache__"),
+    )
+    defaultspack_manifest_path = eco_root / "defaultspack" / "ecosystem.json"
+    defaultspack_manifest = json.loads(defaultspack_manifest_path.read_text(encoding="utf-8"))
+    defaultspack_manifest["host_execution"] = True
+    defaultspack_manifest_path.write_text(
+        json.dumps(defaultspack_manifest, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("RUMI_ALLOW_HOST_EXECUTION", "true")
+    shutil.copytree(
+        repo_root / "ecosystem" / "search_home_pack",
+        eco_root / "search_home_pack",
+        ignore=shutil.ignore_patterns("node_modules", "__pycache__"),
+    )
 
     manager = StartupProfileManager(
         storage_path=tmp_path / "startup_profiles.json",

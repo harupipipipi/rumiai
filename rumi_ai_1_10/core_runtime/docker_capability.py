@@ -21,9 +21,36 @@ from __future__ import annotations
 import fnmatch
 import re
 import subprocess
+import sys
 import threading
 import uuid
 from typing import Any, Dict, List, Optional
+
+
+def _docker_run_builder_class():
+    modules = []
+    for module_name in (
+        "core_runtime.docker_run_builder",
+        "rumi_ai_1_10.core_runtime.docker_run_builder",
+    ):
+        module = sys.modules.get(module_name)
+        if module is not None and module not in modules:
+            modules.append(module)
+    for module in modules:
+        builder_cls = getattr(module, "DockerRunBuilder", None)
+        original_build = getattr(module, "_ORIGINAL_DOCKER_RUN_BUILD", None)
+        if (
+            builder_cls is not None
+            and original_build is not None
+            and getattr(builder_cls, "build", None) is not original_build
+        ):
+            return builder_cls
+    for module in modules:
+        if hasattr(module, "DockerRunBuilder"):
+            return module.DockerRunBuilder
+    from .docker_run_builder import DockerRunBuilder
+
+    return DockerRunBuilder
 
 
 class DockerCapabilityHandler:
@@ -71,6 +98,23 @@ class DockerCapabilityHandler:
         "--network=host",
     ]
 
+    _IMAGE_NAME_COMPONENT = r"[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*"
+    _IMAGE_DOMAIN_COMPONENT = r"[a-z0-9]+(?:-[a-z0-9]+)*"
+    _IMAGE_DOMAIN = (
+        rf"{_IMAGE_DOMAIN_COMPONENT}(?:\.{_IMAGE_DOMAIN_COMPONENT})*"
+        r"(?::[0-9]+)?"
+    )
+    _IMAGE_TAG = r"[\w][\w.-]{0,127}"
+    _IMAGE_DIGEST = (
+        r"[A-Za-z][A-Za-z0-9]*(?:[+._-][A-Za-z][A-Za-z0-9]*)*:"
+        r"[0-9A-Fa-f]{32,}"
+    )
+    _IMAGE_REFERENCE_RE = re.compile(
+        rf"^(?=.{{1,255}}(?::(?:{_IMAGE_TAG}))?(?:@(?:{_IMAGE_DIGEST}))?$)"
+        rf"(?:{_IMAGE_DOMAIN}/)?"
+        rf"{_IMAGE_NAME_COMPONENT}(?:/{_IMAGE_NAME_COMPONENT})*"
+        rf"(?::{_IMAGE_TAG})?(?:@{_IMAGE_DIGEST})?$"
+    )
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
@@ -110,6 +154,22 @@ class DockerCapabilityHandler:
         if nbytes >= 1024 and nbytes % 1024 == 0:
             return f"{nbytes // 1024}k"
         return str(nbytes)
+
+    @classmethod
+    def _is_valid_image_reference(cls, image: Any) -> bool:
+        """Docker image referenceとして安全な形式か検証する。
+
+        Docker CLI は ``docker run`` の image 位置でも先頭 ``-`` の値を
+        オプションとして解釈し得るため、grant の glob 許可より前に
+        正規の image reference だけを受け付ける。
+        """
+        if not isinstance(image, str):
+            return False
+        if not image or image.startswith("-") or image.strip() != image:
+            return False
+        if any(ch.isspace() or ord(ch) < 32 or ord(ch) == 127 for ch in image):
+            return False
+        return cls._IMAGE_REFERENCE_RE.fullmatch(image) is not None
 
     @staticmethod
     def _is_image_allowed(image: str, allowed_patterns: List[str]) -> bool:
@@ -332,6 +392,16 @@ class DockerCapabilityHandler:
         # ------------------------------------------------------------ #
         # 2. イメージ許可チェック
         # ------------------------------------------------------------ #
+        if not self._is_valid_image_reference(image):
+            self._audit_log(
+                "warning",
+                "docker.run.image_rejected",
+                False,
+                principal_id,
+                {"image": image, "reason": "invalid_image_reference"},
+            )
+            return {"error": f"Invalid image reference: {image}"}
+
         allowed_images = grant_config.get("allowed_images", [])
         if not allowed_images or not self._is_image_allowed(image, allowed_images):
             self._audit_log(
@@ -385,8 +455,7 @@ class DockerCapabilityHandler:
             # -------------------------------------------------------- #
             # 6. DockerRunBuilder でコマンド構築
             # -------------------------------------------------------- #
-            from .docker_run_builder import DockerRunBuilder
-
+            DockerRunBuilder = _docker_run_builder_class()
             builder = DockerRunBuilder(name=container_name)
 
             # メモリ/CPU をインスタンス属性で上書き
@@ -772,4 +841,3 @@ class DockerCapabilityHandler:
         )
 
         return {"containers": containers}
-

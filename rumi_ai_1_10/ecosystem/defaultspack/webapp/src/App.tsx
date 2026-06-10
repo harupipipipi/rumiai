@@ -12,7 +12,7 @@ import { browserApprovalRuntimeContent, pendingBrowserApproval, pendingRuntimeAp
 import { reduceBrowserStateFromEvents } from "./lib/browserState";
 import { deriveConversationTitle, formatRelativeTime, inspectConversationIntegrity, messageToText, orderConversationMessages } from "./lib/chat";
 import { cn } from "./lib/cn";
-import { canExecuteComposerEndpointAction, composerSkillMentionWidget, composerToolMentionWidget, isSafeLocalEndpoint, skillMentionIdsFromText, toolMentionIdsFromText } from "./lib/composerWidgets";
+import { canExecuteComposerEndpointAction, composerSkillMentionWidget, composerToolMentionWidget, isSafeLocalEndpoint, skillMentionIdsFromText, toolMentionIdsFromText, trustedComposerActionForWidget } from "./lib/composerWidgets";
 import { conversationMatchesSpotlightFilter, conversationToSearchResult, type SpotlightFilter } from "./lib/conversationSpotlight";
 import { boundedDurationLabel } from "./lib/duration";
 import { fetchDesktopSystemInfo, type DesktopSystemInfo } from "./lib/desktopSystemInfo";
@@ -3796,7 +3796,8 @@ export default function App() {
   };
 
   const handleWidgetAction = (widget: DroppedWidget) => {
-    const action = widget.action;
+    const trustedAction = trustedComposerActionForWidget(widget, composerExtensions);
+    const action = trustedAction ?? (widget.action?.type === "call_endpoint" ? undefined : widget.action);
 
     if (!action) {
       const target = widget.sourceItemId || widget.id;
@@ -4608,7 +4609,7 @@ export default function App() {
           ...(shouldSendExplicitToolSelection ? { selected_tools: submittedToolIds } : {}),
         },
         attachments: submittedAttachments,
-        tools: shouldSendExplicitToolSelection ? submittedToolIds : undefined,
+        tools: submittedToolIds,
         metadata: {
           mode: isOperationsMode ? "operations_company" : isMimoCodingMode ? "mimo_coding_company" : isCodingWorkspaceSubmit ? "coding" : mode,
           ...(groupIdForSubmit ? { group_id: groupIdForSubmit } : {}),

@@ -528,7 +528,7 @@ def test_line_computer_use_fake_webhook_runs_three_browser_tasks_and_acknowledge
         assert context["computer_use_target_title"] == "LINE Chat"
         assert context["line_background_processing"] is True
         assert context["profile_policy"]["max_tool_calls"] == 30
-        assert context["profile_policy"]["yolo_mode"] is True
+        assert "yolo_mode" not in context["profile_policy"]
 
 
 def test_line_route_does_not_acknowledge_normal_line_reply_mode(monkeypatch, tmp_path):
@@ -691,7 +691,7 @@ def test_line_route_applies_endpoint_response_context(monkeypatch, tmp_path):
     assert captured["context"]["external_prompt_prefix"] == "Use computer_use in Google Chrome and reply in LINE Biz."
     assert captured["context"]["computer_use_target_app"] == "Google Chrome"
     assert captured["context"]["computer_use_target_title"] == "LINE"
-    assert captured["context"]["profile_policy"]["yolo_mode"] is True
+    assert "yolo_mode" not in captured["context"].get("profile_policy", {})
     assert captured["context"]["response_prompt_decision"]["action"] == "store_only"
     assert captured["context"]["response_prompt_decision"]["sensitivity"] == "local_only"
 
@@ -1195,7 +1195,7 @@ def test_line_direct_user_message_still_dispatches_without_mention(monkeypatch, 
     assert captured["event"].metadata["line_mention"]["require_group_mention"] is False
 
 
-def test_line_computer_use_group_message_dispatches_when_bot_is_mentioned(monkeypatch, tmp_path):
+def test_line_computer_use_group_message_dispatches_when_saved_group_mentions_bot(monkeypatch, tmp_path):
     from blocks.integrations import line as line_block  # noqa: E402
 
     _install_line_endpoint(
@@ -1206,6 +1206,7 @@ def test_line_computer_use_group_message_dispatches_when_bot_is_mentioned(monkey
         conversation={"strategy": "external_key", "model": "google/gemma-4-31b-it"},
         response={"mode": "computer_use_line_biz"},
     )
+    _remember_line_group(monkeypatch, tmp_path)
     captured: dict[str, Any] = {}
 
     def fake_dispatch(event, *, input_profile_id, audience_policy, audience_decision, context, send_response, mentioned=False):
@@ -1261,6 +1262,71 @@ def test_line_computer_use_group_message_dispatches_when_bot_is_mentioned(monkey
     assert captured["audience_policy"]["require"]["mention"] is True
     assert captured["event"].metadata["line_mention"]["mentioned"] is True
     assert captured["event"].metadata["line_mention"]["require_group_mention"] is True
+
+
+def test_line_computer_use_group_mention_from_unknown_source_is_denied(monkeypatch, tmp_path):
+    from blocks.integrations import line as line_block  # noqa: E402
+
+    _install_line_endpoint(
+        monkeypatch,
+        tmp_path,
+        enabled=True,
+        input_profile_id="line.computer_use",
+        conversation={"strategy": "external_key", "model": "google/gemma-4-31b-it"},
+        response={"mode": "computer_use_line_biz"},
+    )
+
+    def fail_dispatch(*args, **kwargs):
+        raise AssertionError("dispatch_external_event should not run for denied source")
+
+    monkeypatch.setattr(line_block, "dispatch_external_event", fail_dispatch)
+
+    def fail_send(*args, **kwargs):
+        raise AssertionError("reply should not send for denied source")
+
+    monkeypatch.setattr(LineResponseAdapter, "send", fail_send)
+    payload = {
+        "destination": "Udestination",
+        "events": [
+            {
+                "type": "message",
+                "mode": "active",
+                "webhookEventId": "evt-unknown-mention",
+                "replyToken": "reply-unknown-mention",
+                "source": {"type": "group", "groupId": "Cunknown", "userId": "Uactor"},
+                "message": {
+                    "id": "m1",
+                    "type": "text",
+                    "text": "@bot hello",
+                    "mention": {
+                        "mentionees": [
+                            {
+                                "index": 0,
+                                "length": 4,
+                                "type": "user",
+                                "userId": "Udestination",
+                                "isSelf": True,
+                            }
+                        ]
+                    },
+                },
+            }
+        ],
+    }
+
+    result = line_block.run(_signed_line_payload(payload), {})
+
+    denied = result["data"]["events"][0]
+    assert denied["status"] == "denied"
+    assert denied["policy"]["reason"] == "default deny"
+    assert denied["event"]["metadata"]["line_mention"] == {
+        "mentioned": True,
+        "require_group_mention": True,
+        "addressed": True,
+    }
+    saved = ExternalSourceStore().get("line", "group", "Cunknown")
+    assert saved is not None
+    assert saved["enabled"] is False
 
 
 def test_line_route_empty_events_ack_ok_without_dispatch(monkeypatch, tmp_path):

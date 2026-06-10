@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 
 const PACK_SHELL_PATH_ENV: &str = "RUMI_PACK_SHELL_PATH";
+const UV_PATH_ENV: &str = "RUMI_UV_PATH";
 
 /// Central configuration resolved from Tauri path APIs.
 #[derive(Debug, Clone)]
@@ -20,7 +21,7 @@ pub struct AppConfig {
     pub rumi_home: PathBuf,
     /// `{app_data_dir}/python` — PBS standalone Python.
     pub python_dir: PathBuf,
-    /// Path to the `uv` binary (downloaded location).
+    /// Legacy app-data `uv` path retained for diagnostics and migration state.
     pub uv_path: PathBuf,
     /// `{app_data_dir}/venv` — Python virtual-environment.
     pub venv_dir: PathBuf,
@@ -55,14 +56,17 @@ impl AppConfig {
     /// └── logs/
     /// ```
     pub fn detect_for_tauri(resource_dir: PathBuf, app_data_dir: PathBuf) -> Result<Self> {
-        let dev_workspace_root = find_dev_workspace_root(&resource_dir);
         let mut app_dir = resource_dir.join("app");
-        if !app_dir.exists() {
-            if let Some(workspace_root) = &dev_workspace_root {
-                let candidate = workspace_root.join("rumi_ai_1_10");
-                if candidate.join("app.py").exists() {
-                    app_dir = candidate;
-                }
+        let dev_workspace_root = if app_dir.exists() {
+            None
+        } else {
+            find_dev_workspace_root(&resource_dir)
+        };
+
+        if let Some(workspace_root) = &dev_workspace_root {
+            let candidate = workspace_root.join("rumi_ai_1_10");
+            if candidate.join("app.py").exists() {
+                app_dir = candidate;
             }
         }
         let rumi_home = app_dir.clone();
@@ -156,23 +160,36 @@ impl AppConfig {
         })
     }
 
-    /// Resolve the best available `uv` binary path.
+    /// Resolve a trusted `uv` binary path.
     ///
-    /// Prefers the bundled copy shipped alongside the application.  Falls back
-    /// to the downloaded copy at `self.uv_path`.
-    pub fn resolved_uv_path(&self) -> PathBuf {
+    /// Runtime downloads are intentionally not part of this trust boundary. The
+    /// viewer may use a bundled `uv`, a development-checkout bundle, an explicit
+    /// `RUMI_UV_PATH`, or a user-managed `uv` on PATH.
+    pub fn trusted_uv_path(&self) -> Option<PathBuf> {
         let bundled = self.bundled_uv_path();
         if bundled.exists() {
-            return bundled;
+            return Some(bundled);
         }
 
         if let Some(dev_bundled) = self.dev_bundled_uv_path() {
             if dev_bundled.exists() {
-                return dev_bundled;
+                return Some(dev_bundled);
             }
         }
 
-        self.uv_path.clone()
+        if let Some(configured) = configured_uv_path() {
+            if configured.is_file() {
+                return Some(configured);
+            }
+        }
+
+        which::which(uv_binary_name()).ok()
+    }
+
+    /// Resolve the best available `uv` binary path for diagnostics.
+    pub fn resolved_uv_path(&self) -> PathBuf {
+        self.trusted_uv_path()
+            .unwrap_or_else(|| self.uv_path.clone())
     }
 
     pub fn is_dev_workspace(&self) -> bool {
@@ -280,7 +297,12 @@ impl AppConfig {
             .join(".desktop_api_token")
     }
 
-    /// Return the path to the defaultspack ecosystem.json.
+    /// Return the canonical bundled defaultspack ecosystem.json.
+    ///
+    /// The viewer launches defaultspack with the local Pack API token, so the
+    /// host-side launch path must not be redirected by user-writable managed
+    /// pack pointers. Built-in defaultspack is trusted only from the shipped
+    /// application bundle (or the repo copy while running a dev workspace).
     pub fn defaultspack_ecosystem_json(&self) -> PathBuf {
         let bundled = self.bundled_defaultspack_ecosystem_json();
         if self.is_dev_workspace() && bundled.exists() {
@@ -288,47 +310,9 @@ impl AppConfig {
                 "Using repo defaultspack ecosystem during viewer dev startup from {}",
                 bundled.display()
             );
-            return bundled;
-        }
-
-        for managed_root in self.defaultspack_managed_roots() {
-            match resolve_defaultspack_current_pointer(&managed_root) {
-                ManagedPointerResolution::Resolved(ecosystem_path) => {
-                    log::info!(
-                        "Using managed defaultspack ecosystem from {}",
-                        ecosystem_path.display()
-                    );
-                    return ecosystem_path;
-                }
-                ManagedPointerResolution::Missing => {}
-                ManagedPointerResolution::Invalid(reason) => {
-                    let current_json = managed_root.join("current.json");
-                    log::warn!(
-                        "Ignoring defaultspack current pointer at {}: {}",
-                        current_json.display(),
-                        reason
-                    );
-                }
-            }
         }
 
         bundled
-    }
-
-    fn defaultspack_managed_roots(&self) -> Vec<PathBuf> {
-        let mut roots = Vec::with_capacity(2);
-        for root in [
-            self.rumi_home
-                .join("user_data")
-                .join("packs")
-                .join("defaultspack"),
-            self.user_data_dir.join("packs").join("defaultspack"),
-        ] {
-            if !roots.iter().any(|existing| existing == &root) {
-                roots.push(root);
-            }
-        }
-        roots
     }
 
     fn bundled_defaultspack_ecosystem_json(&self) -> PathBuf {
@@ -339,60 +323,6 @@ impl AppConfig {
     }
 }
 
-enum ManagedPointerResolution {
-    Resolved(PathBuf),
-    Missing,
-    Invalid(String),
-}
-
-fn resolve_defaultspack_current_pointer(managed_root: &Path) -> ManagedPointerResolution {
-    let current_json = managed_root.join("current.json");
-    if !current_json.exists() {
-        return ManagedPointerResolution::Missing;
-    }
-
-    let raw = match std::fs::read_to_string(&current_json) {
-        Ok(raw) => raw,
-        Err(error) => {
-            return ManagedPointerResolution::Invalid(format!("read failed: {error}"));
-        }
-    };
-    let data = match serde_json::from_str::<serde_json::Value>(&raw) {
-        Ok(data) => data,
-        Err(error) => {
-            return ManagedPointerResolution::Invalid(format!("invalid JSON: {error}"));
-        }
-    };
-
-    if data.get("pack_id").and_then(|value| value.as_str()) != Some("defaultspack") {
-        return ManagedPointerResolution::Invalid("pack_id must be 'defaultspack'".to_string());
-    }
-
-    let Some(rel) = data.get("path").and_then(|value| value.as_str()) else {
-        return ManagedPointerResolution::Invalid("missing relative 'path'".to_string());
-    };
-    let rel_path = PathBuf::from(rel);
-    if rel_path.is_absolute() {
-        return ManagedPointerResolution::Invalid("path must be relative".to_string());
-    }
-    if rel_path
-        .components()
-        .any(|part| matches!(part, std::path::Component::ParentDir))
-    {
-        return ManagedPointerResolution::Invalid("path must not contain '..'".to_string());
-    }
-
-    let ecosystem = managed_root.join(rel_path).join("ecosystem.json");
-    if !ecosystem.exists() {
-        return ManagedPointerResolution::Invalid(format!(
-            "ecosystem.json not found at {}",
-            ecosystem.display()
-        ));
-    }
-
-    ManagedPointerResolution::Resolved(ecosystem)
-}
-
 fn find_dev_workspace_root(resource_dir: &Path) -> Option<PathBuf> {
     for ancestor in resource_dir.ancestors() {
         let candidate = ancestor.join("rumi_ai_1_10");
@@ -401,6 +331,12 @@ fn find_dev_workspace_root(resource_dir: &Path) -> Option<PathBuf> {
         }
     }
     None
+}
+
+fn configured_uv_path() -> Option<PathBuf> {
+    std::env::var_os(UV_PATH_ENV)
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
 }
 
 fn configured_pack_shell_path() -> Option<PathBuf> {
@@ -606,7 +542,7 @@ mod tests {
     }
 
     #[test]
-    fn detect_for_tauri_marks_staged_dev_bundle_as_workspace() {
+    fn detect_for_tauri_does_not_trust_ancestors_when_bundled_app_exists() {
         use std::fs;
         use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -631,14 +567,14 @@ mod tests {
         let config = AppConfig::detect_for_tauri(resource.clone(), root.join("appdata")).unwrap();
 
         assert_eq!(config.app_dir, resource.join("app"));
-        assert_eq!(config.dev_workspace_root.as_deref(), Some(root.as_path()));
-        assert!(config.is_dev_workspace());
+        assert_eq!(config.dev_workspace_root, None);
+        assert!(!config.is_dev_workspace());
 
         fs::remove_dir_all(&root).ok();
     }
 
     #[test]
-    fn resolved_uv_path_prefers_bundled_copy_in_app_dir() {
+    fn trusted_uv_path_prefers_bundled_copy_in_app_dir() {
         use std::fs;
         use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -656,14 +592,17 @@ mod tests {
         fs::write(&bundled_uv, b"uv").unwrap();
 
         let config = AppConfig::detect_for_tauri(resource, appdata.clone()).unwrap();
-        assert_eq!(config.resolved_uv_path(), bundled_uv);
+        assert_eq!(
+            config.trusted_uv_path().as_deref(),
+            Some(bundled_uv.as_path())
+        );
         assert_eq!(config.bundled_uv_path(), bundled_uv);
 
         fs::remove_dir_all(&root).ok();
     }
 
     #[test]
-    fn resolved_uv_path_prefers_dev_workspace_bundle_over_downloaded_uv() {
+    fn trusted_uv_path_prefers_dev_workspace_bundle_over_appdata_uv() {
         use std::fs;
         use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -695,20 +634,52 @@ mod tests {
             config.dev_bundled_uv_path().as_deref(),
             Some(dev_bundled_uv.as_path())
         );
-        assert_eq!(config.resolved_uv_path(), dev_bundled_uv);
+        assert_eq!(
+            config.trusted_uv_path().as_deref(),
+            Some(dev_bundled_uv.as_path())
+        );
         assert!(config.is_dev_workspace());
 
         fs::remove_dir_all(&root).ok();
     }
 
     #[test]
-    fn resolved_uv_path_falls_back_to_downloaded_uv_when_no_bundle_exists() {
-        let resource = PathBuf::from("/tmp/res");
-        let appdata = PathBuf::from("/tmp/data");
+    fn trusted_uv_path_ignores_appdata_uv_when_no_trusted_source_exists() {
+        use std::fs;
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("rumi_viewer_uv_appdata_ignored_{unique}"));
+        let resource = root.join("resources");
+        let appdata = root.join("appdata");
+
+        fs::create_dir_all(&appdata).unwrap();
+        fs::write(appdata.join(uv_binary_name()), b"uv").unwrap();
+
+        let old_path = std::env::var_os("PATH");
+        let old_uv_path = std::env::var_os(UV_PATH_ENV);
+        std::env::set_var("PATH", "");
+        std::env::remove_var(UV_PATH_ENV);
         let config = AppConfig::detect_for_tauri(resource, appdata.clone()).unwrap();
 
+        assert_eq!(config.trusted_uv_path(), None);
         assert_eq!(config.resolved_uv_path(), config.uv_path);
         assert_eq!(config.uv_path, appdata.join(uv_binary_name()));
+
+        if let Some(path) = old_path {
+            std::env::set_var("PATH", path);
+        } else {
+            std::env::remove_var("PATH");
+        }
+        if let Some(path) = old_uv_path {
+            std::env::set_var(UV_PATH_ENV, path);
+        } else {
+            std::env::remove_var(UV_PATH_ENV);
+        }
+        fs::remove_dir_all(root).ok();
     }
 
     #[test]
@@ -786,7 +757,7 @@ mod tests {
     }
 
     #[test]
-    fn ensure_pack_shell_path_builds_dev_binary_before_using_staged_bundle() {
+    fn ensure_pack_shell_path_uses_staged_bundle_without_building_ancestor_workspace() {
         use std::fs;
         use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -807,7 +778,6 @@ mod tests {
             .join("app")
             .join("bundled")
             .join(pack_shell_binary_name());
-        let dev_pack_shell = dev_pack_shell_binary_path(&root, "debug");
 
         fs::create_dir_all(&resource).unwrap();
         fs::create_dir_all(app_py.parent().unwrap()).unwrap();
@@ -818,22 +788,22 @@ mod tests {
         fs::write(&staged_pack_shell, b"staged-pack-shell").unwrap();
 
         let config = AppConfig::detect_for_tauri(resource, appdata).unwrap();
-        let built = config
+        let resolved = config
             .ensure_pack_shell_path_with(|manifest_path| {
-                assert_eq!(manifest_path, manifest.as_path());
-                fs::create_dir_all(dev_pack_shell.parent().unwrap()).unwrap();
-                fs::write(&dev_pack_shell, b"dev-pack-shell").unwrap();
-                Ok(())
+                panic!(
+                    "unexpected build of ancestor manifest {}",
+                    manifest_path.display()
+                );
             })
             .unwrap();
 
-        assert_eq!(built, dev_pack_shell);
+        assert_eq!(resolved, staged_pack_shell);
 
         fs::remove_dir_all(&root).ok();
     }
 
     #[test]
-    fn defaultspack_ecosystem_prefers_managed_current_pointer() {
+    fn defaultspack_ecosystem_ignores_managed_current_pointer() {
         use std::fs;
         use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -844,6 +814,7 @@ mod tests {
         let root = std::env::temp_dir().join(format!("rumi_viewer_defaultspack_{unique}"));
         let resource = root.join("resources");
         let appdata = root.join("appdata");
+        let bundled = resource.join("app").join("ecosystem").join("defaultspack");
         let managed = resource
             .join("app")
             .join("user_data")
@@ -857,10 +828,24 @@ mod tests {
             .join("defaultspack")
             .join("versions")
             .join("2.4.0");
+        fs::create_dir_all(&bundled).unwrap();
         fs::create_dir_all(&managed).unwrap();
         fs::create_dir_all(&legacy_managed).unwrap();
-        fs::write(managed.join("ecosystem.json"), "{}").unwrap();
-        fs::write(legacy_managed.join("ecosystem.json"), "{}").unwrap();
+        fs::write(
+            bundled.join("ecosystem.json"),
+            r#"{"pack_id":"defaultspack"}"#,
+        )
+        .unwrap();
+        fs::write(
+            managed.join("ecosystem.json"),
+            r#"{"pack_id":"defaultspack","desktop_app":{"command":"evil"}}"#,
+        )
+        .unwrap();
+        fs::write(
+            legacy_managed.join("ecosystem.json"),
+            r#"{"pack_id":"defaultspack","desktop_app":{"command":"legacy-evil"}}"#,
+        )
+        .unwrap();
         fs::write(
             resource
                 .join("app")
@@ -885,13 +870,13 @@ mod tests {
 
         assert_eq!(
             config.defaultspack_ecosystem_json(),
-            managed.join("ecosystem.json")
+            bundled.join("ecosystem.json")
         );
         fs::remove_dir_all(&root).ok();
     }
 
     #[test]
-    fn defaultspack_ecosystem_falls_back_to_appdata_current_pointer_for_migration() {
+    fn defaultspack_ecosystem_ignores_appdata_current_pointer_for_migration() {
         use std::fs;
         use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -902,14 +887,25 @@ mod tests {
         let root = std::env::temp_dir().join(format!("rumi_viewer_defaultspack_appdata_{unique}"));
         let resource = root.join("resources");
         let appdata = root.join("appdata");
+        let bundled = resource.join("app").join("ecosystem").join("defaultspack");
         let managed = appdata
             .join("user_data")
             .join("packs")
             .join("defaultspack")
             .join("versions")
             .join("2.5.0");
+        fs::create_dir_all(&bundled).unwrap();
         fs::create_dir_all(&managed).unwrap();
-        fs::write(managed.join("ecosystem.json"), "{}").unwrap();
+        fs::write(
+            bundled.join("ecosystem.json"),
+            r#"{"pack_id":"defaultspack"}"#,
+        )
+        .unwrap();
+        fs::write(
+            managed.join("ecosystem.json"),
+            r#"{"pack_id":"defaultspack","desktop_app":{"command":"evil"}}"#,
+        )
+        .unwrap();
         fs::write(
             appdata
                 .join("user_data")
@@ -924,7 +920,7 @@ mod tests {
 
         assert_eq!(
             config.defaultspack_ecosystem_json(),
-            managed.join("ecosystem.json")
+            bundled.join("ecosystem.json")
         );
         fs::remove_dir_all(&root).ok();
     }

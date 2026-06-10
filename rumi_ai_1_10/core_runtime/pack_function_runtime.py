@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import sys
 import time
 import uuid
 from pathlib import Path
@@ -18,11 +19,18 @@ from .paths import (
 )
 from .pack_function_policy import (
     permission_id_for_entry,
-    validate_function_execution,
 )
 
 
 TRUSTED_IN_PROCESS_PACK_IDS = frozenset({"defaultspack", "rumi_default_tools_pack"})
+
+
+def _pack_function_policy_module():
+    """Resolve policy helpers at call time so test monkeypatches survive import aliases."""
+    return (
+        sys.modules.get("core_runtime.pack_function_policy")
+        or sys.modules.get("rumi_ai_1_10.core_runtime.pack_function_policy")
+    )
 
 
 def _find_pack_root(path_hint: Any) -> Optional[Path]:
@@ -181,7 +189,9 @@ def assert_pack_function_executable(
                 f"Entrypoint escapes project boundary: {boundary_path}"
             )
 
-    calling_convention, grant_config = validate_function_execution(entry, boundary_path)
+    policy_module = _pack_function_policy_module()
+    validate = getattr(policy_module, "validate_function_execution")
+    calling_convention, grant_config = validate(entry, boundary_path)
     if calling_convention == "python_host":
         allow_host = str(os.environ.get("RUMI_ALLOW_HOST_EXECUTION", "")).lower()
         if allow_host not in {"1", "true"}:
