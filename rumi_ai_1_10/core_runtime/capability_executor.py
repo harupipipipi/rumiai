@@ -522,19 +522,29 @@ class CapabilityExecutor:
             return False
         return resolved.parent.name == "ecosystem"
 
+    def _trusted_builtin_pack_path_verdict(self, pack_id: str, pack_root_hint=None) -> bool | None:
+        """Return True/False for an existing path hint, or None when no path evidence exists."""
+        normalized_pack_id = str(pack_id or "").strip()
+        if normalized_pack_id not in TRUSTED_BUILTIN_PACK_IDS or pack_root_hint is None:
+            return None
+        try:
+            candidate_path = Path(pack_root_hint)
+            if not candidate_path.exists():
+                return None
+            if candidate_path.is_file():
+                candidate_path = candidate_path.parent
+            return self._is_bundled_builtin_pack_dir(candidate_path, normalized_pack_id)
+        except (OSError, TypeError):
+            return None
+
     def _is_trusted_builtin_pack(self, pack_id: str, pack_root_hint=None) -> bool:
         normalized_pack_id = str(pack_id or "").strip()
         if normalized_pack_id not in TRUSTED_BUILTIN_PACK_IDS:
             return False
 
-        if pack_root_hint is not None:
-            try:
-                candidate_path = Path(pack_root_hint).resolve()
-                if candidate_path.is_file():
-                    candidate_path = candidate_path.parent
-                return self._is_bundled_builtin_pack_dir(candidate_path, normalized_pack_id)
-            except (OSError, TypeError):
-                return False
+        path_verdict = self._trusted_builtin_pack_path_verdict(normalized_pack_id, pack_root_hint)
+        if path_verdict is not None:
+            return path_verdict
 
         approval_manager = getattr(self, "_approval_manager", None)
         helper = getattr(approval_manager, "_is_trusted_builtin_pack", None)
@@ -815,11 +825,15 @@ class CapabilityExecutor:
         pack_id = entry.pack_id
         is_core = pack_id.startswith(_CORE_PACK_ID_PREFIX)
         pack_root_hint = getattr(entry, "function_dir", None) or getattr(entry, "main_py_path", None)
-        is_trusted_builtin = self._is_trusted_builtin_pack(pack_id, pack_root_hint=pack_root_hint)
+        builtin_path_verdict = self._trusted_builtin_pack_path_verdict(pack_id, pack_root_hint)
+        if builtin_path_verdict is None:
+            is_trusted_builtin = self._is_trusted_builtin_pack(pack_id)
+        else:
+            is_trusted_builtin = builtin_path_verdict
         principal_is_trusted_builtin = self._is_trusted_builtin_pack(principal_id)
         if not principal_is_trusted_builtin and principal_id == pack_id:
             principal_is_trusted_builtin = is_trusted_builtin
-        if pack_id in TRUSTED_BUILTIN_PACK_IDS and not is_trusted_builtin:
+        if pack_id in TRUSTED_BUILTIN_PACK_IDS and builtin_path_verdict is False:
             resp = CapabilityResponse(
                 success=False,
                 error=f"Built-in pack path is not trusted: {pack_id}",
