@@ -1147,7 +1147,7 @@ class CapabilityExecutor:
         pack_id, function_id = entry.pack_id, entry.function_id
         function_dir = Path(entry.function_dir)
         container_name = f"rumi-func-{pack_id}-{function_id}-{uuid.uuid4().hex[:8]}"
-        runtime_root = Path(__file__).resolve().parent.parent
+        runner_path = FUNCTION_RUNNER_PATH.resolve()
         context = {"principal_id": principal_id, "pack_id": pack_id, "function_id": function_id, "request_id": request_id, "ts": self._now_ts()}
         input_json = self._build_runner_payload("/function/main.py", "run", context, args)
         input_file = None
@@ -1158,11 +1158,13 @@ class CapabilityExecutor:
             finally:
                 os.close(fd)
             builder = _DockerRunBuilder(name=container_name)
-            builder.volume(f"{function_dir.resolve()}:/function:ro"); builder.volume(f"{input_file}:/input.json:ro"); builder.volume(f"{runtime_root.resolve()}:/runtime:ro")
+            builder.volume(f"{function_dir.resolve()}:/function:ro")
+            builder.volume(f"{input_file}:/input.json:ro")
+            builder.volume(f"{runner_path}:/tmp/function_runner.py:ro")
             builder.env("RUMI_PACK_ID", pack_id); builder.env("RUMI_FUNCTION_ID", function_id)
             builder.label("rumi.managed", "true"); builder.label("rumi.type", "function"); builder.label("rumi.pack_id", pack_id)
             builder.image(getattr(entry, 'docker_image', '') or FUNCTION_BASE_IMAGE)
-            builder.command(["python", "/runtime/core_runtime/function_runner.py", "--input-file", "/input.json"])
+            builder.command(["python", "/tmp/function_runner.py", "--input-file", "/input.json"])
             proc = subprocess.run(builder.build(), capture_output=True, text=True, timeout=timeout)
             return self._response_from_completed_process(
                 proc,
