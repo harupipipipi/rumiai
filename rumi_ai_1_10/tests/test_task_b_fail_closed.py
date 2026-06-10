@@ -153,6 +153,54 @@ def test_core_prefixed_block_function_outside_core_pack_is_rejected(tmp_path):
     assert not marker.exists()
 
 
+def test_core_prefixed_ecosystem_subprocess_does_not_bypass_trust(tmp_path):
+    from types import SimpleNamespace
+
+    from core_runtime.capability_executor import CapabilityExecutor
+    from core_runtime.function_registry import FunctionEntry
+
+    function_dir = tmp_path / "ecosystem" / "core_evil" / "functions" / "pwn"
+    function_dir.mkdir(parents=True)
+    marker = tmp_path / "subprocess_executed.txt"
+    main_py = function_dir / "main.py"
+    main_py.write_text(
+        "from pathlib import Path\n"
+        "def execute(context, args):\n"
+        f"    Path({str(marker)!r}).write_text('executed', encoding='utf-8')\n"
+        "    return {'success': True}\n",
+        encoding="utf-8",
+    )
+    entry = FunctionEntry(
+        pack_id="core_evil",
+        function_id="pwn",
+        function_dir=function_dir,
+        main_py_path=main_py,
+        manifest={},
+        calling_convention="subprocess",
+        entrypoint="main.py:execute",
+        vocab_aliases=["core.evil.pwn"],
+    )
+
+    class TrustStore:
+        def is_trusted(self, handler_id, sha256):
+            return SimpleNamespace(trusted=False, reason="not trusted")
+
+    executor = CapabilityExecutor()
+    executor._initialized = True
+    executor._trust_store = TrustStore()
+
+    response = executor._unified_execute(
+        entry,
+        "principal-1",
+        {"args": {}, "request_id": "req-1"},
+        start_time=time.time(),
+    )
+
+    assert response.success is False
+    assert response.error_type == "trust_denied"
+    assert not marker.exists()
+
+
 def test_function_call_core_prefixed_block_outside_core_pack_is_rejected(tmp_path):
     from core_runtime.capability_executor import CapabilityExecutor
     from core_runtime.function_registry import FunctionEntry

@@ -550,6 +550,51 @@ class CapabilityExecutor:
                 return True
         return False
 
+    def _entry_path_looks_like_ecosystem_pack(self, entry, pack_id: str) -> bool:
+        entry_paths = [
+            getattr(entry, "function_dir", None),
+            getattr(entry, "main_py_path", None),
+        ]
+        ecosystem_root = None
+        if _ECOSYSTEM_DIR:
+            try:
+                ecosystem_root = Path(_ECOSYSTEM_DIR).resolve()
+            except (OSError, TypeError):
+                ecosystem_root = Path(_ECOSYSTEM_DIR)
+        for raw_path in entry_paths:
+            if raw_path is None:
+                continue
+            try:
+                candidate = Path(raw_path).resolve()
+            except (OSError, TypeError):
+                continue
+            if ecosystem_root is not None:
+                try:
+                    relative = candidate.relative_to(ecosystem_root)
+                except ValueError:
+                    pass
+                else:
+                    if relative.parts and relative.parts[0] == pack_id:
+                        return True
+            parts = candidate.parts
+            for index, part in enumerate(parts[:-1]):
+                if part == "ecosystem" and parts[index + 1] == pack_id:
+                    return True
+        return False
+
+    def _is_core_builtin_trust_bypass_entry(self, entry) -> bool:
+        """Preserve legacy core handler compatibility without trusting ecosystem metadata."""
+        pack_id = str(getattr(entry, "pack_id", "") or "").strip()
+        if bool(getattr(entry, "legacy_handler_builtin", False)):
+            return True
+        if self._is_bundled_core_pack_entry(entry):
+            return True
+        if not pack_id.startswith(_CORE_PACK_ID_PREFIX):
+            return False
+        if pack_id in self._core_function_handlers:
+            return True
+        return not self._entry_path_looks_like_ecosystem_pack(entry, pack_id)
+
     def _is_trusted_builtin_pack(self, pack_id: str, pack_root_hint=None) -> bool:
         normalized_pack_id = str(pack_id or "").strip()
         if normalized_pack_id not in TRUSTED_BUILTIN_PACK_IDS:
@@ -662,10 +707,7 @@ class CapabilityExecutor:
         # Only core entries loaded from the bundled core_pack tree may bypass the
         # normal trust-store check.  A pack_id prefix alone is attacker-controlled
         # metadata for imported ecosystem packs.
-        is_builtin = (
-            bool(getattr(entry, "legacy_handler_builtin", False))
-            or self._is_bundled_core_pack_entry(entry)
-        )
+        is_builtin = self._is_core_builtin_trust_bypass_entry(entry)
         builtin_sha256 = None
 
         if is_builtin:
