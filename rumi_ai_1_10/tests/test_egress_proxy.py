@@ -45,6 +45,7 @@ from core_runtime.egress_proxy import (
     MAX_RESPONSE_SIZE,
     _EGRESS_DEFAULT_SOCKET_MODE,
     _EGRESS_RELAXED_SOCKET_MODE,
+    execute_http_request,
 )
 
 
@@ -600,6 +601,32 @@ class TestIsIpLiteral:
 
     def test_empty_string(self):
         assert _is_ip_literal("") is False
+
+
+# ======================================================================
+# Network grant enforcement
+# ======================================================================
+
+class TestNetworkGrantEnforcement:
+    """Regression tests for fail-closed egress grant handling."""
+
+    def test_missing_network_grant_manager_denies_without_connecting(self):
+        """No NetworkGrantManager must fail closed before outbound connect."""
+        with patch(
+            "core_runtime.egress_proxy.resolve_and_check_ip",
+            return_value=(False, "", ["203.0.113.10"]),
+        ), patch("core_runtime.egress_proxy.socket.create_connection") as mock_connect:
+            result = execute_http_request(
+                pack_id="pack_a",
+                request={"method": "GET", "url": "http://attacker.example/"},
+                network_grant_manager=None,
+                audit_logger=None,
+            )
+
+        assert result["success"] is False
+        assert result["error_type"] == "grant_denied"
+        assert "network grant manager unavailable" in result["error"]
+        mock_connect.assert_not_called()
 
 
 # ======================================================================
