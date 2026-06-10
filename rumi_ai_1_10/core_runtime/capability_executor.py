@@ -737,9 +737,15 @@ class CapabilityExecutor:
             return self._execute_user_function(principal_id=principal_id, entry=entry, args=args,
                                                 request_id=request_id, start_time=start_time)
         if calling_convention == "binary":
+            guard_resp = self._host_runtime_guard(entry, calling_convention, start_time)
+            if guard_resp is not None:
+                return guard_resp
             return self._execute_binary_function(principal_id=principal_id, entry=entry, args=args,
                                                   request_id=request_id, start_time=start_time)
         if calling_convention == "command":
+            guard_resp = self._host_runtime_guard(entry, calling_convention, start_time)
+            if guard_resp is not None:
+                return guard_resp
             return self._execute_command_function(principal_id=principal_id, entry=entry, args=args,
                                                    request_id=request_id, start_time=start_time)
         return CapabilityResponse(success=False, error=f"Unknown calling_convention: {calling_convention}",
@@ -1034,14 +1040,35 @@ class CapabilityExecutor:
             t = DEFAULT_FUNCTION_TIMEOUT
         return min(max(t, 1.0), MAX_TIMEOUT)
 
+    def _host_runtime_guard(self, entry, runtime, start_time):
+        if not getattr(entry, "host_execution", False):
+            return CapabilityResponse(
+                success=False,
+                error=f"runtime='{runtime}' requires explicit host_execution approval",
+                error_type="security_violation",
+                latency_ms=(time.time() - start_time) * 1000,
+            )
+        allow_host = os.environ.get("RUMI_ALLOW_HOST_EXECUTION", "").lower()
+        if allow_host not in ("1", "true"):
+            return CapabilityResponse(
+                success=False,
+                error="Host execution is disabled. Set RUMI_ALLOW_HOST_EXECUTION=1 to enable.",
+                error_type="host_execution_disabled",
+                latency_ms=(time.time() - start_time) * 1000,
+            )
+        return None
+
     def _execute_user_function(self, principal_id, entry, args, request_id, start_time):
         runtime = getattr(entry, 'runtime', 'python')
-        if entry.host_execution and runtime != "python":
-            return CapabilityResponse(success=False, error=f"runtime='{runtime}' requires Docker execution (host_execution must be false)",
-                                      error_type="security_violation", latency_ms=(time.time() - start_time) * 1000)
         if runtime == "binary":
+            guard_resp = self._host_runtime_guard(entry, runtime, start_time)
+            if guard_resp is not None:
+                return guard_resp
             return self._execute_binary_function(principal_id=principal_id, entry=entry, args=args, request_id=request_id, start_time=start_time)
         elif runtime == "command":
+            guard_resp = self._host_runtime_guard(entry, runtime, start_time)
+            if guard_resp is not None:
+                return guard_resp
             return self._execute_command_function(principal_id=principal_id, entry=entry, args=args, request_id=request_id, start_time=start_time)
         pack_id, function_id = entry.pack_id, entry.function_id
         function_dir, main_py_path = entry.function_dir, entry.main_py_path
@@ -1259,6 +1286,9 @@ class CapabilityExecutor:
         return CapabilityResponse(success=True, output=result, latency_ms=latency_ms)
 
     def _execute_binary_function(self, principal_id, entry, args, request_id, start_time):
+        guard_resp = self._host_runtime_guard(entry, "binary", start_time)
+        if guard_resp is not None:
+            return guard_resp
         binary_path = entry.main_binary_path
         if binary_path is None or not Path(binary_path).is_file():
             return CapabilityResponse(success=False, error=f"Binary not found: {binary_path}", error_type="binary_not_found", latency_ms=(time.time() - start_time) * 1000)
@@ -1286,13 +1316,12 @@ class CapabilityExecutor:
             return CapabilityResponse(success=False, error=f"Execution error: {e}", error_type="internal_error", latency_ms=(time.time() - start_time) * 1000)
 
     def _execute_command_function(self, principal_id, entry, args, request_id, start_time):
+        guard_resp = self._host_runtime_guard(entry, "command", start_time)
+        if guard_resp is not None:
+            return guard_resp
         command = getattr(entry, 'command', [])
         if not command or not isinstance(command, list):
             return CapabilityResponse(success=False, error="No command defined for runtime=command", error_type="invalid_config", latency_ms=(time.time() - start_time) * 1000)
-        # Security: RUMI_ALLOW_HOST_EXECUTION guard (symmetric with _execute_host_function)
-        allow_host = os.environ.get("RUMI_ALLOW_HOST_EXECUTION", "").lower()
-        if allow_host not in ("1", "true"):
-            return CapabilityResponse(success=False, error="Host execution is disabled. Set RUMI_ALLOW_HOST_EXECUTION=1 to enable.", error_type="host_execution_disabled", latency_ms=(time.time() - start_time) * 1000)
         # Security: path traversal check (symmetric with _execute_binary_function)
         func_dir = Path(entry.function_dir).resolve() if entry.function_dir else None
         if func_dir and Path(command[0]).is_absolute():
