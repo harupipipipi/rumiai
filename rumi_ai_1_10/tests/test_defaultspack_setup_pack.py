@@ -70,6 +70,9 @@ class TestSetupPackManager(unittest.TestCase):
         version: str = "1.0.0",
         compatibility: dict | None = None,
         depends_on: list | None = None,
+        conflicts_with: list | None = None,
+        overlap_policy: dict | None = None,
+        defaultspack_promotion: dict | None = None,
         marketplace: dict | None = None,
         signing: dict | None = None,
     ) -> None:
@@ -89,6 +92,12 @@ class TestSetupPackManager(unittest.TestCase):
             payload["compatibility"] = compatibility
         if depends_on is not None:
             payload["depends_on"] = depends_on
+        if conflicts_with is not None:
+            payload["conflicts_with"] = conflicts_with
+        if overlap_policy is not None:
+            payload["overlap_policy"] = overlap_policy
+        if defaultspack_promotion is not None:
+            payload["defaultspack_promotion"] = defaultspack_promotion
         if marketplace is not None:
             payload["marketplace"] = marketplace
         if signing is not None:
@@ -200,6 +209,53 @@ class TestSetupPackManager(unittest.TestCase):
             principals = [call[0]["principal_id"] for call in fake_grants.batch_calls]
             self.assertEqual(principals, ["defaultspack"])
 
+    def test_install_auto_includes_declared_setup_pack_dependencies(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            root = base / "setup_pack"
+            self._write_pack(root, "defaultspack", "defaultspack", True, recommended=True)
+            self._write_pack(root, "tools", "tools", True)
+            self._write_pack(
+                root,
+                "codepack",
+                "codepack",
+                False,
+                depends_on=[
+                    {"pack_id": "defaultspack", "version": ">=1.0.0"},
+                    {"pack_id": "tools", "version": ">=1.0.0"},
+                ],
+            )
+            manager = SetupPackManager(root=root, selection_file=base / "selection.json")
+
+            ctx = self._install_context(
+                base,
+                [
+                    self._target(base, "defaultspack", "rumi:ecosystem/defaultspack"),
+                    self._target(base, "tools", "rumi:ecosystem/tools"),
+                    self._target(base, "codepack", "rumi:ecosystem/codepack"),
+                ],
+            )
+            fake_active, fake_grants, *patches = ctx
+            with patches[0], patches[1], patches[2], patches[3]:
+                result = manager.install("codepack")
+
+            self.assertTrue(result["success"])
+            self.assertEqual(
+                result["installed_setup_pack_ids"],
+                ["defaultspack", "tools", "codepack"],
+            )
+            self.assertEqual(
+                result["installed_target_pack_ids"],
+                ["defaultspack", "tools", "codepack"],
+            )
+            self.assertEqual(result["active_setup_pack_id"], "defaultspack")
+            self.assertEqual(result["active_target_pack_id"], "defaultspack")
+            self.assertEqual(result["granted_all_ok_target_pack_ids"], ["defaultspack", "tools"])
+            self.assertEqual(result["skipped_all_ok_setup_pack_ids"], ["codepack"])
+            self.assertEqual(fake_active.active_pack_identity, "rumi:ecosystem/defaultspack")
+            principals = [call[0]["principal_id"] for call in fake_grants.batch_calls]
+            self.assertEqual(principals, ["defaultspack", "tools"])
+
     def test_recommended_selected_pack_becomes_active(self):
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
@@ -253,6 +309,71 @@ class TestSetupPackManager(unittest.TestCase):
             self.assertEqual(listed["selected_setup_pack_ids"], ["beta", "alpha"])
             self.assertEqual(listed["active_setup_pack_id"], "beta")
             self.assertEqual(listed["active_target_pack_id"], "beta")
+
+    def test_list_packs_exposes_overlap_and_promotion_metadata(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            root = base / "setup_pack"
+            self._write_pack(
+                root,
+                "workspace",
+                "workspace",
+                True,
+                conflicts_with=[
+                    {
+                        "pack_id": "legacy_workspace",
+                        "reason": "Both own slide and sheet recipes.",
+                        "resolution": "prefer_workspace",
+                    }
+                ],
+                overlap_policy={"tool_aliases": "prefer_explicit_pack_namespace"},
+                defaultspack_promotion={"eligible": True, "criteria": ["local_first", "tests_pass"]},
+            )
+            manager = SetupPackManager(root=root, selection_file=base / "selection.json")
+
+            listed = manager.list_packs()
+            pack = listed["packs"][0]
+
+            self.assertEqual(pack["conflicts_with"][0]["pack_id"], "legacy_workspace")
+            self.assertEqual(pack["overlap_policy"]["tool_aliases"], "prefer_explicit_pack_namespace")
+            self.assertTrue(pack["defaultspack_promotion"]["eligible"])
+
+    def test_install_rejects_declared_setup_pack_conflict_before_grants(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            root = base / "setup_pack"
+            self._write_pack(
+                root,
+                "workspace_a",
+                "workspace_a",
+                True,
+                conflicts_with=[
+                    {
+                        "pack_id": "workspace_b",
+                        "reason": "Both register the same workspace surface.",
+                        "resolution": "choose_one_pack",
+                    }
+                ],
+            )
+            self._write_pack(root, "workspace_b", "workspace_b", True)
+            manager = SetupPackManager(root=root, selection_file=base / "selection.json")
+
+            ctx = self._install_context(
+                base,
+                [
+                    self._target(base, "workspace_a", "rumi:ecosystem/workspace_a"),
+                    self._target(base, "workspace_b", "rumi:ecosystem/workspace_b"),
+                ],
+            )
+            _, fake_grants, *patches = ctx
+            with patches[0], patches[1], patches[2], patches[3]:
+                result = manager.install(["workspace_a", "workspace_b"])
+
+            self.assertFalse(result["success"])
+            self.assertEqual(result["status_code"], 400)
+            self.assertEqual(result["errors"][0]["reason"], "setup_pack_conflict")
+            self.assertEqual(result["errors"][0]["resolution"], "choose_one_pack")
+            self.assertEqual(fake_grants.batch_calls, [])
 
     def test_grant_and_revoke_all_ok_reject_unsupported_setup_pack_entries(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -100,3 +100,73 @@ def test_validate_candidates_accepts_compatible_signed_pack(tmp_path):
     )
 
     assert issues == []
+
+
+def test_scan_candidates_exposes_conflict_and_promotion_metadata(tmp_path):
+    ecosystem = tmp_path / "eco"
+    setup_pack_root = ecosystem / "setup_pack"
+    setup_pack_root.mkdir(parents=True)
+    pack = setup_pack_root / "workspace"
+    pack.mkdir()
+    (pack / "pack.json").write_text(
+        json.dumps(
+            {
+                "pack_id": "workspace",
+                "conflicts_with": [
+                    {
+                        "pack_id": "legacy_workspace",
+                        "reason": "Both own generated office artifacts.",
+                        "resolution": "prefer_workspace",
+                    }
+                ],
+                "overlap_policy": {"tool_aliases": "prefer_explicit_pack_namespace"},
+                "defaultspack_promotion": {"eligible": True},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    candidate = PackSelector(setup_pack_root).scan_candidates()[0]
+
+    assert candidate.conflicts_with[0]["pack_id"] == "legacy_workspace"
+    assert candidate.overlap_policy["tool_aliases"] == "prefer_explicit_pack_namespace"
+    assert candidate.defaultspack_promotion["eligible"] is True
+    assert candidate.to_dict()["conflicts_with"][0]["resolution"] == "prefer_workspace"
+
+
+def test_validate_candidates_reports_installed_pack_conflict(tmp_path):
+    ecosystem = tmp_path / "eco"
+    setup_pack_root = ecosystem / "setup_pack"
+    setup_pack_root.mkdir(parents=True)
+    pack = setup_pack_root / "workspace"
+    pack.mkdir()
+    (pack / "pack.json").write_text(
+        json.dumps(
+            {
+                "pack_id": "workspace",
+                "conflicts_with": [
+                    {
+                        "pack_id": "legacy_workspace",
+                        "reason": "Both own generated office artifacts.",
+                        "resolution": "prefer_workspace",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    issues = PackSelector(setup_pack_root).validate_candidates(
+        installed_packs={"legacy_workspace": {"version": "1.0.0"}},
+    )
+
+    assert issues == [
+        {
+            "type": "pack_conflict",
+            "pack_id": "workspace",
+            "conflicts_with": "legacy_workspace",
+            "resolution": "prefer_workspace",
+            "reason": "Both own generated office artifacts.",
+            "severity": "error",
+        }
+    ]

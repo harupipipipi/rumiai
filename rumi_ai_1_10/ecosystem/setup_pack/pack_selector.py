@@ -21,6 +21,9 @@ class PackCandidate:
     risk_level: str = "normal"
     all_ok_eligible: bool = False
     depends_on: List[Dict[str, str]] = None
+    conflicts_with: List[Dict[str, str]] = None
+    overlap_policy: Dict[str, Any] = None
+    defaultspack_promotion: Dict[str, Any] = None
     compatibility: Dict[str, Any] = None
     marketplace: Dict[str, Any] = None
     signing: Dict[str, Any] = None
@@ -36,6 +39,9 @@ class PackCandidate:
             "risk_level": self.risk_level,
             "all_ok_eligible": self.all_ok_eligible,
             "depends_on": list(self.depends_on or []),
+            "conflicts_with": list(self.conflicts_with or []),
+            "overlap_policy": dict(self.overlap_policy or {}),
+            "defaultspack_promotion": dict(self.defaultspack_promotion or {}),
             "compatibility": dict(self.compatibility or {}),
             "marketplace": dict(self.marketplace or {}),
             "signing": dict(self.signing or {}),
@@ -96,6 +102,34 @@ class PackSelector:
                 version = item.get("version") or item.get("constraint") or item.get("version_constraint")
                 if version:
                     spec["version"] = str(version)
+            else:
+                continue
+            if spec["pack_id"] not in seen:
+                seen.add(spec["pack_id"])
+                result.append(spec)
+        return result
+
+    @staticmethod
+    def _normalize_pack_ref_specs(value: Any) -> List[Dict[str, str]]:
+        raw_items = value if isinstance(value, list) else []
+        if isinstance(value, dict):
+            raw_items = [
+                {"pack_id": key, **spec} if isinstance(spec, dict) else {"pack_id": key}
+                for key, spec in value.items()
+            ]
+        result: List[Dict[str, str]] = []
+        seen: set[str] = set()
+        for item in raw_items:
+            if isinstance(item, str):
+                spec = {"pack_id": item}
+            elif isinstance(item, dict):
+                pack_id = item.get("pack_id") or item.get("id") or item.get("name")
+                if not pack_id:
+                    continue
+                spec = {"pack_id": str(pack_id)}
+                for key in ("reason", "resolution", "scope"):
+                    if item.get(key):
+                        spec[key] = str(item[key])
             else:
                 continue
             if spec["pack_id"] not in seen:
@@ -191,6 +225,9 @@ class PackSelector:
                     depends_on=self._normalize_dependency_specs(
                         data.get("depends_on", data.get("dependencies", []))
                     ),
+                    conflicts_with=self._normalize_pack_ref_specs(data.get("conflicts_with", [])),
+                    overlap_policy=self._as_dict(data.get("overlap_policy")),
+                    defaultspack_promotion=self._as_dict(data.get("defaultspack_promotion")),
                     compatibility=compatibility,
                     marketplace=self._as_dict(data.get("marketplace")),
                     signing=self._as_dict(data.get("signing")),
@@ -211,8 +248,11 @@ class PackSelector:
         platform_aliases = self._platform_aliases(platform_name or sys.platform)
         python_version = python_version or platform.python_version()
         issues: List[Dict[str, Any]] = []
+        candidates = self.scan_candidates()
+        candidate_ids = {candidate.pack_id for candidate in candidates}
+        installed_ids = set(installed_packs)
 
-        for candidate in self.scan_candidates():
+        for candidate in candidates:
             for dep in candidate.depends_on or []:
                 dep_id = dep.get("pack_id", "")
                 installed = installed_packs.get(dep_id)
@@ -289,6 +329,21 @@ class PackSelector:
                     "type": "invalid_marketplace_metadata",
                     "pack_id": candidate.pack_id,
                     "severity": "warning",
+                })
+
+            for conflict in candidate.conflicts_with or []:
+                conflict_id = str(conflict.get("pack_id") or "")
+                if not conflict_id:
+                    continue
+                if conflict_id not in candidate_ids and conflict_id not in installed_ids:
+                    continue
+                issues.append({
+                    "type": "pack_conflict",
+                    "pack_id": candidate.pack_id,
+                    "conflicts_with": conflict_id,
+                    "resolution": conflict.get("resolution") or "choose_one_pack",
+                    "reason": conflict.get("reason") or "",
+                    "severity": "error" if conflict_id in installed_ids else "warning",
                 })
 
         return issues
