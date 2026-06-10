@@ -1006,6 +1006,46 @@ def _is_allowed_sensitive_origin(origin):
     return _local_origin_allowed(origin)
 
 
+def _header_value(headers, name):
+    if not headers:
+        return ""
+    try:
+        value = headers.get(name, "")
+    except AttributeError:
+        value = ""
+    if value:
+        return str(value)
+    lowered = str(name).lower()
+    try:
+        items = headers.items()
+    except AttributeError:
+        return ""
+    for key, value in items:
+        if str(key).lower() == lowered:
+            return str(value)
+    return ""
+
+
+def _is_browser_accessible_api_path(path):
+    normalized = str(path or "")
+    return (
+        normalized == "/api"
+        or normalized.startswith("/api/")
+        or normalized == "/v1"
+        or normalized.startswith("/v1/")
+    )
+
+
+def _browser_api_origin_error(method, path, headers, client_address=None):
+    del method, client_address
+    if not _is_browser_accessible_api_path(path):
+        return None
+    origin = _header_value(headers, "Origin")
+    if origin and not _is_allowed_sensitive_origin(origin):
+        return (403, "origin not allowed for local defaultspack API", "ORIGIN_DENIED")
+    return None
+
+
 def _configured_local_auth_token():
     for key in ("RUMI_DEFAULTSPACK_LOCAL_TOKEN", "RUMI_API_TOKEN", "RUMI_TOKEN"):
         value = os.environ.get(key, "").strip()
@@ -1093,6 +1133,12 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
                         "API_ROUTE_NOT_ALLOWED",
                     ),
                 )
+                return
+            origin_error = _browser_api_origin_error(
+                method, path, self.headers, self.client_address
+            )
+            if origin_error:
+                self._send_json(origin_error[0], error(origin_error[1], origin_error[2]))
                 return
             sensitive_error = self._sensitive_request_error(method, path)
             if sensitive_error:
@@ -1227,22 +1273,35 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
             return (403, "local auth token is not configured", "AUTH_REQUIRED")
         if not provided or not hmac.compare_digest(provided, expected):
             return (401, "local auth token required", "AUTH_REQUIRED")
-        if method.upper() in {"POST", "PUT", "DELETE"} and origin and not self.headers.get("X-Rumi-CSRF", "").strip():
+        if (
+            method.upper() in {"POST", "PUT", "DELETE"}
+            and origin
+            and not self.headers.get("X-Rumi-CSRF", "").strip()
+        ):
             return (403, "CSRF header required for sensitive integration mutation", "CSRF_REQUIRED")
         return None
 
     def _send_cors_headers(self):
         path = self.path.split("?")[0]
-        if _is_sensitive_http_path(path):
-            origin = self.headers.get("Origin", "")
+        origin = _header_value(self.headers, "Origin")
+        if _is_sensitive_http_path(path) or _is_browser_accessible_api_path(path):
             if _is_allowed_sensitive_origin(origin):
                 if origin:
                     self.send_header("Access-Control-Allow-Origin", origin)
                     self.send_header("Vary", "Origin")
-            self.send_header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-            self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Rumi-CSRF, X-Rumi-Approval")
+            self.send_header(
+                "Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS"
+            )
+            self.send_header(
+                "Access-Control-Allow-Headers",
+                "Content-Type, Authorization, X-Rumi-CSRF, X-Rumi-Approval",
+            )
             return
-        self.send_header("Access-Control-Allow-Origin", "*")
+        if origin and _is_allowed_sensitive_origin(origin):
+            self.send_header("Access-Control-Allow-Origin", origin)
+            self.send_header("Vary", "Origin")
+        elif not origin:
+            self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Rumi-CSRF")
 
