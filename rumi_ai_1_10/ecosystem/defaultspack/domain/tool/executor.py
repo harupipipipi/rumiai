@@ -1015,15 +1015,12 @@ class ToolExecutor:
             from blocks.coding.file_read import run as file_read_run
 
             path = arguments.get("path", "")
-            workspace_root = arguments.get("workspace_root")
-            if workspace_root is None and isinstance(context, dict):
-                workspace_root = context.get("workspace_root")
+            call_context = context if isinstance(context, dict) else {}
             result = file_read_run(
                 {
                     "path": path,
-                    "workspace_root": workspace_root,
                 },
-                context if isinstance(context, dict) else {},
+                call_context,
             )
             if result.get("status") != "ok":
                 err = result.get("error", {})
