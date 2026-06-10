@@ -64,6 +64,7 @@ import uuid
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from .paths import BASE_DIR
+from .flow_context_security import sanitize_user_flow_context
 
 from .logging_utils import get_structured_logger
 from .profiling import get_profiler
@@ -327,7 +328,7 @@ class KernelFlowExecutionMixin:
             "on_missing_handler": str(defaults.get("on_missing_handler", "skip")).lower()
         }
         if context:
-            ctx.update(context)
+            ctx.update(sanitize_user_flow_context(context))
 
         self.diagnostics.record_step(
             phase=pipeline_name,
@@ -398,15 +399,37 @@ class KernelFlowExecutionMixin:
     # Async Flow 実行
     # ------------------------------------------------------------------
 
-    async def execute_flow(self, flow_id: str, context: Optional[Dict[str, Any]] = None, timeout: Optional[float] = None) -> Dict[str, Any]:
+    async def execute_flow(
+        self,
+        flow_id: str,
+        context: Optional[Dict[str, Any]] = None,
+        timeout: Optional[float] = None,
+        trusted_context: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
         if timeout:
             try:
-                return await asyncio.wait_for(self._execute_flow_internal(flow_id, context), timeout=timeout)
+                if trusted_context is None:
+                    return await asyncio.wait_for(
+                        self._execute_flow_internal(flow_id, context),
+                        timeout=timeout,
+                    )
+                return await asyncio.wait_for(
+                    self._execute_flow_internal(flow_id, context, trusted_context=trusted_context),
+                    timeout=timeout,
+                )
             except asyncio.TimeoutError:
                 return {"_error": f"Flow '{flow_id}' timed out after {timeout}s", "_flow_timeout": True}
-        return await self._execute_flow_internal(flow_id, context)
+        if trusted_context is None:
+            return await self._execute_flow_internal(flow_id, context)
+        return await self._execute_flow_internal(flow_id, context, trusted_context=trusted_context)
 
-    def execute_flow_sync(self, flow_id: str, context: Optional[Dict[str, Any]] = None, timeout: Optional[float] = None) -> Dict[str, Any]:
+    def execute_flow_sync(
+        self,
+        flow_id: str,
+        context: Optional[Dict[str, Any]] = None,
+        timeout: Optional[float] = None,
+        trusted_context: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
         """
         Flow を同期的に実行する。
 
@@ -414,7 +437,10 @@ class KernelFlowExecutionMixin:
         Python 3.9+ 互換のパターンに変更。
         """
         effective_timeout = timeout or 300
-        coro = self.execute_flow(flow_id, context, timeout)
+        if trusted_context is None:
+            coro = self.execute_flow(flow_id, context, timeout)
+        else:
+            coro = self.execute_flow(flow_id, context, timeout, trusted_context=trusted_context)
 
         # S-4: ループの状態を安全に判定
         try:
@@ -435,10 +461,17 @@ class KernelFlowExecutionMixin:
             # イベントループなし → asyncio.run で実行
             return asyncio.run(coro)
 
-    async def _execute_flow_internal(self, flow_id: str, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    async def _execute_flow_internal(
+        self,
+        flow_id: str,
+        context: Optional[Dict[str, Any]] = None,
+        trusted_context: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
         _prof_start = time.monotonic()
         ctx = self._build_kernel_context()
-        ctx.update(context or {})
+        ctx.update(sanitize_user_flow_context(context))
+        if trusted_context:
+            ctx.update(trusted_context)
         try:
             from .runtime_profile_resolver import resolve_runtime_profile_context
 
@@ -736,7 +769,7 @@ class KernelFlowExecutionMixin:
         args = step.get("args", {})
         resolved_args = self._resolve_value(args, ctx)
         if isinstance(resolved_args, dict):
-            child_ctx.update(resolved_args)
+            child_ctx.update(sanitize_user_flow_context(resolved_args))
 
         try:
             flow_def = self.interface_registry.get(f"flow.{flow_name}", strategy="last")
@@ -807,7 +840,7 @@ class KernelFlowExecutionMixin:
         """function.call ステップを実行する。
 
         capability_executor 経由で function.call を呼ぶ。
-        principal_id は ctx から取得し、フォールバックは使わない（フェイルクローズ）。
+        principal_id は信頼済みの flow 実行コンテキストから取得し、フォールバックは使わない（フェイルクローズ）。
 
         Wave 27-D2: vocab_normalize (opt-in) を結果格納前に適用。
         """
@@ -816,12 +849,12 @@ class KernelFlowExecutionMixin:
             _logger.warning("function step '%s': missing 'function' field", step.get("id"))
             return ctx, None
 
-        # フェイルクローズ: principal_id が ctx に無い場合は実行拒否
-        principal_id = ctx.get("_principal_id")
+        # フェイルクローズ: trusted flow principal が ctx に無い場合は実行拒否
+        principal_id = ctx.get("_flow_run_principal_id")
         if not principal_id:
-            error_result = {"_error": "no _principal_id in ctx", "_step_id": step.get("id")}
+            error_result = {"_error": "no trusted flow principal in ctx", "_step_id": step.get("id")}
             _logger.error(
-                "function step '%s': no _principal_id in ctx, refusing execution",
+                "function step '%s': no trusted flow principal in ctx, refusing execution",
                 step.get("id"),
             )
             output_key = step.get("output") or step.get("id")
@@ -978,17 +1011,17 @@ class KernelFlowExecutionMixin:
                 handler=f"function:{function_name}", status="success",
                 meta={"function": function_name},
             )
-            # フェイルクローズ: principal_id が ctx に無い場合は実行拒否
-            principal_id = ctx.get("_principal_id")
+            # フェイルクローズ: trusted flow principal が ctx に無い場合は実行拒否
+            principal_id = ctx.get("_flow_run_principal_id")
             if not principal_id:
                 _logger.error(
-                    "sync function step '%s': no _principal_id in ctx, refusing execution",
+                    "sync function step '%s': no trusted flow principal in ctx, refusing execution",
                     step_id,
                 )
                 self.diagnostics.record_step(
                     phase=phase, step_id=f"{step_id_str}.failed",
                     handler=f"function:{function_name}", status="failed",
-                    error={"type": "MissingPrincipalId", "message": "no _principal_id in ctx"},
+                    error={"type": "MissingPrincipalId", "message": "no trusted flow principal in ctx"},
                     meta={"optional": optional},
                 )
                 fail_soft = ctx.get("_flow_defaults", {}).get("fail_soft", True)

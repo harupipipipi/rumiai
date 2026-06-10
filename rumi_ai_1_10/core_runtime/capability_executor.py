@@ -29,6 +29,7 @@ import shutil
 import uuid
 import logging
 import types
+from .flow_context_security import sanitize_user_flow_context
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -1587,9 +1588,18 @@ class CapabilityExecutor:
         remaining_timeout = max(min(float(args.get("timeout_seconds", timeout_seconds)), MAX_TIMEOUT) - (time.time() - start_time), 1.0)
         call_stack.append(flow_id)
         try:
-            context = {"_flow_run_principal_id": principal_id, "_flow_run_request_id": request_id, "_flow_call_stack": list(call_stack)}
-            context.update(inputs)
-            result = self._kernel.execute_flow_sync(flow_id=flow_id, context=context, timeout=remaining_timeout)
+            trusted_context = {
+                "_flow_run_principal_id": principal_id,
+                "_flow_run_request_id": request_id,
+                "_flow_call_stack": list(call_stack),
+            }
+            context = sanitize_user_flow_context(inputs)
+            result = self._kernel.execute_flow_sync(
+                flow_id=flow_id,
+                context=context,
+                timeout=remaining_timeout,
+                trusted_context=trusted_context,
+            )
             latency_ms = (time.time() - start_time) * 1000
             if isinstance(result, dict) and result.get("_error"):
                 return CapabilityResponse(success=False, error=result["_error"], error_type="flow_execution_error", latency_ms=latency_ms)

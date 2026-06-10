@@ -414,7 +414,7 @@ class TestFlowChainAndRecursion:
         fake_stack = [f"flow_{i}" for i in range(MAX_FLOW_CHAIN_DEPTH)]
 
         result = _run_async(
-            kernel._execute_flow_internal("deep", context={"_flow_call_stack": fake_stack})
+            kernel._execute_flow_internal("deep", trusted_context={"_flow_call_stack": fake_stack})
         )
 
         assert "_error" in result
@@ -426,7 +426,7 @@ class TestFlowChainAndRecursion:
         kernel.interface_registry.register("flow.loop", {"steps": []})
 
         result = _run_async(
-            kernel._execute_flow_internal("loop", context={"_flow_call_stack": ["loop"]})
+            kernel._execute_flow_internal("loop", trusted_context={"_flow_call_stack": ["loop"]})
         )
 
         assert "_error" in result
