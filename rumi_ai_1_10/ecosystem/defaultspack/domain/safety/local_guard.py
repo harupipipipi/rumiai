@@ -9,6 +9,7 @@ LOCAL_ORIGIN_HOSTS = {"127.0.0.1", "localhost", "::1"}
 
 SENSITIVE_CODING_PATHS = {
     "/api/coding/approvals",
+    "/api/coding/files/read",
     "/api/coding/files/write",
     "/api/coding/files/create",
     "/api/coding/files/delete",

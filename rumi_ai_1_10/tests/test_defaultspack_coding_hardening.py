@@ -364,6 +364,33 @@ def test_workspace_jail_blocks_absolute_traversal_protected_and_secret_paths(tmp
     assert blocked["error"]["code"] == "PATH_RESTRICTED"
 
 
+def test_file_read_http_route_requires_local_guard():
+    from domain.safety.local_guard import require_local_guard
+
+    cross_origin = {"Origin": "https://evil.example"}
+    local_origin_without_csrf = {"Origin": "http://127.0.0.1:8766"}
+    local_origin_with_csrf = {"Origin": "http://127.0.0.1:8766", "X-Rumi-CSRF": "1"}
+
+    assert require_local_guard(
+        "/api/coding/files/read",
+        "POST",
+        cross_origin,
+        ("127.0.0.1", 50000),
+    ) == (403, "origin not allowed for sensitive local route", "ORIGIN_DENIED")
+    assert require_local_guard(
+        "/api/coding/files/read",
+        "POST",
+        local_origin_without_csrf,
+        ("127.0.0.1", 50000),
+    ) == (403, "CSRF header required for sensitive local mutation", "CSRF_REQUIRED")
+    assert require_local_guard(
+        "/api/coding/files/read",
+        "POST",
+        local_origin_with_csrf,
+        ("127.0.0.1", 50000),
+    ) is None
+
+
 def test_file_list_search_and_snapshot_hide_restricted_paths_and_external_symlinks(tmp_path):
     from domain.coding.file_ops import FileOps
 

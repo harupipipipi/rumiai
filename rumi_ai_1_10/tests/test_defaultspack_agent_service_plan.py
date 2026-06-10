@@ -3848,7 +3848,7 @@ def test_sensitive_routes_do_not_use_wildcard_cors():
     assert _is_sensitive_http_path("/api/integrations/secrets") is True
     assert _is_sensitive_http_path("/v1/conversations/c1/run-results/r1/browser-screenshots") is True
     assert _is_sensitive_http_path("/api/chat/conversations/c1/run-results/r1/browser-screenshots") is False
-    assert _is_sensitive_http_path("/api/coding/files/read") is False
+    assert _is_sensitive_http_path("/api/coding/files/read") is True
 
 
 def test_http_signal_wait_continues_after_non_interrupt_signal(monkeypatch):
