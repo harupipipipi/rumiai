@@ -1,6 +1,37 @@
 (function () {
   const ELEMENT_ATTR = "data-rumi-element-id";
+  const ROUTE_MESSAGE_TYPE = "rumi:search-home-route-state";
   let sequence = 0;
+
+  window.addEventListener("message", (event) => {
+    if (event.source !== window) {
+      return;
+    }
+    const payload = event.data;
+    if (!payload || payload.type !== ROUTE_MESSAGE_TYPE) {
+      return;
+    }
+    void chrome.runtime.sendMessage({
+      type: "rumi:search-home:set-route-state",
+      payload: payload.payload || {}
+    });
+  });
+
+  window.addEventListener(
+    "keydown",
+    (event) => {
+      const action = searchHomeHotkeyAction(event);
+      if (!action) {
+        return;
+      }
+      event.preventDefault();
+      void chrome.runtime.sendMessage({
+        type: "rumi:search-home:advance-candidate",
+        action
+      });
+    },
+    true
+  );
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (!message || !message.type) {
@@ -375,5 +406,21 @@
 
   function round2(value) {
     return Math.round(value * 100) / 100;
+  }
+
+  function searchHomeHotkeyAction(event) {
+    if (!event.altKey) {
+      return null;
+    }
+    if (event.key === "ArrowRight") {
+      return "next";
+    }
+    if (event.key === "ArrowLeft") {
+      return "prev";
+    }
+    if (event.key === "Enter") {
+      return "fallback";
+    }
+    return null;
   }
 })();
