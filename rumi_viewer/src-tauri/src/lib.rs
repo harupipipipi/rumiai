@@ -267,7 +267,7 @@ fn is_loopback_port_available(port: u16) -> bool {
 }
 
 fn existing_kernel_accepts_bootstrap(port: u16, bootstrap_secret: &str) -> bool {
-    health_check::check_health(port).unwrap_or(false)
+    health_check::check_authenticated_health(port, bootstrap_secret).unwrap_or(false)
         && request_panel_bootstrap_code(port, bootstrap_secret).is_ok()
 }
 
@@ -411,11 +411,15 @@ fn ensure_kernel_ready_for_panel_auth(
     km: &Arc<Mutex<KernelManager>>,
 ) -> AnyResult<()> {
     let port = config.kernel_port;
-    if health_check::check_health(port)? {
+    let kernel_is_running = km
+        .lock()
+        .map_err(|error| anyhow!("kernel manager lock poisoned: {error}"))?
+        .is_running();
+    if kernel_is_running && health_check::check_health(port)? {
         return Ok(());
     }
 
-    if health_check::wait_for_healthy(port, 5).is_ok() {
+    if kernel_is_running && health_check::wait_for_healthy(port, 5).is_ok() {
         return Ok(());
     }
 
@@ -911,10 +915,16 @@ pub fn run() {
             );
 
             std::thread::spawn(move || {
-                // --- Fast path: existing healthy kernel ---
-                update_setup_progress(Some(&handle), &progress_arc, "Checking for existing session...");
-                if let Ok(true) = health_check::check_health(port) {
-                    info!("Existing healthy kernel detected on port {port}, attempting fast-path bootstrap...");
+                // --- Fast path: existing authenticated kernel ---
+                update_setup_progress(
+                    Some(&handle),
+                    &progress_arc,
+                    "Checking for existing session...",
+                );
+                if let Ok(true) =
+                    health_check::check_authenticated_health(port, &panel_bootstrap_secret)
+                {
+                    info!("Existing authenticated kernel detected on port {port}, attempting fast-path bootstrap...");
                     match request_panel_bootstrap_code_with_retry(port, &panel_bootstrap_secret) {
                         Ok(panel_code) => {
                             update_setup_progress(Some(&handle), &progress_arc, "Ready");
