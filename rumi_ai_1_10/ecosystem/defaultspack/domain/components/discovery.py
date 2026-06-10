@@ -95,12 +95,11 @@ def discover_components(
 
                 seen.add(dedupe_key)
                 manifest["source_path"] = str(manifest_path)
-                if source_pack_id:
-                    # Treat the discovery root as the authoritative pack identity.
-                    # Component manifests are data supplied by the pack itself and
-                    # must not be able to spoof first-party trust by declaring a
-                    # different source_pack_id.
-                    manifest["source_pack_id"] = source_pack_id
+                # The pack principal is derived from the discovered domain root,
+                # not from component-controlled manifest data.  Components from
+                # untrusted/user roots therefore cannot impersonate first-party
+                # packs by declaring a trusted source_pack_id in their manifest.
+                manifest["source_pack_id"] = source_pack_id
                 result.components.append(
                     DomainComponent(
                         category=category,
