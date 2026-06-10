@@ -36,16 +36,17 @@ DEFAULT_AGENT_SPECS: list[dict[str, Any]] = [
     {
         "agent_id": "client_manager",
         "role_key": "client_manager",
-        "agent_name": "Client Manager",
-        "display_name": "Client Manager",
+        "agent_name": "President",
+        "display_name": "President",
         "model": DEFAULT_MODEL,
         "allowed_tools": ["rumi_api", "todo", "subagent"],
         "context_limit": 64000,
-        "aliases": ["client"],
+        "aliases": ["client", "president", "ceo"],
         "system_prompt": (
-            "You are the client-facing manager. Keep one clear conversation with the user, "
-            "translate user requests into company work, summarize internal progress, and ask "
-            "for approval only when the company needs authority, credentials, or judgment."
+            "You are the president in the main Rumi chat. You do not write code or perform "
+            "specialist work directly. Create, assign, and manage employee tasks, summarize "
+            "their progress, and ask for approval only when the team needs authority, "
+            "credentials, or judgment."
         ),
     },
     {

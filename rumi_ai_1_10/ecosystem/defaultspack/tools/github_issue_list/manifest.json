@@ -1,0 +1,81 @@
+{
+  "id": "github_issue_list",
+  "description": "List GitHub issues via gh CLI when explicitly executed.",
+  "config": {
+    "tool_id": "github_issue_list",
+    "name": "GitHub Issue List",
+    "summary": "List GitHub issues via gh CLI when explicitly executed.",
+    "tool_category": "connector",
+    "action_type": "network",
+    "write_action": false,
+    "requires_approval": true,
+    "risk": "medium",
+    "tags": [
+      "connector",
+      "agent_os",
+      "artifact_workspace",
+      "issue_sync"
+    ],
+    "ui": {
+      "group_id": "connectors",
+      "group_label": "Connectors",
+      "group_icon": "plug",
+      "item_icon": "plug",
+      "widget_kind": "tool_toggle",
+      "composer_label": "GitHub Issue List",
+      "composer_description": "List GitHub issues with filters.",
+      "composer_icon": "plug"
+    },
+    "schema": {
+      "parameters": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "repo": {
+            "type": "string",
+            "description": "Optional owner/repo override."
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "open",
+              "closed",
+              "all"
+            ]
+          },
+          "status": {
+            "type": "string"
+          },
+          "assignee": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "labels": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "search": {
+            "type": "string"
+          },
+          "limit": {
+            "type": "integer"
+          },
+          "execute": {
+            "type": "boolean"
+          },
+          "timeout": {
+            "type": "integer"
+          }
+        }
+      }
+    },
+    "execution": {
+      "type": "local",
+      "handler": "domain.tool.external_connector_tools:github_issue_list"
+    }
+  }
+}

@@ -348,6 +348,18 @@ def test_high_risk_defaultspack_local_routes_use_sensitive_cors():
     assert not http._is_sensitive_http_path("/api/tools/browser-companion/bridge/poll")
 
 
+def test_human_operator_canvas_routes_are_sensitive_for_cors_without_bearer_auth():
+    from transport import http
+
+    page_path = "/api/human-operator/conversations/c1/sessions/s1"
+    message_path = "/api/human-operator/conversations/c1/sessions/s1/messages"
+
+    assert http._is_sensitive_http_path(page_path)
+    assert http._is_sensitive_http_path(message_path)
+    assert not http._requires_sensitive_http_auth("GET", page_path)
+    assert not http._requires_sensitive_http_auth("POST", message_path)
+
+
 def test_high_risk_defaultspack_local_routes_require_loopback_origin_and_csrf():
     from domain.safety.local_guard import require_local_guard
 

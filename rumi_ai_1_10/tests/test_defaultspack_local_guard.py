@@ -116,6 +116,42 @@ def test_dynamic_tool_post_routes_are_guarded():
     )
 
 
+
+def test_self_improvement_routes_are_guarded_as_sensitive_local_routes():
+    from domain.safety.local_guard import require_local_guard
+    from transport.http import _RequestHandler, _is_sensitive_http_path
+
+    sensitive_paths = [
+        "/api/agent/self-improvement/status",
+        "/api/agent/self-improvement/run",
+        "/api/agent/self-improvement/report",
+    ]
+    for path in sensitive_paths:
+        assert _is_sensitive_http_path(path) is True
+        assert require_local_guard(
+            path,
+            "POST",
+            {"Origin": "https://example.test"},
+            ("127.0.0.1", 54321),
+        ) == (
+            403,
+            "origin not allowed for sensitive local route",
+            "ORIGIN_DENIED",
+        )
+
+    handler = _RequestHandler.__new__(_RequestHandler)
+    handler.headers = {"Origin": "http://localhost:8766"}
+    handler.client_address = ("127.0.0.1", 54321)
+
+    assert handler._sensitive_request_error("POST", "/api/agent/self-improvement/status") == (
+        403,
+        "CSRF header required for sensitive local mutation",
+        "CSRF_REQUIRED",
+    )
+
+    handler.headers = {"Origin": "http://localhost:8766", "X-Rumi-CSRF": "1"}
+    assert handler._sensitive_request_error("POST", "/api/agent/self-improvement/status") is None
+
 def test_non_sensitive_cors_allows_generated_csrf_header():
     from transport.http import _RequestHandler
 

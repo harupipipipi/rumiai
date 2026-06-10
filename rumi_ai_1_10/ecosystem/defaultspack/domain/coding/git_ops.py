@@ -17,7 +17,7 @@ class GitOps:
     def _run(self, args, timeout=30, *, allow_ancestor_git_root=False):
         self.assert_git_root_inside_workspace(allow_ancestor=allow_ancestor_git_root)
         completed = subprocess.run(
-            ["git"] + list(args),
+            ["git"] + self._safe_git_args(args),
             cwd=self._root,
             text=True,
             capture_output=True,
@@ -26,6 +26,18 @@ class GitOps:
         if completed.returncode != 0:
             raise RuntimeError(completed.stderr.strip() or completed.stdout.strip() or "git command failed")
         return completed.stdout
+
+    @staticmethod
+    def _safe_git_args(args):
+        command_args = list(args)
+        if command_args and command_args[0] == "diff":
+            return [
+                "diff",
+                "--no-ext-diff",
+                "--no-textconv",
+                *command_args[1:],
+            ]
+        return command_args
 
     def _run_raw(self, args, timeout=30):
         completed = subprocess.run(

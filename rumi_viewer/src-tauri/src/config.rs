@@ -55,14 +55,17 @@ impl AppConfig {
     /// └── logs/
     /// ```
     pub fn detect_for_tauri(resource_dir: PathBuf, app_data_dir: PathBuf) -> Result<Self> {
-        let dev_workspace_root = find_dev_workspace_root(&resource_dir);
         let mut app_dir = resource_dir.join("app");
-        if !app_dir.exists() {
-            if let Some(workspace_root) = &dev_workspace_root {
-                let candidate = workspace_root.join("rumi_ai_1_10");
-                if candidate.join("app.py").exists() {
-                    app_dir = candidate;
-                }
+        let dev_workspace_root = if app_dir.exists() {
+            None
+        } else {
+            find_dev_workspace_root(&resource_dir)
+        };
+
+        if let Some(workspace_root) = &dev_workspace_root {
+            let candidate = workspace_root.join("rumi_ai_1_10");
+            if candidate.join("app.py").exists() {
+                app_dir = candidate;
             }
         }
         let rumi_home = app_dir.clone();
@@ -606,7 +609,7 @@ mod tests {
     }
 
     #[test]
-    fn detect_for_tauri_marks_staged_dev_bundle_as_workspace() {
+    fn detect_for_tauri_does_not_trust_ancestors_when_bundled_app_exists() {
         use std::fs;
         use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -631,8 +634,8 @@ mod tests {
         let config = AppConfig::detect_for_tauri(resource.clone(), root.join("appdata")).unwrap();
 
         assert_eq!(config.app_dir, resource.join("app"));
-        assert_eq!(config.dev_workspace_root.as_deref(), Some(root.as_path()));
-        assert!(config.is_dev_workspace());
+        assert_eq!(config.dev_workspace_root, None);
+        assert!(!config.is_dev_workspace());
 
         fs::remove_dir_all(&root).ok();
     }
@@ -786,7 +789,7 @@ mod tests {
     }
 
     #[test]
-    fn ensure_pack_shell_path_builds_dev_binary_before_using_staged_bundle() {
+    fn ensure_pack_shell_path_uses_staged_bundle_without_building_ancestor_workspace() {
         use std::fs;
         use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -807,7 +810,6 @@ mod tests {
             .join("app")
             .join("bundled")
             .join(pack_shell_binary_name());
-        let dev_pack_shell = dev_pack_shell_binary_path(&root, "debug");
 
         fs::create_dir_all(&resource).unwrap();
         fs::create_dir_all(app_py.parent().unwrap()).unwrap();
@@ -818,16 +820,16 @@ mod tests {
         fs::write(&staged_pack_shell, b"staged-pack-shell").unwrap();
 
         let config = AppConfig::detect_for_tauri(resource, appdata).unwrap();
-        let built = config
+        let resolved = config
             .ensure_pack_shell_path_with(|manifest_path| {
-                assert_eq!(manifest_path, manifest.as_path());
-                fs::create_dir_all(dev_pack_shell.parent().unwrap()).unwrap();
-                fs::write(&dev_pack_shell, b"dev-pack-shell").unwrap();
-                Ok(())
+                panic!(
+                    "unexpected build of ancestor manifest {}",
+                    manifest_path.display()
+                );
             })
             .unwrap();
 
-        assert_eq!(built, dev_pack_shell);
+        assert_eq!(resolved, staged_pack_shell);
 
         fs::remove_dir_all(&root).ok();
     }

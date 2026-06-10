@@ -521,7 +521,7 @@ function ProfileRuntimePanel({
       <PanelTitle icon={ShieldCheck} title="Profile Runtime" compact />
       <div className="mt-3 space-y-3">
         <KeyValue label="Profile" value={String(profileRuntime.profile_id || 'active')} />
-        <KeyValue label="Prompt" value={String(profileRuntime.system_prompt_id || profileRuntime.default_prompt_id || 'none')} />
+        <KeyValue label="Rule" value={String(profileRuntime.system_prompt_id || profileRuntime.default_prompt_id || 'none')} />
         <div className="flex flex-wrap gap-2">
           <Badge variant={enforce ? 'success' : 'warning'}>
             API strict {enforce ? 'on' : 'off'}
@@ -532,7 +532,7 @@ function ProfileRuntimePanel({
         <div className="grid grid-cols-2 gap-2">
           <MiniCount label="Tools" value={listLength(selected.tools)} />
           <MiniCount label="Webhooks" value={listLength(selected.webhooks)} />
-          <MiniCount label="Prompts" value={listLength(selected.prompts)} />
+          <MiniCount label="Rules" value={listLength(selected.prompts)} />
           <MiniCount label="Frontend" value={listLength(selected.frontend)} />
         </div>
       </div>

@@ -11,6 +11,7 @@ from domain.tool.registry import ToolRegistry  # noqa: E402
 from domain.tool_policy.internal_context import (
     internal_tool_decision,
     sanitize_tool_context,
+    sanitize_untrusted_tool_context,
     seal_tool_context,
 )  # noqa: E402
 
@@ -77,7 +78,7 @@ def run(input_data, context):
     context = context if isinstance(context, dict) else {}
     payload_context = input_data.get("context")
     if isinstance(payload_context, dict):
-        context = {**context, **payload_context}
+        context = {**context, **sanitize_untrusted_tool_context(payload_context)}
     tool_name = input_data.get("tool_name")
     if not tool_name:
         return error("tool_name is required", "MISSING_PARAM")

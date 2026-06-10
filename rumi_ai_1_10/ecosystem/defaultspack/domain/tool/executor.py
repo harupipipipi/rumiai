@@ -992,6 +992,24 @@ class ToolExecutor:
                 "is_error": False,
                 "widget": {"type": "todo", **result},
             }
+        elif tool_name in {"kanban", "tool_kanban"}:
+            from domain.tool.kanban import KanbanController
+
+            result = KanbanController().run(arguments, context if isinstance(context, dict) else {})
+            return {
+                "result": result.get("summary", "kanban updated"),
+                "is_error": False,
+                "widget": {"type": "kanban", **result},
+            }
+        elif tool_name == "tool_kanban_agent_session":
+            from domain.tool.kanban_agent_session import KanbanAgentSessionController
+
+            result = KanbanAgentSessionController().run(arguments, context if isinstance(context, dict) else {})
+            return {
+                "result": result.get("summary", "kanban agent session updated"),
+                "is_error": False,
+                "widget": {"type": "kanban_agent_session", **result},
+            }
         elif tool_name == "subagent":
             from ecosystem.rumi_default_tools_pack.domain.tool.subagent import SubagentController
 
@@ -1629,15 +1647,6 @@ def _context_with_tool_approval_token(context, tool_def, arguments, *extra_looku
         candidates.append(
             (operation, approval.hash_arguments(legacy_scoped_args), pack_id, conversation_id),
         )
-        if str(operation or "").startswith(("browser.", "computer.")):
-            candidates.append(
-                (
-                    operation,
-                    approval.hash_arguments({"action": operation}),
-                    pack_id,
-                    conversation_id,
-                )
-            )
         legacy_args_hash = approval.hash_arguments(_approval_replayable_arguments(arguments))
         legacy_operation = _tool_approval_operation(tool_def)
         candidates.extend(
