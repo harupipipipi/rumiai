@@ -17,6 +17,7 @@ import { conversationMatchesSpotlightFilter, conversationToSearchResult, type Sp
 import { boundedDurationLabel } from "./lib/duration";
 import { fetchDesktopSystemInfo, type DesktopSystemInfo } from "./lib/desktopSystemInfo";
 import { normalizeLocale } from "./lib/i18n";
+import { shortcutLabel, shortcutSpecMatchesEvent } from "./lib/keyboardShortcuts";
 import { PENDING_CHAT_REQUEST_TTL_MS, shouldClearPendingAfterConversationRefresh, type PendingChatRequest } from "./lib/pendingChat";
 import { isHumanOperatorCanvasPreview, isRecord, toolPreviewsFromMessages, upsertStreamActivityEvent } from "./lib/toolPreviews";
 import { extractLatestToolFilterContext } from "./lib/toolStatus";
@@ -2136,6 +2137,10 @@ export default function App() {
   const placeholder = String(settingsValues.general?.composer_placeholder ?? "メッセージを入力...");
   const locale = normalizeLocale(settingsValues.general?.language);
   const keyboardButtonNavigation = parseCommandBoolean(settingsValues.general?.keyboard_button_navigation, false);
+  const spotlightShortcut = String(settingsValues.general?.spotlight_shortcut ?? "Ctrl+K").trim() || "Ctrl+K";
+  const spotlightShortcutEnabled = parseCommandBoolean(settingsValues.general?.spotlight_shortcut_enabled, true);
+  const spotlightShortcutTextInput = parseCommandBoolean(settingsValues.general?.spotlight_shortcut_text_input, true);
+  const spotlightShortcutLabel = spotlightShortcutEnabled ? shortcutLabel(spotlightShortcut) : "Off";
   const disabledToolIds = settingList(settingsValues.tools?.disabled_tool_ids);
   const hiddenToolIds = settingList(settingsValues.tools?.hidden_tool_ids);
   const disabledToolIdSet = useMemo(() => new Set(disabledToolIds), [disabledToolIds]);
@@ -2747,14 +2752,15 @@ export default function App() {
 
   useEffect(() => {
     const handleGlobalKeyDown = (event: KeyboardEvent) => {
-      if (!(event.ctrlKey && event.key.toLowerCase() === "k")) return;
+      if (!spotlightShortcutEnabled) return;
+      if (!shortcutSpecMatchesEvent(spotlightShortcut, event, { allowTextInput: spotlightShortcutTextInput })) return;
       event.preventDefault();
       setIsSpotlightOpen(true);
       setSpotlightSelectedIndex(0);
     };
     document.addEventListener("keydown", handleGlobalKeyDown);
     return () => document.removeEventListener("keydown", handleGlobalKeyDown);
-  }, []);
+  }, [spotlightShortcut, spotlightShortcutEnabled, spotlightShortcutTextInput]);
 
   useEffect(() => {
     if (!isSpotlightOpen) return;
@@ -4881,6 +4887,7 @@ export default function App() {
         selectedIndex={spotlightSelectedIndex}
         loading={spotlightLoading}
         locale={locale}
+        shortcutLabel={spotlightShortcutLabel}
         onQueryChange={setSpotlightQuery}
         onFilterChange={setSpotlightFilter}
         onKeyDown={handleSpotlightKeyDown}

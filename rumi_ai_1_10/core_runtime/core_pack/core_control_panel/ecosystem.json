@@ -64,6 +64,11 @@
     },
     {
       "method": "GET",
+      "path_pattern": "/api/panel/startup/profiles/{id}/tool-permissions",
+      "handler": "_panel_get_startup_profile_tool_permissions"
+    },
+    {
+      "method": "GET",
       "path_pattern": "/api/panel/startup/profiles/{id}/ai-input/traces",
       "handler": "_panel_list_startup_profile_ai_input_traces"
     },
@@ -343,6 +348,12 @@
       "method": "PUT",
       "path_pattern": "/api/panel/startup/profiles/{id}/ai-input",
       "handler": "_panel_update_startup_profile_ai_input",
+      "pass_body": true
+    },
+    {
+      "method": "PUT",
+      "path_pattern": "/api/panel/startup/profiles/{id}/tool-permissions",
+      "handler": "_panel_update_startup_profile_tool_permissions",
       "pass_body": true
     },
     {
