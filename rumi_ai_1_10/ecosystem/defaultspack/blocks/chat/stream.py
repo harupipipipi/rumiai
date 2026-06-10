@@ -18,11 +18,33 @@ def _fallback_send(input_data, context):
     yield from _engine_events(input_data, context)
 
 
+def _has_explicit_stream_tools(input_data):
+    if not isinstance(input_data, dict):
+        return False
+    if "tools" in input_data:
+        return True
+    params = input_data.get("params") if isinstance(input_data.get("params"), dict) else {}
+    tool_policy = params.get("tool_policy") if isinstance(params.get("tool_policy"), dict) else {}
+    if "selected_tools" in tool_policy:
+        return True
+    message = input_data.get("message") if isinstance(input_data.get("message"), dict) else {}
+    metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
+    return "selected_tools" in metadata
+
+
+def _stream_engine_input(input_data):
+    if not isinstance(input_data, dict) or _has_explicit_stream_tools(input_data):
+        return input_data
+    engine_input = dict(input_data)
+    engine_input["tools"] = []
+    return engine_input
+
+
 def _engine_events(input_data, context):
     try:
         engine_context = dict(context or {}) if isinstance(context, dict) else {}
         engine_context.setdefault("run_source", "blocks.chat.stream")
-        for event in ChatRunEngine(client=AIClient()).stream(input_data, engine_context, stream_mode=True):
+        for event in ChatRunEngine(client=AIClient()).stream(_stream_engine_input(input_data), engine_context, stream_mode=True):
             legacy = to_legacy_chat_stream_event(event)
             if legacy is not None:
                 yield legacy

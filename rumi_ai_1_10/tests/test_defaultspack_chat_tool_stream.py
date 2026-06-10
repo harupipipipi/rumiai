@@ -171,6 +171,47 @@ def test_chat_run_engine_provider_tool_stream_support_uses_injected_client(tmp_p
     ChatStore._instance = None
 
 
+def test_stream_without_selected_tools_preserves_no_tool_default(tmp_path, monkeypatch):
+    from domain.chat.store import ChatStore
+    import blocks.chat.stream as stream_module
+
+    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
+    ChatStore._instance = None
+
+    class FakeClient:
+        captured_tools = None
+
+        def supports_stream(self, model):
+            return True
+
+        def stream(self, model, messages, tools=None, params=None):
+            FakeClient.captured_tools = tools
+            yield {"type": "content_delta", "delta": {"type": "text", "text": "hello"}}
+            yield {"type": "stream_end", "finish_reason": "stop", "usage": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}}
+
+        def complete(self, model, messages, tools=None, params=None):
+            raise AssertionError("stream-capable client should not use complete")
+
+    monkeypatch.setattr(stream_module, "AIClient", FakeClient)
+
+    store = ChatStore()
+    conversation = store.create_conversation(model="openai/gpt-5.4")
+    result = stream_module.run(
+        {
+            "conversation_id": conversation["id"],
+            "message": {"role": "user", "content": "hello"},
+        },
+        {},
+    )
+
+    events = list(result["events"])
+
+    assert FakeClient.captured_tools == []
+    assert [event["type"] for event in events][-2:] == ["message", "done"]
+    ChatStore._instance = None
+
+
 def test_stream_with_selected_tools_uses_chat_run_engine_not_legacy_fallback(tmp_path, monkeypatch):
     from domain.chat.store import ChatStore
     from domain.chat.stream_engine import ChatRunEngine
