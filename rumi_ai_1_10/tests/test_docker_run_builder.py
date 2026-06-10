@@ -85,3 +85,10 @@ class TestBasicBehavior:
         cmd = DockerRunBuilder(name="test-container").image("--help").build()
         image_index = cmd.index("--help")
         assert cmd[image_index - 1] == "--"
+
+    def test_option_terminator_before_image(self) -> None:
+        """image の直前で docker run オプション解析を終了する。"""
+        cmd = _default_builder().command(["--help"]).build()
+        image_index = cmd.index("python:3.11-slim")
+        assert cmd[image_index - 1] == "--"
+        assert cmd[image_index + 1] == "--help"
