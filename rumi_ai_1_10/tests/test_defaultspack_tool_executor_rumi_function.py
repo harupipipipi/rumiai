@@ -657,6 +657,28 @@ def test_tool_executor_falls_back_to_local_computer_use_with_yolo_policy(monkeyp
     assert captured["arguments"] == {"action": "context"}
 
 
+def test_tool_file_reader_ignores_caller_supplied_workspace_root(tmp_path):
+    from domain.function_runtime.dispatcher import run_defaultspack_function
+
+    workspace = tmp_path / "workspace"
+    outside = tmp_path / "outside"
+    workspace.mkdir()
+    outside.mkdir()
+    (outside / "secret.txt").write_text("SECRET", encoding="utf-8")
+
+    result = run_defaultspack_function(
+        "tool_file_reader",
+        {"path": "secret.txt", "workspace_root": str(outside)},
+        {"workspace_root": str(workspace)},
+    )
+
+    assert result["status"] == "ok"
+    assert result["data"]["is_error"] is True
+    assert result["data"]["result"] == "File not found: secret.txt"
+    assert result["data"]["widget"]["error"]["code"] == "FILE_NOT_FOUND"
+    assert "SECRET" not in str(result)
+
+
 def test_sandbox_exec_ignores_client_supplied_approval_flags(tmp_path):
     from domain.tool.executor import ToolExecutor
 

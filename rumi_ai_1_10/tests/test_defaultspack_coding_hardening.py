@@ -197,8 +197,8 @@ def test_tool_executor_file_reader_delegates_and_unknown_tools_fail_closed(tmp_p
 
     read = executor._execute_local(
         "file_reader",
-        {"path": "doc.txt", "workspace_root": str(tmp_path)},
-        {},
+        {"path": "doc.txt", "workspace_root": str(tmp_path / "ignored")},
+        {"workspace_root": str(tmp_path)},
     )
     unknown = executor._execute_local("missing_tool", {"x": 1}, {})
 
