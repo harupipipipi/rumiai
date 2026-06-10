@@ -727,12 +727,17 @@ def test_defaultspack_startup_graph_compiles_with_memory_and_prompt_nodes() -> N
     assert set(result.runtime_profile["defaultspack"]["prompts"]) == {"prompt"}
 
 
-def test_defaultspack_startup_graph_override_writes_frontend_launch_target(tmp_path) -> None:
+def test_defaultspack_startup_graph_override_writes_frontend_launch_target(tmp_path, monkeypatch) -> None:
     from core_runtime.startup_capability_bridge import compile_startup_capabilities
 
+    monkeypatch.setenv("RUMI_ALLOW_HOST_EXECUTION", "true")
     repo_root = Path(__file__).resolve().parents[1]
     ecosystem_root = tmp_path / "ecosystem"
     shutil.copytree(repo_root / "ecosystem" / "defaultspack", ecosystem_root / "defaultspack")
+    copied_manifest_path = ecosystem_root / "defaultspack" / "ecosystem.json"
+    copied_manifest = json.loads(copied_manifest_path.read_text(encoding="utf-8"))
+    copied_manifest["host_execution"] = True
+    copied_manifest_path.write_text(json.dumps(copied_manifest), encoding="utf-8")
     frontendpack = ecosystem_root / "frontendpack"
     frontendpack.mkdir(parents=True)
     (frontendpack / "ecosystem.json").write_text(

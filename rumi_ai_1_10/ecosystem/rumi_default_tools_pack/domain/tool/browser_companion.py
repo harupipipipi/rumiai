@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import base64
 import binascii
+import json
 import re
+import secrets
 import time
 from pathlib import Path
 from typing import Any
@@ -14,6 +16,17 @@ from .browser_companion_bridge import (
 
 
 _DATA_URL_RE = re.compile(r"^data:(?P<mime>image/[a-z0-9.+-]+);base64,(?P<data>.+)$", re.IGNORECASE)
+_PAGE_ACTIONS_REQUIRING_APPROVAL = {
+    "page.navigate",
+    "page.snapshot",
+    "page.capture",
+    "page.extract",
+    "page.click",
+    "page.type",
+    "page.press",
+    "page.scroll",
+}
+_READ_ONLY_PAGE_ACTIONS = {"page.snapshot", "page.capture", "page.extract"}
 
 
 class BrowserCompanionController:
@@ -28,8 +41,15 @@ class BrowserCompanionController:
         pack_root = Path(__file__).resolve().parents[2]
         self._artifact_root = artifact_root or pack_root / "user_data" / "artifacts" / "browser_companion"
         self._bridge = bridge_store or BrowserCompanionBridgeStore()
+        self._approval_path = self._bridge.root_dir / "browser_companion_approvals.json"
 
-    def run(self, action: str, payload: dict[str, Any] | None = None, *, context: dict[str, Any] | None = None) -> dict[str, Any]:
+    def run(
+        self,
+        action: str,
+        payload: dict[str, Any] | None = None,
+        *,
+        context: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         payload = dict(payload or {})
         context = context if isinstance(context, dict) else {}
         normalized = self._normalize_action(action)
@@ -48,9 +68,21 @@ class BrowserCompanionController:
         if normalized == "page.navigate":
             return self._run_remote("page.navigate", payload, context, timeout_seconds=20.0)
         if normalized == "page.snapshot":
-            return self._run_remote("page.snapshot", payload, context, timeout_seconds=20.0, attach_capture=bool(payload.get("include_capture")))
+            return self._run_remote(
+                "page.snapshot",
+                payload,
+                context,
+                timeout_seconds=20.0,
+                attach_capture=bool(payload.get("include_capture")),
+            )
         if normalized == "page.capture":
-            return self._run_remote("page.capture", payload, context, timeout_seconds=20.0, attach_capture=True)
+            return self._run_remote(
+                "page.capture",
+                payload,
+                context,
+                timeout_seconds=20.0,
+                attach_capture=True,
+            )
         if normalized == "page.extract":
             return self._run_remote("page.extract", payload, context, timeout_seconds=20.0)
         if normalized == "page.click":
@@ -180,6 +212,22 @@ class BrowserCompanionController:
                 "pairing": self._pairing(context, rotate=False).get("pairing"),
                 "clients": self._bridge.list_clients(include_stale=True),
             }
+        approval_payload = self._approval_payload(remote_action, payload, client)
+        if self._read_only_blocks(remote_action, context):
+            return {
+                "action": remote_action,
+                "is_error": True,
+                "reason": "Browser companion is in read-only safety mode for this request.",
+                "client": client,
+                "requires_approval": False,
+            }
+        if (
+            self._requires_approval(remote_action)
+            and not self._context_allows_remote_action(context)
+            and not self._consume_approval(payload, remote_action, approval_payload)
+        ):
+            return self._approval_required(remote_action, approval_payload, client)
+
         self._bridge.set_active_client(str(client.get("client_id") or ""))
         remote_payload = self._remote_payload(payload)
         if remote_action.startswith("page.") and remote_payload.get("tab_id") is None:
@@ -239,6 +287,151 @@ class BrowserCompanionController:
         if "elements" in result:
             output["elements"] = result.get("elements")
         return output
+
+    @staticmethod
+    def _requires_approval(remote_action: str) -> bool:
+        return remote_action in _PAGE_ACTIONS_REQUIRING_APPROVAL
+
+    @staticmethod
+    def _truthy(value: Any) -> bool:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            return value != 0
+        if isinstance(value, str):
+            return value.strip().lower() in {"1", "true", "yes", "y", "on", "allow", "allowed"}
+        return False
+
+    @classmethod
+    def _context_allows_remote_action(cls, context: dict[str, Any]) -> bool:
+        if not isinstance(context, dict):
+            return False
+        policy = context.get("profile_policy")
+        if not isinstance(policy, dict):
+            policy = context.get("tool_policy")
+        if not isinstance(policy, dict):
+            runtime_profile = context.get("runtime_profile")
+            policy = runtime_profile.get("policy") if isinstance(runtime_profile, dict) else {}
+        if isinstance(policy, dict) and cls._truthy(policy.get("yolo_mode")):
+            return True
+        if cls._truthy(context.get("yolo_mode")):
+            return True
+        return bool(context.get("_tool_server_approval_token_valid") is True)
+
+    @classmethod
+    def _read_only_blocks(cls, remote_action: str, context: dict[str, Any]) -> bool:
+        if remote_action not in _PAGE_ACTIONS_REQUIRING_APPROVAL or remote_action in _READ_ONLY_PAGE_ACTIONS:
+            return False
+        if not isinstance(context, dict):
+            return False
+        candidates = [context.get("browser_companion_safety"), context.get("safety")]
+        policy = context.get("profile_policy")
+        if isinstance(policy, dict):
+            candidates.extend([policy.get("browser_companion_safety"), policy.get("safety")])
+        settings = context.get("tool_settings")
+        if isinstance(settings, dict):
+            companion = settings.get("browser_companion")
+            if isinstance(companion, dict):
+                candidates.append(companion.get("safety"))
+                values = companion.get("values")
+                if isinstance(values, dict):
+                    candidates.append(values.get("safety"))
+        return any(str(value or "").strip().lower() == "read_only" for value in candidates)
+
+    @staticmethod
+    def _safe_payload(payload: dict[str, Any]) -> dict[str, Any]:
+        return {
+            key: value
+            for key, value in dict(payload or {}).items()
+            if key not in {"approved", "approval_token"}
+        }
+
+    def _approval_payload(
+        self,
+        remote_action: str,
+        payload: dict[str, Any],
+        client: dict[str, Any],
+    ) -> dict[str, Any]:
+        approval_payload = self._safe_payload(payload)
+        approval_payload["action"] = remote_action
+        client_id = str(client.get("client_id") or "")
+        if client_id:
+            approval_payload["client_id"] = client_id
+        if remote_action.startswith("page.") and approval_payload.get("tab_id") is None:
+            active_tab_id = client.get("active_tab_id")
+            if active_tab_id is not None:
+                approval_payload["tab_id"] = active_tab_id
+        return approval_payload
+
+    def _approval_required(
+        self,
+        remote_action: str,
+        approval_payload: dict[str, Any],
+        client: dict[str, Any],
+    ) -> dict[str, Any]:
+        token = self._issue_approval(remote_action, approval_payload)
+        return {
+            "action": remote_action,
+            "client": client,
+            "client_id": client.get("client_id"),
+            "is_error": False,
+            "requires_approval": True,
+            "approval_required": True,
+            "approval_token": token,
+            "approval_expires_in_seconds": 300,
+            "approval_hint": (
+                "Repeat the same browser companion action with payload.approval_token "
+                "after explicit user confirmation."
+            ),
+            "payload": approval_payload,
+        }
+
+    def _issue_approval(self, remote_action: str, approval_payload: dict[str, Any]) -> str:
+        approvals = self._read_approvals()
+        token = secrets.token_urlsafe(24)
+        approvals[token] = {
+            "action": remote_action,
+            "payload": approval_payload,
+            "expires_at": time.time() + 300,
+        }
+        self._write_approvals(approvals)
+        return token
+
+    def _consume_approval(
+        self,
+        payload: dict[str, Any],
+        remote_action: str,
+        expected_payload: dict[str, Any],
+    ) -> bool:
+        token = str((payload or {}).get("approval_token") or "").strip()
+        if not token:
+            return False
+        approvals = self._read_approvals()
+        record = approvals.pop(token, None)
+        self._write_approvals(approvals)
+        if not isinstance(record, dict):
+            return False
+        if record.get("action") != remote_action:
+            return False
+        if record.get("payload") != expected_payload:
+            return False
+        if float(record.get("expires_at") or 0) < time.time():
+            return False
+        return True
+
+    def _read_approvals(self) -> dict[str, Any]:
+        try:
+            value = json.loads(self._approval_path.read_text(encoding="utf-8"))
+        except Exception:
+            return {}
+        return value if isinstance(value, dict) else {}
+
+    def _write_approvals(self, approvals: dict[str, Any]) -> None:
+        self._approval_path.parent.mkdir(parents=True, exist_ok=True)
+        self._approval_path.write_text(
+            json.dumps(approvals, ensure_ascii=False, indent=2, sort_keys=True),
+            encoding="utf-8",
+        )
 
     @staticmethod
     def _action_semantics(remote_action: str, result: dict[str, Any]) -> dict[str, bool]:
