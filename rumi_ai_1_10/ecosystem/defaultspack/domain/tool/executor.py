@@ -1644,15 +1644,6 @@ def _context_with_tool_approval_token(context, tool_def, arguments, *extra_looku
         candidates.append(
             (operation, approval.hash_arguments(legacy_scoped_args), pack_id, conversation_id),
         )
-        if str(operation or "").startswith(("browser.", "computer.")):
-            candidates.append(
-                (
-                    operation,
-                    approval.hash_arguments({"action": operation}),
-                    pack_id,
-                    conversation_id,
-                )
-            )
         legacy_args_hash = approval.hash_arguments(_approval_replayable_arguments(arguments))
         legacy_operation = _tool_approval_operation(tool_def)
         candidates.extend(

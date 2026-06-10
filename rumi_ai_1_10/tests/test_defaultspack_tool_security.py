@@ -117,6 +117,65 @@ def test_followup_context_token_beats_model_supplied_fake_token(monkeypatch):
     assert seen["conversation_id"] == "conv-token-precedence"
 
 
+def test_computer_use_action_only_token_cannot_approve_changed_payload(monkeypatch):
+    from domain.tool import executor as executor_module
+
+    def fake_hash(args):
+        return json.dumps(args, sort_keys=True, separators=(",", ":"))
+
+    action_only_hash = fake_hash({"action": "computer.click"})
+    verified_hashes = []
+
+    class FakeApproval:
+        @staticmethod
+        def hash_arguments(args):
+            return fake_hash(args)
+
+        @staticmethod
+        def verify_execution_token(token, operation, args_hash, **kwargs):
+            verified_hashes.append(args_hash)
+            return SimpleNamespace(
+                valid=token == "tok_action_only" and operation == "computer.click" and args_hash == action_only_hash,
+                code="APPROVAL_ARGUMENTS_CHANGED",
+                message="approval token does not match request arguments",
+            )
+
+        @staticmethod
+        def create_approval_request(operation, risk_level, args, *, details=None, expires_in=300):
+            return {
+                "request_id": "apr_exact_payload",
+                "args_hash": fake_hash(args),
+                "expires_at": 123,
+                "display_summary": operation,
+            }
+
+    monkeypatch.setattr(executor_module, "_approval_module", lambda: FakeApproval)
+
+    context, error = _context_with_tool_approval_token(
+        {
+            "pack_id": "defaultspack",
+            "conversation_id": "conv-action-only-token",
+            "tool_approval_tokens": {"computer.click": "tok_action_only"},
+        },
+        {"tool_id": "computer_use", "name": "computer_use", "requires_approval": True, "risk": "high"},
+        {
+            "action": "click",
+            "x": 321,
+            "y": 654,
+            "physical": True,
+            "app": "Calculator",
+            "title": "Sensitive Window",
+        },
+    )
+
+    assert action_only_hash not in verified_hashes
+    assert "_tool_server_approved" not in context
+    assert error["is_error"] is False
+    assert error["widget"]["type"] == "approval_request"
+    assert error["widget"]["approval_request_id"] == "apr_exact_payload"
+    assert error["widget"]["action"] == "computer.click"
+
+
 def test_stale_followup_token_requests_fresh_approval(monkeypatch):
     from domain.tool import executor as executor_module
 
