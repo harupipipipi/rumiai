@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 
 const PACK_SHELL_PATH_ENV: &str = "RUMI_PACK_SHELL_PATH";
+const UV_PATH_ENV: &str = "RUMI_UV_PATH";
 
 /// Central configuration resolved from Tauri path APIs.
 #[derive(Debug, Clone)]
@@ -20,7 +21,7 @@ pub struct AppConfig {
     pub rumi_home: PathBuf,
     /// `{app_data_dir}/python` — PBS standalone Python.
     pub python_dir: PathBuf,
-    /// Path to the `uv` binary (downloaded location).
+    /// Legacy app-data `uv` path retained for diagnostics and migration state.
     pub uv_path: PathBuf,
     /// `{app_data_dir}/venv` — Python virtual-environment.
     pub venv_dir: PathBuf,
@@ -159,23 +160,36 @@ impl AppConfig {
         })
     }
 
-    /// Resolve the best available `uv` binary path.
+    /// Resolve a trusted `uv` binary path.
     ///
-    /// Prefers the bundled copy shipped alongside the application.  Falls back
-    /// to the downloaded copy at `self.uv_path`.
-    pub fn resolved_uv_path(&self) -> PathBuf {
+    /// Runtime downloads are intentionally not part of this trust boundary. The
+    /// viewer may use a bundled `uv`, a development-checkout bundle, an explicit
+    /// `RUMI_UV_PATH`, or a user-managed `uv` on PATH.
+    pub fn trusted_uv_path(&self) -> Option<PathBuf> {
         let bundled = self.bundled_uv_path();
         if bundled.exists() {
-            return bundled;
+            return Some(bundled);
         }
 
         if let Some(dev_bundled) = self.dev_bundled_uv_path() {
             if dev_bundled.exists() {
-                return dev_bundled;
+                return Some(dev_bundled);
             }
         }
 
-        self.uv_path.clone()
+        if let Some(configured) = configured_uv_path() {
+            if configured.is_file() {
+                return Some(configured);
+            }
+        }
+
+        which::which(uv_binary_name()).ok()
+    }
+
+    /// Resolve the best available `uv` binary path for diagnostics.
+    pub fn resolved_uv_path(&self) -> PathBuf {
+        self.trusted_uv_path()
+            .unwrap_or_else(|| self.uv_path.clone())
     }
 
     pub fn is_dev_workspace(&self) -> bool {
@@ -317,6 +331,12 @@ fn find_dev_workspace_root(resource_dir: &Path) -> Option<PathBuf> {
         }
     }
     None
+}
+
+fn configured_uv_path() -> Option<PathBuf> {
+    std::env::var_os(UV_PATH_ENV)
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
 }
 
 fn configured_pack_shell_path() -> Option<PathBuf> {
@@ -554,7 +574,7 @@ mod tests {
     }
 
     #[test]
-    fn resolved_uv_path_prefers_bundled_copy_in_app_dir() {
+    fn trusted_uv_path_prefers_bundled_copy_in_app_dir() {
         use std::fs;
         use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -572,14 +592,17 @@ mod tests {
         fs::write(&bundled_uv, b"uv").unwrap();
 
         let config = AppConfig::detect_for_tauri(resource, appdata.clone()).unwrap();
-        assert_eq!(config.resolved_uv_path(), bundled_uv);
+        assert_eq!(
+            config.trusted_uv_path().as_deref(),
+            Some(bundled_uv.as_path())
+        );
         assert_eq!(config.bundled_uv_path(), bundled_uv);
 
         fs::remove_dir_all(&root).ok();
     }
 
     #[test]
-    fn resolved_uv_path_prefers_dev_workspace_bundle_over_downloaded_uv() {
+    fn trusted_uv_path_prefers_dev_workspace_bundle_over_appdata_uv() {
         use std::fs;
         use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -611,20 +634,52 @@ mod tests {
             config.dev_bundled_uv_path().as_deref(),
             Some(dev_bundled_uv.as_path())
         );
-        assert_eq!(config.resolved_uv_path(), dev_bundled_uv);
+        assert_eq!(
+            config.trusted_uv_path().as_deref(),
+            Some(dev_bundled_uv.as_path())
+        );
         assert!(config.is_dev_workspace());
 
         fs::remove_dir_all(&root).ok();
     }
 
     #[test]
-    fn resolved_uv_path_falls_back_to_downloaded_uv_when_no_bundle_exists() {
-        let resource = PathBuf::from("/tmp/res");
-        let appdata = PathBuf::from("/tmp/data");
+    fn trusted_uv_path_ignores_appdata_uv_when_no_trusted_source_exists() {
+        use std::fs;
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("rumi_viewer_uv_appdata_ignored_{unique}"));
+        let resource = root.join("resources");
+        let appdata = root.join("appdata");
+
+        fs::create_dir_all(&appdata).unwrap();
+        fs::write(appdata.join(uv_binary_name()), b"uv").unwrap();
+
+        let old_path = std::env::var_os("PATH");
+        let old_uv_path = std::env::var_os(UV_PATH_ENV);
+        std::env::set_var("PATH", "");
+        std::env::remove_var(UV_PATH_ENV);
         let config = AppConfig::detect_for_tauri(resource, appdata.clone()).unwrap();
 
+        assert_eq!(config.trusted_uv_path(), None);
         assert_eq!(config.resolved_uv_path(), config.uv_path);
         assert_eq!(config.uv_path, appdata.join(uv_binary_name()));
+
+        if let Some(path) = old_path {
+            std::env::set_var("PATH", path);
+        } else {
+            std::env::remove_var("PATH");
+        }
+        if let Some(path) = old_uv_path {
+            std::env::set_var(UV_PATH_ENV, path);
+        } else {
+            std::env::remove_var(UV_PATH_ENV);
+        }
+        fs::remove_dir_all(root).ok();
     }
 
     #[test]
