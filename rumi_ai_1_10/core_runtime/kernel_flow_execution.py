@@ -94,6 +94,16 @@ class KernelFlowExecutionMixin:
     __init__ を持たない。self の属性は KernelCore.__init__ で初期化済みの
     前提でアクセスする。
     """
+
+    _PACK_FLOW_SOURCE_TYPES = frozenset({"pack", "local_pack"})
+    _PACK_FLOW_ALLOWED_KERNEL_HANDLERS = frozenset({
+        "kernel:noop",
+        "kernel:ctx.set",
+        "kernel:ctx.get",
+        "kernel:ctx.copy",
+        "kernel:python_file_call",
+        "kernel:graph.compile",
+    })
     _startup_ctx: Optional[Dict[str, Any]]
     _startup_steps: Optional[List[Dict[str, Any]]]
     _startup_next_index: int
@@ -114,6 +124,45 @@ class KernelFlowExecutionMixin:
         if isinstance(step, dict):
             return step.get("depends_on")
         return getattr(step, "depends_on", None)
+
+    def _is_pack_flow_context(self, ctx: Dict[str, Any]) -> bool:
+        """Return True when the current async flow originated from an approved pack."""
+        return str(ctx.get("_flow_source_type") or "").strip() in self._PACK_FLOW_SOURCE_TYPES
+
+    def _is_kernel_handler_allowed_for_pack_flow(self, handler_key: str) -> bool:
+        """Allow only inert/sandboxed kernel handlers needed by pack flow syntax."""
+        return handler_key in self._PACK_FLOW_ALLOWED_KERNEL_HANDLERS
+
+    def _should_block_kernel_handler_for_flow(self, handler_key: str, ctx: Dict[str, Any]) -> bool:
+        """Prevent pack-provided flows from invoking privileged internal kernel handlers."""
+        return (
+            isinstance(handler_key, str)
+            and handler_key.startswith("kernel:")
+            and self._is_pack_flow_context(ctx)
+            and not self._is_kernel_handler_allowed_for_pack_flow(handler_key)
+        )
+
+    def _record_blocked_kernel_handler_step(
+        self,
+        step_id: Any,
+        handler_key: str,
+        ctx: Dict[str, Any],
+        *,
+        phase: str = "flow",
+    ) -> None:
+        """Record an authorization skip for a blocked pack-flow kernel handler."""
+        self.diagnostics.record_step(
+            phase=phase,
+            step_id=f"{step_id or 'unknown'}.kernel_handler.blocked",
+            handler=handler_key,
+            status="skipped",
+            meta={
+                "reason": "pack_flow_kernel_handler_not_allowed",
+                "flow_id": ctx.get("_flow_id"),
+                "source_type": ctx.get("_flow_source_type"),
+                "source_pack_id": ctx.get("_flow_source_pack_id"),
+            },
+        )
 
     def _check_depends_on(
         self, step: Any, executed_ids: Set[str]
@@ -430,6 +479,10 @@ class KernelFlowExecutionMixin:
                     meta={"_is_original": True, "_flow_id": flow_id},
                 )
 
+            ctx["_flow_source_type"] = flow_def.get("_source_type")
+            ctx["_flow_source_file"] = flow_def.get("_source_file")
+            ctx["_flow_source_pack_id"] = flow_def.get("_source_pack_id")
+
             steps = flow_def.get("steps", [])
             ctx["_total_steps"] = len(steps)
             self.diagnostics.record_step(phase="flow", step_id=f"flow.{flow_id}.start", handler="kernel:execute_flow",
@@ -570,6 +623,10 @@ class KernelFlowExecutionMixin:
             return ctx, None
         resolved_args = self._resolve_value(step.get("args", {}), ctx)
 
+        if self._should_block_kernel_handler_for_flow(handler_key, ctx):
+            self._record_blocked_kernel_handler_step(step.get("id"), handler_key, ctx)
+            return ctx, None
+
         # handler 解決統一: kernel:* は _resolve_handler を優先し、
         # pipeline 実行と同じ経路で解決する（async/pipeline 非対称の解消）
         handler = self._resolve_handler(handler_key, resolved_args)
@@ -708,6 +765,9 @@ class KernelFlowExecutionMixin:
                 steps = first_pipeline if isinstance(first_pipeline, list) else []
 
             child_ctx["_flow_id"] = flow_name
+            child_ctx["_flow_source_type"] = flow_def.get("_source_type")
+            child_ctx["_flow_source_file"] = flow_def.get("_source_file")
+            child_ctx["_flow_source_pack_id"] = flow_def.get("_source_pack_id")
             child_ctx = await self._execute_steps_async(steps, child_ctx)
 
             result = child_ctx.get("output") or child_ctx.get("result") or child_ctx
@@ -997,6 +1057,9 @@ class KernelFlowExecutionMixin:
 
         step_id_str = str(step_id or "unknown.step")
         handler_str = str(handler or "unknown.handler")
+        if self._should_block_kernel_handler_for_flow(handler_str, ctx):
+            self._record_blocked_kernel_handler_step(step_id_str, handler_str, ctx, phase=phase)
+            return False
         fn = self._resolve_handler(handler_str, args)
         if fn is None:
             missing_policy = str(ctx.get("_flow_defaults", {}).get("on_missing_handler", "skip")).lower()

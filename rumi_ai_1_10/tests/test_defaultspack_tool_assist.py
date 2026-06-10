@@ -401,3 +401,31 @@ def test_coding_tools_get_larger_default_tool_limit():
     assert _default_tool_limit_for_connected_tools(4, {"coding_file_write"}) == 12
     assert _default_tool_limit_for_connected_tools(4, {"calculator"}) == 4
     assert _default_tool_limit_for_connected_tools(2, {"coding_terminal_exec"}) == 2
+
+
+def test_stream_defaults_omitted_tools_to_empty_selection():
+    from blocks.chat import stream
+
+    original = {
+        "conversation_id": "conv-1",
+        "message": {"role": "user", "content": "hello"},
+        "params": {"tool_policy": {}},
+    }
+
+    updated = stream._input_with_default_empty_tools(original)
+
+    assert updated is not original
+    assert updated["tools"] == []
+    assert "tools" not in original
+
+
+def test_stream_preserves_explicit_selected_tools_without_tools_field():
+    from blocks.chat import stream
+
+    original = {
+        "conversation_id": "conv-1",
+        "message": {"role": "user", "content": "hello"},
+        "params": {"tool_policy": {"selected_tools": ["web_search"]}},
+    }
+
+    assert stream._input_with_default_empty_tools(original) is original

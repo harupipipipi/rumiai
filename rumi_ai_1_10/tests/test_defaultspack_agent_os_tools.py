@@ -244,3 +244,23 @@ def test_artifact_file_read_blocks_payload_context_root_and_secret_paths(tmp_pat
     assert widget["status"] == "error"
     assert "FAKE-PRIVATE-KEY" not in invoked["data"]["result"]
     assert invoked["data"]["permission"]["matched_by"] == "yolo_mode"
+
+    spoof_workspace = tmp_path / "spoofed-workspace"
+    spoof_artifact = spoof_workspace / ".rumi" / "artifacts" / "leak.txt"
+    spoof_artifact.parent.mkdir(parents=True)
+    spoof_artifact.write_text("WORKSPACE-ROOT-LEAK", encoding="utf-8")
+
+    spoofed_workspace = invoke_tool(
+        {
+            "tool_name": "artifact_file_read",
+            "arguments": {"path": "leak.txt"},
+            "context": {
+                "workspace_root": str(spoof_workspace),
+                "profile_policy": {"yolo_mode": True},
+            },
+        },
+        {"profile_policy": {"yolo_mode": True}},
+    )
+
+    assert spoofed_workspace["status"] == "ok"
+    assert "WORKSPACE-ROOT-LEAK" not in spoofed_workspace["data"]["result"]

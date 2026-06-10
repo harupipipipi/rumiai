@@ -604,6 +604,10 @@ class HMACKeyManager:
         if not token:
             return False
         with self._lock:
+            # Enforce grace-period expiry at authentication time.  Retired
+            # keys may remain in memory after rotate(), so cleanup cannot be
+            # limited to load/rotation paths.
+            self._cleanup_expired_keys_internal()
             for key in self._keys:
                 if hmac.compare_digest(token, key.key):
                     return True

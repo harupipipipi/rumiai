@@ -13,7 +13,7 @@ import threading
 
 import pytest
 
-from core_runtime.di_container import get_container
+from core_runtime.di_container import get_container, reset_container
 
 pytestmark = pytest.mark.contract
 
@@ -86,6 +86,21 @@ class TestNetworkGrantManagerDI:
         func_instance = get_network_grant_manager()
         di_instance = get_container().get("network_grant_manager")
         assert func_instance is di_instance
+
+
+class TestEgressProxyManagerDI:
+
+    def test_default_egress_proxy_manager_has_network_grant_manager(self) -> None:
+        """DI-created egress proxies must enforce NetworkGrantManager grants."""
+        from core_runtime.network_grant_manager import NetworkGrantManager
+
+        reset_container()
+        container = get_container()
+        grant_manager = container.get("network_grant_manager")
+        egress_manager = container.get("egress_proxy_manager")
+
+        assert isinstance(grant_manager, NetworkGrantManager)
+        assert egress_manager._network_grant_manager is grant_manager
 
 
 # ===================================================================

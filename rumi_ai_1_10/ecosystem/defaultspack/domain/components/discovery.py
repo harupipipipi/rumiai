@@ -24,18 +24,19 @@ class ComponentDiscoveryResult:
 
 def _source_pack_id_for_domain_root(domain_root: Path) -> str:
     pack_root = domain_root.parent
+    if domain_root.name != "domain":
+        return ""
+    fallback_pack_id = pack_root.name
     ecosystem = pack_root / "ecosystem.json"
     if ecosystem.is_file():
         try:
             raw = json.loads(ecosystem.read_text(encoding="utf-8"))
-            pack_id = str(raw.get("pack_id") or raw.get("id") or "").strip()
-            if pack_id:
-                return pack_id
+            declared_pack_id = str(raw.get("pack_id") or raw.get("id") or "").strip()
+            if declared_pack_id == fallback_pack_id:
+                return declared_pack_id
         except Exception:
             pass
-    if domain_root.name == "domain":
-        return pack_root.name
-    return ""
+    return fallback_pack_id
 
 
 def discover_components(
@@ -95,14 +96,18 @@ def discover_components(
                 seen.add(dedupe_key)
                 manifest["source_path"] = str(manifest_path)
                 if source_pack_id:
-                    manifest.setdefault("source_pack_id", source_pack_id)
+                    # Treat the discovery root as the authoritative pack identity.
+                    # Component manifests are data supplied by the pack itself and
+                    # must not be able to spoof first-party trust by declaring a
+                    # different source_pack_id.
+                    manifest["source_pack_id"] = source_pack_id
                 result.components.append(
                     DomainComponent(
                         category=category,
                         component_id=component_id,
                         manifest=manifest,
                         manifest_path=manifest_path,
-                        source_pack_id=str(manifest.get("source_pack_id") or source_pack_id),
+                        source_pack_id=source_pack_id,
                     )
                 )
 

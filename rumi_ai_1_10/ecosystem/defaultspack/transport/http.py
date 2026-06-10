@@ -948,6 +948,8 @@ _SENSITIVE_INTEGRATION_PATHS = {
     "/api/integrations/secrets",
     "/api/external/tokens",
     "/api/external/sources",
+    "/api/recording/devices",
+    "/api/recording/capture",
 }
 _SENSITIVE_INTEGRATION_METHOD_PATHS = {
     "/api/external/templates": {"POST", "PUT", "DELETE"},
@@ -958,6 +960,9 @@ _SENSITIVE_INTEGRATION_PREFIXES = (
 )
 _SENSITIVE_CHAT_PATH_RE = re.compile(
     r"^/v1/conversations/[^/]+/run-results/[^/]+/browser-screenshots$"
+)
+_SENSITIVE_HUMAN_OPERATOR_PATH_RE = re.compile(
+    r"^/api/human-operator/conversations/[^/]+/sessions/[^/]+(?:/messages)?$"
 )
 
 _LOCAL_ORIGIN_HOSTS = {"127.0.0.1", "localhost", "::1"}
@@ -991,6 +996,7 @@ def _is_sensitive_http_path(path):
         or path in _SENSITIVE_INTEGRATION_METHOD_PATHS
         or _matches_sensitive_prefix(path)
         or _SENSITIVE_CHAT_PATH_RE.match(path) is not None
+        or _SENSITIVE_HUMAN_OPERATOR_PATH_RE.match(path) is not None
     )
 
 

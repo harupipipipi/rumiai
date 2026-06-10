@@ -1808,28 +1808,55 @@ class KernelRuntimeHandlersMixin:
     # desktop handlers (Phase V-4)
     # ------------------------------------------------------------------
 
-    def _h_desktop_launch(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
-        """kernel:desktop.launch — Pack のデスクトップアプリを起動する。"""
+    def _desktop_principal_id(self, ctx: Dict[str, Any]) -> str:
+        """Return the authenticated principal for desktop actions, failing closed."""
+        principal_id = ctx.get("_principal_id") or ctx.get("principal_id")
+        return principal_id if isinstance(principal_id, str) else ""
+
+    def _h_desktop_action(self, action: str, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
+        """Run desktop actions only through the grant-aware capability path."""
         pack_id = args.get("pack_id", "")
         if not pack_id:
             return {"success": False, "error": "Missing pack_id"}
+
+        principal_id = self._desktop_principal_id(ctx)
+        if not principal_id:
+            return {"success": False, "error": "Missing principal_id"}
+
         try:
-            from .desktop_app_manager import DesktopAppManager
-            manager = DesktopAppManager()
-            result = manager.launch_app(pack_id)
-            return {"success": result.get("success", False), "data": result}
+            from .capability_grant_manager import get_capability_grant_manager
+            from .di_container import get_container
+
+            grant_result = get_capability_grant_manager().check(
+                principal_id,
+                "desktop_app.execute",
+            )
+            if not grant_result.allowed:
+                return {"success": False, "error": grant_result.reason}
+
+            handler = get_container().get_or_none("desktop_capability_handler")
+            if handler is None:
+                return {"success": False, "error": "Desktop capability handler not available"}
+
+            capability_args = dict(args)
+            capability_args["action"] = action
+            result = handler.handle_execute(
+                principal_id=principal_id,
+                args=capability_args,
+                grant_config=grant_result.config or {},
+            )
+            if "error" in result:
+                return {"success": False, "error": result["error"]}
+
+            app_result = result.get("app", {})
+            return {"success": app_result.get("success", False), "data": app_result}
         except Exception as e:
             return {"success": False, "error": str(e)}
 
+    def _h_desktop_launch(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
+        """kernel:desktop.launch — Pack のデスクトップアプリを起動する。"""
+        return self._h_desktop_action("launch", args, ctx)
+
     def _h_desktop_stop(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
         """kernel:desktop.stop — Pack のデスクトップアプリを停止する。"""
-        pack_id = args.get("pack_id", "")
-        if not pack_id:
-            return {"success": False, "error": "Missing pack_id"}
-        try:
-            from .desktop_app_manager import DesktopAppManager
-            manager = DesktopAppManager()
-            result = manager.stop_app(pack_id)
-            return {"success": result.get("success", False), "data": result}
-        except Exception as e:
-            return {"success": False, "error": str(e)}
+        return self._h_desktop_action("stop", args, ctx)

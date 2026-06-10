@@ -157,6 +157,7 @@ class DockerRunBuilder:
           [--group-add ...]
           [-w ...]
           [--label ...]
+          --
           {image}
           {command...}
 
@@ -216,6 +217,9 @@ class DockerRunBuilder:
             cmd.extend(["--label", f"{key}={value}"])
 
         # image + command
+        # Terminate docker run option parsing before the image reference so an
+        # option-like value can never relax the security baseline.
+        cmd.append("--")
         cmd.append(self._image_val)
         cmd.extend(self._command_val)
 

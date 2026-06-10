@@ -11,6 +11,7 @@ from domain.tool.registry import ToolRegistry  # noqa: E402
 from domain.tool_policy.internal_context import (
     internal_tool_decision,
     sanitize_tool_context,
+    sanitize_untrusted_tool_context,
     seal_tool_context,
 )  # noqa: E402
 
@@ -72,33 +73,12 @@ def _blocked_by_profile_error(tool_name, context):
     }
 
 
-CLIENT_CONTEXT_DENY_KEYS = {
-    "artifact_root",
-    "workspace_root",
-    "workspaceRoot",
-    "rootPath",
-    "profile_policy",
-    "active_startup_profile_id",
-    "profile_id",
-    "effective_tool_allowlist",
-}
-
-
-def _sanitize_payload_context(payload_context):
-    if not isinstance(payload_context, dict):
-        return {}
-    clean = sanitize_tool_context(payload_context)
-    for key in CLIENT_CONTEXT_DENY_KEYS:
-        clean.pop(key, None)
-    return clean
-
-
 def run(input_data, context):
     """defaults.tool.invoke — ツールを実行する"""
     context = context if isinstance(context, dict) else {}
-    payload_context = _sanitize_payload_context(input_data.get("context"))
-    if payload_context:
-        context = {**context, **payload_context}
+    payload_context = input_data.get("context")
+    if isinstance(payload_context, dict):
+        context = {**context, **sanitize_untrusted_tool_context(payload_context)}
     tool_name = input_data.get("tool_name")
     if not tool_name:
         return error("tool_name is required", "MISSING_PARAM")

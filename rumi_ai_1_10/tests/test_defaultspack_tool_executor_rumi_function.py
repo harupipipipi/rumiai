@@ -657,6 +657,28 @@ def test_tool_executor_falls_back_to_local_computer_use_with_yolo_policy(monkeyp
     assert captured["arguments"] == {"action": "context"}
 
 
+def test_tool_file_reader_ignores_caller_supplied_workspace_root(tmp_path):
+    from domain.function_runtime.dispatcher import run_defaultspack_function
+
+    workspace = tmp_path / "workspace"
+    outside = tmp_path / "outside"
+    workspace.mkdir()
+    outside.mkdir()
+    (outside / "secret.txt").write_text("SECRET", encoding="utf-8")
+
+    result = run_defaultspack_function(
+        "tool_file_reader",
+        {"path": "secret.txt", "workspace_root": str(outside)},
+        {"workspace_root": str(workspace)},
+    )
+
+    assert result["status"] == "ok"
+    assert result["data"]["is_error"] is True
+    assert result["data"]["result"] == "File not found: secret.txt"
+    assert result["data"]["widget"]["error"]["code"] == "FILE_NOT_FOUND"
+    assert "SECRET" not in str(result)
+
+
 def test_sandbox_exec_ignores_client_supplied_approval_flags(tmp_path):
     from domain.tool.executor import ToolExecutor
 
@@ -671,9 +693,21 @@ def test_sandbox_exec_ignores_client_supplied_approval_flags(tmp_path):
     assert result["widget"]["approval_required"] is True
 
 
-def test_sandbox_exec_runs_only_with_internal_tool_decision(tmp_path):
+def test_sandbox_exec_runs_only_with_internal_tool_decision(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
     from domain.tool.executor import ToolExecutor
     from domain.tool_policy.internal_context import seal_tool_context
+    from domain.tool import sandbox_tools
+
+    captured = {}
+
+    def fake_run(args, **kwargs):
+        captured["args"] = args
+        captured["kwargs"] = kwargs
+        return SimpleNamespace(returncode=0, stdout="/workspace\n", stderr="")
+
+    monkeypatch.setattr(sandbox_tools.subprocess, "run", fake_run)
 
     context = seal_tool_context(
         {"workspace_root": str(tmp_path)},
@@ -683,7 +717,93 @@ def test_sandbox_exec_runs_only_with_internal_tool_decision(tmp_path):
     result = ToolExecutor().execute("sandbox_exec", {"command": "pwd"}, context)
 
     assert result["is_error"] is False
-    assert str(tmp_path) in result["widget"]["data"]["stdout"]
+    assert result["widget"]["data"]["stdout"] == "/workspace\n"
+    assert captured["args"][:3] == ["docker", "run", "--rm"]
+    assert "--network=none" in captured["args"]
+    assert "--read-only" in captured["args"]
+    assert f"{tmp_path / '.rumi' / 'artifacts'}:/workspace:rw" in captured["args"]
+    image_index = captured["args"].index(sandbox_tools.DEFAULT_SANDBOX_IMAGE)
+    assert captured["args"][image_index - 1] == "--"
+
+
+def test_sandbox_exec_rejects_client_supplied_image_before_docker(tmp_path, monkeypatch):
+    from domain.tool.executor import ToolExecutor
+    from domain.tool_policy.internal_context import seal_tool_context
+    from domain.tool import sandbox_tools
+
+    def fake_run(*args, **kwargs):
+        raise AssertionError("docker must not run with an invalid image reference")
+
+    monkeypatch.setattr(sandbox_tools.subprocess, "run", fake_run)
+
+    context = seal_tool_context(
+        {"workspace_root": str(tmp_path)},
+        {"action": "allow", "allowed": True},
+    )
+
+    result = ToolExecutor().execute(
+        "sandbox_exec",
+        {"command": "pwd", "image": "python:3.12-slim"},
+        context,
+    )
+
+    assert result["is_error"] is True
+    assert result["widget"]["error"]["code"] == "INVALID_SANDBOX_IMAGE"
+
+
+def test_sandbox_exec_rejects_invalid_configured_image_before_docker(tmp_path, monkeypatch):
+    from domain.tool.executor import ToolExecutor
+    from domain.tool_policy.internal_context import seal_tool_context
+    from domain.tool import sandbox_tools
+
+    def fake_run(*args, **kwargs):
+        raise AssertionError("docker must not run with an invalid image reference")
+
+    monkeypatch.setattr(sandbox_tools, "DEFAULT_SANDBOX_IMAGE", "--privileged")
+    monkeypatch.setattr(sandbox_tools.subprocess, "run", fake_run)
+
+    context = seal_tool_context(
+        {"workspace_root": str(tmp_path)},
+        {"action": "allow", "allowed": True},
+    )
+
+    result = ToolExecutor().execute(
+        "sandbox_exec",
+        {"command": "pwd"},
+        context,
+    )
+
+    assert result["is_error"] is True
+    assert result["widget"]["error"]["code"] == "INVALID_SANDBOX_IMAGE"
+
+
+def test_python_exec_uses_container_python_not_host_interpreter(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    from domain.tool.executor import ToolExecutor
+    from domain.tool_policy.internal_context import seal_tool_context
+    from domain.tool import sandbox_tools
+
+    captured = {}
+
+    def fake_run(args, **kwargs):
+        captured["args"] = args
+        return SimpleNamespace(returncode=0, stdout="ok\n", stderr="")
+
+    monkeypatch.setattr(sandbox_tools.subprocess, "run", fake_run)
+
+    context = seal_tool_context(
+        {"workspace_root": str(tmp_path)},
+        {"action": "allow", "allowed": True},
+    )
+
+    result = ToolExecutor().execute("python_exec", {"code": "print('ok')"}, context)
+
+    assert result["is_error"] is False
+    docker_args = captured["args"]
+    assert "--network=none" in docker_args
+    assert "python" in docker_args
+    assert sys.executable not in docker_args
 
 
 def test_package_install_plan_never_executes_packages(tmp_path):
