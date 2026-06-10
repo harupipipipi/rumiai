@@ -101,6 +101,36 @@ def _candidate_ecosystem_dirs(pack_root: Path) -> list[Path]:
     return resolved
 
 
+def route_state_path(*, root: Path | None = None) -> Path:
+    base = root or (_pack_root() / "user_data" / "shared" / "search_home")
+    return base / "route_state.json"
+
+
+def persist_route_state(state: dict[str, Any], *, root: Path | None = None) -> Path:
+    path = route_state_path(root=root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = dict(state or {})
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    return path
+
+
+def load_route_state(*, root: Path | None = None) -> dict[str, Any]:
+    path = route_state_path(root=root)
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    return dict(data) if isinstance(data, dict) else {}
+
+
+def clear_route_state(*, root: Path | None = None) -> None:
+    path = route_state_path(root=root)
+    if path.exists():
+        path.unlink()
+
+
 def _web_root(pack_root: Path) -> Path:
     if (pack_root / "ui" / "index.html").is_file():
         return pack_root / "ui"
@@ -149,13 +179,14 @@ def _open_desktop_surface(url: str, title: str = "Rumi Search Home") -> str:
 
 def _make_handler(pack_root: Path):
     from ecosystem.search_home_pack.domain.defaultspack_bridge import DefaultspackBridge
-    from ecosystem.search_home_pack.domain.route_decision import decide_route
+    from ecosystem.search_home_pack.domain.search_target_resolver import SearchTargetResolver
 
     web_root = _web_root(pack_root)
     bridge = DefaultspackBridge()
+    resolver = SearchTargetResolver(bridge=bridge)
 
     class SearchHomeHandler(BaseHTTPRequestHandler):
-        server_version = "RumiSearchHome/0.1"
+        server_version = "RumiSearchHome/0.2"
 
         def log_message(self, _format: str, *_args: Any) -> None:
             return
@@ -167,9 +198,18 @@ def _make_handler(pack_root: Path):
                     {
                         "status": "ok",
                         "pack_id": "search_home_pack",
-                        "bridge": bridge.healthcheck(),
+                        "route_state_path": str(route_state_path(root=pack_root / "user_data" / "shared" / "search_home")),
                     }
                 )
+                return
+            if path == "/api/route-state":
+                self._json_response(load_route_state(root=pack_root / "user_data" / "shared" / "search_home"))
+                return
+            if path == "/api/models":
+                self._json_response(bridge.list_models())
+                return
+            if path == "/api/settings":
+                self._json_response({"models": bridge.model_settings()})
                 return
             self._serve_static(path)
 
@@ -187,32 +227,38 @@ def _make_handler(pack_root: Path):
                 )
                 return
             if path == "/api/route":
-                decision = decide_route(str(payload.get("input") or ""), bridge=bridge)
+                preferred_model = str(payload.get("model") or payload.get("preferred_model") or "").strip()
+                decision = resolver.resolve(
+                    str(payload.get("input") or ""),
+                    context={"source": "search_home.route", "preferred_model": preferred_model},
+                )
+                persist_route_state(decision.to_dict(), root=pack_root / "user_data" / "shared" / "search_home")
                 self._json_response(decision.to_dict())
                 return
-            if path == "/api/ask":
-                query = str(payload.get("query") or "").strip()
-                with_search = bool(payload.get("with_search"))
-                if not query:
+            if path == "/api/answer":
+                answer = bridge.answer_query(
+                    str(payload.get("input") or payload.get("query") or ""),
+                    preferred_model=str(payload.get("model") or payload.get("preferred_model") or "").strip(),
+                    use_search=bool(payload.get("use_search", True)),
+                    context={"source": "search_home.answer"},
+                )
+                status = HTTPStatus.OK if answer.get("status") == "ok" else HTTPStatus.BAD_GATEWAY
+                self._json_response(answer, status=status)
+                return
+            if path == "/api/settings/model":
+                try:
+                    result = bridge.set_preferred_model(str(payload.get("model") or payload.get("profile_id") or ""))
+                except ValueError as exc:
                     self._json_response(
-                        {
-                            "status": "error",
-                            "error": {"message": "query is required", "code": "INVALID_INPUT"},
-                        },
+                        {"status": "error", "error": {"message": str(exc), "code": "INVALID_INPUT"}},
                         status=HTTPStatus.BAD_REQUEST,
                     )
                     return
-                try:
-                    result = bridge.ask_ai(query, with_search=with_search)
-                    self._json_response(result)
-                except Exception as exc:
-                    self._json_response(
-                        {
-                            "status": "error",
-                            "error": {"message": str(exc), "code": "SEARCH_HOME_ASK_FAILED"},
-                        },
-                        status=HTTPStatus.INTERNAL_SERVER_ERROR,
-                    )
+                self._json_response({"status": "ok", "data": result})
+                return
+            if path == "/api/route-state":
+                persist_route_state(payload, root=pack_root / "user_data" / "shared" / "search_home")
+                self._json_response({"status": "ok", "saved": True})
                 return
             self._json_response(
                 {"status": "error", "error": {"message": "not found", "code": "NOT_FOUND"}},
@@ -267,6 +313,8 @@ def _make_handler(pack_root: Path):
             body = candidate.read_bytes()
             self.send_response(HTTPStatus.OK)
             self.send_header("Content-Type", f"{mime_type or 'text/html'}; charset=utf-8")
+            self.send_header("Cache-Control", "no-store, max-age=0")
+            self.send_header("Pragma", "no-cache")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)

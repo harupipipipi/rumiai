@@ -5,7 +5,7 @@
   "enabled": true,
   "metadata": {
     "name": "Search Home",
-    "description": "Local search home surface that reuses defaultspack AI, chat, and search functions.",
+    "description": "Local search surface that resolves the best destination URL before navigation.",
     "category": "frontend"
   },
   "desktop_app": {
@@ -17,8 +17,8 @@
     },
     "window": {
       "title": "Rumi Search Home",
-      "width": 1120,
-      "height": 760
+      "width": 1160,
+      "height": 780
     }
   }
 }

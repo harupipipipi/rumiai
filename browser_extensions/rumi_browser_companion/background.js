@@ -11,6 +11,8 @@ const LAST_STATUS_KEY = "rumiBrowserCompanionLastStatus";
 const ALARM_NAME = "rumi-browser-companion-poll";
 const BRIDGE_POLL_PATH = "/api/tools/browser-companion/bridge/poll";
 const BRIDGE_RESULT_PATH = "/api/tools/browser-companion/bridge/result";
+const SEARCH_HOME_ROUTE_STATE_KEY = "rumiSearchHomeRouteStateByTab";
+const SEARCH_HOME_ROUTE_MAX_AGE_MS = 1000 * 60 * 60 * 6;
 
 chrome.runtime.onInstalled.addListener(async () => {
   const settings = await ensureSettings();
@@ -31,6 +33,10 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === ALARM_NAME) {
     void pollBridge("alarm");
   }
+});
+
+chrome.tabs.onRemoved.addListener((tabId) => {
+  void clearSearchHomeRouteState(tabId);
 });
 
 chrome.storage.onChanged.addListener((changes, areaName) => {
@@ -58,6 +64,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return;
       case "rumi:list-tabs":
         sendResponse({ ok: true, tabs: await getTabsSummary() });
+        return;
+      case "rumi:search-home:set-route-state":
+        sendResponse(await setSearchHomeRouteState(sender?.tab?.id, message.payload));
+        return;
+      case "rumi:search-home:advance-candidate":
+        sendResponse(await advanceSearchHomeRouteState(sender?.tab?.id, message.action));
         return;
       default:
         sendResponse({ ok: false, error: `Unknown message type: ${message.type}` });
@@ -516,6 +528,152 @@ function normalizeCommands(payload) {
     return [payload.command];
   }
   return [];
+}
+
+async function loadSearchHomeRouteStates() {
+  const stored = await chrome.storage.local.get(SEARCH_HOME_ROUTE_STATE_KEY);
+  const value = stored[SEARCH_HOME_ROUTE_STATE_KEY];
+  return value && typeof value === "object" ? value : {};
+}
+
+async function saveSearchHomeRouteStates(states) {
+  await chrome.storage.local.set({ [SEARCH_HOME_ROUTE_STATE_KEY]: states });
+}
+
+async function clearSearchHomeRouteState(tabId) {
+  if (!Number.isInteger(tabId)) {
+    return;
+  }
+  const states = await loadSearchHomeRouteStates();
+  if (!(String(tabId) in states)) {
+    return;
+  }
+  delete states[String(tabId)];
+  await saveSearchHomeRouteStates(states);
+}
+
+async function setSearchHomeRouteState(tabId, payload) {
+  if (!Number.isInteger(tabId)) {
+    return { ok: false, error: "Active tab is required for Search Home route state." };
+  }
+  const normalized = normalizeSearchHomeRouteState(payload);
+  if (!normalized) {
+    return { ok: false, error: "Invalid Search Home route payload." };
+  }
+  const states = await loadSearchHomeRouteStates();
+  states[String(tabId)] = normalized;
+  await saveSearchHomeRouteStates(states);
+  return { ok: true, tab_id: tabId, selected_index: normalized.selected_index };
+}
+
+async function advanceSearchHomeRouteState(tabId, action) {
+  if (!Number.isInteger(tabId)) {
+    return { ok: false, error: "Active tab is required for Search Home navigation." };
+  }
+  const states = await loadSearchHomeRouteStates();
+  const current = normalizeSearchHomeRouteState(states[String(tabId)]);
+  if (!current || !isFreshSearchHomeRouteState(current)) {
+    return { ok: false, error: "No fresh Search Home route state was found for this tab." };
+  }
+  let url = "";
+  let nextIndex = normalizeSearchHomeIndex(current, current.selected_index);
+  if (action === "fallback") {
+    url = normalizeSearchHomeCandidateUrl(current.fallback_url);
+  } else {
+    const delta = action === "prev" ? -1 : 1;
+    nextIndex = nextSearchHomeIndex(current, delta);
+    const nextCandidate = current.target_candidates[nextIndex];
+    url = normalizeSearchHomeCandidateUrl(nextCandidate?.final_url || nextCandidate?.url);
+  }
+  if (!url) {
+    return { ok: false, error: "No destination URL was available for the requested Search Home action." };
+  }
+  states[String(tabId)] = {
+    ...current,
+    target_url: url,
+    selected_index: nextIndex,
+    updated_at: new Date().toISOString()
+  };
+  await saveSearchHomeRouteStates(states);
+  await chrome.tabs.update(tabId, { url });
+  return { ok: true, tab_id: tabId, url, selected_index: nextIndex };
+}
+
+function normalizeSearchHomeRouteState(value) {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+  const candidates = Array.isArray(value.target_candidates)
+    ? value.target_candidates
+        .map((candidate) => normalizeSearchHomeCandidate(candidate))
+        .filter(Boolean)
+    : [];
+  const fallbackUrl = normalizeSearchHomeCandidateUrl(value.fallback_url);
+  const selectedIndex = normalizeSearchHomeIndex({ target_candidates: candidates }, Number(value.selected_index));
+  return {
+    query: String(value.query || ""),
+    target_url: normalizeSearchHomeCandidateUrl(value.target_url) || fallbackUrl || (candidates[0]?.final_url || candidates[0]?.url || ""),
+    fallback_url: fallbackUrl,
+    selected_index: selectedIndex,
+    target_candidates: candidates,
+    updated_at: typeof value.updated_at === "string" && value.updated_at ? value.updated_at : new Date().toISOString()
+  };
+}
+
+function normalizeSearchHomeCandidate(value) {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+  const finalUrl = normalizeSearchHomeCandidateUrl(value.final_url || value.url);
+  if (!finalUrl) {
+    return null;
+  }
+  return {
+    url: normalizeSearchHomeCandidateUrl(value.url) || finalUrl,
+    final_url: finalUrl,
+    title: String(value.title || ""),
+    domain: String(value.domain || "")
+  };
+}
+
+function normalizeSearchHomeCandidateUrl(value) {
+  try {
+    const url = new URL(String(value || ""));
+    if (url.protocol !== "http:" && url.protocol !== "https:") {
+      return "";
+    }
+    return url.toString();
+  } catch {
+    return "";
+  }
+}
+
+function normalizeSearchHomeIndex(state, value) {
+  const total = Array.isArray(state?.target_candidates) ? state.target_candidates.length : 0;
+  if (total <= 0) {
+    return -1;
+  }
+  return Number.isInteger(value) && value >= 0 && value < total ? value : 0;
+}
+
+function nextSearchHomeIndex(state, delta) {
+  const total = Array.isArray(state?.target_candidates) ? state.target_candidates.length : 0;
+  if (total <= 0) {
+    return -1;
+  }
+  const base = normalizeSearchHomeIndex(state, state.selected_index);
+  return (base + delta + total) % total;
+}
+
+function isFreshSearchHomeRouteState(state) {
+  if (!state || typeof state.updated_at !== "string" || !state.updated_at) {
+    return false;
+  }
+  const updatedAt = Date.parse(state.updated_at);
+  if (!Number.isFinite(updatedAt)) {
+    return false;
+  }
+  return Date.now() - updatedAt <= SEARCH_HOME_ROUTE_MAX_AGE_MS;
 }
 
 function tabSummary(tab) {

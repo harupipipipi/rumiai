@@ -1,382 +1,541 @@
 from __future__ import annotations
 
 import json
-import os
-import uuid
+import re
+import sys
 from pathlib import Path
 from typing import Any, Callable
 
-from core_runtime.paths import BASE_DIR
 
-from .route_decision import RouteDecision, google_search_url
-from .safe_url import classify_direct_url
+def _ensure_defaultspack_import_path() -> None:
+    root = Path(__file__).resolve().parents[3]
+    defaultspack_root = root / "ecosystem" / "defaultspack"
+    for candidate in (root, defaultspack_root):
+        value = str(candidate)
+        if value not in sys.path:
+            sys.path.insert(0, value)
 
 
-FunctionInvoker = Callable[[str, dict[str, Any], dict[str, Any] | None, float | None], dict[str, Any]]
+_ensure_defaultspack_import_path()
 
-_FUNCTION_ALIASES = (
-    "defaultspack.ai.model_call",
-    "defaultspack.chat.create_conversation",
-    "defaultspack.chat.send",
-    "defaultspack.chat.stream",
-    "defaultspack.tool.web_search",
-)
-_CLASSIFIER_PROMPT = """You are the route classifier for Rumi Search Home.
+from blocks.research.web_search import run as research_web_search_run
+from domain.ai_client.model_call import call_model
+from domain.ai_client.model_runtime_settings import ModelRuntimeSettingsService
+from domain.ai_client.model_search import get_model_capabilities, search_models
 
-Routes:
-- URL_NAVIGATE: direct URL or domain navigation only.
-- GOOGLE_REDIRECT: user wants a web results page or a site/page search.
-- ASK_AI: user wants an answer, explanation, reasoning, writing, coding help, or troubleshooting.
-- ASK_AI_WITH_SEARCH: user wants an answer and likely needs fresh or external information such as news, stocks, prices, recent events, schedules, GitHub state, product facts, or recommendations.
-- BLOCKED: unsafe URL scheme.
 
-Prefer ASK_AI_WITH_SEARCH over GOOGLE_REDIRECT for question-like searches.
-Return JSON only:
-{
-  "route": "...",
-  "confidence": 0.0,
-  "normalized_query": "...",
-  "target_url": null,
-  "reason": "...",
-  "needs_freshness": true,
-  "is_question_like": true
-}
-"""
+CallModelFn = Callable[[dict[str, Any], dict[str, Any] | None], dict[str, Any]]
+ModelCapsFn = Callable[[str], dict[str, Any] | None]
+WebSearchFn = Callable[[dict[str, Any], dict[str, Any] | None], dict[str, Any]]
+ChatSendFn = Callable[[dict[str, Any], dict[str, Any] | None], dict[str, Any]]
+ChatStoreFactory = Callable[[], Any]
+
+_JSON_BLOCK_RE = re.compile(r"\{.*\}", re.DOTALL)
 
 
 class DefaultspackBridge:
     def __init__(
         self,
         *,
-        invoker: FunctionInvoker | None = None,
-        principal_id: str = "search_home_pack",
+        web_search_fn: WebSearchFn | None = None,
+        call_model_fn: CallModelFn | None = None,
+        model_caps_fn: ModelCapsFn | None = None,
+        chat_send_fn: ChatSendFn | None = None,
+        chat_store_factory: ChatStoreFactory | None = None,
+        settings_service: ModelRuntimeSettingsService | None = None,
     ) -> None:
-        self._invoker = invoker or self._default_invoke
-        self._principal_id = principal_id
+        self._web_search_fn = web_search_fn or research_web_search_run
+        self._call_model_fn = call_model_fn or call_model
+        self._model_caps_fn = model_caps_fn or get_model_capabilities
+        self._chat_send_fn = chat_send_fn
+        self._chat_store_factory = chat_store_factory
+        self._settings_service = settings_service or ModelRuntimeSettingsService()
 
-    def classify_with_ai(self, query: str) -> RouteDecision:
-        result = self._invoke_ok(
-            "defaultspack.ai.model_call",
+    def web_search(
+        self,
+        query: str,
+        *,
+        limit: int = 8,
+        allow_network: bool = True,
+        timeout: float = 8.0,
+        context: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
+        envelope = self._web_search_fn(
             {
-                "question": f"{_CLASSIFIER_PROMPT}\n\nUser input:\n{query}",
-                "required_capabilities": ["model.fast"],
-                "output_schema": {"type": "object"},
-                "max_tokens": 400,
+                "query": query,
+                "limit": max(1, min(int(limit or 8), 10)),
+                "allow_network": bool(allow_network),
+                "timeout": float(timeout or 8.0),
             },
-            context={"source": "search_home.classifier"},
-            timeout_seconds=45.0,
+            context,
         )
-        payload = self._extract_payload(result)
-        output = payload.get("output")
-        if isinstance(output, str):
-            output = json.loads(output)
-        if not isinstance(output, dict):
-            raise RuntimeError("defaultspack.ai.model_call returned a non-object classifier payload")
+        if not isinstance(envelope, dict) or envelope.get("status") != "ok":
+            return []
+        data = envelope.get("data") if isinstance(envelope.get("data"), dict) else {}
+        sources = data.get("sources")
+        return [dict(item) for item in sources] if isinstance(sources, list) else []
 
-        route = str(output.get("route") or "").strip() or "ASK_AI_WITH_SEARCH"
-        normalized_query = str(output.get("normalized_query") or query).strip() or query.strip()
-        confidence = _bounded_confidence(output.get("confidence"), fallback=0.5)
-        target_url = output.get("target_url")
-        reason = str(output.get("reason") or "AI classifier decision").strip()
+    def judge_search_targets(
+        self,
+        user_query: str,
+        candidates: list[dict[str, Any]],
+        *,
+        preferred_model: str = "",
+        context: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        if not candidates:
+            return self._judge_failure("no_candidates")
+        model_ref = self._preferred_model(preferred_model)
+        caps = self._model_caps_fn(model_ref) or {}
+        supports_images = bool(caps.get("supports_image_input") or caps.get("supports_vision"))
+        has_screenshots = any(isinstance(item.get("screenshot_data_url"), str) and item.get("screenshot_data_url") for item in candidates)
 
-        if route == "GOOGLE_REDIRECT" and not target_url:
-            target_url = google_search_url(normalized_query)
-        if route == "URL_NAVIGATE" and not target_url:
-            direct_url = classify_direct_url(normalized_query)
-            if direct_url and not direct_url.get("blocked"):
-                target_url = str(direct_url["url"])
-            else:
-                route = "ASK_AI_WITH_SEARCH"
-                reason = "AI classifier requested navigation without a valid direct URL"
-                confidence = min(confidence, 0.55)
-                target_url = None
+        if supports_images and has_screenshots:
+            visual = self._run_judge_call(
+                user_query,
+                candidates,
+                model_ref=model_ref,
+                required_capabilities=["model.image_input"],
+                include_images=True,
+                context=context,
+            )
+            if visual.get("status") == "ok":
+                visual["used_visual_judge"] = True
+                return visual
 
-        if route not in {
-            "URL_NAVIGATE",
-            "GOOGLE_REDIRECT",
-            "ASK_AI",
-            "ASK_AI_WITH_SEARCH",
-            "BLOCKED",
-        }:
-            route = "ASK_AI_WITH_SEARCH"
-            confidence = min(confidence, 0.55)
-            reason = "AI classifier returned an unknown route"
-
-        return RouteDecision(
-            route=route,
-            confidence=confidence,
-            normalized_query=normalized_query,
-            target_url=str(target_url) if isinstance(target_url, str) else None,
-            reason=reason,
-            source="ai",
+        text_only = self._run_judge_call(
+            user_query,
+            candidates,
+            model_ref=model_ref,
+            required_capabilities=[],
+            include_images=False,
+            context=context,
         )
+        if text_only.get("status") == "ok":
+            text_only["used_visual_judge"] = False
+            return text_only
+        return self._judge_failure("judge_failed")
 
-    def ask_ai(self, query: str, *, with_search: bool) -> dict[str, Any]:
-        conversation = self._invoke_ok(
-            "defaultspack.chat.create_conversation",
+    def model_settings(self) -> dict[str, Any]:
+        return self._settings_service.get_settings()
+
+    def set_preferred_model(self, model_id: str) -> dict[str, Any]:
+        return self._settings_service.set_preferred_model(model_id)
+
+    def list_models(self, *, query: str = "", configured_only: bool = False, max_results: int = 100) -> dict[str, Any]:
+        result = search_models(
             {
-                "conversation_kind": "search_home",
-                "tags": ["search_home"],
-                "metadata": {
-                    "source": "search_home",
-                    "search_home": True,
-                    "requires_freshness": with_search,
-                },
-            },
-            context={"source": "search_home.chat"},
-            timeout_seconds=30.0,
+                "query": query,
+                "configured_only": configured_only,
+                "max_results": max_results,
+            }
         )
-        conversation_id = str(conversation.get("id") or conversation.get("conversation_id") or "").strip()
-        if not conversation_id:
-            raise RuntimeError("defaultspack.chat.create_conversation did not return a conversation id")
+        if query:
+            return result
+        models = result.get("models") if isinstance(result.get("models"), list) else []
+        by_id = {
+            model_id
+            for item in models
+            for model_id in (str(item.get("profile_id") or ""), str(item.get("qualified_model_id") or ""))
+            if model_id
+        }
+        pinned: list[dict[str, Any]] = []
+        settings = self.model_settings()
+        priority_ids = [str(settings.get("preferred_model") or "").strip()]
+        favorites = settings.get("favorite_profiles")
+        if isinstance(favorites, list):
+            priority_ids.extend(str(item or "").strip() for item in favorites)
+        for profile_id in priority_ids:
+            if not profile_id or profile_id in by_id:
+                continue
+            caps = self._model_caps_fn(profile_id)
+            if not isinstance(caps, dict):
+                caps = self._settings_only_model(profile_id)
+            pinned.append(dict(caps))
+            by_id.update(
+                candidate_id
+                for candidate_id in (str(caps.get("profile_id") or ""), str(caps.get("qualified_model_id") or ""))
+                if candidate_id
+            )
+        if pinned:
+            result = dict(result)
+            result["models"] = pinned + models
+            filters = result.get("filters_applied") if isinstance(result.get("filters_applied"), dict) else {}
+            result["filters_applied"] = {**filters, "pinned_settings_profiles": len(pinned)}
+        return result
 
-        params: dict[str, Any] = {}
-        if with_search:
-            params["tool_policy"] = {
-                "selected_tools": ["web_search"],
-                "allowed_tools": ["web_search"],
-                "tool_choice": "auto",
+    @staticmethod
+    def _settings_only_model(profile_id: str) -> dict[str, Any]:
+        provider_id, _, model_id = profile_id.partition("/")
+        return {
+            "profile_id": profile_id,
+            "qualified_model_id": profile_id,
+            "label": f"Settings / {profile_id}",
+            "display_name": model_id or profile_id,
+            "provider_id": provider_id,
+            "provider_display_name": provider_id,
+            "model_id": model_id or profile_id,
+            "configured": False,
+            "local": False,
+            "requires_api_key": False,
+            "supports_vision": False,
+            "supports_image_input": False,
+            "supports_tool_calling": False,
+            "supports_thinking": False,
+            "supports_fast": False,
+            "capability_tags": [],
+            "availability": {
+                "configured": False,
+                "active": False,
+                "available": False,
+                "status": "settings_only",
+            },
+            "metadata": {
+                "source": "model_runtime_settings",
+                "settings_only": True,
+            },
+        }
+
+    def answer_query(
+        self,
+        user_query: str,
+        *,
+        preferred_model: str = "",
+        use_search: bool = True,
+        context: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        cleaned = str(user_query or "").strip()
+        if not cleaned:
+            return {
+                "status": "error",
+                "error": {"code": "INVALID_INPUT", "message": "query is required"},
             }
 
-        message = self._invoke_ok(
-            "defaultspack.chat.send",
+        model_ref = self._preferred_model(preferred_model)
+        selected_tools = ["web_search"] if use_search else []
+        chat_input, conversation_id = self._build_search_home_chat_input(
+            cleaned,
+            model_ref=model_ref,
+            selected_tools=selected_tools,
+        )
+        chat_send = self._chat_send_fn or self._default_chat_send
+        result = chat_send(
+            chat_input,
+            {
+                **dict(context or {}),
+                "source": "search_home_pack",
+                "runtime_profile_key": (context or {}).get("runtime_profile_key", "search_home.research"),
+            },
+        )
+        if not isinstance(result, dict) or result.get("status") != "ok":
+            error_payload = result.get("error") if isinstance(result, dict) and isinstance(result.get("error"), dict) else {}
+            return {
+                "status": "error",
+                "error": {
+                    "code": str(error_payload.get("code") or "DEFAULTSPACK_CHAT_FAILED"),
+                    "message": str(error_payload.get("message") or "defaultspack chat node failed"),
+                },
+                "conversation_id": conversation_id,
+                "model": model_ref,
+                "used_defaultspack_node": True,
+                "defaultspack_node": "blocks.chat.send",
+            }
+
+        message = result.get("data") if isinstance(result.get("data"), dict) else {}
+        metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
+        tool_logs = message.get("tool_logs") if isinstance(message.get("tool_logs"), list) else []
+        return {
+            "status": "ok",
+            "answer": self._extract_answer_text(message),
+            "message": message,
+            "conversation_id": conversation_id,
+            "model": str(message.get("model") or metadata.get("model") or model_ref),
+            "used_tools": [str(item.get("tool_name") or item.get("name") or "") for item in tool_logs if isinstance(item, dict)],
+            "tool_logs": tool_logs,
+            "events": message.get("events") if isinstance(message.get("events"), list) else [],
+            "used_defaultspack_node": True,
+            "defaultspack_node": "blocks.chat.send",
+            "tool_calling_unavailable_reason": str(metadata.get("tool_calling_unavailable_reason") or ""),
+        }
+
+    def _build_search_home_chat_input(
+        self,
+        user_query: str,
+        *,
+        model_ref: str,
+        selected_tools: list[str],
+    ) -> tuple[dict[str, Any], str]:
+        if self._chat_store_factory is not None:
+            store = self._chat_store_factory()
+        else:
+            try:
+                from domain.chat.store import ChatStore
+            except Exception as exc:
+                raise RuntimeError(f"defaultspack ChatStore unavailable: {exc}") from exc
+
+            store = ChatStore()
+        conversation = store.create_conversation(
+            model=model_ref,
+            conversation_kind="search_home",
+            metadata={"source": "search_home_pack"},
+        )
+        conversation_id = str(conversation.get("id") or "")
+        prompt = (
+            "Search Home request. Answer in the user's language. "
+            "If the request depends on current or recent information, use the connected web_search tool before answering. "
+            "Be concise, cite source titles or URLs when tool results provide them, and do not navigate the browser.\n\n"
+            f"User request:\n{user_query}"
+        )
+        return (
             {
                 "conversation_id": conversation_id,
                 "message": {
                     "role": "user",
-                    "content": query,
+                    "content": prompt,
                     "metadata": {
-                        "source": "search_home",
-                        "search_home": True,
-                        "requires_freshness": with_search,
+                        "selected_tools": list(selected_tools),
+                        "source": "search_home_pack",
                     },
                 },
-                "params": params,
-            },
-            context={"source": "search_home.chat", "conversation_id": conversation_id},
-            timeout_seconds=180.0,
-        )
-        metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
-        routing = metadata.get("model_routing") if isinstance(metadata.get("model_routing"), dict) else {}
-        used_tools = _used_tool_names(message.get("tool_logs"))
-        model = str(message.get("model") or routing.get("selected_model") or "").strip() or None
-        return {
-            "status": "ok",
-            "conversation_id": conversation_id,
-            "answer": _message_text(message),
-            "message": message,
-            "model": model,
-            "used_tools": used_tools,
-            "routing": routing,
-        }
-
-    def healthcheck(self) -> dict[str, Any]:
-        alias_status = {alias: self._is_function_available(alias) for alias in _FUNCTION_ALIASES}
-        return {
-            "status": "ok",
-            "principal_id": self._principal_id,
-            "aliases": alias_status,
-        }
-
-    def _default_invoke(
-        self,
-        qualified_name: str,
-        args: dict[str, Any],
-        context: dict[str, Any] | None = None,
-        timeout_seconds: float | None = None,
-    ) -> dict[str, Any]:
-        from core_runtime.capability_executor import get_capability_executor
-        from core_runtime.di_container import get_container
-
-        container = get_container()
-        registry = container.get_or_none("function_registry")
-        if registry is not None:
-            self._ensure_pack_functions_registered(registry, _pack_id_from_name(qualified_name), qualified_name)
-        executor = container.get_or_none("capability_executor") or get_capability_executor()
-        request = {
-            "type": "function.call",
-            "qualified_name": qualified_name,
-            "args": dict(args or {}),
-            "context": dict(context or {}),
-            "request_id": str((context or {}).get("request_id") or uuid.uuid4()),
-        }
-        if timeout_seconds is not None:
-            request["timeout_seconds"] = timeout_seconds
-        response = executor.execute(
-            self._execution_principal_for(qualified_name),
-            request,
-        )
-        if not getattr(response, "success", False):
-            error_type = str(getattr(response, "error_type", None) or "FUNCTION_CALL_FAILED").upper()
-            return {
-                "status": "error",
-                "error": {
-                    "code": error_type,
-                    "message": str(getattr(response, "error", None) or "Function call failed"),
+                "tools": list(selected_tools),
+                "params": {
+                    "model": model_ref,
+                    "max_tool_calls": 4,
+                    "tool_policy": {
+                        "selected_tools": list(selected_tools),
+                        "tool_choice": "auto",
+                    },
                 },
-            }
-        output = getattr(response, "output", None)
-        if isinstance(output, dict):
-            return output if output.get("status") in {"ok", "error"} else {"status": "ok", "data": output}
-        return {"status": "ok", "data": output}
+            },
+            conversation_id,
+        )
 
-    def _execution_principal_for(self, qualified_name: str) -> str:
-        target_pack = _pack_id_from_name(qualified_name)
-        if target_pack == "defaultspack":
-            return target_pack
-        return self._principal_id
+    @staticmethod
+    def _default_chat_send(input_data: dict[str, Any], context: dict[str, Any] | None) -> dict[str, Any]:
+        from blocks.chat.send import run as chat_send_run
 
-    def _invoke_ok(
+        return chat_send_run(input_data, context or {})
+
+    @staticmethod
+    def _extract_answer_text(message: dict[str, Any]) -> str:
+        raw = message.get("raw_text")
+        if isinstance(raw, str) and raw.strip():
+            return raw.strip()
+        content = message.get("content")
+        if isinstance(content, str):
+            return content.strip()
+        if isinstance(content, list):
+            parts: list[str] = []
+            for block in content:
+                if isinstance(block, str):
+                    parts.append(block)
+                elif isinstance(block, dict):
+                    if isinstance(block.get("text"), str):
+                        parts.append(block["text"])
+                    elif isinstance(block.get("content"), str):
+                        parts.append(block["content"])
+            return "\n".join(part.strip() for part in parts if part.strip()).strip()
+        return ""
+
+    def _run_judge_call(
         self,
-        qualified_name: str,
-        args: dict[str, Any],
+        user_query: str,
+        candidates: list[dict[str, Any]],
         *,
-        context: dict[str, Any] | None = None,
-        timeout_seconds: float | None = None,
+        model_ref: str,
+        required_capabilities: list[str],
+        include_images: bool,
+        context: dict[str, Any] | None,
     ) -> dict[str, Any]:
-        result = self._invoker(qualified_name, dict(args or {}), dict(context or {}), timeout_seconds)
-        if not isinstance(result, dict):
-            raise RuntimeError(f"{qualified_name} returned a non-dict result")
-        if result.get("status") != "ok":
-            error = result.get("error")
-            if isinstance(error, dict):
-                raise RuntimeError(str(error.get("message") or f"{qualified_name} failed"))
-            raise RuntimeError(str(error or f"{qualified_name} failed"))
-        data = result.get("data")
-        if isinstance(data, dict):
-            return data
-        return {"value": data}
+        messages = self._build_messages(user_query, candidates, include_images=include_images)
+        result = self._call_model_fn(
+            {
+                "model": model_ref,
+                "messages": messages,
+                "required_capabilities": list(required_capabilities),
+                "max_tokens": 700,
+                "output_schema": {
+                    "type": "object",
+                    "properties": {
+                        "best_index": {"type": "integer"},
+                        "confidence": {"type": "number"},
+                        "reason": {"type": "string"},
+                        "ordered_indexes": {"type": "array"},
+                        "reject_reasons": {"type": "object"},
+                    },
+                },
+            },
+            context,
+        )
+        if not isinstance(result, dict) or result.get("status") != "ok":
+            return self._judge_failure(str(result.get("code") or "model_call_failed") if isinstance(result, dict) else "model_call_failed")
+        output = self._coerce_judge_output(result.get("output"), candidate_count=len(candidates))
+        if output is None:
+            return self._judge_failure("invalid_judge_json")
+        output.update(
+            {
+                "status": "ok",
+                "used_ai_judge": True,
+                "used_visual_judge": include_images,
+                "model": result.get("model"),
+            }
+        )
+        return output
 
-    def _extract_payload(self, value: dict[str, Any]) -> dict[str, Any]:
-        if value.get("status") == "ok" and isinstance(value.get("data"), dict):
-            return dict(value["data"])
-        return dict(value)
+    def _preferred_model(self, preferred_model: str) -> str:
+        explicit = str(preferred_model or "").strip()
+        if explicit:
+            return explicit
+        settings = self._settings_service.get_settings()
+        return str(settings.get("preferred_model") or "stub/default").strip() or "stub/default"
 
-    def _is_function_available(self, alias: str) -> bool:
+    def _build_messages(self, user_query: str, candidates: list[dict[str, Any]], *, include_images: bool) -> list[dict[str, Any]]:
+        system = (
+            "You are a URL judge for a search-and-redirect assistant. "
+            "Pick the best final destination URL for the user's intent. "
+            "Prefer official or primary sources, avoid generic search result pages, "
+            "avoid login walls, ads, paywalls, and low-quality SEO pages. "
+            "Return JSON only with keys: best_index, confidence, reason, ordered_indexes, reject_reasons."
+        )
+        if include_images:
+            blocks: list[dict[str, Any]] = [{"type": "text", "text": self._judge_prompt_text(user_query, candidates)}]
+            for index, candidate in enumerate(candidates):
+                blocks.append({"type": "text", "text": self._candidate_text(index, candidate)})
+                data_url = str(candidate.get("screenshot_data_url") or "").strip()
+                if data_url:
+                    blocks.append({"type": "image_url", "image_url": {"url": data_url}})
+            user_message: dict[str, Any] = {"role": "user", "content": blocks}
+        else:
+            text = self._judge_prompt_text(user_query, candidates)
+            text += "\n\n" + "\n\n".join(self._candidate_text(index, candidate) for index, candidate in enumerate(candidates))
+            user_message = {"role": "user", "content": text}
+        return [
+            {"role": "system", "content": system},
+            user_message,
+        ]
+
+    @staticmethod
+    def _judge_prompt_text(user_query: str, candidates: list[dict[str, Any]]) -> str:
+        return (
+            "User query:\n"
+            f"{user_query}\n\n"
+            "Choose the best candidate index. "
+            f"There are {len(candidates)} candidates. "
+            "Use screenshots only as extra evidence when present."
+        )
+
+    @staticmethod
+    def _candidate_text(index: int, candidate: dict[str, Any]) -> str:
+        extracted = str(candidate.get("extracted_text") or "")[:1200]
+        return (
+            f"Candidate {index}\n"
+            f"URL: {candidate.get('final_url') or candidate.get('url')}\n"
+            f"Title: {candidate.get('title') or ''}\n"
+            f"Snippet: {candidate.get('snippet') or ''}\n"
+            f"Domain: {candidate.get('domain') or ''}\n"
+            f"Canonical: {candidate.get('canonical_url') or ''}\n"
+            f"Content-Type: {candidate.get('content_type') or ''}\n"
+            f"Flags: search_results={bool(candidate.get('is_search_results'))}, "
+            f"login={bool(candidate.get('looks_like_login'))}, "
+            f"paywall={bool(candidate.get('looks_like_paywall'))}, "
+            f"not_found={bool(candidate.get('looks_like_404'))}, "
+            f"ads={bool(candidate.get('looks_like_ad_heavy'))}\n"
+            f"Extracted text:\n{extracted}"
+        )
+
+    def _coerce_judge_output(self, raw: Any, *, candidate_count: int) -> dict[str, Any] | None:
+        if isinstance(raw, dict):
+            payload = dict(raw)
+        else:
+            text = str(raw or "").strip()
+            if not text:
+                return None
+            payload = self._load_json_like(text)
+            if payload is None:
+                return None
+        ordered_indexes = self._normalize_index_list(payload.get("ordered_indexes"), candidate_count)
+        best_index = self._normalize_index(payload.get("best_index"), candidate_count)
+        if best_index is None:
+            best_index = ordered_indexes[0] if ordered_indexes else 0
+        ordered = [best_index] + [item for item in ordered_indexes if item != best_index]
+        confidence = self._normalize_confidence(payload.get("confidence"))
+        reject_reasons = self._normalize_reject_reasons(payload.get("reject_reasons"), candidate_count)
+        reason = str(payload.get("reason") or "").strip() or "AI judge selected the best target."
+        return {
+            "best_index": best_index,
+            "confidence": confidence,
+            "reason": reason,
+            "ordered_indexes": ordered,
+            "reject_reasons": reject_reasons,
+        }
+
+    @staticmethod
+    def _load_json_like(text: str) -> dict[str, Any] | None:
         try:
-            from core_runtime.di_container import get_container
-
-            registry = get_container().get_or_none("function_registry")
-            if registry is None:
-                return False
-            self._ensure_pack_functions_registered(registry, _pack_id_from_name(alias), alias)
-            return registry.get(alias) is not None or registry.resolve_by_alias(alias) is not None
-        except Exception:
-            return False
-
-    def _ensure_pack_functions_registered(self, registry: Any, pack_id: str, alias: str) -> None:
-        if not pack_id:
-            return
-        try:
-            if registry.get(alias) is not None:
-                return
-        except Exception:
-            pass
-        try:
-            if registry.resolve_by_alias(alias) is not None:
-                return
-        except Exception:
-            pass
-
-        functions_root = _functions_root_for(pack_id)
-        if functions_root is None or not functions_root.is_dir():
-            return
-        for function_dir in sorted(path for path in functions_root.iterdir() if path.is_dir()):
-            manifest_path = function_dir / "manifest.json"
-            if not manifest_path.is_file():
-                continue
+            value = json.loads(text)
+        except json.JSONDecodeError:
+            match = _JSON_BLOCK_RE.search(text)
+            if not match:
+                return None
             try:
-                manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError):
+                value = json.loads(match.group(0))
+            except json.JSONDecodeError:
+                return None
+        return dict(value) if isinstance(value, dict) else None
+
+    @staticmethod
+    def _normalize_index(value: Any, candidate_count: int) -> int | None:
+        try:
+            index = int(value)
+        except (TypeError, ValueError):
+            return None
+        if 0 <= index < candidate_count:
+            return index
+        return None
+
+    def _normalize_index_list(self, value: Any, candidate_count: int) -> list[int]:
+        values = value if isinstance(value, list) else []
+        normalized: list[int] = []
+        for item in values:
+            index = self._normalize_index(item, candidate_count)
+            if index is None or index in normalized:
                 continue
-            function_id = str(manifest.get("function_id") or function_dir.name).strip()
-            if not function_id:
+            normalized.append(index)
+        return normalized
+
+    @staticmethod
+    def _normalize_confidence(value: Any) -> float:
+        try:
+            confidence = float(value)
+        except (TypeError, ValueError):
+            return 0.0
+        return max(0.0, min(confidence, 1.0))
+
+    def _normalize_reject_reasons(self, value: Any, candidate_count: int) -> dict[int, str]:
+        if isinstance(value, dict):
+            pairs = value.items()
+        elif isinstance(value, list):
+            pairs = enumerate(value)
+        else:
+            return {}
+        normalized: dict[int, str] = {}
+        for key, item in pairs:
+            index = self._normalize_index(key, candidate_count)
+            if index is None:
                 continue
-            try:
-                registry.register(
-                    pack_id=pack_id,
-                    function_id=function_id,
-                    manifest=manifest,
-                    function_dir=function_dir,
-                )
-            except Exception:
-                continue
+            text = str(item or "").strip()
+            if text:
+                normalized[index] = text
+        return normalized
 
-
-def _pack_id_from_name(qualified_name: str) -> str:
-    if ":" in qualified_name:
-        return qualified_name.split(":", 1)[0]
-    if "." in qualified_name:
-        return qualified_name.split(".", 1)[0]
-    return ""
-
-
-def _functions_root_for(pack_id: str) -> Path | None:
-    for base_dir in _candidate_base_dirs():
-        candidate = base_dir / "ecosystem" / pack_id / "functions"
-        if candidate.is_dir():
-            return candidate
-    return None
-
-
-def _candidate_base_dirs() -> list[Path]:
-    raw_candidates = [Path(str(BASE_DIR))]
-    for env_name in ("RUMI_APP_DIR", "RUMI_CORE_DIR", "REPO"):
-        configured = os.environ.get(env_name)
-        if configured:
-            raw_candidates.append(Path(configured))
-    resolved: list[Path] = []
-    seen: set[str] = set()
-    for candidate in raw_candidates:
-        if not str(candidate):
-            continue
-        for base in (candidate, candidate / "rumi_ai_1_10"):
-            if not str(base):
-                continue
-            key = str(base.resolve()) if base.exists() else str(base)
-            if key in seen:
-                continue
-            seen.add(key)
-            resolved.append(base)
-    return resolved
-
-
-def _bounded_confidence(raw: Any, *, fallback: float) -> float:
-    try:
-        value = float(raw)
-    except (TypeError, ValueError):
-        return fallback
-    return max(0.0, min(value, 1.0))
-
-
-def _message_text(message: dict[str, Any]) -> str:
-    content = message.get("content")
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        parts: list[str] = []
-        for block in content:
-            if isinstance(block, str):
-                parts.append(block)
-            elif isinstance(block, dict) and block.get("type") == "text":
-                parts.append(str(block.get("text") or ""))
-        text = "".join(parts).strip()
-        if text:
-            return text
-    return str(message.get("raw_text") or "").strip()
-
-
-def _used_tool_names(tool_logs: Any) -> list[str]:
-    if not isinstance(tool_logs, list):
-        return []
-    names: list[str] = []
-    seen: set[str] = set()
-    for log in tool_logs:
-        if not isinstance(log, dict):
-            continue
-        name = str(log.get("tool_name") or "").strip()
-        if not name or name in seen:
-            continue
-        seen.add(name)
-        names.append(name)
-    return names
+    @staticmethod
+    def _judge_failure(reason: str) -> dict[str, Any]:
+        return {
+            "status": "error",
+            "used_ai_judge": False,
+            "used_visual_judge": False,
+            "confidence": 0.0,
+            "reason": reason,
+            "ordered_indexes": [],
+            "reject_reasons": {},
+        }
