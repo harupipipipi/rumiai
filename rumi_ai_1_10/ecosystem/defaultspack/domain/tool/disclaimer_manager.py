@@ -25,6 +25,11 @@ import time
 import uuid
 
 
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
+
+from blocks.chat._prompt_helpers import build_content_classifier_prompt
+
+
 # ======================================================================
 # デフォルトカテゴリ定義（初回起動時に永続化される）
 # ======================================================================
@@ -110,15 +115,10 @@ _DEFAULT_CATEGORIES = {
 # AI 分類用プロンプト
 # ======================================================================
 
-_AI_CLASSIFY_SYSTEM = (
-    "You are a content classifier for disclaimer detection. "
-    "Analyze the given text and determine if it contains advice or "
-    "information that requires a legal disclaimer in any of these categories.\n"
-    "Available categories will be provided as a JSON list.\n"
-    "Respond with ONLY a JSON object:\n"
-    '{"detected": ["category_name1", ...], "confidence": 0.0-1.0}\n'
-    "If no disclaimer-requiring content is found, respond:\n"
-    '{"detected": [], "confidence": 1.0}'
+_AI_CLASSIFY_SYSTEM = build_content_classifier_prompt(
+    list(_DEFAULT_CATEGORIES.keys()),
+    field_name="detected",
+    scope="disclaimer",
 )
 
 

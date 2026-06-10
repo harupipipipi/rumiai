@@ -30,10 +30,10 @@ def controller(tmp_path):
 
 
 def test_click_requires_approval_without_yolo(controller):
-    """click without yolo_mode or approval_token should require approval."""
+    """click without yolo_mode or a trusted approval token should require approval."""
     result = controller.run("computer.click", {"x": 50, "y": 50})
     assert result.get("requires_approval") is True
-    assert "approval_token" in result
+    assert "approval_token" not in result
 
 
 def test_click_executes_with_yolo(controller):
@@ -104,3 +104,36 @@ def test_drag_is_high_risk():
 def test_semantic_action_is_high_risk():
     assert risk_level("semantic_action") == "high"
     assert requires_approval("semantic_action") is True
+
+
+def test_semantic_action_function_routes_through_approval_router(monkeypatch):
+    """Standalone semantic function must not call ComputerSeatService directly."""
+    from rumi_ai_1_10.ecosystem.rumi_default_tools_pack.functions.computer_semantic_action import main
+
+    captured = {}
+
+    def fake_run_computer_action(action, payload, context, **kwargs):
+        captured["action"] = action
+        captured["payload"] = payload
+        captured["context"] = context
+        captured["kwargs"] = kwargs
+        return {"action": action, "requires_approval": True}
+
+    monkeypatch.setattr(main, "run_computer_action", fake_run_computer_action)
+
+    result = main.run(
+        {"conversation_id": "conv-1"},
+        {"app": "VictimApp", "intent": "press Delete", "element_id": "AX-DESTRUCTIVE-BUTTON"},
+    )
+
+    assert result["requires_approval"] is True
+    assert captured["action"] == "computer.semantic_action"
+    assert captured["payload"] == {
+        "app": "VictimApp",
+        "pid": None,
+        "window_id": None,
+        "intent": "press Delete",
+        "element_id": "AX-DESTRUCTIVE-BUTTON",
+    }
+    assert captured["kwargs"]["tool_name"] == "computer_semantic_action"
+    assert captured["kwargs"]["yolo_mode"] is False

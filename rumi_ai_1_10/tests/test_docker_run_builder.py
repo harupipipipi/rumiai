@@ -79,3 +79,9 @@ class TestBasicBehavior:
         assert "--cap-drop=ALL" in cmd
         assert "--read-only" in cmd
         assert "--security-opt=no-new-privileges:true" in cmd
+
+    def test_option_parsing_terminated_before_image(self) -> None:
+        """image 直前に -- を入れて docker run option injection を防ぐ。"""
+        cmd = DockerRunBuilder(name="test-container").image("--help").build()
+        image_index = cmd.index("--help")
+        assert cmd[image_index - 1] == "--"

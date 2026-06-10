@@ -2,7 +2,7 @@
 //!
 //! Flow:
 //! 1. Ensure `uv` binary is available  (bundled → downloaded)
-//! 2. `uv python install 3.13`         (into a temp dir, then rename)
+//! 2. `uv python install 3.13.13`      (into a temp dir, then rename)
 //! 3. `uv venv`                         (create virtual-environment)
 //! 4. `uv pip install -r requirements.txt`
 //!
@@ -18,6 +18,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{bail, Context, Result};
 use flate2::read::GzDecoder;
 use log::{info, warn};
+use sha2::{Digest, Sha256};
 
 use crate::config::{platform_triple, AppConfig};
 use crate::process_utils;
@@ -26,9 +27,12 @@ use crate::process_utils;
 // Constants
 // ---------------------------------------------------------------------------
 
-/// Pinned CPython minor version.  `uv python install` resolves the latest
-/// patch release automatically, so we never hard-code a patch number.
+/// Pinned CPython patch version. Avoid resolving a mutable latest patch at startup.
+const PYTHON_VERSION: &str = "3.13.13";
 const PYTHON_MINOR: &str = "3.13";
+
+/// Pinned uv release and per-platform archive digests.
+const UV_VERSION: &str = "0.11.19";
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -38,7 +42,7 @@ const PYTHON_MINOR: &str = "3.13";
 ///
 /// Steps (each is idempotent):
 /// 1. Ensure uv binary        → bundled or downloaded
-/// 2. uv python install 3.13  → `config.python_dir`
+/// 2. uv python install 3.13.13 → `config.python_dir`
 /// 3. uv venv                 → `config.venv_dir`
 /// 4. uv pip install           → into the venv
 pub fn ensure_python_env(config: &AppConfig) -> Result<()> {
@@ -54,19 +58,52 @@ pub fn ensure_python_env(config: &AppConfig) -> Result<()> {
 // ---------------------------------------------------------------------------
 
 fn ensure_uv(config: &AppConfig) -> Result<()> {
-    let uv = config.resolved_uv_path();
-    if uv.exists() {
-        info!("uv already present at {}", uv.display());
+    let bundled = config.bundled_uv_path();
+    if bundled.exists() {
+        info!("bundled uv already present at {}", bundled.display());
         return Ok(());
     }
 
-    info!("Downloading uv ...");
+    if let Some(dev_bundled) = config.dev_bundled_uv_path() {
+        if dev_bundled.exists() {
+            info!(
+                "development bundled uv already present at {}",
+                dev_bundled.display()
+            );
+            return Ok(());
+        }
+    }
+
     let triple = platform_triple();
+    let expected_sha256 = uv_archive_sha256(triple)?;
+    let stamp_path = uv_stamp_path(&config.uv_path);
+    if config.uv_path.exists() && uv_stamp_matches(&stamp_path, triple, expected_sha256) {
+        info!(
+            "verified uv already present at {}",
+            config.uv_path.display()
+        );
+        return Ok(());
+    }
+
+    if config.uv_path.exists() {
+        warn!(
+            "uv at {} is missing the trusted {} stamp; replacing it",
+            config.uv_path.display(),
+            UV_VERSION
+        );
+        fs::remove_file(&config.uv_path)
+            .with_context(|| format!("failed to remove {}", config.uv_path.display()))?;
+        fs::remove_file(&stamp_path).ok();
+    }
+
+    info!("Downloading uv {UV_VERSION} ...");
     let url = uv_download_url(triple);
     info!("uv URL: {url}");
 
     let data = download_bytes(&url)?;
     info!("Downloaded {} bytes", data.len());
+    verify_sha256(&data, expected_sha256)
+        .with_context(|| format!("uv archive verification failed for {url}"))?;
 
     // Download destination is always the non-bundled location.
     let dest = &config.uv_path;
@@ -86,6 +123,9 @@ fn ensure_uv(config: &AppConfig) -> Result<()> {
         fs::set_permissions(dest, perms)?;
     }
 
+    fs::write(&stamp_path, uv_stamp_content(triple, expected_sha256))
+        .with_context(|| format!("failed to write {}", stamp_path.display()))?;
+
     info!("uv installed at {}", dest.display());
     Ok(())
 }
@@ -96,7 +136,55 @@ fn uv_download_url(triple: &str) -> String {
     } else {
         "tar.gz"
     };
-    format!("https://github.com/astral-sh/uv/releases/latest/download/uv-{triple}.{ext}")
+    format!("https://releases.astral.sh/github/uv/releases/download/{UV_VERSION}/uv-{triple}.{ext}")
+}
+
+fn uv_archive_sha256(triple: &str) -> Result<&'static str> {
+    match triple {
+        "aarch64-apple-darwin" => {
+            Ok("d8f59c38e8c4168ee468d423cd63184be12fa6995a4283d41ee1a14d003c9453")
+        }
+        "x86_64-apple-darwin" => {
+            Ok("1585f415cade9f061e7f00fe5b00030a79ccfac60c650242ce639ba946138d40")
+        }
+        "aarch64-pc-windows-msvc" => {
+            Ok("5592a990a9d9901fd0d23992d872f2ec3ca91b7bbd3d5f0bb5e6f42b851493d8")
+        }
+        "x86_64-pc-windows-msvc" => {
+            Ok("1665fc8e37b5d70a134820d6d7891747471a2ac8bc940ee7af0b69fd03b28d61")
+        }
+        "aarch64-unknown-linux-gnu" => {
+            Ok("83b13ab184a45b7d9a3b0e4b10eaebd50ad41e66cb16dcce8e60aa7be13ae399")
+        }
+        "x86_64-unknown-linux-gnu" => {
+            Ok("7035608168e106375b36d0c818d537a889c51a8625fe7f8f7cad5e62b947c368")
+        }
+        other => bail!("unsupported uv platform triple: {other}"),
+    }
+}
+
+fn uv_stamp_path(uv_path: &Path) -> PathBuf {
+    let mut stamp = uv_path.as_os_str().to_os_string();
+    stamp.push(".stamp");
+    PathBuf::from(stamp)
+}
+
+fn uv_stamp_content(triple: &str, sha256: &str) -> String {
+    format!("version={UV_VERSION}\ntriple={triple}\narchive_sha256={sha256}\n")
+}
+
+fn uv_stamp_matches(stamp_path: &Path, triple: &str, sha256: &str) -> bool {
+    fs::read_to_string(stamp_path)
+        .map(|content| content == uv_stamp_content(triple, sha256))
+        .unwrap_or(false)
+}
+
+fn verify_sha256(data: &[u8], expected_hex: &str) -> Result<()> {
+    let actual = format!("{:x}", Sha256::digest(data));
+    if actual != expected_hex {
+        bail!("sha256 mismatch: expected {expected_hex}, got {actual}");
+    }
+    Ok(())
 }
 
 /// Extract `uv` binary from a tar.gz archive (Unix).
@@ -179,7 +267,7 @@ fn ensure_python(config: &AppConfig) -> Result<()> {
         })?;
     }
 
-    info!("Installing Python {PYTHON_MINOR} via uv ...");
+    info!("Installing Python {PYTHON_VERSION} via uv ...");
     let uv = config.resolved_uv_path();
 
     // Install into a temporary directory under app_data_dir (writable),
@@ -194,7 +282,7 @@ fn ensure_python(config: &AppConfig) -> Result<()> {
         .args([
             "python",
             "install",
-            PYTHON_MINOR,
+            PYTHON_VERSION,
             "--install-dir",
             &tmp_dir.to_string_lossy(),
         ])
@@ -531,15 +619,73 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
-    fn uv_url_unix() {
+    fn uv_url_unix_is_version_pinned() {
         let url = uv_download_url("aarch64-apple-darwin");
-        assert!(url.contains("uv-aarch64-apple-darwin.tar.gz"));
+        assert_eq!(
+            url,
+            "https://releases.astral.sh/github/uv/releases/download/0.11.19/uv-aarch64-apple-darwin.tar.gz"
+        );
+        assert!(!url.contains("/latest/"));
     }
 
     #[test]
-    fn uv_url_windows() {
+    fn uv_url_windows_is_version_pinned() {
         let url = uv_download_url("x86_64-pc-windows-msvc");
-        assert!(url.contains("uv-x86_64-pc-windows-msvc.zip"));
+        assert_eq!(
+            url,
+            "https://releases.astral.sh/github/uv/releases/download/0.11.19/uv-x86_64-pc-windows-msvc.zip"
+        );
+        assert!(!url.contains("/latest/"));
+    }
+
+    #[test]
+    fn uv_archive_digest_is_pinned_for_supported_platform() {
+        assert_eq!(
+            uv_archive_sha256("x86_64-unknown-linux-gnu").unwrap(),
+            "7035608168e106375b36d0c818d537a889c51a8625fe7f8f7cad5e62b947c368"
+        );
+    }
+
+    #[test]
+    fn uv_stamp_requires_exact_version_triple_and_digest() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let stamp = std::env::temp_dir().join(format!("rumi_uv_stamp_{unique}"));
+        fs::write(
+            &stamp,
+            uv_stamp_content(
+                "x86_64-unknown-linux-gnu",
+                "7035608168e106375b36d0c818d537a889c51a8625fe7f8f7cad5e62b947c368",
+            ),
+        )
+        .unwrap();
+
+        assert!(uv_stamp_matches(
+            &stamp,
+            "x86_64-unknown-linux-gnu",
+            "7035608168e106375b36d0c818d537a889c51a8625fe7f8f7cad5e62b947c368"
+        ));
+        assert!(!uv_stamp_matches(
+            &stamp,
+            "aarch64-unknown-linux-gnu",
+            "7035608168e106375b36d0c818d537a889c51a8625fe7f8f7cad5e62b947c368"
+        ));
+        assert!(!uv_stamp_matches(
+            &stamp,
+            "x86_64-unknown-linux-gnu",
+            "83b13ab184a45b7d9a3b0e4b10eaebd50ad41e66cb16dcce8e60aa7be13ae399"
+        ));
+
+        fs::remove_file(stamp).ok();
+    }
+
+    #[test]
+    fn verify_sha256_rejects_mismatches() {
+        let digest = format!("{:x}", Sha256::digest(b"trusted"));
+        verify_sha256(b"trusted", &digest).unwrap();
+        assert!(verify_sha256(b"tampered", &digest).is_err());
     }
 
     #[test]
