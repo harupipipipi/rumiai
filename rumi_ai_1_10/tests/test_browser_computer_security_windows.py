@@ -314,6 +314,19 @@ def test_windows_sendkeys_escapes_literals_and_supports_modifiers():
     assert BrowserComputerController._windows_send_key("alt+back") == "%{LEFT}"
 
 
+def test_windows_key_action_escapes_powershell_string_literals(tmp_path, monkeypatch):
+    controller = _controller(tmp_path)
+    scripts = []
+    monkeypatch.setattr(controller, "_run_powershell", scripts.append)
+
+    controller._windows_desktop_action("computer.key", {"key": "'); Start-Process calc; #"})
+
+    assert len(scripts) == 1
+    assert "$key = '{''); START-PROCESS CALC; #}'" in scripts[0]
+    assert "$key = '{'); START-PROCESS CALC; #}'" not in scripts[0]
+    assert "SendWait($key)" in scripts[0]
+
+
 def test_windows_drag_steps_and_scrolls_at_point(tmp_path, monkeypatch):
     controller = _controller(tmp_path)
     scripts = []
