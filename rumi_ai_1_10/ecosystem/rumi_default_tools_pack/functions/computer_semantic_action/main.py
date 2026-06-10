@@ -4,34 +4,37 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from domain.computer import ComputerSeatService, create_default_computer_seat_service
-
-_service: ComputerSeatService | None = None
-
-
-def _get_service() -> ComputerSeatService:
-    global _service
-    if _service is None:
-        _service = create_default_computer_seat_service()
-    return _service
+from functions._tool_common import RUMI_ROOT  # noqa: F401 - imported for sys.path setup
+from domain.host_bridge.computer_router import run_computer_action
 
 
 def run(context, args):
-    try:
-        svc = _get_service()
-        a = args or {}
-        target = {
-            "app": a.get("app"),
-            "pid": a.get("pid"),
-            "window_id": a.get("window_id"),
-        }
-        element_or_point = None
-        if a.get("element_id"):
-            element_or_point = {"id": a["element_id"]}
-        elif a.get("point"):
-            element_or_point = tuple(a["point"])
-        return svc.semantic_action(
-            target, intent=a.get("intent", ""), element_or_point=element_or_point
-        )
-    except Exception as e:
-        return {"action": "computer.semantic_action", "error": str(e)}
+    """Run semantic desktop actions through the approval-aware computer router."""
+    a = args or {}
+    payload = {
+        "app": a.get("app"),
+        "pid": a.get("pid"),
+        "window_id": a.get("window_id"),
+        "intent": a.get("intent", ""),
+    }
+    if a.get("element_id"):
+        payload["element_id"] = a["element_id"]
+    elif a.get("point"):
+        payload["point"] = a["point"]
+    if a.get("approval_token"):
+        payload["approval_token"] = a["approval_token"]
+
+    return run_computer_action(
+        "computer.semantic_action",
+        payload,
+        context if isinstance(context, dict) else None,
+        tool_name="computer_semantic_action",
+        tool_arguments=dict(a),
+        yolo_mode=_truthy(context.get("yolo_mode")) if isinstance(context, dict) else False,
+    )
+
+
+def _truthy(value):
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+    return bool(value)
