@@ -36,7 +36,7 @@ input_data["conversation_id"] = path_params.get("id", "")
 
 由`_build_context()`为每个传输生成的基字段。每次通话时都必须在场。
 
-|领域|类型 |描述 |
+|领域 |类型 |描述 |
 |---|---|---|
 | §鲁米§0§| §鲁米§1§ |执行流程标识符。直接调用时，`"transport_direct"` (HTTP)、`"stdio_direct"` (stdio) 或`"uds_direct"` (UDS) |
 | §鲁米§0§| §鲁米§1§ |步骤的标识符。直接调用时，`"http_request"` (HTTP)、`"stdio_request"` (stdio) 或`"uds_request"` (UDS) |
@@ -49,7 +49,7 @@ input_data["conversation_id"] = path_params.get("id", "")
 
 当通过 Flow 引擎或通过 `call_handler` 调用处理程序时，内核会将以下附加字段注入到上下文中： 直接调用传输时这些字段不存在（处理程序必须使用 `context.get()` 安全地检索它们）。
 
-|领域|类型 |描述 |
+|领域 |类型 |描述 |
 |---|---|---|
 | §鲁米§0§| §鲁米§1§ |调用其他处理程序的函数。 `call_handler(handler_name: str, input_data: dict) -> dict` 的签名。通过内核的 InterfaceRegistry 解析处理程序名称并调用目标`run()` |
 | §鲁米§0§| §鲁米§1§ |触发事件的函数。 `emit_event(event_type: str, data: dict) -> None` 的签名。发送事件到内核的EventBus |

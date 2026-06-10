@@ -19,7 +19,16 @@ The control panel frontend source is owned by `rumi_viewer/frontend`, and the ke
 Run the following in the repo root:
 
 ```bash
-cd rumi_viewer/src-tauri
+cd rumi_viewer/frontend
+npm install
+cd ..
+cargo tauri dev
+```
+
+From the second time onwards, if you have `rumi_viewer/frontend/node_modules` left, you can start it by simply doing the following:
+
+```bash
+cd rumi_viewer
 cargo tauri dev
 ```
 
@@ -40,7 +49,7 @@ During development startup, the viewer automatically does the following:
 Example:
 
 ```bash
-cd rumi_viewer/src-tauri
+cd rumi_viewer
 RUMI_AUTO_APPROVE_LOCAL=true cargo tauri dev
 ```
 
@@ -59,8 +68,9 @@ In a normal development launch without this opt-in, the modified pack remains pe
 - The frontend source is on the viewer side, but the delivery route is still the kernel's `/panel/`
 - `defaultspack` itself is loaded as a component from the kernel
 - Independent HTTP frontend for `defaultspack` is `DEFAULTS_HTTP_PORT` default value `8766` but is separate from the viewer's initial conduit
-- The viewer first looks at `rumi_home/user_data/packs/defaultspack/current.json` and also looks at `app_data_dir/user_data/packs/defaultspack/current.json` for migration compatibility
-- Therefore, if the setup/updated `Defaultspack v2` is switched as a managed pack, you can open the entity from the viewer.
+- When starting development (`cargo tauri dev`), `rumi_ai_1_10/ecosystem/defaultspack/` included in the repo will be opened first.
+- Distribution/bundle launches see `rumi_home/user_data/packs/defaultspack/current.json` and also refer to `app_data_dir/user_data/packs/defaultspack/current.json` for migration compatibility
+- Therefore, if the setup/updated `Defaultspack v2` is switched to a managed pack, you can open the entity from the distributed viewer.
 
 ## Common clogs
 

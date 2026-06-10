@@ -80,6 +80,7 @@ rumiai 자체는 도메인 지식이 없는 범용 커널입니다. Defaults는 
 | 기능/프로필/사전 설정을 사용하고 싶습니다 | §루미§0§, §루미§1§, §루미§2§ |
 | 프론트엔드의 다음 작업을 보고 싶어요 | §루미§0§ |
 | 브라우저에 반환된 실제 파일의 위치를 ​​보고 싶습니다 | §루미§0§ |
+| 브라우저 도우미 확장 프로그램을 보고 싶습니다 | §루미§0§ |
 | HTTP 엔드포인트를 보고 싶습니다 | §루미§0§, §루미§1§ |
 | 뷰어를 통해 스타트업 흐름을 알고 싶어요 | §루미§0§ |
 
@@ -96,6 +97,9 @@ defaultspack에는 Codex, Claude Code, ChatGPT 프로젝트, Manus, Genspark 및
 - 기본 로컬 프로필은 `profiles/local_agent.profile.yaml`입니다.
 
 로드맵의 경우 `docs/local_agent_implementation_plan.md`로 시작하고 오른쪽 사이드바/위젯 경험의 경우 `docs/ui_agent_experience_design.md`로 시작하세요.
+
+Genspark, Manus, Cline, Hermes에 대한 설치/온보딩 패리티 검사를 위해
+및 OpenClaw, `docs/competitive_agent_install_eval.md` 참조.
 
 ## 제공되지 않는 기본값
 
@@ -834,7 +838,7 @@ user_data/
 
 ## 문서 목록
 
-| 파일 | 사이즈 | 목차 |
+| 파일 | 사이즈 | 내용 |
 |---------|--------|------|
 | §루미§0§ | - | defaultspack 문서 입구 |
 | §루미§0§ | - | PR97의 전체 그림 및 주요 흐름도 |

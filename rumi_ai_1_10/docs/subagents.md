@@ -6,6 +6,16 @@
 
 Rumi no longer treats "subagent" as a primary architecture concept.
 
+For user-facing wording, prefer:
+
+- `team workspace` for the long-running multi-agent workspace surface
+- `team` for the cooperating set of agents inside that workspace
+- `delegation` for sending bounded work to another agent
+- `specialist` or `delegated agent` for a narrowly scoped worker role
+
+`company` and `subagent` remain compatibility/internal names where older APIs,
+routes, stored identifiers, or docs still use them.
+
 The canonical runtime contract is:
 
 - `chat.message`: normal conversation input
@@ -16,8 +26,8 @@ The canonical runtime contract is:
 - `model.switch`: persistent conversation model change
 - `model.route`: turn-scoped routing override
 
-`subagent` remains as a compatibility name and user-facing alias for older routes,
-functions, tools, labels, and docs that still refer to delegated work.
+`subagent` remains as a compatibility name and user-facing alias for older
+routes, functions, tools, labels, and docs that still refer to delegated work.
 
 ## Current Boundary
 
@@ -43,6 +53,10 @@ In practice that means:
 
 - utility-role compatibility calls route through shared `model.call`-style utility routing
 - task-like compatibility calls route through the common input dispatcher as `agent.delegate`
+
+Where older docs say `company workspace`, read that as today's `team workspace`
+unless the text is specifically describing a compatibility API or stored runtime
+identifier.
 
 ## Policy and Approval
 

@@ -14,6 +14,10 @@ RumiInputEnvelope
   -> delivery.action_id handler
 ```
 
+In this document, `delegation` is the preferred user-facing term for sending
+work to another agent. `subagent` survives only as compatibility wording in
+older call sites and payloads.
+
 ## Envelope shape
 
 Every inbound turn is normalized into `RumiInputEnvelope`.
@@ -34,7 +38,8 @@ Every inbound turn is normalized into `RumiInputEnvelope`.
 - `chat.message`: normal user message flow
 - `run.instruction`: enqueue a runtime steer/instruction
 - `run.interrupt`: urgent runtime instruction with room for future pause/cancel/redirect semantics
-- `agent.delegate`: start one delegated agent run from a structured payload
+- `agent.delegate`: start one delegated agent run from a structured payload; this
+  is the canonical action behind older subagent-style flows
 - `model.switch`: persist a conversation default model change
 - `model.route`: set a turn-scoped route override
 
@@ -45,5 +50,7 @@ falling through provider-specific logic.
 
 - Existing `submit_input(...)` callers still work.
 - Existing chat send behavior still routes through the same stores and blocks.
-- Legacy `subagent`-named call sites now use `agent.delegate` or
-  `model.call`-style utility routing internally.
+- Legacy `subagent`-named call sites still work, but they route to
+  `agent.delegate` or `model.call`-style utility routing internally.
+- Rendered prompts and system prompts remain downstream runtime details rather
+  than public `delivery.action_id` concepts.

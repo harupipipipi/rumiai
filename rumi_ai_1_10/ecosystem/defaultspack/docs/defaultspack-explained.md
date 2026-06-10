@@ -5,9 +5,22 @@
 # defaultspack Explained
 
 This document is the PR97 orientation map for defaultspack. It explains how the
-local-first UI, chat runtime, tools, MCP, skills, memory, scheduler, and trigger
-surfaces fit together without requiring the kernel to know any domain-specific
-behavior.
+local-first UI, chat runtime, tools, MCP, rules, skills, memory, scheduler, and
+trigger surfaces fit together without requiring the kernel to know any
+domain-specific behavior.
+
+## Terminology
+
+- `rule` means the always-on instruction layer that applies within a scope.
+- `skill` means a trigger-based or on-demand bundle of instructions and workflow
+  guidance.
+- `prompt` means either a source asset or the rendered model text assembled for
+  a run.
+- `system prompt` is the lower-level API/runtime term for the system-role slice
+  of that rendered prompt.
+- `delegation` is the canonical action for sending work to another agent.
+  `subagent` may still appear in compatibility fields or older docs, but it is
+  not the preferred architecture term.
 
 ## Big Picture
 
@@ -38,7 +51,8 @@ flowchart LR
 
 The important boundary is that content remains removable. defaultspack supplies
 the infrastructure and defaults; user_data and other packs can replace UI
-assets, prompts, tools, agents, schedules, memory files, and skill definitions.
+assets, rules, prompt assets, tools, agents, schedules, memory files, and skill
+definitions.
 
 ## UI And Chat Flow
 
@@ -56,10 +70,10 @@ sequenceDiagram
   participant ToolBroker as tool broker
   participant Store as user_data/chat
 
-  User->>Webapp: type prompt / attach files / pick tools
+  User->>Webapp: type message / attach files / pick tools
   Webapp->>ChatAPI: create or stream message
   ChatAPI->>ChatDomain: persist user message
-  ChatAPI->>ModelRoute: choose model + build prompt
+  ChatAPI->>ModelRoute: choose model + render runtime prompt
   ModelRoute->>ToolBroker: expose selected tools
   ToolBroker-->>Webapp: streamed tool activity events
   ModelRoute-->>ChatAPI: assistant deltas / final message
@@ -110,9 +124,10 @@ The proof lives in structured runtime evidence that the model cannot fake by
 typing similar text.
 
 Assistant message text is never proof that a tool, MCP server, skill, trigger,
-or dropped chat context actually ran. Treat prose such as "I used the tool" as
-display text only; pass/fail decisions must read structured records produced by
-the runtime or visible UI state observed by Browser/Playwright.
+delegation, or dropped chat context actually ran. Treat prose such as "I used
+the tool" as display text only; pass/fail decisions must read structured
+records produced by the runtime or visible UI state observed by
+Browser/Playwright.
 
 | Claim | Evidence to check |
 |---|---|
@@ -133,11 +148,11 @@ tests that mock `/api/...` should be named as mocked UI coverage and kept
 separate from live MCP evidence tests, which must create any server, approval,
 permission, and nonce state inside the test.
 
-## Skills And Extensions
+## Rules, Skills, And Extensions
 
-Skills are packaged behavior and instructions that help agents or tools perform
-specialized workflows. defaultspack treats them as extension content rather
-than hardcoded runtime knowledge.
+Rules provide the always-on instruction layer. Skills provide targeted
+instruction and workflow bundles that activate when relevant. defaultspack
+treats both as extension content rather than hardcoded runtime knowledge.
 
 ```mermaid
 flowchart LR
@@ -153,9 +168,9 @@ flowchart LR
   Registry --> Agent
 ```
 
-The same extension path can add commands, panels, tool metadata, prompts, or
-agent capabilities. The UI receives those as catalog data and renders them in
-the sidebar or composer without needing pack-specific code.
+The same extension path can add commands, panels, tool metadata, rules, prompt
+assets, or agent capabilities. The UI receives those as catalog data and
+renders them in the sidebar or composer without needing pack-specific code.
 
 ## Memory Flow
 
@@ -221,10 +236,11 @@ and audit records.
 
 | Surface | Example | Default path |
 |---|---|---|
-| UI chat | User sends a composer prompt | `/api/chat/conversations/{id}/stream` |
+| UI chat | User sends a composer message | `/api/chat/conversations/{id}/stream` |
 | UI action | Sidebar action previews a result | `/api/ui/catalog` plus action endpoint |
 | Tool call | Model invokes a native or MCP tool | `defaults.tool.invoke` |
 | MCP | Server exposes external tools | `domain/tool/mcp_client.py` |
+| Rule | Always-on instruction layer is applied for a run | prompt assembly and runtime policy layers |
 | Skill | Pack contributes workflow behavior | `domain/extensions/*` |
 | Memory | Prompt builder recalls context | `domain/memory*` |
 | Scheduler | Job fires on time or demand | `/api/agent/schedules` |

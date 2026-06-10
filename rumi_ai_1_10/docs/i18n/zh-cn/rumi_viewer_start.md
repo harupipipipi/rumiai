@@ -19,7 +19,16 @@
 在存储库根目录中运行以下命令：
 
 ```bash
-cd rumi_viewer/src-tauri
+cd rumi_viewer/frontend
+npm install
+cd ..
+cargo tauri dev
+```
+
+从第二次开始，如果您还剩下`rumi_viewer/frontend/node_modules`，您可以通过简单地执行以下操作来启动它：
+
+```bash
+cd rumi_viewer
 cargo tauri dev
 ```
 
@@ -40,7 +49,7 @@ cargo tauri dev
 示例：
 
 ```bash
-cd rumi_viewer/src-tauri
+cd rumi_viewer
 RUMI_AUTO_APPROVE_LOCAL=true cargo tauri dev
 ```
 
@@ -59,8 +68,9 @@ RUMI_AUTO_APPROVE_LOCAL=true cargo tauri dev
 - 前端源位于查看器端，但传递路线仍然是内核的`/panel/`
 - `defaultspack`本身作为组件从内核加载
 - `defaultspack` 的独立 HTTP 前端为 `DEFAULTS_HTTP_PORT` 默认值 `8766`，但与查看器的初始管道分开
-- 观看者首先查看`rumi_home/user_data/packs/defaultspack/current.json`，还查看`app_data_dir/user_data/packs/defaultspack/current.json`以了解迁移兼容性
-- 因此，如果安装/更新的`Defaultspack v2`被切换为托管包，您可以从查看器打开该实体。
+- 开始开发时（`cargo tauri dev`），存储库中包含的`rumi_ai_1_10/ecosystem/defaultspack/`将首先打开。
+- 发行版/捆绑包发布请参阅`rumi_home/user_data/packs/defaultspack/current.json`，另请参阅`app_data_dir/user_data/packs/defaultspack/current.json`以了解迁移兼容性
+- 因此，如果安装/更新的`Defaultspack v2`切换到托管包，您可以从分布式查看器打开该实体。
 
 ## 常见木鞋
 

@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import type { ChatMessage } from "./api";
-import { toolPreviewsFromMessages } from "./toolPreviews";
+import { isHumanOperatorCanvasPreview, toolPreviewsFromMessages } from "./toolPreviews";
 
 const PNG_DATA_URL = "data:image/png;base64,iVBORw0KGgo=";
 
@@ -224,4 +224,26 @@ test("tool previews dedupe normalized localhost urls", () => {
   if (previews[0]?.data.type === "web") {
     assert.equal(previews[0].data.url, "http://localhost:5173/app");
   }
+});
+
+test("human operator canvas previews are detected from local session routes", () => {
+  const previews = toolPreviewsFromMessages([
+    assistantMessage({
+      tool_logs: [
+        {
+          tool_name: "human_operator_canvas_open",
+          tool_call_id: "call_human_operator",
+          result: {
+            status: "ok",
+            data: {
+              local_url: "http://127.0.0.1:8766/api/human-operator/conversations/c1/sessions/humanop_test",
+            },
+          },
+        },
+      ],
+    }),
+  ]);
+
+  assert.equal(previews.length, 1);
+  assert.equal(isHumanOperatorCanvasPreview(previews[0]), true);
 });

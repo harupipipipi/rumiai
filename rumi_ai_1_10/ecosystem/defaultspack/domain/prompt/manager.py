@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 import uuid
 from pathlib import Path
@@ -40,6 +41,7 @@ from .template import PromptTemplate
 # 永続化ディレクトリ
 # ---------------------------------------------------------------------------
 _PROMPTS_DIR: str | None = None
+_PROMPT_ID_SAFE_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
 
 def _get_prompts_dir() -> str:
@@ -133,6 +135,24 @@ class PromptManager:
         if os.path.isfile(fpath):
             os.remove(fpath)
 
+    def _canonical_prompt_path(self, prompt_id: str) -> Path | None:
+        """Locate the canonical in-pack prompt file for a given prompt_id.
+
+        Used as a fallback when an extension override does not ship a body, so
+        we don't have to keep a duplicate prompt.md in extensions/prompts/<id>/.
+        """
+        if not prompt_id or not _PROMPT_ID_SAFE_RE.match(prompt_id):
+            return None
+        base = Path(os.path.dirname(os.path.realpath(__file__)))
+        candidates = [
+            base.parent / "prompts" / prompt_id / "prompt.md",
+            base.parent / "prompts" / (prompt_id + ".system.md"),
+        ]
+        for candidate in candidates:
+            if candidate.is_file():
+                return candidate
+        return None
+
     def _extension_prompts(self) -> dict[str, dict]:
         prompts: dict[str, dict] = {}
         try:
@@ -147,8 +167,14 @@ class PromptManager:
                 ).strip() or "prompt.md"
                 prompt_path = extensions_root / "prompts" / prompt_id / template_file
                 body = ""
+                source = "extension"
                 if prompt_path.is_file():
-                    body = prompt_path.read_text(encoding="utf-8")
+                    body = prompt_path.read_text(encoding="utf-8").strip()
+                if not body:
+                    canonical = self._canonical_prompt_path(prompt_id)
+                    if canonical is not None:
+                        body = canonical.read_text(encoding="utf-8").strip()
+                        source = "canonical_fallback"
                 prompts[prompt_id] = {
                     "id": prompt_id,
                     "name": prompt_id,
@@ -157,7 +183,7 @@ class PromptManager:
                     "description": str(manifest.get("description", "")),
                     "variables": list((manifest.get("config", {}) or {}).get("variables", [])),
                     "metadata": {
-                        "source": "extension",
+                        "source": source,
                         "manifest_path": manifest.get("source_path", ""),
                     },
                     "created_at": "",

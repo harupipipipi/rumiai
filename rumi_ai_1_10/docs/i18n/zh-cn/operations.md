@@ -114,7 +114,7 @@ python app.py --validate
 
 |模式|码头工人 |行为 |
 |--------|--------|------|
-| `strict`（默认）|必填|如果 Docker 不可用则拒绝执行 |
+| `strict`（默认）|必填 |如果 Docker 不可用则拒绝执行 |
 | §鲁米§0§|不需要|允许主机执行但带有警告 |
 
 ```bash
@@ -473,7 +473,7 @@ curl -X POST http://localhost:8765/api/capability/grants/batch \
   }'
 ```
 
-|参数|必填|描述 |
+|参数|必填 |描述 |
 |-----------|------|------|
 | §鲁米§0§| ✅ | Grant 对象数组（最多 50 个）|
 | §鲁米§0§| ✅ |目标包 ID |
@@ -699,7 +699,7 @@ curl -X POST http://localhost:8765/api/stores/shared/approve \
   }'
 ```
 
-|参数|必填|描述 |
+|参数|必填 |描述 |
 |-----------|------|------|
 | §鲁米§0§| ✅ |分享店铺ID |
 | §鲁米§0§| ✅ |商店自有包 ID |
@@ -733,7 +733,7 @@ curl -X POST http://localhost:8765/api/stores/shared/revoke \
   }'
 ```
 
-|参数|必填|描述 |
+|参数|必填 |描述 |
 |-----------|------|------|
 | §鲁米§0§| ✅ |目标商店 ID |
 | §鲁米§0§| ✅ |商店自有包 ID |
@@ -887,7 +887,7 @@ curl -X POST http://localhost:8765/api/privileges/{pack_id}/grant/{privilege_id}
   -H "Content-Type: application/json"
 ```
 
-|参数|必填|描述 |
+|参数|必填 |描述 |
 |-----------|------|------|
 | `pack_id`（路径参数）| ✅ |目标包 ID |
 | `privilege_id`（路径参数）| ✅ |授予权限ID |
@@ -914,7 +914,7 @@ curl -X POST http://localhost:8765/api/privileges/{pack_id}/execute/{privilege_i
   -d '{"args": {"target_pack": "my_pack", "staging_id": "abc123"}}'
 ```
 
-|参数|必填|描述 |
+|参数|必填 |描述 |
 |-----------|------|------|
 | `pack_id`（路径参数）| ✅ |执行源包ID |
 | `privilege_id`（路径参数）| ✅ |要执行的权限 ID |
@@ -944,7 +944,7 @@ curl -X POST http://localhost:8765/api/privileges/{pack_id}/execute/{privilege_i
 
 ### 环境变量
 
-|环境变量|描述 |默认|
+|环境变量|描述 |默认 |
 |----------|------|-----------|
 | §鲁米§0§|出口套接字 GID |无 |
 | §鲁米§0§|功能套接字 GID |无 |
@@ -1055,7 +1055,7 @@ python app.py
 
 ### 环境变量
 
-|环境变量|描述 |默认|
+|环境变量|描述 |默认 |
 |----------|------|-----------|
 | §鲁米§0§|日志级别。调试/信息/警告/错误/严重| §鲁米§1§ |
 | §鲁米§0§|输出格式。 json/文本 | §鲁米§1§ |
@@ -1088,7 +1088,7 @@ python app.py --headless
 
 ### 环境变量
 
-|环境变量|描述 |默认|
+|环境变量|描述 |默认 |
 |----------|------|-----------|
 | §鲁米§0§|调用已弃用的 API 时的行为 | §鲁米§1§ |
 
@@ -1217,7 +1217,7 @@ python -m core_runtime.pack_scaffold my-pack --template full --output-dir ecosys
 
 控制 Rumi AI OS 行为的环境变量列表。
 
-|变量名 |默认|描述 |
+|变量名 |默认 |描述 |
 |--------|-----------|------|
 | §鲁米§0§| §鲁米§1§ |安全模式。 `strict`（需要 Docker）或 `permissive`（不需要 Docker，用于开发）|
 | §鲁米§0§| §鲁米§1§ |日志级别。 §鲁米§2§ / §鲁米§3§ / §鲁米§4§ / §鲁米§5§ / §鲁米§6§ |

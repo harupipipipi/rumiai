@@ -15,6 +15,7 @@
 |やりたいこと |最初に読むところ |どこまで理解できますか |
 |---|---|---|
 |文書を目的別に追跡したい | [`docs/README.md`](./docs/README.md) | 「やりたいこと→どのドキュメント」を1ページで辿れる |
+|用語の意味を揃えたい | [`docs/terminology.md`](./docs/terminology.md) | `rule`、`skill`、`team workspace`、`delegation`の使い方を確認できます。
 |まずは始めたい |ルート [`README.md`](../README.md) |最短の起動コマンドとリポジトリの入り口 |
 |まずは試してみたい | [`docs/tutorials/runtime-quickstart.md`](./docs/tutorials/runtime-quickstart.md) | `--health`から`/panel/`までの最短チュートリアル |
 |コードを読まずに実行時の仕組みを理解したい | [`docs/concepts/system-mechanism.md`](./docs/concepts/system-mechanism.md) |起動、フロー、承認、付与、閲覧者連携の実行パス |
@@ -22,13 +23,13 @@
 | defaultspack のフロントエンドを拡張したい | [`ecosystem/defaultspack/docs/frontend_extensions.md`](./ecosystem/defaultspack/docs/frontend_extensions.md) |右バー、設定、チャット レンダラー、プレビュー フィードを増やす方法 |
 |このランタイムのアイデアを知りたい |この README の `Thoughts` |フロー中心、パック前提、フェイルソフトのアイデア |
 |ディレクトリの役割を知りたい | `Project structure`の役割 |この README の `core_runtime/`、`ecosystem/`、`user_data/`
-|パックの作成/修復 | [`docs/pack-development.md`](../../docs/i18n/ja/pack-development.md) | `ecosystem.json`、`routes.json`、`permissions.json`、シークレットの使用 |
+|パックの作成/修復 | [`docs/pack-development.md`](./docs/pack-development.md) | `ecosystem.json`、`routes.json`、`permissions.json`、シークレットの使用 |
 | defaultspackのチャット・AIをフォローしたい | [`ecosystem/defaultspack/README.md`](./ecosystem/defaultspack/README.md) | defaultspack の実装側 |
 | defaultspack フロントエンドの今後の取り組みを見てみたいと思います | [`ecosystem/defaultspack/docs/frontend_todo.md`](./ecosystem/defaultspack/docs/frontend_todo.md) |レジストリの進捗状況と次の作業 |
-| APIキーとシークレットを設定したい | [`docs/operations.md`](../../docs/i18n/ja/operations.md)の秘密セクション | `user_data/secrets/` と API ルート |
+| APIキーとシークレットを設定したい | [`docs/operations.md`](./docs/operations.md)の秘密セクション | `user_data/secrets/` と API ルート |
 |ビューア経由でブートパスを修正したい | [`../rumi_viewer/src-tauri/src/config.rs`](../rumi_viewer/src-tauri/src/config.rs) および [`../rumi_viewer/src-tauri/src/kernel_manager.rs`](../rumi_viewer/src-tauri/src/kernel_manager.rs) |ビューアはどのカーネルを開始し、どの環境を渡す必要がありますか。
 |セットアップパック / 認証を確認したい | [`core_runtime/setup_pack.py`](./core_runtime/setup_pack.py) および [`core_runtime/approval_manager.py`](./core_runtime/approval_manager.py) |セットアップ パックの選択、オール OK 付与、再認証 |
-|運用や監査について知りたい | [`docs/operations.md`](../../docs/i18n/ja/operations.md) および [`docs/roadmap.md`](./docs/roadmap.md) |運用API、秘密、今後の方針 |
+|運用や監査について知りたい | [`docs/operations.md`](./docs/operations.md) および [`docs/roadmap.md`](./docs/roadmap.md) |運用API、秘密、今後の方針 |
 
 ## 最短のフロアプラン
 
@@ -378,12 +379,12 @@ curl -X POST http://localhost:8765/api/packs/{pack_id}/approve \
 
 |ドキュメント |目次 |
 |---|---|
-| [docs/architecture.md](../../docs/i18n/ja/architecture.md) |デザインと機構の全体像 |
-| [docs/pack-development.md](../../docs/i18n/ja/pack-development.md) |パック開発ガイド |
-| [docs/pack-development-guide.md](../../docs/i18n/ja/pack-development-guide.md) |パック開発のクイック スタート |
-| [docs/operations.md](../../docs/i18n/ja/operations.md) |操作ガイド |
+| [docs/architecture.md](./docs/architecture.md) |デザインと機構の全体像 |
+| [docs/pack-development.md](./docs/pack-development.md) |パック開発ガイド |
+| [docs/pack-development-guide.md](./docs/pack-development-guide.md) |パック開発のクイック スタート |
+| [docs/operations.md](./docs/operations.md) |操作ガイド |
 | [docs/roadmap.md](./docs/roadmap.md) |ロードマップ |
-| [docs/quality_pack/philosophy_memo.md](./docs/quality_pack/philosophy_memo.md) |開発上の意思決定に使用される思考メモ |
+| [docs/quality_pack/philosophy_memo.md](docs/quality_pack/philosophy_memo.md) |開発上の意思決定に使用される思考メモ |
 | [docs/quality_pack/claude_desktop_quality_pack.md](./docs/quality_pack/claude_desktop_quality_pack.md) |品質保証/監査/回帰検証パック |
 
 ---

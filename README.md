@@ -13,6 +13,7 @@ The repository keeps the runtime implementation under `rumi_ai_1_10/`, while `ru
 | What I want to do | Where to read first | Supplements |
 |---|---|---|
 | I want to follow the document by purpose | [`rumi_ai_1_10/docs/README.md`](./rumi_ai_1_10/docs/README.md) | We will guide you in the reading order starting from "what you want to do" |
+| I want to align the meanings of terms | [`rumi_ai_1_10/docs/terminology.md`](./rumi_ai_1_10/docs/terminology.md) | `rule`, `skill`, `team workspace`, `subagent` Organizing compatible names |
 | I want to start it anyway | `Start` of [`README.md`](./README.md) | Only the shortest startup command is listed |
 | I want to know the overall picture of runtime / kernel | [`rumi_ai_1_10/README.md`](./rumi_ai_1_10/README.md) | There is an explanation of the architecture and main directories |
 | I want to understand the mechanism without reading the code | [`rumi_ai_1_10/docs/concepts/system-mechanism.md`](./rumi_ai_1_10/docs/concepts/system-mechanism.md) | You can follow the flow of startup, flow, approval, and grant in text |
@@ -32,6 +33,7 @@ The repository keeps the runtime implementation under `rumi_ai_1_10/`, while `ru
 - `pack-shell/`: desktop pack launcher
 - `rumi_viewer/`: desktop shell and control panel frontend source
 - `rumi_mobile/`: Flutter iOS/Android app for trusted-LAN defaultspack access
+- `rumi_ai_1_10/ecosystem/defaultspack/browser_extensions/`: browser companion assets bundled with defaultspack
 
 ## Setup
 
@@ -97,12 +99,21 @@ python -m rumi_ai
 ### Viewer development
 
 ```bash
-cd rumi_viewer/src-tauri
+cd rumi_viewer/frontend
+npm install
+cd ..
+cargo tauri dev
+```
+
+From the second time onwards, if you have `rumi_viewer/frontend/node_modules` left, you can start it by simply doing the following:
+
+```bash
+cd rumi_viewer
 cargo tauri dev
 ```
 
 The development viewer automatically detects `rumi_ai_1_10/` in the repo and starts the kernel.
-After startup, proceed from `Open Defaultspack` of Home to `Defaultspack v2` UI selected by managed current pointer.
+`Open Defaultspack` opens with priority to `defaultspack` included in the repo when starting development.
 Please refer to [`rumi_ai_1_10/docs/rumi_viewer_start.md`](./rumi_ai_1_10/docs/rumi_viewer_start.md) for a guide including how to get stuck at startup.
 
 ## Development
@@ -134,6 +145,7 @@ python -m rumi_ai migrate-hmac
 - `pack-shell`: launches desktop packs and brokers token/bootstrap flow
 - `rumi_viewer`: viewer-side application shell and canonical panel frontend source
 - `rumi_mobile`: mobile remote client for the bearer-auth Kernel Pack API
+- `rumi_ai_1_10/ecosystem/defaultspack/browser_extensions/rumi_browser_companion`: unpacked Chromium extension for the defaultspack `browser_companion` tool
 
 For architecture and runtime details, see [rumi_ai_1_10/README.md](./rumi_ai_1_10/README.md).
 

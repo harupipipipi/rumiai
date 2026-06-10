@@ -26,7 +26,7 @@ def run(input_data: dict, context: dict) -> dict:
 
 **`context`** 是一个包含流信息和相关函数的字典。 `_build_context()` 或`transport/http.py` 构建具有以下字段的上下文。
 
-|领域|类型 |描述 |
+|领域 |类型 |描述 |
 |---|---|---|
 | §鲁米§0§| §鲁米§1§ |流ID。 `"transport_direct"` 用于直接 HTTP 调用 |
 | §鲁米§0§| §鲁米§1§ |步骤 ID。 `"http_request"` 用于直接 HTTP 调用 |
@@ -120,7 +120,7 @@ metadata:                       # メタデータ
 
 context 是传递给处理程序的执行上下文的字典。主要领域有：
 
-|领域|类型 |描述 |
+|领域 |类型 |描述 |
 |---|---|---|
 | §鲁米§0§| §鲁米§1§ |运行流ID。 `"transport_direct"` 直接致电 |
 | §鲁米§0§| §鲁米§1§ |当前步骤 ID。 `"http_request"` 直接致电 |

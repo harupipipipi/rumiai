@@ -18,7 +18,7 @@ GitHub Actions 的`release.yml` 触发标签推送以在 4 个平台上执行同
 |-----------------|---------|-----------|--------|
 | macOS ARM | macOS 最新 | aarch64-苹果-达尔文 | .dmg |
 | macOS 英特尔 | macos-15-英特尔 | x86_64-苹果-达尔文 | .dmg |
-|窗户 | Windows 最新 | x86_64-pc-windows-msvc | x86_64-pc-windows-msvc | x86_64-pc-windows-msvc .exe (NSIS) |
+|窗户| Windows 最新 | x86_64-pc-windows-msvc | x86_64-pc-windows-msvc | x86_64-pc-windows-msvc .exe (NSIS) |
 | Linux | ubuntu-最新 | x86_64-未知-linux-gnu | .deb、.AppImage |
 
 ---

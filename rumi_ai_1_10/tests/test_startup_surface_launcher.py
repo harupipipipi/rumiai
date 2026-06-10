@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from core_runtime.startup_surface_launcher import launch_pending_startup_profile_surface
 
 
@@ -23,6 +25,25 @@ class FakeDesktopHandler:
         return {"app": {"success": True, "status": "launched", "pid": 123}}
 
 
+class FakeGrantManager:
+    def __init__(self, *, allowed=True, config=None, reason="Granted"):
+        self.allowed = allowed
+        self.config = config
+        self.reason = reason
+        self.calls = []
+
+    def check(self, principal_id, permission_id):
+        self.calls.append((principal_id, permission_id))
+        config = self.config
+        if config is None:
+            config = {"allowed_packs": [principal_id]}
+        return SimpleNamespace(
+            allowed=self.allowed,
+            config=config,
+            reason=self.reason,
+        )
+
+
 def test_pending_non_desktop_profile_launches_browser_surface():
     active = FakeActive(
         {
@@ -37,6 +58,7 @@ def test_pending_non_desktop_profile_launches_browser_surface():
     result = launch_pending_startup_profile_surface(
         active_manager=active,
         desktop_handler=handler,
+        grant_manager=FakeGrantManager(),
     )
 
     assert result["launched"] is True
@@ -62,6 +84,7 @@ def test_pending_desktop_profile_launches_webview_surface():
     result = launch_pending_startup_profile_surface(
         active_manager=active,
         desktop_handler=handler,
+        grant_manager=FakeGrantManager(),
     )
 
     assert result["launched"] is True
@@ -91,6 +114,7 @@ def test_pending_profile_launches_graph_surface_target_pack():
     result = launch_pending_startup_profile_surface(
         active_manager=active,
         desktop_handler=handler,
+        grant_manager=FakeGrantManager(),
     )
 
     assert result["launched"] is True
@@ -121,6 +145,7 @@ def test_surface_launch_uses_runtime_port_from_env(monkeypatch):
     launch_pending_startup_profile_surface(
         active_manager=active,
         desktop_handler=handler,
+        grant_manager=FakeGrantManager(),
     )
 
     assert handler.calls[0]["grant_config"]["port"] == 8767
@@ -144,6 +169,7 @@ def test_surface_launch_invalid_runtime_port_falls_back(monkeypatch):
     launch_pending_startup_profile_surface(
         active_manager=active,
         desktop_handler=handler,
+        grant_manager=FakeGrantManager(),
     )
 
     assert handler.calls[0]["grant_config"]["port"] == 8765
@@ -155,6 +181,43 @@ def test_non_pending_surface_launch_is_noop():
     result = launch_pending_startup_profile_surface(
         active_manager=active,
         desktop_handler=FakeDesktopHandler(),
+        grant_manager=FakeGrantManager(),
     )
 
     assert result == {"launched": False, "reason": "not_pending"}
+
+
+def test_surface_launch_requires_desktop_execute_grant():
+    active = FakeActive(
+        {
+            "startup_surface_open_pending": True,
+            "startup_base_pack": "evilpack",
+            "startup_profile_id": "custom",
+            "startup_profile_surfaces": {"preferred": "browser", "enabled": ["browser"]},
+            "startup_surface_launch_target": {
+                "kind": "desktop_app",
+                "pack_id": "evilpack",
+                "principal_id": "evilpack",
+                "surface": "browser",
+            },
+        }
+    )
+    handler = FakeDesktopHandler()
+    grant_manager = FakeGrantManager(
+        allowed=False,
+        config={},
+        reason="No capability grant for principal 'evilpack'",
+    )
+
+    result = launch_pending_startup_profile_surface(
+        active_manager=active,
+        desktop_handler=handler,
+        grant_manager=grant_manager,
+    )
+
+    assert result["launched"] is False
+    assert result["reason"] == "desktop_app_execute_not_granted"
+    assert "desktop_app.execute" not in result.get("error", "")
+    assert handler.calls == []
+    assert grant_manager.calls == [("evilpack", "desktop_app.execute")]
+    assert active.metadata["startup_surface_open_pending"] is False

@@ -15,6 +15,7 @@
 |我想做什么|首先从哪里阅读 |我能明白多少|
 |---|---|---|
 |我想按目的追踪文档 | §鲁米§0§|我可以在一页上追踪“我想要做什么→哪个文档” |
+|我想调整术语的含义 | §鲁米§0§|我可以检查`rule`、`skill`、`team workspace`、`delegation`的用法 |
 |我想先开始|根 [`README.md`](../README.md) |最短的启动命令和repo入口|
 |我想先尝试一下| §鲁米§0§|从`--health`到`/panel/`的最短教程 |
 |想不看代码就了解运行时机制 | §鲁米§0§|启动、流程、审批、授权、观众协作的执行路径 |
@@ -25,10 +26,10 @@
 |创建/修复包 | §鲁米§0§| `ecosystem.json`、`routes.json`、`permissions.json`，使用秘密 |
 |我想关注defaultspack的聊天/ai | §鲁米§0§| defaultspack 的实现端 |
 |我想看看defaultspack前端的未来工作 | §鲁米§0§|登记进展及下一步工作|
-|我想设置 API 密钥和机密 | [`docs/operations.md`](../../docs/i18n/zh-cn/operations.md) 的秘密部分 | `user_data/secrets/`和API路线|
+|我想设置 API 密钥和机密 | [`docs/operations.md`](./docs/operations.md) 的秘密部分 | `user_data/secrets/`和API路线|
 |我想通过查看器修复启动路径 | [`../rumi_viewer/src-tauri/src/config.rs`](../rumi_viewer/src-tauri/src/config.rs) 和 [`../rumi_viewer/src-tauri/src/kernel_manager.rs`](../rumi_viewer/src-tauri/src/kernel_manager.rs) |查看器应该启动哪个内核以及它应该通过哪个环境 |
 |安装包/想查看授权| [`core_runtime/setup_pack.py`](./core_runtime/setup_pack.py) 和 [`core_runtime/approval_manager.py`](./core_runtime/approval_manager.py) |安装包选择、一切正常授予、重新授权 |
-|我想了解运营和审计 | [`docs/operations.md`](../../docs/i18n/zh-cn/operations.md) 和 [`docs/roadmap.md`](./docs/roadmap.md) |操作API、秘密、未来政策|
+|我想了解运营和审计 | [`docs/operations.md`](./docs/operations.md) 和 [`docs/roadmap.md`](./docs/roadmap.md) |操作API、秘密、未来政策|
 
 ## 最短平面图
 

@@ -80,6 +80,7 @@ Aiming for a level of quality that allows defaults alone to compete head-on with
 | I want to use capability/profile/preset | `capabilities/`, `profiles/local_agent.profile.yaml`, `presets/local_only_safe.preset.yaml` |
 | I want to see the next task of frontend | `docs/frontend_todo.md` |
 | I want to see the location of the actual file returned to the browser | `ui/` |
+| I want to see the Browser Companion extension | `browser_extensions/rumi_browser_companion/` |
 | I want to see the HTTP endpoint | `docs/chat.md`, `transport/http.py` |
 | I want to know the startup flow via viewer | `../../docs/rumi_viewer_start.md` |
 
@@ -96,6 +97,9 @@ defaultspack includes local-first building blocks inspired by Codex, Claude Code
 - The default local profile is `profiles/local_agent.profile.yaml`.
 
 Start with `docs/local_agent_implementation_plan.md` for the roadmap and `docs/ui_agent_experience_design.md` for the right-sidebar/widget experience.
+
+For install/onboarding parity checks against Genspark, Manus, Cline, Hermes,
+and OpenClaw, see `docs/competitive_agent_install_eval.md`.
 
 ## What defaults don't provide
 

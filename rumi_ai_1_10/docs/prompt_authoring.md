@@ -4,9 +4,16 @@
 
 # Prompt Authoring
 
-Prompts are passive text resources. They describe behavior for an AI request, but
-they do not select models, discover tools, grant permissions, call providers, or
-mutate runtime state on their own.
+In Rumi's product vocabulary, prefer `rule` for always-loaded instructions and
+`skill` for triggered or on-demand instruction/workflow bundles.
+
+`prompt` is the lower-level runtime term for the raw model input text assembled
+at execution time. `system prompt` is the transport/API form of system-role
+prompt text, not the main user-facing concept.
+
+Prompts are passive text resources. They describe behavior for an AI request,
+but they do not select models, discover tools, grant permissions, call
+providers, or mutate runtime state on their own.
 
 Each prompt needs a stable prompt id, content, owner pack or profile, and
 lint/compaction expectations.
@@ -32,3 +39,7 @@ Do not author tools with `execution.type="prompt"`. Prompts remain passive; use
 
 Prompt linting should flag redundancy, missing role context, and token budget
 risk. Compaction must preserve safety, permission, and tool-use constraints.
+
+When writing docs or UI copy, explain authored behavior in terms of `rules` and
+`skills`, and explain `prompt` or `system prompt` only when discussing runtime
+assembly, provider payloads, or debugging.

@@ -44,6 +44,8 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+TRUSTED_BUILTIN_PACK_IDS = {"defaultspack", "rumi_default_tools_pack"}
+
 # PC-4: function_id validation regex (compiled once at module level)
 _FUNC_ID_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 
@@ -339,6 +341,19 @@ class Registry:
             )
             _pi = f"local:{_pid}"
             ecosystem_data["pack_identity"] = _pi
+
+        # Built-in pack IDs are reserved for the shipped directories.  A
+        # user-installed pack can otherwise sort before the bundled copy,
+        # declare pack_id=defaultspack, and inherit first-party trust.
+        if _pid in TRUSTED_BUILTIN_PACK_IDS and pack_dir.name != _pid:
+            logger.warning(
+                "[Registry] Rejecting pack at '%s': reserved built-in pack_id '%s' "
+                "does not match directory name '%s'.",
+                pack_dir,
+                _pid,
+                pack_dir.name,
+            )
+            return None
         # END D-PATCH -------------------------------------------------------
 
         # UUIDを生成（または既存の値を使用）

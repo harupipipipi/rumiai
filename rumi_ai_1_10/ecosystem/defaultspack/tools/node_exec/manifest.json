@@ -1,10 +1,10 @@
 {
   "id": "node_exec",
-  "description": "Execute approved Node.js code/script inside the artifact workspace.",
+  "description": "Execute approved Node.js code/script in an isolated Docker container with only the artifact workspace mounted.",
   "config": {
     "tool_id": "node_exec",
     "name": "Node Exec",
-    "summary": "Execute approved Node.js code/script inside the artifact workspace.",
+    "summary": "Execute approved Node.js code/script in an isolated Docker container with only the artifact workspace mounted.",
     "tool_category": "sandbox",
     "action_type": "execute",
     "write_action": true,
@@ -22,7 +22,7 @@
       "item_icon": "terminal",
       "widget_kind": "tool_toggle",
       "composer_label": "Node Exec",
-      "composer_description": "Execute approved Node.js code/script inside the artifact workspace.",
+      "composer_description": "Execute approved Node.js code/script in an isolated Docker container with only the artifact workspace mounted.",
       "composer_icon": "terminal"
     },
     "schema": {

@@ -53,7 +53,7 @@ Rumi AI OS的capability_executor.py实现了两个calling_conventions：`binary`
 
 ### 运行时字段
 
-|领域|类型 |描述 |
+|领域 |类型 |描述 |
 |-----------|-----|------|
 |类型 |字符串| §鲁米§0§ / §鲁米§1§ / §鲁米§2§ |
 |构建命令 |字符串|构建命令 |
@@ -86,7 +86,7 @@ Rumi AI OS的capability_executor.py实现了两个calling_conventions：`binary`
 
 #### 上下文字段
 
-|领域|类型 |描述 |
+|领域 |类型 |描述 |
 |-----------|-----|------|
 |主体 ID |字符串|发出请求的主体 ID（来自 UDS）|
 |包ID |字符串|执行的Function所属Pack ID |

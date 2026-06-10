@@ -80,6 +80,7 @@ rumiai 自体は汎用カーネルであり、ドメインの知識はありま�
 |機能/プロファイル/プリセットを使用したい | `capabilities/`、`profiles/local_agent.profile.yaml`、`presets/local_only_safe.preset.yaml` |
 |フロントエンドの次のタスクを見たい | `docs/frontend_todo.md` |
 |ブラウザに返された実際のファイルの場所を確認したい | `ui/` |
+|ブラウザ コンパニオン拡張機能を確認したい | `browser_extensions/rumi_browser_companion/` |
 | HTTP エンドポイントを確認したい | `docs/chat.md`、`transport/http.py` |
 |ビューアによる起動の流れを知りたい | `../../docs/rumi_viewer_start.md` |
 
@@ -96,6 +97,9 @@ defaultspack には、Codex、Claude Code、ChatGPT Projects、Manus、Genspark�
 - デフォルトのローカル プロファイルは `profiles/local_agent.profile.yaml` です。
 
 ロードマップについては `docs/local_agent_implementation_plan.md` から、右側のサイドバー/ウィジェット エクスペリエンスについては `docs/ui_agent_experience_design.md` から始めてください。
+
+Genspark、Manus、Cline、Hermes に対するインストール/オンボーディング パリティ チェック用
+および OpenClaw については、`docs/competitive_agent_install_eval.md` を参照してください。
 
 ## デフォルトでは提供されないもの
 

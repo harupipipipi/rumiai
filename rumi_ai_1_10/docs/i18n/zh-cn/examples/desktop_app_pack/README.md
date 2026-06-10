@@ -101,7 +101,7 @@ pack-shell run desktop_app_pack \
 }
 ```
 
-|领域|描述 |
+|领域 |描述 |
 |-----------|------|
 | §鲁米§0§| pack-shell 启动的命令。 `--command` 作为参数传递 |
 | §鲁米§0§| `DesktopAppManager` 是否被视为 `RUMI_API_TOKEN` 强制性的？当前状态始终保存在`true`|中

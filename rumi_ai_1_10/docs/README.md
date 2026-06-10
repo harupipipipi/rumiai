@@ -11,6 +11,7 @@ This is the gateway to get to the place you want to read in the shortest possibl
 | What I want to do | Read first | Read next |
 |---|---|---|
 | I want to confirm startup as soon as possible | [tutorials/runtime-quickstart.md](./tutorials/runtime-quickstart.md) | "Start" in [operations.md](./operations.md) |
+| I want to align the meanings of terms | [terminology.md](./terminology.md) | [prompt_authoring.md](./prompt_authoring.md), [subagents.md](./subagents.md) |
 | I want to understand how runtime works without code | [concepts/system-mechanism.md](./concepts/system-mechanism.md) | [architecture.md](./architecture.md) |
 | I want to know how to start and jam `rumi_viewer` | [rumi_viewer_start.md](./rumi_viewer_start.md) | [../README.md](../README.md) “Purpose-specific guide” |
 | I want to create a pack | [pack-development-guide.md](./pack-development-guide.md) | [pack-development.md](./pack-development.md) |

@@ -15,6 +15,7 @@ Place the reading destinations for each purpose first so that you can find the e
 | What I want to do | Where to read first | How much can I understand |
 |---|---|---|
 | I want to trace documents by purpose | [`docs/README.md`](./docs/README.md) | I can trace "what I want to do → which document" on one page |
+| I want to align the meanings of terms | [`docs/terminology.md`](./docs/terminology.md) | I can check the usage of `rule`, `skill`, `team workspace`, `delegation` |
 | I want to start it first | Root [`README.md`](../README.md) | Shortest startup command and repo entrance |
 | I want to try it out first | [`docs/tutorials/runtime-quickstart.md`](./docs/tutorials/runtime-quickstart.md) | The shortest tutorial from `--health` to `/panel/` |
 | I want to understand the runtime mechanism without reading the code | [`docs/concepts/system-mechanism.md`](./docs/concepts/system-mechanism.md) | Execution path of startup, flow, approval, grant, viewer collaboration |
@@ -383,7 +384,7 @@ curl -X POST http://localhost:8765/api/packs/{pack_id}/approve \
 | [docs/pack-development-guide.md](./docs/pack-development-guide.md) | Pack development quick start |
 | [docs/operations.md](./docs/operations.md) | Operation guide |
 | [docs/roadmap.md](./docs/roadmap.md) | Roadmap |
-| [docs/quality_pack/philosophy_memo.md](./docs/quality_pack/philosophy_memo.md) | Thought notes used for development decisions |
+| [docs/quality_pack/philosophy_memo.md](docs/quality_pack/philosophy_memo.md) | Thought notes used for development decisions |
 | [docs/quality_pack/claude_desktop_quality_pack.md](./docs/quality_pack/claude_desktop_quality_pack.md) | Quality Assurance/Audit/Regression Verification Pack |
 
 ---

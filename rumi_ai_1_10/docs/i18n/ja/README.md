@@ -11,6 +11,7 @@
 |やりたいこと |最初にお読みください |次を読む |
 |---|---|---|
 |できるだけ早く起動を確認したい | [tutorials/runtime-quickstart.md](./tutorials/runtime-quickstart.md) | [operations.md](./operations.md)の「開始」 |
+| 用語の意味を揃えたい | [terminology.md](./terminology.md) | [prompt_authoring.md](./prompt_authoring.md)、[subagents.md](./subagents.md) |
 |コードなしでランタイムがどのように動作するかを理解したい | [concepts/system-mechanism.md](./concepts/system-mechanism.md) | [architecture.md](./architecture.md) |
 | `rumi_viewer`のスタートとジャムのやり方を知りたい | 教えてください。 [rumi_viewer_start.md](./rumi_viewer_start.md) | [../README.md](../../../i18n/ja/README.md) 「目的別ガイド」 |
 |パックを作成したい | [pack-development-guide.md](./pack-development-guide.md) | [pack-development.md](./pack-development.md) |

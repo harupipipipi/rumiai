@@ -132,7 +132,7 @@ class BaseProvider:
 
 **StubProvider** — 固定応答を返します。テストと開発用。 API 呼び出しはありません。
 
-**OpenAIProvider** — OpenAI API を呼び出します。環境変数`OPENAI_API_KEY`によって検出されます。
+**OpenAIProvider** — OpenAI API を呼び出します。環境変数 `OPENAI_API_KEY` によって検出されます。
 
 **AnthropicProvider** — Anthropic API を呼び出します。環境変数 `ANTHROPIC_API_KEY` によって検出されます。
 

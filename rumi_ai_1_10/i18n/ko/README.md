@@ -15,6 +15,7 @@
 | 내가 하고 싶은 것 | 먼저 읽을 곳 | 나는 얼마나 이해할 수 있는가 |
 |---|---|---|
 | 목적별로 문서를 추적하고 싶어요 | §루미§0§ | "하고 싶은 일 → 어떤 문서"를 한 페이지에서 추적할 수 있습니다 |
+| 용어의 의미를 정렬하고 싶습니다 | §루미§0§ | `rule`, `skill`, `team workspace`, `delegation`의 사용법을 확인할 수 있습니다 |
 | 먼저 시작하고 싶어요 | 루트 [`README.md`](../README.md) | 최단 시작 명령 및 Repo 입구 |
 | 먼저 해보고 싶어요 | §루미§0§ | `--health`에서 `/panel/`까지의 가장 짧은 튜토리얼 |
 | 코드를 읽지 않고 런타임 메커니즘을 이해하고 싶습니다 | §루미§0§ | 스타트업, 플로우, 승인, 부여, 시청자 협업 실행경로 |
@@ -25,10 +26,10 @@
 | 팩 생성/수리 | §루미§0§ | `ecosystem.json`, `routes.json`, `permissions.json`, 비밀 사용 |
 | defaultspack의 채팅/ai를 팔로우하고 싶어요 | §루미§0§ | defaultspack의 구현 측면 |
 | defaultspack 프론트엔드의 향후 작업을 보고 싶습니다 | §루미§0§ | 레지스트리 진행 및 차기작 |
-| API 키와 비밀을 설정하고 싶습니다 | [`docs/operations.md`](../../docs/i18n/ko/operations.md)의 비밀 섹션 | `user_data/secrets/` 및 API 경로 |
+| API 키와 비밀을 설정하고 싶습니다 | [`docs/operations.md`](./docs/operations.md)의 비밀 섹션 | `user_data/secrets/` 및 API 경로 |
 | 뷰어를 통해 부팅 경로를 수정하고 싶습니다 | [`../rumi_viewer/src-tauri/src/config.rs`](../rumi_viewer/src-tauri/src/config.rs) 및 [`../rumi_viewer/src-tauri/src/kernel_manager.rs`](../rumi_viewer/src-tauri/src/kernel_manager.rs) | 뷰어가 시작해야 하는 커널과 통과해야 하는 환경은 무엇입니까 |
 | 설치 팩 / 인증을 보고 싶습니다 | [`core_runtime/setup_pack.py`](./core_runtime/setup_pack.py) 및 [`core_runtime/approval_manager.py`](./core_runtime/approval_manager.py) | 설치 팩 선택, all-ok 부여, 재인증 |
-| 운영 및 감사에 대해 알고 싶습니다 | [`docs/operations.md`](../../docs/i18n/ko/operations.md) 및 [`docs/roadmap.md`](./docs/roadmap.md) | 운영 API, 비밀, 향후 정책 |
+| 운영 및 감사에 대해 알고 싶습니다 | [`docs/operations.md`](./docs/operations.md) 및 [`docs/roadmap.md`](./docs/roadmap.md) | 운영 API, 비밀, 향후 정책 |
 
 ## 최단 평면도
 

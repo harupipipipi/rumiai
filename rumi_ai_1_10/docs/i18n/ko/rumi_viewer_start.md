@@ -19,7 +19,16 @@ control panel frontend의 source는 `rumi_viewer/frontend`이 소유하고 kerne
 repo 루트에서 다음을 수행합니다.
 
 ```bash
-cd rumi_viewer/src-tauri
+cd rumi_viewer/frontend
+npm install
+cd ..
+cargo tauri dev
+```
+
+2번째 이후, `rumi_viewer/frontend/node_modules`가 남아 있는 경우는 다음만으로 기동할 수 있습니다.
+
+```bash
+cd rumi_viewer
 cargo tauri dev
 ```
 
@@ -40,7 +49,7 @@ cargo tauri dev
 예:
 
 ```bash
-cd rumi_viewer/src-tauri
+cd rumi_viewer
 RUMI_AUTO_APPROVE_LOCAL=true cargo tauri dev
 ```
 
@@ -59,8 +68,9 @@ RUMI_AUTO_APPROVE_LOCAL=true cargo tauri dev
 - frontend source는 뷰어 측에 있지만 배달 경로는 kernel의 `/panel/`로 유지됩니다.
 - `defaultspack` 자체는 커널에서 component로 읽습니다.
 - `defaultspack`의 독립 HTTP frontend는 `DEFAULTS_HTTP_PORT` 기본값 `8766`이지만 뷰어의 초기 리드와는 별도입니다.
-- 뷰어는 먼저 `rumi_home/user_data/packs/defaultspack/current.json`를 보고 마이그레이션 호환성으로 `app_data_dir/user_data/packs/defaultspack/current.json`도 참조합니다.
-- 그러므로 setup/업데이트된 `Defaultspack v2` 가 managed pack 으로 바뀌고 있으면, viewer 로부터 그 실체를 연다
+- 개발 기동 (`cargo tauri dev`) 에서는 repo 동고의 `rumi_ai_1_10/ecosystem/defaultspack/` 를 우선해 엽니다
+- 배포판 / bundle 기동에서는 `rumi_home/user_data/packs/defaultspack/current.json` 를 보고, 마이그레이션 호환으로서 `app_data_dir/user_data/packs/defaultspack/current.json` 도 참조합니다
+- 그러므로 setup/업데이트된 `Defaultspack v2` 가 managed pack 으로 바뀌고 있으면 배포판 viewer 로부터 그 실체를 엽니다
 
 ## 자주 걸리는 방법
 

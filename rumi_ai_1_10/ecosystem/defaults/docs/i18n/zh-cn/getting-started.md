@@ -37,7 +37,7 @@ ui/              ← フロントエンド（shell.html, dev_panel.js）
 
 默认包中的 HTTP 服务器引用以下环境变量。阅读`transport/http.py`的`DefaultsHttpServer.__init__`。
 
-|环境变量|默认值 |描述 |
+|环境变量|默认值|描述 |
 |---|---|---|
 | §鲁米§0§| §鲁米§1§ | HTTP服务器绑定地址 |
 | §鲁米§0§| §鲁米§1§ | HTTP 服务器端口号 |
