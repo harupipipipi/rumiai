@@ -245,7 +245,7 @@ test("composer chrome widgets declare layout widths separately from actions", ()
   assert.match(html, /data-composer-widget="send"/);
   assert.match(html, /data-composer-widget="file-attach" data-composer-slot="leading"/);
   assert.match(html, /data-composer-widget="model-picker" data-composer-slot="trailing"/);
-  assert.match(html, /style="[^"]*flex:0 0 11.5rem;min-width:11.5rem;max-width:11.5rem/);
+  assert.match(html, /style="[^"]*flex:0 1 auto;min-width:9.25rem;max-width:11.5rem/);
   assert.match(html, /class="[^"]*rumi-composer-control-surface[^"]*gap-2/);
   assert.match(html, /class="[^"]*min-w-0 flex-1 truncate/);
   assert.match(html, /aria-label="Thinking level"/);

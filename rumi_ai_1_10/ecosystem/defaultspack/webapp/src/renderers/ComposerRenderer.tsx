@@ -109,7 +109,7 @@ const COMPOSER_CHROME_WIDTHS = {
   icon: { basis: "2rem", min: "2rem", max: "2rem" },
   mode: { basis: "auto", min: "2rem", max: "7rem", shrink: 1 },
   badge: { basis: "auto", min: "0", max: "11rem", shrink: 1 },
-  model: { basis: "11.5rem", min: "11.5rem", max: "11.5rem", shrink: 0 },
+  model: { basis: "auto", min: "9.25rem", max: "11.5rem", shrink: 1 },
   thinking: { basis: "5.25rem", min: "5.25rem", max: "5.25rem", shrink: 0 },
   status: { basis: "auto", min: "2.5rem", shrink: 0 },
   send: { basis: "2rem", min: "2rem", max: "2rem" },
@@ -1401,9 +1401,6 @@ export function ComposerRenderer({
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const recognitionRef = useRef<{ stop: () => void } | null>(null);
   const chromeWidgetNodeMapRef = useRef<Map<string, HTMLDivElement>>(new Map());
-  const chromeWidgetPositionMapRef = useRef<Map<string, { left: number; top: number }>>(new Map());
-  const chromeWidgetCleanupTimersRef = useRef<Map<string, number>>(new Map());
-  const hasMeasuredChromeWidgetLayoutRef = useRef(false);
   const submitPointerHandledRef = useRef(false);
   const lastModelPickerRequestIdRef = useRef(modelPickerRequestId);
   const chromeButtonTabIndex = keyboardButtonNavigation ? undefined : -1;
@@ -2126,14 +2123,6 @@ export function ComposerRenderer({
     }
   }, [openModelStatusId, visibleModelStatusIndicators]);
 
-  useEffect(() => () => {
-    if (typeof window === "undefined") return;
-    for (const timeoutId of chromeWidgetCleanupTimersRef.current.values()) {
-      window.clearTimeout(timeoutId);
-    }
-    chromeWidgetCleanupTimersRef.current.clear();
-  }, []);
-
   const chromeWidgets: ComposerChromeWidgetSpec[] = [
     {
       id: "file-attach",
@@ -2410,80 +2399,6 @@ export function ComposerRenderer({
   const newConversationTopRightWidgets = leadingChromeWidgets.filter((widget) => widget.id === "voice-input");
   const newConversationSendWidgets = trailingChromeWidgets.filter((widget) => widget.id === "send");
   const newConversationTrailingWidgets = trailingChromeWidgets.filter((widget) => widget.id !== "send");
-  const animatedDockWidgetIds = (isNewConversation ? newConversationTrailingWidgets : trailingChromeWidgets).map((widget) => widget.id);
-  const animatedDockLayoutSignature = [
-    animatedDockWidgetIds.join("|"),
-    profileName,
-    selectedProviderLabel,
-    thinkingLevel ?? "",
-    levels.join("|"),
-    visibleModelStatusIndicators.map((indicator) => indicator.id).join("|"),
-  ].join("::");
-
-  useIsomorphicLayoutEffect(() => {
-    if (typeof window === "undefined") return;
-    const nextPositions = new Map<string, { left: number; top: number }>();
-
-    for (const widgetId of animatedDockWidgetIds) {
-      const node = chromeWidgetNodeMapRef.current.get(widgetId);
-      if (!node) continue;
-      const rect = node.getBoundingClientRect();
-      nextPositions.set(widgetId, { left: rect.left, top: rect.top });
-    }
-
-    if (!hasMeasuredChromeWidgetLayoutRef.current) {
-      chromeWidgetPositionMapRef.current = nextPositions;
-      hasMeasuredChromeWidgetLayoutRef.current = true;
-      return;
-    }
-
-    for (const [widgetId, nextPosition] of nextPositions.entries()) {
-      const node = chromeWidgetNodeMapRef.current.get(widgetId);
-      if (!node) continue;
-      const previousPosition = chromeWidgetPositionMapRef.current.get(widgetId);
-      const existingTimer = chromeWidgetCleanupTimersRef.current.get(widgetId);
-      if (existingTimer) {
-        window.clearTimeout(existingTimer);
-        chromeWidgetCleanupTimersRef.current.delete(widgetId);
-      }
-
-      const finishAnimation = () => {
-        if (chromeWidgetNodeMapRef.current.get(widgetId) !== node) return;
-        node.style.transition = "";
-        node.style.transform = "";
-        node.style.opacity = "";
-      };
-
-      if (!previousPosition) {
-        node.style.transition = "none";
-        node.style.opacity = "0";
-        node.style.transform = "translateX(10px)";
-        void node.getBoundingClientRect();
-        node.style.transition = "transform 220ms cubic-bezier(0.22, 1, 0.36, 1), opacity 180ms ease";
-        node.style.opacity = "1";
-        node.style.transform = "translateX(0)";
-        chromeWidgetCleanupTimersRef.current.set(widgetId, window.setTimeout(finishAnimation, 260));
-        continue;
-      }
-
-      const deltaX = previousPosition.left - nextPosition.left;
-      const deltaY = previousPosition.top - nextPosition.top;
-      if (Math.abs(deltaX) < 0.5 && Math.abs(deltaY) < 0.5) {
-        finishAnimation();
-        continue;
-      }
-
-      node.style.transition = "none";
-      node.style.transform = `translate(${deltaX}px, ${deltaY}px)`;
-      node.style.opacity = "1";
-      void node.getBoundingClientRect();
-      node.style.transition = "transform 240ms cubic-bezier(0.22, 1, 0.36, 1), opacity 180ms ease";
-      node.style.transform = "translate(0px, 0px)";
-      chromeWidgetCleanupTimersRef.current.set(widgetId, window.setTimeout(finishAnimation, 280));
-    }
-
-    chromeWidgetPositionMapRef.current = nextPositions;
-  }, [animatedDockLayoutSignature, animatedDockWidgetIds]);
 
   return (
     <div
