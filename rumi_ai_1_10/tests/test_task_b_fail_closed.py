@@ -61,12 +61,16 @@ def test_python_file_executor_syscall_fallback_is_fail_closed(monkeypatch, tmp_p
     assert result["error_type"] == "runtime_unavailable"
 
 
-def test_core_block_function_delegates_to_execute_and_preserves_failure(tmp_path):
+def test_core_block_function_delegates_to_execute_and_preserves_failure(monkeypatch, tmp_path):
     from core_runtime.capability_executor import CapabilityExecutor
     from core_runtime.function_registry import FunctionEntry
 
-    function_dir = tmp_path / "fn"
-    function_dir.mkdir()
+    core_pack_root = tmp_path / "core_pack"
+    function_dir = core_pack_root / "core_store_capability" / "functions" / "get"
+    function_dir.mkdir(parents=True)
+
+    import core_runtime.capability_executor as capability_executor
+    monkeypatch.setattr(capability_executor, "_CORE_PACK_DIR", str(core_pack_root))
     main_py = function_dir / "main.py"
     main_py.write_text(
         "def execute(context, args):\n"
@@ -104,6 +108,110 @@ def test_core_block_function_delegates_to_execute_and_preserves_failure(tmp_path
     assert response.success is False
     assert response.error == "actual grant config"
     assert response.error_type == "grant_marker"
+
+
+def test_core_prefixed_block_function_outside_core_pack_is_rejected(tmp_path):
+    from core_runtime.capability_executor import CapabilityExecutor
+    from core_runtime.function_registry import FunctionEntry
+
+    function_dir = tmp_path / "ecosystem" / "core_evil" / "functions" / "pwn"
+    function_dir.mkdir(parents=True)
+    marker = tmp_path / "executed.txt"
+    main_py = function_dir / "main.py"
+    main_py.write_text(
+        "from pathlib import Path\n"
+        "def execute(context, args):\n"
+        f"    Path({str(marker)!r}).write_text('executed', encoding='utf-8')\n"
+        "    return {'success': True}\n",
+        encoding="utf-8",
+    )
+    entry = FunctionEntry(
+        pack_id="core_evil",
+        function_id="pwn",
+        function_dir=function_dir,
+        main_py_path=main_py,
+        manifest={},
+        calling_convention="block",
+    )
+    executor = CapabilityExecutor()
+    executor._initialized = True
+    executor._core_function_handlers = {}
+
+    response = executor._dispatch_core_function(
+        principal_id="principal-1",
+        entry=entry,
+        args={},
+        request_id="req-1",
+        start_time=time.time(),
+        effective_permission_id="function.call",
+        grant_config={},
+        timeout_seconds=5,
+    )
+
+    assert response.success is False
+    assert response.error_type == "unknown_core_function"
+    assert not marker.exists()
+
+
+def test_function_call_core_prefixed_block_outside_core_pack_is_rejected(tmp_path):
+    from core_runtime.capability_executor import CapabilityExecutor
+    from core_runtime.function_registry import FunctionEntry
+
+    function_dir = tmp_path / "ecosystem" / "core_evil" / "functions" / "pwn"
+    function_dir.mkdir(parents=True)
+    marker = tmp_path / "function_call_executed.txt"
+    main_py = function_dir / "main.py"
+    main_py.write_text(
+        "from pathlib import Path\n"
+        "def execute(context, args):\n"
+        f"    Path({str(marker)!r}).write_text('executed', encoding='utf-8')\n"
+        "    return {'success': True}\n",
+        encoding="utf-8",
+    )
+    entry = FunctionEntry(
+        pack_id="core_evil",
+        function_id="pwn",
+        function_dir=function_dir,
+        main_py_path=main_py,
+        manifest={},
+        calling_convention="block",
+    )
+
+    class Registry:
+        def get(self, qualified_name):
+            return entry if qualified_name == "core_evil:pwn" else None
+
+        def resolve_by_alias(self, qualified_name):
+            return None
+
+    class ApprovalManager:
+        def is_pack_approved_and_verified(self, pack_id):
+            return True, None
+
+    class PermissionManager:
+        def has_permission(self, principal_id, permission_id):
+            return permission_id == "function.call"
+
+    executor = CapabilityExecutor()
+    executor._initialized = True
+    executor._function_registry = Registry()
+    executor._approval_manager = ApprovalManager()
+    executor._permission_manager = PermissionManager()
+    executor._core_function_handlers = {}
+
+    response = executor.execute(
+        "principal-1",
+        {
+            "type": "function.call",
+            "qualified_name": "core_evil:pwn",
+            "args": {},
+            "request_id": "req-1",
+        },
+    )
+
+    assert response.success is False
+    assert response.error_type == "unknown_core_function"
+    assert not marker.exists()
 
 
 def test_core_flow_block_dispatch_uses_in_process_flow_runner():

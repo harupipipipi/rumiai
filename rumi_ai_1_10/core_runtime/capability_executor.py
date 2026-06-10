@@ -484,6 +484,7 @@ class CapabilityExecutor:
             entrypoint=entrypoint,
             function_dir=function_dir,
             is_builtin=is_builtin,
+            legacy_handler_builtin=is_builtin,
             vocab_aliases=vocab_aliases,
         )
 
@@ -521,6 +522,33 @@ class CapabilityExecutor:
         if pack_id and resolved.name != pack_id:
             return False
         return resolved.parent.name == "ecosystem"
+
+    def _is_bundled_core_pack_entry(self, entry) -> bool:
+        """Return True only for entries shipped from core_runtime/core_pack/<pack_id>."""
+        pack_id = str(getattr(entry, "pack_id", "") or "").strip()
+        if not pack_id.startswith(_CORE_PACK_ID_PREFIX):
+            return False
+
+        try:
+            core_pack_root = Path(_CORE_PACK_DIR).resolve()
+        except (OSError, TypeError):
+            core_pack_root = Path(_CORE_PACK_DIR)
+
+        entry_paths = [
+            getattr(entry, "function_dir", None),
+            getattr(entry, "main_py_path", None),
+        ]
+        for raw_path in entry_paths:
+            if raw_path is None:
+                continue
+            try:
+                candidate = Path(raw_path).resolve()
+                relative = candidate.relative_to(core_pack_root)
+            except (OSError, TypeError, ValueError):
+                continue
+            if relative.parts and relative.parts[0] == pack_id:
+                return True
+        return False
 
     def _is_trusted_builtin_pack(self, pack_id: str, pack_root_hint=None) -> bool:
         normalized_pack_id = str(pack_id or "").strip()
@@ -631,7 +659,13 @@ class CapabilityExecutor:
                 return resp
 
         # 2. Trust チェック
-        is_builtin = entry.pack_id.startswith(_CORE_PACK_ID_PREFIX)
+        # Only core entries loaded from the bundled core_pack tree may bypass the
+        # normal trust-store check.  A pack_id prefix alone is attacker-controlled
+        # metadata for imported ecosystem packs.
+        is_builtin = (
+            bool(getattr(entry, "legacy_handler_builtin", False))
+            or self._is_bundled_core_pack_entry(entry)
+        )
         builtin_sha256 = None
 
         if is_builtin:
@@ -1231,11 +1265,17 @@ class CapabilityExecutor:
         di_service_name = self._core_function_handlers.get(pack_id)
         if di_service_name is None:
             if entry.main_py_path or entry.function_dir:
-                return self._execute_core_python_block(principal_id=principal_id, entry=entry, args=args,
-                                                       request_id=request_id, start_time=start_time,
-                                                       effective_permission_id=permission_id,
-                                                       grant_config=grant_config,
-                                                       timeout_seconds=timeout_seconds)
+                if self._is_bundled_core_pack_entry(entry):
+                    return self._execute_core_python_block(principal_id=principal_id, entry=entry, args=args,
+                                                           request_id=request_id, start_time=start_time,
+                                                           effective_permission_id=permission_id,
+                                                           grant_config=grant_config,
+                                                           timeout_seconds=timeout_seconds)
+                logger.warning(
+                    "Rejected unregistered core-prefixed function outside bundled core_pack: %s:%s",
+                    pack_id,
+                    function_id,
+                )
             return CapabilityResponse(success=False, error=f"No handler registered for core pack: {pack_id}", error_type="unknown_core_function", latency_ms=(time.time() - start_time) * 1000)
         method_name = f"handle_{function_id}"
         try:
