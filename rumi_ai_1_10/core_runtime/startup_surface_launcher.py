@@ -19,6 +19,7 @@ def launch_pending_startup_profile_surface(
     *,
     active_manager: Optional[Any] = None,
     desktop_handler: Optional[Any] = None,
+    grant_manager: Optional[Any] = None,
 ) -> Dict[str, Any]:
     """Consume a pending startup-profile surface launch request."""
     active = active_manager
@@ -58,11 +59,24 @@ def launch_pending_startup_profile_surface(
             result["reason"] = "missing_launch_target"
             return result
 
+        grant_result = _check_desktop_execute_grant(
+            principal_id,
+            grant_manager=grant_manager,
+        )
+        if not grant_result.get("allowed"):
+            result["reason"] = "desktop_app_execute_not_granted"
+            result["error"] = grant_result.get("reason") or (
+                f"desktop_app.execute not granted for pack: {principal_id}"
+            )
+            return result
+
         handler = desktop_handler or _get_desktop_capability_handler()
         if handler is None:
             result["reason"] = "desktop_capability_unavailable"
             return result
 
+        grant_config = dict(grant_result.get("config") or {})
+        grant_config["port"] = resolve_runtime_port()
         env = surface_env(mode)
         env.update(dict(launch_target.get("env") or {}))
         launch = handler.handle_execute(
@@ -72,10 +86,7 @@ def launch_pending_startup_profile_surface(
                 "action": "launch",
                 "env": env,
             },
-            grant_config={
-                "allowed_packs": [target_pack],
-                "port": resolve_runtime_port(),
-            },
+            grant_config=grant_config,
         )
         result["launch"] = launch
         app = launch.get("app") if isinstance(launch, dict) else None
@@ -94,6 +105,31 @@ def launch_pending_startup_profile_surface(
             active.set_metadata("startup_surface_open_result", result)
         except Exception:
             logger.debug("failed to record startup surface launch result", exc_info=True)
+
+
+def _check_desktop_execute_grant(
+    principal_id: str,
+    *,
+    grant_manager: Optional[Any] = None,
+) -> Dict[str, Any]:
+    if not principal_id:
+        return {"allowed": False, "reason": "missing principal_id", "config": {}}
+    try:
+        manager = grant_manager
+        if manager is None:
+            from .capability_grant_manager import get_capability_grant_manager
+
+            manager = get_capability_grant_manager()
+        grant_result = manager.check(principal_id, "desktop_app.execute")
+    except Exception as exc:
+        logger.warning("Failed to check desktop_app.execute grant", exc_info=True)
+        return {"allowed": False, "reason": str(exc), "config": {}}
+
+    return {
+        "allowed": bool(getattr(grant_result, "allowed", False)),
+        "reason": str(getattr(grant_result, "reason", "") or ""),
+        "config": dict(getattr(grant_result, "config", {}) or {}),
+    }
 
 
 def _get_desktop_capability_handler() -> Optional[Any]:
