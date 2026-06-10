@@ -936,7 +936,12 @@ class CapabilityExecutor:
                 return resp
         calling_convention = getattr(entry, "calling_convention", None)
         dispatch_grant_config = dict(self._entry_grant_config(entry) or {})
-        if calling_convention and calling_convention in _VALID_CALLING_CONVENTIONS:
+        allow_manifest_calling_convention = is_core or is_trusted_builtin
+        if (
+            allow_manifest_calling_convention
+            and calling_convention
+            and calling_convention in _VALID_CALLING_CONVENTIONS
+        ):
             resp = self._dispatch_by_calling_convention(
                 calling_convention=calling_convention,
                 entry=entry,
