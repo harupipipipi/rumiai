@@ -11,12 +11,27 @@ SENSITIVE_TOOL_CONTEXT_KEYS = {
     "_tool_permission_internal",
 }
 
+UNTRUSTED_TOOL_CONTEXT_KEYS = SENSITIVE_TOOL_CONTEXT_KEYS | {
+    "effective_tool_allowlist",
+    "profile_policy",
+    "runtime_profile",
+    "_tool_server_approved",
+    "_tool_server_approval_token_valid",
+}
+
 _INTERNAL_TOOL_PERMISSION = object()
 
 
 def sanitize_tool_context(context: dict[str, Any] | None) -> dict[str, Any]:
     clean = dict(context or {}) if isinstance(context, dict) else {}
     for key in SENSITIVE_TOOL_CONTEXT_KEYS:
+        clean.pop(key, None)
+    return clean
+
+
+def sanitize_untrusted_tool_context(context: dict[str, Any] | None) -> dict[str, Any]:
+    clean = dict(context or {}) if isinstance(context, dict) else {}
+    for key in UNTRUSTED_TOOL_CONTEXT_KEYS:
         clean.pop(key, None)
     return clean
 
