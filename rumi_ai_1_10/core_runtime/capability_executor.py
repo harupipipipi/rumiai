@@ -1603,17 +1603,17 @@ class CapabilityExecutor:
             return CapabilityResponse(success=False, error="'inputs' must be a dict", error_type="invalid_request", latency_ms=(time.time() - start_time) * 1000)
         if self._kernel is None:
             return CapabilityResponse(success=False, error="Kernel not available for flow.run", error_type="initialization_error", latency_ms=(time.time() - start_time) * 1000)
-        allowed_flow_ids = grant_config.get("allowed_flow_ids")
-        if allowed_flow_ids is not None:
-            if not isinstance(allowed_flow_ids, list): allowed_flow_ids = [allowed_flow_ids]
-            if flow_id not in allowed_flow_ids:
-                return CapabilityResponse(success=False, error="Permission denied", error_type="grant_denied", latency_ms=(time.time() - start_time) * 1000)
         if not hasattr(_flow_call_stack_local, "stack"): _flow_call_stack_local.stack = []
         call_stack = _flow_call_stack_local.stack
         if flow_id in call_stack:
             return CapabilityResponse(success=False, error=f"Recursive flow.run detected: {' -> '.join(call_stack + [flow_id])}", error_type="recursive_flow", latency_ms=(time.time() - start_time) * 1000)
         if len(call_stack) >= MAX_FLOW_CALL_DEPTH:
             return CapabilityResponse(success=False, error=f"Flow call depth limit exceeded ({MAX_FLOW_CALL_DEPTH}): {' -> '.join(call_stack + [flow_id])}", error_type="flow_depth_exceeded", latency_ms=(time.time() - start_time) * 1000)
+        allowed_flow_ids = grant_config.get("allowed_flow_ids")
+        if not isinstance(allowed_flow_ids, list):
+            allowed_flow_ids = [allowed_flow_ids] if isinstance(allowed_flow_ids, str) else []
+        if flow_id not in allowed_flow_ids:
+            return CapabilityResponse(success=False, error="Permission denied", error_type="grant_denied", latency_ms=(time.time() - start_time) * 1000)
         remaining_timeout = max(min(float(args.get("timeout_seconds", timeout_seconds)), MAX_TIMEOUT) - (time.time() - start_time), 1.0)
         call_stack.append(flow_id)
         try:

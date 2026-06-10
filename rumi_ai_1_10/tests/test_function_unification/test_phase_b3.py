@@ -303,11 +303,15 @@ class TestUnifiedExecuteFlowRunDispatch(unittest.TestCase):
         entry = _MockFunctionEntry(
             pack_id="core_flow",
             qualified_name="core_flow:run",
+            grant_config={},
             vocab_aliases=["flow.run"],
         )
 
         grant_manager = MagicMock()
-        grant_manager.check.return_value = _MockGrantResult(allowed=True)
+        grant_manager.check.return_value = _MockGrantResult(
+            allowed=True,
+            config={"allowed_flow_ids": ["my_flow"]},
+        )
         executor = _make_executor(grant_manager=grant_manager)
         executor._kernel = MagicMock()
         executor._kernel.execute_flow_sync.return_value = {"status": "done"}

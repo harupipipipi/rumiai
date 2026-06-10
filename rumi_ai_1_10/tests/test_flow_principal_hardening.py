@@ -23,7 +23,7 @@ def test_capability_flow_run_strips_spoofed_principal_and_sets_trusted_principal
     response = executor._execute_flow_run(
         principal_id="actual_pack",
         permission_id="flow.run",
-        grant_config={},
+        grant_config={"allowed_flow_ids": ["demo.flow"]},
         args={
             "flow_id": "demo.flow",
             "inputs": {
