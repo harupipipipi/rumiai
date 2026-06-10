@@ -946,6 +946,7 @@ _SENSITIVE_CODING_PATHS = set(SENSITIVE_CODING_PATHS) | set(METHOD_SENSITIVE_COD
 
 _SENSITIVE_INTEGRATION_PATHS = {
     "/api/integrations/secrets",
+    "/api/integrations/p2p/events",
     "/api/external/tokens",
     "/api/external/sources",
     "/api/recording/devices",
@@ -955,6 +956,7 @@ _SENSITIVE_INTEGRATION_METHOD_PATHS = {
     "/api/external/templates": {"POST", "PUT", "DELETE"},
 }
 _SENSITIVE_INTEGRATION_PREFIXES = (
+    "/api/p2p",
     "/api/webhooks/endpoints",
     "/api/webhooks/public-urls",
 )
