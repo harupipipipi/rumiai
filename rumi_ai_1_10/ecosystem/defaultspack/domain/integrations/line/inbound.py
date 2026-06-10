@@ -370,12 +370,12 @@ def _apply_endpoint_response_context(runtime_context: dict[str, Any], endpoint: 
     response_tool_policy = response.get("tool_policy") if isinstance(response.get("tool_policy"), dict) else {}
     if response_tool_policy:
         tool_policy.update(response_tool_policy)
-    if _truthy(
-        response.get("auto_approve")
-        or response.get("auto_approve_computer_use")
-        or response.get("yolo_mode")
-    ):
-        tool_policy["yolo_mode"] = True
+    # LINE webhook events are external, remote-origin input.  Endpoint response
+    # configuration must not translate "auto approve" aliases into yolo_mode
+    # for computer/browser tools, because yolo_mode bypasses the local approval
+    # token checks for screenshots and desktop input.  Operators can still set
+    # other explicit tool_policy fields above, but inbound LINE response presets
+    # cannot auto-approve computer use on behalf of a remote sender.
     if tool_policy:
         updated["profile_policy"] = tool_policy
 
