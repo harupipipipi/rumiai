@@ -74,7 +74,6 @@ def _blocked_by_profile_error(tool_name, context):
 
 CLIENT_CONTEXT_DENY_KEYS = {
     "artifact_root",
-    "conversation_workspace_dir",
     "workspace_root",
     "workspaceRoot",
     "rootPath",
