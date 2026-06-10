@@ -615,10 +615,14 @@ class ApprovalManager:
                 
                 file_hashes = self._compute_pack_hashes(pack_dir)
             
+            previous_hashes = dict(approval.file_hashes)
+
             approval.status = PackStatus.APPROVED
             approval.approved_at = self._now_ts()
             approval.file_hashes = file_hashes
             approval.rejection_reason = None
+            if approval.rule_approved and previous_hashes != file_hashes:
+                self._clear_rule_approval(approval)
 
             # G-3: バージョン履歴を記録
             approval.version_history.append({
@@ -749,9 +753,24 @@ class ApprovalManager:
 
         with self._lock:
             approval = self._approvals.get(pack_id)
-            if not approval:
+            if not approval or not approval.rule_approved:
                 return False
-            return approval.rule_approved
+            return self._rule_approval_matches_current_hashes(approval)
+
+    @staticmethod
+    def _clear_rule_approval(approval: PackApproval) -> None:
+        """Pack のルール拡張承認を取り消す。"""
+        approval.rule_approved = False
+        approval.rule_approved_at = None
+
+    @staticmethod
+    def _rule_approval_matches_current_hashes(approval: PackApproval) -> bool:
+        """現在承認済みのハッシュに対して rule approval が付与済みか確認。"""
+        for entry in reversed(approval.version_history):
+            if entry.get("action") != "approve_rule":
+                continue
+            return entry.get("file_hashes") == approval.file_hashes
+        return False
 
     def reject(self, pack_id: str, reason: str = "") -> ApprovalResult:
         """Packを拒否"""
@@ -762,6 +781,7 @@ class ApprovalManager:
             approval = self._approvals[pack_id]
             approval.status = PackStatus.BLOCKED
             approval.rejection_reason = reason
+            self._clear_rule_approval(approval)
             
             self._save_grant(approval)
             
@@ -774,8 +794,10 @@ class ApprovalManager:
         """Packを変更済みとしてマーク（再承認必要）"""
         with self._lock:
             if pack_id in self._approvals:
-                self._approvals[pack_id].status = PackStatus.MODIFIED
-                self._save_grant(self._approvals[pack_id])
+                approval = self._approvals[pack_id]
+                approval.status = PackStatus.MODIFIED
+                self._clear_rule_approval(approval)
+                self._save_grant(approval)
     
     # ------------------------------------------------------------------ #
     # Wave 1-1: ハッシュ粒度緩和 — ファイルごとのクリティカル判定
