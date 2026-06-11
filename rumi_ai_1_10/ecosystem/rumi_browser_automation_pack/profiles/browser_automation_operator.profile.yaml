@@ -1,0 +1,11 @@
+profile_id: rumi_browser_automation.operator
+pack_id: rumi_browser_automation_pack
+purpose: Plan and execute bounded browser playbooks through approved browser tools.
+policy:
+  local_first: true
+  network_default: deny
+  require_observation_before_action: true
+  require_evidence_ledger: true
+tool_routing:
+  browser_execution: rumi_default_tools_pack.browser_companion
+  semantic_dom_optional: rumi_browser_element_pack.semantic_dom_v2
