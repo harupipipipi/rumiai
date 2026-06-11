@@ -12,23 +12,11 @@ Flow Engine itself is a general-purpose mechanism and has no domain knowledge su
 
 Flow Engine consists of two layers.
 
-**Layer 1 — System Flow (handler.py)**: Processing pipeline defined by the flow.yaml + handler.py pair. handler.py receives FlowContext and calls any handler using general-purpose primitives (call_handler, emit_event, etc.).
-
-**Layer 2 — Custom Flow (node graph)**: A declarative method to build a flow using only YAML node definitions. Supports conditional branching, loops, parallel execution, and subflow calls. No need to write handler.py.
+**Layer 1 — System Flow (handler.py)**: Processing pipeline defined by the flow.yaml + handler.py pair. handler.py receives FlowContext and calls any handler using general-purpose primitives (call_handler, emit_event, etc.).**Layer 2 — Custom Flow (node graph)**: A declarative method to build a flow using only YAML node definitions. Supports conditional branching, loops, parallel execution, and subflow calls. No need to write handler.py.
 
 ## 2. Design philosophy
 
-**The flow itself is a plugin**: The default 3 flows are not treated specially. A new flow is added by simply placing flow.yaml + handler.py in the flows/ directory. Flow Engine loads and executes all flows in the same way.
-
-**Generic primitives only**: FlowContext only provides the following generic primitives: call_handler, emit_event, wait_event, data_read, data_write, capability, execute_flow, emit_widget. There are no domain-specific APIs. Saving a chat, executing an agent, and updating memory are all done by simply calling the handler using call_handler.
-
-**Standard vocabulary (Block contract)**: Defaults defines the input/output specifications of handler as the "standard vocabulary" in contracts.py. Pack can assume this vocabulary. However, handlers that are not registered in the contract can also be called freely using call_handler. Standard vocabulary is a common language, not a constraint.
-
-**Declarative + Imperative Hybrid**: Define metadata and node connections declaratively in flow.yaml and write execution logic imperatively in handler.py. A simple flow can be completed with just handler.py, and a complex flow can be completed by engine.py, which interprets and executes the node graph in flow.yaml.
-
-**Step-by-step**: Works completely on Layer 1 only. Layer 2 can be used when needed. As for the trigger system, user_input and API will work immediately, and webhook and schedule will be enabled once the infrastructure is in place.
-
-**Provides only the mechanism**: Defaults provides the Flow Engine mechanism (engine.py, router.py, validator.py, node_executor.py, trigger_manager.py, context.py). The default Flow definitions (simple_chat, agent_chat, planning_agent) are included as a battery, but they can be completely replaced by placing a definition with the same flow_id in user_data/shared/flows/ or user_data/packs/*/flows/.
+**The flow itself is a plugin**: The default 3 flows are not treated specially. A new flow is added by simply placing flow.yaml + handler.py in the flows/ directory. Flow Engine loads and executes all flows in the same way.**Generic primitives only**: FlowContext only provides the following generic primitives: call_handler, emit_event, wait_event, data_read, data_write, capability, execute_flow, emit_widget. There are no domain-specific APIs. Saving a chat, executing an agent, and updating memory are all done by simply calling the handler using call_handler.**Standard vocabulary (Block contract)**: Defaults defines the input/output specifications of handler as the "standard vocabulary" in contracts.py. Pack can assume this vocabulary. However, handlers that are not registered in the contract can also be called freely using call_handler. Standard vocabulary is a common language, not a constraint.**Declarative + Imperative Hybrid**: Define metadata and node connections declaratively in flow.yaml and write execution logic imperatively in handler.py. A simple flow can be completed with just handler.py, and a complex flow can be completed by engine.py, which interprets and executes the node graph in flow.yaml.**Step-by-step**: Works completely on Layer 1 only. Layer 2 can be used when needed. As for the trigger system, user_input and API will work immediately, and webhook and schedule will be enabled once the infrastructure is in place.**Provides only the mechanism**: Defaults provides the Flow Engine mechanism (engine.py, router.py, validator.py, node_executor.py, trigger_manager.py, context.py). The default Flow definitions (simple_chat, agent_chat, planning_agent) are included as a battery, but they can be completely replaced by placing a definition with the same flow_id in user_data/shared/flows/ or user_data/packs/*/flows/.
 
 ## 3. Relationship with official rumiai Flow
 

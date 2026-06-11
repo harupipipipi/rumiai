@@ -12,9 +12,7 @@ A tool is a unit of functionality that the agent calls based on the AI's judgmen
 
 There are two types of tools.
 
-**Built-in tool** (`execution.type: "local"`) is a demonstration tool that is automatically registered with `ToolRegistry._register_defaults()`. Three items will be registered: `web_search`, `calculator`, and `file_reader`.
-
-**Dynamic Tools** (`execution.type: "dynamic"`) are user-defined tools that can be created, updated, and deleted via the API. It is persisted in the `user_data/shared/tools/` directory as `.tool.json` (definition) and `.handler.py` (execution code).
+**Built-in tool** (`execution.type: "local"`) is a demonstration tool that is automatically registered with `ToolRegistry._register_defaults()`. Three items will be registered: `web_search`, `calculator`, and `file_reader`.**Dynamic Tools** (`execution.type: "dynamic"`) are user-defined tools that can be created, updated, and deleted via the API. It is persisted in the `user_data/shared/tools/` directory as `.tool.json` (definition) and `.handler.py` (execution code).
 
 ## tool definition JSON format
 
@@ -76,19 +74,13 @@ def handler(arguments, context):
     }
 ```
 
-**Arguments**: `arguments` is a dict of parameters passed during the API call. `context` is the execution context of handler and may contain functions such as `call_handler`, `emit_event`, etc.
-
-**Return value**: Returns a dict with three keys: `result` (string), `is_error` (bool), `widget` (dict or None).
-
-**Limitations**: handler_code may be AI-generated in `generate_handler_code_with_ai()` of `domain/tool/builder.py`. If `handler_code` is `None`, AI will automatically generate it, and if AI is unavailable, skeleton code will be generated in `generate_skeleton()`.
+**Arguments**: `arguments` is a dict of parameters passed during the API call. `context` is the execution context of handler and may contain functions such as `call_handler`, `emit_event`, etc.**Return value**: Returns a dict with three keys: `result` (string), `is_error` (bool), `widget` (dict or None).**Limitations**: handler_code may be AI-generated in `generate_handler_code_with_ai()` of `domain/tool/builder.py`. If `handler_code` is `None`, AI will automatically generate it, and if AI is unavailable, skeleton code will be generated in `generate_skeleton()`.
 
 ## CRUD via API
 
 ### Tool creation
 
-**HTTP**: `POST /api/tools/create`（`blocks/tool/create.py`）
-
-**input_data**:
+**HTTP**: `POST /api/tools/create`（`blocks/tool/create.py`）**input_data**:
 
 | Field | Type | Required | Description |
 |---|---|---|---|
@@ -105,9 +97,7 @@ If a tool with the same name already exists, a `ALREADY_EXISTS` error will be re
 
 ### Tool update
 
-**HTTP**: `PUT /api/tools/{name}`（`blocks/tool/update.py`）
-
-**input_data**:
+**HTTP**: `PUT /api/tools/{name}`（`blocks/tool/update.py`）**input_data**:
 
 | Field | Type | Required | Description |
 |---|---|---|---|
@@ -120,9 +110,7 @@ Only dynamic tools (`execution.type: "dynamic"`) can be updated. `updated_at` wi
 
 ### Delete tools
 
-**HTTP**: `DELETE /api/tools/{name}`（`blocks/tool/delete.py`）
-
-**input_data**:
+**HTTP**: `DELETE /api/tools/{name}`（`blocks/tool/delete.py`）**input_data**:
 
 | Field | Type | Required | Description |
 |---|---|---|---|
@@ -134,9 +122,7 @@ Only dynamic tools can be deleted. `.tool.json` and `.handler.py` within `user_d
 
 ### Tool Export
 
-**HTTP**: `GET /api/tools/{name}/export`（`blocks/tool/export.py`）
-
-**input_data**:
+**HTTP**: `GET /api/tools/{name}/export`（`blocks/tool/export.py`）**input_data**:
 
 | Field | Type | Required | Description |
 |---|---|---|---|

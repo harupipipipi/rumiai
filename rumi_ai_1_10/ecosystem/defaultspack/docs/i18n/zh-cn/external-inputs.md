@@ -26,7 +26,7 @@ provider payload
 ## 核心类型
 
 `ExternalEvent` 是规范化的入库记录。它包含稳定的字段：
-§鲁米§0§，§鲁米§1§，§鲁米§2§，§鲁米§3§，§鲁米§4§，§鲁米§5§，§鲁米§6§，
+`provider`，`workspace`，`scope`，`actor`，`conversation`，`event`，`payload`，
 `verified`，并编辑`metadata`。提供者特定的标识符被吸收
 融入这些原则。原始请求主体可用于签名检查，但是
 原始秘密和令牌值永远不会在返回的事件对象中公开
@@ -195,18 +195,18 @@ URL 作为屏蔽的外部令牌。 Slack 使用事件请求 URL、签名
 
 |路线 |目的|
 |---|---|
-| §鲁米§0§| Slack Events API 摄入 |
-| §鲁米§0§| LINE Messaging API webhook 摄入 |
-| §鲁米§0§|不和谐互动摄入量 |
-| §鲁米§0§|不和谐消息事件接收 |
-| §鲁米§0§|仅限秘密状态 |
-| §鲁米§0§|设置或清除只写机密 |
-| §鲁米§0§|类似 API 密钥的外部令牌状态 |
-| §鲁米§0§|更新插入、重命名或删除命名外部令牌 |
-| §鲁米§0§|列出内置和自定义输入/输出模板 |
-| §鲁米§0§|注册自定义输入或输出模板 |
-| §鲁米§0§|通用 webhook 摄入 |
-| §鲁米§0§|列出 webhook 端点配置 |
+| `POST /api/integrations/slack/events`| Slack Events API 摄入 |
+| `POST /api/integrations/line/webhook`| LINE Messaging API webhook 摄入 |
+| `POST /api/integrations/discord/interactions`|不和谐互动摄入量 |
+| `POST /api/integrations/discord/events`|不和谐消息事件接收 |
+| `GET /api/integrations/secrets`|仅限秘密状态 |
+| `POST /api/integrations/secrets`|设置或清除只写机密 |
+| `GET /api/external/tokens`|类似 API 密钥的外部令牌状态 |
+| `POST /api/external/tokens`|更新插入、重命名或删除命名外部令牌 |
+| `GET /api/external/templates`|列出内置和自定义输入/输出模板 |
+| `POST /api/external/templates`|注册自定义输入或输出模板 |
+| `POST /api/webhooks/inbound/{webhook_id}`|通用 webhook 摄入 |
+| `GET /api/webhooks/endpoints`|列出 webhook 端点配置 |
 
 ## 本地主机输入端点
 

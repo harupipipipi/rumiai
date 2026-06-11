@@ -33,15 +33,7 @@ class AIClient:
 
 ### 적용 클래스
 
-**AIClient** (`domain/ai_client/client.py`) — AI 공급자를 관리하고 위임합니다. 초기화 시 스텁 공급자를 등록하고, 환경 변수에서 감지된 공급자(OpenAI, Anthropic, Google)를 자동으로 등록합니다. `complete()`, `stream()`, `embed()`, `image_gen()`, `image_analyze()`, `transcribe()`, `tts()` 메서드가 있습니다. 모델 문자열 `"provider/model"`을 해결하고 해당 공급자에게 위임합니다.
-
-**McpClient** (`domain/tool/mcp_client.py`) — MCP(모델 컨텍스트 프로토콜) 서버와의 연결을 관리합니다. `threading.Lock`을 사용하여 스레드로부터 안전한 서버 연결 관리를 수행합니다. `connect()`, `disconnect()`, `invoke()`, `list_servers()`, `get_server_tools()` 메서드가 있습니다.
-
-**ToolRegistry** (`domain/tool/registry.py`) — 도구 정의를 등록하고 관리합니다. 메모리 내 dict + `user_data/shared/tools/`에 대한 지속성을 관리합니다. 시작 시 내장 도구(web_search, 계산기, file_reader)를 자동으로 등록하고 파일에서 동적 도구를 로드합니다. `threading.Lock`를 사용하여 스레드로부터 안전한 작동을 제공합니다.
-
-**ChatStore** (`domain/chat/store.py`) — 대화 및 메시지의 메모리 내 관리 기능을 제공합니다. `__new__`에서 인스턴스를 공유하고 `_conversations`에서 dict를 유지합니다. CRUD 작업 외에도 `branch()`, `search()`, `export_conversation()`, `get_message_chain()` 등의 트리 작업을 제공합니다.
-
-**Inspector** (`domain/dev/inspector.py`) — 요청 로그의 기록 및 검색을 관리합니다. `threading.Lock`으로 스레드 안전. 상한선은 `collections.deque(maxlen=1000)`에 의해 제어됩니다. `log_request()`, `get_log()`, `get_latest()`, `list_logs()`, `find_by_conversation()` 메서드가 있습니다.
+**AIClient** (`domain/ai_client/client.py`) — AI 공급자를 관리하고 위임합니다. 초기화 시 스텁 공급자를 등록하고, 환경 변수에서 감지된 공급자(OpenAI, Anthropic, Google)를 자동으로 등록합니다. `complete()`, `stream()`, `embed()`, `image_gen()`, `image_analyze()`, `transcribe()`, `tts()` 메서드가 있습니다. 모델 문자열 `"provider/model"`을 해결하고 해당 공급자에게 위임합니다.**McpClient** (`domain/tool/mcp_client.py`) — MCP(모델 컨텍스트 프로토콜) 서버와의 연결을 관리합니다. `threading.Lock`을 사용하여 스레드로부터 안전한 서버 연결 관리를 수행합니다. `connect()`, `disconnect()`, `invoke()`, `list_servers()`, `get_server_tools()` 메서드가 있습니다.**ToolRegistry** (`domain/tool/registry.py`) — 도구 정의를 등록하고 관리합니다. 메모리 내 dict + `user_data/shared/tools/`에 대한 지속성을 관리합니다. 시작 시 내장 도구(web_search, 계산기, file_reader)를 자동으로 등록하고 파일에서 동적 도구를 로드합니다. `threading.Lock`를 사용하여 스레드로부터 안전한 작동을 제공합니다.**ChatStore** (`domain/chat/store.py`) — 대화 및 메시지의 메모리 내 관리 기능을 제공합니다. `__new__`에서 인스턴스를 공유하고 `_conversations`에서 dict를 유지합니다. CRUD 작업 외에도 `branch()`, `search()`, `export_conversation()`, `get_message_chain()` 등의 트리 작업을 제공합니다.**Inspector** (`domain/dev/inspector.py`) — 요청 로그의 기록 및 검색을 관리합니다. `threading.Lock`으로 스레드 안전. 상한선은 `collections.deque(maxlen=1000)`에 의해 제어됩니다. `log_request()`, `get_log()`, `get_latest()`, `list_logs()`, `find_by_conversation()` 메서드가 있습니다.
 
 ---
 
@@ -130,15 +122,7 @@ class BaseProvider:
 
 ### 구현 공급자
 
-**StubProvider** — 고정된 응답을 반환합니다. 테스트 및 개발용. API 호출이 없습니다.
-
-**OpenAIProvider** — OpenAI API를 호출합니다. 환경 변수 `OPENAI_API_KEY`에 의해 감지되었습니다.
-
-**AnthropicProvider** — Anthropic API를 호출합니다. 환경 변수 `ANTHROPIC_API_KEY`에 의해 감지되었습니다.
-
-**GoogleProvider** — Google AI API를 호출합니다. 환경 변수 `GOOGLE_API_KEY`에 의해 감지되었습니다.
-
-**RumiProvider** — 메타 공급자. 파이프라인을 통해 요청을 처리하거나 대체 공급자에게 위임하세요. AIClient 인스턴스를 수신하고 하나 이상의 다른 공급자가 등록된 경우에만 활성화됩니다.
+**StubProvider** — 고정된 응답을 반환합니다. 테스트 및 개발용. API 호출이 없습니다.**OpenAIProvider** — OpenAI API를 호출합니다. 환경 변수 `OPENAI_API_KEY`에 의해 감지되었습니다.**AnthropicProvider** — Anthropic API를 호출합니다. 환경 변수 `ANTHROPIC_API_KEY`에 의해 감지되었습니다.**GoogleProvider** — Google AI API를 호출합니다. 환경 변수 `GOOGLE_API_KEY`에 의해 감지되었습니다.**RumiProvider** — 메타 공급자. 파이프라인을 통해 요청을 처리하거나 대체 공급자에게 위임하세요. AIClient 인스턴스를 수신하고 하나 이상의 다른 공급자가 등록된 경우에만 활성화됩니다.
 
 ### 공급자 자동 감지
 
@@ -201,6 +185,4 @@ skeleton = generate_skeleton("my_tool", "ツールの説明", {
 
 PromptManager는 메모리 내 dict + `user_data/shared/prompts/`에 대한 JSON 파일 지속성을 사용하여 프롬프트를 관리합니다. `get_manager()`을 사용하여 모듈 수준 싱글톤으로 얻습니다.
 
-**주요 방법:** `create_prompt()`, `get_prompt()`, `get_prompt_by_name()`, `list_prompts()`, `update_prompt()`, `delete_prompt()`, `to_template()`, `create_from_template()`, `get_system_prompt()`, `set_system_prompt()`.
-
-**컨텍스트 변수 주입:** `inject_context_variables(variables, context)` 정적 메서드는 컨텍스트 딕셔너리에서 `context.total_tokens`, `context.message_count`와 같은 특수 변수를 자동으로 주입합니다.
+**주요 방법:** `create_prompt()`, `get_prompt()`, `get_prompt_by_name()`, `list_prompts()`, `update_prompt()`, `delete_prompt()`, `to_template()`, `create_from_template()`, `get_system_prompt()`, `set_system_prompt()`.**컨텍스트 변수 주입:** `inject_context_variables(variables, context)` 정적 메서드는 컨텍스트 딕셔너리에서 `context.total_tokens`, `context.message_count`와 같은 특수 변수를 자동으로 주입합니다.

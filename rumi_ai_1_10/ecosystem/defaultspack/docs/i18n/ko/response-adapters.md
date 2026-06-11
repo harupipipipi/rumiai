@@ -169,13 +169,13 @@ response_prompt:
 
 | 어댑터 | 납품대상 |
 |---|---|
-| §루미§0§ | 옵션 `thread_ts`가 포함된 Slack `chat.postMessage` |
-| §루미§0§ | 단기 응답 토큰 참조를 사용하는 LINE 응답 API |
-| §루미§0§ | Discord 상호작용 응답 본문 |
-| §루미§0§ | Discord 채널 메시지 API |
-| §루미§0§ | Discord 웹훅 URL |
-| §루미§0§ | 일반 JSON 응답 또는 콜백 URL |
-| §루미§0§ | 도구 지원 LINE/Discord/Slack/일반 승인 후 보내기 |
+| `slack-thread` | 옵션 `thread_ts`가 포함된 Slack `chat.postMessage` |
+| `line-reply` | 단기 응답 토큰 참조를 사용하는 LINE 응답 API |
+| `discord-interaction` | Discord 상호작용 응답 본문 |
+| `discord-channel` | Discord 채널 메시지 API |
+| `discord-webhook` | Discord 웹훅 URL |
+| `webhook-json` | 일반 JSON 응답 또는 콜백 URL |
+| `external_send` | 도구 지원 LINE/Discord/Slack/일반 승인 후 보내기 |
 
 어댑터 ID는 채팅 핸들러가 아닌 `InputProfile`에 의해 선택됩니다.
 
@@ -192,7 +192,7 @@ response_prompt:
 | 아웃바운드 토큰 누락 | 원시 비밀 없이 수정된 배달 오류 |
 | 공급자 비율 제한 | `store_only` 또는 제공업체별 지연 처리 |
 | 메시지가 너무 깁니다 | 일반 플래너 청킹 |
-| 계획 이후 거부된 정책 | §루미§0§ |
+| 계획 이후 거부된 정책 | `store_only` |
 
 ## 안전 규칙
 

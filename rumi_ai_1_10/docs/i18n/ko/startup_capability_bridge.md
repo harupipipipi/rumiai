@@ -32,7 +32,7 @@
 `launch_capability_graph`을 생략하거나 `false`로 설정한 프로필은
 이전 시작 실행 동작. 출시 결과에는 다음이 포함됩니다.
 `capability_graph.skipped: true` 이유 있음
-§루미§0§; 이것은 치명적이지 않습니다.
+`launch_capability_graph_disabled`; 이것은 치명적이지 않습니다.
 
 ## 실행 동작
 

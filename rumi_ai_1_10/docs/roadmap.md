@@ -6,7 +6,7 @@
 
 ## 🚀 Phase V: Rumi Viewer + Pack Desktop application [Most important/top priority]
 
-> **This phase takes precedence over all other tasks. **
+> **This phase takes precedence over all other tasks.**
 > Most important milestone to enable Rumi to be distributed as a "terminal-free desktop app".
 
 ### Architecture Overview
@@ -16,9 +16,7 @@
 1. **Rumi Console** (rumi-launcher, Rust)—Resident in tray. Kernel process management. Users are usually not aware of this.
 2. **Rumi Viewer** (Tauri) — A general-purpose WebView app that displays the Pack front end. The main app that users use on a daily basis.
 3. **bundled/uv** — For building a Python environment.
-4. **app/** (rumi_ai_1_10/) — Kernel source code.
-
-**What is Rumi Viewer:**
+4. **app/** (rumi_ai_1_10/) — Kernel source code.**What is Rumi Viewer:**
 - General-purpose WebView application created with Tauri
 - Display the frontend (HTML/CSS/JS) declared by Pack in `web_mount`
 - Can only connect to Kernel API (localhost:8765). I can't go to external sites
@@ -102,7 +100,7 @@ This is a complete roadmap that includes design concepts and past plans. See [ar
 ## 0. North Star (Vision)
 
 - **Foundation without infrastructure**: The official version has no domain concept (chat/tools/prompts/UI, etc.) and only provides OS-like mechanisms such as "execution, approval, isolation, audit, and authority."
-- The ecosystem is assumed to be created by a third party (malicious assumption), and the core is **Approval required**, **Docker isolation (strict recommended)**, **Fail-soft**, and **Audit log**.
+- The ecosystem is assumed to be created by a third party (malicious assumption), and the core is **Approval required**,**Docker isolation (strict recommended)**,**Fail-soft**, and**Audit log**.
 
 ---
 
@@ -354,11 +352,7 @@ vocab_registry already has a mechanism to solve this problem, but it lacks "auto
 
 #### Proposed implementation plan
 
-**Method A (normalization during storage - recommended)**: Convert to preferred term in vocab_registry before storing ctx in kernel_core. Existing mechanisms can be utilized by changing a few lines.
-
-**Method B (normalization on reference)**: Synonym fallback with _resolve_value. The stored data is not changed, but the resolution path is complicated.
-
-**Method C (opt-in normalization)**: Normalize: true flag in Flow step or declare output_vocab_group in component manifest. There is no impact on existing products, but Pack authors need to be aware of this.
+**Method A (normalization during storage - recommended)**: Convert to preferred term in vocab_registry before storing ctx in kernel_core. Existing mechanisms can be utilized by changing a few lines.**Method B (normalization on reference)**: Synonym fallback with _resolve_value. The stored data is not changed, but the resolution path is complicated.**Method C (opt-in normalization)**: Normalize: true flag in Flow step or declare output_vocab_group in component manifest. There is no impact on existing products, but Pack authors need to be aware of this.
 
 ### 6.6 Internal refactoring (P3 pending)
 

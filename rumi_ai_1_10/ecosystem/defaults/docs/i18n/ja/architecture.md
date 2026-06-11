@@ -48,13 +48,7 @@ rumiai カーネルは、エコシステム全体を管理するコア ランタ
 
 デフォルト パックは 4 つのレイヤーで構成されます。
 
-**トランスポート層** (`transport/`) は外部からのリクエストを受け入れます。 `transport/http.py` の `DefaultsHttpServer` クラスはルーティングを実行し、URL パスと HTTP メソッドに基づいて適切なハンドラーを呼び出します。 `transport/stdio.py` と `transport/uds.py` は、それぞれ標準入出力と Unix ドメイン ソケット トランスポートを提供します。
-
-**ブロック レイヤー** (`blocks/`) はハンドラーのコレクションです。各ハンドラはシグネチャ `def run(input_data, context)` を持ち、`input_data` (dict) でリクエスト パラメータを受け取り、`context` (dict) でフロー情報と `call_handler` 関数を受け取ります。ハンドラーはドメイン層のロジックを呼び出し、`ok(data)` または `error(message, code)` の形式で結果を返します。
-
-**ドメイン層** (`domain/`) はビジネス ロジックを実装します。 `domain/chat/store.py` (ChatStore)、`domain/agent/engine.py` (AgentEngine)、`domain/tool/registry.py` (ToolRegistry)、`domain/prompt/manager.py` (PromptManager) などが含まれます。ハンドラーはドメイン層クラスを直接インポートして使用します。
-
-**外部 API レイヤー** は、`domain/ai_client/` を通じて AI プロバイダー (OpenAI、Anthropic など) と通信します。
+**トランスポート層** (`transport/`) は外部からのリクエストを受け入れます。 `transport/http.py` の `DefaultsHttpServer` クラスはルーティングを実行し、URL パスと HTTP メソッドに基づいて適切なハンドラーを呼び出します。 `transport/stdio.py` と `transport/uds.py` は、それぞれ標準入出力と Unix ドメイン ソケット トランスポートを提供します。**ブロック レイヤー** (`blocks/`) はハンドラーのコレクションです。各ハンドラはシグネチャ `def run(input_data, context)` を持ち、`input_data` (dict) でリクエスト パラメータを受け取り、`context` (dict) でフロー情報と `call_handler` 関数を受け取ります。ハンドラーはドメイン層のロジックを呼び出し、`ok(data)` または `error(message, code)` の形式で結果を返します。**ドメイン層** (`domain/`) はビジネス ロジックを実装します。 `domain/chat/store.py` (ChatStore)、`domain/agent/engine.py` (AgentEngine)、`domain/tool/registry.py` (ToolRegistry)、`domain/prompt/manager.py` (PromptManager) などが含まれます。ハンドラーはドメイン層クラスを直接インポートして使用します。**外部 API レイヤー** は、`domain/ai_client/` を通じて AI プロバイダー (OpenAI、Anthropic など) と通信します。
 
 ## データの流れ
 
@@ -188,26 +182,10 @@ rumiai_defaults/
 
 `ecosystem.json`はカーネルがPackを認識するための構造定義ファイルです。実際のファイル内容に基づく構造は次のとおりです。
 
-**`pack_id`** (`"defaults"`) はパックの一意の識別子です。ハンドラー名の最初の部分として使用されます (`defaults` の `defaults.chat.send`)。
-
-**`pack_identity`** (`"github:harupipipipi/rumiai-defaults"`) はパックのリモート識別子です。
-
-**`version`** (`"1.0.0"`) はパック版です。
-
-**`vocabulary.types`** は、Pack が提供するコンポーネント タイプのリストです。 `["chat", "agent", "coding", "ai_client", "tool", "prompt", "memory", "media", "frontend", "dev"]` の 10 個が定義されています。
-
-**`components`** は各コンポーネントの定義です。各コンポーネントには、`type`、`id`、`path` (ブロック内のディレクトリ パス)、および `connectivity.provides` (提供するハンドラー名のリスト) があります。たとえば、`chat` コンポーネントは `path: "blocks/chat"` にあり、`defaults.chat.create_conversation` から `defaults.chat.auto_trim` までの 18 個のハンドラーを提供します。
-
-**`load_order`** はコンポーネントの初期化順序です。 `memory` → `prompt` → `media` → `ai_client` → `tool` → `coding` → `chat` → `agent` → `dev` → `frontend` の順序でロードされます。
-
-**`metadata`** はパックのメタ情報 (説明、作成者、ライセンス) です。
+**`pack_id`** (`"defaults"`) はパックの一意の識別子です。ハンドラー名の最初の部分として使用されます (`defaults` の `defaults.chat.send`)。**`pack_identity`** (`"github:harupipipipi/rumiai-defaults"`) はパックのリモート識別子です。**`version`** (`"1.0.0"`) はパック版です。**`vocabulary.types`** は、Pack が提供するコンポーネント タイプのリストです。 `["chat", "agent", "coding", "ai_client", "tool", "prompt", "memory", "media", "frontend", "dev"]` の 10 個が定義されています。**`components`** は各コンポーネントの定義です。各コンポーネントには、`type`、`id`、`path` (ブロック内のディレクトリ パス)、および `connectivity.provides` (提供するハンドラー名のリスト) があります。たとえば、`chat` コンポーネントは `path: "blocks/chat"` にあり、`defaults.chat.create_conversation` から `defaults.chat.auto_trim` までの 18 個のハンドラーを提供します。**`load_order`** はコンポーネントの初期化順序です。 `memory` → `prompt` → `media` → `ai_client` → `tool` → `coding` → `chat` → `agent` → `dev` → `frontend` の順序でロードされます。**`metadata`** はパックのメタ情報 (説明、作成者、ライセンス) です。
 
 ## KernelFacade との連絡先
 
 デフォルト パックは、次の 3 つの主要な点でカーネルと対話します。
 
-**`io.http.server`**: `blocks/frontend/start.py` はカーネルから `facade` を受け取り、それを `transport/http.py` の `start_http_server(facade)` に渡して HTTP サーバーを起動します。ファサードは `DefaultsHttpServer` のインスタンスに保持されており、`_handle_context_info()` は `facade.list_interfaces()` を呼び出してインターフェイスのリストを返します。
-
-**`get_interface` / `list_interfaces`**: カーネルによって登録された InterfaceRegistry から、他のパックまたはカーネル自体によって提供されるインターフェイスを取得するために使用されます。 `/api/context` エンドポイントで現在利用可能なインターフェースのリストを確認できます。
-
-**`emit` (EventBus)**: `call_handler` はハンドラーの `context` を介して提供され、それを通じて他のハンドラーを呼び出します。 `call_handler("defaults.ai.complete", params)`のようにハンドラ名とパラメータを指定して呼び出します。これは、カーネルの EventBus / InterfaceRegistry を通じて解決されます。
+**`io.http.server`**: `blocks/frontend/start.py` はカーネルから `facade` を受け取り、それを `transport/http.py` の `start_http_server(facade)` に渡して HTTP サーバーを起動します。ファサードは `DefaultsHttpServer` のインスタンスに保持されており、`_handle_context_info()` は `facade.list_interfaces()` を呼び出してインターフェイスのリストを返します。**`get_interface` / `list_interfaces`**: カーネルによって登録された InterfaceRegistry から、他のパックまたはカーネル自体によって提供されるインターフェイスを取得するために使用されます。 `/api/context` エンドポイントで現在利用可能なインターフェースのリストを確認できます。**`emit` (EventBus)**: `call_handler` はハンドラーの `context` を介して提供され、それを通じて他のハンドラーを呼び出します。 `call_handler("defaults.ai.complete", params)`のようにハンドラ名とパラメータを指定して呼び出します。これは、カーネルの EventBus / InterfaceRegistry を通じて解決されます。

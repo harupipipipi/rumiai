@@ -48,13 +48,7 @@ rumiai 内核是管理整个生态系统的核心运行时。默认包是在内�
 
 默认包由四层组成。
 
-**传输层**（`transport/`）接受来自外部的请求。 `transport/http.py` 中的`DefaultsHttpServer` 类执行路由并根据 URL 路径和 HTTP 方法调用适当的处理程序。 `transport/stdio.py`和`transport/uds.py`分别提供标准输入/输出和Unix域套接字传输。
-
-**块层** (`blocks/`) 是处理程序的集合。每个处理程序都有一个签名`def run(input_data, context)`，接收`input_data`（字典）中的请求参数，并接收`context`（字典）中的流信息和`call_handler`函数。 handler 调用领域层的逻辑，并以`ok(data)`或`error(message, code)`的形式返回结果。
-
-**领域层** (`domain/`) 实现业务逻辑。包括`domain/chat/store.py`（ChatStore）、`domain/agent/engine.py`（AgentEngine）、`domain/tool/registry.py`（ToolRegistry）、`domain/prompt/manager.py`（PromptManager）等。handler直接导入并使用领域层类。
-
-**外部 API 层**通过 `domain/ai_client/` 与 AI 提供商（OpenAI、Anthropic 等）进行通信。
+**传输层**（`transport/`）接受来自外部的请求。 `transport/http.py` 中的`DefaultsHttpServer` 类执行路由并根据 URL 路径和 HTTP 方法调用适当的处理程序。 `transport/stdio.py`和`transport/uds.py`分别提供标准输入/输出和Unix域套接字传输。**块层** (`blocks/`) 是处理程序的集合。每个处理程序都有一个签名`def run(input_data, context)`，接收`input_data`（字典）中的请求参数，并接收`context`（字典）中的流信息和`call_handler`函数。 handler 调用领域层的逻辑，并以`ok(data)`或`error(message, code)`的形式返回结果。**领域层** (`domain/`) 实现业务逻辑。包括`domain/chat/store.py`（ChatStore）、`domain/agent/engine.py`（AgentEngine）、`domain/tool/registry.py`（ToolRegistry）、`domain/prompt/manager.py`（PromptManager）等。handler直接导入并使用领域层类。**外部 API 层**通过 `domain/ai_client/` 与 AI 提供商（OpenAI、Anthropic 等）进行通信。
 
 ## 与提供商无关的聊天 IR
 
@@ -220,26 +214,10 @@ rumiai_defaults/
 
 `ecosystem.json`是内核识别Pack的结构体定义文件。根据实际文件内容的结构如下。
 
-**`pack_id`** (`"defaults"`) 是包的唯一标识符。用作处理程序名称的第一部分（`defaults` 或`defaults.chat.send`）。
-
-**`pack_identity`** (`"github:harupipipipi/rumiai-defaults"`) 是包的远程标识符。
-
-**`version`** (`"1.0.0"`) 是包版本。
-
-**`vocabulary.types`** 是 Pack 提供的组件类型列表。定义了`["chat", "agent", "coding", "ai_client", "tool", "prompt", "memory", "media", "frontend", "dev"]`的10条。
-
-**`components`** 是每个组件的定义。每个组件都有`type`、`id`、`path`（块内的目录路径）和`connectivity.provides`（要提供的处理程序名称列表）。例如，`chat`组件位于`path: "blocks/chat"`中，并提供从`defaults.chat.create_conversation`到`defaults.chat.auto_trim`的18个处理程序。
-
-**`load_order`** 是组件初始化顺序。它们按以下顺序加载：`memory` → `prompt` → `media` → `ai_client` → `tool` → `coding` → `chat` → `agent` → `dev` → `frontend`。
-
-**`metadata`** 是包元信息（描述、作者、许可证）。
+**`pack_id`** (`"defaults"`) 是包的唯一标识符。用作处理程序名称的第一部分（`defaults` 或`defaults.chat.send`）。**`pack_identity`** (`"github:harupipipipi/rumiai-defaults"`) 是包的远程标识符。**`version`** (`"1.0.0"`) 是包版本。**`vocabulary.types`** 是 Pack 提供的组件类型列表。定义了`["chat", "agent", "coding", "ai_client", "tool", "prompt", "memory", "media", "frontend", "dev"]`的10条。**`components`** 是每个组件的定义。每个组件都有`type`、`id`、`path`（块内的目录路径）和`connectivity.provides`（要提供的处理程序名称列表）。例如，`chat`组件位于`path: "blocks/chat"`中，并提供从`defaults.chat.create_conversation`到`defaults.chat.auto_trim`的18个处理程序。**`load_order`** 是组件初始化顺序。它们按以下顺序加载：`memory` → `prompt` → `media` → `ai_client` → `tool` → `coding` → `chat` → `agent` → `dev` → `frontend`。**`metadata`** 是包元信息（描述、作者、许可证）。
 
 ## 与 KernelFacade 的接触点
 
 默认包在三个主要点与内核交互：
 
-**`io.http.server`**：`blocks/frontend/start.py`从内核接收`facade`并将其传递给`transport/http.py`中的`start_http_server(facade)`以启动HTTP服务器。外观保存在`DefaultsHttpServer`的实例中，`_handle_context_info()`调用`facade.list_interfaces()`来返回接口列表。
-
-**`get_interface` / `list_interfaces`**：用于从内核注册的InterfaceRegistry中检索其他Packs或内核本身提供的接口。 `/api/context` 您可以检查端点上当前可用的接口列表。
-
-**`emit` (EventBus)**：`call_handler` 通过处理程序的`context` 提供，通过它调用其他处理程序。通过指定处理程序名称和参数（如`call_handler("defaults.ai.complete", params)`）来调用它。这是通过内核的EventBus/InterfaceRegistry来解决的。
+**`io.http.server`**：`blocks/frontend/start.py`从内核接收`facade`并将其传递给`transport/http.py`中的`start_http_server(facade)`以启动HTTP服务器。外观保存在`DefaultsHttpServer`的实例中，`_handle_context_info()`调用`facade.list_interfaces()`来返回接口列表。**`get_interface` / `list_interfaces`**：用于从内核注册的InterfaceRegistry中检索其他Packs或内核本身提供的接口。 `/api/context` 您可以检查端点上当前可用的接口列表。**`emit` (EventBus)**：`call_handler` 通过处理程序的`context` 提供，通过它调用其他处理程序。通过指定处理程序名称和参数（如`call_handler("defaults.ai.complete", params)`）来调用它。这是通过内核的EventBus/InterfaceRegistry来解决的。

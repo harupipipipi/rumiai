@@ -38,12 +38,12 @@ stdio/UDS의 경우 요청 JSON의 `"data"` 필드 내용이 전달됩니다. �
 
 | 필드 | 유형 | 설명 |
 |---|---|---|
-| §루미§0§ | §루미§1§ | 실행 흐름 식별자입니다. 전송 직접 호출하는 경우 `"transport_direct"`(HTTP), `"stdio_direct"`(stdio) 또는 `"uds_direct"`(UDS) |
-| §루미§0§ | §루미§1§ | 단계의 식별자입니다. 전송 직접 호출하는 경우 `"http_request"`(HTTP), `"stdio_request"`(stdio) 또는 `"uds_request"`(UDS) |
-| §루미§0§ | §루미§1§ | 항상 `"execute"` |
-| §루미§0§ | §루미§1§ | ISO 8601 타임스탬프(예: `"2025-01-01T00:00:00Z"`) |
-| §루미§0§ | §루미§1§ | 항상 `"defaults"` |
-| §루미§0§ | §루미§1§ | 추가 입력. 일반적으로 비어 있는 dict |
+| `flow_id` | `string` | 실행 흐름 식별자입니다. 전송 직접 호출하는 경우 `"transport_direct"`(HTTP), `"stdio_direct"`(stdio) 또는 `"uds_direct"`(UDS) |
+| `step_id` | `string` | 단계의 식별자입니다. 전송 직접 호출하는 경우 `"http_request"`(HTTP), `"stdio_request"`(stdio) 또는 `"uds_request"`(UDS) |
+| `phase` | `string` | 항상 `"execute"` |
+| `ts` | `string` | ISO 8601 타임스탬프(예: `"2025-01-01T00:00:00Z"`) |
+| `owner_pack` | `string` | 항상 `"defaults"` |
+| `inputs` | `dict` | 추가 입력. 일반적으로 비어 있는 dict |
 
 #### Flow 엔진/커널을 통해 추가된 필드
 
@@ -51,13 +51,13 @@ stdio/UDS의 경우 요청 JSON의 `"data"` 필드 내용이 전달됩니다. �
 
 | 필드 | 유형 | 설명 |
 |---|---|---|
-| §루미§0§ | §루미§1§ | 다른 핸들러를 호출하는 함수입니다. `call_handler(handler_name: str, input_data: dict) -> dict`의 서명. 커널의 InterfaceRegistry를 통해 핸들러 이름을 확인하고 대상 `run()` |
-| §루미§0§ | §루미§1§ | 이벤트를 발생시키는 함수입니다. `emit_event(event_type: str, data: dict) -> None`의 서명. 커널의 EventBus에 이벤트 보내기 |
-| §루미§0§ | §루미§1§ | 이벤트를 기다리는 함수입니다. `wait_event(event_type: str, timeout: int, filter: dict) -> dict \| None`의 서명. 지정된 이벤트가 발생할 때까지 차단 |
-| §루미§0§ | §루미§1§ | 위젯을 UI로 보내는 함수입니다. `emit_widget(widget_json: dict) -> None`의 서명. `lib/rumi_widgets/`에 정의된 위젯 구조 보내기 |
-| §루미§0§ | §루미§1§ | 현재 실행이 취소되었는지 확인하는 함수입니다. `cancel_check() -> bool`의 서명. 장기 실행 루프에서 주기적으로 호출하고 조기 종료에 사용 |
-| §루미§0§ | §루미§1§ | 핸들러 구성 정보. `conditions.json` 등에 정의된 핸들러별 설정은 커널 |
-| §루미§0§ | §루미§1§ | 세션 정보. `session_id`, `workspace`와 같은 필드를 포함합니다. 세션 범위 상태 관리에 사용 |
+| `call_handler` | `callable \| None` | 다른 핸들러를 호출하는 함수입니다. `call_handler(handler_name: str, input_data: dict) -> dict`의 서명. 커널의 InterfaceRegistry를 통해 핸들러 이름을 확인하고 대상 `run()` |
+| `emit_event` | `callable \| None` | 이벤트를 발생시키는 함수입니다. `emit_event(event_type: str, data: dict) -> None`의 서명. 커널의 EventBus에 이벤트 보내기 |
+| `wait_event` | `callable \| None` | 이벤트를 기다리는 함수입니다. `wait_event(event_type: str, timeout: int, filter: dict) -> dict \| None`의 서명. 지정된 이벤트가 발생할 때까지 차단 |
+| `emit_widget` | `callable \| None` | 위젯을 UI로 보내는 함수입니다. `emit_widget(widget_json: dict) -> None`의 서명. `lib/rumi_widgets/`에 정의된 위젯 구조 보내기 |
+| `cancel_check` | `callable \| None` | 현재 실행이 취소되었는지 확인하는 함수입니다. `cancel_check() -> bool`의 서명. 장기 실행 루프에서 주기적으로 호출하고 조기 종료에 사용 |
+| `handler_config` | `dict \| None` | 핸들러 구성 정보. `conditions.json` 등에 정의된 핸들러별 설정은 커널 |
+| `session` | `dict \| None` | 세션 정보. `session_id`, `workspace`와 같은 필드를 포함합니다. 세션 범위 상태 관리에 사용 |
 
 #### 컨텍스트 필드 사용 예
 
@@ -164,7 +164,7 @@ from domain.ai_client.client import AIClient
 
 `blocks/_common.py`은 다음과 같은 5가지 기능을 제공합니다:
 
-### §루미§0§
+### `ok(data=None) -> dict`
 
 성공 응답을 반환합니다. JSON 직렬화 가능 개체를 `data`에 전달합니다.
 
@@ -173,7 +173,7 @@ ok({"id": "abc"})   # → {"status": "ok", "data": {"id": "abc"}}
 ok()                 # → {"status": "ok", "data": null}
 ```
 
-### §루미§0§
+### `error(message, code="ERROR") -> dict`
 
 오류 응답을 반환합니다.
 
@@ -182,7 +182,7 @@ error("not found", "NOT_FOUND")  # → {"status": "error", "error": {"code": "NO
 error("fail")                     # → {"status": "error", "error": {"code": "ERROR", "message": "fail"}}
 ```
 
-### §루미§0§
+### `not_implemented(handler_name) -> dict`
 
 구현되지 않은 핸들러에 대한 스텁 응답을 반환합니다.
 
@@ -191,7 +191,7 @@ not_implemented("defaults.foo.bar")
 # → {"status": "ok", "data": null, "_stub": true, "_handler": "defaults.foo.bar"}
 ```
 
-### §루미§0§
+### `timestamp() -> str`
 
 ISO 8601 형식의 UTC 타임스탬프 문자열을 반환합니다.
 
@@ -201,7 +201,7 @@ timestamp()  # → "2025-01-01T00:00:00Z"
 
 내부 구현: `time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())`
 
-### §루미§0§
+### `gen_id() -> str`
 
 UUID v4 문자열을 반환합니다.
 

@@ -269,7 +269,7 @@ requires:
 2. `priority` 昇順
 3. `modifier_id` 昇順
 
-###solve_target (共有辞書で解決)
+### solve_target (共有辞書で解決)
 
 ```yaml
 modifier_id: compat_modifier
@@ -666,7 +666,7 @@ scan → pending → approve → installed
 
 ホイールのみがデフォルトです (`--only-binary=:all:`)。 sdistが必要な場合は承認時に`allow_sdist: true`を指定してください。ビルダー コンテナー (ダウンロード) は `--network=bridge` + `--cap-drop=ALL` で実行され、ビルダー コンテナー (インストール) は `--network=none` (完全にオフライン) で実行されます。実行コンテナから、サイト パッケージは読み取り専用でマウントされ (`/pip-packages:ro`)、`PYTHONPATH` に追加されます。
 
-###index_url 制約
+### index_url 制約
 
 `https` スキームのみが許可されます。ホスト名が localhost / 127.0.0.1 / ::1 / private IP / link-local の場合は拒否されます。
 
@@ -715,7 +715,7 @@ thinking_budget, reasoning_effort
 
 同じ行に書かれた単語は同義語として扱われます。
 
-###コンバータ
+### コンバータ
 
 ```python
 # ecosystem/<pack_id>/backend/converters/tool_to_function_calling.py
@@ -825,7 +825,7 @@ def check_converter_with_locals(
 
 ### ファイルの命名
 
-§るみ§0§
+`{category}_{YYYY-MM-DD}.jsonl`
 
 ファイル名の日付は、エントリの `ts` (タイムスタンプ) から決定されます。 0時を越えてもエントリーの`ts`に該当するファイルに振り分けられます。 `ts` が無効な場合は、書き込み時の日付に戻ります。
 

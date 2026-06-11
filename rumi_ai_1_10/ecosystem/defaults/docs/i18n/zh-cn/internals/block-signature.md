@@ -38,12 +38,12 @@ input_data["conversation_id"] = path_params.get("id", "")
 
 |领域 |类型 |描述 |
 |---|---|---|
-| §鲁米§0§| §鲁米§1§ |执行流程标识符。直接调用时，`"transport_direct"` (HTTP)、`"stdio_direct"` (stdio) 或`"uds_direct"` (UDS) |
-| §鲁米§0§| §鲁米§1§ |步骤的标识符。直接调用时，`"http_request"` (HTTP)、`"stdio_request"` (stdio) 或`"uds_request"` (UDS) |
-| §鲁米§0§| §鲁米§1§ |总是`"execute"` |
-| §鲁米§0§| §鲁米§1§ | ISO 8601 时间戳（例如`"2025-01-01T00:00:00Z"`）|
-| §鲁米§0§| §鲁米§1§ |总是`"defaults"` |
-| §鲁米§0§| §鲁米§1§ |附加输入。通常为空字典 |
+| `flow_id`| `string` |执行流程标识符。直接调用时，`"transport_direct"` (HTTP)、`"stdio_direct"` (stdio) 或`"uds_direct"` (UDS) |
+| `step_id`| `string` |步骤的标识符。直接调用时，`"http_request"` (HTTP)、`"stdio_request"` (stdio) 或`"uds_request"` (UDS) |
+| `phase`| `string` |总是`"execute"` |
+| `ts`| `string` | ISO 8601 时间戳（例如`"2025-01-01T00:00:00Z"`）|
+| `owner_pack`| `string` |总是`"defaults"` |
+| `inputs`| `dict` |附加输入。通常为空字典 |
 
 #### 通过 Flow 引擎/内核添加的字段
 
@@ -51,13 +51,13 @@ input_data["conversation_id"] = path_params.get("id", "")
 
 |领域 |类型 |描述 |
 |---|---|---|
-| §鲁米§0§| §鲁米§1§ |调用其他处理程序的函数。 `call_handler(handler_name: str, input_data: dict) -> dict` 的签名。通过内核的 InterfaceRegistry 解析处理程序名称并调用目标`run()` |
-| §鲁米§0§| §鲁米§1§ |触发事件的函数。 `emit_event(event_type: str, data: dict) -> None` 的签名。发送事件到内核的EventBus |
-| §鲁米§0§| §鲁米§1§ |等待事件的函数。 `wait_event(event_type: str, timeout: int, filter: dict) -> dict \| None` 的签名。阻止直到指定的事件触发 |
-| §鲁米§0§| §鲁米§1§ |将 Widget 发送到 UI 的函数。 `emit_widget(widget_json: dict) -> None` 的签名。发送第 `lib/rumi_widgets/` | 中定义的 Widget 结构
-| §鲁米§0§| §鲁米§1§ |检查当前执行是否已取消的函数。 `cancel_check() -> bool` 的签名。在长时间运行的循环中定期调用它并使用它来提前终止 |
-| §鲁米§0§| §鲁米§1§ |处理程序配置信息。 `conditions.json` 等中定义的处理程序特定设置是从内核注入的 |
-| §鲁米§0§| §鲁米§1§ |会话信息。包含`session_id`、`workspace`等字段。用于会话范围状态管理 |
+| `call_handler`| `callable \| None` |调用其他处理程序的函数。 `call_handler(handler_name: str, input_data: dict) -> dict` 的签名。通过内核的 InterfaceRegistry 解析处理程序名称并调用目标`run()` |
+| `emit_event`| `callable \| None` |触发事件的函数。 `emit_event(event_type: str, data: dict) -> None` 的签名。发送事件到内核的EventBus |
+| `wait_event`| `callable \| None` |等待事件的函数。 `wait_event(event_type: str, timeout: int, filter: dict) -> dict \| None` 的签名。阻止直到指定的事件触发 |
+| `emit_widget`| `callable \| None` |将 Widget 发送到 UI 的函数。 `emit_widget(widget_json: dict) -> None` 的签名。发送第 `lib/rumi_widgets/` | 中定义的 Widget 结构
+| `cancel_check`| `callable \| None` |检查当前执行是否已取消的函数。 `cancel_check() -> bool` 的签名。在长时间运行的循环中定期调用它并使用它来提前终止 |
+| `handler_config`| `dict \| None` |处理程序配置信息。 `conditions.json` 等中定义的处理程序特定设置是从内核注入的 |
+| `session`| `dict \| None` |会话信息。包含`session_id`、`workspace`等字段。用于会话范围状态管理 |
 
 #### 使用上下文字段的示例
 
@@ -160,11 +160,11 @@ from domain.ai_client.client import AIClient
 
 ---
 
-##`_common.py`的所有功能
+## `_common.py`的所有功能
 
 `blocks/_common.py`提供以下五种功能：
 
-### §鲁米§0§
+### `ok(data=None) -> dict`
 
 返回成功响应。将任何 JSON 可序列化对象传递给`data`。
 
@@ -173,7 +173,7 @@ ok({"id": "abc"})   # → {"status": "ok", "data": {"id": "abc"}}
 ok()                 # → {"status": "ok", "data": null}
 ```
 
-### §鲁米§0§
+### `error(message, code="ERROR") -> dict`
 
 返回错误响应。
 
@@ -182,7 +182,7 @@ error("not found", "NOT_FOUND")  # → {"status": "error", "error": {"code": "NO
 error("fail")                     # → {"status": "error", "error": {"code": "ERROR", "message": "fail"}}
 ```
 
-### §鲁米§0§
+### `not_implemented(handler_name) -> dict`
 
 返回未实现的处理程序的存根响应。
 
@@ -191,7 +191,7 @@ not_implemented("defaults.foo.bar")
 # → {"status": "ok", "data": null, "_stub": true, "_handler": "defaults.foo.bar"}
 ```
 
-### §鲁米§0§
+### `timestamp() -> str`
 
 返回 ISO 8601 格式的 UTC 时间戳字符串。
 
@@ -201,7 +201,7 @@ timestamp()  # → "2025-01-01T00:00:00Z"
 
 内部实施：`time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())`
 
-### §鲁米§0§
+### `gen_id() -> str`
 
 返回 UUID v4 字符串。
 

@@ -14,19 +14,19 @@
 
 会话密钥如下：
 
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
+- `agent:{agent_id}:main`
+- `agent:{agent_id}:chat:{conversation_id}`
+- `agent:{agent_id}:line:user:{line_user_id}`
+- `agent:{agent_id}:discord:channel:{channel_id}`
+- `cron:{job_id}`
+- `webhook:{webhook_id}`
 
 ## 外部输入关系
 
 网关是本地输入外壳，而不是外部输入框架本身。公共
 或特定于提供商的事件应标准化为`ExternalEvent`，由
 `AudiencePolicy`，通过`InputProfile`映射，并通过
-§鲁米§0§。网关消息可以是这些事件的来源之一。
+`submit_input`。网关消息可以是这些事件的来源之一。
 
 响应传递应经过 `ResponsePlanner` 和 `ResponseAdapter`，以便
 聊天和代理代码不学习 Slack、Discord、LINE、webhook 或隧道

@@ -15,7 +15,7 @@
 
 - 输入特征：`input.text`、`input.image`、`input.file`
 - 模型功能：`model.text`、`model.image_input`、`model.tool_calling`、
-  §鲁米§0§，§鲁米§1§
+  `model.thinking`，`model.fast`
 - 运行时能力
 - 政策能力
 - 标签
@@ -27,36 +27,36 @@
 
 工具定义可以声明：
 
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
+- `capability_requirements.requires_all`
+- `capability_requirements.requires_any`
+- `capability_requirements.forbids`
+- `requires_model_capabilities`
+- `requires_input_modalities`
+- `requires_runtime_capabilities`
+- `attachment_policy`
+- `supports_attachments`
 
 ## 稳定的原因代码
 
 被阻止或拒绝的工具使用稳定的原因代码：
 
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
+- `missing_capability`
+- `missing_input`
+- `model_unsupported`
+- `disabled_by_user`
+- `disabled_by_policy`
+- `requires_approval`
+- `not_connected_to_profile`
+- `requires_trusted_workspace`
+- `missing_api_key`
+- `attachment_not_supported`
+- `risk_blocked`
 
 执行时拒绝返回结构化结果：
 
-- §鲁米§0§
+- `status: rejected`
 - 提供商安全`code`
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
+- `reason`
+- `required`
+- `actual`
+- `repair_suggestions`

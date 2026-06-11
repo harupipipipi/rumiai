@@ -48,11 +48,11 @@ ComputerSeat 是一个模块化桌面自动化运行时，提供 AI 代理
 
 |组件|文件|角色 |
 |-----------|------|------|
-| §鲁米§0§| §鲁米§1§ |通过驱动链协调行动 |
-| §鲁米§0§| §鲁米§1§ |管理司机注册和连锁订购 |
-| §鲁米§0§| §鲁米§1§ | JSON 行仅附加审核日志 |
-| §鲁米§0§| §鲁米§1§ |风险分类和审批检查|
-| §鲁米§0§| §鲁米§1§ |共享数据类（ActionResult、ObserveResult 等）|
+| `ComputerSeatService`| `service.py` |通过驱动链协调行动 |
+| `DriverRegistry`| `registry.py` |管理司机注册和连锁订购 |
+| `AuditLogger`| `audit.py` | JSON 行仅附加审核日志 |
+| `permissions`| `permissions.py` |风险分类和审批检查|
+| `models`| `models.py` |共享数据类（ActionResult、ObserveResult 等）|
 
 ### 数据模型
 
@@ -94,18 +94,18 @@ class ObserveResult:
 
 |司机 |名称 |优先|能力|
 |--------|------|----------|--------------|
-| Mac 辅助功能驱动程序 | §鲁米§0§| 1（最高）|通过 AX 树进行语义操作 |
-| MacAppleEvents 驱动程序 | §鲁米§0§| 2 |列入白名单的 AppleScript 操作 |
-| MacCGEventPidDriver | MacCGEventPidDriver | MacCGEventPidDriver §鲁米§0§| 3 |通过 CGEventPostToPid 后台输入 |
-| MacForegroundFallbackDriver | MacForegroundFallbackDriver | MacForegroundFallbackDriver | MacForegroundFallbackDriver §鲁米§0§| 4（最低）|激活应用程序+前台输入 |
-| MacScreenCapture 驱动程序 | §鲁米§0§| — |仅观察（截图）|
+| Mac 辅助功能驱动程序 | `mac_accessibility`| 1（最高）|通过 AX 树进行语义操作 |
+| MacAppleEvents 驱动程序 | `mac_apple_events`| 2 |列入白名单的 AppleScript 操作 |
+| MacCGEventPidDriver | MacCGEventPidDriver | MacCGEventPidDriver `mac_cgevent_pid`| 3 |通过 CGEventPostToPid 后台输入 |
+| MacForegroundFallbackDriver | MacForegroundFallbackDriver | MacForegroundFallbackDriver | MacForegroundFallbackDriver `mac_foreground`| 4（最低）|激活应用程序+前台输入 |
+| MacScreenCapture 驱动程序 | `mac_screen_capture`| — |仅观察（截图）|
 
 ### Windows 驱动程序（骨架）
 
 |司机 |名称 |优先|状态 |
 |--------|------|----------|--------|
-| WindowsUIA 驱动程序 | §鲁米§0§| 1 |骨架 – 引发 NotImplementedError |
-| WindowsPostMessageDriver | WindowsPostMessageDriver | §鲁米§0§| 2 |骨架 – 引发 NotImplementedError |
+| WindowsUIA 驱动程序 | `windows_uia`| 1 |骨架 – 引发 NotImplementedError |
+| WindowsPostMessageDriver | WindowsPostMessageDriver | `windows_postmessage`| 2 |骨架 – 引发 NotImplementedError |
 
 ---
 
@@ -252,7 +252,7 @@ result = service.click(
 # }
 ```
 
-###医生
+### 医生
 
 ```python
 result = service.doctor()
@@ -294,9 +294,9 @@ result = service.doctor()
 
 |水平|行动|行为 |
 |-------|---------|----------|
-| §鲁米§0§|观察、列表、屏幕截图、ax_tree_read |无需批准 |
-| §鲁米§0§|滚动|无需批准（目前）|
-| §鲁米§0§|单击、type_text、key、semantic_action、ax_press、ax_set_value、post_to_pid |需要批准 |
+| `low`|观察、列表、屏幕截图、ax_tree_read |无需批准 |
+| `medium`|滚动|无需批准（目前）|
+| `high`|单击、type_text、key、semantic_action、ax_press、ax_set_value、post_to_pid |需要批准 |
 
 ### 审批流程
 
@@ -334,10 +334,10 @@ result = service.doctor()
 
 |功能|描述 |
 |----------|-------------|
-| §鲁米§0§|观察目标——截图+AX树+能力|
-| §鲁米§0§|执行语义动作（按下按钮，设置值）|
-| §鲁米§0§|直接CGEvent注入（实验性）|
-| §鲁米§0§|诊断平台能力和权限 |
+| `computer_observe`|观察目标——截图+AX树+能力|
+| `computer_semantic_action`|执行语义动作（按下按钮，设置值）|
+| `computer_pid_event`|直接CGEvent注入（实验性）|
+| `computer_doctor`|诊断平台能力和权限 |
 
 每个函数都遵循标准清单格式：
 ```json
@@ -365,9 +365,9 @@ Windows 实现提供了相同的驱动程序接口，但不是
 
 |模块|目的|
 |--------|---------|
-| §鲁米§0§| UI 自动化树操作（存根）|
-| §鲁米§0§|窗口句柄枚举（存根）|
-| §鲁米§0§| PrintWindow 屏幕截图捕获（存根）|
+| `windows/uia.py`| UI 自动化树操作（存根）|
+| `windows/hwnd.py`|窗口句柄枚举（存根）|
+| `windows/printwindow.py`| PrintWindow 屏幕截图捕获（存根）|
 
 ### Windows 驱动程序顺序
 
@@ -455,13 +455,13 @@ domain/computer/
 
 |测试文件|覆盖范围|
 |-----------|----------|
-| §鲁米§0§|使用模拟服务观察/点击/输入文本 |
-| §鲁米§0§|注册表排序和过滤|
-| §鲁米§0§|后备链行为 |
-| §鲁米§0§|现有电脑_使用冒烟测试|
-| §鲁米§0§| Windows驱动接口合约|
-| §鲁米§0§| Mac AX 驱动程序实例化 |
-| §鲁米§0§| CGEvent 驱动程序 PID 要求 |
+| `test_computer_seat_service.py`|使用模拟服务观察/点击/输入文本 |
+| `test_computer_driver_registry.py`|注册表排序和过滤|
+| `test_computer_fallback_order.py`|后备链行为 |
+| `test_browser_computer_compat.py`|现有电脑_使用冒烟测试|
+| `test_windows_driver_skeleton.py`| Windows驱动接口合约|
+| `test_mac_accessibility_driver.py`| Mac AX 驱动程序实例化 |
+| `test_mac_cgevent_pid_driver.py`| CGEvent 驱动程序 PID 要求 |
 
 运行所有测试：
 ```bash

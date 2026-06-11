@@ -22,11 +22,7 @@ The agent is an execution loop that "receives a task, the AI does some thinking,
 
 ## Task execution (execute)
 
-**handler**: `defaults.agent.execute`（`blocks/agent/execute.py`）
-
-**HTTP**: `POST /api/agent/execute`
-
-**input_data**:
+**handler**: `defaults.agent.execute`（`blocks/agent/execute.py`）**HTTP**: `POST /api/agent/execute`**input_data**:
 
 | Field | Type | Required | Description |
 |---|---|---|---|
@@ -35,9 +31,7 @@ The agent is an execution loop that "receives a task, the AI does some thinking,
 | `model` | `string` | No | AI model. Default `"default"` |
 | `system_prompt` | `string` | No | System prompt |
 
-**Processing**: Call `AgentEngine().execute(task, tools, model, system_prompt, context)`. Build an initial message, send it to the AI, and return a status of either `completed` / `waiting_approval` / `error` depending on the response.
-
-**Return value**:
+**Processing**: Call `AgentEngine().execute(task, tools, model, system_prompt, context)`. Build an initial message, send it to the AI, and return a status of either `completed` / `waiting_approval` / `error` depending on the response.**Return value**:
 
 ```json
 {
@@ -69,60 +63,38 @@ The agent is an execution loop that "receives a task, the AI does some thinking,
 
 ## Approve
 
-**handler**: `defaults.agent.approve`（`blocks/agent/approve.py`）
-
-**HTTP**: `POST /api/agent/{id}/approve`
-
-**input_data**:
+**handler**: `defaults.agent.approve`（`blocks/agent/approve.py`）**HTTP**: `POST /api/agent/{id}/approve`**input_data**:
 
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `execution_id` | `string` | Yes | Run ID (automatically injected from URL path) |
 
-**Processing**: Call `engine.approve(execution_id)`. Run the pending tool, return the results to the AI, and get the next response. If the AI ​​calls more tools, it will become `waiting_approval` again.
-
-**Return value**: `ok(result)` — Updated execution state.
+**Processing**: Call `engine.approve(execution_id)`. Run the pending tool, return the results to the AI, and get the next response. If the AI ​​calls more tools, it will become `waiting_approval` again.**Return value**: `ok(result)` — Updated execution state.
 
 ## reject
 
-**handler**: `defaults.agent.reject`（`blocks/agent/reject.py`）
-
-**HTTP**: `POST /api/agent/{id}/reject`
-
-**input_data**:
+**handler**: `defaults.agent.reject`（`blocks/agent/reject.py`）**HTTP**: `POST /api/agent/{id}/reject`**input_data**:
 
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `execution_id` | `string` | Yes | Run ID (automatically injected from URL path) |
 | `reason` | `string` | No | Reason for refusal. Default `"Rejected by user"` |
 
-**Processing**: Call `engine.reject(execution_id, reason)`. Send a message to the AI ​​that says "User declined the tool call. Reason: {reason}. Please suggest an alternative."
-
-**Return value**: `ok(result)` — Updated execution state.
+**Processing**: Call `engine.reject(execution_id, reason)`. Send a message to the AI ​​that says "User declined the tool call. Reason: {reason}. Please suggest an alternative."**Return value**: `ok(result)` — Updated execution state.
 
 ## Cancel
 
-**handler**: `defaults.agent.cancel`（`blocks/agent/cancel.py`）
-
-**HTTP**: `POST /api/agent/{id}/cancel`
-
-**input_data**:
+**handler**: `defaults.agent.cancel`（`blocks/agent/cancel.py`）**HTTP**: `POST /api/agent/{id}/cancel`**input_data**:
 
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `execution_id` | `string` | Yes | Run ID (automatically injected from URL path) |
 
-**Processing**: Call `engine.cancel(execution_id)` and remove the engine from memory in `_state.remove_engine(execution_id)`. The instructions for such execution in `InstructionQueue` are also cleared.
-
-**Return value**: `ok({"execution_id": "...", "status": "cancelled"})`
+**Processing**: Call `engine.cancel(execution_id)` and remove the engine from memory in `_state.remove_engine(execution_id)`. The instructions for such execution in `InstructionQueue` are also cleared.**Return value**: `ok({"execution_id": "...", "status": "cancelled"})`
 
 ## Check status
 
-**handler**: `defaults.agent.status`（`blocks/agent/status.py`）
-
-**HTTP**: `GET /api/agent/{id}/status`
-
-**input_data**:
+**handler**: `defaults.agent.status`（`blocks/agent/status.py`）**HTTP**: `GET /api/agent/{id}/status`**input_data**:
 
 | Field | Type | Required | Description |
 |---|---|---|---|
@@ -160,9 +132,7 @@ HTTP route is currently undefined. Can only be called via `call_handler("default
 | `model` | `string` | No | AI model. Default `"default"` |
 | `system_prompt` | `string` | No | System prompt |
 
-**Processing**: Call `engine.plan()`. Unlike the regular `execute`, we call the AI ​​by adding the following instruction to the system prompt: "PLANNING mode. Do not call tools. Return step-by-step plan in numbered list."
-
-**Return value**:
+**Processing**: Call `engine.plan()`. Unlike the regular `execute`, we call the AI ​​by adding the following instruction to the system prompt: "PLANNING mode. Do not call tools. Return step-by-step plan in numbered list."**Return value**:
 
 ```json
 {
@@ -178,11 +148,7 @@ HTTP route is currently undefined. Can only be called via `call_handler("default
 
 ## Add instructions during task (add_instruction)
 
-**handler**: `defaults.agent.add_instruction`（`blocks/agent/add_instruction.py`）
-
-**HTTP**: `POST /api/agent/{id}/instruct`
-
-**input_data**:
+**handler**: `defaults.agent.add_instruction`（`blocks/agent/add_instruction.py`）**HTTP**: `POST /api/agent/{id}/instruct`**input_data**:
 
 | Field | Type | Required | Description |
 |---|---|---|---|
@@ -190,9 +156,7 @@ HTTP route is currently undefined. Can only be called via `call_handler("default
 | `instruction` | `string` | Yes | Additional instructions |
 | `priority` | `string` | No | `"normal"` or `"urgent"`. Default `"normal"` |
 
-**Processing**: Add the instruction to the queue with `InstructionQueue.add_instruction()`. Instructions are injected into the message history by `AgentEngine._inject_pending_instructions()` before the next AI completion step. `urgent` has the `[RUNTIME INSTRUCTION — URGENT: Override current approach]` prefix. `normal` has the `[RUNTIME INSTRUCTION — Additional guidance from user]` prefix.
-
-**Return value**:
+**Processing**: Add the instruction to the queue with `InstructionQueue.add_instruction()`. Instructions are injected into the message history by `AgentEngine._inject_pending_instructions()` before the next AI completion step. `urgent` has the `[RUNTIME INSTRUCTION — URGENT: Override current approach]` prefix. `normal` has the `[RUNTIME INSTRUCTION — Additional guidance from user]` prefix.**Return value**:
 
 ```json
 {

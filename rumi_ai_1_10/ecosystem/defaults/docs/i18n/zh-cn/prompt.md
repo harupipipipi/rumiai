@@ -2,13 +2,13 @@
 [EN](../../prompt.md) | [JP](../ja/prompt.md) | [KR](../ko/prompt.md) | [CN](./prompt.md)
 <!-- docs-i18n-links:end -->
 
-#prompt.md — Rumi AI OS提示符设计文档
+# prompt.md — Rumi AI OS提示符设计文档
 
 ## 1. 概述
 
 提示模块是Rumi AI OS中负责定义、管理和渲染提示的组件。
 
-提示符是“`function that receives a variable and returns text.'' The prompt module is completely passive and only works when the caller (agent, chat, etc.) calls `prompt_manager.render(prompt_id,variables)”。提示模块本身不会启动任何东西或干扰其他模块。
+提示是“`function that receives a variable and returns text.'' The prompt module is completely passive and only works when the caller (agent, chat, etc.) calls `prompt_manager.render(prompt_id,variables)”。提示模块本身不会启动任何东西或干扰其他模块。
 
 支持使用模板文件（Jinja2 语法）的声明性定义和使用 Python 文件（prompt.py）的可编程扩展。
 
@@ -96,7 +96,7 @@ user_data/packs/coding_pro_prompts/
 
 最简单的配置只需放置一个文件 template.md 即可。
 
-§鲁米§0§：
+`user_data/shared/prompts/my_prompt/template.md`：
 
 ```markdown
 あなたは {{ agent_name }} です。
@@ -261,7 +261,7 @@ VARIABLES = {
 }
 ```
 
-如果`METADATA["template"]`为None并且`TEMPLATE`字符串存在，则使用该字符串作为模板。
+如果 `METADATA["template"]` 为 None 并且 `TEMPLATE` 字符串存在，则使用该字符串作为模板。
 
 
 ## 6. 模板语法
@@ -352,11 +352,7 @@ VARIABLES = {
 
 ### 7.1 变量分类
 
-**required** 是一个变量，其值必须由调用者传递。如果没有通过，验证器将返回错误。
-
-**可选**是一个变量，即使不传递，也会使用默认值。指定`source: system`会使variable_resolver自动从系统检索值。
-
-**自定义** 是特定于此提示的自定义点。提示的用户（agent.json 或调用代码中的prompt_variables）可以覆盖该值。提示包用户使用它来微调提示行为。
+**required** 是一个变量，其值必须由调用者传递。如果没有通过，验证器将返回错误。**可选**是一个变量，即使没有通过，也会使用默认值。指定`source: system`会使variable_resolver自动从系统检索值。**自定义**是特定于此提示的自定义点。提示的用户（agent.json 或调用代码中的prompt_variables）可以覆盖该值。提示包用户使用它来微调提示行为。
 
 变量的数量没有限制。您还可以在prompt.py中的pre_render中动态生成和返回变量。
 
@@ -563,9 +559,9 @@ render(prompt_id, variables, context) が呼ばれる
 
 loader.py 按以下顺序扫描所有搜索路径并收集具有相同prompt_id 的所有候选者。
 
-1.§鲁米§0§
-2.`user_data/packs/*/prompts/{prompt_id}/`（所有包）
-3.§鲁米§0§
+1.`user_data/shared/prompts/{prompt_id}/`
+2. `user_data/packs/*/prompts/{prompt_id}/`（所有包）
+3.`ecosystem/default/prompts/{prompt_id}/`
 
 ### 10.2 碰撞检测
 
@@ -591,7 +587,7 @@ loader.py 按以下顺序扫描所有搜索路径并收集具有相同prompt_id 
 
 ### 10.4 未解决的冲突
 
-未记录在resolution.json 中的冲突将在渲染时返回`PromptConflictError`。该错误包含一个建议列表，前端向用户显示一个选择 UI。
+未记录在resolution.json中的冲突将在渲染时返回`PromptConflictError`。该错误包含一个建议列表，前端向用户显示一个选择 UI。
 
 ```python
 class PromptConflictError(Exception):
@@ -697,9 +693,9 @@ async def resolve_prompt_id(self, raw_id):
 
 `context["session_state"]` 读取会话状态。需要权限中的`session_state: true`。
 
-`context["render_template"]` 是部分模板渲染。随时可用。
+`context["render_template"]`是部分模板渲染。随时可用。
 
-`context["get_variable"]`显式检索另一个变量提供者的值。随时可用。
+`context["get_variable"]` 显式检索另一个变量提供者的值。随时可用。
 
 `context["workspace_path"]` 是工作空间路径。随时可用。
 
@@ -766,34 +762,28 @@ user_data/packs/advanced_coding_prompts/
 
 ### 15.3 提示包类型
 
-**系统提示包**是定义座席个性和行为准则的提示集合。
-
-**实用提示包**是用于内部处理（压缩、内存更新、规划等）的模板集合。
-
-**部分包**是其他提示中包含的零件的集合。
-
-**完整代理包**是包含所有提示、工具和代理定义的完整包。
+**系统提示包**是定义座席个性和行为准则的提示集合。**实用程序提示包**是用于内部处理（压缩、内存更新、规划等）的模板集合。**部分包**是其他提示中包含的部分的集合。**完整座席包**是包含所有提示、工具和座席定义的完整包。
 
 
 ## 16.内置提示
 
 Rumi AI OS默认提供的提示列表。
 
-|提示ID |类型 |延伸|用途 |
+| prompt_id | type | extends | usage |
 |-----------|------|---------|------|
-|通用系统 |系统| — |一般系统提示。所有代理商的基础|
-|编码系统 |系统|通用系统 |编码专用系统提示|
-|历史压缩 |压缩| — |对话历史压缩|
-|内存更新 |内存更新 | — |更新project.md / user.md |
-|计划任务分解|规划| — |任务分解|
+| general_system | system | — | General system prompt. Foundation of all agents |
+| coding_system | system | general_system | Coding-specific system prompt |
+| history_compression | compression | — | Conversation history compression |
+| memory_update | memory_update | — | Update project.md / user.md |
+| planning_task_decomposition | planning | — | Task decomposition |
 
 部分：
 
-|文件|用途 |
+| File | Usage |
 |----------|------|
-|部分/safety_rules.md |安全守则|
-|部分/tool_instructions.md |使用该工具的一般指南 |
-|部分/output_format.md |指定输出格式 |
+| partials/safety_rules.md | Safety rules |
+| partials/tool_instructions.md | General guidelines for using the tool |
+| partials/output_format.md | Specifying output format |
 
 模板的实际文本尚未创建。仅确认了结构。
 
@@ -937,7 +927,7 @@ class PromptLoader:
 
 ### 18.1 最低配置（仅限 template.md）
 
-只需放置一个`user_data/shared/prompts/my_prompt/template.md`文件即可。
+只需放置一个 `user_data/shared/prompts/my_prompt/template.md` 文件即可。
 
 ### 18.2 完整配置（prompt.py）
 
@@ -945,7 +935,7 @@ class PromptLoader:
 
 ### 18.3 继承现有提示
 
-在prompt.py 中使用`METADATA["extends"]` 指定父级，并在template.md 中使用`{% extends %}` 覆盖该块。
+在prompt.py中使用`METADATA["extends"]`指定父级，并在template.md中使用`{% extends %}`覆盖该块。
 
 ### 作为 18.4 Prompt Pack 分发
 

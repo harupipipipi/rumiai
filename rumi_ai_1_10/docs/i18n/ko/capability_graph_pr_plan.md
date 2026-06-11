@@ -10,11 +10,11 @@
 
 범위:
 
-- §루미§0§
-- §루미§0§
-- §루미§0§
-- §루미§0§
-- §루미§0§
+- `docs/capability_graph.md`
+- `docs/node_spec.md`
+- `docs/profile_spec.md`
+- `docs/port_standards.md`
+- `docs/capability_graph_pr_plan.md`
 
 수락:
 
@@ -27,11 +27,11 @@
 
 범위:
 
-- §루미§0§
-- §루미§0§
-- §루미§0§
-- §루미§0§
-- §루미§0§
+- `core_runtime/node_models.py`
+- `core_runtime/ecosystem_nodes.py`
+- `kernel:node.load_all`
+- `kernel:node.list`
+- `kernel:node.get`
 - 최소 기본 팩 `node.json`
 - 테스트
 
@@ -59,14 +59,14 @@
 
 범위:
 
-- §루미§0§
-- §루미§0§
-- §루미§0§
-- §루미§0§
-- §루미§0§
-- §루미§0§
-- §루미§0§
-- §루미§0§
+- `core_runtime/profile_models.py`
+- `core_runtime/profile_loader.py`
+- `core_runtime/profile_node_registry.py`
+- `core_runtime/node_state.py`
+- `kernel:profile.load_all`
+- `kernel:profile.list`
+- `kernel:profile.get`
+- `kernel:profile.node_state`
 - 샘플 프로필
 - 테스트
 
@@ -91,12 +91,12 @@
 
 범위:
 
-- §루미§0§
-- §루미§0§
-- §루미§0§
-- §루미§0§
-- §루미§0§
-- §루미§0§
+- `core_runtime/graph_models.py`
+- `core_runtime/capability_graph_loader.py`
+- `core_runtime/port_standards.py`
+- `kernel:graph.load_all`
+- `kernel:graph.get`
+- `kernel:graph.validate`
 - `.graph.yaml` 설비
 - 테스트
 
@@ -137,9 +137,9 @@
 
 범위:
 
-- §루미§0§
-- §루미§0§
-- §루미§0§
+- `core_runtime/capability_graph_compiler.py`
+- `core_runtime/binding_handlers.py`
+- `kernel:graph.compile`
 - 테스트
 
 필수 동작:
@@ -216,10 +216,10 @@
 
 - `GET /api/nodes` 및 `GET /api/nodes/{node_id}`
 - `GET /api/profiles` 및 `GET /api/profiles/{profile_id}`
-- §루미§0§
+- `GET /api/profiles/{profile_id}/nodes`
 - `GET /api/graphs` 및 `GET /api/graphs/{graph_id}`
-- §루미§0§
-- §루미§0§
+- `POST /api/graphs/{graph_id}/validate`
+- `POST /api/graphs/{graph_id}/compile`
 - 제어판 뷰어 세션의 `/api/panel/*` 별칭
 
 프로필 API는 `StartupProfileManager`이 실행 시 정보 소스로 남아 있음을 나타내는 시작 프로필 관계 개체를 반환합니다. 기능 그래프 프로필은 시작 프로필을 자동으로 대체하는 것이 아니라 그래프/런타임 사전 설정 및 팔레트 필터로 노출됩니다.

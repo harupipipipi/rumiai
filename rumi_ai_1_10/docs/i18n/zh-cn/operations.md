@@ -20,9 +20,9 @@
 8. [能力授予管理](#能力授予管理)
 9.【pip依赖库管理】(#pip-dependency-library-management)
 10. [秘密管理](#保密管理)
-11.§鲁米§0§
+11.[Pack Import / Apply](#pack-import--apply)
 12. [共享商店管理](#共享店铺管理)
-13.§鲁米§0§
+13.[Docker / Container management](#docker--container-management)
 14. [流程执行](#流程执行)
 15. [权限管理](#权限管理)
 16. [UDS 套接字设置](#uds-套接字设置)
@@ -115,7 +115,7 @@ python app.py --validate
 |模式|码头工人 |行为 |
 |--------|--------|------|
 | `strict`（默认）|必填 |如果 Docker 不可用则拒绝执行 |
-| §鲁米§0§|不需要|允许主机执行但带有警告 |
+| `permissive`|不需要|允许主机执行但带有警告 |
 
 ```bash
 # 本番
@@ -135,113 +135,113 @@ export RUMI_SECURITY_MODE=permissive
 
 |方法|路径|描述 |
 |----------|------|------|
-|获取 | §鲁米§0§|所有包列表 |
-|获取 | §鲁米§0§|等待批准的包列表 |
-|获取 | §鲁米§0§|获取包状态 |
-|发布 | §鲁米§0§|打包扫描 |
-|发布 | §鲁米§0§|包装审批 |
-|发布 | §鲁米§0§|包裹被拒绝 |
-|发布 | §鲁米§0§|包进口|
-|发布 | §鲁米§0§|包申请 |
-|删除 | §鲁米§0§|包卸载 |
+|获取 | `/api/packs`|所有包列表 |
+|获取 | `/api/packs/pending`|等待批准的包列表 |
+|获取 | `/api/packs/{pack_id}/status`|获取包状态 |
+|发布 | `/api/packs/scan`|打包扫描 |
+|发布 | `/api/packs/{pack_id}/approve`|包装审批 |
+|发布 | `/api/packs/{pack_id}/reject`|包裹被拒绝 |
+|发布 | `/api/packs/import`|包进口|
+|发布 | `/api/packs/apply`|包申请 |
+|删除 | `/api/packs/{pack_id}`|包卸载 |
 
 ### 网络权限
 
 |方法|路径|描述 |
 |----------|------|------|
-|获取 | §鲁米§0§|所有补助金列表 |
-|发布 | §鲁米§0§|授予网络权限 |
-|发布 | §鲁米§0§|撤销网络权限 |
-|发布 | §鲁米§0§|检查访问权限 |
+|获取 | `/api/network/list`|所有补助金列表 |
+|发布 | `/api/network/grant`|授予网络权限 |
+|发布 | `/api/network/revoke`|撤销网络权限 |
+|发布 | `/api/network/check`|检查访问权限 |
 
 ### 候选能力处理程序
 
 |方法|路径|描述 |
 |----------|------|------|
-|发布 | §鲁米§0§|候选人扫描 |
-|获取 | §鲁米§0§|应用列表 |
-|发布 | §鲁米§0§|授权（信任+复制）|
-|发布 | §鲁米§0§|被拒绝 |
-|获取 | §鲁米§0§|阻止列表 |
-|发布 | §鲁米§0§|解除封锁 |
+|发布 | `/api/capability/candidates/scan`|候选人扫描 |
+|获取 | `/api/capability/requests?status=pending`|应用列表 |
+|发布 | `/api/capability/requests/{key}/approve`|授权（信任+复制）|
+|发布 | `/api/capability/requests/{key}/reject`|被拒绝 |
+|获取 | `/api/capability/blocked`|阻止列表 |
+|发布 | `/api/capability/blocked/{key}/unblock`|解除封锁 |
 
 ### 能力补助
 
 |方法|路径|描述 |
 |----------|------|------|
-|获取 | §鲁米§0§|资助名单|
-|发布 | §鲁米§0§|格兰特 |
-|发布 | §鲁米§0§|撤销拨款 |
-|发布 | §鲁米§0§|批量资助（最多 50 名）|
+|获取 | `/api/capability/grants?principal_id=xxx`|资助名单|
+|发布 | `/api/capability/grants/grant`|格兰特 |
+|发布 | `/api/capability/grants/revoke`|撤销拨款 |
+|发布 | `/api/capability/grants/batch`|批量资助（最多 50 名）|
 
 ### pip依赖库
 
 |方法|路径|描述 |
 |----------|------|------|
-|发布 | §鲁米§0§|候选人扫描 |
-|获取 | §鲁米§0§|应用列表 |
-|发布 | §鲁米§0§|审批+安装|
-|发布 | §鲁米§0§|被拒绝 |
-|获取 | §鲁米§0§|阻止列表 |
-|发布 | §鲁米§0§|解除封锁 |
+|发布 | `/api/pip/candidates/scan`|候选人扫描 |
+|获取 | `/api/pip/requests?status=pending`|应用列表 |
+|发布 | `/api/pip/requests/{key}/approve`|审批+安装|
+|发布 | `/api/pip/requests/{key}/reject`|被拒绝 |
+|获取 | `/api/pip/blocked`|阻止列表 |
+|发布 | `/api/pip/blocked/{key}/unblock`|解除封锁 |
 
 ### 秘密
 
 |方法|路径|描述 |
 |----------|------|------|
-|获取 | §鲁米§0§|键列表（值被屏蔽）|
-|发布 | §鲁米§0§|设置秘密值 |
-|发布 | §鲁米§0§|删除秘密值 |
+|获取 | `/api/secrets`|键列表（值被屏蔽）|
+|发布 | `/api/secrets/set`|设置秘密值 |
+|发布 | `/api/secrets/delete`|删除秘密值 |
 
 ### 流程执行
 
 |方法|路径|描述 |
 |----------|------|------|
-|获取 | §鲁米§0§|已注册流量列表 |
-|发布 | §鲁米§0§|运行流程|
+|获取 | `/api/flows`|已注册流量列表 |
+|发布 | `/api/flows/{flow_id}/run`|运行流程|
 
 ### 商店
 
 |方法|路径|描述 |
 |----------|------|------|
-|获取 | §鲁米§0§|店铺列表 |
-|发布 | §鲁米§0§|创建商店 |
-|获取 | §鲁米§0§|共享店铺列表 |
-|发布 | §鲁米§0§|共享商店授权|
-|发布 | §鲁米§0§|共享商店取消|
+|获取 | `/api/stores`|店铺列表 |
+|发布 | `/api/stores/create`|创建商店 |
+|获取 | `/api/stores/shared`|共享店铺列表 |
+|发布 | `/api/stores/shared/approve`|共享商店授权|
+|发布 | `/api/stores/shared/revoke`|共享商店取消|
 
 ### 单位
 
 |方法|路径|描述 |
 |----------|------|------|
-|获取 | §鲁米§0§|单位列表 |
-|发布 | §鲁米§0§|发布单位 |
-|发布 | §鲁米§0§|运行单位|
+|获取 | `/api/units?store_id=xxx`|单位列表 |
+|发布 | `/api/units/publish`|发布单位 |
+|发布 | `/api/units/execute`|运行单位|
 
 ### 特权
 
 |方法|路径|描述 |
 |----------|------|------|
-|获取 | §鲁米§0§|特权清单 |
-|发布 | §鲁米§0§|特权授予|
-|发布 | §鲁米§0§|特权执行|
+|获取 | `/api/privileges`|特权清单 |
+|发布 | `/api/privileges/{pack_id}/grant/{privilege_id}`|特权授予|
+|发布 | `/api/privileges/{pack_id}/execute/{privilege_id}`|特权执行|
 
-###打包原路线
+### 打包原路线
 
 |方法|路径|描述 |
 |----------|------|------|
-|获取 | §鲁米§0§|已登记航线一览 |
-|发布 | §鲁米§0§|重新加载路由表 |
+|获取 | `/api/routes`|已登记航线一览 |
+|发布 | `/api/routes/reload`|重新加载路由表 |
 
 ### Docker/容器
 
 |方法|路径|描述 |
 |----------|------|------|
-|获取 | §鲁米§0§| Docker 可用性 |
-|获取 | §鲁米§0§|集装箱清单 |
-|发布 | §鲁米§0§|启动容器|
-|发布 | §鲁米§0§|停止容器 |
-|删除 | §鲁米§0§|容器删除|
+|获取 | `/api/docker/status`| Docker 可用性 |
+|获取 | `/api/containers`|集装箱清单 |
+|发布 | `/api/containers/{pack_id}/start`|启动容器|
+|发布 | `/api/containers/{pack_id}/stop`|停止容器 |
+|删除 | `/api/containers/{pack_id}`|容器删除|
 
 ---
 
@@ -475,10 +475,10 @@ curl -X POST http://localhost:8765/api/capability/grants/batch \
 
 |参数|必填 |描述 |
 |-----------|------|------|
-| §鲁米§0§| ✅ | Grant 对象数组（最多 50 个）|
-| §鲁米§0§| ✅ |目标包 ID |
-| §鲁米§0§| ✅ |授权ID |
-| §鲁米§0§|可选|拨款设置（`allowed_keys`等）|
+| `grants`| ✅ | Grant 对象数组（最多 50 个）|
+| `grants[].principal_id`| ✅ |目标包 ID |
+| `grants[].permission_id`| ✅ |授权ID |
+| `grants[].config`|可选|拨款设置（`allowed_keys`等）|
 
 响应示例：
 
@@ -623,8 +623,8 @@ curl -X POST http://localhost:8765/api/secrets/delete \
 |价值|行为 |
 |-----|------|
 | `auto`（默认）|如果加密密钥可用则加密，否则保存为纯文本 |
-| §鲁米§0§|始终允许以纯文本形式存储 |
-| §鲁米§0§|需要加密密钥。如果密钥丢失，则拒绝存储秘密值 |
+| `true`|始终允许以纯文本形式存储 |
+| `false`|需要加密密钥。如果密钥丢失，则拒绝存储秘密值 |
 
 建议在生产环境中使用`RUMI_SECRETS_ALLOW_PLAINTEXT=false`。
 
@@ -701,9 +701,9 @@ curl -X POST http://localhost:8765/api/stores/shared/approve \
 
 |参数|必填 |描述 |
 |-----------|------|------|
-| §鲁米§0§| ✅ |分享店铺ID |
-| §鲁米§0§| ✅ |商店自有包 ID |
-| §鲁米§0§| ✅ |分享包ID |
+| `store_id`| ✅ |分享店铺ID |
+| `owner_pack`| ✅ |商店自有包 ID |
+| `target_pack`| ✅ |分享包ID |
 
 响应示例：
 
@@ -735,9 +735,9 @@ curl -X POST http://localhost:8765/api/stores/shared/revoke \
 
 |参数|必填 |描述 |
 |-----------|------|------|
-| §鲁米§0§| ✅ |目标商店 ID |
-| §鲁米§0§| ✅ |商店自有包 ID |
-| §鲁米§0§| ✅ |取消共享包 ID |
+| `store_id`| ✅ |目标商店 ID |
+| `owner_pack`| ✅ |商店自有包 ID |
+| `target_pack`| ✅ |取消共享包 ID |
 
 响应示例：
 
@@ -834,11 +834,11 @@ curl -X POST http://localhost:8765/api/flows/hello/run \
 
 |状态代码 |描述 |
 |-------------|------|
-| §鲁米§0§|指定的`flow_id`不存在|
-| §鲁米§0§|流程执行超时 |
-| §鲁米§0§|达到并发执行限制 (`RUMI_MAX_CONCURRENT_FLOWS`) |
-| §鲁米§0§|运行 Flow 时发生意外错误 |
-| §鲁米§0§|系统暂时不可用（启动等）|
+| `404`|指定的`flow_id`不存在|
+| `408`|流程执行超时 |
+| `429`|达到并发执行限制 (`RUMI_MAX_CONCURRENT_FLOWS`) |
+| `500`|运行 Flow 时发生意外错误 |
+| `503`|系统暂时不可用（启动等）|
 
 ### 响应大小限制
 
@@ -918,7 +918,7 @@ curl -X POST http://localhost:8765/api/privileges/{pack_id}/execute/{privilege_i
 |-----------|------|------|
 | `pack_id`（路径参数）| ✅ |执行源包ID |
 | `privilege_id`（路径参数）| ✅ |要执行的权限 ID |
-| §鲁米§0§（身体）|可选|传递给特权操作的参数 |
+| `args`（身体）|可选|传递给特权操作的参数 |
 
 响应示例：
 
@@ -946,12 +946,12 @@ curl -X POST http://localhost:8765/api/privileges/{pack_id}/execute/{privilege_i
 
 |环境变量|描述 |默认 |
 |----------|------|-----------|
-| §鲁米§0§|出口套接字 GID |无 |
-| §鲁米§0§|功能套接字 GID |无 |
-| §鲁米§0§|出口套接字权限 | §鲁米§1§ |
-| §鲁米§0§|能力 Socket 权限 | §鲁米§1§ |
-| §鲁米§0§|出口套接字基目录| §鲁米§1§ |
-| §鲁米§0§|能力套接字基目录| §鲁米§1§ |
+| `RUMI_EGRESS_SOCKET_GID`|出口套接字 GID |无 |
+| `RUMI_CAPABILITY_SOCKET_GID`|功能套接字 GID |无 |
+| `RUMI_EGRESS_SOCKET_MODE`|出口套接字权限 | `0660` |
+| `RUMI_CAPABILITY_SOCKET_MODE`|能力 Socket 权限 | `0660` |
+| `RUMI_EGRESS_SOCK_DIR`|出口套接字基目录| `/run/rumi/egress/packs` |
+| `RUMI_CAPABILITY_SOCK_DIR`|能力套接字基目录| `/run/rumi/capability/principals` |
 
 ### 配置步骤
 
@@ -1004,14 +1004,14 @@ cat user_data/settings/shared_dict/journal.jsonl | jq 'select(.result == "cycle_
 
 |类别 |内容 |
 |----------|------|
-| §鲁米§0§|流程执行 |
-| §鲁米§0§|应用修改器 |
-| §鲁米§0§|块执行 |
-| §鲁米§0§|包审批操作|
-| §鲁米§0§|权限操作|
-| §鲁米§0§|网络通讯|
-| §鲁米§0§|安全事件|
-| §鲁米§0§|系统事件|
+| `flow_execution`|流程执行 |
+| `modifier_application`|应用修改器 |
+| `python_file_call`|块执行 |
+| `approval`|包审批操作|
+| `permission`|权限操作|
+| `network`|网络通讯|
+| `security`|安全事件|
+| `system`|系统事件|
 
 ---
 
@@ -1057,8 +1057,8 @@ python app.py
 
 |环境变量|描述 |默认 |
 |----------|------|-----------|
-| §鲁米§0§|日志级别。调试/信息/警告/错误/严重| §鲁米§1§ |
-| §鲁米§0§|输出格式。 json/文本 | §鲁米§1§ |
+| `RUMI_LOG_LEVEL`|日志级别。调试/信息/警告/错误/严重| `INFO` |
+| `RUMI_LOG_FORMAT`|输出格式。 json/文本 | `json` |
 
 ### 如何设置
 
@@ -1090,14 +1090,14 @@ python app.py --headless
 
 |环境变量|描述 |默认 |
 |----------|------|-----------|
-| §鲁米§0§|调用已弃用的 API 时的行为 | §鲁米§1§ |
+| `RUMI_DEPRECATION_LEVEL`|调用已弃用的 API 时的行为 | `warn` |
 
 |价值|行为 |
 |-----|------|
-| §鲁米§0§| `DeprecationWarning` 发布为 `warnings.warn` |
-| §鲁米§0§| `DeprecationWarning` 提出例外 |
-| §鲁米§0§|什么都不做 |
-| §鲁米§0§| `logging` | 警告级别输出
+| `warn`| `DeprecationWarning` 发布为 `warnings.warn` |
+| `error`| `DeprecationWarning` 提出例外 |
+| `silent`|什么都不做 |
+| `log`| `logging` | 警告级别输出
 
 ### 设置示例
 
@@ -1157,14 +1157,14 @@ snapshot = collector.snapshot()
 
 |指标名称 |类型 |描述 |标签 |
 |-------------|------|------|--------|
-| §鲁米§0§|柜台 |步骤执行成功计数 |处理程序 |
-| §鲁米§0§|柜台 |步骤执行失败计数|处理程序 |
-| §鲁米§0§|柜台 |流程执行完成计数 |流_id |
-| §鲁米§0§|仪表| Docker 可用性 | — |
-| §鲁米§0§|柜台 |容器启动成功次数| — |
-| §鲁米§0§|柜台 |容器启动失败次数| — |
-| §鲁米§0§|仪表|注册流量数量 | — |
-| §鲁米§0§|直方图| Python 文件执行时间（毫秒）| — |
+| `flow.step.success`|柜台 |步骤执行成功计数 |处理程序 |
+| `flow.step.error`|柜台 |步骤执行失败计数|处理程序 |
+| `flow.execution.complete`|柜台 |流程执行完成计数 |流_id |
+| `docker.available`|仪表| Docker 可用性 | — |
+| `container.start.success`|柜台 |容器启动成功次数| — |
+| `container.start.failed`|柜台 |容器启动失败次数| — |
+| `flows.registered`|仪表|注册流量数量 | — |
+| `python_file_call.duration_ms`|直方图| Python 文件执行时间（毫秒）| — |
 
 ---
 
@@ -1183,9 +1183,9 @@ python -m core_runtime.pack_scaffold <pack_id> [--template TEMPLATE] [--output-d
 |模板|描述 |
 |-------------|------|
 | `minimal`（默认）|最小配置（ecosystem.json + run.py）|
-| §鲁米§0§|具有能力处理程序|
-| §鲁米§0§|具有流程定义|
-| §鲁米§0§|全部包含 |
+| `capability`|具有能力处理程序|
+| `flow`|具有流程定义|
+| `full`|全部包含 |
 
 ### 执行示例
 
@@ -1203,13 +1203,13 @@ python -m core_runtime.pack_scaffold my-pack --template full --output-dir ecosys
 
 |类别 |描述 |示例 |
 |---------|------|-----|
-| §鲁米§0§|认证/授权 | `RUMI-AUTH-001`（令牌无效）|
-| §鲁米§0§|网络| `RUMI-NET-001`（连接失败）|
-| §鲁米§0§|流程执行 | `RUMI-FLOW-001`（未发现流）|
-| §鲁米§0§|包管理| `RUMI-PACK-001`（pack_id 无效）|
-| §鲁米§0§|能力| `RUMI-CAP-001`（未发现的能力）|
-| §鲁米§0§|验证 | `RUMI-VAL-001`（空值）|
-| §鲁米§0§|系统概况| `RUMI-SYS-001`（内部错误）|
+| `AUTH`|认证/授权 | `RUMI-AUTH-001`（令牌无效）|
+| `NET`|网络| `RUMI-NET-001`（连接失败）|
+| `FLOW`|流程执行 | `RUMI-FLOW-001`（未发现流）|
+| `PACK`|包管理| `RUMI-PACK-001`（pack_id 无效）|
+| `CAP`|能力| `RUMI-CAP-001`（未发现的能力）|
+| `VAL`|验证 | `RUMI-VAL-001`（空值）|
+| `SYS`|系统概况| `RUMI-SYS-001`（内部错误）|
 
 ---
 
@@ -1219,27 +1219,27 @@ python -m core_runtime.pack_scaffold my-pack --template full --output-dir ecosys
 
 |变量名 |默认 |描述 |
 |--------|-----------|------|
-| §鲁米§0§| §鲁米§1§ |安全模式。 `strict`（需要 Docker）或 `permissive`（不需要 Docker，用于开发）|
-| §鲁米§0§| §鲁米§1§ |日志级别。 §鲁米§2§ / §鲁米§3§ / §鲁米§4§ / §鲁米§5§ / §鲁米§6§ |
-| §鲁米§0§| §鲁米§1§ |日志输出格式。 `json`（结构化 JSON）或 `text`（人类文本）|
-| §鲁米§0§| §鲁米§1§ |调用已弃用的 API 时的行为。 §鲁米§2§ / §鲁米§3§ / §鲁米§4§ / §鲁米§5§ |
-| §鲁米§0§|无 |用于 Fernet 加密 Secrets 的密钥（Base64 编码）。如果未设置，则回退到`.secrets_key`文件或自动生成|
-| §鲁米§0§| §鲁米§1§ |允许明文秘密。 `auto`（如果加密密钥不可用，另存为纯文本），`true`（始终允许纯文本），`false`（需要加密密钥，没有密钥则拒绝存储）|
-| §鲁米§0§| §鲁米§1§ (4MB) |流程执行结果和出口代理响应的最大大小（字节）|
-| §鲁米§0§| §鲁米§1§ |同时执行 Flow 的数量上限 |
-| §鲁米§0§| §鲁米§1§ (1MB) | HTTP API 接受的请求正文的最大大小（字节） |
-| §鲁米§0§| §鲁米§1§ | API服务器绑定地址。如果外部发布，请更改为`0.0.0.0`（不推荐）|
-| §鲁米§0§|无 |以逗号分隔的 CORS 允许来源列表（例如 `http://localhost:3000,http://localhost:8080`）|
-| §鲁米§0§| §鲁米§1§ |如果设置为`true`，HMAC 密钥将在下次启动时轮换 |
-| §鲁米§0§| §鲁米§1§ |设置为`true`以在诊断日志中包含详细信息 |
-| §鲁米§0§|无 |出口 UDS 套接字的 GID。 | §鲁米§1§ |无 |出口 UDS 套接字的 GID。需要在严格模式下从容器访问套接字 |
-| §鲁米§0§|无 |能力 UDS 套接字 GID。需要在严格模式下从容器访问套接字 |
-| §鲁米§0§| §鲁米§1§ |出口 UDS 套接字权限 |
-| §鲁米§0§| §鲁米§1§ |能力UDS套接字权限|
-| §鲁米§0§| §鲁米§1§ |出口 UDS 套接字基目录 |
-| §鲁米§0§| §鲁米§1§ |能力UDS套接字基目录|
-| §鲁米§0§| §鲁米§1§ | `secrets.get`速率限制（次/分钟/包，滑动窗口）|
-| §鲁米§0§| §鲁米§1§ | local_pack兼容模式。 `off`（已禁用）或`require_approval`（需要批准后有效，不推荐）|
+| `RUMI_SECURITY_MODE`| `strict` |安全模式。 `strict`（需要 Docker）或 `permissive`（不需要 Docker，用于开发）|
+| `RUMI_LOG_LEVEL`| `INFO` |日志级别。 `DEBUG` / `INFO` / `WARNING` / `ERROR` / `CRITICAL` |
+| `RUMI_LOG_FORMAT`| `json` |日志输出格式。 `json`（结构化 JSON）或 `text`（人类文本）|
+| `RUMI_DEPRECATION_LEVEL`| `warn` |调用已弃用的 API 时的行为。 `warn` / `error` / `silent` / `log` |
+| `RUMI_SECRETS_KEY`|无 |用于 Fernet 加密 Secrets 的密钥（Base64 编码）。如果未设置，则回退到`.secrets_key`文件或自动生成|
+| `RUMI_SECRETS_ALLOW_PLAINTEXT`| `auto` |允许明文秘密。 `auto`（如果加密密钥不可用，另存为纯文本），`true`（始终允许纯文本），`false`（需要加密密钥，没有密钥则拒绝存储）|
+| `RUMI_MAX_RESPONSE_BYTES`| `4194304` (4MB) |流程执行结果和出口代理响应的最大大小（字节）|
+| `RUMI_MAX_CONCURRENT_FLOWS`| `10` |同时执行 Flow 的数量上限 |
+| `RUMI_MAX_REQUEST_BODY_BYTES`| `1048576` (1MB) | HTTP API 接受的请求正文的最大大小（字节） |
+| `RUMI_API_BIND_ADDRESS`| `127.0.0.1` | API服务器绑定地址。如果外部发布，请更改为`0.0.0.0`（不推荐）|
+| `RUMI_CORS_ORIGINS`|无 |以逗号分隔的 CORS 允许来源列表（例如 `http://localhost:3000,http://localhost:8080`）|
+| `RUMI_HMAC_ROTATE`| `false` |如果设置为`true`，HMAC 密钥将在下次启动时轮换 |
+| `RUMI_DIAGNOSTICS_VERBOSE`| `false` |设置为`true`以在诊断日志中包含详细信息 |
+| `RUMI_EGRESS_SOCKET_GID`|无 |出口 UDS 套接字的 GID。 | `RUMI_EGRESS_SOCKET_GID` |无 |出口 UDS 套接字的 GID。需要在严格模式下从容器访问套接字 |
+| `RUMI_CAPABILITY_SOCKET_GID`|无 |能力 UDS 套接字 GID。需要在严格模式下从容器访问套接字 |
+| `RUMI_EGRESS_SOCKET_MODE`| `0660` |出口 UDS 套接字权限 |
+| `RUMI_CAPABILITY_SOCKET_MODE`| `0660` |能力UDS套接字权限|
+| `RUMI_EGRESS_SOCK_DIR`| `/run/rumi/egress/packs` |出口 UDS 套接字基目录 |
+| `RUMI_CAPABILITY_SOCK_DIR`| `/run/rumi/capability/principals` |能力UDS套接字基目录|
+| `RUMI_SECRET_GET_RATE_LIMIT`| `60` | `secrets.get`速率限制（次/分钟/包，滑动窗口）|
+| `RUMI_LOCAL_PACK_MODE`| `off` | local_pack兼容模式。 `off`（已禁用）或`require_approval`（需要批准后有效，不推荐）|
 
 ---
 

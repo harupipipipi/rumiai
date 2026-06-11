@@ -43,15 +43,15 @@ LAN 전용 빌드를 배포하는 경우 명시적인 릴리스 네트워크 정
 
 | 목적 | 방법 | 경로 |
 | --- | --- | --- |
-| 건강검진 | §루미§0§ | §루미§1§ |
-| 모듈 목록 | §루미§0§ | §루미§1§ |
-| 모듈 세부정보 | §루미§0§ | §루미§1§ |
-| 모듈 활성화 | §루미§0§ | §루미§1§ |
-| 모듈 비활성화 | §루미§0§ | §루미§1§ |
-| 모듈 다시 로드 | §루미§0§ | §루미§1§ |
-| 롤백 모듈 | §루미§0§ | §루미§1§ |
-| 마이그레이션 상태 | §루미§0§ | §루미§1§ |
-| 팩 요청 | §루미§0§ | §루미§1§ |
+| 건강검진 | `GET` | `/health` |
+| 모듈 목록 | `GET` | `/api/defaultspack/modules` |
+| 모듈 세부정보 | `GET` | `/api/defaultspack/modules/{id}` |
+| 모듈 활성화 | `POST` | `/api/defaultspack/modules/{id}/enable` |
+| 모듈 비활성화 | `POST` | `/api/defaultspack/modules/{id}/disable` |
+| 모듈 다시 로드 | `POST` | `/api/defaultspack/modules/{id}/reload` |
+| 롤백 모듈 | `POST` | `/api/defaultspack/modules/{id}/rollback` |
+| 마이그레이션 상태 | `GET` | `/api/defaultspack/migration/status` |
+| 팩 요청 | `GET` | `/api/defaultspack/pack-requests` |
 
 ## 개발
 

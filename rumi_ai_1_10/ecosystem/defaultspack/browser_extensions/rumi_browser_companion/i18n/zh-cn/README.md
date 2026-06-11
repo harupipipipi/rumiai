@@ -4,7 +4,7 @@
 
 # Rumi 浏览器伴侣
 
-`Rumi Browser Companion` 是 Manifest V3 Chromium 扩展，可让 Rumi 通过本地桥驱动用户的真实浏览器会话。它旨在补充现有的`browser_use`和`computer_use`工具：
+`Rumi Browser Companion` 是 Manifest V3 Chromium 扩展，可让 Rumi 通过本地桥驱动用户的真实浏览器会话。它旨在补充现有的 `browser_use` 和 `computer_use` 工具：
 
 - `computer_use` / `browser_computer`：可见窗口，计算机使用风格控制
 - `browser_companion`：用户登录的浏览器配置文件中的 DOM 感知浏览器控件
@@ -24,13 +24,13 @@
 2. 打开浏览器的扩展页面并启用开发者模式。
 3. 选择“加载已解压的文件”并选择此文件夹：
 
-   §鲁米§0§
+   `<repo>/rumi_ai_1_10/ecosystem/defaultspack/browser_extensions/rumi_browser_companion`
 
-4. 在 Rumi 中，使用 `action: "bridge.pairing"` 调用 `browser_companion` 来获取配对令牌和候选服务器 URL。
+4. 在 Rumi 中，使用 `action: "bridge.pairing"` 调用 `browser_companion` 以获取配对令牌和候选服务器 URL。
 5.打开扩展选项页面并粘贴：
 
    - `Server URL` 例如`http://127.0.0.1:8766`
-   - §鲁米§0§
+   - `Pairing Token`
 
 6. 单击`Poll Bridge Now` 确认分机可以连接。
 
@@ -38,8 +38,8 @@
 
 该扩展与这些本地端点进行通信：
 
-- §鲁米§0§
-- §鲁米§0§
+- `POST {serverUrl}/api/tools/browser-companion/bridge/poll`
+- `POST {serverUrl}/api/tools/browser-companion/bridge/result`
 
 `poll`请求正文：
 
@@ -114,16 +114,16 @@
 
 ## 支持的操作
 
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
+- `browser.tabs`
+- `browser.select_tab`
+- `page.navigate`
+- `page.snapshot`
+- `page.capture`
+- `page.click`
+- `page.type`
+- `page.press`
+- `page.scroll`
+- `page.extract`
 
 ## 安全注意事项
 

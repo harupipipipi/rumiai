@@ -327,7 +327,7 @@ ai_client.md 内の適切な場所に追記。候補:
 
 ## 注意事項
 - ai_client.md の既存の記法・トーン・構造を維持
-- events.ui.yaml は「任意」（optional）であることを繰り返し明記 
+- events.ui.yaml は「任意」（optional）であることを繰り返し明記
 - 新しい Widget 型は追加しない（widget.md 既存の型のみ使用）
 - ai_client にデフォルトのアニメーション定義をハードコードしない
 - 「仕組みだけ提供」の原則を守る

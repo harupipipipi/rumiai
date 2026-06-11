@@ -14,13 +14,13 @@ tool 是一个“接收参数并返回结果的函数”，其定义由 schema.j
 
 |工具的概念|提示的概念|
 |---|---|
-| §鲁米§0§| §鲁米§1§ |
+| `tool_id`| `prompt_id` |
 | `parameters` 之 `schema.json` | `required` of `VARIABLES` + `optional` + `custom` |
 | `handler.py` 之 `run(params, context)` | `prompt.py` 或 `pre_render(variables, context)` |
 |返回值`handler.py``{"result": ...}`|渲染文本字符串 |
 | `guide.json` 之 `purpose` / `when_to_use` | `METADATA` 或 `description` |
-| §鲁米§0§|不适用（提示无型号条件）|
-| `permission.json` 之 `capabilities_required` | §鲁米§2§ |
+| `conditions.json`|不适用（提示无型号条件）|
+| `permission.json` 之 `capabilities_required` | `PERMISSIONS` |
 | `tool.json` 之 `tags` | `METADATA` 或 `tags` |
 
 这种对称性允许工具和提示之间的双向转换。
@@ -79,11 +79,11 @@ def tool_to_prompt_variables(schema: dict) -> dict:
 |工具领域|提示字段|
 |---|---|
 | `tool.json` 之 `tool_id` | `METADATA["prompt_id"]` 或 `"tool_prompt_{tool_id}"` |
-| `tool.json` 之 `name` | §鲁米§2§ |
-| `tool.json` 之 `summary` | §鲁米§2§ |
-| `tool.json` 之 `version` | §鲁米§2§ |
-| `tool.json` 之 `tags` | §鲁米§2§ |
-| `permission.json`能力| §鲁米§1§ |
+| `tool.json` 之 `name` | `METADATA["name"]` |
+| `tool.json` 之 `summary` | `METADATA["description"]` |
+| `tool.json` 之 `version` | `METADATA["version"]` |
+| `tool.json` 之 `tags` | `METADATA["metadata"]["tags"]` |
+| `permission.json`能力| `PERMISSIONS` |
 
 
 ## 3.提示→工具转换
@@ -163,7 +163,7 @@ def run(params, context):
 
 转换是通过处理程序完成的。
 
-###工具→提示转换
+### 工具→提示转换
 
 ```python
 # tool の handler.py 内で
@@ -181,7 +181,7 @@ rendered = context["call_handler"]("defaults.prompt.render", {
 })
 ```
 
-###提示→工具调用
+### 提示→工具调用
 
 ```python
 # agent やフロー内で prompt をツールとして使う

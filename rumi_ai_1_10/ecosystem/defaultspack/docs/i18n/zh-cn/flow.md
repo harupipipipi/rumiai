@@ -12,29 +12,17 @@ Flow Engine本身是一种通用机制，没有聊天、代理或编码等领域
 
 Flow Engine由两层组成。
 
-**第 1 层 — 系统流 (handler.py)**：由 flow.yaml + handler.py 对定义的处理管道。 handler.py 接收 FlowContext 并使用通用原语（call_handler、emit_event 等）调用任何处理程序。
-
-**第 2 层 - 自定义流（节点图）**：仅使用 YAML 节点定义构建流的声明性方法。支持条件分支、循环、并行执行和子流调用。无需编写handler.py。
+**第 1 层 — 系统流 (handler.py)**：由 flow.yaml + handler.py 对定义的处理管道。 handler.py 接收 FlowContext 并使用通用原语（call_handler、emit_event 等）调用任何处理程序。**第 2 层 - 自定义流（节点图）**：仅使用 YAML 节点定义构建流的声明性方法。支持条件分支、循环、并行执行和子流调用。无需编写handler.py。
 
 ## 2.设计理念
 
-**流本身就是一个插件**：默认3个流，不做特殊处理。只需将 flow.yaml + handler.py 放置在 Flows/ 目录中即可添加新流程。 Flow Engine 以相同的方式加载和执行所有流。
-
-**仅限通用原语**：FlowContext 仅提供以下通用原语：call_handler、emit_event、wait_event、data_read、data_write、capability、execute_flow、emit_widget。没有特定于域的 API。保存聊天、执行代理和更新内存都只需使用 call_handler 调用处理程序即可完成。
-
-**标准词汇（区块合约）**：默认将handler的输入/输出规范定义为contracts.py中的“标准词汇”。 Pack 可以采用这个词汇。但是，未在合约中注册的处理程序也可以使用 call_handler 自由调用。标准词汇是一种通用语言，而不是一种约束。
-
-**声明式 + 命令式混合**：在 flow.yaml 中以声明方式定义元数据和节点连接，并在 handler.py 中以命令方式编写执行逻辑。简单的流程只需handler.py就可以完成，复杂的流程可以通过engine.py完成，engine.py解释并执行flow.yaml中的节点图。
-
-**分步**：仅在第 1 层完全有效。需要时可以使用第 2 层。至于触发系统，user_input 和 API 将立即工作，一旦基础设施到位，webhook 和计划将启用。
-
-**仅提供机制**：Defaults提供Flow Engine机制（engine.py、router.py、validator.py、node_executor.py、trigger_manager.py、context.py）。默认的流定义（simple_chat、agent_chat、planning_agent）作为电池包含在内，但可以通过在 user_data/shared/flows/ 或 user_data/packs/*/flows/ 中放置具有相同 flow_id 的定义来完全替换它们。
+**流本身就是一个插件**：默认3个流，不做特殊处理。只需将 flow.yaml + handler.py 放置在 Flows/ 目录中即可添加新流程。 Flow Engine 以相同的方式加载和执行所有流。**仅通用原语**：FlowContext 仅提供以下通用原语：call_handler、emit_event、wait_event、data_read、data_write、capability、execute_flow、emit_widget。没有特定于域的 API。保存聊天、执行代理和更新内存都只需使用 call_handler 调用处理程序即可完成。**标准词汇（块合约）**：Defaults 将处理程序的输入/输出规范定义为contracts.py 中的“标准词汇”。 Pack 可以采用这个词汇。但是，未在合约中注册的处理程序也可以使用 call_handler 自由调用。标准词汇是通用语言，而不是约束。**声明式 + 命令式混合**：在 flow.yaml 中以声明方式定义元数据和节点连接，并在 handler.py 中以命令方式编写执行逻辑。简单的流程只需handler.py就可以完成，复杂的流程可以由engine.py完成，engine.py解释并执行flow.yaml中的节点图。**逐步**：仅在第1层完全工作。需要时可以使用第 2 层。至于触发系统，user_input和API将立即工作，一旦基础设施就位，webhook和schedule将启用。**仅提供机制**：Defaults提供Flow Engine机制（engine.py，router.py，validator.py，node_executor.py，trigger_manager.py，context.py）。默认的流定义（simple_chat、agent_chat、planning_agent）作为电池包含在内，但可以通过在 user_data/shared/flows/ 或 user_data/packs/*/flows/ 中放置具有相同 flow_id 的定义来完全替换它们。
 
 ## 3.与官方rumaii Flow的关系
 
 官方rumiai有自己的流程系统（阶段+步骤）。步骤类型只有四种：handler、python_file_call、set 和 if。
 
-默认 Flow Engine 作为官方 Flow 的处理程序步骤启动。当您在官方流程步骤中调用`handler: defaults.flow.execute`时，默认流程引擎将运行。
+默认 Flow Engine 作为官方 Flow 的处理程序步骤启动。当您在官方流程步骤中调用`handler: defaults.flow.execute`时，默认的流程引擎将运行。
 
 ```yaml
 # 公式 rumiai の Flow（phases + steps 形式）
@@ -677,39 +665,39 @@ async def run(ctx: FlowContext) -> FlowResult:
 
 #### 基本节点
 
-|类型 |描述 |输入 |输出|
+| type | description | input | output |
 |---|---|---|---|
-| §鲁米§0§|流程开始。定义输入变量 |触发输入|定义变量 |
-| §鲁米§0§|流程结束。定义最终输出 |任何 |流程结果 |
-| §鲁米§0§|呼叫任何处理程序 |处理程序名称，参数 |处理程序的返回值|
-| §鲁米§0§|提示渲染 |提示ID，变量|渲染文本 |
-| §鲁米§0§|活动问题 |事件类型，数据 |无 |
-| §鲁米§0§|等待活动|事件类型、超时、过滤器 |事件数据 |
-| §鲁米§0§|用户数据读取|路径|内容 |
-| §鲁米§0§|用户数据写入 |路径、内容 |成功|
-| §鲁米§0§|能力调用|能力_id，参数|结果|
-| §鲁米§0§|调用另一个流作为子流 | flow_id，输入|流程结果 |
-| §鲁米§0§|小工具发送 |小部件 JSON |无 |
+| `start` | Flow start. Define input variables | trigger_input | Defined variables |
+| `end` | Flow ends. Define final output | Any | FlowResult |
+| `handler` | Call any handler | handler_name, params | Return value of handler |
+| `prompt` | Prompt rendering | prompt_id, variables | rendered_text |
+| `event_emit` | Event issue | event_type, data | None |
+| `event_wait` | Waiting for event | event_type, timeout, filter | Event data |
+| `data_read` | user_data read | path | content |
+| `data_write` | user_data write | path, content | success |
+| `capability` | capability call | capability_id, params | result |
+| `flow` | Call another flow as a subflow | flow_id, input | FlowResult |
+| `widget` | Widget sending | widget JSON | None |
 
 #### 控制节点
 
-|类型 |描述 |
+| type | description |
 |---|---|
-| §鲁米§0§|条件分支（if/else）|
-| §鲁米§0§|多分支（开关/案例/默认）|
-| §鲁米§0§|循环（for_each / while / count）|
-| §鲁米§0§|并行执行（等待全部完成或最快完成）|
-| §鲁米§0§|等待定时器|
-| §鲁米§0§|跳转到指定节点（循环支持）|
+| `condition` | Conditional branch (if/else) |
+| `switch` | Multi-branch (switch / case / default) |
+| `loop` | Loop (for_each / while / count) |
+| `parallel` | Parallel execution (waiting for all completion or fastest completion) |
+| `wait` | Waiting for timer |
+| `goto` | Jump to specified node (cyclic support) |
 
 #### 数据节点
 
-|类型 |描述 |
+| type | description |
 |---|---|
-| §鲁米§0§|设置、更新和删除变量 |
-| §鲁米§0§| Jinja2 模板渲染 |
-| §鲁米§0§| Python 代码执行（在沙箱中）|
-| §鲁米§0§|发送 HTTP 请求 |
+| `variable` | Setting, updating, and deleting variables |
+| `template` | Jinja2 template rendering |
+| `code` | Python code execution (in sandbox) |
+| `http` | Send HTTP request |
 
 基本节点`handler`都是键。 handler节点是一个通用节点，可以调用任何handler，只需更改handler_name，就可以执行聊天操作、代理执行、内存更新和工具执行。
 
@@ -904,14 +892,14 @@ nodes:
 
 ### 10.1 触发器类型
 
-|类型 |描述 |状态 |
+| type | description | status |
 |---|---|---|
-| §鲁米§0§|用户在聊天中输入|实施目标|
-| §鲁米§0§| REST API 调用 |实施目标|
-| §鲁米§0§|内部活动|实施目标|
-| §鲁米§0§|从外部接收 HTTP POST |所需的守护进程基础设施 |
-| §鲁米§0§| cron 风格的时间表 |所需的守护进程基础设施|
-| §鲁米§0§|来自另一个流的子流调用 |实施目标|
+| `user_input` | User input in chat | Implementation target |
+| `api` | REST API call | Implementation target |
+| `event` | Internal event | Implementation target |
+| `webhook` | Receive HTTP POST from outside | Daemon infrastructure required |
+| `schedule` | cron-style schedule | daemon infrastructure required |
+| `flow` | Subflow call from another flow | Implementation target |
 
 ### 10.2 触发器定义示例
 
@@ -1135,12 +1123,12 @@ class TriggerManager:
 
 可以为每个节点指定on_error。
 
-|错误 |行为 |
+| on_error | Behavior |
 |---|---|
-| §鲁米§0§|重试 max_retries 次。默认2次|
-| §鲁米§0§|跳过节点并继续执行default_output |
-| §鲁米§0§|转移到指定的fallback_node |
-| §鲁米§0§|停止整个流程并返回错误结果 |
+| `retry` | Retry max_retries times. Default 2 times |
+| `skip` | Skip node and proceed with default_output |
+| `fallback` | Transition to the specified fallback_node |
+| `stop` | Stops the entire flow and returns an error result |
 
 ```yaml
 - id: api_call
@@ -1203,23 +1191,23 @@ async def run(ctx: FlowContext) -> FlowResult:
 
 ### 12.1 启动验证（validator.py）
 
-|检查项目 |说明|
+| Check items | Explanation |
 |---|---|
-| flow.yaml 语法 | YAML 可以解析吗？是否有必填字段 |
-|检查处理程序是否存在 |处理程序名称是在 handler.py 中调用还是在注册的节点中调用？ |
-|合同验证|合约中注册的handler的实现是否符合规范 |
-|节点图验证 |节点之间的连接是否有效，是否存在不可达的节点 |
-|循环检测|流与流之间的子流调用是否存在循环 |
-| config_schema 验证 | flow_config 是否符合 config_schema |
+| flow.yaml syntax | Is YAML parsable? Are there required fields |
+| Check the existence of handler | Is the handler name called in handler.py or in a node registered? |
+| Contract verification | Does the implementation of the handler registered in the contract meet the specifications |
+| Node graph validation | Is the connection between nodes valid and are there any unreachable nodes |
+| Cycle detection | Is there a cycle in subflow calls between flows |
+| config_schema validation | Does flow_config conform to config_schema |
 
 ### 12.2 运行时验证
 
-|检查项目 |说明|
+| Check items | Explanation |
 |---|---|
-|权限检查|验证调用者对 call_handler 的授予 |
-|迭代次数|是否超过 max_total_iterations |
-|超时 |是否超出global_timeout_ms |
-|变量参考|是否有提及`{{ node_id.field }}` |
+| Permission check | Validate caller's Grant on call_handler |
+| Number of iterations | Does it exceed max_total_iterations |
+| Timeout | Is global_timeout_ms exceeded |
+| Variable reference | Is there a reference to `{{ node_id.field }}` |
 
 ## 13. 打包合作
 
@@ -1258,7 +1246,7 @@ validator.py 检查合约，如果没有问题则应用替换。如果您在call
 }
 ```
 
-在第 2 层节点图中可用，如`type: slack_notify`。
+在第 2 层节点图中可用，如 `type: slack_notify`。
 
 ## 14. 流之间的协作
 
@@ -1295,47 +1283,47 @@ after_flow:
 
 ## 15. 安全
 
-|项目 |措施|
+| Item | Measures |
 |---|---|
-|运行处理程序.py |仅运行 Pack 审批流程允许的内容 |
-| call_handler 权限检查 |只有调用者的Grant中包含的权限才能被执行 |
-|代码节点|在 Docker 沙箱中运行 |
-| http 节点 |可以通过允许的域列表进行限制 |
-|变量注入|模板表达式`{{ }}` 在 Jinja2 沙盒模式下计算 |
-|无限循环|强制停止于 max_total_iterations + global_timeout_ms |
+| Run handler.py | Run only what is allowed by the Pack approval flow |
+| call_handler permission check | Only permissions included in the caller's Grant can be executed |
+| code node | run in Docker sandbox |
+| http node | Can be restricted by allowed domain list |
+| Variable injection | Template expression `{{ }}` evaluated in Jinja2 sandbox mode |
+| Infinite loop | Forced stop at max_total_iterations + global_timeout_ms |
 
 ## 16. 性能
 
-|项目 |政策 |
+| Item | Policy |
 |---|---|
-|流定义缓存|启动时加载，内存缓存。更改时重新加载 flow.yaml |
-|处理程序解析缓存| call_handler 的处理程序名称 → 缓存实现映射 |
-|并行节点 |使用 asyncio.gather 并行执行 |
-|流媒体 |用emit_event/emit_widget顺序传输|
-|大规模流动 | 100个以上节点的流单独保存执行日志 |
+| Flow definition cache | Loaded at startup, memory cache. Reload flow.yaml when changing |
+| handler resolution cache | handler name of call_handler → cache implementation mapping |
+| Parallel nodes | Parallel execution with asyncio.gather |
+| Streaming | Sequential transmission with emit_event / emit_widget |
+| Large-scale flows | Execution logs are saved separately for flows with more than 100 nodes |
 
 ## 17. 事件列表
 
 默认情况下标准发出的事件列表。这些是标准词汇，可用于事件触发器和 wait_event。包还可以添加自己的事件。
 
-|活动类型|出版商 |描述 |
+| Event type | Publisher | Description |
 |---|---|---|
-| §鲁米§0§|聊天处理程序 |收到用户消息时 |
-| §鲁米§0§|聊天处理程序 |当新消息添加到对话中时 |
-| §鲁米§0§|聊天处理程序 |就在消息显示在 UI 中之前 |
-| §鲁米§0§|聊天处理程序 |当创建新对话时 |
-| §鲁米§0§|代理处理程序 |当代理执行开始时 |
-| §鲁米§0§|代理处理程序 |当代理执行完成时 |
-| §鲁米§0§|代理处理程序 |当代理步骤完成时 |
-| §鲁米§0§|工具处理程序|当工具执行开始时 |
-| §鲁米§0§|工具处理程序|当工具执行完成时 |
-| §鲁米§0§|引擎.py |在流程执行开始时 |
-| §鲁米§0§|引擎.py |当流程执行完成时 |
-| §鲁米§0§|引擎.py |当发生流程错误时 |
-| §鲁米§0§|可选|弹出显示请求|
-| §鲁米§0§|前端 |用户对弹出窗口的响应 |
-| §鲁米§0§|可选|计划介绍 |
-| §鲁米§0§|前端 |用户对计划的反应|
+| `chat.message.received` | chat handler | When receiving user message |
+| `chat.message.new` | chat handler | When a new message is added to a conversation |
+| `chat.message.before_display` | chat handler | Just before the message is displayed in the UI |
+| `chat.conversation.created` | chat handler | When a new conversation is created |
+| `agent.execution.started` | agent handler | When agent execution starts |
+| `agent.execution.completed` | agent handler | When agent execution completes |
+| `agent.step.completed` | agent handler | When an agent step completes |
+| `tool.execution.started` | tool handler | When tool execution starts |
+| `tool.execution.completed` | tool handler | When tool execution completes |
+| `flow.started` | engine.py | At the start of flow execution |
+| `flow.completed` | engine.py | When flow execution completes |
+| `flow.error` | engine.py | When a flow error occurs |
+| `ui.popup.show` | Optional | Pop-up display request |
+| `ui.popup.response` | Frontend | User response to popup |
+| `ui.plan.proposed` | Optional | Plan presentation |
+| `ui.plan.response` | Frontend | User responses to plans |
 
 所有这些事件都可以使用emit_event / wait_event 来处理。它还充当挂钩点，通过事件触发器自动启动流程。
 

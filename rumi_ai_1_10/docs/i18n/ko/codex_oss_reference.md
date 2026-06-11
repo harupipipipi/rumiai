@@ -31,7 +31,7 @@ Codex는 Rust 터미널 코딩 에이전트인 반면 승인 모델입니다.
 - 민감한 코딩 작업을 위해 서명된 서버측 승인 토큰입니다.
 - 작업공간 루트 제한 및 등록된 신뢰할 수 있는 작업공간 확인.
 - Codex 스타일 앱 서버 백엔드 스캐폴드
-  §루미§0§.
+  `ecosystem/defaultspack/domain/coding_backends/codex-app-server/`.
 - 정적, 보안, 패키지, 프런트엔드, Rust, Windows 및 설치 프로그램 CI 레인.
 - 도구 검색, 추천, 정책 필터링 및 모델 제공자
   적응.

@@ -39,8 +39,8 @@
 
 第一阶段发现路径：
 
-1.§鲁米§0§
-2.§鲁米§0§
+1.`ecosystem/<pack_id>/nodes/*.node.json`
+2.`ecosystem/<pack_id>/components/*/node.json`
 
 递归`**/node.json`发现被有意推迟。
 
@@ -131,24 +131,24 @@
 
 节点：
 
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
+- `node_id`
+- `kind`
+- `display_name`
+- `ports`
 
 港口：
 
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
+- `id`
+- `direction`
+- `standards`
 
 ## 港口方向
 
 允许值：
 
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
+- `input`
+- `output`
+- `bidirectional`
 
 第 1 阶段需要支持`input`和`output`。 `bidirectional` 由模式保留，在实现之前可能会被验证器拒绝。
 
@@ -234,8 +234,8 @@ source.standards intersect target.standards is not empty
 
 显示文字分辨率：
 
-1.§鲁米§0§
-2.§鲁米§0§
+1.`display_name[user_locale]`
+2.`display_name.en`
 3. 遗产`name`
 4.`node_id`或港口`id`
 
@@ -245,7 +245,7 @@ source.standards intersect target.standards is not empty
 
 常见绑定槽位：
 
-- §鲁米§0§
-- §鲁米§0§
+- `compile`
+- `on_input.<port_id>`
 
 绑定处理程序必须通过批准的注册表或内核处理程序基础设施来解析。不允许直接任意进口。

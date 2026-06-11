@@ -10,24 +10,24 @@
 
 | 내가 하고 싶은 것 | 먼저 읽어보세요 | 다음 읽기 |
 |---|---|---|
-| 가능한 한 빨리 시작을 확인하고 싶습니다 | §루미§0§ | [operations.md](./operations.md)의 "시작" |
-| 사용 언어의 의미는 を揃えたい | §루미§0§ | §루미§1§, §루미§2§ |
-| 코드 없이 런타임이 어떻게 작동하는지 이해하고 싶습니다 | §루미§0§ | §루미§1§ |
-| `rumi_viewer` 시작 및 잼 방법을 알고 싶습니다 | §루미§0§ | [../README.md](../../../i18n/ko/README.md) “목적별 가이드” |
-| 팩을 만들고 싶습니다 | §루미§0§ | §루미§1§ |
-| Pack 문서 배치 방법을 알고 싶습니다 | §루미§0§ | §루미§1§ |
-| 데스크톱 앱 팩을 만들고 싶습니다 | §루미§0§ | §루미§1§ |
-| 뷰어 디스플레이 팩을 만들고 싶습니다 | §루미§0§ | §루미§1§ |
-| 성능 그래프/노드/프로필 사양을 확인하고 싶어요 | §루미§0§ | §루미§1§, §루미§2§, §루미§3§ |
-| API 키/비밀/작업을 알고 싶습니다 | §루미§0§ | §루미§1§ |
-| defaultspack의 구현 측면을 따르고 싶습니다 | §루미§0§ | §루미§1§ |
-| Codex OSS | §루미§0§ | 루트 [../../AGENTS.md](../../AGENTS.md), [../../justfile](../../justfile) |
+| 가능한 한 빨리 시작을 확인하고 싶습니다 | [tutorials/runtime-quickstart.md](./tutorials/runtime-quickstart.md) | [operations.md](./operations.md)의 "시작" |
+| 사용 언어의 의미는 を揃えたい | [terminology.md](./terminology.md) | [prompt_authoring.md](./prompt_authoring.md), [subagents.md](./subagents.md) |
+| 코드 없이 런타임이 어떻게 작동하는지 이해하고 싶습니다 | [concepts/system-mechanism.md](./concepts/system-mechanism.md) | [architecture.md](./architecture.md) |
+| `rumi_viewer` 시작 및 잼 방법을 알고 싶습니다 | [rumi_viewer_start.md](./rumi_viewer_start.md) | [../README.md](../../../i18n/ko/README.md) “목적별 가이드” |
+| 팩을 만들고 싶습니다 | [pack-development-guide.md](./pack-development-guide.md) | [pack-development.md](./pack-development.md) |
+| Pack 문서 배치 방법을 알고 싶습니다 | [pack-documentation-contract.md](./pack-documentation-contract.md) | [pack-development.md](./pack-development.md) |
+| 데스크톱 앱 팩을 만들고 싶습니다 | [pack_desktop_app_guide.md](./pack_desktop_app_guide.md) | [examples/desktop_app_pack/README.md](./examples/desktop_app_pack/README.md) |
+| 뷰어 디스플레이 팩을 만들고 싶습니다 | [examples/viewer_hello_pack/README.md](./examples/viewer_hello_pack/README.md) | [examples/viewer_pack/README.md](./examples/viewer_pack/README.md) |
+| 성능 그래프/노드/프로필 사양을 확인하고 싶어요 | [capability_graph.md](./capability_graph.md) | [node_spec.md](./node_spec.md), [profile_spec.md](./profile_spec.md), [capability_graph_pr_plan.md](./capability_graph_pr_plan.md) |
+| API 키/비밀/작업을 알고 싶습니다 | [operations.md](./operations.md) | [quality_pack/philosophy_memo.md](./quality_pack/philosophy_memo.md) |
+| defaultspack의 구현 측면을 따르고 싶습니다 | [../ecosystem/defaultspack/README.md](../ecosystem/defaultspack/README.md) | [../ecosystem/defaultspack/docs/getting-started.md](../ecosystem/defaultspack/docs/getting-started.md) |
+| Codex OSS | [codex_oss_reference.md](./codex_oss_reference.md) | 루트 [../../AGENTS.md](../../AGENTS.md), [../../justfile](../../justfile) |
 
 ## 여기를 먼저 보시면 전체 그림을 보실 수 있습니다.
 
-1. §루미§0§
-2. §루미§0§
-3. §루미§0§
+1. [tutorials/runtime-quickstart.md](./tutorials/runtime-quickstart.md)
+2. [concepts/system-mechanism.md](./concepts/system-mechanism.md)
+3. [operations.md](./operations.md)
 
 ## 기존/호환 문서
 
@@ -35,6 +35,6 @@
 
 | 레거시 | 대신 표준 읽기 |
 |---|---|
-| §루미§0§ | §루미§1§, §루미§2§ |
-| §루미§0§ | §루미§1§ |
-| §루미§0§ | §루미§1§ |
+| [pack_development_guide.md](./pack_development_guide.md) | [pack-development.md](./pack-development.md), [pack-development-guide.md](./pack-development-guide.md) |
+| [defaultspack_v2.md](./defaultspack_v2.md) | [defaultspack-v2.md](./defaultspack-v2.md) |
+| [setuptodo.md](./setuptodo.md) | [roadmap.md](./roadmap.md) |

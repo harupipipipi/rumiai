@@ -43,15 +43,15 @@ Android 版本不允许全局允许明文流量；使用 HTTPS 或
 
 |目的|方法|路径|
 | --- | --- | --- |
-|健康检查| §鲁米§0§| §鲁米§1§ |
-|模块列表 | §鲁米§0§| §鲁米§1§ |
-|模块详情 | §鲁米§0§| §鲁米§1§ |
-|启用模块 | §鲁米§0§| §鲁米§1§ |
-|禁用模块 | §鲁米§0§| §鲁米§1§ |
-|重新加载模块 | §鲁米§0§| §鲁米§1§ |
-|回滚模块| §鲁米§0§| §鲁米§1§ |
-|移民状况 | §鲁米§0§| §鲁米§1§ |
-|打包请求 | §鲁米§0§| §鲁米§1§ |
+|健康检查| `GET`| `/health` |
+|模块列表 | `GET`| `/api/defaultspack/modules` |
+|模块详情 | `GET`| `/api/defaultspack/modules/{id}` |
+|启用模块 | `POST`| `/api/defaultspack/modules/{id}/enable` |
+|禁用模块 | `POST`| `/api/defaultspack/modules/{id}/disable` |
+|重新加载模块 | `POST`| `/api/defaultspack/modules/{id}/reload` |
+|回滚模块| `POST`| `/api/defaultspack/modules/{id}/rollback` |
+|移民状况 | `GET`| `/api/defaultspack/migration/status` |
+|打包请求 | `GET`| `/api/defaultspack/pack-requests` |
 
 ## 发展
 

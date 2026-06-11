@@ -6,7 +6,7 @@
 
 ## 🚀 第五阶段：Rumi Viewer + Pack 桌面应用程序【最重要/最高优先级】
 
-> **此阶段优先于所有其他任务。 **
+> **此阶段优先于所有其他任务。**
 > 最重要的里程碑是使 Rumi 能够作为“无终端桌面应用程序”进行分发。
 
 ### 架构概述
@@ -16,9 +16,7 @@
 1. **Rumi Console**（rumi-launcher、Rust）—驻留在托盘中。内核进程管理。用户通常不知道这一点。
 2. **Rumi Viewer** (Tauri) — 一个显示 Pack 前端的通用 WebView 应用程序。用户日常使用的主要应用程序。
 3. **bundled/uv** — 用于构建Python环境。
-4. **app/** (rumi_ai_1_10/) — 内核源代码。
-
-**什么是 Rumi Viewer：**
+4. **app/** (rumi_ai_1_10/) — 内核源代码。**什么是 Rumi Viewer：**
 - 使用 Tauri 创建的通用 WebView 应用程序
 - 显示`web_mount`中Pack声明的前端（HTML/CSS/JS）
 - 只能连接到内核 API (localhost:8765)。我无法访问外部网站
@@ -354,11 +352,7 @@ vocab_registry已经有解决这个问题的机制，但是缺少“Flow执行�
 
 #### 拟议的实施计划
 
-**方法 A（存储期间标准化 - 推荐）**：在将 ctx 存储到 kernel_core 之前，转换为 vocab_registry 中的首选术语。可以通过改变几行来利用现有机制。
-
-**方法 B（参考标准化）**：使用 _resolve_value 进行同义词回退。存储的数据没有改变，但解析路径复杂。
-
-**方法 C（选择加入规范化）**：规范化：流程步骤中的 true 标志或在组件清单中声明 output_vocab_group。对现有产品没有影响，但 Pack 作者需要意识到这一点。
+**方法 A（存储期间标准化 - 推荐）**：在将 ctx 存储到 kernel_core 之前，转换为 vocab_registry 中的首选术语。可以通过改变几行来利用现有机制。**方法 B（参考标准化）**：使用 _resolve_value 进行同义词回退。存储的数据没有改变，但解析路径复杂。**方法 C（选择加入规范化）**：规范化：流程步骤中的 true 标志或在组件清单中声明 output_vocab_group。对现有产品没有影响，但 Pack 作者需要意识到这一点。
 
 ### 6.6 内部重构（P3待定）
 

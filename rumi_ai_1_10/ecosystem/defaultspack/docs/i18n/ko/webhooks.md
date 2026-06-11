@@ -41,7 +41,7 @@ HTTP request
 | 공급자 | 검증 |
 |---|---|
 | 슬랙 | `x-slack-signature` 및 `x-slack-request-timestamp` |
-| 라인 | §루미§0§ |
+| 라인 | `x-line-signature` |
 | 불화 | `x-signature-ed25519` 및 `x-signature-timestamp` |
 | 일반 웹훅 | 베어러 토큰, HMAC 서명 또는 기타 구성된 검증자 |
 
@@ -75,7 +75,7 @@ dedupe_key = provider + ":" + event_id
 `ResponseAdapter`가 최종 응답을 전달합니다.
 
 LINE `computer_use_line_biz` 엔드포인트는 다음과 같은 빠른 승인 동작을 선택할 수 있습니다.
-§루미§0§. 이렇게 하면 웹훅 처리만 다음으로 이동됩니다.
+`response.background_processing: true`. 이렇게 하면 웹훅 처리만 다음으로 이동됩니다.
 공급자가 HTTP 200을 즉시 수신하도록 처리 중인 작업자 그렇지 않다
 실험적인 배경 데스크톱 드라이버를 활성화합니다. 눈에 보이는 컴퓨터 사용 잔존물
 `RUMI_ENABLE_EXPERIMENTAL_BACKGROUND_COMPUTER_USE=1`이 설정되지 않은 경우 기본값입니다.

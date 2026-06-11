@@ -22,7 +22,7 @@ desktop_app_pack/
 
 ---
 
-##desktop_app.execute 機能とは何ですか?
+## desktop_app.execute 機能とは何ですか?
 
 `desktop_app.execute` は、Pack が **独立したデスクトップ ウィンドウ** でアプリケーションを起動できるようにする Rumi AI OS の中核機能です。
 

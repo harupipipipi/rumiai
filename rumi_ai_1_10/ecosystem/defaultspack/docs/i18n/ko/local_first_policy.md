@@ -7,7 +7,7 @@
 defaultspack 코어는 클라우드 API 키 없이 사용할 수 있습니다.
 
 이 저장소의 정식 구현은 다음과 같습니다.
-§루미§0§. 이전 `ecosystem/defaults/` 패키지
+`rumi_ai_1_10/ecosystem/defaultspack/`. 이전 `ecosystem/defaults/` 패키지
 별도의 `harupipipipi/rumiai_defaults` 저장소는 호환성이 있거나
 스냅샷 소스. 새로운 런타임 동작, 안전 규칙, 경로 계약 및 UI
 기본값은 defaultspack에서 먼저 구현되어야 하며 레거시 별칭은 그대로 유지됩니다.

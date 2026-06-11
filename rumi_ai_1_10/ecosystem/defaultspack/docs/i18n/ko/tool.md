@@ -118,12 +118,12 @@ ecosystem/default/backend/blocks/pack/
 
 **execution.type 유형:**
 
-| 유형 | 설명 | 운영위치 |
+| type | Description | Operating location |
 |------|------|----------|
-| §루미§0§ | handler.py를 직접 실행 | 도커에서 |
-| §루미§0§ | 기능 처리기를 통해 | 호스트 측 |
-| §루미§0§ | MCP 서버를 통해 | 외부 프로세스 |
-| §루미§0§ | HTTP 요청 | llm_network를 통해 |
+| `local` | Run handler.py directly | In Docker |
+| `capability` | Via Capability Handler | Host side |
+| `mcp` | Via MCP server | External process |
+| `http` | HTTP request | via llm_network |
 
 ### 3.2 스키마.json(필수)
 
@@ -313,11 +313,9 @@ ecosystem/default/backend/blocks/pack/
 }
 ```
 
-**`pack_dependencies`**: 이 도구에는 외부 팩이 필요합니다. 지정된 팩이 설치되지 않은 경우 `repo`에서 자동 획득이 제안됩니다.
+**`pack_dependencies`**: 이 도구에는 외부 팩이 필요합니다. 지정된 팩이 설치되지 않은 경우 `repo`.**`capabilities_required`**에서 자동 획득이 제안됩니다: handler.py의 컨텍스트에 주입된 기능 선언. 여기에 선언된 기능만 컨텍스트에 주입됩니다.
 
-**`capabilities_required`**: handler.py의 컨텍스트에 기능 선언이 삽입되었습니다. 여기에 선언된 기능만 컨텍스트에 주입됩니다.
-
-`llm_call`을 사용하는 경우 `llm_call_allowed: true`로 설정하고 제한 사항을 작성할 수 있습니다.
+`llm_call`을 사용할 때 이를 `llm_call_allowed: true`으로 설정하고 제한 사항을 작성할 수 있습니다.
 
 ```json
 {
@@ -369,30 +367,30 @@ handler.py에 주입된 컨텍스트는 범용 프리미티브로만 구성됩�
 
 **항상 주입됨(선언 필요 없음):**
 
-| 컨텍스트 키 | 설명 |
+| context key | description |
 |---|---|
-| §루미§0§ | 핸들러를 호출하십시오. Grant |
-| §루미§0§ | 이벤트를 게시합니다. 처리기, 흐름, 프런트 엔드는 수신 가능 |
-| §루미§0§ | 이벤트를 기다리세요. 시간 초과를 지정할 수 있습니다 |
-| §루미§0§ | 위젯 JSON을 UI로 보내기 |
-| §루미§0§ | 취소 확인 |
-| §루미§0§ | Conditions.json의 Behavior_variants에서 주입된 설정 |
-| §루미§0§ | 세션 정보(session_id, 작업공간 등) |
+| `context["call_handler"]` | Call any handler. Can only be executed within the scope of permissions granted by Grant |
+| `context["emit_event"]` | Publish an event. handler, flow, front end can receive |
+| `context["wait_event"]` | Wait for an event. Timeout can be specified |
+| `context["emit_widget"]` | Send Widget JSON to the UI |
+| `context["cancel_check"]` | Cancellation confirmation |
+| `context["handler_config"]` | Settings injected from behavior_variants in conditions.json |
+| `context["session"]` | Session information (session_id, workspace, etc.) |
 
 **permission.json의 `capabilities_required`에 선언 및 삽입됨:**
 
-| 능력_ID | 설명 | 컨텍스트 키 | 위험 |
+| capability_id | description | context key | risk |
 |---|---|---|---|
-| §루미§1§ | user_data 아래의 파일 읽기 | §루미§2§ | 낮음 |
-| §루미§1§ | user_data 아래에 파일 쓰기 | §루미§2§ | 중간 |
-| §루미§1§ | 흐름 시작 | §루미§2§ | 중간 |
-| §루미§1§ | 쉘 명령 실행 | §루미§2§ | 높음 |
-| §루미§1§ | 브라우저 작동 | §루미§2§ | 높음 |
-| §루미§1§ | Docker 컨테이너 시작, 운영 및 삭제 | §루미§2§ | 높음 |
-| §루미§1§ | 호스트 애플리케이션 운영 | §루미§2§ | 높음 |
-| §루미§1§ | 외부 HTTP 통신 | §루미§2§ | 중간 |
-| §루미§1§ | 도구 내 LLM 통화 | §루미§2§ | 중간 |
-| §루미§1§ | 세션 상태 읽기/쓰기 | §루미§2§ | 낮음 |
+| `data_read` | Read file under user_data | `context["data_read"](path) → str` | Low |
+| `data_write` | Writing files under user_data | `context["data_write"](path, content)` | Medium |
+| `execute_flow` | Start Flow | `context["execute_flow"](flow_id, input) → FlowResult` | Medium |
+| `shell_exec` | Shell command execution | `context["capability"]("shell_exec", {...})` | High |
+| `browser_control` | Browser operation | `context["capability"]("browser_control", {...})` | High |
+| `container_exec` | Starting, operating, and destroying Docker containers | `context["capability"]("container_exec", {...})` | High |
+| `app_control` | Host application operation | `context["capability"]("app_control", {...})` | High |
+| `http_request` | External HTTP communication | `context["capability"]("http_request", {...})` | Medium |
+| `llm_call` | In-tool LLM call | `context["capability"]("llm_call", {...})` | Medium |
+| `session_state` | Session state read/write | `context["capability"]("session_state", {...})` | Low |
 
 #### call_handler
 
@@ -497,27 +495,27 @@ context["capability"]("container_exec", {
 
 Container_exec 작업 목록:
 
-| 액션 | 설명 | 필수 매개변수 |
+| action | description | required parameters |
 |---|---|---|
-| §루미§0§ | 컨테이너 생성/시작 | 이미지, 옵션 |
-| §루미§0§ | 컨테이너에서 명령 실행 | 컨테이너_ID, 명령 |
-| §루미§0§ | 디스플레이 스크린샷 받기 | 컨테이너_ID |
-| §루미§0§ | 표시할 입력 | 컨테이너_ID, 입력_유형, (x, y / 텍스트 / 키) |
-| §루미§0§ | 컨테이너에 파일 보내기 | 컨테이너_ID, 호스트_경로, 컨테이너_경로 |
-| §루미§0§ | 컨테이너에서 파일 가져오기 | 컨테이너_ID, 컨테이너_경로 |
-| §루미§0§ | 컨테이너 파괴 | 컨테이너_ID |
-| §루미§0§ | 실행 중인 컨테이너 목록 | 없음 |
+| `create` | Container creation/startup | image, options |
+| `exec` | Command execution in container | container_id, command |
+| `screenshot` | Get display screenshot | container_id |
+| `input` | Input to display | container_id, input_type, (x, y / text / key) |
+| `upload` | Send file to container | container_id, host_path, container_path |
+| `download` | Get file from container | container_id, container_path |
+| `destroy` | Container destruction | container_id |
+| `list` | List of running containers | None |
 
 input_type 유형:
 
-| 입력_유형 | 설명 | 매개변수 |
+| input_type | description | parameters |
 |---|---|---|
-| §루미§0§ | 좌표 클릭 | x, y, 버튼(왼쪽/오른쪽/가운데) |
-| §루미§0§ | 더블클릭 | x, y |
-| §루미§0§ | 텍스트 입력 | 텍스트 |
-| §루미§0§ | 키 전송 | 키(예: "Enter", "Ctrl+C") |
-| §루미§0§ | 스크롤 | x, y, 델타 |
-| §루미§0§ | 드래그 | from_x, from_y, to_x, to_y |
+| `click` | Coordinate click | x, y, button(left/right/middle) |
+| `double_click` | Double click | x, y |
+| `type` | Text input | text |
+| `key` | Key transmission | key (e.g. "Enter", "Ctrl+C") |
+| `scroll` | Scroll | x, y, delta |
+| `drag` | Drag | from_x, from_y, to_x, to_y |
 
 #### handler.py의 반환 값
 
@@ -769,7 +767,7 @@ bash/capability/
 }
 ```
 
-`scope`: `"public"`은 `capabilities_required`와 함께 다른 도구도 사용할 수 있습니다. `"private"`은 이 도구에만 적용됩니다.
+`scope`: `"public"`은 `capabilities_required`와 함께 다른 도구를 사용할 수도 있습니다. `"private"`은 이 도구에만 적용됩니다.
 
 호스트 측 handler.py는 사용자 명시적 승인 + 해시 레코드 + 수정 감지의 대상입니다.
 
@@ -858,22 +856,22 @@ bash/capability/
 }
 ```
 
-| 열쇠 | 설명 |
+| Key | Description |
 |------|------|
-| §루미§0§ | 이 개수 이상의 도구를 보유하고 있는 경우 점진적 공개 |
-| §루미§0§ | §루미§1§ / §루미§2§ / §루미§3§ |
-| §루미§0§ | 마켓플레이스 검증 팩에 대한 자동 승인 도구 |
-| §루미§0§ | 모든 도구의 분당 총 통화 제한 |
-| §루미§0§ | 멱등성 도구 결과 캐시 시간 |
-| §루미§0§ | 영구 쉘 세션 구성 |
-| §루미§0§ | Docker 컨테이너 구성 |
-| §루미§0§ | 도구 내 LLM 호출에 대한 기본 제한 |
-| §루미§0§ | 하위 에이전트(작업 도구) 제한 사항 |
-| §루미§0§ | LLM에 전달할 최대 이미지 수 |
-| §루미§0§ | 도구 출력 잘림 임계값 |
-| §루미§0§ | 비활성화할 도구 ID 목록 |
-| §루미§0§ | 도구 정의가 동기화되는 GitHub 저장소 |
-| §루미§0§ | 팩 설치 관련 설정 |
+| `stage_threshold` | If you have more than this number of tools, use gradual disclosure |
+| `approval.global_approval_mode` | `per_call` / `per_session` / `auto` |
+| `approval.auto_approve_verified_packs` | Auto-approve tools for marketplace verified packs |
+| `rate_limit.max_total_calls_per_minute` | Total call limit for all tools per minute |
+| `cache.ttl_seconds` | idempotent tool result cache time |
+| `shell.*` | Configuring a persistent shell session |
+| `container.*` | Configuring Docker containers |
+| `llm_call.*` | Default limits for in-tool LLM calls |
+| `agent.*` | Subagent (Task tool) limitations |
+| `display.max_images_in_context` | Maximum number of images to pass to LLM |
+| `display.max_output_chars` | Tool output truncation threshold |
+| `disabled_tools` | List of tool IDs to disable |
+| `sync.*` | GitHub repository from which tool definitions are synchronized |
+| `pack_install.*` | Pack installation related settings |
 
 ---
 
@@ -910,7 +908,7 @@ Permission.json의 `pack_dependencies`을 사용하면 도구에서 외부 팩�
 
 ### 5.2 팩 종속성 해결
 
-팩 자체는 다른 팩(pack.json의 `dependencies`)에 종속될 수도 있습니다.
+팩 자체도 다른 팩에 종속될 수 있습니다(pack.json의 `dependencies`).
 
 ```json
 {
@@ -944,7 +942,7 @@ GitHub API의 zipball을 사용합니다. git 명령이 필요하지 않습니�
 GET https://api.github.com/repos/{owner}/{repo}/zipball/{ref}
 ```
 
-다운로드 후 `path`에 지정된 디렉터리만 압축을 풀고 추출하여 `user_data/packs/`에 넣습니다. 인증이 필요한 개인 저장소는 `GITHUB_TOKEN` 환경 변수를 사용합니다.
+다운로드 후 `path`에 지정된 디렉토리만 압축을 풀고 추출하여 `user_data/packs/`에 넣습니다. 인증이 필요한 개인 저장소는 `GITHUB_TOKEN` 환경 변수를 사용합니다.
 
 ### 5.4 마켓플레이스 레지스트리
 
@@ -970,7 +968,7 @@ GET https://api.github.com/repos/{owner}/{repo}/zipball/{ref}
 }
 ```
 
-상태: `"verified"`가 Rumi 팀에 의해 확인되었습니다. `"unverified"`은 검증되지 않았습니다. `"blacklisted"`는 위험하다고 판단됩니다.
+상태: `"verified"`이 루미 팀에 의해 확인되었습니다. `"unverified"`은 확인되지 않았습니다. `"blacklisted"`은 위험하다고 판단됩니다.
 
 ### 5.5 .pack_meta.json
 
@@ -1031,12 +1029,12 @@ GET https://api.github.com/repos/{owner}/{repo}/zipball/{ref}
 
 ### 5.7 능력 검색 우선순위
 
-executor.py가 도구에 대한 `capabilities_required`을 해결하는 순서:
+executor.py가 도구에 대한 `capabilities_required`을 해결하는 순서는 다음과 같습니다.
 
 1. 시스템 통합(`ecosystem/default/backend/capabilities/`)
-2. 공유 능력(`user_data/shared/capabilities/`)
+2. 공유 기능(`user_data/shared/capabilities/`)
 3. 도구 포함(`tools/xxx/capability/`)
-4. 팩 제공 (`user_data/packs/xxx/capabilities/`)
+4. 팩 제공(`user_data/packs/xxx/capabilities/`)
 5. `pack_dependencies`에서 자동 획득 → 4에 배치
 
 ---
@@ -1063,7 +1061,7 @@ LLM의 시스템 프롬프트에 경량 도구 카탈로그를 삽입합니다.
 
 ### 2단계: 세부정보(선택한 도구 또는 도구 수 ≤ stage_threshold)
 
-전체 스키마를 LLM의 `tools` 매개변수에 전달합니다. 설명에 `usage_guide` 및 `guide.json`의 `tips`를 삽입합니다.
+전체 스키마를 LLM의 `tools` 매개변수에 전달합니다. 설명에 `guide.json`의 `usage_guide` 및 `tips`를 삽입합니다.
 
 ### 3단계: 런타임
 
@@ -1168,7 +1166,7 @@ tool_call 受信
 3. **실행 결과 → LLM 메시지 형식**: 결과 / llm_content → 공급자별 메시지 형식
 4. **prompt_based 지원**: tool_calls를 지원하지 않는 모델에 대한 프롬프트 임베딩 + 응답 구문 분석
 
-`capabilities.json`의 `tool_result_image_support`에 있는 이미지 지원 분기: `true`(Anthropic)는 tool_result에 이미지를 포함할 수 있습니다. `false`(OpenAI)은 다음과 같은 사용자 메시지로 이미지를 보냅니다.
+`capabilities.json`의 `tool_result_image_support`에 있는 이미지 지원 분기: `true`(인류)는 tool_result에 이미지를 포함할 수 있습니다. `false`(OpenAI)은 다음과 같은 사용자 메시지로 이미지를 보냅니다.
 
 ### 8.3 session_manager.py
 
@@ -1209,7 +1207,7 @@ class SessionState:
 
 ### 8.4 loader.py 순회 순서
 
-1. `user_data/shared/tools/` (사용자 관리)
+1. `user_data/shared/tools/` (이용자 관리)
 2. `user_data/packs/*/tools/`(팩 제공)
 3. MCP 서버에서 동적 획득
 
@@ -1219,14 +1217,14 @@ class SessionState:
 
 모든 MCP 기능과 호환:
 
-| MCP 기능 | 구현 |
+| MCP Features | Implementation |
 |----------|------|
-| 도구(도구/목록, 도구/호출) | 도구로 등록합니다.execution.type = "mcp" |
-| 리소스(리소스/목록, 리소스/읽기, 리소스/구독) | 흐름 컨텍스트에 주입됨 |
-| 프롬프트(프롬프트/목록, 프롬프트/가져오기) | 템플릿으로 사용 가능 |
-| 샘플링(샘플링/createMessage) | ai_client를 통한 LLM 호출 |
-| 루트(루트/목록) | 작업공간 경로 알림 |
-| 도출(도출/생성) | Emit_event로 사용자에게 연락 |
+| Tools (tools/list, tools/call) | Register as a tool, execution.type = "mcp" |
+| Resources (resources/list, resources/read, resources/subscribe) | Injected into Flow context |
+| Prompts (prompts/list, prompts/get) | Available as a template |
+| Sampling (sampling/createMessage) | LLM call via ai_client |
+| Roots (roots/list) | Notify workspace path |
+| Elicitation (elicitation/create) | Contact user with emit_event |
 
 mcp.json 구성 예:
 
@@ -1336,7 +1334,7 @@ nodes:
 
 ## 10. 준비 상태 확인
 
-도구에 `readiness/check.py`를 배치하면 실행 전에 환경을 감지할 수 있습니다.
+도구에 `readiness/check.py`을 배치하면 실행 전에 환경을 감지할 수 있습니다.
 
 ```python
 # readiness/check.py

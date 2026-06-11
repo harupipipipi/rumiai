@@ -313,9 +313,7 @@ Authority/approval/restriction.
 }
 ```
 
-**`pack_dependencies`**: External Packs required by this tool. If the specified Pack has not been installed, automatic acquisition will be suggested from `repo`.
-
-**`capabilities_required`**: Capability declaration injected into handler.py's context. Only the capabilities declared here are injected into the context.
+**`pack_dependencies`**: External Packs required by this tool. If the specified Pack has not been installed, automatic acquisition will be suggested from `repo`.**`capabilities_required`**: Capability declaration injected into handler.py's context. Only the capabilities declared here are injected into the context.
 
 When using `llm_call`, you can set it to `llm_call_allowed: true` and write the restrictions:
 
@@ -383,16 +381,16 @@ The context injected into handler.py consists only of general-purpose primitives
 
 | capability_id | description | context key | risk |
 |---|---|---|---|
-| `data_read` | Read file under user_data | `context["data_read"](§RUMI§0§) → str` | Low |
-| `data_write` | Writing files under user_data | `context["data_write"](§RUMI§0§)` | Medium |
-| `execute_flow` | Start Flow | `context["execute_flow"](§RUMI§0§) → FlowResult` | Medium |
-| `shell_exec` | Shell command execution | `context["capability"](§RUMI§0§)` | High |
-| `browser_control` | Browser operation | `context["capability"](§RUMI§0§)` | High |
-| `container_exec` | Starting, operating, and destroying Docker containers | `context["capability"](§RUMI§0§)` | High |
-| `app_control` | Host application operation | `context["capability"](§RUMI§0§)` | High |
-| `http_request` | External HTTP communication | `context["capability"](§RUMI§0§)` | Medium |
-| `llm_call` | In-tool LLM call | `context["capability"](§RUMI§0§)` | Medium |
-| `session_state` | Session state read/write | `context["capability"](§RUMI§0§)` | Low |
+| `data_read` | Read file under user_data | `context["data_read"](path) → str` | Low |
+| `data_write` | Writing files under user_data | `context["data_write"](path, content)` | Medium |
+| `execute_flow` | Start Flow | `context["execute_flow"](flow_id, input) → FlowResult` | Medium |
+| `shell_exec` | Shell command execution | `context["capability"]("shell_exec", {...})` | High |
+| `browser_control` | Browser operation | `context["capability"]("browser_control", {...})` | High |
+| `container_exec` | Starting, operating, and destroying Docker containers | `context["capability"]("container_exec", {...})` | High |
+| `app_control` | Host application operation | `context["capability"]("app_control", {...})` | High |
+| `http_request` | External HTTP communication | `context["capability"]("http_request", {...})` | Medium |
+| `llm_call` | In-tool LLM call | `context["capability"]("llm_call", {...})` | Medium |
+| `session_state` | Session state read/write | `context["capability"]("session_state", {...})` | Low |
 
 #### call_handler
 

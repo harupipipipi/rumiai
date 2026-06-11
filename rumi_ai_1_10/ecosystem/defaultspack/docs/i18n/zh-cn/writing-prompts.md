@@ -4,19 +4,19 @@
 
 # 写作提示
 
-使用默认包创建和管理提示模板的指南。处理程序在`blocks/prompt/`中实现，域逻辑在`domain/prompt/manager.py`（PromptManager）、`domain/prompt/template.py`（PromptTemplate）和`domain/prompt/renderer.py`（渲染）中实现。
+使用默认包创建和管理提示模板的指南。处理程序在 `blocks/prompt/` 中实现，域逻辑在 `domain/prompt/manager.py` (PromptManager)、`domain/prompt/template.py` (PromptTemplate) 和 `domain/prompt/renderer.py` (render) 中实现。
 
 ## 提示概念
 
 提示是一个包含模板变量的可重用文本模板。使用`{{variable_name}}`语法嵌入变量，并在渲染时将其替换为实际值。
 
-提示由`PromptManager`（单例）管理，JSON 文件持久保存到内存中的 dict + `user_data/shared/prompts/`。启动时从 JSON 文件自动加载。
+提示由 `PromptManager`（单例）管理，JSON 文件持久保存到内存中的 dict + `user_data/shared/prompts/`。启动时从 JSON 文件自动加载。
 
 提示是一个被动层。必要时从流程/功能调用`defaults.prompt.render`或`defaults.prompt.resolve_for_conversation`，无需选择和执行工具/提供者/权限。
 
 ## 提示模板的格式
 
-`PromptTemplate`类的结构在`domain/prompt/template.py`中定义。
+`domain/prompt/template.py`中定义的`PromptTemplate`类的结构。
 
 ```python
 PromptTemplate(
@@ -31,7 +31,7 @@ PromptTemplate(
 )
 ```
 
-持久化的 JSON 格式如下（`create_prompt()` of `domain/prompt/manager.py`）：
+持久化的 JSON 格式如下（第 `domain/prompt/manager.py` 的`create_prompt()`）：
 
 ```json
 {
@@ -50,52 +50,52 @@ PromptTemplate(
 }
 ```
 
-|领域 |类型 |描述 |
+| Field | Type | Description |
 |---|---|---|
-| §鲁米§0§| §鲁米§1§ |自动生成 8 个字符的十六进制 ID |
-| §鲁米§0§| §鲁米§1§ |提示名称（唯一）|
-| §鲁米§0§| §鲁米§1§ |模板主体（`body`的别名。保留两者以实现向后兼容）|
-| §鲁米§0§| §鲁米§1§ |模板主体|
-| §鲁米§0§| §鲁米§1§ |说明|
-| §鲁米§0§| §鲁米§1§ |变量定义列表|
-| §鲁米§0§| §鲁米§1§ |自由格式元数据 |
-| §鲁米§0§| §鲁米§1§ |创建日期和时间 (ISO 8601) |
-| §鲁米§0§| §鲁米§1§ |更新日期和时间 (ISO 8601) |
+| `id` | `string` | Automatically generated 8-character hex ID |
+| `name` | `string` | Prompt name (unique) |
+| `content` | `string` | Template body (alias of `body`. Keep both for backwards compatibility) |
+| `body` | `string` | Template body |
+| `description` | `string` | Explanation |
+| `variables` | `list[dict]` | Variable definition list |
+| `metadata` | `dict` | Free-form metadata |
+| `created_at` | `string` | Creation date and time (ISO 8601) |
+| `updated_at` | `string` | Updated date and time (ISO 8601) |
 
 变量的每个元素都有以下字段。
 
-|领域 |类型 |描述 |
+| Field | Type | Description |
 |---|---|---|
-| §鲁米§0§| §鲁米§1§ |变量名 |
-| §鲁米§0§| §鲁米§1§ |类型（`"string"`、`"integer"`等）。默认`"string"` |
-| §鲁米§0§| §鲁米§1§ |默认值。 `null` 无 |
-| §鲁米§0§| §鲁米§1§ |是必须的吗？默认`false` |
+| `name` | `string` | Variable name |
+| `type` | `string` | type (`"string"`, `"integer"`, etc.). Default `"string"` |
+| `default` | `any` | Default value. None for `null` |
+| `required` | `bool` | Is it required? Default `false` |
 
-旧格式 (`variables: ["var1", "var2"]`) 也受支持并自动转换为`_normalize_variables()` 中的新格式。
+旧格式 (`variables: ["var1", "var2"]`) 也受支持并自动转换为`_normalize_variables()`中的新格式。
 
 ## 模板变量
 
 ### 常规变量
 
-在`{{variable_name}}`中描述。在渲染期间替换为 `variables` 字典的值。 `domain/prompt/renderer.py`中的`render()`函数使用`_VARIABLE_PATTERN = re.compile(r"\{\{\s*([\w.]+)\s*\}\}")`一次性替换。
+`{{variable_name}}`中描述。在渲染期间替换为 `variables` dict 的值。 `domain/prompt/renderer.py`中的`render()`函数使用`_VARIABLE_PATTERN = re.compile(r"\{\{\s*([\w.]+)\s*\}\}")`一次性替换。
 
 不存在的变量将被保留（并且不会导致错误）。允许使用空格（`{{ name }}` 也有效）。
 
 ### 特殊变量（上下文变量）
 
-`CONTEXT_VARIABLE_KEYS` 在`domain/prompt/template.py`中定义。
+`CONTEXT_VARIABLE_KEYS`在`domain/prompt/template.py`中定义。
 
-|变量名 |类型 |描述 |
+| Variable name | Type | Description |
 |---|---|---|
-| §鲁米§0§| §鲁米§1§ |当前上下文中的令牌总数 |
-| §鲁米§0§| §鲁米§1§ |消息数量 |
-| §鲁米§0§| §鲁米§1§ |留言内容。对于list/dict，转换为JSON字符串 |
-| §鲁米§0§| §鲁米§1§ |系统提示|
-| §鲁米§0§| §鲁米§1§ |对话 ID |
+| `{{context.total_tokens}}` | `int` | Total number of tokens in current context |
+| `{{context.message_count}}` | `int` | Number of messages |
+| `{{context.messages}}` | `string/list` | Message content. For list/dict, it is converted to JSON string |
+| `{{context.system_prompt}}` | `string` | System prompt |
+| `{{context.conversation_id}}` | `string` | Conversation ID |
 
-特殊变量通过`PromptManager.inject_context_variables(variables, context)`自动注入。用户明确指定的值不会被覆盖。该值是从上下文字典中的相应键（`total_tokens`、`message_count`等）中检索的。
+特殊变量通过 `PromptManager.inject_context_variables(variables, context)` 自动注入。用户明确指定的值不会被覆盖。该值是从上下文字典中的相应键检索的（`total_tokens`、`message_count`等）。
 
-###变量提取方法
+### 变量提取方法
 
 `PromptTemplate`类提供了分析体内变量的方法。
 
@@ -112,7 +112,7 @@ template.list_context_variables()   # → ["context.total_tokens"]
 
 **处理程序**：`defaults.prompt.create`（`blocks/prompt/create.py`）
 
-HTTP 传输没有直接的提示创建路由。通过`call_handler`致电。
+HTTP 传输没有直接的提示创建路由。通过 `call_handler` 致电。
 
 ```python
 result = context["call_handler"]("defaults.prompt.create", {
@@ -124,11 +124,11 @@ result = context["call_handler"]("defaults.prompt.create", {
 
 **输入数据**：
 
-|领域 |类型 |必填 |描述 |
+| Field | Type | Required | Description |
 |---|---|---|---|
-| §鲁米§0§| §鲁米§1§ |是的 |提示名称 |
-| §鲁米§0§| §鲁米§1§ |是的 |模板主体|
-| §鲁米§0§| §鲁米§1§ |没有 |变量定义。 `["var1"]` 格式（旧）和`[{"name": "var1", ...}]` 格式（新）均可 |
+| `name` | `string` | Yes | Prompt name |
+| `content` | `string` | Yes | Template body |
+| `variables` | `list` | No | Variable definition. Both `["var1"]` format (old) and `[{"name": "var1", ...}]` format (new) are possible |
 
 **返回值**：`ok({"prompt": {...}})`
 
@@ -136,28 +136,22 @@ result = context["call_handler"]("defaults.prompt.create", {
 
 **处理程序**：`defaults.prompt.list`（`blocks/prompt/list.py`）
 
-HTTP 传输没有直接的提示列表路由。通过`call_handler`致电。
+HTTP 传输没有直接的提示列表路由。通过 `call_handler` 致电。
 
 ```python
 result = context["call_handler"]("defaults.prompt.list", {})
 ```
 
-**输入数据**：`{}`（无参数）
-
-**返回值**：`ok({"prompts": [...]})`
+**输入数据**：`{}`（无参数）**返回值**：`ok({"prompts": [...]})`
 
 ### 及时更新
 
-**处理程序**：`defaults.prompt.update`（`blocks/prompt/update.py`）
+**处理程序**：`defaults.prompt.update`（`blocks/prompt/update.py`）**HTTP**：`PUT /api/prompts/{name}`**输入数据**：
 
-**HTTP**：`PUT /api/prompts/{name}`
-
-**输入数据**：
-
-|领域 |类型 |必填 |描述 |
+| Field | Type | Required | Description |
 |---|---|---|---|
-| §鲁米§0§| §鲁米§1§ |是的 |提示名称要更新（从URL路径自动注入）|
-| §鲁米§0§| §鲁米§1§ |是的 |要更新的字段 |
+| `name` | `string` | Yes | Prompt name to be updated (automatically injected from URL path) |
+| `updates` | `dict` | Yes | Field to update |
 
 `updates` 的可能字段：`content`（或`body`）、`description`、`variables`、`metadata`、`name`（重命名）。重命名时，旧文件将被删除，索引将自动更新。
 
@@ -165,15 +159,11 @@ result = context["call_handler"]("defaults.prompt.list", {})
 
 ### 删除提示
 
-**处理程序**：`defaults.prompt.delete`（`blocks/prompt/delete.py`）
+**处理程序**：`defaults.prompt.delete`（`blocks/prompt/delete.py`）**HTTP**：`DELETE /api/prompts/{name}`**输入数据**：
 
-**HTTP**：`DELETE /api/prompts/{name}`
-
-**输入数据**：
-
-|领域 |类型 |必填 |描述 |
+| Field | Type | Required | Description |
 |---|---|---|---|
-| §鲁米§0§| §鲁米§1§ |是的 |提示名称（从 URL 路径自动注入）|
+| `name` | `string` | Yes | Prompt name (auto-injected from URL path) |
 
 **返回值**：`ok({"deleted": "prompt_name"})`
 
@@ -181,7 +171,7 @@ result = context["call_handler"]("defaults.prompt.list", {})
 
 **处理程序**：`defaults.prompt.render`（`blocks/prompt/render.py`）
 
-HTTP 传输没有直接的渲染路由。通过`call_handler`致电。
+HTTP 传输没有直接的渲染路由。通过 `call_handler` 致电。
 
 ```python
 result = context["call_handler"]("defaults.prompt.render", {
@@ -192,15 +182,15 @@ result = context["call_handler"]("defaults.prompt.render", {
 
 **输入数据**：
 
-|领域 |类型 |必填 |描述 |
+| Field | Type | Required | Description |
 |---|---|---|---|
-| §鲁米§0§| §鲁米§1§ |没有 |提示ID。指定后，从 PromptManager | 检索
-| §鲁米§0§| §鲁米§1§ |没有 |直接指定模板字符串。 `prompt_id` 优先 |
-| §鲁米§0§| §鲁米§1§ |没有 |变量值 |
+| `prompt_id` | `string` | No | Prompt ID. When specified, retrieved from PromptManager |
+| `template` | `string` | No | Specify template string directly. `prompt_id` takes precedence |
+| `variables` | `dict` | No | Variable value |
 
 **返回值**：`ok({"rendered": "rendered string", "prompt_id": "..." or null})`
 
-###系统提示
+### 系统提示
 
 **处理程序**：`defaults.prompt.system`（`blocks/prompt/system.py`）
 
@@ -208,23 +198,17 @@ result = context["call_handler"]("defaults.prompt.render", {
 
 设置：`{"action": "set", "content": "new system prompt"}`→`ok({"content": "..."})`
 
-###工具↔提示转换
+### 工具↔提示转换
 
-**处理程序**：`defaults.prompt.convert`（`blocks/prompt/convert.py`）
+**处理程序**：`defaults.prompt.convert`（`blocks/prompt/convert.py`）**HTTP**：`POST /api/prompts/convert`**输入数据**：
 
-**HTTP**：`POST /api/prompts/convert`
-
-**输入数据**：
-
-|领域 |类型 |必填 |描述 |
+| Field | Type | Required | Description |
 |---|---|---|---|
-| §鲁米§0§| §鲁米§1§ |是的 | `"tool"` 或 `"prompt"` |
-| §鲁米§0§| §鲁米§1§ |是的 |来源名称 |
-| §鲁米§0§| §鲁米§1§ |是的 | `"tool"` 或 `"prompt"`（必须与 source_type 不同）|
+| `source_type` | `string` | Yes | `"tool"` or `"prompt"` |
+| `source_name` | `string` | Yes | Source name |
+| `target_type` | `string` | Yes | `"tool"` or `"prompt"` (must be different from source_type) |
 
-**工具 → 提示**：将工具的`parameters`转换为变量，将`summary`转换为模板主体标题。使用`PromptTemplate.from_tool_schema()`。
-
-**提示→工具**：作为创作路线无效。 `execution.type: "prompt"`工具将不会被创建。如有必要，请从流程/函数调用`defaults.prompt.render`，如果您需要工具，请将其单独定义为`rumi_function`或`capability`外观。
+**工具→提示**：将工具的`parameters`转换为变量，将`summary`转换为模板主体标题。使用`PromptTemplate.from_tool_schema()`。**提示 → 工具**：作为创作路径无效。 `execution.type: "prompt"` 工具将不会被创建。如有必要，请从流程/函数中调用`defaults.prompt.render`，如果您需要工具，请将其单独定义为`rumi_function`或`capability`外观。
 
 ## 获取上下文的示例
 
@@ -288,10 +272,10 @@ result = context["call_handler"]("defaults.prompt.create", {
 
 `name` 应该是一个清楚描述提示目的的名称。这使得在提示列表中更容易识别它们。
 
-请在`variables`中适当设置`required: true`。如果未指定所需变量，`{{variable_name}}` 仍保留在输出中。
+请在`variables`中适当设置`required: true`。如果未指定所需变量，则 `{{variable_name}}` 保留在输出中。
 
-使用`{{context.*}}`变量在运行时自动将上下文信息注入`content`（主体）中。如果用户显式指定一个值，则不会被覆盖，因此测试时可以传递模拟值。
+使用 `{{context.*}}` 变量在运行时自动将上下文信息注入到 `content`（主体）中。如果用户显式指定一个值，则不会被覆盖，因此测试时可以传递模拟值。
 
-根据提示自动生成工具的创作路径无效。 `context.*`变量由`defaults.prompt.resolve_for_conversation`被动解析，并且如果需要工具，则单独定义为`rumi_function`/`capability`外观。
+根据提示自动生成工具的创作路径无效。 `context.*`变量由`defaults.prompt.resolve_for_conversation`被动解析，如果需要工具，则单独定义为`rumi_function`/`capability`外观。
 
 持久性文件 (`user_data/shared/prompts/`) 由`PromptManager` 管理。文件名由`_safe_filename(name) + ".json"`生成，字母数字字符、连字符和下划线以外的字符将转换为下划线。

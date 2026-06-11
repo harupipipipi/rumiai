@@ -22,7 +22,7 @@
 }
 ```
 
-`max_tool_calls`은 AgentEngine에 의해 시행됩니다. §루미§1§ 및
+`max_tool_calls`은 AgentEngine에 의해 시행됩니다. `allow_shell=false` 및
 `allow_file_write=false` 필터 제공자 도구 및 직접 ToolExecutor 거부
 도구 메타데이터가 셸 또는 쓰기 작업을 표시할 때 호출됩니다.
 

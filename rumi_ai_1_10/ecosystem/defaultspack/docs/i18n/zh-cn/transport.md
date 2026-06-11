@@ -51,43 +51,43 @@ server = start_http_server(facade)  # KernelFacade or None
 
 |方法|路径|处理程序（块）|
 |---|---|---|
-| §鲁米§0§| §鲁米§1§ | `defaultspack.chat_turn`（`blocks/chat/send.py`后备）|
-| §鲁米§0§| §鲁米§1§ | §鲁米§2§ |
-| §鲁米§0§| §鲁米§1§ | §鲁米§2§ |
-| §鲁米§0§| §鲁米§1§ | §鲁米§2§ |
-| §鲁米§0§| §鲁米§1§ | §鲁米§2§ |
-| §鲁米§0§| §鲁米§1§ | §鲁米§2§ |
-| §鲁米§0§| §鲁米§1§ | `defaultspack.chat_turn`（`blocks/chat/send.py`后备）|
-| §鲁米§0§| §鲁米§1§ | `defaultspack.chat_stream_turn`（`blocks/chat/stream.py`后备）|
-| §鲁米§0§| §鲁米§1§ | §鲁米§2§ |
-| §鲁米§0§| §鲁米§1§ | §鲁米§2§ |
-| §鲁米§0§| §鲁米§1§ | §鲁米§2§ |
-| §鲁米§0§| §鲁米§1§ | §鲁米§2§ |
-| §鲁米§0§| §鲁米§1§ | §鲁米§2§ |
-| §鲁米§0§| §鲁米§1§ | §鲁米§2§ |
-| §鲁米§0§| §鲁米§1§ | §鲁米§2§ |
-| §鲁米§0§| §鲁米§1§ | §鲁米§2§ |
-| §鲁米§0§| §鲁米§1§ | §鲁米§2§ |
-| §鲁米§0§| §鲁米§1§ | §鲁米§2§ |
-| §鲁米§0§| §鲁米§1§ | §鲁米§2§ |
-| §鲁米§0§| §鲁米§1§ | §鲁米§2§ |
-| §鲁米§0§| §鲁米§1§ | §鲁米§2§ |
-| §鲁米§0§| §鲁米§1§ | §鲁米§2§ |
-| §鲁米§0§| §鲁米§1§ | §鲁米§2§ |
-| §鲁米§0§| §鲁米§1§ | §鲁米§2§ |
-| §鲁米§0§| §鲁米§1§ | §鲁米§2§ |
-| §鲁米§0§| §鲁米§1§ | §鲁米§2§ |
-| §鲁米§0§| §鲁米§1§ | §鲁米§2§ |
-| §鲁米§0§| §鲁米§1§ | §鲁米§2§ |
-| §鲁米§0§| §鲁米§1§ | §鲁米§2§ |
-| §鲁米§0§| §鲁米§1§ | §鲁米§2§ |
-| §鲁米§0§| §鲁米§1§ | §鲁米§2§ |
-| §鲁米§0§| §鲁米§1§ | §鲁米§2§ |
-| §鲁米§0§| §鲁米§1§ | §鲁米§2§ |
-| §鲁米§0§| §鲁米§1§ | （内嵌：健康检查）|
-| §鲁米§0§| §鲁米§1§ | （内联：包信息+接口） |
-| §鲁米§0§| §鲁米§1§ | （静态：`ui/shell.html`）|
-| §鲁米§0§| §鲁米§1§ | （静态：`ui/{path}`）|
+| `POST`| `/v1/chat/completions` | `defaultspack.chat_turn`（`blocks/chat/send.py`后备）|
+| `POST`| `/api/chat/conversations` | `blocks/chat/create_conversation.py` |
+| `GET`| `/api/chat/conversations` | `blocks/chat/list_conversations.py` |
+| `GET`| `/api/chat/conversations/{id}` | `blocks/chat/get_conversation.py` |
+| `PUT`| `/api/chat/conversations/{id}` | `blocks/chat/update_conversation.py` |
+| `DELETE`| `/api/chat/conversations/{id}` | `blocks/chat/delete_conversation.py` |
+| `POST`| `/api/chat/conversations/{id}/messages` | `defaultspack.chat_turn`（`blocks/chat/send.py`后备）|
+| `POST`| `/api/chat/conversations/{id}/stream` | `defaultspack.chat_stream_turn`（`blocks/chat/stream.py`后备）|
+| `POST`| `/api/chat/conversations/{id}/export` | `blocks/chat/export_conversation.py` |
+| `POST`| `/api/chat/conversations/{id}/summarize` | `blocks/chat/summarize_and_trim.py` |
+| `POST`| `/api/chat/conversations/{id}/auto-trim` | `blocks/chat/auto_trim.py` |
+| `POST`| `/api/agent/execute` | `blocks/agent/execute.py` |
+| `POST`| `/api/agent/{id}/approve` | `blocks/agent/approve.py` |
+| `POST`| `/api/agent/{id}/reject` | `blocks/agent/reject.py` |
+| `POST`| `/api/agent/{id}/cancel` | `blocks/agent/cancel.py` |
+| `GET`| `/api/agent/{id}/status` | `blocks/agent/status.py` |
+| `POST`| `/api/agent/multi/execute` | `blocks/agent/multi_execute.py` |
+| `GET`| `/api/agent/multi/{id}/status` | `blocks/agent/multi_status.py` |
+| `POST`| `/api/agent/multi/{id}/message` | `blocks/agent/multi_message.py` |
+| `POST`| `/api/agent/{id}/instruct` | `blocks/agent/add_instruction.py` |
+| `POST`| `/api/consent/check` | `blocks/tool/consent_check.py` |
+| `POST`| `/api/consent/{id}/confirm` | `blocks/tool/consent_confirm.py` |
+| `PUT`| `/api/prompts/{name}` | `blocks/prompt/update.py` |
+| `DELETE`| `/api/prompts/{name}` | `blocks/prompt/delete.py` |
+| `POST`| `/api/prompts/convert` | `blocks/prompt/convert.py` |
+| `POST`| `/api/tools/create` | `blocks/tool/create.py` |
+| `PUT`| `/api/tools/{name}` | `blocks/tool/update.py` |
+| `DELETE`| `/api/tools/{name}` | `blocks/tool/delete.py` |
+| `GET`| `/api/tools/{name}/export` | `blocks/tool/export.py` |
+| `GET`| `/api/dev/inspect` | `blocks/dev/inspect.py` |
+| `GET`| `/api/dev/prompt-history` | `blocks/dev/prompt_history.py` |
+| `POST`| `/api/dev/edit-prompt` | `blocks/dev/edit_prompt_live.py` |
+| `POST`| `/api/dev/replay` | `blocks/dev/replay.py` |
+| `GET`| `/api/health` | （内嵌：健康检查）|
+| `GET`| `/api/context` | （内联：包信息+接口） |
+| `GET`| `/` | （静态：`ui/shell.html`）|
+| `GET`| `/static/{path}` | （静态：`ui/{path}`）|
 
 ### CORS 设置
 
@@ -158,9 +158,9 @@ transport.start()  # ブロッキング（stdin を読み続ける）
 
 |领域 |必填 |类型 |描述 |
 |---|---|---|---|
-| §鲁米§0§|可选| §鲁米§1§ | HTTP 方法。默认`"GET"` |
-| §鲁米§0§|必填 | §鲁米§1§ |端点路径 |
-| §鲁米§0§|可选| §鲁米§1§ |请求正文 |
+| `method`|可选| `string` | HTTP 方法。默认`"GET"` |
+| `path`|必填 | `string` |端点路径 |
+| `data`|可选| `object` |请求正文 |
 
 **响应格式（输出一行 JSON 到 stdout）：**
 
@@ -174,22 +174,22 @@ stdio 传输使用`transport/registry.py` 中的规范路线规范。除静态�
 
 |方法|路径|块模块 | ID注入|
 |---|---|---|---|
-| §鲁米§0§| §鲁米§1§ | §鲁米§2§ | — |
-| §鲁米§0§| §鲁米§1§ | §鲁米§2§ | — |
-| §鲁米§0§| §鲁米§1§ | §鲁米§2§ | — |
-| §鲁米§0§| §鲁米§1§ | §鲁米§2§ | §鲁米§3§ ← §鲁米§4§ |
-| §鲁米§0§| §鲁米§1§ | §鲁米§2§ | §鲁米§3§ ← §鲁米§4§ |
-| §鲁米§0§| §鲁米§1§ | §鲁米§2§ | §鲁米§3§ ← §鲁米§4§ |
-| §鲁米§0§| §鲁米§1§ | §鲁米§2§ | §鲁米§3§ ← §鲁米§4§ |
-| §鲁米§0§| §鲁米§1§ | §鲁米§2§ | §鲁米§3§ ← §鲁米§4§ |
-| §鲁米§0§| §鲁米§1§ | §鲁米§2§ | §鲁米§3§ ← §鲁米§4§ |
-| §鲁米§0§| §鲁米§1§ | §鲁米§2§ | — |
-| §鲁米§0§| §鲁米§1§ | §鲁米§2§ | §鲁米§3§ ← §鲁米§4§ |
-| §鲁米§0§| §鲁米§1§ | §鲁米§2§ | §鲁米§3§ ← §鲁米§4§ |
-| §鲁米§0§| §鲁米§1§ | §鲁米§2§ | §鲁米§3§ ← §鲁米§4§ |
-| §鲁米§0§| §鲁米§1§ | §鲁米§2§ | §鲁米§3§ ← §鲁米§4§ |
-| §鲁米§0§| §鲁米§1§ | （内联）| — |
-| §鲁米§0§| §鲁米§1§ | （内联）| — |
+| `POST`| `/v1/chat/completions` | `defaultspack.chat_turn` | — |
+| `POST`| `/api/chat/conversations` | `blocks.chat.create_conversation` | — |
+| `GET`| `/api/chat/conversations` | `blocks.chat.list_conversations` | — |
+| `GET`| `/api/chat/conversations/{id}` | `blocks.chat.get_conversation` | `conversation_id` ← `id` |
+| `PUT`| `/api/chat/conversations/{id}` | `blocks.chat.update_conversation` | `conversation_id` ← `id` |
+| `DELETE`| `/api/chat/conversations/{id}` | `blocks.chat.delete_conversation` | `conversation_id` ← `id` |
+| `POST`| `/api/chat/conversations/{id}/messages` | `defaultspack.chat_turn` | `conversation_id` ← `id` |
+| `POST`| `/api/chat/conversations/{id}/stream` | `defaultspack.chat_stream_turn` | `conversation_id` ← `id` |
+| `POST`| `/api/chat/conversations/{id}/export` | `blocks.chat.export_conversation` | `conversation_id` ← `id` |
+| `POST`| `/api/agent/execute` | `blocks.agent.execute` | — |
+| `POST`| `/api/agent/{id}/approve` | `blocks.agent.approve` | `execution_id` ← `id` |
+| `POST`| `/api/agent/{id}/reject` | `blocks.agent.reject` | `execution_id` ← `id` |
+| `POST`| `/api/agent/{id}/cancel` | `blocks.agent.cancel` | `execution_id` ← `id` |
+| `GET`| `/api/agent/{id}/status` | `blocks.agent.status` | `execution_id` ← `id` |
+| `GET`| `/api/health` | （内联）| — |
+| `GET`| `/api/context` | （内联）| — |
 
 静态文件传送（`/`、`/chat`、`/static/{path}`）是 HTTP 传输所独有的。
 

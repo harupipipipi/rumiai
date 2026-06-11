@@ -2,7 +2,7 @@
 [EN](../../defaultspack_migration.md) | [JP](./defaultspack_migration.md) | [KR](../ko/defaultspack_migration.md) | [CN](../zh-cn/defaultspack_migration.md)
 <!-- docs-i18n-links:end -->
 
-#defaultspack 移行メモ
+# defaultspack 移行メモ
 
 ## 従来の互換性
 

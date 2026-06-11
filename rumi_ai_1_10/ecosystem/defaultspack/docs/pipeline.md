@@ -12,13 +12,7 @@ Defaults Pack's AI pipeline combines multiple AI models to generate the optimal 
 
 The pipeline consists of four components:
 
-**ParallelCaller** — Send requests to multiple models simultaneously and return results together. Use `concurrent.futures.ThreadPoolExecutor`.
-
-**Router** — Rule-based analysis of input and selects the best model or pipeline.
-
-**Evaluator** — Compare and evaluate multiple responses to choose the best one. Combine basic scoring with LLM judges.
-
-**Pipeline** — Execute a combination of the above three in multiple layers.
+**ParallelCaller** — Send requests to multiple models simultaneously and return results together. Use `concurrent.futures.ThreadPoolExecutor`.**Router** — Rule-based analysis of input and selects the best model or pipeline.**Evaluator** — Compare and evaluate multiple responses to choose the best one. Combine basic scoring with LLM judges.**Pipeline** — Execute a combination of the above three in multiple layers.
 
 ---
 

@@ -14,18 +14,18 @@
 
 |我想做什么|首先从哪里阅读 |我能明白多少|
 |---|---|---|
-|我想按目的追踪文档 | §鲁米§0§|我可以在一页上追踪“我想要做什么→哪个文档” |
-|我想调整术语的含义 | §鲁米§0§|我可以检查`rule`、`skill`、`team workspace`、`delegation`的用法 |
+|我想按目的追踪文档 | [`docs/README.md`](./docs/README.md)|我可以在一页上追踪“我想要做什么→哪个文档” |
+|我想调整术语的含义 | [`docs/terminology.md`](./docs/terminology.md)|我可以检查`rule`、`skill`、`team workspace`、`delegation`的用法 |
 |我想先开始|根 [`README.md`](../README.md) |最短的启动命令和repo入口|
-|我想先尝试一下| §鲁米§0§|从`--health`到`/panel/`的最短教程 |
-|想不看代码就了解运行时机制 | §鲁米§0§|启动、流程、审批、授权、观众协作的执行路径 |
-|我想看看`rumi_viewer`的启动过程以及它是如何卡住的 | §鲁米§0§| `401`、黑屏、面板与默认包的关系 |
-|我想扩展defaultspack的前端 | §鲁米§0§|如何增加右侧栏、设置、聊天渲染器和预览提要 |
+|我想先尝试一下| [`docs/tutorials/runtime-quickstart.md`](./docs/tutorials/runtime-quickstart.md)|从`--health`到`/panel/`的最短教程 |
+|想不看代码就了解运行时机制 | [`docs/concepts/system-mechanism.md`](./docs/concepts/system-mechanism.md)|启动、流程、审批、授权、观众协作的执行路径 |
+|我想看看`rumi_viewer`的启动过程以及它是如何卡住的 | [`docs/rumi_viewer_start.md`](./docs/rumi_viewer_start.md)| `401`、黑屏、面板与默认包的关系 |
+|我想扩展defaultspack的前端 | [`ecosystem/defaultspack/docs/frontend_extensions.md`](./ecosystem/defaultspack/docs/frontend_extensions.md)|如何增加右侧栏、设置、聊天渲染器和预览提要 |
 |我想知道这个运行时的想法 |本自述文件中的`Thoughts` |以流程为中心、Pack前提、Fail-Soft理念|
 |我想知道目录的作用| `Project structure` 的作用 |本自述文件中的`core_runtime/`、`ecosystem/`、`user_data/` |
-|创建/修复包 | §鲁米§0§| `ecosystem.json`、`routes.json`、`permissions.json`，使用秘密 |
-|我想关注defaultspack的聊天/ai | §鲁米§0§| defaultspack 的实现端 |
-|我想看看defaultspack前端的未来工作 | §鲁米§0§|登记进展及下一步工作|
+|创建/修复包 | [`docs/pack-development.md`](./docs/pack-development.md)| `ecosystem.json`、`routes.json`、`permissions.json`，使用秘密 |
+|我想关注defaultspack的聊天/ai | [`ecosystem/defaultspack/README.md`](./ecosystem/defaultspack/README.md)| defaultspack 的实现端 |
+|我想看看defaultspack前端的未来工作 | [`ecosystem/defaultspack/docs/frontend_todo.md`](./ecosystem/defaultspack/docs/frontend_todo.md)|登记进展及下一步工作|
 |我想设置 API 密钥和机密 | [`docs/operations.md`](./docs/operations.md) 的秘密部分 | `user_data/secrets/`和API路线|
 |我想通过查看器修复启动路径 | [`../rumi_viewer/src-tauri/src/config.rs`](../rumi_viewer/src-tauri/src/config.rs) 和 [`../rumi_viewer/src-tauri/src/kernel_manager.rs`](../rumi_viewer/src-tauri/src/kernel_manager.rs) |查看器应该启动哪个内核以及它应该通过哪个环境 |
 |安装包/想查看授权| [`core_runtime/setup_pack.py`](./core_runtime/setup_pack.py) 和 [`core_runtime/approval_manager.py`](./core_runtime/approval_manager.py) |安装包选择、一切正常授予、重新授权 |
@@ -122,10 +122,10 @@ python -m rumi_ai migrate-hmac
 
 ## 项目结构
 
-§鲁米§0§
+<details>
 <summary>目录树（点击展开）</summary>
 
-§鲁米§0§§鲁米§1§
+<pre><code>
 项目根目录/
 ├── 应用程序.py
 ├── bootstrap.py
@@ -205,7 +205,7 @@ python -m rumi_ai migrate-hmac
 │ └── json_patch.py
 │
 ├── 生态系统/
-│ ├── §鲁米§0§/
+│ ├── <pack_id>/
 │ │ └── 后端/
 │ │ ├── 生态系统.json
 │ │ ├── 权限.json
@@ -219,7 +219,7 @@ python -m rumi_ai migrate-hmac
 │ │ ├── vocab.txt
 │ │ └── 转换器/
 │ └── 包/
-│ └── §鲁米§0§/...
+│ └── <pack_id>/...
 │
 ├── 用户数据/
 │ ├── 审核/
@@ -279,43 +279,43 @@ python -m rumi_ai migrate-hmac
     ├── pack-development.md
     ├── 操作.md
     └── 路线图.md
-§鲁米§0§§鲁米§1§
+</code></pre>
 
-§鲁米§0§
+</details>
 
 ### 主目录
 
 |目录 |角色 |
 |---|---|
-| §鲁米§0§|内核——流程执行引擎、安全性和权限管理|
-| §鲁米§0§|共享词典系统（快照日志）|
-| §鲁米§0§|官方能力实施（Store、Secrets、Flow、Communication、Docker）|
-| §鲁米§0§|生态系统基础——包/组件加载/初始化|
-| §鲁米§0§|包装存储（外部供应）|
-| §鲁米§0§|运行时持久数据（审核日志、批准、机密、存储）|
-| §鲁米§0§|设置帮助（CLI / Web / 指南）|
-| §鲁米§0§|官方流程（启动/基础）|
-| §鲁米§0§|多语言消息 |
-| §鲁米§0§|测试|
-| §鲁米§0§|文件|
+| `core_runtime/`|内核——流程执行引擎、安全性和权限管理|
+| `core_runtime/shared_dict/`|共享词典系统（快照日志）|
+| `core_runtime/core_pack/`|官方能力实施（Store、Secrets、Flow、Communication、Docker）|
+| `backend_core/ecosystem/`|生态系统基础——包/组件加载/初始化|
+| `ecosystem/`|包装存储（外部供应）|
+| `user_data/`|运行时持久数据（审核日志、批准、机密、存储）|
+| `rumi_setup/`|设置帮助（CLI / Web / 指南）|
+| `flows/`|官方流程（启动/基础）|
+| `lang/`|多语言消息 |
+| `tests/`|测试|
+| `docs/`|文件|
 
 ### 主要文件
 
 |文件|角色 |
 |---|---|
-| §鲁米§0§|操作系统入口点|
-| §鲁米§0§|设置入口点 |
-| §鲁米§0§| Mixin 组装/处理程序注册 |
-| §鲁米§0§|流程执行引擎本体 |
-| §鲁米§0§| `python_file_call` 执行 |
-| §鲁米§0§| Docker隔离执行 |
-| §鲁米§0§|包审批管理 |
-| §鲁米§0§|能力代理服务器（UDS）|
-| §鲁米§0§|外部通信代理（UDS） |
-| §鲁米§0§|流 YAML 加载器 |
-| §鲁米§0§|流动改性剂应用|
-| §鲁米§0§|打包导入（zip/文件夹→暂存）|
-| §鲁米§0§|打包申请（暂存→生态系统） |
+| `app.py`|操作系统入口点|
+| `bootstrap.py`|设置入口点 |
+| `kernel.py`| Mixin 组装/处理程序注册 |
+| `kernel_core.py`|流程执行引擎本体 |
+| `python_file_executor.py`| `python_file_call` 执行 |
+| `secure_executor.py`| Docker隔离执行 |
+| `approval_manager.py`|包审批管理 |
+| `capability_proxy.py`|能力代理服务器（UDS）|
+| `egress_proxy.py`|外部通信代理（UDS） |
+| `flow_loader.py`|流 YAML 加载器 |
+| `flow_modifier.py`|流动改性剂应用|
+| `pack_importer.py`|打包导入（zip/文件夹→暂存）|
+| `pack_applier.py`|打包申请（暂存→生态系统） |
 
 ## 查看器图表编辑器
 
@@ -379,13 +379,13 @@ curl -X POST http://localhost:8765/api/packs/{pack_id}/approve \
 
 |文件|内容 |
 |---|---|
-| §鲁米§0§|设计及机构整体图|
-| §鲁米§0§|包开发指南 |
-| §鲁米§0§| Pack开发快速入门|
-| §鲁米§0§|操作指南|
-| §鲁米§0§|路线图 |
-| §鲁米§0§|用于开发决策的思考笔记|
-| §鲁米§0§|质量保证/审核/回归验证包|
+| [docs/architecture.md](./docs/architecture.md)|设计及机构整体图|
+| [docs/pack-development.md](./docs/pack-development.md)|包开发指南 |
+| [docs/pack-development-guide.md](./docs/pack-development-guide.md)| Pack开发快速入门|
+| [docs/operations.md](./docs/operations.md)|操作指南|
+| [docs/roadmap.md](./docs/roadmap.md)|路线图 |
+| [docs/quality_pack/philosophy_memo.md](docs/quality_pack/philosophy_memo.md)|用于开发决策的思考笔记|
+| [docs/quality_pack/claude_desktop_quality_pack.md](./docs/quality_pack/claude_desktop_quality_pack.md)|质量保证/审核/回归验证包|
 
 ---
 
@@ -396,7 +396,7 @@ curl -X POST http://localhost:8765/api/packs/{pack_id}/approve \
 ## defaultspack 真相来源
 
 此存储库中规范的 defaultspack 实现是
-§鲁米§0§。旧的`ecosystem/defaults/`路径和单独的路径
+`ecosystem/defaultspack/`。旧的`ecosystem/defaults/`路径和单独的路径
 `harupipipipi/rumiai_defaults`存储库是兼容性或快照源。
 新的本地优先运行时行为应该与旧版本一起出现在默认包中
 在需要时将别名委托给它。

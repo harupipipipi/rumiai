@@ -103,11 +103,11 @@ pack-shell run desktop_app_pack \
 
 | 필드 | 설명 |
 |-----------|------|
-| §루미§0§ | pack-shell을 실행하는 명령입니다. `--command` 인수로 전달됨 |
-| §루미§0§ | `DesktopAppManager`은 `RUMI_API_TOKEN`로 간주됩니까? 현재 상태는 항상 `true` |
-| §루미§0§ | 바로가기 이름/창 제목에 사용 |
-| §루미§0§ | 권장 창 크기(앱 측에서 읽을 때) |
-| §루미§0§ | 지원되는 플랫폼 |
+| `desktop_app.command` | pack-shell을 실행하는 명령입니다. `--command` 인수로 전달됨 |
+| `desktop_app.requires_api_token` | `DesktopAppManager`은 `RUMI_API_TOKEN`로 간주됩니까? 현재 상태는 항상 `true` |
+| `desktop_app.window.title` | 바로가기 이름/창 제목에 사용 |
+| `desktop_app.window.width/height` | 권장 창 크기(앱 측에서 읽을 때) |
+| `desktop_app.platforms` | 지원되는 플랫폼 |
 
 ---
 
@@ -131,9 +131,9 @@ pack-shell로 설정된 환경 변수:
 
 | 변수 | 설명 |
 |------|------|
-| §루미§0§ | 커널에서 발행한 임시 토큰 |
-| §루미§0§ | 커널 API 포트 번호(기본값: 8765) |
-| §루미§0§ | 대상 팩 ID |
+| `RUMI_TOKEN` | 커널에서 발행한 임시 토큰 |
+| `RUMI_PORT` | 커널 API 포트 번호(기본값: 8765) |
+| `RUMI_PACK_ID` | 대상 팩 ID |
 
 ---
 

@@ -123,13 +123,13 @@ rumiai (コンパイル済みバイナリ)
 
 ### 常に注入される (宣言は必要ありません)
 
-`context["call_handler"](§RUMI§0§)` は任意のハンドラーを呼び出します。 Grantで付与された権限の範囲内でのみ実行できます。呼び出されたハンドラーによって要求されたアクセス許可が呼び出し元にない場合、PermissionError で拒否されます。これにより、ツールは同じプリミティブを使用して、チャット操作、エージェントの起動、プロンプトのレンダリング、メモリの読み取りと書き込みを実行できるようになります。
+`context["call_handler"](handler_name, params)` は任意のハンドラーを呼び出します。 Grantで付与された権限の範囲内でのみ実行できます。呼び出されたハンドラーによって要求されたアクセス許可が呼び出し元にない場合、PermissionError で拒否されます。これにより、ツールは同じプリミティブを使用して、チャット操作、エージェントの起動、プロンプトのレンダリング、メモリの読み取りと書き込みを実行できるようになります。
 
-`context["emit_event"](§RUMI§0§)` がイベントを公開します。他のハンドラー、フロー イベント トリガー、およびフロントエンド アセットはこのイベントを受信できます。発行者は受信者を知りません。
+`context["emit_event"](event_type, data)` がイベントを公開します。他のハンドラー、フロー イベント トリガー、およびフロントエンド アセットはこのイベントを受信できます。発行者は受信者を知りません。
 
-`context["wait_event"](§RUMI§0§)`はイベントを待ちます。指定されたイベント タイプが発生するまでブロックします。タイムアウトを指定できます。フィルターを使用して条件を絞り込むことができます。 Emit_eventと組み合わせることで、フロントエンドでのポップアップ表示→ユーザー応答待ち、ツール間の非同期通信、フロートリガーのフックなどを実現します。
+`context["wait_event"](event_type, timeout, filter)`はイベントを待ちます。指定されたイベント タイプが発生するまでブロックします。タイムアウトを指定できます。フィルターを使用して条件を絞り込むことができます。 Emit_eventと組み合わせることで、フロントエンドでのポップアップ表示→ユーザー応答待ち、ツール間の非同期通信、フロートリガーのフックなどを実現します。
 
-`context["emit_widget"](§RUMI§0§)` は Widget JSON を UI に送信します。フロントエンドのウィジェット レンダラーによって描画されます。
+`context["emit_widget"](widget_json)` は Widget JSON を UI に送信します。フロントエンドのウィジェット レンダラーによって描画されます。
 
 `context["cancel_check"]()`はキャンセル確認です。ユーザーがキャンセルした場合は、CancelledError を発生させます。
 
@@ -139,25 +139,25 @@ rumiai (コンパイル済みバイナリ)
 
 ### 機能として宣言することで注入されるもの
 
-`data_read` は user_data の下にあるファイルを読み取ります。 `context["data_read"](§RUMI§0§)` からアクセスします。パスは user_data/ に対する相対パスです。
+`data_read` は user_data の下にあるファイルを読み取ります。 `context["data_read"](path)` からアクセスします。パスは user_data/ に対する相対パスです。
 
-`data_write` は user_data の下にファイルを書き込みます。 `context["data_write"](§RUMI§0§)` からアクセスします。
+`data_write` は user_data の下にファイルを書き込みます。 `context["data_write"](path, content)` からアクセスします。
 
-`execute_flow`はフローを開始します。 `context["execute_flow"](§RUMI§0§)` からアクセスします。フローエンジン経由で実行されます。
+`execute_flow`はフローを開始します。 `context["execute_flow"](flow_id, input)` からアクセスします。フローエンジン経由で実行されます。
 
-`shell_exec`はシェルコマンドを実行します。 `context["capability"](§RUMI§0§)` からアクセスします。
+`shell_exec`はシェルコマンドを実行します。 `context["capability"]("shell_exec", {...})` からアクセスします。
 
-`browser_control`はブラウザ操作です。 `context["capability"](§RUMI§0§)` からアクセスします。
+`browser_control`はブラウザ操作です。 `context["capability"]("browser_control", {...})` からアクセスします。
 
-`container_exec` は、Docker コンテナを起動、操作、および破棄します。 `context["capability"](§RUMI§0§)` からアクセスします。 GUI環境(Xvfb+VNC)は表示オプションで起動し、スクリーンショットと入力(クリック、タイプ、キー、スクロール)により座標ベースの画面操作が可能です。
+`container_exec` は、Docker コンテナを起動、操作、および破棄します。 `context["capability"]("container_exec", {...})` からアクセスします。 GUI環境(Xvfb+VNC)は表示オプションで起動し、スクリーンショットと入力(クリック、タイプ、キー、スクロール)により座標ベースの画面操作が可能です。
 
-`app_control`はホストアプリケーションの動作です。 `context["capability"](§RUMI§0§)` からアクセスします。
+`app_control`はホストアプリケーションの動作です。 `context["capability"]("app_control", {...})` からアクセスします。
 
-`http_request`は外部HTTP通信です。 `context["capability"](§RUMI§0§)` からアクセスします。
+`http_request`は外部HTTP通信です。 `context["capability"]("http_request", {...})` からアクセスします。
 
-`llm_call` はツール内 LLM 呼び出しです。 `context["capability"](§RUMI§0§)` からアクセスします。
+`llm_call` はツール内 LLM 呼び出しです。 `context["capability"]("llm_call", {...})` からアクセスします。
 
-`session_state` はセッション状態の読み取り/書き込みです。 `context["capability"](§RUMI§0§)` からアクセスします。
+`session_state` はセッション状態の読み取り/書き込みです。 `context["capability"]("session_state", {...})` からアクセスします。
 
 ### 特化した API を作成してみてはいかがでしょうか?
 
@@ -224,23 +224,23 @@ Widgetの詳しい仕様はdocs/widget.mdに定義されています。
 
 ### ナレッジ検索
 
-ベクトル検索ツールを user_data/shared/tools/knowledge_search/ に配置します。 Flow Modifier を user_data/shared/flows/ に配置し、user_input が到着したときにこのツールを自動的に実行するステップを挿入します。ツール handler.py は、`context["capability"](§RUMI§0§)` で埋め込みを生成し、`context["data_read"]` でインデックスを読み取り、結果を返します。デフォルトからの変更はありません。
+ベクトル検索ツールを user_data/shared/tools/knowledge_search/ に配置します。 Flow Modifier を user_data/shared/flows/ に配置し、user_input が到着したときにこのツールを自動的に実行するステップを挿入します。ツール handler.py は、`context["capability"]("llm_call", {...})` で埋め込みを生成し、`context["data_read"]` でインデックスを読み取り、結果を返します。デフォルトからの変更はありません。
 
 ### マルチエージェント
 
-エージェント委任ツールを user_data/shared/tools/agent_delegate/ に配置します。ツール handler.py は、`context["call_handler"](§RUMI§0§)` で新しい会話を作成し、`context["call_handler"](§RUMI§1§)` でエージェントを開始し、結果を受信して​​返します。組織構造が必要な場合は、複数のagent.jsonファイルをuser_data/shared/agents/に配置すると、委任ツールが適切なエージェントを選択します。デフォルトからの変更はありません。
+エージェント委任ツールを user_data/shared/tools/agent_delegate/ に配置します。ツール handler.py は、`context["call_handler"]("defaults.chat.create_conversation", {...})` で新しい会話を作成し、`context["call_handler"]("defaults.agent.execute", {...})` でエージェントを開始し、結果を受信して​​返します。組織構造が必要な場合は、複数のagent.jsonファイルをuser_data/shared/agents/に配置すると、委任ツールが適切なエージェントを選択します。デフォルトからの変更はありません。
 
 ### AIによる会話履歴の自動編集
 
-履歴編集ツールを user_data/shared/tools/history_prune/ に配置します。ツール handler.py は、`context["call_handler"](§RUMI§0§)` でメッセージを取得し、`context["data_write"]` で会話ファイルを更新します。このツールをagent.jsonのtools.enabledに追加すると、エージェントは自律的に履歴を整理できます。デフォルトからの変更はありません。
+履歴編集ツールを user_data/shared/tools/history_prune/ に配置します。ツール handler.py は、`context["call_handler"]("defaults.chat.list_conversations", {...})` でメッセージを取得し、`context["data_write"]` で会話ファイルを更新します。このツールをagent.jsonのtools.enabledに追加すると、エージェントは自律的に履歴を整理できます。デフォルトからの変更はありません。
 
 ### Linux環境でのGUI操作
 
-環境操作ツールを user_data/shared/tools/linux_env/ に配置します。 handler.pyというツールは`context["capability"](§RUMI§0§)`でコンテナを起動し、スクリーンショットや入力アクションで画面を操作します。 Agent.jsonのモデル設定で操作するモデルを選択します。デフォルトからの変更はありません。
+環境操作ツールを user_data/shared/tools/linux_env/ に配置します。 handler.pyというツールは`context["capability"]("container_exec", {"action": "create", "options": {"display": true}})`でコンテナを起動し、スクリーンショットや入力アクションで画面を操作します。 Agent.jsonのモデル設定で操作するモデルを選択します。デフォルトからの変更はありません。
 
 ### 同意ポップアップ
 
-同意確認ツールを user_data/shared/tools/consent_check/ に配置します。ツール handler.py は、`context["emit_event"](§RUMI§0§)` でポップアップを表示し、`context["wait_event"](§RUMI§1§)` でユーザーの応答を待ちます。これをagent.jsonのtools.enabledに追加し、エージェントのシステムプロンプトに「投資アドバイスに該当する場合はこのツールを使用する」ように指示します。デフォルトからの変更はありません。
+同意確認ツールを user_data/shared/tools/consent_check/ に配置します。ツール handler.py は、`context["emit_event"]("ui.popup.show", {"title": "免責事項", ...})` でポップアップを表示し、`context["wait_event"]("ui.popup.response", timeout=60)` でユーザーの応答を待ちます。これをagent.jsonのtools.enabledに追加し、エージェントのシステムプロンプトに「投資アドバイスに該当する場合はこのツールを使用する」ように指示します。デフォルトからの変更はありません。
 
 ### 定期実行
 
@@ -248,7 +248,7 @@ user_data/shared/flows/ にスケジュールトリガーを設定したフロ�
 
 ### 請求/クレジット管理
 
-使用状況チェックツールを user_data/shared/tools/billing_check/ に配置します。ツール handler.py は、`context["call_handler"](§RUMI§0§)` で使用量を取得し、`context["data_read"](§RUMI§1§)` でプラン定義を読み取り、残りのクレジットを計算して返します。 UI 表示が必要な場合は、課金アセットを含むパックを user_data/packs/ に配置します。デフォルトからの変更はありません。
+使用状況チェックツールを user_data/shared/tools/billing_check/ に配置します。ツール handler.py は、`context["call_handler"]("defaults.ai.usage", {...})` で使用量を取得し、`context["data_read"]("billing/plan.json")` でプラン定義を読み取り、残りのクレジットを計算して返します。 UI 表示が必要な場合は、課金アセットを含むパックを user_data/packs/ に配置します。デフォルトからの変更はありません。
 
 ## 7. デフォルトのファイル構造
 

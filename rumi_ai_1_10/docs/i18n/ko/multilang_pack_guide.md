@@ -22,8 +22,8 @@ Rumi AI OS의capability_executor.py는 `binary` 및 `command`의 두 가지 호�
 |------|--------|---------|
 | 실행 방법 | 컴파일된 바이너리를 직접 실행 | 명령 목록으로 프로세스 시작 |
 | 적합한 언어 | 러스트, Go, C, C++ | Node.js, Ruby, Python(다른 버전), 쉘 스크립팅 |
-| Ecosystem.json 지정 | §루미§0§, §루미§1§ | §루미§2§, §루미§3§ |
-| 기능입력 필드 | §루미§0§ | `command` (목록[str]) |
+| Ecosystem.json 지정 | `"runtime": "binary"`, `"main": "path/to/binary"` | `"runtime": "command"`, `"command": ["node", "index.js"]` |
+| 기능입력 필드 | `main_binary_path` | `command` (목록[str]) |
 | 경로 순회 검증 | 예(binary가 function_dir에 있는지 확인) | 명령에 따라 다름 |
 
 ---
@@ -55,7 +55,7 @@ Ecosystem.json에 `runtime` 섹션을 추가하여 다국어 팩을 빌드하고
 
 | 필드 | 유형 | 설명 |
 |-----------|-----|------|
-| 유형 | 문자열 | §루미§0§ / §루미§1§ / §루미§2§ |
+| 유형 | 문자열 | `"binary"` / `"command"` / `"python"` |
 | 빌드.명령 | 문자열 | 빌드 명령 |
 | 빌드.출력 | 문자열 | 아티팩트 경로 빌드 |
 | 바이너리 | 문자열 | 실행될 바이너리의 경로(type=binary인 경우) |
@@ -126,9 +126,9 @@ Ecosystem.json에 `runtime` 섹션을 추가하여 다국어 팩을 빌드하고
 
 | 설정 | 가치 | 소스 |
 |------|-----|--------|
-| 기본 시간 초과 | 30초 | §루미§0§ |
-| 최대 시간 초과 | 120초 | §루미§0§ |
-| 최소 시간 초과 | 1초 | §루미§0§ |
+| 기본 시간 초과 | 30초 | `DEFAULT_FUNCTION_TIMEOUT = 30.0` |
+| 최대 시간 초과 | 120초 | `MAX_TIMEOUT = 120.0` |
+| 최소 시간 초과 | 1초 | `max(t, 1.0)` |
 | 맞춤화 | 함수 매니페스트의 `grant_config.timeout`에 지정됨 |
 
 시간 초과에 도달하면 프로세스가 종료되고 `error_type: "timeout"`의 CapabilityResponse가 반환됩니다.
@@ -311,7 +311,7 @@ cargo init --name hello_pack
 
 ### 7.3 종속 상자 추가하기
 
-§루미§0§:
+`Cargo.toml`:
 ```toml
 [package]
 name = "hello_pack"
@@ -325,7 +325,7 @@ serde_json = "1"
 
 ### 7.4 구현
 
-§루미§0§:
+`src/main.rs`:
 ```rust
 use serde::{Deserialize, Serialize};
 use std::io::{self, Read};
@@ -437,7 +437,7 @@ go mod init hello_pack
 
 ### 8.3 구현
 
-§루미§0§:
+`main.go`:
 ```go
 package main
 
@@ -526,7 +526,7 @@ npm init -y
 
 ### 9.3 구현
 
-§루미§0§:
+`index.js`:
 ```javascript
 'use strict';
 
@@ -738,14 +738,14 @@ cat /tmp/test_input.json | ./my_binary | wc -c
 
 | 함수 동작 | 역량응답 |
 |----------------|-------------------|
-| 종료 0 + JSON을 표준 출력으로 | §루미§0§ |
-| 종료 0 + 표준 출력 비어 있음 | §루미§0§ |
-| 종료 0 + stdout이 잘못된 JSON입니다 | §루미§0§ |
-| 종료 0 + 표준 출력 > 1MB | §루미§0§ |
-| 0이 아닌 종료 | §루미§0§ |
-| 시간 초과 | §루미§0§ |
-| 바이너리를 찾을 수 없습니다 | §루미§0§ |
-| 경로 탐색 감지 | §루미§0§ |
+| 종료 0 + JSON을 표준 출력으로 | `success=true, output=<parsed JSON>` |
+| 종료 0 + 표준 출력 비어 있음 | `success=true, output=null` |
+| 종료 0 + stdout이 잘못된 JSON입니다 | `success=false, error_type="invalid_json_output"` |
+| 종료 0 + 표준 출력 > 1MB | `success=false, error_type="response_too_large"` |
+| 0이 아닌 종료 | `success=false, error_type="function_execution_error"` |
+| 시간 초과 | `success=false, error_type="timeout"` |
+| 바이너리를 찾을 수 없습니다 | `success=false, error_type="binary_not_found"` |
+| 경로 탐색 감지 | `success=false, error_type="security_violation"` |
 
 ---
 

@@ -26,7 +26,7 @@ Slack, Discord, LINE 또는 터널별 입력이 아닌 정규화된 입력을 �
 ## 핵심 유형
 
 `ExternalEvent`은 정규화된 인바운드 레코드입니다. 여기에는 안정적인 필드가 포함되어 있습니다.
-§루미§0§, §루미§1§, §루미§2§, §루미§3§, §루미§4§, §루미§5§, §루미§6§,
+`provider`, `workspace`, `scope`, `actor`, `conversation`, `event`, `payload`,
 `verified`, `metadata` 수정. 공급자별 식별자가 흡수됩니다.
 그 교장들에게. 원시 요청 본문은 서명 확인에 사용될 수 있지만
 원시 비밀과 토큰 값은 반환된 이벤트 객체에 노출되지 않습니다.
@@ -195,18 +195,18 @@ LINE은 공급자가 생성한 웹훅 URL과 `Channel Secret` 확인을 사용�
 
 | 경로 | 목적 |
 |---|---|
-| §루미§0§ | Slack 이벤트 API 섭취 |
-| §루미§0§ | LINE Messaging API 웹훅 수신 |
-| §루미§0§ | Discord 상호작용 섭취 |
-| §루미§0§ | 디스코드 메시지 이벤트 접수 |
-| §루미§0§ | 비밀 상태만 |
-| §루미§0§ | 쓰기 전용 비밀 설정 또는 지우기 |
-| §루미§0§ | API 키와 유사한 외부 토큰 상태 |
-| §루미§0§ | 명명된 외부 토큰 업데이트, 이름 바꾸기 또는 삭제 |
-| §루미§0§ | 기본 제공 및 사용자 정의 입력/출력 템플릿 나열 |
-| §루미§0§ | 사용자 정의 입력 또는 출력 템플릿 등록 |
-| §루미§0§ | 일반 웹훅 섭취 |
-| §루미§0§ | 웹훅 엔드포인트 구성 나열 |
+| `POST /api/integrations/slack/events` | Slack 이벤트 API 섭취 |
+| `POST /api/integrations/line/webhook` | LINE Messaging API 웹훅 수신 |
+| `POST /api/integrations/discord/interactions` | Discord 상호작용 섭취 |
+| `POST /api/integrations/discord/events` | 디스코드 메시지 이벤트 접수 |
+| `GET /api/integrations/secrets` | 비밀 상태만 |
+| `POST /api/integrations/secrets` | 쓰기 전용 비밀 설정 또는 지우기 |
+| `GET /api/external/tokens` | API 키와 유사한 외부 토큰 상태 |
+| `POST /api/external/tokens` | 명명된 외부 토큰 업데이트, 이름 바꾸기 또는 삭제 |
+| `GET /api/external/templates` | 기본 제공 및 사용자 정의 입력/출력 템플릿 나열 |
+| `POST /api/external/templates` | 사용자 정의 입력 또는 출력 템플릿 등록 |
+| `POST /api/webhooks/inbound/{webhook_id}` | 일반 웹훅 섭취 |
+| `GET /api/webhooks/endpoints` | 웹훅 엔드포인트 구성 나열 |
 
 ## 로컬호스트 입력 엔드포인트
 

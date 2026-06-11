@@ -34,7 +34,7 @@ defaultspack AI 客户端是流程和模型提供者之间的边界。它
 ## 请求合同
 
 `defaults.ai.build_request` 产生消耗的标准化请求
-§鲁米§0§：
+`defaults.ai.complete`：
 
 ```json
 {
@@ -65,7 +65,7 @@ defaultspack AI 客户端是流程和模型提供者之间的边界。它
 
 提供者发现是清单优先的。可以添加兼容 OpenAI 的提供商
 与`extensions/llm/providers/<provider_id>/manifest.json`加上
-§鲁米§0§；运行时从中实例化`OpenAICompatibleProvider`
+`models/*.json`；运行时从中实例化`OpenAICompatibleProvider`
 配置凭据时会显示。自定义提供商协议仍可能
 使用显式 Python 入口点。
 
@@ -78,17 +78,17 @@ defaultspack AI 客户端是流程和模型提供者之间的边界。它
 特定于提供商的流媒体块在到达聊天/UI 之前会被标准化
 消费者。常见的事件名称包括：
 
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
+- `message_start`
+- `thinking_start`
+- `thinking_delta`
+- `thinking_end`
+- `content_start`
+- `content_delta`
+- `tool_call_start`
+- `tool_call_delta`
+- `tool_call_end`
+- `message_end`
+- `error`
 
 事件有效负载应在有用时在元数据下保留提供者详细信息，但是
 顶级事件名称和文本/工具字段应保持提供商中立。

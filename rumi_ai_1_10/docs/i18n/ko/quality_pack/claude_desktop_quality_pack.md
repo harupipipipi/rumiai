@@ -4,8 +4,8 @@
 
 # rumi_ai를 위한 Claude 데스크톱 수준 품질 팩
 
-이 문서는 rumi_ai를 고품질로 지속적으로 개발, 감사, 검증하기 위한 실용적인 팩입니다.  
-**PR1은 품질 자산만 추가하며 제품 동작을 변경하지 않습니다. **
+이 문서는 rumi_ai를 고품질로 지속적으로 개발, 감사, 검증하기 위한 실용적인 팩입니다.
+**PR1은 품질 자산만 추가하며 제품 동작을 변경하지 않습니다.**
 
 ---
 
@@ -87,9 +87,9 @@ cd pack-shell && cargo test && cd ..
 ## 4. 감사 절차
 
 1. 감사 로그 확인
-   - §루미§0§
-   - §루미§0§
-   - §루미§0§
+   - `user_data/audit/security_YYYY-MM-DD.jsonl`
+   - `user_data/audit/network_YYYY-MM-DD.jsonl`
+   - `user_data/audit/permission_YYYY-MM-DD.jsonl`
 2. 승인상태 확인
    - 승인되지 않은 팩이 실행되지 않습니다.
    - `modified` 상태 팩이 재인증 없이 실행되지 않습니다.

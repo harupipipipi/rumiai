@@ -88,8 +88,8 @@ python -m rumi_ai
 
 |领域 |描述 |
 |-----------|------|
-| §鲁米§0§|请求的功能列表。指定`viewer.display` 启用查看器显示 |
-| §鲁米§0§|提供静态文件的目录。相对于 Pack root 的路径 |
+| `capabilities`|请求的功能列表。指定`viewer.display` 启用查看器显示 |
+| `web_mount`|提供静态文件的目录。相对于 Pack root 的路径 |
 
 ---
 

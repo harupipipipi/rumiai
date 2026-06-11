@@ -13,15 +13,7 @@
 
 ## 2.设计理念
 
-**声明性**：主题不是代码。只需将值写入 YAML 中即可。它不包含任何执行逻辑。
-
-**基于标记**：主题定义为命名标记（`color.primary`、`spacing.md`等），而不是直接写入颜色和尺寸值。资产查找代币名称，主题解析实际值。
-
-**后端独立**：主题仅由前端层（shell.html 中的主题引擎）读取。后端处理程序、工具和流程不知道主题的存在。 emit_widget 发送的 Widget JSON 是与主题无关的数据，主题引擎在渲染时应用外观。
-
-**完全可替换**：初始设置期间默认放置的默认主题可以由用户或包自由覆盖或替换。
-
-**可继承**：一个主题可以通过`extends`继承另一个主题并仅定义差异。
+**声明性**：主题不是代码。只需将值写入 YAML 中即可。它不包含任何执行逻辑。**基于令牌**：主题被定义为命名令牌（`color.primary`、`spacing.md`等），而不是直接写入颜色和大小值。资产查找令牌名称，主题解析实际值。**后端独立**：主题仅由前端层（shell.html 中的主题引擎）读取。后端处理程序、工具和流程不知道主题的存在。 emit_widget 发送的 Widget JSON 是与主题无关的数据，主题引擎在渲染时应用外观。**完全可替换**：初始设置期间默认放置的默认主题可以由用户或包自由覆盖或替换。**可继承**：一个主题可以通过 `extends` 继承另一个主题，并仅定义差异。
 
 
 ## 3.目录结构
@@ -35,7 +27,7 @@ user_data/themes/
     └── nord.theme.yaml
 ```
 
-可以使用`theme_id`或`user_data/config.json`切换主题。
+可以使用`user_data/config.json`的`theme_id`切换主题。
 
 ```json
 {
@@ -43,7 +35,7 @@ user_data/themes/
 }
 ```
 
-`theme_id` 与 theme.yaml 中的`theme_id` 字段匹配。
+`theme_id` 与 theme.yaml 中的 `theme_id` 字段匹配。
 
 
 ## 4. theme.yaml完整规范
@@ -635,7 +627,7 @@ scrollbar:
 
 ### 5.1 令牌引用语法
 
-要在主题内交叉引用标记，请使用`{category.key}`语法。
+要在主题内交叉引用标记，请使用 `{category.key}` 语法。
 
 ```yaml
 border_focus: "1px solid {color.primary}"    # color.primary の値に展開される
@@ -646,19 +638,9 @@ padding: "{spacing.md}"                       # spacing.md の値に展開され
 
 ### 5.2 代币类别
 
-**颜色** — 颜色值。描述如何使用 CSS 颜色表达式（hex、rgba、hsl）。使用语义名称（`primary`、`success`、`error`等）进行定义并分配特定的颜色代码。
+**颜色** — 颜色值。描述如何使用 CSS 颜色表达式（hex、rgba、hsl）。使用语义名称（`primary`、`success`、`error`等）进行定义并分配特定的颜色代码。**版式** — 字体相关值。 `font_family` 是 CSS 字体系列字符串。 `font_size_*` 是一个以 px 为单位的整数。 `font_weight_*` 是 CSS 字体粗细值。 `line_height_*` 是无单位比率。
 
-**版式** — 与字体相关的值。 `font_family` 是 CSS 字体系列字符串。 `font_size_*` 是一个以 px 为单位的整数。 `font_weight_*` 是 CSS 字体粗细值。 `line_height_*` 是无单位比率。
-
-**间距** — 边距或间隙值。以 px 为单位的整数。名称是相对大小：xs、sm、md、lg、xl、2xl。
-
-**半径** — 圆角半径值。以 px 为单位的整数。 `full`代表9999px的药丸类型。
-
-**shadow** — 框阴影值。 CSS 框阴影字符串。
-
-**过渡** — 过渡值。 CSS 过渡简写字符串。
-
-**z_index** — 堆叠顺序值。整数。
+**间距** — 边距或间隙值。以 px 为单位的整数。名称是相对大小：xs、sm、md、lg、xl、2xl。**radius** — 圆角半径值。以 px 为单位的整数。 `full` 表示具有 9999px 的药丸类型。**shadow** — 框阴影值。 CSS box-shadow string.**transition** — 过渡值。 CSS 转换简写字符串。**z_index** — 堆叠顺序值。整数。
 
 
 ## 6.动画定义
@@ -681,7 +663,7 @@ animations:
 
 ### 6.2 来自小部件的引用
 
-在小部件的`style_hint.animation`或小部件样式定义的`animation`字段中指定动画名称。
+在小部件的 `style_hint.animation` 或小部件样式定义的 `animation` 字段中指定动画名称。
 
 ```json
 {
@@ -692,18 +674,18 @@ animations:
 }
 ```
 
-主题引擎参考`animations.wave_dots`应用CSS动画。如果 Widget JSON 中未指定动画名称，则使用 Widget 样式定义中的默认动画（例如`indicator.states.running.animation`）。
+主题引擎参考`animations.wave_dots`应用CSS动画。如果 Widget JSON 中未指定动画名称，则使用 Widget 样式定义中的默认动画（例如 `indicator.states.running.animation`）。
 
 ### 6.3 自定义动画
 
-您只需将新动画添加到主题文件的`animations`部分即可定义新动画。如果 Asset JS 引用动画名称，则适用。默认方面不需要进行任何更改。
+您只需将新动画添加到主题文件的 `animations` 部分即可定义新动画。如果 Asset JS 引用动画名称，则适用。默认方面不需要进行任何更改。
 
 
 ## 7. Widget样式定义
 
 ### 7.1 结构
 
-使用 Widget 类型名称作为键定义 `widgets` 部分中的样式。
+使用 Widget 类型名称作为键定义第 `widgets` 部分中的样式。
 
 ```yaml
 widgets:
@@ -718,7 +700,7 @@ widgets:
 
 ### 7.2 变体
 
-某些小部件（按钮、卡片等）具有`variants`。指定在 Widget JSON 的 `style_hint.variant` 中使用哪个变体。
+某些小部件（按钮、卡片等）具有 `variants`。在 Widget JSON 的 `style_hint.variant` 中指定要使用的变体。
 
 ```json
 {
@@ -736,11 +718,11 @@ button:
     danger: { background: "...", ... }
 ```
 
-如果`style_hint.variant`未指定或未知值，则使用`default`变体。
+如果 `style_hint.variant` 是未指定或未知的值，则使用 `default` 变体。
 
 ### 7.3 状态（仅指示器）
 
-指标小部件在`state`字段中有一个状态。主题定义每个状态的颜色和动画。
+指标 Widget 在 `state` 字段中有一个状态。主题定义每个状态的颜色和动画。
 
 ```yaml
 indicator:
@@ -753,7 +735,7 @@ indicator:
 
 ### 7.4 样式提示
 
-Widget JSON 中的`style_hint` 字段是对主题的提示。主题可能会也可能不会解释此提示。可以包含除变体之外的任何键。
+Widget JSON 中的 `style_hint` 字段是对主题的提示。主题可能会也可能不会解释此提示。可以包含除变体之外的任何键。
 
 ```json
 {
@@ -763,23 +745,23 @@ Widget JSON 中的`style_hint` 字段是对主题的提示。主题可能会也�
 }
 ```
 
-主题定义主题引擎如何将`style_hint`转换为CSS。默认主题引擎默认识别以下提示键。
+主题定义主题引擎如何将 `style_hint` 转换为 CSS。默认主题引擎默认识别以下提示键。
 
-|提示键|描述 |转换为 CSS |
+| Hint key | Description | Conversion to CSS |
 |---|---|---|
-| §鲁米§0§|选择小部件变体 |应用变体风格 |
-| §鲁米§0§|按代币名称指定颜色 | §鲁米§1§ |
-| §鲁米§0§|尺寸：xs/sm/md/lg/xl | §鲁米§1§ |
-| §鲁米§0§|字体粗细| §鲁米§1§ |
-| §鲁米§0§|文本对齐 | §鲁米§1§ |
-| §鲁米§0§|用令牌名称填充 | §鲁米§1§ |
-| §鲁米§0§|隐藏 | §鲁米§1§ |
+| `variant` | Select Widget variant | Apply variant style |
+| `color` | Color specification by token name | `color: var(--color-{value})` |
+| `size` | Size of xs/sm/md/lg/xl | `font-size: var(--font-size-{value})` |
+| `weight` | Font weight | `font-weight: var(--font-weight-{value})` |
+| `align` | Text alignment | `text-align: {value}` |
+| `padding` | Padding with token name | `padding: var(--spacing-{value})` |
+| `hidden` | Hide | `display: none` |
 
 主题也可以添加自己的提示键。主题引擎无法识别的键将被忽略。
 
 ### 7.5 自定义小部件样式
 
-使用自定义小部件的`custom_type` 作为键定义`widgets.custom` 部分中的样式。
+使用自定义小部件的 `custom_type` 作为键定义`widgets.custom`部分中的样式。
 
 ```yaml
 widgets:
@@ -793,12 +775,12 @@ widgets:
       border: "1px solid {color.border}"
 ```
 
-自定义小部件的渲染器（JS 放置在`user_data/widget_renderers/` 中）读取并应用此样式。
+自定义小部件的渲染器（JS 位于`user_data/widget_renderers/` 中）读取并应用此样式。
 
 
 ## 8. 插槽样式
 
-`slots` 部分定义了 shell.html 插槽的外观（标题、侧边栏、主栏、面板、状态栏、浮动）。
+`slots` 部分定义了 shell.html 槽的外观（标题、侧边栏、主栏、面板、状态栏、浮动）。
 
 插槽的结构和布局（哪个资产进入哪个插槽）不是主题的责任。主题仅定义插槽的背景颜色、边框、默认大小和调整大小手柄颜色。
 
@@ -807,7 +789,7 @@ widgets:
 
 ### 9.1 转换规则
 
-主题引擎将主题文件转换为 CSS 变量并将它们设置为`:root`。转换规则如下。
+主题引擎将主题文件转换为 CSS 变量并将其设置为 `:root`。转换规则如下。
 
 代币：`tokens.{category}.{key}`→`--{category}-{key}`
 
@@ -833,7 +815,7 @@ tokens:
 
 ### 9.2 注入动画
 
-将`animations`部分的所有关键帧作为`<style>`元素注入。
+将 `animations` 部分的所有关键帧作为 `<style>` 元素注入。
 
 ```css
 @keyframes wave-dots {
@@ -876,9 +858,9 @@ Asset的HTML/JS指的是CSS变量。
 
 1. shell.html 的主题引擎读取 `user_data/config.json` 至 `theme_id`
 2. 加载`user_data/themes/{theme_id}.theme.yaml`
-3.如果指定`extends`，则递归加载父主题
-4. 扩展代币引用（`{category.key}`）
-5. 将 CSS 变量设置为`:root`
+3.如果指定了`extends`，则递归加载父主题
+4. 扩展令牌引用 (`{category.key}`)
+5. 将 CSS 变量设置为 `:root`
 6.注入动画关键帧
 7. 将 Widget 样式定义保存在内存中
 
@@ -904,7 +886,7 @@ Asset的HTML/JS指的是CSS变量。
 
 ### 11.1 扩展
 
-主题可以继承`extends`字段中的另一个主题。
+一个主题可以继承 `extends` 字段中的另一个主题。
 
 ```yaml
 theme_id: "dark_blue"
@@ -915,7 +897,7 @@ tokens:
     primary_hover: "#60a5fa"
 ```
 
-在这种情况下，`dark`主题中的所有值都将成为基础，并且只有`dark_blue`中明确定义的值才会被覆盖。 `dark`、`color.background`、`typography.*`、`spacing.*`等都是遗传的。
+在这种情况下，`dark` 主题中的所有值都将成为基础，并且只有 `dark_blue` 中明确定义的值才会被覆盖。 `dark`、`color.background`、`typography.*`、`spacing.*`等都是继承的。
 
 ### 11.2 合并规则
 
@@ -972,7 +954,7 @@ user_data/packs/monokai_theme/
 }
 ```
 
-安装流程：包批准 → 将`themes/monokai.theme.yaml`复制到`user_data/themes/installed/monokai.theme.yaml` → 如果用户将`config.json`的`theme_id`更改为`monokai`，则会应用。
+安装流程：包审批 → 复制`themes/monokai.theme.yaml`至`user_data/themes/installed/monokai.theme.yaml` → 用户将`config.json`的`theme_id`更改为`monokai`时应用。
 
 默认值方面的更改为零。
 
@@ -1015,6 +997,6 @@ radius.md: 8
 
 主题引擎在加载时验证以下内容：
 
-必填字段：`theme_id`、`name`、`version`。所需代币：`color.background`、`color.surface`、`color.text`、`color.border`、`color.primary`、`typography.font_family`、`typography.font_family_mono`、`typography.font_size_base`、`spacing.md`、`radius.md`。循环引用：令牌之间的`{category.key}`引用中是否存在循环？循环继承：`extends`链中是否有循环？
+必填字段：`theme_id`、`name`、`version`。所需标记：`color.background`、`color.surface`、`color.text`、`color.border`、`color.primary`、`typography.font_family`、`typography.font_family_mono`、`typography.font_size_base`、`spacing.md`、`radius.md`。循环引用：令牌之间的`{category.key}`引用中是否存在循环？循环继承：`extends`链中是否存在循环？
 
 如果缺少必填字段或令牌，后备主题将仅补全缺少的值并发出警告。不要完全拒绝这个主题，而是让它尽可能地发挥作用。

@@ -7,7 +7,7 @@
 面向用户的主要协调路径是团队工作区运行时。
 在内部，实施仍然以`CompanySlackRuntime`为中心，
 在`domain/company/message_router.py`中实现，具有持久的运行时状态
-§鲁米§0§。
+`domain/company/runtime_store.py`。
 
 运行时类似于 Slack：
 

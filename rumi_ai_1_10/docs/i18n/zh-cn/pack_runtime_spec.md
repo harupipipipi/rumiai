@@ -38,11 +38,11 @@ Ecosystem.json 的 `runtime` 部分允许 Pack 以声明方式指定其运行时
 
 |价值|描述 |
 |----|------|
-| §鲁米§0§|作为主机上的 Python 子进程运行。需要`RUMI_ALLOW_HOST_EXECUTION=1`。 |
-| §鲁米§0§|在 Docker 容器内运行 Python（相当于默认行为）。 |
-| §鲁米§0§|运行编译的二进制文件。通过 stdin/stdout JSON 协议进行通信。 |
-| §鲁米§0§|执行任意命令。通过 stdin/stdout JSON 协议进行通信。 |
-| §鲁米§0§|在 WebAssembly 运行时上运行（用于将来的扩展，目前未实现）。 |
+| `python_host`|作为主机上的 Python 子进程运行。需要`RUMI_ALLOW_HOST_EXECUTION=1`。 |
+| `python_docker`|在 Docker 容器内运行 Python（相当于默认行为）。 |
+| `binary`|运行编译的二进制文件。通过 stdin/stdout JSON 协议进行通信。 |
+| `command`|执行任意命令。通过 stdin/stdout JSON 协议进行通信。 |
+| `wasm`|在 WebAssembly 运行时上运行（用于将来的扩展，目前未实现）。 |
 
 ### `language`（可选）
 
@@ -60,9 +60,9 @@ Ecosystem.json 的 `runtime` 部分允许 Pack 以声明方式指定其运行时
 
 |领域|类型 |默认|描述 |
 |-----------|-----|-----------|------|
-| §鲁米§0§|字符串| §鲁米§1§ | Docker 镜像名称 |
-| §鲁米§0§|字符串\|空|空 |构建命令（用于将来的扩展）|
-| §鲁米§0§|布尔 |假 |允许网络访问容器 |
+| `image`|字符串| `python:3.11-slim` | Docker 镜像名称 |
+| `build_command`|字符串\|空|空 |构建命令（用于将来的扩展）|
+| `network`|布尔 |假 |允许网络访问容器 |
 
 ### `host_requirements`（可选）
 
@@ -70,8 +70,8 @@ Ecosystem.json 的 `runtime` 部分允许 Pack 以声明方式指定其运行时
 
 |领域|类型 |默认|描述 |
 |-----------|-----|-----------|------|
-| §鲁米§0§|整数\|null |空 |最小内存请求 (MB) |
-| §鲁米§0§|布尔 |假 |需要 GPU |
+| `min_memory_mb`|整数\|null |空 |最小内存请求 (MB) |
+| `gpu`|布尔 |假 |需要 GPU |
 
 ## 向后兼容性
 
@@ -178,10 +178,10 @@ Ecosystem.json 的 `runtime` 部分允许 Pack 以声明方式指定其运行时
 
 1. `registry.py`的`_load_functions()`读取ecosystem.json的`runtime`部分
 2. 默认情况下将包级运行时信息注入到每个函数的清单中：
-   - §鲁米§0§ → §鲁米§1§
-   - §鲁米§0§ → §鲁米§1§
-   - §鲁米§0§ → §鲁米§1§
-   - §鲁米§0§ → §鲁米§1§
+   - `runtime.type` → `manifest["calling_convention"]`
+   - `runtime.docker.image` → `manifest["docker_image"]`
+   - `runtime.type == "python_host"` → `manifest["host_execution"] = True`
+   - `runtime.type in ("binary", "command")` → `manifest["runtime"] = type`
 3.`FunctionRegistry._entry_from_kwargs()`从清单构造FunctionEntry
 4.calling_convention 处的 `_dispatch_by_calling_convention()` 或 `capability_executor.py` 分支
 

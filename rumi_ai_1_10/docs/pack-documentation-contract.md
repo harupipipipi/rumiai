@@ -12,7 +12,7 @@ Common rules for consolidating Pack-specific docs into `ecosystem/<pack_id>/docs
 
 - Runtime common explanations such as kernel, flow, approval, grant, etc.
 - How to make a pack
--docs terms
+- Docs terms
 
 `ecosystem/<pack_id>/docs/` only puts the description specific to that Pack.
 

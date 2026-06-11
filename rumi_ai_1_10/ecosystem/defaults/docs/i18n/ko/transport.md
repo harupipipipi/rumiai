@@ -51,43 +51,43 @@ server = start_http_server(facade)  # KernelFacade or None
 
 | 방법 | 경로 | 핸들러(블록) |
 |---|---|---|
-| §루미§0§ | §루미§1§ | §루미§2§ |
-| §루미§0§ | §루미§1§ | §루미§2§ |
-| §루미§0§ | §루미§1§ | §루미§2§ |
-| §루미§0§ | §루미§1§ | §루미§2§ |
-| §루미§0§ | §루미§1§ | §루미§2§ |
-| §루미§0§ | §루미§1§ | §루미§2§ |
-| §루미§0§ | §루미§1§ | §루미§2§ |
-| §루미§0§ | §루미§1§ | §루미§2§ |
-| §루미§0§ | §루미§1§ | §루미§2§ |
-| §루미§0§ | §루미§1§ | §루미§2§ |
-| §루미§0§ | §루미§1§ | §루미§2§ |
-| §루미§0§ | §루미§1§ | §루미§2§ |
-| §루미§0§ | §루미§1§ | §루미§2§ |
-| §루미§0§ | §루미§1§ | §루미§2§ |
-| §루미§0§ | §루미§1§ | §루미§2§ |
-| §루미§0§ | §루미§1§ | §루미§2§ |
-| §루미§0§ | §루미§1§ | §루미§2§ |
-| §루미§0§ | §루미§1§ | §루미§2§ |
-| §루미§0§ | §루미§1§ | §루미§2§ |
-| §루미§0§ | §루미§1§ | §루미§2§ |
-| §루미§0§ | §루미§1§ | §루미§2§ |
-| §루미§0§ | §루미§1§ | §루미§2§ |
-| §루미§0§ | §루미§1§ | §루미§2§ |
-| §루미§0§ | §루미§1§ | §루미§2§ |
-| §루미§0§ | §루미§1§ | §루미§2§ |
-| §루미§0§ | §루미§1§ | §루미§2§ |
-| §루미§0§ | §루미§1§ | §루미§2§ |
-| §루미§0§ | §루미§1§ | §루미§2§ |
-| §루미§0§ | §루미§1§ | §루미§2§ |
-| §루미§0§ | §루미§1§ | §루미§2§ |
-| §루미§0§ | §루미§1§ | §루미§2§ |
-| §루미§0§ | §루미§1§ | §루미§2§ |
-| §루미§0§ | §루미§1§ | §루미§2§ |
-| §루미§0§ | §루미§1§ | (인라인: 상태 점검) |
-| §루미§0§ | §루미§1§ | (인라인: 팩 정보 + 인터페이스) |
-| §루미§0§ | §루미§1§ | (정적: `ui/shell.html`) |
-| §루미§0§ | §루미§1§ | (정적: `ui/{path}`) |
+| `POST` | `/v1/chat/completions` | `blocks/chat/send.py` |
+| `POST` | `/api/chat/conversations` | `blocks/chat/create_conversation.py` |
+| `GET` | `/api/chat/conversations` | `blocks/chat/list_conversations.py` |
+| `GET` | `/api/chat/conversations/{id}` | `blocks/chat/get_conversation.py` |
+| `PUT` | `/api/chat/conversations/{id}` | `blocks/chat/update_conversation.py` |
+| `DELETE` | `/api/chat/conversations/{id}` | `blocks/chat/delete_conversation.py` |
+| `POST` | `/api/chat/conversations/{id}/messages` | `blocks/chat/send.py` |
+| `POST` | `/api/chat/conversations/{id}/stream` | `blocks/chat/stream.py` |
+| `POST` | `/api/chat/conversations/{id}/export` | `blocks/chat/export_conversation.py` |
+| `POST` | `/api/chat/conversations/{id}/summarize` | `blocks/chat/summarize_and_trim.py` |
+| `POST` | `/api/chat/conversations/{id}/auto-trim` | `blocks/chat/auto_trim.py` |
+| `POST` | `/api/agent/execute` | `blocks/agent/execute.py` |
+| `POST` | `/api/agent/{id}/approve` | `blocks/agent/approve.py` |
+| `POST` | `/api/agent/{id}/reject` | `blocks/agent/reject.py` |
+| `POST` | `/api/agent/{id}/cancel` | `blocks/agent/cancel.py` |
+| `GET` | `/api/agent/{id}/status` | `blocks/agent/status.py` |
+| `POST` | `/api/agent/multi/execute` | `blocks/agent/multi_execute.py` |
+| `GET` | `/api/agent/multi/{id}/status` | `blocks/agent/multi_status.py` |
+| `POST` | `/api/agent/multi/{id}/message` | `blocks/agent/multi_message.py` |
+| `POST` | `/api/agent/{id}/instruct` | `blocks/agent/add_instruction.py` |
+| `POST` | `/api/consent/check` | `blocks/tool/consent_check.py` |
+| `POST` | `/api/consent/{id}/confirm` | `blocks/tool/consent_confirm.py` |
+| `PUT` | `/api/prompts/{name}` | `blocks/prompt/update.py` |
+| `DELETE` | `/api/prompts/{name}` | `blocks/prompt/delete.py` |
+| `POST` | `/api/prompts/convert` | `blocks/prompt/convert.py` |
+| `POST` | `/api/tools/create` | `blocks/tool/create.py` |
+| `PUT` | `/api/tools/{name}` | `blocks/tool/update.py` |
+| `DELETE` | `/api/tools/{name}` | `blocks/tool/delete.py` |
+| `GET` | `/api/tools/{name}/export` | `blocks/tool/export.py` |
+| `GET` | `/api/dev/inspect` | `blocks/dev/inspect.py` |
+| `GET` | `/api/dev/prompt-history` | `blocks/dev/prompt_history.py` |
+| `POST` | `/api/dev/edit-prompt` | `blocks/dev/edit_prompt_live.py` |
+| `POST` | `/api/dev/replay` | `blocks/dev/replay.py` |
+| `GET` | `/api/health` | (인라인: 상태 점검) |
+| `GET` | `/api/context` | (인라인: 팩 정보 + 인터페이스) |
+| `GET` | `/` | (정적: `ui/shell.html`) |
+| `GET` | `/static/{path}` | (정적: `ui/{path}`) |
 
 ### CORS 설정
 
@@ -158,9 +158,9 @@ transport.start()  # ブロッキング（stdin を読み続ける）
 
 | 필드 | 필수 | 유형 | 설명 |
 |---|---|---|---|
-| §루미§0§ | 선택사항 | §루미§1§ | HTTP 메서드. 기본 `"GET"` |
-| §루미§0§ | 필수 | §루미§1§ | 엔드포인트 경로 |
-| §루미§0§ | 선택사항 | §루미§1§ | 요청 본문 |
+| `method` | 선택사항 | `string` | HTTP 메서드. 기본 `"GET"` |
+| `path` | 필수 | `string` | 엔드포인트 경로 |
+| `data` | 선택사항 | `object` | 요청 본문 |
 
 **응답 형식(JSON 한 줄을 표준 출력으로 출력):**
 
@@ -174,22 +174,22 @@ stdio 전송은 HTTP 전송의 하위 집합을 제공합니다. `transport/stdi
 
 | 방법 | 경로 | 블록 모듈 | ID 주입 |
 |---|---|---|---|
-| §루미§0§ | §루미§1§ | §루미§2§ | — |
-| §루미§0§ | §루미§1§ | §루미§2§ | — |
-| §루미§0§ | §루미§1§ | §루미§2§ | — |
-| §루미§0§ | §루미§1§ | §루미§2§ | §루미§3§ ← §루미§4§ |
-| §루미§0§ | §루미§1§ | §루미§2§ | §루미§3§ ← §루미§4§ |
-| §루미§0§ | §루미§1§ | §루미§2§ | §루미§3§ ← §루미§4§ |
-| §루미§0§ | §루미§1§ | §루미§2§ | §루미§3§ ← §루미§4§ |
-| §루미§0§ | §루미§1§ | §루미§2§ | §루미§3§ ← §루미§4§ |
-| §루미§0§ | §루미§1§ | §루미§2§ | §루미§3§ ← §루미§4§ |
-| §루미§0§ | §루미§1§ | §루미§2§ | — |
-| §루미§0§ | §루미§1§ | §루미§2§ | §루미§3§ ← §루미§4§ |
-| §루미§0§ | §루미§1§ | §루미§2§ | §루미§3§ ← §루미§4§ |
-| §루미§0§ | §루미§1§ | §루미§2§ | §루미§3§ ← §루미§4§ |
-| §루미§0§ | §루미§1§ | §루미§2§ | §루미§3§ ← §루미§4§ |
-| §루미§0§ | §루미§1§ | (인라인) | — |
-| §루미§0§ | §루미§1§ | (인라인) | — |
+| `POST` | `/v1/chat/completions` | `blocks.chat.send` | — |
+| `POST` | `/api/chat/conversations` | `blocks.chat.create_conversation` | — |
+| `GET` | `/api/chat/conversations` | `blocks.chat.list_conversations` | — |
+| `GET` | `/api/chat/conversations/{id}` | `blocks.chat.get_conversation` | `conversation_id` ← `id` |
+| `PUT` | `/api/chat/conversations/{id}` | `blocks.chat.update_conversation` | `conversation_id` ← `id` |
+| `DELETE` | `/api/chat/conversations/{id}` | `blocks.chat.delete_conversation` | `conversation_id` ← `id` |
+| `POST` | `/api/chat/conversations/{id}/messages` | `blocks.chat.send` | `conversation_id` ← `id` |
+| `POST` | `/api/chat/conversations/{id}/stream` | `blocks.chat.stream` | `conversation_id` ← `id` |
+| `POST` | `/api/chat/conversations/{id}/export` | `blocks.chat.export_conversation` | `conversation_id` ← `id` |
+| `POST` | `/api/agent/execute` | `blocks.agent.execute` | — |
+| `POST` | `/api/agent/{id}/approve` | `blocks.agent.approve` | `execution_id` ← `id` |
+| `POST` | `/api/agent/{id}/reject` | `blocks.agent.reject` | `execution_id` ← `id` |
+| `POST` | `/api/agent/{id}/cancel` | `blocks.agent.cancel` | `execution_id` ← `id` |
+| `GET` | `/api/agent/{id}/status` | `blocks.agent.status` | `execution_id` ← `id` |
+| `GET` | `/api/health` | (인라인) | — |
+| `GET` | `/api/context` | (인라인) | — |
 
 **총: 16개 경로**(핸들러 모듈 14개 + 인라인 시스템 2개)
 

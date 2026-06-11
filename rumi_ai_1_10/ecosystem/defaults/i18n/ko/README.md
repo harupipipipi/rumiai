@@ -16,15 +16,7 @@ rumiai 자체는 도메인 지식이 없는 범용 커널입니다. Defaults는 
 
 ## 생각
 
-**배터리가 포함되어 있지만 모든 배터리는 분리 가능합니다.** 기본값을 포함하면 모든 기능이 작동합니다. 그러나 모든 구성 요소를 다른 팩으로 교체할 수 있습니다.
-
-**기본값은 한계가 아닌 표준을 정의합니다.** 기본적으로 정의된 권한, 핸들러 및 도메인 모델은 루미아이 생태계의 "표준 어휘"가 됩니다. 다른 팩에서는 이 용어를 사용합니다. 그러나 이 어휘는 확장 가능하며 다른 팩에서는 기본값이 모르는 개념을 추가할 수 있습니다.
-
-**모든 것을 알고 아무것도 가정하지 않습니다.** 기본값에는 AI 서비스에 필요한 모든 도메인 지식이 있습니다. 그러나 사용자의 환경, 사용 사례 또는 선호도에 대해 어떠한 가정도 하지 않습니다.
-
-**신뢰가 아닌 기능에 의한 보안.** 기본값은 rumiai의 보안 모델을 완전히 따릅니다. defaults 자체는 부여된 권한 범위 내에서만 작동합니다.
-
-**인프라만, user_data의 콘텐츠.** 기본값은 도메인 로직(핸들러), 통신 인프라, 위젯 라이브러리, 셸 및 흐름 정의만 제공합니다. 화면 모양(자산), 도구 정의, 에이전트 설정, 프롬프트, 테마 및 레이아웃은 모두 user_data에 배치됩니다. 기본값은 작동할 수 있는 API와 프레임워크를 제공합니다.
+**배터리가 포함되어 있지만 모든 배터리는 분리 가능합니다.** 기본값을 포함하면 모든 기능이 작동합니다. 그러나 모든 구성 요소를 다른 팩으로 교체할 수 있습니다.**기본값은 한계가 아닌 표준을 정의합니다.** 기본적으로 정의된 권한, 핸들러 및 도메인 모델은 루미아이 생태계의 "표준 어휘"가 됩니다. 다른 팩에서는 이 용어를 사용합니다. 그러나 이 어휘는 확장 가능하며 다른 팩은 기본값이 모르는 개념을 추가할 수 있습니다.**모든 것을 알고 아무것도 가정하지 않습니다.** 기본값에는 AI 서비스에 필요한 모든 도메인 지식이 있습니다. 그러나 사용자의 환경, 사용 사례 또는 선호도에 대해 가정하지 않습니다.**신뢰가 아닌 기능에 의한 보안.** 기본값은 rumiai의 보안 모델을 완전히 따릅니다. 기본값 자체는 부여된 권한 범위 내에서만 작동합니다.**인프라 전용, user_data의 콘텐츠.** 기본값은 도메인 로직(핸들러), 통신 인프라, 위젯 라이브러리, 셸 및 흐름 정의만 제공합니다. 화면 모양(자산), 도구 정의, 에이전트 설정, 프롬프트, 테마 및 레이아웃은 모두 user_data에 배치됩니다. 기본값은 작동할 수 있는 API와 프레임워크를 제공합니다.
 
 ---
 
@@ -55,30 +47,30 @@ rumiai 자체는 도메인 지식이 없는 범용 커널입니다. Defaults는 
 
 ### 항상 주입됨(선언 필요 없음)
 
-| 컨텍스트 키 | 설명 |
+| context key | description |
 |---|---|
-| §루미§0§ | 핸들러를 호출하십시오. Grant |
-| §루미§0§ | 이벤트를 게시합니다. 핸들러, 흐름 트리거 및 프런트 엔드를 수신할 수 있습니다 |
-| §루미§0§ | 이벤트를 기다리세요. 시간 초과를 지정할 수 있습니다 |
-| §루미§0§ | 위젯 JSON을 UI로 보내기 |
-| §루미§0§ | 취소 확인 |
-| §루미§0§ | Conditions.json에서 주입된 설정 |
-| §루미§0§ | 세션 정보(session_id, 작업공간 등) |
+| `call_handler(handler_name, params)` | Call any handler. Can only be executed within the scope of permissions granted by Grant |
+| `emit_event(event_type, data)` | Publish an event. handler, Flow trigger, and front end can be received |
+| `wait_event(event_type, timeout, filter)` | Wait for an event. Timeout can be specified |
+| `emit_widget(widget_json)` | Send Widget JSON to the UI |
+| `cancel_check()` | Cancellation confirmation |
+| `handler_config` | Settings injected from conditions.json |
+| `session` | Session information (session_id, workspace, etc.) |
 
 ### Capability_required로 선언되고 주입되는 것
 
-| 능력_ID | 컨텍스트 키 | 설명 | 위험 |
+| capability_id | context key | description | risk |
 |---|---|---|---|
-| §루미§0§ | §루미§1§ | user_data 아래의 파일 읽기 | 낮음 |
-| §루미§0§ | §루미§1§ | user_data 아래에 파일 쓰기 | 중간 |
-| §루미§0§ | §루미§1§ | 실행 흐름 | 중간 |
-| §루미§0§ | §루미§1§ | 쉘 명령 실행 | 높음 |
-| §루미§0§ | §루미§1§ | 브라우저 작동 | 높음 |
-| §루미§0§ | §루미§1§ | Docker 컨테이너 시작, 운영 및 삭제 | 높음 |
-| §루미§0§ | §루미§1§ | 호스트 애플리케이션 운영 | 높음 |
-| §루미§0§ | §루미§1§ | 외부 HTTP 통신 | 중간 |
-| §루미§0§ | §루미§1§ | 도구 내 LLM 통화 | 중간 |
-| §루미§0§ | §루미§1§ | 세션 상태 읽기/쓰기 | 낮음 |
+| `data_read` | `data_read(path) → str/bytes` | Read file under user_data | Low |
+| `data_write` | `data_write(path, content)` | Writing files under user_data | Medium |
+| `execute_flow` | `execute_flow(flow_id, input) → FlowResult` | Launch Flow | Medium |
+| `shell_exec` | `capability("shell_exec", {...})` | Shell command execution | High |
+| `browser_control` | `capability("browser_control", {...})` | Browser operation | High |
+| `container_exec` | `capability("container_exec", {...})` | Starting, operating, and destroying Docker containers | High |
+| `app_control` | `capability("app_control", {...})` | Host application operation | High |
+| `http_request` | `capability("http_request", {...})` | External HTTP communication | Medium |
+| `llm_call` | `capability("llm_call", {...})` | In-tool LLM call | Medium |
+| `session_state` | `capability("session_state", {...})` | Session state read/write | Low |
 
 ### call_handler 작동 방식
 
@@ -150,7 +142,7 @@ defaults는 권한을 루미아이 생태계의 "표준 어휘"로 정의합니�
 
 ### 명명 규칙
 
-`domain.resource.action` 3겹의 도트 분리. 와일드카드 `*`을 사용하여 한꺼번에 지정할 수 있습니다.
+`domain.resource.action` 3겹의 도트 분리. 와일드카드 `*`을 사용하여 한 번에 지정할 수 있습니다.
 
 ```
 chat.conversation.create     → chat ドメイン、conversation リソース、create アクション
@@ -160,345 +152,345 @@ chat.*                       → chat ドメインの全権限
 
 ### 채팅 도메인(18권한)
 
-| 권한 | 설명 |
+| Permissions | Description |
 |------|------|
-| §루미§0§ | 대화 생성 |
-| §루미§0§ | 대화읽기 |
-| §루미§0§ | 대화 목록 |
-| §루미§0§ | 대화 업데이트 |
-| §루미§0§ | 대화가 삭제되었습니다 |
-| §루미§0§ | 대화 내보내기 |
-| §루미§0§ | 대화 분기 |
-| §루미§0§ | 메시지 보내기 |
-| §루미§0§ | 메시지 읽기 |
-| §루미§0§ | 메시지 편집 |
-| §루미§0§ | 메시지 삭제 |
-| §루미§0§ | AI 응답 재생 |
-| §루미§0§ | 스트리밍 |
-| §루미§0§ | 스트리밍 중지 |
-| §루미§0§ | 첨부파일 업로드 |
-| §루미§0§ | 첨부파일 읽기 |
-| §루미§0§ | 반응 |
-| §루미§0§ | 메시지 검색 |
+| `chat.conversation.create` | Conversation creation |
+| `chat.conversation.read` | Conversation reading |
+| `chat.conversation.list` | Conversation list |
+| `chat.conversation.update` | Conversation update |
+| `chat.conversation.delete` | Conversation deleted |
+| `chat.conversation.export` | Conversation export |
+| `chat.conversation.branch` | Conversation branching |
+| `chat.message.send` | Send message |
+| `chat.message.read` | Read message |
+| `chat.message.edit` | Edit message |
+| `chat.message.delete` | Delete message |
+| `chat.message.regenerate` | AI response regeneration |
+| `chat.message.stream` | Streaming |
+| `chat.message.stop` | Stop streaming |
+| `chat.attachment.upload` | Upload attachment |
+| `chat.attachment.read` | Read attachment |
+| `chat.reaction.write` | Reaction |
+| `chat.search` | Message search |
 
 ### 에이전트 도메인(권한 18개)
 
-| 권한 | 설명 |
+| Permissions | Description |
 |------|------|
-| §루미§0§ | 에이전트 생성 |
-| §루미§0§ | 에이전트 읽기 |
-| §루미§0§ | 에이전트 목록 |
-| §루미§0§ | 에이전트 업데이트 |
-| §루미§0§ | 에이전트 삭제 |
-| §루미§0§ | 에이전트 실행 |
-| §루미§0§ | 단계 읽기 |
-| §루미§0§ | 단계 승인 |
-| §루미§0§ | 단계 거부 |
-| §루미§0§ | 실행 취소 |
-| §루미§0§ | 일시중지 |
-| §루미§0§ | 이력서 |
-| §루미§0§ | 상태 읽기 |
-| §루미§0§ | 하위 에이전트 시작 |
-| §루미§0§ | 하위 에이전트 관리 |
-| §루미§0§ | 계획 읽기 |
-| §루미§0§ | 계획 변경 |
-| §루미§0§ | 역사읽기 |
+| `agent.create` | Agent creation |
+| `agent.read` | Agent read |
+| `agent.list` | Agent list |
+| `agent.update` | Agent update |
+| `agent.delete` | Agent deletion |
+| `agent.execute` | Agent execution |
+| `agent.step.read` | Step reading |
+| `agent.step.approve` | Step approval |
+| `agent.step.reject` | Step Rejection |
+| `agent.cancel` | Cancel execution |
+| `agent.pause` | Pause |
+| `agent.resume` | Resume |
+| `agent.status.read` | Status reading |
+| `agent.sub.spawn` | Subagent startup |
+| `agent.sub.manage` | Subagent management |
+| `agent.plan.read` | Read plan |
+| `agent.plan.modify` | Plan change |
+| `agent.history.read` | History reading |
 
 ### 도구 도메인(권한 13개)
 
-| 권한 | 설명 |
+| Permissions | Description |
 |------|------|
-| §루미§0§ | 도구 실행 |
-| §루미§0§ | 도구 읽기 |
-| §루미§0§ | 도구 목록 |
-| §루미§0§ | 스키마 읽기 |
-| §루미§0§ | 도구 생성 |
-| §루미§0§ | 도구 업데이트 |
-| §루미§0§ | 도구 삭제 |
-| §루미§0§ | 실행 결과 읽기 |
-| §루미§0§ | 권한 읽기 |
-| §루미§0§ | 승인 쓰기 |
-| §루미§0§ | MCP 서버 연결 |
-| §루미§0§ | MCP 서버 연결 끊김 |
-| §루미§0§ | MCP 도구 목록 |
+| `tool.invoke` | Tool execution |
+| `tool.read` | Tool reading |
+| `tool.list` | Tool list |
+| `tool.schema.read` | Schema reading |
+| `tool.create` | Tool creation |
+| `tool.update` | Tool update |
+| `tool.delete` | Tool deletion |
+| `tool.result.read` | Read execution results |
+| `tool.permission.read` | Read permissions |
+| `tool.permission.write` | Authorization write |
+| `tool.mcp.connect` | MCP server connection |
+| `tool.mcp.disconnect` | MCP server disconnection |
+| `tool.mcp.list` | MCP tools list |
 
 ### 프롬프트 도메인(권한 12개)
 
-| 권한 | 설명 |
+| Permissions | Description |
 |------|------|
-| §루미§0§ | 프롬프트 생성 |
-| §루미§0§ | 프롬프트 읽기 |
-| §루미§0§ | 프롬프트 목록 |
-| §루미§0§ | 신속한 업데이트 |
-| §루미§0§ | 프롬프트 삭제 |
-| §루미§0§ | 신속한 렌더링 |
-| §루미§0§ | 변수 읽기 |
-| §루미§0§ | 변수 작성 |
-| §루미§0§ | 시스템 프롬프트 읽기 |
-| §루미§0§ | 시스템 프롬프트 작성 |
-| §루미§0§ | 가져오기 |
-| §루미§0§ | 수출 |
+| `prompt.create` | Prompt creation |
+| `prompt.read` | Prompt reading |
+| `prompt.list` | Prompt list |
+| `prompt.update` | Prompt update |
+| `prompt.delete` | Delete prompt |
+| `prompt.render` | Prompt rendering |
+| `prompt.variable.read` | Read variable |
+| `prompt.variable.write` | Writing variables |
+| `prompt.system.read` | Read system prompt |
+| `prompt.system.write` | System prompt writing |
+| `prompt.import` | Import |
+| `prompt.export` | Export |
 
 ### ai 도메인(19권한)
 
-| 권한 | 설명 |
+| Permissions | Description |
 |------|------|
-| §루미§0§ | 텍스트 생성 |
-| §루미§0§ | 스트리밍 생성 |
-| §루미§0§ | 모델 목록 |
-| §루미§0§ | 모델 정보 읽기 |
-| §루미§0§ | 공급자 목록 |
-| §루미§0§ | 공급자 추가 |
-| §루미§0§ | 공급자 삭제 |
-| §루미§0§ | 공급자 설정 읽기 |
-| §루미§0§ | 공급자 설정 쓰기 |
-| §루미§0§ | AI 프로필 읽기 |
-| §루미§0§ | AI 프로필 작성 |
-| §루미§0§ | 프로필 목록 |
-| §루미§0§ | 사용법 읽기 |
-| §루미§0§ | 토큰 개수 |
-| §루미§0§ | 임베딩 벡터 생성 |
-| §루미§0§ | 이미지 생성 |
-| §루미§0§ | 이미지 분석 |
-| §루미§0§ | 오디오 전사 |
-| §루미§0§ | 음성 합성 |
+| `ai.completion` | Text generation |
+| `ai.stream` | Streaming generation |
+| `ai.model.list` | Model list |
+| `ai.model.read` | Read model information |
+| `ai.provider.list` | List of providers |
+| `ai.provider.add` | Add provider |
+| `ai.provider.remove` | Delete provider |
+| `ai.provider.config.read` | Read provider settings |
+| `ai.provider.config.write` | Write provider settings |
+| `ai.profile.read` | AI profile reading |
+| `ai.profile.write` | AI profile writing |
+| `ai.profile.list` | Profile list |
+| `ai.usage.read` | Read usage |
+| `ai.token.count` | Token count |
+| `ai.embedding` | Embedding vector generation |
+| `ai.image.generate` | Image generation |
+| `ai.image.analyze` | Image analysis |
+| `ai.audio.transcribe` | Audio transcription |
+| `ai.audio.synthesize` | Speech synthesis |
 
 ### 파일 도메인(18개 권한)
 
-| 권한 | 설명 |
+| Permissions | Description |
 |------|------|
-| §루미§0§ | 파일 읽기 |
-| §루미§0§ | 파일 쓰기 |
-| §루미§0§ | 파일 생성 |
-| §루미§0§ | 파일 삭제 |
-| §루미§0§ | 파일 이동 |
-| §루미§0§ | 파일 복사 |
-| §루미§0§ | 파일 목록 |
-| §루미§0§ | 파일 검색 |
-| §루미§0§ | 파일 모니터링 |
-| §루미§0§ | 메타데이터 읽기 |
-| §루미§0§ | 권한 읽기 |
-| §루미§0§ | 작업공간 읽기 |
-| §루미§0§ | 작업공간 글쓰기 |
-| §루미§0§ | 시스템 파일 읽기 |
-| §루미§0§ | 시스템 파일 쓰기 |
-| §루미§0§ | 임시 파일 쓰기 |
-| §루미§0§ | 아카이브 읽기 |
-| §루미§0§ | 아카이브 생성 |
+| `file.read` | File read |
+| `file.write` | File writing |
+| `file.create` | File creation |
+| `file.delete` | File deletion |
+| `file.move` | File movement |
+| `file.copy` | File copy |
+| `file.list` | File list |
+| `file.search` | File search |
+| `file.watch` | File monitoring |
+| `file.metadata.read` | Read metadata |
+| `file.permission.read` | Read permissions |
+| `file.workspace.read` | Workspace Read |
+| `file.workspace.write` | Workspace writing |
+| `file.system.read` | System file read |
+| `file.system.write` | System file writing |
+| `file.temp.write` | Temporary file writing |
+| `file.archive.read` | Archive reading |
+| `file.archive.create` | Archive creation |
 
 ### 터미널 도메인(11권한)
 
-| 권한 | 설명 |
+| Permissions | Description |
 |------|------|
-| §루미§0§ | 명령 실행 |
-| §루미§0§ | 출력 읽기 |
-| §루미§0§ | 스트리밍 출력 |
-| §루미§0§ | 세션 생성 |
-| §루미§0§ | 세션 목록 |
-| §루미§0§ | 세션 종료 |
-| §루미§0§ | 중단 |
-| §루미§0§ | 환경 변수 읽기 |
-| §루미§0§ | 환경 변수 작성 |
-| §루미§0§ | 현재 디렉터리 읽기 |
-| §루미§0§ | 현재 디렉터리 변경 |
+| `terminal.execute` | Command execution |
+| `terminal.read` | Read output |
+| `terminal.stream` | Streaming output |
+| `terminal.session.create` | Session creation |
+| `terminal.session.list` | Session list |
+| `terminal.session.close` | End session |
+| `terminal.interrupt` | Interruption |
+| `terminal.env.read` | Read environment variables |
+| `terminal.env.write` | Writing environment variables |
+| `terminal.cwd.read` | Read current directory |
+| `terminal.cwd.write` | Change current directory |
 
 ### git 도메인(권한 15개)
 
-| 권한 | 설명 |
+| Permissions | Description |
 |------|------|
-| §루미§0§ | 상태 확인 |
-| §루미§0§ | 차이 표시 |
-| §루미§0§ | 로그 표시 |
-| §루미§0§ | 커밋 |
-| §루미§0§ | 지점 목록 |
-| §루미§0§ | 지점 만들기 |
-| §루미§0§ | 지점 전환 |
-| §루미§0§ | 지점 삭제 |
-| §루미§0§ | 병합 |
-| §루미§0§ | 푸시 |
-| §루미§0§ | 당겨 |
-| §루미§0§ | 보관함 |
-| §루미§0§ | 재설정 |
-| §루미§0§ | 원격 목록 |
-| §루미§0§ | 원격 관리 |
+| `git.status` | Status confirmation |
+| `git.diff` | Difference display |
+| `git.log` | Log display |
+| `git.commit` | Commit |
+| `git.branch.list` | Branch list |
+| `git.branch.create` | Create branch |
+| `git.branch.switch` | Branch switching |
+| `git.branch.delete` | Branch deletion |
+| `git.merge` | Merge |
+| `git.push` | Push |
+| `git.pull` | Pull |
+| `git.stash` | Stash |
+| `git.reset` | Reset |
+| `git.remote.list` | Remote list |
+| `git.remote.manage` | Remote management |
 
 ### 메모리 도메인(13개 권한)
 
-| 권한 | 설명 |
+| Permissions | Description |
 |------|------|
-| §루미§0§ | 단기 기억 읽기 |
-| §루미§0§ | 단기 기억 쓰기 |
-| §루미§0§ | 장기 기억 읽기 |
-| §루미§0§ | 장기 기억 쓰기 |
-| §루미§0§ | 장기 기억 삭제 |
-| §루미§0§ | 장기 기억 검색 |
-| §루미§0§ | 프로젝트 메모리 읽기 |
-| §루미§0§ | 프로젝트 메모리 쓰기 |
-| §루미§0§ | 사용자 메모리 읽기 |
-| §루미§0§ | 사용자 메모리 쓰기 |
-| §루미§0§ | 벡터 저장 |
-| §루미§0§ | 벡터 검색 |
-| §루미§0§ | 메모리 지우기 |
+| `memory.short.read` | Short-term memory read |
+| `memory.short.write` | Short-term memory write |
+| `memory.long.read` | Long-term memory read |
+| `memory.long.write` | Long-term memory write |
+| `memory.long.delete` | Long-term memory deletion |
+| `memory.long.search` | Long-term memory retrieval |
+| `memory.project.read` | Read project memory |
+| `memory.project.write` | Project memory write |
+| `memory.user.read` | User memory read |
+| `memory.user.write` | User memory write |
+| `memory.vector.store` | Vector storage |
+| `memory.vector.query` | Vector search |
+| `memory.clear` | Clear memory |
 
 ### 미디어 도메인(권한 12개)
 
-| 권한 | 설명 |
+| Permissions | Description |
 |------|------|
-| §루미§0§ | 이미지 읽기 |
-| §루미§0§ | 이미지 생성 |
-| §루미§0§ | 이미지 변환 |
-| §루미§0§ | 음성읽기 |
-| §루미§0§ | 오디오 생성 |
-| §루미§0§ | 오디오 전사 |
-| §루미§0§ | 비디오 읽기 |
-| §루미§0§ | 문서 읽기 |
-| §루미§0§ | 문서분석 |
-| §루미§0§ | 클립보드 읽기 |
-| §루미§0§ | 클립보드 쓰기 |
-| §루미§0§ | 스크린샷 |
+| `media.image.read` | Image reading |
+| `media.image.create` | Image creation |
+| `media.image.transform` | Image conversion |
+| `media.audio.read` | Voice reading |
+| `media.audio.create` | Audio creation |
+| `media.audio.transcribe` | Audio transcription |
+| `media.video.read` | Video reading |
+| `media.document.read` | Read document |
+| `media.document.parse` | Document analysis |
+| `media.clipboard.read` | Clipboard reading |
+| `media.clipboard.write` | Clipboard writing |
+| `media.screenshot` | Screenshot |
 
 ### 플로우 도메인(12개 권한)
 
-| 권한 | 설명 |
+| Permissions | Description |
 |------|------|
-| §루미§0§ | 흐름 실행 |
-| §루미§0§ | 흐름 읽기 |
-| §루미§0§ | 흐름 목록 |
-| §루미§0§ | 흐름 생성 |
-| §루미§0§ | 흐름 업데이트 |
-| §루미§0§ | 흐름 삭제 |
-| §루미§0§ | 실행 상태 읽기 |
-| §루미§0§ | 실행 중인 흐름 취소 |
-| §루미§0§ | 흐름 수정자 적용 |
-| §루미§0§ | 수정자 목록 |
-| §루미§0§ | 흐름 컨텍스트 읽기 |
-| §루미§0§ | 흐름 컨텍스트 작성 |
+| `flow.execute` | Flow execution |
+| `flow.read` | Flow reading |
+| `flow.list` | Flow list |
+| `flow.create` | Flow creation |
+| `flow.update` | Flow update |
+| `flow.delete` | Flow Delete |
+| `flow.status.read` | Read execution status |
+| `flow.cancel` | Cancel running Flow |
+| `flow.modifier.apply` | Apply Flow Modifier |
+| `flow.modifier.list` | Modifier list |
+| `flow.context.read` | Flow context read |
+| `flow.context.write` | Flow context writing |
 
 ### 구성 도메인(13개 권한)
 
-| 권한 | 설명 |
+| Permissions | Description |
 |------|------|
-| §루미§0§ | 설정 읽기 |
-| §루미§0§ | 설정 쓰기 |
-| §루미§0§ | 프로필 열람 |
-| §루미§0§ | 프로필 작성 |
-| §루미§0§ | 프로필 목록 |
-| §루미§0§ | 주제읽기 |
-| §루미§0§ | 테마작성 |
-| §루미§0§ | 키 바인딩 읽기 |
-| §루미§0§ | 키바인딩 쓰기 |
-| §루미§0§ | 로케일 읽기 |
-| §루미§0§ | 로캘 쓰기 |
-| §루미§0§ | 설정 내보내기 |
-| §루미§0§ | 설정 가져오기 |
+| `config.read` | Read settings |
+| `config.write` | Settings write |
+| `config.profile.read` | Profile reading |
+| `config.profile.write` | Profile writing |
+| `config.profile.list` | Profile list |
+| `config.theme.read` | Theme reading |
+| `config.theme.write` | Theme writing |
+| `config.keybind.read` | Keybind Read |
+| `config.keybind.write` | Keybind writing |
+| `config.locale.read` | Read locale |
+| `config.locale.write` | Locale writing |
+| `config.export` | Settings export |
+| `config.import` | Settings import |
 
 ### 넷 도메인(11개 권한)
 
-| 권한 | 설명 |
+| Permissions | Description |
 |------|------|
-| §루미§0§ | HTTP 요청 |
-| §루미§0§ | HTTP 스트리밍 |
-| §루미§0§ | WebSocket 연결 |
-| §루미§0§ | WebSocket 전송 |
-| §루미§0§ | DNS 확인 |
-| §루미§0§ | 프록시 읽기 |
-| §루미§0§ | 대리작성 |
-| §루미§0§ | 권한 목록 읽기 |
-| §루미§0§ | 권한 목록 쓰기 |
-| §루미§0§ | 다운로드 |
-| §루미§0§ | 업로드 |
+| `net.http.request` | HTTP request |
+| `net.http.stream` | HTTP Streaming |
+| `net.websocket.connect` | WebSocket connection |
+| `net.websocket.send` | WebSocket sending |
+| `net.dns.resolve` | DNS resolution |
+| `net.proxy.read` | Proxy read |
+| `net.proxy.write` | Proxy writing |
+| `net.allowlist.read` | Read permission list |
+| `net.allowlist.write` | Write permission list |
+| `net.download` | Download |
+| `net.upload` | Upload |
 
 ### 프런트엔드 도메인(권한 12개)
 
-| 권한 | 설명 |
+| Permissions | Description |
 |------|------|
-| §루미§0§ | 도면 화면에 자산 배치 |
-| §루미§0§ | 도면 표면에서 제거 |
-| §루미§0§ | 도면 내용 업데이트 |
-| §루미§0§ | 백엔드 → 그리기 표면 |
-| §루미§0§ | 그리기 표면 → 백엔드 |
-| §루미§0§ | 지속적으로 데이터 스트리밍 |
-| §루미§0§ | 자산 등록 수락 |
-| §루미§0§ | 자산 취소 |
-| §루미§0§ | 등록자산 목록 |
-| §루미§0§ | 레이아웃 정보 가져오기 |
-| §루미§0§ | 레이아웃 변경/저장 |
-| §루미§0§ | 테마 정보 얻기 |
+| `frontend.render.mount` | Put Asset on the drawing surface |
+| `frontend.render.unmount` | Remove from drawing surface |
+| `frontend.render.update` | Update drawing content |
+| `frontend.message.send` | Backend → drawing surface |
+| `frontend.message.receive` | Drawing surface → backend |
+| `frontend.message.stream` | Stream data continuously |
+| `frontend.asset.register` | Accept Asset Registration |
+| `frontend.asset.unregister` | Cancellation of Asset |
+| `frontend.asset.list` | List of registered Assets |
+| `frontend.layout.read` | Get layout information |
+| `frontend.layout.write` | Change/save layout |
+| `frontend.theme.read` | Get theme information |
 
 ### 이벤트 도메인(권한 5개)
 
-| 권한 | 설명 |
+| Permissions | Description |
 |------|------|
-| §루미§0§ | 이벤트 게재 |
-| §루미§0§ | 이벤트 구독 |
-| §루미§0§ | 이벤트 구독 취소 |
-| §루미§0§ | 이벤트 목록 |
-| §루미§0§ | 이벤트 기록 읽기 |
+| `event.emit` | Event publication |
+| `event.subscribe` | Event subscription |
+| `event.unsubscribe` | Unsubscribe from event |
+| `event.list` | Event list |
+| `event.history.read` | Read event history |
 
 ### 감사 도메인(권한 3개)
 
-| 권한 | 설명 |
+| Permissions | Description |
 |------|------|
-| §루미§0§ | 감사 로그 읽기 |
-| §루미§0§ | 감사로그 검색 |
-| §루미§0§ | 감사 로그 내보내기 |
+| `audit.read` | Read audit log |
+| `audit.search` | Audit log search |
+| `audit.export` | Audit log export |
 
 ### 팩 도메인(8개 권한)
 
-| 권한 | 설명 |
+| Permissions | Description |
 |------|------|
-| §루미§0§ | 팩 목록 |
-| §루미§0§ | 팩 독서 |
-| §루미§0§ | 팩 설치 |
-| §루미§0§ | 팩 삭제 |
-| §루미§0§ | 팩 업데이트 |
-| §루미§0§ | 팩 승인 |
-| §루미§0§ | 팩 설정 읽기 |
-| §루미§0§ | 팩 설정 쓰기 |
+| `pack.list` | Pack list |
+| `pack.read` | Pack reading |
+| `pack.install` | Pack installation |
+| `pack.remove` | Delete pack |
+| `pack.update` | Pack update |
+| `pack.approve` | Pack approval |
+| `pack.config.read` | Read pack settings |
+| `pack.config.write` | Pack settings write |
 
 ### 비밀 도메인(4개 권한)
 
-| 권한 | 설명 |
+| Permissions | Description |
 |------|------|
-| §루미§0§ | 비밀 읽기 |
-| §루미§0§ | 비밀글 |
-| §루미§0§ | 비밀 삭제 |
-| §루미§0§ | 비밀 목록 |
+| `secret.read` | Secret read |
+| `secret.write` | Secret writing |
+| `secret.delete` | Secret deletion |
+| `secret.list` | Secret list |
 
 ### 커널 도메인(권한 5개)
 
-| 권한 | 설명 |
+| Permissions | Description |
 |------|------|
-| §루미§0§ | 커널 상태 읽기 |
-| §루미§0§ | 종료 |
-| §루미§0§ | 재부팅 |
-| §루미§0§ | 건강검진 |
-| §루미§0§ | 버전 정보 |
+| `kernel.status.read` | Read kernel state |
+| `kernel.shutdown` | Shutdown |
+| `kernel.restart` | Reboot |
+| `kernel.health` | Health check |
+| `kernel.version` | Version information |
 
 ### 일정 도메인(권한 5개)
 
-| 권한 | 설명 |
+| Permissions | Description |
 |------|------|
-| §루미§0§ | 일정 생성 |
-| §루미§0§ | 독서 일정 |
-| §루미§0§ | 업데이트 일정 |
-| §루미§0§ | 일정 삭제 |
-| §루미§0§ | 일정 목록 |
+| `schedule.create` | Schedule creation |
+| `schedule.read` | Schedule reading |
+| `schedule.update` | Schedule update |
+| `schedule.delete` | Delete schedule |
+| `schedule.list` | Schedule list |
 
 ---
 
 ## 권한 사전 설정
 
-| 프리셋 | 포함된 권한 | 사용법 |
+| Preset | Permissions included | Usage |
 |-----------|---------|------|
-| §루미§0§ | §루미§1§, §루미§2§, §루미§3§, §루미§4§ | 기본 채팅 |
-| §루미§0§ | §루미§1§ + §루미§2§, §루미§3§, §루미§4§, §루미§5§ | 전체 채팅 |
-| §루미§0§ | §루미§1§, §루미§2§, §루미§3§, §루미§4§, §루미§5§ | 코딩 |
-| §루미§0§ | §루미§1§, §루미§2§, §루미§3§, §루미§4§, §루미§5§ | 기본 에이전트 |
-| §루미§0§ | §루미§1§ + §루미§2§, §루미§3§, §루미§4§, §루미§5§ | 풀 에이전트 |
-| §루미§0§ | §루미§1§, §루미§2§, §루미§3§, §루미§4§ | 프런트엔드 |
-| §루미§0§ | §루미§1§, §루미§2§ | 읽기 전용 |
-| §루미§0§ | `*`(전체 권한) | 관리자 |
+| `preset.chat_basic` | `chat.conversation.*`, `chat.message.*`, `ai.completion`, `ai.stream` | Basic chat |
+| `preset.chat_full` | `preset.chat_basic` + `chat.search`, `chat.attachment.*`, `prompt.*`, `memory.short.*` | Full chat |
+| `preset.coding` | `file.workspace.*`, `terminal.*`, `git.*`, `ai.completion`, `ai.stream` | Coding |
+| `preset.agent_basic` | `agent.*`, `tool.invoke`, `tool.list`, `tool.schema.read`, `ai.*` | Basic agent |
+| `preset.agent_full` | `preset.agent_basic` + `file.*`, `terminal.*`, `net.*`, `memory.*` | Full agent |
+| `preset.frontend` | `frontend.*`, `event.*`, `config.read`, `config.theme.*` | Front end |
+| `preset.readonly` | `*.read`, `*.list` | Read-only |
+| `preset.admin` | `*` (Full privileges) | Administrator |
 
 ---
 
@@ -528,7 +520,7 @@ grants:
 
 다음은 기본값에 추가되지 않습니다. rumiai CLI 또는 명시적인 사용자 상호 작용이 필요합니다.
 
-§루미§0§, §루미§1§, §루미§2§, §루미§3§, §루미§4§, §루미§5§, §루미§6§
+`secret.write`, `secret.delete`, `kernel.shutdown`, `kernel.restart`, `pack.install`, `pack.remove`, `pack.approve`
 
 ---
 
@@ -538,7 +530,7 @@ grants:
 
 ### 핸들러 명명 규칙
 
-§루미§0§
+`pack_id.category.name`
 
 ```
 defaults.frontend.start        → defaults パック、frontend カテゴリ、start handler
@@ -550,114 +542,114 @@ some_pack.custom.my_handler    → 別パックの handler
 
 #### 프론트엔드(핸들러 3개)
 
-| 핸들러 | 필수 권한 | 설명 |
+| handler | Required permissions | Description |
 |---|---|---|
-| §루미§0§ | §루미§1§, §루미§2§, §루미§3§ | 전송 시작(http/stdio/uds) |
-| §루미§0§ | §루미§1§ | 운송 중지 |
-| §루미§0§ | §루미§1§ | 이벤트를 프런트 엔드로 보내기 |
+| `defaults.frontend.start` | `frontend.serve`, `frontend.bind`, `frontend.auth.manage` | Start transport (http/stdio/uds) |
+| `defaults.frontend.stop` | `frontend.serve` | Stop transport |
+| `defaults.frontend.emit` | `frontend.event.emit` | Send events to the front end |
 
 #### 채팅(핸들러 16명)
 
-| 핸들러 | 필수 권한 | 설명 |
+| handler | Required permissions | Description |
 |---|---|---|
-| §루미§0§ | §루미§1§ | 대화 생성 |
-| §루미§0§ | §루미§1§ | 대화 데이터 수집 |
-| §루미§0§ | §루미§1§ | 대화 목록 |
-| §루미§0§ | §루미§1§ | 대화 메타데이터 업데이트 |
-| §루미§0§ | §루미§1§ | 대화 삭제 |
-| §루미§0§ | §루미§1§ | 대화 내보내기 |
-| §루미§0§ | §루미§1§, §루미§2§ | 메시지 전송 + AI 응답 생성 |
-| §루미§0§ | §루미§1§, §루미§2§ | 스트리밍 응답 |
-| §루미§0§ | §루미§1§ | 메시지 추가(AI 무응답) |
-| §루미§0§ | §루미§1§ | 메시지 받기 |
-| §루미§0§ | §루미§1§ | 메시지 편집 |
-| §루미§0§ | §루미§1§ | 메시지 삭제 |
-| §루미§0§ | §루미§1§ | 대화 분기 |
-| §루미§0§ | §루미§1§ | 메시지 검색 |
-| §루미§0§ | §루미§1§ | 스트리밍 중지 |
-| §루미§0§ | §루미§1§, §루미§2§ | 반응 재생 |
+| `defaults.chat.create_conversation` | `chat.conversation.create` | Conversation creation |
+| `defaults.chat.get_conversation` | `chat.conversation.read` | Conversation data acquisition |
+| `defaults.chat.list_conversations` | `chat.conversation.list` | Conversation list |
+| `defaults.chat.update_conversation` | `chat.conversation.update` | Conversation metadata update |
+| `defaults.chat.delete_conversation` | `chat.conversation.delete` | Conversation deletion |
+| `defaults.chat.export_conversation` | `chat.conversation.export` | Conversation export |
+| `defaults.chat.send` | `chat.message.send`, `ai.completion` | Message sending + AI response generation |
+| `defaults.chat.stream` | `chat.message.stream`, `ai.stream` | Streaming response |
+| `defaults.chat.add_message` | `chat.message.send` | Add message (AI no response) |
+| `defaults.chat.get_message` | `chat.message.read` | Get message |
+| `defaults.chat.update_message` | `chat.message.edit` | Edit message |
+| `defaults.chat.delete_message` | `chat.message.delete` | Delete message |
+| `defaults.chat.branch` | `chat.conversation.branch` | Conversation branching |
+| `defaults.chat.search` | `chat.search` | Message search |
+| `defaults.chat.stop` | `chat.message.stop` | Stop streaming |
+| `defaults.chat.regenerate` | `chat.message.regenerate`, `ai.completion` | Response regeneration |
 
 #### 에이전트(핸들러 6명)
 
-| 핸들러 | 필수 권한 | 설명 |
+| handler | Required permissions | Description |
 |---|---|---|
-| §루미§0§ | §루미§1§, §루미§2§ | 에이전트 실행 |
-| §루미§0§ | §루미§1§ | 단계 승인 |
-| §루미§0§ | §루미§1§ | 단계 거부 |
-| §루미§0§ | §루미§1§ | 실행 취소 |
-| §루미§0§ | §루미§1§ | 지위 취득 |
-| §루미§0§ | §루미§1§ | 계획 세우기 |
+| `defaults.agent.execute` | `agent.execute`, `tool.invoke` | Agent execution |
+| `defaults.agent.approve` | `agent.step.approve` | Step approval |
+| `defaults.agent.reject` | `agent.step.reject` | Step Rejection |
+| `defaults.agent.cancel` | `agent.cancel` | Cancel execution |
+| `defaults.agent.status` | `agent.status.read` | Status acquisition |
+| `defaults.agent.plan` | `agent.plan.read` | Get a plan |
 
 #### 코딩(12개 핸들러)
 
-| 핸들러 | 필수 권한 | 설명 |
+| handler | Required permissions | Description |
 |---|---|---|
-| §루미§0§ | §루미§1§ | 파일 읽기 |
-| §루미§0§ | §루미§1§ | 파일 쓰기 |
-| §루미§0§ | §루미§1§ | 파일 생성 |
-| §루미§0§ | §루미§1§ | 파일 삭제 |
-| §루미§0§ | §루미§1§ | 파일 검색 |
-| §루미§0§ | §루미§1§ | 파일 목록 |
-| §루미§0§ | §루미§1§ | 명령 실행 |
-| §루미§0§ | §루미§1§ | 스트리밍 출력 |
-| §루미§0§ | §루미§1§ | 힘내 상태 |
-| §루미§0§ | §루미§1§ | 힘내 비교 |
-| §루미§0§ | §루미§1§ | 힘내 커밋 |
-| §루미§0§ | §루미§1§ | 힘내 푸시 |
+| `defaults.coding.file_read` | `file.workspace.read` | File reading |
+| `defaults.coding.file_write` | `file.workspace.write` | File writing |
+| `defaults.coding.file_create` | `file.create` | File creation |
+| `defaults.coding.file_delete` | `file.delete` | File deletion |
+| `defaults.coding.file_search` | `file.search` | File search |
+| `defaults.coding.file_list` | `file.list` | File list |
+| `defaults.coding.terminal_exec` | `terminal.execute` | Command execution |
+| `defaults.coding.terminal_stream` | `terminal.stream` | Streaming output |
+| `defaults.coding.git_status` | `git.status` | Git status |
+| `defaults.coding.git_diff` | `git.diff` | Git diff |
+| `defaults.coding.git_commit` | `git.commit` | Git commit |
+| `defaults.coding.git_push` | `git.push` | Git push |
 
 #### ai(9 핸들러)
 
-| 핸들러 | 필수 권한 | 설명 |
+| handler | Required permissions | Description |
 |---|---|---|
-| §루미§0§ | §루미§1§ | 텍스트 생성 |
-| §루미§0§ | §루미§1§ | 스트리밍 생성 |
-| §루미§0§ | §루미§1§ | 모델 목록 |
-| §루미§0§ | §루미§1§ | 공급자 목록 |
-| §루미§0§ | §루미§1§ | 임베딩 벡터 생성 |
-| §루미§0§ | §루미§1§ | 이미지 생성 |
-| §루미§0§ | §루미§1§ | 이미지 분석 |
-| §루미§0§ | §루미§1§ | 오디오 전사 |
-| §루미§0§ | §루미§1§ | 음성 합성 |
+| `defaults.ai.complete` | `ai.completion` | Text generation |
+| `defaults.ai.stream` | `ai.stream` | Streaming generation |
+| `defaults.ai.models` | `ai.model.list` | Model list |
+| `defaults.ai.providers` | `ai.provider.list` | List of providers |
+| `defaults.ai.embed` | `ai.embedding` | Embedding vector generation |
+| `defaults.ai.image_gen` | `ai.image.generate` | Image generation |
+| `defaults.ai.image_analyze` | `ai.image.analyze` | Image analysis |
+| `defaults.ai.transcribe` | `ai.audio.transcribe` | Audio transcription |
+| `defaults.ai.tts` | `ai.audio.synthesize` | Speech synthesis |
 
 #### 도구(핸들러 5개)
 
-| 핸들러 | 필수 권한 | 설명 |
+| handler | Required permissions | Description |
 |---|---|---|
-| §루미§0§ | §루미§1§ | 도구 실행 |
-| §루미§0§ | §루미§1§ | 도구 목록 |
-| §루미§0§ | §루미§1§ | 스키마 읽기 |
-| §루미§0§ | §루미§1§ | MCP 서버 연결 |
-| §루미§0§ | §루미§1§ | MCP 도구 목록 |
+| `defaults.tool.invoke` | `tool.invoke` | Tool execution |
+| `defaults.tool.list` | `tool.list` | Tool list |
+| `defaults.tool.schema` | `tool.schema.read` | Schema reading |
+| `defaults.tool.mcp_connect` | `tool.mcp.connect` | MCP server connection |
+| `defaults.tool.mcp_list` | `tool.mcp.list` | MCP tools list |
 
 #### 프롬프트(4 핸들러)
 
-| 핸들러 | 필수 권한 | 설명 |
+| handler | Required permissions | Description |
 |---|---|---|
-| §루미§0§ | §루미§1§ | 신속한 렌더링 |
-| §루미§0§ | §루미§1§ | 프롬프트 목록 |
-| §루미§0§ | §루미§1§ | 프롬프트 생성 |
-| §루미§0§ | §루미§1§, §루미§2§ | 시스템 신속한 관리 |
+| `defaults.prompt.render` | `prompt.render` | Prompt rendering |
+| `defaults.prompt.list` | `prompt.list` | Prompt list |
+| `defaults.prompt.create` | `prompt.create` | Prompt creation |
+| `defaults.prompt.system` | `prompt.system.read`, `prompt.system.write` | System prompt management |
 
 #### 메모리(핸들러 5개)
 
-| 핸들러 | 필수 권한 | 설명 |
+| handler | Required permissions | Description |
 |---|---|---|
-| §루미§0§ | §루미§1§ | 장기 기억 저장 |
-| §루미§0§ | §루미§1§, §루미§2§ | 장기 기억 검색/읽기 |
-| §루미§0§ | §루미§1§ | 프로젝트 메모리 읽기 |
-| §루미§0§ | §루미§1§ | 벡터 보존 |
-| §루미§0§ | §루미§1§ | 벡터 검색 |
+| `defaults.memory.store` | `memory.long.write` | Long-term memory storage |
+| `defaults.memory.recall` | `memory.long.read`, `memory.long.search` | Long-term memory search/read |
+| `defaults.memory.project_context` | `memory.project.read` | Read project memory |
+| `defaults.memory.vector_store` | `memory.vector.store` | Vector preservation |
+| `defaults.memory.vector_query` | `memory.vector.query` | Vector search |
 
 #### 미디어(6 핸들러)
 
-| 핸들러 | 필수 권한 | 설명 |
+| handler | Required permissions | Description |
 |---|---|---|
-| §루미§0§ | §루미§1§ | 이미지 읽기 |
-| §루미§0§ | §루미§1§ | 이미지 변환 |
-| §루미§0§ | §루미§1§ | 문서분석 |
-| §루미§0§ | §루미§1§ | 클립보드 읽기 |
-| §루미§0§ | §루미§1§ | 클립보드 쓰기 |
-| §루미§0§ | §루미§1§ | 스크린샷 |
+| `defaults.media.image_read` | `media.image.read` | Image reading |
+| `defaults.media.image_transform` | `media.image.transform` | Image conversion |
+| `defaults.media.doc_parse` | `media.document.parse` | Document analysis |
+| `defaults.media.clipboard_read` | `media.clipboard.read` | Clipboard reading |
+| `defaults.media.clipboard_write` | `media.clipboard.write` | Clipboard writing |
+| `defaults.media.screenshot` | `media.screenshot` | Screenshot |
 
 ### 핸들러를 사용하는 다른 Pack의 예
 
@@ -774,22 +766,22 @@ user_data/
 
 ## 문서 목록
 
-| 파일 | 사이즈 | 내용 |
+| File | Size | Contents |
 |---------|--------|------|
-| §루미§0§ | 3.9KB | 기본값 전체 아키텍처 |
-| §루미§0§ | 41KB | 에이전트 디자인 |
-| §루미§0§ | 53KB | AI 클라이언트 디자인 |
-| §루미§0§ | 43KB | 채팅 모듈 디자인 |
-| §루미§0§ | 36KB | 흐름 엔진 설계 |
-| §루미§0§ | 32KB | 신속한 디자인 |
-| §루미§0§ | 35KB | 도구 모듈 설계 |
-| §루미§0§ | - | 프론트엔드 디자인 (개정 예정) |
-| §루미§0§ | - | 위젯 사양(신규 예정) |
-| §루미§0§ | - | 테마 사양(신규 예정) |
-| §루미§0§ | 3.2KB | AI 모델 프로필 |
-| §루미§0§ | 3.4KB | 갈등해결 |
-| §루미§0§ | 4.2KB | UI 및 레이아웃 |
-| §루미§0§ | 9.2KB | 기능 종속성 해결 |
+| `docs/architecture_defaults.md` | 3.9KB | defaults Overall architecture |
+| `docs/agent.md` | 41KB | Agent design |
+| `docs/ai_client.md` | 53KB | AI client design |
+| `docs/chat.md` | 43KB | Chat module design |
+| `docs/flow.md` | 36KB | Flow Engine design |
+| `docs/prompt.md` | 32KB | Prompt design |
+| `docs/tool.md` | 35KB | Tool module design |
+| `docs/frontend.md` | - | Front-end design (scheduled for revision) |
+| `docs/widget.md` | - | Widget specifications (newly planned) |
+| `docs/theme.md` | - | Theme specifications (newly planned) |
+| `docs/profiles_and_models.md` | 3.2KB | AI model profile |
+| `docs/conflict_resolution.md` | 3.4KB | Conflict resolution |
+| `docs/ui_and_layout.md` | 4.2KB | UI and layout |
+| `docs/capability/dependency-resolution.md` | 9.2KB | capability dependency resolution |
 
 ---
 

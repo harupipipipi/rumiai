@@ -13,15 +13,7 @@
 
 ## 2. 設計哲学
 
-**宣言的**: テーマはコードではありません。 YAML に値を記述するだけです。実行ロジックは含まれていません。
-
-**トークンベース**: テーマは、色とサイズの値を直接記述するのではなく、名前付きトークン (`color.primary`、`spacing.md` など) として定義されます。アセットはトークン名を検索し、テーマは実際の値を解決します。
-
-**バックエンドに依存しない**: テーマはフロントエンド層 (shell.html のテーマ エンジン) によってのみ読み取られます。バックエンド ハンドラー、ツール、フローはテーマの存在を認識しません。 Emit_widget によって送信されるウィジェット JSON はテーマに依存しないデータであり、テーマ エンジンはレンダリング時に外観を適用します。
-
-**完全に置き換え可能**: 初期セットアップ中にデフォルトで配置されたデフォルトのテーマは、ユーザーまたはパックが自由に上書きまたは置き換えることができます。
-
-**継承可能**: テーマは `extends` を使用して別のテーマを継承し、相違点のみを定義できます。
+**宣言的**: テーマはコードではありません。 YAML に値を記述するだけです。実行ロジックは含まれません。**トークンベース**: テーマは、色とサイズの値を直接記述するのではなく、名前付きトークン (`color.primary`、`spacing.md` など) として定義されます。アセットはトークン名を検索し、テーマは実際の値を解決します。**バックエンドに依存しない**: テーマはフロントエンド層 (shell.html のテーマ エンジン) によってのみ読み取られます。バックエンド ハンドラー、ツール、フローはテーマの存在を認識しません。 Emit_widget によって送信されるウィジェット JSON はテーマに依存しないデータであり、テーマ エンジンはレンダリング時にその外観を適用します。**完全に置き換え可能**: 初期セットアップ中にデフォルトで配置されたデフォルトのテーマは、ユーザーまたはパックによって自由に上書きまたは置き換えることができます。**継承可能**: テーマは `extends` で別のテーマを継承し、相違点のみを定義できます。
 
 
 ## 3. ディレクトリ構造
@@ -646,19 +638,9 @@ padding: "{spacing.md}"                       # spacing.md の値に展開され
 
 ### 5.2 トークンのカテゴリ
 
-**color** — 色の値。 CSSの色表現(hex、rgba、hsl)を用いて記述します。意味名(`primary`、`success`、`error`など)で定義し、特定のカラーコードを割り当てます。
+**color** — 色の値。 CSSの色表現(hex、rgba、hsl)を用いて記述します。セマンティック名 (`primary`、`success`、`error` など) で定義し、特定のカラー コードを割り当てます。**typography** — フォント関連の値。 `font_family` は CSS フォントファミリー文字列です。 `font_size_*` は px 単位の整数です。 `font_weight_*` は CSS のフォントウェイト値です。 `line_height_*` は単位のない比率です。
 
-**タイポグラフィ** — フォント関連の値。 `font_family` は CSS フォントファミリー文字列です。 `font_size_*` は px 単位の整数です。 `font_weight_*` は CSS のフォントウェイト値です。 `line_height_*` は単位のない比率です。
-
-**spacing** — マージンまたはギャップの値。ピクセル単位の整数。名前は相対的なサイズです: xs、sm、md、lg、xl、2xl。
-
-**半径** — コーナー半径の値。ピクセル単位の整数。 `full`は9999pxの錠剤の種類を表します。
-
-**shadow** — ボックスのシャドウ値。 CSS ボックスシャドウ文字列。
-
-**transition** — 遷移値。 CSS トランジションの短縮文字列。
-
-**z_index** — スタック順序の値。整数。
+**spacing** — マージンまたはギャップの値。ピクセル単位の整数。名前は相対的なサイズです: xs、sm、md、lg、xl、2xl。**radius** — コーナー半径値。ピクセル単位の整数。 `full` は、9999px.**shadow** — ボックス シャドウ値を持つ錠剤の種類を表します。 CSS box-shadow string.**transition** — トランジション値。 CSS トランジションの短縮表現 string.**z_index** — スタック順序の値。整数。
 
 
 ## 6. アニメーションの定義
@@ -677,7 +659,7 @@ animations:
     iteration: "infinite"
 ```
 
-`keyframes` では、CSS の @keyframes ルールがそのまま記述されています。 `duration` は CSS アニメーションの継続時間です。 `timing`はアニメーションタイミング機能です。 `iteration` はアニメーションの反復回数です。
+`keyframes` では、CSS の @keyframes ルールをそのまま記述します。 `duration` は CSS アニメーションの継続時間です。 `timing`はアニメーションタイミング関数です。 `iteration` はアニメーションの反復回数です。
 
 ### 6.2 ウィジェットからの参照
 
@@ -696,7 +678,7 @@ animations:
 
 ### 6.3 カスタムアニメーション
 
-新しいアニメーションをテーマ ファイルの `animations` セクションに追加するだけで、新しいアニメーションを定義できます。アセット JS がアニメーション名を参照する場合に適用されます。デフォルト側では変更は必要ありません。
+新しいアニメーションをテーマ ファイルの `animations` セクションに追加するだけで定義できます。アセット JS がアニメーション名を参照する場合に適用されます。デフォルト側では変更は必要ありません。
 
 
 ## 7. ウィジェットのスタイル定義
@@ -740,7 +722,7 @@ button:
 
 ### 7.3 状態 (インジケーターのみ)
 
-インジケーター ウィジェットの `state` フィールドに状態があります。テーマは、各状態の色とアニメーションを定義します。
+インジケーター ウィジェットの `state` フィールドには状態があります。テーマは、各状態の色とアニメーションを定義します。
 
 ```yaml
 indicator:
@@ -765,21 +747,21 @@ indicator:
 
 テーマは、テーマ エンジンが `style_hint` を CSS に変換する方法を定義します。デフォルトのテーマ エンジンは、デフォルトで次のヒント キーを認識します。
 
-|ヒントキー |説明 | CSSへの変換 |
+| Hint key | Description | Conversion to CSS |
 |---|---|---|
-| `variant` |ウィジェット バリアントを選択 |バリアント スタイルを適用する |
-| `color` |トークン名による色の指定 | `color: var(--color-{value})` |
-| `size` |サイズ xs/sm/md/lg/xl | `font-size: var(--font-size-{value})` |
-| `weight` |フォントの太さ | `font-weight: var(--font-weight-{value})` |
-| `align` |テキストの配置 | `text-align: {value}` |
-| `padding` |トークン名によるパディング | `padding: var(--spacing-{value})` |
-| `hidden` |隠す | `display: none` |
+| `variant` | Select Widget variant | Apply variant style |
+| `color` | Color specification by token name | `color: var(--color-{value})` |
+| `size` | Size of xs/sm/md/lg/xl | `font-size: var(--font-size-{value})` |
+| `weight` | Font weight | `font-weight: var(--font-weight-{value})` |
+| `align` | Text alignment | `text-align: {value}` |
+| `padding` | Padding with token name | `padding: var(--spacing-{value})` |
+| `hidden` | Hide | `display: none` |
 
 テーマに独自のヒント キーを追加することもできます。テーマ エンジンによって認識されないキーは無視されます。
 
 ### 7.5 カスタムウィジェットスタイル
 
-Custom Widget の `custom_type` をキーとして使用し、`widgets.custom` セクションでスタイルを定義します。
+Custom Widget の `custom_type` をキーとして使用して、`widgets.custom` セクションでスタイルを定義します。
 
 ```yaml
 widgets:
@@ -875,10 +857,10 @@ tokens:
 ### 10.1 起動時
 
 1.shell.html のテーマ エンジンは `user_data/config.json` から `theme_id` を読み取ります。
-2. `user_data/themes/{theme_id}.theme.yaml`をロードする
-3. `extends`が指定されている場合、親テーマを再帰的に読み込みます
+2. ロード`user_data/themes/{theme_id}.theme.yaml`
+3. `extends` が指定されている場合、親テーマを再帰的に読み込みます
 4. トークン参照を展開します (`{category.key}`)
-5. CSS変数を`:root`に設定します。
+5. CSS 変数を `:root` に設定します。
 6. アニメーションキーフレームを挿入する
 7. ウィジェットのスタイル定義をメモリに保存する
 
@@ -1004,7 +986,7 @@ YAML 解析が失敗した場合は、フォールバック テーマを使用�
 
 ### 13.3 未定義のトークンが参照された場合
 
-アセットが `var(--color-nonexistent)` を参照する場合、CSS 仕様に従って `initial` の値が使用されます。テーマ エンジンは未定義のトークン参照を検出し、コンソールに警告を発行します。
+Asset が `var(--color-nonexistent)` を参照する場合、CSS 仕様に従って `initial` 値が使用されます。テーマ エンジンは未定義のトークン参照を検出し、コンソールに警告を発行します。
 
 ### 13.4 ウィジェットのスタイルが未定義の場合
 
@@ -1015,6 +997,6 @@ YAML 解析が失敗した場合は、フォールバック テーマを使用�
 
 テーマ エンジンはロード時に以下を検証します。
 
-必須フィールド: `theme_id`、`name`、`version`。必要なトークン: `color.background`、`color.surface`、`color.text`、`color.border`、`color.primary`、`typography.font_family`、`typography.font_family_mono`、`typography.font_size_base`、`spacing.md`、`radius.md`。循環参照: `{category.key}` のトークン間の参照に循環はありますか?循環継承: `extends` チェーン内に循環はありますか?
+必須フィールド: `theme_id`、`name`、`version`。必要なトークン: `color.background`、`color.surface`、`color.text`、`color.border`、`color.primary`、`typography.font_family`、`typography.font_family_mono`、`typography.font_size_base`、`spacing.md`、`radius.md`。循環参照: トークン間の `{category.key}` 参照に循環はありますか?循環継承: `extends` チェーン内に循環はありますか?
 
 必須フィールドまたはトークンが欠落している場合、フォールバック テーマは欠落している値のみを補完し、警告を発行します。テーマを完全に拒否するのではなく、可能な限り機能するようにします。

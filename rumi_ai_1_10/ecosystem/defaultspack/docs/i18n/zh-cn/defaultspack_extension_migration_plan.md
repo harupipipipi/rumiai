@@ -2,7 +2,7 @@
 [EN](../../defaultspack_extension_migration_plan.md) | [JP](../ja/defaultspack_extension_migration_plan.md) | [KR](../ko/defaultspack_extension_migration_plan.md) | [CN](./defaultspack_extension_migration_plan.md)
 <!-- docs-i18n-links:end -->
 
-#defaultspack扩展迁移计划（PR集成版）
+# defaultspack扩展迁移计划（PR集成版）
 
 ## 背景和目的
 
@@ -25,16 +25,16 @@
 
 ## 扩展类别（基础）
 
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
+- `llm_provider`
+- `llm_model`
+- `prompt`
+- `tool`
+- `chat_mode`
+- `agent_mode`
+- `knowledge_backend`
+- `transport`
+- `ui_surface`
+- `policy`
 
 ## 目录基础
 
@@ -148,7 +148,7 @@ Supabase、登录、帐户创建或用户管理进入 defaultspack 范围。
   成为真理的第二个来源；
 - `stub/default`是有保证的无钥匙模型默认值；
 - 云提供商自动注册是通过选择加入
-  §鲁米§0§；
+  `RUMI_DEFAULTSPACK_ENABLE_CLOUD_PROVIDERS`；
 - 本地提供商在后端和前端被视为无密钥提供商
   目录；
 - 敏感编码HTTP路由通过本地守卫；

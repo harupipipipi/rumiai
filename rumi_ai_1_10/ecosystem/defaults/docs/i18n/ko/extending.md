@@ -2,7 +2,7 @@
 [EN](../../extending.md) | [JP](../ja/extending.md) | [KR](./extending.md) | [CN](../zh-cn/extending.md)
 <!-- docs-i18n-links:end -->
 
-#defaults 팩 확장 가이드
+# defaults 팩 확장 가이드
 
 기본 팩에 새로운 기능을 추가하는 절차를 설명합니다.
 

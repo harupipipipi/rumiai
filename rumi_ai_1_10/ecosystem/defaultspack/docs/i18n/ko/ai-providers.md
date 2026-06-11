@@ -16,18 +16,18 @@ defaultspack의 ai_client는 매니페스트 우선으로 공급자를 확인합
 
 | 제공자 ID | 설명 |
 |---|---|
-| §루미§0§ | OpenAI API(GPT-4o, GPT-4o-mini, o3, o4-mini 등) |
-| §루미§0§ | Anthropic API(Claude Opus 4, Sonnet 4, Haiku 3 등) |
-| §루미§0§ | Google Gemini API(Gemini 2.5 Pro, Gemini 2.5 Flash 등) |
-| §루미§0§ | OpenRouter API(defaultspack에서는 `tencent/hy3-preview:free`만) |
-| §루미§0§ | Gitlawb OpenGateway(MiMo에 대한 고정 허용 목록. 모든 모델에 필요한 API 키) |
-| §루미§0§ | Groq OpenAI 호환 API |
-| §루미§0§ | Cerebras OpenAI 호환 API |
-| §루미§0§ | NVIDIA NIM OpenAI 호환 API |
-| §루미§0§ | Moonshot AI OpenAI 호환 API |
-| §루미§0§ | Xiaomi MiMo 직접 API 지역 카탈로그 항목(초기 상태를 실행할 수 없음) |
-| §루미§0§ | 테스트 스텁. 고정 응답 반환 |
-| §루미§0§ | 루미의 자체 메타 제공자(파이프라인, 라우팅, 평가) |
+| `openai` | OpenAI API(GPT-4o, GPT-4o-mini, o3, o4-mini 등) |
+| `anthropic` | Anthropic API(Claude Opus 4, Sonnet 4, Haiku 3 등) |
+| `google` | Google Gemini API(Gemini 2.5 Pro, Gemini 2.5 Flash 등) |
+| `openrouter` | OpenRouter API(defaultspack에서는 `tencent/hy3-preview:free`만) |
+| `gitlawb-opengateway` | Gitlawb OpenGateway(MiMo에 대한 고정 허용 목록. 모든 모델에 필요한 API 키) |
+| `groq` | Groq OpenAI 호환 API |
+| `cerebras` | Cerebras OpenAI 호환 API |
+| `nvidia` | NVIDIA NIM OpenAI 호환 API |
+| `moonshotai` | Moonshot AI OpenAI 호환 API |
+| `xiaomi-mimo` | Xiaomi MiMo 직접 API 지역 카탈로그 항목(초기 상태를 실행할 수 없음) |
+| `stub` | 테스트 스텁. 고정 응답 반환 |
+| `rumi` | 루미의 자체 메타 제공자(파이프라인, 라우팅, 평가) |
 
 
 ## 3. 각 공급자별 환경변수 설정
@@ -86,11 +86,11 @@ GITLAWB_OPENGATEWAY_BASE_URL=https://opengateway.gitlawb.com/v1
 
 | 모델명 | 특징 |
 |---|---|
-| §루미§0§ | 추론을 위한 MiMo V2.5 Pro |
-| §루미§0§ | 빠른 MiMo V2 플래시 |
-| §루미§0§ | 이미지 입력 ​​기능이 있는 MiMo V2 Omni |
-| §루미§0§ | 추론을 위한 MiMo V2 Pro |
-| §루미§0§ | 추론을 위한 MiMo V2.5 |
+| `gitlawb-opengateway/mimo-v2.5-pro` | 추론을 위한 MiMo V2.5 Pro |
+| `gitlawb-opengateway/mimo-v2-flash` | 빠른 MiMo V2 플래시 |
+| `gitlawb-opengateway/mimo-v2-omni` | 이미지 입력 ​​기능이 있는 MiMo V2 Omni |
+| `gitlawb-opengateway/mimo-v2-pro` | 추론을 위한 MiMo V2 Pro |
+| `gitlawb-opengateway/mimo-v2.5` | 추론을 위한 MiMo V2.5 |
 
 `mimo` 시스템은 Gitlawb OpenGateway의 OpenAI 호환 `POST /v1/chat/completions`으로 전송되며 유일한 차이점은 `model`입니다. `mimo-v2-omni` 이미지 인식은 OpenAI 호환 `content` 배열 형식을 사용합니다. 런타임은 게이트웨이 호환성을 위해 브라우저 사용자 에이전트를 할당합니다.
 
@@ -143,46 +143,46 @@ MiMo 토큰 계획은 공급자 카탈로그에서 `subscription_plans`으로 �
 
 | 모델명 | 특징 |
 |---|---|
-| §루미§0§ | 기함. 다중 모드 호환 |
-| §루미§0§ | 경량, 고속, 저비용 |
-| §루미§0§ | 추론 전문화(추론 토큰) |
-| §루미§0§ | 추론 전문/라이트 버전 |
-| §루미§0§ | 최신 세대(사용 가능한 경우) |
-| §루미§0§ | 최신 세대/경량 버전 |
-| §루미§0§ | 최신 세대 및 가장 가벼운 |
+| `gpt-4o` | 기함. 다중 모드 호환 |
+| `gpt-4o-mini` | 경량, 고속, 저비용 |
+| `o3` | 추론 전문화(추론 토큰) |
+| `o4-mini` | 추론 전문/라이트 버전 |
+| `gpt-4.1` | 최신 세대(사용 가능한 경우) |
+| `gpt-4.1-mini` | 최신 세대/경량 버전 |
+| `gpt-4.1-nano` | 최신 세대 및 가장 가벼운 |
 
 ### 인류학
 
 | 모델명 | 특징 |
 |---|---|
-| §루미§0§ | 최고의 성능. 확장된 사고 대응 |
-| §루미§0§ | 균형 잡힌 유형. 확장된 사고 대응 |
-| §루미§0§ | 빠른 속도와 저렴한 비용 |
+| `claude-opus-4-20250514` | 최고의 성능. 확장된 사고 대응 |
+| `claude-sonnet-4-20250514` | 균형 잡힌 유형. 확장된 사고 대응 |
+| `claude-haiku-3-20250307` | 빠른 속도와 저렴한 비용 |
 
 ### 구글
 
 | 모델명 | 특징 |
 |---|---|
-| §루미§0§ | 기함. 생각의 대응 |
-| §루미§0§ | 빠른 속도와 저렴한 비용 |
-| §루미§0§ | 안정 버전 |
+| `gemini-2.5-pro` | 기함. 생각의 대응 |
+| `gemini-2.5-flash` | 빠른 속도와 저렴한 비용 |
+| `gemini-2.0-flash` | 안정 버전 |
 
 ### 스텁
 
 | 모델명 | 특징 |
 |---|---|
-| §루미§0§ | 입력을 있는 그대로 반환 |
-| §루미§0§ | 고정 텍스트 반환 |
-| §루미§0§ | 항상 오류를 반환합니다 |
+| `stub/echo` | 입력을 있는 그대로 반환 |
+| `stub/fixed` | 고정 텍스트 반환 |
+| `stub/error` | 항상 오류를 반환합니다 |
 
 ### 루미
 
 | 모델명 | 특징 |
 |---|---|
-| §루미§0§ | 여러 모델의 파이프라인 실행 |
-| §루미§0§ | 업무에 따른 자동 모델 선택 |
-| §루미§0§ | 에이전트의 혼합물 |
-| §루미§0§ | 생성된 결과의 자동 평가 및 순위 재지정 |
+| `rumi/pipeline` | 여러 모델의 파이프라인 실행 |
+| `rumi/router` | 업무에 따른 자동 모델 선택 |
+| `rumi/moa` | 에이전트의 혼합물 |
+| `rumi/eval` | 생성된 결과의 자동 평가 및 순위 재지정 |
 
 
 ## 5. 모델 사양 방법
@@ -292,13 +292,13 @@ user_data/shared/ai_models/
 
 | 특징 | 오픈AI | 인류학 | 구글 | 스텁 | 루미 |
 |---|---|---|---|---|---|
-| §루미§0§ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| §루미§0§ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| §루미§0§ | ✅ | ❌ | ✅ | ❌ | ❌ |
-| §루미§0§ | ✅ (달이) | ❌ | ✅ (이미지) | ❌ | ❌ |
-| §루미§0§ | ✅ (비전) | ✅ (비전) | ✅ (비전) | ❌ | ✅ |
-| §루미§0§ | ✅ (속삭임) | ❌ | ✅ | ❌ | ❌ |
-| §루미§0§ | ✅ | ❌ | ✅ | ❌ | ❌ |
+| `defaults.ai.complete` | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `defaults.ai.stream` | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `defaults.ai.embed` | ✅ | ❌ | ✅ | ❌ | ❌ |
+| `defaults.ai.image_gen` | ✅ (달이) | ❌ | ✅ (이미지) | ❌ | ❌ |
+| `defaults.ai.image_analyze` | ✅ (비전) | ✅ (비전) | ✅ (비전) | ❌ | ✅ |
+| `defaults.ai.transcribe` | ✅ (속삭임) | ❌ | ✅ | ❌ | ❌ |
+| `defaults.ai.tts` | ✅ | ❌ | ✅ | ❌ | ❌ |
 | 도구 호출 | ✅ | ✅ | ✅ | ✅ | ✅ |
 | 사고/추론 | ✅ (o3 시리즈) | ✅ (확장된 사고) | ✅ (제미니 2.5) | ❌ | ✅ |
 | 비전 | ✅ | ✅ | ✅ | ❌ | ✅ |

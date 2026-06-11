@@ -8,21 +8,13 @@
 
 Widget 是一种统一的数据格式，允许后端声明“我希望这个数据像这样显示。”Widget 是纯 JSON 数据，不是 UI 库。
 
-后端中的每个代码（处理程序、工具的 handler.py、提示符、流程节点）都会生成 Widget JSON 并使用`emit_widget` 将其发送出去。前端Asset接收这个JSON并根据主题进行渲染。
+后端中的每个代码（处理程序、工具的 handler.py、提示符、Flow 节点）都会生成 Widget JSON 并使用 `emit_widget` 发送出去。前端Asset接收这个JSON并根据主题进行渲染。
 
 小部件没有领域知识。没有“聊天小部件”或“代理小部件”。仅定义通用显示基元，例如文本、代码块、图像、表格和进度条。显示什么以及如何显示由生成小部件的一方（工具、处理程序等）决定，而如何显示则由主题决定。
 
 ## 2.设计理念
 
-**纯数据**：Widget 是一个 JSON 字典。不包含渲染逻辑或事件处理程序。绘图是前端的职责。
-
-**与域无关**：Widget 类型是通用显示基元，例如“文本”、“图像”和“表格”。没有针对特定领域（聊天、代理等）的专门类型。
-
-**可嵌套**：小部件可以放置在小部件内部。将代码块和文本放入卡片中，将多个按钮排列成一行等。
-
-**回退假设**：如果前端无法绘制某种Widget类型，它将回退到文本表示。自定义小部件有一个明确的后备小部件。在 CLI 环境中，所有小部件都会回退到文本表示形式。
-
-**与主题分离**：小部件仅声明“显示什么”。主题决定了它的呈现方式（颜色、字体、动画、圆角、阴影等）。小部件可以使用 style_hint 将提示传递给主题，但主题可以忽略这一点。
+**纯数据**：Widget 是一个 JSON 字典。不包含渲染逻辑或事件处理程序。绘图是前端的责任。**领域无关**：Widget 类型是通用的显示原语，例如“文本”、“图像”和“表格”。没有针对特定领域（聊天、代理等）的专门类型。**可嵌套**：小部件可以放置在小部件内部。将CodeBlock和Text放在Card中，将多个Button排列成一行等。**回退假设**：如果前端无法绘制某种Widget类型，则会回退到文本表示。自定义小部件有一个明确的后备小部件。在 CLI 环境中，所有小部件都会回退到文本表示。**与主题分离**：小部件仅声明“显示内容”。主题决定了它的呈现方式（颜色、字体、动画、圆角、阴影等）。小部件可以使用 style_hint 将提示传递给主题，但主题可以忽略这一点。
 
 ## 3. Widget JSON 规范
 
@@ -39,12 +31,12 @@ Widget 是一种统一的数据格式，允许后端声明“我希望这个数�
 }
 ```
 
-|物业 |类型 |必填 |描述 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §鲁米§0§|字符串|必填 |小部件类型。下面列出的类型之一 |
-| §鲁米§0§|字符串|可选 |小部件标识符。用于在流式更新期间更新特定的小部件 |
-| §鲁米§0§|字典 |可选 |主题的提示。主题可能会也可能不会被解释 |
-| §鲁米§0§|字典 |任何|任何元数据。前端可以忽略|
+| `type` | string | Required | Widget type. One of the types listed below |
+| `id` | string | optional | Widget identifier. Used to update specific widgets during streaming updates |
+| `style_hint` | dict | optional | hints to the theme. The theme may or may not be interpreted |
+| `meta` | dict | any | any metadata. You can ignore the front end |
 
 ### 3.2 JSON表达式示例
 
@@ -86,9 +78,9 @@ Widget 是一种统一的数据格式，允许后端声明“我希望这个数�
 }
 ```
 
-|物业 |类型 |必填 |描述 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §鲁米§0§|字符串|必填 |要显示的文本 |
+| `text` | string | Required | Text to display |
 
 CLI 后备：按原样输出。
 
@@ -106,12 +98,12 @@ CLI 后备：按原样输出。
 }
 ```
 
-|物业 |类型 |必填 |描述 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §鲁米§0§|字符串|任何|编程语言|
-| §鲁米§0§|字符串|必填 |代码正文 |
-| §鲁米§0§|字符串|可选|文件名（用于显示）|
-| §鲁米§0§|整数 |可选 |起始行号。默认 1 |
+| `language` | string | any | programming language |
+| `content` | string | Required | Code body |
+| `filename` | string | Optional | File name (for display) |
+| `line_start` | integer | optional | starting line number. Default 1 |
 
 CLI 后备：纯文本输出。
 
@@ -128,11 +120,11 @@ CLI 后备：纯文本输出。
 }
 ```
 
-|物业 |类型 |必填 |描述 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §鲁米§0§|字符串|必填 |变更前内容 |
-| §鲁米§0§|字符串|必填 |新内容 |
-| §鲁米§0§|字符串|任意|文件名 |
+| `old_content` | string | Required | Contents before change |
+| `new_content` | string | Required | New content |
+| `filename` | string | arbitrary | file name |
 
 CLI 后备：统一 diff 格式。
 
@@ -150,12 +142,12 @@ CLI 后备：统一 diff 格式。
 }
 ```
 
-|物业 |类型 |必填 |描述 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §鲁米§0§|字符串|必填 | Base64 数据或 URL |
-| §鲁米§0§|字符串|任何|替代文本|
-| §鲁米§0§|整数 |任何|宽度（像素）|
-| §鲁米§0§|整数 |任意|高度（像素）|
+| `src` | string | Required | base64 data or URL |
+| `alt` | string | any | alternative text |
+| `width` | integer | any | width (pixels) |
+| `height` | integer | arbitrary | height (pixels) |
 
 CLI 后备：`[Image: {alt} {width}x{height}]`
 
@@ -172,11 +164,11 @@ CLI 后备：`[Image: {alt} {width}x{height}]`
 }
 ```
 
-|物业 |类型 |必填 |描述 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §鲁米§0§|字符串|必填 | Base64 数据 |
-| §鲁米§0§|字符串|任何 |截图来源网址|
-| §鲁米§0§|字符串|可选 |页面标题 |
+| `src` | string | Required | base64 data |
+| `url` | string | Any | Screenshot source URL |
+| `title` | string | optional | page title |
 
 CLI 后备：`[Screenshot: {title} - {url}]`
 
@@ -194,12 +186,12 @@ CLI 后备：`[Screenshot: {title} - {url}]`
 }
 ```
 
-|物业 |类型 |必填 |描述 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §鲁米§0§|字符串|必填 |进度标签|
-| §鲁米§0§|数量 |必填 |当前值|
-| §鲁米§0§|数量 |必填 |总价值|
-| §鲁米§0§|字符串|可选| §鲁米§1§、§鲁米§2§、§鲁米§3§。默认`"running"` |
+| `label` | string | Required | Progress label |
+| `current` | number | Required | Current value |
+| `total` | number | Required | Total value |
+| `state` | string | Optional | `"running"`, `"success"`, `"error"`. Default `"running"` |
 
 CLI 后备：`[████░░░░░░] 30% Reading file...`
 
@@ -216,11 +208,11 @@ CLI 后备：`[████░░░░░░] 30% Reading file...`
 }
 ```
 
-|物业 |类型 |必填 |描述 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §鲁米§0§|字符串|任何|执行的命令 |
-| §鲁米§0§|字符串|必填 |输出内容 |
-| §鲁米§0§|整数 |可选 |退出代码 |
+| `command` | string | any | executed command |
+| `output` | string | Required | Output content |
+| `exit_code` | integer | optional | exit code |
 
 CLI 后备：`$ {command}\n{output}`
 
@@ -239,10 +231,10 @@ CLI 后备：`$ {command}\n{output}`
 }
 ```
 
-|物业 |类型 |必填 |描述 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §鲁米§0§|列表[字符串] |必填 |列标题|
-| §鲁米§0§|列表[列表] |必填 |行数据|
+| `headers` | list[string] | Required | Column header |
+| `rows` | list[list] | Required | Row data |
 
 CLI 后备：ASCII 表。
 
@@ -259,11 +251,11 @@ CLI 后备：ASCII 表。
 }
 ```
 
-|物业 |类型 |必填 |描述 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §鲁米§0§|字符串|必填 | §鲁米§1§、§鲁米§2§、§鲁米§3§、§鲁米§4§|
-| §鲁米§0§|列表[字符串] |必填 |标签|
-| §鲁米§0§|列表[数字] |必填 |数据|
+| `chart_type` | string | Required | `"bar"`, `"line"`, `"pie"`, `"scatter"` |
+| `labels` | list[string] | Required | Label |
+| `data` | list[number] | Required | Data |
 
 CLI 后备：数字摘要文本。
 
@@ -284,9 +276,9 @@ CLI 后备：数字摘要文本。
 }
 ```
 
-|物业 |类型 |必填 |描述 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §鲁米§0§|列表[字典] |必填|树节点。每个节点都有`name`，`type`（`"file"`或`"dir"`），`children`（可选）|
+| `tree` | list[dict] | required | tree node. Each node has `name`, `type`(`"file"` or `"dir"`), `children` (optional) |
 
 CLI 后备：缩进文本。
 
@@ -301,9 +293,9 @@ CLI 后备：缩进文本。
 }
 ```
 
-|物业 |类型 |必填 |描述 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §鲁米§0§|字符串|必填 |降价文本 |
+| `content` | string | Required | Markdown text |
 
 CLI 后备：纯文本。
 
@@ -319,10 +311,10 @@ CLI 后备：纯文本。
 }
 ```
 
-|物业 |类型 |必填 |描述 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §鲁米§0§|字符串|必填 | Base64 数据或 URL |
-| §鲁米§0§|整数 |任意|播放时间（毫秒）|
+| `src` | string | Required | base64 data or URL |
+| `duration` | integer | arbitrary | playback time (ms) |
 
 CLI 后备：`[Audio: {duration}ms]`
 
@@ -338,10 +330,10 @@ CLI 后备：`[Audio: {duration}ms]`
 }
 ```
 
-|物业 |类型 |必填 |描述 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §鲁米§0§|字符串|必填 | Base64 数据或 URL |
-| §鲁米§0§|整数 |任意|播放时间（毫秒）|
+| `src` | string | Required | base64 data or URL |
+| `duration` | integer | arbitrary | playback time (ms) |
 
 CLI 后备：`[Video: {duration}ms]`
 
@@ -358,11 +350,11 @@ CLI 后备：`[Video: {duration}ms]`
 }
 ```
 
-|物业 |类型 |必填 |描述 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §鲁米§0§|数量 |必填|纬度 |
-| §鲁米§0§|数量 |必填|经度 |
-| §鲁米§0§|整数 |可选 |缩放级别。默认 13 |
+| `lat` | number | required | latitude |
+| `lng` | number | required | longitude |
+| `zoom` | integer | optional | zoom level. Default 13 |
 
 CLI 后备：`[Map: {lat}, {lng}]`
 
@@ -383,11 +375,11 @@ CLI 后备：`[Map: {lat}, {lng}]`
 }
 ```
 
-|物业 |类型 |必填 |描述 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §鲁米§0§|字符串|可选 |占位符 |
-| §鲁米§0§|字符串|任意|初始值|
-| §鲁米§0§|布尔 |任何|多行。默认 false |
+| `placeholder` | string | optional | placeholder |
+| `value` | string | arbitrary | initial value |
+| `multiline` | boolean | any | multiple lines. Default false |
 
 #### 按钮
 
@@ -402,11 +394,11 @@ CLI 后备：`[Map: {lat}, {lng}]`
 }
 ```
 
-|物业 |类型 |必填 |描述 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §鲁米§0§|字符串|必填 |按钮标签|
-| §鲁米§0§|字符串|必填 |单击时发出的操作名称 |
-| §鲁米§0§|字符串|可选| §鲁米§1§、§鲁米§2§、§鲁米§3§。默认`"primary"` |
+| `label` | string | Required | Button label |
+| `action` | string | Required | Action name issued on click |
+| `variant` | string | Optional | `"primary"`, `"secondary"`, `"danger"`. Default `"primary"` |
 
 #### 选择
 
@@ -424,11 +416,11 @@ CLI 后备：`[Map: {lat}, {lng}]`
 }
 ```
 
-|物业 |类型 |必填 |描述 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §鲁米§0§|列表[字典] |必填 |选择。每个元素都有`label`、`value` |
-| §鲁米§0§|任何|任何|选定值 |
-| §鲁米§0§|布尔 |任何 |多项选择。默认 false |
+| `options` | list[dict] | Required | Choices. Each element has `label`, `value` |
+| `value` | any | any | selected value |
+| `multiple` | boolean | Any | Multiple selection. Default false |
 
 #### 切换
 
@@ -442,10 +434,10 @@ CLI 后备：`[Map: {lat}, {lng}]`
 }
 ```
 
-|物业 |类型 |必填 |描述 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §鲁米§0§|字符串|必填 |标签|
-| §鲁米§0§|布尔 |任何 |当前状态。默认 false |
+| `label` | string | Required | Label |
+| `value` | boolean | Any | Current state. Default false |
 
 #### 滑块
 
@@ -461,12 +453,12 @@ CLI 后备：`[Map: {lat}, {lng}]`
 }
 ```
 
-|物业 |类型 |必填 |描述 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §鲁米§0§|数量 |必填 |最小值|
-| §鲁米§0§|数量 |必填 |最大|
-| §鲁米§0§|数量 |任意|当前值|
-| §鲁米§0§|数量 |任何|步。默认 1 |
+| `min` | number | Required | Minimum value |
+| `max` | number | Required | Maximum |
+| `value` | number | arbitrary | current value |
+| `step` | number | any | step. Default 1 |
 
 #### 复选框
 
@@ -480,10 +472,10 @@ CLI 后备：`[Map: {lat}, {lng}]`
 }
 ```
 
-|物业 |类型 |必填 |描述 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §鲁米§0§|字符串|必填 |标签|
-| §鲁米§0§|布尔 |可选|检查状态。默认 false |
+| `label` | string | Required | Label |
+| `checked` | boolean | Optional | Checked state. Default false |
 
 ### 4.3 布局类型（6种）
 
@@ -503,9 +495,9 @@ CLI 后备：`[Map: {lat}, {lng}]`
 }
 ```
 
-|物业 |类型 |必填 |描述 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §鲁米§0§|列表[小部件] |必填 |子部件数组 |
+| `children` | list[Widget] | Required | Array of child widgets |
 
 #### 行
 
@@ -522,12 +514,12 @@ CLI 后备：`[Map: {lat}, {lng}]`
 }
 ```
 
-|物业 |类型 |必填 |描述 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §鲁米§0§|列表[小部件] |必填 |子部件 |
-| §鲁米§0§|整数 |任何|子元素之间的间隙（像素）|
+| `children` | list[Widget] | Required | Child Widget |
+| `gap` | integer | any | gap between child elements (pixels) |
 
-####专栏
+#### 专栏
 
 垂直排列子部件。
 
@@ -539,10 +531,10 @@ CLI 后备：`[Map: {lat}, {lng}]`
 }
 ```
 
-|物业 |类型 |必填 |描述 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §鲁米§0§|列表[小部件] |必填 |子部件 |
-| §鲁米§0§|整数 |任何|子元素之间的间隙（像素）|
+| `children` | list[Widget] | Required | Child Widget |
+| `gap` | integer | any | gap between child elements (pixels) |
 
 #### 标签
 
@@ -558,9 +550,9 @@ CLI 后备：`[Map: {lat}, {lng}]`
 }
 ```
 
-|物业 |类型 |必填 |描述 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §鲁米§0§|列表[字典] |必填 |每个选项卡。与`label`（字符串）和`content`（小部件）|
+| `tabs` | list[dict] | Required | Each tab. with `label`(string) and `content`(Widget) |
 
 #### 可折叠
 
@@ -577,13 +569,13 @@ CLI 后备：`[Map: {lat}, {lng}]`
 }
 ```
 
-|物业 |类型 |必填 |描述 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §鲁米§0§|字符串|必填 |折叠标签|
-| §鲁米§0§|布尔 |可选|初始状态。默认 false |
-| §鲁米§0§|列表[小部件] |必填 |折叠中的子部件 |
+| `label` | string | Required | Folding label |
+| `default_open` | boolean | Optional | Initial state. Default false |
+| `children` | list[Widget] | Required | Child Widget in Collapse |
 
-####卡
+#### 卡
 
 卡片包含三个部分：页眉、正文和页脚。
 
@@ -596,11 +588,11 @@ CLI 后备：`[Map: {lat}, {lng}]`
 }
 ```
 
-|物业 |类型 |必填 |描述 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §鲁米§0§|小部件 |可选|标题|
-| §鲁米§0§|小部件 |任何 |身体|
-| §鲁米§0§|小部件 |可选|页脚|
+| `header` | Widget | Optional | Header |
+| `body` | Widget | Any | Body |
+| `footer` | Widget | Optional | Footer |
 
 ### 4.4 流媒体类型（2种）
 
@@ -619,9 +611,9 @@ CLI 后备：`[Map: {lat}, {lng}]`
 }
 ```
 
-|物业 |类型 |必填 |描述 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §鲁米§0§|字典[字符串，字典] |必填 |以状态名称作为键的定义。每个州都有`animation`（字符串，可选）和`label`（字符串）|
+| `states` | dict[string, dict] | Required | Definition with state name as key. Each state has `animation`(string, optional) and `label`(string) |
 
 #### 指标
 
@@ -636,11 +628,11 @@ CLI 后备：`[Map: {lat}, {lng}]`
 }
 ```
 
-|物业 |类型 |必填 |描述 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §鲁米§0§|字符串|必填 |标签|
-| §鲁米§0§|字符串|必填 | §鲁米§1§、§鲁米§2§、§鲁米§3§、§鲁米§4§|
-| §鲁米§0§|字符串|可选|主题中定义的动画名称 |
+| `label` | string | Required | Label |
+| `state` | string | Required | `"running"`, `"success"`, `"error"`, `"waiting"` |
+| `animation` | string | Optional | Animation name defined in the theme |
 
 ### 4.5 定制（1 种）
 
@@ -664,13 +656,13 @@ CLI 后备：`[Map: {lat}, {lng}]`
 }
 ```
 
-|物业 |类型 |必填 |描述 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §鲁米§0§|字符串|必填 |自定义类型标识符 |
-| §鲁米§0§|小部件 |必填 |如果不存在渲染器则后备小部件 |
-| §鲁米§0§|字典 |可选|传递给自定义渲染器的数据 |
+| `custom_type` | string | Required | Custom type identifier |
+| `fallback` | Widget | Required | Fallback Widget if no renderer exists |
+| `data` | dict | Optional | Data to pass to custom renderer |
 
-自定义小部件渲染器可以放置在`user_data/widget_renderers/`中。
+自定义Widget渲染器可以放置在`user_data/widget_renderers/`中。
 
 ```
 user_data/widget_renderers/
@@ -693,7 +685,7 @@ entry: "renderer.js"
 
 ## 5.rumi_widgets — Python 帮助程序库
 
-默认放置在`lib/rumi_widgets/`中的Python帮助器。您可以通过在handler.py或tool的handler.py中导入来使用它。用法是可选的，相当于直接返回 JSON 字典。
+默认放置在 `lib/rumi_widgets/` 中的 Python 帮助程序。您可以通过在handler.py或tool的handler.py中导入来使用它。用法是可选的，相当于直接返回 JSON 字典。
 
 ### 5.1 地点
 
@@ -728,7 +720,7 @@ from rumi_widgets import (
 
 ### 5.3 使用方法
 
-每个类在其构造函数中接收 Widget 属性，并在 `.to_dict()` 中返回一个 JSON 字典。如果直接将其传递给`emit_widget`，则无需调用`.to_dict()`（emit_widget在内部调用它）。
+每个类在其构造函数中接收 Widget 属性，并在 `.to_dict()` 中返回一个 JSON 字典。如果直接传递给`emit_widget`，则不需要调用`.to_dict()`（emit_widget内部调用它）。
 
 ```python
 # クラスで構築
@@ -772,7 +764,7 @@ class Widget:
 
 ## 6. 通过emit_widget发送
 
-小部件使用工具上下文 API 的通用原语`emit_widget` 发送。
+小部件是使用工具上下文 API 的通用原语 `emit_widget` 发送的。
 
 ```python
 # tool の handler.py
@@ -798,7 +790,7 @@ def run(params, context):
     }
 ```
 
-emit_widget 将部分进度的 Widget 实时发送到前端。返回`widget`字段是将显示为最终结果的小部件。
+emit_widget 将部分进度的 Widget 实时发送到前端。返回 `widget` 字段是将显示为最终结果的小部件。
 
 emit_widget 发送的 Widget 以 Widget JSON 的形式存储在 message.stream.data 消息的数据中并到达前端。
 
@@ -822,17 +814,17 @@ emit_widget 发送的 Widget 以 Widget JSON 的形式存储在 message.stream.d
 
 ### 7.1 小部件渲染器
 
-前端的shell.html有一个内置的Widget渲染器。 Widget 渲染器查看 Widget JSON 的`type`字段并调用相应的绘图函数。
+前端的shell.html有一个内置的Widget渲染器。 Widget 渲染器查看 Widget JSON 的 `type` 字段并调用相应的绘图函数。
 
 绘图函数是在 shell 级别提供的，而不是在资源的 iframe 内提供的。 Asset的JS调用`window.renderWidget(widgetJson, targetElement)`来绘制小部件。
 
 ### 7.2 未知类型
 
-如果 Widget 渲染器无法识别`type`，它将按以下顺序回退。
+如果 Widget 渲染器无法识别 `type`，它将按以下顺序回退。
 
-1.如果`user_data/widget_renderers/`有自定义渲染器，请使用它
-2. 如果类型为`"custom"`且`fallback`存在，则绘制后备小部件
-3. 如果这些都不适用，则将文本显示为`[Unknown widget: {type}]`
+1. 如果`user_data/widget_renderers/`有自定义渲染器，请使用它
+2. 如果类型为`"custom"`并且`fallback`存在，则绘制后备小部件
+3. 如果这些都不适用，则将文本显示为 `[Unknown widget: {type}]`
 
 ### 7.3 主题合作
 
@@ -863,7 +855,7 @@ widgets:
         padding: "{spacing.sm}"
 ```
 
-小部件的`style_hint`用作选择主题变体等的提示。例如，如果它是`style_hint: {"variant": "compact"}`，则将应用主题的`card.variants.compact`。主题可能会忽略此提示。
+Widget的`style_hint`用作选择主题变体等的提示。例如，如果它是`style_hint: {"variant": "compact"}`，则将应用主题的`card.variants.compact`。主题可能会忽略此提示。
 
 有关主题详细信息，请参阅 theme.md。
 
@@ -871,37 +863,37 @@ widgets:
 
 在 CLI 环境中，所有小部件都会回退到文本表示形式。每个小部件类型的后备表达式如下。
 
-|类型 | CLI 表达式 |
+| type | CLI expression |
 |---|---|
-| §鲁米§0§|按原样输出 |
-| §鲁米§0§|纯文本 |
-| §鲁米§0§|统一差异|
-| §鲁米§0§| §鲁米§1§ |
-| §鲁米§0§| §鲁米§1§ |
-| §鲁米§0§| §鲁米§1§ |
-| §鲁米§0§| §鲁米§1§ |
-| §鲁米§0§| ASCII 表 |
-| §鲁米§0§|数值总结|
-| §鲁米§0§|缩进文本|
-| §鲁米§0§|纯文本 |
-| §鲁米§0§| §鲁米§1§ |
-| §鲁米§0§| §鲁米§1§ |
-| §鲁米§0§| §鲁米§1§ |
-| §鲁米§0§| §鲁米§1§ |
-| §鲁米§0§| §鲁米§1§ |
-| §鲁米§0§| §鲁米§1§ |
-| §鲁米§0§| §鲁米§1§ |
-| §鲁米§0§| §鲁米§1§ |
-| §鲁米§0§| §鲁米§1§ |
-| §鲁米§0§|按顺序输出子项 |
-| §鲁米§0§|水平输出子项，以`  ` | 分隔
-| §鲁米§0§|带换行符垂直输出子项 |
-| §鲁米§0§|每个选项卡上的`--- {label} ---\n{content}`输出 |
-| §鲁米§0§| §鲁米§1§ |
-| §鲁米§0§| §鲁米§1§ |
-| §鲁米§0§| §鲁米§1§ |
-| §鲁米§0§| §鲁米§1§ |
-| §鲁米§0§|后备小部件的 CLI 表示 |
+| `text` | Output as is |
+| `code_block` | Plain text |
+| `diff` | unified diff |
+| `image` | `[Image: {alt} {width}x{height}]` |
+| `screenshot` | `[Screenshot: {title} - {url}]` |
+| `progress` | `[████░░░░░░] 30% {label}` |
+| `terminal` | `$ {command}\n{output}` |
+| `table` | ASCII table |
+| `chart` | Numerical summary |
+| `file_tree` | Indented text |
+| `markdown` | Plain text |
+| `audio` | `[Audio: {duration}ms]` |
+| `video` | `[Video: {duration}ms]` |
+| `map` | `[Map: {lat}, {lng}]` |
+| `input` | `[Input: {placeholder}]` |
+| `button` | `[{label}]` |
+| `select` | `[Select: {options}]` |
+| `toggle` | `[{label}: {value}]` |
+| `slider` | `[{min}-{max}: {value}]` |
+| `checkbox` | `[{checked ? "x" : " "}] {label}` |
+| `container` | Output children in order |
+| `row` | Output children horizontally, separated by `  ` |
+| `column` | Output children vertically with line breaks |
+| `tabs` | `--- {label} ---\n{content}` output on each tab |
+| `collapsible` | `▸ {label}\n{children}` |
+| `card` | `[{header}]\n{body}\n{footer}` |
+| `stream` | `[{current_state.label}]` |
+| `indicator` | `[{state}] {label}` |
+| `custom` | CLI representation of fallback widget |
 ```
 
 これで完全な widget.md の内容。
@@ -950,7 +942,7 @@ Widget型一覧:
 
 表示系（14種）:
 - Text
-- CodeBlock  
+- CodeBlock
 - Diff
 - Image
 - Screenshot
@@ -1034,34 +1026,26 @@ widget.md に必要な要素:
 
 Widget 是一种统一的数据格式，允许后端声明“我希望这个数据像这样显示。”Widget 是纯 JSON 数据，不是 UI 库。
 
-后端中的任何代码（工具、处理程序、流程节点中的 handler.py）都会生成 Widget JSON 并将其在上下文的`emit_widget`中发送出去。前端接收到这个JSON并根据主题进行渲染。
+后端中的任何代码（工具、处理程序、Flow 节点中的 handler.py）都会生成 Widget JSON 并将其在上下文的`emit_widget`中发送出去。前端接收到这个JSON并根据主题进行渲染。
 
 小部件没有领域知识。仅定义通用显示基元，例如文本、代码块、图像、表格和进度条。显示什么、如何显示是由生成widget的一方决定的，而如何显示则是由主题决定的。
 
 
 ## 2.设计理念
 
-**纯数据**：Widget 是一个 JSON 字典。不包含渲染逻辑、事件处理程序或样式定义。绘图是前端的职责。
-
-**与领域无关**：Widget 类型是通用原语，例如“文本”、“图像”和“表格”。没有特定于域的类型，例如“聊天消息小部件”或“代理状态小部件”。
-
-**可嵌套**：小部件可以放置在小部件内部。在卡片主体中插入代码块、在行中排列多个按钮、在选项卡的每个选项卡中放置不同的小部件等。
-
-**回退假设**：如果前端无法绘制某种Widget类型，它将回退到文本表示。自定义小部件有一个明确的后备小部件。在 CLI 环境中，所有小部件都会回退到文本表示形式。
-
-**与主题分离**：小部件仅声明“显示什么”。主题决定了它的呈现方式。小部件可以使用`style_hint`向主题传递提示，但主题可以忽略这一点。
+**纯数据**：Widget 是一个 JSON 字典。不包含渲染逻辑、事件处理程序或样式定义。绘图是前端的责任。**领域无关**：Widget 类型是通用原语，例如“文本”、“图像”和“表格”。没有特定于域的类型，例如“聊天消息小部件”或“代理状态小部件”。**可嵌套**：小部件可以放置在小部件内。在Card的body中插入CodeBlock、在Row中排列多个Button、在Tabs的每个选项卡中放置不同的Widget等。**回退假设**：如果前端无法绘制某种Widget类型，则会回退到文本表示。自定义小部件有一个明确的后备小部件。在 CLI 环境中，所有小部件都会回退到文本表示。**与主题分离**：小部件仅声明“显示内容”。主题决定了它的呈现方式。小部件可以使用 `style_hint` 将提示传递给主题，但主题可以忽略这一点。
 
 
 ## 3. 基本属性
 
 所有小部件都具有的通用属性。
 
-|物业 |类型 |必填 |描述 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §鲁米§0§|字符串|必填 |小部件类型。第 4 节 | 中列出的任何类型
-| §鲁米§0§|字符串|可选 |标识符。用于在流式更新期间替换特定小部件 |
-| §鲁米§0§|字典 |可选 |主题的提示。主题可能会也可能不会被解释 |
-| §鲁米§0§|字典 |任何|任何元数据。前端可以忽略|
+| `type` | string | Required | Widget type. Any of the types listed in Section 4 |
+| `id` | string | optional | identifier. Used to replace specific widgets during streaming updates |
+| `style_hint` | dict | optional | hints to the theme. The theme may or may not be interpreted |
+| `meta` | dict | any | any metadata. You can ignore the front end |
 
 ```json
 {
@@ -1090,9 +1074,9 @@ Widget 是一种统一的数据格式，允许后端声明“我希望这个数�
 { "type": "text", "text": "Hello, world" }
 ```
 
-|物业 |类型 |必填 |描述 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §鲁米§0§|字符串|必填 |显示文字|
+| `text` | string | Required | Display text |
 
 CLI：按原样输出。
 
@@ -1110,12 +1094,12 @@ CLI：按原样输出。
 }
 ```
 
-|物业 |类型 |必填 |描述 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §鲁米§0§|字符串|任何|语言名称 |
-| §鲁米§0§|字符串|必填 |代码正文 |
-| §鲁米§0§|字符串|任意|文件名 |
-| §鲁米§0§|整数 |可选 |起始行号。默认 1 |
+| `language` | string | any | language name |
+| `content` | string | Required | Code body |
+| `filename` | string | arbitrary | file name |
+| `line_start` | integer | optional | starting line number. Default 1 |
 
 CLI：纯文本。
 
@@ -1132,11 +1116,11 @@ CLI：纯文本。
 }
 ```
 
-|物业 |类型 |必填 |描述 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §鲁米§0§|字符串|必填 |变更前 |
-| §鲁米§0§|字符串|必填 |变更后|
-| §鲁米§0§|字符串|任意|文件名 |
+| `old_content` | string | Required | Before change |
+| `new_content` | string | Required | After change |
+| `filename` | string | arbitrary | file name |
 
 CLI：统一差异。
 
@@ -1154,12 +1138,12 @@ CLI：统一差异。
 }
 ```
 
-|物业 |类型 |必填 |描述 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §鲁米§0§|字符串|必填 | Base64 数据或 URL |
-| §鲁米§0§|字符串|任何|替代文本|
-| §鲁米§0§|整数 |任意|宽度|
-| §鲁米§0§|整数 |任意|高度|
+| `src` | string | Required | base64 data or URL |
+| `alt` | string | any | alternative text |
+| `width` | integer | arbitrary | width |
+| `height` | integer | arbitrary | height |
 
 CLI：`[Image: {alt} {width}x{height}]`
 
@@ -1176,11 +1160,11 @@ CLI：`[Image: {alt} {width}x{height}]`
 }
 ```
 
-|物业 |类型 |必填 |描述 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §鲁米§0§|字符串|必填 | Base64 数据 |
-| §鲁米§0§|字符串|任何|原始网址 |
-| §鲁米§0§|字符串|任意|标题 |
+| `src` | string | Required | base64 data |
+| `url` | string | any | original URL |
+| `title` | string | arbitrary | title |
 
 CLI：`[Screenshot: {title} - {url}]`
 
@@ -1198,12 +1182,12 @@ CLI：`[Screenshot: {title} - {url}]`
 }
 ```
 
-|物业 |类型 |必填 |描述 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §鲁米§0§|字符串|必填 |标签|
-| §鲁米§0§|数量 |必填 |当前值|
-| §鲁米§0§|数量 |必填 |总价值|
-| §鲁米§0§|字符串|可选 | §鲁米§1§ / §鲁米§2§ / §鲁米§3§。默认`"running"` |
+| `label` | string | Required | Label |
+| `current` | number | Required | Current value |
+| `total` | number | Required | Total value |
+| `state` | string | optional | `"running"` / `"success"` / `"error"`. Default `"running"` |
 
 CLI：`[████░░░░░░] 30% Reading...`
 
@@ -1220,11 +1204,11 @@ CLI：`[████░░░░░░] 30% Reading...`
 }
 ```
 
-|物业 |类型 |必填 |描述 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §鲁米§0§|字符串|任意|执行命令 |
-| §鲁米§0§|字符串|必填 |输出|
-| §鲁米§0§|整数 |可选 |退出代码 |
+| `command` | string | arbitrary | execution command |
+| `output` | string | Required | Output |
+| `exit_code` | integer | optional | exit code |
 
 CLI：`$ {command}\n{output}`
 
@@ -1240,10 +1224,10 @@ CLI：`$ {command}\n{output}`
 }
 ```
 
-|物业 |类型 |必填 |描述 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §鲁米§0§|列表[字符串] |必填 |列标题|
-| §鲁米§0§|列表[列表] |必填 |行数据|
+| `headers` | list[string] | Required | Column header |
+| `rows` | list[list] | Required | Row data |
 
 CLI：ASCII 表。
 
@@ -1260,11 +1244,11 @@ CLI：ASCII 表。
 }
 ```
 
-|物业 |类型 |必填 |描述 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §鲁米§0§|字符串|必填 | §鲁米§1§ / §鲁米§2§ / §鲁米§3§ / §鲁米§4§ |
-| §鲁米§0§|列表[字符串] |必填 |标签|
-| §鲁米§0§|列表[数字] |必填 |数据|
+| `chart_type` | string | Required | `"bar"` / `"line"` / `"pie"` / `"scatter"` |
+| `labels` | list[string] | Required | Label |
+| `data` | list[number] | Required | Data |
 
 CLI：数值摘要。
 
@@ -1284,9 +1268,9 @@ CLI：数值摘要。
 }
 ```
 
-|物业 |类型 |必填 |描述 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §鲁米§0§|列表[字典] |必填 |节点数组。每个节点都是`name`（字符串），`type`（`"file"`或`"dir"`），`children`（列表，可选）|
+| `tree` | list[dict] | Required | Node array. Each node is `name`(string), `type`(`"file"` or `"dir"`), `children`(list, optional) |
 
 CLI：缩进文本。
 
@@ -1298,9 +1282,9 @@ CLI：缩进文本。
 { "type": "markdown", "content": "# Title\n\n**bold**" }
 ```
 
-|物业 |类型 |必填 |描述 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §鲁米§0§|字符串|必填 |降价文本 |
+| `content` | string | Required | Markdown text |
 
 CLI：纯文本。
 
@@ -1312,10 +1296,10 @@ CLI：纯文本。
 { "type": "audio", "src": "base64 or URL", "duration": 5000 }
 ```
 
-|物业 |类型 |必填 |描述 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §鲁米§0§|字符串|必填 | Base64 或 URL |
-| §鲁米§0§|整数 |任何|毫秒 |
+| `src` | string | Required | base64 or URL |
+| `duration` | integer | any | milliseconds |
 
 CLI：`[Audio: {duration}ms]`
 
@@ -1327,10 +1311,10 @@ CLI：`[Audio: {duration}ms]`
 { "type": "video", "src": "base64 or URL", "duration": 30000 }
 ```
 
-|物业 |类型 |必填 |描述 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §鲁米§0§|字符串|必填 | Base64 或 URL |
-| §鲁米§0§|整数 |任何|毫秒 |
+| `src` | string | Required | base64 or URL |
+| `duration` | integer | any | milliseconds |
 
 CLI：`[Video: {duration}ms]`
 
@@ -1342,18 +1326,18 @@ CLI：`[Video: {duration}ms]`
 { "type": "map", "lat": 35.6812, "lng": 139.7671, "zoom": 15 }
 ```
 
-|物业 |类型 |必填 |描述 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §鲁米§0§|数量 |必填|纬度 |
-| §鲁米§0§|数量 |必填|经度 |
-| §鲁米§0§|整数 |可选 |缩放级别。默认 13 |
+| `lat` | number | required | latitude |
+| `lng` | number | required | longitude |
+| `zoom` | integer | optional | zoom level. Default 13 |
 
 CLI：`[Map: {lat}, {lng}]`
 
 
 ### 4.2 控制系统（6种）
 
-接受用户输入。用户操作的结果由Asset的JS使用`emit_event`返回到后端。
+接受用户输入。用户操作的结果由Asset的JS使用`emit_event`返回给后端。
 
 ---
 
@@ -1363,11 +1347,11 @@ CLI：`[Map: {lat}, {lng}]`
 { "type": "input", "placeholder": "Type here...", "value": "", "multiline": false }
 ```
 
-|物业 |类型 |必填 |描述 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §鲁米§0§|字符串|可选 |占位符 |
-| §鲁米§0§|字符串|任意|初始值|
-| §鲁米§0§|布尔 |任何|多行。默认 false |
+| `placeholder` | string | optional | placeholder |
+| `value` | string | arbitrary | initial value |
+| `multiline` | boolean | any | multiple lines. Default false |
 
 ---
 
@@ -1377,11 +1361,11 @@ CLI：`[Map: {lat}, {lng}]`
 { "type": "button", "label": "Execute", "action": "run_task", "variant": "primary" }
 ```
 
-|物业 |类型 |必填 |描述 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §鲁米§0§|字符串|必填 |标签|
-| §鲁米§0§|字符串|必填 |单击操作名称 |
-| §鲁米§0§|字符串|可选 | §鲁米§1§ / §鲁米§2§ / §鲁米§3§。默认`"primary"` |
+| `label` | string | Required | Label |
+| `action` | string | Required | Click action name |
+| `variant` | string | optional | `"primary"` / `"secondary"` / `"danger"`. Default `"primary"` |
 
 ---
 
@@ -1396,11 +1380,11 @@ CLI：`[Map: {lat}, {lng}]`
 }
 ```
 
-|物业 |类型 |必填 |描述 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §鲁米§0§|列表[字典] |必填 |每个元素都是`label`（字符串），`value`（任何）|
-| §鲁米§0§|任何|任何|当前值|
-| §鲁米§0§|布尔 |任何 |多项选择。默认 false |
+| `options` | list[dict] | Required | Each element is `label`(string), `value`(any) |
+| `value` | any | any | current value |
+| `multiple` | boolean | Any | Multiple selection. Default false |
 
 ---
 
@@ -1410,10 +1394,10 @@ CLI：`[Map: {lat}, {lng}]`
 { "type": "toggle", "label": "Enable", "value": false }
 ```
 
-|物业 |类型 |必填 |描述 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §鲁米§0§|字符串|必填 |标签|
-| §鲁米§0§|布尔 |可选|默认 false |
+| `label` | string | Required | Label |
+| `value` | boolean | Optional | Default false |
 
 ---
 
@@ -1423,12 +1407,12 @@ CLI：`[Map: {lat}, {lng}]`
 { "type": "slider", "min": 0, "max": 100, "value": 50, "step": 1 }
 ```
 
-|物业 |类型 |必填 |描述 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §鲁米§0§|数量 |必填 |最小值|
-| §鲁米§0§|数量 |必填 |最大|
-| §鲁米§0§|数量 |任意|当前值|
-| §鲁米§0§|数量 |任何|步。默认 1 |
+| `min` | number | Required | Minimum value |
+| `max` | number | Required | Maximum |
+| `value` | number | arbitrary | current value |
+| `step` | number | any | step. Default 1 |
 
 ---
 
@@ -1438,10 +1422,10 @@ CLI：`[Map: {lat}, {lng}]`
 { "type": "checkbox", "label": "I agree", "checked": false }
 ```
 
-|物业 |类型 |必填 |描述 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §鲁米§0§|字符串|必填 |标签|
-| §鲁米§0§|布尔 |可选|默认 false |
+| `label` | string | Required | Label |
+| `checked` | boolean | Optional | Default false |
 
 
 ### 4.3 布局类型（6种）
@@ -1456,9 +1440,9 @@ CLI：`[Map: {lat}, {lng}]`
 { "type": "container", "children": [{"type": "text", "text": "..."}, {"type": "code_block", "content": "..."}] }
 ```
 
-|物业 |类型 |必填 |描述 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §鲁米§0§|列表[小部件] |必填 |子部件 |
+| `children` | list[Widget] | Required | Child Widget |
 
 ---
 
@@ -1468,23 +1452,23 @@ CLI：`[Map: {lat}, {lng}]`
 { "type": "row", "children": [...], "gap": 8 }
 ```
 
-|物业 |类型 |必填 |描述 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §鲁米§0§|列表[小部件] |必填 |子部件 |
-| §鲁米§0§|整数 |任意|间隔（像素）|
+| `children` | list[Widget] | Required | Child Widget |
+| `gap` | integer | arbitrary | interval (px) |
 
 ---
 
-####专栏
+#### 专栏
 
 ```json
 { "type": "column", "children": [...], "gap": 8 }
 ```
 
-|物业 |类型 |必填 |描述 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §鲁米§0§|列表[小部件] |必填 |子部件 |
-| §鲁米§0§|整数 |任意|间隔（像素）|
+| `children` | list[Widget] | Required | Child Widget |
+| `gap` | integer | arbitrary | interval (px) |
 
 ---
 
@@ -1500,9 +1484,9 @@ CLI：`[Map: {lat}, {lng}]`
 }
 ```
 
-|物业 |类型 |必填 |描述 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §鲁米§0§|列表[字典] |必填 |每个元素都是`label`（字符串），`content`（小部件）|
+| `tabs` | list[dict] | Required | Each element is `label`(string), `content`(Widget) |
 
 ---
 
@@ -1517,15 +1501,15 @@ CLI：`[Map: {lat}, {lng}]`
 }
 ```
 
-|物业 |类型 |必填 |描述 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §鲁米§0§|字符串|必填 |标签|
-| §鲁米§0§|布尔 |可选|默认 false |
-| §鲁米§0§|列表[小部件] |必填 |子部件 |
+| `label` | string | Required | Label |
+| `default_open` | boolean | Optional | Default false |
+| `children` | list[Widget] | Required | Child Widget |
 
 ---
 
-####卡
+#### 卡
 
 ```json
 {
@@ -1536,11 +1520,11 @@ CLI：`[Map: {lat}, {lng}]`
 }
 ```
 
-|物业 |类型 |必填 |描述 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §鲁米§0§|小部件 |可选|标题|
-| §鲁米§0§|小部件 |任何 |身体|
-| §鲁米§0§|小部件 |可选|页脚|
+| `header` | Widget | Optional | Header |
+| `body` | Widget | Any | Body |
+| `footer` | Widget | Optional | Footer |
 
 
 ### 4.4 流媒体类型（2种）
@@ -1562,9 +1546,9 @@ CLI：`[Map: {lat}, {lng}]`
 }
 ```
 
-|物业 |类型 |必填 |描述 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §鲁米§0§|字典[字符串，字典] |必填 |州名 → `label`(字符串) + `animation`(字符串，可选) |
+| `states` | dict[string, dict] | Required | State name → `label`(string) + `animation`(string, optional) |
 
 ---
 
@@ -1581,18 +1565,18 @@ CLI：`[Map: {lat}, {lng}]`
 }
 ```
 
-|物业 |类型 |必填 |描述 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §鲁米§0§|字符串|必填 |标签|
-| §鲁米§0§|字符串|必填 | §鲁米§1§ / §鲁米§2§ / §鲁米§3§ / §鲁米§4§ |
-| §鲁米§0§|字符串|可选|主题定义动画名称 |
+| `label` | string | Required | Label |
+| `state` | string | Required | `"running"` / `"success"` / `"error"` / `"waiting"` |
+| `animation` | string | Optional | Theme-defined animation name |
 
 
 ### 4.5 定制（1 种）
 
 #### 自定义
 
-不适合任何预定义类型的显示。如果`user_data/widget_renderers/`有渲染器，则完成专用绘制，否则绘制`fallback`。
+不适合任何预定义类型的显示。如果`user_data/widget_renderers/`有渲染器，则进行专用绘制，否则绘制`fallback`。
 
 ```json
 {
@@ -1603,11 +1587,11 @@ CLI：`[Map: {lat}, {lng}]`
 }
 ```
 
-|物业 |类型 |必填 |描述 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §鲁米§0§|字符串|必填 |自定义类型标识符 |
-| §鲁米§0§|小部件 |必填 |渲染器不存在时的回退 |
-| §鲁米§0§|字典 |可选|传递给自定义渲染器的数据 |
+| `custom_type` | string | Required | Custom type identifier |
+| `fallback` | Widget | Required | Fallback when renderer is absent |
+| `data` | dict | Optional | Data to pass to custom renderer |
 
 自定义渲染器放置：
 
@@ -1632,7 +1616,7 @@ CLI：后备小部件的 CLI 表示。
 
 ## 5.rumi_widgets — Python 帮助程序库
 
-默认值位于`lib/rumi_widgets/`中。可以通过在handler.py中导入来使用。使用是可选的。相当于直接返回一个JSON dict。
+默认值位于 `lib/rumi_widgets/` 中。可以通过在handler.py中导入来使用。使用是可选的。相当于直接返回一个JSON dict。
 
 ### 5.1 安置
 
@@ -1746,7 +1730,7 @@ def run(params, context):
     }
 ```
 
-使用`emit_widget`发送的小部件将作为流消息传输。返回的`widget`字段是最终结果小部件。
+使用 `emit_widget` 发送的小部件将作为流消息传输。返回的`widget`字段是最终结果小部件。
 
 ### 6.2 通讯表达
 
@@ -1764,7 +1748,7 @@ emit_widget 发送的 Widget 存储在 JSON Lines 消息的数据中。
 
 ### 6.3 通过id替换
 
-如果您将`id`添加到小部件并发出它，前端将覆盖并使用相同的`id`绘制小部件。用于更新进度。
+如果您将`id`添加到小部件并发出它，前端将覆盖并绘制具有相同`id`的小部件。用于更新进度。
 
 ```python
 context["emit_widget"](Progress(id="p1", label="Step 1", current=1, total=3))
@@ -1792,7 +1776,7 @@ window.rumiWidgets.render(widgetJson, targetElement);
 2. 如果类型为`"custom"`，则搜索`user_data/widget_renderers/{custom_type}/`渲染器
 3.如果有自定义渲染器，请使用专用渲染器
 4. 如果没有，`fallback` 使用内置渲染器绘制小部件
-5. 如果以上都不适用，则将文本显示为`[Unknown widget: {type}]`
+5. 如果以上都不适用，则将文本显示为 `[Unknown widget: {type}]`
 
 ### 7.3 主题协作
 
@@ -1838,13 +1822,13 @@ widgets:
     height: 4
 ```
 
-您可以使用 Widget 的`style_hint` 选择主题变体。
+您可以使用 Widget 的 `style_hint` 选择主题变体。
 
 ```json
 {"type": "card", "style_hint": {"variant": "compact"}, "body": {"type": "text", "text": "..."}}
 ```
 
-主题的`card.variants.compact`适用。如果主题没有相应的变体，则将使用`default`。
+适用主题的`card.variants.compact`。如果主题没有相应的变体，则将使用`default`。
 
 有关详细的主题规范，请参阅 theme.md。
 
@@ -1853,36 +1837,36 @@ widgets:
 
 CLI 环境中没有前端小部件渲染器。所有小部件都转换为文本表示形式。
 
-|类型 | CLI 表达式 |
+| type | CLI expression |
 |---|---|
-| §鲁米§0§|按原样输出 |
-| §鲁米§0§|纯文本 |
-| §鲁米§0§|统一差异|
-| §鲁米§0§| §鲁米§1§ |
-| §鲁米§0§| §鲁米§1§ |
-| §鲁米§0§| §鲁米§1§ |
-| §鲁米§0§| §鲁米§1§ |
-| §鲁米§0§| ASCII 表 |
-| §鲁米§0§|数值总结|
-| §鲁米§0§|缩进文本|
-| §鲁米§0§|纯文本 |
-| §鲁米§0§| §鲁米§1§ |
-| §鲁米§0§| §鲁米§1§ |
-| §鲁米§0§| §鲁米§1§ |
-| §鲁米§0§| §鲁米§1§ |
-| §鲁米§0§| §鲁米§1§ |
-| §鲁米§0§| §鲁米§1§ |
-| §鲁米§0§| §鲁米§1§ |
-| §鲁米§0§| §鲁米§1§ |
-| §鲁米§0§| §鲁米§1§ |
-| §鲁米§0§|按顺序输出子项 |
-| §鲁米§0§|输出以空格水平分隔的子项 |
-| §鲁米§0§|带换行符垂直输出子项 |
-| §鲁米§0§| §鲁米§1§ |
-| §鲁米§0§| §鲁米§1§ |
-| §鲁米§0§| §鲁米§1§ |
-| §鲁米§0§| §鲁米§1§ |
-| §鲁米§0§| §鲁米§1§ |
-| §鲁米§0§|后备的 CLI 表示 |
+| `text` | Output as is |
+| `code_block` | Plain text |
+| `diff` | unified diff |
+| `image` | `[Image: {alt} {width}x{height}]` |
+| `screenshot` | `[Screenshot: {title} - {url}]` |
+| `progress` | `[████░░░░░░] 30% {label}` |
+| `terminal` | `$ {command}\n{output}` |
+| `table` | ASCII table |
+| `chart` | Numerical summary |
+| `file_tree` | Indented text |
+| `markdown` | Plain text |
+| `audio` | `[Audio: {duration}ms]` |
+| `video` | `[Video: {duration}ms]` |
+| `map` | `[Map: {lat}, {lng}]` |
+| `input` | `[Input: {placeholder}]` |
+| `button` | `[{label}]` |
+| `select` | `[Select: {options}]` |
+| `toggle` | `[{label}: {value}]` |
+| `slider` | `[{min}-{max}: {value}]` |
+| `checkbox` | `[{checked ? "x" : " "}] {label}` |
+| `container` | Output children in order |
+| `row` | Output children horizontally separated by spaces |
+| `column` | Output children vertically with line breaks |
+| `tabs` | `--- {label} ---\n{content}` |
+| `collapsible` | `▸ {label}\n{children}` |
+| `card` | `[{header}]\n{body}\n{footer}` |
+| `stream` | `[{current_state.label}]` |
+| `indicator` | `[{state}] {label}` |
+| `custom` | CLI representation of fallback |
 
-CLI 回退实现作为`to_cli()` 方法在`lib/rumi_widgets/` 中的每个类中提供。如果传输层检测到 CLI 模式，emit_widget 会输出`to_cli()`而不是`to_dict()`的结果。
+CLI 回退实现作为 `lib/rumi_widgets/` 中每个类中的 `to_cli()` 方法提供。如果传输层检测到 CLI 模式，emit_widget 会输出 `to_cli()` 的结果，而不是 `to_dict()`。

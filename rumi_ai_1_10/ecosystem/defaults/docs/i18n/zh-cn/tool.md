@@ -118,12 +118,12 @@ ecosystem/default/backend/blocks/pack/
 
 **execution.type 类型：**
 
-|类型 |描述 |经营地点|
+| type | Description | Operating location |
 |------|------|----------|
-| §鲁米§0§|直接运行handler.py |在 Docker 中 |
-| §鲁米§0§|通过功能处理程序 |主机端|
-| §鲁米§0§|通过 MCP 服务器 |外部流程|
-| §鲁米§0§| HTTP 请求 |通过 llm_network |
+| `local` | Run handler.py directly | In Docker |
+| `capability` | Via Capability Handler | Host side |
+| `mcp` | Via MCP server | External process |
+| `http` | HTTP request | via llm_network |
 
 ### 3.2 schema.json（必需）
 
@@ -313,9 +313,7 @@ ecosystem/default/backend/blocks/pack/
 }
 ```
 
-**`pack_dependencies`**：此工具所需的外部包。如果指定的Pack尚未安装，将建议从`repo`自动获取。
-
-**`capabilities_required`**：注入到 handler.py 上下文中的功能声明。只有此处声明的功能才会注入到上下文中。
+**`pack_dependencies`**：此工具所需的外部包。如果指定的 Pack 尚未安装，则会建议自动获取 `repo`.**`capabilities_required`**：注入到 handler.py 上下文中的功能声明。只有此处声明的功能才会注入到上下文中。
 
 使用`llm_call`时，可以将其设置为`llm_call_allowed: true`并写入限制：
 
@@ -369,30 +367,30 @@ ecosystem/default/backend/blocks/pack/
 
 **始终注入（无需声明）：**
 
-|上下文键 |描述 |
+| context key | description |
 |---|---|
-| §鲁米§0§|呼叫任何处理程序。只能在Grant | 授予的权限范围内执行
-| §鲁米§0§|发布一个活动。 handler、流程、前端可接收|
-| §鲁米§0§|等待一个事件。可以指定超时 |
-| §鲁米§0§|将 Widget JSON 发送到 UI |
-| §鲁米§0§|取消确认 |
-| §鲁米§0§|从conditions.json 中的behavior_variants 注入的设置 |
-| §鲁米§0§|会话信息（session_id、工作空间等）|
+| `context["call_handler"]` | Call any handler. Can only be executed within the scope of permissions granted by Grant |
+| `context["emit_event"]` | Publish an event. handler, flow, front end can receive |
+| `context["wait_event"]` | Wait for an event. Timeout can be specified |
+| `context["emit_widget"]` | Send Widget JSON to the UI |
+| `context["cancel_check"]` | Cancellation confirmation |
+| `context["handler_config"]` | Settings injected from behavior_variants in conditions.json |
+| `context["session"]` | Session information (session_id, workspace, etc.) |
 
 **在permission.json的`capabilities_required`中声明并注入：**
 
-|能力_id |描述 |上下文键 |风险|
+| capability_id | description | context key | risk |
 |---|---|---|---|
-| §鲁米§1§ |读取user_data下的文件| §鲁米§2§ |低|
-| §鲁米§1§ |在user_data下写入文件 | §鲁米§2§ |中等|
-| §鲁米§1§ |开始流程 | §鲁米§2§ |中等|
-| §鲁米§1§ | Shell命令执行 | §鲁米§2§ |高|
-| §鲁米§1§ |浏览器操作| §鲁米§2§ |高|
-| §鲁米§1§ |启动、操作和销毁 Docker 容器 | §鲁米§2§ |高|
-| §鲁米§1§ |主机应用操作| §鲁米§2§ |高|
-| §鲁米§1§ |外部 HTTP 通信 | §鲁米§2§ |中等|
-| §鲁米§1§ |工具内法学硕士通话| §鲁米§2§ |中等|
-| §鲁米§1§ |会话状态读/写| §鲁米§2§ |低|
+| `data_read` | Read file under user_data | `context["data_read"](path) → str` | Low |
+| `data_write` | Writing files under user_data | `context["data_write"](path, content)` | Medium |
+| `execute_flow` | Start Flow | `context["execute_flow"](flow_id, input) → FlowResult` | Medium |
+| `shell_exec` | Shell command execution | `context["capability"]("shell_exec", {...})` | High |
+| `browser_control` | Browser operation | `context["capability"]("browser_control", {...})` | High |
+| `container_exec` | Starting, operating, and destroying Docker containers | `context["capability"]("container_exec", {...})` | High |
+| `app_control` | Host application operation | `context["capability"]("app_control", {...})` | High |
+| `http_request` | External HTTP communication | `context["capability"]("http_request", {...})` | Medium |
+| `llm_call` | In-tool LLM call | `context["capability"]("llm_call", {...})` | Medium |
+| `session_state` | Session state read/write | `context["capability"]("session_state", {...})` | Low |
 
 #### 调用处理程序
 
@@ -497,27 +495,27 @@ context["capability"]("container_exec", {
 
 container_exec 操作列表：
 
-|行动|描述 |所需参数 |
+| action | description | required parameters |
 |---|---|---|
-| §鲁米§0§|容器创建/启动 |图像，选项|
-| §鲁米§0§|容器中的命令执行 |容器 ID，命令 |
-| §鲁米§0§|获取显示屏幕截图 |容器 ID |
-| §鲁米§0§|输入显示|容器ID，输入类型，（x，y /文本/键）|
-| §鲁米§0§|发送文件到容器 |容器 ID、主机路径、容器路径 |
-| §鲁米§0§|从容器获取文件 |容器 ID、容器路径 |
-| §鲁米§0§|集装箱销毁|容器 ID |
-| §鲁米§0§|正在运行的容器列表 |无 |
+| `create` | Container creation/startup | image, options |
+| `exec` | Command execution in container | container_id, command |
+| `screenshot` | Get display screenshot | container_id |
+| `input` | Input to display | container_id, input_type, (x, y / text / key) |
+| `upload` | Send file to container | container_id, host_path, container_path |
+| `download` | Get file from container | container_id, container_path |
+| `destroy` | Container destruction | container_id |
+| `list` | List of running containers | None |
 
 input_type 的类型：
 
-|输入类型 |描述 |参数|
+| input_type | description | parameters |
 |---|---|---|
-| §鲁米§0§|坐标点击| x、y、按钮（左/右/中）|
-| §鲁米§0§|双击 | x, y |
-| §鲁米§0§|文字输入 |文字|
-| §鲁米§0§|按键传输 |键（例如“Enter”、“Ctrl+C”）|
-| §鲁米§0§|滚动 | x、y、增量 |
-| §鲁米§0§|拖动|从_x，从_y，到_x，到_y |
+| `click` | Coordinate click | x, y, button(left/right/middle) |
+| `double_click` | Double click | x, y |
+| `type` | Text input | text |
+| `key` | Key transmission | key (e.g. "Enter", "Ctrl+C") |
+| `scroll` | Scroll | x, y, delta |
+| `drag` | Drag | from_x, from_y, to_x, to_y |
 
 #### handler.py的返回值
 
@@ -769,7 +767,7 @@ bash/capability/
 }
 ```
 
-`scope`：`"public"`也可以与`capabilities_required`一起使用其他工具。 `"private"` 是该工具独有的。
+`scope`：`"public"`还可以与`capabilities_required`一起使用其他工具。 `"private"` 是该工具独有的。
 
 主机端handler.py需经过用户显式批准+哈希记录+修改检测。
 
@@ -858,22 +856,22 @@ bash/capability/
 }
 ```
 
-|关键|描述 |
+| Key | Description |
 |------|------|
-| §鲁米§0§|如果您拥有的工具数量超过这个数量，请使用逐步披露 |
-| §鲁米§0§| §鲁米§1§ / §鲁米§2§ / §鲁米§3§ |
-| §鲁米§0§|用于市场验证包的自动批准工具 |
-| §鲁米§0§|所有工具每分钟的总调用限制 |
-| §鲁米§0§|幂等工具结果缓存时间|
-| §鲁米§0§|配置持久 shell 会话 |
-| §鲁米§0§|配置 Docker 容器 |
-| §鲁米§0§|工具内 LLM 调用的默认限制 |
-| §鲁米§0§|子代理（任务工具）限制 |
-| §鲁米§0§|传递给 LLM 的最大图像数量 |
-| §鲁米§0§|工具输出截断阈值|
-| §鲁米§0§|要禁用的工具 ID 列表 |
-| §鲁米§0§|同步工具定义的 GitHub 存储库 |
-| §鲁米§0§|包安装相关设置|
+| `stage_threshold` | If you have more than this number of tools, use gradual disclosure |
+| `approval.global_approval_mode` | `per_call` / `per_session` / `auto` |
+| `approval.auto_approve_verified_packs` | Auto-approve tools for marketplace verified packs |
+| `rate_limit.max_total_calls_per_minute` | Total call limit for all tools per minute |
+| `cache.ttl_seconds` | idempotent tool result cache time |
+| `shell.*` | Configuring a persistent shell session |
+| `container.*` | Configuring Docker containers |
+| `llm_call.*` | Default limits for in-tool LLM calls |
+| `agent.*` | Subagent (Task tool) limitations |
+| `display.max_images_in_context` | Maximum number of images to pass to LLM |
+| `display.max_output_chars` | Tool output truncation threshold |
+| `disabled_tools` | List of tool IDs to disable |
+| `sync.*` | GitHub repository from which tool definitions are synchronized |
+| `pack_install.*` | Pack installation related settings |
 
 ---
 
@@ -881,7 +879,7 @@ bash/capability/
 
 ### 5.1 工具要求包
 
-Permission.json 中的`pack_dependencies` 允许工具请求外部包。
+Permission.json 中的 `pack_dependencies` 允许工具请求外部包。
 
 ```json
 {
@@ -944,11 +942,11 @@ Permission.json 中的`pack_dependencies` 允许工具请求外部包。
 GET https://api.github.com/repos/{owner}/{repo}/zipball/{ref}
 ```
 
-下载后，解压并仅提取`path`中指定的目录，并将其放置在`user_data/packs/`中。需要身份验证的私有存储库使用`GITHUB_TOKEN`环境变量。
+下载后，解压并仅提取`path`中指定的目录，并将其放置在`user_data/packs/`中。需要身份验证的私有存储库使用 `GITHUB_TOKEN` 环境变量。
 
 ### 5.4 市场注册
 
-`harupipipipi/rumi-marketplace` 存储库`registry.json`：
+`harupipipipi/rumi-marketplace`存储库`registry.json`：
 
 ```json
 {
@@ -970,7 +968,7 @@ GET https://api.github.com/repos/{owner}/{repo}/zipball/{ref}
 }
 ```
 
-状态：`"verified"`已由Rumi团队验证。 `"unverified"` 尚未得到验证。 `"blacklisted"` 被确定为危险的。
+状态：`"verified"`已由Rumi团队验证。 `"unverified"`尚未得到验证。 `"blacklisted"`被确定为危险的。
 
 ### 5.5 .pack_meta.json
 
@@ -1034,10 +1032,10 @@ GET https://api.github.com/repos/{owner}/{repo}/zipball/{ref}
 executor.py 解析工具的 `capabilities_required` 的顺序：
 
 1. 系统集成（`ecosystem/default/backend/capabilities/`）
-2. 共享能力（`user_data/shared/capabilities/`）
+2. 共享能力 (`user_data/shared/capabilities/`)
 3. 包含工具 (`tools/xxx/capability/`)
-4. 提供包装（`user_data/packs/xxx/capabilities/`）
-5.从`pack_dependencies`自动获得→置于4
+4. 提供包装 (`user_data/packs/xxx/capabilities/`)
+5.自动从`pack_dependencies`获得→放置在4中
 
 ---
 
@@ -1059,11 +1057,11 @@ executor.py 解析工具的 `capabilities_required` 的顺序：
 使用したいツールの名前を返してください。
 ```
 
-从每个工具中仅提取`name`、`summary`、`tags`、`use_cases`或`tool.json`。
+从每个工具中仅提取 `name`、`summary`、`tags`、`use_cases` 或 `tool.json`。
 
 ### 第 2 阶段：详细信息（所选工具或工具数量 ≤ stage_threshold）
 
-将完整架构传递给 LLM 的`tools`参数。将 `guide.json` 的 `usage_guide` 和 `tips` 注入描述中。
+将完整架构传递给 LLM 的 `tools` 参数。将 `guide.json` 的 `usage_guide` 和 `tips` 插入描述中。
 
 ### 第 3 阶段：运行时
 
@@ -1073,13 +1071,13 @@ executor.py 解析工具的 `capabilities_required` 的顺序：
 
 ## 7. 小部件集成
 
-handler.py 返回的`widget` 字段遵循 widget.md 中定义的统一小部件方案。所有域（工具、提示、ai_client、聊天、代理）都以相同的小部件格式声明 UI 显示。
+handler.py 返回的 `widget` 字段遵循 widget.md 中定义的统一小部件方案。所有域（工具、提示、ai_client、聊天、代理）都以相同的小部件格式声明 UI 显示。
 
 从 handler.py 发送 Widget 有两种方法。
 
 将最终结果 Widget 包含在返回值的`widget`字段中。该工具运行完毕后将显示此信息。
 
-使用`context["emit_widget"]` 在执行期间实时发送小部件。用于进度显示和流式显示。
+使用 `context["emit_widget"]` 在执行期间实时发送小部件。用于进度显示和流式显示。
 
 ```python
 def run(params, context):
@@ -1168,7 +1166,7 @@ tool_call 受信
 3. **执行结果→LLM消息格式**：result/llm_content→各provider的消息格式
 4. **prompt_based support**：针对不支持tool_calls的模型进行提示嵌入+响应解析
 
-`capabilities.json` 的 `tool_result_image_support` 处的图像支持分支：`true`（人类）可以在 tool_result 中包含图像。 `false` (OpenAI) 将图像作为以下用户消息发送。
+`capabilities.json` 的 `tool_result_image_support` 处的图像支持分支：`true`（人择）可以在 tool_result 中包含图像。 `false` (OpenAI) 将图像作为以下用户消息发送。
 
 ### 8.3 会话管理器.py
 
@@ -1209,8 +1207,8 @@ class SessionState:
 
 ### 8.4 loader.py遍历顺序
 
-1.`user_data/shared/tools/`（用户管理）
-2.`user_data/packs/*/tools/`（Pack提供）
+1. `user_data/shared/tools/`（用户管理）
+2. `user_data/packs/*/tools/`（Pack提供）
 3.从MCP服务器动态获取
 
 对于同名的工具，共享优先。
@@ -1219,14 +1217,14 @@ class SessionState:
 
 与所有 MCP 功能兼容：
 
-| MCP 特点 |实施 |
+| MCP Features | Implementation |
 |----------|------|
-|工具（工具/列表、工具/调用）|注册为工具，execution.type = "mcp" |
-|资源（资源/列表、资源/读取、资源/订阅）|注入 Flow 上下文 |
-|提示（提示/列表、提示/获取）|可用作模板 |
-|采样（采样/createMessage）|通过 ai_client 调用 LLM |
-|根（根/列表）|通知工作区路径 |
-|启发（启发/创建）|使用 emit_event 联系用户 |
+| Tools (tools/list, tools/call) | Register as a tool, execution.type = "mcp" |
+| Resources (resources/list, resources/read, resources/subscribe) | Injected into Flow context |
+| Prompts (prompts/list, prompts/get) | Available as a template |
+| Sampling (sampling/createMessage) | LLM call via ai_client |
+| Roots (roots/list) | Notify workspace path |
+| Elicitation (elicitation/create) | Contact user with emit_event |
 
 mcp.json配置示例：
 
@@ -1310,7 +1308,7 @@ blocks_used:
 
 ### 自定义流程（用户数据）
 
-用户或包将流添加到`user_data/shared/flows/`。可以使用`context["execute_flow"]`从工具的handler.py启动。通过使用 Flow 的事件触发器，您还可以实现钩子，例如当 user_input 到达时自动运行知识搜索工具。
+用户或包将流添加到`user_data/shared/flows/`。可以使用 `context["execute_flow"]` 从工具的 handler.py 启动。通过使用 Flow 的事件触发器，您还可以实现钩子，例如当 user_input 到达时自动运行知识搜索工具。
 
 ```yaml
 # user_data/shared/flows/knowledge_hook/flow.yaml

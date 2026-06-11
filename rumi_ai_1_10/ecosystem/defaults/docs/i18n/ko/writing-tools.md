@@ -12,9 +12,7 @@
 
 도구에는 두 가지 유형이 있습니다.
 
-**내장 도구**(`execution.type: "local"`)는 `ToolRegistry._register_defaults()`에 자동으로 등록되는 데모 도구입니다. `web_search`, `calculator`, `file_reader`의 세 가지 항목이 등록됩니다.
-
-**동적 도구**(`execution.type: "dynamic"`)는 API를 통해 생성, 업데이트, 삭제할 수 있는 사용자 정의 도구입니다. 이는 `user_data/shared/tools/` 디렉토리에 `.tool.json`(정의) 및 `.handler.py`(실행 코드)으로 유지됩니다.
+**내장 도구**(`execution.type: "local"`)는 `ToolRegistry._register_defaults()`에 자동으로 등록되는 데모 도구입니다. `web_search`, `calculator`, `file_reader`의 세 가지 항목이 등록됩니다.**동적 도구**(`execution.type: "dynamic"`)는 API를 통해 생성, 업데이트, 삭제할 수 있는 사용자 정의 도구입니다. 이는 `user_data/shared/tools/` 디렉토리에 `.tool.json`(정의) 및 `.handler.py`(실행 코드)으로 유지됩니다.
 
 ## 도구 정의 JSON 형식
 
@@ -41,20 +39,20 @@
 }
 ```
 
-| 필드 | 유형 | 설명 |
+| Field | Type | Description |
 |---|---|---|
-| §루미§0§ | §루미§1§ | 도구의 고유 식별자입니다. 일반적으로 `name` |
-| §루미§0§ | §루미§1§ | 도구 이름 |
-| §루미§0§ | §루미§1§ | 도구 설명. 도구 선택 시 AI가 참조 |
-| §루미§0§ | §루미§1§ | 꼬리표. 필터링에 사용 |
-| §루미§0§ | §루미§1§ | JSON 스키마 형식의 매개변수 정의 |
-| §루미§0§ | §루미§1§ | `"local"`, `"dynamic"`, `"prompt"` 중 하나 |
-| §루미§0§ | §루미§1§ | 생성 날짜 및 시간(ISO 8601) |
-| §루미§0§ | §루미§1§ | 업데이트 날짜 및 시간(ISO 8601) 갱신 시 자동 부여 |
+| `tool_id` | `string` | Unique identifier for the tool. Usually the same as `name` |
+| `name` | `string` | Tool name |
+| `summary` | `string` | Tool description. Referenced by AI when selecting tools |
+| `tags` | `string[]` | Tag. Used for filtering |
+| `schema.parameters` | `object` | Parameter definition in JSON Schema format |
+| `execution.type` | `string` | Any of `"local"`, `"dynamic"`, `"prompt"` |
+| `created_at` | `string` | Creation date and time (ISO 8601) |
+| `updated_at` | `string` | Date and time of update (ISO 8601). Automatically granted upon renewal |
 
 ## handler_code 작성 방법
 
-handler_code는 다음 시그니처를 사용하여 `handler` 함수로 작성됩니다.
+handler_code는 다음 서명을 사용하여 `handler` 함수로 작성됩니다.
 
 ```python
 def handler(arguments, context):
@@ -76,28 +74,22 @@ def handler(arguments, context):
     }
 ```
 
-**인수**: `arguments`는 API 호출 중에 전달된 매개변수의 사전입니다. `context`은 핸들러의 실행 컨텍스트이며 `call_handler`, `emit_event` 등과 같은 기능을 포함할 수 있습니다.
-
-**반환 값**: `result`(문자열), `is_error`(부울), `widget`(dict 또는 None)의 세 가지 키가 있는 사전을 반환합니다.
-
-**제한사항**: handler_code는 `domain/tool/builder.py`의 `generate_handler_code_with_ai()`에서 AI로 생성될 수 있습니다. `handler_code`가 `None`이면 AI가 자동으로 생성하고, AI가 불가능한 경우 `generate_skeleton()`에서 스켈레톤 코드를 생성합니다.
+**인수**: `arguments`은 API 호출 중에 전달된 매개변수의 사전입니다. `context`은 핸들러의 실행 컨텍스트이며 `call_handler`, `emit_event` 등과 같은 기능을 포함할 수 있습니다.**반환 값**: `result`(문자열), `is_error`(부울), `widget`(dict 또는 None)의 세 가지 키가 있는 사전을 반환합니다.**제한 사항**: handler_code는 `domain/tool/builder.py`의 `generate_handler_code_with_ai()`에서 AI로 생성될 수 있습니다. `handler_code`가 `None`이면 AI가 자동으로 생성하고, AI가 불가능한 경우 `generate_skeleton()`에서 스켈레톤 코드를 생성합니다.
 
 ## API를 통한 CRUD
 
 ### 도구 생성
 
-**HTTP**: `POST /api/tools/create`(`blocks/tool/create.py`)
+**HTTP**: `POST /api/tools/create`(`blocks/tool/create.py`)**input_data**:
 
-**입력_데이터**:
-
-| 필드 | 유형 | 필수 | 설명 |
+| Field | Type | Required | Description |
 |---|---|---|---|
-| §루미§0§ | §루미§1§ | 예 | 도구 이름 |
-| §루미§0§ | §루미§1§ | 아니요 | 설명 |
-| §루미§0§ | §루미§1§ | 예 | JSON 스키마 형식 매개변수 정의 |
-| §루미§0§ | §루미§1§ | 아니요 | 파이썬 코드. `None`의 경우 AI가 자동으로 |
-| §루미§0§ | §루미§1§ | 아니요 | 꼬리표. 기본 `["dynamic", "user-created"]` |
-| §루미§0§ | §루미§1§ | 아니요 | handler_code 자동 생성에 사용되는 AI 모델 |
+| `name` | `string` | Yes | Tool name |
+| `description` | `string` | No | Explanation |
+| `parameters` | `object` | Yes | JSON Schema format parameter definition |
+| `handler_code` | `string` | No | Python code. In case of `None`, AI automatically generates |
+| `tags` | `string[]` | No | Tag. Default `["dynamic", "user-created"]` |
+| `model` | `string` | No | handler_code AI model used for automatic generation |
 
 동일한 이름의 도구가 이미 존재하는 경우 `ALREADY_EXISTS` 오류가 반환됩니다.
 
@@ -105,14 +97,12 @@ def handler(arguments, context):
 
 ### 도구 업데이트
 
-**HTTP**: `PUT /api/tools/{name}`(`blocks/tool/update.py`)
+**HTTP**: `PUT /api/tools/{name}`(`blocks/tool/update.py`)**input_data**:
 
-**입력_데이터**:
-
-| 필드 | 유형 | 필수 | 설명 |
+| Field | Type | Required | Description |
 |---|---|---|---|
-| §루미§0§ | §루미§1§ | 예 | 도구 이름(URL 경로에서 자동 삽입) |
-| §루미§0§ | §루미§1§ | 예 | 업데이트할 필드입니다. `name` 및 `tool_id`에 대한 변경은 금지됩니다 |
+| `name` | `string` | Yes | Tool name (automatically injected from URL path) |
+| `updates` | `dict` | Yes | Field to update. Changes to `name` and `tool_id` are prohibited |
 
 동적 도구(`execution.type: "dynamic"`)만 업데이트할 수 있습니다. `updated_at`은 자동으로 부여됩니다.
 
@@ -120,13 +110,11 @@ def handler(arguments, context):
 
 ### 삭제 도구
 
-**HTTP**: `DELETE /api/tools/{name}`(`blocks/tool/delete.py`)
+**HTTP**: `DELETE /api/tools/{name}`(`blocks/tool/delete.py`)**input_data**:
 
-**입력_데이터**:
-
-| 필드 | 유형 | 필수 | 설명 |
+| Field | Type | Required | Description |
 |---|---|---|---|
-| §루미§0§ | §루미§1§ | 예 | 도구 이름(URL 경로에서 자동 삽입) |
+| `name` | `string` | Yes | Tool name (automatically injected from URL path) |
 
 동적 도구만 삭제할 수 있습니다. `user_data/shared/tools/` 내의 `.tool.json` 및 `.handler.py`도 제거됩니다.
 
@@ -134,14 +122,12 @@ def handler(arguments, context):
 
 ### 도구 내보내기
 
-**HTTP**: `GET /api/tools/{name}/export`(`blocks/tool/export.py`)
+**HTTP**: `GET /api/tools/{name}/export`(`blocks/tool/export.py`)**input_data**:
 
-**입력_데이터**:
-
-| 필드 | 유형 | 필수 | 설명 |
+| Field | Type | Required | Description |
 |---|---|---|---|
-| §루미§0§ | §루미§1§ | 아니요 | 단일 도구 이름 |
-| §루미§0§ | §루미§1§ | 아니요 | 여러 도구 이름(`name`에만 해당) |
+| `name` | `string` | No | Single tool name |
+| `names` | `string[]` | No | Multiple tool names (exclusive with `name`) |
 
 **반환 값**: `ok({"tools": [...], "count": N, "not_found": [...]})`. 각 도구는 `handler_code`을 포함한 완전한 정의입니다.
 
@@ -187,7 +173,7 @@ curl -X POST http://127.0.0.1:8766/api/tools/create \
   }'
 ```
 
-`handler_code`을 생략하면 AI 제공자가 있으면 AI가 코드를 생성합니다. 사용할 수 없는 경우 뼈대 코드가 생성됩니다.
+`handler_code`을 생략하면 AI 제공업체가 있는 경우 AI가 코드를 생성합니다. 사용할 수 없는 경우 뼈대 코드가 생성됩니다.
 
 ### 예시 3: 업데이트 도구
 
@@ -204,10 +190,10 @@ curl -X PUT http://127.0.0.1:8766/api/tools/unit_converter \
 
 ## 모범 사례
 
-도구의 기능을 설명하는 한 단어 이름으로 `name`를 짧고 명확하게 유지하세요. AI는 도구를 선택할 때 `name` 및 `summary`를 참조하므로 `summary`에 도구의 목적을 구체적으로 설명해야 합니다.
+도구의 기능을 설명하는 한 단어 이름으로 `name`을 짧고 명확하게 유지하세요. AI는 도구를 선택할 때 `name` 및 `summary`를 참조하므로 `summary`에 도구의 목적을 구체적으로 설명해야 합니다.
 
 `parameters`에 대한 JSON 스키마를 최대한 자세히 정의하십시오. `required` 필드에 필수 매개변수를 지정하고 각 속성에 대해 정확히 `type`를 지정해야 합니다.
 
-`handler_code`는 항상 `{"result": str, "is_error": bool, "widget": None}` 형식의 사전을 반환해야 합니다. 예상치 못한 예외가 발생하면 `is_error: true`로 결과를 반환해 주세요.
+`handler_code`은 항상 `{"result": str, "is_error": bool, "widget": None}` 형식의 사전을 반환해야 합니다. 예상치 못한 예외가 발생하면 `is_error: true`로 결과를 반환해 주세요.
 
 지속성 파일(`user_data/shared/tools/`)을 직접 편집하지 말고 API를 통해 작동하십시오. `ToolRegistry`은 메모리 내 캐시와 파일 일관성을 관리합니다.

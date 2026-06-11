@@ -12,7 +12,7 @@ Dev Tools ハンドラーは `blocks/dev/` ディレクトリに配置され、`
 
 `blocks/dev/`には以下のファイルが含まれています。
 
-|ファイル |ハンドラー名 |
+| file | handler name |
 |---|---|
 | `inspect.py` | `defaults.dev.inspect` |
 | `prompt_history.py` | `defaults.dev.prompt_history` |
@@ -24,9 +24,7 @@ Dev Tools ハンドラーは `blocks/dev/` ディレクトリに配置され、`
 
 LLM に送信されたリクエストの完全な詳細を表示します。
 
-**ハンドラ**: `defaults.dev.inspect`（`blocks/dev/inspect.py`）
-
-**HTTP**: `GET /api/dev/inspect`
+**ハンドラー**: `defaults.dev.inspect`（`blocks/dev/inspect.py`）**HTTP**: `GET /api/dev/inspect`
 
 ```python
 # handler 経由で直前のリクエスト情報を取得
@@ -71,9 +69,7 @@ info = context["call_handler"]("defaults.dev.inspect", {
 
 セッション中に表示されたプロンプトの履歴を表示します。
 
-**ハンドラ**: `defaults.dev.prompt_history`（`blocks/dev/prompt_history.py`）
-
-**HTTP**: `GET /api/dev/prompt-history`
+**ハンドラー**: `defaults.dev.prompt_history`（`blocks/dev/prompt_history.py`）**HTTP**: `GET /api/dev/prompt-history`
 
 ```python
 history = context["call_handler"]("defaults.dev.prompt_history", {
@@ -100,9 +96,7 @@ history = context["call_handler"]("defaults.dev.prompt_history", {
 
 プロンプトをその場で編集および上書きします。指定された `prompt_name` プロンプトが存在する場合、`content` が更新されます。存在しない場合は、新しいものが作成されます。 `prompt_name` に `"system"` を指定すると、システム プロンプトが書き換えられます。
 
-**ハンドラ**: `defaults.dev.edit_prompt_live`（`blocks/dev/edit_prompt_live.py`）
-
-**HTTP**: `POST /api/dev/edit-prompt`
+**ハンドラー**: `defaults.dev.edit_prompt_live`（`blocks/dev/edit_prompt_live.py`）**HTTP**: `POST /api/dev/edit-prompt`
 
 ```python
 context["call_handler"]("defaults.dev.edit_prompt_live", {
@@ -124,16 +118,14 @@ context["call_handler"]("defaults.dev.edit_prompt_live", {
 }
 ```
 
-復元するには`new_body`に元のテンプレート本体を指定して再度呼び出します。
+復元するには、`new_body`に元のテンプレート本体を指定して再度呼び出します。
 
 
 ## 5.replay (過去のリクエストの再生)
 
 同じパラメータを使用して以前の LLM リクエストを再実行します。モデルやパラメータを変更することも可能です。
 
-**ハンドラ**: `defaults.dev.replay`（`blocks/dev/replay.py`）
-
-**HTTP**: `POST /api/dev/replay`
+**ハンドラー**: `defaults.dev.replay`（`blocks/dev/replay.py`）**HTTP**: `POST /api/dev/replay`
 
 ```python
 result = context["call_handler"]("defaults.dev.replay", {
@@ -155,14 +147,14 @@ result = context["call_handler"]("defaults.dev.replay", {
 
 パネル アセットは user_data のパックとして提供されます。デフォルトでは、Dev Tools ハンドラー (`defaults.dev.inspect`、`defaults.dev.prompt_history`、`defaults.dev.edit_prompt_live`、`defaults.dev.replay`) が提供されます。リファレンス実装は、デフォルト パックの `ui/dev_panel.js` に含まれています。
 
-パネル アセット配置スロットには、`panel.bottom` または `floating` が推奨されます。
+パネル アセット配置スロットには `panel.bottom` または `floating` を推奨します。
 
 
 ## 7. API エンドポイント
 
-|ハンドラー | HTTP ルート |入力データ |戻り値 |
+| handler | HTTP route | input_data | return value |
 |---|---|---|---|
-| `defaults.dev.inspect` | `GET /api/dev/inspect` | `{conversation_id, message_id}` |リクエスト/レスポンスの詳細 |
-| `defaults.dev.prompt_history` | `GET /api/dev/prompt-history` | `{session_id, limit}` |プロンプト使用履歴配列 |
+| `defaults.dev.inspect` | `GET /api/dev/inspect` | `{conversation_id, message_id}` | Request/Response Details |
+| `defaults.dev.prompt_history` | `GET /api/dev/prompt-history` | `{session_id, limit}` | Prompt usage history array |
 | `defaults.dev.edit_prompt_live` | `POST /api/dev/edit-prompt` | `{prompt_name, new_body}` | `{prompt_name, updated, content, prompt_id}` |
-| `defaults.dev.replay` | `POST /api/dev/replay` | `{conversation_id, message_id, override}` |標準応答 |
+| `defaults.dev.replay` | `POST /api/dev/replay` | `{conversation_id, message_id, override}` | StandardResponse |

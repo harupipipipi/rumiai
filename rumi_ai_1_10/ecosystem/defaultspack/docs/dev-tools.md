@@ -24,9 +24,7 @@ The Dev Tools handler is placed in the `blocks/dev/` directory and declared as t
 
 View complete details of requests submitted to LLM.
 
-**handler**: `defaults.dev.inspect`（`blocks/dev/inspect.py`）
-
-**HTTP**: `GET /api/dev/inspect`
+**handler**: `defaults.dev.inspect`（`blocks/dev/inspect.py`）**HTTP**: `GET /api/dev/inspect`
 
 ```python
 # handler 経由で直前のリクエスト情報を取得
@@ -71,9 +69,7 @@ Return value:
 
 See the history of prompts rendered during a session.
 
-**handler**: `defaults.dev.prompt_history`（`blocks/dev/prompt_history.py`）
-
-**HTTP**: `GET /api/dev/prompt-history`
+**handler**: `defaults.dev.prompt_history`（`blocks/dev/prompt_history.py`）**HTTP**: `GET /api/dev/prompt-history`
 
 ```python
 history = context["call_handler"]("defaults.dev.prompt_history", {
@@ -100,9 +96,7 @@ Return value:
 
 Edit and override prompts on the fly. If the specified `prompt_name` prompt exists, `content` is updated; if it does not exist, a new one is created. Specifying `"system"` for `prompt_name` rewrites the system prompt.
 
-**handler**: `defaults.dev.edit_prompt_live`（`blocks/dev/edit_prompt_live.py`）
-
-**HTTP**: `POST /api/dev/edit-prompt`
+**handler**: `defaults.dev.edit_prompt_live`（`blocks/dev/edit_prompt_live.py`）**HTTP**: `POST /api/dev/edit-prompt`
 
 ```python
 context["call_handler"]("defaults.dev.edit_prompt_live", {
@@ -131,9 +125,7 @@ To restore, specify the original template body in `new_body` and call it again.
 
 Rerun a previous LLM request with the same parameters. It is also possible to change the model and parameters.
 
-**handler**: `defaults.dev.replay`（`blocks/dev/replay.py`）
-
-**HTTP**: `POST /api/dev/replay`
+**handler**: `defaults.dev.replay`（`blocks/dev/replay.py`）**HTTP**: `POST /api/dev/replay`
 
 ```python
 result = context["call_handler"]("defaults.dev.replay", {

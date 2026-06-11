@@ -2,7 +2,7 @@
 [EN](../../README.md) | [JP](./README.md) | [KR](../ko/README.md) | [CN](../zh-cn/README.md)
 <!-- docs-i18n-links:end -->
 
-#ルーミリモートモバイル
+# ルーミリモートモバイル
 
 Rumi Remote Mobile は、PC でホストされる Rumi を管理するための Flutter クライアントです。
 信頼されたネットワーク上の iOS および Android デバイスからの `defaultspack`。

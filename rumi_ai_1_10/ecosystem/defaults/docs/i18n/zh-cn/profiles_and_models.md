@@ -35,10 +35,10 @@
 
 ### 2. 标准化用户数据
 与特定用户环境相关的所有配置都必须存储在`user_data/`下。这包括：
-*§鲁米§0§
-*§鲁米§0§
-*§鲁米§0§
-*§鲁米§0§
+*`user_data/ai_profiles/`
+*`user_data/tool_settings/`
+*`user_data/agent_configs/`
+*`user_data/ui_preferences/`
 
 这种标准化确保用户配置可移植、易于备份并与系统级包文件隔离。
 

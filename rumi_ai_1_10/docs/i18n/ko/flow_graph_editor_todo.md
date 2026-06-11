@@ -6,7 +6,7 @@
 
 이 TODO 는 `rumi_start` / port contracts / basepack bootstrap 의 도입 후에 남는 발전 과제를 정리한 것입니다.
 
-##Next
+## Next
 
 - `rumi_graph`에서 실제 런타임용 `steps` 로의 컴파일 정밀도를 올린다
 - `depends_on`와 graph branching의 대응 관계를 정리한다.

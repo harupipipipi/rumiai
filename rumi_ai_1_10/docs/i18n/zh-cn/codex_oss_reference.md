@@ -31,7 +31,7 @@ OpenAI Codex OSS 被审查作为 Rumi 编码工具界面的参考。
 - 用于敏感编码操作的签名服务器端批准令牌。
 - 工作空间根限制和注册的可信工作空间检查。
 - Codex 风格的应用程序服务器后端脚手架
-  §鲁米§0§。
+  `ecosystem/defaultspack/domain/coding_backends/codex-app-server/`。
 - 静态、安全、包、前端、Rust、Windows 和安装程序 CI 通道。
 - 工具发现、推荐、策略过滤和模型提供者
   适应。

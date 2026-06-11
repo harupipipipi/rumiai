@@ -1584,9 +1584,7 @@ In a future version, we are considering adding the ability to recognize special 
 
 `run()` When an uncaught exception occurs within a function, the execution engine does the following:
 
-**Container mode**: The Docker process exits with a non-zero exit code and the contents of stderr are logged as an error message. `success` of `ExecutionResult` becomes `False`, and `error_type` becomes `"container_execution_error"`.
-
-**Host mode (permissive)**: The exception propagates from `Future` in `ThreadPoolExecutor`, and similarly `success` in `ExecutionResult` becomes `False`.
+**Container mode**: The Docker process exits with a non-zero exit code and the contents of stderr are logged as an error message. `success` of `ExecutionResult` becomes `False`, and `error_type` becomes `"container_execution_error"`.**Host mode (permissive)**: The exception propagates from `Future` in `ThreadPoolExecutor`, and similarly `success` in `ExecutionResult` becomes `False`.
 
 In either case, the Kernel's handler (`_h_python_file_call`) returns `_kernel_step_status: "failed"`.
 
@@ -1833,16 +1831,16 @@ def run(input_data, context=None):
 
 ## Notes
 
-- **InterfaceRegistry is an internal API. ** Do not operate the IR directly from the Pack.
+- **InterfaceRegistry is an internal API.** Do not operate the IR directly from the Pack.
 - **External communication must be done via Egress Proxy**. Use `context["http_request"]`.
-- **lib can only be written to `/data`. ** Writing to any other path will fail due to `--read-only`.
-- Do not change **pack_identity. ** apply will be rejected if `pack_identity` changes during update.
-- **principal_id is forced to be overwritten by owner_pack in v1. ** Even if you specify `principal_id` in the Flow definition or Modifier, the value of `owner_pack` will be used as the principal at runtime. If a discrepancy is detected, a warning is logged in the audit log.
+- **lib can only be written to `/data`.** Writing to any other path will fail due to `--read-only`.
+- Do not change **pack_identity.** apply will be rejected if `pack_identity` changes during update.
+- **principal_id is forced to be overwritten by owner_pack in v1.** Even if you specify `principal_id` in the Flow definition or Modifier, the value of `owner_pack` will be used as the principal at runtime. If a discrepancy is detected, a warning is logged in the audit log.
 - **About response size limit**: The response limit for Egress Proxy (`rumi_syscall`) and Capability Client (`rumi_capability`) is 4MB (can be changed in `RUMI_MAX_RESPONSE_BYTES`). However, the response limit for Capability Executor (server side subprocess execution) is 1MB.
-- The default value size limit for **store.set is 1MB. ** Can be changed with Grant's `grant_config.max_value_bytes`.
-- **The minimum interval value of FlowScheduler is 10 seconds. ** If you specify less than 10 seconds, it will be rounded up to the next 10 seconds.
-- **The default number of simultaneous Flow executions is 10. ** Can be changed using the `RUMI_MAX_CONCURRENT_FLOWS` environment variable.
-- **Capability execution timeout limit is 120 seconds. ** Even if you specify a value greater than 120 for `timeout_seconds` of `rumi_capability.call()`, it will be limited to 120 seconds. Default is 30 seconds.
+- The default value size limit for **store.set is 1MB.** Can be changed with Grant's `grant_config.max_value_bytes`.
+- **The minimum interval value of FlowScheduler is 10 seconds.** If you specify less than 10 seconds, it will be rounded up to the next 10 seconds.
+- **The default number of simultaneous Flow executions is 10.** Can be changed using the `RUMI_MAX_CONCURRENT_FLOWS` environment variable.
+- **Capability execution timeout limit is 120 seconds.** Even if you specify a value greater than 120 for `timeout_seconds` of `rumi_capability.call()`, it will be limited to 120 seconds. Default is 30 seconds.
 
 ### Hard links not supported
 
@@ -1867,7 +1865,7 @@ symlink.py → target.py:
 
 #### Recommended Alternatives
 
-- **Symbolic link**: Resolves to a real path in `resolve()`, making it consistent with hash validation. However, the reference destination of the symbolic link is limited to **within the pack_subdir boundary**. Symbolic links pointing outside the boundary are rejected at runtime.
+- **Symbolic link**: Resolves to a real path in `resolve()`, making it consistent with hash validation. However, the reference destination of the symbolic link is limited to**within the pack_subdir boundary**. Symbolic links pointing outside the boundary are rejected at runtime.
 - **File Copy**: The safest method. Each file has an independent hash and there are no verification issues.
 
 ---

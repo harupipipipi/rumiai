@@ -45,12 +45,12 @@ Defaultspack 将其默认功能公开为 Rumi 函数。 HTTP 路由、AI 工具�
 
 模型运行时设置归`ModelRuntimeSettingsService`所有。主要入口点是：
 
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
+- `defaultspack:ai_get_preferred_model`
+- `defaultspack:ai_set_preferred_model`
+- `defaultspack:ai_get_thinking_level`
+- `defaultspack:ai_set_thinking_level`
+- `defaultspack:ai_get_effective_thinking_level`
+- `defaultspack:ai_normalize_thinking_level`
 
 当聊天或 AI 完成参数不包含`thinking_level`时，defaultspack 会从对话、个人资料和全局设置中解析服务器端的有效级别。
 
@@ -58,20 +58,20 @@ Defaultspack 将其默认功能公开为 Rumi 函数。 HTTP 路由、AI 工具�
 
 模型目录现在公开配置文件感知路由使用的功能元数据：
 
-- §鲁米§0§ / §鲁米§1§
-- §鲁米§0§ / §鲁米§1§
-- §鲁米§0§ / §鲁米§1§
-- §鲁米§0§ / §鲁米§1§
-- §鲁米§0§ / §鲁米§1§
+- `defaultspack:ai_search_models` / `defaults.ai.search_models`
+- `defaultspack:ai_get_model_capabilities` / `defaults.ai.get_model_capabilities`
+- `defaultspack:ai_recommend_model` / `defaults.ai.recommend_model`
+- `defaultspack:ai_route_model` / `defaults.ai.route_model`
+- `defaultspack:ai_explain_model_choice` / `defaults.ai.explain_model_choice`
 
 能力字段包括`supports_vision`、`supports_tool_calling`、`supports_thinking`、`supports_fast`、`speed_tier`、`quality_tier`、`knowledge_level`、`knowledge_band`和角色建议。 `knowledge_level` 是相对的 rumiai 路由分数，而不是关于智能的绝对声明。
 
 Vision Bridge 和兼容性实用程序路由可通过以下方式获得：
 
-- §鲁米§0§ / §鲁米§1§
+- `defaultspack:vision_describe_images` / `defaults.vision.describe_images`
 - `defaultspack:agent_run_subagent` / `defaults.agent.run_subagent`（实用程序路由或委托运行的兼容性别名）
-- §鲁米§0§ / §鲁米§1§
-- §鲁米§0§ / §鲁米§1§
+- `defaultspack:prompt_lint_prompt` / `defaults.prompt.lint_prompt`
+- `defaultspack:prompt_compact_prompt` / `defaults.prompt.compact_prompt`
 
 ## 流程示例
 

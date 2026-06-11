@@ -28,11 +28,11 @@
 
 每个包至少有：
 
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
+- `ecosystem/<pack_id>/README.md`
+- `ecosystem/<pack_id>/docs/README.md`
+- `ecosystem/<pack_id>/docs/architecture.md`
+- `ecosystem/<pack_id>/docs/interfaces.md`
+- `ecosystem/<pack_id>/docs/operations.md`
 
 各文件的职责：
 

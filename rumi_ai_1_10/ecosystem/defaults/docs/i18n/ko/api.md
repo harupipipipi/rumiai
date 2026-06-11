@@ -13,13 +13,7 @@ Tauri 프런트엔드, CLI, 외부 스크립트, 웹훅은 모두 동일한 흐�
 
 ## 2. 디자인 철학
 
-**전송 독립적**: 모든 통신은 궁극적으로 `FlowEngine.execute(flow_id, trigger_input)`에 대한 호출로 이어집니다. HTTP, stdin/stdout 또는 UDS를 통해 Flow에 도달하는 Trigger_input의 형식은 동일합니다.
-
-**엔드포인트는 흐름입니다**: HTTP의 `/v1/chat/completions` 및 CLI의 `rumi chat`는 모두 동일한 `default.chat` 흐름을 시작합니다. 엔드포인트 추가는 흐름 정의에 추가되며 코드 변경을 포함하지 않습니다.
-
-**인증은 전송 계층에서 수행됩니다**: HTTP용 API 키, stdio용 상위 프로세스 신뢰, UDS용 소켓 권한. Flow 레이어는 인증된 요청만 허용합니다.
-
-**스트리밍은 전송에 의해 흡수됩니다**: 흐름은 `ctx.emit()`에서만 이벤트를 발행합니다. HTTP 전송은 SSE로 변환되고, stdio 전송은 JSON 라인으로 변환되며, Tauri 전송은 IPC 채널로 변환됩니다. Flow는 어떤 전송 수단으로 배달될지 모릅니다.
+**전송 독립적**: 모든 통신은 궁극적으로 `FlowEngine.execute(flow_id, trigger_input)`에 대한 호출로 이어집니다. HTTP, stdin/stdout 또는 UDS를 통해 Flow에 도달하는 Trigger_input의 형식은 동일합니다.**엔드포인트는 흐름입니다**: HTTP의 `/v1/chat/completions` 및 CLI의 `rumi chat`는 모두 동일한 `default.chat` 흐름을 시작합니다. 엔드포인트 추가는 흐름 정의에 추가되며 코드 변경을 포함하지 않습니다.**인증은 전송 계층에서 수행됩니다**: HTTP용 API 키, stdio용 상위 프로세스 신뢰, UDS용 소켓 권한. 흐름 계층은 인증된 요청만 허용합니다.**스트리밍은 전송에 의해 흡수됩니다**: 흐름은 `ctx.emit()`의 이벤트만 발행합니다. HTTP 전송은 SSE로 변환되고, stdio 전송은 JSON 라인으로 변환되며, Tauri 전송은 IPC 채널로 변환됩니다. Flow는 어떤 전송 수단으로 배달될지 모릅니다.
 
 
 ## 3. 아키텍처
@@ -38,11 +32,11 @@ UDS Client  ─→ uds transport ──┘
 
 전송 계층은 기본 처리기로 구현됩니다.
 
-| 핸들러 | 운송 | 권한 |
+| handler | transport | permissions |
 |---|---|---|
-| §루미§0§ | HTTP 서버 | §루미§1§, §루미§2§ |
-| §루미§0§ | 표준 입력/출력 | §루미§1§ |
-| §루미§0§ | 유닉스 도메인 소켓 | §루미§1§, §루미§2§ |
+| `defaults.transport.http` | HTTP Server | `frontend.serve`, `frontend.bind` |
+| `defaults.transport.stdio` | Standard input/output | `frontend.serve` |
+| `defaults.transport.uds` | Unix Domain Socket | `frontend.serve`, `frontend.bind` |
 
 각 전송 핸들러는 부여된 권한으로만 작동하며 전체 커널 개체에 액세스하지 않습니다(io.http.server 문제 방지).
 
@@ -68,12 +62,12 @@ UDS Client  ─→ uds transport ──┘
 }
 ```
 
-| 필드 | 유형 | 필수 | 설명 |
+| Field | Type | Required | Description |
 |---|---|---|---|
-| 아이디 | 문자열 | 선택사항 | 요청 식별자. 생략시 자동생성 |
-| 흐름_ID | 문자열 | 필수 | 시작할 흐름의 ID |
-| 입력 | 개체 | 필수 | 흐름 Trigger_input |
-| 구성 | 개체 | 선택사항 | Flow에 대한 flow_config 재정의 |
+| id | string | optional | request identifier. Automatically generated if omitted |
+| flow_id | string | Required | ID of the Flow to start |
+| input | object | Required | Flow trigger_input |
+| config | object | optional | flow_config override for Flow |
 
 ### 4.2 응답(비스트리밍)
 
@@ -98,12 +92,12 @@ UDS Client  ─→ uds transport ──┘
 }
 ```
 
-| 필드 | 유형 | 설명 |
+| Field | Type | Description |
 |---|---|---|
-| 아이디 | 문자열 | 요청 식별자 |
-| 상태 | 문자열 | §루미§0§, §루미§1§, §루미§2§, §루미§3§ |
-| 출력 | 개체 | 흐름 출력(FlowResult.output) |
-| 메타데이터 | 개체 | 실행 메타데이터 |
+| id | string | request identifier |
+| status | string | `completed`, `error`, `cancelled`, `timeout` |
+| output | object | Flow output (FlowResult.output) |
+| metadata | object | execution metadata |
 
 ### 4.3 응답(스트리밍)
 
@@ -139,18 +133,18 @@ stream.delta의 `data.type`은 ai_client.md 섹션 11.3의 정규화된 이벤�
 
 오류 코드 시스템.
 
-| 코드 | 설명 |
+| Code | Description |
 |---|---|
-| §루미§0§ | 인증 필요 |
-| §루미§0§ | API 키가 잘못되었습니다 |
-| §루미§0§ | 지정된 flow_id가 존재하지 않습니다 |
-| §루미§0§ | Flow 실행 중 오류 |
-| §루미§0§ | 흐름 시간이 초과되었습니다 |
-| §루미§0§ | 사용자 또는 시스템에 의해 취소됨 |
-| §루미§0§ | 잘못된 입력 형식 |
-| §루미§0§ | 권한이 부족함 |
-| §루미§0§ | 비율 제한 |
-| §루미§0§ | 내부 오류 |
+| `AUTH_REQUIRED` | Authentication required |
+| `AUTH_INVALID` | API key is invalid |
+| `FLOW_NOT_FOUND` | Specified flow_id does not exist |
+| `FLOW_ERROR` | Error while running Flow |
+| `FLOW_TIMEOUT` | Flow timed out |
+| `FLOW_CANCELLED` | Cancelled by user or system |
+| `VALIDATION_ERROR` | Invalid input format |
+| `PERMISSION_DENIED` | Insufficient authority |
+| `RATE_LIMITED` | Rate Limit |
+| `INTERNAL_ERROR` | Internal error |
 
 
 ## 5. HTTP 전송
@@ -201,7 +195,7 @@ API 키는 `user_data/secrets/api_keys.json`에서 관리됩니다.
 }
 ```
 
-`permissions`은 흐름 수준 권한입니다. `["*"]`은 모든 흐름에 접근할 수 있습니다. `["default.chat", "default.model_list"]`와 같이 제한될 수 있습니다.
+`permissions`은 흐름 수준 권한입니다. `["*"]`은 모든 흐름에 액세스할 수 있습니다. `["default.chat", "default.model_list"]`와 같이 제한될 수 있습니다.
 
 ### 5.3 라우팅
 
@@ -244,7 +238,7 @@ HTTP 끝점에서 flow_id로의 매핑은 `user_data/config/routes.json`에 정�
 }
 ```
 
-`input_mapping`은 HTTP 요청에서 일반 메시지 형식 `input`으로 매핑되는 필드입니다. `body.model`는 요청 본문의 `model` 필드를 의미합니다. `"*": "body"`는 전체 본문을 입력으로 만듭니다. `{flow_id}`는 경로 매개변수입니다.
+`input_mapping`은 HTTP 요청에서 일반 메시지 형식 `input`으로 매핑되는 필드입니다. `body.model`는 요청 본문의 `model` 필드를 의미합니다. `"*": "body"`는 본문 전체를 입력으로 만듭니다. `{flow_id}`은 경로 매개변수입니다.
 
 Routes.json을 편집하여 모든 HTTP 엔드포인트를 추가할 수 있습니다. Flow 측에서는 코드 변경이 필요하지 않습니다. 팩은 Routes.json에 항목을 추가할 수도 있습니다.
 
@@ -426,7 +420,7 @@ JSON 라인. stdio 전송과 동일한 형식입니다.
 
 ### 7.4 인증
 
-소켓 파일 권한(`0600`, 소유자만 읽고 쓸 수 있음)에 의해 제어됩니다. API Key 인증을 추가로 요구하도록 설정하는 것도 가능합니다.
+소켓 파일 권한에 의해 제어됩니다(`0600`, 소유자만 읽고 쓸 수 있음). API Key 인증을 추가로 요구하도록 설정하는 것도 가능합니다.
 
 ```json
 {
@@ -536,31 +530,31 @@ Hello! How can I help you today?█
 
 흐름이나 도구가 Emit_widget과 함께 위젯 JSON을 보내는 경우 CLI는 위젯의 텍스트 표현으로 대체됩니다.
 
-| 위젯 유형 | CLI 디스플레이 |
+| Widget type | CLI display |
 |---|---|
-| 텍스트 | 텍스트로 출력 |
-| 코드블록 | ```` 엔클로저 + 언어 이름 |
-| 차이점 | 통합 diff 형식 |
-| 이미지 | §루미§0§ |
-| 스크린샷 | §루미§0§ |
-| 터미널 | 명령 및 출력을 있는 그대로 |
-| 진행 | §루미§0§ |
-| 테이블 | ASCII 테이블 |
-| 파일트리 | 들여쓰기된 텍스트 |
-| 마크다운 | 있는 그대로 출력 |
-| 차트 | 수치 요약 |
-| 오디오 | §루미§0§ |
-| 비디오 | §루미§0§ |
-| 지도 | §루미§0§ |
-| 지표 | §루미§0§ |
-| 카드 | 머리글 + 본문의 텍스트 조합 |
+| Text | Output as text |
+| CodeBlock | ``` Enclosure + language name |
+| Diff | unified diff format |
+| Image | `[Image: alt WxH]` |
+| Screenshot | `[Screenshot: url]` |
+| Terminal | Command and output as is |
+| Progress | `[████░░░░░░] 40%` |
+| Table | ASCII table |
+| FileTree | Indented text |
+| Markdown | Output as is |
+| Chart | Numerical summary |
+| Audio | `[Audio: duration]` |
+| Video | `[Video: duration]` |
+| Map | `[Map: lat, lng]` |
+| Indicator | `● label (state)` |
+| Card | Text combination of header + body |
 
 
 ## 9. 엔드포인트 등록 메커니즘
 
 ### 9.1 Flow API 트리거
 
-HTTP 엔드포인트는 Flow 정의의 `trigger.type: api`에 등록되어 있습니다. flow.md의 트리거 시스템과 함께 작동합니다.
+HTTP 끝점은 흐름 정의의 `trigger.type: api`에 등록되어 있습니다. flow.md의 트리거 시스템과 함께 작동합니다.
 
 ```yaml
 # user_data/shared/flows/my_api/flow.yaml
@@ -613,15 +607,15 @@ handler: handler.py
 
 ### 10.1 전송 계층 격리
 
-각 전송 핸들러는 Grant가 부여한 권한으로만 작동합니다. `io.http.server`처럼 전체 커널 객체를 전달하는 문제는 발생하지 않습니다.
+각 전송 핸들러는 Grant가 부여한 권한으로만 작동합니다. `io.http.server`과 같이 커널 객체 전체를 전달하는 문제는 발생하지 않습니다.
 
 ### 10.2 인증 계층
 
-| 운송 | 인증방법 | 기초 |
+| transport | Authentication method | Basis |
 |---|---|---|
-| HTTP | API 키(베어러 토큰) | 네트워크를 통한 접근에는 항상 인증이 필요합니다 |
-| 스튜디오 | 없음 | 상위 프로세스 신뢰 |
-| UDS | 소켓 권한 + 선택적 API 키 | 로컬 프로세스 신뢰 + 구성 가능 |
+| HTTP | API key (Bearer token) | Access via network always requires authentication |
+| stdio | None | Parent process trust |
+| UDS | Socket permissions + optional API key | Local process trust + configurable |
 
 ### 10.3 흐름 수준 권한
 
@@ -629,7 +623,7 @@ API 키의 `permissions` 필드를 사용하여 각 키에 대해 액세스 가�
 
 ### 10.4 속도 제한
 
-전송 계층에서 구현됩니다. `requests_per_minute`은 API 키별로 설정할 수 있습니다. 초과하면 `429 RATE_LIMITED`이 반환됩니다.
+전송 계층에서 구현됩니다. `requests_per_minute`은 API 키마다 설정할 수 있습니다. 초과하면 `429 RATE_LIMITED`이 반환됩니다.
 
 ### 10.5 입력 유효성 검사
 
@@ -706,29 +700,29 @@ Flow의 `config_schema`(flow.md 섹션 6.1)에 따른 입력 검증은 FlowEngin
 
 ### 11.1 input_mapping 표기법
 
-| 표기법 | 설명 | 예 |
+| Notation | Explanation | Example |
 |---|---|---|
-| §루미§0§ | 요청 본문 필드 | §루미§1§ |
-| §루미§0§ | URL 경로 매개변수 | §루미§1§ |
-| §루미§0§ | 쿼리 매개변수 | §루미§1§ |
-| §루미§0§ | 요청 헤더 | §루미§1§ |
-| §루미§0§ | 전신입력 | — |
+| `body.{field}` | Request body fields | `body.model` |
+| `path.{param}` | URL path parameters | `path.model_id` |
+| `query.{param}` | Query parameters | `query.limit` |
+| `header.{name}` | Request header | `header.X-Custom` |
+| `"*": "body"` | Make the entire body input | — |
 
 ### 11.2 응답_형식
 
-| 가치 | 설명 |
+| Value | Description |
 |---|---|
-| 생략 / `"default"` | 일반적인 메시지 형식으로 있는 그대로 반환 |
-| §루미§0§ | OpenAI API 호환 형식으로 변환 및 반환 |
+| Omitted / `"default"` | Return as is in common message format |
+| `"openai"` | Convert and return to OpenAI API compatible format |
 
 `"anthropic"` 등은 향후 추가될 수 있습니다. 변환 논리를 전송 계층에 배치합니다.
 
 
 ## 12. 다른 문서와의 관계
 
-| 문서 | 관계 |
+| Document | Relationship |
 |---|---|
-| 프론트엔드.md | stdio 전송의 메시지 형식은 frontend.md의 통신 흐름과 공존합니다. `flow_id`이 있으면 FlowEngine으로 이동하고, `type`이 있으면 프런트 엔드 |
-| flow.md | 엔드포인트는 Flow의 API 트리거에 등록됩니다. FlowEngine이 요청을 처리합니다 |
-| ai_client.md | 스트리밍 이벤트 유형은 ai_client.md 섹션 11.3 |
-| 도구.md | 전송은 도구의 컨텍스트 API(call_handler, Emit_event 등)를 사용하여 조작되지 않습니다. 전송은 상위 계층이며 도구에 직접 닿지 않습니다 |
+| frontend.md | The message format of the stdio transport coexists with the communication flow of frontend.md. If you have `flow_id`, go to FlowEngine, if you have `type`, go to front end |
+| flow.md | Endpoints are registered with Flow's api trigger. FlowEngine processes the request |
+| ai_client.md | Streaming event type is the same as normalized event in ai_client.md section 11.3 |
+| tool.md | Transport is not manipulated using the tool's context API (call_handler, emit_event, etc.). transport is an upper layer and is not touched directly by tools |

@@ -2,7 +2,7 @@
 [EN](../../extending.md) | [JP](./extending.md) | [KR](../ko/extending.md) | [CN](../zh-cn/extending.md)
 <!-- docs-i18n-links:end -->
 
-#defaults パック拡張ガイド
+# defaults パック拡張ガイド
 
 デフォルトパックに新機能を追加する手順を説明します。
 

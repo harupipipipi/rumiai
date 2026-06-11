@@ -26,8 +26,8 @@ ir_to_stored_messages(ir)
 ## 루미채팅 IR v2
 
 IR 객체는 명시적인 `schema_version` 필드를 전달합니다. 핵심 모델에는 다음이 포함됩니다.
-§루미§0§, §루미§1§, §루미§2§, §루미§3§,
-§루미§0§, §루미§1§, §루미§2§, §루미§3§,
+`RumiChatIR`, `RumiIRMessage`, `RumiIRBlock`, `RumiToolCallIR`,
+`RumiToolResultIR`, `RumiUsageIR`, `RumiResponseIR`, `RumiStreamEventIR`,
 `ProviderWarning`, `DroppedFeature`, `BridgeAction`.
 
 지원되는 블록 유형에는 텍스트, 이미지, 오디오, 비디오, 파일, PDF, 도구 호출,

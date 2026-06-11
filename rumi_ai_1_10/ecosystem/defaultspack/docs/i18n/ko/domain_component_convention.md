@@ -123,11 +123,11 @@ ID, 도구 ID, 공급자 별칭, 모델 별칭, 경로 이름 및 레거시 가�
 
 - 엔드포인트 ID: `line-main`, `discord-main`, `slack-main`, `test-webhook`
 - 프로필 ID: `line.default`, `discord.default`, `slack.default`,
-  §루미§0§
+  `generic.webhook.default`
 - 제공자 ID: `gitlawb-opengateway`
 - 모델 ID: `gitlawb-opengateway/mimo-v2.5-pro`,
-  §루미§0§,
-  §루미§0§
+  `gitlawb-opengateway/mimo-v2-flash`,
+  `gitlawb-opengateway/mimo-v2-omni`
 
 ## 경로 메타데이터
 

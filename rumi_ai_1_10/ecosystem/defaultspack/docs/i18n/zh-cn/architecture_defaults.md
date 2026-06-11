@@ -123,13 +123,13 @@ rumiai (コンパイル済みバイナリ)
 
 ### 始终注入（无需声明）
 
-`context["call_handler"](§RUMI§0§)` 调用任何处理程序。只能在Grant授予的权限范围内执行。如果调用者没有被调用处理程序请求的权限，则会因 PermissionError 被拒绝。这允许该工具执行聊天操作、代理启动、提示渲染、内存读写，所有这些都使用相同的原语。
+`context["call_handler"](handler_name, params)` 调用任何处理程序。只能在Grant授予的权限范围内执行。如果调用者没有被调用处理程序请求的权限，则会因 PermissionError 被拒绝。这允许该工具执行聊天操作、代理启动、提示渲染、内存读写，所有这些都使用相同的原语。
 
-`context["emit_event"](§RUMI§0§)` 发布一个事件。其他处理程序、流程事件触发器和前端资产可以接收此事件。发行人不认识收款人。
+`context["emit_event"](event_type, data)` 发布一个事件。其他处理程序、流程事件触发器和前端资产可以接收此事件。发行人不认识收款人。
 
-`context["wait_event"](§RUMI§0§)`等待事件。阻塞直到触发指定的事件类型。可以指定超时。您可以使用过滤器缩小条件范围。通过与emit_event结合，实现前端弹出显示→等待用户响应、工具间异步通信、Flow触发器的hook等。
+`context["wait_event"](event_type, timeout, filter)`等待事件。阻塞直到触发指定的事件类型。可以指定超时。您可以使用过滤器缩小条件范围。通过与emit_event结合，实现前端弹出显示→等待用户响应、工具间异步通信、Flow触发器的hook等。
 
-`context["emit_widget"](§RUMI§0§)` 将 Widget JSON 发送到 UI。由前端Widget渲染器绘制。
+`context["emit_widget"](widget_json)` 将 Widget JSON 发送到 UI。由前端Widget渲染器绘制。
 
 `context["cancel_check"]()` 是取消确认。如果用户取消，则引发 CancelledError。
 
@@ -139,25 +139,25 @@ rumiai (コンパイル済みバイナリ)
 
 ### 通过将其声明为功能来注入什么
 
-`data_read`读取user_data下的文件。通过`context["data_read"](§RUMI§0§)`访问。该路径是相对于 user_data/ 的。
+`data_read`读取user_data下的文件。通过`context["data_read"](path)`访问。该路径是相对于 user_data/ 的。
 
-`data_write` 在 user_data 下写入文件。通过`context["data_write"](§RUMI§0§)`访问。
+`data_write` 在 user_data 下写入文件。通过`context["data_write"](path, content)`访问。
 
-`execute_flow`开始流程。通过`context["execute_flow"](§RUMI§0§)`访问。通过 Flow Engine 执行。
+`execute_flow`开始流程。通过`context["execute_flow"](flow_id, input)`访问。通过 Flow Engine 执行。
 
-`shell_exec` 执行 shell 命令。通过`context["capability"](§RUMI§0§)`访问。
+`shell_exec` 执行 shell 命令。通过`context["capability"]("shell_exec", {...})`访问。
 
-`browser_control` 是浏览器操作。通过`context["capability"](§RUMI§0§)`访问。
+`browser_control` 是浏览器操作。通过`context["capability"]("browser_control", {...})`访问。
 
-`container_exec` 启动、操作和销毁 Docker 容器。通过`context["capability"](§RUMI§0§)`访问。 GUI环境（Xvfb + VNC）通过显示选项启动，并且可以通过屏幕截图和输入（单击、键入、按键、滚动）进行基于坐标的屏幕操作。
+`container_exec` 启动、操作和销毁 Docker 容器。通过`context["capability"]("container_exec", {...})`访问。 GUI环境（Xvfb + VNC）通过显示选项启动，并且可以通过屏幕截图和输入（单击、键入、按键、滚动）进行基于坐标的屏幕操作。
 
-`app_control`是主机应用程序操作。通过`context["capability"](§RUMI§0§)`访问。
+`app_control`是主机应用程序操作。通过`context["capability"]("app_control", {...})`访问。
 
-`http_request` 是外部 HTTP 通信。通过`context["capability"](§RUMI§0§)`访问。
+`http_request` 是外部 HTTP 通信。通过`context["capability"]("http_request", {...})`访问。
 
-`llm_call` 是工具内 LLM 调用。通过`context["capability"](§RUMI§0§)`访问。
+`llm_call` 是工具内 LLM 调用。通过`context["capability"]("llm_call", {...})`访问。
 
-`session_state` 是会话状态读/写。通过`context["capability"](§RUMI§0§)`访问。
+`session_state` 是会话状态读/写。通过`context["capability"]("session_state", {...})`访问。
 
 ### 为什么不创建专门的 API？
 
@@ -224,23 +224,23 @@ Widget 的详细规范在 docs/widget.md 中定义。
 
 ### 知识搜索
 
-将矢量搜索工具放置在 user_data/shared/tools/knowledge_search/ 中。将 Flow Modifier 放置在 user_data/shared/flows/ 中，并注入一个步骤，以便在 user_input 到达时自动运行此工具。工具 handler.py 生成`context["capability"](§RUMI§0§)`中的嵌入，读取`context["data_read"]`中的索引，并返回结果。对默认值的零更改。
+将矢量搜索工具放置在 user_data/shared/tools/knowledge_search/ 中。将 Flow Modifier 放置在 user_data/shared/flows/ 中，并注入一个步骤，以便在 user_input 到达时自动运行此工具。工具 handler.py 生成`context["capability"]("llm_call", {...})`中的嵌入，读取`context["data_read"]`中的索引，并返回结果。对默认值的零更改。
 
 ### 多代理
 
-将代理委托工具放置在 user_data/shared/tools/agent_delegate/ 中。工具 handler.py 在`context["call_handler"](§RUMI§0§)`中创建一个新对话，在`context["call_handler"](§RUMI§1§)`中启动一个代理，接收并返回结果。如果您需要组织结构，请将多个agent.json文件放在user_data/shared/agents/中，委托工具将选择适当的代理。对默认值的零更改。
+将代理委托工具放置在 user_data/shared/tools/agent_delegate/ 中。工具 handler.py 在`context["call_handler"]("defaults.chat.create_conversation", {...})`中创建一个新对话，在`context["call_handler"]("defaults.agent.execute", {...})`中启动一个代理，接收并返回结果。如果您需要组织结构，请将多个agent.json文件放在user_data/shared/agents/中，委托工具将选择适当的代理。对默认值的零更改。
 
 ### 使用 AI 自编辑对话历史记录
 
-将历史编辑工具放置在 user_data/shared/tools/history_prune/ 中。工具 handler.py 检索`context["call_handler"](§RUMI§0§)`中的消息并更新`context["data_write"]`中的对话文件。通过将此工具添加到agent.json中的tools.enabled中，代理可以自主组织其历史记录。对默认值的零更改。
+将历史编辑工具放置在 user_data/shared/tools/history_prune/ 中。工具 handler.py 检索`context["call_handler"]("defaults.chat.list_conversations", {...})`中的消息并更新`context["data_write"]`中的对话文件。通过将此工具添加到agent.json中的tools.enabled中，代理可以自主组织其历史记录。对默认值的零更改。
 
 ### Linux环境下GUI操作
 
-将环境操作工具放置在 user_data/shared/tools/linux_env/ 中。工具 handler.py 使用`context["capability"](§RUMI§0§)`启动容器，并使用屏幕截图和输入操作操作屏幕。使用agent.json中的模型设置选择要操作的模型。对默认值的零更改。
+将环境操作工具放置在 user_data/shared/tools/linux_env/ 中。工具 handler.py 使用`context["capability"]("container_exec", {"action": "create", "options": {"display": true}})`启动容器，并使用屏幕截图和输入操作操作屏幕。使用agent.json中的模型设置选择要操作的模型。对默认值的零更改。
 
 ### 同意弹出窗口
 
-将同意确认工具放置在 user_data/shared/tools/consent_check/ 中。工具 handler.py 在`context["emit_event"](§RUMI§0§)`中显示一个弹出窗口，并在`context["wait_event"](§RUMI§1§)`中等待用户的响应。将其添加到agent.json中的tools.enabled中，并指示代理的系统提示“在适用于投资建议时使用此工具。”对默认值进行零更改。
+将同意确认工具放置在 user_data/shared/tools/consent_check/ 中。工具 handler.py 在`context["emit_event"]("ui.popup.show", {"title": "免責事項", ...})`中显示一个弹出窗口，并在`context["wait_event"]("ui.popup.response", timeout=60)`中等待用户的响应。将其添加到agent.json中的tools.enabled中，并指示代理的系统提示“在适用于投资建议时使用此工具。”对默认值进行零更改。
 
 ### 定期执行
 
@@ -248,7 +248,7 @@ Widget 的详细规范在 docs/widget.md 中定义。
 
 ### 计费/信用管理
 
-将使用情况检查工具放置在 user_data/shared/tools/billing_check/ 中。工具handler.py获取`context["call_handler"](§RUMI§0§)`中的使用量，读取`context["data_read"](§RUMI§1§)`中的计划定义，计算剩余积分并返回。如果需要显示UI，请将带有计费资产的包放置在user_data/packs/中。对默认值的零更改。
+将使用情况检查工具放置在 user_data/shared/tools/billing_check/ 中。工具handler.py获取`context["call_handler"]("defaults.ai.usage", {...})`中的使用量，读取`context["data_read"]("billing/plan.json")`中的计划定义，计算剩余积分并返回。如果需要显示UI，请将带有计费资产的包放置在user_data/packs/中。对默认值的零更改。
 
 ## 7. 默认文件结构
 

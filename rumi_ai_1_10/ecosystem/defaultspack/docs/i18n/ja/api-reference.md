@@ -2,794 +2,760 @@
 [EN](../../api-reference.md) | [JP](./api-reference.md) | [KR](../ko/api-reference.md) | [CN](../zh-cn/api-reference.md)
 <!-- docs-i18n-links:end -->
 
-# API Reference
+# APIリファレンス
 
-defaults Pack の HTTP transport (`transport/http.py`) が公開する全エンドポイント。
+デフォルト パックの HTTP トランスポート (`transport/http.py`) によって公開されるすべてのエンドポイント。
 
-すべてのレスポンスは JSON 形式で、成功時は `{"status": "ok", "data": ...}`、エラー時は `{"status": "error", "error": {"code": "...", "message": "..."}}` を返す。
+すべての応答は JSON 形式であり、成功した場合は `{"status": "ok", "data": ...}` を返し、エラーの場合は `{"status": "error", "error": {"code": "...", "message": "..."}}` を返します。
 
-CORS ヘッダーはすべてのレスポンスに付与される: `Access-Control-Allow-Origin: *`, `Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS`, `Access-Control-Allow-Headers: Content-Type, Authorization`。
+CORS ヘッダーはすべての応答に追加されます: `Access-Control-Allow-Origin: *`、`Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS`、`Access-Control-Allow-Headers: Content-Type, Authorization`。
 
 ---
 
-## Chat — 会話管理
+## チャット — 会話管理
 
 ### POST /v1/chat/completions
 
-OpenAI 互換エンドポイント。メッセージを送信して AI レスポンスを取得する。内部で `blocks.chat.send` を呼び出す。
+OpenAI互換エンドポイント。メッセージを送信し、AI 応答を受け取ります。内部で `blocks.chat.send` を呼び出します。
 
-**Request Body:**
+**リクエスト本文:**
 
-| パラメータ | 必須 | 型 | 説明 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| `conversation_id` | 必須 | `string` | 会話 ID |
-| `message` | 必須 | `object` | `{"role": "user", "content": "..."}` 形式のメッセージ |
-| `message.role` | 任意 | `string` | ロール。デフォルト `"user"` |
-| `message.content` | 必須 | `string \| array` | テキスト文字列または content block 配列 |
+| `conversation_id` | Required | `string` | Conversation ID |
+| `message` | Required | `object` | `{"role": "user", "content": "..."}` format message |
+| `message.role` | Optional | `string` | Role. Default `"user"` |
+| `message.content` | Required | `string \| array` | Text string or content block array |
 
-**Response (`data`):**
+**応答 (`data`):**
 
-| フィールド | 型 | 説明 |
+| Field | Type | Description |
 |---|---|---|
-| `id` | `string` | アシスタントメッセージ ID |
-| `conversation_id` | `string` | 会話 ID |
+| `id` | `string` | Assistant Message ID |
+| `conversation_id` | `string` | Conversation ID |
 | `role` | `string` | `"assistant"` |
 | `content` | `array` | `[{"type": "text", "text": "..."}]` |
-| `parent_id` | `string` | 親メッセージ ID |
-| `sequence_number` | `int` | シーケンス番号 |
-| `created_at` | `int` | 作成タイムスタンプ（ミリ秒） |
-| `finish_reason` | `string \| null` | `"stop"` 等 |
+| `parent_id` | `string` | Parent message ID |
+| `sequence_number` | `int` | Sequence number |
+| `created_at` | `int` | Creation timestamp (milliseconds) |
+| `finish_reason` | `string \| null` | `"stop"` etc. |
 | `usage` | `object \| null` | `{"prompt_tokens": int, "completion_tokens": int, "total_tokens": int}` |
 
 **エラーケース:**
 
-| コード | 説明 |
+| Code | Description |
 |---|---|
-| `INVALID_INPUT` | `conversation_id` または `message` が未指定 |
-| `NOT_FOUND` | 指定の会話が存在しない |
-| `INTERNAL_ERROR` | メッセージ追加に失敗 |
+| `INVALID_INPUT` | `conversation_id` or `message` not specified |
+| `NOT_FOUND` | Specified conversation does not exist |
+| `INTERNAL_ERROR` | Failed to add message |
 
 ---
 
 ### POST /api/chat/conversations
 
-新しい会話を作成する。内部で `blocks.chat.create_conversation` を呼び出す。
+新しい会話を作成します。内部で `blocks.chat.create_conversation` を呼び出します。
 
-**Request Body:**
+**リクエスト本文:**
 
-| パラメータ | 必須 | 型 | 説明 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| `model` | 任意 | `string` | 使用モデル。デフォルト `"stub/default"` |
-| `system_prompt_id` | 任意 | `string` | システムプロンプト ID |
-| `agent_id` | 任意 | `string` | エージェント ID |
-| `tags` | 任意 | `array[string]` | タグ |
+| `model` | Optional | `string` | Usage model. Default `"stub/default"` |
+| `system_prompt_id` | Optional | `string` | System prompt ID |
+| `agent_id` | Optional | `string` | Agent ID |
+| `tags` | Optional | `array[string]` | Tag |
 
-**Response (`data`):**
+**応答 (`data`):**
 
-| フィールド | 型 | 説明 |
+| Field | Type | Description |
 |---|---|---|
-| `id` | `string` | 会話 ID (UUID) |
+| `id` | `string` | Conversation ID (UUID) |
 | `title` | `string` | `"New Conversation"` |
-| `created_at` | `int` | 作成タイムスタンプ |
-| `updated_at` | `int` | 更新タイムスタンプ |
-| `model` | `string` | モデル文字列 |
-| `system_prompt_id` | `string \| null` | システムプロンプト ID |
-| `agent_id` | `string \| null` | エージェント ID |
-| `tags` | `array[string]` | タグ |
-| `is_starred` | `bool` | スター状態 |
-| `is_archived` | `bool` | アーカイブ状態 |
-| `current_node_id` | `string \| null` | 現在のノード ID |
-| `messages` | `array` | メッセージ配列（初期は空） |
+| `created_at` | `int` | Creation timestamp |
+| `updated_at` | `int` | Update timestamp |
+| `model` | `string` | Model string |
+| `system_prompt_id` | `string \| null` | System Prompt ID |
+| `agent_id` | `string \| null` | Agent ID |
+| `tags` | `array[string]` | Tag |
+| `is_starred` | `bool` | Star state |
+| `is_archived` | `bool` | Archive status |
+| `current_node_id` | `string \| null` | Current node ID |
+| `messages` | `array` | Message array (initially empty) |
 
 ---
 
 ### GET /api/chat/conversations
 
-会話一覧を取得する。内部で `blocks.chat.list_conversations` を呼び出す。
+会話のリストを取得します。内部で `blocks.chat.list_conversations` を呼び出します。
 
-**Request Body:** なし（GET のためクエリパラメータは Body 不要）
+**リクエストボディ:** なし(GETなのでクエリパラメータは不要)**レスポンス(`data`):**
 
-**Response (`data`):**
-
-| フィールド | 型 | 説明 |
+| Field | Type | Description |
 |---|---|---|
-| `conversations` | `array[object]` | 会話オブジェクトの配列 |
-| `total` | `int` | 総件数 |
+| `conversations` | `array[object]` | Array of conversation objects |
+| `total` | `int` | Total number |
 
-**エラーケース:** なし（空配列を返す）
+**エラーの場合:** なし (空の配列を返します)
 
 ---
 
 ### GET /api/chat/conversations/{id}
 
-指定 ID の会話を取得する。パスパラメータ `{id}` が `conversation_id` として注入される。
+指定したIDの会話を取得します。パス パラメーター `{id}` は `conversation_id` として挿入されます。
 
 **パスパラメータ:**
 
-| パラメータ | 必須 | 型 | 説明 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| `id` | 必須 | `string` | 会話 ID |
+| `id` | Required | `string` | Conversation ID |
 
-**Response (`data`):** 会話オブジェクト（POST /api/chat/conversations の Response と同形式）
+**レスポンス (`data`):** 会話オブジェクト (POST /api/chat/conversations のレスポンスと同じ形式)**エラーケース:**
 
-**エラーケース:**
-
-| コード | 説明 |
+| Code | Description |
 |---|---|
-| `NOT_FOUND` | 指定の会話が存在しない |
+| `NOT_FOUND` | Specified conversation does not exist |
 
 ---
 
 ### PUT /api/chat/conversations/{id}
 
-会話のメタデータを更新する。
+会話メタデータを更新します。
 
 **パスパラメータ:**
 
-| パラメータ | 必須 | 型 | 説明 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| `id` | 必須 | `string` | 会話 ID |
+| `id` | Required | `string` | Conversation ID |
 
-**Request Body:**
+**リクエスト本文:**
 
-| パラメータ | 必須 | 型 | 説明 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| `title` | 任意 | `string` | 新しいタイトル |
-| `tags` | 任意 | `array[string]` | 新しいタグ |
-| `is_starred` | 任意 | `bool` | スター状態 |
-| `is_archived` | 任意 | `bool` | アーカイブ状態 |
-| `model` | 任意 | `string` | モデル変更 |
+| `title` | Optional | `string` | New title |
+| `tags` | Optional | `array[string]` | New tag |
+| `is_starred` | Optional | `bool` | Star state |
+| `is_archived` | Optional | `bool` | Archive status |
+| `model` | Optional | `string` | Model change |
 
-**Response (`data`):** 更新後の会話オブジェクト
+**応答 (`data`):** 会話オブジェクトを更新しました**エラーケース:**
 
-**エラーケース:**
-
-| コード | 説明 |
+| Code | Description |
 |---|---|
-| `NOT_FOUND` | 指定の会話が存在しない |
+| `NOT_FOUND` | Specified conversation does not exist |
 
 ---
 
-### DELETE /api/chat/conversations/{id}
+### /api/chat/conversations/{id} を削除します
 
-会話を削除する。内部で `blocks.chat.delete_conversation` を呼び出す。
+会話を削除します。内部で `blocks.chat.delete_conversation` を呼び出します。
 
 **パスパラメータ:**
 
-| パラメータ | 必須 | 型 | 説明 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| `id` | 必須 | `string` | 会話 ID |
+| `id` | Required | `string` | Conversation ID |
 
-**Response (`data`):** `{"success": true}`
+**応答 (`data`):** `{"success": true}`**エラーケース:**
 
-**エラーケース:**
-
-| コード | 説明 |
+| Code | Description |
 |---|---|
-| `NOT_FOUND` | 指定の会話が存在しない |
+| `NOT_FOUND` | Specified conversation does not exist |
 
 ---
 
 ### POST /api/chat/conversations/{id}/messages
 
-会話にメッセージを送信して AI レスポンスを取得する。`/v1/chat/completions` と同じ block（`blocks.chat.send`）を呼び出すが、`conversation_id` がパスから注入される。
+会話にメッセージを送信し、AI 応答を受け取ります。 `/v1/chat/completions` と同じブロック (`blocks.chat.send`) を呼び出しますが、`conversation_id` がパスから挿入されます。
 
 **パスパラメータ:**
 
-| パラメータ | 必須 | 型 | 説明 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| `id` | 必須 | `string` | 会話 ID |
+| `id` | Required | `string` | Conversation ID |
 
-**Request Body:**
+**リクエスト本文:**
 
-| パラメータ | 必須 | 型 | 説明 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| `message` | 必須 | `object` | `{"role": "user", "content": "..."}` |
+| `message` | Required | `object` | `{"role": "user", "content": "..."}` |
 
-**Response (`data`):** アシスタントメッセージオブジェクト（POST /v1/chat/completions と同形式）
-
-**エラーケース:** POST /v1/chat/completions と同じ
+**応答 (`data`):** アシスタント メッセージ オブジェクト (POST /v1/chat/completions と同じ形式)**エラーの場合:** POST /v1/chat/completions と同じ
 
 ---
 
 ### POST /api/chat/conversations/{id}/stream
 
-ストリーミングレスポンスを開始する。内部で `blocks.chat.stream` を呼び出す。
+ストリーミング応答を開始します。内部で `blocks.chat.stream` を呼び出します。
 
 **パスパラメータ:**
 
-| パラメータ | 必須 | 型 | 説明 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| `id` | 必須 | `string` | 会話 ID |
+| `id` | Required | `string` | Conversation ID |
 
-**Request Body:**
+**リクエスト本文:**
 
-| パラメータ | 必須 | 型 | 説明 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| `message` | 必須 | `object` | `{"role": "user", "content": "..."}` |
+| `message` | Required | `object` | `{"role": "user", "content": "..."}` |
 
-**Response (`data`):**
+**応答 (`data`):**
 
-| フィールド | 型 | 説明 |
+| Field | Type | Description |
 |---|---|---|
-| `stream_id` | `string` | ストリーム ID |
-| `conversation_id` | `string` | 会話 ID |
+| `stream_id` | `string` | Stream ID |
+| `conversation_id` | `string` | Conversation ID |
 
 **エラーケース:**
 
-| コード | 説明 |
+| Code | Description |
 |---|---|
-| `INVALID_INPUT` | `conversation_id` または `message` が未指定 |
-| `NOT_FOUND` | 指定の会話が存在しない |
+| `INVALID_INPUT` | `conversation_id` or `message` not specified |
+| `NOT_FOUND` | Specified conversation does not exist |
 
 ---
 
 ### POST /api/chat/conversations/{id}/export
 
-会話をエクスポートする。内部で `blocks.chat.export_conversation` を呼び出す。
+会話をエクスポートします。内部で `blocks.chat.export_conversation` を呼び出します。
 
 **パスパラメータ:**
 
-| パラメータ | 必須 | 型 | 説明 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| `id` | 必須 | `string` | 会話 ID |
+| `id` | Required | `string` | Conversation ID |
 
-**Request Body:**
+**リクエスト本文:**
 
-| パラメータ | 必須 | 型 | 説明 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| `format` | 任意 | `string` | `"markdown"` または `"json"`。デフォルト `"markdown"` |
+| `format` | Optional | `string` | `"markdown"` or `"json"`. Default `"markdown"` |
 
-**Response (`data`):**
+**応答 (`data`):**
 
-| フィールド | 型 | 説明 |
+| Field | Type | Description |
 |---|---|---|
-| `content` | `string` | エクスポートされた文字列 |
-| `format` | `string` | フォーマット名 |
+| `content` | `string` | Exported string |
+| `format` | `string` | Format name |
 
 **エラーケース:**
 
-| コード | 説明 |
+| Code | Description |
 |---|---|
-| `NOT_FOUND` | 指定の会話が存在しない |
+| `NOT_FOUND` | Specified conversation does not exist |
 
 ---
 
 ### POST /api/chat/conversations/{id}/summarize
 
-会話を要約してトリミングする。内部で `blocks.chat.summarize_and_trim` を呼び出す。
+会話を要約してトリミングします。内部で `blocks.chat.summarize_and_trim` を呼び出します。
 
 **パスパラメータ:**
 
-| パラメータ | 必須 | 型 | 説明 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| `id` | 必須 | `string` | 会話 ID |
+| `id` | Required | `string` | Conversation ID |
 
-**Request Body:**
+**リクエスト本文:**
 
-| パラメータ | 必須 | 型 | 説明 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| `start_message_id` | 必須 | `string` | 要約開始メッセージ ID |
-| `end_message_id` | 必須 | `string` | 要約終了メッセージ ID |
-| `model` | 任意 | `string` | 要約に使うモデル |
+| `start_message_id` | Required | `string` | Summary start message ID |
+| `end_message_id` | Required | `string` | Summary end message ID |
+| `model` | Optional | `string` | Model used for summarization |
 
-**Response (`data`):** 要約結果オブジェクト
+**応答 (`data`):** 要約結果オブジェクト**エラーケース:**
 
-**エラーケース:**
-
-| コード | 説明 |
+| Code | Description |
 |---|---|
-| `NOT_FOUND` | 会話またはメッセージが存在しない |
-| `INVALID_INPUT` | 必須パラメータ不足 |
+| `NOT_FOUND` | Conversation or message does not exist |
+| `INVALID_INPUT` | Required parameter missing |
 
 ---
 
 ### POST /api/chat/conversations/{id}/auto-trim
 
-会話を自動トリミングする。内部で `blocks.chat.auto_trim` を呼び出す。
+会話を自動トリミングします。内部で `blocks.chat.auto_trim` を呼び出します。
 
 **パスパラメータ:**
 
-| パラメータ | 必須 | 型 | 説明 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| `id` | 必須 | `string` | 会話 ID |
+| `id` | Required | `string` | Conversation ID |
 
-**Request Body:**
+**リクエスト本文:**
 
-| パラメータ | 必須 | 型 | 説明 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| `max_tokens` | 任意 | `int` | トリミング閾値トークン数 |
-| `model` | 任意 | `string` | 要約に使うモデル |
+| `max_tokens` | Optional | `int` | Trimming threshold token count |
+| `model` | Optional | `string` | Model used for summarization |
 
-**Response (`data`):** トリミング結果オブジェクト
+**応答 (`data`):** トリミング結果オブジェクト**エラーの場合:**
 
-**エラーケース:**
-
-| コード | 説明 |
+| Code | Description |
 |---|---|
-| `NOT_FOUND` | 会話が存在しない |
+| `NOT_FOUND` | Conversation does not exist |
 
 ---
 
-## Agent — エージェント実行
+## エージェント — エージェントの実行
 
 ### POST /api/agent/execute
 
-エージェントタスクを実行する。内部で `blocks.agent.execute` を呼び出す。
+エージェントタスクを実行します。内部で `blocks.agent.execute` を呼び出します。
 
-**Request Body:**
+**リクエスト本文:**
 
-| パラメータ | 必須 | 型 | 説明 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| `task` | 必須 | `string` | 実行するタスクの説明 |
-| `tools` | 任意 | `array` | 使用可能なツール定義 |
-| `model` | 任意 | `string` | 使用モデル。デフォルト `"default"` |
-| `system_prompt` | 任意 | `string` | システムプロンプト |
+| `task` | Required | `string` | Description of the task to be performed |
+| `tools` | Optional | `array` | Available tool definitions |
+| `model` | Optional | `string` | Usage model. Default `"default"` |
+| `system_prompt` | Optional | `string` | System prompt |
 
-**Response (`data`):**
+**応答 (`data`):**
 
-| フィールド | 型 | 説明 |
+| Field | Type | Description |
 |---|---|---|
-| `execution_id` | `string` | 実行 ID |
-| `status` | `string` | 実行状態 |
-| `steps` | `array` | 実行ステップ一覧 |
+| `execution_id` | `string` | Run ID |
+| `status` | `string` | Execution state |
+| `steps` | `array` | List of execution steps |
 
 **エラーケース:**
 
-| コード | 説明 |
+| Code | Description |
 |---|---|
-| `ERROR` | `task` が未指定 |
+| `ERROR` | `task` not specified |
 
 ---
 
 ### POST /api/agent/{id}/approve
 
-エージェントの現在のステップを承認する。内部で `blocks.agent.approve` を呼び出す。
+エージェントの現在のステップを承認します。内部で `blocks.agent.approve` を呼び出します。
 
 **パスパラメータ:**
 
-| パラメータ | 必須 | 型 | 説明 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| `id` | 必須 | `string` | execution_id |
+| `id` | Required | `string` | execution_id |
 
-**Response (`data`):** 承認結果オブジェクト
+**レスポンス (`data`):** 承認結果オブジェクト**エラーケース:**
 
-**エラーケース:**
-
-| コード | 説明 |
+| Code | Description |
 |---|---|
-| `ERROR` | `execution_id` が未指定または実行が存在しない |
+| `ERROR` | `execution_id` is unspecified or execution does not exist |
 
 ---
 
 ### POST /api/agent/{id}/reject
 
-エージェントの現在のステップを拒否する。内部で `blocks.agent.reject` を呼び出す。
+エージェントの現在のステップを拒否します。内部で `blocks.agent.reject` を呼び出します。
 
 **パスパラメータ:**
 
-| パラメータ | 必須 | 型 | 説明 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| `id` | 必須 | `string` | execution_id |
+| `id` | Required | `string` | execution_id |
 
-**Response (`data`):** 拒否結果オブジェクト
+**応答 (`data`):** 拒否結果オブジェクト**エラーの場合:**
 
-**エラーケース:**
-
-| コード | 説明 |
+| Code | Description |
 |---|---|
-| `ERROR` | `execution_id` が未指定または実行が存在しない |
+| `ERROR` | `execution_id` is unspecified or execution does not exist |
 
 ---
 
 ### POST /api/agent/{id}/cancel
 
-エージェントの実行をキャンセルする。内部で `blocks.agent.cancel` を呼び出す。
+エージェントの実行をキャンセルします。内部で `blocks.agent.cancel` を呼び出します。
 
 **パスパラメータ:**
 
-| パラメータ | 必須 | 型 | 説明 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| `id` | 必須 | `string` | execution_id |
+| `id` | Required | `string` | execution_id |
 
-**Response (`data`):** キャンセル結果オブジェクト
+**レスポンス (`data`):** キャンセル結果オブジェクト**エラーケース:**
 
-**エラーケース:**
-
-| コード | 説明 |
+| Code | Description |
 |---|---|
-| `ERROR` | `execution_id` が未指定または実行が存在しない |
+| `ERROR` | `execution_id` is unspecified or execution does not exist |
 
 ---
 
 ### GET /api/agent/{id}/status
 
-エージェントの実行状態を取得する。内部で `blocks.agent.status` を呼び出す。
+エージェントの実行ステータスを取得します。内部で `blocks.agent.status` を呼び出します。
 
 **パスパラメータ:**
 
-| パラメータ | 必須 | 型 | 説明 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| `id` | 必須 | `string` | execution_id |
+| `id` | Required | `string` | execution_id |
 
-**Response (`data`):** ステータスオブジェクト
+**応答 (`data`):** ステータス オブジェクト**エラーの場合:**
 
-**エラーケース:**
-
-| コード | 説明 |
+| Code | Description |
 |---|---|
-| `ERROR` | `execution_id` が未指定または実行が存在しない |
+| `ERROR` | `execution_id` is unspecified or execution does not exist |
 
 ---
 
 ### POST /api/agent/{id}/instruct
 
-実行中のエージェントにランタイム指示を追加する。内部で `blocks.agent.add_instruction` を呼び出す。指示は次の AI completion ステップの前にメッセージ履歴へ注入される。
+実行中のエージェントにランタイム命令を追加します。内部で `blocks.agent.add_instruction` を呼び出します。命令は、次の AI 完了ステップの前にメッセージ履歴に挿入されます。
 
 **パスパラメータ:**
 
-| パラメータ | 必須 | 型 | 説明 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| `id` | 必須 | `string` | execution_id（パスから `execution_id` として注入） |
+| `id` | Required | `string` | execution_id (injected as `execution_id` from path) |
 
-**Request Body:**
+**リクエスト本文:**
 
-| パラメータ | 必須 | 型 | 説明 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| `instruction` | 必須 | `string` | 追加する指示内容 |
-| `priority` | 任意 | `string` | `"normal"` または `"urgent"`。デフォルト `"normal"` |
+| `instruction` | Required | `string` | Additional instructions |
+| `priority` | Optional | `string` | `"normal"` or `"urgent"`. Default `"normal"` |
 
-**Response (`data`):**
+**応答 (`data`):**
 
-| フィールド | 型 | 説明 |
+| Field | Type | Description |
 |---|---|---|
-| `instruction_id` | `string` | 指示 ID (UUID) |
-| `execution_id` | `string` | 実行 ID |
-| `priority` | `string` | 優先度 |
+| `instruction_id` | `string` | Instruction ID (UUID) |
+| `execution_id` | `string` | Run ID |
+| `priority` | `string` | Priority |
 | `status` | `string` | `"queued"` |
 
 **エラーケース:**
 
-| コード | 説明 |
+| Code | Description |
 |---|---|
-| `ERROR` | `execution_id` が未指定、`instruction` が未指定、実行が存在しない、または実行がアクティブ状態でない |
+| `ERROR` | `execution_id` unspecified, `instruction` unspecified, run does not exist, or run is not active |
 
 ---
 
-## Company Workspace Compatibility — legacy multi-agent endpoints
+## 会社のワークスペースの互換性 - 従来のマルチエージェント エンドポイント
 
 ### POST /api/agent/multi/execute
 
-互換性エンドポイント。内部では `CompanySlackRuntime` に会社メッセージを投稿し、mentions/tasks/AgentEngine runs として非同期にルーティングする。レスポンスには `deprecation_warning` が含まれる。
+互換性エンドポイント。内部的には、企業メッセージは `CompanySlackRuntime` に投稿され、メンション/タスク/AgentEngine の実行時に非同期にルーティングされます。応答には `deprecation_warning` が含まれます。
 
-**Request Body:**
+**リクエスト本文:**
 
-| パラメータ | 必須 | 型 | 説明 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| `task` | 必須 | `string` | タスクの記述 |
-| `agents` | 必須 | `array[object]` | エージェント定義のリスト（最低1つ）。各要素は `{name, role, model?, system_prompt?, tools?}` |
-| `company_id` | 任意 | `string` | ルーティング先 company workspace。未指定時は default company |
+| `task` | Required | `string` | Task description |
+| `agents` | Required | `array[object]` | List of agent definitions (at least one). Each element is `{name, role, model?, system_prompt?, tools?}` |
+| `company_id` | Optional | `string` | Route to company workspace. If not specified, default company |
 
-**Response (`data`):**
+**応答 (`data`):**
 
-| フィールド | 型 | 説明 |
+| Field | Type | Description |
 |---|---|---|
-| `session_id` | `string` | 互換 session id。実体は company thread id |
-| `status` | `string` | ルーティング状態 |
-| `turn_results` | `array` | 互換用の空配列 |
+| `session_id` | `string` | Compatible session id. The entity is company thread id |
+| `status` | `string` | Routing state |
+| `turn_results` | `array` | Empty array for compatibility |
 | `result` | `object` | CompanySlackRuntime routing result |
-| `deprecation_warning` | `string` | 互換 wrapper 告知 |
+| `deprecation_warning` | `string` | Compatible wrapper announcement |
 
 **エラーケース:**
 
-| コード | 説明 |
+| Code | Description |
 |---|---|
-| `ERROR` | `task` が未指定、または company workspace routing に失敗 |
+| `ERROR` | `task` is not specified or company workspace routing fails |
 
 ---
 
 ### GET /api/agent/multi/{id}/status
 
-互換 session id に対応する company thread の messages/tasks を取得する。パスパラメータ `{id}` が `session_id` として注入される。
+互換性のあるセッション ID に対応する企業スレッドのメッセージ/タスクを取得します。パス パラメーター `{id}` は `session_id` として挿入されます。
 
 **パスパラメータ:**
 
-| パラメータ | 必須 | 型 | 説明 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| `id` | 必須 | `string` | session_id |
+| `id` | Required | `string` | session_id |
 
-**Response (`data`):** company thread status, messages, tasks, and compatibility warning.
+**応答 (`data`):** 会社のスレッドのステータス、メッセージ、タスク、および互換性の警告。**エラーのケース:**
 
-**エラーケース:**
-
-| コード | 説明 |
+| Code | Description |
 |---|---|
-| `ERROR` | `session_id` が未指定 |
+| `ERROR` | `session_id` not specified |
 
 ---
 
 ### POST /api/agent/multi/{id}/message
 
-互換 session thread にメッセージを投稿する。mention は active run への runtime instruction、または AgentEngine delegated task として処理される。
+互換性のあるセッション スレッドにメッセージを投稿します。メンションは、アクティブな実行または AgentEngine に委任されたタスクへの実行時指示として扱われます。
 
 **パスパラメータ:**
 
-| パラメータ | 必須 | 型 | 説明 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| `id` | 必須 | `string` | session_id |
+| `id` | Required | `string` | session_id |
 
-**Request Body:**
+**リクエスト本文:**
 
-| パラメータ | 必須 | 型 | 説明 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| `message` | 必須 | `string` | 投入するメッセージ内容 |
-| `target_agent` | 任意 | `string` | 特定のエージェント宛にする場合の名前。未指定の場合は共有メッセージとして全エージェントに送信 |
+| `message` | Required | `string` | Message content to be input |
+| `target_agent` | Optional | `string` | Name when addressing to a specific agent. If not specified, send as a shared message to all agents |
 
-**Response (`data`):**
+**応答 (`data`):**
 
-| フィールド | 型 | 説明 |
+| Field | Type | Description |
 |---|---|---|
-| `session_id` | `string` | セッション ID |
+| `session_id` | `string` | Session ID |
 | `message` | `string` | `"Message injected successfully"` |
 
 **エラーケース:**
 
-| コード | 説明 |
+| Code | Description |
 |---|---|
-| `ERROR` | `session_id` が未指定、`message` が未指定、またはセッションが存在しない |
+| `ERROR` | `session_id` not specified, `message` not specified, or session does not exist |
 
 ---
 
-## Consent — 同意管理
+## 同意 — 同意の管理
 
 ### POST /api/consent/check
 
-テキストがセンシティブかどうか判定する。内部で `blocks.tool.consent_check` を呼び出す。
+テキストが機密かどうかを判断します。内部で `blocks.tool.consent_check` を呼び出します。
 
-**Request Body:**
+**リクエスト本文:**
 
-| パラメータ | 必須 | 型 | 説明 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| `text` | 必須 | `string` | 判定対象テキスト |
-| `use_ai` | 任意 | `bool` | AI 判定を使うか。デフォルト `false` |
-| `model` | 任意 | `string` | AI 判定時のモデル指定。デフォルト `"stub/default"` |
+| `text` | Required | `string` | Judgment target text |
+| `use_ai` | Optional | `bool` | Whether to use AI judgment. Default `false` |
+| `model` | Optional | `string` | Model specification during AI judgment. Default `"stub/default"` |
 
-**Response (`data`):**
+**応答 (`data`):**
 
-| フィールド | 型 | 説明 |
+| Field | Type | Description |
 |---|---|---|
-| `requires_consent` | `bool` | 同意が必要かどうか |
-| `categories` | `array[string]` | 検出されたカテゴリ |
-| `consent_id` | `string \| null` | 同意が必要な場合の同意 ID |
-| `disclaimers` | `object` | カテゴリごとの免責テキスト `{category: disclaimer_text}` |
+| `requires_consent` | `bool` | Whether consent is required |
+| `categories` | `array[string]` | Detected categories |
+| `consent_id` | `string \| null` | Consent ID if consent is required |
+| `disclaimers` | `object` | Disclaimer text by category `{category: disclaimer_text}` |
 
 **エラーケース:**
 
-| コード | 説明 |
+| Code | Description |
 |---|---|
-| `MISSING_PARAM` | `text` が未指定 |
-| `INVALID_PARAM` | `text` が文字列でない |
+| `MISSING_PARAM` | `text` not specified |
+| `INVALID_PARAM` | `text` is not a string |
 
 ---
 
 ### POST /api/consent/{id}/confirm
 
-同意または拒否を記録する。内部で `blocks.tool.consent_confirm` を呼び出す。パスパラメータ `{id}` が `consent_id` として注入される。
+同意または拒否を記録します。内部で `blocks.tool.consent_confirm` を呼び出します。パス パラメーター `{id}` は `consent_id` として挿入されます。
 
 **パスパラメータ:**
 
-| パラメータ | 必須 | 型 | 説明 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| `id` | 必須 | `string` | consent_id |
+| `id` | Required | `string` | consent_id |
 
-**Request Body:**
+**リクエスト本文:**
 
-| パラメータ | 必須 | 型 | 説明 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| `accepted` | 必須 | `bool` | ユーザーが同意したかどうか |
+| `accepted` | Required | `bool` | Whether the user consented |
 
-**Response (`data`):**
+**応答 (`data`):**
 
-| フィールド | 型 | 説明 |
+| Field | Type | Description |
 |---|---|---|
-| `consent_id` | `string` | 同意 ID |
-| `accepted` | `bool` | 同意状態 |
-| `accepted_at` | `string \| null` | 同意した場合の ISO 8601 タイムスタンプ |
+| `consent_id` | `string` | Consent ID |
+| `accepted` | `bool` | Consent status |
+| `accepted_at` | `string \| null` | ISO 8601 timestamp if consent |
 
 **エラーケース:**
 
-| コード | 説明 |
+| Code | Description |
 |---|---|
-| `MISSING_PARAM` | `consent_id` または `accepted` が未指定 |
-| `INVALID_PARAM` | `consent_id` が文字列でない、または `accepted` が bool でない |
-| `NOT_FOUND` | 指定の consent_id が存在しない |
+| `MISSING_PARAM` | `consent_id` or `accepted` not specified |
+| `INVALID_PARAM` | `consent_id` is not a string or `accepted` is not bool |
+| `NOT_FOUND` | The specified consent_id does not exist |
 
 ---
 
-## Prompt — プロンプト管理
+## プロンプト — プロンプト管理
 
-### PUT /api/prompts/{name}
+### PUT /api/prompts/{名前}
 
-既存プロンプトを更新する。内部で `blocks.prompt.update` を呼び出す。
+既存のプロンプトを更新します。内部で `blocks.prompt.update` を呼び出します。
 
 **パスパラメータ:**
 
-| パラメータ | 必須 | 型 | 説明 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| `name` | 必須 | `string` | プロンプト名 |
+| `name` | Required | `string` | Prompt name |
 
-**Request Body:**
+**リクエスト本文:**
 
-| パラメータ | 必須 | 型 | 説明 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| `content` | 任意 | `string` | 新しい本文（`body` のエイリアス） |
-| `body` | 任意 | `string` | 新しい本文 |
-| `description` | 任意 | `string` | 説明 |
-| `variables` | 任意 | `array` | 変数定義 |
-| `metadata` | 任意 | `object` | メタデータ |
+| `content` | Optional | `string` | New body (alias for `body`) |
+| `body` | Optional | `string` | New text |
+| `description` | Optional | `string` | Description |
+| `variables` | Optional | `array` | Variable definition |
+| `metadata` | Optional | `object` | Metadata |
 
-**Response (`data`):** 更新後のプロンプトオブジェクト
+**応答 (`data`):** プロンプト オブジェクトを更新しました**エラーの場合:**
 
-**エラーケース:**
-
-| コード | 説明 |
+| Code | Description |
 |---|---|
-| `NOT_FOUND` | 指定のプロンプトが存在しない |
+| `NOT_FOUND` | The specified prompt does not exist |
 
 ---
 
-### DELETE /api/prompts/{name}
+### /api/prompts/{名前}を削除します
 
-プロンプトを削除する。内部で `blocks.prompt.delete` を呼び出す。
+プロンプトを削除します。内部で `blocks.prompt.delete` を呼び出します。
 
 **パスパラメータ:**
 
-| パラメータ | 必須 | 型 | 説明 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| `name` | 必須 | `string` | プロンプト名 |
+| `name` | Required | `string` | Prompt name |
 
-**Response (`data`):** `{"deleted": true}`
+**応答 (`data`):** `{"deleted": true}`**エラーケース:**
 
-**エラーケース:**
-
-| コード | 説明 |
+| Code | Description |
 |---|---|
-| `NOT_FOUND` | 指定のプロンプトが存在しない |
+| `NOT_FOUND` | The specified prompt does not exist |
 
 ---
 
 ### POST /api/prompts/convert
 
-tool ↔ prompt の相互変換を行う。内部で `blocks.prompt.convert` を呼び出す。
+ツール↔プロンプト間で相互変換を行います。内部で `blocks.prompt.convert` を呼び出します。
 
-**Request Body:**
+**リクエスト本文:**
 
-| パラメータ | 必須 | 型 | 説明 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| `source_type` | 必須 | `string` | `"tool"` または `"prompt"` |
-| `source_name` | 必須 | `string` | 変換元の名前 |
-| `target_type` | 必須 | `string` | `"tool"` または `"prompt"` |
+| `source_type` | Required | `string` | `"tool"` or `"prompt"` |
+| `source_name` | Required | `string` | Source name |
+| `target_type` | Required | `string` | `"tool"` or `"prompt"` |
 
-**Response (`data`):**
+**応答 (`data`):**
 
-| フィールド | 型 | 説明 |
+| Field | Type | Description |
 |---|---|---|
-| `result` | `object` | 変換結果（tool 定義またはプロンプトオブジェクト） |
-| `target_type` | `string` | 変換先タイプ |
+| `result` | `object` | Conversion result (tool definition or prompt object) |
+| `target_type` | `string` | Destination type |
 
 **エラーケース:**
 
-| コード | 説明 |
+| Code | Description |
 |---|---|
-| `INVALID_INPUT` | `source_type`/`target_type` が不正、または同一 |
-| `NOT_FOUND` | 変換元が存在しない |
+| `INVALID_INPUT` | `source_type`/`target_type` are incorrect or identical |
+| `NOT_FOUND` | Conversion source does not exist |
 
 ---
 
-## Tool — 動的ツール管理
+## ツール — 動的なツール管理
 
 ### POST /api/tools/create
 
-動的ツールを作成する。handler_code が未指定の場合は AI で自動生成する。内部で `blocks.tool.create` を呼び出す。
+動的ツールを作成します。 handler_code が指定されていない場合は、AI によって自動生成されます。内部で `blocks.tool.create` を呼び出します。
 
-**Request Body:**
+**リクエスト本文:**
 
-| パラメータ | 必須 | 型 | 説明 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| `name` | 必須 | `string` | ツール名（tool_id と同一） |
-| `description` | 任意 | `string` | ツールの説明 |
-| `parameters` | 必須 | `object` | JSON Schema 形式のパラメータ定義 |
-| `handler_code` | 任意 | `string` | Python handler コード。null なら AI 生成 |
-| `tags` | 任意 | `array[string]` | タグ。デフォルト `["dynamic", "user-created"]` |
-| `model` | 任意 | `string` | handler_code 生成に使う AI モデル |
+| `name` | Required | `string` | Tool name (same as tool_id) |
+| `description` | Optional | `string` | Tool description |
+| `parameters` | Required | `object` | Parameter definition in JSON Schema format |
+| `handler_code` | Optional | `string` | Python handler code. If null, AI generation |
+| `tags` | Optional | `array[string]` | Tag. Default `["dynamic", "user-created"]` |
+| `model` | Optional | `string` | AI model used to generate handler_code |
 
-**Response (`data`):**
+**応答 (`data`):**
 
-| フィールド | 型 | 説明 |
+| Field | Type | Description |
 |---|---|---|
-| `tool_id` | `string` | ツール ID |
-| `name` | `string` | ツール名 |
-| `summary` | `string` | 説明 |
-| `handler_code` | `string` | 生成されたハンドラコード |
-| `created_at` | `string` | ISO 8601 タイムスタンプ |
+| `tool_id` | `string` | Tool ID |
+| `name` | `string` | Tool name |
+| `summary` | `string` | Description |
+| `handler_code` | `string` | Generated handler code |
+| `created_at` | `string` | ISO 8601 timestamp |
 
 **エラーケース:**
 
-| コード | 説明 |
+| Code | Description |
 |---|---|
-| `MISSING_PARAM` | `name` または `parameters` が未指定 |
-| `INVALID_PARAM` | `parameters` が dict でない |
-| `ALREADY_EXISTS` | 同名のツールが既に存在する |
-| `REGISTER_ERROR` | 登録処理でエラー |
+| `MISSING_PARAM` | `name` or `parameters` not specified |
+| `INVALID_PARAM` | `parameters` is not a dict |
+| `ALREADY_EXISTS` | A tool with the same name already exists |
+| `REGISTER_ERROR` | Error in registration process |
 
 ---
 
-### PUT /api/tools/{name}
+### PUT /api/tools/{名前}
 
-動的ツールを更新する。内部で `blocks.tool.update` を呼び出す。
+動的ツールを更新します。内部で `blocks.tool.update` を呼び出します。
 
 **パスパラメータ:**
 
-| パラメータ | 必須 | 型 | 説明 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| `name` | 必須 | `string` | ツール名 |
+| `name` | Required | `string` | Tool name |
 
-**Request Body:**
+**リクエスト本文:**
 
-| パラメータ | 必須 | 型 | 説明 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| `description` | 任意 | `string` | 新しい説明 |
-| `parameters` | 任意 | `object` | 新しいスキーマ |
-| `handler_code` | 任意 | `string` | 新しいハンドラコード |
-| `tags` | 任意 | `array[string]` | 新しいタグ |
+| `description` | Optional | `string` | New description |
+| `parameters` | Optional | `object` | New schema |
+| `handler_code` | Optional | `string` | New handler code |
+| `tags` | Optional | `array[string]` | New tag |
 
-**Response (`data`):** 更新後のツール定義
+**応答 (`data`):** ツール定義を更新しました**エラーケース:**
 
-**エラーケース:**
-
-| コード | 説明 |
+| Code | Description |
 |---|---|
-| `NOT_FOUND` | 指定のツールが存在しないか dynamic でない |
+| `NOT_FOUND` | The specified tool does not exist or is not dynamic |
 
 ---
 
-### DELETE /api/tools/{name}
+### /api/tools/{名前}を削除します
 
-動的ツールを削除する。ファイルも同時に削除される。内部で `blocks.tool.delete` を呼び出す。
+動的ツールを削除します。ファイルも同時に削除されます。内部で `blocks.tool.delete` を呼び出します。
 
 **パスパラメータ:**
 
-| パラメータ | 必須 | 型 | 説明 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| `name` | 必須 | `string` | ツール名 |
+| `name` | Required | `string` | Tool name |
 
-**Response (`data`):** `{"deleted": true}`
+**応答 (`data`):** `{"deleted": true}`**エラーケース:**
 
-**エラーケース:**
-
-| コード | 説明 |
+| Code | Description |
 |---|---|
-| `NOT_FOUND` | 指定のツールが存在しないか dynamic でない |
+| `NOT_FOUND` | The specified tool does not exist or is not dynamic |
 
 ---
 
 ### GET /api/tools/{name}/export
 
-ツール定義を handler_code 込みでエクスポートする。内部で `blocks.tool.export` を呼び出す。
+handler_code を含むツール定義をエクスポートします。内部で `blocks.tool.export` を呼び出します。
 
 **パスパラメータ:**
 
-| パラメータ | 必須 | 型 | 説明 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| `name` | 必須 | `string` | ツール名 |
+| `name` | Required | `string` | Tool name |
 
-**Response (`data`):** ツール定義オブジェクト（handler_code フィールドを含む）
+**応答 (`data`):** ツール定義オブジェクト (handler_code フィールドを含む)**エラーの場合:**
 
-**エラーケース:**
-
-| コード | 説明 |
+| Code | Description |
 |---|---|
-| `NOT_FOUND` | 指定のツールが存在しない |
+| `NOT_FOUND` | The specified tool does not exist |
 
 ---
 
@@ -797,109 +763,103 @@ tool ↔ prompt の相互変換を行う。内部で `blocks.prompt.convert` を
 
 ### GET /api/dev/inspect
 
-直前のリクエスト情報を取得する。内部で `blocks.dev.inspect` を呼び出す。
+前回のリクエスト情報を取得します。内部で `blocks.dev.inspect` を呼び出します。
 
-**Request Body (任意):**
+**リクエスト本文 (オプション):**
 
-| パラメータ | 必須 | 型 | 説明 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| `request_id` | 任意 | `string` | 特定のリクエスト ID |
-| `conversation_id` | 任意 | `string` | 特定の会話 ID |
+| `request_id` | Optional | `string` | Specific request ID |
+| `conversation_id` | Optional | `string` | Specific conversation ID |
 
-`request_id` 指定時はそのログを返す。`conversation_id` 指定時はその会話の最新ログを返す。両方未指定で直前のリクエストを返す。
+`request_id` 指定すると、ログを返します。 `conversation_id` 指定すると、会話の最新のログが返されます。両方が指定されていない場合は、前のリクエストを返します。
 
-**Response (`data`):**
+**応答 (`data`):**
 
-| フィールド | 型 | 説明 |
+| Field | Type | Description |
 |---|---|---|
-| `request_id` | `string` | リクエスト ID |
-| `conversation_id` | `string` | 会話 ID |
-| `model` | `string` | 使用モデル |
-| `prompt_used` | `string` | 使用されたプロンプト |
-| `tools_called` | `array` | 呼び出されたツール |
-| `context_info` | `object` | コンテキスト情報 |
-| `timestamp` | `string` | ISO 8601 タイムスタンプ |
+| `request_id` | `string` | Request ID |
+| `conversation_id` | `string` | Conversation ID |
+| `model` | `string` | Usage Model |
+| `prompt_used` | `string` | Prompt used |
+| `tools_called` | `array` | Invoked tool |
+| `context_info` | `object` | Context information |
+| `timestamp` | `string` | ISO 8601 timestamp |
 
 **エラーケース:**
 
-| コード | 説明 |
+| Code | Description |
 |---|---|
-| `NOT_FOUND` | 指定の ID のログが存在しない |
+| `NOT_FOUND` | Log with specified ID does not exist |
 
 ---
 
 ### GET /api/dev/prompt-history
 
-プロンプト履歴を取得する。内部で `blocks.dev.prompt_history` を呼び出す。
+プロンプト履歴を取得します。内部で `blocks.dev.prompt_history` を呼び出します。
 
-**Request Body (任意):**
+**リクエスト本文 (オプション):**
 
-| パラメータ | 必須 | 型 | 説明 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| `limit` | 任意 | `int` | 取得件数。デフォルト 20 |
+| `limit` | Optional | `int` | Number of results. Default 20 |
 
-**Response (`data`):** ログ配列（新しい順）
+**応答 (`data`):** ログ配列 (新しい順)
 
 ---
 
 ### POST /api/dev/edit-prompt
 
-プロンプトをライブ編集して再実行する。内部で `blocks.dev.edit_prompt_live` を呼び出す。
+ライブ編集および再実行プロンプト。内部で `blocks.dev.edit_prompt_live` を呼び出します。
 
-**Request Body:**
+**リクエスト本文:**
 
-| パラメータ | 必須 | 型 | 説明 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| `request_id` | 必須 | `string` | 編集対象のリクエスト ID |
-| `new_prompt` | 必須 | `string` | 新しいプロンプト |
+| `request_id` | Required | `string` | Request ID to be edited |
+| `new_prompt` | Required | `string` | New prompt |
 
-**Response (`data`):** 再実行結果
+**応答(`data`):** 再実行結果**エラーケース:**
 
-**エラーケース:**
-
-| コード | 説明 |
+| Code | Description |
 |---|---|
-| `NOT_FOUND` | 指定のリクエストが存在しない |
-| `INVALID_INPUT` | 必須パラメータ不足 |
+| `NOT_FOUND` | The specified request does not exist |
+| `INVALID_INPUT` | Required parameter missing |
 
 ---
 
 ### POST /api/dev/replay
 
-過去のリクエストを再実行する。内部で `blocks.dev.replay` を呼び出す。
+過去のリクエストを再試行します。内部で `blocks.dev.replay` を呼び出します。
 
-**Request Body:**
+**リクエスト本文:**
 
-| パラメータ | 必須 | 型 | 説明 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| `request_id` | 必須 | `string` | 再実行対象のリクエスト ID |
-| `model` | 任意 | `string` | 別のモデルで再実行 |
+| `request_id` | Required | `string` | Request ID to be re-executed |
+| `model` | Optional | `string` | Rerun with another model |
 
-**Response (`data`):** 再実行結果
+**応答(`data`):** 再実行結果**エラーケース:**
 
-**エラーケース:**
-
-| コード | 説明 |
+| Code | Description |
 |---|---|
-| `NOT_FOUND` | 指定のリクエストが存在しない |
+| `NOT_FOUND` | The specified request does not exist |
 
 ---
 
-## System — システム情報
+## システム — システム情報
 
 ### GET /api/health
 
-ヘルスチェック。block を呼び出さず、直接レスポンスを返す。
+健康診断。ブロックを呼び出さずに直接応答を返します。
 
-**Request Body:** なし
+**リクエスト本文:** なし**レスポンス (`data`):**
 
-**Response (`data`):**
-
-| フィールド | 型 | 説明 |
+| Field | Type | Description |
 |---|---|---|
 | `status` | `string` | `"healthy"` |
 | `pack` | `string` | `"defaults"` |
-| `ts` | `string` | ISO 8601 タイムスタンプ |
+| `ts` | `string` | ISO 8601 timestamp |
 
 **エラーケース:** なし
 
@@ -907,48 +867,46 @@ tool ↔ prompt の相互変換を行う。内部で `blocks.prompt.convert` を
 
 ### GET /api/context
 
-Pack のコンテキスト情報を取得する。facade が設定されている場合はインターフェース一覧も返す。
+パックのコンテキスト情報を取得します。ファサードが設定されている場合は、インターフェイスのリストも返します。
 
-**Request Body:** なし
+**リクエスト本文:** なし**レスポンス (`data`):**
 
-**Response (`data`):**
-
-| フィールド | 型 | 説明 |
+| Field | Type | Description |
 |---|---|---|
 | `pack` | `string` | `"defaults"` |
-| `interfaces` | `object` | カーネルファサードのインターフェース一覧 |
-| `ts` | `string` | ISO 8601 タイムスタンプ |
+| `interfaces` | `object` | Kernel facade interface list |
+| `ts` | `string` | ISO 8601 timestamp |
 
 **エラーケース:** なし
 
 ---
 
-## Static — 静的ファイル配信
+## 静的 — 静的ファイル配信
 
-### GET /
+### 取得 /
 
-Shell HTML を返す。`ui/shell.html` が存在すればその内容を返す。存在しなければフォールバック HTML を返す。
+シェル HTML を返します。 `ui/shell.html` が存在する場合は、その内容が返されます。存在しない場合は、フォールバック HTML を返します。
 
-**Response:** `text/html` コンテンツ
+**応答:** `text/html` 内容
 
 ---
 
-### GET /static/{path}
+### GET /static/{パス}
 
-静的ファイルを配信する。`..` による親ディレクトリ参照はブロックされる。
+静的ファイルを提供します。 `..` を含む親ディレクトリの参照はブロックされます。
 
 **パスパラメータ:**
 
-| パラメータ | 必須 | 型 | 説明 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| `path` | 必須 | `string` | ファイルの相対パス |
+| `path` | Required | `string` | Relative path of the file |
 
-**Response:** 対応する Content-Type のファイル内容。バイナリファイルは base64 エンコードされる。
+**応答:** 対応する Content-Type のファイルの内容。バイナリ ファイルは Base64 でエンコードされます。
 
-対応する拡張子: `.html`, `.css`, `.js`, `.json`, `.png`, `.jpg`, `.jpeg`, `.gif`, `.svg`, `.ico`
+対応する拡張子: `.html`、`.css`、`.js`、`.json`、`.png`、`.jpg`、`.jpeg`、`.gif`、`.svg`、`.ico`
 
 **エラーケース:**
 
-| コード | 説明 |
+| Code | Description |
 |---|---|
-| `ERROR` | パスが不正（`..` を含む等）またはファイルが存在しない |
+| `ERROR` | The path is invalid (including `..`, etc.) or the file does not exist |

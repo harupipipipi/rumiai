@@ -40,15 +40,7 @@ Aiming for a level of quality that allows defaults alone to compete head-on with
 
 ## Thoughts
 
-**Batteries Included, But Every Battery Is Removable.** If you include defaults, all functions will work. However, you can replace any component with another pack.
-
-**Defaults Defines the Standard, Not the Limit.** The permissions, handlers, and domain models defined by defaults become the "standard vocabulary" of the rumiai ecosystem. Other packs use this vocabulary. However, this vocabulary is extensible, and other packs can add concepts that defaults do not know.
-
-**Know Everything, Assume Nothing.** Defaults have all the domain knowledge required by the AI service. But it makes no assumptions about the user's environment, use case, or preferences.
-
-**Security by Capability, Not by Trust.** defaults fully follows rumiai's security model. defaults itself operates only within the scope of the granted privileges.
-
-**Infrastructure Only, Content in user_data.** Defaults only provide domain logic (handler), communication infrastructure, Widget library, shell, and Flow definition. Screen appearance (Assets), tool definitions, agent settings, prompts, themes, and layouts are all placed in user_data. Defaults provide the API and framework for them to work.
+**Batteries Included, But Every Battery Is Removable.** If you include defaults, all functions will work. However, you can replace any component with another pack.**Defaults Defines the Standard, Not the Limit.** The permissions, handlers, and domain models defined by defaults become the "standard vocabulary" of the rumiai ecosystem. Other packs use this vocabulary. However, this vocabulary is extensible, and other packs can add concepts that defaults do not know.**Know Everything, Assume Nothing.** Defaults have all the domain knowledge required by the AI service. But it makes no assumptions about the user's environment, use case, or preferences.**Security by Capability, Not by Trust.** defaults fully follows rumiai's security model. defaults itself operates only within the scope of the granted privileges.**Infrastructure Only, Content in user_data.** Defaults only provide domain logic (handler), communication infrastructure, Widget library, shell, and Flow definition. Screen appearance (Assets), tool definitions, agent settings, prompts, themes, and layouts are all placed in user_data. Defaults provide the API and framework for them to work.
 
 ---
 

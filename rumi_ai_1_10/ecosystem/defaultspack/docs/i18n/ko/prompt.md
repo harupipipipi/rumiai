@@ -10,13 +10,13 @@
 
 ## 효과적인 프롬프트 우선순위
 
-§루미§0§ 및
+`defaults.prompt.load_effective` 및
 `defaults.prompt.resolve_for_conversation`는 동일한 우선순위를 사용합니다:
 
 1. 작업공간 프롬프트 디렉터리에서 프로필 재정의
-   §루미§0§.
+   `profiles/<profile_id>/prompts/`.
 2. 프로필 스냅샷
-   §루미§0§.
+   `profiles/<profile_id>/ecosystem/snapshots/<pack>/prompts/`.
 3. defaultspack 프롬프트 구성 요소 또는 프롬프트 확장에서 기본값을 압축합니다.
 
 작업공간 프롬프트 파일은 공식적인 `profile_override` 레이어입니다. 그것은
@@ -43,7 +43,7 @@
 누락된 변수는 렌더러에 의해 텍스트에 남아 있습니다. 유효성 검사를 사용하여
 흐름이 실행되기 전에 이를 감지합니다.
 
-프롬프트 작성으로 실행 가능한 도구를 생성해서는 안 됩니다. §루미§0§는
+프롬프트 작성으로 실행 가능한 도구를 생성해서는 안 됩니다. `execution.type="prompt"`는
 레거시 호환성 경로일 뿐이며 제작 표면이 아닙니다. 워크플로우라면
 렌더링된 프롬프트 텍스트가 필요하면 흐름/함수에서 `defaults.prompt.render`을 호출하세요.
 도구가 필요한 경우 `rumi_function` 또는 `capability` 도구 외관을 작성하세요.

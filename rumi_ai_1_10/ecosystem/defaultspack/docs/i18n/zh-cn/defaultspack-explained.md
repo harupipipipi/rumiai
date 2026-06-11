@@ -5,9 +5,22 @@
 # 默认包解释
 
 本文档是 defaultspack 的 PR97 方向图。它解释了如何
-本地优先 UI、聊天运行时、工具、MCP、技能、内存、调度程序和触发器
-表面可以组合在一起，而不需要内核知道任何特定于领域的信息
-行为。
+本地优先 UI、聊天运行时、工具、MCP、规则、技能、内存、调度程序和
+触发表面可以组合在一起，而不需要内核知道任何
+特定领域的行为。
+
+## 术语
+
+- `rule` 表示在某个范围内应用的始终在线指令层。
+- `skill` 表示基于触发器或按需的指令和工作流程包
+  指导。
+- `prompt` 表示源资源或为以下目的而组装的渲染模型文本
+  跑步。
+- `system prompt` 是系统角色切片的较低级别 API/运行时术语
+  所呈现的提示。
+- `delegation` 是将工作发送给另一个代理的规范操作。
+  `subagent` 可能仍出现在兼容性字段或旧文档中，但它是
+  不是首选的架构术语。
 
 ## 大局观
 
@@ -38,11 +51,12 @@ flowchart LR
 
 重要的界限是内容仍然是可移动的。默认包装用品
 基础设施和默认设置； user_data等包可以替代UI
-资产、提示、工具、代理、时间表、内存文件和技能定义。
+资产、规则、提示资产、工具、代理、时间表、内存文件和技能
+定义。
 
 ## UI 和聊天流程
 
-`webapp/` 中的独立 Web 应用程序与 `/api/...` 暴露的端点进行通信
+`webapp/` 中的独立 Web 应用程序与 `/api/...` 公开的端点进行通信
 默认包。 UI 呈现一个带有历史记录、聊天消息、作曲家的 shell，
 活动预览、右侧边栏、设置和可选的编码驾驶舱区域。
 
@@ -56,10 +70,10 @@ sequenceDiagram
   participant ToolBroker as tool broker
   participant Store as user_data/chat
 
-  User->>Webapp: type prompt / attach files / pick tools
+  User->>Webapp: type message / attach files / pick tools
   Webapp->>ChatAPI: create or stream message
   ChatAPI->>ChatDomain: persist user message
-  ChatAPI->>ModelRoute: choose model + build prompt
+  ChatAPI->>ModelRoute: choose model + render runtime prompt
   ModelRoute->>ToolBroker: expose selected tools
   ToolBroker-->>Webapp: streamed tool activity events
   ModelRoute-->>ChatAPI: assistant deltas / final message
@@ -110,17 +124,18 @@ PR97 检查不应将辅助散文或固定标记字符串视为证据。
 输入类似的文字。
 
 辅助消息文本绝不是工具、MCP 服务器、技能、触发器、
-或者删除了实际运行的聊天上下文。将诸如“我使用该工具”之类的散文视为
-仅显示文本；通过/失败决策必须读取由以下机构生成的结构化记录
-浏览器/Playwright 观察到的运行时或可见 UI 状态。
+委派，或删除实际运行的聊天上下文。对待散文如“我用过
+工具”仅作为显示文本；通过/失败决策必须是结构化的
+运行时产生的记录或观察到的可见 UI 状态
+浏览器/剧作家。
 
-|索赔 |需要检查的证据|
+| Claim | Evidence to check |
 |---|---|
-| Rumi 可以使用 MCP |辅助消息`tool_logs`、`tool_call_started`和`tool_call_completed`包含MCP工具ID和结果|
-|技能已发射 |助手元数据包含`matched_skill_instructions`，准备好的系统上下文包含渲染的技能指令 |
-|引用了一条已删除的聊天记录 |用户元数据包含`chat_references.references[]`、`conversation_id`、摘要和`history_json_path` |
-|触发器在未发送的情况下触发 |外部管道元数据有`fire=true`和`send=false`|
-| UI 预览已打开 |剧作家/浏览器观察实际的前景对话框或时间线项目，而不是模拟的助手句子 |
+| MCP was usable by Rumi | assistant message `tool_logs`, `tool_call_started`, and `tool_call_completed` contain the MCP tool id and result |
+| A skill fired | assistant metadata contains `matched_skill_instructions`, and the prepared system context contains the rendered skill instruction |
+| A dropped chat was referenced | user metadata contains `chat_references.references[]` with `conversation_id`, summary, and `history_json_path` |
+| A trigger fired without sending | external pipeline metadata has `fire=true` and `send=false` |
+| UI preview opened | Playwright/Browser observes the actual foreground dialog or timeline item, not a mocked assistant sentence |
 
 对于确定性测试，使用动态输入并断言最终答案是
 从工具结果得出。对于实时浏览器冒烟测试，保留通过/失败
@@ -133,11 +148,11 @@ PR97 检查不应将辅助散文或固定标记字符串视为证据。
 与实时 MCP 证据测试分开，后者必须创建任何服务器、批准、
 许可，以及测试中的随机数状态。
 
-## 技能和扩展
+## 规则、技能和扩展
 
-技能是帮助代理或工具执行的打包行为和指令
-专门的工作流程。 defaultspack 将它们视为扩展内容而不是
-比硬编码的运行时知识。
+规则提供始终在线的指令层。技能提供针对性
+相关时激活的指令和工作流程包。默认包
+将两者视为扩展内容而不是硬编码的运行时知识。
 
 ```mermaid
 flowchart LR
@@ -153,9 +168,9 @@ flowchart LR
   Registry --> Agent
 ```
 
-相同的扩展路径可以添加命令、面板、工具元数据、提示或
-代理能力。 UI 接收这些作为目录数据并将它们呈现在
-侧边栏或作曲家，无需特定于包的代码。
+相同的扩展路径可以添加命令、面板、工具元数据、规则、提示
+资产或代理能力。 UI 接收这些作为目录数据并
+将它们呈现在侧边栏或编辑器中，而不需要特定于包的代码。
 
 ## 内存流
 
@@ -213,22 +228,23 @@ flowchart LR
   Agent --> Delivery
 ```
 
-`no_agent` 调度程序作业受到故意限制。代理职位是
+`no_agent` 调度程序作业被故意限制。代理职位是
 正常路径，因为它们保留对话上下文、权限、批准，
 和审计记录。
 
 ## 请求表面
 
-|表面|示例|默认路径 |
+| Surface | Example | Default path |
 |---|---|---|
-|用户界面聊天|用户发送作曲家提示 | §鲁米§0§|
-|用户界面操作 |侧边栏操作预览结果 | `/api/ui/catalog` 加行动端点 |
-|工具调用|模型调用本机或 MCP 工具 | §鲁米§0§|
-| MCP|服务器公开外部工具| §鲁米§0§|
-|技能| Pack 贡献工作流程行为 | §鲁米§0§|
-|内存|提示构建器回忆上下文 | §鲁米§0§|
-|调度程序|按时或按需解雇工作 | §鲁米§0§|
-|触发| Webhook/事件进入运行时 |网关、调度程序或事件总线 |
+| UI chat | User sends a composer message | `/api/chat/conversations/{id}/stream` |
+| UI action | Sidebar action previews a result | `/api/ui/catalog` plus action endpoint |
+| Tool call | Model invokes a native or MCP tool | `defaults.tool.invoke` |
+| MCP | Server exposes external tools | `domain/tool/mcp_client.py` |
+| Rule | Always-on instruction layer is applied for a run | prompt assembly and runtime policy layers |
+| Skill | Pack contributes workflow behavior | `domain/extensions/*` |
+| Memory | Prompt builder recalls context | `domain/memory*` |
+| Scheduler | Job fires on time or demand | `/api/agent/schedules` |
+| Trigger | Webhook/event enters runtime | gateway, scheduler, or event bus |
 
 ## 操作规则
 

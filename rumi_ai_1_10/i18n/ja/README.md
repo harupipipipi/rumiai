@@ -122,7 +122,7 @@ python -m rumi_ai migrate-hmac
 
 ## プロジェクトの構造
 
-§るみ§0§
+<details>
 <summary>ディレクトリ ツリー (クリックして展開)</summary>
 
 <pre><code>
@@ -281,7 +281,7 @@ python -m rumi_ai migrate-hmac
     ━── ロードマップ.md
 </code></pre>
 
-§るみ§0§
+</details>
 
 ### メインディレクトリ
 
@@ -393,7 +393,7 @@ curl -X POST http://localhost:8765/api/packs/{pack_id}/approve \
 
 MITライセンス
 詳細については、リポジトリ ルートの LICENSE を参照してください。
-##defaultspack の信頼できる情報源
+## defaultspack の信頼できる情報源
 
 このリポジトリの正規のdefaultspack実装は次のとおりです。
 `ecosystem/defaultspack/`。古い `ecosystem/defaults/` パスと別の

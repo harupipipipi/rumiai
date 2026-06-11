@@ -63,7 +63,7 @@ External Dependency Resolution により、Pack は `pack.json` に GitHub リ�
 git コマンドは使用しない。GitHub REST API の zipball エンドポイントを使用する。
 
 ```
-获取§鲁米§0§
+获取https://api.github.com/repos/{owner}/{repo}/zipball/{ref}
 ```
 
 手順:

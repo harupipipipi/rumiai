@@ -24,9 +24,9 @@
 12. [共享词典](#共享字典)
 13. [库系统](#库系统)
 14.【pip依赖库介绍】(#pip-dependency-library-installation)
-15.§鲁米§0§
+15.[Pack Import / Apply](#pack-import--apply)
 16. [组件概念](#组件概念)
-17.§鲁米§0§
+17.[vocab / converter](#vocab--converter)
 18. [审核日志](#审核日志)
 19. [待导出](#待导出)
 20. [DI容器和服务清单](#di-container-and-service-list)
@@ -112,9 +112,9 @@ steps:
 
 |优先|路径|用途 |批准 |
 |--------|------|------|------|
-| 1 | §鲁米§0§|官方流程（启动/基础）|不需要|
-| 2 | §鲁米§0§|由用户/外部工具放置的共享流程 |不需要|
-| 3 | §鲁米§0§| Pack | 提供的流程需要包装批准 |
+| 1 | `flows/`|官方流程（启动/基础）|不需要|
+| 2 | `user_data/shared/flows/`|由用户/外部工具放置的共享流程 |不需要|
+| 3 | `ecosystem/<pack_id>/backend/flows/`| Pack | 提供的流程需要包装批准 |
 | 4 | `ecosystem/flows/`（已弃用）| local_pack 兼容流程 |仅当`RUMI_LOCAL_PACK_MODE=require_approval`时有效。需要批准 |
 
 覆盖规则：官方流程不能被任何人覆盖。共享流不能覆盖官方流，但它们优先于 Pack 提供的流。包提供的流程不能被覆盖，无论是官方的还是共享的。 local_pack 具有最低优先级，不能覆盖任何其他源。
@@ -123,12 +123,12 @@ steps:
 
 |类型 |描述 |
 |------|------|
-| §鲁米§0§|调用内核处理程序 |
-| §鲁米§0§|运行 Pack 中的 Python 文件 |
-| §鲁米§0§|在上下文中设置值 |
-| §鲁米§0§|条件分支（简化版）|
-| §鲁米§0§|执行在FunctionRegistry中注册的函数（第27波） |
-| §鲁米§0§|调用另一个流作为子流 |
+| `handler`|调用内核处理程序 |
+| `python_file_call`|运行 Pack 中的 Python 文件 |
+| `set`|在上下文中设置值 |
+| `if`|条件分支（简化版）|
+| `function`|执行在FunctionRegistry中注册的函数（第27波） |
+| `flow`|调用另一个流作为子流 |
 
 ### 执行顺序
 
@@ -182,8 +182,8 @@ def run(input_data, context=None):
 
 `python_file_call`中的`file`字段是相对于pack_subdir解析的。按顺序搜索以下候选人：
 
-1.§鲁米§0§
-2.§鲁米§0§
+1.`<pack_subdir>/blocks/`
+2.`<pack_subdir>/backend/blocks/`
 3.`<pack_subdir>/backend/components/`（兼容）
 4.`<pack_subdir>/backend/`（兼容：直接安装）
 5.`<pack_subdir>/<file>`（最终后备）
@@ -238,20 +238,20 @@ step:
 
 修改器应放置在下面，文件名为 `*.modifier.yaml`：
 
-- §鲁米§0§
+- `user_data/shared/flows/modifiers/`
 - `ecosystem/<pack_id>/backend/flows/modifiers/`（如果包提供）
 
 ### 行动
 
 |行动|描述 |目标步骤 ID |步骤|
 |--------|------|----------------|------|
-| §鲁米§0§|在指定步骤之前插入 |必填 |必填 |
-| §鲁米§0§|在指定步骤后插入 |必填 |必填 |
-| §鲁米§0§|添加到阶段结束 |不需要|必填 |
-| §鲁米§0§|替换指定步骤 |必填 |必填 |
-| §鲁米§0§|删除指定步​​骤 |必填 |不需要|
+| `inject_before`|在指定步骤之前插入 |必填 |必填 |
+| `inject_after`|在指定步骤后插入 |必填 |必填 |
+| `append`|添加到阶段结束 |不需要|必填 |
+| `replace`|替换指定步骤 |必填 |必填 |
+| `remove`|删除指定步​​骤 |必填 |不需要|
 
-###需要条件
+### 需要条件
 
 ```yaml
 requires:
@@ -269,7 +269,7 @@ requires:
 2.`priority`升序
 3.`modifier_id`升序
 
-###resolve_target（使用共享字典解析）
+### resolve_target（使用共享字典解析）
 
 ```yaml
 modifier_id: compat_modifier
@@ -291,7 +291,7 @@ resolve_namespace: "flow_id"      # デフォルト
 |模式|码头工人 |行为 |
 |--------|--------|------|
 | `strict`（默认）|必填 |如果 Docker 不可用则拒绝执行 |
-| §鲁米§0§|不需要|允许主机执行并发出警告（用于开发） |
+| `permissive`|不需要|允许主机执行并发出警告（用于开发） |
 
 ### 保护机制列表
 
@@ -301,7 +301,7 @@ resolve_namespace: "flow_id"      # デフォルト
 |哈希验证 |文件批准后修改自动失效|
 | HMAC 签名 |检测到授予文件篡改 |
 |路径限制|拒绝在 pack_subdir 边界之外执行文件 |
-| Docker 隔离 | §鲁米§0§、§鲁米§1§、§鲁米§2§|
+| Docker 隔离 | `--network=none`、`--cap-drop=ALL`、`--read-only`|
 |出口代理 (UDS) |使用特定于包的白名单控制外部通信 |
 | UDS 组添加 |使用专用 GID 管理套接字权限 |
 |审核日志|记录所有操作 |
@@ -344,24 +344,24 @@ Pack 配置 (ecosystem/<pack_id>/)
 
 |状态 |代码执行 |描述 |
 |------|-----------|------|
-| §鲁米§0§| ❌ |已放置，未经批准 |
-| §鲁米§0§| ❌ |等待审批|
-| §鲁米§0§| ✅ |已批准 |
-| §鲁米§0§| ✅ |已批准并运行 |
-| §鲁米§0§| ❌ |批准后检测文件更改 |
-| §鲁米§0§| ❌ |被拒绝 |
-| §鲁米§0§| ❌ |发生错误（审批过程失败等）|
+| `installed`| ❌ |已放置，未经批准 |
+| `pending`| ❌ |等待审批|
+| `approved`| ✅ |已批准 |
+| `running`| ✅ |已批准并运行 |
+| `modified`| ❌ |批准后检测文件更改 |
+| `blocked`| ❌ |被拒绝 |
+| `error`| ❌ |发生错误（审批过程失败等）|
 
 当文件修改导致`modified`状态时，代码执行和网络权限将自动禁用。需要重新授权。
 
-###包存放路径
+### 包存放路径
 
 包可以放置在以下路径之一：
 
 |路径|类型 |描述 |
 |------|------|------|
-| §鲁米§0§| **推荐** | `paths.py`是探索的重中之重|
-| §鲁米§0§|遗产|如果与推荐路径重叠则忽略 |
+| `ecosystem/<pack_id>/`| **推荐** | `paths.py`是探索的重中之重|
+| `ecosystem/packs/<pack_id>/`|遗产|如果与推荐路径重叠则忽略 |
 
 `paths.py` 中的`discover_pack_locations()` 首先搜索`ecosystem/*`，然后搜索`ecosystem/packs/*` 作为兼容路由。如果两者中存在相同的`pack_id`，则`ecosystem/<pack_id>/`优先。
 
@@ -424,10 +424,10 @@ Pack (network=none) → UDS Socket → Egress Proxy → 外部 API
 
 |模块|职责|
 |-----------|------|
-| §鲁米§0§|内部IP检查、DNS重新绑定措施|
-| §鲁米§0§|协议方法头检查|
-| §鲁米§0§|包单位速率限制 |
-| §鲁米§0§|域白名单/黑名单控制 |
+| `egress_ip.py`|内部IP检查、DNS重新绑定措施|
+| `egress_protocol.py`|协议方法头检查|
+| `egress_rate_limiter.py`|包单位速率限制 |
+| `egress_domain_controller.py`|域白名单/黑名单控制 |
 
 #### 重复代码删除 (W14-FIX)
 
@@ -466,11 +466,11 @@ Grant 付与（principal × permission）
 
 |状况 |描述 |
 |------|------|
-| §鲁米§0§|候选人被发现并等待批准 |
-| §鲁米§0§|得到正式认可的。信托登记+副本完成 |
-| §鲁米§0§|拒绝了。冷却后可以小睡（1 小时）|
-| §鲁米§0§|有 3 次拒绝的静默块。解锁之前不会收到通知 |
-| §鲁米§0§|批准过程中发生错误 |
+| `pending`|候选人被发现并等待批准 |
+| `installed`|得到正式认可的。信托登记+副本完成 |
+| `rejected`|拒绝了。冷却后可以小睡（1 小时）|
+| `blocked`|有 3 次拒绝的静默块。解锁之前不会收到通知 |
+| `failed`|批准过程中发生错误 |
 
 ### 候选键
 
@@ -496,9 +496,9 @@ Grant 付与（principal × permission）
 
 |模块|职责|
 |-----------|------|
-| §鲁米§0§|能力相关数据模型定义|
-| §鲁米§0§| Flow Modifier相关数据模型定义|
-| §鲁米§0§|修改器文件加载/解析 |
+| `capability_models.py`|能力相关数据模型定义|
+| `flow_modifier_models.py`| Flow Modifier相关数据模型定义|
+| `flow_modifier_loader.py`|修改器文件加载/解析 |
 
 ### 与功能系统集成（A-D 阶段）
 
@@ -512,36 +512,36 @@ Grant 付与（principal × permission）
 
 |领域 |类型 |描述 |
 |-----------|-----|------|
-| §鲁米§0§| §鲁米§1§ |功能 ID |
-| §鲁米§0§| §鲁米§1§ |联盟包 ID |
-| §鲁米§0§| `str`（属性）| `{pack_id}:{function_id}`（冒号分隔）|
-| §鲁米§0§| §鲁米§1§ |执行方法。 7 种中的任何一种 |
-| §鲁米§0§| §鲁米§1§ |授权 ID（用于授权验证）|
-| §鲁米§0§| §鲁米§1§ |入口点（例如`main.py:run`）|
-| §鲁米§0§| §鲁米§1§ |风险等级|
-| §鲁米§0§| §鲁米§1§ |它是一个内置函数吗？ |
-| §鲁米§0§| §鲁米§1§ | §鲁米§2§ / §鲁米§3§ / §鲁米§4§ |
-| §鲁米§0§| §鲁米§1§ | handler.py 中的 SHA-256（用于信任验证）|
-| §鲁米§0§| §鲁米§1§ |词汇别名（可在`resolve_by_alias()`中搜索）|
-| §鲁米§0§| §鲁米§1§ | Grant设置（非None时执行Grant验证） |
+| `function_id`| `str` |功能 ID |
+| `pack_id`| `str` |联盟包 ID |
+| `qualified_name`| `str`（属性）| `{pack_id}:{function_id}`（冒号分隔）|
+| `calling_convention`| `Optional[str]` |执行方法。 7 种中的任何一种 |
+| `permission_id`| `Optional[str]` |授权 ID（用于授权验证）|
+| `entrypoint`| `Optional[str]` |入口点（例如`main.py:run`）|
+| `risk`| `Optional[str]` |风险等级|
+| `is_builtin`| `bool` |它是一个内置函数吗？ |
+| `runtime`| `str` | `python` / `binary` / `command` |
+| `handler_py_sha256`| `Optional[str]` | handler.py 中的 SHA-256（用于信任验证）|
+| `vocab_aliases`| `Optional[List[str]]` |词汇别名（可在`resolve_by_alias()`中搜索）|
+| `grant_config`| `Optional[Dict]` | Grant设置（非None时执行Grant验证） |
 
 #### 调用约定（7 种）
 
 |调用约定 |描述 |
 |-------------------|------|
-| §鲁米§0§|直接作为内核处理程序运行。无法通过`capability_executor`执行 |
-| §鲁米§0§|在子进程中执行（指定入口点） |
-| §鲁米§0§|通过 core_pack 的 DI 服务运行 |
-| §鲁米§0§|在主机 Python 中运行（需要`RUMI_ALLOW_HOST_EXECUTION=1`）|
-| §鲁米§0§|在 Docker 容器中运行（默认）|
-| §鲁米§0§|直接运行二进制文件 |
-| §鲁米§0§|执行任意命令 |
+| `kernel`|直接作为内核处理程序运行。无法通过`capability_executor`执行 |
+| `subprocess`|在子进程中执行（指定入口点） |
+| `block`|通过 core_pack 的 DI 服务运行 |
+| `python_host`|在主机 Python 中运行（需要`RUMI_ALLOW_HOST_EXECUTION=1`）|
+| `python_docker`|在 Docker 容器中运行（默认）|
+| `binary`|直接运行二进制文件 |
+| `command`|执行任意命令 |
 
 #### 内核函数
 
 `kernel.py` 定义`_KERNEL_HANDLER_MANIFESTS`。 70 个（系统 29 + 运行时 41）处理程序在`register_kernel_function()`、`pack_id="kernel"`、`calling_convention="kernel"`和`FunctionRegistry`中注册。
 
-####执行流程
+#### 执行流程
 
 ```
 capability_executor.execute(principal_id, request)
@@ -571,10 +571,10 @@ calling_convention で分岐実行
 
 |环境变量|描述 |默认 |
 |----------|------|-----------|
-| §鲁米§0§|出口套接字 GID |无 |
-| §鲁米§0§|功能套接字 GID |无 |
-| §鲁米§0§|出口套接字权限 | §鲁米§1§ |
-| §鲁米§0§|能力 Socket 权限 | §鲁米§1§ |
+| `RUMI_EGRESS_SOCKET_GID`|出口套接字 GID |无 |
+| `RUMI_CAPABILITY_SOCKET_GID`|功能套接字 GID |无 |
+| `RUMI_EGRESS_SOCKET_MODE`|出口套接字权限 | `0660` |
+| `RUMI_CAPABILITY_SOCKET_MODE`|能力 Socket 权限 | `0660` |
 
 如果设置了 GID，则在 `docker run` 时将自动授予`--group-add=<GID>`。
 
@@ -634,13 +634,13 @@ calling_convention で分岐実行
 
 |状况 |要执行的文件 |
 |------|-------------------|
-|第一次介绍（无记录）| §鲁米§0§|
+|第一次介绍（无记录）| `lib/install.py`|
 |更改哈希 | `lib/update.py`（如果不是`install.py`）|
 |没有变化|别跑|
 
 ### Docker 隔离
 
-在严格模式下，它在 Docker 容器内隔离运行。 §鲁米§0§、§鲁米§1§、§鲁米§2§、§鲁米§3§。 RW 安装仅限`user_data/packs/{pack_id}/`（在容器中：`/data`）。
+在严格模式下，它在 Docker 容器内隔离运行。 `--network=none`、`--cap-drop=ALL`、`--read-only`、`--memory=256m`。 RW 安装仅限`user_data/packs/{pack_id}/`（在容器中：`/data`）。
 
 ---
 
@@ -650,7 +650,7 @@ calling_convention で分岐実行
 
 包可以通过包含`requirements.lock`来声明对 PyPI 包的依赖关系。一旦用户通过 API 授权，它就会被安全地下载并安装到构建器的 Docker 容器中。宿主Python环境不脏。
 
-###requirements.lock约定
+### requirements.lock约定
 
 仅允许`NAME==VERSION`行（允许注释/空行）。禁止使用以下内容：`-e`（可编辑）、`git+`/`http://`/`https://`（URL/VCS 引用）、`file:`/`../`/`/`（本地引用）、`--`可选行、`@`直接引用。
 
@@ -814,18 +814,18 @@ def check_converter_with_locals(
 
 |类别 |内容 |
 |----------|------|
-| §鲁米§0§|流程执行 |
-| §鲁米§0§|应用修改器 |
-| §鲁米§0§|块执行 |
-| §鲁米§0§|包审批操作|
-| §鲁米§0§|权限运营（包括网络授权、能力授权）|
-| §鲁米§0§|网络通讯|
-| §鲁米§0§|安全事件|
-| §鲁米§0§|系统事件（lib、pip、待导出等）|
+| `flow_execution`|流程执行 |
+| `modifier_application`|应用修改器 |
+| `python_file_call`|块执行 |
+| `approval`|包审批操作|
+| `permission`|权限运营（包括网络授权、能力授权）|
+| `network`|网络通讯|
+| `security`|安全事件|
+| `system`|系统事件（lib、pip、待导出等）|
 
 ### 文件命名
 
-§鲁米§0§
+`{category}_{YYYY-MM-DD}.jsonl`
 
 文件名中的日期由条目的`ts`（时间戳）确定。即使过了午夜，也会被分类到该条目的`ts`对应的文件中。如果`ts`无效，它将回退到撰写本文时的日期。
 
@@ -903,33 +903,33 @@ def check_converter_with_locals(
 
 |方法|描述 |
 |---------|------|
-| §鲁米§0§|按名称注册工厂函数。首先实例化`get`（延迟生成）|
-| §鲁米§0§|获取实例。如果未注册`KeyError` |
-| §鲁米§0§|获取实例。如果未注册`None` |
-| §鲁米§0§|判断是否已注册|
-| §鲁米§0§|清除所有注册 |
-| §鲁米§0§|直接注册现有实例（用于测试）|
+| `register(name, factory)`|按名称注册工厂函数。首先实例化`get`（延迟生成）|
+| `get(name)`|获取实例。如果未注册`KeyError` |
+| `get_or_none(name)`|获取实例。如果未注册`None` |
+| `has(name)`|判断是否已注册|
+| `reset()`|清除所有注册 |
+| `set_instance(name, instance)`|直接注册现有实例（用于测试）|
 
 ### 全球访问
 
 |功能|描述 |
 |------|------|
-| §鲁米§0§|获取全局容器（单例）|
-| §鲁米§0§|重置全局容器（用于测试）|
+| `get_container()`|获取全局容器（单例）|
+| `reset_container()`|重置全局容器（用于测试）|
 
 ### 注册服务列表（32个服务）
 
 |波|服务名称|
 |------|-----------|
-|第 1 波 | §鲁米§0§，§鲁米§1§|
-|第 2 波 | §鲁米§0§、§鲁米§1§、§鲁米§2§|
-|第 3 波 | §鲁米§0§，§鲁米§1§|
+|第 1 波 | `audit_logger`，`hmac_key_manager`|
+|第 2 波 | `vocab_registry`、`network_grant_manager`、`store_registry`|
+|第 3 波 | `approval_manager`，`permission_manager`|
 |第 4 波 | `container_orchestrator`、`host_privilege_manager`、`flow_composer`、`function_alias_registry`、`secrets_store`、`secrets_grant_manager`、`modifier_loader`、`modifier_applier`|
 |第 5 波 | `pack_api_server`、`egress_proxy_manager`、`python_file_executor`、`secure_executor`、`lib_executor`、`unit_executor`、`capability_executor`|
 |第 8 波 | `diagnostics`、`install_journal`、`interface_registry`、`event_bus`、`component_lifecycle`|
-|第 15 波 | §鲁米§0§、§鲁米§1§、§鲁米§2§|
-|第 22 波 | §鲁米§0§|
-|第 24 波 | §鲁米§0§|
+|第 15 波 | `health_checker`、`metrics_collector`、`profiler`|
+|第 22 波 | `docker_capability_handler`|
+|第 24 波 | `function_registry`|
 
 ---
 
@@ -943,10 +943,10 @@ def check_converter_with_locals(
 
 | Mixin 类 |文件|职责|
 |-------------|---------|------|
-| §鲁米§0§| §鲁米§1§ |发动机本体。流程加载、上下文构建、关闭 |
-| §鲁米§0§| §鲁米§1§ |流程执行、`depends_on`分辨率、条件评估 |
-| §鲁米§0§| §鲁米§1§ |启动/系统处理程序（初始化、扫描、批准等）|
-| §鲁米§0§| §鲁米§1§ |操作/执行处理程序（流程执行、能力调用等）|
+| `KernelCore`| `kernel_core.py` |发动机本体。流程加载、上下文构建、关闭 |
+| `KernelFlowExecutionMixin`| `kernel_flow_execution.py` |流程执行、`depends_on`分辨率、条件评估 |
+| `KernelSystemHandlersMixin`| `kernel_handlers_system.py` |启动/系统处理程序（初始化、扫描、批准等）|
+| `KernelRuntimeHandlersMixin`| `kernel_handlers_runtime.py` |操作/执行处理程序（流程执行、能力调用等）|
 
 ### 合成
 
@@ -977,11 +977,11 @@ Wave 15 中添加的四个模块提供结构化日志、运行状况检查、指
 
 |类/函数 |描述 |
 |--------------|------|
-| §鲁米§0§|将日志格式化为 JSON 或文本格式 |
-| §鲁米§0§| `logging.Logger`包装。在`bind()` 中给出键值上下文 |
-| §鲁米§0§|线程安全`correlation_id`管理。用于每个请求跟踪 |
-| §鲁米§0§|带缓存的工厂。使用相同的名称调用返回相同的实例 |
-| §鲁米§0§|立即应用全局日志设置（级别、格式） |
+| `StructuredFormatter`|将日志格式化为 JSON 或文本格式 |
+| `StructuredLogger`| `logging.Logger`包装。在`bind()` 中给出键值上下文 |
+| `CorrelationContext`|线程安全`correlation_id`管理。用于每个请求跟踪 |
+| `get_structured_logger(name)`|带缓存的工厂。使用相同的名称调用返回相同的实例 |
+| `configure_logging()`|立即应用全局日志设置（级别、格式） |
 
 环境变量`RUMI_LOG_LEVEL`（默认`INFO`）和`RUMI_LOG_FORMAT`（`json`或`text`，默认`text`）控制行为。
 
@@ -991,11 +991,11 @@ Wave 15 中添加的四个模块提供结构化日志、运行状况检查、指
 
 |类/函数 |描述 |
 |--------------|------|
-| §鲁米§0§|注册探针、超时并行运行并聚合结果 |
-| §鲁米§0§| `UP` / `DOWN` / `DEGRADED` / `UNKNOWN` 4 个州 |
-| §鲁米§0§|检查可用磁盘空间（内置探测器）|
-| §鲁米§0§|检查内存使用情况（内置探针）|
-| §鲁米§0§|检查文件是否可以写入（内置探针） |
+| `HealthChecker`|注册探针、超时并行运行并聚合结果 |
+| `HealthStatus`| `UP` / `DOWN` / `DEGRADED` / `UNKNOWN` 4 个州 |
+| `probe_disk_space`|检查可用磁盘空间（内置探测器）|
+| `probe_memory`|检查内存使用情况（内置探针）|
+| `probe_file_writable`|检查文件是否可以写入（内置探针） |
 
 如果所有探针都是`UP`，则所有探针也被判定为`UP`，如果其中任何一个是`DOWN`，则判定为`DEGRADED`，如果所有探针都是`DOWN`，则判定为`DOWN`。
 
@@ -1005,11 +1005,11 @@ Wave 15 中添加的四个模块提供结构化日志、运行状况检查、指
 
 |方法|描述 |
 |---------|------|
-| §鲁米§0§|增量计数器|
-| §鲁米§0§|设置仪表|
-| §鲁米§0§|在直方图中记录值 |
-| §鲁米§0§|上下文管理器。自动记录区块执行时间 |
-| §鲁米§0§|返回字典中所有指标的当前值 |
+| `increment(name, labels, value)`|增量计数器|
+| `set_gauge(name, labels, value)`|设置仪表|
+| `observe(name, labels, value)`|在直方图中记录值 |
+| `timer(name, labels)`|上下文管理器。自动记录区块执行时间 |
+| `snapshot()`|返回字典中所有指标的当前值 |
 
 标签（字典）允许您将指标分类为多个维度。在 Wave 15 中，它已集成到`kernel_flow_execution.py`（步骤执行时间）、`kernel_handlers_system.py`/`kernel_handlers_runtime.py`（处理程序调用计数/时间）中。
 
@@ -1019,10 +1019,10 @@ Wave 15 中添加的四个模块提供结构化日志、运行状况检查、指
 
 |方法/装饰器 |描述 |
 |--------------------|------|
-| §鲁米§0§|上下文管理器。记录区块执行时间 |
-| §鲁米§0§|同步函数的装饰器 |
-| §鲁米§0§|异步函数的装饰器 |
-| §鲁米§0§|返回带有 p50 / p95 / p99 百分位数的摘要 |
+| `profile(name)`|上下文管理器。记录区块执行时间 |
+| `profile_func(name)`|同步函数的装饰器 |
+| `profile_async(name)`|异步函数的装饰器 |
+| `summary()`|返回带有 p50 / p95 / p99 百分位数的摘要 |
 
 您可以将`max_samples`设置为内存限制，一旦超过限制，较旧的样本将被丢弃。它已被集成到 Wave 15 中的`kernel_flow_execution.py`（流程执行时间、步骤执行时间）中。
 
@@ -1044,10 +1044,10 @@ Wave 15 中添加的四个模块提供结构化日志、运行状况检查、指
 
 |元素|描述 |
 |------|------|
-| §鲁米§0§|冻结数据类。 `RUMI-{CAT}-{NNN}` 格式（例如`RUMI-AUTH-001`）|
+| `ErrorCode`|冻结数据类。 `RUMI-{CAT}-{NNN}` 格式（例如`RUMI-AUTH-001`）|
 |类别 | `AUTH`（身份验证）、`NET`（网络）、`FLOW`（流程）、`PACK`（包）、`CAP`（能力）、`VAL`（验证）、`SYS`（系统）|
-| §鲁米§0§|统一异常类。保留`code`、`message`、`details`、`suggestion`|
-| §鲁米§0§|模板扩展助手。动态填充消息中的占位符 |
+| `RumiError`|统一异常类。保留`code`、`message`、`details`、`suggestion`|
+| `format_error()`|模板扩展助手。动态填充消息中的占位符 |
 
 错误代码在自动收集注册表中进行管理，并在模块加载时自动注册到注册表中。
 
@@ -1058,9 +1058,9 @@ Wave 15 中添加的四个模块提供结构化日志、运行状况检查、指
 |类型 |定义 |
 |------|------|
 |新类型 | `PackId`、`FlowId`、`CapabilityName`、`HandlerKey`、`StoreKey`|
-|输入别名 | §鲁米§0§，§鲁米§1§|
+|输入别名 | `JsonValue`，`JsonDict`|
 |通用| `Result[T]`（保留成功值或错误）|
-|枚举 | §鲁米§0§（§鲁米§1§，§鲁米§2§，§鲁米§3§，§鲁米§4§）|
+|枚举 | `Severity`（`info`，`warn`，`error`，`critical`）|
 
 包含`py.typed` 标记文件 (PEP 561)，以启用使用外部工具（mypy 等）进行类型检查。
 
@@ -1070,10 +1070,10 @@ Wave 15 中添加的四个模块提供结构化日志、运行状况检查、指
 
 |元素|描述 |
 |------|------|
-| §鲁米§0§|冻结数据类。保留已弃用的目标、版本和替代方案 |
-| §鲁米§0§|辛格尔顿。线程安全地管理弃用信息 |
-| §鲁米§0§|函数/方法的装饰器（异步兼容）。调用时输出警告 |
-| §鲁米§0§|类的装饰器。创建实例时输出警告 |
+| `DeprecationInfo`|冻结数据类。保留已弃用的目标、版本和替代方案 |
+| `DeprecationRegistry`|辛格尔顿。线程安全地管理弃用信息 |
+| `deprecated()`|函数/方法的装饰器（异步兼容）。调用时输出警告 |
+| `deprecated_class()`|类的装饰器。创建实例时输出警告 |
 
 环境变量`RUMI_DEPRECATION_LEVEL`控制行为：`warn`（默认，打印警告），`error`（引发异常），`silent`（忽略），`log`（仅记录）。
 
@@ -1091,10 +1091,10 @@ Wave 15 中添加的四个模块提供结构化日志、运行状况检查、指
 
 |模板|描述 |
 |------------|------|
-| §鲁米§0§|最低配置。仅`ecosystem.json` + 空`backend/` |
-| §鲁米§0§|具有能力处理程序。包含`share/capability_handlers/` |
-| §鲁米§0§|随着流量。包含`backend/flows/`和`backend/blocks/`|
-| §鲁米§0§|全套包括所有元素。包括`lib/`、`converters/`、`modifiers/`等|
+| `minimal`|最低配置。仅`ecosystem.json` + 空`backend/` |
+| `capability`|具有能力处理程序。包含`share/capability_handlers/` |
+| `flow`|随着流量。包含`backend/flows/`和`backend/blocks/`|
+| `full`|全套包括所有元素。包括`lib/`、`converters/`、`modifiers/`等|
 
 生成的文件使用`validation.py`进行验证，以防止结构错误。
 
@@ -1132,8 +1132,8 @@ python -m backend_core.pack_scaffold --template full --pack-id my_pack --output 
 
 |删除目标 |更换|原因 |
 |---------|------|------|
-| §鲁米§0§| §鲁米§1§ |集成到 FunctionRegistry（A 到 D 阶段）|
-| §鲁米§0§| §鲁米§1§ |迁移到 core_pack |
+| `capability_handler_registry.py`| `function_registry.py` |集成到 FunctionRegistry（A 到 D 阶段）|
+| `builtin_capability_handlers/`| `core_pack/` |迁移到 core_pack |
 
 # Defaultspack 函数边界
 

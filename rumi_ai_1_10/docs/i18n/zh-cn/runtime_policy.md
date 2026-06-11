@@ -22,7 +22,7 @@
 }
 ```
 
-`max_tool_calls` 由 AgentEngine 强制执行。 §鲁米§1§和
+`max_tool_calls` 由 AgentEngine 强制执行。 `allow_shell=false`和
 `allow_file_write=false`过滤提供者工具并拒绝直接ToolExecutor
 当工具元数据标记 shell 或写入操作时调用。
 

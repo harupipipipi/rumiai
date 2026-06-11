@@ -200,7 +200,7 @@ export RUMI_SECURITY_MODE=permissive
 |入手 | `/api/flows` |登録済みフロー一覧 |
 |投稿 | `/api/flows/{flow_id}/run` |実行フロー |
 
-###ストア
+### ストア
 
 |方法 |パス |説明 |
 |----------|------|------|

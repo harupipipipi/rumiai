@@ -103,11 +103,11 @@ pack-shell run desktop_app_pack \
 
 |领域 |描述 |
 |-----------|------|
-| §鲁米§0§| pack-shell 启动的命令。 `--command` 作为参数传递 |
-| §鲁米§0§| `DesktopAppManager` 是否被视为 `RUMI_API_TOKEN` 强制性的？当前状态始终保存在`true`|中
-| §鲁米§0§|用于快捷方式名称/窗口标题 |
-| §鲁米§0§|建议的窗口大小（在应用程序端阅读时）|
-| §鲁米§0§|支持的平台 |
+| `desktop_app.command`| pack-shell 启动的命令。 `--command` 作为参数传递 |
+| `desktop_app.requires_api_token`| `DesktopAppManager` 是否被视为 `RUMI_API_TOKEN` 强制性的？当前状态始终保存在`true`|中
+| `desktop_app.window.title`|用于快捷方式名称/窗口标题 |
+| `desktop_app.window.width/height`|建议的窗口大小（在应用程序端阅读时）|
+| `desktop_app.platforms`|支持的平台 |
 
 ---
 
@@ -131,9 +131,9 @@ pack-shell 设置的环境变量：
 
 |变量|描述 |
 |------|------|
-| §鲁米§0§|内核颁发的临时令牌 |
-| §鲁米§0§|内核API端口号（默认：8765）|
-| §鲁米§0§|目标包 ID |
+| `RUMI_TOKEN`|内核颁发的临时令牌 |
+| `RUMI_PORT`|内核API端口号（默认：8765）|
+| `RUMI_PACK_ID`|目标包 ID |
 
 ---
 

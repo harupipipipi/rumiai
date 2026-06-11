@@ -21,9 +21,9 @@
 
 后端扩展清单按以下顺序加载。
 
-1.§鲁米§0§
+1.`ecosystem/defaultspack/extensions/`
 2.所选兄弟包的`extensions/`
-3.§鲁米§0§
+3.`ecosystem/defaultspack/user_data/shared/extensions/`
 4. `RUMI_DEFAULTSPACK_EXTENSION_ROOTS`中指定的附加根
 
 前端扩展清单是同级包的`frontend_extensions/`
@@ -157,9 +157,9 @@
 
 当前内置渲染器：
 
-- §鲁米§0§，§鲁米§1§
-- §鲁米§0§
-- §鲁米§0§
+- `text`，`markdown`
+- `code`
+- `image`
 - `widget`后备
 - 未知的块回退（`json` / `text` / `hidden`）
 
@@ -174,8 +174,8 @@
 预览源聚合了以下来源。
 
 - `tools_called` of `Inspector`
-- §鲁米§0§
-- §鲁米§0§
+- `context_info.knowledge_results`
+- `context_info.memory_results`
 - 消息`widget`
 - `code` / `image` 包含在消息的`content` 中
 

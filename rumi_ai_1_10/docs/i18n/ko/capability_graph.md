@@ -47,9 +47,9 @@ if target_node.kind == "agent" and source_node.kind == "tool":
 
 초기 발견 후보:
 
-1. §루미§0§
-2. §루미§0§
-3. §루미§0§
+1. `user_data/shared/graphs/*.graph.yaml`
+2. `ecosystem/<pack_id>/graphs/*.graph.yaml`
+3. `graphs/*.graph.yaml`
 
 중복된 `graph_id` 값이 발견되면 1단계에서는 이를 진단 오류로 처리합니다.
 
@@ -87,13 +87,13 @@ edges:
 
 1단계 가장자리 종류:
 
-- §루미§0§
+- `binding`
 
 예약된 미래 엣지 종류:
 
-- §루미§0§
-- §루미§0§
-- §루미§0§
+- `data`
+- `event`
+- `control`
 
 알 수 없는 가장자리 종류는 1단계의 오류입니다.
 
@@ -180,18 +180,18 @@ runtime_profile.<profile_id>.<graph_id>
 
 API 읽기:
 
-- §루미§0§
-- §루미§0§
-- §루미§0§
-- §루미§0§
-- §루미§0§
-- §루미§0§
-- §루미§0§
+- `GET /api/nodes`
+- `GET /api/nodes/{node_id}`
+- `GET /api/profiles`
+- `GET /api/profiles/{profile_id}`
+- `GET /api/profiles/{profile_id}/nodes`
+- `GET /api/graphs`
+- `GET /api/graphs/{graph_id}`
 
 그래프 미리보기 API:
 
-- §루미§0§
-- §루미§0§
+- `POST /api/graphs/{graph_id}/validate`
+- `POST /api/graphs/{graph_id}/compile`
 
 뷰어 측 노드 응답에는 프로필 선택 시 로케일 확인 레이블, 포트, 표준, 별칭, 바인딩, 메타데이터, 요구 사항, 권한 및 프로필 노드 상태가 포함됩니다. 프로필 노드 API는 설치되어 프로필이 활성화된 노드만 포함하는 `palette_nodes`도 반환하므로 뷰어는 노드 유형을 하드코딩할 필요가 없습니다.
 

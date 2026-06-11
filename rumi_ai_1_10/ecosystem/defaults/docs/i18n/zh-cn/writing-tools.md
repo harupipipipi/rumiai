@@ -12,9 +12,7 @@
 
 有两种类型的工具。
 
-**内置工具** (`execution.type: "local"`) 是一个演示工具，自动注册到`ToolRegistry._register_defaults()`。将注册三个项目：`web_search`、`calculator`和`file_reader`。
-
-**动态工具** (`execution.type: "dynamic"`) 是用户定义的工具，可以通过 API 创建、更新和删除。它以`.tool.json`（定义）和`.handler.py`（执行代码）的形式保留在`user_data/shared/tools/`目录中。
+**内置工具** (`execution.type: "local"`) 是一个演示工具，自动注册到`ToolRegistry._register_defaults()`。将注册三个项目：`web_search`、`calculator` 和 `file_reader`。**动态工具** (`execution.type: "dynamic"`) 是用户定义的工具，可以通过 API 创建、更新和删除。它作为 `.tool.json`（定义）和 `.handler.py`（执行代码）保留在 `user_data/shared/tools/` 目录中。
 
 ## 工具定义JSON格式
 
@@ -41,16 +39,16 @@
 }
 ```
 
-|领域 |类型 |描述 |
+| Field | Type | Description |
 |---|---|---|
-| §鲁米§0§| §鲁米§1§ |该工具的唯一标识符。通常与`name` | 相同
-| §鲁米§0§| §鲁米§1§ |工具名称|
-| §鲁米§0§| §鲁米§1§ |工具说明。 AI选择工具时参考 |
-| §鲁米§0§| §鲁米§1§ |标签。用于过滤 |
-| §鲁米§0§| §鲁米§1§ | JSON Schema 格式的参数定义 |
-| §鲁米§0§| §鲁米§1§ | `"local"`、`"dynamic"`、`"prompt"` 中的任何一项 |
-| §鲁米§0§| §鲁米§1§ |创建日期和时间 (ISO 8601) |
-| §鲁米§0§| §鲁米§1§ |更新日期和时间 (ISO 8601)。续订时自动授予 |
+| `tool_id` | `string` | Unique identifier for the tool. Usually the same as `name` |
+| `name` | `string` | Tool name |
+| `summary` | `string` | Tool description. Referenced by AI when selecting tools |
+| `tags` | `string[]` | Tag. Used for filtering |
+| `schema.parameters` | `object` | Parameter definition in JSON Schema format |
+| `execution.type` | `string` | Any of `"local"`, `"dynamic"`, `"prompt"` |
+| `created_at` | `string` | Creation date and time (ISO 8601) |
+| `updated_at` | `string` | Date and time of update (ISO 8601). Automatically granted upon renewal |
 
 ## 如何编写handler_code
 
@@ -76,43 +74,35 @@ def handler(arguments, context):
     }
 ```
 
-**参数**：`arguments` 是 API 调用期间传递的参数的字典。 `context`是处理程序的执行上下文，可能包含`call_handler`、`emit_event`等函数。
-
-**返回值**：返回具有三个键的字典：`result`（字符串），`is_error`（布尔），`widget`（字典或无）。
-
-**限制**：handler_code 可能是由 AI 在`domain/tool/builder.py` 的`generate_handler_code_with_ai()` 中生成的。如果`handler_code`是`None`，AI会自动生成它，如果AI不可用，骨架代码将在`generate_skeleton()`中生成。
+**参数**：`arguments` 是 API 调用期间传递的参数的字典。 `context`是处理程序的执行上下文，可能包含诸如`call_handler`、`emit_event`等函数。**返回值**：返回具有三个键的字典：`result`（字符串）、`is_error`（布尔）、`widget`（字典或无）。**限制**：handler_code可能是在`domain/tool/builder.py`的`generate_handler_code_with_ai()`中AI生成的。如果`handler_code`是`None`，AI会自动生成它，如果AI不可用，骨架代码会在`generate_skeleton()`中生成。
 
 ## 通过 API 进行增删改查
 
 ### 工具创建
 
-**HTTP**：`POST /api/tools/create`（`blocks/tool/create.py`）
+**HTTP**：`POST /api/tools/create`（`blocks/tool/create.py`）**输入数据**：
 
-**输入数据**：
-
-|领域 |类型 |必填 |描述 |
+| Field | Type | Required | Description |
 |---|---|---|---|
-| §鲁米§0§| §鲁米§1§ |是的 |工具名称|
-| §鲁米§0§| §鲁米§1§ |没有 |说明|
-| §鲁米§0§| §鲁米§1§ |是的 | JSON Schema 格式参数定义 |
-| §鲁米§0§| §鲁米§1§ |没有 | Python 代码。如果是`None`，AI会自动生成|
-| §鲁米§0§| §鲁米§1§ |没有 |标签。默认`["dynamic", "user-created"]` |
-| §鲁米§0§| §鲁米§1§ |没有 | handler_code 用于自动生成的AI模型 |
+| `name` | `string` | Yes | Tool name |
+| `description` | `string` | No | Explanation |
+| `parameters` | `object` | Yes | JSON Schema format parameter definition |
+| `handler_code` | `string` | No | Python code. In case of `None`, AI automatically generates |
+| `tags` | `string[]` | No | Tag. Default `["dynamic", "user-created"]` |
+| `model` | `string` | No | handler_code AI model used for automatic generation |
 
-如果同名工具已存在，则会返回`ALREADY_EXISTS`错误。
+如果同名工具已存在，将返回`ALREADY_EXISTS`错误。
 
 **返回值**：`ok({"tool_id": "...", "name": "...", "summary": "...", "handler_code": "...", "created_at": "..."})`
 
 ### 工具更新
 
-**HTTP**：`PUT /api/tools/{name}`（`blocks/tool/update.py`）
+**HTTP**：`PUT /api/tools/{name}`（`blocks/tool/update.py`）**输入数据**：
 
-**输入数据**：
-
-|领域 |类型 |必填 |描述 |
+| Field | Type | Required | Description |
 |---|---|---|---|
-| §鲁米§0§| §鲁米§1§ |是的 |工具名称（从 URL 路径自动注入）|
-| §鲁米§0§| §鲁米§1§ |是的 |要更新的字段。禁止更改`name` 和`tool_id` |
+| `name` | `string` | Yes | Tool name (automatically injected from URL path) |
+| `updates` | `dict` | Yes | Field to update. Changes to `name` and `tool_id` are prohibited |
 
 仅动态工具 (`execution.type: "dynamic"`) 可以更新。 `updated_at` 将自动授予。
 
@@ -120,13 +110,11 @@ def handler(arguments, context):
 
 ### 删除工具
 
-**HTTP**：`DELETE /api/tools/{name}`（`blocks/tool/delete.py`）
+**HTTP**：`DELETE /api/tools/{name}`（`blocks/tool/delete.py`）**输入数据**：
 
-**输入数据**：
-
-|领域 |类型 |必填 |描述 |
+| Field | Type | Required | Description |
 |---|---|---|---|
-| §鲁米§0§| §鲁米§1§ |是的 |工具名称（从 URL 路径自动注入）|
+| `name` | `string` | Yes | Tool name (automatically injected from URL path) |
 
 只能删除动态工具。 `user_data/shared/tools/` 中的`.tool.json` 和`.handler.py` 也被删除。
 
@@ -134,14 +122,12 @@ def handler(arguments, context):
 
 ### 工具导出
 
-**HTTP**：`GET /api/tools/{name}/export`（`blocks/tool/export.py`）
+**HTTP**：`GET /api/tools/{name}/export`（`blocks/tool/export.py`）**输入数据**：
 
-**输入数据**：
-
-|领域 |类型 |必填 |描述 |
+| Field | Type | Required | Description |
 |---|---|---|---|
-| §鲁米§0§| §鲁米§1§ |没有 |单一工具名称 |
-| §鲁米§0§| §鲁米§1§ |没有 |多个工具名称（`name` 独有）|
+| `name` | `string` | No | Single tool name |
+| `names` | `string[]` | No | Multiple tool names (exclusive with `name`) |
 
 **返回值**：`ok({"tools": [...], "count": N, "not_found": [...]})`。每个工具都是一个完整的定义，包括`handler_code`。
 
@@ -187,7 +173,7 @@ curl -X POST http://127.0.0.1:8766/api/tools/create \
   }'
 ```
 
-如果省略`handler_code`，如果 AI 提供商可用，AI 将生成代码。如果不可用，将生成骨架代码。
+如果您省略 `handler_code`，则在有可用的 AI 提供商的情况下，AI 将生成代码。如果不可用，将生成骨架代码。
 
 ### 示例 3：更新工具
 
@@ -204,10 +190,10 @@ curl -X PUT http://127.0.0.1:8766/api/tools/unit_converter \
 
 ## 最佳实践
 
-保持`name`简短、清晰，并使用一个单词名称来描述该工具的功能。 AI在选择工具时会参考`name`和`summary`，因此请务必在`summary`中具体描述该工具的用途。
+保持`name`简短、清晰，并使用一个单词名称来描述该工具的功能。 AI在选择工具时会参考`name`和`summary`，所以一定要在`summary`中具体描述工具的用途。
 
-请尽可能详细地定义`parameters`的JSON架构。请务必在`required`字段中指定所需的参数，并为每个属性准确指定`type`。
+请尽可能详细地定义 `parameters` 的 JSON 架构。请务必在 `required` 字段中指定所需参数，并为每个属性准确指定 `type`。
 
-`handler_code` 应始终返回`{"result": str, "is_error": bool, "widget": None}` 形式的字典。如果发生意外异常，请使用`is_error: true`返回结果。
+`handler_code` 应始终返回 `{"result": str, "is_error": bool, "widget": None}` 形式的字典。如果出现意外异常，请按照`is_error: true`返回结果。
 
 不要直接编辑持久性文件（`user_data/shared/tools/`），而是通过 API 对其进行操作。 `ToolRegistry` 管理内存缓存和文件一致性。

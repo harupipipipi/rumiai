@@ -36,7 +36,7 @@ Python ヘルパー ライブラリは `ecosystem/defaults/lib/rumi_widgets/` �
 | `Video` |ビデオ再生 | `src`、`duration` |
 | `Map` |地図表示 | `lat`、`lng`、`zoom` |
 
-###controls.py (6種類のコントロール)
+### controls.py (6種類のコントロール)
 
 |クラス |使い方 |主なパラメータ |
 |---|---|---|
@@ -47,7 +47,7 @@ Python ヘルパー ライブラリは `ecosystem/defaults/lib/rumi_widgets/` �
 | `Slider` |スライダー | `min`、`max`、`value`、`step` |
 | `Checkbox` |チェックボックス | `label`、`checked` |
 
-###layout.py (6種類のレイアウト)
+### layout.py (6種類のレイアウト)
 
 |クラス |使い方 |主なパラメータ |
 |---|---|---|
@@ -65,7 +65,7 @@ Python ヘルパー ライブラリは `ecosystem/defaults/lib/rumi_widgets/` �
 | `Stream` |状態ベースのストリーム表示 | `states` (辞書) |
 | `Indicator` |単一状態インジケータ | `label`、`state`、`animation` |
 
-###custom.py (カスタム1種類)
+### custom.py (カスタム1種類)
 
 |クラス |使い方 |主なパラメータ |
 |---|---|---|

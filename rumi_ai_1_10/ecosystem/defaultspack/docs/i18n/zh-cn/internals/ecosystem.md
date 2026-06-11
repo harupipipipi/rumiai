@@ -10,15 +10,15 @@
 
 ## 顶级字段
 
-|领域 |类型 |描述 |
+| Field | Type | Description |
 |---|---|---|
-| §鲁米§0§| §鲁米§1§ |包的唯一标识符。在默认包`"defaults"` |
-| §鲁米§0§| §鲁米§1§ |包的存储库标识符。格式：`"github:<owner>/<repo>"`|
-| §鲁米§0§| §鲁米§1§ |语义版本控制。示例：`"1.0.0"`|
-| §鲁米§0§| §鲁米§1§ | Pack | 使用的词汇定义
-| §鲁米§0§| §鲁米§1§ |组件定义图 |
-| §鲁米§0§| §鲁米§1§ |组件加载顺序|
-| §鲁米§0§| §鲁米§1§ |元数据 |
+| `pack_id` | `string` | Unique identifier for the Pack. In defaults pack `"defaults"` |
+| `pack_identity` | `string` | Repository identifier for the Pack. Format: `"github:<owner>/<repo>"` |
+| `version` | `string` | Semantic versioning. Example: `"1.0.0"` |
+| `vocabulary` | `object` | Vocabulary definitions used by Pack |
+| `components` | `object` | Map of component definitions |
+| `load_order` | `array[string]` | Component loading order |
+| `metadata` | `object` | Metadata |
 
 ---
 
@@ -48,9 +48,9 @@
 }
 ```
 
-`types` 是 Pack 提供的组件类型列表。每种类型对应于`components`中条目的`type`字段。内核使用此列表来了解 Pack 提供的功能类别。
+`types` 是 Pack 提供的组件类型列表。每种类型对应于 `components` 中条目的`type` 字段。内核使用此列表来了解 Pack 提供的功能类别。
 
-默认包定义了 11 种类型：`chat`（对话管理）、`agent`（代理执行）、`coding`（编码工具）、`ai_client`（AI 提供商管理）、`tool`（工具管理）、`prompt`（提示管理）、`memory`（内存管理）、`knowledge`（知识）管理）、`media`（媒体处理）、`frontend`（前端）、`dev`（开发人员工具）。
+默认包定义了 11 种类型：`chat`（对话管理）、`agent`（代理执行）、`coding`（编码工具）、`ai_client`（AI 提供商管理）、`tool`（工具管理）、`prompt`（提示管理）、`memory`（内存管理）、`knowledge`（知识管理）、 `media`（媒体处理）、`frontend`（前端）、`dev`（开发人员工具）。
 
 ---
 
@@ -78,21 +78,21 @@
 }
 ```
 
-|领域 |类型 |描述 |
+| Field | Type | Description |
 |---|---|---|
-| §鲁米§0§| §鲁米§1§ | §鲁米§2§ |
-| §鲁米§0§| §鲁米§1§ |组件内的唯一ID |
-| §鲁米§0§| §鲁米§1§ |块文件存储目录的相对路径（相对于Pack root） |
-| §鲁米§0§| §鲁米§1§ |连接定义|
-| §鲁米§0§| §鲁米§1§ |该组件提供的处理程序名称列表 |
+| `type` | `string` | `vocabulary.types` |
+| `id` | `string` | Unique ID within the component |
+| `path` | `string` | Relative path of the directory where the block file is stored (relative to the Pack root) |
+| `connectivity` | `object` | Connectivity definition |
+| `connectivity.provides` | `array[string]` | List of handler names provided by this component |
 
 > **注意：前端组件的路径**
 >
-> 之前，`frontend`组件的`path`是`"ui"`（直接位于Pack根目录下的`ui/`目录），但现在已更改为`"blocks/frontend"`。所有组件均遵循`blocks/<type>` 或`blocks/<id>` 模式。
+> 以前，`frontend`组件的`path`是`"ui"`（直接位于Pack根目录下的`ui/`目录），但现在已更改为`"blocks/frontend"`。所有组件均遵循 `blocks/<type>` 或 `blocks/<id>` 模式。
 
-###connectivity.provides 的含义
+### connectivity.provides 的含义
 
-`provides` 数组中列出的字符串是该组件公开的处理程序名称。该格式遵循`pack_id.category.action`的三段结构。
+`provides` 数组中列出的字符串是该组件公开的处理程序名称。格式遵循`pack_id.category.action`的三段结构。
 
 ```
 defaults.chat.create_conversation
@@ -100,7 +100,7 @@ defaults.chat.create_conversation
 pack_id  category  action
 ```
 
-内核使用此信息来确定调用`call_handler("defaults.chat.create_conversation", params)` 时应处理哪个 Pack 的哪个组件。
+内核使用此信息来确定调用 `call_handler("defaults.chat.create_conversation", params)` 时应处理哪个 Pack 的哪个组件。
 
 ### 每个组件的提供列表
 
@@ -109,27 +109,7 @@ pack_id  category  action
      提示=7、内存=5、知识=6、媒体=6、前端=3、开发=4
 -->
 
-**聊天**（18 个处理程序）：`defaults.chat.create_conversation`、`defaults.chat.get_conversation`、`defaults.chat.list_conversations`、`defaults.chat.update_conversation`、`defaults.chat.delete_conversation`、`defaults.chat.export_conversation`、`defaults.chat.send`、`defaults.chat.stream`、`defaults.chat.add_message`、`defaults.chat.get_message`、`defaults.chat.update_message`、`defaults.chat.delete_message`、 §鲁米§12§、§鲁米§13§、§鲁米§14§、§鲁米§15§、§鲁米§16§、§鲁米§17§
-
-**代理**（10 名处理者）：`defaults.agent.execute`、`defaults.agent.approve`、`defaults.agent.reject`、`defaults.agent.cancel`、`defaults.agent.status`、`defaults.agent.plan`、`defaults.agent.add_instruction`、`defaults.agent.multi_execute`、`defaults.agent.multi_status`、`defaults.agent.multi_message`
-
-**编码**（12 个处理程序）：`defaults.coding.file_read`、`defaults.coding.file_write`、`defaults.coding.file_create`、`defaults.coding.file_delete`、`defaults.coding.file_search`、`defaults.coding.file_list`、`defaults.coding.terminal_exec`、`defaults.coding.terminal_stream`、`defaults.coding.git_status`、`defaults.coding.git_diff`、`defaults.coding.git_commit`、`defaults.coding.git_push`
-
-**ai_client**（9 个处理程序）：`defaults.ai.complete`、`defaults.ai.stream`、`defaults.ai.models`、`defaults.ai.providers`、`defaults.ai.embed`、`defaults.ai.image_gen`、`defaults.ai.image_analyze`、`defaults.ai.transcribe`、`defaults.ai.tts`
-
-**工具**（11 个处理程序）：`defaults.tool.invoke`、`defaults.tool.list`、`defaults.tool.schema`、`defaults.tool.mcp_connect`、`defaults.tool.mcp_list`、`defaults.tool.create`、`defaults.tool.update`、`defaults.tool.delete`、`defaults.tool.export`、`defaults.tool.consent_check`、`defaults.tool.consent_confirm`
-
-**提示**（7 个处理程序）：`defaults.prompt.render`、`defaults.prompt.list`、`defaults.prompt.create`、`defaults.prompt.system`、`defaults.prompt.update`、`defaults.prompt.delete`、`defaults.prompt.convert`
-
-**内存**（5 个处理程序）：`defaults.memory.store`、`defaults.memory.recall`、`defaults.memory.project_context`、`defaults.memory.vector_store`、`defaults.memory.vector_query`
-
-**知识**（6 个处理程序）：`defaults.knowledge.create`、`defaults.knowledge.get`、`defaults.knowledge.list`、`defaults.knowledge.search`、`defaults.knowledge.update`、`defaults.knowledge.delete`
-
-**媒体**（6 个处理程序）：`defaults.media.image_read`、`defaults.media.image_transform`、`defaults.media.doc_parse`、`defaults.media.clipboard_read`、`defaults.media.clipboard_write`、`defaults.media.screenshot`
-
-**前端**（3 个处理程序）：`defaults.frontend.start`、`defaults.frontend.stop`、`defaults.frontend.emit`
-
-**开发**（4 个处理程序）：`defaults.dev.inspect`、`defaults.dev.prompt_history`、`defaults.dev.edit_prompt_live`、`defaults.dev.replay`
+**聊天**（18 个处理程序）：`defaults.chat.create_conversation`、`defaults.chat.get_conversation`、`defaults.chat.list_conversations`、`defaults.chat.update_conversation`、`defaults.chat.delete_conversation`、`defaults.chat.export_conversation`、`defaults.chat.send`、`defaults.chat.stream`、`defaults.chat.add_message`、`defaults.chat.get_message`、`defaults.chat.update_message`、`defaults.chat.delete_message`、`defaults.chat.branch`、`defaults.chat.search`、 `defaults.chat.stop`、`defaults.chat.regenerate`、`defaults.chat.summarize_and_trim`、`defaults.chat.auto_trim`**代理**（10 个处理程序）：`defaults.agent.execute`、`defaults.agent.approve`、`defaults.agent.reject`、`defaults.agent.cancel`、`defaults.agent.status`、`defaults.agent.plan`、`defaults.agent.add_instruction`、`defaults.agent.multi_execute`、`defaults.agent.multi_status`、 `defaults.agent.multi_message`**编码**（12个处理程序）：`defaults.coding.file_read`、`defaults.coding.file_write`、`defaults.coding.file_create`、`defaults.coding.file_delete`、`defaults.coding.file_search`、`defaults.coding.file_list`、`defaults.coding.terminal_exec`、`defaults.coding.terminal_stream`、`defaults.coding.git_status`、`defaults.coding.git_diff`、`defaults.coding.git_commit`、`defaults.coding.git_push`**ai_client** (9 个处理程序): `defaults.ai.complete`, `defaults.ai.stream`, `defaults.ai.models`, `defaults.ai.providers`, `defaults.ai.embed`, `defaults.ai.image_gen`, `defaults.ai.image_analyze`, `defaults.ai.transcribe`, `defaults.ai.tts`**工具** (11 个处理程序): `defaults.tool.invoke`, `defaults.tool.list`, `defaults.tool.schema`, `defaults.tool.mcp_connect`、`defaults.tool.mcp_list`、`defaults.tool.create`、`defaults.tool.update`、`defaults.tool.delete`、`defaults.tool.export`、`defaults.tool.consent_check`、`defaults.tool.consent_confirm`**提示**（7 个处理程序）：`defaults.prompt.render`、`defaults.prompt.list`、`defaults.prompt.create`、`defaults.prompt.system`、`defaults.prompt.update`、 `defaults.prompt.delete`、`defaults.prompt.convert`**记忆**（5 个处理程序）：`defaults.memory.store`、`defaults.memory.recall`、`defaults.memory.project_context`、`defaults.memory.vector_store`、`defaults.memory.vector_query`**知识**（6 个处理程序）：`defaults.knowledge.create`、`defaults.knowledge.get`、`defaults.knowledge.list`、`defaults.knowledge.search`、`defaults.knowledge.update`、 `defaults.knowledge.delete`**媒体** (6 个处理程序): `defaults.media.image_read`, `defaults.media.image_transform`, `defaults.media.doc_parse`, `defaults.media.clipboard_read`, `defaults.media.clipboard_write`, `defaults.media.screenshot`**前端** (3 个处理程序): `defaults.frontend.start`, `defaults.frontend.stop`, `defaults.frontend.emit`**dev** (4 个处理程序): `defaults.dev.inspect`, `defaults.dev.prompt_history`、`defaults.dev.edit_prompt_live`、`defaults.dev.replay`
 
 ---
 
@@ -189,11 +169,11 @@ pack_id  category  action
 }
 ```
 
-|领域 |类型 |描述 |
+| Field | Type | Description |
 |---|---|---|
-| §鲁米§0§| §鲁米§1§ |包说明 |
-| §鲁米§0§| §鲁米§1§ |作者 |
-| §鲁米§0§| §鲁米§1§ |许可证|
+| `description` | `string` | Pack description |
+| `author` | `string` | Author |
+| `license` | `string` | License |
 
 ---
 
@@ -201,4 +181,4 @@ pack_id  category  action
 
 默认包的实际`ecosystem.json`是`pack_id: "defaults"`、`version: "1.0.0"`，定义了11个组件（聊天、代理、编码、ai_client、工具、提示、内存、知识、媒体、前端、开发）并提供总共91个处理程序。
 
-§鲁米§0§
+<!-- Handler total breakdown: chat(18) + agent(10) + coding(12) + ai_client(9) + tool(11) + prompt(7) + memory(5) + knowledge(6) + media(6) + frontend(3) + dev(4) = 91 -->

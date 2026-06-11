@@ -12,23 +12,11 @@ Flow Engine 자체는 범용 메커니즘이며 채팅, 에이전트, 코딩과 
 
 Flow Engine은 두 개의 레이어로 구성됩니다.
 
-**레이어 1 - 시스템 흐름(handler.py)**: flow.yaml + handler.py 쌍으로 정의된 처리 파이프라인. handler.py는 FlowContext를 수신하고 범용 프리미티브(call_handler, Emit_event 등)를 사용하여 핸들러를 호출합니다.
-
-**레이어 2 - 사용자 정의 흐름(노드 그래프)**: YAML 노드 정의만 사용하여 흐름을 구축하는 선언적 방법입니다. 조건부 분기, 루프, 병렬 실행 및 하위 흐름 호출을 지원합니다. handler.py를 작성할 필요가 없습니다.
+**레이어 1 - 시스템 흐름(handler.py)**: flow.yaml + handler.py 쌍으로 정의된 처리 파이프라인. handler.py는 FlowContext를 수신하고 범용 프리미티브(call_handler, Emit_event 등)를 사용하여 핸들러를 호출합니다.**레이어 2 — 사용자 정의 흐름(노드 그래프)**: YAML 노드 정의만 사용하여 흐름을 구축하는 선언적 방법입니다. 조건부 분기, 루프, 병렬 실행 및 하위 흐름 호출을 지원합니다. handler.py를 작성할 필요가 없습니다.
 
 ## 2. 디자인 철학
 
-**흐름 자체는 플러그인입니다**: 기본 3개 흐름은 특별히 처리되지 않습니다. flow.yaml + handler.py를 flow/ 디렉터리에 넣기만 하면 새 흐름이 추가됩니다. Flow Engine은 모든 흐름을 동일한 방식으로 로드하고 실행합니다.
-
-**일반 프리미티브만 해당**: FlowContext는 call_handler, Emit_event, wait_event, data_read, data_write, Capability, Execution_flow, Emit_widget과 같은 일반 프리미티브만 제공합니다. 도메인별 API는 없습니다. call_handler를 사용하여 핸들러를 호출하면 채팅 저장, 에이전트 실행, 메모리 업데이트가 모두 완료됩니다.
-
-**표준 어휘(블록 계약)**: Defaults는 contract.py의 "표준 어휘"로 핸들러의 입력/출력 사양을 정의합니다. Pack은 이 어휘를 가정할 수 있습니다. 다만, 컨트랙트에 등록되지 않은 핸들러도 call_handler를 이용하여 자유롭게 호출할 수 있습니다. 표준어휘는 제약사항이 아닌 공통언어이다.
-
-**선언적 + 명령적 하이브리드**: flow.yaml에서 선언적으로 메타데이터와 노드 연결을 정의하고 handler.py에서 실행 논리를 명령적으로 작성합니다. 간단한 흐름은 handler.py만으로 완성할 수 있고, 복잡한 흐름은 flow.yaml의 노드 그래프를 해석하고 실행하는 Engine.py로 완성할 수 있습니다.
-
-**단계별**: 레이어 1에서만 완전히 작동합니다. 필요할 때 레이어 2를 사용할 수 있습니다. 트리거 시스템의 경우 user_input 및 API가 즉시 작동하고 인프라가 구축되면 웹훅 및 일정이 활성화됩니다.
-
-**메커니즘만 제공**: 기본값은 흐름 엔진 메커니즘(engine.py, router.py, validator.py, node_executor.py, Trigger_manager.py, context.py)을 제공합니다. 기본 흐름 정의(simple_chat, Agent_chat, Planning_agent)는 배터리로 포함되지만 user_data/shared/flows/ 또는 user_data/packs/*/flows/에 동일한 flow_id를 가진 정의를 배치하여 완전히 대체할 수 있습니다.
+**흐름 자체는 플러그인입니다**: 기본 3개 흐름은 특별히 처리되지 않습니다. flow.yaml + handler.py를 flow/ 디렉터리에 넣기만 하면 새 흐름이 추가됩니다. Flow Engine은 동일한 방식으로 모든 흐름을 로드하고 실행합니다.**일반 프리미티브만 해당**: FlowContext는 call_handler, Emit_event, wait_event, data_read, data_write, Capability, Execution_flow, Emit_widget과 같은 일반 프리미티브만 제공합니다. 도메인별 API는 없습니다. call_handler를 사용하여 핸들러를 호출하기만 하면 채팅 저장, 에이전트 실행, 메모리 업데이트가 모두 완료됩니다.**표준 어휘(블록 계약)**: Defaults에서는 contract.py의 "표준 어휘"로 핸들러의 입출력 사양을 정의합니다. Pack은 이 어휘를 가정할 수 있습니다. 다만, 컨트랙트에 등록되지 않은 핸들러도 call_handler를 이용하여 자유롭게 호출할 수 있습니다. 표준 어휘는 제약 조건이 아닌 공통 언어입니다.**선언적 + 명령형 하이브리드**: flow.yaml에서 메타데이터 및 노드 연결을 선언적으로 정의하고 handler.py에서 명령적으로 실행 논리를 작성합니다. 간단한 흐름은 handler.py만으로 완료할 수 있고, 복잡한 흐름은 flow.yaml의 노드 그래프를 해석하고 실행하는engine.py로 완료할 수 있습니다.**단계별**: 완전히 레이어 1에서만 작동합니다. 필요할 때 레이어 2를 사용할 수 있습니다. 트리거 시스템의 경우 user_input 및 API가 즉시 작동하고 인프라가 구축되면 웹훅 및 일정이 활성화됩니다.**메커니즘만 제공**: 기본값은 Flow Engine 메커니즘(engine.py, router.py, validator.py, node_executor.py, Trigger_manager.py, context.py)을 제공합니다. 기본 흐름 정의(simple_chat, Agent_chat, Planning_agent)는 배터리로 포함되지만 user_data/shared/flows/ 또는 user_data/packs/*/flows/에 동일한 flow_id를 가진 정의를 배치하여 완전히 대체할 수 있습니다.
 
 ## 3. 공식 루미아이 Flow와의 관계
 
@@ -677,41 +665,41 @@ handler.py를 작성하지 않고 flow.yaml에 있는 노드만 이용하여 플
 
 #### 기본 노드
 
-| 유형 | 설명 | 입력 | 출력 |
+| type | description | input | output |
 |---|---|---|---|
-| §루미§0§ | 흐름 시작. 입력 변수 정의 | 트리거_입력 | 정의된 변수 |
-| §루미§0§ | 흐름이 종료됩니다. 최종 출력 정의 | 모두 | 흐름결과 |
-| §루미§0§ | 핸들러 호출 | handler_name, 매개변수 | 핸들러의 반환 값 |
-| §루미§0§ | 신속한 렌더링 | 프롬프트 ID, 변수 | 렌더링_텍스트 |
-| §루미§0§ | 이벤트 문제 | 이벤트_유형, 데이터 | 없음 |
-| §루미§0§ | 이벤트를 기다리는 중 | event_type, 시간 초과, 필터 | 이벤트 데이터 |
-| §루미§0§ | user_data 읽기 | 경로 | 내용 |
-| §루미§0§ | user_data 쓰기 | 경로, 내용 | 성공 |
-| §루미§0§ | 기능 호출 | 능력_ID, 매개변수 | 결과 |
-| §루미§0§ | 다른 흐름을 하위 흐름으로 호출 | flow_id, 입력 | 흐름결과 |
-| §루미§0§ | 위젯 전송 | 위젯 JSON | 없음 |
+| `start` | Flow start. Define input variables | trigger_input | Defined variables |
+| `end` | Flow ends. Define final output | Any | FlowResult |
+| `handler` | Call any handler | handler_name, params | Return value of handler |
+| `prompt` | Prompt rendering | prompt_id, variables | rendered_text |
+| `event_emit` | Event issue | event_type, data | None |
+| `event_wait` | Waiting for event | event_type, timeout, filter | Event data |
+| `data_read` | user_data read | path | content |
+| `data_write` | user_data write | path, content | success |
+| `capability` | capability call | capability_id, params | result |
+| `flow` | Call another flow as a subflow | flow_id, input | FlowResult |
+| `widget` | Widget sending | widget JSON | None |
 
 #### 제어 노드
 
-| 유형 | 설명 |
+| type | description |
 |---|---|
-| §루미§0§ | 조건 분기(if/else) |
-| §루미§0§ | 멀티브랜치(스위치/케이스/기본) |
-| §루미§0§ | 루프(for_each / while / count) |
-| §루미§0§ | 병렬 실행(모든 완료 또는 가장 빠른 완료를 기다리는 중) |
-| §루미§0§ | 타이머를 기다리는 중 |
-| §루미§0§ | 지정된 노드로 점프(순환 지원) |
+| `condition` | Conditional branch (if/else) |
+| `switch` | Multi-branch (switch / case / default) |
+| `loop` | Loop (for_each / while / count) |
+| `parallel` | Parallel execution (waiting for all completion or fastest completion) |
+| `wait` | Waiting for timer |
+| `goto` | Jump to specified node (cyclic support) |
 
 #### 데이터 노드
 
-| 유형 | 설명 |
+| type | description |
 |---|---|
-| §루미§0§ | 변수 설정, 업데이트 및 삭제 |
-| §루미§0§ | Jinja2 템플릿 렌더링 |
-| §루미§0§ | Python 코드 실행(샌드박스에서) |
-| §루미§0§ | HTTP 요청 보내기 |
+| `variable` | Setting, updating, and deleting variables |
+| `template` | Jinja2 template rendering |
+| `code` | Python code execution (in sandbox) |
+| `http` | Send HTTP request |
 
-기본 노드 `handler`는 모두 키입니다. 핸들러 노드는 임의의 핸들러를 호출하는 범용 노드로, handler_name만 변경하면 채팅 작업, 에이전트 실행, 메모리 업데이트, 도구 실행 등을 수행할 수 있습니다.
+기본 노드 `handler`은 모두 키입니다. 핸들러 노드는 임의의 핸들러를 호출하는 범용 노드로, handler_name만 변경하면 채팅 작업, 에이전트 실행, 메모리 업데이트, 도구 실행 등을 수행할 수 있습니다.
 
 #### 사용자 정의 노드 팩
 
@@ -904,14 +892,14 @@ nodes:
 
 ### 10.1 트리거 유형
 
-| 유형 | 설명 | 상태 |
+| type | description | status |
 |---|---|---|
-| §루미§0§ | 채팅에서 사용자 입력 | 실시대상 |
-| §루미§0§ | REST API 호출 | 실시대상 |
-| §루미§0§ | 내부행사 | 실시대상 |
-| §루미§0§ | 외부에서 HTTP POST 수신 | 데몬 인프라 필요 |
-| §루미§0§ | 크론 스타일 일정 | 데몬 인프라 필요 |
-| §루미§0§ | 다른 흐름의 하위 흐름 호출 | 실시대상 |
+| `user_input` | User input in chat | Implementation target |
+| `api` | REST API call | Implementation target |
+| `event` | Internal event | Implementation target |
+| `webhook` | Receive HTTP POST from outside | Daemon infrastructure required |
+| `schedule` | cron-style schedule | daemon infrastructure required |
+| `flow` | Subflow call from another flow | Implementation target |
 
 ### 10.2 트리거 정의 예시
 
@@ -1135,12 +1123,12 @@ class TriggerManager:
 
 on_error는 각 노드에 대해 지정할 수 있습니다.
 
-| 오류 발생 | 행동 |
+| on_error | Behavior |
 |---|---|
-| §루미§0§ | max_retries 횟수만큼 재시도하세요. 기본 2회 |
-| §루미§0§ | 노드를 건너뛰고 default_output |
-| §루미§0§ | 지정된 fallback_node로 전환 |
-| §루미§0§ | 전체 흐름을 중지하고 오류 결과를 반환합니다. |
+| `retry` | Retry max_retries times. Default 2 times |
+| `skip` | Skip node and proceed with default_output |
+| `fallback` | Transition to the specified fallback_node |
+| `stop` | Stops the entire flow and returns an error result |
 
 ```yaml
 - id: api_call
@@ -1203,23 +1191,23 @@ async def run(ctx: FlowContext) -> FlowResult:
 
 ### 12.1 시작 유효성 검사(validator.py)
 
-| 항목 확인 | 설명 |
+| Check items | Explanation |
 |---|---|
-| flow.yaml 구문 | YAML을 구문 분석할 수 있나요? 필수 항목이 있나요 |
-| 핸들러 존재 여부 확인 | handler.py에서 호출되는 핸들러 이름인가요, 아니면 등록된 노드인가요? |
-| 계약 확인 | 계약에 등록된 핸들러의 구현이 사양을 충족합니까 |
-| 노드 그래프 검증 | 노드 간 연결이 유효합니까? 연결할 수 없는 노드가 있습니까 |
-| 사이클 감지 | 흐름 간의 하위 흐름 호출에 주기가 있습니까 |
-| config_schema 유효성 검사 | flow_config는 config_schema |
+| flow.yaml syntax | Is YAML parsable? Are there required fields |
+| Check the existence of handler | Is the handler name called in handler.py or in a node registered? |
+| Contract verification | Does the implementation of the handler registered in the contract meet the specifications |
+| Node graph validation | Is the connection between nodes valid and are there any unreachable nodes |
+| Cycle detection | Is there a cycle in subflow calls between flows |
+| config_schema validation | Does flow_config conform to config_schema |
 
 ### 12.2 런타임 확인
 
-| 항목 확인 | 설명 |
+| Check items | Explanation |
 |---|---|
-| 권한 확인 | call_handler에 대한 호출자의 승인 확인 |
-| 반복 횟수 | max_total_iterations |
-| 시간 초과 | global_timeout_ms가 초과되었습니까 |
-| 변수 참조 | `{{ node_id.field }}` |
+| Permission check | Validate caller's Grant on call_handler |
+| Number of iterations | Does it exceed max_total_iterations |
+| Timeout | Is global_timeout_ms exceeded |
+| Variable reference | Is there a reference to `{{ node_id.field }}` |
 
 ## 13. 팩 협력
 
@@ -1258,7 +1246,7 @@ validator.py는 계약을 확인하고 문제가 없으면 교체를 적용합�
 }
 ```
 
-레이어 2 노드 그래프에서 `type: slack_notify`으로 사용 가능합니다.
+`type: slack_notify`으로 레이어 2 노드 그래프에서 사용할 수 있습니다.
 
 ## 14. 흐름 간 협력
 
@@ -1295,47 +1283,47 @@ after_flow:
 
 ## 15. 보안
 
-| 아이템 | 대책 |
+| Item | Measures |
 |---|---|
-| handler.py 실행 | Pack 승인 흐름에서 허용되는 것만 실행 |
-| call_handler 권한 확인 | 호출자의 Grant에 포함된 권한만 실행 가능 |
-| 코드 노드 | Docker 샌드박스에서 실행 |
-| http 노드 | 허용된 도메인 목록으로 제한 가능 |
-| 가변 주입 | Jinja2 샌드박스 모드에서 평가되는 템플릿 표현식 `{{ }}` |
-| 무한 루프 | max_total_iterations + global_timeout_ms에서 강제 중지 |
+| Run handler.py | Run only what is allowed by the Pack approval flow |
+| call_handler permission check | Only permissions included in the caller's Grant can be executed |
+| code node | run in Docker sandbox |
+| http node | Can be restricted by allowed domain list |
+| Variable injection | Template expression `{{ }}` evaluated in Jinja2 sandbox mode |
+| Infinite loop | Forced stop at max_total_iterations + global_timeout_ms |
 
 ## 16. 성능
 
-| 아이템 | 정책 |
+| Item | Policy |
 |---|---|
-| 흐름 정의 캐시 | 시작 시 로드되며 메모리 캐시입니다. 변경 시 flow.yaml 다시 로드 |
-| 핸들러 해상도 캐시 | call_handler의 핸들러 이름 → 캐시 구현 매핑 |
-| 병렬 노드 | asyncio.gather를 사용한 병렬 실행 |
-| 스트리밍 | Emit_event / Emit_widget을 사용한 순차 전송 |
-| 대규모 흐름 | 노드가 100개를 초과하는 흐름의 경우 실행 로그가 별도로 저장됩니다. |
+| Flow definition cache | Loaded at startup, memory cache. Reload flow.yaml when changing |
+| handler resolution cache | handler name of call_handler → cache implementation mapping |
+| Parallel nodes | Parallel execution with asyncio.gather |
+| Streaming | Sequential transmission with emit_event / emit_widget |
+| Large-scale flows | Execution logs are saved separately for flows with more than 100 nodes |
 
 ## 17. 이벤트 목록
 
 기본적으로 표준적으로 생성되는 이벤트 목록입니다. 이는 표준 어휘이며 이벤트 트리거 및 wait_event에서 사용할 수 있습니다. 팩에는 자체 이벤트를 추가할 수도 있습니다.
 
-| 이벤트 유형 | 출판사 | 설명 |
+| Event type | Publisher | Description |
 |---|---|---|
-| §루미§0§ | 채팅 핸들러 | 사용자 메시지 수신 시 |
-| §루미§0§ | 채팅 핸들러 | 대화에 새 메시지가 추가되면 |
-| §루미§0§ | 채팅 핸들러 | 메시지가 UI에 표시되기 직전 |
-| §루미§0§ | 채팅 핸들러 | 새 대화가 생성되면 |
-| §루미§0§ | 에이전트 핸들러 | 에이전트 실행이 시작되면 |
-| §루미§0§ | 에이전트 핸들러 | 에이전트 실행이 완료되면 |
-| §루미§0§ | 에이전트 핸들러 | 에이전트 단계가 완료되면 |
-| §루미§0§ | 도구 핸들러 | 도구 실행이 시작되면 |
-| §루미§0§ | 도구 핸들러 | 도구 실행이 완료되면 |
-| §루미§0§ | 엔진.py | 흐름 실행 시작 시 |
-| §루미§0§ | 엔진.py | 흐름 실행이 완료되면 |
-| §루미§0§ | 엔진.py | 흐름 오류가 발생한 경우 |
-| §루미§0§ | 선택사항 | 팝업 표시 요청 |
-| §루미§0§ | 프론트엔드 | 팝업에 대한 사용자 반응 |
-| §루미§0§ | 선택사항 | 기획발표 |
-| §루미§0§ | 프론트엔드 | 계획에 대한 사용자 반응 |
+| `chat.message.received` | chat handler | When receiving user message |
+| `chat.message.new` | chat handler | When a new message is added to a conversation |
+| `chat.message.before_display` | chat handler | Just before the message is displayed in the UI |
+| `chat.conversation.created` | chat handler | When a new conversation is created |
+| `agent.execution.started` | agent handler | When agent execution starts |
+| `agent.execution.completed` | agent handler | When agent execution completes |
+| `agent.step.completed` | agent handler | When an agent step completes |
+| `tool.execution.started` | tool handler | When tool execution starts |
+| `tool.execution.completed` | tool handler | When tool execution completes |
+| `flow.started` | engine.py | At the start of flow execution |
+| `flow.completed` | engine.py | When flow execution completes |
+| `flow.error` | engine.py | When a flow error occurs |
+| `ui.popup.show` | Optional | Pop-up display request |
+| `ui.popup.response` | Frontend | User response to popup |
+| `ui.plan.proposed` | Optional | Plan presentation |
+| `ui.plan.response` | Frontend | User responses to plans |
 
 이러한 모든 이벤트는 Emit_event / wait_event를 사용하여 처리할 수 있습니다. 또한 이벤트 트리거로 흐름을 자동으로 시작하는 후크 포인트 역할도 합니다.
 

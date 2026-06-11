@@ -24,9 +24,9 @@
 12. [공유 사전](#공유-사전)
 13. [lib 시스템](#lib-시스템)
 14. [pip 종속 라이브러리 소개](#pip-dependency-library-installation)
-15. §루미§0§
+15. [Pack Import / Apply](#pack-import--apply)
 16. [컴포넌트 개념](#구성요소-개념)
-17. §루미§0§
+17. [vocab / converter](#vocab--converter)
 18. [감사 기록](#감사-로그)
 19. [수출 보류 중](#내보내기-보류-중)
 20. [DI 컨테이너 및 서비스 목록](#di-container-and-service-list)
@@ -112,9 +112,9 @@ steps:
 
 | 우선순위 | 경로 | 사용법 | 승인 |
 |--------|------|------|------|
-| 1 | §루미§0§ | 공식 흐름(스타트업/베이스) | 필요하지 않음 |
-| 2 | §루미§0§ | 사용자/외부 도구에 의해 배치된 공유 흐름 | 필요하지 않음 |
-| 3 | §루미§0§ | Pack에서 제공하는 흐름 | 팩 승인 필요 |
+| 1 | `flows/` | 공식 흐름(스타트업/베이스) | 필요하지 않음 |
+| 2 | `user_data/shared/flows/` | 사용자/외부 도구에 의해 배치된 공유 흐름 | 필요하지 않음 |
+| 3 | `ecosystem/<pack_id>/backend/flows/` | Pack에서 제공하는 흐름 | 팩 승인 필요 |
 | 4 | `ecosystem/flows/`(더 이상 사용되지 않음) | local_pack 호환 흐름 | `RUMI_LOCAL_PACK_MODE=require_approval`인 경우에만 유효합니다. 승인 필요 |
 
 재정의 규칙: 공식 흐름은 누구도 덮어쓸 수 없습니다. 공유 흐름은 공식 흐름을 재정의할 수 없지만 팩 제공 흐름보다 우선합니다. 팩 제공 흐름은 공식적이든 공유적이든 덮어쓸 수 없습니다. local_pack은 우선순위가 가장 낮으며 다른 소스를 재정의할 수 없습니다.
@@ -123,12 +123,12 @@ steps:
 
 | 유형 | 설명 |
 |------|------|
-| §루미§0§ | 커널 핸들러 호출 |
-| §루미§0§ | Pack에서 Python 파일 실행 |
-| §루미§0§ | 컨텍스트에 따라 값 설정 |
-| §루미§0§ | 조건부 분기(간소화된 버전) |
-| §루미§0§ | FunctionRegistry(Wave 27)에 등록된 기능 실행 |
-| §루미§0§ | 다른 흐름을 하위 흐름으로 호출 |
+| `handler` | 커널 핸들러 호출 |
+| `python_file_call` | Pack에서 Python 파일 실행 |
+| `set` | 컨텍스트에 따라 값 설정 |
+| `if` | 조건부 분기(간소화된 버전) |
+| `function` | FunctionRegistry(Wave 27)에 등록된 기능 실행 |
+| `flow` | 다른 흐름을 하위 흐름으로 호출 |
 
 ### 실행 순서
 
@@ -182,8 +182,8 @@ def run(input_data, context=None):
 
 `python_file_call`의 `file` 필드는 pack_subdir을 기준으로 확인됩니다. 다음 후보자를 순서대로 검색합니다.
 
-1. §루미§0§
-2. §루미§0§
+1. `<pack_subdir>/blocks/`
+2. `<pack_subdir>/backend/blocks/`
 3. `<pack_subdir>/backend/components/`(호환)
 4. `<pack_subdir>/backend/` (호환: 직접 설치)
 5. `<pack_subdir>/<file>`(최종 대체)
@@ -238,18 +238,18 @@ step:
 
 수정자는 파일 이름 `*.modifier.yaml`으로 아래에 배치되어야 합니다.
 
-- §루미§0§
+- `user_data/shared/flows/modifiers/`
 - `ecosystem/<pack_id>/backend/flows/modifiers/`(팩에서 제공하는 경우)
 
 ### 액션
 
 | 액션 | 설명 | 타겟_단계_ID | 단계 |
 |--------|------|----------------|------|
-| §루미§0§ | 지정된 단계 앞에 삽입 | 필수 | 필수 |
-| §루미§0§ | 지정된 단계 뒤에 삽입 | 필수 | 필수 |
-| §루미§0§ | 단계 끝에 추가됨 | 필요하지 않음 | 필수 |
-| §루미§0§ | 지정된 단계 바꾸기 | 필수 | 필수 |
-| §루미§0§ | 지정된 단계 삭제 | 필수 | 필요하지 않음 |
+| `inject_before` | 지정된 단계 앞에 삽입 | 필수 | 필수 |
+| `inject_after` | 지정된 단계 뒤에 삽입 | 필수 | 필수 |
+| `append` | 단계 끝에 추가됨 | 필요하지 않음 | 필수 |
+| `replace` | 지정된 단계 바꾸기 | 필수 | 필수 |
+| `remove` | 지정된 단계 삭제 | 필수 | 필요하지 않음 |
 
 ### 조건이 필요합니다
 
@@ -265,11 +265,11 @@ requires:
 
 ### 신청 순서
 
-1. §루미§0§ 주문
+1. `phase` 주문
 2. `priority` 오름차순
 3. `modifier_id` 오름차순
 
-###solve_target(공유 사전으로 해결)
+### solve_target(공유 사전으로 해결)
 
 ```yaml
 modifier_id: compat_modifier
@@ -291,7 +291,7 @@ resolve_namespace: "flow_id"      # デフォルト
 | 모드 | 도커 | 행동 |
 |--------|--------|------|
 | `strict`(기본값) | 필수 | Docker를 사용할 수 없는 경우 실행 거부 |
-| §루미§0§ | 필요하지 않음 | 경고와 함께 호스트 실행 허용(개발용) |
+| `permissive` | 필요하지 않음 | 경고와 함께 호스트 실행 허용(개발용) |
 
 ### 보호 메커니즘 목록
 
@@ -301,7 +301,7 @@ resolve_namespace: "flow_id"      # デフォルト
 | 해시 검증 | 승인 후 파일 수정시 자동 무효화 |
 | HMAC 서명 | 그랜트 파일 변조 감지됨 |
 | 경로 제한 | pack_subdir 경계 외부의 파일 실행 거부 |
-| 도커 격리 | §루미§0§, §루미§1§, §루미§2§ |
+| 도커 격리 | `--network=none`, `--cap-drop=ALL`, `--read-only` |
 | 송신 프록시(UDS) | 팩별 허용 목록으로 외부 통신 제어 |
 | UDS 그룹 추가 | 전용 GID로 소켓 권한 관리 |
 | 감사 로그 | 모든 작업을 기록 |
@@ -344,13 +344,13 @@ Pack 配置 (ecosystem/<pack_id>/)
 
 | 상태 | 코드 실행 | 설명 |
 |------|-----------|------|
-| §루미§0§ | ❌ | 배치됨, 승인되지 않음 |
-| §루미§0§ | ❌ | 승인을 기다리는 중 |
-| §루미§0§ | ✅ | 승인됨 |
-| §루미§0§ | ✅ | 승인 및 실행 중 |
-| §루미§0§ | ❌ | 승인 후 파일 변경 감지 |
-| §루미§0§ | ❌ | 거부됨 |
-| §루미§0§ | ❌ | 오류발생(승인처리 실패 등) |
+| `installed` | ❌ | 배치됨, 승인되지 않음 |
+| `pending` | ❌ | 승인을 기다리는 중 |
+| `approved` | ✅ | 승인됨 |
+| `running` | ✅ | 승인 및 실행 중 |
+| `modified` | ❌ | 승인 후 파일 변경 감지 |
+| `blocked` | ❌ | 거부됨 |
+| `error` | ❌ | 오류발생(승인처리 실패 등) |
 
 파일 수정으로 인해 `modified` 상태가 발생하면 코드 실행 및 네트워크 권한이 자동으로 비활성화됩니다. 재승인이 필요합니다.
 
@@ -360,8 +360,8 @@ Pack 配置 (ecosystem/<pack_id>/)
 
 | 경로 | 유형 | 설명 |
 |------|------|------|
-| §루미§0§ | **권장** | `paths.py`은 탐사의 최우선 순위입니다 |
-| §루미§0§ | 레거시 | 권장경로와 중복되면 무시 |
+| `ecosystem/<pack_id>/` | **권장** | `paths.py`은 탐사의 최우선 순위입니다 |
+| `ecosystem/packs/<pack_id>/` | 레거시 | 권장경로와 중복되면 무시 |
 
 `paths.py`의 `discover_pack_locations()`에서는 `ecosystem/*`를 먼저 검색한 후 호환 경로로 `ecosystem/packs/*`를 검색합니다. 동일한 `pack_id`가 둘 다에 존재하는 경우 `ecosystem/<pack_id>/`가 우선합니다.
 
@@ -424,10 +424,10 @@ Wave 13에서는 송신 프록시 구현을 다음 모듈로 나누었습니다.
 
 | 모듈 | 책임 |
 |-----------|------|
-| §루미§0§ | 내부 IP 점검, DNS 리바인딩 대책 |
-| §루미§0§ | 프로토콜 메소드 헤더 검사 |
-| §루미§0§ | 팩 단위 비율 제한 |
-| §루미§0§ | 도메인 허용 목록/차단 목록 제어 |
+| `egress_ip.py` | 내부 IP 점검, DNS 리바인딩 대책 |
+| `egress_protocol.py` | 프로토콜 메소드 헤더 검사 |
+| `egress_rate_limiter.py` | 팩 단위 비율 제한 |
+| `egress_domain_controller.py` | 도메인 허용 목록/차단 목록 제어 |
 
 #### 중복 코드 제거(W14-FIX)
 
@@ -466,11 +466,11 @@ Grant 付与（principal × permission）
 
 | 조건 | 설명 |
 |------|------|
-| §루미§0§ | 후보자 감지 및 승인 대기 중 |
-| §루미§0§ | 승인되었습니다. 신탁등록+복사완료 |
-| §루미§0§ | 거부되었습니다. 쿨다운(1시간) 후 스누즈 가능 |
-| §루미§0§ | 3번의 거부가 있는 자동 블록입니다. 차단 해제될 때까지 알림을 받지 않음 |
-| §루미§0§ | 승인 과정 중 오류 발생 |
+| `pending` | 후보자 감지 및 승인 대기 중 |
+| `installed` | 승인되었습니다. 신탁등록+복사완료 |
+| `rejected` | 거부되었습니다. 쿨다운(1시간) 후 스누즈 가능 |
+| `blocked` | 3번의 거부가 있는 자동 블록입니다. 차단 해제될 때까지 알림을 받지 않음 |
+| `failed` | 승인 과정 중 오류 발생 |
 
 ### Candidate_key
 
@@ -496,9 +496,9 @@ Wave 13에서는 기능 관련 모델과 로더가 다음 모듈로 나누어졌
 
 | 모듈 | 책임 |
 |-----------|------|
-| §루미§0§ | 기능 관련 데이터 모델 정의 |
-| §루미§0§ | Flow Modifier 관련 데이터 모델 정의 |
-| §루미§0§ | 수정자 파일 로드/파싱 |
+| `capability_models.py` | 기능 관련 데이터 모델 정의 |
+| `flow_modifier_models.py` | Flow Modifier 관련 데이터 모델 정의 |
+| `flow_modifier_loader.py` | 수정자 파일 로드/파싱 |
 
 ### 기능 시스템과의 통합(A~D 단계)
 
@@ -512,30 +512,30 @@ A~D 단계에서는 기존 `capability_handler_registry.py`가 폐지되고 `fun
 
 | 필드 | 유형 | 설명 |
 |-----------|-----|------|
-| §루미§0§ | §루미§1§ | 기능 ID |
-| §루미§0§ | §루미§1§ | 제휴 팩 ID |
-| §루미§0§ | `str`(속성) | `{pack_id}:{function_id}`(콜론으로 구분) |
-| §루미§0§ | §루미§1§ | 실행 방법. 7종 중 임의 |
-| §루미§0§ | §루미§1§ | 부여 ID(지원 유효성 검사에 사용됨) |
-| §루미§0§ | §루미§1§ | 진입점(예: `main.py:run`) |
-| §루미§0§ | §루미§1§ | 위험 수준 |
-| §루미§0§ | §루미§1§ | 내장된 기능인가요? |
-| §루미§0§ | §루미§1§ | §루미§2§ / §루미§3§ / §루미§4§ |
-| §루미§0§ | §루미§1§ | handler.py의 SHA-256(신뢰 확인용) |
-| §루미§0§ | §루미§1§ | 어휘 별칭(`resolve_by_alias()`에서 검색 가능) |
-| §루미§0§ | §루미§1§ | 부여 설정(None이 아닌 경우 부여 확인 수행) |
+| `function_id` | `str` | 기능 ID |
+| `pack_id` | `str` | 제휴 팩 ID |
+| `qualified_name` | `str`(속성) | `{pack_id}:{function_id}`(콜론으로 구분) |
+| `calling_convention` | `Optional[str]` | 실행 방법. 7종 중 임의 |
+| `permission_id` | `Optional[str]` | 부여 ID(지원 유효성 검사에 사용됨) |
+| `entrypoint` | `Optional[str]` | 진입점(예: `main.py:run`) |
+| `risk` | `Optional[str]` | 위험 수준 |
+| `is_builtin` | `bool` | 내장된 기능인가요? |
+| `runtime` | `str` | `python` / `binary` / `command` |
+| `handler_py_sha256` | `Optional[str]` | handler.py의 SHA-256(신뢰 확인용) |
+| `vocab_aliases` | `Optional[List[str]]` | 어휘 별칭(`resolve_by_alias()`에서 검색 가능) |
+| `grant_config` | `Optional[Dict]` | 부여 설정(None이 아닌 경우 부여 확인 수행) |
 
 #### Calling_Convention (7종)
 
 | 전화 컨벤션 | 설명 |
 |-------------------|------|
-| §루미§0§ | 커널 처리기로 직접 실행합니다. `capability_executor`을 통해 실행할 수 없습니다 |
-| §루미§0§ | 하위 프로세스에서 실행(진입점 지정) |
-| §루미§0§ | core_pack의 DI 서비스를 통해 실행 |
-| §루미§0§ | 호스트 Python에서 실행됩니다(`RUMI_ALLOW_HOST_EXECUTION=1` 필요) |
-| §루미§0§ | Docker 컨테이너에서 실행(기본값) |
-| §루미§0§ | 바이너리 직접 실행 |
-| §루미§0§ | 명령 실행 |
+| `kernel` | 커널 처리기로 직접 실행합니다. `capability_executor`을 통해 실행할 수 없습니다 |
+| `subprocess` | 하위 프로세스에서 실행(진입점 지정) |
+| `block` | core_pack의 DI 서비스를 통해 실행 |
+| `python_host` | 호스트 Python에서 실행됩니다(`RUMI_ALLOW_HOST_EXECUTION=1` 필요) |
+| `python_docker` | Docker 컨테이너에서 실행(기본값) |
+| `binary` | 바이너리 직접 실행 |
+| `command` | 명령 실행 |
 
 #### 커널 기능
 
@@ -571,10 +571,10 @@ calling_convention で分岐実行
 
 | 환경 변수 | 설명 | 기본값 |
 |----------|------|-----------|
-| §루미§0§ | 송신 소켓 GID | 없음 |
-| §루미§0§ | 기능 소켓 GID | 없음 |
-| §루미§0§ | 송신 소켓 권한 | §루미§1§ |
-| §루미§0§ | 기능 소켓 권한 | §루미§1§ |
+| `RUMI_EGRESS_SOCKET_GID` | 송신 소켓 GID | 없음 |
+| `RUMI_CAPABILITY_SOCKET_GID` | 기능 소켓 GID | 없음 |
+| `RUMI_EGRESS_SOCKET_MODE` | 송신 소켓 권한 | `0660` |
+| `RUMI_CAPABILITY_SOCKET_MODE` | 기능 소켓 권한 | `0660` |
 
 GID가 설정되면 `--group-add=<GID>`가 `docker run`에서 자동으로 부여됩니다.
 
@@ -634,13 +634,13 @@ API 키와 같은 비밀값을 안전하게 관리하세요.
 
 | 조건 | 실행할 파일 |
 |------|-------------------|
-| 첫 소개(기록 없음) | §루미§0§ |
+| 첫 소개(기록 없음) | `lib/install.py` |
 | 해시 변경 | `lib/update.py`(`install.py`이 아닌 경우) |
 | 변화 없음 | 실행하지 마십시오 |
 
 ### 도커 격리
 
-엄격 모드에서는 Docker 컨테이너 내에서 격리되어 실행됩니다. §루미§0§, §루미§1§, §루미§2§, §루미§3§. RW 마운트는 `user_data/packs/{pack_id}/`(컨테이너 내: `/data`)로만 제한됩니다.
+엄격 모드에서는 Docker 컨테이너 내에서 격리되어 실행됩니다. `--network=none`, `--cap-drop=ALL`, `--read-only`, `--memory=256m`. RW 마운트는 `user_data/packs/{pack_id}/`(컨테이너 내: `/data`)로만 제한됩니다.
 
 ---
 
@@ -814,18 +814,18 @@ def check_converter_with_locals(
 
 | 카테고리 | 내용 |
 |----------|------|
-| §루미§0§ | 흐름 실행 |
-| §루미§0§ | 수정자 적용 |
-| §루미§0§ | 실행 차단 |
-| §루미§0§ | 팩 승인작업 |
-| §루미§0§ | 권한운영(네트워크 부여, 능력 부여 포함) |
-| §루미§0§ | 네트워크 통신 |
-| §루미§0§ | 보안 이벤트 |
-| §루미§0§ | 시스템 이벤트(lib, pip, 보류 중인 내보내기 등) |
+| `flow_execution` | 흐름 실행 |
+| `modifier_application` | 수정자 적용 |
+| `python_file_call` | 실행 차단 |
+| `approval` | 팩 승인작업 |
+| `permission` | 권한운영(네트워크 부여, 능력 부여 포함) |
+| `network` | 네트워크 통신 |
+| `security` | 보안 이벤트 |
+| `system` | 시스템 이벤트(lib, pip, 보류 중인 내보내기 등) |
 
 ### 파일 이름 지정
 
-§루미§0§
+`{category}_{YYYY-MM-DD}.jsonl`
 
 파일 이름의 날짜는 항목의 `ts`(타임스탬프)에 따라 결정됩니다. 자정이 지나도 해당 항목의 `ts`에 해당하는 파일로 분류됩니다. `ts`가 유효하지 않은 경우 작성 당시 날짜로 되돌아갑니다.
 
@@ -903,33 +903,33 @@ def check_converter_with_locals(
 
 | 방법 | 설명 |
 |---------|------|
-| §루미§0§ | 팩토리 함수를 이름으로 등록합니다. 처음에 인스턴스화됨 `get`(지연 생성) |
-| §루미§0§ | 인스턴스를 얻으세요. 등록되지 않은 경우 `KeyError` |
-| §루미§0§ | 인스턴스를 얻으세요. 등록되지 않은 경우 `None` |
-| §루미§0§ | 등록 여부 확인 |
-| §루미§0§ | 모든 등록 지우기 |
-| §루미§0§ | 기존 인스턴스 직접 등록(테스트용) |
+| `register(name, factory)` | 팩토리 함수를 이름으로 등록합니다. 처음에 인스턴스화됨 `get`(지연 생성) |
+| `get(name)` | 인스턴스를 얻으세요. 등록되지 않은 경우 `KeyError` |
+| `get_or_none(name)` | 인스턴스를 얻으세요. 등록되지 않은 경우 `None` |
+| `has(name)` | 등록 여부 확인 |
+| `reset()` | 모든 등록 지우기 |
+| `set_instance(name, instance)` | 기존 인스턴스 직접 등록(테스트용) |
 
 ### 글로벌 액세스
 
 | 기능 | 설명 |
 |------|------|
-| §루미§0§ | 글로벌 컨테이너 가져오기(싱글톤) |
-| §루미§0§ | 전역 컨테이너 재설정(테스트용) |
+| `get_container()` | 글로벌 컨테이너 가져오기(싱글톤) |
+| `reset_container()` | 전역 컨테이너 재설정(테스트용) |
 
 ### 등록된 서비스 목록(32개 서비스)
 
 | 웨이브 | 서비스 이름 |
 |------|-----------|
-| 웨이브 1 | §루미§0§, §루미§1§ |
-| 웨이브 2 | §루미§0§, §루미§1§, §루미§2§ |
-| 웨이브 3 | §루미§0§, §루미§1§ |
+| 웨이브 1 | `audit_logger`, `hmac_key_manager` |
+| 웨이브 2 | `vocab_registry`, `network_grant_manager`, `store_registry` |
+| 웨이브 3 | `approval_manager`, `permission_manager` |
 | 웨이브 4 | `container_orchestrator`, `host_privilege_manager`, `flow_composer`, `function_alias_registry`, `secrets_store`, `secrets_grant_manager`, `modifier_loader`, `modifier_applier` |
 | 웨이브 5 | `pack_api_server`, `egress_proxy_manager`, `python_file_executor`, `secure_executor`, `lib_executor`, `unit_executor`, `capability_executor` |
-| 웨이브 8 | §루미§0§, §루미§1§, §루미§2§, §루미§3§, §루미§4§ |
-| 웨이브 15 | §루미§0§, §루미§1§, §루미§2§ |
-| 웨이브 22 | §루미§0§ |
-| 웨이브 24 | §루미§0§ |
+| 웨이브 8 | `diagnostics`, `install_journal`, `interface_registry`, `event_bus`, `component_lifecycle` |
+| 웨이브 15 | `health_checker`, `metrics_collector`, `profiler` |
+| 웨이브 22 | `docker_capability_handler` |
+| 웨이브 24 | `function_registry` |
 
 ---
 
@@ -943,10 +943,10 @@ def check_converter_with_locals(
 
 | 믹스인 클래스 | 파일 | 책임 |
 |-------------|---------|------|
-| §루미§0§ | §루미§1§ | 엔진 본체. 흐름 로딩, 컨텍스트 구성, 종료 |
-| §루미§0§ | §루미§1§ | 플로우 실행, `depends_on` 해결, 조건 평가 |
-| §루미§0§ | §루미§1§ | 시작/시스템 핸들러(초기화, 스캔, 승인 등) |
-| §루미§0§ | §루미§1§ | 연산/실행 핸들러(흐름 실행, 능력 호출 등) |
+| `KernelCore` | `kernel_core.py` | 엔진 본체. 흐름 로딩, 컨텍스트 구성, 종료 |
+| `KernelFlowExecutionMixin` | `kernel_flow_execution.py` | 플로우 실행, `depends_on` 해결, 조건 평가 |
+| `KernelSystemHandlersMixin` | `kernel_handlers_system.py` | 시작/시스템 핸들러(초기화, 스캔, 승인 등) |
+| `KernelRuntimeHandlersMixin` | `kernel_handlers_runtime.py` | 연산/실행 핸들러(흐름 실행, 능력 호출 등) |
 
 ### 합성
 
@@ -977,11 +977,11 @@ Wave 15에 추가된 4개의 모듈은 구조화된 로그, 상태 확인, 지�
 
 | 클래스/기능 | 설명 |
 |--------------|------|
-| §루미§0§ | JSON 또는 텍스트 형식으로 로그 형식 지정 |
-| §루미§0§ | §루미§1§ 래퍼. `bind()`에서 키-값 컨텍스트 제공 |
-| §루미§0§ | 스레드로부터 안전한 `correlation_id` 관리. 요청별 추적에 사용 |
-| §루미§0§ | 캐시가 있는 공장. 동일한 이름으로 호출하면 동일한 인스턴스가 반환됩니다. |
-| §루미§0§ | 글로벌 로그 설정(레벨, 포맷)을 한번에 적용 |
+| `StructuredFormatter` | JSON 또는 텍스트 형식으로 로그 형식 지정 |
+| `StructuredLogger` | `logging.Logger` 래퍼. `bind()`에서 키-값 컨텍스트 제공 |
+| `CorrelationContext` | 스레드로부터 안전한 `correlation_id` 관리. 요청별 추적에 사용 |
+| `get_structured_logger(name)` | 캐시가 있는 공장. 동일한 이름으로 호출하면 동일한 인스턴스가 반환됩니다. |
+| `configure_logging()` | 글로벌 로그 설정(레벨, 포맷)을 한번에 적용 |
 
 환경 변수 `RUMI_LOG_LEVEL`(기본값 `INFO`) 및 `RUMI_LOG_FORMAT`(`json` 또는 `text`, 기본값 `text`)이 동작을 제어합니다.
 
@@ -991,11 +991,11 @@ Wave 15에 추가된 4개의 모듈은 구조화된 로그, 상태 확인, 지�
 
 | 클래스/기능 | 설명 |
 |--------------|------|
-| §루미§0§ | 프로브 등록, 시간 초과와 병렬로 실행 및 결과 집계 |
-| §루미§0§ | `UP` / `DOWN` / `DEGRADED` / `UNKNOWN`의 4가지 상태 |
-| §루미§0§ | 여유 디스크 공간 확인(내장 프로브) |
-| §루미§0§ | 메모리 사용량 검사(내장 프로브) |
-| §루미§0§ | 파일을 쓸 수 있는지 확인(내장 프로브) |
+| `HealthChecker` | 프로브 등록, 시간 초과와 병렬로 실행 및 결과 집계 |
+| `HealthStatus` | `UP` / `DOWN` / `DEGRADED` / `UNKNOWN`의 4가지 상태 |
+| `probe_disk_space` | 여유 디스크 공간 확인(내장 프로브) |
+| `probe_memory` | 메모리 사용량 검사(내장 프로브) |
+| `probe_file_writable` | 파일을 쓸 수 있는지 확인(내장 프로브) |
 
 모든 프로브가 `UP`이면 모든 프로브도 `UP`로 판정되고, 그 중 하나라도 `DOWN`이면 `DEGRADED`로 판정되며, 모든 프로브가 `DOWN`이면 `DOWN`로 판정된다.
 
@@ -1005,11 +1005,11 @@ Wave 15에 추가된 4개의 모듈은 구조화된 로그, 상태 확인, 지�
 
 | 방법 | 설명 |
 |---------|------|
-| §루미§0§ | 증가 카운터 |
-| §루미§0§ | 게이지 설정 |
-| §루미§0§ | 히스토그램에 값 기록 |
-| §루미§0§ | 컨텍스트 관리자. 블록 실행 시간 자동 기록 |
-| §루미§0§ | 사전에 있는 모든 측정항목의 현재 값을 반환합니다. |
+| `increment(name, labels, value)` | 증가 카운터 |
+| `set_gauge(name, labels, value)` | 게이지 설정 |
+| `observe(name, labels, value)` | 히스토그램에 값 기록 |
+| `timer(name, labels)` | 컨텍스트 관리자. 블록 실행 시간 자동 기록 |
+| `snapshot()` | 사전에 있는 모든 측정항목의 현재 값을 반환합니다. |
 
 라벨(사전)을 사용하면 측정항목을 여러 측정기준으로 분류할 수 있습니다. Wave 15에서는 `kernel_flow_execution.py`(단계 실행 시간), `kernel_handlers_system.py` / `kernel_handlers_runtime.py`(핸들러 호출 횟수/시간)에 통합되었습니다.
 
@@ -1019,10 +1019,10 @@ Wave 15에 추가된 4개의 모듈은 구조화된 로그, 상태 확인, 지�
 
 | 메소드/데코레이터 | 설명 |
 |--------------------|------|
-| §루미§0§ | 컨텍스트 관리자. 블록 실행 시간 기록 |
-| §루미§0§ | 동기 함수용 데코레이터 |
-| §루미§0§ | 비동기 함수용 데코레이터 |
-| §루미§0§ | p50/p95/p99 백분위수로 요약 반환 |
+| `profile(name)` | 컨텍스트 관리자. 블록 실행 시간 기록 |
+| `profile_func(name)` | 동기 함수용 데코레이터 |
+| `profile_async(name)` | 비동기 함수용 데코레이터 |
+| `summary()` | p50/p95/p99 백분위수로 요약 반환 |
 
 `max_samples`을 메모리 제한으로 설정할 수 있으며, 제한이 초과되면 오래된 샘플이 삭제됩니다. Wave 15에서는 `kernel_flow_execution.py`(Flow 실행 시간, Step 실행 시간)에 통합되었습니다.
 
@@ -1044,10 +1044,10 @@ Wave 15에 추가된 4개의 모듈은 구조화된 로그, 상태 확인, 지�
 
 | 요소 | 설명 |
 |------|------|
-| §루미§0§ | 고정된 데이터 클래스. `RUMI-{CAT}-{NNN}` 형식(예: `RUMI-AUTH-001`) |
+| `ErrorCode` | 고정된 데이터 클래스. `RUMI-{CAT}-{NNN}` 형식(예: `RUMI-AUTH-001`) |
 | 카테고리 | `AUTH`(인증), `NET`(네트워크), `FLOW`(플로우), `PACK`(팩), `CAP`(기능), `VAL`(검증), `SYS`(시스템) |
-| §루미§0§ | 균일한 예외 클래스. `code`, `message`, `details`, `suggestion` 유지 |
-| §루미§0§ | 템플릿 확장 도우미. 메시지의 자리 표시자를 동적으로 채우기 |
+| `RumiError` | 균일한 예외 클래스. `code`, `message`, `details`, `suggestion` 유지 |
+| `format_error()` | 템플릿 확장 도우미. 메시지의 자리 표시자를 동적으로 채우기 |
 
 에러코드는 자동수집 레지스트리에서 관리되며, 모듈이 로딩되면 자동으로 레지스트리에 등록됩니다.
 
@@ -1057,10 +1057,10 @@ Wave 15에 추가된 4개의 모듈은 구조화된 로그, 상태 확인, 지�
 
 | 유형 | 정의 |
 |------|------|
-| 뉴타입 | §루미§0§, §루미§1§, §루미§2§, §루미§3§, §루미§4§ |
-| 별칭 입력 | §루미§0§, §루미§1§ |
+| 뉴타입 | `PackId`, `FlowId`, `CapabilityName`, `HandlerKey`, `StoreKey` |
+| 별칭 입력 | `JsonValue`, `JsonDict` |
 | 일반 | `Result[T]`(성공 값 또는 오류 유지) |
-| 열거형 | §루미§0§（`info`, `warn`, `error`, `critical`） |
+| 열거형 | `Severity`（`info`, `warn`, `error`, `critical`） |
 
 `py.typed` 마커 파일(PEP 561)이 포함되어 외부 도구(mypy 등)를 사용하여 유형을 확인할 수 있습니다.
 
@@ -1070,10 +1070,10 @@ Wave 15에 추가된 4개의 모듈은 구조화된 로그, 상태 확인, 지�
 
 | 요소 | 설명 |
 |------|------|
-| §루미§0§ | 고정된 데이터 클래스. 더 이상 사용되지 않는 대상, 버전 및 대안 보존 |
-| §루미§0§ | 하나씩 일어나는 것. 스레드로부터 안전하게 지원 중단 정보 관리 |
-| §루미§0§ | 함수/메서드용 데코레이터(비동기 호환) 호출 시 경고 출력 |
-| §루미§0§ | 수업을 위한 데코레이터. 인스턴스 생성 시 경고 출력 |
+| `DeprecationInfo` | 고정된 데이터 클래스. 더 이상 사용되지 않는 대상, 버전 및 대안 보존 |
+| `DeprecationRegistry` | 하나씩 일어나는 것. 스레드로부터 안전하게 지원 중단 정보 관리 |
+| `deprecated()` | 함수/메서드용 데코레이터(비동기 호환) 호출 시 경고 출력 |
+| `deprecated_class()` | 수업을 위한 데코레이터. 인스턴스 생성 시 경고 출력 |
 
 환경 변수 `RUMI_DEPRECATION_LEVEL`는 동작을 제어합니다: `warn`(기본값, 경고 인쇄), `error`(예외 발생), `silent`(무시), `log`(로그만).
 
@@ -1091,10 +1091,10 @@ Wave 15에 추가된 4개의 모듈은 구조화된 로그, 상태 확인, 지�
 
 | 템플릿 | 설명 |
 |------------|------|
-| §루미§0§ | 최소한의 구성. `ecosystem.json` + 비어 있음 `backend/`만 |
-| §루미§0§ | 기능 처리기를 사용합니다. `share/capability_handlers/` 포함 |
-| §루미§0§ | 흐름과 함께. `backend/flows/` 및 `backend/blocks/` 포함 |
-| §루미§0§ | 모든 요소를 ​​포함한 풀 세트입니다. `lib/`, `converters/`, `modifiers/` 등을 포함 |
+| `minimal` | 최소한의 구성. `ecosystem.json` + 비어 있음 `backend/`만 |
+| `capability` | 기능 처리기를 사용합니다. `share/capability_handlers/` 포함 |
+| `flow` | 흐름과 함께. `backend/flows/` 및 `backend/blocks/` 포함 |
+| `full` | 모든 요소를 ​​포함한 풀 세트입니다. `lib/`, `converters/`, `modifiers/` 등을 포함 |
 
 생성된 파일은 잘못된 구조를 방지하기 위해 `validation.py`로 검증됩니다.
 
@@ -1132,8 +1132,8 @@ JSON 패치 기반 애드온 메커니즘은 `backend_core/ecosystem/addon_manag
 
 | 삭제 대상 | 교체 | 이유 |
 |---------|------|------|
-| §루미§0§ | §루미§1§ | FunctionRegistry에 통합(A~D 단계) |
-| §루미§0§ | §루미§1§ | core_pack으로 마이그레이션 |
+| `capability_handler_registry.py` | `function_registry.py` | FunctionRegistry에 통합(A~D 단계) |
+| `builtin_capability_handlers/` | `core_pack/` | core_pack으로 마이그레이션 |
 
 # Defaultspack 함수 경계
 

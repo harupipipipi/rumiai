@@ -31,19 +31,19 @@ domain/<category>/<component_id>/
 
 使用复数、面向领域的类别：
 
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
+- `webhooks`
+- `integrations`
+- `gateway_channels`
+- `webhook_url_providers`
+- `tools`
+- `providers`
+- `prompts`
+- `templates`
+- `input_profiles`
+- `output_profiles`
+- `audience_policies`
+- `transports`
+- `ui_surfaces`
 
 类别名称应该描述所有权，而不是实现细节。对于
 例如，LINE webhook 默认属于 `webhooks/line`，而 LINE 入站
@@ -123,11 +123,11 @@ ids、工具 ids、提供者别名、模型别名、路由名称和旧版导入
 
 - 端点 ID：`line-main`、`discord-main`、`slack-main`、`test-webhook`
 - 个人资料 ID：`line.default`、`discord.default`、`slack.default`、
-  §鲁米§0§
+  `generic.webhook.default`
 - 提供商 ID：`gitlawb-opengateway`
 - 型号 ID：`gitlawb-opengateway/mimo-v2.5-pro`，
-  §鲁米§0§，
-  §鲁米§0§
+  `gitlawb-opengateway/mimo-v2-flash`，
+  `gitlawb-opengateway/mimo-v2-omni`
 
 ## 路由元数据
 

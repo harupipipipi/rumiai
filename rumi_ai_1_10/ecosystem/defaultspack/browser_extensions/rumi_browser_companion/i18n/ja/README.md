@@ -14,7 +14,7 @@
 ## ファイル
 
 - `manifest.json`: 拡張マニフェスト
-- `background.js`: ブリッジ ポーリング、ブラウザ メタデータ、タブ操作、キャプチャ オーケストレーション
+- `background.js`: ブリッジポーリング、ブラウザメタデータ、タブ操作、キャプチャオーケストレーション
 - `content_script.js`: DOM スナップショットと要素レベルのアクション
 - `options.html`、`options.css`、`options.js`: ローカルブリッジ設定 UI
 
@@ -24,12 +24,12 @@
 2. ブラウザの拡張機能ページを開き、開発者モードを有効にします。
 3. [解凍してロード] を選択し、次のフォルダーを選択します。
 
-   §るみ§0§
+   `<repo>/rumi_ai_1_10/ecosystem/defaultspack/browser_extensions/rumi_browser_companion`
 
 4. Rumi で、`browser_companion` を `action: "bridge.pairing"` とともに呼び出して、ペアリング トークンと候補サーバー URL を取得します。
 5. 拡張機能のオプション ページを開いて、以下を貼り付けます。
 
-   - `Server URL` など `http://127.0.0.1:8766`
+   - `Server URL` `http://127.0.0.1:8766`など
    - `Pairing Token`
 
 6. `Poll Bridge Now` をクリックして、拡張機能が接続できることを確認します。

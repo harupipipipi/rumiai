@@ -71,11 +71,11 @@
 
 |供应商|会话密钥示例 |
 |---|---|
-|松弛的螺纹 | §鲁米§0§|
-|松弛DM | §鲁米§0§|
-|线源 | §鲁米§0§|
-|不和谐频道 | §鲁米§0§|
-|通用 webhook | §鲁米§0§|
+|松弛的螺纹 | `slack:{team_id}:{channel_id}:{thread_id}`|
+|松弛DM | `slack:{team_id}:dm:{user_id}`|
+|线源 | `line:{source_type}:{source_id}`|
+|不和谐频道 | `discord:{guild_id}:{channel_id}`|
+|通用 webhook | `webhook:{profile_id}:{external_subject}`|
 
 会话密钥不是凭证。如果不包含秘密，则可以记录
 或敏感消息内容。

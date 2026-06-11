@@ -65,7 +65,7 @@ defaultspack AI 클라이언트는 흐름과 모델 제공자 간의 경계입�
 
 공급자 검색은 매니페스트 우선입니다. OpenAI 호환 공급자 추가 가능
 `extensions/llm/providers/<provider_id>/manifest.json` 플러스 포함
-§루미§0§; 런타임은 그로부터 `OpenAICompatibleProvider`를 인스턴스화합니다.
+`models/*.json`; 런타임은 그로부터 `OpenAICompatibleProvider`를 인스턴스화합니다.
 자격 증명이 구성되면 매니페스트됩니다. 사용자 정의 공급자 프로토콜은 여전히
 명시적인 Python 진입점을 사용합니다.
 

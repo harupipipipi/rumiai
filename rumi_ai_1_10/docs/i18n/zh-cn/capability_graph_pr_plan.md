@@ -10,11 +10,11 @@
 
 范围：
 
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
+- `docs/capability_graph.md`
+- `docs/node_spec.md`
+- `docs/profile_spec.md`
+- `docs/port_standards.md`
+- `docs/capability_graph_pr_plan.md`
 
 验收：
 
@@ -27,11 +27,11 @@
 
 范围：
 
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
+- `core_runtime/node_models.py`
+- `core_runtime/ecosystem_nodes.py`
+- `kernel:node.load_all`
+- `kernel:node.list`
+- `kernel:node.get`
 - 最小默认包`node.json`
 - 测试
 
@@ -59,14 +59,14 @@
 
 范围：
 
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
+- `core_runtime/profile_models.py`
+- `core_runtime/profile_loader.py`
+- `core_runtime/profile_node_registry.py`
+- `core_runtime/node_state.py`
+- `kernel:profile.load_all`
+- `kernel:profile.list`
+- `kernel:profile.get`
+- `kernel:profile.node_state`
 - 样本配置文件
 - 测试
 
@@ -91,12 +91,12 @@
 
 范围：
 
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
+- `core_runtime/graph_models.py`
+- `core_runtime/capability_graph_loader.py`
+- `core_runtime/port_standards.py`
+- `kernel:graph.load_all`
+- `kernel:graph.get`
+- `kernel:graph.validate`
 - `.graph.yaml`固定装置
 - 测试
 
@@ -137,9 +137,9 @@
 
 范围：
 
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
+- `core_runtime/capability_graph_compiler.py`
+- `core_runtime/binding_handlers.py`
+- `kernel:graph.compile`
 - 测试
 
 所需行为：
@@ -216,10 +216,10 @@
 
 - `GET /api/nodes`和`GET /api/nodes/{node_id}`
 - `GET /api/profiles`和`GET /api/profiles/{profile_id}`
-- §鲁米§0§
+- `GET /api/profiles/{profile_id}/nodes`
 - `GET /api/graphs`和`GET /api/graphs/{graph_id}`
-- §鲁米§0§
-- §鲁米§0§
+- `POST /api/graphs/{graph_id}/validate`
+- `POST /api/graphs/{graph_id}/compile`
 - 控制面板查看器会话的`/api/panel/*`别名
 
 配置文件 API 返回一个启动配置文件关系对象，该对象指出 `StartupProfileManager` 仍然是启动时的事实来源。功能图配置文件作为图形/运行时预设和调色板过滤器公开，而不是作为启动配置文件的静默替代。

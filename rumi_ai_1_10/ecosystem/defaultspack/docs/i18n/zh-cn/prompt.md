@@ -10,13 +10,13 @@
 
 ## 有效提示优先级
 
-§鲁米§0§和
+`defaults.prompt.load_effective`和
 `defaults.prompt.resolve_for_conversation` 使用相同的优先级：
 
 1. 从工作区提示目录覆盖配置文件
-   §鲁米§0§。
+   `profiles/<profile_id>/prompts/`。
 2.个人资料快照来自
-   §鲁米§0§。
+   `profiles/<profile_id>/ecosystem/snapshots/<pack>/prompts/`。
 3. 从defaultspack提示组件或提示扩展中打包默认值。
 
 工作区提示文件是正式的`profile_override`层。它是

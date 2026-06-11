@@ -48,13 +48,7 @@ rumiai 커널은 전체 생태계를 관리하는 핵심 런타임입니다. 기
 
 기본 팩은 4개의 레이어로 구성됩니다.
 
-**전송 계층**(`transport/`)은 외부로부터의 요청을 받아들입니다. `transport/http.py`의 `DefaultsHttpServer` 클래스는 라우팅을 수행하고 URL 경로 및 HTTP 메서드를 기반으로 적절한 핸들러를 호출합니다. `transport/stdio.py` 및 `transport/uds.py`는 각각 표준 입력/출력 및 Unix 도메인 소켓 전송을 제공합니다.
-
-**블록 레이어**(`blocks/`)는 핸들러 모음입니다. 각 핸들러에는 `def run(input_data, context)` 서명이 있고, `input_data`(dict)에서 요청 매개변수를 받고, `context`(dict)에서 흐름 정보와 `call_handler` 기능을 받습니다. 핸들러는 도메인 레이어의 로직을 호출하고 `ok(data)` 또는 `error(message, code)` 형식으로 결과를 반환합니다.
-
-**도메인 레이어**(`domain/`)는 비즈니스 로직을 구현합니다. `domain/chat/store.py`(ChatStore), `domain/agent/engine.py`(AgentEngine), `domain/tool/registry.py`(ToolRegistry), `domain/prompt/manager.py`(PromptManager) 등이 포함됩니다. 핸들러는 도메인 레이어 클래스를 직접 가져와서 사용합니다.
-
-**외부 API 레이어**는 `domain/ai_client/`를 통해 AI 제공업체(OpenAI, Anthropic 등)와 통신합니다.
+**전송 계층**(`transport/`)은 외부로부터의 요청을 받아들입니다. `transport/http.py`의 `DefaultsHttpServer` 클래스는 라우팅을 수행하고 URL 경로 및 HTTP 메서드를 기반으로 적절한 핸들러를 호출합니다. `transport/stdio.py` 및 `transport/uds.py`는 각각 표준 입력/출력 및 Unix 도메인 소켓 전송을 제공합니다.**블록 레이어**(`blocks/`)는 핸들러 모음입니다. 각 핸들러에는 `def run(input_data, context)` 서명이 있고, `input_data`(dict)에서 요청 매개변수를 받고, `context`(dict)에서 흐름 정보와 `call_handler` 기능을 받습니다. 핸들러는 도메인 레이어의 로직을 호출하고 `ok(data)` 또는 `error(message, code)` 형식으로 결과를 반환합니다.**도메인 레이어**(`domain/`)는 비즈니스 로직을 구현합니다. `domain/chat/store.py`(ChatStore), `domain/agent/engine.py`(AgentEngine), `domain/tool/registry.py`(ToolRegistry), `domain/prompt/manager.py`(PromptManager) 등이 포함됩니다. 핸들러는 도메인 레이어 클래스를 직접 가져와서 사용합니다.**외부 API 레이어**는 `domain/ai_client/`를 통해 AI 제공업체(OpenAI, Anthropic 등)와 통신합니다.
 
 ## 데이터 흐름
 
@@ -188,26 +182,10 @@ rumiai_defaults/
 
 `ecosystem.json`은 커널이 Pack을 인식하기 위한 구조 정의 파일입니다. 실제 파일 내용을 기준으로 한 구조는 다음과 같습니다.
 
-**`pack_id`**(`"defaults"`)은 팩의 고유 식별자입니다. 핸들러 이름의 첫 번째 부분으로 사용됩니다(`defaults.chat.send`의 `defaults`).
-
-**`pack_identity`**(`"github:harupipipipi/rumiai-defaults"`)은 팩의 원격 식별자입니다.
-
-**`version`**(`"1.0.0"`)은 팩 버전입니다.
-
-**`vocabulary.types`**은 Pack에서 제공하는 구성요소 종류 목록입니다. `["chat", "agent", "coding", "ai_client", "tool", "prompt", "memory", "media", "frontend", "dev"]` 중 10개가 정의되어 있습니다.
-
-**`components`**은 각 구성요소의 정의입니다. 각 구성 요소에는 `type`, `id`, `path`(블록 내 디렉터리 경로) 및 `connectivity.provides`(제공할 처리기 이름 목록)이 있습니다. 예를 들어 `chat` 컴포넌트는 `path: "blocks/chat"`에 위치하며 `defaults.chat.create_conversation`부터 `defaults.chat.auto_trim`까지 18개의 핸들러를 제공합니다.
-
-**`load_order`**은 구성 요소 초기화 순서입니다. `memory` → `prompt` → `media` → `ai_client` → `tool` → `coding` → `chat` → `agent` → `dev` → `frontend` 순서로 로드됩니다.
-
-**`metadata`**은 팩 메타 정보(설명, 작성자, 라이센스)입니다.
+**`pack_id`**(`"defaults"`)은 팩의 고유 식별자입니다. 핸들러 이름의 첫 번째 부분으로 사용됩니다(`defaults.chat.send`의 `defaults`).**`pack_identity`**(`"github:harupipipipi/rumiai-defaults"`)은 팩의 원격 식별자입니다.**`version`**(`"1.0.0"`)은 팩 버전입니다.**`vocabulary.types`**은 Pack에서 제공하는 구성요소 종류 목록입니다. `["chat", "agent", "coding", "ai_client", "tool", "prompt", "memory", "media", "frontend", "dev"]` 중 10개가 정의되어 있습니다.**`components`**은 각 구성요소의 정의입니다. 각 구성 요소에는 `type`, `id`, `path`(블록 내 디렉터리 경로) 및 `connectivity.provides`(제공할 처리기 이름 목록)이 있습니다. 예를 들어 `chat` 컴포넌트는 `path: "blocks/chat"`에 위치하며 `defaults.chat.create_conversation`부터 `defaults.chat.auto_trim`까지 18개의 핸들러를 제공합니다.**`load_order`**은 구성 요소 초기화 순서입니다. `memory` → `prompt` → `media` → `ai_client` → `tool` → `coding` → `chat` → `agent` → `dev` → `frontend` 순서로 로드됩니다.**`metadata`**은 팩 메타 정보(설명, 작성자, 라이센스)입니다.
 
 ## KernelFacade와의 접점
 
 기본 팩은 세 가지 주요 지점에서 커널과 상호 작용합니다.
 
-**`io.http.server`**: `blocks/frontend/start.py`은 커널로부터 `facade`를 수신하고 이를 `transport/http.py`의 `start_http_server(facade)`에 전달하여 HTTP 서버를 시작합니다. 파사드는 `DefaultsHttpServer` 인스턴스에 보관되며 `_handle_context_info()`는 `facade.list_interfaces()`을 호출하여 인터페이스 목록을 반환합니다.
-
-**`get_interface` / `list_interfaces`**: 커널이 등록한 InterfaceRegistry에서 다른 팩이나 커널 자체가 제공하는 인터페이스를 검색하는 데 사용됩니다. `/api/context` 현재 엔드포인트에서 사용 가능한 인터페이스 목록을 확인할 수 있습니다.
-
-**`emit`(EventBus)**: `call_handler`은 핸들러의 `context`를 통해 제공되며 이를 통해 다른 핸들러를 호출합니다. `call_handler("defaults.ai.complete", params)`과 같은 핸들러 이름과 매개변수를 지정하여 호출하세요. 이는 커널의 EventBus/InterfaceRegistry를 통해 해결됩니다.
+**`io.http.server`**: `blocks/frontend/start.py`은 커널로부터 `facade`를 수신하고 이를 `transport/http.py`의 `start_http_server(facade)`에 전달하여 HTTP 서버를 시작합니다. 파사드는 `DefaultsHttpServer` 인스턴스에 보관되며 `_handle_context_info()`는 `facade.list_interfaces()`을 호출하여 인터페이스 목록을 반환합니다.**`get_interface` / `list_interfaces`**: 커널이 등록한 InterfaceRegistry에서 다른 팩이나 커널 자체가 제공하는 인터페이스를 검색하는 데 사용됩니다. `/api/context` 현재 엔드포인트에서 사용 가능한 인터페이스 목록을 확인할 수 있습니다.**`emit`(EventBus)**: `call_handler`은 핸들러의 `context`를 통해 제공되며 이를 통해 다른 핸들러를 호출합니다. `call_handler("defaults.ai.complete", params)`과 같은 핸들러 이름과 매개변수를 지정하여 호출하세요. 이는 커널의 EventBus/InterfaceRegistry를 통해 해결됩니다.

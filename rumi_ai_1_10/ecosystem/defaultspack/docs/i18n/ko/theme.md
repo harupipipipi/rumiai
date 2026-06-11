@@ -13,15 +13,7 @@
 
 ## 2. 디자인 철학
 
-**선언적**: 테마는 코드가 아닙니다. YAML에 값을 작성하면 됩니다. 실행 논리가 포함되어 있지 않습니다.
-
-**토큰 기반**: 테마는 색상 및 크기 값을 직접 작성하는 것이 아니라 명명된 토큰(`color.primary`, `spacing.md` 등)으로 정의됩니다. 자산은 토큰 이름을 조회하고 테마는 실제 값을 결정합니다.
-
-**백엔드 독립적**: 테마는 프런트엔드 레이어(shell.html의 테마 엔진)에서만 읽습니다. 백엔드 핸들러, 도구 및 흐름은 테마의 존재를 인식하지 못합니다. Emit_widget이 전송한 Widget JSON은 테마 독립적인 데이터이며, 테마 엔진은 렌더링 시 모양을 적용합니다.
-
-**완전히 교체 가능**: 초기 설정 시 기본적으로 배치된 기본 테마는 사용자나 팩이 자유롭게 덮어쓰거나 교체할 수 있습니다.
-
-**상속 가능**: 테마는 `extends`을 사용하여 다른 테마를 상속하고 차이점만 정의할 수 있습니다.
+**선언적**: 테마는 코드가 아닙니다. YAML에 값을 작성하면 됩니다. 실행 로직이 포함되어 있지 않습니다.**토큰 기반**: 테마는 색상 및 크기 값을 직접 작성하는 것이 아니라 명명된 토큰(`color.primary`, `spacing.md` 등)으로 정의됩니다. 자산은 토큰 이름을 조회하고 테마는 실제 값을 확인합니다.**백엔드 독립적**: 테마는 프런트엔드 레이어(shell.html의 테마 엔진)에서만 읽습니다. 백엔드 핸들러, 도구 및 흐름은 테마의 존재를 인식하지 못합니다. Emit_widget이 전송한 Widget JSON은 테마 독립적인 데이터이며 테마 엔진은 렌더링 시 모양을 적용합니다.**완전히 교체 가능**: 초기 설정 시 기본으로 배치된 기본 테마는 사용자나 팩이 자유롭게 덮어쓰거나 교체할 수 있습니다.**상속 가능**: 테마는 `extends`를 사용하여 다른 테마를 상속하고 차이점만 정의할 수 있습니다.
 
 
 ## 3. 디렉토리 구조
@@ -35,7 +27,7 @@ user_data/themes/
     └── nord.theme.yaml
 ```
 
-`user_data/config.json`의 `theme_id`를 사용하여 테마를 전환할 수 있습니다.
+`user_data/config.json`의 `theme_id`을 사용하여 테마를 전환할 수 있습니다.
 
 ```json
 {
@@ -43,7 +35,7 @@ user_data/themes/
 }
 ```
 
-`theme_id`는 theme.yaml의 `theme_id` 필드와 일치합니다.
+`theme_id`은 theme.yaml의 `theme_id` 필드와 일치합니다.
 
 
 ## 4. theme.yaml 전체 사양
@@ -646,19 +638,9 @@ padding: "{spacing.md}"                       # spacing.md の値に展開され
 
 ### 5.2 토큰 카테고리
 
-**색상** — 색상 값입니다. CSS 색상 표현(hex, rgba, hsl)을 사용하여 설명합니다. 시맨틱 이름(`primary`, `success`, `error` 등)으로 정의하고 특정 색상 코드를 할당합니다.
+**색상** — 색상 값입니다. CSS 색상 표현(hex, rgba, hsl)을 사용하여 설명합니다. 의미적 이름(`primary`, `success`, `error` 등)으로 정의하고 특정 색상 코드를 할당합니다.**타이포그래피** — 글꼴 관련 값입니다. `font_family`은 CSS 글꼴 계열 문자열입니다. `font_size_*`는 px 단위의 정수입니다. `font_weight_*`은 CSS 글꼴 두께 값입니다. `line_height_*`은 단위 없는 비율입니다.
 
-**타이포그래피** — 글꼴 관련 값입니다. `font_family`은 CSS 글꼴 계열 문자열입니다. `font_size_*`은 px 단위의 정수입니다. `font_weight_*`는 CSS 글꼴 두께 값입니다. `line_height_*`은 단위 없는 비율입니다.
-
-**spacing** — 여백 또는 간격 값입니다. px 단위의 정수입니다. 이름은 xs, sm, md, lg, xl, 2xl과 같은 상대적 크기입니다.
-
-**반경** — 코너 반경 값입니다. px 단위의 정수입니다. `full`은 9999px의 알약 유형을 나타냅니다.
-
-**shadow** — 상자 그림자 값입니다. CSS 상자 그림자 문자열.
-
-**전환** — 전환 값. CSS 전환 속기 문자열입니다.
-
-**z_index** — 스택 순서 값입니다. 정수.
+**spacing** — 여백 또는 간격 값입니다. px 단위의 정수입니다. 이름은 상대적인 크기입니다: xs, sm, md, lg, xl, 2xl.**radius** — 모서리 반경 값. px 단위의 정수입니다. `full`은 9999px.**shadow** — 상자 그림자 값을 갖는 알약 유형을 나타냅니다. CSS box-shadow string.**transition** — 전환 값. CSS 전환 단축 문자열.**z_index** — 스택 순서 값. 정수.
 
 
 ## 6. 애니메이션 정의
@@ -692,7 +674,7 @@ animations:
 }
 ```
 
-테마 엔진은 `animations.wave_dots`을 참조하여 CSS 애니메이션을 적용합니다. 위젯 JSON에 애니메이션 이름이 지정되지 않은 경우 위젯 스타일 정의(예: `indicator.states.running.animation`)의 기본 애니메이션이 사용됩니다.
+Theme Engine은 `animations.wave_dots`을 참조하여 CSS 애니메이션을 적용합니다. 위젯 JSON에 애니메이션 이름이 지정되지 않은 경우 위젯 스타일 정의(예: `indicator.states.running.animation`)의 기본 애니메이션이 사용됩니다.
 
 ### 6.3 맞춤 애니메이션
 
@@ -736,7 +718,7 @@ button:
     danger: { background: "...", ... }
 ```
 
-`style_hint.variant`가 지정되지 않았거나 알 수 없는 값인 경우 `default` 변형이 사용됩니다.
+`style_hint.variant` 값이 지정되지 않았거나 알 수 없는 경우 `default` 변형이 사용됩니다.
 
 ### 7.3 상태(표시기만 해당)
 
@@ -765,15 +747,15 @@ indicator:
 
 테마는 테마 엔진이 `style_hint`을 CSS로 변환하는 방법을 정의합니다. 기본 테마 엔진은 기본적으로 다음 힌트 키를 인식합니다.
 
-| 힌트 키 | 설명 | CSS로 변환 |
+| Hint key | Description | Conversion to CSS |
 |---|---|---|
-| §루미§0§ | 위젯 변형 선택 | 변형 스타일 적용 |
-| §루미§0§ | 토큰 이름별 색상 지정 | §루미§1§ |
-| §루미§0§ | xs/sm/md/lg/xl 크기 | §루미§1§ |
-| §루미§0§ | 글꼴 두께 | §루미§1§ |
-| §루미§0§ | 텍스트 정렬 | §루미§1§ |
-| §루미§0§ | 토큰 이름으로 패딩 | §루미§1§ |
-| §루미§0§ | 숨기기 | §루미§1§ |
+| `variant` | Select Widget variant | Apply variant style |
+| `color` | Color specification by token name | `color: var(--color-{value})` |
+| `size` | Size of xs/sm/md/lg/xl | `font-size: var(--font-size-{value})` |
+| `weight` | Font weight | `font-weight: var(--font-weight-{value})` |
+| `align` | Text alignment | `text-align: {value}` |
+| `padding` | Padding with token name | `padding: var(--spacing-{value})` |
+| `hidden` | Hide | `display: none` |
 
 테마에 자체 힌트 키를 추가하는 것도 가능합니다. 테마 엔진에서 인식되지 않는 키는 무시됩니다.
 
@@ -875,10 +857,10 @@ tokens:
 ### 10.1 시작 시
 
 1. shell.html의 테마 엔진은 `user_data/config.json`부터 `theme_id`까지 읽습니다.
-2. `user_data/themes/{theme_id}.theme.yaml` 로드
+2. 로드 `user_data/themes/{theme_id}.theme.yaml`
 3. `extends`이 지정된 경우 상위 테마를 재귀적으로 로드합니다.
 4. 토큰 참조 확장(`{category.key}`)
-5. CSS 변수를 `:root`으로 설정합니다.
+5. CSS 변수를 `:root`로 설정합니다.
 6. 애니메이션 키프레임 삽입
 7. 위젯 스타일 정의를 메모리에 유지
 
@@ -897,7 +879,7 @@ tokens:
 
 테마 엔진은 새 테마 파일을 로드하고 CSS 변수를 덮어쓴 다음 애니메이션을 다시 삽입합니다. 모든 자산은 실시간으로 새로운 테마처럼 보이도록 변경됩니다.
 
-테마를 변경하려면 `user_data/config.json`의 `theme_id`를 백엔드의 `config.write` 권한으로 다시 작성하고 `emit_event("theme.change", {"theme_id": "..."})`로 프런트엔드에 알립니다.
+테마를 변경하려면 `user_data/config.json`의 `theme_id`을 백엔드의 `config.write` 권한으로 다시 작성하고 `emit_event("theme.change", {"theme_id": "..."})`로 프런트엔드에 알립니다.
 
 
 ## 11. 테마 상속
@@ -981,7 +963,7 @@ user_data/packs/monokai_theme/
 
 ### 13.1 테마 파일을 찾을 수 없는 경우
 
-`config.json`의 `theme_id`에 해당하는 테마 파일이 존재하지 않는 경우 테마 엔진은 하드 코딩된 최소 대체 테마를 사용합니다. fallback 테마에는 shell.html에 다음 값만 내장되어 있습니다.
+`config.json`의 `theme_id`에 해당하는 테마 파일이 존재하지 않는 경우 테마 엔진은 하드코딩된 최소 폴백 테마를 사용합니다. fallback 테마에는 shell.html에 다음 값만 내장되어 있습니다.
 
 ```
 color.background: #000000
@@ -1004,7 +986,7 @@ YAML 구문 분석이 실패하면 대체 테마를 사용하고 상태 표시�
 
 ### 13.3 정의되지 않은 토큰을 참조하는 경우
 
-자산이 `var(--color-nonexistent)`을 참조하는 경우 CSS 사양에 따라 `initial` 값이 사용됩니다. 테마 엔진은 정의되지 않은 토큰 참조를 감지하고 콘솔에 경고를 표시합니다.
+자산이 `var(--color-nonexistent)`을 참조하는 경우 `initial` 값은 CSS 사양에 따라 사용됩니다. 테마 엔진은 정의되지 않은 토큰 참조를 감지하고 콘솔에 경고를 표시합니다.
 
 ### 13.4 위젯 스타일이 정의되지 않은 경우
 

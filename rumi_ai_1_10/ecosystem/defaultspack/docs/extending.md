@@ -2,7 +2,7 @@
 [EN](./extending.md) | [JP](./i18n/ja/extending.md) | [KR](./i18n/ko/extending.md) | [CN](./i18n/zh-cn/extending.md)
 <!-- docs-i18n-links:end -->
 
-#defaults pack extension guide
+# defaults pack extension guide
 
 Explaining the procedure for adding new features to defaults pack.
 

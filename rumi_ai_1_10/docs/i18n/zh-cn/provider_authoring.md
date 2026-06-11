@@ -14,10 +14,10 @@
 
 对于 OpenAI 兼容的提供商，设置：
 
-- §鲁米§0§
-- §鲁米§0§
+- `category: "llm_provider"`
+- `adapter: "openai_compatible"`
 - `api_key_env` 和可选的`base_url_env`
-- §鲁米§0§
+- `default_base_url`
 - `default_model`或`default_model_for`
 - 能力元数据，例如`streaming`、`vision`和`native_tool_calling`
 

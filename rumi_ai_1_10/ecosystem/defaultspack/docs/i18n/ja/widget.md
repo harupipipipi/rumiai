@@ -14,15 +14,7 @@
 
 ## 2. 設計哲学
 
-**純粋なデータ**: ウィジェットは JSON 辞書です。レンダリング ロジックやイベント ハンドラーは含まれません。描画はフロントエンドの責任です。
-
-**ドメイン非依存**: ウィジェット タイプは、「テキスト」、「イメージ」、「テーブル」などの汎用表示プリミティブです。特定のドメイン (チャット、エージェントなど) に特化したタイプはありません。
-
-**ネスト可能**: ウィジェットはウィジェット内に配置できます。コードブロックとテキストをカードに配置したり、複数のボタンを一列に配置したりできます。
-
-**フォールバックの仮定**: フロントエンドが特定のウィジェット タイプを描画できない場合は、テキスト表現にフォールバックします。カスタム ウィジェットには明示的なフォールバック ウィジェットがあります。 CLI 環境では、すべてのウィジェットはテキスト表現に戻ります。
-
-**テーマからの分離**: Widget は「何を表示するか」のみを宣言します。テーマによって、その表示方法 (色、フォント、アニメーション、丸い角、影など) が決まります。ウィジェットは style_hint を使用してテーマにヒントを渡すことができますが、テーマはこれを無視できます。
+**純粋なデータ**: ウィジェットは JSON 辞書です。レンダリング ロジックやイベント ハンドラーは含まれません。描画はフロントエンドの責任です。**ドメイン非依存**: ウィジェット タイプは、「テキスト」、「イメージ」、「テーブル」などの汎用表示プリミティブです。特定のドメイン (チャット、エージェントなど) に特化したタイプはありません。**ネスト可能**: ウィジェットはウィジェット内に配置できます。コードブロックとテキストをカードに配置し、複数のボタンを行に配置します。**フォールバックの仮定**: フロントエンドが特定のウィジェット タイプを描画できない場合は、テキスト表現にフォールバックします。カスタム ウィジェットには明示的なフォールバック ウィジェットがあります。 CLI 環境では、すべてのウィジェットはテキスト表現に戻ります。**テーマからの分離**: ウィジェットは「何を表示するか」のみを宣言します。テーマによって、その表示方法 (色、フォント、アニメーション、丸い角、影など) が決まります。ウィジェットは style_hint を使用してテーマにヒントを渡すことができますが、テーマはこれを無視できます。
 
 ## 3. ウィジェットのJSON仕様
 
@@ -39,12 +31,12 @@
 }
 ```
 
-|プロパティ |タイプ |必須 |説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `type` |文字列 |必須 |ウィジェットの種類。以下にリストされているタイプの 1 つ |
-| `id` |文字列 |オプション |ウィジェットの識別子。ストリーミング更新中に特定のウィジェットを更新するために使用されます。
-| `style_hint` |辞書 |オプション |テーマへのヒント。テーマは解釈される場合と解釈されない場合があります。
-| `meta` |辞書 |任意 |あらゆるメタデータ。フロントエンドは無視して構いません。
+| `type` | string | Required | Widget type. One of the types listed below |
+| `id` | string | optional | Widget identifier. Used to update specific widgets during streaming updates |
+| `style_hint` | dict | optional | hints to the theme. The theme may or may not be interpreted |
+| `meta` | dict | any | any metadata. You can ignore the front end |
 
 ### 3.2 JSON 式の例
 
@@ -86,9 +78,9 @@
 }
 ```
 
-|プロパティ |タイプ |必須 |説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `text` |文字列 |必須 |表示するテキスト |
+| `text` | string | Required | Text to display |
 
 CLI フォールバック: そのまま出力します。
 
@@ -106,12 +98,12 @@ CLI フォールバック: そのまま出力します。
 }
 ```
 
-|プロパティ |タイプ |必須 |説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `language` |文字列 |任意 |プログラミング言語 |
-| `content` |文字列 |必須 |コード本体 |
-| `filename` |文字列 |オプション |ファイル名(表示用) |
-| `line_start` |整数 |オプション |開始行番号。デフォルト 1 |
+| `language` | string | any | programming language |
+| `content` | string | Required | Code body |
+| `filename` | string | Optional | File name (for display) |
+| `line_start` | integer | optional | starting line number. Default 1 |
 
 CLI フォールバック: プレーン テキスト出力。
 
@@ -128,11 +120,11 @@ CLI フォールバック: プレーン テキスト出力。
 }
 ```
 
-|プロパティ |タイプ |必須 |説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `old_content` |文字列 |必須 |変更前の内容 |
-| `new_content` |文字列 |必須 |新しいコンテンツ |
-| `filename` |文字列 |任意 |ファイル名 |
+| `old_content` | string | Required | Contents before change |
+| `new_content` | string | Required | New content |
+| `filename` | string | arbitrary | file name |
 
 CLI フォールバック: 統合された diff 形式。
 
@@ -150,12 +142,12 @@ CLI フォールバック: 統合された diff 形式。
 }
 ```
 
-|プロパティ |タイプ |必須 |説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `src` |文字列 |必須 | Base64 データまたは URL |
-| `alt` |文字列 |任意 |代替テキスト |
-| `width` |整数 |任意 |幅 (ピクセル) |
-| `height` |整数 |任意 |高さ (ピクセル) |
+| `src` | string | Required | base64 data or URL |
+| `alt` | string | any | alternative text |
+| `width` | integer | any | width (pixels) |
+| `height` | integer | arbitrary | height (pixels) |
 
 CLI フォールバック: `[Image: {alt} {width}x{height}]`
 
@@ -172,11 +164,11 @@ CLI フォールバック: `[Image: {alt} {width}x{height}]`
 }
 ```
 
-|プロパティ |タイプ |必須 |説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `src` |文字列 |必須 | Base64 データ |
-| `url` |文字列 |任意 |スクリーンショットのソース URL |
-| `title` |文字列 |オプション |ページタイトル |
+| `src` | string | Required | base64 data |
+| `url` | string | Any | Screenshot source URL |
+| `title` | string | optional | page title |
 
 CLI フォールバック: `[Screenshot: {title} - {url}]`
 
@@ -194,12 +186,12 @@ CLI フォールバック: `[Screenshot: {title} - {url}]`
 }
 ```
 
-|プロパティ |タイプ |必須 |説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `label` |文字列 |必須 |進行状況ラベル |
-| `current` |番号 |必須 |現在の値 |
-| `total` |番号 |必須 |合計値 |
-| `state` |文字列 |オプション | `"running"`、`"success"`、`"error"`。デフォルト `"running"` |
+| `label` | string | Required | Progress label |
+| `current` | number | Required | Current value |
+| `total` | number | Required | Total value |
+| `state` | string | Optional | `"running"`, `"success"`, `"error"`. Default `"running"` |
 
 CLI フォールバック: `[████░░░░░░] 30% Reading file...`
 
@@ -216,15 +208,15 @@ CLI フォールバック: `[████░░░░░░] 30% Reading file...
 }
 ```
 
-|プロパティ |タイプ |必須 |説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `command` |文字列 |任意 |実行されたコマンド |
-| `output` |文字列 |必須 |出力内容 |
-| `exit_code` |整数 |オプション |終了コード |
+| `command` | string | any | executed command |
+| `output` | string | Required | Output content |
+| `exit_code` | integer | optional | exit code |
 
 CLI フォールバック: `$ {command}\n{output}`
 
-####テーブル
+#### テーブル
 
 テーブルを表示します。
 
@@ -239,10 +231,10 @@ CLI フォールバック: `$ {command}\n{output}`
 }
 ```
 
-|プロパティ |タイプ |必須 |説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `headers` |リスト[文字列] |必須 |列ヘッダー |
-| `rows` |リスト[リスト] |必須 |行データ |
+| `headers` | list[string] | Required | Column header |
+| `rows` | list[list] | Required | Row data |
 
 CLI フォールバック: ASCII テーブル。
 
@@ -259,11 +251,11 @@ CLI フォールバック: ASCII テーブル。
 }
 ```
 
-|プロパティ |タイプ |必須 |説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `chart_type` |文字列 |必須 | `"bar"`、`"line"`、`"pie"`、`"scatter"` |
-| `labels` |リスト[文字列] |必須 |ラベル |
-| `data` |リスト[番号] |必須 |データ |
+| `chart_type` | string | Required | `"bar"`, `"line"`, `"pie"`, `"scatter"` |
+| `labels` | list[string] | Required | Label |
+| `data` | list[number] | Required | Data |
 
 CLI フォールバック: 数値の概要テキスト。
 
@@ -284,9 +276,9 @@ CLI フォールバック: 数値の概要テキスト。
 }
 ```
 
-|プロパティ |タイプ |必須 |説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `tree` |リスト[辞書] |必須 |ツリーノード。各ノードには、`name`、`type`(`"file"` または `"dir"`)、`children` (オプション) があります。
+| `tree` | list[dict] | required | tree node. Each node has `name`, `type`(`"file"` or `"dir"`), `children` (optional) |
 
 CLI フォールバック: インデントされたテキスト。
 
@@ -301,9 +293,9 @@ Markdown テキストをレンダリングして表示します。
 }
 ```
 
-|プロパティ |タイプ |必須 |説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `content` |文字列 |必須 |マークダウンテキスト |
+| `content` | string | Required | Markdown text |
 
 CLI フォールバック: プレーンテキスト。
 
@@ -319,10 +311,10 @@ CLI フォールバック: プレーンテキスト。
 }
 ```
 
-|プロパティ |タイプ |必須 |説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `src` |文字列 |必須 | Base64 データまたは URL |
-| `duration` |整数 |任意 |再生時間 (ミリ秒) |
+| `src` | string | Required | base64 data or URL |
+| `duration` | integer | arbitrary | playback time (ms) |
 
 CLI フォールバック: `[Audio: {duration}ms]`
 
@@ -338,10 +330,10 @@ CLI フォールバック: `[Audio: {duration}ms]`
 }
 ```
 
-|プロパティ |タイプ |必須 |説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `src` |文字列 |必須 | Base64 データまたは URL |
-| `duration` |整数 |任意 |再生時間 (ミリ秒) |
+| `src` | string | Required | base64 data or URL |
+| `duration` | integer | arbitrary | playback time (ms) |
 
 CLI フォールバック: `[Video: {duration}ms]`
 
@@ -358,11 +350,11 @@ CLI フォールバック: `[Video: {duration}ms]`
 }
 ```
 
-|プロパティ |タイプ |必須 |説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `lat` |番号 |必須 |緯度 |
-| `lng` |番号 |必須 |経度 |
-| `zoom` |整数 |オプション |ズームレベル。デフォルト 13 |
+| `lat` | number | required | latitude |
+| `lng` | number | required | longitude |
+| `zoom` | integer | optional | zoom level. Default 13 |
 
 CLI フォールバック: `[Map: {lat}, {lng}]`
 
@@ -383,11 +375,11 @@ CLI フォールバック: `[Map: {lat}, {lng}]`
 }
 ```
 
-|プロパティ |タイプ |必須 |説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `placeholder` |文字列 |オプション |プレースホルダー |
-| `value` |文字列 |任意 |初期値 |
-| `multiline` |ブール値 |任意 |複数行。デフォルトは false |
+| `placeholder` | string | optional | placeholder |
+| `value` | string | arbitrary | initial value |
+| `multiline` | boolean | any | multiple lines. Default false |
 
 #### ボタン
 
@@ -402,11 +394,11 @@ CLI フォールバック: `[Map: {lat}, {lng}]`
 }
 ```
 
-|プロパティ |タイプ |必須 |説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `label` |文字列 |必須 |ボタンラベル |
-| `action` |文字列 |必須 |クリック時に発行されるアクション名 |
-| `variant` |文字列 |オプション | `"primary"`、`"secondary"`、`"danger"`。デフォルト `"primary"` |
+| `label` | string | Required | Button label |
+| `action` | string | Required | Action name issued on click |
+| `variant` | string | Optional | `"primary"`, `"secondary"`, `"danger"`. Default `"primary"` |
 
 #### 選択
 
@@ -424,11 +416,11 @@ CLI フォールバック: `[Map: {lat}, {lng}]`
 }
 ```
 
-|プロパティ |タイプ |必須 |説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `options` |リスト[辞書] |必須 |選択肢。各要素には `label`、`value` があります。
-| `value` |任意 |任意 |選択された値 |
-| `multiple` |ブール値 |任意 |複数選択。デフォルトは false |
+| `options` | list[dict] | Required | Choices. Each element has `label`, `value` |
+| `value` | any | any | selected value |
+| `multiple` | boolean | Any | Multiple selection. Default false |
 
 #### トグル
 
@@ -442,10 +434,10 @@ CLI フォールバック: `[Map: {lat}, {lng}]`
 }
 ```
 
-|プロパティ |タイプ |必須 |説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `label` |文字列 |必須 |ラベル |
-| `value` |ブール値 |任意 |現在の状態。デフォルトは false |
+| `label` | string | Required | Label |
+| `value` | boolean | Any | Current state. Default false |
 
 #### スライダー
 
@@ -461,12 +453,12 @@ CLI フォールバック: `[Map: {lat}, {lng}]`
 }
 ```
 
-|プロパティ |タイプ |必須 |説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `min` |番号 |必須 |最小値 |
-| `max` |番号 |必須 |最大 |
-| `value` |番号 |任意 |現在値 |
-| `step` |番号 |任意 |ステップ。デフォルト 1 |
+| `min` | number | Required | Minimum value |
+| `max` | number | Required | Maximum |
+| `value` | number | arbitrary | current value |
+| `step` | number | any | step. Default 1 |
 
 #### チェックボックス
 
@@ -480,10 +472,10 @@ CLI フォールバック: `[Map: {lat}, {lng}]`
 }
 ```
 
-|プロパティ |タイプ |必須 |説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `label` |文字列 |必須 |ラベル |
-| `checked` |ブール値 |オプション |チェックした状態。デフォルトは false |
+| `label` | string | Required | Label |
+| `checked` | boolean | Optional | Checked state. Default false |
 
 ### 4.3 レイアウトタイプ(6種類)
 
@@ -503,9 +495,9 @@ CLI フォールバック: `[Map: {lat}, {lng}]`
 }
 ```
 
-|プロパティ |タイプ |必須 |説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `children` |リスト[ウィジェット] |必須 |子ウィジェットの配列 |
+| `children` | list[Widget] | Required | Array of child widgets |
 
 #### 行
 
@@ -522,12 +514,12 @@ CLI フォールバック: `[Map: {lat}, {lng}]`
 }
 ```
 
-|プロパティ |タイプ |必須 |説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `children` |リスト[ウィジェット] |必須 |子ウィジェット |
-| `gap` |整数 |任意 |子要素間のギャップ (ピクセル) |
+| `children` | list[Widget] | Required | Child Widget |
+| `gap` | integer | any | gap between child elements (pixels) |
 
-####列
+#### 列
 
 子ウィジェットを縦に並べます。
 
@@ -539,10 +531,10 @@ CLI フォールバック: `[Map: {lat}, {lng}]`
 }
 ```
 
-|プロパティ |タイプ |必須 |説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `children` |リスト[ウィジェット] |必須 |子ウィジェット |
-| `gap` |整数 |任意 |子要素間のギャップ (ピクセル) |
+| `children` | list[Widget] | Required | Child Widget |
+| `gap` | integer | any | gap between child elements (pixels) |
 
 #### タブ
 
@@ -558,9 +550,9 @@ CLI フォールバック: `[Map: {lat}, {lng}]`
 }
 ```
 
-|プロパティ |タイプ |必須 |説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `tabs` |リスト[辞書] |必須 |各タブ。 `label`(文字列) と `content`(ウィジェット) を使用します。
+| `tabs` | list[dict] | Required | Each tab. with `label`(string) and `content`(Widget) |
 
 #### 折りたたみ可能
 
@@ -577,11 +569,11 @@ CLI フォールバック: `[Map: {lat}, {lng}]`
 }
 ```
 
-|プロパティ |タイプ |必須 |説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `label` |文字列 |必須 |折りたたみラベル |
-| `default_open` |ブール値 |オプション |初期状態。デフォルトは false |
-| `children` |リスト[ウィジェット] |必須 |折りたたみ中の子ウィジェット |
+| `label` | string | Required | Folding label |
+| `default_open` | boolean | Optional | Initial state. Default false |
+| `children` | list[Widget] | Required | Child Widget in Collapse |
 
 #### カード
 
@@ -596,11 +588,11 @@ CLI フォールバック: `[Map: {lat}, {lng}]`
 }
 ```
 
-|プロパティ |タイプ |必須 |説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `header` |ウィジェット |オプション |ヘッダー |
-| `body` |ウィジェット |任意 |本文 |
-| `footer` |ウィジェット |オプション |フッター |
+| `header` | Widget | Optional | Header |
+| `body` | Widget | Any | Body |
+| `footer` | Widget | Optional | Footer |
 
 ### 4.4 ストリーミング型(2種類)
 
@@ -619,9 +611,9 @@ CLI フォールバック: `[Map: {lat}, {lng}]`
 }
 ```
 
-|プロパティ |タイプ |必須 |説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `states` | dict[文字列, dict] |必須 |状態名をキーとした定義。各状態には `animation`(文字列、オプション) と `label`(文字列) があります。
+| `states` | dict[string, dict] | Required | Definition with state name as key. Each state has `animation`(string, optional) and `label`(string) |
 
 #### インジケーター
 
@@ -636,11 +628,11 @@ CLI フォールバック: `[Map: {lat}, {lng}]`
 }
 ```
 
-|プロパティ |タイプ |必須 |説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `label` |文字列 |必須 |ラベル |
-| `state` |文字列 |必須 | `"running"`、`"success"`、`"error"`、`"waiting"` |
-| `animation` |文字列 |オプション |テーマで定義されたアニメーション名 |
+| `label` | string | Required | Label |
+| `state` | string | Required | `"running"`, `"success"`, `"error"`, `"waiting"` |
+| `animation` | string | Optional | Animation name defined in the theme |
 
 ### 4.5カスタム(1種類)
 
@@ -664,11 +656,11 @@ CLI フォールバック: `[Map: {lat}, {lng}]`
 }
 ```
 
-|プロパティ |タイプ |必須 |説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `custom_type` |文字列 |必須 |カスタムタイプ識別子 |
-| `fallback` |ウィジェット |必須 |レンダラーが存在しない場合のフォールバック ウィジェット |
-| `data` |辞書 |オプション |カスタム レンダラーに渡すデータ |
+| `custom_type` | string | Required | Custom type identifier |
+| `fallback` | Widget | Required | Fallback Widget if no renderer exists |
+| `data` | dict | Optional | Data to pass to custom renderer |
 
 カスタムウィジェットレンダラーは`user_data/widget_renderers/`に配置できます。
 
@@ -798,7 +790,7 @@ def run(params, context):
     }
 ```
 
-Emit_widget は、途中まで進行した Widget をリアルタイムでフロントエンドに送信します。返される `widget` フィールドは、最終結果として表示されるウィジェットです。
+Emit_widget は、途中まで進行した Widget をリアルタイムでフロントエンドに送信します。戻り `widget` フィールドは、最終結果として表示されるウィジェットです。
 
 Emit_widget で送信された Widget は、message.stream.data メッセージのデータに Widget JSON として格納され、フロントエンドに到達します。
 
@@ -863,7 +855,7 @@ widgets:
         padding: "{spacing.sm}"
 ```
 
-ウィジェットの`style_hint`は、テーマバリアント選択等のヒントとして使用されます。例えば、`style_hint: {"variant": "compact"}`であれば、テーマの`card.variants.compact`が適用されます。テーマはこのヒントを無視する可能性があります。
+ウィジェットの `style_hint` は、テーマのバリエーションなどを選択する際のヒントとして使用されます。例えば `style_hint: {"variant": "compact"}` の場合、テーマの `card.variants.compact` が適用されます。テーマはこのヒントを無視する可能性があります。
 
 テーマの詳細については、theme.md を参照してください。
 
@@ -871,19 +863,19 @@ widgets:
 
 CLI 環境では、すべてのウィジェットはテキスト表現に戻ります。各ウィジェットタイプのフォールバック式は次のとおりです。
 
-|タイプ | CLI 式 |
+| type | CLI expression |
 |---|---|
-| `text` |そのまま出力 |
-| `code_block` |プレーンテキスト |
-| `diff` |統合された差分 |
+| `text` | Output as is |
+| `code_block` | Plain text |
+| `diff` | unified diff |
 | `image` | `[Image: {alt} {width}x{height}]` |
 | `screenshot` | `[Screenshot: {title} - {url}]` |
 | `progress` | `[████░░░░░░] 30% {label}` |
 | `terminal` | `$ {command}\n{output}` |
-| `table` | ASCII テーブル |
-| `chart` |数値サマリー |
-| `file_tree` |インデントされたテキスト |
-| `markdown` |プレーンテキスト |
+| `table` | ASCII table |
+| `chart` | Numerical summary |
+| `file_tree` | Indented text |
+| `markdown` | Plain text |
 | `audio` | `[Audio: {duration}ms]` |
 | `video` | `[Video: {duration}ms]` |
 | `map` | `[Map: {lat}, {lng}]` |
@@ -893,15 +885,15 @@ CLI 環境では、すべてのウィジェットはテキスト表現に戻り�
 | `toggle` | `[{label}: {value}]` |
 | `slider` | `[{min}-{max}: {value}]` |
 | `checkbox` | `[{checked ? "x" : " "}] {label}` |
-| `container` |子を順番に出力する |
-| `row` |子を `  ` で区切って水平方向に出力します。
-| `column` |子を改行して縦方向に出力します。
-| `tabs` | `--- {label} ---\n{content}` 各タブの出力 |
+| `container` | Output children in order |
+| `row` | Output children horizontally, separated by `  ` |
+| `column` | Output children vertically with line breaks |
+| `tabs` | `--- {label} ---\n{content}` output on each tab |
 | `collapsible` | `▸ {label}\n{children}` |
 | `card` | `[{header}]\n{body}\n{footer}` |
 | `stream` | `[{current_state.label}]` |
 | `indicator` | `[{state}] {label}` |
-| `custom` |フォールバック ウィジェットの CLI 表現 |
+| `custom` | CLI representation of fallback widget |
 ```
 
 これで完全な widget.md の内容。
@@ -950,7 +942,7 @@ Widget型一覧:
 
 表示系（14種）:
 - Text
-- CodeBlock  
+- CodeBlock
 - Diff
 - Image
 - Screenshot
@@ -1041,27 +1033,19 @@ widget.md に必要な要素:
 
 ## 2. 設計哲学
 
-**純粋なデータ**: ウィジェットは JSON 辞書です。レンダリング ロジック、イベント ハンドラー、スタイル定義は含まれません。描画はフロントエンドの責任です。
-
-**ドメイン非依存**: ウィジェット タイプは、「テキスト」、「イメージ」、「テーブル」などの汎用プリミティブです。 「チャット メッセージ ウィジェット」や「エージェント ステータス ウィジェット」などのドメイン固有のタイプはありません。
-
-**ネスト可能**: ウィジェットはウィジェット内に配置できます。カードの本文にコードブロックを挿入する、複数のボタンを一列に配置する、タブの各タブに異なるウィジェットを配置するなど。
-
-**フォールバックの仮定**: フロントエンドが特定のウィジェット タイプを描画できない場合は、テキスト表現にフォールバックします。カスタム ウィジェットには明示的なフォールバック ウィジェットがあります。 CLI 環境では、すべてのウィジェットはテキスト表現に戻ります。
-
-**テーマからの分離**: Widget は「何を表示するか」のみを宣言します。テーマによって、それがどのように提示されるかが決まります。ウィジェットは `style_hint` を使用してテーマにヒントを渡すことができますが、テーマはこれを無視できます。
+**純粋なデータ**: ウィジェットは JSON 辞書です。レンダリング ロジック、イベント ハンドラー、スタイル定義は含まれません。描画はフロントエンドの責任です。**ドメイン非依存**: ウィジェット タイプは、「テキスト」、「イメージ」、「テーブル」などの汎用プリミティブです。 「チャット メッセージ ウィジェット」や「エージェント ステータス ウィジェット」などのドメイン固有のタイプはありません。**ネスト可能**: ウィジェットはウィジェット内に配置できます。カードの本文に CodeBlock を挿入する、複数のボタンを 1 列に配置する、タブの各タブに異なるウィジェットを配置するなど。**フォールバックの仮定**: フロントエンドが特定のウィジェット タイプを描画できない場合は、テキスト表現にフォールバックします。カスタム ウィジェットには明示的なフォールバック ウィジェットがあります。 CLI 環境では、すべてのウィジェットはテキスト表現に戻ります。**テーマからの分離**: ウィジェットは「何を表示するか」のみを宣言します。テーマによって、それがどのように提示されるかが決まります。ウィジェットは `style_hint` を使用してテーマにヒントを渡すことができますが、テーマはこれを無視できます。
 
 
 ## 3. 基本プロパティ
 
 すべてのウィジェットが持つ共通のプロパティ。
 
-|プロパティ |タイプ |必須 |説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `type` |文字列 |必須 |ウィジェットの種類。セクション 4 にリストされているタイプのいずれか |
-| `id` |文字列 |オプション |識別子。ストリーミング更新中に特定のウィジェットを置き換えるために使用されます。
-| `style_hint` |辞書 |オプション |テーマへのヒント。テーマは解釈される場合と解釈されない場合があります。
-| `meta` |辞書 |任意 |あらゆるメタデータ。フロントエンドは無視して構いません。
+| `type` | string | Required | Widget type. Any of the types listed in Section 4 |
+| `id` | string | optional | identifier. Used to replace specific widgets during streaming updates |
+| `style_hint` | dict | optional | hints to the theme. The theme may or may not be interpreted |
+| `meta` | dict | any | any metadata. You can ignore the front end |
 
 ```json
 {
@@ -1090,9 +1074,9 @@ widget.md に必要な要素:
 { "type": "text", "text": "Hello, world" }
 ```
 
-|プロパティ |タイプ |必須 |説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `text` |文字列 |必須 |表示テキスト |
+| `text` | string | Required | Display text |
 
 CLI: そのまま出力します。
 
@@ -1110,12 +1094,12 @@ CLI: そのまま出力します。
 }
 ```
 
-|プロパティ |タイプ |必須 |説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `language` |文字列 |任意 |言語名 |
-| `content` |文字列 |必須 |コード本体 |
-| `filename` |文字列 |任意 |ファイル名 |
-| `line_start` |整数 |オプション |開始行番号。デフォルト 1 |
+| `language` | string | any | language name |
+| `content` | string | Required | Code body |
+| `filename` | string | arbitrary | file name |
+| `line_start` | integer | optional | starting line number. Default 1 |
 
 CLI: プレーンテキスト。
 
@@ -1132,11 +1116,11 @@ CLI: プレーンテキスト。
 }
 ```
 
-|プロパティ |タイプ |必須 |説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `old_content` |文字列 |必須 |変更前 |
-| `new_content` |文字列 |必須 |変更後 |
-| `filename` |文字列 |任意 |ファイル名 |
+| `old_content` | string | Required | Before change |
+| `new_content` | string | Required | After change |
+| `filename` | string | arbitrary | file name |
 
 CLI: 統合差分。
 
@@ -1154,12 +1138,12 @@ CLI: 統合差分。
 }
 ```
 
-|プロパティ |タイプ |必須 |説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `src` |文字列 |必須 | Base64 データまたは URL |
-| `alt` |文字列 |任意 |代替テキスト |
-| `width` |整数 |任意 |幅 |
-| `height` |整数 |任意 |身長 |
+| `src` | string | Required | base64 data or URL |
+| `alt` | string | any | alternative text |
+| `width` | integer | arbitrary | width |
+| `height` | integer | arbitrary | height |
 
 CLI: `[Image: {alt} {width}x{height}]`
 
@@ -1176,11 +1160,11 @@ CLI: `[Image: {alt} {width}x{height}]`
 }
 ```
 
-|プロパティ |タイプ |必須 |説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `src` |文字列 |必須 | Base64 データ |
-| `url` |文字列 |任意 |元の URL |
-| `title` |文字列 |任意 |タイトル |
+| `src` | string | Required | base64 data |
+| `url` | string | any | original URL |
+| `title` | string | arbitrary | title |
 
 CLI: `[Screenshot: {title} - {url}]`
 
@@ -1198,12 +1182,12 @@ CLI: `[Screenshot: {title} - {url}]`
 }
 ```
 
-|プロパティ |タイプ |必須 |説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `label` |文字列 |必須 |ラベル |
-| `current` |番号 |必須 |現在の値 |
-| `total` |番号 |必須 |合計値 |
-| `state` |文字列 |オプション | `"running"` / `"success"` / `"error"`。デフォルト `"running"` |
+| `label` | string | Required | Label |
+| `current` | number | Required | Current value |
+| `total` | number | Required | Total value |
+| `state` | string | optional | `"running"` / `"success"` / `"error"`. Default `"running"` |
 
 CLI: `[████░░░░░░] 30% Reading...`
 
@@ -1220,17 +1204,17 @@ CLI: `[████░░░░░░] 30% Reading...`
 }
 ```
 
-|プロパティ |タイプ |必須 |説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `command` |文字列 |任意 |実行コマンド |
-| `output` |文字列 |必須 |出力 |
-| `exit_code` |整数 |オプション |終了コード |
+| `command` | string | arbitrary | execution command |
+| `output` | string | Required | Output |
+| `exit_code` | integer | optional | exit code |
 
 CLI: `$ {command}\n{output}`
 
 ---
 
-####テーブル
+#### テーブル
 
 ```json
 {
@@ -1240,10 +1224,10 @@ CLI: `$ {command}\n{output}`
 }
 ```
 
-|プロパティ |タイプ |必須 |説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `headers` |リスト[文字列] |必須 |列ヘッダー |
-| `rows` |リスト[リスト] |必須 |行データ |
+| `headers` | list[string] | Required | Column header |
+| `rows` | list[list] | Required | Row data |
 
 CLI: ASCII テーブル。
 
@@ -1260,11 +1244,11 @@ CLI: ASCII テーブル。
 }
 ```
 
-|プロパティ |タイプ |必須 |説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `chart_type` |文字列 |必須 | `"bar"` / `"line"` / `"pie"` / `"scatter"` |
-| `labels` |リスト[文字列] |必須 |ラベル |
-| `data` |リスト[番号] |必須 |データ |
+| `chart_type` | string | Required | `"bar"` / `"line"` / `"pie"` / `"scatter"` |
+| `labels` | list[string] | Required | Label |
+| `data` | list[number] | Required | Data |
 
 CLI: 数値の概要。
 
@@ -1284,9 +1268,9 @@ CLI: 数値の概要。
 }
 ```
 
-|プロパティ |タイプ |必須 |説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `tree` |リスト[辞書] |必須 |ノード配列。各ノードは `name`(文字列)、`type`(`"file"` または `"dir"`)、`children`(リスト、オプション) | です。
+| `tree` | list[dict] | Required | Node array. Each node is `name`(string), `type`(`"file"` or `"dir"`), `children`(list, optional) |
 
 CLI: インデントされたテキスト。
 
@@ -1298,9 +1282,9 @@ CLI: インデントされたテキスト。
 { "type": "markdown", "content": "# Title\n\n**bold**" }
 ```
 
-|プロパティ |タイプ |必須 |説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `content` |文字列 |必須 |マークダウンテキスト |
+| `content` | string | Required | Markdown text |
 
 CLI: プレーンテキスト。
 
@@ -1312,10 +1296,10 @@ CLI: プレーンテキスト。
 { "type": "audio", "src": "base64 or URL", "duration": 5000 }
 ```
 
-|プロパティ |タイプ |必須 |説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `src` |文字列 |必須 | Base64 または URL |
-| `duration` |整数 |任意 |ミリ秒 |
+| `src` | string | Required | base64 or URL |
+| `duration` | integer | any | milliseconds |
 
 CLI: `[Audio: {duration}ms]`
 
@@ -1327,10 +1311,10 @@ CLI: `[Audio: {duration}ms]`
 { "type": "video", "src": "base64 or URL", "duration": 30000 }
 ```
 
-|プロパティ |タイプ |必須 |説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `src` |文字列 |必須 | Base64 または URL |
-| `duration` |整数 |任意 |ミリ秒 |
+| `src` | string | Required | base64 or URL |
+| `duration` | integer | any | milliseconds |
 
 CLI: `[Video: {duration}ms]`
 
@@ -1342,11 +1326,11 @@ CLI: `[Video: {duration}ms]`
 { "type": "map", "lat": 35.6812, "lng": 139.7671, "zoom": 15 }
 ```
 
-|プロパティ |タイプ |必須 |説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `lat` |番号 |必須 |緯度 |
-| `lng` |番号 |必須 |経度 |
-| `zoom` |整数 |オプション |ズームレベル。デフォルト 13 |
+| `lat` | number | required | latitude |
+| `lng` | number | required | longitude |
+| `zoom` | integer | optional | zoom level. Default 13 |
 
 CLI: `[Map: {lat}, {lng}]`
 
@@ -1363,11 +1347,11 @@ CLI: `[Map: {lat}, {lng}]`
 { "type": "input", "placeholder": "Type here...", "value": "", "multiline": false }
 ```
 
-|プロパティ |タイプ |必須 |説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `placeholder` |文字列 |オプション |プレースホルダー |
-| `value` |文字列 |任意 |初期値 |
-| `multiline` |ブール値 |任意 |複数行。デフォルトは false |
+| `placeholder` | string | optional | placeholder |
+| `value` | string | arbitrary | initial value |
+| `multiline` | boolean | any | multiple lines. Default false |
 
 ---
 
@@ -1377,11 +1361,11 @@ CLI: `[Map: {lat}, {lng}]`
 { "type": "button", "label": "Execute", "action": "run_task", "variant": "primary" }
 ```
 
-|プロパティ |タイプ |必須 |説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `label` |文字列 |必須 |ラベル |
-| `action` |文字列 |必須 |アクション名 | をクリックします。
-| `variant` |文字列 |オプション | `"primary"` / `"secondary"` / `"danger"`。デフォルト `"primary"` |
+| `label` | string | Required | Label |
+| `action` | string | Required | Click action name |
+| `variant` | string | optional | `"primary"` / `"secondary"` / `"danger"`. Default `"primary"` |
 
 ---
 
@@ -1396,11 +1380,11 @@ CLI: `[Map: {lat}, {lng}]`
 }
 ```
 
-|プロパティ |タイプ |必須 |説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `options` |リスト[辞書] |必須 |各要素は `label`(文字列)、`value`(任意) | です。
-| `value` |任意 |任意 |現在値 |
-| `multiple` |ブール値 |任意 |複数選択。デフォルトは false |
+| `options` | list[dict] | Required | Each element is `label`(string), `value`(any) |
+| `value` | any | any | current value |
+| `multiple` | boolean | Any | Multiple selection. Default false |
 
 ---
 
@@ -1410,10 +1394,10 @@ CLI: `[Map: {lat}, {lng}]`
 { "type": "toggle", "label": "Enable", "value": false }
 ```
 
-|プロパティ |タイプ |必須 |説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `label` |文字列 |必須 |ラベル |
-| `value` |ブール値 |オプション |デフォルトは false |
+| `label` | string | Required | Label |
+| `value` | boolean | Optional | Default false |
 
 ---
 
@@ -1423,12 +1407,12 @@ CLI: `[Map: {lat}, {lng}]`
 { "type": "slider", "min": 0, "max": 100, "value": 50, "step": 1 }
 ```
 
-|プロパティ |タイプ |必須 |説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `min` |番号 |必須 |最小値 |
-| `max` |番号 |必須 |最大 |
-| `value` |番号 |任意 |現在値 |
-| `step` |番号 |任意 |ステップ。デフォルト 1 |
+| `min` | number | Required | Minimum value |
+| `max` | number | Required | Maximum |
+| `value` | number | arbitrary | current value |
+| `step` | number | any | step. Default 1 |
 
 ---
 
@@ -1438,10 +1422,10 @@ CLI: `[Map: {lat}, {lng}]`
 { "type": "checkbox", "label": "I agree", "checked": false }
 ```
 
-|プロパティ |タイプ |必須 |説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `label` |文字列 |必須 |ラベル |
-| `checked` |ブール値 |オプション |デフォルトは false |
+| `label` | string | Required | Label |
+| `checked` | boolean | Optional | Default false |
 
 
 ### 4.3 レイアウトタイプ(6種類)
@@ -1456,9 +1440,9 @@ CLI: `[Map: {lat}, {lng}]`
 { "type": "container", "children": [{"type": "text", "text": "..."}, {"type": "code_block", "content": "..."}] }
 ```
 
-|プロパティ |タイプ |必須 |説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `children` |リスト[ウィジェット] |必須 |子ウィジェット |
+| `children` | list[Widget] | Required | Child Widget |
 
 ---
 
@@ -1468,23 +1452,23 @@ CLI: `[Map: {lat}, {lng}]`
 { "type": "row", "children": [...], "gap": 8 }
 ```
 
-|プロパティ |タイプ |必須 |説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `children` |リスト[ウィジェット] |必須 |子ウィジェット |
-| `gap` |整数 |任意 |間隔 (ピクセル) |
+| `children` | list[Widget] | Required | Child Widget |
+| `gap` | integer | arbitrary | interval (px) |
 
 ---
 
-####列
+#### 列
 
 ```json
 { "type": "column", "children": [...], "gap": 8 }
 ```
 
-|プロパティ |タイプ |必須 |説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `children` |リスト[ウィジェット] |必須 |子ウィジェット |
-| `gap` |整数 |任意 |間隔 (ピクセル) |
+| `children` | list[Widget] | Required | Child Widget |
+| `gap` | integer | arbitrary | interval (px) |
 
 ---
 
@@ -1500,9 +1484,9 @@ CLI: `[Map: {lat}, {lng}]`
 }
 ```
 
-|プロパティ |タイプ |必須 |説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `tabs` |リスト[辞書] |必須 |各要素は `label`(文字列)、`content`(ウィジェット) |
+| `tabs` | list[dict] | Required | Each element is `label`(string), `content`(Widget) |
 
 ---
 
@@ -1517,11 +1501,11 @@ CLI: `[Map: {lat}, {lng}]`
 }
 ```
 
-|プロパティ |タイプ |必須 |説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `label` |文字列 |必須 |ラベル |
-| `default_open` |ブール値 |オプション |デフォルトは false |
-| `children` |リスト[ウィジェット] |必須 |子ウィジェット |
+| `label` | string | Required | Label |
+| `default_open` | boolean | Optional | Default false |
+| `children` | list[Widget] | Required | Child Widget |
 
 ---
 
@@ -1536,11 +1520,11 @@ CLI: `[Map: {lat}, {lng}]`
 }
 ```
 
-|プロパティ |タイプ |必須 |説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `header` |ウィジェット |オプション |ヘッダー |
-| `body` |ウィジェット |任意 |本文 |
-| `footer` |ウィジェット |オプション |フッター |
+| `header` | Widget | Optional | Header |
+| `body` | Widget | Any | Body |
+| `footer` | Widget | Optional | Footer |
 
 
 ### 4.4 ストリーミング型(2種類)
@@ -1562,9 +1546,9 @@ CLI: `[Map: {lat}, {lng}]`
 }
 ```
 
-|プロパティ |タイプ |必須 |説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `states` | dict[文字列, dict] |必須 |州名 → `label`(文字列) + `animation`(文字列、オプション) |
+| `states` | dict[string, dict] | Required | State name → `label`(string) + `animation`(string, optional) |
 
 ---
 
@@ -1581,18 +1565,18 @@ CLI: `[Map: {lat}, {lng}]`
 }
 ```
 
-|プロパティ |タイプ |必須 |説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `label` |文字列 |必須 |ラベル |
-| `state` |文字列 |必須 | `"running"` / `"success"` / `"error"` / `"waiting"` |
-| `animation` |文字列 |オプション |テーマ定義のアニメーション名 |
+| `label` | string | Required | Label |
+| `state` | string | Required | `"running"` / `"success"` / `"error"` / `"waiting"` |
+| `animation` | string | Optional | Theme-defined animation name |
 
 
 ### 4.5カスタム(1種類)
 
 #### カスタム
 
-事前定義されたタイプに適合しない表示。 `user_data/widget_renderers/`がレンダラーを持っている場合は専用の描画が行われ、そうでない場合は`fallback`が描画されます。
+事前定義されたタイプに適合しない表示。 `user_data/widget_renderers/`にレンダラがある場合は専用の描画が行われ、ない場合は`fallback`が描画されます。
 
 ```json
 {
@@ -1603,11 +1587,11 @@ CLI: `[Map: {lat}, {lng}]`
 }
 ```
 
-|プロパティ |タイプ |必須 |説明 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| `custom_type` |文字列 |必須 |カスタムタイプ識別子 |
-| `fallback` |ウィジェット |必須 |レンダラーが存在しない場合のフォールバック |
-| `data` |辞書 |オプション |カスタム レンダラーに渡すデータ |
+| `custom_type` | string | Required | Custom type identifier |
+| `fallback` | Widget | Required | Fallback when renderer is absent |
+| `data` | dict | Optional | Data to pass to custom renderer |
 
 カスタムレンダラーの配置:
 
@@ -1632,7 +1616,7 @@ CLI: フォールバック ウィジェットの CLI 表現。
 
 ## 5. rumi_widgets — Python ヘルパー ライブラリ
 
-デフォルトは`lib/rumi_widgets/`に配置されます。 handler.pyにインポートして利用できます。使用は任意です。 JSON dict を直接返すのと同じです。
+デフォルトは `lib/rumi_widgets/` に配置されます。 handler.pyにインポートして利用できます。使用は任意です。 JSON dict を直接返すのと同じです。
 
 ### 5.1 配置
 
@@ -1727,7 +1711,7 @@ widget = {
 
 ### 6.1 エミットウィジェット
 
-ツールのhandler.py内で`context["emit_widget"]`を呼び出します。進行中のウィジェットをリアルタイムでフロントエンドに送信します。
+ツールの handler.py で `context["emit_widget"]` を呼び出します。進行中のウィジェットをリアルタイムでフロントエンドに送信します。
 
 ```python
 def run(params, context):
@@ -1764,7 +1748,7 @@ Emit_widget によって送信された Widget は、JSON Lines メッセージ�
 
 ### 6.3 IDによる置換
 
-`id`をウィジェットに追加して発行すると、フロントエンドは同じ`id`でウィジェットを上書き描画します。進行状況を更新するために使用されます。
+ウィジェットに `id` を追加して発行すると、フロントエンドは同じ `id` をウィジェットに上書きして描画します。進行状況を更新するために使用されます。
 
 ```python
 context["emit_widget"](Progress(id="p1", label="Step 1", current=1, total=3))
@@ -1792,7 +1776,7 @@ window.rumiWidgets.render(widgetJson, targetElement);
 2. タイプが `"custom"` の場合、`user_data/widget_renderers/{custom_type}/` レンダラーを検索します。
 3. カスタム レンダラーがある場合は、専用のレンダリングを使用します。
 4. そうでない場合は、`fallback` 組み込みレンダラーを使用してウィジェットを描画します
-5. 上記のいずれにも当てはまらない場合は、テキストを`[Unknown widget: {type}]`として表示します。
+5. 上記のいずれにも当てはまらない場合は、テキストを `[Unknown widget: {type}]` として表示します。
 
 ### 7.3 テーマのコラボレーション
 
@@ -1838,13 +1822,13 @@ widgets:
     height: 4
 ```
 
-ウィジェットの`style_hint`でテーマのバリアントを選択できます。
+ウィジェットの `style_hint` でテーマのバリアントを選択できます。
 
 ```json
 {"type": "card", "style_hint": {"variant": "compact"}, "body": {"type": "text", "text": "..."}}
 ```
 
-テーマの`card.variants.compact`が該当します。テーマに対応するバリアントがない場合は、`default` が使用されます。
+テーマの`card.variants.compact`が適用されます。テーマに対応するバリアントがない場合は、`default` が使用されます。
 
 テーマの詳細な仕様については、theme.md を参照してください。
 
@@ -1853,19 +1837,19 @@ widgets:
 
 CLI 環境にはフロントエンド ウィジェット レンダラーがありません。すべてのウィジェットはテキスト表現に変換されます。
 
-|タイプ | CLI 式 |
+| type | CLI expression |
 |---|---|
-| `text` |そのまま出力 |
-| `code_block` |プレーンテキスト |
-| `diff` |統合された差分 |
+| `text` | Output as is |
+| `code_block` | Plain text |
+| `diff` | unified diff |
 | `image` | `[Image: {alt} {width}x{height}]` |
 | `screenshot` | `[Screenshot: {title} - {url}]` |
 | `progress` | `[████░░░░░░] 30% {label}` |
 | `terminal` | `$ {command}\n{output}` |
-| `table` | ASCII テーブル |
-| `chart` |数値サマリー |
-| `file_tree` |インデントされたテキスト |
-| `markdown` |プレーンテキスト |
+| `table` | ASCII table |
+| `chart` | Numerical summary |
+| `file_tree` | Indented text |
+| `markdown` | Plain text |
 | `audio` | `[Audio: {duration}ms]` |
 | `video` | `[Video: {duration}ms]` |
 | `map` | `[Map: {lat}, {lng}]` |
@@ -1875,14 +1859,14 @@ CLI 環境にはフロントエンド ウィジェット レンダラーがあ�
 | `toggle` | `[{label}: {value}]` |
 | `slider` | `[{min}-{max}: {value}]` |
 | `checkbox` | `[{checked ? "x" : " "}] {label}` |
-| `container` |子を順番に出力する |
-| `row` |子を水平方向にスペースで区切って出力します。
-| `column` |子を改行して縦方向に出力します。
+| `container` | Output children in order |
+| `row` | Output children horizontally separated by spaces |
+| `column` | Output children vertically with line breaks |
 | `tabs` | `--- {label} ---\n{content}` |
 | `collapsible` | `▸ {label}\n{children}` |
 | `card` | `[{header}]\n{body}\n{footer}` |
 | `stream` | `[{current_state.label}]` |
 | `indicator` | `[{state}] {label}` |
-| `custom` |フォールバックの CLI 表現 |
+| `custom` | CLI representation of fallback |
 
 CLI フォールバック実装は、`lib/rumi_widgets/` の各クラスの `to_cli()` メソッドとして提供されます。トランスポート層が CLI モードを検出した場合、emit_widget は `to_dict()` ではなく `to_cli()` の結果を出力します。

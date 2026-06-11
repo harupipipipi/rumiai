@@ -2,7 +2,7 @@
 [EN](../../extending.md) | [JP](../ja/extending.md) | [KR](../ko/extending.md) | [CN](./extending.md)
 <!-- docs-i18n-links:end -->
 
-#defaults 包扩展指南
+# defaults 包扩展指南
 
 解释向默认包添加新功能的过程。
 

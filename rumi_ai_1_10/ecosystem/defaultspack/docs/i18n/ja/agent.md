@@ -2,42 +2,36 @@
 [EN](../../agent.md) | [JP](./agent.md) | [KR](../ko/agent.md) | [CN](../zh-cn/agent.md)
 <!-- docs-i18n-links:end -->
 
-# Agent API
+# エージェント API
 
-defaults Pack のエージェント機能の全 API リファレンスです。handler は `blocks/agent/` に、ドメインロジックは `domain/agent/engine.py`（AgentEngine）と `domain/agent/execution.py`（AgentExecution）に実装されています。
+デフォルト パックのエージェント機能に関する完全な API リファレンス。ハンドラーは `blocks/agent/` に実装され、ドメイン ロジックは `domain/agent/engine.py` (AgentEngine) および `domain/agent/execution.py` (AgentExecution) に実装されます。
 
 ## エージェントの概念
 
-エージェントは「タスクを受け取り、AI が思考し、必要に応じてツールを呼び出し、結果を返す」実行ループです。defaults Pack のエージェントは以下の flow で実現されます。
+エージェントは「タスクを受け取り、AIが何らかの思考を行い、必要に応じてツールを呼び出し、結果を返す」という実行ループです。デフォルト パック エージェントは、次のフローを使用して実装されます。
 
-1. ユーザーがタスクと使用可能なツールを指定して `execute` を呼び出す。
-2. `AgentEngine` が初期メッセージ（system_prompt + task）を構築し、AI に送信する。
-3. AI が「テキスト応答」を返した場合 → タスク完了（status: `completed`）。
-4. AI が「ツール呼び出し」を返した場合 → ユーザー承認待ち（status: `waiting_approval`）。
-5. ユーザーが `approve` → ツール実行 → 結果を AI に返す → 3 に戻る。
-6. ユーザーが `reject` → 拒否理由を AI に返す → AI が代替案を提案 → 3 に戻る。
-7. ツール呼び出し深度が `MAX_FLOW_CALL_DEPTH`（10）に達した場合 → エラー。
+1. ユーザーはタスクと利用可能なツールを指定して `execute` を呼び出します。
+2. `AgentEngine` は初期メッセージ (system_prompt + task) を構築し、AI に送信します。
+3. AI が「テキスト応答」を返した場合 → タスク完了 (ステータス: `completed`)。
+4. AIが「ツール呼び出し」を返した場合 → ユーザーの承認待ち（状態：`waiting_approval`）。
+5. ユーザー `approve` → ツールを実行 → 結果を AI に返す → 3 に戻ります。
+6. ユーザー `reject` → AI に拒否理由を返す → AI が代替案を提案 → ステップ 3 に戻る。
+7. ツール呼び出しの深さが `MAX_FLOW_CALL_DEPTH` (10) に達した場合 → エラー。
 
-`blocks/agent/_state.py` がインメモリで実行中の `AgentEngine` インスタンスを管理します。`execution_id` をキーとして `set_engine()` / `get_engine()` / `remove_engine()` で管理されます。
+`blocks/agent/_state.py` は、メモリ内で実行されている `AgentEngine` インスタンスを管理します。 `execution_id`をキーとして`set_engine()` / `get_engine()` / `remove_engine()`で管理されます。
 
-## タスク実行（execute）
+## タスクの実行（実行）
 
-**handler**: `defaults.agent.execute`（`blocks/agent/execute.py`）
+**ハンドラー**: `defaults.agent.execute`（`blocks/agent/execute.py`）**HTTP**: `POST /api/agent/execute`**input_data**:
 
-**HTTP**: `POST /api/agent/execute`
-
-**input_data**:
-
-| フィールド | 型 | 必須 | 説明 |
+| Field | Type | Required | Description |
 |---|---|---|---|
-| `task` | `string` | Yes | タスクの記述 |
-| `tools` | `list` | No | 使用可能なツール定義リスト。デフォルト `[]` |
-| `model` | `string` | No | AI モデル。デフォルト `"default"` |
-| `system_prompt` | `string` | No | システムプロンプト |
+| `task` | `string` | Yes | Task description |
+| `tools` | `list` | No | List of available tool definitions. Default `[]` |
+| `model` | `string` | No | AI model. Default `"default"` |
+| `system_prompt` | `string` | No | System prompt |
 
-**処理**: `AgentEngine().execute(task, tools, model, system_prompt, context)` を呼び出します。初期メッセージを構築し、AI に送信し、応答に応じて `completed` / `waiting_approval` / `error` のいずれかのステータスを返します。
-
-**戻り値**:
+**処理**: `AgentEngine().execute(task, tools, model, system_prompt, context)`を呼び出します。初期メッセージを作成して AI に送信し、応答に応じて `completed` / `waiting_approval` / `error` のいずれかのステータスを返します。**戻り値**:
 
 ```json
 {
@@ -67,66 +61,44 @@ defaults Pack のエージェント機能の全 API リファレンスです。h
 }
 ```
 
-## 承認（approve）
+## 承認する
 
-**handler**: `defaults.agent.approve`（`blocks/agent/approve.py`）
+**ハンドラー**: `defaults.agent.approve`（`blocks/agent/approve.py`）**HTTP**: `POST /api/agent/{id}/approve`**input_data**:
 
-**HTTP**: `POST /api/agent/{id}/approve`
-
-**input_data**:
-
-| フィールド | 型 | 必須 | 説明 |
+| Field | Type | Required | Description |
 |---|---|---|---|
-| `execution_id` | `string` | Yes | 実行 ID（URL パスから自動注入） |
+| `execution_id` | `string` | Yes | Run ID (automatically injected from URL path) |
 
-**処理**: `engine.approve(execution_id)` を呼び出します。保留中のツールを実行し、結果を AI に返し、次の応答を取得します。AI がさらにツールを呼び出した場合は再び `waiting_approval` になります。
+**処理**: `engine.approve(execution_id)`を呼び出します。保留中のツールを実行し、結果を AI に返し、次の応答を取得します。 AI がさらにツールを呼び出すと、再び `waiting_approval` になります。**戻り値**: `ok(result)` — 更新された実行状態。
 
-**戻り値**: `ok(result)` — 更新された実行状態。
+## 拒否
 
-## 拒否（reject）
+**ハンドラー**: `defaults.agent.reject`（`blocks/agent/reject.py`）**HTTP**: `POST /api/agent/{id}/reject`**input_data**:
 
-**handler**: `defaults.agent.reject`（`blocks/agent/reject.py`）
-
-**HTTP**: `POST /api/agent/{id}/reject`
-
-**input_data**:
-
-| フィールド | 型 | 必須 | 説明 |
+| Field | Type | Required | Description |
 |---|---|---|---|
-| `execution_id` | `string` | Yes | 実行 ID（URL パスから自動注入） |
-| `reason` | `string` | No | 拒否理由。デフォルト `"Rejected by user"` |
+| `execution_id` | `string` | Yes | Run ID (automatically injected from URL path) |
+| `reason` | `string` | No | Reason for refusal. Default `"Rejected by user"` |
 
-**処理**: `engine.reject(execution_id, reason)` を呼び出します。「ユーザーがツール呼び出しを拒否した。理由: {reason}。代替案を提案してください。」というメッセージを AI に送信します。
-
-**戻り値**: `ok(result)` — 更新された実行状態。
+**処理**: `engine.reject(execution_id, reason)`を呼び出します。 「ユーザーがツール呼び出しを拒否しました。理由: {reason}。代替案を提案してください。」というメッセージを AI に送信します。**戻り値**: `ok(result)` — 更新された実行状態。
 
 ## キャンセル
 
-**handler**: `defaults.agent.cancel`（`blocks/agent/cancel.py`）
+**ハンドラー**: `defaults.agent.cancel`（`blocks/agent/cancel.py`）**HTTP**: `POST /api/agent/{id}/cancel`**input_data**:
 
-**HTTP**: `POST /api/agent/{id}/cancel`
-
-**input_data**:
-
-| フィールド | 型 | 必須 | 説明 |
+| Field | Type | Required | Description |
 |---|---|---|---|
-| `execution_id` | `string` | Yes | 実行 ID（URL パスから自動注入） |
+| `execution_id` | `string` | Yes | Run ID (automatically injected from URL path) |
 
-**処理**: `engine.cancel(execution_id)` を呼び出し、`_state.remove_engine(execution_id)` でエンジンをメモリから削除します。`InstructionQueue` の当該実行の指示もクリアされます。
+**処理**: `engine.cancel(execution_id)` を呼び出し、`_state.remove_engine(execution_id)` でメモリからエンジンを削除します。 `InstructionQueue` のそのような実行命令もクリアされます。**戻り値**: `ok({"execution_id": "...", "status": "cancelled"})`
 
-**戻り値**: `ok({"execution_id": "...", "status": "cancelled"})`
+## ステータスを確認する
 
-## ステータス確認
+**ハンドラー**: `defaults.agent.status`（`blocks/agent/status.py`）**HTTP**: `GET /api/agent/{id}/status`**input_data**:
 
-**handler**: `defaults.agent.status`（`blocks/agent/status.py`）
-
-**HTTP**: `GET /api/agent/{id}/status`
-
-**input_data**:
-
-| フィールド | 型 | 必須 | 説明 |
+| Field | Type | Required | Description |
 |---|---|---|---|
-| `execution_id` | `string` | Yes | 実行 ID（URL パスから自動注入） |
+| `execution_id` | `string` | Yes | Run ID (automatically injected from URL path) |
 
 **戻り値**:
 
@@ -145,24 +117,22 @@ defaults Pack のエージェント機能の全 API リファレンスです。h
 }
 ```
 
-## 計画のみ（plan）
+## 計画のみ (計画)
 
-**handler**: `defaults.agent.plan`（`blocks/agent/plan.py`）
+**ハンドラー**: `defaults.agent.plan`（`blocks/agent/plan.py`）
 
-現在 HTTP ルートは未定義。`call_handler("defaults.agent.plan", ...)` 経由でのみ呼び出し可能。
+HTTP ルートは現在未定義です。 `call_handler("defaults.agent.plan", ...)` 経由でのみ呼び出すことができます。
 
-**input_data**:
+**入力データ**:
 
-| フィールド | 型 | 必須 | 説明 |
+| Field | Type | Required | Description |
 |---|---|---|---|
-| `task` | `string` | Yes | タスクの記述 |
-| `tools` | `list` | No | 使用可能なツール定義リスト。デフォルト `[]` |
-| `model` | `string` | No | AI モデル。デフォルト `"default"` |
-| `system_prompt` | `string` | No | システムプロンプト |
+| `task` | `string` | Yes | Task description |
+| `tools` | `list` | No | List of available tool definitions. Default `[]` |
+| `model` | `string` | No | AI model. Default `"default"` |
+| `system_prompt` | `string` | No | System prompt |
 
-**処理**: `engine.plan()` を呼び出します。通常の `execute` と異なり、システムプロンプトに「PLANNING モード。ツール呼び出し禁止。ステップバイステップの計画を番号付きリストで返せ。」という指示を追加して AI を呼び出します。
-
-**戻り値**:
+**処理**: `engine.plan()`を呼び出します。通常の `execute` とは異なり、システム プロンプトに次の命令を追加して AI を呼び出します:「計画モード。ツールを呼び出さないでください。番号付きリストで段階的な計画を返します。」**戻り値**:
 
 ```json
 {
@@ -176,23 +146,17 @@ defaults Pack のエージェント機能の全 API リファレンスです。h
 }
 ```
 
-## タスク中の指示追加（add_instruction）
+## タスク中に命令を追加します (add_instruction)
 
-**handler**: `defaults.agent.add_instruction`（`blocks/agent/add_instruction.py`）
+**ハンドラー**: `defaults.agent.add_instruction`（`blocks/agent/add_instruction.py`）**HTTP**: `POST /api/agent/{id}/instruct`**input_data**:
 
-**HTTP**: `POST /api/agent/{id}/instruct`
-
-**input_data**:
-
-| フィールド | 型 | 必須 | 説明 |
+| Field | Type | Required | Description |
 |---|---|---|---|
-| `execution_id` | `string` | Yes | 実行 ID（URL パスから自動注入） |
-| `instruction` | `string` | Yes | 追加する指示内容 |
-| `priority` | `string` | No | `"normal"` または `"urgent"`。デフォルト `"normal"` |
+| `execution_id` | `string` | Yes | Run ID (automatically injected from URL path) |
+| `instruction` | `string` | Yes | Additional instructions |
+| `priority` | `string` | No | `"normal"` or `"urgent"`. Default `"normal"` |
 
-**処理**: `InstructionQueue.add_instruction()` で指示をキューに追加します。指示は次の AI completion ステップの前に `AgentEngine._inject_pending_instructions()` によってメッセージ履歴に注入されます。`urgent` の場合は `[RUNTIME INSTRUCTION — URGENT: Override current approach]` プレフィックスが付きます。`normal` の場合は `[RUNTIME INSTRUCTION — Additional guidance from user]` プレフィックスが付きます。
-
-**戻り値**:
+**処理**: `InstructionQueue.add_instruction()` で命令をキューに追加します。命令は、次の AI 完了ステップの前に、`AgentEngine._inject_pending_instructions()` によってメッセージ履歴に挿入されます。 `urgent` には接頭辞 `[RUNTIME INSTRUCTION — URGENT: Override current approach]` が付きます。 `normal` には `[RUNTIME INSTRUCTION — Additional guidance from user]` という接頭辞が付いています。**戻り値**:
 
 ```json
 {
@@ -206,9 +170,9 @@ defaults Pack のエージェント機能の全 API リファレンスです。h
 }
 ```
 
-## 全 API エンドポイント一覧
+## すべての API エンドポイントのリスト
 
-| メソッド | パス | handler ファイル |
+| method | path | handler file |
 |---|---|---|
 | `POST` | `/api/agent/execute` | `blocks/agent/execute.py` |
 | `POST` | `/api/agent/{id}/approve` | `blocks/agent/approve.py` |
@@ -216,4 +180,4 @@ defaults Pack のエージェント機能の全 API リファレンスです。h
 | `POST` | `/api/agent/{id}/cancel` | `blocks/agent/cancel.py` |
 | `GET` | `/api/agent/{id}/status` | `blocks/agent/status.py` |
 | `POST` | `/api/agent/{id}/instruct` | `blocks/agent/add_instruction.py` |
-| — | — (`call_handler` 経由のみ) | `blocks/agent/plan.py` |
+| — | — (only via `call_handler`) | `blocks/agent/plan.py` |

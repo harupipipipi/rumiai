@@ -14,8 +14,8 @@
 
 초기 발견 후보:
 
-1. §루미§0§
-2. §루미§0§
+1. `user_data/shared/profiles/*.profile.yaml`
+2. `ecosystem/<pack_id>/profiles/*.profile.yaml`
 
 팩 제공 프로필 파일은 기존 팩 승인 및 해시 확인 흐름을 통과한 팩에서만 로드되며, 팩 제공 흐름 로딩에 사용되는 신뢰 경계와 일치합니다. 사용자 공유 프로필 파일은 사용자 소유 구성이지만 등록 또는 사용 전에 여전히 스키마 유효성 검사 및 진단이 필요합니다.
 
@@ -93,21 +93,21 @@ node_settings:
 
 ## 필수 입력사항
 
-- §루미§0§
-- §루미§0§
-- §루미§0§
+- `profile_id`
+- `version`
+- `kind`
 
 ## 공통 필드
 
-- §루미§0§
-- §루미§0§
-- §루미§0§
-- §루미§0§
-- §루미§0§
-- §루미§0§
-- §루미§0§
-- §루미§0§
-- §루미§0§
+- `enabled_nodes`
+- `disabled_nodes`
+- `default_graph`
+- `default_flow`
+- `viewer.palette`
+- `permissions`
+- `policy`
+- `node_settings`
+- `locale`
 
 ## 노드 가용성
 

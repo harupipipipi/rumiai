@@ -71,11 +71,11 @@
 
 | 공급자 | 세션 키 예시 |
 |---|---|
-| 슬랙 스레드 | §루미§0§ |
-| 슬랙 DM | §루미§0§ |
-| 라인 소스 | §루미§0§ |
-| 디스코드 채널 | §루미§0§ |
-| 일반 웹훅 | §루미§0§ |
+| 슬랙 스레드 | `slack:{team_id}:{channel_id}:{thread_id}` |
+| 슬랙 DM | `slack:{team_id}:dm:{user_id}` |
+| 라인 소스 | `line:{source_type}:{source_id}` |
+| 디스코드 채널 | `discord:{guild_id}:{channel_id}` |
+| 일반 웹훅 | `webhook:{profile_id}:{external_subject}` |
 
 세션 키는 자격 증명이 아닙니다. 비밀이 포함되어 있지 않으면 기록될 수 있습니다.
 또는 민감한 메시지 내용.

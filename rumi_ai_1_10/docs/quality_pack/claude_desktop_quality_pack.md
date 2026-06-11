@@ -4,8 +4,8 @@
 
 # Claude Desktop-level quality pack for rumi_ai
 
-This document is a practical pack for continuously developing, auditing, and validating rumi_ai with high quality.  
-**PR1 only adds quality assets and does not change product behavior. **
+This document is a practical pack for continuously developing, auditing, and validating rumi_ai with high quality.
+**PR1 only adds quality assets and does not change product behavior.**
 
 ---
 

@@ -36,20 +36,20 @@ ecosystem/my_pack/
 
 ### テンプレートの種類
 
-|テンプレート |目次 |
+| Template | Contents |
 |-------------|------|
-| `minimal` |最小構成 (`ecosystem.json` + `__init__.py`) |
-| `capability` |ミニマル + `capability_handler.py` |
-| `flow` |ミニマル + `flows/sample_flow.yaml` |
-| `full` |すべて含まれます (上記のすべて + `tests/` + `README.md`) |
+| `minimal` | Minimum configuration (`ecosystem.json` + `__init__.py`) |
+| `capability` | minimal + `capability_handler.py` |
+| `flow` | minimal + `flows/sample_flow.yaml` |
+| `full` | All included (all of the above + `tests/` + `README.md`) |
 
 ### CLI オプション
 
-|オプション |説明 |
+| Options | Description |
 |-----------|------|
-| `--template`、`-t` |テンプレート タイプ (デフォルト: `minimal`) |
-| `--output`、`-o` |出力先の親ディレクトリ（デフォルト：カレントディレクトリ） |
-| `--force`、`-f` |既存のディレクトリの上書きを許可する |
+| `--template`, `-t` | Template type (default: `minimal`) |
+| `--output`, `-o` | Parent directory of output destination (default: current directory) |
+| `--force`, `-f` | Allow overwriting of existing directories |
 
 > 初めての場合は、`minimal` テンプレートから始めて、必要に応じてファイルを追加することをお勧めします。
 
@@ -57,7 +57,7 @@ ecosystem/my_pack/
 
 ## ステップ 2: エコシステム.json を編集する
 
-scaffoldで生成された`ecosystem.json`を編集します。スキャフォールドの出力には `pack_identity` が含まれていないため、手動で追加します。
+scaffold によって生成された `ecosystem.json` を編集します。スキャフォールドの出力には `pack_identity` が含まれていないため、手動で追加します。
 
 ### scaffold によって生成されたエコシステム.json
 
@@ -96,10 +96,10 @@ scaffoldで生成された`ecosystem.json`を編集します。スキャフォ�
 
 ### 必須フィールド
 
-|フィールド |説明 |
+| Field | Description |
 |-----------|------|
-| `pack_id` |パックの識別子。ディレクトリ名と一致します。 `[a-zA-Z0-9_-]{1,64}`のパターンに従います。
-| `pack_identity` |配布元を示す識別子 (例: `github:author/repo`)。パックの更新中にこの値が変更された場合、適用は拒否されます。
+| `pack_id` | Pack identifier. Match directory name. Follow the pattern of `[a-zA-Z0-9_-]{1,64}` |
+| `pack_identity` | Identifier indicating the distribution source (e.g. `github:author/repo`). If this value changes during Pack update, apply will be rejected |
 
 > 各フィールドの詳細については、[the ecosystem.json section of pack-development.md](./pack-development.md#エコシステムjson)を参照してください。
 
@@ -155,9 +155,7 @@ def run() -> dict | None:
 
 ### 重要な注意事項
 
-**戻り値は JSON 互換である必要があります**: `dict`、`list`、`str`、`int`、`float`、`bool`、`None`のいずれかを返します。
-
-**`_` 接頭辞を持つキーは使用しないでください**: 返された辞書に `_` 接頭辞で始まるキー (例: `_internal`) を含めると、カーネルは自動的にそれを除外します。
+**戻り値は JSON 互換である必要があります**: `dict`、`list`、`str`、`int`、`float`、`bool`、`None`のいずれかを返します。**`_` 接頭辞を持つキーは使用しないでください**: 返される辞書に `_` 接頭辞で始まるキー (例: `_internal`) を含める場合、カーネルはそれを自動的に除外します。
 
 ```python
 # NG: _ プレフィックスは除外される
@@ -170,7 +168,7 @@ def run(input_data, context=None):
     return {"result": "kept", "metadata": {"source": "my_pack"}}
 ```
 
-**入力データの検証**: `input_data` は外部ソースから取得されるため、必ずタイプと存在のチェックを実行してください。
+**入力データの検証**: `input_data` は外部ソースから取得されるため、必ず型と存在のチェックを実行してください。
 
 ```python
 def run(input_data: dict, context: dict) -> dict:
@@ -184,7 +182,7 @@ def run(input_data: dict, context: dict) -> dict:
     return {"message": f"Hello, {name}!"}
 ```
 
-> 詳細なブロック仕様については、[the blocks section of pack-development.md](./pack-development.md#ブロック)を参照してください。
+> ブロック仕様の詳細については、[the blocks section of pack-development.md](./pack-development.md#ブロック)を参照してください。
 
 ---
 
@@ -198,12 +196,12 @@ python app.py --validate
 
 検証では次のことがチェックされます。
 
-|チェック項目 |説明 |
+| Check items | Explanation |
 |-------------|------|
-| JSON解析 | `ecosystem.json` は有効な JSON ですか? |
-| `pack_id` 一致 |ディレクトリ名は `ecosystem.json` の `pack_id` と一致しますか?
-| `connectivity` 宣言 | `connectivity` フィールドは宣言されていますか |
-| `${ctx.*}` 参照整合性 | `${ctx.PACK_ID.*}` は、`connectivity` に含まれるフロー内の参照ですか。
+| JSON parse | Is `ecosystem.json` valid JSON? |
+| `pack_id` Match | Does the directory name match `pack_id` in `ecosystem.json` |
+| `connectivity` Declaration | `connectivity` Is the field declared |
+| `${ctx.*}` Referential integrity | Are `${ctx.PACK_ID.*}` references in the Flow contained in `connectivity` |
 
 ### プログラムからの検証
 
@@ -225,7 +223,7 @@ for e in report.errors:
 
 ### 手動テスト
 
-フローを直接実行して、ブロックの動作を確認できます。 `user_data/shared/flows/`でテストフローファイルを作成します。
+フローを直接実行して、ブロックの動作を確認できます。 `user_data/shared/flows/` でテスト フロー ファイルを作成します。
 
 ```yaml
 # user_data/shared/flows/test_hello.flow.yaml
@@ -280,10 +278,10 @@ Pack ブロックはフロー定義から呼び出されます。
 
 ### フローファイルの配置
 
-|パス |目的 |
+| Path | Purpose |
 |------|------|
-| `user_data/shared/flows/` |共有フロー。複数のパック間の配線に使用 |
-| `ecosystem/<pack_id>/backend/flows/` |パック固有のフロー |
+| `user_data/shared/flows/` | Share Flow. Used for wiring across multiple packs |
+| `ecosystem/<pack_id>/backend/flows/` | Pack-specific Flow |
 
 ### フロー定義例
 
@@ -313,17 +311,17 @@ steps:
 
 ### ステップのキーフィールド
 
-|フィールド |必須 |説明 |
+| Field | Required | Description |
 |-----------|------|------|
-| `id` | ✅ |ステップ ID (フロー内で一意) |
-| `phase` | ✅ |所属段階 |
-| `priority` |オプション |実行優先度 (昇順、デフォルトは 100) |
+| `id` | ✅ | Step ID (unique within the Flow) |
+| `phase` | ✅ | Affiliation phase |
+| `priority` | Optional | Execution priority (ascending order; default 100) |
 | `type` | ✅ | `python_file_call` |
-| `owner_pack` |オプション |所有パック ID |
-| `file` | ✅ |実行可能ファイルの相対パス |
-| `input` |オプション |入力データ（`${ctx.key}`で変数拡張可能） |
-| `output` |オプション |出力先コンテキストキー |
-| `timeout_seconds` |オプション |タイムアウト秒 (デフォルトは 60、最大は 120) |
+| `owner_pack` | Optional | Owned Pack ID |
+| `file` | ✅ | Relative path of executable file |
+| `input` | Optional | Input data (variable expansion possible with `${ctx.key}`) |
+| `output` | Optional | Output destination context key |
+| `timeout_seconds` | Optional | Timeout seconds (default 60, maximum 120) |
 
 ### 変数の展開
 
@@ -339,7 +337,7 @@ Rumi AI OS のコア ランタイムは、Pack 開発に一般的に必要な基
 
 ### 構造化ログ
 
-`core_runtime.logging_utils` モジュールは、JSON 形式での構造化ログ出力をサポートしています。
+`core_runtime.logging_utils` モジュールは、JSON 形式での構造化ログ出力をサポートします。
 
 ```python
 from core_runtime.logging_utils import get_structured_logger, CorrelationContext
@@ -368,11 +366,11 @@ ctx_logger.info("Step 2")  # pack_id, flow_id が自動付与
 
 出力形式は環境変数 `RUMI_LOG_FORMAT` (`json` または `text`) で制御できます。
 
-> 詳細は[the structured log settings section of operations.md](./operations.md#構造化ログ設定)を参照してください。
+> 詳細については、[the structured log settings section of operations.md](./operations.md#structured-log-settings)を参照してください。
 
 ### 統合エラー
 
-`core_runtime.error_messages` モジュールは、統一エラー コード化スキーム (`RUMI-{CATEGORY}-{NUMBER}`) を提供します。
+`core_runtime.error_messages` モジュールは、統一されたエラー コード化スキーム (`RUMI-{CATEGORY}-{NUMBER}`) を提供します。
 
 ```python
 from core_runtime.error_messages import format_error, RumiError
@@ -391,7 +389,7 @@ def run(input_data, context=None):
 
 主なエラー コード カテゴリ: `AUTH` (認証)、`NET` (ネットワーク)、`FLOW` (フロー)、`PACK` (パック管理)、`CAP` (機能)、`VAL` (検証)、`SYS` (システム)。
 
-> 詳細は[the error code reference section of operations.md](./operations.md#エラーコードリファレンス)を参照してください。
+> 詳細については、[the error code reference section of operations.md](./operations.md#error-code-reference)を参照してください。
 
 ### 型の注釈
 
@@ -412,7 +410,7 @@ def load_data(key: str) -> Result[JsonDict]:
         return Result(success=False, error=str(e))
 ```
 
-使用可能なタイプ: `PackId`、`FlowId`、`CapabilityName`、`HandlerKey`、`StoreKey` (NewType)、`JsonValue`、`JsonDict` (タイプ エイリアス)、`Result[T]` (汎用結果タイプ)、`Severity` (ログ重大度列挙型)。
+利用可能な型: `PackId`、`FlowId`、`CapabilityName`、`HandlerKey`、`StoreKey` (NewType)、`JsonValue`、`JsonDict` (型別名)、`Result[T]` (汎用結果型)、`Severity` (ログ重大度列挙型)。
 
 > 詳細については、[the type hints/validation section of pack-development.md](./pack-development.md#型のヒント検証)を参照してください。
 
@@ -429,11 +427,11 @@ def old_handler(input_data, context=None):
     return new_handler(input_data, context)
 ```
 
-デコレータを与えると関数呼び出し時に`DeprecationWarning`が発行され、自動的に`DeprecationRegistry`に登録されます。 `async def`にも対応しています。
+デコレータを与えると関数呼び出し時に`DeprecationWarning`が発行され、`DeprecationRegistry`に自動的に登録されます。 `async def` もサポートされています。
 
-警告動作は、環境変数 `RUMI_DEPRECATION_LEVEL` (`warn` / `error` / `silent` / `log`) で制御できます。
+警告動作は環境変数 `RUMI_DEPRECATION_LEVEL` (`warn` / `error` / `silent` / `log`) で制御できます。
 
-> 詳細は[the deprecation warning level control section of operations.md](./operations.md#非推奨警告レベルの制御)を参照してください。
+> 詳細については、[the deprecation warning level control section of operations.md](./operations.md#deprecation-warning-level-control)を参照してください。
 
 ---
 

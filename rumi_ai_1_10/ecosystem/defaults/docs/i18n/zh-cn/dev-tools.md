@@ -8,25 +8,23 @@
 
 开发工具是默认为开发人员提供的一组检查和调试功能。提供AI请求详细信息、提示使用历史记录、实时编辑和请求重放。
 
-开发工具处理程序放置在`blocks/dev/`目录中，并声明为`ecosystem.json`的`dev`组件。特定的 UI 面板作为 user_data 端的资产提供，但默认包包含`ui/dev_panel.js`中的参考实现。
+开发工具处理程序放置在 `blocks/dev/` 目录中，并声明为 `ecosystem.json` 的 `dev` 组件。特定的 UI 面板作为 user_data 端的资产提供，但默认包包含第 `ui/dev_panel.js` 中的参考实现。
 
 `blocks/dev/` 包含以下文件。
 
-|文件|处理者名称 |
+| file | handler name |
 |---|---|
-| §鲁米§0§| §鲁米§1§ |
-| §鲁米§0§| §鲁米§1§ |
-| §鲁米§0§| §鲁米§1§ |
-| §鲁米§0§| §鲁米§1§ |
+| `inspect.py` | `defaults.dev.inspect` |
+| `prompt_history.py` | `defaults.dev.prompt_history` |
+| `edit_prompt_live.py` | `defaults.dev.edit_prompt_live` |
+| `replay.py` | `defaults.dev.replay` |
 
 
 ## 2.检查（确认请求信息）
 
 查看提交给 LLM 的请求的完整详细信息。
 
-**处理程序**：`defaults.dev.inspect`（`blocks/dev/inspect.py`）
-
-**HTTP**：`GET /api/dev/inspect`
+**处理程序**：`defaults.dev.inspect`（`blocks/dev/inspect.py`）**HTTP**：`GET /api/dev/inspect`
 
 ```python
 # handler 経由で直前のリクエスト情報を取得
@@ -71,9 +69,7 @@ info = context["call_handler"]("defaults.dev.inspect", {
 
 查看会话期间呈现的提示的历史记录。
 
-**处理程序**：`defaults.dev.prompt_history`（`blocks/dev/prompt_history.py`）
-
-**HTTP**：`GET /api/dev/prompt-history`
+**处理程序**：`defaults.dev.prompt_history`（`blocks/dev/prompt_history.py`）**HTTP**：`GET /api/dev/prompt-history`
 
 ```python
 history = context["call_handler"]("defaults.dev.prompt_history", {
@@ -98,11 +94,9 @@ history = context["call_handler"]("defaults.dev.prompt_history", {
 
 ## 4.实时编辑提示
 
-即时编辑和覆盖提示。如果指定的`prompt_name`提示存在，则更新`content`；如果不存在，则创建一个新的。为`prompt_name` 指定`"system"` 会重写系统提示符。
+即时编辑和覆盖提示。如果指定的`prompt_name`提示存在，则更新`content`；如果不存在，则创建一个新的。为 `prompt_name` 指定`"system"` 会重写系统提示符。
 
-**处理程序**：`defaults.dev.edit_prompt_live`（`blocks/dev/edit_prompt_live.py`）
-
-**HTTP**：`POST /api/dev/edit-prompt`
+**处理程序**：`defaults.dev.edit_prompt_live`（`blocks/dev/edit_prompt_live.py`）**HTTP**：`POST /api/dev/edit-prompt`
 
 ```python
 context["call_handler"]("defaults.dev.edit_prompt_live", {
@@ -124,16 +118,14 @@ context["call_handler"]("defaults.dev.edit_prompt_live", {
 }
 ```
 
-要恢复，请在`new_body`中指定原始模板主体并再次调用它。
+要恢复，请在`new_body`中指定原始模板主体，然后再次调用它。
 
 
 ## 5.重放（重放过去的请求）
 
 使用相同的参数重新运行之前的 LLM 请求。也可以更改模型和参数。
 
-**处理程序**：`defaults.dev.replay`（`blocks/dev/replay.py`）
-
-**HTTP**：`POST /api/dev/replay`
+**处理程序**：`defaults.dev.replay`（`blocks/dev/replay.py`）**HTTP**：`POST /api/dev/replay`
 
 ```python
 result = context["call_handler"]("defaults.dev.replay", {
@@ -153,16 +145,16 @@ result = context["call_handler"]("defaults.dev.replay", {
 
 前端的资源检测`Ctrl+Shift+D`键绑定并切换开发工具面板的显示/隐藏。
 
-面板资产以用户数据包的形式提供。 defaults 提供开发工具处理程序（`defaults.dev.inspect`、`defaults.dev.prompt_history`、`defaults.dev.edit_prompt_live`、`defaults.dev.replay`）。参考实现包含在默认包的`ui/dev_panel.js`中。
+面板资产以用户数据包的形式提供。 defaults 提供开发工具处理程序（`defaults.dev.inspect`、`defaults.dev.prompt_history`、`defaults.dev.edit_prompt_live`、`defaults.dev.replay`）。默认包的第 `ui/dev_panel.js` 中包含参考实现。
 
-建议将`panel.bottom`或`floating`用于面板资产放置槽。
+建议将 `panel.bottom` 或 `floating` 用于面板资源放置槽。
 
 
 ## 7. API 端点
 
-|处理程序 | HTTP 路由 |输入数据|返回值|
+| handler | HTTP route | input_data | return value |
 |---|---|---|---|
-| §鲁米§0§| §鲁米§1§ | §鲁米§2§ |请求/响应详细信息 |
-| §鲁米§0§| §鲁米§1§ | §鲁米§2§ |提示使用历史数组 |
-| §鲁米§0§| §鲁米§1§ | §鲁米§2§ | §鲁米§3§|
-| §鲁米§0§| §鲁米§1§ | §鲁米§2§ |标准响应 |
+| `defaults.dev.inspect` | `GET /api/dev/inspect` | `{conversation_id, message_id}` | Request/Response Details |
+| `defaults.dev.prompt_history` | `GET /api/dev/prompt-history` | `{session_id, limit}` | Prompt usage history array |
+| `defaults.dev.edit_prompt_live` | `POST /api/dev/edit-prompt` | `{prompt_name, new_body}` | `{prompt_name, updated, content, prompt_id}` |
+| `defaults.dev.replay` | `POST /api/dev/replay` | `{conversation_id, message_id, override}` | StandardResponse |

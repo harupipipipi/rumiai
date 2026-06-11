@@ -33,15 +33,7 @@ class AIClient:
 
 ### 适用类别
 
-**AIClient** (`domain/ai_client/client.py`) — 管理和委托人工智能提供商。在初始化期间注册存根提供程序，并自动注册在环境变量中检测到的提供程序（OpenAI、Anthropic、Google）。具有`complete()`、`stream()`、`embed()`、`image_gen()`、`image_analyze()`、`transcribe()`、`tts()`方法。解析模型字符串`"provider/model"`并委托给相应的提供者。
-
-**McpClient** (`domain/tool/mcp_client.py`) — 管理与 MCP（模型上下文协议）服务器的连接。使用`threading.Lock`执行线程安全的服务器连接管理。具有`connect()`、`disconnect()`、`invoke()`、`list_servers()`、`get_server_tools()`方法。
-
-**ToolRegistry** (`domain/tool/registry.py`) — 注册和管理工具定义。管理内存中字典的持久性 + `user_data/shared/tools/`。启动时自动注册内置工具（web_search、calculator、file_reader），并从文件中加载动态工具。使用`threading.Lock`提供线程安全操作。
-
-**ChatStore** (`domain/chat/store.py`) — 提供对话和消息的内存管理。在`__new__`中共享实例并在`_conversations`中维护字典。除了CRUD操作外，它还提供`branch()`、`search()`、`export_conversation()`、`get_message_chain()`等树操作。
-
-**检查器** (`domain/dev/inspector.py`) — 管理请求日志的记录和检索。使用`threading.Lock`实现线程安全。上限由`collections.deque(maxlen=1000)`控制。具有`log_request()`、`get_log()`、`get_latest()`、`list_logs()`、`find_by_conversation()`方法。
+**AIClient** (`domain/ai_client/client.py`) — 管理和委托人工智能提供商。在初始化期间注册存根提供程序，并自动注册在环境变量中检测到的提供程序（OpenAI、Anthropic、Google）。具有`complete()`、`stream()`、`embed()`、`image_gen()`、`image_analyze()`、`transcribe()`、`tts()`方法。解析模型字符串`"provider/model"`并委托给相应的提供者。**McpClient** (`domain/tool/mcp_client.py`) — 管理与 MCP（模型上下文协议）服务器的连接。使用`threading.Lock`执行线程安全的服务器连接管理。具有`connect()`、`disconnect()`、`invoke()`、`list_servers()`、`get_server_tools()`方法。**ToolRegistry** (`domain/tool/registry.py`) — 注册和管理工具定义。管理内存中字典的持久性 + `user_data/shared/tools/`。启动时自动注册内置工具（web_search、calculator、file_reader），并从文件中加载动态工具。使用`threading.Lock`提供线程安全操作。**ChatStore** (`domain/chat/store.py`) — 提供对话和消息的内存管理。在`__new__`中共享实例并在`_conversations`中维护字典。除了CRUD操作外，它还提供`branch()`、`search()`、`export_conversation()`、`get_message_chain()`等树操作。**检查器** (`domain/dev/inspector.py`) — 管理请求日志的记录和检索。使用`threading.Lock`实现线程安全。上限由`collections.deque(maxlen=1000)`控制。具有`log_request()`、`get_log()`、`get_latest()`、`list_logs()`、`find_by_conversation()`方法。
 
 ---
 
@@ -130,15 +122,7 @@ class BaseProvider:
 
 ### 实施提供商
 
-**StubProvider** — 返回固定响应。用于测试和开发。没有 API 调用。
-
-**OpenAIProvider** — 调用 OpenAI API。通过环境变量`OPENAI_API_KEY`检测。
-
-**AnthropicProvider** — 调用 Anthropic API。通过环境变量`ANTHROPIC_API_KEY`检测。
-
-**GoogleProvider** — 调用 Google AI API。通过环境变量`GOOGLE_API_KEY`检测。
-
-**RumiProvider** — 元提供商。通过 Pipeline 处理请求或委托给后备提供商。接收 AIClient 实例，并且仅在注册了一个或多个其他提供程序时才启用。
+**StubProvider** — 返回固定响应。用于测试和开发。没有 API 调用。**OpenAIProvider** — 调用 OpenAI API。通过环境变量`OPENAI_API_KEY`检测。**AnthropicProvider** — 调用 Anthropic API。通过环境变量`ANTHROPIC_API_KEY`检测。**GoogleProvider** — 调用 Google AI API。通过环境变量`GOOGLE_API_KEY`检测。**RumiProvider** — 元提供商。通过 Pipeline 处理请求或委托给后备提供商。接收 AIClient 实例，并且仅在注册了一个或多个其他提供程序时才启用。
 
 ### 提供商自动检测
 
@@ -201,6 +185,4 @@ skeleton = generate_skeleton("my_tool", "ツールの説明", {
 
 PromptManager 通过将 JSON 文件持久化到内存中的字典 + `user_data/shared/prompts/` 来管理提示。通过`get_manager()` 作为模块级单例获得。
 
-**关键方法：**`create_prompt()`、`get_prompt()`、`get_prompt_by_name()`、`list_prompts()`、`update_prompt()`、`delete_prompt()`、`to_template()`、`create_from_template()`、`get_system_prompt()`、`set_system_prompt()`。
-
-**上下文变量注入：**`inject_context_variables(variables, context)`静态方法自动从上下文字典中注入特殊变量，例如`context.total_tokens`，`context.message_count`。
+**关键方法：**`create_prompt()`、`get_prompt()`、`get_prompt_by_name()`、`list_prompts()`、`update_prompt()`、`delete_prompt()`、`to_template()`、`create_from_template()`、`get_system_prompt()`、`set_system_prompt()`。**上下文变量注入：**`inject_context_variables(variables, context)`静态方法自动从上下文字典中注入特殊变量，例如`context.total_tokens`，`context.message_count`。

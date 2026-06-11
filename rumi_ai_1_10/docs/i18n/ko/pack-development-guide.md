@@ -4,7 +4,7 @@
 
 # 팩 개발 빠른 시작 가이드
 
-> 자세한 API 참조는 [pack-development.md](./pack-development.md)를 참조하세요.
+> 자세한 API 참조는 [pack-development.md](./pack-development.md)을 참조하세요.
 
 이 가이드에서는 스캐폴드(템플릿 생성 도구)를 사용하여 첫 번째 Pack을 만들고 Flow에서 호출하고 작동을 확인하는 단계를 설명합니다.
 
@@ -36,20 +36,20 @@ ecosystem/my_pack/
 
 ### 템플릿 유형
 
-| 템플릿 | 내용 |
+| Template | Contents |
 |-------------|------|
-| §루미§0§ | 최소 구성(`ecosystem.json` + `__init__.py`) |
-| §루미§0§ | 최소 + `capability_handler.py` |
-| §루미§0§ | 최소 + `flows/sample_flow.yaml` |
-| §루미§0§ | 모두 포함됨(위의 모든 항목 + `tests/` + `README.md`) |
+| `minimal` | Minimum configuration (`ecosystem.json` + `__init__.py`) |
+| `capability` | minimal + `capability_handler.py` |
+| `flow` | minimal + `flows/sample_flow.yaml` |
+| `full` | All included (all of the above + `tests/` + `README.md`) |
 
 ### CLI 옵션
 
-| 옵션 | 설명 |
+| Options | Description |
 |-----------|------|
-| §루미§0§, §루미§1§ | 템플릿 유형(기본값: `minimal`) |
-| §루미§0§, §루미§1§ | 출력 대상의 상위 디렉터리(기본값: 현재 디렉터리) |
-| §루미§0§, §루미§1§ | 기존 디렉터리 덮어쓰기 허용 |
+| `--template`, `-t` | Template type (default: `minimal`) |
+| `--output`, `-o` | Parent directory of output destination (default: current directory) |
+| `--force`, `-f` | Allow overwriting of existing directories |
 
 > 처음이라면 `minimal` 템플릿으로 시작하여 필요에 따라 파일을 추가하는 것이 좋습니다.
 
@@ -57,7 +57,7 @@ ecosystem/my_pack/
 
 ## 2단계: Ecosystem.json 편집
 
-비계에 의해 생성된 `ecosystem.json`를 편집합니다. 스캐폴드 출력에는 `pack_identity`이 포함되어 있지 않으므로 수동으로 추가하세요.
+스캐폴드에 의해 생성된 `ecosystem.json`을 편집합니다. 스캐폴드 출력에는 `pack_identity`이 포함되지 않으므로 수동으로 추가하세요.
 
 ### 스캐폴드에 의해 생성된 Ecosystem.json
 
@@ -96,12 +96,12 @@ ecosystem/my_pack/
 
 ### 필수항목
 
-| 필드 | 설명 |
+| Field | Description |
 |-----------|------|
-| §루미§0§ | 팩 식별자. 디렉터리 이름을 일치시킵니다. `[a-zA-Z0-9_-]{1,64}` |
-| §루미§0§ | 배포 소스를 나타내는 식별자(예: `github:author/repo`)입니다. 팩 업데이트 중에 이 값이 변경되면 적용이 거부됩니다 |
+| `pack_id` | Pack identifier. Match directory name. Follow the pattern of `[a-zA-Z0-9_-]{1,64}` |
+| `pack_identity` | Identifier indicating the distribution source (e.g. `github:author/repo`). If this value changes during Pack update, apply will be rejected |
 
-> 각 분야에 대한 자세한 사항은 [the ecosystem.json section of pack-development.md](./pack-development.md#생태계json)을 참조하시기 바랍니다.
+> 각 분야에 대한 자세한 내용은 [the ecosystem.json section of pack-development.md](./pack-development.md#생태계json)을 참조하시기 바랍니다.
 
 ---
 
@@ -155,9 +155,7 @@ def run() -> dict | None:
 
 ### 중요 참고 사항
 
-**반환 값은 JSON과 호환되어야 합니다**: `dict`, `list`, `str`, `int`, `float`, `bool`, `None` 중 하나를 반환합니다.
-
-**`_` 접두사가 있는 키를 사용하지 마세요**: 반환된 사전에 `_` 접두사(예: `_internal`)로 시작하는 키를 포함하면 커널이 자동으로 이를 제외합니다.
+**반환 값은 JSON과 호환되어야 합니다**: `dict`, `list`, `str`, `int`, `float`, `bool`, `None` 중 하나를 반환합니다.**`_` 접두사가 있는 키를 사용하지 마세요**: 반환된 사전에 `_` 접두사(예: `_internal`)로 시작하는 키를 포함하면 커널은 자동으로 제외하세요.
 
 ```python
 # NG: _ プレフィックスは除外される
@@ -198,12 +196,12 @@ python app.py --validate
 
 유효성 검사에서는 다음을 확인합니다.
 
-| 항목 확인 | 설명 |
+| Check items | Explanation |
 |-------------|------|
-| JSON 구문 분석 | `ecosystem.json`은 유효한 JSON인가요? |
-| §루미§0§ 경기 | 디렉터리 이름이 `ecosystem.json`의 `pack_id`과 일치합니까 |
-| §루미§0§ 선언 | `connectivity` 필드가 선언되었습니까 |
-| `${ctx.*}` 참조 무결성 | `connectivity` |
+| JSON parse | Is `ecosystem.json` valid JSON? |
+| `pack_id` Match | Does the directory name match `pack_id` in `ecosystem.json` |
+| `connectivity` Declaration | `connectivity` Is the field declared |
+| `${ctx.*}` Referential integrity | Are `${ctx.PACK_ID.*}` references in the Flow contained in `connectivity` |
 
 ### 프로그램에서 확인
 
@@ -280,10 +278,10 @@ def test_hello_default():
 
 ### 흐름 파일 배치
 
-| 경로 | 목적 |
+| Path | Purpose |
 |------|------|
-| §루미§0§ | 공유 흐름. 여러 팩에 걸쳐 배선하는 데 사용 |
-| §루미§0§ | 팩별 흐름 |
+| `user_data/shared/flows/` | Share Flow. Used for wiring across multiple packs |
+| `ecosystem/<pack_id>/backend/flows/` | Pack-specific Flow |
 
 ### 흐름 정의 예
 
@@ -313,21 +311,21 @@ steps:
 
 ### 단계의 주요 필드
 
-| 필드 | 필수 | 설명 |
+| Field | Required | Description |
 |-----------|------|------|
-| §루미§0§ | ✅ | 단계 ID(흐름 내에서 고유함) |
-| §루미§0§ | ✅ | 제휴 단계 |
-| §루미§0§ | 선택사항 | 실행 우선순위(오름차순, 기본값 100) |
-| §루미§0§ | ✅ | §루미§1§ |
-| §루미§0§ | 선택사항 | 소유 팩 ID |
-| §루미§0§ | ✅ | 실행 파일의 상대 경로 |
-| §루미§0§ | 선택사항 | 입력 데이터(`${ctx.key}`로 가변 확장 가능) |
-| §루미§0§ | 선택사항 | 출력 대상 컨텍스트 키 |
-| §루미§0§ | 선택사항 | 제한시간 초(기본값 60, 최대 120) |
+| `id` | ✅ | Step ID (unique within the Flow) |
+| `phase` | ✅ | Affiliation phase |
+| `priority` | Optional | Execution priority (ascending order; default 100) |
+| `type` | ✅ | `python_file_call` |
+| `owner_pack` | Optional | Owned Pack ID |
+| `file` | ✅ | Relative path of executable file |
+| `input` | Optional | Input data (variable expansion possible with `${ctx.key}`) |
+| `output` | Optional | Output destination context key |
+| `timeout_seconds` | Optional | Timeout seconds (default 60, maximum 120) |
 
 ### 변수 확장
 
-`${ctx.key}`의 맥락에서 값을 참조할 수 있습니다. 중첩된 참조(`${ctx.user.id}`)도 가능합니다. 참조가 존재하지 않는 경우 `null`가 됩니다.
+`${ctx.key}`의 맥락에서 값을 참조할 수 있습니다. 중첩된 참조(`${ctx.user.id}`)도 가능합니다. 참조가 존재하지 않는 경우 `null`입니다.
 
 > Flow 정의에 대한 자세한 내용은 [Flow definition section of pack-development.md](./pack-development.md#흐름-정의)을 참조하세요.
 
@@ -368,7 +366,7 @@ ctx_logger.info("Step 2")  # pack_id, flow_id が自動付与
 
 출력 형식은 환경 변수 `RUMI_LOG_FORMAT`(`json` 또는 `text`)을 사용하여 제어할 수 있습니다.
 
-> 자세한 내용은 [the structured log settings section of operations.md](./operations.md#구조화된-로그-설정)를 참조하세요.
+> 자세한 내용은 [the structured log settings section of operations.md](./operations.md#structured-log-settings)을 참조하세요.
 
 ### 통합 오류
 
@@ -387,15 +385,15 @@ def run(input_data, context=None):
     return {"message": f"Hello, {name}!"}
 ```
 
-`format_error()`는 `ErrorCode` 상수 템플릿에 매개변수를 포함하고 `RumiError` 인스턴스를 반환합니다. `RumiError`에는 `.code`, `.message`, `.suggestion`, `.details` 속성이 있으며 `.to_dict()`을 사용하여 JSON 직렬화 가능 사전으로 변환될 수 있습니다.
+`format_error()`은 `ErrorCode` 상수 템플릿에 매개변수를 포함하고 `RumiError` 인스턴스를 반환합니다. `RumiError`에는 `.code`, `.message`, `.suggestion`, `.details` 속성이 있으며 `.to_dict()`을 사용하여 직렬화 가능한 JSON 사전으로 변환할 수 있습니다.
 
 주요 오류 코드 범주: `AUTH`(인증), `NET`(네트워크), `FLOW`(흐름), `PACK`(팩 관리), `CAP`(기능), `VAL`(검증), `SYS`(시스템).
 
-> 자세한 내용은 [the error code reference section of operations.md](./operations.md#오류-코드-참조)를 참조하세요.
+> 자세한 내용은 [the error code reference section of operations.md](./operations.md#error-code-reference)을 참조하세요.
 
 ### 유형 주석
 
-`core_runtime.types` 모듈은 유형 수준에서 ID 문자열 사용을 지정하기 위한 `NewType`을 제공합니다.
+`core_runtime.types` 모듈은 유형 수준에서 ID 문자열의 사용을 지정하기 위한 `NewType`을 제공합니다.
 
 ```python
 from core_runtime.types import PackId, FlowId, JsonDict, Result
@@ -429,11 +427,11 @@ def old_handler(input_data, context=None):
     return new_handler(input_data, context)
 ```
 
-데코레이터가 주어지면 함수 호출 시 `DeprecationWarning`가 발행되며 자동으로 `DeprecationRegistry`에 등록됩니다. `async def`도 지원됩니다.
+데코레이터가 주어지면 함수 호출 시 `DeprecationWarning`이 발행되며, 자동으로 `DeprecationRegistry`에 등록됩니다. `async def`도 지원됩니다.
 
 경고 동작은 환경 변수 `RUMI_DEPRECATION_LEVEL`(`warn` / `error` / `silent` / `log`)을 사용하여 제어할 수 있습니다.
 
-> 자세한 내용은 [the deprecation warning level control section of operations.md](./operations.md#지원-중단-경고-수준-제어)를 참조하세요.
+> 자세한 내용은 [the deprecation warning level control section of operations.md](./operations.md#deprecation-warning-level-control)을 참조하세요.
 
 ---
 

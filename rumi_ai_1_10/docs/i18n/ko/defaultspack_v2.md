@@ -21,33 +21,33 @@
 
 Each module exposes:
 
-- §루미§0§
-- §루미§0§
-- §루미§0§
-- §루미§0§
-- §루미§0§
+- `enabled`
+- `disabled`
+- `degraded`
+- `error_disabled`
+- `experimental`
 
 Dependency failures degrade dependents without taking down the whole pack.
 
 ## Main endpoints
 
-- §루미§0§
-- §루미§0§
-- §루미§0§
-- §루미§0§
-- §루미§0§
-- §루미§0§
-- §루미§0§
-- §루미§0§
-- §루미§0§
-- §루미§0§
-- §루미§0§
-- §루미§0§
-- §루미§0§
-- §루미§0§
-- §루미§0§
-- §루미§0§
-- §루미§0§
+- `GET /api/defaultspack/modules`
+- `GET /api/defaultspack/modules/{id}`
+- `POST /api/defaultspack/modules/{id}/enable`
+- `POST /api/defaultspack/modules/{id}/disable`
+- `POST /api/defaultspack/modules/{id}/reload`
+- `POST /api/defaultspack/modules/{id}/rollback`
+- `GET /api/setup/packs`
+- `POST /api/setup/packs/install`
+- `POST /api/setup/packs/{id}/grant-all-ok`
+- `POST /api/setup/packs/{id}/revoke-all-ok`
+- `GET /api/setup/migration/status`
+- `GET /api/defaultspack/pack-requests`
+- `POST /api/defaultspack/pack-requests/request-extension`
+- `POST /api/defaultspack/pack-requests/forced-patch`
+- `POST /api/defaultspack/pack-requests/{id}/approve`
+- `POST /api/defaultspack/pack-requests/{id}/reject`
+- `POST /api/defaultspack/pack-requests/{id}/rollback`
 
 ## Setup flow
 
@@ -64,8 +64,8 @@ vulnerability boundary.
 
 Pack changes can be staged first, then submitted as either:
 
-- §루미§0§
-- §루미§0§
+- `request_extension`
+- `forced_patch`
 
 Both produce an approval-backed request record before any apply occurs.
 

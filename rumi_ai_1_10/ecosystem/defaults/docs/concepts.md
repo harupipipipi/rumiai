@@ -22,9 +22,7 @@ block is a group of modules under the `blocks/` directory, and each file corresp
 def run(input_data: dict, context: dict) -> dict:
 ```
 
-**`input_data`** is a dict of request parameters. The body of the HTTP request is parsed as JSON and the URL path parameter (for example, `conversation_id`) is also appended and passed.
-
-**`context`** is a dict containing flow information and dependent functions. `_build_context()` of `transport/http.py` constructs a context with the following fields.
+**`input_data`** is a dict of request parameters. The body of the HTTP request is parsed as JSON and the URL path parameter (for example, `conversation_id`) is also appended and passed.**`context`** is a dict containing flow information and dependent functions. `_build_context()` of `transport/http.py` constructs a context with the following fields.
 
 | Field | Type | Description |
 |---|---|---|
@@ -114,7 +112,7 @@ A widget is a Python representation of a UI component defined in `lib/rumi_widge
 - `stream.py` — Stream widgets such as Stream, Indicator, etc.
 - `custom.py` — Custom Widget
 
-A handler can send a widget to the UI using `context["emit_widget"](§RUMI§0§)`.
+A handler can send a widget to the UI using `context["emit_widget"](widget_json)`.
 
 ## What is context?
 
@@ -138,6 +136,4 @@ context is a dict of execution context passed to handler. The main fields are:
 
 ## Relationship with InterfaceRegistry / EventBus
 
-**InterfaceRegistry** is a registry of interfaces managed by the kernel. The interface (handler) provided by each Pack is registered and used for name resolution by `call_handler`. You can get a list of registered interfaces by calling `facade.list_interfaces()` on the `/api/context` endpoint.
-
-**EventBus** is a kernel-managed event bus. You can fire an event with `context["emit_event"](§RUMI§0§)` and wait for an event with `context["wait_event"](§RUMI§1§)`. Used for asynchronous communication between handlers and flows.
+**InterfaceRegistry** is a registry of interfaces managed by the kernel. The interface (handler) provided by each Pack is registered and used for name resolution by `call_handler`. You can get a list of registered interfaces by calling `facade.list_interfaces()` on the `/api/context` endpoint.**EventBus** is a kernel-managed event bus. You can fire an event with `context["emit_event"](event_type, data)` and wait for an event with `context["wait_event"](event_type, timeout, filter)`. Used for asynchronous communication between handlers and flows.

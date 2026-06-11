@@ -15,7 +15,7 @@
 
 - 입력 특성: `input.text`, `input.image`, `input.file`
 - 모델 기능: `model.text`, `model.image_input`, `model.tool_calling`,
-  §루미§0§, §루미§1§
+  `model.thinking`, `model.fast`
 - 런타임 기능
 - 정책 역량
 - 태그

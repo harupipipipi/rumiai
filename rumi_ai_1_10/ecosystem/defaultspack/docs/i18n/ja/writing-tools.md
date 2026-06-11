@@ -12,9 +12,7 @@
 
 ツールには 2 種類あります。
 
-**組み込みツール** (`execution.type: "local"`) は、`ToolRegistry._register_defaults()` に自動的に登録されるデモ ツールです。 `web_search`、`calculator`、`file_reader`の3つの項目が登録されます。
-
-**ダイナミック ツール** (`execution.type: "dynamic"`) は、API 経由で作成、更新、削除できるユーザー定義ツールです。これは、`user_data/shared/tools/` ディレクトリに `.tool.json` (定義) および `.handler.py` (実行コード) として保存されます。
+**組み込みツール** (`execution.type: "local"`) は、`ToolRegistry._register_defaults()` に自動的に登録されるデモンストレーション ツールです。登録される項目は、`web_search`、`calculator`、`file_reader`の 3 つです。**ダイナミック ツール** (`execution.type: "dynamic"`) は、API 経由で作成、更新、削除できるユーザー定義ツールです。これは、`user_data/shared/tools/` ディレクトリに `.tool.json` (定義) および `.handler.py` (実行コード) として保存されます。
 
 ## ツール定義の JSON 形式
 
@@ -41,16 +39,16 @@
 }
 ```
 
-|フィールド |タイプ |説明 |
+| Field | Type | Description |
 |---|---|---|
-| `tool_id` | `string` |ツールの一意の識別子。通常は`name`と同じです。
-| `name` | `string` |ツール名 |
-| `summary` | `string` |ツールの説明。ツール選択時にAIが参照 |
-| `tags` | `string[]` |タグ。フィルタリングに使用 |
-| `schema.parameters` | `object` | JSONスキーマ形式でのパラメータ定義 |
-| `execution.type` | `string` |作成可能なツールは `"rumi_function"` または `"capability"` です。 `"local"`、`"dynamic"`、`"prompt"` は、信頼できるファーストパーティ互換パスのみです。
-| `created_at` | `string` |作成日時 (ISO 8601) |
-| `updated_at` | `string` |更新の日時 (ISO 8601)。更新時に自動的に付与 |
+| `tool_id` | `string` | Unique identifier for the tool. Usually the same as `name` |
+| `name` | `string` | Tool name |
+| `summary` | `string` | Tool description. Referenced by AI when selecting tools |
+| `tags` | `string[]` | Tag. Used for filtering |
+| `schema.parameters` | `object` | Parameter definition in JSON Schema format |
+| `execution.type` | `string` | Authorable tool is `"rumi_function"` or `"capability"`. `"local"`, `"dynamic"`, `"prompt"` are only trusted first-party compatibility paths |
+| `created_at` | `string` | Creation date and time (ISO 8601) |
+| `updated_at` | `string` | Date and time of update (ISO 8601). Automatically granted upon renewal |
 
 ## handler_codeの書き方
 
@@ -76,43 +74,35 @@ def handler(arguments, context):
     }
 ```
 
-**引数**: `arguments` は、API 呼び出し中に渡されるパラメータの辞書です。 `context` はハンドラーの実行コンテキストであり、`call_handler`、`emit_event` などの関数が含まれる場合があります。
-
-**戻り値**: 3 つのキーを持つ dict を返します: `result` (文字列)、`is_error` (bool)、`widget` (dict または None)。
-
-**制限事項**: handler_code は、`domain/tool/builder.py` の `generate_handler_code_with_ai()` で AI によって生成される場合があります。 `handler_code`が`None`の場合はAIが自動生成し、AIが利用できない場合は`generate_skeleton()`でスケルトンコードを生成します。
+**引数**: `arguments` は、API 呼び出し中に渡されるパラメータの辞書です。 `context` はハンドラーの実行コンテキストであり、`call_handler`、`emit_event` などの関数が含まれる場合があります。**戻り値**: 3 つのキーを持つ dict を返します: `result` (文字列)、`is_error` (bool)、`widget` (dict または None)。**制限事項**: handler_code は、`domain/tool/builder.py` の `generate_handler_code_with_ai()` で AI 生成される場合があります。 `handler_code`が`None`の場合はAIが自動生成し、AIが利用できない場合は`generate_skeleton()`でスケルトンコードを生成します。
 
 ## API 経由の CRUD
 
 ### ツールの作成
 
-**HTTP**: `POST /api/tools/create`（`blocks/tool/create.py`）
+**HTTP**: `POST /api/tools/create`（`blocks/tool/create.py`）**input_data**:
 
-**入力データ**:
-
-|フィールド |タイプ |必須 |説明 |
+| Field | Type | Required | Description |
 |---|---|---|---|
-| `name` | `string` |はい |ツール名 |
-| `description` | `string` |いいえ |説明 |
-| `parameters` | `object` |はい | JSON スキーマ形式のパラメータ定義 |
-| `handler_code` | `string` |いいえ | Python コード。 `None`の場合、AIが自動生成します。
-| `tags` | `string[]` |いいえ |タグ。デフォルト `["dynamic", "user-created"]` |
-| `model` | `string` |いいえ | handler_code 自動生成に使用するAIモデル |
+| `name` | `string` | Yes | Tool name |
+| `description` | `string` | No | Explanation |
+| `parameters` | `object` | Yes | JSON Schema format parameter definition |
+| `handler_code` | `string` | No | Python code. In case of `None`, AI automatically generates |
+| `tags` | `string[]` | No | Tag. Default `["dynamic", "user-created"]` |
+| `model` | `string` | No | handler_code AI model used for automatic generation |
 
-同名のツールが既に存在する場合、`ALREADY_EXISTS` エラーが返されます。
+同じ名前のツールがすでに存在する場合は、`ALREADY_EXISTS` エラーが返されます。
 
 **戻り値**: `ok({"tool_id": "...", "name": "...", "summary": "...", "handler_code": "...", "created_at": "..."})`
 
 ### ツールのアップデート
 
-**HTTP**: `PUT /api/tools/{name}`（`blocks/tool/update.py`）
+**HTTP**: `PUT /api/tools/{name}`（`blocks/tool/update.py`）**input_data**:
 
-**入力データ**:
-
-|フィールド |タイプ |必須 |説明 |
+| Field | Type | Required | Description |
 |---|---|---|---|
-| `name` | `string` |はい |ツール名 (URL パスから自動的に挿入) |
-| `updates` | `dict` |はい |更新するフィールド。 `name` および `tool_id` への変更は禁止されています。
+| `name` | `string` | Yes | Tool name (automatically injected from URL path) |
+| `updates` | `dict` | Yes | Field to update. Changes to `name` and `tool_id` are prohibited |
 
 更新できるのは動的ツール (`execution.type: "dynamic"`) のみです。 `updated_at`は自動的に付与されます。
 
@@ -120,28 +110,24 @@ def handler(arguments, context):
 
 ### ツールの削除
 
-**HTTP**: `DELETE /api/tools/{name}`（`blocks/tool/delete.py`）
+**HTTP**: `DELETE /api/tools/{name}`（`blocks/tool/delete.py`）**input_data**:
 
-**入力データ**:
-
-|フィールド |タイプ |必須 |説明 |
+| Field | Type | Required | Description |
 |---|---|---|---|
-| `name` | `string` |はい |ツール名 (URL パスから自動的に挿入) |
+| `name` | `string` | Yes | Tool name (automatically injected from URL path) |
 
-削除できるのは動的ツールのみです。 `user_data/shared/tools/`内の`.tool.json`と`.handler.py`も削除されます。
+削除できるのは動的ツールのみです。 `user_data/shared/tools/` 内の `.tool.json` および `.handler.py` も削除されます。
 
 **戻り値**: `ok({"deleted": "tool_name", "tool_id": "..."})`
 
 ### ツールのエクスポート
 
-**HTTP**: `GET /api/tools/{name}/export`（`blocks/tool/export.py`）
+**HTTP**: `GET /api/tools/{name}/export`（`blocks/tool/export.py`）**input_data**:
 
-**入力データ**:
-
-|フィールド |タイプ |必須 |説明 |
+| Field | Type | Required | Description |
 |---|---|---|---|
-| `name` | `string` |いいえ |単一のツール名 |
-| `names` | `string[]` |いいえ |複数のツール名 (`name` との排他) |
+| `name` | `string` | No | Single tool name |
+| `names` | `string[]` | No | Multiple tool names (exclusive with `name`) |
 
 **戻り値**: `ok({"tools": [...], "count": N, "not_found": [...]})`。各ツールは、`handler_code` を含む完全な定義です。
 
@@ -204,10 +190,10 @@ curl -X PUT http://127.0.0.1:8766/api/tools/unit_converter \
 
 ## ベストプラクティス
 
-`name` は短く明確にして、ツールの機能を説明する 1 語の名前を付けてください。 AIはツールを選択する際に`name`と`summary`を参照しますので、`summary`にツールの目的を必ず具体的に記載してください。
+`name` は短く明確にして、ツールの機能を説明する 1 語の名前を付けてください。 AIはツールを選択する際に`name`と`summary`を参照しますので、`summary`にツールの目的を具体的に記載してください。
 
-`parameters` の JSON スキーマをできるだけ詳細に定義してください。必ず `required` フィールドに必要なパラメータを指定し、各プロパティに `type` を正確に指定してください。
+`parameters` の JSON スキーマをできるだけ詳細に定義してください。必ず `required` フィールドに必須のパラメータを指定し、各プロパティの `type` を正確に指定してください。
 
-`handler_code` は常に `{"result": str, "is_error": bool, "widget": None}` の形式の辞書を返す必要があります。予期せぬ例外が発生した場合は`is_error: true`で結果を返してください。
+`handler_code` は常に `{"result": str, "is_error": bool, "widget": None}` の形式の辞書を返す必要があります。予期しない例外が発生した場合は、`is_error: true` で結果を返してください。
 
 永続化ファイル(`user_data/shared/tools/`)は直接編集せず、API経由で操作してください。 `ToolRegistry` は、メモリ内のキャッシュとファイルの一貫性を管理します。

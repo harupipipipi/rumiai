@@ -33,8 +33,8 @@ Rumi 将这些值视为只写凭证。
 
 |端点 |行为 |
 |---|---|
-| §鲁米§0§|返回提供者令牌状态、屏蔽标签、种类和端点链接 |
-| §鲁米§0§| `upsert`、`rename`或`delete`命名令牌 |
+| `GET /api/external/tokens`|返回提供者令牌状态、屏蔽标签、种类和端点链接 |
+| `POST /api/external/tokens`| `upsert`、`rename`或`delete`命名令牌 |
 
 命名令牌密钥使用`RUMIEXT_{PROVIDER}_{TOKEN_ID}`。元数据已存储
 与原始秘密分开，包括提供者 ID、令牌 ID、显示名称、
@@ -44,8 +44,8 @@ Rumi 将这些值视为只写凭证。
 
 |端点 |行为 |
 |---|---|
-| §鲁米§0§|仅返回提供程序状态和配置的键名称 |
-| §鲁米§0§|设置或清除支持的秘密值 |
+| `GET /api/integrations/secrets`|仅返回提供程序状态和配置的键名称 |
+| `POST /api/integrations/secrets`|设置或清除支持的秘密值 |
 
 写入端点接受原始值，因为它是保存的摄入路径
 一个秘密。响应不得回显该值。

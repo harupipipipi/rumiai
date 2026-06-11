@@ -2,7 +2,7 @@
 [EN](../../rumi_viewer_start.md) | [JP](../ja/rumi_viewer_start.md) | [KR](./rumi_viewer_start.md) | [CN](../zh-cn/rumi_viewer_start.md)
 <!-- docs-i18n-links:end -->
 
-#rumi_viewer Start Guide
+# rumi_viewer Start Guide
 
 `rumi_viewer`는 Tauri의 desktop shell입니다. 개발 시작은 repo에서 `rumi_ai_1_10/`을 자동 감지하고 Python kernel을 시작하여 panel UI에 연결합니다.
 control panel frontend의 source는 `rumi_viewer/frontend`이 소유하고 kernel은 build 된 artifact를 `rumi_ai_1_10/core_runtime/core_pack/core_control_panel/web`에서 `/panel/`로 전달합니다.

@@ -2,7 +2,7 @@
 [EN](../../frontend_extensions.md) | [JP](./frontend_extensions.md) | [KR](../ko/frontend_extensions.md) | [CN](../zh-cn/frontend_extensions.md)
 <!-- docs-i18n-links:end -->
 
-#defaultspack フロントエンド拡張機能
+# defaultspack フロントエンド拡張機能
 
 `defaultspack` のスタンドアロン フロントエンドは「特定の UI を認識」せず、バックエンドから返されたレジストリを読み取り、シェル レイアウト、右バー、設定、およびチャット レンダラーを構成します。
 

@@ -58,11 +58,7 @@ hold raw provider tokens or construct provider API calls directly.
 
 ## Create a conversation
 
-**handler**: `defaults.chat.create_conversation`（`blocks/chat/create_conversation.py`）
-
-**HTTP**: `POST /api/chat/conversations`
-
-**input_data**:
+**handler**: `defaults.chat.create_conversation`（`blocks/chat/create_conversation.py`）**HTTP**: `POST /api/chat/conversations`**input_data**:
 
 | Field | Type | Required | Description |
 |---|---|---|---|
@@ -95,11 +91,7 @@ hold raw provider tokens or construct provider API calls directly.
 
 ## Get conversation
 
-**handler**: `defaults.chat.get_conversation`（`blocks/chat/get_conversation.py`）
-
-**HTTP**: `GET /api/chat/conversations/{id}`
-
-**input_data**:
+**handler**: `defaults.chat.get_conversation`（`blocks/chat/get_conversation.py`）**HTTP**: `GET /api/chat/conversations/{id}`**input_data**:
 
 | Field | Type | Required | Description |
 |---|---|---|---|
@@ -109,11 +101,7 @@ hold raw provider tokens or construct provider API calls directly.
 
 ## List of conversations
 
-**handler**: `defaults.chat.list_conversations`（`blocks/chat/list_conversations.py`）
-
-**HTTP**: `GET /api/chat/conversations`
-
-**input_data**:
+**handler**: `defaults.chat.list_conversations`（`blocks/chat/list_conversations.py`）**HTTP**: `GET /api/chat/conversations`**input_data**:
 
 | Field | Type | Required | Description |
 |---|---|---|---|
@@ -127,11 +115,7 @@ hold raw provider tokens or construct provider API calls directly.
 
 ## Update conversation
 
-**handler**: `defaults.chat.update_conversation`（`blocks/chat/update_conversation.py`）
-
-**HTTP**: `PUT /api/chat/conversations/{id}`
-
-**input_data**:
+**handler**: `defaults.chat.update_conversation`（`blocks/chat/update_conversation.py`）**HTTP**: `PUT /api/chat/conversations/{id}`**input_data**:
 
 | Field | Type | Required | Description |
 |---|---|---|---|
@@ -142,11 +126,7 @@ hold raw provider tokens or construct provider API calls directly.
 
 ## Delete conversation
 
-**handler**: `defaults.chat.delete_conversation`（`blocks/chat/delete_conversation.py`）
-
-**HTTP**: `DELETE /api/chat/conversations/{id}`
-
-**input_data**:
+**handler**: `defaults.chat.delete_conversation`（`blocks/chat/delete_conversation.py`）**HTTP**: `DELETE /api/chat/conversations/{id}`**input_data**:
 
 | Field | Type | Required | Description |
 |---|---|---|---|
@@ -156,11 +136,7 @@ hold raw provider tokens or construct provider API calls directly.
 
 ## Send a message (with AI response)
 
-**handler**: `defaults.chat.send`（`blocks/chat/send.py`）
-
-**HTTP**: `POST /api/chat/conversations/{id}/messages` or `POST /v1/chat/completions`
-
-**input_data**:
+**handler**: `defaults.chat.send`（`blocks/chat/send.py`）**HTTP**: `POST /api/chat/conversations/{id}/messages` or `POST /v1/chat/completions`**input_data**:
 
 | Field | Type | Required | Description |
 |---|---|---|---|
@@ -169,9 +145,7 @@ hold raw provider tokens or construct provider API calls directly.
 | `message.role` | `string` | No | Role. Default `"user"` |
 | `message.content` | `string` or `list` | Yes | Message content. If it is a string, it will be converted to `[{"type": "text", "text": ...}]` |
 
-**Processing flow**: Save user message in `ChatStore.add_message()` → Get conversation history in `get_message_chain()` → Convert to standard format in `convert_to_standard()` → Call AI in `call_handler("defaults.ai.complete", ...)` → Build assistant message in `build_assistant_message()` → Save in `ChatStore.add_message()`.
-
-**Return value**: `ok(assistant_msg)` — AI response message object.
+**Processing flow**: Save user message in `ChatStore.add_message()` → Get conversation history in `get_message_chain()` → Convert to standard format in `convert_to_standard()` → Call AI in `call_handler("defaults.ai.complete", ...)` → Build assistant message in `build_assistant_message()` → Save in `ChatStore.add_message()`.**Return value**: `ok(assistant_msg)` — AI response message object.
 
 ```json
 {
@@ -195,9 +169,7 @@ hold raw provider tokens or construct provider API calls directly.
 
 ## Add message (AI no response)
 
-**handler**: `defaults.chat.add_message`（`blocks/chat/add_message.py`）
-
-**input_data**:
+**handler**: `defaults.chat.add_message`（`blocks/chat/add_message.py`）**input_data**:
 
 | Field | Type | Required | Description |
 |---|---|---|---|
@@ -208,9 +180,7 @@ hold raw provider tokens or construct provider API calls directly.
 
 ## Get message
 
-**handler**: `defaults.chat.get_message`（`blocks/chat/get_message.py`）
-
-**input_data**:
+**handler**: `defaults.chat.get_message`（`blocks/chat/get_message.py`）**input_data**:
 
 | Field | Type | Required | Description |
 |---|---|---|---|
@@ -221,9 +191,7 @@ hold raw provider tokens or construct provider API calls directly.
 
 ## Update message
 
-**handler**: `defaults.chat.update_message`（`blocks/chat/update_message.py`）
-
-**input_data**:
+**handler**: `defaults.chat.update_message`（`blocks/chat/update_message.py`）**input_data**:
 
 | Field | Type | Required | Description |
 |---|---|---|---|
@@ -235,9 +203,7 @@ hold raw provider tokens or construct provider API calls directly.
 
 ## Delete message
 
-**handler**: `defaults.chat.delete_message`（`blocks/chat/delete_message.py`）
-
-**input_data**:
+**handler**: `defaults.chat.delete_message`（`blocks/chat/delete_message.py`）**input_data**:
 
 | Field | Type | Required | Description |
 |---|---|---|---|
@@ -248,26 +214,18 @@ hold raw provider tokens or construct provider API calls directly.
 
 ## Streaming transmission
 
-**handler**: `defaults.chat.stream`（`blocks/chat/stream.py`）
-
-**HTTP**: `POST /api/chat/conversations/{id}/stream`
-
-**input_data**:
+**handler**: `defaults.chat.stream`（`blocks/chat/stream.py`）**HTTP**: `POST /api/chat/conversations/{id}/stream`**input_data**:
 
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `conversation_id` | `string` | Yes | Conversation ID |
 | `message` | `dict` | Yes | Message object |
 
-**Processing**: Store user messages and make streaming AI calls in `call_handler("defaults.ai.stream", ...)`. `stream_id` is returned and can be used to stop the stream.
-
-**Return value**: `ok({"stream_id": "...", "conversation_id": "..."})`
+**Processing**: Store user messages and make streaming AI calls in `call_handler("defaults.ai.stream", ...)`. `stream_id` is returned and can be used to stop the stream.**Return value**: `ok({"stream_id": "...", "conversation_id": "..."})`
 
 ## Stop streaming
 
-**handler**: `defaults.chat.stop`（`blocks/chat/stop.py`）
-
-**input_data**:
+**handler**: `defaults.chat.stop`（`blocks/chat/stop.py`）**input_data**:
 
 | Field | Type | Required | Description |
 |---|---|---|---|
@@ -278,58 +236,40 @@ hold raw provider tokens or construct provider API calls directly.
 
 ## Regenerate AI responses
 
-**handler**: `defaults.chat.regenerate`（`blocks/chat/regenerate.py`）
-
-**input_data**:
+**handler**: `defaults.chat.regenerate`（`blocks/chat/regenerate.py`）**input_data**:
 
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `conversation_id` | `string` | Yes | Conversation ID |
 | `message_id` | `string` | Yes | Message ID to be regenerated |
 
-**Processing**: Delete specified message → Get conversation chain up to parent message → Send again to AI → Save new assistant message.
-
-**Return value**: `ok(assistant_msg)` — New AI response message.
+**Processing**: Delete specified message → Get conversation chain up to parent message → Send again to AI → Save new assistant message.**Return value**: `ok(assistant_msg)` — New AI response message.
 
 ## Branch (conversation branch)
 
-**handler**: `defaults.chat.branch`（`blocks/chat/branch.py`）
-
-**HTTP**: Direct HTTP route is undefined. Call via `call_handler("defaults.chat.branch", ...)`.
-
-**input_data**:
+**handler**: `defaults.chat.branch`（`blocks/chat/branch.py`）**HTTP**: Direct HTTP route is undefined. Call via `call_handler("defaults.chat.branch", ...)`.**input_data**:
 
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `conversation_id` | `string` | Yes | Original conversation ID |
 | `message_id` | `string` | Yes | Branch origin message ID |
 
-**Processing**: `ChatStore.branch()` creates a new conversation by copying the chain up to the specified message. New conversation titles will have `" (branch)"` appended to them. `parent_id` / `children_ids` in the message will be remapped to the new ID.
-
-**Return value**: `ok(new_conv)` — New branched conversation object.
+**Processing**: `ChatStore.branch()` creates a new conversation by copying the chain up to the specified message. New conversation titles will have `" (branch)"` appended to them. `parent_id` / `children_ids` in the message will be remapped to the new ID.**Return value**: `ok(new_conv)` — New branched conversation object.
 
 ## Search
 
-**handler**: `defaults.chat.search`（`blocks/chat/search.py`）
-
-**input_data**:
+**handler**: `defaults.chat.search`（`blocks/chat/search.py`）**input_data**:
 
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `query` | `string` | Yes | Search query |
 | `conversation_id` | `string` | No | To limit to a specific conversation |
 
-**Processing**: `ChatStore.search()` performs a case-insensitive partial match search on the `raw_text` field of all messages.
-
-**Return value**: `ok({"results": [msg, msg, ...]})`
+**Processing**: `ChatStore.search()` performs a case-insensitive partial match search on the `raw_text` field of all messages.**Return value**: `ok({"results": [msg, msg, ...]})`
 
 ## Export
 
-**handler**: `defaults.chat.export_conversation`（`blocks/chat/export_conversation.py`）
-
-**HTTP**: `POST /api/chat/conversations/{id}/export`
-
-**input_data**:
+**handler**: `defaults.chat.export_conversation`（`blocks/chat/export_conversation.py`）**HTTP**: `POST /api/chat/conversations/{id}/export`**input_data**:
 
 | Field | Type | Required | Description |
 |---|---|---|---|
@@ -340,11 +280,7 @@ hold raw provider tokens or construct provider API calls directly.
 
 ## AI summary of conversation history (summarize_and_trim)
 
-**handler**: `defaults.chat.summarize_and_trim`（`blocks/chat/summarize_and_trim.py`）
-
-**HTTP**: `POST /api/chat/conversations/{id}/summarize`
-
-**input_data**:
+**handler**: `defaults.chat.summarize_and_trim`（`blocks/chat/summarize_and_trim.py`）**HTTP**: `POST /api/chat/conversations/{id}/summarize`**input_data**:
 
 | Field | Type | Required | Description |
 |---|---|---|---|
@@ -354,9 +290,7 @@ hold raw provider tokens or construct provider API calls directly.
 | `model` | `string` | No | AI model used for summarization. Use conversational model for `"default"` |
 | `instruction` | `string` | No | Additional summary instructions |
 
-**Processing**: Get messages in a specified range → Convert to standard format with `convert_to_standard()` → Build summary prompt → Let AI summarize → Delete messages in range in bulk (`delete_messages_bulk`) → Insert summary message (`insert_message_at`). Summary message `metadata` includes `is_summary: true` and `original_message_ids`.
-
-**Return value**:
+**Processing**: Get messages in a specified range → Convert to standard format with `convert_to_standard()` → Build summary prompt → Let AI summarize → Delete messages in range in bulk (`delete_messages_bulk`) → Insert summary message (`insert_message_at`). Summary message `metadata` includes `is_summary: true` and `original_message_ids`.**Return value**:
 
 ```json
 {
@@ -371,11 +305,7 @@ hold raw provider tokens or construct provider API calls directly.
 
 ## AI automatic trim suggestion for conversation history (auto_trim)
 
-**handler**: `defaults.chat.auto_trim`（`blocks/chat/auto_trim.py`）
-
-**HTTP**: `POST /api/chat/conversations/{id}/auto-trim`
-
-**input_data**:
+**handler**: `defaults.chat.auto_trim`（`blocks/chat/auto_trim.py`）**HTTP**: `POST /api/chat/conversations/{id}/auto-trim`**input_data**:
 
 | Field | Type | Required | Description |
 |---|---|---|---|
@@ -383,9 +313,7 @@ hold raw provider tokens or construct provider API calls directly.
 | `model` | `string` | No | AI model used for analysis. Use conversational model for `"default"` |
 | `max_context_tokens` | `int` | No | Target number of tokens after trimming |
 
-**Processing**: Get all messages of the conversation → Extract text from the content of each message → Send analysis prompt to AI → AI returns summarizable segments as JSON array → Validate by checking for presence of message ID.
-
-**Return value**:
+**Processing**: Get all messages of the conversation → Extract text from the content of each message → Send analysis prompt to AI → AI returns summarizable segments as JSON array → Validate by checking for presence of message ID.**Return value**:
 
 ```json
 {

@@ -33,15 +33,7 @@ class AIClient:
 
 ### 対象クラス
 
-**AIClient** (`domain/ai_client/client.py`) — AI プロバイダーを管理および委任します。初期化時にスタブプロバイダを登録し、検出されたプロバイダ（OpenAI、Anthropic、Google）を環境変数に自動登録します。 `complete()`、`stream()`、`embed()`、`image_gen()`、`image_analyze()`、`transcribe()`、`tts()`メソッドがあります。モデル文字列 `"provider/model"` を解決し、対応するプロバイダーに委任します。
-
-**McpClient** (`domain/tool/mcp_client.py`) — MCP (Model Context Protocol) サーバーとの接続を管理します。 `threading.Lock` を使用して、スレッドセーフなサーバー接続管理を実行します。 `connect()`、`disconnect()`、`invoke()`、`list_servers()`、`get_server_tools()`のメソッドがあります。
-
-**ToolRegistry** (`domain/tool/registry.py`) — ツール定義を登録および管理します。メモリ内辞書 + `user_data/shared/tools/` への永続性を管理します。起動時に組み込みツール (web_search、calculator、file_reader) を自動的に登録し、ファイルから動的ツールを読み込みます。 `threading.Lock` を使用してスレッドセーフな操作を提供します。
-
-**ChatStore** (`domain/chat/store.py`) — 会話とメッセージのメモリ内管理を提供します。 `__new__` でインスタンスを共有し、`_conversations` で辞書を維持します。 CRUD 操作に加えて、`branch()`、`search()`、`export_conversation()`、`get_message_chain()` などのツリー操作も提供します。
-
-**インスペクター** (`domain/dev/inspector.py`) — リクエスト ログの記録と取得を管理します。 `threading.Lock` によるスレッドセーフ。上限は`collections.deque(maxlen=1000)`によって制御されます。 `log_request()`、`get_log()`、`get_latest()`、`list_logs()`、`find_by_conversation()`のメソッドがあります。
+**AIClient** (`domain/ai_client/client.py`) — AI プロバイダーを管理および委任します。初期化時にスタブプロバイダを登録し、検出されたプロバイダ（OpenAI、Anthropic、Google）を環境変数に自動登録します。 `complete()`、`stream()`、`embed()`、`image_gen()`、`image_analyze()`、`transcribe()`、`tts()`メソッドがあります。モデル文字列 `"provider/model"` を解決し、対応するプロバイダーに委任します。**McpClient** (`domain/tool/mcp_client.py`) — MCP (Model Context Protocol) サーバーとの接続を管理します。 `threading.Lock` を使用して、スレッドセーフなサーバー接続管理を実行します。 `connect()`、`disconnect()`、`invoke()`、`list_servers()`、`get_server_tools()`のメソッドがあります。**ToolRegistry** (`domain/tool/registry.py`) — ツール定義を登録および管理します。メモリ内辞書 + `user_data/shared/tools/` への永続性を管理します。起動時に組み込みツール (web_search、calculator、file_reader) を自動的に登録し、ファイルから動的ツールを読み込みます。 `threading.Lock` を使用してスレッドセーフな操作を提供します。**ChatStore** (`domain/chat/store.py`) — 会話とメッセージのメモリ内管理を提供します。 `__new__` でインスタンスを共有し、`_conversations` で辞書を維持します。 CRUD 操作に加えて、`branch()`、`search()`、`export_conversation()`、`get_message_chain()` などのツリー操作も提供します。**インスペクター** (`domain/dev/inspector.py`) — リクエスト ログの記録と取得を管理します。 `threading.Lock` によるスレッドセーフ。上限は`collections.deque(maxlen=1000)`によって制御されます。 `log_request()`、`get_log()`、`get_latest()`、`list_logs()`、`find_by_conversation()`のメソッドがあります。
 
 ---
 
@@ -130,15 +122,7 @@ class BaseProvider:
 
 ### 実装プロバイダー
 
-**StubProvider** — 固定応答を返します。テストと開発用。 API 呼び出しはありません。
-
-**OpenAIProvider** — OpenAI API を呼び出します。環境変数 `OPENAI_API_KEY` によって検出されます。
-
-**AnthropicProvider** — Anthropic API を呼び出します。環境変数 `ANTHROPIC_API_KEY` によって検出されます。
-
-**GoogleProvider** — Google AI API を呼び出します。環境変数 `GOOGLE_API_KEY` によって検出されます。
-
-**RumiProvider** — メタプロバイダー。リクエストをパイプライン経由で処理するか、フォールバック プロバイダーに委任します。 AIClient インスタンスを受け取り、1 つ以上の他のプロバイダーが登録されている場合にのみ有効になります。
+**StubProvider** — 固定応答を返します。テストと開発用。 API 呼び出しはありません。**OpenAIProvider** — OpenAI API を呼び出します。環境変数 `OPENAI_API_KEY` によって検出されます。**AnthropicProvider** — Anthropic API を呼び出します。環境変数 `ANTHROPIC_API_KEY` によって検出されます。**GoogleProvider** — Google AI API を呼び出します。環境変数 `GOOGLE_API_KEY` によって検出されます。**RumiProvider** — メタプロバイダー。リクエストをパイプライン経由で処理するか、フォールバック プロバイダーに委任します。 AIClient インスタンスを受け取り、1 つ以上の他のプロバイダーが登録されている場合にのみ有効になります。
 
 ### プロバイダーの自動検出
 
@@ -201,6 +185,4 @@ skeleton = generate_skeleton("my_tool", "ツールの説明", {
 
 PromptManager は、メモリ内の辞書 + `user_data/shared/prompts/` への JSON ファイルの永続化を使用してプロンプトを管理します。 `get_manager()` を使用してモジュールレベルのシングルトンとして取得されます。
 
-**主要なメソッド:** `create_prompt()`、`get_prompt()`、`get_prompt_by_name()`、`list_prompts()`、`update_prompt()`、`delete_prompt()`、`to_template()`、`create_from_template()`、`get_system_prompt()`、`set_system_prompt()`。
-
-**コンテキスト変数の挿入:** `inject_context_variables(variables, context)` 静的メソッドは、コンテキスト辞書から `context.total_tokens`、`context.message_count` などの特殊変数を自動的に挿入します。
+**主要なメソッド:** `create_prompt()`、`get_prompt()`、`get_prompt_by_name()`、`list_prompts()`、`update_prompt()`、`delete_prompt()`、`to_template()`、`create_from_template()`、`get_system_prompt()`、`set_system_prompt()`。**コンテキスト変数の挿入:** `inject_context_variables(variables, context)` 静的メソッドは、コンテキスト辞書から `context.total_tokens`、`context.message_count` などの特殊変数を自動的に挿入します。

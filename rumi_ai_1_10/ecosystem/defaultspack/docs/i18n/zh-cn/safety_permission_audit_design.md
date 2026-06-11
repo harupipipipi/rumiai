@@ -43,7 +43,7 @@ git 推送。
 ## 审计存储
 
 本地审计存储是 JSONL。默认情况下它写在下面
-§鲁米§0§；测试或嵌入式
+`ecosystem/defaultspack/user_data/audit/local_actions.jsonl`；测试或嵌入式
 运行时可以使用`RUMI_DEFAULTSPACK_AUDIT_PATH`覆盖路径。
 
 审计层记录：

@@ -7,7 +7,7 @@
 defaultspack 核心无需云 API 密钥即可使用。
 
 该存储库的规范实现是
-§鲁米§0§。旧的`ecosystem/defaults/`包
+`rumi_ai_1_10/ecosystem/defaultspack/`。旧的`ecosystem/defaults/`包
 和单独的`harupipipipi/rumiai_defaults`存储库是兼容性或
 快照源。新的运行时行为、安全规则、路由契约和 UI
 默认值应首先在 defaultspack 中实现，并保留旧别名

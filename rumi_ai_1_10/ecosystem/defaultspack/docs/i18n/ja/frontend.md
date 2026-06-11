@@ -2,7 +2,7 @@
 [EN](../../frontend.md) | [JP](./frontend.md) | [KR](../ko/frontend.md) | [CN](../zh-cn/frontend.md)
 <!-- docs-i18n-links:end -->
 
-#frontend.md — Rumi AI OS フロントエンド設計ドキュメント
+# frontend.md — Rumi AI OS フロントエンド設計ドキュメント
 
 ## 1. 概要
 

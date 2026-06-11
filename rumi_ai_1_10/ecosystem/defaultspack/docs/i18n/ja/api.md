@@ -13,13 +13,7 @@ Tauri フロントエンド、CLI、外部スクリプト、Webhook はすべて
 
 ## 2. 設計哲学
 
-**トランスポートに依存しない**: すべての通信は最終的に `FlowEngine.execute(flow_id, trigger_input)` への呼び出しになります。 HTTP、stdin/stdout、UDS のいずれを経由しても、Flow に到達するtrigger_input の形式は同じです。
-
-**エンドポイントはフローです**: HTTP の `/v1/chat/completions` と CLI の `rumi chat` はどちらも同じ `default.chat` フローを起動します。エンドポイントの追加はフロー定義への追加であり、コードの変更は必要ありません。
-
-**認証はトランスポート層で行われます**: HTTP の場合は API キー、stdio の場合は親プロセスの信頼、UDS の場合はソケット権限。フロー層は認証されたリクエストのみを受け入れます。
-
-**ストリーミングはトランスポートによって吸収されます**: フローは `ctx.emit()` のイベントのみを発行します。 HTTP トランスポートは SSE に変換され、stdio トランスポートは JSON Lines に変換され、Tauri トランスポートは IPC チャネルに変換されます。フローは、どのトランスポートで配信されるのかを知りません。
+**トランスポートに依存しない**: すべての通信は最終的に `FlowEngine.execute(flow_id, trigger_input)` への呼び出しになります。 Whether via HTTP, stdin/stdout, or UDS, trigger_input that reaches Flow has the same format.**Endpoints are flows**: HTTP's `/v1/chat/completions` and CLI's `rumi chat` both launch the same `default.chat` flow. Adding an endpoint is an addition to the Flow definition and does not involve changing the code.**Authentication is done at the transport layer**: API key for HTTP, parent process trust for stdio, socket permissions for UDS.フロー層は認証されたリクエストのみを受け入れます。**ストリーミングはトランスポートによって吸収されます**: フローは `ctx.emit()` でのみイベントを発行します。 HTTP トランスポートは SSE に変換され、stdio トランスポートは JSON Lines に変換され、Tauri トランスポートは IPC チャネルに変換されます。フローは、どのトランスポートで配信されるのかを知りません。
 
 
 ## 3. アーキテクチャ
@@ -38,11 +32,11 @@ UDS Client  ─→ uds transport ──┘
 
 トランスポート層はデフォルト ハンドラーとして実装されます。
 
-|ハンドラー |輸送 |権限 |
+| handler | transport | permissions |
 |---|---|---|
-| `defaults.transport.http` | HTTPサーバー | `frontend.serve`、`frontend.bind` |
-| `defaults.transport.stdio` |標準入出力 | `frontend.serve` |
-| `defaults.transport.uds` | Unix ドメインソケット | `frontend.serve`、`frontend.bind` |
+| `defaults.transport.http` | HTTP Server | `frontend.serve`, `frontend.bind` |
+| `defaults.transport.stdio` | Standard input/output | `frontend.serve` |
+| `defaults.transport.uds` | Unix Domain Socket | `frontend.serve`, `frontend.bind` |
 
 各トランスポート ハンドラーは、許可によって付与された権限でのみ動作し、カーネル オブジェクト全体にはアクセスしません (io.http.server 問題を回避します)。
 
@@ -68,12 +62,12 @@ UDS Client  ─→ uds transport ──┘
 }
 ```
 
-|フィールド |タイプ |必須 |説明 |
+| Field | Type | Required | Description |
 |---|---|---|---|
-| ID |文字列 |オプション |リクエスト識別子。省略した場合は自動生成 |
-|フローID |文字列 |必須 |開始するフローの ID |
-|入力 |オブジェクト |必須 |フロートリガー入力 |
-|設定 |オブジェクト |オプション |フローの flow_config オーバーライド |
+| id | string | optional | request identifier. Automatically generated if omitted |
+| flow_id | string | Required | ID of the Flow to start |
+| input | object | Required | Flow trigger_input |
+| config | object | optional | flow_config override for Flow |
 
 ### 4.2 応答 (非ストリーミング)
 
@@ -98,12 +92,12 @@ UDS Client  ─→ uds transport ──┘
 }
 ```
 
-|フィールド |タイプ |説明 |
+| Field | Type | Description |
 |---|---|---|
-| ID |文字列 |リクエスト識別子 |
-|ステータス |文字列 | `completed`、`error`、`cancelled`、`timeout` |
-|出力 |オブジェクト |フロー出力 (FlowResult.output) |
-|メタデータ |オブジェクト |実行メタデータ |
+| id | string | request identifier |
+| status | string | `completed`, `error`, `cancelled`, `timeout` |
+| output | object | Flow output (FlowResult.output) |
+| metadata | object | execution metadata |
 
 ### 4.3 応答 (ストリーミング)
 
@@ -139,18 +133,18 @@ stream.delta の `data.type` は、ai_client.md セクション 11.3 の正規�
 
 エラーコードシステム。
 
-|コード |説明 |
+| Code | Description |
 |---|---|
-| `AUTH_REQUIRED` |認証が必要です |
-| `AUTH_INVALID` | API キーが無効です |
-| `FLOW_NOT_FOUND` |指定された flow_id が存在しません |
-| `FLOW_ERROR` |フローの実行中にエラーが発生しました |
-| `FLOW_TIMEOUT` |フローがタイムアウトしました |
-| `FLOW_CANCELLED` |ユーザーまたはシステムによってキャンセルされました |
-| `VALIDATION_ERROR` |無効な入力形式 |
-| `PERMISSION_DENIED` |権限が不十分です |
-| `RATE_LIMITED` |レート制限 |
-| `INTERNAL_ERROR` |内部エラー |
+| `AUTH_REQUIRED` | Authentication required |
+| `AUTH_INVALID` | API key is invalid |
+| `FLOW_NOT_FOUND` | Specified flow_id does not exist |
+| `FLOW_ERROR` | Error while running Flow |
+| `FLOW_TIMEOUT` | Flow timed out |
+| `FLOW_CANCELLED` | Cancelled by user or system |
+| `VALIDATION_ERROR` | Invalid input format |
+| `PERMISSION_DENIED` | Insufficient authority |
+| `RATE_LIMITED` | Rate Limit |
+| `INTERNAL_ERROR` | Internal error |
 
 
 ## 5. HTTP トランスポート
@@ -182,7 +176,7 @@ HTTP トランスポートは、リクエストごとに認証を実行します
 Authorization: Bearer rumi_xxxxxxxxxxxx
 ```
 
-APIキーは`user_data/secrets/api_keys.json`で管理されます。
+API キーは `user_data/secrets/api_keys.json` で管理されます。
 
 ```json
 {
@@ -201,7 +195,7 @@ APIキーは`user_data/secrets/api_keys.json`で管理されます。
 }
 ```
 
-`permissions` はフロー レベルの権限です。 `["*"]` はすべてのフローにアクセスできます。 `["default.chat", "default.model_list"]`のように制限することができます。
+`permissions` はフローレベルの権限です。 `["*"]` はすべてのフローにアクセスできます。 `["default.chat", "default.model_list"]`のように制限することができます。
 
 ### 5.3 ルーティング
 
@@ -244,7 +238,7 @@ HTTP エンドポイントから flow_id へのマッピングは、`user_data/c
 }
 ```
 
-`input_mapping` は、HTTP リクエストから共通メッセージ形式 `input` にマッピングされるフィールドです。 `body.model` は、リクエストボディの `model` フィールドを意味します。 `"*": "body"`は全身を入力とします。 `{flow_id}` はパスパラメータです。
+`input_mapping` は、HTTP リクエストから共通メッセージ形式 `input` へのフィールド マッピングです。 `body.model` は、リクエスト本文の `model` フィールドを意味します。 `"*": "body"`は全身を入力とします。 `{flow_id}` はパスパラメータです。
 
 Routes.json を編集するだけで、任意の HTTP エンドポイントを追加できます。フロー側でコードを変更する必要はありません。パックは、routes.json にエントリを追加することもできます。
 
@@ -360,25 +354,25 @@ Router.json の `/v1/chat/completions` エンドポイントに `response_format
 
 現在のデフォルトパックの HTTP ルートには次のものが含まれます。
 
-|方法 |パス |役割 |
+| method | path | role |
 |---|---|---|
-| `GET` | `/api/integrations/secrets` |シークレットステータスのみ、生の値はなし |
-| `POST` | `/api/integrations/secrets` |書き込み専用 サポートされているプロバイダー シークレットを設定またはクリア |
-| `POST` | `/api/integrations/slack/events` | Slack イベントの取り込み |
-| `POST` | `/api/integrations/line/webhook` | LINE Webhook 取り込み |
-| `POST` | `/api/integrations/discord/interactions` | Discord インタラクションの摂取 |
-| `POST` | `/api/integrations/discord/events` | Discordイベント受付 |
-| `GET` | `/api/external/tokens` |マスクされた外部トークンのステータス |
-| `POST` | `/api/external/tokens` |書き込み専用の外部トークンの更新/挿入、名前変更、削除 |
-| `POST` | `/api/webhooks/inbound/{webhook_id}` |一般的な Webhook の取り込み |
-| `GET` | `/api/webhooks/endpoints` | Webhook エンドポイント構成をリストする |
-| `POST` | `/api/webhooks/endpoints` | Webhook エンドポイント構成を作成する |
-| `PUT` | `/api/webhooks/endpoints/{webhook_id}` | Webhook エンドポイント構成を更新する |
-| `DELETE` | `/api/webhooks/endpoints/{webhook_id}` | Webhook エンドポイント構成を削除する |
-| `POST` | `/api/webhooks/endpoints/{webhook_id}/test` | Webhook テスト ペイロードを実行する |
-| `GET` | `/api/webhooks/public-urls` |パブリック URL プロバイダーとローカルのデフォルト URL をリストします。
-| `POST` | `/api/webhooks/public-urls` |プロバイダー支援のパブリック URL を作成します。失敗すると編集された `ok: false` データが返されます。
-| `DELETE` | `/api/webhooks/public-urls/{url_id}` |パブリック URL を閉じるかクリアする |
+| `GET` | `/api/integrations/secrets` | secret status only, no raw values |
+| `POST` | `/api/integrations/secrets` | write-only set or clear for supported provider secrets |
+| `POST` | `/api/integrations/slack/events` | Slack event intake |
+| `POST` | `/api/integrations/line/webhook` | LINE webhook intake |
+| `POST` | `/api/integrations/discord/interactions` | Discord interaction intake |
+| `POST` | `/api/integrations/discord/events` | Discord event intake |
+| `GET` | `/api/external/tokens` | masked external token status |
+| `POST` | `/api/external/tokens` | write-only external token upsert, rename, delete |
+| `POST` | `/api/webhooks/inbound/{webhook_id}` | generic webhook intake |
+| `GET` | `/api/webhooks/endpoints` | list webhook endpoint configs |
+| `POST` | `/api/webhooks/endpoints` | create webhook endpoint config |
+| `PUT` | `/api/webhooks/endpoints/{webhook_id}` | update webhook endpoint config |
+| `DELETE` | `/api/webhooks/endpoints/{webhook_id}` | delete webhook endpoint config |
+| `POST` | `/api/webhooks/endpoints/{webhook_id}/test` | run a webhook test payload |
+| `GET` | `/api/webhooks/public-urls` | list public URL providers and the local default URL |
+| `POST` | `/api/webhooks/public-urls` | create a provider-backed public URL; failures return redacted `ok: false` data |
+| `DELETE` | `/api/webhooks/public-urls/{url_id}` | close or clear a public URL |
 
 Cloudflare Quick Tunnel は開発用に一時的なパブリック URL を提供する場合がありますが、
 API コントラクトはそれに依存してはなりません。外部入力 UI は次の目的でのみ使用します。
@@ -434,7 +428,7 @@ Frontend.md で定義されている `component.register`、`render.mount`、`me
 {"type":"message.send","component":"defaults.chat","data":{...}}
 ```
 
-トランスポート ハンドラーはメッセージを配布します。 `flow_id` が存在する場合は、FlowEngine に転送します。 `type` が存在する場合、フロントエンド ハンドラーに転送します。
+トランスポート ハンドラーはメッセージを配布します。 If `flow_id` is present, forward to FlowEngine; `type` が存在する場合、フロントエンド ハンドラーに転送されます。
 
 
 ## 7. UDS トランスポート
@@ -502,7 +496,7 @@ rumi run my_custom_flow --input '{"key": "value"}'
   → {"flow_id": "my_custom_flow", "input": {"key": "value"}}
 ```
 
-command と flow_id の間のマッピングは `user_data/config/cli.json` で定義されています。
+command と flow_id 間のマッピングは `user_data/config/cli.json` で定義されています。
 
 ```json
 {
@@ -571,24 +565,24 @@ Hello! How can I help you today?█
 
 フローまたはツールが Emit_widget を使用してウィジェット JSON を送信すると、CLI はウィジェットのテキスト表現にフォールバックします。
 
-|ウィジェットの種類 | CLI 表示 |
+| Widget type | CLI display |
 |---|---|
-|テキスト |テキストとして出力 |
-|コードブロック | ``` エンクロージャ + 言語名 |
-|差分 |統一された差分フォーマット |
-|画像 | `[Image: alt WxH]` |
-|スクリーンショット | `[Screenshot: url]` |
-|ターミナル |コマンドとそのままの出力 |
-|進捗状況 | `[████░░░░░░] 40%` |
-|表 | ASCII テーブル |
-|ファイルツリー |インデントされたテキスト |
-|マークダウン |そのまま出力 |
-|チャート |数値サマリー |
-|オーディオ | `[Audio: duration]` |
-|ビデオ | `[Video: duration]` |
-|地図 | `[Map: lat, lng]` |
-|インジケーター | `● label (state)` |
-|カード |ヘッダーと本文のテキストの組み合わせ |
+| Text | Output as text |
+| CodeBlock | ``` Enclosure + language name |
+| Diff | unified diff format |
+| Image | `[Image: alt WxH]` |
+| Screenshot | `[Screenshot: url]` |
+| Terminal | Command and output as is |
+| Progress | `[████░░░░░░] 40%` |
+| Table | ASCII table |
+| FileTree | Indented text |
+| Markdown | Output as is |
+| Chart | Numerical summary |
+| Audio | `[Audio: duration]` |
+| Video | `[Video: duration]` |
+| Map | `[Map: lat, lng]` |
+| Indicator | `● label (state)` |
+| Card | Text combination of header + body |
 
 
 ## 9. エンドポイント登録メカニズム
@@ -652,11 +646,11 @@ handler: handler.py
 
 ### 10.2 認証階層
 
-|輸送 |認証方法 |基礎 |
+| transport | Authentication method | Basis |
 |---|---|---|
-| HTTP | APIキー（ベアラートークン） |ネットワーク経由のアクセスには常に認証が必要です |
-| stdio |なし |親プロセスの信頼 |
-| UDS |ソケット権限 + オプションの API キー |ローカルプロセスの信頼 + 構成可能 |
+| HTTP | API key (Bearer token) | Access via network always requires authentication |
+| stdio | None | Parent process trust |
+| UDS | Socket permissions + optional API key | Local process trust + configurable |
 
 ### 10.3 フローレベルの権限
 
@@ -664,7 +658,7 @@ API キーの `permissions` フィールドを使用して、キーごとにア�
 
 ### 10.4 レート制限
 
-トランスポート層に実装されます。 APIキーごとに`requests_per_minute`を設定できます。超過した場合は`429 RATE_LIMITED`を返します。
+トランスポート層に実装されます。 APIキーごとに`requests_per_minute`を設定できます。超過した場合は`429 RATE_LIMITED`が返されます。
 
 ### 10.5 入力の検証
 
@@ -741,31 +735,31 @@ Flow の `config_schema` (flow.md セクション 6.1) に従った入力検証�
 
 ### 11.1 input_mapping の表記
 
-|表記法 |説明 |例 |
+| Notation | Explanation | Example |
 |---|---|---|
-| `body.{field}` |リクエスト本文のフィールド | `body.model` |
-| `path.{param}` | URL パスパラメータ | `path.model_id` |
-| `query.{param}` |クエリパラメータ | `query.limit` |
-| `header.{name}` |リクエストヘッダー | `header.X-Custom` |
-| `"*": "body"` |全身を入力する | — |
+| `body.{field}` | Request body fields | `body.model` |
+| `path.{param}` | URL path parameters | `path.model_id` |
+| `query.{param}` | Query parameters | `query.limit` |
+| `header.{name}` | Request header | `header.X-Custom` |
+| `"*": "body"` | Make the entire body input | — |
 
 ### 11.2 応答形式
 
-|値 |説明 |
+| Value | Description |
 |---|---|
-|省略 / `"default"` |共通のメッセージフォーマットのまま返却 |
-| `"openai"` | OpenAI API 互換形式に変換して戻す |
+| Omitted / `"default"` | Return as is in common message format |
+| `"openai"` | Convert and return to OpenAI API compatible format |
 
 `"anthropic"`などは今後追加される可能性があります。変換ロジックをトランスポート層に配置します。
 
 
 ## 12. 他の文書との関係
 
-|ドキュメント |関係 |
+| Document | Relationship |
 |---|---|
-|フロントエンド.md | stdio トランスポートのメッセージ形式は、frontend.md の通信フローと共存します。 `flow_id` がある場合は FlowEngine に移動し、`type` がある場合はフロントエンド |
-|フロー.md |エンドポイントはFlowのAPIトリガーで登録されます。 FlowEngine はリクエストを処理します。
-| ai_client.md |ストリーミング イベント タイプは、ai_client.md セクション 11.3 の正規化イベントと同じです。
-|ツール.md |トランスポートは、ツールのコンテキスト API (call_handler、emit_event など) を使用して操作されません。トランスポートは上位層であり、ツールによって直接操作されることはありません。
-|外部入力.md |プロバイダーに依存しない取り込みパスを定義します: `ExternalEvent`、`AudiencePolicy`、`InputProfile`、`submit_input`、`ResponsePlanner`、および `ResponseAdapter`
-|ウェブフック.md |正規化された送信前の Webhook 固有の検証と ACK 動作を文書化します。
+| frontend.md | The message format of the stdio transport coexists with the communication flow of frontend.md. If you have `flow_id`, go to FlowEngine, if you have `type`, go to front end |
+| flow.md | Endpoints are registered with Flow's api trigger. FlowEngine processes the request |
+| ai_client.md | Streaming event type is the same as normalized event in ai_client.md section 11.3 |
+| tool.md | Transport is not manipulated using the tool's context API (call_handler, emit_event, etc.). transport is an upper layer and is not touched directly by tools |
+| external-inputs.md | Defines the provider-neutral intake path: `ExternalEvent`, `AudiencePolicy`, `InputProfile`, `submit_input`, `ResponsePlanner`, and `ResponseAdapter` |
+| webhooks.md | Documents webhook-specific verification and ack behavior before normalized submission |

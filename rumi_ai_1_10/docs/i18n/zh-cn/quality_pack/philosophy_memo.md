@@ -2,7 +2,7 @@
 [EN](../../../quality_pack/philosophy_memo.md) | [JP](../../ja/quality_pack/philosophy_memo.md) | [KR](../../ko/quality_pack/philosophy_memo.md) | [CN](./philosophy_memo.md)
 <!-- docs-i18n-links:end -->
 
-#rumi_ai思想备忘录（开发判断标准）
+# rumi_ai思想备忘录（开发判断标准）
 
 ## 1. 目的
 

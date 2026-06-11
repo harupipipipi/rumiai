@@ -123,13 +123,13 @@ Tools are the most important consumers of the mechanisms provided by defaults. T
 
 ### Always injected (no declaration required)
 
-`context["call_handler"](§RUMI§0§)` calls any handler. Can only be executed within the scope of the permissions granted by the Grant. If the caller does not have the permission requested by the called handler, it will be denied with a PermissionError. This allows the tool to perform chat operations, agent startup, prompt rendering, memory reading and writing, all using the same primitive.
+`context["call_handler"](handler_name, params)` calls any handler. Can only be executed within the scope of the permissions granted by the Grant. If the caller does not have the permission requested by the called handler, it will be denied with a PermissionError. This allows the tool to perform chat operations, agent startup, prompt rendering, memory reading and writing, all using the same primitive.
 
-`context["emit_event"](§RUMI§0§)` publishes an event. Other handlers, Flow event triggers, and front-end Assets can receive this event. The issuer does not know the recipient.
+`context["emit_event"](event_type, data)` publishes an event. Other handlers, Flow event triggers, and front-end Assets can receive this event. The issuer does not know the recipient.
 
-`context["wait_event"](§RUMI§0§)` waits for an event. Blocks until the specified event type is fired. Timeout can be specified. You can narrow down your conditions using filters. By combining with emit_event, popup display on the front end → waiting for user response, asynchronous communication between tools, hooking of Flow trigger, etc. are all realized.
+`context["wait_event"](event_type, timeout, filter)` waits for an event. Blocks until the specified event type is fired. Timeout can be specified. You can narrow down your conditions using filters. By combining with emit_event, popup display on the front end → waiting for user response, asynchronous communication between tools, hooking of Flow trigger, etc. are all realized.
 
-`context["emit_widget"](§RUMI§0§)` sends Widget JSON to the UI. Drawn by the front-end Widget renderer.
+`context["emit_widget"](widget_json)` sends Widget JSON to the UI. Drawn by the front-end Widget renderer.
 
 `context["cancel_check"]()` is cancellation confirmation. Raise CancelledError if the user cancels.
 
@@ -139,25 +139,25 @@ Tools are the most important consumers of the mechanisms provided by defaults. T
 
 ### What is injected by declaring it as a capability
 
-`data_read` reads files under user_data. Access via `context["data_read"](§RUMI§0§)`. The path is relative to user_data/.
+`data_read` reads files under user_data. Access via `context["data_read"](path)`. The path is relative to user_data/.
 
-`data_write` writes files under user_data. Access via `context["data_write"](§RUMI§0§)`.
+`data_write` writes files under user_data. Access via `context["data_write"](path, content)`.
 
-`execute_flow` starts Flow. Access via `context["execute_flow"](§RUMI§0§)`. Executed via Flow Engine.
+`execute_flow` starts Flow. Access via `context["execute_flow"](flow_id, input)`. Executed via Flow Engine.
 
-`shell_exec` executes a shell command. Access via `context["capability"](§RUMI§0§)`.
+`shell_exec` executes a shell command. Access via `context["capability"]("shell_exec", {...})`.
 
-`browser_control` is browser operation. Access via `context["capability"](§RUMI§0§)`.
+`browser_control` is browser operation. Access via `context["capability"]("browser_control", {...})`.
 
-`container_exec` starts, operates, and destroys Docker containers. Access via `context["capability"](§RUMI§0§)`. The GUI environment (Xvfb + VNC) is started with the display option, and coordinate-based screen operations are possible with screenshot and input (click, type, key, scroll).
+`container_exec` starts, operates, and destroys Docker containers. Access via `context["capability"]("container_exec", {...})`. The GUI environment (Xvfb + VNC) is started with the display option, and coordinate-based screen operations are possible with screenshot and input (click, type, key, scroll).
 
-`app_control` is host application operation. Access via `context["capability"](§RUMI§0§)`.
+`app_control` is host application operation. Access via `context["capability"]("app_control", {...})`.
 
-`http_request` is external HTTP communication. Access via `context["capability"](§RUMI§0§)`.
+`http_request` is external HTTP communication. Access via `context["capability"]("http_request", {...})`.
 
-`llm_call` is an in-tool LLM call. Access via `context["capability"](§RUMI§0§)`.
+`llm_call` is an in-tool LLM call. Access via `context["capability"]("llm_call", {...})`.
 
-`session_state` is session state read/write. Access via `context["capability"](§RUMI§0§)`.
+`session_state` is session state read/write. Access via `context["capability"]("session_state", {...})`.
 
 ### Why not create specialized APIs?
 
@@ -224,23 +224,23 @@ All of the following are realized as tools, agents, flows, and assets of user_da
 
 ### Knowledge Search
 
-Place the vector search tool in user_data/shared/tools/knowledge_search/. Place Flow Modifier in user_data/shared/flows/ and inject a step to automatically run this tool when user_input arrives. The tool handler.py generates the embedding in `context["capability"](§RUMI§0§)`, reads the index in `context["data_read"]`, and returns the result. Zero changes to defaults.
+Place the vector search tool in user_data/shared/tools/knowledge_search/. Place Flow Modifier in user_data/shared/flows/ and inject a step to automatically run this tool when user_input arrives. The tool handler.py generates the embedding in `context["capability"]("llm_call", {...})`, reads the index in `context["data_read"]`, and returns the result. Zero changes to defaults.
 
 ### Multi-agent
 
-Place the agent delegation tool in user_data/shared/tools/agent_delegate/. The tool handler.py creates a new conversation in `context["call_handler"](§RUMI§0§)`, starts an agent in `context["call_handler"](§RUMI§1§)`, receives and returns the results. If you need an organizational structure, place multiple agent.json files in user_data/shared/agents/ and the delegation tool will select the appropriate agent. Zero changes to defaults.
+Place the agent delegation tool in user_data/shared/tools/agent_delegate/. The tool handler.py creates a new conversation in `context["call_handler"]("defaults.chat.create_conversation", {...})`, starts an agent in `context["call_handler"]("defaults.agent.execute", {...})`, receives and returns the results. If you need an organizational structure, place multiple agent.json files in user_data/shared/agents/ and the delegation tool will select the appropriate agent. Zero changes to defaults.
 
 ### Self-editing conversation history with AI
 
-Place the history editing tool in user_data/shared/tools/history_prune/. The tool handler.py retrieves messages in `context["call_handler"](§RUMI§0§)` and updates the conversation file in `context["data_write"]`. By adding this tool to tools.enabled in agent.json, agents can organize their history autonomously. Zero changes to defaults.
+Place the history editing tool in user_data/shared/tools/history_prune/. The tool handler.py retrieves messages in `context["call_handler"]("defaults.chat.list_conversations", {...})` and updates the conversation file in `context["data_write"]`. By adding this tool to tools.enabled in agent.json, agents can organize their history autonomously. Zero changes to defaults.
 
 ### GUI operation in Linux environment
 
-Place environment manipulation tools in user_data/shared/tools/linux_env/. The tool handler.py starts the container with `context["capability"](§RUMI§0§)` and operates the screen with the screenshot and input actions. Select the model to operate using the model setting in agent.json. Zero changes to defaults.
+Place environment manipulation tools in user_data/shared/tools/linux_env/. The tool handler.py starts the container with `context["capability"]("container_exec", {"action": "create", "options": {"display": true}})` and operates the screen with the screenshot and input actions. Select the model to operate using the model setting in agent.json. Zero changes to defaults.
 
 ### Consent popup
 
-Place the consent confirmation tool in user_data/shared/tools/consent_check/. The tool handler.py displays a popup in `context["emit_event"](§RUMI§0§)` and waits for the user's response in `context["wait_event"](§RUMI§1§)`. Add it to tools.enabled in agent.json and instruct the agent's system prompt to ``Use this tool when applicable for investment advice.'' Zero changes to defaults.
+Place the consent confirmation tool in user_data/shared/tools/consent_check/. The tool handler.py displays a popup in `context["emit_event"]("ui.popup.show", {"title": "免責事項", ...})` and waits for the user's response in `context["wait_event"]("ui.popup.response", timeout=60)`. Add it to tools.enabled in agent.json and instruct the agent's system prompt to ``Use this tool when applicable for investment advice.'' Zero changes to defaults.
 
 ### Regular execution
 
@@ -248,7 +248,7 @@ Place a Flow with a schedule trigger in user_data/shared/flows/. Set Flow's trig
 
 ### Billing/Credit Management
 
-Place the usage check tool in user_data/shared/tools/billing_check/. The tool handler.py gets the usage amount in `context["call_handler"](§RUMI§0§)`, reads the plan definition in `context["data_read"](§RUMI§1§)`, calculates the remaining credits, and returns it. If UI display is required, place a pack with billing Asset in user_data/packs/. Zero changes to defaults.
+Place the usage check tool in user_data/shared/tools/billing_check/. The tool handler.py gets the usage amount in `context["call_handler"]("defaults.ai.usage", {...})`, reads the plan definition in `context["data_read"]("billing/plan.json")`, calculates the remaining credits, and returns it. If UI display is required, place a pack with billing Asset in user_data/packs/. Zero changes to defaults.
 
 ## 7. Defaults file structure
 

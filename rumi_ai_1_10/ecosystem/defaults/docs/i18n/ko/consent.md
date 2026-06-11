@@ -10,11 +10,11 @@
 
 기본 팩은 전체 동의 메커니즘(판단 로직, 핸들러, UI 팝업 협업, 이벤트 통신)을 제공합니다. 특히 기본 팩에는 다음 파일이 포함됩니다.
 
-| 파일 | 설명 |
+| File | Description |
 |---|---|
-| §루미§0§ | 심판 처리자(`defaults.tool.consent_check`) |
-| §루미§0§ | 동의 기록 처리기(`defaults.tool.consent_confirm`) |
-| §루미§0§ | `ConsentChecker` 클래스(판단 로직/동의 기록 관리) |
+| `blocks/tool/consent_check.py` | Judgment handler (`defaults.tool.consent_check`) |
+| `blocks/tool/consent_confirm.py` | Consent record handler (`defaults.tool.consent_confirm`) |
+| `domain/tool/consent.py` | `ConsentChecker` Class (determination logic/consent record management) |
 
 `defaults.tool.consent_check` 및 `defaults.tool.consent_confirm`은 `ecosystem.json`의 `tool` 구성 요소 중 `provides`에 선언되어 있습니다. HTTP 전송은 `POST /api/consent/check` 및 `POST /api/consent/{id}/confirm` 경로를 사용하여 액세스할 수 있습니다.
 
@@ -89,15 +89,13 @@ _AI_JUDGE_SYSTEM = (
 
 텍스트를 확인하고 동의가 필요한지 여부를 반환합니다.
 
-**HTTP**: §루미§0§
+**HTTP**: `POST /api/consent/check`**input_data**:
 
-**입력_데이터**:
-
-| 필드 | 유형 | 필수 | 설명 |
+| Field | Type | Required | Description |
 |---|---|---|---|
-| §루미§0§ | §루미§1§ | 예 | 판정대상 텍스트 |
-| §루미§0§ | §루미§1§ | 아니요 | AI 판단 사용(기본값 `false`) |
-| §루미§0§ | §루미§1§ | 아니요 | AI 판단 시 모델 지정(기본 `"stub/default"`) |
+| `text` | `string` | Yes | Judgment target text |
+| `use_ai` | `bool` | No | Use AI judgment (default `false`) |
+| `model` | `string` | No | Model specification during AI judgment (default `"stub/default"`) |
 
 **반환 값**:
 
@@ -116,20 +114,18 @@ _AI_JUDGE_SYSTEM = (
 }
 ```
 
-`requires_consent`이 `false`이면 `categories`는 빈 배열이고, `consent_id`은 `null`이고 `disclaimers`는 빈 사전입니다.
+`requires_consent`이 `false`인 경우 `categories`는 빈 배열이고, `consent_id`은 `null`이고, `disclaimers`은 빈 사전입니다.
 
 ### defaults.tool.consent_confirm
 
 사용자 동의/거부를 기록합니다.
 
-**HTTP**: §루미§0§
+**HTTP**: `POST /api/consent/{id}/confirm`**input_data**:
 
-**입력_데이터**:
-
-| 필드 | 유형 | 필수 | 설명 |
+| Field | Type | Required | Description |
 |---|---|---|---|
-| §루미§0§ | §루미§1§ | 예 | `consent_check`에서 반환된 동의_ID(HTTP의 경로 매개변수에서 삽입됨) |
-| §루미§0§ | §루미§1§ | 예 | 사용자 동의 |
+| `consent_id` | `string` | Yes | consent_id returned by `consent_check` (injected from path parameter in HTTP) |
+| `accepted` | `bool` | Yes | User consent |
 
 **반환 값**:
 
@@ -144,12 +140,12 @@ _AI_JUDGE_SYSTEM = (
 }
 ```
 
-동의 기록은 `user_data/shared/consent_log/{consent_id}.json`(`ConsentChecker._persist()`에 작성됨)에서 영구적으로 기록됩니다.
+동의 기록은 `user_data/shared/consent_log/{consent_id}.json`(`ConsentChecker._persist()`에 작성)에서 영구적으로 기록됩니다.
 
 
 ## 4. chat.send에 통합하는 방법(제안)
 
-`blocks/tool/consent_check.py`에 대한 문서 문자열에 설명된 대로 통합 제안:
+`blocks/tool/consent_check.py`에 대한 문서 문자열에 설명된 통합 제안:
 
 ```python
 # blocks/chat/send.py の assistant_msg 生成後に追加
@@ -175,7 +171,7 @@ if consent_result["data"]["requires_consent"]:
 
 ## 5. 프런트 엔드에 표시
 
-`emit_widget` 또는 `emit_event("ui.popup.show", ...)`에 동의 팝업이 표시됩니다. 프런트 엔드의 자산은 이 이벤트를 수신하고 팝업을 그립니다.
+동의 팝업은 `emit_widget` 또는 `emit_event("ui.popup.show", ...)`에 표시됩니다. 프런트 엔드의 자산은 이 이벤트를 수신하고 팝업을 그립니다.
 
 Asset의 JS가 `event.broadcast`을 수신하고 `event_type`이 `"ui.popup.show"`인 경우 팝업이 표시됩니다. 사용자가 버튼을 클릭하면 `event.broadcast`는 `"ui.popup.response"` 이벤트를 다시 보냅니다.
 

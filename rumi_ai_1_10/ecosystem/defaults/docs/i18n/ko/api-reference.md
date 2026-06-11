@@ -2,99 +2,97 @@
 [EN](../../api-reference.md) | [JP](../ja/api-reference.md) | [KR](./api-reference.md) | [CN](../zh-cn/api-reference.md)
 <!-- docs-i18n-links:end -->
 
-# API Reference
+# API 참조
 
-defaults Pack의 HTTP transport(`transport/http.py`)가 게시하는 모든 엔드포인트.
+기본 팩의 HTTP 전송(`transport/http.py`)에 의해 노출되는 모든 엔드포인트입니다.
 
-모든 응답은 JSON 형식으로 성공하면 `{"status": "ok", "data": ...}`, 오류가 발생하면 `{"status": "error", "error": {"code": "...", "message": "..."}}`을 반환합니다.
+모든 응답은 JSON 형식이며 성공 시 `{"status": "ok", "data": ...}`, 오류 시 `{"status": "error", "error": {"code": "...", "message": "..."}}`을 반환합니다.
 
-CORS 헤더는 모든 응답에 부여됩니다 : `Access-Control-Allow-Origin: *`, `Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS`, `Access-Control-Allow-Headers: Content-Type, Authorization`.
+CORS 헤더는 모든 응답에 추가됩니다: `Access-Control-Allow-Origin: *`, `Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS`, `Access-Control-Allow-Headers: Content-Type, Authorization`.
 
 ---
 
-## Chat — 대화 관리
+## 채팅 — 대화 관리
 
 ### POST /v1/chat/completions
 
-OpenAI 호환 엔드포인트. 메시지를 보내 AI 응답을 얻습니다. 내부에서 `blocks.chat.send`를 호출합니다.
+OpenAI 호환 엔드포인트. 메시지를 보내고 AI 응답을 받으세요. 내부적으로 `blocks.chat.send`을 호출하세요.
 
-**Request Body:**
+**요청 본문:**
 
-| 매개변수 | 필수 | 유형 | 설명 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| `conversation_id` | 필수 | `string` | 대화 ID |
-| `message` | 필수 | `object` | `{"role": "user", "content": "..."}` 형식 메시지 |
-| `message.role` | 선택 | `string` | 역할. 기본 `"user"` |
-| `message.content` | 필수 | `string \| array` | 텍스트 문자열 또는 content block 배열 |
+| `conversation_id` | Required | `string` | Conversation ID |
+| `message` | Required | `object` | `{"role": "user", "content": "..."}` format message |
+| `message.role` | Optional | `string` | Role. Default `"user"` |
+| `message.content` | Required | `string \| array` | Text string or content block array |
 
-**Response (`data`):**
+**답변(`data`):**
 
-| 필드 | 유형 | 설명 |
+| Field | Type | Description |
 |---|---|---|
-| `id` | `string` | 어시스턴트 메시지 ID |
-| `conversation_id` | `string` | 대화 ID |
+| `id` | `string` | Assistant Message ID |
+| `conversation_id` | `string` | Conversation ID |
 | `role` | `string` | `"assistant"` |
 | `content` | `array` | `[{"type": "text", "text": "..."}]` |
-| `parent_id` | `string` | 상위 메시지 ID |
-| `sequence_number` | `int` | 시퀀스 번호 |
-| `created_at` | `int` | 작성 타임스탬프(밀리초) |
-| `finish_reason` | `string \| null` | `"stop"` 등 |
+| `parent_id` | `string` | Parent message ID |
+| `sequence_number` | `int` | Sequence number |
+| `created_at` | `int` | Creation timestamp (milliseconds) |
+| `finish_reason` | `string \| null` | `"stop"` etc. |
 | `usage` | `object \| null` | `{"prompt_tokens": int, "completion_tokens": int, "total_tokens": int}` |
 
-**오류 케이스:**
+**오류 사례:**
 
-| 코드 | 설명 |
+| Code | Description |
 |---|---|
-| `INVALID_INPUT` |`conversation_id` 또는 `message`가 지정되지 않음 |
-| `NOT_FOUND` | 지정된 대화가 존재하지 않음 |
-| `INTERNAL_ERROR` | 메시지 추가 실패 |
+| `INVALID_INPUT` | `conversation_id` or `message` not specified |
+| `NOT_FOUND` | Specified conversation does not exist |
+| `INTERNAL_ERROR` | Failed to add message |
 
 ---
 
-### POST /api/chat/conversations
+### POST /api/chat/대화
 
-새로운 대화를 만듭니다. 내부에서 `blocks.chat.create_conversation`를 호출합니다.
+새 대화를 만듭니다. 내부적으로 `blocks.chat.create_conversation`을 호출하세요.
 
-**Request Body:**
+**요청 본문:**
 
-| 매개변수 | 필수 | 유형 | 설명 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| `model` | 선택적 | `string` | 사용 모델. 기본 `"stub/default"` |
-| `system_prompt_id` | 선택적 | `string` | 시스템 프롬프트 ID |
-| `agent_id` | 선택적 | `string` | 에이전트 ID |
-| `tags` | 선택적 | `array[string]` | 태그 |
+| `model` | Optional | `string` | Usage model. Default `"stub/default"` |
+| `system_prompt_id` | Optional | `string` | System prompt ID |
+| `agent_id` | Optional | `string` | Agent ID |
+| `tags` | Optional | `array[string]` | Tag |
 
-**Response (`data`):**
+**답변(`data`):**
 
-| 필드 | 유형 | 설명 |
+| Field | Type | Description |
 |---|---|---|
-| `id` | `string` | 대화 ID(UUID) |
+| `id` | `string` | Conversation ID (UUID) |
 | `title` | `string` | `"New Conversation"` |
-| `created_at` | `int` | 작성 타임스탬프 |
-| `updated_at` | `int` | 업데이트 타임스탬프 |
-| `model` | `string` | 모델 문자열 |
-| `system_prompt_id` | `string \| null` | 시스템 프롬프트 ID |
-| `agent_id` | `string \| null` | 에이전트 ID |
-| `tags` | `array[string]` | 태그 |
-| `is_starred` | `bool` | 스타 상태 |
-| `is_archived` | `bool` | 아카이브 상태 |
-| `current_node_id` | `string \| null` | 현재 노드 ID |
-| `messages` | `array` | 메시지 배열(초기에는 비어 있음) |
+| `created_at` | `int` | Creation timestamp |
+| `updated_at` | `int` | Update timestamp |
+| `model` | `string` | Model string |
+| `system_prompt_id` | `string \| null` | System Prompt ID |
+| `agent_id` | `string \| null` | Agent ID |
+| `tags` | `array[string]` | Tag |
+| `is_starred` | `bool` | Star state |
+| `is_archived` | `bool` | Archive status |
+| `current_node_id` | `string \| null` | Current node ID |
+| `messages` | `array` | Message array (initially empty) |
 
 ---
 
 ### GET /api/chat/conversations
 
-대화 목록을 가져옵니다. 내부에서 `blocks.chat.list_conversations`를 호출합니다.
+대화 목록을 가져옵니다. 내부적으로 `blocks.chat.list_conversations`을 호출하세요.
 
-**Request Body:** 없음(GET 때문에 쿼리 매개 변수는 Body 필요 없음)
+**요청 본문:** 없음(쿼리 매개변수는 GET이므로 필요하지 않음)**응답(`data`):**
 
-**Response (`data`):**
-
-| 필드 | 유형 | 설명 |
+| Field | Type | Description |
 |---|---|---|
-| `conversations` | `array[object]` | 대화 객체 배열 |
-| `total` | `int` | 총 건수 |
+| `conversations` | `array[object]` | Array of conversation objects |
+| `total` | `int` | Total number |
 
 **오류 사례:** 없음(빈 배열 반환)
 
@@ -102,21 +100,19 @@ OpenAI 호환 엔드포인트. 메시지를 보내 AI 응답을 얻습니다. �
 
 ### GET /api/chat/conversations/{id}
 
-지정된 ID의 대화를 가져옵니다. 경로 매개 변수 `{id}`가 `conversation_id`로 주입됩니다.
+지정된 ID로 대화를 가져옵니다. 경로 매개변수 `{id}`는 `conversation_id`으로 주입됩니다.
 
 **경로 매개변수:**
 
-| 매개변수 | 필수 | 유형 | 설명 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| `id` | 필수 | `string` | 대화 ID |
+| `id` | Required | `string` | Conversation ID |
 
-**Response(`data`):** 대화 객체(POST /api/chat/conversations의 Response와 동일한 형식)
+**응답(`data`):** 대화 개체(POST /api/chat/conversations의 응답과 동일한 형식)**오류 사례:**
 
-**오류 케이스:**
-
-| 코드 | 설명 |
+| Code | Description |
 |---|---|
-| `NOT_FOUND` | 지정된 대화가 존재하지 않음 |
+| `NOT_FOUND` | Specified conversation does not exist |
 
 ---
 
@@ -126,829 +122,791 @@ OpenAI 호환 엔드포인트. 메시지를 보내 AI 응답을 얻습니다. �
 
 **경로 매개변수:**
 
-| 매개변수 | 필수 | 유형 | 설명 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| `id` | 필수 | `string` | 대화 ID |
+| `id` | Required | `string` | Conversation ID |
 
-**Request Body:**
+**요청 본문:**
 
-| 매개변수 | 필수 | 유형 | 설명 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| `title` | 선택적 | `string` | 새로운 제목 |
-| `tags` | 선택 사항 | `array[string]` | 새 태그 |
-| `is_starred` | 선택적 | `bool` | 스타 상태 |
-| `is_archived` | 선택적 | `bool` | 아카이브 상태 |
-| `model` | 선택적 | `string` | 모델 변경 |
+| `title` | Optional | `string` | New title |
+| `tags` | Optional | `array[string]` | New tag |
+| `is_starred` | Optional | `bool` | Star state |
+| `is_archived` | Optional | `bool` | Archive status |
+| `model` | Optional | `string` | Model change |
 
-**Response (`data`):** 업데이트 후 대화 객체
+**응답(`data`):** 업데이트된 대화 개체**오류 사례:**
 
-**오류 케이스:**
-
-| 코드 | 설명 |
+| Code | Description |
 |---|---|
-| `NOT_FOUND` | 지정된 대화가 존재하지 않음 |
+| `NOT_FOUND` | Specified conversation does not exist |
 
 ---
 
-### DELETE /api/chat/conversations/{id}
+### 삭제 /api/chat/conversations/{id}
 
-대화를 삭제합니다. 내부에서 `blocks.chat.delete_conversation`를 호출합니다.
+대화를 삭제합니다. 내부적으로 `blocks.chat.delete_conversation`을 호출하세요.
 
 **경로 매개변수:**
 
-| 매개변수 | 필수 | 유형 | 설명 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| `id` | 필수 | `string` | 대화 ID |
+| `id` | Required | `string` | Conversation ID |
 
-**Response (`data`):** `{"success": true}`
+**응답(`data`):** `{"success": true}`**오류 사례:**
 
-**오류 케이스:**
-
-| 코드 | 설명 |
+| Code | Description |
 |---|---|
-| `NOT_FOUND` | 지정된 대화가 존재하지 않음 |
+| `NOT_FOUND` | Specified conversation does not exist |
 
 ---
 
 ### POST /api/chat/conversations/{id}/messages
 
-대화에 메시지를 보내 AI 응답을 받습니다. `/v1/chat/completions`와 동일한 block(`blocks.chat.send`)를 호출하지만, `conversation_id`가 경로에서 주입됩니다.
+대화에 메시지를 보내고 AI 응답을 받으세요. `/v1/chat/completions`과 동일한 블록(`blocks.chat.send`)을 호출하지만 경로에서 `conversation_id`가 삽입됩니다.
 
 **경로 매개변수:**
 
-| 매개변수 | 필수 | 유형 | 설명 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| `id` | 필수 | `string` | 대화 ID |
+| `id` | Required | `string` | Conversation ID |
 
-**Request Body:**
+**요청 본문:**
 
-| 매개변수 | 필수 | 유형 | 설명 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| `message` | 필수 | `object` | `{"role": "user", "content": "..."}` |
+| `message` | Required | `object` | `{"role": "user", "content": "..."}` |
 
-**Response(`data`):** 어시스턴트 메시지 객체(POST /v1/chat/completions와 동일한 형식)
-
-**오류 사례:** POST /v1/chat/completions와 동일
+**응답(`data`):** 보조 메시지 개체(POST /v1/chat/completions와 동일한 형식)**오류 사례:** POST /v1/chat/completions와 동일
 
 ---
 
 ### POST /api/chat/conversations/{id}/stream
 
-스트리밍 응답을 시작합니다. 내부에서 `blocks.chat.stream`를 호출합니다.
+스트리밍 응답을 시작합니다. 내부적으로 `blocks.chat.stream`을 호출하세요.
 
 **경로 매개변수:**
 
-| 매개변수 | 필수 | 유형 | 설명 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| `id` | 필수 | `string` | 대화 ID |
+| `id` | Required | `string` | Conversation ID |
 
-**Request Body:**
+**요청 본문:**
 
-| 매개변수 | 필수 | 유형 | 설명 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| `message` | 필수 | `object` | `{"role": "user", "content": "..."}` |
+| `message` | Required | `object` | `{"role": "user", "content": "..."}` |
 
-**Response (`data`):**
+**답변(`data`):**
 
-| 필드 | 유형 | 설명 |
+| Field | Type | Description |
 |---|---|---|
-| `stream_id` | `string` | 스트림 ID |
-| `conversation_id` | `string` | 대화 ID |
+| `stream_id` | `string` | Stream ID |
+| `conversation_id` | `string` | Conversation ID |
 
-**오류 케이스:**
+**오류 사례:**
 
-| 코드 | 설명 |
+| Code | Description |
 |---|---|
-| `INVALID_INPUT` |`conversation_id` 또는 `message`가 지정되지 않음 |
-| `NOT_FOUND` | 지정된 대화가 존재하지 않음 |
+| `INVALID_INPUT` | `conversation_id` or `message` not specified |
+| `NOT_FOUND` | Specified conversation does not exist |
 
 ---
 
 ### POST /api/chat/conversations/{id}/export
 
-대화를 내보냅니다. 내부에서 `blocks.chat.export_conversation`를 호출합니다.
+대화를 내보냅니다. 내부적으로 `blocks.chat.export_conversation`을 호출하세요.
 
 **경로 매개변수:**
 
-| 매개변수 | 필수 | 유형 | 설명 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| `id` | 필수 | `string` | 대화 ID |
+| `id` | Required | `string` | Conversation ID |
 
-**Request Body:**
+**요청 본문:**
 
-| 매개변수 | 필수 | 유형 | 설명 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| `format` | 선택 | `string` | `"markdown"` 또는 `"json"`. 기본 `"markdown"` |
+| `format` | Optional | `string` | `"markdown"` or `"json"`. Default `"markdown"` |
 
-**Response (`data`):**
+**답변(`data`):**
 
-| 필드 | 유형 | 설명 |
+| Field | Type | Description |
 |---|---|---|
-| `content` | `string` | 내보낸 문자열 |
-| `format` | `string` | 형식 이름 |
+| `content` | `string` | Exported string |
+| `format` | `string` | Format name |
 
-**오류 케이스:**
+**오류 사례:**
 
-| 코드 | 설명 |
+| Code | Description |
 |---|---|
-| `NOT_FOUND` | 지정된 대화가 존재하지 않음 |
+| `NOT_FOUND` | Specified conversation does not exist |
 
 ---
 
 ### POST /api/chat/conversations/{id}/summarize
 
-대화를 요약하고 잘라냅니다. 내부에서 `blocks.chat.summarize_and_trim`를 호출합니다.
+대화를 요약하고 다듬습니다. 내부적으로 `blocks.chat.summarize_and_trim`을 호출하세요.
 
 **경로 매개변수:**
 
-| 매개변수 | 필수 | 유형 | 설명 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| `id` | 필수 | `string` | 대화 ID |
+| `id` | Required | `string` | Conversation ID |
 
-**Request Body:**
+**요청 본문:**
 
-| 매개변수 | 필수 | 유형 | 설명 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| `start_message_id` | 필수 | `string` | 요약 시작 메시지 ID |
-| `end_message_id` | 필수 | `string` | 요약 종료 메시지 ID |
-| `model` | 선택적 | `string` | 요약에 사용되는 모델 |
+| `start_message_id` | Required | `string` | Summary start message ID |
+| `end_message_id` | Required | `string` | Summary end message ID |
+| `model` | Optional | `string` | Model used for summarization |
 
-**Response (`data`):** 요약 결과 개체
+**응답(`data`):** 요약 결과 개체**오류 사례:**
 
-**오류 케이스:**
-
-| 코드 | 설명 |
+| Code | Description |
 |---|---|
-| `NOT_FOUND` | 대화 또는 메시지가 존재하지 않음 |
-| `INVALID_INPUT` | 필수 매개변수 부족 |
+| `NOT_FOUND` | Conversation or message does not exist |
+| `INVALID_INPUT` | Required parameter missing |
 
 ---
 
 ### POST /api/chat/conversations/{id}/auto-trim
 
-대화를 자동 자르기. 내부에서 `blocks.chat.auto_trim`를 호출합니다.
+대화를 자동으로 자릅니다. 내부적으로 `blocks.chat.auto_trim`을 호출하세요.
 
 **경로 매개변수:**
 
-| 매개변수 | 필수 | 유형 | 설명 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| `id` | 필수 | `string` | 대화 ID |
+| `id` | Required | `string` | Conversation ID |
 
-**Request Body:**
+**요청 본문:**
 
-| 매개변수 | 필수 | 유형 | 설명 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| `max_tokens` | 선택적 | `int` | 트리밍 임계값 토큰 수 |
-| `model` | 선택적 | `string` | 요약에 사용되는 모델 |
+| `max_tokens` | Optional | `int` | Trimming threshold token count |
+| `model` | Optional | `string` | Model used for summarization |
 
-**Response (`data`):** 트리밍 결과 객체
+**응답(`data`):** 트리밍 결과 개체**오류 사례:**
 
-**오류 케이스:**
-
-| 코드 | 설명 |
+| Code | Description |
 |---|---|
-| `NOT_FOUND` | 대화가 존재하지 않음 |
+| `NOT_FOUND` | Conversation does not exist |
 
 ---
 
-## Agent — 에이전트 실행
+## 에이전트 — 에이전트 실행
 
 ### POST /api/agent/execute
 
-에이전트 작업을 수행합니다. 내부에서 `blocks.agent.execute`를 호출합니다.
+에이전트 작업을 실행합니다. 내부적으로 `blocks.agent.execute`을 호출하세요.
 
-**Request Body:**
+**요청 본문:**
 
-| 매개변수 | 필수 | 유형 | 설명 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| `task` | 필수 | `string` | 수행할 작업 설명 |
-| `tools` | 선택적 | `array` | 사용 가능한 도구 정의 |
-| `model` | 선택적 | `string` | 사용 모델. 기본 `"default"` |
-| `system_prompt` | 선택적 | `string` | 시스템 프롬프트 |
+| `task` | Required | `string` | Description of the task to be performed |
+| `tools` | Optional | `array` | Available tool definitions |
+| `model` | Optional | `string` | Usage model. Default `"default"` |
+| `system_prompt` | Optional | `string` | System prompt |
 
-**Response (`data`):**
+**답변(`data`):**
 
-| 필드 | 유형 | 설명 |
+| Field | Type | Description |
 |---|---|---|
-| `execution_id` | `string` | 실행 ID |
-| `status` | `string` | 실행 상태 |
-| `steps` | `array` | 실행 단계 목록 |
+| `execution_id` | `string` | Run ID |
+| `status` | `string` | Execution state |
+| `steps` | `array` | List of execution steps |
 
-**오류 케이스:**
+**오류 사례:**
 
-| 코드 | 설명 |
+| Code | Description |
 |---|---|
-| `ERROR` |`task`이 지정되지 않음 |
+| `ERROR` | `task` not specified |
 
 ---
 
 ### POST /api/agent/{id}/approve
 
-에이전트의 현재 단계를 승인합니다. 내부에서 `blocks.agent.approve`를 호출합니다.
+에이전트의 현재 단계를 승인합니다. 내부적으로 `blocks.agent.approve`을 호출하세요.
 
 **경로 매개변수:**
 
-| 매개변수 | 필수 | 유형 | 설명 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| `id` | 필수 | `string` | execution_id |
+| `id` | Required | `string` | execution_id |
 
-**Response (`data`):** 승인 결과 개체
+**응답(`data`):** 승인 결과 개체**오류 사례:**
 
-**오류 케이스:**
-
-| 코드 | 설명 |
+| Code | Description |
 |---|---|
-| `ERROR` |`execution_id`이 지정되지 않거나 실행되지 않음 |
+| `ERROR` | `execution_id` is unspecified or execution does not exist |
 
 ---
 
 ### POST /api/agent/{id}/reject
 
-에이전트의 현재 단계를 거부합니다. 내부에서 `blocks.agent.reject`를 호출합니다.
+에이전트의 현재 단계를 거부합니다. 내부적으로 `blocks.agent.reject`을 호출하세요.
 
 **경로 매개변수:**
 
-| 매개변수 | 필수 | 유형 | 설명 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| `id` | 필수 | `string` | execution_id |
+| `id` | Required | `string` | execution_id |
 
-**Response (`data`):** 거부 결과 개체
+**응답(`data`):** 거부 결과 개체**오류 사례:**
 
-**오류 케이스:**
-
-| 코드 | 설명 |
+| Code | Description |
 |---|---|
-| `ERROR` |`execution_id`이 지정되지 않거나 실행되지 않음 |
+| `ERROR` | `execution_id` is unspecified or execution does not exist |
 
 ---
 
 ### POST /api/agent/{id}/cancel
 
-에이전트 실행을 취소합니다. 내부에서 `blocks.agent.cancel`를 호출합니다.
+에이전트 실행을 취소합니다. 내부적으로 `blocks.agent.cancel`을 호출하세요.
 
 **경로 매개변수:**
 
-| 매개변수 | 필수 | 유형 | 설명 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| `id` | 필수 | `string` | execution_id |
+| `id` | Required | `string` | execution_id |
 
-**Response (`data`):** 취소 결과 개체
+**응답(`data`):** 취소 결과 개체**오류 사례:**
 
-**오류 케이스:**
-
-| 코드 | 설명 |
+| Code | Description |
 |---|---|
-| `ERROR` |`execution_id`이 지정되지 않거나 실행되지 않음 |
+| `ERROR` | `execution_id` is unspecified or execution does not exist |
 
 ---
 
 ### GET /api/agent/{id}/status
 
-에이전트의 실행 상태를 취득한다. 내부에서 `blocks.agent.status`를 호출합니다.
+에이전트의 실행 상태를 가져옵니다. 내부적으로 `blocks.agent.status`을 호출하세요.
 
 **경로 매개변수:**
 
-| 매개변수 | 필수 | 유형 | 설명 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| `id` | 필수 | `string` | execution_id |
+| `id` | Required | `string` | execution_id |
 
-**Response (`data`):** 상태 객체
+**응답(`data`):** 상태 개체**오류 사례:**
 
-**오류 케이스:**
-
-| 코드 | 설명 |
+| Code | Description |
 |---|---|
-| `ERROR` |`execution_id`이 지정되지 않거나 실행되지 않음 |
+| `ERROR` | `execution_id` is unspecified or execution does not exist |
 
 ---
 
 ### POST /api/agent/{id}/instruct
 
-실행 중인 에이전트에 런타임 표시를 추가합니다. 내부에서 `blocks.agent.add_instruction`를 호출합니다. 표시는 다음 AI completion 단계 전에 메시지 기록에 주입됩니다.
+실행 중인 에이전트에 런타임 지침을 추가합니다. 내부적으로 `blocks.agent.add_instruction`을 호출하세요. 다음 AI 완료 단계 전에 지침이 메시지 기록에 삽입됩니다.
 
 **경로 매개변수:**
 
-| 매개변수 | 필수 | 유형 | 설명 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| `id` | 필수 | `string` | execution_id(경로에서 `execution_id`로 주입) |
+| `id` | Required | `string` | execution_id (injected as `execution_id` from path) |
 
-**Request Body:**
+**요청 본문:**
 
-| 매개변수 | 필수 | 유형 | 설명 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| `instruction` | 필수 | `string` | 추가 지침 |
-| `priority` | 선택 | `string` | `"normal"` 또는 `"urgent"`. 기본 `"normal"` |
+| `instruction` | Required | `string` | Additional instructions |
+| `priority` | Optional | `string` | `"normal"` or `"urgent"`. Default `"normal"` |
 
-**Response (`data`):**
+**답변(`data`):**
 
-| 필드 | 유형 | 설명 |
+| Field | Type | Description |
 |---|---|---|
-| `instruction_id` | `string` | 지시 ID(UUID) |
-| `execution_id` | `string` | 실행 ID |
-| `priority` | `string` | 우선 순위 |
+| `instruction_id` | `string` | Instruction ID (UUID) |
+| `execution_id` | `string` | Run ID |
+| `priority` | `string` | Priority |
 | `status` | `string` | `"queued"` |
 
-**오류 케이스:**
+**오류 사례:**
 
-| 코드 | 설명 |
+| Code | Description |
 |---|---|
-| `ERROR` |`execution_id`이 지정되지 않음, `instruction`가 지정되지 않음, 실행이 존재하지 않거나 실행이 활성 상태가 아닙니다 |
+| `ERROR` | `execution_id` unspecified, `instruction` unspecified, run does not exist, or run is not active |
 
 ---
 
-## Multi-Agent — 멀티 에이전트 실행
+## 다중 에이전트 — 다중 에이전트 실행
 
 ### POST /api/agent/multi/execute
 
-멀티 에이전트 세션을 시작합니다. 내부에서 `blocks.agent.multi_execute`를 호출합니다.
+다중 에이전트 세션을 시작합니다. 내부적으로 `blocks.agent.multi_execute`을 호출하세요.
 
-**Request Body:**
+**요청 본문:**
 
-| 매개변수 | 필수 | 유형 | 설명 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| `task` | 필수 | `string` | 작업 설명 |
-| `agents` | 필수 | `array[object]` | 에이전트 정의 목록(최소 하나). 각 요소는 `{name, role, model?, system_prompt?, tools?}` |
-| `orchestration` | 선택적 | `string` | `"round_robin"`, `"directed"`, `"free"` 중 하나. 기본 `"round_robin"` |
-| `max_turns` | 선택적 | `int` | 최대 턴 수. 기본 `10`. 하나 이상의 양의 정수 |
+| `task` | Required | `string` | Task description |
+| `agents` | Required | `array[object]` | List of agent definitions (at least one). Each element is `{name, role, model?, system_prompt?, tools?}` |
+| `orchestration` | Optional | `string` | Any of `"round_robin"`, `"directed"`, `"free"`. Default `"round_robin"` |
+| `max_turns` | Optional | `int` | Maximum number of turns. Default `10`. Positive integer greater than or equal to 1 |
 
-**Response (`data`):**
+**답변(`data`):**
 
-| 필드 | 유형 | 설명 |
+| Field | Type | Description |
 |---|---|---|
-| `session_id` | `string` | 세션 ID(`multi_` 접두사) |
-| `status` | `string` | 세션 상태(`"completed"`, `"error"` 등) |
-| `turn_results` | `array` | 각 턴의 결과 `[{agent, type, content}, ...]` |
-| `result` | `object` | 세션 상세 개체 |
+| `session_id` | `string` | Session ID (`multi_` Prefix) |
+| `status` | `string` | Session state (`"completed"`, `"error"`, etc.) |
+| `turn_results` | `array` | Results of each turn `[{agent, type, content}, ...]` |
+| `result` | `object` | Session details object |
 
-**오류 케이스:**
+**오류 사례:**
 
-| 코드 | 설명 |
+| Code | Description |
 |---|---|
-| `ERROR` |`task`이 지정되지 않음, `agents`가 지정되지 않거나 비어 있고 에이전트 정의의 `name`/`role`가 지정되지 않음, `orchestration`가 잘못된 값, `max_turns`가 양의 정수가 아닙니다 |
+| `ERROR` | `task` is unspecified, `agents` is unspecified or empty, `name`/`role` of agent definition is unspecified, `orchestration` is an invalid value, `max_turns` is not a positive integer |
 
 ---
 
 ### GET /api/agent/multi/{id}/status
 
-멀티 에이전트 세션의 상태를 얻는다. 내부에서 `blocks.agent.multi_status`를 호출합니다. 경로 매개 변수 `{id}`이 `session_id`로 주입됩니다.
+다중 에이전트 세션의 상태를 가져옵니다. 내부적으로 `blocks.agent.multi_status`을 호출하세요. 경로 매개변수 `{id}`은 `session_id`로 주입됩니다.
 
 **경로 매개변수:**
 
-| 매개변수 | 필수 | 유형 | 설명 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| `id` | 필수 | `string` | session_id |
+| `id` | Required | `string` | session_id |
 
-**Response(`data`):** 세션 상태 개체(`session.to_dict()` 결과)
+**응답(`data`):** 세션 상태 개체(`session.to_dict()` 결과)**오류 사례:**
 
-**오류 케이스:**
-
-| 코드 | 설명 |
+| Code | Description |
 |---|---|
-| `ERROR` |`session_id`이 지정되지 않았거나 세션이 존재하지 않음 |
+| `ERROR` | `session_id` is unspecified or session does not exist |
 
 ---
 
 ### POST /api/agent/multi/{id}/message
 
-실행중인 멀티 에이전트 세션에 외부에서 메시지를 제출합니다. 내부에서 `blocks.agent.multi_message`를 호출합니다. 경로 매개 변수 `{id}`이 `session_id`로 주입됩니다.
+실행 중인 다중 에이전트 세션에 외부적으로 메시지를 삽입합니다. 내부적으로 `blocks.agent.multi_message`을 호출하세요. 경로 매개변수 `{id}`은 `session_id`로 주입됩니다.
 
 **경로 매개변수:**
 
-| 매개변수 | 필수 | 유형 | 설명 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| `id` | 필수 | `string` | session_id |
+| `id` | Required | `string` | session_id |
 
-**Request Body:**
+**요청 본문:**
 
-| 매개변수 | 필수 | 유형 | 설명 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| `message` | 필수 | `string` | 입력할 메시지 내용 |
-| `target_agent` | 선택적 | `string` | 특정 상담원에게 지정할 이름. 지정되지 않은 경우 공유 메시지로 모든 에이전트로 전송 |
+| `message` | Required | `string` | Message content to be input |
+| `target_agent` | Optional | `string` | Name when addressing to a specific agent. If not specified, send as a shared message to all agents |
 
-**Response (`data`):**
+**답변(`data`):**
 
-| 필드 | 유형 | 설명 |
+| Field | Type | Description |
 |---|---|---|
-| `session_id` | `string` | 세션 ID |
+| `session_id` | `string` | Session ID |
 | `message` | `string` | `"Message injected successfully"` |
 
-**오류 케이스:**
+**오류 사례:**
 
-| 코드 | 설명 |
+| Code | Description |
 |---|---|
-| `ERROR` |`session_id`이 지정되지 않았거나 `message`가 지정되지 않았거나 세션이 존재하지 않음 |
+| `ERROR` | `session_id` not specified, `message` not specified, or session does not exist |
 
 ---
 
-## Consent — 동의 관리
+## 동의 — 동의 관리
 
 ### POST /api/consent/check
 
-텍스트가 민감한지 여부를 결정합니다. 내부에서 `blocks.tool.consent_check`를 호출합니다.
+텍스트가 민감한지 여부를 확인합니다. 내부적으로 `blocks.tool.consent_check`을 호출하세요.
 
-**Request Body:**
+**요청 본문:**
 
-| 매개변수 | 필수 | 유형 | 설명 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| `text` | 필수 | `string` | 판정 대상 텍스트 |
-| `use_ai` | 선택 사항 | `bool` | AI 판정을 사용합니까? 기본 `false` |
-| `model` | 선택 | `string` | AI 판정시 모델 지정. 기본 `"stub/default"` |
+| `text` | Required | `string` | Judgment target text |
+| `use_ai` | Optional | `bool` | Whether to use AI judgment. Default `false` |
+| `model` | Optional | `string` | Model specification during AI judgment. Default `"stub/default"` |
 
-**Response (`data`):**
+**답변(`data`):**
 
-| 필드 | 유형 | 설명 |
+| Field | Type | Description |
 |---|---|---|
-| `requires_consent` | `bool` | 동의가 필요한지 |
-| `categories` | `array[string]` | 감지된 카테고리 |
-| `consent_id` | `string \| null` | 동의가 필요한 경우 동의 ID |
-| `disclaimers` | `object` | 범주별 책임 텍스트 `{category: disclaimer_text}` |
+| `requires_consent` | `bool` | Whether consent is required |
+| `categories` | `array[string]` | Detected categories |
+| `consent_id` | `string \| null` | Consent ID if consent is required |
+| `disclaimers` | `object` | Disclaimer text by category `{category: disclaimer_text}` |
 
-**오류 케이스:**
+**오류 사례:**
 
-| 코드 | 설명 |
+| Code | Description |
 |---|---|
-| `MISSING_PARAM` |`text`이 지정되지 않음 |
-| `INVALID_PARAM` | `text`이 문자열이 아닙니다 |
+| `MISSING_PARAM` | `text` not specified |
+| `INVALID_PARAM` | `text` is not a string |
 
 ---
 
 ### POST /api/consent/{id}/confirm
 
-동의 또는 거부를 기록한다. 내부에서 `blocks.tool.consent_confirm`를 호출합니다. 경로 매개 변수 `{id}`이 `consent_id`로 주입됩니다.
+동의 또는 거부를 기록하십시오. 내부적으로 `blocks.tool.consent_confirm`을 호출하세요. 경로 매개변수 `{id}`은 `consent_id`로 주입됩니다.
 
 **경로 매개변수:**
 
-| 매개변수 | 필수 | 유형 | 설명 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| `id` | 필수 | `string` | consent_id |
+| `id` | Required | `string` | consent_id |
 
-**Request Body:**
+**요청 본문:**
 
-| 매개변수 | 필수 | 유형 | 설명 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| `accepted` | 필수 | `bool` | 사용자가 동의했는지 |
+| `accepted` | Required | `bool` | Whether the user consented |
 
-**Response (`data`):**
+**답변(`data`):**
 
-| 필드 | 유형 | 설명 |
+| Field | Type | Description |
 |---|---|---|
-| `consent_id` | `string` | 동의 ID |
-| `accepted` | `bool` | 동의 상태 |
-| `accepted_at` | `string \| null` | 동의한 경우 ISO 8601 타임스탬프 |
+| `consent_id` | `string` | Consent ID |
+| `accepted` | `bool` | Consent status |
+| `accepted_at` | `string \| null` | ISO 8601 timestamp if consent |
 
-**오류 케이스:**
+**오류 사례:**
 
-| 코드 | 설명 |
+| Code | Description |
 |---|---|
-| `MISSING_PARAM` |`consent_id` 또는 `accepted`가 지정되지 않음 |
-| `INVALID_PARAM` |`consent_id`이 문자열이 아니거나 `accepted`가 bool이 아닙니다 |
-| `NOT_FOUND` | 지정된 consent_id가 존재하지 않습니다 |
+| `MISSING_PARAM` | `consent_id` or `accepted` not specified |
+| `INVALID_PARAM` | `consent_id` is not a string or `accepted` is not bool |
+| `NOT_FOUND` | The specified consent_id does not exist |
 
 ---
 
-## Prompt — 프롬프트 관리
+## 프롬프트 - 프롬프트 관리
 
-### PUT /api/prompts/{name}
+### PUT /api/prompts/{이름}
 
-기존 프롬프트를 업데이트합니다. 내부에서 `blocks.prompt.update`를 호출합니다.
+기존 프롬프트를 업데이트합니다. 내부적으로 `blocks.prompt.update`을 호출하세요.
 
 **경로 매개변수:**
 
-| 매개변수 | 필수 | 유형 | 설명 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| `name` | 필수 | `string` | 프롬프트 이름 |
+| `name` | Required | `string` | Prompt name |
 
-**Request Body:**
+**요청 본문:**
 
-| 매개변수 | 필수 | 유형 | 설명 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| `content` | 선택적 | `string` | 새로운 본문(`body`의 별칭) |
-| `body` | 선택적 | `string` | 새로운 본문 |
-| `description` | 선택적 | `string` | 설명 |
-| `variables` | 선택적 | `array` | 변수 정의 |
-| `metadata` | 선택적 | `object` | 메타데이터 |
+| `content` | Optional | `string` | New body (alias for `body`) |
+| `body` | Optional | `string` | New text |
+| `description` | Optional | `string` | Description |
+| `variables` | Optional | `array` | Variable definition |
+| `metadata` | Optional | `object` | Metadata |
 
-**Response (`data`):** 업데이트 후 프롬프트 개체
+**응답(`data`):** 프롬프트 개체 업데이트됨**오류 사례:**
 
-**오류 케이스:**
-
-| 코드 | 설명 |
+| Code | Description |
 |---|---|
-| `NOT_FOUND` | 지정된 프롬프트가 존재하지 않습니다 |
+| `NOT_FOUND` | The specified prompt does not exist |
 
 ---
 
-### DELETE /api/prompts/{name}
+### 삭제 /api/prompts/{이름}
 
-프롬프트를 삭제합니다. 내부에서 `blocks.prompt.delete`를 호출합니다.
+프롬프트를 제거합니다. 내부적으로 `blocks.prompt.delete`을 호출하세요.
 
 **경로 매개변수:**
 
-| 매개변수 | 필수 | 유형 | 설명 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| `name` | 필수 | `string` | 프롬프트 이름 |
+| `name` | Required | `string` | Prompt name |
 
-**Response (`data`):** `{"deleted": true}`
+**응답(`data`):** `{"deleted": true}`**오류 사례:**
 
-**오류 케이스:**
-
-| 코드 | 설명 |
+| Code | Description |
 |---|---|
-| `NOT_FOUND` | 지정된 프롬프트가 존재하지 않습니다 |
+| `NOT_FOUND` | The specified prompt does not exist |
 
 ---
 
-### POST /api/prompts/convert
+### POST /api/프롬프트/변환
 
-tool ↔ prompt를 상호 변환합니다. 내부에서 `blocks.prompt.convert`를 호출합니다.
+도구 ⇔ 프롬프트 간의 상호 변환을 수행합니다. 내부적으로 `blocks.prompt.convert`을 호출하세요.
 
-**Request Body:**
+**요청 본문:**
 
-| 매개변수 | 필수 | 유형 | 설명 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| `source_type` | 필수 | `string` | `"tool"` 또는 `"prompt"` |
-| `source_name` | 필수 | `string` | 변환 소스 이름 |
-| `target_type` | 필수 | `string` | `"tool"` 또는 `"prompt"` |
+| `source_type` | Required | `string` | `"tool"` or `"prompt"` |
+| `source_name` | Required | `string` | Source name |
+| `target_type` | Required | `string` | `"tool"` or `"prompt"` |
 
-**Response (`data`):**
+**답변(`data`):**
 
-| 필드 | 유형 | 설명 |
+| Field | Type | Description |
 |---|---|---|
-| `result` | `object` | 변환 결과(tool 정의 또는 프롬프트 객체) |
-| `target_type` | `string` | 대상 유형 |
+| `result` | `object` | Conversion result (tool definition or prompt object) |
+| `target_type` | `string` | Destination type |
 
-**오류 케이스:**
+**오류 사례:**
 
-| 코드 | 설명 |
+| Code | Description |
 |---|---|
-| `INVALID_INPUT` |`source_type`/`target_type`가 잘못되었거나 동일합니다.
-| `NOT_FOUND` | 변환 소스가 없습니다 |
+| `INVALID_INPUT` | `source_type`/`target_type` are incorrect or identical |
+| `NOT_FOUND` | Conversion source does not exist |
 
 ---
 
-## Tool — 동적 도구 관리
+## 도구 - 동적 도구 관리
 
 ### POST /api/tools/create
 
-동적 도구를 만듭니다. handler_code가 지정되지 않으면 AI로 자동 생성됩니다. 내부에서 `blocks.tool.create`를 호출합니다.
+동적 도구를 만듭니다. handler_code를 지정하지 않으면 AI에 의해 자동으로 생성됩니다. 내부적으로 `blocks.tool.create`을 호출하세요.
 
-**Request Body:**
+**요청 본문:**
 
-| 매개변수 | 필수 | 유형 | 설명 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| `name` | 필수 | `string` | 도구 이름(tool_id와 동일) |
-| `description` | 선택 사항 | `string` | 도구 설명 |
-| `parameters` | 필수 | `object` | JSON Schema 형식의 매개 변수 정의 |
-| `handler_code` | 선택적 | `string` | Python handler 코드. null이면 AI 생성 |
-| `tags` | 선택적 | `array[string]` | 태그. 기본 `["dynamic", "user-created"]` |
-| `model` | 선택적 | `string` | handler_code 생성에 사용되는 AI 모델 |
+| `name` | Required | `string` | Tool name (same as tool_id) |
+| `description` | Optional | `string` | Tool description |
+| `parameters` | Required | `object` | Parameter definition in JSON Schema format |
+| `handler_code` | Optional | `string` | Python handler code. If null, AI generation |
+| `tags` | Optional | `array[string]` | Tag. Default `["dynamic", "user-created"]` |
+| `model` | Optional | `string` | AI model used to generate handler_code |
 
-**Response (`data`):**
+**답변(`data`):**
 
-| 필드 | 유형 | 설명 |
+| Field | Type | Description |
 |---|---|---|
-| `tool_id` | `string` | 도구 ID |
-| `name` | `string` | 도구 이름 |
-| `summary` | `string` | 설명 |
-| `handler_code` | `string` | 생성된 핸들러 코드 |
-| `created_at` | `string` | ISO 8601 타임스탬프 |
+| `tool_id` | `string` | Tool ID |
+| `name` | `string` | Tool name |
+| `summary` | `string` | Description |
+| `handler_code` | `string` | Generated handler code |
+| `created_at` | `string` | ISO 8601 timestamp |
 
-**오류 케이스:**
+**오류 사례:**
 
-| 코드 | 설명 |
+| Code | Description |
 |---|---|
-| `MISSING_PARAM` |`name` 또는 `parameters`가 지정되지 않음 |
-| `INVALID_PARAM` | `parameters`이 dict가 아님 |
-| `ALREADY_EXISTS` | 같은 이름의 도구가 이미 있습니다 |
-| `REGISTER_ERROR` | 등록 과정에서 오류 |
+| `MISSING_PARAM` | `name` or `parameters` not specified |
+| `INVALID_PARAM` | `parameters` is not a dict |
+| `ALREADY_EXISTS` | A tool with the same name already exists |
+| `REGISTER_ERROR` | Error in registration process |
 
 ---
 
-### PUT /api/tools/{name}
+### PUT /api/tools/{이름}
 
-동적 도구를 업데이트합니다. 내부에서 `blocks.tool.update`를 호출합니다.
+동적 도구를 업데이트합니다. 내부적으로 `blocks.tool.update`을 호출하세요.
 
 **경로 매개변수:**
 
-| 매개변수 | 필수 | 유형 | 설명 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| `name` | 필수 | `string` | 도구 이름 |
+| `name` | Required | `string` | Tool name |
 
-**Request Body:**
+**요청 본문:**
 
-| 매개변수 | 필수 | 유형 | 설명 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| `description` | 선택적 | `string` | 새로운 설명 |
-| `parameters` | 선택적 | `object` | 새로운 스키마 |
-| `handler_code` | 선택적 | `string` | 새로운 핸들러 코드 |
-| `tags` | 선택 사항 | `array[string]` | 새 태그 |
+| `description` | Optional | `string` | New description |
+| `parameters` | Optional | `object` | New schema |
+| `handler_code` | Optional | `string` | New handler code |
+| `tags` | Optional | `array[string]` | New tag |
 
-**Response (`data`):** 업데이트 후 도구 정의
+**응답(`data`):** 업데이트된 도구 정의**오류 사례:**
 
-**오류 케이스:**
-
-| 코드 | 설명 |
+| Code | Description |
 |---|---|
-| `NOT_FOUND` | 지정된 도구가 없거나 dynamic이 아닙니다 |
+| `NOT_FOUND` | The specified tool does not exist or is not dynamic |
 
 ---
 
-### DELETE /api/tools/{name}
+### 삭제 /api/tools/{이름}
 
-동적 도구를 삭제합니다. 파일도 동시에 삭제된다. 내부에서 `blocks.tool.delete`를 호출합니다.
+동적 도구를 삭제합니다. 동시에 파일도 삭제됩니다. 내부적으로 `blocks.tool.delete`을 호출하세요.
 
 **경로 매개변수:**
 
-| 매개변수 | 필수 | 유형 | 설명 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| `name` | 필수 | `string` | 도구 이름 |
+| `name` | Required | `string` | Tool name |
 
-**Response (`data`):** `{"deleted": true}`
+**응답(`data`):** `{"deleted": true}`**오류 사례:**
 
-**오류 케이스:**
-
-| 코드 | 설명 |
+| Code | Description |
 |---|---|
-| `NOT_FOUND` | 지정된 도구가 없거나 dynamic이 아닙니다 |
+| `NOT_FOUND` | The specified tool does not exist or is not dynamic |
 
 ---
 
-### GET /api/tools/{name}/export
+### GET /api/tools/{이름}/export
 
-도구 정의를 handler_code로 내보냅니다. 내부에서 `blocks.tool.export`를 호출합니다.
+handler_code를 포함하여 도구 정의를 내보냅니다. 내부적으로 `blocks.tool.export`을 호출하세요.
 
 **경로 매개변수:**
 
-| 매개변수 | 필수 | 유형 | 설명 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| `name` | 필수 | `string` | 도구 이름 |
+| `name` | Required | `string` | Tool name |
 
-**Response(`data`):** 도구 정의 객체(handler_code 필드 포함)
+**응답(`data`):** 도구 정의 개체(handler_code 필드 포함)**오류 사례:**
 
-**오류 케이스:**
-
-| 코드 | 설명 |
+| Code | Description |
 |---|---|
-| `NOT_FOUND` | 지정된 도구가 없습니다 |
+| `NOT_FOUND` | The specified tool does not exist |
 
 ---
 
-## Dev — 개발자 도구
+## 개발 — 개발자 도구
 
 ### GET /api/dev/inspect
 
-직전의 요구 정보를 취득한다. 내부에서 `blocks.dev.inspect`를 호출합니다.
+이전 요청 정보를 가져옵니다. 내부적으로 `blocks.dev.inspect`을 호출하세요.
 
-**Request Body(선택 사항):**
+**요청 본문(선택 사항):**
 
-| 매개변수 | 필수 | 유형 | 설명 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| `request_id` | 선택적 | `string` | 특정 요청 ID |
-| `conversation_id` | 선택적 | `string` | 특정 대화 ID |
+| `request_id` | Optional | `string` | Specific request ID |
+| `conversation_id` | Optional | `string` | Specific conversation ID |
 
-`request_id` 지정시에는 그 로그를 돌려준다. `conversation_id` 지정시 대화의 최신 로그를 반환합니다. 둘 다 지정되지 않은 직전의 요청을 반환합니다.
+`request_id` 지정되면 로그를 반환합니다. `conversation_id` 지정되면 대화의 최신 로그를 반환합니다. 둘 다 지정되지 않은 경우 이전 요청을 반환합니다.
 
-**Response (`data`):**
+**답변(`data`):**
 
-| 필드 | 유형 | 설명 |
+| Field | Type | Description |
 |---|---|---|
-| `request_id` | `string` | 요청 ID |
-| `conversation_id` | `string` | 대화 ID |
-| `model` | `string` | 사용 모델 |
-| `prompt_used` | `string` | 사용된 프롬프트 |
-| `tools_called` | `array` | 호출된 도구 |
-| `context_info` | `object` | 컨텍스트 정보 |
-| `timestamp` | `string` | ISO 8601 타임스탬프 |
+| `request_id` | `string` | Request ID |
+| `conversation_id` | `string` | Conversation ID |
+| `model` | `string` | Usage Model |
+| `prompt_used` | `string` | Prompt used |
+| `tools_called` | `array` | Invoked tool |
+| `context_info` | `object` | Context information |
+| `timestamp` | `string` | ISO 8601 timestamp |
 
-**오류 케이스:**
+**오류 사례:**
 
-| 코드 | 설명 |
+| Code | Description |
 |---|---|
-| `NOT_FOUND` | 지정된 ID에 대한 로그가 없습니다 |
+| `NOT_FOUND` | Log with specified ID does not exist |
 
 ---
 
 ### GET /api/dev/prompt-history
 
-프롬프트 기록을 얻습니다. 내부에서 `blocks.dev.prompt_history`를 호출합니다.
+프롬프트 기록을 얻으십시오. 내부적으로 `blocks.dev.prompt_history`을 호출하세요.
 
-**Request Body(선택 사항):**
+**요청 본문(선택 사항):**
 
-| 매개변수 | 필수 | 유형 | 설명 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| `limit` | 선택 | `int` | 취득 건수. 기본 20 |
+| `limit` | Optional | `int` | Number of results. Default 20 |
 
-**Response (`data`):** 로그 배열(새 순서)
+**응답(`data`):** 로그 배열(최신 항목순)
 
 ---
 
 ### POST /api/dev/edit-prompt
 
-프롬프트를 라이브 편집하고 다시 실행합니다. 내부에서 `blocks.dev.edit_prompt_live`를 호출합니다.
+실시간 편집 및 재실행 프롬프트. 내부적으로 `blocks.dev.edit_prompt_live`을 호출하세요.
 
-**Request Body:**
+**요청 본문:**
 
-| 매개변수 | 필수 | 유형 | 설명 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| `request_id` | 필수 | `string` | 편집할 요청 ID |
-| `new_prompt` | 필수 | `string` | 새로운 프롬프트 |
+| `request_id` | Required | `string` | Request ID to be edited |
+| `new_prompt` | Required | `string` | New prompt |
 
-**Response (`data`):** 재실행 결과
+**응답(`data`):** 재실행 결과**오류 사례:**
 
-**오류 케이스:**
-
-| 코드 | 설명 |
+| Code | Description |
 |---|---|
-| `NOT_FOUND` | 지정된 요청이 없습니다 |
-| `INVALID_INPUT` | 필수 매개변수 부족 |
+| `NOT_FOUND` | The specified request does not exist |
+| `INVALID_INPUT` | Required parameter missing |
 
 ---
 
 ### POST /api/dev/replay
 
-과거 요청을 다시 실행합니다. 내부에서 `blocks.dev.replay`를 호출합니다.
+과거 요청을 다시 시도하세요. 내부적으로 `blocks.dev.replay`을 호출하세요.
 
-**Request Body:**
+**요청 본문:**
 
-| 매개변수 | 필수 | 유형 | 설명 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| `request_id` | 필수 | `string` | 재실행 대상 요청 ID |
-| `model` | 선택적 | `string` | 다른 모델에서 재실행 |
+| `request_id` | Required | `string` | Request ID to be re-executed |
+| `model` | Optional | `string` | Rerun with another model |
 
-**Response (`data`):** 재실행 결과
+**응답(`data`):** 재실행 결과**오류 사례:**
 
-**오류 케이스:**
-
-| 코드 | 설명 |
+| Code | Description |
 |---|---|
-| `NOT_FOUND` | 지정된 요청이 없습니다 |
+| `NOT_FOUND` | The specified request does not exist |
 
 ---
 
-## System — 시스템 정보
+## 시스템 — 시스템 정보
 
-### GET /api/health
+### GET /api/건강
 
-건강 확인. block를 호출하지 않고 직접 응답을 반환합니다.
+건강검진. 블록을 호출하지 않고 직접 응답을 반환합니다.
 
-**Request Body:** 없음
+**요청 본문:** 없음**응답(`data`):**
 
-**Response (`data`):**
-
-| 필드 | 유형 | 설명 |
+| Field | Type | Description |
 |---|---|---|
 | `status` | `string` | `"healthy"` |
 | `pack` | `string` | `"defaults"` |
-| `ts` | `string` | ISO 8601 타임스탬프 |
+| `ts` | `string` | ISO 8601 timestamp |
 
-**오류 케이스:** 없음
+**오류 사례:** 없음
 
 ---
 
-### GET /api/context
+### GET /api/컨텍스트
 
-Pack의 컨텍스트 정보를 가져옵니다. facade 가 설정되어 있는 경우는 인터페이스 리스트도 돌려준다.
+팩에 대한 컨텍스트 정보를 가져옵니다. Facade가 설정된 경우 인터페이스 목록도 반환합니다.
 
-**Request Body:** 없음
+**요청 본문:** 없음**응답(`data`):**
 
-**Response (`data`):**
-
-| 필드 | 유형 | 설명 |
+| Field | Type | Description |
 |---|---|---|
 | `pack` | `string` | `"defaults"` |
-| `interfaces` | `object` | 커널 외관 인터페이스 목록 |
-| `ts` | `string` | ISO 8601 타임스탬프 |
+| `interfaces` | `object` | Kernel facade interface list |
+| `ts` | `string` | ISO 8601 timestamp |
 
-**오류 케이스:** 없음
-
----
-
-## Static — 정적 파일 전달
-
-### GET /
-
-Shell HTML을 반환합니다. `ui/shell.html`이 있으면 그 내용을 반환한다. 존재하지 않으면 폴백 HTML을 반환합니다.
-
-**Response:** `text/html` 콘텐츠
+**오류 사례:** 없음
 
 ---
 
-### GET /static/{path}
+## 정적 — 정적 파일 전달
 
-정적 파일을 전달합니다. `..`에 의한 상위 디렉토리 참조는 차단된다.
+### 받기 /
+
+쉘 HTML을 반환합니다. `ui/shell.html`이 있으면 해당 내용이 반환됩니다. 존재하지 않는 경우 대체 HTML을 반환합니다.
+
+**답변:** `text/html` 콘텐츠
+
+---
+
+### GET /static/{경로}
+
+정적 파일을 제공합니다. `..`이 포함된 상위 디렉터리 참조는 차단됩니다.
 
 **경로 매개변수:**
 
-| 매개변수 | 필수 | 유형 | 설명 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| `path` | 필수 | `string` | 파일의 상대 경로 |
+| `path` | Required | `string` | Relative path of the file |
 
-**Response:** 해당 Content-Type의 파일 내용입니다. 바이너리 파일은 base64로 인코딩됩니다.
+**응답:** 해당 Content-Type의 파일 콘텐츠입니다. 바이너리 파일은 base64로 인코딩됩니다.
 
 해당 확장자: `.html`, `.css`, `.js`, `.json`, `.png`, `.jpg`, `.jpeg`, `.gif`, `.svg`, `.ico`
 
-**오류 케이스:**
+**오류 사례:**
 
-| 코드 | 설명 |
+| Code | Description |
 |---|---|
-| `ERROR` | 경로가 잘못되었습니다 (`..` 포함) 또는 파일이 없습니다 |
+| `ERROR` | The path is invalid (including `..`, etc.) or the file does not exist |

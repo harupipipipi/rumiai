@@ -10,31 +10,29 @@
 
 包是rumaii生态系统中的一个应用单元。默认包是rumaii标配的包，提供聊天、代理、编码、AI客户端、工具、提示、内存、媒体、前端功能。
 
-每个包在`ecosystem.json`中声明其结构（组件、处理程序列表、加载顺序）。内核读取此文件来识别包并执行处理程序名称解析。
+每个 Pack 在 `ecosystem.json` 中声明其结构（组件、处理程序列表、加载顺序）。内核读取此文件来识别包并执行处理程序名称解析。
 
-包名称用在处理程序名称的开头。默认包中的所有处理程序均以`defaults.`开头（例如`defaults.chat.send`、`defaults.agent.execute`）。
+包名称用在处理程序名称的开头。默认包中的所有处理程序均以 `defaults.` 开头（例如 `defaults.chat.send`、`defaults.agent.execute`）。
 
 ## 什么是块/处理程序？
 
-block是`blocks/`目录下的一组模块，每个文件对应一个处理程序。 handler 是请求的入口点，并作为具有以下签名的 `run` 函数实现：
+block是`blocks/`目录下的一组模块，每个文件对应一个handler。 handler 是请求的入口点，并作为具有以下签名的 `run` 函数实现：
 
 ```python
 def run(input_data: dict, context: dict) -> dict:
 ```
 
-**`input_data`** 是请求参数的字典。 HTTP 请求的正文被解析为 JSON，并且还附加并传递 URL 路径参数（例如，`conversation_id`）。
+**`input_data`** 是请求参数的字典。 HTTP 请求的正文被解析为 JSON，并且还会附加并传递 URL 路径参数（例如，`conversation_id`）。**`context`** 是一个包含流信息和依赖函数的字典。 `transport/http.py` 的`_build_context()` 构建了一个包含以下字段的上下文。
 
-**`context`** 是一个包含流信息和相关函数的字典。 `_build_context()` 或`transport/http.py` 构建具有以下字段的上下文。
-
-|领域 |类型 |描述 |
+| Field | Type | Description |
 |---|---|---|
-| §鲁米§0§| §鲁米§1§ |流ID。 `"transport_direct"` 用于直接 HTTP 调用 |
-| §鲁米§0§| §鲁米§1§ |步骤 ID。 `"http_request"` 用于直接 HTTP 调用 |
-| §鲁米§0§| §鲁米§1§ |阶段。 §鲁米§2§ |
-| §鲁米§0§| §鲁米§1§ | ISO 8601 时间戳 |
-| §鲁米§0§| §鲁米§1§ |呼叫者的包 ID。 §鲁米§2§ |
-| §鲁米§0§| §鲁米§1§ |附加输入数据|
-| §鲁米§0§| §鲁米§1§ |调用其他处理程序的函数（通过内核注入）|
+| `flow_id` | `str` | Flow ID. `"transport_direct"` for direct HTTP calls |
+| `step_id` | `str` | Step ID. `"http_request"` for direct HTTP calls |
+| `phase` | `str` | Phase. `"execute"` |
+| `ts` | `str` | ISO 8601 timestamp |
+| `owner_pack` | `str` | Pack ID of the caller. `"defaults"` |
+| `inputs` | `dict` | Additional input data |
+| `call_handler` | `function` | Functions that call other handlers (injected via kernel) |
 
 **返回值**可以采用`blocks/_common.py`中定义的以下两种格式之一：
 
@@ -48,7 +46,7 @@ def error(message, code="ERROR"):
     return {"status": "error", "error": {"code": code, "message": message}}
 ```
 
-##什么是流量？
+## 什么是流量？
 
 流是一种执行定义，它将多个处理程序排序为步骤。它们作为一对 `flow.yaml` 和 `handler.py` 放置在 `flows/` 目录下。
 
@@ -81,15 +79,15 @@ metadata:                       # メタデータ
 
 ## 什么是域名？
 
-域是handler调用的业务逻辑层。它作为每个域的子目录放置在`domain/` 目录下。
+域是handler调用的业务逻辑层。它作为每个域的子目录放置在 `domain/` 目录下。
 
 该处理程序是一个精简入口点，仅执行验证、调用域并格式化结果。实际逻辑（存储数据、调用AI、搜索等）由领域层中的类处理。
 
 主要的域类有：
 
-- **`domain/chat/store.py`** — `ChatStore`：用于对话和消息的内存中 CRUD。辛格尔顿。
+- **`domain/chat/store.py`** — `ChatStore`：对话和消息的内存 CRUD。辛格尔顿。
 - **`domain/agent/engine.py`** — `AgentEngine`：代理执行循环（思考→工具调用→批准→响应）。
-- **`domain/company/message_router.py`** — `CompanySlackRuntime`：基于通道/线程/消息/提及/任务的公司路由。
+- **`domain/company/message_router.py`** — `CompanySlackRuntime`：基于渠道/线程/消息/提及/任务的公司路由。
 - **`domain/agent/multi.py`** — 仅兼容旧版本。
 - **`domain/tool/registry.py`** — `ToolRegistry`：工具定义的注册和管理。辛格尔顿。持久化到内存中 + `user_data/shared/tools/`。
 - **`domain/prompt/manager.py`** — `PromptManager`：提示 CRUD。持久化到内存中 + `user_data/shared/prompts/`。
@@ -115,30 +113,28 @@ metadata:                       # メタデータ
 - `stream.py` — 流小部件，例如流、指示器等。
 - `custom.py` — 自定义小部件
 
-处理程序可以使用`context["emit_widget"](§RUMI§0§)`将小部件发送到 UI。
+处理程序可以使用`context["emit_widget"](widget_json)`将小部件发送到 UI。
 
 ## 什么是上下文？
 
 context 是传递给处理程序的执行上下文的字典。主要领域有：
 
-|领域 |类型 |描述 |
+| Field | Type | Description |
 |---|---|---|
-| §鲁米§0§| §鲁米§1§ |运行流ID。 `"transport_direct"` 直接致电 |
-| §鲁米§0§| §鲁米§1§ |当前步骤 ID。 `"http_request"` 直接致电 |
-| §鲁米§0§| §鲁米§1§ |执行阶段。 §鲁米§2§ |
-| §鲁米§0§| §鲁米§1§ |时间戳 (ISO 8601) |
-| §鲁米§0§| §鲁米§1§ |来电者包 ID |
-| §鲁米§0§| §鲁米§1§ |附加输入数据|
-| §鲁米§0§| §鲁米§1§ |调用其他处理程序的函数 |
-| §鲁米§0§| §鲁米§1§ |触发事件的函数 |
-| §鲁米§0§| §鲁米§1§ |等待事件的函数 |
-| §鲁米§0§| §鲁米§1§ |发送Widget到UI的函数|
-| §鲁米§0§| §鲁米§1§ |检查是否取消的函数 |
-| §鲁米§0§| §鲁米§1§ |处理程序设置（conditions.json 等）|
-| §鲁米§0§| §鲁米§1§ |会话信息（session_id、工作空间等）|
+| `flow_id` | `str` | Running flow ID. `"transport_direct"` for direct call |
+| `step_id` | `str` | Current step ID. `"http_request"` for direct call |
+| `phase` | `str` | Execution phase. `"execute"` |
+| `ts` | `str` | Timestamp (ISO 8601) |
+| `owner_pack` | `str` | Caller's Pack ID |
+| `inputs` | `dict` | Additional input data |
+| `call_handler` | `function` | Function that calls other handlers |
+| `emit_event` | `function` | Function that fires an event |
+| `wait_event` | `function` | Function that waits for an event |
+| `emit_widget` | `function` | Function to send Widget to UI |
+| `cancel_check` | `function` | Function to check if canceled |
+| `handler_config` | `dict` | Handler settings (conditions.json, etc.) |
+| `session` | `dict` | Session information (session_id, workspace, etc.) |
 
 ## 与InterfaceRegistry/EventBus的关系
 
-**InterfaceRegistry** 是由内核管理的接口的注册表。每个Pack提供的接口（处理程序）由`call_handler`注册并用于名称解析。您可以通过在`/api/context`端点上调用`facade.list_interfaces()`来获取已注册接口的列表。
-
-**EventBus** 是内核管理的事件总线。您可以使用`context["emit_event"](§RUMI§0§)`触发事件并使用`context["wait_event"](§RUMI§1§)`等待事件。用于处理程序和流之间的异步通信。
+**InterfaceRegistry** 是由内核管理的接口的注册表。每个 Pack 提供的接口（处理程序）均由 `call_handler` 注册并用于名称解析。您可以通过在 `/api/context` 端点上调用 `facade.list_interfaces()` 来获取已注册接口的列表。**EventBus** 是内核管理的事件总线。您可以使用 `context["emit_event"](event_type, data)` 触发事件并使用 `context["wait_event"](event_type, timeout, filter)` 等待事件。用于处理程序和流之间的异步通信。

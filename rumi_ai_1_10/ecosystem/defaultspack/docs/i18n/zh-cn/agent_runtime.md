@@ -6,7 +6,7 @@
 
 defaultspack 现在在 `user_data/shared/agent_runtime/state.db` 中记录代理执行情况
 并将活动转录事件镜像到下面的 JSONL 文件
-§鲁米§0§。
+`user_data/shared/agent_runtime/transcripts/`。
 
 现有的`defaults.agent.execute/status/approve/reject/cancel` API 仍然存在
 兼容。 `blocks.agent._state` 仍然保留可用的实时引擎，但它
@@ -15,4 +15,4 @@ defaultspack 现在在 `user_data/shared/agent_runtime/state.db` 中记录代理
 
 核心运行时添加仍然是通用的：文件锁、JSONL/SQLite 帮助程序、运行时
 事件和审计编辑助手。代理域行为存在于
-§鲁米§0§。
+`domain/agent_runtime`。

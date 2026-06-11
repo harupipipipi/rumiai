@@ -156,12 +156,12 @@ context["call_handler"]("defaults.tool.mcp_disconnect", {
 
 |处理程序 |许可|描述 |
 |---|---|---|
-| §鲁米§0§| §鲁米§1§ |连接到 MCP 服务器 |
-| §鲁米§0§| §鲁米§1§ |获取连接服务器的工具列表 |
-| §鲁米§0§| §鲁米§1§ |与 MCP 服务器断开连接 |
-| §鲁米§0§| §鲁米§1§ |调用工具（MCP/原生通用）|
-| §鲁米§0§| §鲁米§1§ |获取所有工具列表（包括MCP） |
-| §鲁米§0§| §鲁米§1§ |获取工具架构 |
+| `defaults.tool.mcp_connect`| `tool.mcp.connect` |连接到 MCP 服务器 |
+| `defaults.tool.mcp_list`| `tool.mcp.list` |获取连接服务器的工具列表 |
+| `defaults.tool.mcp_disconnect`| `tool.mcp.disconnect` |与 MCP 服务器断开连接 |
+| `defaults.tool.invoke`| `tool.invoke` |调用工具（MCP/原生通用）|
+| `defaults.tool.list`| `tool.list` |获取所有工具列表（包括MCP） |
+| `defaults.tool.schema`| `tool.schema.read` |获取工具架构 |
 
 ### 输入数据/返回值
 

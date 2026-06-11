@@ -156,12 +156,12 @@ context["call_handler"]("defaults.tool.mcp_disconnect", {
 
 | 핸들러 | 허가 | 설명 |
 |---|---|---|
-| §루미§0§ | §루미§1§ | MCP 서버에 연결 |
-| §루미§0§ | §루미§1§ | 연결된 서버용 도구 목록 가져오기 |
-| §루미§0§ | §루미§1§ | MCP 서버 연결 끊기 |
-| §루미§0§ | §루미§1§ | 호출 도구(MCP/네이티브 공통) |
-| §루미§0§ | §루미§1§ | 모든 도구 목록 가져오기(MCP 포함) |
-| §루미§0§ | §루미§1§ | 도구 스키마 가져오기 |
+| `defaults.tool.mcp_connect` | `tool.mcp.connect` | MCP 서버에 연결 |
+| `defaults.tool.mcp_list` | `tool.mcp.list` | 연결된 서버용 도구 목록 가져오기 |
+| `defaults.tool.mcp_disconnect` | `tool.mcp.disconnect` | MCP 서버 연결 끊기 |
+| `defaults.tool.invoke` | `tool.invoke` | 호출 도구(MCP/네이티브 공통) |
+| `defaults.tool.list` | `tool.list` | 모든 도구 목록 가져오기(MCP 포함) |
+| `defaults.tool.schema` | `tool.schema.read` | 도구 스키마 가져오기 |
 
 ### input_data / 반환 값
 

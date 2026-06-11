@@ -21,7 +21,7 @@ Genspark、Manus、Cline、Hermes、OpenClaw の現在のパブリック イン�
 |エルメス | `NousResearch/hermes-agent` GitHub ページでは、インストーラー、デスクトップ ビルド、ゲートウェイ、プロバイダー、プラグイン、スキル、ダッシュボード サーフェスを備えた大規模なエージェント ランタイムが公開されています。 | defaultspack には、生のチャットだけではなく、目に見えるプロバイダー、ツール、承認、ダッシュボードのプリミティブが必要です。 |
 |オープンクロウ |公式ドキュメントには、インストーラー スクリプト、npm install、オンボーディング、ゲートウェイ ステータス、ダッシュボードの起動、およびチャネルのセットアップが記載されています。 Windows インストーラは `iwr -useb https://openclaw.ai/install.ps1 | iex` です。オンボードなしモードについても文書化されています。 | defaultspack には、短いインストール パス、ネットワークなし/キーなしのローカル モード、およびゲートウェイ/UI/モデルのステータスに関する次のステップのチェックをクリアする必要があります。 |
 
-##defaultspack 結果
+## defaultspack 結果
 
 - `python -m rumi_ai --health` は、ディスクおよび書き込み可能な温度プローブに対して `UP` を返しました。
 - `ecosystem/defaultspack/webapp`の`npm test`は207のテストに合格しました。

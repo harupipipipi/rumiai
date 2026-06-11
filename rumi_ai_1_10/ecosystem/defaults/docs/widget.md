@@ -14,15 +14,7 @@ Widgets have no domain knowledge. There are no "chat widgets" or "agent widgets.
 
 ## 2. Design philosophy
 
-**Pure data**: Widget is a JSON dict. Contains no rendering logic or event handlers. Drawing is the responsibility of the front end.
-
-**Domain independent**: Widget types are general-purpose display primitives such as "text", "image", and "table". There are no specialized types for specific domains (chat, agents, etc.).
-
-**Nestable**: Widgets can be placed inside Widgets. Put CodeBlock and Text in a Card, arrange multiple Buttons in a Row, etc.
-
-**Fallback assumption**: If the front end cannot draw a certain Widget type, it will fall back to the text representation. Custom widgets have an explicit fallback widget. In the CLI environment, all widgets fall back to text representation.
-
-**Separation from theme**: Widget declares only "what to display". The theme determines how it will be presented (colors, fonts, animations, rounded corners, shadows, etc.). The widget can pass a hint to the theme using style_hint, but the theme can ignore this.
+**Pure data**: Widget is a JSON dict. Contains no rendering logic or event handlers. Drawing is the responsibility of the front end.**Domain independent**: Widget types are general-purpose display primitives such as "text", "image", and "table". There are no specialized types for specific domains (chat, agents, etc.).**Nestable**: Widgets can be placed inside Widgets. Put CodeBlock and Text in a Card, arrange multiple Buttons in a Row, etc.**Fallback assumption**: If the front end cannot draw a certain Widget type, it will fall back to the text representation. Custom widgets have an explicit fallback widget. In the CLI environment, all widgets fall back to text representation.**Separation from theme**: Widget declares only "what to display". The theme determines how it will be presented (colors, fonts, animations, rounded corners, shadows, etc.). The widget can pass a hint to the theme using style_hint, but the theme can ignore this.
 
 ## 3. Widget JSON specification
 
@@ -950,7 +942,7 @@ Widget型一覧:
 
 表示系（14種）:
 - Text
-- CodeBlock  
+- CodeBlock
 - Diff
 - Image
 - Screenshot
@@ -1041,15 +1033,7 @@ Widgets have no domain knowledge. Define only general-purpose display primitives
 
 ## 2. Design philosophy
 
-**Pure data**: Widget is a JSON dict. Contains no rendering logic, event handlers, or style definitions. Drawing is the responsibility of the front end.
-
-**Domain independent**: Widget types are general-purpose primitives such as "text", "image", and "table". There are no domain-specific types such as "Chat Message Widget" or "Agent Status Widget."
-
-**Nestable**: Widgets can be placed inside Widgets. Inserting a CodeBlock in the body of a Card, arranging multiple Buttons in a Row, placing a different widget in each tab of Tabs, etc.
-
-**Fallback assumption**: If the front end cannot draw a certain Widget type, it will fall back to the text representation. Custom widgets have an explicit fallback widget. In the CLI environment, all widgets fall back to text representation.
-
-**Separation from theme**: Widget declares only "what to display". The theme determines how it will be presented. The widget can pass a hint to the theme with `style_hint`, but the theme can ignore this.
+**Pure data**: Widget is a JSON dict. Contains no rendering logic, event handlers, or style definitions. Drawing is the responsibility of the front end.**Domain independent**: Widget types are general-purpose primitives such as "text", "image", and "table". There are no domain-specific types such as "Chat Message Widget" or "Agent Status Widget."**Nestable**: Widgets can be placed inside Widgets. Inserting a CodeBlock in the body of a Card, arranging multiple Buttons in a Row, placing a different widget in each tab of Tabs, etc.**Fallback assumption**: If the front end cannot draw a certain Widget type, it will fall back to the text representation. Custom widgets have an explicit fallback widget. In the CLI environment, all widgets fall back to text representation.**Separation from theme**: Widget declares only "what to display". The theme determines how it will be presented. The widget can pass a hint to the theme with `style_hint`, but the theme can ignore this.
 
 
 ## 3. Base properties

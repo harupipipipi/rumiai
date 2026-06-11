@@ -11,12 +11,12 @@
 
 - 存储库：`rumiai`
 - 用于此检查点的本地工作区：
-  §鲁米§0§
+  `/Users/haru/Desktop/puroguramukei/rumi_ai_mac`
 - 主包目录：`rumi_ai_1_10`
 - 分支机构：`codex/defaultspack-function-flow`
 - 远程：`origin`，`https://github.com/harupipipipi/rumiai.git`
 - 在此切换文件之前检查点提交：
-  §鲁米§0§
+  `776178f2 WIP: canonicalize defaultspack function flow runtime`
 
 继续在同一个分支上工作，并将所有剩余的工作放入一个 PR 中。
 除非用户明确更改范围，否则请勿将其拆分为多个 PR。
@@ -51,22 +51,22 @@
 - 旧版兼容性：`ecosystem/defaults` 代表`defaultspack`。
 - 流程实现：YAML 声明加 Python 引擎。
 - 允许的可创作工具执行类型：
-  - §鲁米§0§
-  - §鲁米§0§
-  - §鲁米§0§
+  - `rumi_function`
+  - `capability`
+  - `mcp`
 - 旧执行类型，例如`local`、`handler`、`dynamic`和`prompt`
   不可授权给不受信任的工具。现有的第一方兼容性
   路径可能会暂时保留，但对于不受信任的工具应该无法关闭。
 - 当前使用的能力分类：
-  - §鲁米§0§
-  - §鲁米§0§
-  - §鲁米§0§
-  - §鲁米§0§
-  - §鲁米§0§
-  - §鲁米§0§
-  - §鲁米§0§
-  - §鲁米§0§
-  - §鲁米§0§
+  - `file.read`
+  - `file.write`
+  - `terminal.exec`
+  - `git.read`
+  - `git.write`
+  - `network.read`
+  - `network.send`
+  - `browser.control`
+  - `computer.control`
 - `write_action` 仅是元数据。必须做出许可和风险决策
   从风险类别、审批策略、执行类型、可信包身份以及
   能力补助金。
@@ -98,10 +98,10 @@
 
 - 扩展`ecosystem/defaultspack/domain/flow/engine.py`。
 - 添加了声明性验证和执行支持：
-  - §鲁米§0§
-  - §鲁米§0§
-  - §鲁米§0§
-  - §鲁米§0§
+  - `function`
+  - `subflow`
+  - `branch`
+  - `parallel`
 - 将`ecosystem/defaultspack/flows/chat_turn.flow.yaml`更新为规范
   正常聊天入口。
 - 添加了`ecosystem/defaultspack/flows/chat_stream_turn.flow.yaml`。
@@ -124,8 +124,8 @@
 - 将`ecosystem/defaults/transport/{http,cli,stdio,uds}.py`转换为薄
   兼容性垫片。
 - 添加/更新了路线测试：
-  - §鲁米§0§
-  - §鲁米§0§
+  - `tests/test_defaultspack_route_integration.py`
+  - `tests/test_defaults_mcp_transport.py`
 
 ### 提示
 
@@ -133,14 +133,14 @@
 - 更新了提示加载/解析，以便有效的提示返回源链
   并解决了内容。
 - 添加了调度程序条目：
-  - §鲁米§0§
-  - §鲁米§0§
+  - `prompt_validate_template`
+  - `prompt_resolve_for_conversation`
 - 禁用提示工具创作作为可执行提示逻辑。
 - 更新了提示模板/统一转换生成被动/函数
   外观元数据而不是可执行文件`execution.type = prompt`。
 - 添加了测试：
-  - §鲁米§0§
-  - §鲁米§0§
+  - `tests/test_defaultspack_prompt_effective.py`
+  - `tests/test_defaultspack_prompt_passive.py`
 
 ### AI 客户/提供商
 
@@ -157,7 +157,7 @@
 - 更新
   `ecosystem/rumi_default_tools_pack/domain/tool/browser_computer.py`要避免
   自定义测试工件根重用旧的共享选定窗口状态
-  §鲁米§0§。
+  `browser_sessions.json`。
 - 这修复了在完整的浏览器/计算机状态敏感故障中出现的问题
   pytest 运行。
 
@@ -175,14 +175,14 @@
 
 重要的文档更改包括：
 
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
+- `docs/flow_spec.md`
+- `docs/prompt_authoring.md`
+- `docs/provider_authoring.md`
+- `ecosystem/defaultspack/docs/ai_client.md`
+- `ecosystem/defaultspack/docs/prompt.md`
+- `ecosystem/defaultspack/docs/tool-prompt-conversion.md`
+- `ecosystem/defaultspack/docs/transport.md`
+- `ecosystem/defaultspack/docs/writing-tools.md`
 
 ## 验证已运行
 
@@ -252,7 +252,7 @@ python -m pytest -q
 发生了什么：
 
 1. 在浏览器/计算机状态修复达到之前完整运行：
-   §鲁米§0§。
+   `4373 passed, 19 skipped, 7 failed`。
 2. 所有 7 次失败都是浏览器/计算机物理动作委托测试，其中
    过时的选定窗口状态使操作返回`executed=False`。
 3. 添加了状态修复并通过了相关的 18 测试子集。
@@ -302,7 +302,7 @@ rg -n 'from domain\\.ai_client\\.client import AIClient|from ecosystem\\.default
 仅应保留允许的旧版/导入兼容性位置。
 
 7. 完成后，从 `codex/defaultspack-function-flow` 创建一个 PR 到
-   §鲁米§0§。
+   `master`。
 
 ## 最终 PR 的接受标准
 

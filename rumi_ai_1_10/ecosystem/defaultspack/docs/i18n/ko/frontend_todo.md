@@ -16,7 +16,7 @@
 - preview pane을 conversation preview API 구동으로 변경
 - chat renderer에 code/image/widget/unknown fallback 추가
 
-##Next
+## Next
 
 - `chat_renderers` metadata와 frontend renderer 구현을 완전히 분리
 - widget type 당 전용 renderer registry를 `webapp/src/renderers/`로 잘라냅니다.

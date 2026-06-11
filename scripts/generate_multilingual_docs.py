@@ -20,7 +20,7 @@ ROOT = Path(__file__).resolve().parents[1]
 LINK_BLOCK_START = "<!-- docs-i18n-links:start -->"
 LINK_BLOCK_END = "<!-- docs-i18n-links:end -->"
 SPLIT_TOKEN = "\n§§§RUMI_DOC_SPLIT§§§\n"
-PLACEHOLDER_PREFIX = "§RUMI§"
+PLACEHOLDER_RE = re.compile(r"§§(\d+)§§")
 
 
 @dataclass(frozen=True)
@@ -42,12 +42,15 @@ TARGET_PATTERNS: tuple[tuple[Path, tuple[str, ...]], ...] = (
     (ROOT, ("README.md",)),
     (ROOT / "pack-shell", ("README.md",)),
     (ROOT / "rumi_mobile", ("README.md", "TODO.md")),
-    (ROOT / "browser_extensions" / "rumi_browser_companion", ("README.md",)),
     (ROOT / "rumi_viewer" / "frontend", ("README.md",)),
     (ROOT / "rumi_ai_1_10", ("README.md", "CHANGELOG.md")),
     (ROOT / "rumi_ai_1_10" / "docs", ("**/*.md",)),
     (ROOT / "rumi_ai_1_10" / "core_runtime" / "core_pack" / "core_control_panel", ("README.md",)),
     (ROOT / "rumi_ai_1_10" / "ecosystem" / "defaultspack", ("README.md",)),
+    (
+        ROOT / "rumi_ai_1_10" / "ecosystem" / "defaultspack" / "browser_extensions" / "rumi_browser_companion",
+        ("README.md",),
+    ),
     (ROOT / "rumi_ai_1_10" / "ecosystem" / "defaultspack" / "docs", ("**/*.md",)),
     (ROOT / "rumi_ai_1_10" / "ecosystem" / "defaults", ("README.md",)),
     (ROOT / "rumi_ai_1_10" / "ecosystem" / "defaults" / "docs", ("**/*.md",)),
@@ -57,6 +60,7 @@ TARGET_PATTERNS: tuple[tuple[Path, tuple[str, ...]], ...] = (
 HEADING_RE = re.compile(r"^(#{1,6})\s+(.*?)(?:\s+#+\s*)?$")
 CODE_FENCE_RE = re.compile(r"^\s*```")
 TABLE_DELIMITER_RE = re.compile(r"^\s*\|?(?:\s*:?-{3,}:?\s*\|)+\s*:?-{3,}:?\s*\|?\s*$")
+TABLE_ROW_RE = re.compile(r"^\s*\|.*\|\s*$")
 INLINE_CODE_RE = re.compile(r"`[^`\n]+`")
 HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
 HTML_TAG_RE = re.compile(r"</?[\w:-]+(?:\s+[^<>]*?)?>")
@@ -372,7 +376,27 @@ def rewrite_link_target(
 def replace_tokens(text: str, replacements: dict[str, str]) -> str:
     for token, value in replacements.items():
         text = text.replace(token, value)
+    if replacements:
+        ordered = [value for _, value in sorted((_token_index(token), value) for token, value in replacements.items())]
+
+        def fallback_replace(match: re.Match[str]) -> str:
+            index = int(match.group(1))
+            return ordered[index] if index < len(ordered) else match.group(0)
+
+        text = PLACEHOLDER_RE.sub(fallback_replace, text)
     return text
+
+
+def _token_index(token: str) -> int:
+    match = PLACEHOLDER_RE.fullmatch(token)
+    if not match:
+        raise ValueError(f"invalid placeholder token: {token}")
+    return int(match.group(1))
+
+
+def tidy_markdown(text: str) -> str:
+    text = re.sub(r"\*\*([^*\n]*?)\s+\*\*", r"**\1**", text)
+    return "\n".join(line.rstrip() for line in text.splitlines()) + "\n"
 
 
 def prepare_inline(
@@ -390,7 +414,7 @@ def prepare_inline(
 
     def make_token(value: str) -> str:
         nonlocal counter
-        token = f"{PLACEHOLDER_PREFIX}{counter}§"
+        token = f"§§{counter}§§"
         counter += 1
         replacements[token] = value
         return token
@@ -434,6 +458,7 @@ def render_document(
     prepared_lines: dict[int, str] = {}
     replacements_by_index: dict[int, dict[str, str]] = {}
     literal_lines: dict[int, str] = {}
+    heading_prefix_by_index: dict[int, str] = {}
 
     for index, line in enumerate(lines):
         stripped = line.strip()
@@ -441,11 +466,31 @@ def render_document(
             in_fence = not in_fence
             literal_lines[index] = line
             continue
-        if in_fence or TABLE_DELIMITER_RE.match(line) or stripped.startswith("<!-- docs-i18n-links:"):
+        if (
+            in_fence
+            or TABLE_DELIMITER_RE.match(line)
+            or TABLE_ROW_RE.match(line)
+            or stripped.startswith("<!-- docs-i18n-links:")
+        ):
             literal_lines[index] = line
             continue
         if not stripped:
             literal_lines[index] = ""
+            continue
+        heading_match = HEADING_RE.match(line)
+        if heading_match:
+            prepared, replacements = prepare_inline(
+                heading_match.group(2).strip(),
+                source_path,
+                lang,
+                current_output,
+                heading_maps,
+                target_outputs,
+            )
+            heading_prefix_by_index[index] = heading_match.group(1)
+            prepared_lines[index] = prepared
+            replacements_by_index[index] = replacements
+            batch_inputs.append(prepared)
             continue
         prepared, replacements = prepare_inline(
             line,
@@ -466,14 +511,17 @@ def render_document(
             translated_lines.append(literal_lines[index])
         else:
             translated = translated_lookup[prepared_lines[index]].replace("&#39;", "'")
-            translated_lines.append(replace_tokens(translated, replacements_by_index[index]))
+            restored = replace_tokens(translated, replacements_by_index[index])
+            if index in heading_prefix_by_index:
+                restored = f"{heading_prefix_by_index[index]} {restored.strip()}"
+            translated_lines.append(restored)
 
     link_line = " | ".join(
         f"[{candidate.label}]({normalize_relpath(os.path.relpath(target_outputs[source_path][candidate.code], current_output.parent))})"
         for candidate in LANGS
     )
     body = "\n".join(translated_lines).strip() + "\n"
-    return f"{LINK_BLOCK_START}\n{link_line}\n{LINK_BLOCK_END}\n\n{body}"
+    return tidy_markdown(f"{LINK_BLOCK_START}\n{link_line}\n{LINK_BLOCK_END}\n\n{body}")
 
 
 def main() -> int:

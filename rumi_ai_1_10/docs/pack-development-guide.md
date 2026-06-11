@@ -155,9 +155,7 @@ def run() -> dict | None:
 
 ### Important Notes
 
-**Return value must be JSON compatible**: Return one of `dict`, `list`, `str`, `int`, `float`, `bool`, `None`.
-
-**Don't use keys with the `_` prefix**: If you include a key starting with the `_` prefix (e.g. `_internal`) in the returned dict, the Kernel will automatically exclude it.
+**Return value must be JSON compatible**: Return one of `dict`, `list`, `str`, `int`, `float`, `bool`, `None`.**Don't use keys with the `_` prefix**: If you include a key starting with the `_` prefix (e.g. `_internal`) in the returned dict, the Kernel will automatically exclude it.
 
 ```python
 # NG: _ プレフィックスは除外される

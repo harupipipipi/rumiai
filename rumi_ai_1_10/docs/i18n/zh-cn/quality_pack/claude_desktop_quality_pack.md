@@ -4,8 +4,8 @@
 
 # Claude rumi_ai 桌面级质量包
 
-本文档是一个实用包，用于持续开发、审核和验证 rumi_ai 的高质量。  
-**PR1仅添加优质资产，不会改变产品行为。 **
+本文档是一个实用包，用于持续开发、审核和验证 rumi_ai 的高质量。
+**PR1仅添加优质资产，不会改变产品行为。**
 
 ---
 
@@ -87,9 +87,9 @@ cd pack-shell && cargo test && cd ..
 ## 4. 审核程序
 
 1.检查审计日志
-   - §鲁米§0§
-   - §鲁米§0§
-   - §鲁米§0§
+   - `user_data/audit/security_YYYY-MM-DD.jsonl`
+   - `user_data/audit/network_YYYY-MM-DD.jsonl`
+   - `user_data/audit/permission_YYYY-MM-DD.jsonl`
 2.查看审批状态
    - 没有未经授权的包正在运行
    - `modified` 状态包未经重新授权无法运行

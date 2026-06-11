@@ -14,13 +14,13 @@
 
 | 도구의 개념 | 프롬프트의 개념 |
 |---|---|
-| §루미§0§ | §루미§1§ |
+| `tool_id` | `prompt_id` |
 | `parameters`의 `schema.json` | `required` of `VARIABLES` + `optional` + `custom` |
 | `handler.py`의 `run(params, context)` | `prompt.py`의 `pre_render(variables, context)` |
 | `handler.py` `{"result": ...}`의 반환 값 | 렌더링된 텍스트 문자열 |
 | `guide.json` of `purpose` / `when_to_use` | `METADATA`의 `description` |
-| §루미§0§ | 해당 없음(프롬프트에 모델 조건이 없음) |
-| `permission.json`의 `capabilities_required` | §루미§2§ |
+| `conditions.json` | 해당 없음(프롬프트에 모델 조건이 없음) |
+| `permission.json`의 `capabilities_required` | `PERMISSIONS` |
 | `tool.json`의 `tags` | `METADATA`의 `tags` |
 
 이러한 대칭을 통해 도구와 프롬프트 간의 양방향 변환이 가능해집니다.
@@ -79,11 +79,11 @@ def tool_to_prompt_variables(schema: dict) -> dict:
 | 도구 분야 | 프롬프트 필드 |
 |---|---|
 | `tool.json`의 `tool_id` | `METADATA["prompt_id"]`의 `"tool_prompt_{tool_id}"` |
-| `tool.json`의 `name` | §루미§2§ |
-| `tool.json`의 `summary` | §루미§2§ |
-| `tool.json`의 `version` | §루미§2§ |
-| `tool.json`의 `tags` | §루미§2§ |
-| `permission.json` 기능 | §루미§1§ |
+| `tool.json`의 `name` | `METADATA["name"]` |
+| `tool.json`의 `summary` | `METADATA["description"]` |
+| `tool.json`의 `version` | `METADATA["version"]` |
+| `tool.json`의 `tags` | `METADATA["metadata"]["tags"]` |
+| `permission.json` 기능 | `PERMISSIONS` |
 
 
 ## 3. 프롬프트 → 도구 변환

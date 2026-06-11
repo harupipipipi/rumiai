@@ -61,7 +61,7 @@ curl http://127.0.0.1:8765/health
 
 执行的原始日志保存在下面。
 
-- §鲁米§0§
+- [../assets/tutorials/runtime-quickstart.log](../assets/tutorials/runtime-quickstart.log)
 
 ## 继续阅读
 

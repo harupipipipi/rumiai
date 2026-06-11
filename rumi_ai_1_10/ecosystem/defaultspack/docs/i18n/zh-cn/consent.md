@@ -10,20 +10,20 @@
 
 默认包提供了完整的同意机制（判断逻辑、处理程序、UI弹出协作、事件通信）。具体来说，以下文件放置在默认包中。
 
-|文件|描述 |
+| File | Description |
 |---|---|
-| §鲁米§0§|判断处理者 (`defaults.tool.consent_check`) |
-| §鲁米§0§|同意记录处理程序 (`defaults.tool.consent_confirm`) |
-| §鲁米§0§| `ConsentChecker`类（判定逻辑/同意记录管理）|
+| `blocks/tool/consent_check.py` | Judgment handler (`defaults.tool.consent_check`) |
+| `blocks/tool/consent_confirm.py` | Consent record handler (`defaults.tool.consent_confirm`) |
+| `domain/tool/consent.py` | `ConsentChecker` Class (determination logic/consent record management) |
 
-`defaults.tool.consent_check` 和`defaults.tool.consent_confirm` 在`ecosystem.json` 的`tool` 部分的`provides` 中声明。可以使用路由`POST /api/consent/check`和`POST /api/consent/{id}/confirm`访问HTTP传输。
+`defaults.tool.consent_check`和`defaults.tool.consent_confirm`在`ecosystem.json`的`tool`部分的`provides`中声明。可以使用路由 `POST /api/consent/check` 和 `POST /api/consent/{id}/confirm` 访问 HTTP 传输。
 
 
 ## 2.判断机制
 
 ### 基于关键词的判断
 
-轻量且快速的初步判断。检查响应文本是否包含特定关键字。执行`domain/tool/consent.py` 的`ConsentChecker.check_keywords()`。类别和关键字作为 `CATEGORIES` 字典硬编码到模块中。
+轻量且快速的初步判断。检查响应文本是否包含特定关键字。 `domain/tool/consent.py`的`ConsentChecker.check_keywords()`被执行。类别和关键字作为 `CATEGORIES` 字典硬编码到模块中。
 
 ```python
 # domain/tool/consent.py より抜粋
@@ -65,7 +65,7 @@ CATEGORIES = {
 
 ### 基于人工智能的判断
 
-如果将`consent_check`处理程序的`use_ai`参数设置为`true`，`ConsentChecker.check_ai()`将执行基于AI的判断。内部调用`AIClient.complete()`来对文本是否属于敏感类别进行分类。
+如果将`consent_check`处理程序的`use_ai`参数设置为`true`，`ConsentChecker.check_ai()`将进行基于AI的判断。内部调用`AIClient.complete()`来对文本是否属于敏感类别进行分类。
 
 ```python
 # domain/tool/consent.py の AI 判定用システムプロンプト
@@ -80,7 +80,7 @@ _AI_JUDGE_SYSTEM = (
 )
 ```
 
-`ConsentChecker.check()`结合了关键词判断和人工智能判断。关键词判断误报多但漏报少，AI判断误报少但速度慢。
+`ConsentChecker.check()`结合关键词判断和AI判断。关键词判断误报多但漏报少，AI判断误报少但速度慢。
 
 
 ## 3. 处理程序 API
@@ -89,15 +89,13 @@ _AI_JUDGE_SYSTEM = (
 
 确定文本并返回是否需要同意。
 
-**HTTP**：`POST /api/consent/check`
+**HTTP**：`POST /api/consent/check`**输入数据**：
 
-**输入数据**：
-
-|领域 |类型 |必填 |描述 |
+| Field | Type | Required | Description |
 |---|---|---|---|
-| §鲁米§0§| §鲁米§1§ |是的 |判断目标文本 |
-| §鲁米§0§| §鲁米§1§ |没有 |使用AI判断（默认`false`）|
-| §鲁米§0§| §鲁米§1§ |没有 | AI判断时的模型规范（默认`"stub/default"`）|
+| `text` | `string` | Yes | Judgment target text |
+| `use_ai` | `bool` | No | Use AI judgment (default `false`) |
+| `model` | `string` | No | Model specification during AI judgment (default `"stub/default"`) |
 
 **返回值**：
 
@@ -122,14 +120,12 @@ _AI_JUDGE_SYSTEM = (
 
 记录用户同意/拒绝。
 
-**HTTP**：`POST /api/consent/{id}/confirm`
+**HTTP**：`POST /api/consent/{id}/confirm`**输入数据**：
 
-**输入数据**：
-
-|领域 |类型 |必填 |描述 |
+| Field | Type | Required | Description |
 |---|---|---|---|
-| §鲁米§0§| §鲁米§1§ |是的 | `consent_check`返回的consent_id（从HTTP中的路径参数注入）|
-| §鲁米§0§| §鲁米§1§ |是的 |用户同意 |
+| `consent_id` | `string` | Yes | consent_id returned by `consent_check` (injected from path parameter in HTTP) |
+| `accepted` | `bool` | Yes | User consent |
 
 **返回值**：
 
@@ -144,12 +140,12 @@ _AI_JUDGE_SYSTEM = (
 }
 ```
 
-同意记录在`user_data/shared/consent_log/{consent_id}.json`中永久保存（写在`ConsentChecker._persist()`中）。
+同意记录在 `user_data/shared/consent_log/{consent_id}.json` 中永久保存（写入 `ConsentChecker._persist()`）。
 
 
 ## 4. 如何集成到chat.send（建议）
 
-建议的集成如`blocks/tool/consent_check.py`的文档字符串中所述：
+建议的集成如 `blocks/tool/consent_check.py` 的文档字符串中所述：
 
 ```python
 # blocks/chat/send.py の assistant_msg 生成後に追加
@@ -177,7 +173,7 @@ if consent_result["data"]["requires_consent"]:
 
 同意弹出窗口显示在`emit_widget`或`emit_event("ui.popup.show", ...)`中。前端的资源接收此事件并绘制一个弹出窗口。
 
-如果Asset的JS收到`event.broadcast`并且`event_type`是`"ui.popup.show"`，它将显示一个弹出窗口。当用户单击按钮时，`event.broadcast` 发送回`"ui.popup.response"` 事件。
+如果Asset的JS收到`event.broadcast`并且`event_type`是`"ui.popup.show"`，它会显示一个弹出窗口。当用户单击按钮时，`event.broadcast` 会发回`"ui.popup.response"` 事件。
 
 将弹出窗口表示为小部件时：
 

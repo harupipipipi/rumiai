@@ -2,7 +2,7 @@
 [EN](../../index.md) | [JP](./index.md) | [KR](../ko/index.md) | [CN](../zh-cn/index.md)
 <!-- docs-i18n-links:end -->
 
-#defaultspack ドキュメントのインデックス
+# defaultspack ドキュメントのインデックス
 
 defaultspack のドキュメントに移動するときは、ここから始めてください。正規の実装は次のとおりです
 `rumi_ai_1_10/ecosystem/defaultspack/`。

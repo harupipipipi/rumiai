@@ -17,37 +17,37 @@
 - 包修改请求现在在批准之前强制执行插槽/全屏冲突规则。
 - 旧版 CLI/HTTP 回退通过 `bridge/block_adapter.py` 传输调度，而不是直接导入块处理程序。
 
-##模块型号
+## 模块型号
 
 每个模块公开：
 
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
+- `enabled`
+- `disabled`
+- `degraded`
+- `error_disabled`
+- `experimental`
 
 依赖性故障会降低依赖性，但不会破坏整个包。
 
 ## 主要终点
 
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
+- `GET /api/defaultspack/modules`
+- `GET /api/defaultspack/modules/{id}`
+- `POST /api/defaultspack/modules/{id}/enable`
+- `POST /api/defaultspack/modules/{id}/disable`
+- `POST /api/defaultspack/modules/{id}/reload`
+- `POST /api/defaultspack/modules/{id}/rollback`
+- `GET /api/setup/packs`
+- `POST /api/setup/packs/install`
+- `POST /api/setup/packs/{id}/grant-all-ok`
+- `POST /api/setup/packs/{id}/revoke-all-ok`
+- `GET /api/setup/migration/status`
+- `GET /api/defaultspack/pack-requests`
+- `POST /api/defaultspack/pack-requests/request-extension`
+- `POST /api/defaultspack/pack-requests/forced-patch`
+- `POST /api/defaultspack/pack-requests/{id}/approve`
+- `POST /api/defaultspack/pack-requests/{id}/reject`
+- `POST /api/defaultspack/pack-requests/{id}/rollback`
 
 ## 设置流程
 
@@ -55,7 +55,7 @@
 选定的安装包会一起安装，并从安装程序中获得`all OK`资助。
 
 `supports_all_ok` 是存储库管理的可信安装包元数据，位于
-§鲁米§0§。上游仅处理经过维护者审查的安装包
+`ecosystem/setup_pack/*`。上游仅处理经过维护者审查的安装包
 定义为可信的。叉子可能会添加自己的安装包，但这样做是
 与修改该分叉中的可信源相同；它不是一个单独的运行时
 脆弱性边界。
@@ -64,8 +64,8 @@
 
 可以先暂存包更改，然后按以下任一方式提交：
 
-- §鲁米§0§
-- §鲁米§0§
+- `request_extension`
+- `forced_patch`
 
 两者都会在任何申请发生之前生成受批准支持的请求记录。
 

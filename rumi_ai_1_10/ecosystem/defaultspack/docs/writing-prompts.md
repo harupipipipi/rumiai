@@ -142,17 +142,11 @@ There is no direct prompt list route for the HTTP transport. Call via `call_hand
 result = context["call_handler"]("defaults.prompt.list", {})
 ```
 
-**input_data**: `{}` (no parameters)
-
-**Return value**: `ok({"prompts": [...]})`
+**input_data**: `{}` (no parameters)**Return value**: `ok({"prompts": [...]})`
 
 ### Prompt update
 
-**handler**: `defaults.prompt.update`（`blocks/prompt/update.py`）
-
-**HTTP**: `PUT /api/prompts/{name}`
-
-**input_data**:
+**handler**: `defaults.prompt.update`（`blocks/prompt/update.py`）**HTTP**: `PUT /api/prompts/{name}`**input_data**:
 
 | Field | Type | Required | Description |
 |---|---|---|---|
@@ -165,11 +159,7 @@ Possible fields for `updates`: `content` (or `body`), `description`, `variables`
 
 ### Delete prompt
 
-**handler**: `defaults.prompt.delete`（`blocks/prompt/delete.py`）
-
-**HTTP**: `DELETE /api/prompts/{name}`
-
-**input_data**:
+**handler**: `defaults.prompt.delete`（`blocks/prompt/delete.py`）**HTTP**: `DELETE /api/prompts/{name}`**input_data**:
 
 | Field | Type | Required | Description |
 |---|---|---|---|
@@ -210,11 +200,7 @@ Settings: `{"action": "set", "content": "new system prompt"}` → `ok({"content"
 
 ### tool ↔ prompt conversion
 
-**handler**: `defaults.prompt.convert`（`blocks/prompt/convert.py`）
-
-**HTTP**: `POST /api/prompts/convert`
-
-**input_data**:
+**handler**: `defaults.prompt.convert`（`blocks/prompt/convert.py`）**HTTP**: `POST /api/prompts/convert`**input_data**:
 
 | Field | Type | Required | Description |
 |---|---|---|---|
@@ -222,9 +208,7 @@ Settings: `{"action": "set", "content": "new system prompt"}` → `ok({"content"
 | `source_name` | `string` | Yes | Source name |
 | `target_type` | `string` | Yes | `"tool"` or `"prompt"` (must be different from source_type) |
 
-**tool → prompt**: Convert tool's `parameters` into a variable and `summary` into a template body header. `PromptTemplate.from_tool_schema()` is used.
-
-**prompt → tool**: Invalid as an authoring route. `execution.type: "prompt"` tool will not be created. If necessary, call `defaults.prompt.render` from a flow/function, and if you need a tool, define it separately as a `rumi_function` or `capability` facade.
+**tool → prompt**: Convert tool's `parameters` into a variable and `summary` into a template body header. `PromptTemplate.from_tool_schema()` is used.**prompt → tool**: Invalid as an authoring route. `execution.type: "prompt"` tool will not be created. If necessary, call `defaults.prompt.render` from a flow/function, and if you need a tool, define it separately as a `rumi_function` or `capability` facade.
 
 ## Example of getting context
 

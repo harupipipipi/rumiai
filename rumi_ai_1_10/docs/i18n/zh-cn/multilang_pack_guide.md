@@ -22,8 +22,8 @@ Rumi AI OS的capability_executor.py实现了两个calling_conventions：`binary`
 |------|--------|---------|
 |如何跑步 |直接运行编译好的二进制文件 |使用命令列表启动进程 |
 |适合的语言 | Rust、Go、C、C++ | Node.js、Ruby、Python（不同版本）、shell 脚本 |
-|指定 Ecosystem.json | §鲁米§0§，§鲁米§1§| §鲁米§2§，§鲁米§3§|
-|函数输入字段 | §鲁米§0§| `command`（列表[str]）|
+|指定 Ecosystem.json | `"runtime": "binary"`，`"main": "path/to/binary"`| `"runtime": "command"`，`"command": ["node", "index.js"]`|
+|函数输入字段 | `main_binary_path`| `command`（列表[str]）|
 |路径遍历验证|是（验证二进制文件是否在 function_dir 中）|取决于命令 |
 
 ---
@@ -55,7 +55,7 @@ Rumi AI OS的capability_executor.py实现了两个calling_conventions：`binary`
 
 |领域 |类型 |描述 |
 |-----------|-----|------|
-|类型 |字符串| §鲁米§0§ / §鲁米§1§ / §鲁米§2§ |
+|类型 |字符串| `"binary"` / `"command"` / `"python"` |
 |构建命令 |字符串|构建命令 |
 |构建.输出|字符串|构建工件路径 |
 |二进制|字符串|要执行的二进制文件的路径（当 type=binary 时） |
@@ -126,9 +126,9 @@ Rumi AI OS的capability_executor.py实现了两个calling_conventions：`binary`
 
 |设置|价值|来源 |
 |------|-----|--------|
-|默认超时 | 30 秒 | §鲁米§0§|
-|最大超时| 120 秒 | §鲁米§0§|
-|最小超时 | 1 秒 | §鲁米§0§|
+|默认超时 | 30 秒 | `DEFAULT_FUNCTION_TIMEOUT = 30.0`|
+|最大超时| 120 秒 | `MAX_TIMEOUT = 120.0`|
+|最小超时 | 1 秒 | `max(t, 1.0)`|
 |定制|在函数清单的`grant_config.timeout`中指定 |
 
 如果达到超时，进程将被终止，并返回`error_type: "timeout"`的 CapabilityResponse。
@@ -311,7 +311,7 @@ cargo init --name hello_pack
 
 ### 7.3 添加依赖包
 
-§鲁米§0§：
+`Cargo.toml`：
 ```toml
 [package]
 name = "hello_pack"
@@ -325,7 +325,7 @@ serde_json = "1"
 
 ### 7.4 实施
 
-§鲁米§0§：
+`src/main.rs`：
 ```rust
 use serde::{Deserialize, Serialize};
 use std::io::{self, Read};
@@ -437,7 +437,7 @@ go mod init hello_pack
 
 ### 8.3 实施
 
-§鲁米§0§：
+`main.go`：
 ```go
 package main
 
@@ -526,7 +526,7 @@ npm init -y
 
 ### 9.3 实施
 
-§鲁米§0§：
+`index.js`：
 ```javascript
 'use strict';
 
@@ -738,14 +738,14 @@ cat /tmp/test_input.json | ./my_binary | wc -c
 
 |函数行为 |能力响应 |
 |----------------|-------------------|
-|退出 0 + JSON 到标准输出 | §鲁米§0§|
-|退出 0 + 标准输出为空 | §鲁米§0§|
-| exit 0 + stdout 无效 JSON | §鲁米§0§|
-|退出 0 + 标准输出 > 1MB | §鲁米§0§|
-|退出非零 | §鲁米§0§|
-|超时 | §鲁米§0§|
-|找不到二进制文件 | §鲁米§0§|
-|路径遍历检测| §鲁米§0§|
+|退出 0 + JSON 到标准输出 | `success=true, output=<parsed JSON>`|
+|退出 0 + 标准输出为空 | `success=true, output=null`|
+| exit 0 + stdout 无效 JSON | `success=false, error_type="invalid_json_output"`|
+|退出 0 + 标准输出 > 1MB | `success=false, error_type="response_too_large"`|
+|退出非零 | `success=false, error_type="function_execution_error"`|
+|超时 | `success=false, error_type="timeout"`|
+|找不到二进制文件 | `success=false, error_type="binary_not_found"`|
+|路径遍历检测| `success=false, error_type="security_violation"`|
 
 ---
 

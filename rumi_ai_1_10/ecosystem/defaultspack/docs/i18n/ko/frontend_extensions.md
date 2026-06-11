@@ -21,9 +21,9 @@
 
 백엔드 확장 매니페스트는 다음 순서로 로드됩니다.
 
-1. §루미§0§
+1. `ecosystem/defaultspack/extensions/`
 2. 선택한 형제 팩의 `extensions/`
-3. §루미§0§
+3. `ecosystem/defaultspack/user_data/shared/extensions/`
 4. `RUMI_DEFAULTSPACK_EXTENSION_ROOTS`에 명시된 추가근
 
 프런트엔드 확장 매니페스트는 형제 팩의 `frontend_extensions/`입니다.
@@ -157,9 +157,9 @@
 
 현재 내장 렌더러:
 
-- §루미§0§, §루미§1§
-- §루미§0§
-- §루미§0§
+- `text`, `markdown`
+- `code`
+- `image`
 - `widget` 대체
 - 알 수 없는 블록 대체(`json` / `text` / `hidden`)
 
@@ -174,8 +174,8 @@
 미리보기 피드는 다음 소스를 집계합니다.
 
 - `Inspector`의 `tools_called`
-- §루미§0§
-- §루미§0§
+- `context_info.knowledge_results`
+- `context_info.memory_results`
 - 메시지 `widget`
 - 메시지의 `content`에 `code` / `image` 포함
 

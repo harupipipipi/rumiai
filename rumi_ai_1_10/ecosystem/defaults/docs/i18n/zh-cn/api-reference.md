@@ -6,7 +6,7 @@
 
 默认包中 HTTP 传输 (`transport/http.py`) 公开的所有端点。
 
-所有响应均采用 JSON 格式，成功时返回 `{"status": "ok", "data": ...}`，出错时返回 `{"status": "error", "error": {"code": "...", "message": "..."}}`。
+所有响应均采用 JSON 格式，成功时返回 `{"status": "ok", "data": ...}`，错误时返回 `{"status": "error", "error": {"code": "...", "message": "..."}}`。
 
 CORS 标头添加到所有响应中：`Access-Control-Allow-Origin: *`、`Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS`、`Access-Control-Allow-Headers: Content-Type, Authorization`。
 
@@ -16,85 +16,83 @@ CORS 标头添加到所有响应中：`Access-Control-Allow-Origin: *`、`Access
 
 ### POST /v1/chat/completions
 
-OpenAI 兼容端点。发送消息并获得 AI 回复。内部致电`blocks.chat.send`。
+OpenAI 兼容端点。发送消息并获得 AI 回复。内部调用`blocks.chat.send`。
 
 **请求正文：**
 
-|参数|必填|类型 |描述 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| §鲁米§0§|必填| §鲁米§1§ |对话 ID |
-| §鲁米§0§|必填| §鲁米§1§ | `{"role": "user", "content": "..."}`格式消息|
-| §鲁米§0§|可选| §鲁米§1§ |角色。默认`"user"` |
-| §鲁米§0§|必填| §鲁米§1§ |文本字符串或内容块数组 |
+| `conversation_id` | Required | `string` | Conversation ID |
+| `message` | Required | `object` | `{"role": "user", "content": "..."}` format message |
+| `message.role` | Optional | `string` | Role. Default `"user"` |
+| `message.content` | Required | `string \| array` | Text string or content block array |
 
 **回应（`data`）：**
 
-|领域|类型 |描述 |
+| Field | Type | Description |
 |---|---|---|
-| §鲁米§0§| §鲁米§1§ |助理留言ID |
-| §鲁米§0§| §鲁米§1§ |对话 ID |
-| §鲁米§0§| §鲁米§1§ | §鲁米§2§ |
-| §鲁米§0§| §鲁米§1§ | §鲁米§2§ |
-| §鲁米§0§| §鲁米§1§ |家长留言ID |
-| §鲁米§0§| §鲁米§1§ |序列号|
-| §鲁米§0§| §鲁米§1§ |创建时间戳（毫秒）|
-| §鲁米§0§| §鲁米§1§ | `"stop"`等|
-| §鲁米§0§| §鲁米§1§ | §鲁米§2§ |
+| `id` | `string` | Assistant Message ID |
+| `conversation_id` | `string` | Conversation ID |
+| `role` | `string` | `"assistant"` |
+| `content` | `array` | `[{"type": "text", "text": "..."}]` |
+| `parent_id` | `string` | Parent message ID |
+| `sequence_number` | `int` | Sequence number |
+| `created_at` | `int` | Creation timestamp (milliseconds) |
+| `finish_reason` | `string \| null` | `"stop"` etc. |
+| `usage` | `object \| null` | `{"prompt_tokens": int, "completion_tokens": int, "total_tokens": int}` |
 
 **错误情况：**
 
-|代码|描述 |
+| Code | Description |
 |---|---|
-| §鲁米§0§| `conversation_id` 或 `message` 未指定 |
-| §鲁米§0§|指定的对话不存在 |
-| §鲁米§0§|添加消息失败 |
+| `INVALID_INPUT` | `conversation_id` or `message` not specified |
+| `NOT_FOUND` | Specified conversation does not exist |
+| `INTERNAL_ERROR` | Failed to add message |
 
 ---
 
 ### POST /api/chat/conversations
 
-创建一个新对话。内部致电`blocks.chat.create_conversation`。
+创建一个新对话。内部调用`blocks.chat.create_conversation`。
 
 **请求正文：**
 
-|参数|必填|类型 |描述 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| §鲁米§0§|可选| §鲁米§1§ |使用模型。默认`"stub/default"` |
-| §鲁米§0§|可选| §鲁米§1§ |系统提示ID |
-| §鲁米§0§|可选| §鲁米§1§ |代理 ID |
-| §鲁米§0§|可选| §鲁米§1§ |标签 |
+| `model` | Optional | `string` | Usage model. Default `"stub/default"` |
+| `system_prompt_id` | Optional | `string` | System prompt ID |
+| `agent_id` | Optional | `string` | Agent ID |
+| `tags` | Optional | `array[string]` | Tag |
 
 **回应（`data`）：**
 
-|领域|类型 |描述 |
+| Field | Type | Description |
 |---|---|---|
-| §鲁米§0§| §鲁米§1§ |对话 ID (UUID) |
-| §鲁米§0§| §鲁米§1§ | §鲁米§2§ |
-| §鲁米§0§| §鲁米§1§ |创建时间戳 |
-| §鲁米§0§| §鲁米§1§ |更新时间戳 |
-| §鲁米§0§| §鲁米§1§ |模型字符串 |
-| §鲁米§0§| §鲁米§1§ |系统提示ID |
-| §鲁米§0§| §鲁米§1§ |代理 ID |
-| §鲁米§0§| §鲁米§1§ |标签 |
-| §鲁米§0§| §鲁米§1§ |星州|
-| §鲁米§0§| §鲁米§1§ |存档状态 |
-| §鲁米§0§| §鲁米§1§ |当前节点ID |
-| §鲁米§0§| §鲁米§1§ |消息数组（最初为空）|
+| `id` | `string` | Conversation ID (UUID) |
+| `title` | `string` | `"New Conversation"` |
+| `created_at` | `int` | Creation timestamp |
+| `updated_at` | `int` | Update timestamp |
+| `model` | `string` | Model string |
+| `system_prompt_id` | `string \| null` | System Prompt ID |
+| `agent_id` | `string \| null` | Agent ID |
+| `tags` | `array[string]` | Tag |
+| `is_starred` | `bool` | Star state |
+| `is_archived` | `bool` | Archive status |
+| `current_node_id` | `string \| null` | Current node ID |
+| `messages` | `array` | Message array (initially empty) |
 
 ---
 
 ### 获取/api/聊天/对话
 
-获取对话列表。内部致电`blocks.chat.list_conversations`。
+获取对话列表。内部调用`blocks.chat.list_conversations`。
 
-**Request Body：** None（查询参数不是必需的，因为它是GET）
+**请求正文：**无（查询参数不是必需的，因为它是 GET）**响应（`data`）：**
 
-**回应（`data`）：**
-
-|领域|类型 |描述 |
+| Field | Type | Description |
 |---|---|---|
-| §鲁米§0§| §鲁米§1§ |对话对象数组 |
-| §鲁米§0§| §鲁米§1§ |总数 |
+| `conversations` | `array[object]` | Array of conversation objects |
+| `total` | `int` | Total number |
 
 **错误情况：** None（返回空数组）
 
@@ -106,17 +104,15 @@ OpenAI 兼容端点。发送消息并获得 AI 回复。内部致电`blocks.chat
 
 **路径参数：**
 
-|参数|必填|类型 |描述 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| §鲁米§0§|必填| §鲁米§1§ |对话 ID |
+| `id` | Required | `string` | Conversation ID |
 
-**响应（`data`）：** 对话对象（与 POST /api/chat/conversations 的响应格式相同）
+**响应 (`data`):** 对话对象（与 POST /api/chat/conversations 的响应格式相同）**错误情况：**
 
-**错误情况：**
-
-|代码|描述 |
+| Code | Description |
 |---|---|
-| §鲁米§0§|指定的对话不存在 |
+| `NOT_FOUND` | Specified conversation does not exist |
 
 ---
 
@@ -126,188 +122,178 @@ OpenAI 兼容端点。发送消息并获得 AI 回复。内部致电`blocks.chat
 
 **路径参数：**
 
-|参数|必填|类型 |描述 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| §鲁米§0§|必填| §鲁米§1§ |对话 ID |
+| `id` | Required | `string` | Conversation ID |
 
 **请求正文：**
 
-|参数|必填|类型 |描述 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| §鲁米§0§|可选| §鲁米§1§ |新标题 |
-| §鲁米§0§|可选| §鲁米§1§ |新标签|
-| §鲁米§0§|可选| §鲁米§1§ |星州|
-| §鲁米§0§|可选| §鲁米§1§ |存档状态 |
-| §鲁米§0§|可选| §鲁米§1§ |型号变更 |
+| `title` | Optional | `string` | New title |
+| `tags` | Optional | `array[string]` | New tag |
+| `is_starred` | Optional | `bool` | Star state |
+| `is_archived` | Optional | `bool` | Archive status |
+| `model` | Optional | `string` | Model change |
 
-**响应（`data`）：**更新的对话对象
+**响应（`data`）：**更新的对话对象**错误情况：**
 
-**错误情况：**
-
-|代码|描述 |
+| Code | Description |
 |---|---|
-| §鲁米§0§|指定的对话不存在 |
+| `NOT_FOUND` | Specified conversation does not exist |
 
 ---
 
 ### 删除 /api/chat/conversations/{id}
 
-删除对话。内部致电`blocks.chat.delete_conversation`。
+删除对话。内部调用`blocks.chat.delete_conversation`。
 
 **路径参数：**
 
-|参数|必填|类型 |描述 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| §鲁米§0§|必填| §鲁米§1§ |对话 ID |
+| `id` | Required | `string` | Conversation ID |
 
-**回应（`data`）：** `{"success": true}`
+**响应（`data`）：** `{"success": true}`**错误情况：**
 
-**错误情况：**
-
-|代码|描述 |
+| Code | Description |
 |---|---|
-| §鲁米§0§|指定的对话不存在 |
+| `NOT_FOUND` | Specified conversation does not exist |
 
 ---
 
 ### POST /api/chat/conversations/{id}/messages
 
-向对话发送消息并获得 AI 回复。调用与 `/v1/chat/completions` 相同的块 (`blocks.chat.send`)，但`conversation_id` 是从路径注入的。
+向对话发送消息并获得 AI 回复。调用与 `/v1/chat/completions` 相同的块 (`blocks.chat.send`)，但 `conversation_id` 是从路径注入的。
 
 **路径参数：**
 
-|参数|必填|类型 |描述 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| §鲁米§0§|必填| §鲁米§1§ |对话 ID |
+| `id` | Required | `string` | Conversation ID |
 
 **请求正文：**
 
-|参数|必填|类型 |描述 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| §鲁米§0§|必填| §鲁米§1§ | §鲁米§2§ |
+| `message` | Required | `object` | `{"role": "user", "content": "..."}` |
 
-**响应（`data`）：** 助理消息对象（与 POST /v1/chat/completions 格式相同）
-
-**错误情况：** 与 POST /v1/chat/completions 相同
+**响应（`data`）：**助理消息对象（与 POST /v1/chat/completions 格式相同）**错误情况：**与 POST /v1/chat/completions 相同
 
 ---
 
 ### POST /api/chat/conversations/{id}/stream
 
-开始流式响应。内部致电`blocks.chat.stream`。
+开始流式响应。内部调用`blocks.chat.stream`。
 
 **路径参数：**
 
-|参数|必填|类型 |描述 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| §鲁米§0§|必填| §鲁米§1§ |对话 ID |
+| `id` | Required | `string` | Conversation ID |
 
 **请求正文：**
 
-|参数|必填|类型 |描述 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| §鲁米§0§|必填| §鲁米§1§ | §鲁米§2§ |
+| `message` | Required | `object` | `{"role": "user", "content": "..."}` |
 
 **回应（`data`）：**
 
-|领域|类型 |描述 |
+| Field | Type | Description |
 |---|---|---|
-| §鲁米§0§| §鲁米§1§ |流 ID |
-| §鲁米§0§| §鲁米§1§ |对话 ID |
+| `stream_id` | `string` | Stream ID |
+| `conversation_id` | `string` | Conversation ID |
 
 **错误情况：**
 
-|代码|描述 |
+| Code | Description |
 |---|---|
-| §鲁米§0§| `conversation_id` 或 `message` 未指定 |
-| §鲁米§0§|指定的对话不存在 |
+| `INVALID_INPUT` | `conversation_id` or `message` not specified |
+| `NOT_FOUND` | Specified conversation does not exist |
 
 ---
 
 ### POST /api/chat/conversations/{id}/export
 
-导出对话。内部致电`blocks.chat.export_conversation`。
+导出对话。内部调用`blocks.chat.export_conversation`。
 
 **路径参数：**
 
-|参数|必填|类型 |描述 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| §鲁米§0§|必填| §鲁米§1§ |对话 ID |
+| `id` | Required | `string` | Conversation ID |
 
 **请求正文：**
 
-|参数|必填|类型 |描述 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| §鲁米§0§|可选| §鲁米§1§ | `"markdown"`或`"json"`。默认`"markdown"` |
+| `format` | Optional | `string` | `"markdown"` or `"json"`. Default `"markdown"` |
 
 **回应（`data`）：**
 
-|领域|类型 |描述 |
+| Field | Type | Description |
 |---|---|---|
-| §鲁米§0§| §鲁米§1§ |导出的字符串 |
-| §鲁米§0§| §鲁米§1§ |格式名称|
+| `content` | `string` | Exported string |
+| `format` | `string` | Format name |
 
 **错误情况：**
 
-|代码|描述 |
+| Code | Description |
 |---|---|
-| §鲁米§0§|指定的对话不存在 |
+| `NOT_FOUND` | Specified conversation does not exist |
 
 ---
 
 ### POST /api/chat/conversations/{id}/summarize
 
-总结并修剪对话。内部致电`blocks.chat.summarize_and_trim`。
+总结并修剪对话。内部调用`blocks.chat.summarize_and_trim`。
 
 **路径参数：**
 
-|参数|必填|类型 |描述 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| §鲁米§0§|必填| §鲁米§1§ |对话 ID |
+| `id` | Required | `string` | Conversation ID |
 
 **请求正文：**
 
-|参数|必填|类型 |描述 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| §鲁米§0§|必填| §鲁米§1§ |摘要开始消息 ID |
-| §鲁米§0§|必填| §鲁米§1§ |摘要结束消息ID |
-| §鲁米§0§|可选| §鲁米§1§ |用于总结的模型 |
+| `start_message_id` | Required | `string` | Summary start message ID |
+| `end_message_id` | Required | `string` | Summary end message ID |
+| `model` | Optional | `string` | Model used for summarization |
 
-**响应（`data`）：** 摘要结果对象
+**响应（`data`）：**汇总结果对象**错误情况：**
 
-**错误情况：**
-
-|代码|描述 |
+| Code | Description |
 |---|---|
-| §鲁米§0§|对话或消息不存在 |
-| §鲁米§0§|缺少必需的参数 |
+| `NOT_FOUND` | Conversation or message does not exist |
+| `INVALID_INPUT` | Required parameter missing |
 
 ---
 
 ### POST /api/chat/conversations/{id}/auto-trim
 
-自动修剪对话。内部致电`blocks.chat.auto_trim`。
+自动修剪对话。内部调用`blocks.chat.auto_trim`。
 
 **路径参数：**
 
-|参数|必填|类型 |描述 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| §鲁米§0§|必填| §鲁米§1§ |对话 ID |
+| `id` | Required | `string` | Conversation ID |
 
 **请求正文：**
 
-|参数|必填|类型 |描述 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| §鲁米§0§|可选| §鲁米§1§ |修剪阈值令牌计数 |
-| §鲁米§0§|可选| §鲁米§1§ |用于总结的模型 |
+| `max_tokens` | Optional | `int` | Trimming threshold token count |
+| `model` | Optional | `string` | Model used for summarization |
 
-**响应（`data`）：** 修剪结果对象
+**响应（`data`）：**修剪结果对象**错误情况：**
 
-**错误情况：**
-
-|代码|描述 |
+| Code | Description |
 |---|---|
-| §鲁米§0§|对话不存在 |
+| `NOT_FOUND` | Conversation does not exist |
 
 ---
 
@@ -315,144 +301,136 @@ OpenAI 兼容端点。发送消息并获得 AI 回复。内部致电`blocks.chat
 
 ### POST /api/agent/execute
 
-运行代理任务。内部致电`blocks.agent.execute`。
+运行代理任务。内部调用`blocks.agent.execute`。
 
 **请求正文：**
 
-|参数|必填|类型 |描述 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| §鲁米§0§|必填| §鲁米§1§ |要执行的任务的描述 |
-| §鲁米§0§|可选| §鲁米§1§ |可用工具定义|
-| §鲁米§0§|可选| §鲁米§1§ |使用模型。默认`"default"` |
-| §鲁米§0§|可选| §鲁米§1§ |系统提示|
+| `task` | Required | `string` | Description of the task to be performed |
+| `tools` | Optional | `array` | Available tool definitions |
+| `model` | Optional | `string` | Usage model. Default `"default"` |
+| `system_prompt` | Optional | `string` | System prompt |
 
 **回应（`data`）：**
 
-|领域|类型 |描述 |
+| Field | Type | Description |
 |---|---|---|
-| §鲁米§0§| §鲁米§1§ |运行 ID |
-| §鲁米§0§| §鲁米§1§ |执行状态 |
-| §鲁米§0§| §鲁米§1§ |执行步骤列表 |
+| `execution_id` | `string` | Run ID |
+| `status` | `string` | Execution state |
+| `steps` | `array` | List of execution steps |
 
 **错误情况：**
 
-|代码|描述 |
+| Code | Description |
 |---|---|
-| §鲁米§0§| `task` 未指定 |
+| `ERROR` | `task` not specified |
 
 ---
 
 ### POST /api/agent/{id}/approve
 
-批准代理的当前步骤。内部致电`blocks.agent.approve`。
+批准代理的当前步骤。内部调用`blocks.agent.approve`。
 
 **路径参数：**
 
-|参数|必填|类型 |描述 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| §鲁米§0§|必填| §鲁米§1§ |执行 ID |
+| `id` | Required | `string` | execution_id |
 
-**响应（`data`）：**批准结果对象
+**响应（`data`）：**审批结果对象**错误情况：**
 
-**错误情况：**
-
-|代码|描述 |
+| Code | Description |
 |---|---|
-| §鲁米§0§| `execution_id` 未指定或执行不存在 |
+| `ERROR` | `execution_id` is unspecified or execution does not exist |
 
 ---
 
 ### POST /api/agent/{id}/reject
 
-拒绝代理的当前步骤。内部致电`blocks.agent.reject`。
+拒绝代理的当前步骤。内部调用`blocks.agent.reject`。
 
 **路径参数：**
 
-|参数|必填|类型 |描述 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| §鲁米§0§|必填| §鲁米§1§ |执行 ID |
+| `id` | Required | `string` | execution_id |
 
-**响应（`data`）：**拒绝结果对象
+**响应（`data`）：**拒绝结果对象**错误情况：**
 
-**错误情况：**
-
-|代码|描述 |
+| Code | Description |
 |---|---|
-| §鲁米§0§| `execution_id` 未指定或执行不存在 |
+| `ERROR` | `execution_id` is unspecified or execution does not exist |
 
 ---
 
 ### POST /api/agent/{id}/取消
 
-取消代理执行。内部致电`blocks.agent.cancel`。
+取消代理执行。内部调用`blocks.agent.cancel`。
 
 **路径参数：**
 
-|参数|必填|类型 |描述 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| §鲁米§0§|必填| §鲁米§1§ |执行 ID |
+| `id` | Required | `string` | execution_id |
 
-**响应（`data`）：**取消结果对象
+**响应（`data`）：**取消结果对象**错误情况：**
 
-**错误情况：**
-
-|代码|描述 |
+| Code | Description |
 |---|---|
-| §鲁米§0§| `execution_id` 未指定或执行不存在 |
+| `ERROR` | `execution_id` is unspecified or execution does not exist |
 
 ---
 
 ### GET /api/agent/{id}/status
 
-获取代理的执行状态。内部致电`blocks.agent.status`。
+获取代理的执行状态。内部调用`blocks.agent.status`。
 
 **路径参数：**
 
-|参数|必填|类型 |描述 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| §鲁米§0§|必填| §鲁米§1§ |执行 ID |
+| `id` | Required | `string` | execution_id |
 
-**响应（`data`）：** 状态对象
+**响应（`data`）：**状态对象**错误情况：**
 
-**错误情况：**
-
-|代码|描述 |
+| Code | Description |
 |---|---|
-| §鲁米§0§| `execution_id` 未指定或执行不存在 |
+| `ERROR` | `execution_id` is unspecified or execution does not exist |
 
 ---
 
 ### POST /api/agent/{id}/instruct
 
-将运行时指令添加到正在运行的代理。内部致电`blocks.agent.add_instruction`。在下一个 AI 完成步骤之前，指令将被注入到消息历史记录中。
+将运行时指令添加到正在运行的代理。内部调用`blocks.agent.add_instruction`。在下一个 AI 完成步骤之前，指令将被注入到消息历史记录中。
 
 **路径参数：**
 
-|参数|必填|类型 |描述 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| §鲁米§0§|必填| §鲁米§1§ | execution_id（从路径注入`execution_id`）|
+| `id` | Required | `string` | execution_id (injected as `execution_id` from path) |
 
 **请求正文：**
 
-|参数|必填|类型 |描述 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| §鲁米§0§|必填| §鲁米§1§ |附加说明 |
-| §鲁米§0§|可选| §鲁米§1§ | `"normal"`或`"urgent"`。默认`"normal"` |
+| `instruction` | Required | `string` | Additional instructions |
+| `priority` | Optional | `string` | `"normal"` or `"urgent"`. Default `"normal"` |
 
 **回应（`data`）：**
 
-|领域|类型 |描述 |
+| Field | Type | Description |
 |---|---|---|
-| §鲁米§0§| §鲁米§1§ |指令 ID (UUID) |
-| §鲁米§0§| §鲁米§1§ |运行 ID |
-| §鲁米§0§| §鲁米§1§ |优先|
-| §鲁米§0§| §鲁米§1§ | §鲁米§2§ |
+| `instruction_id` | `string` | Instruction ID (UUID) |
+| `execution_id` | `string` | Run ID |
+| `priority` | `string` | Priority |
+| `status` | `string` | `"queued"` |
 
 **错误情况：**
 
-|代码|描述 |
+| Code | Description |
 |---|---|
-| §鲁米§0§| `execution_id` 未指定，`instruction` 未指定，运行不存在，或运行未激活 |
+| `ERROR` | `execution_id` unspecified, `instruction` unspecified, run does not exist, or run is not active |
 
 ---
 
@@ -460,83 +438,81 @@ OpenAI 兼容端点。发送消息并获得 AI 回复。内部致电`blocks.chat
 
 ### POST /api/agent/multi/execute
 
-启动多代理会话。内部致电`blocks.agent.multi_execute`。
+启动多代理会话。内部调用`blocks.agent.multi_execute`。
 
 **请求正文：**
 
-|参数|必填|类型 |描述 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| §鲁米§0§|必填| §鲁米§1§ |任务描述|
-| §鲁米§0§|必填| §鲁米§1§ |代理定义列表（至少一个）。每个元素都是`{name, role, model?, system_prompt?, tools?}` |
-| §鲁米§0§|可选| §鲁米§1§ | `"round_robin"`、`"directed"`、`"free"`中的任何一项。默认`"round_robin"` |
-| §鲁米§0§|可选| §鲁米§1§ |最大圈数。默认`10`。大于或等于 1 的正整数 |
+| `task` | Required | `string` | Task description |
+| `agents` | Required | `array[object]` | List of agent definitions (at least one). Each element is `{name, role, model?, system_prompt?, tools?}` |
+| `orchestration` | Optional | `string` | Any of `"round_robin"`, `"directed"`, `"free"`. Default `"round_robin"` |
+| `max_turns` | Optional | `int` | Maximum number of turns. Default `10`. Positive integer greater than or equal to 1 |
 
 **回应（`data`）：**
 
-|领域|类型 |描述 |
+| Field | Type | Description |
 |---|---|---|
-| §鲁米§0§| §鲁米§1§ |会话 ID（`multi_` 前缀）|
-| §鲁米§0§| §鲁米§1§ |会话状态（`"completed"`、`"error"`等）|
-| §鲁米§0§| §鲁米§1§ |每回合结果`[{agent, type, content}, ...]` |
-| §鲁米§0§| §鲁米§1§ |会话详细信息对象 |
+| `session_id` | `string` | Session ID (`multi_` Prefix) |
+| `status` | `string` | Session state (`"completed"`, `"error"`, etc.) |
+| `turn_results` | `array` | Results of each turn `[{agent, type, content}, ...]` |
+| `result` | `object` | Session details object |
 
 **错误情况：**
 
-|代码|描述 |
+| Code | Description |
 |---|---|
-| §鲁米§0§| `task` 未指定，`agents` 未指定或为空，代理定义的`name`/`role` 未指定，`orchestration` 为无效值，`max_turns` 不是正整数 |
+| `ERROR` | `task` is unspecified, `agents` is unspecified or empty, `name`/`role` of agent definition is unspecified, `orchestration` is an invalid value, `max_turns` is not a positive integer |
 
 ---
 
 ### GET /api/agent/multi/{id}/status
 
-获取多代理会话的状态。内部致电`blocks.agent.multi_status`。路径参数`{id}`被注入为`session_id`。
+获取多代理会话的状态。内部调用`blocks.agent.multi_status`。路径参数`{id}`被注入为`session_id`。
 
 **路径参数：**
 
-|参数|必填|类型 |描述 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| §鲁米§0§|必填| §鲁米§1§ |会话 ID |
+| `id` | Required | `string` | session_id |
 
-**响应（`data`）：**会话状态对象（`session.to_dict()`的结果）
+**响应（`data`）：**会话状态对象（`session.to_dict()`的结果）**错误情况：**
 
-**错误情况：**
-
-|代码|描述 |
+| Code | Description |
 |---|---|
-| §鲁米§0§| `session_id` 未指定或会话不存在 |
+| `ERROR` | `session_id` is unspecified or session does not exist |
 
 ---
 
 ### POST /api/agent/multi/{id}/message
 
-将消息从外部注入到正在运行的多代理会话中。内部致电`blocks.agent.multi_message`。路径参数`{id}`被注入为`session_id`。
+将消息从外部注入到正在运行的多代理会话中。内部调用`blocks.agent.multi_message`。路径参数`{id}`被注入为`session_id`。
 
 **路径参数：**
 
-|参数|必填|类型 |描述 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| §鲁米§0§|必填| §鲁米§1§ |会话 ID |
+| `id` | Required | `string` | session_id |
 
 **请求正文：**
 
-|参数|必填|类型 |描述 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| §鲁米§0§|必填| §鲁米§1§ |需输入的留言内容 |
-| §鲁米§0§|可选| §鲁米§1§ |称呼特定代理时的姓名。如果未指定，则作为共享消息发送给所有代理 |
+| `message` | Required | `string` | Message content to be input |
+| `target_agent` | Optional | `string` | Name when addressing to a specific agent. If not specified, send as a shared message to all agents |
 
 **回应（`data`）：**
 
-|领域|类型 |描述 |
+| Field | Type | Description |
 |---|---|---|
-| §鲁米§0§| §鲁米§1§ |会话 ID |
-| §鲁米§0§| §鲁米§1§ | §鲁米§2§ |
+| `session_id` | `string` | Session ID |
+| `message` | `string` | `"Message injected successfully"` |
 
 **错误情况：**
 
-|代码|描述 |
+| Code | Description |
 |---|---|
-| §鲁米§0§| `session_id` 未指定，`message` 未指定，或会话不存在 |
+| `ERROR` | `session_id` not specified, `message` not specified, or session does not exist |
 
 ---
 
@@ -544,65 +520,65 @@ OpenAI 兼容端点。发送消息并获得 AI 回复。内部致电`blocks.chat
 
 ### POST /api/同意/检查
 
-确定文本是否敏感。内部致电`blocks.tool.consent_check`。
+确定文本是否敏感。内部调用`blocks.tool.consent_check`。
 
 **请求正文：**
 
-|参数|必填|类型 |描述 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| §鲁米§0§|必填| §鲁米§1§ |判断目标文本 |
-| §鲁米§0§|可选| §鲁米§1§ |是否使用AI判断。默认`false` |
-| §鲁米§0§|可选| §鲁米§1§ | AI判断时的模型规范。默认`"stub/default"` |
+| `text` | Required | `string` | Judgment target text |
+| `use_ai` | Optional | `bool` | Whether to use AI judgment. Default `false` |
+| `model` | Optional | `string` | Model specification during AI judgment. Default `"stub/default"` |
 
 **回应（`data`）：**
 
-|领域|类型 |描述 |
+| Field | Type | Description |
 |---|---|---|
-| §鲁米§0§| §鲁米§1§ |是否需要同意 |
-| §鲁米§0§| §鲁米§1§ |检测到的类别 |
-| §鲁米§0§| §鲁米§1§ |同意 ID（如果需要同意）|
-| §鲁米§0§| §鲁米§1§ |按类别`{category: disclaimer_text}` | 的免责声明文本
+| `requires_consent` | `bool` | Whether consent is required |
+| `categories` | `array[string]` | Detected categories |
+| `consent_id` | `string \| null` | Consent ID if consent is required |
+| `disclaimers` | `object` | Disclaimer text by category `{category: disclaimer_text}` |
 
 **错误情况：**
 
-|代码|描述 |
+| Code | Description |
 |---|---|
-| §鲁米§0§| `text` 未指定 |
-| §鲁米§0§| `text` 不是字符串 |
+| `MISSING_PARAM` | `text` not specified |
+| `INVALID_PARAM` | `text` is not a string |
 
 ---
 
 ### POST /api/consent/{id}/confirm
 
-记录您的同意或拒绝。内部致电`blocks.tool.consent_confirm`。路径参数`{id}`被注入为`consent_id`。
+记录您的同意或拒绝。内部调用`blocks.tool.consent_confirm`。路径参数`{id}`被注入为`consent_id`。
 
 **路径参数：**
 
-|参数|必填|类型 |描述 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| §鲁米§0§|必填| §鲁米§1§ |同意 ID |
+| `id` | Required | `string` | consent_id |
 
 **请求正文：**
 
-|参数|必填|类型 |描述 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| §鲁米§0§|必填| §鲁米§1§ |用户是否同意 |
+| `accepted` | Required | `bool` | Whether the user consented |
 
 **回应（`data`）：**
 
-|领域|类型 |描述 |
+| Field | Type | Description |
 |---|---|---|
-| §鲁米§0§| §鲁米§1§ |同意 ID |
-| §鲁米§0§| §鲁米§1§ |同意状态 |
-| §鲁米§0§| §鲁米§1§ | ISO 8601 时间戳（如果同意）|
+| `consent_id` | `string` | Consent ID |
+| `accepted` | `bool` | Consent status |
+| `accepted_at` | `string \| null` | ISO 8601 timestamp if consent |
 
 **错误情况：**
 
-|代码|描述 |
+| Code | Description |
 |---|---|
-| §鲁米§0§| `consent_id` 或 `accepted` 未指定 |
-| §鲁米§0§| `consent_id` 不是字符串或 `accepted` 不是布尔 |
-| §鲁米§0§|指定的consent_id不存在 |
+| `MISSING_PARAM` | `consent_id` or `accepted` not specified |
+| `INVALID_PARAM` | `consent_id` is not a string or `accepted` is not bool |
+| `NOT_FOUND` | The specified consent_id does not exist |
 
 ---
 
@@ -610,79 +586,75 @@ OpenAI 兼容端点。发送消息并获得 AI 回复。内部致电`blocks.chat
 
 ### PUT /api/prompts/{name}
 
-更新现有提示。内部致电`blocks.prompt.update`。
+更新现有提示。内部调用`blocks.prompt.update`。
 
 **路径参数：**
 
-|参数|必填|类型 |描述 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| §鲁米§0§|必填| §鲁米§1§ |提示名称 |
+| `name` | Required | `string` | Prompt name |
 
 **请求正文：**
 
-|参数|必填|类型 |描述 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| §鲁米§0§|可选| §鲁米§1§ |新机构（`body`的别名）|
-| §鲁米§0§|可选| §鲁米§1§ |新文本 |
-| §鲁米§0§|可选| §鲁米§1§ |描述 |
-| §鲁米§0§|可选| §鲁米§1§ |变量定义 |
-| §鲁米§0§|可选| §鲁米§1§ |元数据 |
+| `content` | Optional | `string` | New body (alias for `body`) |
+| `body` | Optional | `string` | New text |
+| `description` | Optional | `string` | Description |
+| `variables` | Optional | `array` | Variable definition |
+| `metadata` | Optional | `object` | Metadata |
 
-**响应（`data`）：**更新的提示对象
+**响应（`data`）：**更新提示对象**错误情况：**
 
-**错误情况：**
-
-|代码|描述 |
+| Code | Description |
 |---|---|
-| §鲁米§0§|指定的提示不存在 |
+| `NOT_FOUND` | The specified prompt does not exist |
 
 ---
 
 ### 删除 /api/prompts/{name}
 
-删除提示。内部致电`blocks.prompt.delete`。
+删除提示。内部调用`blocks.prompt.delete`。
 
 **路径参数：**
 
-|参数|必填|类型 |描述 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| §鲁米§0§|必填| §鲁米§1§ |提示名称 |
+| `name` | Required | `string` | Prompt name |
 
-**回应（`data`）：** `{"deleted": true}`
+**响应（`data`）：** `{"deleted": true}`**错误情况：**
 
-**错误情况：**
-
-|代码|描述 |
+| Code | Description |
 |---|---|
-| §鲁米§0§|指定的提示不存在 |
+| `NOT_FOUND` | The specified prompt does not exist |
 
 ---
 
 ### POST /api/prompts/convert
 
-进行工具↔提示之间的相互转换。内部致电`blocks.prompt.convert`。
+进行工具↔提示之间的相互转换。内部调用`blocks.prompt.convert`。
 
 **请求正文：**
 
-|参数|必填|类型 |描述 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| §鲁米§0§|必填| §鲁米§1§ | `"tool"` 或 `"prompt"` |
-| §鲁米§0§|必填| §鲁米§1§ |来源名称 |
-| §鲁米§0§|必填| §鲁米§1§ | `"tool"` 或 `"prompt"` |
+| `source_type` | Required | `string` | `"tool"` or `"prompt"` |
+| `source_name` | Required | `string` | Source name |
+| `target_type` | Required | `string` | `"tool"` or `"prompt"` |
 
 **回应（`data`）：**
 
-|领域|类型 |描述 |
+| Field | Type | Description |
 |---|---|---|
-| §鲁米§0§| §鲁米§1§ |转换结果（工具定义或提示对象）|
-| §鲁米§0§| §鲁米§1§ |目的地类型 |
+| `result` | `object` | Conversion result (tool definition or prompt object) |
+| `target_type` | `string` | Destination type |
 
 **错误情况：**
 
-|代码|描述 |
+| Code | Description |
 |---|---|
-| §鲁米§0§| `source_type`/`target_type` 不正确或相同 |
-| §鲁米§0§|转换源不存在 |
+| `INVALID_INPUT` | `source_type`/`target_type` are incorrect or identical |
+| `NOT_FOUND` | Conversion source does not exist |
 
 ---
 
@@ -690,106 +662,100 @@ OpenAI 兼容端点。发送消息并获得 AI 回复。内部致电`blocks.chat
 
 ### POST /api/tools/create
 
-创建动态工具。如果不指定handler_code，它将由AI自动生成。内部致电`blocks.tool.create`。
+创建动态工具。如果不指定handler_code，它将由AI自动生成。内部调用`blocks.tool.create`。
 
 **请求正文：**
 
-|参数|必填|类型 |描述 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| §鲁米§0§|必填| §鲁米§1§ |工具名称（与 tool_id 相同）|
-| §鲁米§0§|可选| §鲁米§1§ |工具说明|
-| §鲁米§0§|必填| §鲁米§1§ | JSON Schema 格式的参数定义 |
-| §鲁米§0§|可选| §鲁米§1§ | Python 处理程序代码。如果为 null，则 AI 生成 |
-| §鲁米§0§|可选| §鲁米§1§ |标签。默认`["dynamic", "user-created"]` |
-| §鲁米§0§|可选| §鲁米§1§ |用于生成handler_code的AI模型 |
+| `name` | Required | `string` | Tool name (same as tool_id) |
+| `description` | Optional | `string` | Tool description |
+| `parameters` | Required | `object` | Parameter definition in JSON Schema format |
+| `handler_code` | Optional | `string` | Python handler code. If null, AI generation |
+| `tags` | Optional | `array[string]` | Tag. Default `["dynamic", "user-created"]` |
+| `model` | Optional | `string` | AI model used to generate handler_code |
 
 **回应（`data`）：**
 
-|领域|类型 |描述 |
+| Field | Type | Description |
 |---|---|---|
-| §鲁米§0§| §鲁米§1§ |工具ID |
-| §鲁米§0§| §鲁米§1§ |工具名称|
-| §鲁米§0§| §鲁米§1§ |描述 |
-| §鲁米§0§| §鲁米§1§ |生成的处理程序代码 |
-| §鲁米§0§| §鲁米§1§ | ISO 8601 时间戳 |
+| `tool_id` | `string` | Tool ID |
+| `name` | `string` | Tool name |
+| `summary` | `string` | Description |
+| `handler_code` | `string` | Generated handler code |
+| `created_at` | `string` | ISO 8601 timestamp |
 
 **错误情况：**
 
-|代码|描述 |
+| Code | Description |
 |---|---|
-| §鲁米§0§| `name` 或 `parameters` 未指定 |
-| §鲁米§0§| `parameters` 不是一个字典 |
-| §鲁米§0§|已存在同名工具 |
-| §鲁米§0§|注册过程中出现错误 |
+| `MISSING_PARAM` | `name` or `parameters` not specified |
+| `INVALID_PARAM` | `parameters` is not a dict |
+| `ALREADY_EXISTS` | A tool with the same name already exists |
+| `REGISTER_ERROR` | Error in registration process |
 
 ---
 
 ### PUT /api/tools/{名称}
 
-更新动态工具。内部致电`blocks.tool.update`。
+更新动态工具。内部调用`blocks.tool.update`。
 
 **路径参数：**
 
-|参数|必填|类型 |描述 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| §鲁米§0§|必填| §鲁米§1§ |工具名称|
+| `name` | Required | `string` | Tool name |
 
 **请求正文：**
 
-|参数|必填|类型 |描述 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| §鲁米§0§|可选| §鲁米§1§ |新描述 |
-| §鲁米§0§|可选| §鲁米§1§ |新架构|
-| §鲁米§0§|可选| §鲁米§1§ |新处理程序代码 |
-| §鲁米§0§|可选| §鲁米§1§ |新标签|
+| `description` | Optional | `string` | New description |
+| `parameters` | Optional | `object` | New schema |
+| `handler_code` | Optional | `string` | New handler code |
+| `tags` | Optional | `array[string]` | New tag |
 
-**响应（`data`）：**更新了工具定义
+**响应（`data`）：**更新了工具定义**错误情况：**
 
-**错误情况：**
-
-|代码|描述 |
+| Code | Description |
 |---|---|
-| §鲁米§0§|指定的工具不存在或不是动态的 |
+| `NOT_FOUND` | The specified tool does not exist or is not dynamic |
 
 ---
 
 ### 删除 /api/tools/{name}
 
-删除动态工具。文件也会同时被删除。内部致电`blocks.tool.delete`。
+删除动态工具。文件也会同时被删除。内部调用`blocks.tool.delete`。
 
 **路径参数：**
 
-|参数|必填|类型 |描述 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| §鲁米§0§|必填| §鲁米§1§ |工具名称|
+| `name` | Required | `string` | Tool name |
 
-**回应（`data`）：** `{"deleted": true}`
+**响应（`data`）：** `{"deleted": true}`**错误情况：**
 
-**错误情况：**
-
-|代码|描述 |
+| Code | Description |
 |---|---|
-| §鲁米§0§|指定的工具不存在或不是动态的 |
+| `NOT_FOUND` | The specified tool does not exist or is not dynamic |
 
 ---
 
 ### GET /api/tools/{name}/export
 
-导出工具定义，包括 handler_code。内部致电`blocks.tool.export`。
+导出工具定义，包括 handler_code。内部调用`blocks.tool.export`。
 
 **路径参数：**
 
-|参数|必填|类型 |描述 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| §鲁米§0§|必填| §鲁米§1§ |工具名称|
+| `name` | Required | `string` | Tool name |
 
-**响应（`data`）：**工具定义对象（包含handler_code字段）
+**响应（`data`）：**工具定义对象（包含handler_code字段）**错误情况：**
 
-**错误情况：**
-
-|代码|描述 |
+| Code | Description |
 |---|---|
-| §鲁米§0§|指定的工具不存在 |
+| `NOT_FOUND` | The specified tool does not exist |
 
 ---
 
@@ -797,46 +763,46 @@ OpenAI 兼容端点。发送消息并获得 AI 回复。内部致电`blocks.chat
 
 ### 获取/api/dev/inspect
 
-获取之前的请求信息。内部致电`blocks.dev.inspect`。
+获取之前的请求信息。内部调用`blocks.dev.inspect`。
 
 **请求正文（可选）：**
 
-|参数|必填|类型 |描述 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| §鲁米§0§|可选| §鲁米§1§ |特定请求 ID |
-| §鲁米§0§|可选| §鲁米§1§ |特定对话ID |
+| `request_id` | Optional | `string` | Specific request ID |
+| `conversation_id` | Optional | `string` | Specific conversation ID |
 
-`request_id` 指定后，返回日志。 `conversation_id` 指定后，返回最新的对话日志。如果两者均未指定，则返回前一个请求。
+`request_id` 指定时，返回日志。 `conversation_id` 如果指定，则返回最新的对话日志。如果两者均未指定，则返回前一个请求。
 
 **回应（`data`）：**
 
-|领域|类型 |描述 |
+| Field | Type | Description |
 |---|---|---|
-| §鲁米§0§| §鲁米§1§ |请求 ID |
-| §鲁米§0§| §鲁米§1§ |对话 ID |
-| §鲁米§0§| §鲁米§1§ |使用模式|
-| §鲁米§0§| §鲁米§1§ |提示已使用 |
-| §鲁米§0§| §鲁米§1§ |调用工具|
-| §鲁米§0§| §鲁米§1§ |上下文信息 |
-| §鲁米§0§| §鲁米§1§ | ISO 8601 时间戳 |
+| `request_id` | `string` | Request ID |
+| `conversation_id` | `string` | Conversation ID |
+| `model` | `string` | Usage Model |
+| `prompt_used` | `string` | Prompt used |
+| `tools_called` | `array` | Invoked tool |
+| `context_info` | `object` | Context information |
+| `timestamp` | `string` | ISO 8601 timestamp |
 
 **错误情况：**
 
-|代码|描述 |
+| Code | Description |
 |---|---|
-| §鲁米§0§|指定ID的日志不存在 |
+| `NOT_FOUND` | Log with specified ID does not exist |
 
 ---
 
 ### 获取 /api/dev/prompt-history
 
-获取即时历史记录。内部致电`blocks.dev.prompt_history`。
+获取即时历史记录。内部调用`blocks.dev.prompt_history`。
 
 **请求正文（可选）：**
 
-|参数|必填|类型 |描述 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| §鲁米§0§|可选| §鲁米§1§ |结果数。默认 20 |
+| `limit` | Optional | `int` | Number of results. Default 20 |
 
 **响应（`data`）：** 日志数组（最新的在前）
 
@@ -844,44 +810,40 @@ OpenAI 兼容端点。发送消息并获得 AI 回复。内部致电`blocks.chat
 
 ### POST /api/dev/edit-prompt
 
-实时编辑和重新运行提示。内部致电`blocks.dev.edit_prompt_live`。
+实时编辑和重新运行提示。内部调用`blocks.dev.edit_prompt_live`。
 
 **请求正文：**
 
-|参数|必填|类型 |描述 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| §鲁米§0§|必填| §鲁米§1§ |请求 ID 进行编辑 |
-| §鲁米§0§|必填| §鲁米§1§ |新提示 |
+| `request_id` | Required | `string` | Request ID to be edited |
+| `new_prompt` | Required | `string` | New prompt |
 
-**响应（`data`）：**重新执行结果
+**响应(`data`)：**重新执行结果**错误情况：**
 
-**错误情况：**
-
-|代码|描述 |
+| Code | Description |
 |---|---|
-| §鲁米§0§|指定的请求不存在 |
-| §鲁米§0§|缺少必需的参数 |
+| `NOT_FOUND` | The specified request does not exist |
+| `INVALID_INPUT` | Required parameter missing |
 
 ---
 
 ### POST /api/dev/replay
 
-重试过去的请求。内部致电`blocks.dev.replay`。
+重试过去的请求。内部调用`blocks.dev.replay`。
 
 **请求正文：**
 
-|参数|必填|类型 |描述 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| §鲁米§0§|必填| §鲁米§1§ |请求ID被重新执行|
-| §鲁米§0§|可选| §鲁米§1§ |使用另一个模型重新运行 |
+| `request_id` | Required | `string` | Request ID to be re-executed |
+| `model` | Optional | `string` | Rerun with another model |
 
-**响应（`data`）：**重新执行结果
+**响应(`data`)：**重新执行结果**错误情况：**
 
-**错误情况：**
-
-|代码|描述 |
+| Code | Description |
 |---|---|
-| §鲁米§0§|指定的请求不存在 |
+| `NOT_FOUND` | The specified request does not exist |
 
 ---
 
@@ -891,15 +853,13 @@ OpenAI 兼容端点。发送消息并获得 AI 回复。内部致电`blocks.chat
 
 健康检查。直接返回响应而不调用block。
 
-**请求正文：** 无
+**请求正文：**无**响应（`data`）：**
 
-**回应（`data`）：**
-
-|领域|类型 |描述 |
+| Field | Type | Description |
 |---|---|---|
-| §鲁米§0§| §鲁米§1§ | §鲁米§2§ |
-| §鲁米§0§| §鲁米§1§ | §鲁米§2§ |
-| §鲁米§0§| §鲁米§1§ | ISO 8601 时间戳 |
+| `status` | `string` | `"healthy"` |
+| `pack` | `string` | `"defaults"` |
+| `ts` | `string` | ISO 8601 timestamp |
 
 **错误情况：**无
 
@@ -909,15 +869,13 @@ OpenAI 兼容端点。发送消息并获得 AI 回复。内部致电`blocks.chat
 
 获取包的上下文信息。如果设置了外观，还返回接口列表。
 
-**请求正文：** 无
+**请求正文：**无**响应（`data`）：**
 
-**回应（`data`）：**
-
-|领域|类型 |描述 |
+| Field | Type | Description |
 |---|---|---|
-| §鲁米§0§| §鲁米§1§ | §鲁米§2§ |
-| §鲁米§0§| §鲁米§1§ |内核门面接口列表 |
-| §鲁米§0§| §鲁米§1§ | ISO 8601 时间戳 |
+| `pack` | `string` | `"defaults"` |
+| `interfaces` | `object` | Kernel facade interface list |
+| `ts` | `string` | ISO 8601 timestamp |
 
 **错误情况：**无
 
@@ -935,20 +893,20 @@ OpenAI 兼容端点。发送消息并获得 AI 回复。内部致电`blocks.chat
 
 ### 获取/静态/{路径}
 
-提供静态文件。带有`..`的父目录引用被阻止。
+提供静态文件。带有 `..` 的父目录引用将被阻止。
 
 **路径参数：**
 
-|参数|必填|类型 |描述 |
+| Parameter | Required | Type | Description |
 |---|---|---|---|
-| §鲁米§0§|必填| §鲁米§1§ |文件的相对路径|
+| `path` | Required | `string` | Relative path of the file |
 
 **响应：** 对应Content-Type的文件内容。二进制文件采用 Base64 编码。
 
-对应扩展：`.html`、`.css`、`.js`、`.json`、`.png`、`.jpg`、`.jpeg`、`.gif`、`.svg`、`.ico`
+对应扩展： `.html`、`.css`、`.js`、`.json`、`.png`、`.jpg`、`.jpeg`、`.gif`、`.svg`、`.ico`
 
 **错误情况：**
 
-|代码|描述 |
+| Code | Description |
 |---|---|
-| §鲁米§0§|路径无效（包括`..`等）或文件不存在 |
+| `ERROR` | The path is invalid (including `..`, etc.) or the file does not exist |

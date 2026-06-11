@@ -8,19 +8,19 @@
 
 |编号 |类别 |灵感来源 |本地|应用程序编程接口 |优先|状态 |默认包目标 |
 |---|---|---|---:|---:|---|---|---|
-|计划模式 |代理核心 |抄本、克劳德代码、马努斯 |是的 |没有| P0|已实施 | §鲁米§0§，§鲁米§1§|
-|步骤执行 |代理核心 |法典，马努斯 |是的 |没有| P0|已实施 | §鲁米§0§，§鲁米§1§|
-|审批工作流程 |安全|法典，克劳德·代码 |是的 |没有| P0|已实施 | §鲁米§0§，§鲁米§1§|
-|本地文件工作空间 |工作区 |法典，克劳德代码，光标 |是的 |没有| P0|已实施 | §鲁米§0§，§鲁米§1§|
-|终端外壳 |终端|法典，克劳德·代码 |是的 |没有| P0|已实施 | §鲁米§0§|
-| git_集成 | git | git法典，克劳德代码，光标 |是的 |部分 | P0|已实施 | §鲁米§0§|
-|记忆 |个性化| ChatGPT，克劳德项目 |是的 |没有| P1 |已实施 | §鲁米§0§|
-|项目工作空间 |项目| ChatGPT 项目，光标 |是的 |没有| P1 |已实施 | §鲁米§0§|
-|紧凑上下文 |背景 |克劳德代码，ChatGPT |是的 |没有| P1 |已实施 | §鲁米§0§|
-|文物|文物|克劳德、ChatGPT、Genspark |是的 |没有| P1 |已实施 | §鲁米§0§|
-|本地研究 |研究|马努斯 Genspark |部分 |没有| P2 |已实施 | §鲁米§0§|
-|浏览器可选 |可选浏览器 |马努斯，张开爪|部分 |可选 | P3 |计划| §鲁米§0§|
-|本地模型提供者 |型号| OpenClaw、Ollama 应用程序 |是的 |没有| P0|已实施 | §鲁米§0§|
+|计划模式 |代理核心 |抄本、克劳德代码、马努斯 |是的 |没有| P0|已实施 | `schemas/agent_plan.schema.yaml`，`prompts/planner.system.md`|
+|步骤执行 |代理核心 |法典，马努斯 |是的 |没有| P0|已实施 | `schemas/agent_step.schema.yaml`，`blocks/agent/*`|
+|审批工作流程 |安全|法典，克劳德·代码 |是的 |没有| P0|已实施 | `schemas/tool_call.schema.yaml`，`capabilities/safety.capability.yaml`|
+|本地文件工作空间 |工作区 |法典，克劳德代码，光标 |是的 |没有| P0|已实施 | `capabilities/local_file.capability.yaml`，`blocks/coding/*`|
+|终端外壳 |终端|法典，克劳德·代码 |是的 |没有| P0|已实施 | `capabilities/terminal.capability.yaml`|
+| git_集成 | git | git法典，克劳德代码，光标 |是的 |部分 | P0|已实施 | `capabilities/git.capability.yaml`|
+|记忆 |个性化| ChatGPT，克劳德项目 |是的 |没有| P1 |已实施 | `capabilities/memory.capability.yaml`|
+|项目工作空间 |项目| ChatGPT 项目，光标 |是的 |没有| P1 |已实施 | `schemas/project.schema.yaml`|
+|紧凑上下文 |背景 |克劳德代码，ChatGPT |是的 |没有| P1 |已实施 | `capabilities/compact.capability.yaml`|
+|文物|文物|克劳德、ChatGPT、Genspark |是的 |没有| P1 |已实施 | `schemas/artifact.schema.yaml`|
+|本地研究 |研究|马努斯 Genspark |部分 |没有| P2 |已实施 | `schemas/research_result.schema.yaml`|
+|浏览器可选 |可选浏览器 |马努斯，张开爪|部分 |可选 | P3 |计划| `capabilities/browser_optional.capability.yaml`|
+|本地模型提供者 |型号| OpenClaw、Ollama 应用程序 |是的 |没有| P0|已实施 | `capabilities/local_model.capability.yaml`|
 
 规则：
 

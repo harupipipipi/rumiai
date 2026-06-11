@@ -2,7 +2,7 @@
 [EN](../../prompt.md) | [JP](./prompt.md) | [KR](../ko/prompt.md) | [CN](../zh-cn/prompt.md)
 <!-- docs-i18n-links:end -->
 
-#prompt.md — Rumi AI OS プロンプト設計ドキュメント
+# prompt.md — Rumi AI OS プロンプト設計ドキュメント
 
 ## 1. 概要
 
@@ -352,11 +352,7 @@ VARIABLES = {
 
 ### 7.1 変数の分類
 
-**必須** は、呼び出し元によって値を渡す必要がある変数です。渡されない場合、バリデーターはエラーを返します。
-
-**optional** は、渡されなくてもデフォルト値が使用される変数です。 `source: system` を指定すると、variable_resolver がシステムから値を自動的に取得します。
-
-**custom** は、このプロンプトに固有のカスタマイズ ポイントです。プロンプトのユーザー (agent.json の prompt_variables または呼び出しコード) は、値をオーバーライドできます。プロンプト パック ユーザーがプロンプトの動作を微調整するために使用します。
+**必須** は、呼び出し元によって値を渡す必要がある変数です。渡されない場合、バリデータはエラーを返します。**optional** は、渡されなくてもデフォルト値が使用される変数です。 `source: system` を指定すると、variable_resolver がシステムから値を自動的に取得します。**custom** は、このプロンプトに固有のカスタマイズ ポイントです。プロンプトのユーザー (agent.json の prompt_variables または呼び出しコード) は、値をオーバーライドできます。プロンプト パック ユーザーがプロンプトの動作を微調整するために使用します。
 
 変数の数に制限はありません。また、prompt.py の pre_render 内で変数を動的に生成して返すこともできます。
 
@@ -591,7 +587,7 @@ loader.py は、すべての検索パスを次の順序でスキャンし、同�
 
 ### 10.4 未解決の競合
 
-Resolution.json に記録されていない競合は、レンダリング時に `PromptConflictError` を返します。エラーには提案リストが含まれており、フロントエンドはユーザーに選択 UI を表示します。
+solution.json に記録されていない競合は、レンダリング時に `PromptConflictError` を返します。エラーには提案リストが含まれており、フロントエンドはユーザーに選択 UI を表示します。
 
 ```python
 class PromptConflictError(Exception):
@@ -712,7 +708,7 @@ PERMISSIONS で宣言されていない機能はコンテキスト内に存在�
 
 プロンプト.pyはサーバー側で実行されます。以下の制限が適用されます。
 
-PERMISSIONS で宣言されたコンテキスト機能のみが挿入されます。実行時間は LIMITS `max_execution_time` によって制限されます (デフォルトは 5 秒)。出力サイズは、LIMITS `max_output_size` によって制限されます (デフォルトは 50,000 文字)。
+PERMISSIONS で宣言されたコンテキスト機能のみが挿入されます。実行時間は LIMITS `max_execution_time` によって制限されます (デフォルトは 5 秒)。出力サイズは LIMITS `max_output_size` によって制限されます (デフォルトは 50,000 文字)。
 
 Pack からインストールされたprompt.py は、ユーザーが Pack の承認フローを通じてコードをすでに検証および承認していることを前提としています。
 
@@ -766,34 +762,28 @@ user_data/packs/advanced_coding_prompts/
 
 ### 15.3 プロンプトパックのタイプ
 
-**システム プロンプト パック** は、エージェントの性格と行動規範を定義するプロンプトのコレクションです。
-
-**Utility Prompt Pack** は、内部処理 (圧縮、メモリ更新、計画など) のためのテンプレートのコレクションです。
-
-**部分パック** は、他のプロンプトから含まれるパーツのコレクションです。
-
-**フル エージェント パック** は、すべてのプロンプト、ツール、およびエージェント定義を含む完全なパッケージです。
+**システム プロンプト パック** は、エージェントの性格と行動規範を定義するプロンプトのコレクションです。**ユーティリティ プロンプト パック** は、内部処理 (圧縮、メモリ更新、計画など) 用のテンプレートのコレクションです。**部分パック** は、他のプロンプトから含まれる部分のコレクションです。**フル エージェント パック** は、すべてのプロンプト、ツール、およびエージェント定義を含む完全なパッケージです。
 
 
 ## 16. 組み込みプロンプト
 
 Rumi AI OS によってデフォルトで提供されるプロンプトのリスト。
 
-|プロンプト ID |タイプ |伸びる |使い方 |
+| prompt_id | type | extends | usage |
 |-----------|------|---------|------|
-|一般システム |システム | — |一般的なシステム プロンプト。すべてのエージェントの基盤 |
-|コーディングシステム |システム |一般システム |コーディング固有のシステム プロンプト |
-|履歴圧縮 |圧縮 | — |会話履歴の圧縮 |
-|メモリ更新 |メモリ更新 | — | project.md / user.md を更新 |
-|計画タスク分解 |企画 | — |タスクの分解 |
+| general_system | system | — | General system prompt. Foundation of all agents |
+| coding_system | system | general_system | Coding-specific system prompt |
+| history_compression | compression | — | Conversation history compression |
+| memory_update | memory_update | — | Update project.md / user.md |
+| planning_task_decomposition | planning | — | Task decomposition |
 
 部分音:
 
-|ファイル |使い方 |
+| File | Usage |
 |----------|------|
-|部分/安全ルール.md |安全規則 |
-|パーシャル/tool_instructions.md |ツールの使用に関する一般的なガイドライン |
-|パーシャル/出力フォーマット.md |出力形式の指定 |
+| partials/safety_rules.md | Safety rules |
+| partials/tool_instructions.md | General guidelines for using the tool |
+| partials/output_format.md | Specifying output format |
 
 テンプレートの実際のテキストはまだ作成されていません。構造のみ確認済みです。
 
@@ -941,11 +931,11 @@ class PromptLoader:
 
 ### 18.2 完全な構成 (prompt.py)
 
-`user_data/shared/prompts/my_prompt/prompt.py`で必要に応じてMETADATA、VARIABLES、pre_renderを定義します。テンプレートは、TEMPLATE 文字列または template.md によって指定されます。
+必要に応じて、`user_data/shared/prompts/my_prompt/prompt.py` で METADATA、VARIABLES、および pre_render を定義します。テンプレートは、TEMPLATE 文字列または template.md によって指定されます。
 
 ### 18.3 既存のプロンプトの継承
 
-prompt.pyの`METADATA["extends"]`で親を指定し、template.mdの`{% extends %}`でブロックを上書きします。
+プロンプト.pyの`METADATA["extends"]`で親を指定し、template.mdの`{% extends %}`でブロックを上書きします。
 
 ### 18.4 プロンプト パックとして配布
 

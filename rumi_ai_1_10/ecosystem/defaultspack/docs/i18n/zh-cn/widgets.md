@@ -21,55 +21,55 @@ Python 帮助程序库位于`ecosystem/defaults/lib/rumi_widgets/`。用法是�
 
 |班级 |用途 |主要参数|
 |---|---|---|
-| §鲁米§0§|文字显示| §鲁米§1§ |
-| §鲁米§0§|查看源代码 | §鲁米§1§、§鲁米§2§、§鲁米§3§、§鲁米§4§|
-| §鲁米§0§|差异展示| §鲁米§1§、§鲁米§2§、§鲁米§3§|
-| §鲁米§0§|图片展示| §鲁米§1§、§鲁米§2§、§鲁米§3§、§鲁米§4§|
-| §鲁米§0§|截图展示| §鲁米§1§、§鲁米§2§、§鲁米§3§|
-| §鲁米§0§|进度显示| §鲁米§1§、§鲁米§2§、§鲁米§3§、§鲁米§4§|
-| §鲁米§0§|终端输出显示| §鲁米§1§、§鲁米§2§、§鲁米§3§|
-| §鲁米§0§|桌面展示| §鲁米§1§，§鲁米§2§|
-| §鲁米§0§|图表显示 | §鲁米§1§、§鲁米§2§、§鲁米§3§|
-| §鲁米§0§|文件树显示 | §鲁米§1§ |
-| §鲁米§0§| Markdown 渲染 | §鲁米§1§ |
-| §鲁米§0§|音频播放 | §鲁米§1§，§鲁米§2§|
-| §鲁米§0§|视频播放| §鲁米§1§，§鲁米§2§|
-| §鲁米§0§|地图显示| §鲁米§1§、§鲁米§2§、§鲁米§3§|
+| `Text`|文字显示| `text` |
+| `CodeBlock`|查看源代码 | `language`、`content`、`filename`、`line_start`|
+| `Diff`|差异展示| `old_content`、`new_content`、`filename`|
+| `Image`|图片展示| `src`、`alt`、`width`、`height`|
+| `Screenshot`|截图展示| `src`、`url`、`title`|
+| `Progress`|进度显示| `label`、`current`、`total`、`state`|
+| `Terminal`|终端输出显示| `command`、`output`、`exit_code`|
+| `Table`|桌面展示| `headers`，`rows`|
+| `Chart`|图表显示 | `chart_type`、`labels`、`data`|
+| `FileTree`|文件树显示 | `tree` |
+| `Markdown`| Markdown 渲染 | `content` |
+| `Audio`|音频播放 | `src`，`duration`|
+| `Video`|视频播放| `src`，`duration`|
+| `Map`|地图显示| `lat`、`lng`、`zoom`|
 
-###controls.py（6种控件）
-
-|班级 |用途 |主要参数|
-|---|---|---|
-| §鲁米§0§|文字输入 | §鲁米§1§、§鲁米§2§、§鲁米§3§|
-| §鲁米§0§|按钮| §鲁米§1§、§鲁米§2§、§鲁米§3§|
-| §鲁米§0§|选择| §鲁米§1§、§鲁米§2§、§鲁米§3§|
-| §鲁米§0§|拨动开关| §鲁米§1§，§鲁米§2§|
-| §鲁米§0§|滑块| §鲁米§1§、§鲁米§2§、§鲁米§3§、§鲁米§4§|
-| §鲁米§0§|复选框 | §鲁米§1§，§鲁米§2§|
-
-###layout.py（6种布局类型）
+### controls.py（6种控件）
 
 |班级 |用途 |主要参数|
 |---|---|---|
-| §鲁米§0§|通用集装箱| §鲁米§1§ |
-| §鲁米§0§|并排布局 | §鲁米§1§，§鲁米§2§|
-| §鲁米§0§|垂直布局| §鲁米§1§，§鲁米§2§|
-| §鲁米§0§|标签切换 | `tabs`（每个`{label, content}`）|
-| §鲁米§0§|折叠 | §鲁米§1§、§鲁米§2§、§鲁米§3§|
-| §鲁米§0§|带页眉/正文/页脚的卡片 | §鲁米§1§、§鲁米§2§、§鲁米§3§|
+| `Input`|文字输入 | `placeholder`、`value`、`multiline`|
+| `Button`|按钮| `label`、`action`、`variant`|
+| `Select`|选择| `options`、`value`、`multiple`|
+| `Toggle`|拨动开关| `label`，`value`|
+| `Slider`|滑块| `min`、`max`、`value`、`step`|
+| `Checkbox`|复选框 | `label`，`checked`|
 
-###stream.py（2种流类型）
+### layout.py（6种布局类型）
 
 |班级 |用途 |主要参数|
 |---|---|---|
-| §鲁米§0§|基于状态的流显示| `states`（字典）|
-| §鲁米§0§|单状态指示器| §鲁米§1§、§鲁米§2§、§鲁米§3§|
+| `Container`|通用集装箱| `children` |
+| `Row`|并排布局 | `children`，`gap`|
+| `Column`|垂直布局| `children`，`gap`|
+| `Tabs`|标签切换 | `tabs`（每个`{label, content}`）|
+| `Collapsible`|折叠 | `label`、`default_open`、`children`|
+| `Card`|带页眉/正文/页脚的卡片 | `header`、`body`、`footer`|
+
+### stream.py（2种流类型）
+
+|班级 |用途 |主要参数|
+|---|---|---|
+| `Stream`|基于状态的流显示| `states`（字典）|
+| `Indicator`|单状态指示器| `label`、`state`、`animation`|
 
 ### custom.py（1 种自定义类型）
 
 |班级 |用途 |主要参数|
 |---|---|---|
-| §鲁米§0§|未定义的小部件 | §鲁米§1§、§鲁米§2§、§鲁米§3§|
+| `Custom`|未定义的小部件 | `custom_type`、`fallback`、`data`|
 
 
 ## 3.Python端如何生成JSON

@@ -37,9 +37,9 @@ domain/<category>/<component_id>/
 
 - Gitlawb OpenGateway 提供商 ID 仍为 `gitlawb-opengateway`。
 - Gitlawb OpenGateway 模型 ID 保留：
-  - §鲁米§0§
-  - §鲁米§0§
-  - §鲁米§0§
+  - `gitlawb-opengateway/mimo-v2.5-pro`
+  - `gitlawb-opengateway/mimo-v2-flash`
+  - `gitlawb-opengateway/mimo-v2-omni`
 - 保留无键行为、默认基本 URL 行为、浏览器用户代理行为和固定模型白名单行为。
 - MiMo Omni 保留经过验证的图像元数据。
 - `rumi_model_catalog_pack`提供商/模型清单被保留并保持清单支持。

@@ -40,8 +40,8 @@ ui/              ← 配信される build 済み frontend（shell.html, shell-a
 
 |环境变量|默认值|描述 |
 |---|---|---|
-| §鲁米§0§| §鲁米§1§ | HTTP服务器绑定地址 |
-| §鲁米§0§| §鲁米§1§ | HTTP 服务器端口号 |
+| `DEFAULTS_HTTP_HOST`| `127.0.0.1` | HTTP服务器绑定地址 |
+| `DEFAULTS_HTTP_PORT`| `8766` | HTTP 服务器端口号 |
 
 如果您使用 AI 提供商，还需为每个提供商设置 API 密钥（例如，`OPENAI_API_KEY`、`ANTHROPIC_API_KEY`等）。如果未设置 API 密钥，AI 调用将返回存根响应 (`[stub] AI response placeholder`)。
 

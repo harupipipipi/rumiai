@@ -123,11 +123,11 @@ ID、ツール ID、プロバイダー エイリアス、モデル エイリア�
 
 - エンドポイント ID: `line-main`、`discord-main`、`slack-main`、`test-webhook`
 - プロフィール ID: `line.default`、`discord.default`、`slack.default`、
-  §るみ§0§
+  `generic.webhook.default`
 - プロバイダー ID: `gitlawb-opengateway`
 - モデル ID: `gitlawb-opengateway/mimo-v2.5-pro`、
   `gitlawb-opengateway/mimo-v2-flash`、
-  §るみ§0§
+  `gitlawb-opengateway/mimo-v2-omni`
 
 ## ルートのメタデータ
 

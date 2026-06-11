@@ -37,9 +37,9 @@ domain/<category>/<component_id>/
 
 - Gitlawb OpenGateway 공급자 ID는 `gitlawb-opengateway`로 유지됩니다.
 - Gitlawb OpenGateway 모델 ID는 그대로 유지됩니다.
-  - §루미§0§
-  - §루미§0§
-  - §루미§0§
+  - `gitlawb-opengateway/mimo-v2.5-pro`
+  - `gitlawb-opengateway/mimo-v2-flash`
+  - `gitlawb-opengateway/mimo-v2-omni`
 - 키 없음 동작, 기본 기본 URL 동작, 브라우저 사용자 에이전트 동작 및 고정 모델 허용 목록 동작이 유지됩니다.
 - MiMo Omni는 검증된 이미지 메타데이터를 유지합니다.
 - `rumi_model_catalog_pack` 공급자/모델 매니페스트가 보존되고 매니페스트 지원 상태로 유지됩니다.

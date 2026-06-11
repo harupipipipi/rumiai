@@ -16,18 +16,18 @@ defaultspack 的 ai_client 使用清单优先解析提供程序。 OpenAI 兼容
 
 |提供商 ID |描述 |
 |---|---|
-| §鲁米§0§| OpenAI API（GPT-4o、GPT-4o-mini、o3、o4-mini 等）|
-| §鲁米§0§| Anthropic API（克劳德作品 4、十四行诗 4、俳句 3 等）|
-| §鲁米§0§| Google Gemini API（Gemini 2.5 Pro、Gemini 2.5 Flash 等）|
-| §鲁米§0§| OpenRouter API（仅默认包中的`tencent/hy3-preview:free`）|
-| §鲁米§0§| Gitlawb OpenGateway（修复了 MiMo 的许可名单。所有型号都需要 API 密钥）|
-| §鲁米§0§| Groq OpenAI 兼容 API |
-| §鲁米§0§| Cerebras OpenAI 兼容 API |
-| §鲁米§0§| NVIDIA NIM OpenAI 兼容 API |
-| §鲁米§0§| Moonshot AI OpenAI 兼容 API |
-| §鲁米§0§|小米MiMo直接API区域目录入口（初始状态无法执行）|
-| §鲁米§0§|测试存根。返回固定响应 |
-| §鲁米§0§| rumi 自己的元提供程序（管道、路由、评估）|
+| `openai`| OpenAI API（GPT-4o、GPT-4o-mini、o3、o4-mini 等）|
+| `anthropic`| Anthropic API（克劳德作品 4、十四行诗 4、俳句 3 等）|
+| `google`| Google Gemini API（Gemini 2.5 Pro、Gemini 2.5 Flash 等）|
+| `openrouter`| OpenRouter API（仅默认包中的`tencent/hy3-preview:free`）|
+| `gitlawb-opengateway`| Gitlawb OpenGateway（修复了 MiMo 的许可名单。所有型号都需要 API 密钥）|
+| `groq`| Groq OpenAI 兼容 API |
+| `cerebras`| Cerebras OpenAI 兼容 API |
+| `nvidia`| NVIDIA NIM OpenAI 兼容 API |
+| `moonshotai`| Moonshot AI OpenAI 兼容 API |
+| `xiaomi-mimo`|小米MiMo直接API区域目录入口（初始状态无法执行）|
+| `stub`|测试存根。返回固定响应 |
+| `rumi`| rumi 自己的元提供程序（管道、路由、评估）|
 
 
 ## 3.各provider的环境变量设置
@@ -86,11 +86,11 @@ GITLAWB_OPENGATEWAY_BASE_URL=https://opengateway.gitlawb.com/v1
 
 |型号名称 |特点|
 |---|---|
-| §鲁米§0§| MiMo V2.5 Pro 推理 |
-| §鲁米§0§|快速 MiMo V2 闪存 |
-| §鲁米§0§| MiMo V2 Omni 带图像输入 |
-| §鲁米§0§| MiMo V2 Pro 推理 |
-| §鲁米§0§| MiMo V2.5 推理 |
+| `gitlawb-opengateway/mimo-v2.5-pro`| MiMo V2.5 Pro 推理 |
+| `gitlawb-opengateway/mimo-v2-flash`|快速 MiMo V2 闪存 |
+| `gitlawb-opengateway/mimo-v2-omni`| MiMo V2 Omni 带图像输入 |
+| `gitlawb-opengateway/mimo-v2-pro`| MiMo V2 Pro 推理 |
+| `gitlawb-opengateway/mimo-v2.5`| MiMo V2.5 推理 |
 
 `mimo`系统被发送到Gitlawb OpenGateway的OpenAI兼容`POST /v1/chat/completions`，唯一的区别是`model`。 `mimo-v2-omni`图像识别使用OpenAI兼容的`content`数组格式。运行时分配浏览器用户代理以实现网关兼容性。
 
@@ -143,51 +143,51 @@ MiMo 代币计划将在提供商目录中保留为`subscription_plans`。目前�
 
 |型号名称 |特点|
 |---|---|
-| §鲁米§0§|旗舰。多式联运兼容 |
-| §鲁米§0§|轻量化、高速、低成本|
-| §鲁米§0§|推理专业化（推理代币）|
-| §鲁米§0§|推理专用/轻型版 |
-| §鲁米§0§|最新一代（如果有）|
-| §鲁米§0§|最新一代/轻量化版本|
-| §鲁米§0§|最新一代、最轻|
+| `gpt-4o`|旗舰。多式联运兼容 |
+| `gpt-4o-mini`|轻量化、高速、低成本|
+| `o3`|推理专业化（推理代币）|
+| `o4-mini`|推理专用/轻型版 |
+| `gpt-4.1`|最新一代（如果有）|
+| `gpt-4.1-mini`|最新一代/轻量化版本|
+| `gpt-4.1-nano`|最新一代、最轻|
 
 ### 人择
 
 |型号名称 |特点|
 |---|---|
-| §鲁米§0§|最佳表现。扩展思维对应|
-| §鲁米§0§|平衡型。扩展思维对应|
-| §鲁米§0§|速度快、成本低|
+| `claude-opus-4-20250514`|最佳表现。扩展思维对应|
+| `claude-sonnet-4-20250514`|平衡型。扩展思维对应|
+| `claude-haiku-3-20250307`|速度快、成本低|
 
 ### 谷歌
 
 |型号名称 |特点|
 |---|---|
-| §鲁米§0§|旗舰。思维对应|
-| §鲁米§0§|速度快、成本低|
-| §鲁米§0§|稳定版 |
+| `gemini-2.5-pro`|旗舰。思维对应|
+| `gemini-2.5-flash`|速度快、成本低|
+| `gemini-2.0-flash`|稳定版 |
 
 ### 存根
 
 |型号名称 |特点|
 |---|---|
-| §鲁米§0§|按原样返回输入 |
-| §鲁米§0§|返回固定文本 |
-| §鲁米§0§|总是返回错误 |
+| `stub/echo`|按原样返回输入 |
+| `stub/fixed`|返回固定文本 |
+| `stub/error`|总是返回错误 |
 
 ### 鲁米
 
 |型号名称 |特点|
 |---|---|
-| §鲁米§0§|多个模型的管道执行 |
-| §鲁米§0§|根据任务自动选型 |
-| §鲁米§0§|药剂混合物|
-| §鲁米§0§|自动评估和重新排序生成的结果 |
+| `rumi/pipeline`|多个模型的管道执行 |
+| `rumi/router`|根据任务自动选型 |
+| `rumi/moa`|药剂混合物|
+| `rumi/eval`|自动评估和重新排序生成的结果 |
 
 
 ## 5.模型指定方法
 
-###“提供商/模型”格式
+### “提供商/模型”格式
 
 使用`"provider/model"`格式的字符串指定模型。
 
@@ -292,13 +292,13 @@ user_data/shared/ai_models/
 
 |特点|开放人工智能 |人择 |谷歌 |存根|鲁米 |
 |---|---|---|---|---|---|
-| §鲁米§0§| ✅ | ✅ | ✅ | ✅ | ✅ |
-| §鲁米§0§| ✅ | ✅ | ✅ | ✅ | ✅ |
-| §鲁米§0§| ✅ | ❌ | ✅ | ❌ | ❌ |
-| §鲁米§0§| ✅ (DALL-E) | ❌ | ✅（图像）| ❌ | ❌ |
-| §鲁米§0§| ✅（愿景）| ✅（愿景）| ✅（愿景）| ❌ | ✅ |
-| §鲁米§0§| ✅（小声）| ❌ | ✅ | ❌ | ❌ |
-| §鲁米§0§| ✅ | ❌ | ✅ | ❌ | ❌ |
+| `defaults.ai.complete`| ✅ | ✅ | ✅ | ✅ | ✅ |
+| `defaults.ai.stream`| ✅ | ✅ | ✅ | ✅ | ✅ |
+| `defaults.ai.embed`| ✅ | ❌ | ✅ | ❌ | ❌ |
+| `defaults.ai.image_gen`| ✅ (DALL-E) | ❌ | ✅（图像）| ❌ | ❌ |
+| `defaults.ai.image_analyze`| ✅（愿景）| ✅（愿景）| ✅（愿景）| ❌ | ✅ |
+| `defaults.ai.transcribe`| ✅（小声）| ❌ | ✅ | ❌ | ❌ |
+| `defaults.ai.tts`| ✅ | ❌ | ✅ | ❌ | ❌ |
 |工具调用 | ✅ | ✅ | ✅ | ✅ | ✅ |
 |思考/推理 | ✅（o3系列）| ✅（延伸思考）| ✅（双子座2.5）| ❌ | ✅ |
 |愿景| ✅ | ✅ | ✅ | ❌ | ✅ |

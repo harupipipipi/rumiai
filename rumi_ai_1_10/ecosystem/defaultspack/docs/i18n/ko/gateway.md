@@ -26,7 +26,7 @@ POST 섭취를 위한 `x-rumi-gateway-token` 토큰.
 게이트웨이는 외부 입력 프레임워크 자체가 아닌 로컬 흡입 셸입니다. 공개
 또는 공급자별 이벤트는 `ExternalEvent`로 정규화되어야 하며 다음을 통해 확인되어야 합니다.
 `AudiencePolicy`, `InputProfile`을 통해 매핑되고 다음을 통해 제출됨
-§루미§0§. 게이트웨이 메시지는 해당 이벤트의 소스 중 하나일 수 있습니다.
+`submit_input`. 게이트웨이 메시지는 해당 이벤트의 소스 중 하나일 수 있습니다.
 
 응답 전달은 `ResponsePlanner` 및 `ResponseAdapter`을 거쳐야 하므로
 채팅 및 에이전트 코드는 Slack, Discord, LINE, 웹훅 또는 터널을 학습하지 않습니다.

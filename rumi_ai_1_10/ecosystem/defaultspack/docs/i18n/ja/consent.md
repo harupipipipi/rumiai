@@ -10,20 +10,20 @@
 
 デフォルト パックは、同意メカニズム全体 (判断ロジック、ハンドラー、UI ポップアップ コラボレーション、イベント通信) を提供します。具体的には、次のファイルがデフォルト パックに配置されます。
 
-|ファイル |説明 |
+| File | Description |
 |---|---|
-| `blocks/tool/consent_check.py` |ジャッジメントハンドラー (`defaults.tool.consent_check`) |
-| `blocks/tool/consent_confirm.py` |同意記録ハンドラー (`defaults.tool.consent_confirm`) |
-| `domain/tool/consent.py` | `ConsentChecker` クラス（判定ロジック・同意記録管理） |
+| `blocks/tool/consent_check.py` | Judgment handler (`defaults.tool.consent_check`) |
+| `blocks/tool/consent_confirm.py` | Consent record handler (`defaults.tool.consent_confirm`) |
+| `domain/tool/consent.py` | `ConsentChecker` Class (determination logic/consent record management) |
 
 `defaults.tool.consent_check` および `defaults.tool.consent_confirm` は、`ecosystem.json` の `tool` コンポーネントの `provides` で宣言されています。 HTTP トランスポートには、ルート `POST /api/consent/check` および `POST /api/consent/{id}/confirm` を使用してアクセスできます。
 
 
-##2. 判定の仕組み
+## 2. 判定の仕組み
 
 ### キーワードによる判断
 
-軽量かつ迅速な一次判定。応答テキストに特定のキーワードが含まれているかどうかを確認します。 `domain/tool/consent.py`の`ConsentChecker.check_keywords()`が実行されます。カテゴリとキーワードは、`CATEGORIES` dicts としてモジュールにハードコーディングされます。
+軽量かつ迅速な一次判定。応答テキストに特定のキーワードが含まれているかどうかを確認します。 `domain/tool/consent.py`の`ConsentChecker.check_keywords()`が実行されます。カテゴリとキーワードは、`CATEGORIES` 辞書としてモジュールにハードコーディングされています。
 
 ```python
 # domain/tool/consent.py より抜粋
@@ -65,7 +65,7 @@ CATEGORIES = {
 
 ### AIによる判断
 
-`consent_check`ハンドラの`use_ai`パラメータを`true`に設定すると、`ConsentChecker.check_ai()`がAI判定を行います。 `AIClient.complete()` を内部的に呼び出して、テキストが機密カテゴリに該当するかどうかを分類します。
+`consent_check`ハンドラの`use_ai`パラメータを`true`に設定すると、`ConsentChecker.check_ai()`がAI判定を行います。 `AIClient.complete()` を内部的に呼び出して、テキストが機密カテゴリに分類されるかどうかを分類します。
 
 ```python
 # domain/tool/consent.py の AI 判定用システムプロンプト
@@ -85,19 +85,17 @@ _AI_JUDGE_SYSTEM = (
 
 ## 3. ハンドラー API
 
-###defaults.tool.consent_check
+### defaults.tool.consent_check
 
 テキストを決定し、同意が必要かどうかを返します。
 
-**HTTP**: `POST /api/consent/check`
+**HTTP**: `POST /api/consent/check`**input_data**:
 
-**入力データ**:
-
-|フィールド |タイプ |必須 |説明 |
+| Field | Type | Required | Description |
 |---|---|---|---|
-| `text` | `string` |はい |判定対象テキスト |
-| `use_ai` | `bool` |いいえ | AI判定を使用（デフォルト`false`） |
-| `model` | `string` |いいえ | AI判定時のモデル指定（デフォルト`"stub/default"`） |
+| `text` | `string` | Yes | Judgment target text |
+| `use_ai` | `bool` | No | Use AI judgment (default `false`) |
+| `model` | `string` | No | Model specification during AI judgment (default `"stub/default"`) |
 
 **戻り値**:
 
@@ -118,18 +116,16 @@ _AI_JUDGE_SYSTEM = (
 
 `requires_consent` が `false` である場合、`categories` は空の配列、`consent_id` は `null`、`disclaimers` は空の辞書です。
 
-###defaults.tool.consent_confirm
+### defaults.tool.consent_confirm
 
 ユーザーの同意/拒否を記録します。
 
-**HTTP**: `POST /api/consent/{id}/confirm`
+**HTTP**: `POST /api/consent/{id}/confirm`**input_data**:
 
-**入力データ**:
-
-|フィールド |タイプ |必須 |説明 |
+| Field | Type | Required | Description |
 |---|---|---|---|
-| `consent_id` | `string` |はい | `consent_check` によって返されるconsent_id (HTTPのパスパラメータから挿入) |
-| `accepted` | `bool` |はい |ユーザーの同意 |
+| `consent_id` | `string` | Yes | consent_id returned by `consent_check` (injected from path parameter in HTTP) |
+| `accepted` | `bool` | Yes | User consent |
 
 **戻り値**:
 
@@ -144,7 +140,7 @@ _AI_JUDGE_SYSTEM = (
 }
 ```
 
-同意記録は `user_data/shared/consent_log/{consent_id}.json` で永続化されます (`ConsentChecker._persist()` で記述されます)。
+同意記録は `user_data/shared/consent_log/{consent_id}.json` で永続化されます (`ConsentChecker._persist()` で記述)。
 
 
 ## 4. chat.send への統合方法 (提案)
@@ -177,7 +173,7 @@ if consent_result["data"]["requires_consent"]:
 
 `emit_widget`または`emit_event("ui.popup.show", ...)`で同意ポップアップが表示されます。フロントエンドのアセットはこのイベントを受け取り、ポップアップを描画します。
 
-Asset の JS が `event.broadcast` を受け取り、`event_type` が `"ui.popup.show"` の場合、ポップアップが表示されます。ユーザーがボタンをクリックすると、`event.broadcast` は `"ui.popup.response"` イベントを送り返します。
+Asset の JS が `event.broadcast` を受け取り、`event_type` が `"ui.popup.show"` である場合、ポップアップが表示されます。ユーザーがボタンをクリックすると、`event.broadcast` は `"ui.popup.response"` イベントを送り返します。
 
 ポップアップをウィジェットとして表現する場合:
 

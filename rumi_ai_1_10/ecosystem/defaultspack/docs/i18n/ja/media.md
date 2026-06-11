@@ -11,7 +11,7 @@
 
 ## 2. 画像操作
 
-###defaults.media.image_read
+### defaults.media.image_read
 
 画像ファイルを読み取り、メタデータとbase64データを返します。
 
@@ -40,7 +40,7 @@
 }
 ```
 
-###defaults.media.image_transform
+### defaults.media.image_transform
 
 画像に変換を適用します。
 
@@ -76,7 +76,7 @@
 
 ## 3. 文書の解析
 
-###defaults.media.doc_parse
+### defaults.media.doc_parse
 
 PDF、Word、PowerPoint などのドキュメント ファイルからテキストを抽出します。
 
@@ -115,7 +115,7 @@ PDF、Word、PowerPoint などのドキュメント ファイルからテキス�
 
 ## 4. クリップボードの操作
 
-###defaults.media.clipboard_read
+### defaults.media.clipboard_read
 
 システムのクリップボードの内容を読み取ります。
 
@@ -149,7 +149,7 @@ PDF、Word、PowerPoint などのドキュメント ファイルからテキス�
 }
 ```
 
-###defaults.media.clipboard_write
+### defaults.media.clipboard_write
 
 システムのクリップボードに書き込みます。
 

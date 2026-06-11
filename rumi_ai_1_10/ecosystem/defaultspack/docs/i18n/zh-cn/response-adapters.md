@@ -169,13 +169,13 @@ Webhook 处理程序可以在适配器稍后发送时返回 ack。
 
 |适配器|交付目标|
 |---|---|
-| §鲁米§0§| Slack `chat.postMessage` 与可选的`thread_ts` |
-| §鲁米§0§|使用短期回复令牌的 LINE 回复 API 参考 |
-| §鲁米§0§| Discord 交互响应体 |
-| §鲁米§0§| Discord 频道消息 API |
-| §鲁米§0§| Discord Webhook URL |
-| §鲁米§0§|通用 JSON 响应或回调 URL |
-| §鲁米§0§|工具支持的 LINE/Discord/Slack/通用 批准后发送 |
+| `slack-thread`| Slack `chat.postMessage` 与可选的`thread_ts` |
+| `line-reply`|使用短期回复令牌的 LINE 回复 API 参考 |
+| `discord-interaction`| Discord 交互响应体 |
+| `discord-channel`| Discord 频道消息 API |
+| `discord-webhook`| Discord Webhook URL |
+| `webhook-json`|通用 JSON 响应或回调 URL |
+| `external_send`|工具支持的 LINE/Discord/Slack/通用 批准后发送 |
 
 适配器 ID 由`InputProfile` 选择，而不是由聊天处理程序选择。
 
@@ -192,7 +192,7 @@ Webhook 处理程序可以在适配器稍后发送时返回 ack。
 |缺少出站令牌 |未经原始秘密的编辑传递错误 |
 |提供商速率限制 | `store_only` 或提供商特定的延迟处理 |
 |留言太长 |正常计划者分块|
-|规划后保单被拒绝| §鲁米§0§|
+|规划后保单被拒绝| `store_only`|
 
 ## 安全规则
 

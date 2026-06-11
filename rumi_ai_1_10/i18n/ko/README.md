@@ -14,18 +14,18 @@
 
 | 내가 하고 싶은 것 | 먼저 읽을 곳 | 나는 얼마나 이해할 수 있는가 |
 |---|---|---|
-| 목적별로 문서를 추적하고 싶어요 | §루미§0§ | "하고 싶은 일 → 어떤 문서"를 한 페이지에서 추적할 수 있습니다 |
-| 용어의 의미를 정렬하고 싶습니다 | §루미§0§ | `rule`, `skill`, `team workspace`, `delegation`의 사용법을 확인할 수 있습니다 |
+| 목적별로 문서를 추적하고 싶어요 | [`docs/README.md`](./docs/README.md) | "하고 싶은 일 → 어떤 문서"를 한 페이지에서 추적할 수 있습니다 |
+| 용어의 의미를 정렬하고 싶습니다 | [`docs/terminology.md`](./docs/terminology.md) | `rule`, `skill`, `team workspace`, `delegation`의 사용법을 확인할 수 있습니다 |
 | 먼저 시작하고 싶어요 | 루트 [`README.md`](../README.md) | 최단 시작 명령 및 Repo 입구 |
-| 먼저 해보고 싶어요 | §루미§0§ | `--health`에서 `/panel/`까지의 가장 짧은 튜토리얼 |
-| 코드를 읽지 않고 런타임 메커니즘을 이해하고 싶습니다 | §루미§0§ | 스타트업, 플로우, 승인, 부여, 시청자 협업 실행경로 |
-| `rumi_viewer`의 시작 절차와 작동이 어떻게 중단되는지 보고 싶습니다 | §루미§0§ | `401`, 검은색 화면, 패널과 defaultspack의 관계 |
-| defaultspack의 프런트엔드를 확장하고 싶습니다 | §루미§0§ | 오른쪽 막대, 설정, 채팅 렌더러 및 미리보기 피드를 늘리는 방법 |
+| 먼저 해보고 싶어요 | [`docs/tutorials/runtime-quickstart.md`](./docs/tutorials/runtime-quickstart.md) | `--health`에서 `/panel/`까지의 가장 짧은 튜토리얼 |
+| 코드를 읽지 않고 런타임 메커니즘을 이해하고 싶습니다 | [`docs/concepts/system-mechanism.md`](./docs/concepts/system-mechanism.md) | 스타트업, 플로우, 승인, 부여, 시청자 협업 실행경로 |
+| `rumi_viewer`의 시작 절차와 작동이 어떻게 중단되는지 보고 싶습니다 | [`docs/rumi_viewer_start.md`](./docs/rumi_viewer_start.md) | `401`, 검은색 화면, 패널과 defaultspack의 관계 |
+| defaultspack의 프런트엔드를 확장하고 싶습니다 | [`ecosystem/defaultspack/docs/frontend_extensions.md`](./ecosystem/defaultspack/docs/frontend_extensions.md) | 오른쪽 막대, 설정, 채팅 렌더러 및 미리보기 피드를 늘리는 방법 |
 | 이 런타임의 아이디어를 알고 싶습니다 | 이 README의 `Thoughts` | 흐름 중심, Pack 전제, Fail-Soft 아이디어 |
 | 디렉토리의 역할을 알고 싶습니다 | `Project structure`의 역할 | 이 추가 정보의 `core_runtime/`, `ecosystem/`, `user_data/` |
-| 팩 생성/수리 | §루미§0§ | `ecosystem.json`, `routes.json`, `permissions.json`, 비밀 사용 |
-| defaultspack의 채팅/ai를 팔로우하고 싶어요 | §루미§0§ | defaultspack의 구현 측면 |
-| defaultspack 프론트엔드의 향후 작업을 보고 싶습니다 | §루미§0§ | 레지스트리 진행 및 차기작 |
+| 팩 생성/수리 | [`docs/pack-development.md`](./docs/pack-development.md) | `ecosystem.json`, `routes.json`, `permissions.json`, 비밀 사용 |
+| defaultspack의 채팅/ai를 팔로우하고 싶어요 | [`ecosystem/defaultspack/README.md`](./ecosystem/defaultspack/README.md) | defaultspack의 구현 측면 |
+| defaultspack 프론트엔드의 향후 작업을 보고 싶습니다 | [`ecosystem/defaultspack/docs/frontend_todo.md`](./ecosystem/defaultspack/docs/frontend_todo.md) | 레지스트리 진행 및 차기작 |
 | API 키와 비밀을 설정하고 싶습니다 | [`docs/operations.md`](./docs/operations.md)의 비밀 섹션 | `user_data/secrets/` 및 API 경로 |
 | 뷰어를 통해 부팅 경로를 수정하고 싶습니다 | [`../rumi_viewer/src-tauri/src/config.rs`](../rumi_viewer/src-tauri/src/config.rs) 및 [`../rumi_viewer/src-tauri/src/kernel_manager.rs`](../rumi_viewer/src-tauri/src/kernel_manager.rs) | 뷰어가 시작해야 하는 커널과 통과해야 하는 환경은 무엇입니까 |
 | 설치 팩 / 인증을 보고 싶습니다 | [`core_runtime/setup_pack.py`](./core_runtime/setup_pack.py) 및 [`core_runtime/approval_manager.py`](./core_runtime/approval_manager.py) | 설치 팩 선택, all-ok 부여, 재인증 |
@@ -122,10 +122,10 @@ python -m rumi_ai migrate-hmac
 
 ## 프로젝트 구조
 
-§루미§0§
+<details>
 <summary>디렉토리 트리(확대하려면 클릭)</summary>
 
-§루미§0§§루미§1§
+<pre><code>
 프로젝트_루트/
 ├── app.py
 ├── bootstrap.py
@@ -205,7 +205,7 @@ python -m rumi_ai migrate-hmac
 │ └── json_patch.py
 │
 ├── 생태계/
-│ ├── §루미§0§/
+│ ├── <pack_id>/
 │ │ └── 백엔드/
 │ │ ├── 생태계.json
 │ │ ├── 허가.json
@@ -219,7 +219,7 @@ python -m rumi_ai migrate-hmac
 │ │ ├── vocab.txt
 │ │ └── 변환기/
 │ └── 팩/
-│ └── §루미§0§/...
+│ └── <pack_id>/...
 │
 ├── 사용자_데이터/
 │ ├── 감사/
@@ -279,43 +279,43 @@ python -m rumi_ai migrate-hmac
     ├── 팩-개발.md
     ├── Operations.md
     └── 로드맵.md
-§루미§0§§루미§1§
+</code></pre>
 
-§루미§0§
+</details>
 
 ### 메인 디렉토리
 
 | 디렉토리 | 역할 |
 |---|---|
-| §루미§0§ | 커널 — 흐름 실행 엔진, 보안 및 권한 관리 |
-| §루미§0§ | 공유사전시스템(스냅샷저널) |
-| §루미§0§ | 공식 기능 구현(Store, Secrets, Flow, Communication, Docker) |
-| §루미§0§ | 생태계 기반 — 팩/컴포넌트 로딩/초기화 |
-| §루미§0§ | 팩 보관(외장용품) |
-| §루미§0§ | 런타임 영구 데이터(감사 로그, 승인, 비밀, 저장) |
-| §루미§0§ | 설정 지원(CLI/웹/가이드) |
-| §루미§0§ | 공식 흐름(스타트업/베이스) |
-| §루미§0§ | 다국어 메시지 |
-| §루미§0§ | 테스트 |
-| §루미§0§ | 문서 |
+| `core_runtime/` | 커널 — 흐름 실행 엔진, 보안 및 권한 관리 |
+| `core_runtime/shared_dict/` | 공유사전시스템(스냅샷저널) |
+| `core_runtime/core_pack/` | 공식 기능 구현(Store, Secrets, Flow, Communication, Docker) |
+| `backend_core/ecosystem/` | 생태계 기반 — 팩/컴포넌트 로딩/초기화 |
+| `ecosystem/` | 팩 보관(외장용품) |
+| `user_data/` | 런타임 영구 데이터(감사 로그, 승인, 비밀, 저장) |
+| `rumi_setup/` | 설정 지원(CLI/웹/가이드) |
+| `flows/` | 공식 흐름(스타트업/베이스) |
+| `lang/` | 다국어 메시지 |
+| `tests/` | 테스트 |
+| `docs/` | 문서 |
 
 ### 주요 파일
 
 | 파일 | 역할 |
 |---|---|
-| §루미§0§ | OS 진입점 |
-| §루미§0§ | 설정 진입점 |
-| §루미§0§ | 믹스인 어셈블리/핸들러 등록 |
-| §루미§0§ | 흐름 실행 엔진 본체 |
-| §루미§0§ | §루미§1§ 실행 |
-| §루미§0§ | Docker 격리 실행 |
-| §루미§0§ | 팩 승인 관리 |
-| §루미§0§ | 기능 프록시 서버(UDS) |
-| §루미§0§ | 외부 통신 프록시(UDS) |
-| §루미§0§ | 흐름 YAML 로더 |
-| §루미§0§ | 흐름 수정자 적용 |
-| §루미§0§ | 팩 가져오기(zip/폴더 → 준비) |
-| §루미§0§ | 팩 적용(스테이징 → 생태계) |
+| `app.py` | OS 진입점 |
+| `bootstrap.py` | 설정 진입점 |
+| `kernel.py` | 믹스인 어셈블리/핸들러 등록 |
+| `kernel_core.py` | 흐름 실행 엔진 본체 |
+| `python_file_executor.py` | `python_file_call` 실행 |
+| `secure_executor.py` | Docker 격리 실행 |
+| `approval_manager.py` | 팩 승인 관리 |
+| `capability_proxy.py` | 기능 프록시 서버(UDS) |
+| `egress_proxy.py` | 외부 통신 프록시(UDS) |
+| `flow_loader.py` | 흐름 YAML 로더 |
+| `flow_modifier.py` | 흐름 수정자 적용 |
+| `pack_importer.py` | 팩 가져오기(zip/폴더 → 준비) |
+| `pack_applier.py` | 팩 적용(스테이징 → 생태계) |
 
 ## 뷰어 그래프 편집기
 
@@ -379,13 +379,13 @@ curl -X POST http://localhost:8765/api/packs/{pack_id}/approve \
 
 | 문서 | 내용 |
 |---|---|
-| §루미§0§ | 디자인 및 메커니즘의 전체 그림 |
-| §루미§0§ | 팩 개발 가이드 |
-| §루미§0§ | 팩 개발 빠른 시작 |
-| §루미§0§ | 운영안내 |
-| §루미§0§ | 로드맵 |
-| §루미§0§ | 개발 결정에 사용되는 생각 노트 |
-| §루미§0§ | 품질 보증/감사/회귀 검증 팩 |
+| [docs/architecture.md](./docs/architecture.md) | 디자인 및 메커니즘의 전체 그림 |
+| [docs/pack-development.md](./docs/pack-development.md) | 팩 개발 가이드 |
+| [docs/pack-development-guide.md](./docs/pack-development-guide.md) | 팩 개발 빠른 시작 |
+| [docs/operations.md](./docs/operations.md) | 운영안내 |
+| [docs/roadmap.md](./docs/roadmap.md) | 로드맵 |
+| [docs/quality_pack/philosophy_memo.md](docs/quality_pack/philosophy_memo.md) | 개발 결정에 사용되는 생각 노트 |
+| [docs/quality_pack/claude_desktop_quality_pack.md](./docs/quality_pack/claude_desktop_quality_pack.md) | 품질 보증/감사/회귀 검증 팩 |
 
 ---
 
@@ -396,7 +396,7 @@ MIT 라이센스
 ## defaultspack 진실의 소스
 
 이 저장소의 정식 defaultspack 구현은 다음과 같습니다.
-§루미§0§. 이전 `ecosystem/defaults/` 경로와 별도의 경로
+`ecosystem/defaultspack/`. 이전 `ecosystem/defaults/` 경로와 별도의 경로
 `harupipipipi/rumiai_defaults` 저장소는 호환성 또는 스냅샷 소스입니다.
 새로운 로컬 우선 런타임 동작은 레거시와 함께 defaultspack에 포함되어야 합니다.
 필요한 경우 별칭을 다시 위임합니다.

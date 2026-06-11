@@ -39,8 +39,8 @@ Core는 생태계 노드 검색 전에 내장 노드를 등록합니다. 1단계
 
 1단계 검색 경로:
 
-1. §루미§0§
-2. §루미§0§
+1. `ecosystem/<pack_id>/nodes/*.node.json`
+2. `ecosystem/<pack_id>/components/*/node.json`
 
 재귀적 `**/node.json` 검색은 의도적으로 연기됩니다.
 
@@ -131,24 +131,24 @@ Core는 생태계 노드 검색 전에 내장 노드를 등록합니다. 1단계
 
 노드:
 
-- §루미§0§
-- §루미§0§
-- §루미§0§
-- §루미§0§
+- `node_id`
+- `kind`
+- `display_name`
+- `ports`
 
 포트:
 
-- §루미§0§
-- §루미§0§
-- §루미§0§
+- `id`
+- `direction`
+- `standards`
 
 ## 포트 방향
 
 허용되는 값:
 
-- §루미§0§
-- §루미§0§
-- §루미§0§
+- `input`
+- `output`
+- `bidirectional`
 
 1단계에서는 `input` 및 `output`에 대한 지원이 필요합니다. `bidirectional`는 스키마에 의해 예약되어 있으며 구현될 때까지 유효성 검사기에 의해 거부될 수 있습니다.
 
@@ -234,8 +234,8 @@ Capability Graph는 이를 활성 프런트엔드 표면으로 선택합니다. 
 
 디스플레이 텍스트 해상도:
 
-1. §루미§0§
-2. §루미§0§
+1. `display_name[user_locale]`
+2. `display_name.en`
 3. 레거시 `name`
 4. `node_id` 또는 포트 `id`
 
@@ -245,7 +245,7 @@ Capability Graph는 이를 활성 프런트엔드 표면으로 선택합니다. 
 
 일반적인 바인딩 슬롯:
 
-- §루미§0§
-- §루미§0§
+- `compile`
+- `on_input.<port_id>`
 
 바인딩 핸들러는 승인된 레지스트리 또는 커널 핸들러 인프라를 통해 해결되어야 합니다. 직접 임의 가져오기는 허용되지 않습니다.

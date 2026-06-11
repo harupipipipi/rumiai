@@ -2,7 +2,7 @@
 [EN](../../rumi_viewer_start.md) | [JP](../ja/rumi_viewer_start.md) | [KR](../ko/rumi_viewer_start.md) | [CN](./rumi_viewer_start.md)
 <!-- docs-i18n-links:end -->
 
-#rumi_viewer 入门指南
+# rumi_viewer 入门指南
 
 `rumi_viewer` 是 Tauri 制作的桌面外壳。在开发启动期间，它会自动检测存储库中的`rumi_ai_1_10/`，启动Python内核，并连接到面板UI。
 控制面板前端源代码由`rumi_viewer/frontend`所有，内核提供构建工件作为`rumi_ai_1_10/core_runtime/core_pack/core_control_panel/web`至`/panel/`。
@@ -74,11 +74,11 @@ RUMI_AUTO_APPROVE_LOCAL=true cargo tauri dev
 
 ## 常见木鞋
 
-### §鲁米§0§
+### `Kernel directory not found`
 
 查看器只能在捆绑包中看到`app/`，或者无法检测到回购结账。请在 repo 根目录下开始开发。
 
-### §鲁米§0§
+### `panel bootstrap returned 401 Unauthorized`
 
 引导程序机密可能未对齐，或者旧内核可能正在占用端口`8765`。检查下面的占用情况。
 
@@ -106,8 +106,8 @@ curl http://127.0.0.1:8766/api/health
 
 ## 相关文件
 
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
+- `rumi_viewer/src-tauri/src/config.rs`
+- `rumi_viewer/src-tauri/src/kernel_manager.rs`
+- `rumi_viewer/src-tauri/src/lib.rs`
+- `rumi_viewer/frontend/src/App.tsx`
+- `rumi_viewer/frontend/src/lib/routes.ts`

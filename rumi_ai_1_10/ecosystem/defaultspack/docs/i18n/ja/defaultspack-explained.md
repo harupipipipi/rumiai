@@ -2,12 +2,25 @@
 [EN](../../defaultspack-explained.md) | [JP](./defaultspack-explained.md) | [KR](../ko/defaultspack-explained.md) | [CN](../zh-cn/defaultspack-explained.md)
 <!-- docs-i18n-links:end -->
 
-#defaultspack の説明
+# defaultspack の説明
 
 このドキュメントは、defaultspack の PR97 方向マップです。どのようにして
-ローカルファースト UI、チャット ランタイム、ツール、MCP、スキル、メモリ、スケジューラ、トリガー
-カーネルがドメイン固有の情報を認識する必要がなくても、サーフェスは結合されます。
-行動。
+ローカルファースト UI、チャット ランタイム、ツール、MCP、ルール、スキル、メモリ、スケジューラ、
+トリガー サーフェスは、カーネルが何も認識する必要なく結合されます。
+ドメイン固有の動作。
+
+## 用語
+
+- `rule` は、スコープ内で適用される常時オンの命令層を意味します。
+- `skill` は、トリガーベースまたはオンデマンドの命令とワークフローのバンドルを意味します
+  指導。
+- `prompt` は、ソース アセットまたはアセンブルされたレンダリングされたモデル テキストのいずれかを意味します。
+  ランニング。
+- `system prompt` は、システム ロール スライスの下位レベルの API/ランタイム用語です。
+  表示されたプロンプトの。
+- `delegation` は、別のエージェントに作業を送信するための正規のアクションです。
+  `subagent` は互換性フィールドや古いドキュメントにまだ表示されている可能性がありますが、
+  好ましいアーキテクチャ用語ではありません。
 
 ## 全体像
 
@@ -38,7 +51,8 @@ flowchart LR
 
 重要な境界は、コンテンツが削除可能なままであるということです。デフォルトパックの消耗品
 インフラストラクチャとデフォルト。 user_data および他のパックは UI を置き換えることができます
-アセット、プロンプト、ツール、エージェント、スケジュール、メモリ ファイル、スキル定義。
+アセット、ルール、プロンプト アセット、ツール、エージェント、スケジュール、メモリ ファイル、スキル
+定義。
 
 ## UI とチャットの流れ
 
@@ -56,10 +70,10 @@ sequenceDiagram
   participant ToolBroker as tool broker
   participant Store as user_data/chat
 
-  User->>Webapp: type prompt / attach files / pick tools
+  User->>Webapp: type message / attach files / pick tools
   Webapp->>ChatAPI: create or stream message
   ChatAPI->>ChatDomain: persist user message
-  ChatAPI->>ModelRoute: choose model + build prompt
+  ChatAPI->>ModelRoute: choose model + render runtime prompt
   ModelRoute->>ToolBroker: expose selected tools
   ToolBroker-->>Webapp: streamed tool activity events
   ModelRoute-->>ChatAPI: assistant deltas / final message
@@ -110,17 +124,18 @@ PR97 チェックでは、補助散文や固定マーカー文字列を証拠と
 同様のテキストを入力します。
 
 アシスタントのメッセージ テキストは、ツール、MCP サーバー、スキル、トリガー、
-または、実際に実行されたチャット コンテキストがドロップされました。 「私はツールを使用しました」などの散文を次のように扱います。
-テキストのみを表示します。合否の決定は、によって生成された構造化レコードを読み取る必要があります。
-ブラウザ/プレイライトによって観察されるランタイムまたは目に見える UI の状態。
+委任、またはドロップされたチャット コンテキストが実際に実行されました。 「私は使用しました」のような散文を扱います
+ツール」は表示テキストのみとして使用されます。合否の決定は構造化されたものでなければなりません
+ランタイムによって生成されるレコード、またはによって観察される可視の UI 状態
+ブラウザ/プレイライト。
 
-|クレーム |確認すべき証拠 |
+| Claim | Evidence to check |
 |---|---|
-| MCPはRumiさんで使えました |アシスタント メッセージ `tool_logs`、`tool_call_started`、および `tool_call_completed` には、MCP ツール ID と結果が含まれています。
-|発動したスキル |アシスタントのメタデータには `matched_skill_instructions` が含まれており、準備されたシステム コンテキストにはレンダリングされたスキルの指示が含まれています。
-|ドロップされたチャットが参照されました |ユーザー メタデータには、`chat_references.references[]` と `conversation_id`、概要、および `history_json_path` が含まれています。
-| | を送信せずにトリガーが起動されました。外部パイプライン メタデータには `fire=true` および `send=false` があります。
-| UI プレビューが開きました | Playwright/Browser は、模擬アシスタントの文ではなく、実際のフォアグラウンド ダイアログまたはタイムライン アイテムを観察します。
+| MCP was usable by Rumi | assistant message `tool_logs`, `tool_call_started`, and `tool_call_completed` contain the MCP tool id and result |
+| A skill fired | assistant metadata contains `matched_skill_instructions`, and the prepared system context contains the rendered skill instruction |
+| A dropped chat was referenced | user metadata contains `chat_references.references[]` with `conversation_id`, summary, and `history_json_path` |
+| A trigger fired without sending | external pipeline metadata has `fire=true` and `send=false` |
+| UI preview opened | Playwright/Browser observes the actual foreground dialog or timeline item, not a mocked assistant sentence |
 
 決定論的テストの場合は、動的入力を使用し、最終的な答えが次であることをアサートします。
 ツールの結果から派生します。ライブブラウザスモークテストの場合、合格/不合格を維持します。
@@ -133,11 +148,11 @@ API のみのチェックは、ブラウザ/Playwright フローが失敗した�
 ライブ MCP 証拠テストとは別に、サーバー、承認、
 テスト内の許可と nonce 状態。
 
-## スキルと拡張機能
+## ルール、スキル、拡張機能
 
-スキルは、エージェントやツールの実行を支援するパッケージ化された動作と指示です。
-特殊なワークフロー。 defaultspack はそれらを拡張コンテンツとして扱います。
-ハードコードされたランタイムの知識よりも。
+ルールは、常時オンの命令レイヤーを提供します。スキルはターゲットを絞ったものを提供します
+関連する場合にアクティブ化される指示とワークフローのバンドル。デフォルトパック
+は両方を、ハードコードされた実行時の知識ではなく拡張コンテンツとして扱います。
 
 ```mermaid
 flowchart LR
@@ -153,9 +168,9 @@ flowchart LR
   Registry --> Agent
 ```
 
-同じ拡張パスにコマンド、パネル、ツール メタデータ、プロンプト、または
-エージェントの機能。 UI はこれらをカタログ データとして受け取り、レンダリングします。
-パック固有のコードを必要とせずに、サイドバーまたはコンポーザーを使用できます。
+同じ拡張パスでコマンド、パネル、ツールのメタデータ、ルール、プロンプトを追加できます。
+資産、またはエージェントの機能。 UIはそれらをカタログデータとして受け取り、
+パック固有のコードを必要とせずに、サイドバーまたはコンポーザーでそれらをレンダリングします。
 
 ## メモリフロー
 
@@ -219,16 +234,17 @@ flowchart LR
 
 ## リクエスト サーフェス
 
-|表面 |例 |デフォルトのパス |
+| Surface | Example | Default path |
 |---|---|---|
-| UIチャット |ユーザーがコンポーザー プロンプトを送信する | `/api/chat/conversations/{id}/stream` |
-| UI アクション |サイドバー アクションで結果をプレビューする | `/api/ui/catalog` プラス アクション エンドポイント |
-|ツール呼び出し |モデルはネイティブまたは MCP ツールを呼び出します。 `defaults.tool.invoke` |
-| MCP |サーバーは外部ツールを公開します | `domain/tool/mcp_client.py` |
-|スキル |パックはワークフローの動作に貢献します | `domain/extensions/*` |
-|メモリ |プロンプトビルダーがコンテキストを呼び出す | `domain/memory*` |
-|スケジューラー |時間または要求に応じてジョブを起動 | `/api/agent/schedules` |
-|トリガー | Webhook/イベントがランタイムに入ります |ゲートウェイ、スケジューラ、またはイベント バス |
+| UI chat | User sends a composer message | `/api/chat/conversations/{id}/stream` |
+| UI action | Sidebar action previews a result | `/api/ui/catalog` plus action endpoint |
+| Tool call | Model invokes a native or MCP tool | `defaults.tool.invoke` |
+| MCP | Server exposes external tools | `domain/tool/mcp_client.py` |
+| Rule | Always-on instruction layer is applied for a run | prompt assembly and runtime policy layers |
+| Skill | Pack contributes workflow behavior | `domain/extensions/*` |
+| Memory | Prompt builder recalls context | `domain/memory*` |
+| Scheduler | Job fires on time or demand | `/api/agent/schedules` |
+| Trigger | Webhook/event enters runtime | gateway, scheduler, or event bus |
 
 ## 運用ルール
 

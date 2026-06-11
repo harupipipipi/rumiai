@@ -41,7 +41,7 @@ HTTP request
 |供应商|验证|
 |---|---|
 |松弛| `x-slack-signature` 和 `x-slack-request-timestamp` |
-|线路 | §鲁米§0§|
+|线路 | `x-line-signature`|
 |不和谐 | `x-signature-ed25519` 和 `x-signature-timestamp` |
 |通用 webhook |持有者令牌、HMAC 签名或其他配置的验证器 |
 
@@ -75,7 +75,7 @@ dedupe_key = provider + ":" + event_id
 `ResponseAdapter` 提供最终答复。
 
 LINE `computer_use_line_biz` 端点可以选择快速确认行为
-§鲁米§0§。这只会将 webhook 处理移至
+`response.background_processing: true`。这只会将 webhook 处理移至
 进程内工作人员，以便提供者立即收到 HTTP 200；它没有
 启用实验性后台桌面驱动程序。可见的计算机使用仍然存在
 除非设置了`RUMI_ENABLE_EXPERIMENTAL_BACKGROUND_COMPUTER_USE=1`，否则为默认值。
@@ -104,9 +104,9 @@ LINE `computer_use_line_biz` 端点可以选择快速确认行为
 
 Webhook 端点现在可以定义：
 
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
+- `target`
+- `default_delivery`
+- `allowed_delivery_actions`
 - `ttl_seconds`或`expires_at`
 
 入站通用 Webhook 首先应用端点默认值，然后仅允许请求

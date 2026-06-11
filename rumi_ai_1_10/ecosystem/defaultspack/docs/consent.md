@@ -89,9 +89,7 @@ _AI_JUDGE_SYSTEM = (
 
 Determines the text and returns whether consent is required.
 
-**HTTP**: `POST /api/consent/check`
-
-**input_data**:
+**HTTP**: `POST /api/consent/check`**input_data**:
 
 | Field | Type | Required | Description |
 |---|---|---|---|
@@ -122,9 +120,7 @@ If `requires_consent` is `false`, `categories` is an empty array, `consent_id` i
 
 Record user consent/refusal.
 
-**HTTP**: `POST /api/consent/{id}/confirm`
-
-**input_data**:
+**HTTP**: `POST /api/consent/{id}/confirm`**input_data**:
 
 | Field | Type | Required | Description |
 |---|---|---|---|

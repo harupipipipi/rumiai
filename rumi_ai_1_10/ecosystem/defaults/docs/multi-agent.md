@@ -18,11 +18,7 @@ Agents can mention other agents in their responses in the form `@agent_name: mes
 
 ## Session creation (multi_execute)
 
-**handler**: `defaults.agent.multi_execute`（`blocks/agent/multi_execute.py`）
-
-**HTTP**: `POST /api/agent/multi/execute`
-
-**input_data**:
+**handler**: `defaults.agent.multi_execute`（`blocks/agent/multi_execute.py`）**HTTP**: `POST /api/agent/multi/execute`**input_data**:
 
 | Field | Type | Required | Description |
 |---|---|---|---|
@@ -70,9 +66,7 @@ Agents can mention other agents in their responses in the form `@agent_name: mes
 
 ## Orchestration method
 
-**`round_robin`** (default): Agents speak in turn. `session.current_turn % len(agents)` determines the next speaker. Completed (`done: true`) agents are skipped.
-
-**`directed`**: Determines the next speaker from the `@agent_name:` mention in the previous message. If there are no mentions, it will fall back to round robin. Parsed with `_MENTION_RE = re.compile(r"@(\w+)\s*:")`.
+**`round_robin`** (default): Agents speak in turn. `session.current_turn % len(agents)` determines the next speaker. Completed (`done: true`) agents are skipped.**`directed`**: Determines the next speaker from the `@agent_name:` mention in the previous message. If there are no mentions, it will fall back to round robin. Parsed with `_MENTION_RE = re.compile(r"@(\w+)\s*:")`.
 
 **`free`**: All incomplete agents speak in parallel. Use `threading.Thread` to execute multiple agent turns simultaneously. Each thread has a timeout of 120 seconds.
 
@@ -118,29 +112,17 @@ Agents can mention other agents in their responses in the form `@agent_name: mes
 
 ## Check status
 
-**handler**: `defaults.agent.multi_status`（`blocks/agent/multi_status.py`）
-
-**HTTP**: `GET /api/agent/multi/{id}/status`
-
-**input_data**:
+**handler**: `defaults.agent.multi_status`（`blocks/agent/multi_status.py`）**HTTP**: `GET /api/agent/multi/{id}/status`**input_data**:
 
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `session_id` | `string` | Yes | Session ID (auto-injected from URL path) |
 
-**Processing**: Get session at `_state.get_multi_session(session_id)` and return `session.to_dict()` at `orchestrator.get_status(session)`.
-
-**Return value**: `ok(session_dict)` — Complete state of the session.
-
-**Error case**: If `session_id` is unspecified or the session does not exist, return `error(...)`.
+**Processing**: Get session at `_state.get_multi_session(session_id)` and return `session.to_dict()` at `orchestrator.get_status(session)`.**Return value**: `ok(session_dict)` — Complete state of the session.**Error case**: If `session_id` is unspecified or the session does not exist, return `error(...)`.
 
 ## Inputting messages from outside
 
-**handler**: `defaults.agent.multi_message`（`blocks/agent/multi_message.py`）
-
-**HTTP**: `POST /api/agent/multi/{id}/message`
-
-**input_data**:
+**handler**: `defaults.agent.multi_message`（`blocks/agent/multi_message.py`）**HTTP**: `POST /api/agent/multi/{id}/message`**input_data**:
 
 | Field | Type | Required | Description |
 |---|---|---|---|
@@ -148,11 +130,7 @@ Agents can mention other agents in their responses in the form `@agent_name: mes
 | `message` | `string` | Yes | Message content to be input |
 | `target_agent` | `string` | No | Name when addressing to a specific agent |
 
-**Processing**: If `target_agent` is specified, send a direct message with `post_direct("user", target, message, turn)` and also add it to the agent's `agent_contexts[name]["messages"]` as `[User message]: ...`. If not specified, it will be posted as a shared message using `post_shared("user", message, turn)` and added to the messages of all agents.
-
-**Return value**: `ok({"session_id": "...", "message": "Message injected successfully"})`
-
-**Error case**: Returns `error(...)` if `session_id` is unspecified, `message` is unspecified, or the session does not exist.
+**Processing**: If `target_agent` is specified, send a direct message with `post_direct("user", target, message, turn)` and also add it to the agent's `agent_contexts[name]["messages"]` as `[User message]: ...`. If not specified, it will be posted as a shared message using `post_shared("user", message, turn)` and added to the messages of all agents.**Return value**: `ok({"session_id": "...", "message": "Message injected successfully"})`**Error case**: Returns `error(...)` if `session_id` is unspecified, `message` is unspecified, or the session does not exist.
 
 ## List of all HTTP endpoints
 

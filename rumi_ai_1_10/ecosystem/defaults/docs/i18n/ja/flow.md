@@ -12,25 +12,13 @@
 
 フロー エンジンは 2 つのレイヤーで構成されます。
 
-**レイヤー 1 — システム フロー (handler.py)**: flow.yaml + handler.py のペアによって定義された処理パイプライン。 handler.py は FlowContext を受け取り、汎用プリミティブ (call_handler、emit_event など) を使用して任意のハンドラーを呼び出します。
-
-**レイヤー 2 — カスタム フロー (ノード グラフ)**: YAML ノード定義のみを使用してフローを構築する宣言型メソッド。条件付き分岐、ループ、並列実行、およびサブフロー呼び出しをサポートします。 handler.py を記述する必要はありません。
+**レイヤー 1 — システム フロー (handler.py)**: flow.yaml + handler.py のペアによって定義された処理パイプライン。 handler.py は FlowContext を受け取り、汎用プリミティブ (call_handler、emit_event など) を使用して任意のハンドラーを呼び出します。**レイヤー 2 — カスタム フロー (ノード グラフ)**: YAML ノード定義のみを使用してフローを構築する宣言型メソッド。条件付き分岐、ループ、並列実行、およびサブフロー呼び出しをサポートします。 handler.py を記述する必要はありません。
 
 ## 2. 設計哲学
 
-**フロー自体はプラグインです**: デフォルトの 3 つのフローは特別に扱われません。新しいフローは、flow.yaml + handler.py を flows/ ディレクトリに配置するだけで追加されます。フロー エンジンは、すべてのフローを同じ方法でロードして実行します。
+**フロー自体はプラグインです**: デフォルトの 3 つのフローは特別に扱われません。新しいフローは、flow.yaml + handler.py を flows/ ディレクトリに配置するだけで追加されます。フロー エンジンは、すべてのフローを同じ方法でロードして実行します。**汎用プリミティブのみ**: FlowContext は、次の汎用プリミティブのみを提供します: call_handler、emit_event、wait_event、data_read、data_write、capability、execute_flow、emit_widget。ドメイン固有の API はありません。チャットの保存、エージェントの実行、メモリの更新はすべて、call_handler を使用してハンドラーを呼び出すだけで実行されます。**標準語彙 (ブロック コントラクト)**: デフォルトでは、ハンドラーの入出力仕様をcontracts.py に「標準語彙」として定義します。 Pack はこの語彙を想定できます。ただし、コントラクトに登録されていないハンドラーも、call_handler を使用して自由に呼び出すことができます。標準語彙は共通言語であり、制約ではありません。**宣言型 + 命令型ハイブリッド**: メタデータとノード接続を flow.yaml で宣言的に定義し、実行ロジックを handler.py で命令的に記述します。単純なフローは handler.py だけで完了でき、複雑なフローは、flow.yaml のノード グラフを解釈して実行する Engine.py で完了できます。**ステップバイステップ**: レイヤー 1 でのみ完全に動作します。必要に応じてレイヤー 2 を使用できます。トリガー システムに関しては、user_input と API はすぐに機能し、インフラストラクチャが配置されると Webhook とスケジュールが有効になります。**メカニズムのみを提供します**: デフォルトは、フロー エンジン メカニズム (engine.py、router.py、validator.py、node_executor.py、trigger_manager.py、context.py) を提供します。デフォルトのフロー定義 (simple_chat、agent_chat、planning_agent) はバッテリーとして含まれていますが、同じ flow_id を持つ定義を user_data/shared/flows/ または user_data/packs/*/flows/ に配置することで完全に置き換えることができます。
 
-**汎用プリミティブのみ**: FlowContext は、次の汎用プリミティブのみを提供します: call_handler、emit_event、wait_event、data_read、data_write、capability、execute_flow、emit_widget。ドメイン固有の API はありません。チャットの保存、エージェントの実行、メモリの更新はすべて、call_handler を使用してハンドラーを呼び出すだけで実行されます。
-
-**標準語彙（ブロックコントラクト）**: デフォルトではハンドラの入出力仕様をcontracts.pyに「標準語彙」として定義しています。 Pack はこの語彙を想定できます。ただし、コントラクトに登録されていないハンドラーも、call_handler を使用して自由に呼び出すことができます。標準語彙は共通言語であり、制約ではありません。
-
-**宣言型 + 命令型ハイブリッド**: flow.yaml でメタデータとノード接続を宣言的に定義し、handler.py で実行ロジックを命令的に記述します。単純なフローはhandler.pyだけで完成でき、複雑なフローはflow.yamlのノードグラフを解釈して実行するengine.pyで完成できます。
-
-**ステップバイステップ**: レイヤ 1 でのみ完全に機能します。必要に応じてレイヤー 2 を使用できます。トリガー システムに関しては、user_input と API がすぐに機能し、インフラストラクチャが整備されると Webhook とスケジュールが有効になります。
-
-**メカニズムのみを提供します**: デフォルトは、フロー エンジン メカニズム (engine.py、router.py、validator.py、node_executor.py、trigger_manager.py、context.py) を提供します。デフォルトのフロー定義 (simple_chat、agent_chat、planning_agent) はバッテリーとして含まれていますが、同じ flow_id を持つ定義を user_data/shared/flows/ または user_data/packs/*/flows/ に配置することで完全に置き換えることができます。
-
-##3.rumiai公式との関係の流れ
+## 3.rumiai公式との関係の流れ
 
 公式rumiaiには独自のフローシステム（フェーズ+ステップ）があります。ステップの種類は、handler、python_file_call、set、if の 4 つだけです。
 
@@ -677,39 +665,39 @@ handler.pyを書かずにflow.yaml内のノードだけを使ってフローを�
 
 #### 基本ノード
 
-|タイプ |説明 |入力 |出力 |
+| type | description | input | output |
 |---|---|---|---|
-| `start` |フロー開始。入力変数を定義する |トリガー入力 |定義された変数 |
-| `end` |流れが終了します。最終出力を定義する |任意 |フロー結果 |
-| `handler` |任意のハンドラーを呼び出します |ハンドラー名、パラメータ |ハンドラーの戻り値 |
-| `prompt` |プロンプトレンダリング |プロンプト ID、変数 |レンダリングされたテキスト |
-| `event_emit` |イベントの問題 |イベントの種類、データ |なし |
-| `event_wait` |イベントを待っています |イベントタイプ、タイムアウト、フィルター |イベントデータ |
-| `data_read` |ユーザーデータの読み取り |パス |コンテンツ |
-| `data_write` |ユーザーデータの書き込み |パス、コンテンツ |成功 |
-| `capability` |機能呼び出し |能力 ID、パラメータ |結果 |
-| `flow` |別のフローをサブフローとして呼び出す |フロー ID、入力 |フロー結果 |
-| `widget` |ウィジェット送信 |ウィジェット JSON |なし |
+| `start` | Flow start. Define input variables | trigger_input | Defined variables |
+| `end` | Flow ends. Define final output | Any | FlowResult |
+| `handler` | Call any handler | handler_name, params | Return value of handler |
+| `prompt` | Prompt rendering | prompt_id, variables | rendered_text |
+| `event_emit` | Event issue | event_type, data | None |
+| `event_wait` | Waiting for event | event_type, timeout, filter | Event data |
+| `data_read` | user_data read | path | content |
+| `data_write` | user_data write | path, content | success |
+| `capability` | capability call | capability_id, params | result |
+| `flow` | Call another flow as a subflow | flow_id, input | FlowResult |
+| `widget` | Widget sending | widget JSON | None |
 
 #### 制御ノード
 
-|タイプ |説明 |
+| type | description |
 |---|---|
-| `condition` |条件分岐 (if/else) |
-| `switch` |マルチブランチ (スイッチ/ケース/デフォルト) |
-| `loop` |ループ (for_each / while / count) |
-| `parallel` |並列実行 (すべての完了または最速の完了を待機) |
-| `wait` |タイマーを待っています |
-| `goto` |指定したノードへジャンプ（サイクリックサポート） |
+| `condition` | Conditional branch (if/else) |
+| `switch` | Multi-branch (switch / case / default) |
+| `loop` | Loop (for_each / while / count) |
+| `parallel` | Parallel execution (waiting for all completion or fastest completion) |
+| `wait` | Waiting for timer |
+| `goto` | Jump to specified node (cyclic support) |
 
 #### データノード
 
-|タイプ |説明 |
+| type | description |
 |---|---|
-| `variable` |変数の設定、更新、削除 |
-| `template` | Jinja2 テンプレートのレンダリング |
-| `code` | Python コードの実行 (サンドボックス内) |
-| `http` | HTTP リクエストを送信する |
+| `variable` | Setting, updating, and deleting variables |
+| `template` | Jinja2 template rendering |
+| `code` | Python code execution (in sandbox) |
+| `http` | Send HTTP request |
 
 基本ノード `handler` はすべてキーです。ハンドラーノードは任意のハンドラーを呼び出す汎用ノードであり、handler_nameを変更するだけでチャット操作、エージェント実行、メモリ更新、ツール実行が可能になります。
 
@@ -904,14 +892,14 @@ nodes:
 
 ### 10.1 トリガーの種類
 
-|タイプ |説明 |ステータス |
+| type | description | status |
 |---|---|---|
-| `user_input` |チャットでのユーザー入力 |実施対象 |
-| `api` | REST API 呼び出し |実施対象 |
-| `event` |内部イベント |実施対象 |
-| `webhook` |外部からHTTP POSTを受信 |デーモンインフラストラクチャが必要です |
-| `schedule` | cron スタイルのスケジュール |デーモンインフラストラクチャが必要です |
-| `flow` |別のフローからのサブフロー呼び出し |実施対象 |
+| `user_input` | User input in chat | Implementation target |
+| `api` | REST API call | Implementation target |
+| `event` | Internal event | Implementation target |
+| `webhook` | Receive HTTP POST from outside | Daemon infrastructure required |
+| `schedule` | cron-style schedule | daemon infrastructure required |
+| `flow` | Subflow call from another flow | Implementation target |
 
 ### 10.2 トリガー定義例
 
@@ -1135,12 +1123,12 @@ class TriggerManager:
 
 on_error はノードごとに指定できます。
 
-|エラー時 |行動 |
+| on_error | Behavior |
 |---|---|
-| `retry` | max_retries 回再試行します。デフォルト 2 回 |
-| `skip` |ノードをスキップして、default_output | に進みます。
-| `fallback` |指定された fallback_node に遷移 |
-| `stop` |フロー全体を停止し、エラー結果を返します。
+| `retry` | Retry max_retries times. Default 2 times |
+| `skip` | Skip node and proceed with default_output |
+| `fallback` | Transition to the specified fallback_node |
+| `stop` | Stops the entire flow and returns an error result |
 
 ```yaml
 - id: api_call
@@ -1203,25 +1191,25 @@ async def run(ctx: FlowContext) -> FlowResult:
 
 ### 12.1 起動時の検証 (validator.py)
 
-|チェック項目 |説明 |
+| Check items | Explanation |
 |---|---|
-| flow.yaml 構文 | YAMLは解析可能ですか?必須フィールドはありますか |
-|ハンドラーの存在を確認する |ハンドラー名は handler.py で呼び出されるのか、それとも登録されたノードで呼び出されるのか? |
-|契約の確認 |コントラクトに登録されたハンドラーの実装は仕様を満たしていますか?
-|ノードグラフの検証 |ノード間の接続は有効ですか、到達できないノードはありますか。
-|サイクル検出 |フロー間のサブフロー呼び出しにサイクルはありますか?
-| config_schema の検証 | flow_config は config_schema に準拠していますか |
+| flow.yaml syntax | Is YAML parsable? Are there required fields |
+| Check the existence of handler | Is the handler name called in handler.py or in a node registered? |
+| Contract verification | Does the implementation of the handler registered in the contract meet the specifications |
+| Node graph validation | Is the connection between nodes valid and are there any unreachable nodes |
+| Cycle detection | Is there a cycle in subflow calls between flows |
+| config_schema validation | Does flow_config conform to config_schema |
 
 ### 12.2 実行時検証
 
-|チェック項目 |説明 |
+| Check items | Explanation |
 |---|---|
-|権限チェック | call_handler に対する呼び出し側の許可を検証する |
-|反復回数 | max_total_iterations を超えていますか |
-|タイムアウト | global_timeout_ms を超えていますか |
-|変数参照 | `{{ node_id.field }}`への参照はありますか?
+| Permission check | Validate caller's Grant on call_handler |
+| Number of iterations | Does it exceed max_total_iterations |
+| Timeout | Is global_timeout_ms exceeded |
+| Variable reference | Is there a reference to `{{ node_id.field }}` |
 
-##13.パック連携
+## 13.パック連携
 
 ### 13.1 パックはフローを提供します
 
@@ -1295,47 +1283,47 @@ after_flow:
 
 ## 15. セキュリティ
 
-|アイテム |対策 |
+| Item | Measures |
 |---|---|
-| handler.py を実行します。パックの承認フローで許可されているもののみを実行します。
-| call_handler 権限チェック |呼び出し元の許可に含まれるアクセス許可のみを実行できます。
-|コードノード | Docker サンドボックスで実行する |
-| http ノード |許可されたドメイン リストによって制限できます |
-|変数インジェクション |テンプレート式 `{{ }}` が Jinja2 サンドボックス モードで評価されました。
-|無限ループ | max_total_iterations + global_timeout_ms で強制停止 |
+| Run handler.py | Run only what is allowed by the Pack approval flow |
+| call_handler permission check | Only permissions included in the caller's Grant can be executed |
+| code node | run in Docker sandbox |
+| http node | Can be restricted by allowed domain list |
+| Variable injection | Template expression `{{ }}` evaluated in Jinja2 sandbox mode |
+| Infinite loop | Forced stop at max_total_iterations + global_timeout_ms |
 
 ## 16. パフォーマンス
 
-|アイテム |ポリシー |
+| Item | Policy |
 |---|---|
-|フロー定義キャッシュ |起動時にロードされるメモリキャッシュ。 | 変更するときは flow.yaml をリロードします。
-|ハンドラー解決キャッシュ | call_handler のハンドラー名 → キャッシュ実装マッピング |
-|並列ノード | asyncio.gather による並列実行 |
-|ストリーミング | Emit_event / Emit_widget によるシーケンシャル送信 |
-|大規模フロー |実行ログは、100 ノードを超えるフローに対して個別に保存されます。
+| Flow definition cache | Loaded at startup, memory cache. Reload flow.yaml when changing |
+| handler resolution cache | handler name of call_handler → cache implementation mapping |
+| Parallel nodes | Parallel execution with asyncio.gather |
+| Streaming | Sequential transmission with emit_event / emit_widget |
+| Large-scale flows | Execution logs are saved separately for flows with more than 100 nodes |
 
 ## 17. イベントリスト
 
 デフォルトで標準的に発行されるイベントのリスト。これらは標準語彙であり、イベント トリガーと wait_event で使用できます。パックには独自のイベントを追加することもできます。
 
-|イベントの種類 |出版社 |説明 |
+| Event type | Publisher | Description |
 |---|---|---|
-| `chat.message.received` |チャットハンドラ |ユーザーメッセージ受信時 |
-| `chat.message.new` |チャットハンドラ |新しいメッセージが会話に追加されたとき |
-| `chat.message.before_display` |チャットハンドラ |メッセージが UI に表示される直前 |
-| `chat.conversation.created` |チャットハンドラ |新しい会話が作成されたとき |
-| `agent.execution.started` |エージェントハンドラー |エージェントの実行開始時 |
-| `agent.execution.completed` |エージェントハンドラー |エージェントの実行が完了したとき |
-| `agent.step.completed` |エージェントハンドラー |エージェントのステップが完了したとき |
-| `tool.execution.started` |ツールハンドラー |ツールの実行開始時 |
-| `tool.execution.completed` |ツールハンドラー |ツールの実行が完了したとき |
-| `flow.started` |エンジン.py |フロー実行の開始時 |
-| `flow.completed` |エンジン.py |フローの実行が完了したとき |
-| `flow.error` |エンジン.py |フローエラーが発生した場合 |
-| `ui.popup.show` |オプション |ポップアップ表示リクエスト |
-| `ui.popup.response` |フロントエンド |ポップアップに対するユーザーの応答 |
-| `ui.plan.proposed` |オプション |企画プレゼンテーション |
-| `ui.plan.response` |フロントエンド |プランに対するユーザーの反応 |
+| `chat.message.received` | chat handler | When receiving user message |
+| `chat.message.new` | chat handler | When a new message is added to a conversation |
+| `chat.message.before_display` | chat handler | Just before the message is displayed in the UI |
+| `chat.conversation.created` | chat handler | When a new conversation is created |
+| `agent.execution.started` | agent handler | When agent execution starts |
+| `agent.execution.completed` | agent handler | When agent execution completes |
+| `agent.step.completed` | agent handler | When an agent step completes |
+| `tool.execution.started` | tool handler | When tool execution starts |
+| `tool.execution.completed` | tool handler | When tool execution completes |
+| `flow.started` | engine.py | At the start of flow execution |
+| `flow.completed` | engine.py | When flow execution completes |
+| `flow.error` | engine.py | When a flow error occurs |
+| `ui.popup.show` | Optional | Pop-up display request |
+| `ui.popup.response` | Frontend | User response to popup |
+| `ui.plan.proposed` | Optional | Plan presentation |
+| `ui.plan.response` | Frontend | User responses to plans |
 
 これらのイベントはすべて、emit_event / wait_event で処理できます。イベントトリガーでフローを自動的に開始するフックポイントとしても機能します。
 

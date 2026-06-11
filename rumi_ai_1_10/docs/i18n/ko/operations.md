@@ -20,9 +20,9 @@
 8. [역량 부여 관리](#역량-부여-관리)
 9. [pip 종속 라이브러리 관리](#pip-dependency-library-management)
 10. [비밀관리](#비밀-관리)
-11. §루미§0§
+11. [Pack Import / Apply](#pack-import--apply)
 12. [공유점포관리](#공유-매장-관리)
-13. §루미§0§
+13. [Docker / Container management](#docker--container-management)
 14. [플로우 실행](#흐름-실행)
 15. [권한 관리](#권한-관리)
 16. [UDS 소켓 설정](#uds-소켓-설정)
@@ -115,7 +115,7 @@ python app.py --validate
 | 모드 | 도커 | 행동 |
 |--------|--------|------|
 | `strict`(기본값) | 필수 | Docker를 사용할 수 없는 경우 실행 거부 |
-| §루미§0§ | 필요하지 않음 | 경고와 함께 호스트 실행 허용 |
+| `permissive` | 필요하지 않음 | 경고와 함께 호스트 실행 허용 |
 
 ```bash
 # 本番
@@ -135,113 +135,113 @@ export RUMI_SECURITY_MODE=permissive
 
 | 방법 | 경로 | 설명 |
 |----------|------|------|
-| 받기 | §루미§0§ | 모든 팩 목록 |
-| 받기 | §루미§0§ | 승인 대기 중인 팩 목록 |
-| 받기 | §루미§0§ | 팩 상태 가져오기 |
-| 포스트 | §루미§0§ | 팩 스캔 |
-| 포스트 | §루미§0§ | 팩 승인 |
-| 포스트 | §루미§0§ | 팩이 거부됨 |
-| 포스트 | §루미§0§ | 팩 수입 |
-| 포스트 | §루미§0§ | 팩 적용 |
-| 삭제 | §루미§0§ | 팩 제거 |
+| 받기 | `/api/packs` | 모든 팩 목록 |
+| 받기 | `/api/packs/pending` | 승인 대기 중인 팩 목록 |
+| 받기 | `/api/packs/{pack_id}/status` | 팩 상태 가져오기 |
+| 포스트 | `/api/packs/scan` | 팩 스캔 |
+| 포스트 | `/api/packs/{pack_id}/approve` | 팩 승인 |
+| 포스트 | `/api/packs/{pack_id}/reject` | 팩이 거부됨 |
+| 포스트 | `/api/packs/import` | 팩 수입 |
+| 포스트 | `/api/packs/apply` | 팩 적용 |
+| 삭제 | `/api/packs/{pack_id}` | 팩 제거 |
 
 ### 네트워크 권한
 
 | 방법 | 경로 | 설명 |
 |----------|------|------|
-| 받기 | §루미§0§ | 모든 보조금 목록 |
-| 포스트 | §루미§0§ | 네트워크 권한 부여 |
-| 포스트 | §루미§0§ | 네트워크 권한 취소 |
-| 포스트 | §루미§0§ | 액세스 확인 |
+| 받기 | `/api/network/list` | 모든 보조금 목록 |
+| 포스트 | `/api/network/grant` | 네트워크 권한 부여 |
+| 포스트 | `/api/network/revoke` | 네트워크 권한 취소 |
+| 포스트 | `/api/network/check` | 액세스 확인 |
 
 ### 기능 처리기 후보
 
 | 방법 | 경로 | 설명 |
 |----------|------|------|
-| 포스트 | §루미§0§ | 후보자 스캔 |
-| 받기 | §루미§0§ | 지원서 목록 |
-| 포스트 | §루미§0§ | 승인(신뢰+복사) |
-| 포스트 | §루미§0§ | 거부됨 |
-| 받기 | §루미§0§ | 차단 목록 |
-| 포스트 | §루미§0§ | 차단 해제 |
+| 포스트 | `/api/capability/candidates/scan` | 후보자 스캔 |
+| 받기 | `/api/capability/requests?status=pending` | 지원서 목록 |
+| 포스트 | `/api/capability/requests/{key}/approve` | 승인(신뢰+복사) |
+| 포스트 | `/api/capability/requests/{key}/reject` | 거부됨 |
+| 받기 | `/api/capability/blocked` | 차단 목록 |
+| 포스트 | `/api/capability/blocked/{key}/unblock` | 차단 해제 |
 
 ### 기능 부여
 
 | 방법 | 경로 | 설명 |
 |----------|------|------|
-| 받기 | §루미§0§ | 보조금 목록 |
-| 포스트 | §루미§0§ | 그랜트 |
-| 포스트 | §루미§0§ | 부여 취소 |
-| 포스트 | §루미§0§ | 일괄 부여(최대 50개) |
+| 받기 | `/api/capability/grants?principal_id=xxx` | 보조금 목록 |
+| 포스트 | `/api/capability/grants/grant` | 그랜트 |
+| 포스트 | `/api/capability/grants/revoke` | 부여 취소 |
+| 포스트 | `/api/capability/grants/batch` | 일괄 부여(최대 50개) |
 
 ### pip 종속 라이브러리
 
 | 방법 | 경로 | 설명 |
 |----------|------|------|
-| 포스트 | §루미§0§ | 후보자 스캔 |
-| 받기 | §루미§0§ | 지원서 목록 |
-| 포스트 | §루미§0§ | 승인 + 설치 |
-| 포스트 | §루미§0§ | 거부됨 |
-| 받기 | §루미§0§ | 차단 목록 |
-| 포스트 | §루미§0§ | 차단 해제 |
+| 포스트 | `/api/pip/candidates/scan` | 후보자 스캔 |
+| 받기 | `/api/pip/requests?status=pending` | 지원서 목록 |
+| 포스트 | `/api/pip/requests/{key}/approve` | 승인 + 설치 |
+| 포스트 | `/api/pip/requests/{key}/reject` | 거부됨 |
+| 받기 | `/api/pip/blocked` | 차단 목록 |
+| 포스트 | `/api/pip/blocked/{key}/unblock` | 차단 해제 |
 
 ### 비밀
 
 | 방법 | 경로 | 설명 |
 |----------|------|------|
-| 받기 | §루미§0§ | 키 목록(값이 마스크됨) |
-| 포스트 | §루미§0§ | 비밀 값 설정 |
-| 포스트 | §루미§0§ | 비밀 값 삭제 |
+| 받기 | `/api/secrets` | 키 목록(값이 마스크됨) |
+| 포스트 | `/api/secrets/set` | 비밀 값 설정 |
+| 포스트 | `/api/secrets/delete` | 비밀 값 삭제 |
 
 ### 흐름 실행
 
 | 방법 | 경로 | 설명 |
 |----------|------|------|
-| 받기 | §루미§0§ | 등록된 흐름 목록 |
-| 포스트 | §루미§0§ | 흐름 실행 |
+| 받기 | `/api/flows` | 등록된 흐름 목록 |
+| 포스트 | `/api/flows/{flow_id}/run` | 흐름 실행 |
 
 ### 매장
 
 | 방법 | 경로 | 설명 |
 |----------|------|------|
-| 받기 | §루미§0§ | 매장 목록 |
-| 포스트 | §루미§0§ | 매장 만들기 |
-| 받기 | §루미§0§ | 공유스토어 목록 |
-| 포스트 | §루미§0§ | 공유스토어 인증 |
-| 포스트 | §루미§0§ | 공유점포 취소 |
+| 받기 | `/api/stores` | 매장 목록 |
+| 포스트 | `/api/stores/create` | 매장 만들기 |
+| 받기 | `/api/stores/shared` | 공유스토어 목록 |
+| 포스트 | `/api/stores/shared/approve` | 공유스토어 인증 |
+| 포스트 | `/api/stores/shared/revoke` | 공유점포 취소 |
 
 ### 단위
 
 | 방법 | 경로 | 설명 |
 |----------|------|------|
-| 받기 | §루미§0§ | 단위 목록 |
-| 포스트 | §루미§0§ | 게시 단위 |
-| 포스트 | §루미§0§ | 실행 단위 |
+| 받기 | `/api/units?store_id=xxx` | 단위 목록 |
+| 포스트 | `/api/units/publish` | 게시 단위 |
+| 포스트 | `/api/units/execute` | 실행 단위 |
 
 ### 권한
 
 | 방법 | 경로 | 설명 |
 |----------|------|------|
-| 받기 | §루미§0§ | 특전 목록 |
-| 포스트 | §루미§0§ | 특권부여 |
-| 포스트 | §루미§0§ | 특권 실행 |
+| 받기 | `/api/privileges` | 특전 목록 |
+| 포스트 | `/api/privileges/{pack_id}/grant/{privilege_id}` | 특권부여 |
+| 포스트 | `/api/privileges/{pack_id}/execute/{privilege_id}` | 특권 실행 |
 
 ### 원래 경로 팩
 
 | 방법 | 경로 | 설명 |
 |----------|------|------|
-| 받기 | §루미§0§ | 등록된 경로 목록 |
-| 포스트 | §루미§0§ | 경로 테이블 다시 로드 |
+| 받기 | `/api/routes` | 등록된 경로 목록 |
+| 포스트 | `/api/routes/reload` | 경로 테이블 다시 로드 |
 
 ### 도커/컨테이너
 
 | 방법 | 경로 | 설명 |
 |----------|------|------|
-| 받기 | §루미§0§ | 도커 가용성 |
-| 받기 | §루미§0§ | 컨테이너 목록 |
-| 포스트 | §루미§0§ | 컨테이너 시작 |
-| 포스트 | §루미§0§ | 컨테이너 중지 |
-| 삭제 | §루미§0§ | 컨테이너 삭제 |
+| 받기 | `/api/docker/status` | 도커 가용성 |
+| 받기 | `/api/containers` | 컨테이너 목록 |
+| 포스트 | `/api/containers/{pack_id}/start` | 컨테이너 시작 |
+| 포스트 | `/api/containers/{pack_id}/stop` | 컨테이너 중지 |
+| 삭제 | `/api/containers/{pack_id}` | 컨테이너 삭제 |
 
 ---
 
@@ -475,10 +475,10 @@ curl -X POST http://localhost:8765/api/capability/grants/batch \
 
 | 매개변수 | 필수 | 설명 |
 |-----------|------|------|
-| §루미§0§ | ✅ | Grant 객체 배열(최대 50개) |
-| §루미§0§ | ✅ | 대상 팩 ID |
-| §루미§0§ | ✅ | 승인 ID |
-| §루미§0§ | 선택사항 | 부여 설정(`allowed_keys` 등) |
+| `grants` | ✅ | Grant 객체 배열(최대 50개) |
+| `grants[].principal_id` | ✅ | 대상 팩 ID |
+| `grants[].permission_id` | ✅ | 승인 ID |
+| `grants[].config` | 선택사항 | 부여 설정(`allowed_keys` 등) |
 
 예시 응답:
 
@@ -623,8 +623,8 @@ curl -X POST http://localhost:8765/api/secrets/delete \
 | 가치 | 행동 |
 |-----|------|
 | `auto`(기본값) | 암호화 키가 있으면 암호화하고, 그렇지 않으면 일반 텍스트로 저장 |
-| §루미§0§ | 항상 일반 텍스트로 저장 허용 |
-| §루미§0§ | 암호화 키가 필요합니다. 키가 누락된 경우 비밀 값 저장 거부 |
+| `true` | 항상 일반 텍스트로 저장 허용 |
+| `false` | 암호화 키가 필요합니다. 키가 누락된 경우 비밀 값 저장 거부 |
 
 `RUMI_SECRETS_ALLOW_PLAINTEXT=false`은 프로덕션 환경에 권장됩니다.
 
@@ -701,9 +701,9 @@ curl -X POST http://localhost:8765/api/stores/shared/approve \
 
 | 매개변수 | 필수 | 설명 |
 |-----------|------|------|
-| §루미§0§ | ✅ | 공유할 매장ID |
-| §루미§0§ | ✅ | 매장 소유 팩 ID |
-| §루미§0§ | ✅ | 공유할 팩 ID |
+| `store_id` | ✅ | 공유할 매장ID |
+| `owner_pack` | ✅ | 매장 소유 팩 ID |
+| `target_pack` | ✅ | 공유할 팩 ID |
 
 예시 응답:
 
@@ -735,9 +735,9 @@ curl -X POST http://localhost:8765/api/stores/shared/revoke \
 
 | 매개변수 | 필수 | 설명 |
 |-----------|------|------|
-| §루미§0§ | ✅ | 대상 매장ID |
-| §루미§0§ | ✅ | 매장 소유 팩 ID |
-| §루미§0§ | ✅ | 팩 ID 공유 취소 |
+| `store_id` | ✅ | 대상 매장ID |
+| `owner_pack` | ✅ | 매장 소유 팩 ID |
+| `target_pack` | ✅ | 팩 ID 공유 취소 |
 
 예시 응답:
 
@@ -834,11 +834,11 @@ curl -X POST http://localhost:8765/api/flows/hello/run \
 
 | 상태_코드 | 설명 |
 |-------------|------|
-| §루미§0§ | 지정된 `flow_id`이 존재하지 않습니다 |
-| §루미§0§ | 흐름 실행 시간이 초과되었습니다 |
-| §루미§0§ | 동시 실행 제한(`RUMI_MAX_CONCURRENT_FLOWS`) 도달 |
-| §루미§0§ | Flow를 실행하는 동안 예기치 않은 오류가 발생했습니다 |
-| §루미§0§ | 시스템을 일시적으로 사용할 수 없습니다(시작 등) |
+| `404` | 지정된 `flow_id`이 존재하지 않습니다 |
+| `408` | 흐름 실행 시간이 초과되었습니다 |
+| `429` | 동시 실행 제한(`RUMI_MAX_CONCURRENT_FLOWS`) 도달 |
+| `500` | Flow를 실행하는 동안 예기치 않은 오류가 발생했습니다 |
+| `503` | 시스템을 일시적으로 사용할 수 없습니다(시작 등) |
 
 ### 응답 크기 제한
 
@@ -918,7 +918,7 @@ curl -X POST http://localhost:8765/api/privileges/{pack_id}/execute/{privilege_i
 |-----------|------|------|
 | `pack_id`(경로 매개변수) | ✅ | 실행 소스 팩 ID |
 | `privilege_id`(경로 매개변수) | ✅ | 실행할 권한 ID |
-| §루미§0§(본문) | 선택사항 | 권한 있는 작업에 전달될 인수 |
+| `args`(본문) | 선택사항 | 권한 있는 작업에 전달될 인수 |
 
 예시 응답:
 
@@ -946,12 +946,12 @@ curl -X POST http://localhost:8765/api/privileges/{pack_id}/execute/{privilege_i
 
 | 환경 변수 | 설명 | 기본값 |
 |----------|------|-----------|
-| §루미§0§ | 송신 소켓 GID | 없음 |
-| §루미§0§ | 기능 소켓 GID | 없음 |
-| §루미§0§ | 송신 소켓 권한 | §루미§1§ |
-| §루미§0§ | 기능 소켓 권한 | §루미§1§ |
-| §루미§0§ | 송신 소켓 기본 디렉터리 | §루미§1§ |
-| §루미§0§ | 기능 소켓 기본 디렉터리 | §루미§1§ |
+| `RUMI_EGRESS_SOCKET_GID` | 송신 소켓 GID | 없음 |
+| `RUMI_CAPABILITY_SOCKET_GID` | 기능 소켓 GID | 없음 |
+| `RUMI_EGRESS_SOCKET_MODE` | 송신 소켓 권한 | `0660` |
+| `RUMI_CAPABILITY_SOCKET_MODE` | 기능 소켓 권한 | `0660` |
+| `RUMI_EGRESS_SOCK_DIR` | 송신 소켓 기본 디렉터리 | `/run/rumi/egress/packs` |
+| `RUMI_CAPABILITY_SOCK_DIR` | 기능 소켓 기본 디렉터리 | `/run/rumi/capability/principals` |
 
 ### 구성 단계
 
@@ -1004,14 +1004,14 @@ cat user_data/settings/shared_dict/journal.jsonl | jq 'select(.result == "cycle_
 
 | 카테고리 | 내용 |
 |----------|------|
-| §루미§0§ | 흐름 실행 |
-| §루미§0§ | 수정자 적용 |
-| §루미§0§ | 실행 차단 |
-| §루미§0§ | 팩 승인작업 |
-| §루미§0§ | 권한 운영 |
-| §루미§0§ | 네트워크 통신 |
-| §루미§0§ | 보안 이벤트 |
-| §루미§0§ | 시스템 이벤트 |
+| `flow_execution` | 흐름 실행 |
+| `modifier_application` | 수정자 적용 |
+| `python_file_call` | 실행 차단 |
+| `approval` | 팩 승인작업 |
+| `permission` | 권한 운영 |
+| `network` | 네트워크 통신 |
+| `security` | 보안 이벤트 |
+| `system` | 시스템 이벤트 |
 
 ---
 
@@ -1057,8 +1057,8 @@ python app.py
 
 | 환경 변수 | 설명 | 기본값 |
 |----------|------|-----------|
-| §루미§0§ | 로그 수준. 디버그/정보/경고/오류/위험 | §루미§1§ |
-| §루미§0§ | 출력 형식. JSON/텍스트 | §루미§1§ |
+| `RUMI_LOG_LEVEL` | 로그 수준. 디버그/정보/경고/오류/위험 | `INFO` |
+| `RUMI_LOG_FORMAT` | 출력 형식. JSON/텍스트 | `json` |
 
 ### 설정 방법
 
@@ -1090,14 +1090,14 @@ python app.py --headless
 
 | 환경 변수 | 설명 | 기본값 |
 |----------|------|-----------|
-| §루미§0§ | 더 이상 사용되지 않는 API 호출 시 동작 | §루미§1§ |
+| `RUMI_DEPRECATION_LEVEL` | 더 이상 사용되지 않는 API 호출 시 동작 | `warn` |
 
 | 가치 | 행동 |
 |-----|------|
-| §루미§0§ | `DeprecationWarning` 출판 `warnings.warn` |
-| §루미§0§ | `DeprecationWarning` 예외 발생 |
-| §루미§0§ | 아무것도 하지 않음 |
-| §루미§0§ | `logging`에서 경고 수준 출력 |
+| `warn` | `DeprecationWarning` 출판 `warnings.warn` |
+| `error` | `DeprecationWarning` 예외 발생 |
+| `silent` | 아무것도 하지 않음 |
+| `log` | `logging`에서 경고 수준 출력 |
 
 ### 설정 예
 
@@ -1157,14 +1157,14 @@ Wave 15에서는 다음 지표가 자동으로 수집됩니다.
 
 | 측정항목 이름 | 유형 | 설명 | 라벨 |
 |-------------|------|------|--------|
-| §루미§0§ | 카운터 | 단계 실행 성공 횟수 | 핸들러 |
-| §루미§0§ | 카운터 | 단계 실행 실패 횟수 | 핸들러 |
-| §루미§0§ | 카운터 | 흐름 실행 완료 횟수 | 흐름_ID |
-| §루미§0§ | 게이지 | 도커 가용성 | — |
-| §루미§0§ | 카운터 | 컨테이너 시작 성공 횟수 | — |
-| §루미§0§ | 카운터 | 컨테이너 시작 실패 횟수 | — |
-| §루미§0§ | 게이지 | 등록된 흐름 수 | — |
-| §루미§0§ | 히스토그램 | Python 파일 실행 시간(ms) | — |
+| `flow.step.success` | 카운터 | 단계 실행 성공 횟수 | 핸들러 |
+| `flow.step.error` | 카운터 | 단계 실행 실패 횟수 | 핸들러 |
+| `flow.execution.complete` | 카운터 | 흐름 실행 완료 횟수 | 흐름_ID |
+| `docker.available` | 게이지 | 도커 가용성 | — |
+| `container.start.success` | 카운터 | 컨테이너 시작 성공 횟수 | — |
+| `container.start.failed` | 카운터 | 컨테이너 시작 실패 횟수 | — |
+| `flows.registered` | 게이지 | 등록된 흐름 수 | — |
+| `python_file_call.duration_ms` | 히스토그램 | Python 파일 실행 시간(ms) | — |
 
 ---
 
@@ -1183,9 +1183,9 @@ python -m core_runtime.pack_scaffold <pack_id> [--template TEMPLATE] [--output-d
 | 템플릿 | 설명 |
 |-------------|------|
 | `minimal`(기본값) | 최소 구성(ecosystem.json + run.py) |
-| §루미§0§ | 기능 처리기 포함 |
-| §루미§0§ | 흐름 정의 포함 |
-| §루미§0§ | 모두 포함됨 |
+| `capability` | 기능 처리기 포함 |
+| `flow` | 흐름 정의 포함 |
+| `full` | 모두 포함됨 |
 
 ### 실행 예
 
@@ -1203,13 +1203,13 @@ python -m core_runtime.pack_scaffold my-pack --template full --output-dir ecosys
 
 | 카테고리 | 설명 | 예 |
 |---------|------|-----|
-| §루미§0§ | 인증/권한 부여 | `RUMI-AUTH-001`(토큰이 유효하지 않음) |
-| §루미§0§ | 네트워크 | `RUMI-NET-001`(연결 실패) |
-| §루미§0§ | 흐름 실행 | `RUMI-FLOW-001`(흐름이 발견되지 않음) |
-| §루미§0§ | 팩 관리 | `RUMI-PACK-001`(pack_id가 잘못됨) |
-| §루미§0§ | 능력 | `RUMI-CAP-001`(능력이 발견되지 않음) |
-| §루미§0§ | 검증 | `RUMI-VAL-001`(빈 값) |
-| §루미§0§ | 시스템 일반 | `RUMI-SYS-001`(내부 오류) |
+| `AUTH` | 인증/권한 부여 | `RUMI-AUTH-001`(토큰이 유효하지 않음) |
+| `NET` | 네트워크 | `RUMI-NET-001`(연결 실패) |
+| `FLOW` | 흐름 실행 | `RUMI-FLOW-001`(흐름이 발견되지 않음) |
+| `PACK` | 팩 관리 | `RUMI-PACK-001`(pack_id가 잘못됨) |
+| `CAP` | 능력 | `RUMI-CAP-001`(능력이 발견되지 않음) |
+| `VAL` | 검증 | `RUMI-VAL-001`(빈 값) |
+| `SYS` | 시스템 일반 | `RUMI-SYS-001`(내부 오류) |
 
 ---
 
@@ -1219,27 +1219,27 @@ Rumi AI OS 동작을 제어하는 환경 변수 목록입니다.
 
 | 변수 이름 | 기본값 | 설명 |
 |--------|-----------|------|
-| §루미§0§ | §루미§1§ | 보안 모드. `strict`(Docker 필요) 또는 `permissive`(Docker 필요하지 않음, 개발용) |
-| §루미§0§ | §루미§1§ | 로그 수준. §루미§2§ / §루미§3§ / §루미§4§ / §루미§5§ / §루미§6§ |
-| §루미§0§ | §루미§1§ | 로그 출력 형식. `json`(구조화된 JSON) 또는 `text`(사람 텍스트) |
-| §루미§0§ | §루미§1§ | 더 이상 사용되지 않는 API를 호출할 때의 동작입니다. §루미§2§ / §루미§3§ / §루미§4§ / §루미§5§ |
-| §루미§0§ | 없음 | 비밀의 Fernet 암호화에 사용되는 키(Base64 인코딩) 설정되지 않은 경우 `.secrets_key` 파일로 대체하거나 자동 생성 |
-| §루미§0§ | §루미§1§ | 일반 텍스트 비밀을 허용합니다. `auto`(암호화 키가 없는 경우 일반 텍스트로 저장), `true`(항상 일반 텍스트 허용), `false`(암호화 키 필요, 키 없이 저장 거부) |
-| §루미§0§ | §루미§1§(4MB) | Flow 실행 결과 및 Egress Proxy 응답의 최대 크기(바이트) |
-| §루미§0§ | §루미§1§ | 동시 Flow 실행 횟수 상한 |
-| §루미§0§ | §루미§1§(1MB) | HTTP API에서 허용하는 요청 본문의 최대 크기(바이트) |
-| §루미§0§ | §루미§1§ | API 서버 바인드 주소. 외부에 게시하는 경우 `0.0.0.0`로 변경(권장하지 않음) |
-| §루미§0§ | 없음 | 쉼표로 구분된 CORS 허용 원본 목록(예: `http://localhost:3000,http://localhost:8080`) |
-| §루미§0§ | §루미§1§ | `true`로 설정하면 다음 시작 시 HMAC 키가 순환됩니다 |
-| §루미§0§ | §루미§1§ | 진단 로그에 자세한 정보를 포함하려면 `true`로 설정 |
-| §루미§0§ | 없음 | 송신 UDS 소켓의 GID입니다. | §루미§1§ | 없음 | 송신 UDS 소켓의 GID입니다. 엄격 모드의 컨테이너에서 소켓에 액세스하는 데 필요 |
-| §루미§0§ | 없음 | 기능 UDS 소켓 GID. 엄격 모드의 컨테이너에서 소켓에 액세스하는 데 필요 |
-| §루미§0§ | §루미§1§ | 송신 UDS 소켓 권한 |
-| §루미§0§ | §루미§1§ | 기능 UDS 소켓 권한 |
-| §루미§0§ | §루미§1§ | 송신 UDS 소켓 기본 디렉터리 |
-| §루미§0§ | §루미§1§ | 기능 UDS 소켓 기본 디렉터리 |
-| §루미§0§ | §루미§1§ | `secrets.get` 속도 제한(회/분/팩, 슬라이딩 윈도우) |
-| §루미§0§ | §루미§1§ | local_pack 호환 모드. `off`(비활성화) 또는 `require_approval`(승인이 필요한 경우 유효, 권장되지 않음) |
+| `RUMI_SECURITY_MODE` | `strict` | 보안 모드. `strict`(Docker 필요) 또는 `permissive`(Docker 필요하지 않음, 개발용) |
+| `RUMI_LOG_LEVEL` | `INFO` | 로그 수준. `DEBUG` / `INFO` / `WARNING` / `ERROR` / `CRITICAL` |
+| `RUMI_LOG_FORMAT` | `json` | 로그 출력 형식. `json`(구조화된 JSON) 또는 `text`(사람 텍스트) |
+| `RUMI_DEPRECATION_LEVEL` | `warn` | 더 이상 사용되지 않는 API를 호출할 때의 동작입니다. `warn` / `error` / `silent` / `log` |
+| `RUMI_SECRETS_KEY` | 없음 | 비밀의 Fernet 암호화에 사용되는 키(Base64 인코딩) 설정되지 않은 경우 `.secrets_key` 파일로 대체하거나 자동 생성 |
+| `RUMI_SECRETS_ALLOW_PLAINTEXT` | `auto` | 일반 텍스트 비밀을 허용합니다. `auto`(암호화 키가 없는 경우 일반 텍스트로 저장), `true`(항상 일반 텍스트 허용), `false`(암호화 키 필요, 키 없이 저장 거부) |
+| `RUMI_MAX_RESPONSE_BYTES` | `4194304`(4MB) | Flow 실행 결과 및 Egress Proxy 응답의 최대 크기(바이트) |
+| `RUMI_MAX_CONCURRENT_FLOWS` | `10` | 동시 Flow 실행 횟수 상한 |
+| `RUMI_MAX_REQUEST_BODY_BYTES` | `1048576`(1MB) | HTTP API에서 허용하는 요청 본문의 최대 크기(바이트) |
+| `RUMI_API_BIND_ADDRESS` | `127.0.0.1` | API 서버 바인드 주소. 외부에 게시하는 경우 `0.0.0.0`로 변경(권장하지 않음) |
+| `RUMI_CORS_ORIGINS` | 없음 | 쉼표로 구분된 CORS 허용 원본 목록(예: `http://localhost:3000,http://localhost:8080`) |
+| `RUMI_HMAC_ROTATE` | `false` | `true`로 설정하면 다음 시작 시 HMAC 키가 순환됩니다 |
+| `RUMI_DIAGNOSTICS_VERBOSE` | `false` | 진단 로그에 자세한 정보를 포함하려면 `true`로 설정 |
+| `RUMI_EGRESS_SOCKET_GID` | 없음 | 송신 UDS 소켓의 GID입니다. | `RUMI_EGRESS_SOCKET_GID` | 없음 | 송신 UDS 소켓의 GID입니다. 엄격 모드의 컨테이너에서 소켓에 액세스하는 데 필요 |
+| `RUMI_CAPABILITY_SOCKET_GID` | 없음 | 기능 UDS 소켓 GID. 엄격 모드의 컨테이너에서 소켓에 액세스하는 데 필요 |
+| `RUMI_EGRESS_SOCKET_MODE` | `0660` | 송신 UDS 소켓 권한 |
+| `RUMI_CAPABILITY_SOCKET_MODE` | `0660` | 기능 UDS 소켓 권한 |
+| `RUMI_EGRESS_SOCK_DIR` | `/run/rumi/egress/packs` | 송신 UDS 소켓 기본 디렉터리 |
+| `RUMI_CAPABILITY_SOCK_DIR` | `/run/rumi/capability/principals` | 기능 UDS 소켓 기본 디렉터리 |
+| `RUMI_SECRET_GET_RATE_LIMIT` | `60` | `secrets.get` 속도 제한(회/분/팩, 슬라이딩 윈도우) |
+| `RUMI_LOCAL_PACK_MODE` | `off` | local_pack 호환 모드. `off`(비활성화) 또는 `require_approval`(승인이 필요한 경우 유효, 권장되지 않음) |
 
 ---
 

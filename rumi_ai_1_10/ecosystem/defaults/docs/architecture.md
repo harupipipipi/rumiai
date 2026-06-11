@@ -52,9 +52,7 @@ The **transport layer** (`transport/`) accepts requests from outside. The `Defau
 
 The **blocks layer** (`blocks/`) is a collection of handlers. Each handler has a signature `def run(input_data, context)`, receives request parameters in `input_data` (dict), and receives flow information and `call_handler` functions in `context` (dict). handler calls logic in the domain layer and returns results in the form of `ok(data)` or `error(message, code)`.
 
-The **domain layer** (`domain/`) implements the business logic. Includes `domain/chat/store.py` (ChatStore), `domain/agent/engine.py` (AgentEngine), `domain/tool/registry.py` (ToolRegistry), `domain/prompt/manager.py` (PromptManager), etc. handler directly imports and uses the domain layer class.
-
-**External API layer** communicates with AI providers (OpenAI, Anthropic, etc.) through `domain/ai_client/`.
+The **domain layer** (`domain/`) implements the business logic. Includes `domain/chat/store.py` (ChatStore), `domain/agent/engine.py` (AgentEngine), `domain/tool/registry.py` (ToolRegistry), `domain/prompt/manager.py` (PromptManager), etc. handler directly imports and uses the domain layer class.**External API layer** communicates with AI providers (OpenAI, Anthropic, etc.) through `domain/ai_client/`.
 
 ## Data flow
 
@@ -188,26 +186,10 @@ rumiai_defaults/
 
 `ecosystem.json` is a structure definition file for the kernel to recognize Pack. The structure based on the actual file contents is as follows.
 
-**`pack_id`** (`"defaults"`) is the Pack's unique identifier. Used as the first part of the handler name (`defaults` of `defaults.chat.send`).
-
-**`pack_identity`** (`"github:harupipipipi/rumiai-defaults"`) is the Pack's remote identifier.
-
-**`version`** (`"1.0.0"`) is the Pack version.
-
-**`vocabulary.types`** is a list of component types provided by Pack. 10 of `["chat", "agent", "coding", "ai_client", "tool", "prompt", "memory", "media", "frontend", "dev"]` are defined.
-
-**`components`** is the definition of each component. Each component has `type`, `id`, `path` (directory path within blocks), and `connectivity.provides` (list of handler names to provide). For example, the `chat` component is located in `path: "blocks/chat"` and provides 18 handlers from `defaults.chat.create_conversation` to `defaults.chat.auto_trim`.
-
-**`load_order`** is the component initialization order. They are loaded in the following order: `memory` → `prompt` → `media` → `ai_client` → `tool` → `coding` → `chat` → `agent` → `dev` → `frontend`.
-
-**`metadata`** is Pack meta information (description, author, license).
+**`pack_id`** (`"defaults"`) is the Pack's unique identifier. Used as the first part of the handler name (`defaults` of `defaults.chat.send`).**`pack_identity`** (`"github:harupipipipi/rumiai-defaults"`) is the Pack's remote identifier.**`version`** (`"1.0.0"`) is the Pack version.**`vocabulary.types`** is a list of component types provided by Pack. 10 of `["chat", "agent", "coding", "ai_client", "tool", "prompt", "memory", "media", "frontend", "dev"]` are defined.**`components`** is the definition of each component. Each component has `type`, `id`, `path` (directory path within blocks), and `connectivity.provides` (list of handler names to provide). For example, the `chat` component is located in `path: "blocks/chat"` and provides 18 handlers from `defaults.chat.create_conversation` to `defaults.chat.auto_trim`.**`load_order`** is the component initialization order. They are loaded in the following order: `memory` → `prompt` → `media` → `ai_client` → `tool` → `coding` → `chat` → `agent` → `dev` → `frontend`.**`metadata`** is Pack meta information (description, author, license).
 
 ## Contact point with KernelFacade
 
 The defaults pack interacts with the kernel at three main points:
 
-**`io.http.server`**: `blocks/frontend/start.py` receives `facade` from the kernel and passes it to `start_http_server(facade)` in `transport/http.py` to start the HTTP server. The facade is held in an instance of `DefaultsHttpServer`, and `_handle_context_info()` calls `facade.list_interfaces()` to return a list of interfaces.
-
-**`get_interface` / `list_interfaces`**: Used to retrieve interfaces provided by other Packs or the kernel itself from the InterfaceRegistry registered by the kernel. `/api/context` You can check the list of interfaces currently available on the endpoint.
-
-**`emit` (EventBus)**: `call_handler` is provided via the handler's `context`, through which it calls other handlers. Call it by specifying the handler name and parameters like `call_handler("defaults.ai.complete", params)`. This is resolved through the kernel's EventBus / InterfaceRegistry.
+**`io.http.server`**: `blocks/frontend/start.py` receives `facade` from the kernel and passes it to `start_http_server(facade)` in `transport/http.py` to start the HTTP server. The facade is held in an instance of `DefaultsHttpServer`, and `_handle_context_info()` calls `facade.list_interfaces()` to return a list of interfaces.**`get_interface` / `list_interfaces`**: Used to retrieve interfaces provided by other Packs or the kernel itself from the InterfaceRegistry registered by the kernel. `/api/context` You can check the list of interfaces currently available on the endpoint.**`emit` (EventBus)**: `call_handler` is provided via the handler's `context`, through which it calls other handlers. Call it by specifying the handler name and parameters like `call_handler("defaults.ai.complete", params)`. This is resolved through the kernel's EventBus / InterfaceRegistry.

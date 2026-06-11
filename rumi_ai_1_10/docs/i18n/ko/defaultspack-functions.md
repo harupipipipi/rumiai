@@ -45,12 +45,12 @@ Defaultspack은 기본 기능을 Rumi 함수로 노출합니다. HTTP 경로, AI
 
 모델 런타임 설정은 `ModelRuntimeSettingsService`의 소유입니다. 주요 진입점은 다음과 같습니다.
 
-- §루미§0§
-- §루미§0§
-- §루미§0§
-- §루미§0§
-- §루미§0§
-- §루미§0§
+- `defaultspack:ai_get_preferred_model`
+- `defaultspack:ai_set_preferred_model`
+- `defaultspack:ai_get_thinking_level`
+- `defaultspack:ai_set_thinking_level`
+- `defaultspack:ai_get_effective_thinking_level`
+- `defaultspack:ai_normalize_thinking_level`
 
 채팅 또는 AI 완료 매개변수에 `thinking_level`이 포함되지 않은 경우 defaultspack은 대화, 프로필, 전역 설정을 통해 서버 측의 유효 수준을 확인합니다.
 
@@ -58,20 +58,20 @@ Defaultspack은 기본 기능을 Rumi 함수로 노출합니다. HTTP 경로, AI
 
 이제 모델 카탈로그는 프로필 인식 라우팅에서 사용되는 기능 메타데이터를 공개합니다.
 
-- §루미§0§ / §루미§1§
-- §루미§0§ / §루미§1§
-- §루미§0§ / §루미§1§
-- §루미§0§ / §루미§1§
-- §루미§0§ / §루미§1§
+- `defaultspack:ai_search_models` / `defaults.ai.search_models`
+- `defaultspack:ai_get_model_capabilities` / `defaults.ai.get_model_capabilities`
+- `defaultspack:ai_recommend_model` / `defaults.ai.recommend_model`
+- `defaultspack:ai_route_model` / `defaults.ai.route_model`
+- `defaultspack:ai_explain_model_choice` / `defaults.ai.explain_model_choice`
 
 기능 필드에는 `supports_vision`, `supports_tool_calling`, `supports_thinking`, `supports_fast`, `speed_tier`, `quality_tier`, `knowledge_level`, `knowledge_band` 및 역할 권장 사항이 포함됩니다. `knowledge_level`은 상대적인 루미아이 라우팅 점수이지 지능에 대한 절대적인 주장이 아닙니다.
 
 비전 브리지 및 호환성 유틸리티 라우팅은 다음을 통해 사용할 수 있습니다.
 
-- §루미§0§ / §루미§1§
+- `defaultspack:vision_describe_images` / `defaults.vision.describe_images`
 - `defaultspack:agent_run_subagent` / `defaults.agent.run_subagent`(유틸리티 라우팅 또는 위임 실행에 대한 호환성 별칭)
-- §루미§0§ / §루미§1§
-- §루미§0§ / §루미§1§
+- `defaultspack:prompt_lint_prompt` / `defaults.prompt.lint_prompt`
+- `defaultspack:prompt_compact_prompt` / `defaults.prompt.compact_prompt`
 
 ## 흐름 예시
 

@@ -13,13 +13,7 @@ Tauri 前端、CLI、外部脚本、Webhooks 都达到相同的流程。唯一�
 
 ## 2.设计理念
 
-**与传输无关**：所有通信最终都会调用`FlowEngine.execute(flow_id, trigger_input)`。无论是通过 HTTP、stdin/stdout 还是 UDS，到达 Flow 的trigger_input 都具有相同的格式。
-
-**端点是流**：HTTP 的`/v1/chat/completions` 和 CLI 的`rumi chat` 都启动相同的`default.chat` 流。添加端点是对流定义的补充，不涉及更改代码。
-
-**身份验证在传输层完成**：HTTP 的 API 密钥、stdio 的父进程信任、UDS 的套接字权限。 Flow 层仅接受经过身份验证的请求。
-
-**流被传输吸收**：流仅发出`ctx.emit()`中的事件。 HTTP 传输转换为 SSE，stdio 传输转换为 JSON Lines，Tauri 传输转换为 IPC Channel。 Flow 不知道它将通过哪种传输方式进行传送。
+**与传输无关**：所有通信最终都会导致对 `FlowEngine.execute(flow_id, trigger_input)` 的调用。无论是通过 HTTP、stdin/stdout 还是 UDS，到达 Flow 的trigger_input 都具有相同的格式。**端点是流**：HTTP 的`/v1/chat/completions` 和 CLI 的`rumi chat` 都启动相同的`default.chat` 流。添加端点是对 Flow 定义的补充，不涉及更改代码。**身份验证在传输层完成**：HTTP 的 API 密钥、stdio 的父进程信任、UDS 的套接字权限。 Flow层仅接受经过身份验证的请求。**流被传输吸收**：Flow仅发出`ctx.emit()`中的事件。 HTTP 传输转换为 SSE，stdio 传输转换为 JSON Lines，Tauri 传输转换为 IPC Channel。 Flow 不知道它将通过哪种传输方式进行传送。
 
 
 ## 3. 架构
@@ -38,11 +32,11 @@ UDS Client  ─→ uds transport ──┘
 
 传输层作为默认处理程序实现。
 
-|处理程序 |运输 |权限|
+| handler | transport | permissions |
 |---|---|---|
-| §鲁米§0§| HTTP 服务器 | §鲁米§1§，§鲁米§2§|
-| §鲁米§0§|标准输入/输出 | §鲁米§1§ |
-| §鲁米§0§| Unix 域套接字 | §鲁米§1§，§鲁米§2§|
+| `defaults.transport.http` | HTTP Server | `frontend.serve`, `frontend.bind` |
+| `defaults.transport.stdio` | Standard input/output | `frontend.serve` |
+| `defaults.transport.uds` | Unix Domain Socket | `frontend.serve`, `frontend.bind` |
 
 每个传输处理程序仅使用授予的权限进行操作，并且不会访问整个内核对象（避免 io.http.server 问题）。
 
@@ -68,12 +62,12 @@ UDS Client  ─→ uds transport ──┘
 }
 ```
 
-|领域 |类型 |必填 |描述 |
+| Field | Type | Required | Description |
 |---|---|---|---|
-|编号 |字符串|可选 |请求标识符。如果省略则自动生成 |
-|流_id |字符串|必填 |要启动的流程的 ID |
-|输入 |对象|必填 |流程触发器输入|
-|配置 |对象|可选 | Flow 的 flow_config 覆盖 |
+| id | string | optional | request identifier. Automatically generated if omitted |
+| flow_id | string | Required | ID of the Flow to start |
+| input | object | Required | Flow trigger_input |
+| config | object | optional | flow_config override for Flow |
 
 ### 4.2 响应（非流式传输）
 
@@ -98,12 +92,12 @@ UDS Client  ─→ uds transport ──┘
 }
 ```
 
-|领域 |类型 |描述 |
+| Field | Type | Description |
 |---|---|---|
-|编号 |字符串|请求标识符|
-|状态 |字符串| §鲁米§0§、§鲁米§1§、§鲁米§2§、§鲁米§3§|
-|输出|对象|流输出（FlowResult.output）|
-|元数据 |对象|执行元数据|
+| id | string | request identifier |
+| status | string | `completed`, `error`, `cancelled`, `timeout` |
+| output | object | Flow output (FlowResult.output) |
+| metadata | object | execution metadata |
 
 ### 4.3 响应（流式传输）
 
@@ -139,18 +133,18 @@ Stream.delta 的`data.type` 与 ai_client.md 第 11.3 节中的规范化事件�
 
 错误代码系统。
 
-|代码|描述 |
+| Code | Description |
 |---|---|
-| §鲁米§0§|需要身份验证 |
-| §鲁米§0§| API 密钥无效 |
-| §鲁米§0§|指定的flow_id不存在 |
-| §鲁米§0§|运行 Flow 时出错 |
-| §鲁米§0§|流程超时 |
-| §鲁米§0§|被用户或系统取消 |
-| §鲁米§0§|输入格式无效 |
-| §鲁米§0§|权限不足|
-| §鲁米§0§|速率限制 |
-| §鲁米§0§|内部错误 |
+| `AUTH_REQUIRED` | Authentication required |
+| `AUTH_INVALID` | API key is invalid |
+| `FLOW_NOT_FOUND` | Specified flow_id does not exist |
+| `FLOW_ERROR` | Error while running Flow |
+| `FLOW_TIMEOUT` | Flow timed out |
+| `FLOW_CANCELLED` | Cancelled by user or system |
+| `VALIDATION_ERROR` | Invalid input format |
+| `PERMISSION_DENIED` | Insufficient authority |
+| `RATE_LIMITED` | Rate Limit |
+| `INTERNAL_ERROR` | Internal error |
 
 
 ## 5.HTTP 传输
@@ -182,7 +176,7 @@ HTTP 传输对每个请求执行身份验证。
 Authorization: Bearer rumi_xxxxxxxxxxxx
 ```
 
-API 密钥在`user_data/secrets/api_keys.json` 中管理。
+API 密钥在 `user_data/secrets/api_keys.json` 中管理。
 
 ```json
 {
@@ -201,11 +195,11 @@ API 密钥在`user_data/secrets/api_keys.json` 中管理。
 }
 ```
 
-`permissions` 是流级别权限。 `["*"]`可以访问所有流程。它可以按照`["default.chat", "default.model_list"]` 进行限制。
+`permissions` 是流级别权限。 `["*"]`可以访问所有流。它可以按照第 `["default.chat", "default.model_list"]` 中的规定进行限制。
 
 ### 5.3 路由
 
-从 HTTP 端点到 flow_id 的映射在`user_data/config/routes.json`中定义。
+从 HTTP 端点到 flow_id 的映射在 `user_data/config/routes.json` 中定义。
 
 ```json
 {
@@ -244,7 +238,7 @@ API 密钥在`user_data/secrets/api_keys.json` 中管理。
 }
 ```
 
-`input_mapping`是从HTTP请求到通用消息格式`input`的字段映射。 `body.model` 指请求正文的`model` 字段。 `"*": "body"`使整个身体成为输入。 `{flow_id}` 是路径参数。
+`input_mapping`是从HTTP请求到通用消息格式`input`的字段映射。 `body.model` 指请求正文的`model` 字段。 `"*": "body"` 使整个身体成为输入。 `{flow_id}` 是路径参数。
 
 您只需编辑routes.json 即可添加任何HTTP 端点。 Flow 端无需更改代码。 Packs 还可以将条目添加到routes.json。
 
@@ -303,7 +297,7 @@ data: {"id":"req_01JXYZ","data":{"status":"completed","output":{...}}}
 
 ### 5.6 OpenAI 兼容模式
 
-将`response_format: "openai"` 添加到routes.json 中的`/v1/chat/completions` 端点会将响应转换为OpenAI API 兼容格式并返回。
+将 `response_format: "openai"` 添加到 paths.json 中的 `/v1/chat/completions` 端点会将响应转换为 OpenAI API 兼容格式并返回。
 
 ```json
 {
@@ -356,34 +350,34 @@ data: {"id":"req_01JXYZ","data":{"status":"completed","output":{...}}}
 外部输入路由是提供者适配器，而不是聊天运行时合约。他们
 应将入站提供商有效负载标准化为`ExternalEvent`，评估
 `AudiencePolicy`，选择`InputProfile`，调用`submit_input`，然后返回或
-通过`ResponsePlanner`加`ResponseAdapter`发送响应。
+通过 `ResponsePlanner` 加 `ResponseAdapter` 发送响应。
 
 当前的 defaultspack HTTP 路由包括：
 
-|方法|路径|角色 |
+| method | path | role |
 |---|---|---|
-| §鲁米§0§| §鲁米§1§ |仅秘密状态，无原始值 |
-| §鲁米§0§| §鲁米§1§ |只写设置或清除受支持的提供者机密 |
-| §鲁米§0§| §鲁米§1§ | Slack 事件摄入量 |
-| §鲁米§0§| §鲁米§1§ | LINE webhook 摄入 |
-| §鲁米§0§| §鲁米§1§ |不和谐互动摄入量 |
-| §鲁米§0§| §鲁米§1§ |不和谐事件摄入量 |
-| §鲁米§0§| §鲁米§1§ |屏蔽外部令牌状态 |
-| §鲁米§0§| §鲁米§1§ |只写外部令牌更新插入、重命名、删除 |
-| §鲁米§0§| §鲁米§1§ |通用 webhook 摄入 |
-| §鲁米§0§| §鲁米§1§ |列出 webhook 端点配置 |
-| §鲁米§0§| §鲁米§1§ |创建 webhook 端点配置 |
-| §鲁米§0§| §鲁米§1§ |更新 webhook 端点配置 |
-| §鲁米§0§| §鲁米§1§ |删除 webhook 端点配置 |
-| §鲁米§0§| §鲁米§1§ |运行 webhook 测试负载 |
-| §鲁米§0§| §鲁米§1§ |列出公共 URL 提供商和本地默认 URL |
-| §鲁米§0§| §鲁米§1§ |创建由提供商支持的公共 URL；失败返回经过编辑的`ok: false`数据|
-| §鲁米§0§| §鲁米§1§ |关闭或清除公共 URL |
+| `GET` | `/api/integrations/secrets` | secret status only, no raw values |
+| `POST` | `/api/integrations/secrets` | write-only set or clear for supported provider secrets |
+| `POST` | `/api/integrations/slack/events` | Slack event intake |
+| `POST` | `/api/integrations/line/webhook` | LINE webhook intake |
+| `POST` | `/api/integrations/discord/interactions` | Discord interaction intake |
+| `POST` | `/api/integrations/discord/events` | Discord event intake |
+| `GET` | `/api/external/tokens` | masked external token status |
+| `POST` | `/api/external/tokens` | write-only external token upsert, rename, delete |
+| `POST` | `/api/webhooks/inbound/{webhook_id}` | generic webhook intake |
+| `GET` | `/api/webhooks/endpoints` | list webhook endpoint configs |
+| `POST` | `/api/webhooks/endpoints` | create webhook endpoint config |
+| `PUT` | `/api/webhooks/endpoints/{webhook_id}` | update webhook endpoint config |
+| `DELETE` | `/api/webhooks/endpoints/{webhook_id}` | delete webhook endpoint config |
+| `POST` | `/api/webhooks/endpoints/{webhook_id}/test` | run a webhook test payload |
+| `GET` | `/api/webhooks/public-urls` | list public URL providers and the local default URL |
+| `POST` | `/api/webhooks/public-urls` | create a provider-backed public URL; failures return redacted `ok: false` data |
+| `DELETE` | `/api/webhooks/public-urls/{url_id}` | close or clear a public URL |
 
 Cloudflare Quick Tunnel 可能会提供用于开发的临时公共 URL，但是
 API 合约不得依赖于它。外部输入 UI 仅使用它
 生成可复制的提供程序 Webhook URL，例如
-§鲁米§0§。任何隧道或
+`https://...trycloudflare.com/api/integrations/line/webhook`。任何隧道或
 托管入口应提供相同的本地路由。
 
 
@@ -423,7 +417,7 @@ stdio 传输不执行身份验证。只有父进程（Tauri 的 Rust 层，或�
 
 ### 6.4 与前端消息集成
 
-frontend.md 中定义的前端特定消息（例如`component.register`、`render.mount`、`message.send`）也共享相同的标准输入/标准输出。区别在于是否存在`type`字段。
+frontend.md 中定义的前端特定消息（例如 `component.register`、`render.mount`、`message.send`）也共享相同的 stdin/stdout。区别在于是否存在 `type` 字段。
 
 ```jsonl
 // Flow 呼び出し（type フィールドなし、flow_id フィールドあり）
@@ -434,7 +428,7 @@ frontend.md 中定义的前端特定消息（例如`component.register`、`rende
 {"type":"message.send","component":"defaults.chat","data":{...}}
 ```
 
-传输处理程序分发消息。如果存在`flow_id`，则转发至 FlowEngine；如果存在`type`，则转发到前端处理程序。
+传输处理程序分发消息。如果存在 `flow_id`，则转发至 FlowEngine；如果 `type` 存在，则转发到前端处理程序。
 
 
 ## 7.UDS 传输
@@ -571,24 +565,24 @@ Hello! How can I help you today?█
 
 如果流程或工具使用 emmit_widget 发送小组件 JSON，则 CLI 将回退到小组件的文本表示形式。
 
-|小部件类型 | CLI 显示 |
+| Widget type | CLI display |
 |---|---|
-|文字|输出为文本 |
-|代码块| ``` 附件 + 语言名称 |
-|差异|统一差异格式|
-|图片| §鲁米§0§|
-|截图| §鲁米§0§|
-|终端|命令和输出按原样 |
-|进展| §鲁米§0§|
-|表| ASCII 表 |
-|文件树 |缩进文本|
-|降价|按原样输出 |
-|图表|数值总结|
-|音频| §鲁米§0§|
-|视频 | §鲁米§0§|
-|地图 | §鲁米§0§|
-|指标| §鲁米§0§|
-|卡|标题+正文的文本组合 |
+| Text | Output as text |
+| CodeBlock | ``` Enclosure + language name |
+| Diff | unified diff format |
+| Image | `[Image: alt WxH]` |
+| Screenshot | `[Screenshot: url]` |
+| Terminal | Command and output as is |
+| Progress | `[████░░░░░░] 40%` |
+| Table | ASCII table |
+| FileTree | Indented text |
+| Markdown | Output as is |
+| Chart | Numerical summary |
+| Audio | `[Audio: duration]` |
+| Video | `[Video: duration]` |
+| Map | `[Map: lat, lng]` |
+| Indicator | `● label (state)` |
+| Card | Text combination of header + body |
 
 
 ## 9.端点注册机制
@@ -648,27 +642,27 @@ handler: handler.py
 
 ### 10.1 传输层隔离
 
-每个传输处理程序仅在 Grant 授予的权限下运行。不会出现`io.http.server` 中传递整个内核对象的问题。
+每个传输处理程序仅在 Grant 授予的权限下运行。不会出现第 `io.http.server` 中传递整个内核对象的问题。
 
 ### 10.2 身份验证层次结构
 
-|运输 |认证方式 |基础|
+| transport | Authentication method | Basis |
 |---|---|---|
-| HTTP | API 密钥（不记名令牌）|通过网络访问总是需要身份验证 |
-|工作室|无 |父进程信任|
-|统一数据系统 |套接字权限 + 可选 API 密钥 |本地进程信任+可配置|
+| HTTP | API key (Bearer token) | Access via network always requires authentication |
+| stdio | None | Parent process trust |
+| UDS | Socket permissions + optional API key | Local process trust + configurable |
 
 ### 10.3 流级别权限
 
-可以使用 API 密钥的`permissions` 字段限制每个密钥的可访问流。具有强大管理权限的密钥可以与有限用途的密钥分开。
+可以使用 API 密钥的 `permissions` 字段限制每个密钥的可访问流。具有强大管理权限的密钥可以与有限用途的密钥分开。
 
 ### 10.4 速率限制
 
-在传输层实现。可为每个 API 密钥设置`requests_per_minute`。如果超出，则返回`429 RATE_LIMITED`。
+在传输层实现。可为每个 API 密钥设置 `requests_per_minute`。如果超出，则返回`429 RATE_LIMITED`。
 
 ### 10.5 输入验证
 
-根据 Flow 的`config_schema`（flow.md 第 6.1 节）进行的输入验证由 FlowEngine 执行。传输层仅执行格式检查（它作为 JSON 是否有效？）。
+根据 Flow 的 `config_schema`（flow.md 第 6.1 节）进行的输入验证由 FlowEngine 执行。传输层仅执行格式检查（它作为 JSON 是否有效？）。
 
 
 ## 11.默认路由
@@ -741,31 +735,31 @@ handler: handler.py
 
 ### 11.1 input_mapping 的表示法
 
-|符号|说明|示例|
+| Notation | Explanation | Example |
 |---|---|---|
-| §鲁米§0§|请求正文字段 | §鲁米§1§ |
-| §鲁米§0§| URL 路径参数 | §鲁米§1§ |
-| §鲁米§0§|查询参数| §鲁米§1§ |
-| §鲁米§0§|请求标头| §鲁米§1§ |
-| §鲁米§0§|让整个身体投入| — |
+| `body.{field}` | Request body fields | `body.model` |
+| `path.{param}` | URL path parameters | `path.model_id` |
+| `query.{param}` | Query parameters | `query.limit` |
+| `header.{name}` | Request header | `header.X-Custom` |
+| `"*": "body"` | Make the entire body input | — |
 
 ### 11.2 响应格式
 
-|价值|描述 |
+| Value | Description |
 |---|---|
-|省略/`"default"` |按普通消息格式返回 |
-| §鲁米§0§|转换并返回 OpenAI API 兼容格式 |
+| Omitted / `"default"` | Return as is in common message format |
+| `"openai"` | Convert and return to OpenAI API compatible format |
 
-`"anthropic"`等可以在未来添加。将转换逻辑放在传输层。
+`"anthropic"`等将来可以添加。将转换逻辑放在传输层。
 
 
 ## 12. 与其他文档的关系
 
-|文件|关系 |
+| Document | Relationship |
 |---|---|
-|前端.md | stdio传输的消息格式与frontend.md的通信流共存。如果您有`flow_id`，请转到FlowEngine，如果您有`type`，请转到前端|
-|流.md |端点通过 Flow 的 api 触发器注册。 FlowEngine 处理请求 |
-| ai_client.md |流事件类型与 ai_client.md 第 11.3 节中的标准化事件相同 |
-|工具.md |传输不使用工具的上下文 API（call_handler、emit_event 等）进行操作。运输是上层，工具不直接触及|
-|外部输入.md |定义提供者中立的摄入路径：`ExternalEvent`、`AudiencePolicy`、`InputProfile`、`submit_input`、`ResponsePlanner`和`ResponseAdapter` |
-| webhooks.md |在规范化提交之前记录特定于 webhook 的验证和确认行为 |
+| frontend.md | The message format of the stdio transport coexists with the communication flow of frontend.md. If you have `flow_id`, go to FlowEngine, if you have `type`, go to front end |
+| flow.md | Endpoints are registered with Flow's api trigger. FlowEngine processes the request |
+| ai_client.md | Streaming event type is the same as normalized event in ai_client.md section 11.3 |
+| tool.md | Transport is not manipulated using the tool's context API (call_handler, emit_event, etc.). transport is an upper layer and is not touched directly by tools |
+| external-inputs.md | Defines the provider-neutral intake path: `ExternalEvent`, `AudiencePolicy`, `InputProfile`, `submit_input`, `ResponsePlanner`, and `ResponseAdapter` |
+| webhooks.md | Documents webhook-specific verification and ack behavior before normalized submission |

@@ -11,12 +11,12 @@
 
 - 저장소: `rumiai`
 - 이 체크포인트에 사용된 로컬 작업공간:
-  §루미§0§
+  `/Users/haru/Desktop/puroguramukei/rumi_ai_mac`
 - 메인 패키지 디렉터리: `rumi_ai_1_10`
 - 지점: `codex/defaultspack-function-flow`
 - 원격: `origin`, `https://github.com/harupipipipi/rumiai.git`
 - 이 핸드오프 파일 이전의 체크포인트 커밋:
-  §루미§0§
+  `776178f2 WIP: canonicalize defaultspack function flow runtime`
 
 동일한 지점에서 작업을 계속하고 나머지 모든 작업을 하나의 PR에 넣습니다.
 사용자가 명시적으로 범위를 변경하지 않는 한 이를 여러 PR로 분할하지 마세요.
@@ -51,22 +51,22 @@
 - 레거시 호환성: `ecosystem/defaults`은 `defaultspack`에 위임됩니다.
 - 흐름 구현: YAML 선언과 Python 엔진.
 - 허용되는 승인 가능한 도구 실행 유형:
-  - §루미§0§
-  - §루미§0§
-  - §루미§0§
+  - `rumi_function`
+  - `capability`
+  - `mcp`
 - `local`, `handler`, `dynamic`, `prompt` 등의 레거시 실행 유형
   신뢰할 수 없는 도구에는 사용할 수 없습니다. 기존 자사 호환성
   경로는 일시적으로 유지될 수 있지만 신뢰할 수 없는 도구에 대해서는 장애 시 닫혀야 합니다.
 - 현재 사용되는 기능 분류:
-  - §루미§0§
-  - §루미§0§
-  - §루미§0§
-  - §루미§0§
-  - §루미§0§
-  - §루미§0§
-  - §루미§0§
-  - §루미§0§
-  - §루미§0§
+  - `file.read`
+  - `file.write`
+  - `terminal.exec`
+  - `git.read`
+  - `git.write`
+  - `network.read`
+  - `network.send`
+  - `browser.control`
+  - `computer.control`
 - `write_action`은 메타데이터일 뿐입니다. 허가 및 위험 결정이 이루어져야 합니다.
   위험 등급, 승인 정책, 실행 유형, 신뢰할 수 있는 팩 ID 등
   능력 부여.
@@ -98,10 +98,10 @@
 
 - `ecosystem/defaultspack/domain/flow/engine.py` 확장.
 - 다음에 대한 선언적 검증 및 실행 지원이 추가되었습니다.
-  - §루미§0§
-  - §루미§0§
-  - §루미§0§
-  - §루미§0§
+  - `function`
+  - `subflow`
+  - `branch`
+  - `parallel`
 - `ecosystem/defaultspack/flows/chat_turn.flow.yaml`를 표준으로 업데이트했습니다.
   정상적인 채팅 진입.
 - `ecosystem/defaultspack/flows/chat_stream_turn.flow.yaml`을 추가했습니다.
@@ -124,8 +124,8 @@
 - `ecosystem/defaults/transport/{http,cli,stdio,uds}.py`를 씬으로 변환했습니다.
   호환성 심.
 - 경로 테스트를 추가/업데이트했습니다:
-  - §루미§0§
-  - §루미§0§
+  - `tests/test_defaultspack_route_integration.py`
+  - `tests/test_defaults_mcp_transport.py`
 
 ### 프롬프트
 
@@ -133,14 +133,14 @@
 - 프롬프트 로딩/해결이 업데이트되어 효과적인 프롬프트가 소스 체인을 반환합니다.
   그리고 해결된 내용.
 - 다음에 대한 발송자 항목이 추가되었습니다.
-  - §루미§0§
-  - §루미§0§
+  - `prompt_validate_template`
+  - `prompt_resolve_for_conversation`
 - 실행 가능한 프롬프트 로직으로 프롬프트-도구 작성을 비활성화했습니다.
 - 패시브/기능 생성을 위한 프롬프트 템플릿/통합 변환 업데이트
   실행 파일 `execution.type = prompt` 대신 Facade 메타데이터.
 - 추가된 테스트:
-  - §루미§0§
-  - §루미§0§
+  - `tests/test_defaultspack_prompt_effective.py`
+  - `tests/test_defaultspack_prompt_passive.py`
 
 ### AI 클라이언트/공급자
 
@@ -157,7 +157,7 @@
 - 업데이트됨
   `ecosystem/rumi_default_tools_pack/domain/tool/browser_computer.py`를 피하려면
   오래된 공유 선택 창 상태를 재사용하는 사용자 정의 테스트 아티팩트 루트
-  §루미§0§.
+  `browser_sessions.json`.
 - 전체 실행 중에 표시되는 브라우저/컴퓨터 상태 감지 오류가 수정되었습니다.
   파이 테스트 실행.
 
@@ -175,14 +175,14 @@
 
 변경된 중요 문서는 다음과 같습니다.
 
-- §루미§0§
-- §루미§0§
-- §루미§0§
-- §루미§0§
-- §루미§0§
-- §루미§0§
-- §루미§0§
-- §루미§0§
+- `docs/flow_spec.md`
+- `docs/prompt_authoring.md`
+- `docs/provider_authoring.md`
+- `ecosystem/defaultspack/docs/ai_client.md`
+- `ecosystem/defaultspack/docs/prompt.md`
+- `ecosystem/defaultspack/docs/tool-prompt-conversion.md`
+- `ecosystem/defaultspack/docs/transport.md`
+- `ecosystem/defaultspack/docs/writing-tools.md`
 
 ## 확인이 이미 실행되었습니다.
 
@@ -252,7 +252,7 @@ python -m pytest -q
 무슨 일이 일어났나요:
 
 1. 브라우저/컴퓨터 상태 수정에 도달하기 전 전체 실행:
-   §루미§0§.
+   `4373 passed, 19 skipped, 7 failed`.
 2. 7번의 실패는 모두 브라우저/컴퓨터 물리적 행동 위임 테스트였습니다.
    오래된 선택 창 상태로 인해 작업이 `executed=False`을 반환했습니다.
 3. 상태 수정 사항이 추가되었으며 관련 18개 테스트 하위 집합이 통과되었습니다.
@@ -302,7 +302,7 @@ rg -n 'from domain\\.ai_client\\.client import AIClient|from ecosystem\\.default
 허용된 레거시/가져오기 호환성 위치만 남아 있어야 합니다.
 
 7. 완료되면 `codex/defaultspack-function-flow`에서 PR 하나를 생성하여
-   §루미§0§.
+   `master`.
 
 ## 최종 PR 승인 기준
 

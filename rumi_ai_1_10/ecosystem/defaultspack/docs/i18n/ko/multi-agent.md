@@ -7,7 +7,7 @@
 사용자가 접하는 기본 조정 경로는 팀 작업 영역 런타임입니다.
 내부적으로는 여전히 `CompanySlackRuntime`을 중심으로 구현됩니다.
 `domain/company/message_router.py`에서 내구성 있는 런타임 상태로 구현됨
-§루미§0§.
+`domain/company/runtime_store.py`.
 
 런타임은 Slack과 유사합니다.
 

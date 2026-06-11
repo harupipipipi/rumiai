@@ -47,9 +47,9 @@ if target_node.kind == "agent" and source_node.kind == "tool":
 
 初步发现候选者：
 
-1.§鲁米§0§
-2.§鲁米§0§
-3.§鲁米§0§
+1.`user_data/shared/graphs/*.graph.yaml`
+2.`ecosystem/<pack_id>/graphs/*.graph.yaml`
+3.`graphs/*.graph.yaml`
 
 如果发现重复的`graph_id`值，第一阶段会将其视为诊断错误。
 
@@ -87,13 +87,13 @@ edges:
 
 第一阶段边缘种类：
 
-- §鲁米§0§
+- `binding`
 
 保留的未来边缘种类：
 
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
+- `data`
+- `event`
+- `control`
 
 未知的边缘类型是第一阶段中的错误。
 
@@ -180,18 +180,18 @@ runtime_profile.<profile_id>.<graph_id>
 
 读取API：
 
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
+- `GET /api/nodes`
+- `GET /api/nodes/{node_id}`
+- `GET /api/profiles`
+- `GET /api/profiles/{profile_id}`
+- `GET /api/profiles/{profile_id}/nodes`
+- `GET /api/graphs`
+- `GET /api/graphs/{graph_id}`
 
 图表预览API：
 
-- §鲁米§0§
-- §鲁米§0§
+- `POST /api/graphs/{graph_id}/validate`
+- `POST /api/graphs/{graph_id}/compile`
 
 面向查看者的节点响应包括区域设置解析的标签、端口、标准、别名、绑定、元数据、要求、权限以及选择配置文件时的配置文件节点状态。配置文件节点 API 还返回`palette_nodes`，其中仅包含已安装且启用配置文件的节点，因此查看器不需要对节点类型进行硬编码。
 

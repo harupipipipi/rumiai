@@ -43,7 +43,7 @@ Origin 헤더를 포함하는 민감한 변형 및 경로별 민감도.
 ## 감사 저장
 
 로컬 감사 저장소는 JSONL입니다. 기본적으로 아래에 기록됩니다.
-§루미§0§; 테스트 또는 임베디드
+`ecosystem/defaultspack/user_data/audit/local_actions.jsonl`; 테스트 또는 임베디드
 런타임은 `RUMI_DEFAULTSPACK_AUDIT_PATH`으로 경로를 재정의할 수 있습니다.
 
 감사 계층은 다음을 기록합니다.

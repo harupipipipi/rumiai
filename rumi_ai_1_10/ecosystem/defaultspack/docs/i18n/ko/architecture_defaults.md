@@ -123,13 +123,13 @@ rumiai (コンパイル済みバイナリ)
 
 ### 항상 주입됨(선언 필요 없음)
 
-`context["call_handler"](§RUMI§0§)`은 모든 핸들러를 호출합니다. Grant가 부여한 권한 범위 내에서만 실행할 수 있습니다. 호출자에게 호출된 핸들러가 요청한 권한이 없으면 PermissionError와 함께 거부됩니다. 이를 통해 도구는 동일한 기본 요소를 사용하여 채팅 작업, 에이전트 시작, 프롬프트 렌더링, 메모리 읽기 및 쓰기를 모두 수행할 수 있습니다.
+`context["call_handler"](handler_name, params)`은 모든 핸들러를 호출합니다. Grant가 부여한 권한 범위 내에서만 실행할 수 있습니다. 호출자에게 호출된 핸들러가 요청한 권한이 없으면 PermissionError와 함께 거부됩니다. 이를 통해 도구는 동일한 기본 요소를 사용하여 채팅 작업, 에이전트 시작, 프롬프트 렌더링, 메모리 읽기 및 쓰기를 모두 수행할 수 있습니다.
 
-`context["emit_event"](§RUMI§0§)`에서 이벤트를 게시합니다. 다른 핸들러, Flow 이벤트 트리거 및 프런트엔드 자산이 이 이벤트를 수신할 수 있습니다. 발급자는 수신자를 알지 못합니다.
+`context["emit_event"](event_type, data)`에서 이벤트를 게시합니다. 다른 핸들러, Flow 이벤트 트리거 및 프런트엔드 자산이 이 이벤트를 수신할 수 있습니다. 발급자는 수신자를 알지 못합니다.
 
-`context["wait_event"](§RUMI§0§)`은 이벤트를 기다립니다. 지정된 이벤트 유형이 실행될 때까지 차단됩니다. 시간 초과를 지정할 수 있습니다. 필터를 사용하여 조건의 범위를 좁힐 수 있습니다. Emit_event와 결합하여 프런트 엔드에 팝업 표시 → 사용자 응답 대기, 도구 간 비동기 통신, Flow 트리거 Hooking 등이 모두 구현됩니다.
+`context["wait_event"](event_type, timeout, filter)`은 이벤트를 기다립니다. 지정된 이벤트 유형이 실행될 때까지 차단됩니다. 시간 초과를 지정할 수 있습니다. 필터를 사용하여 조건의 범위를 좁힐 수 있습니다. Emit_event와 결합하여 프런트 엔드에 팝업 표시 → 사용자 응답 대기, 도구 간 비동기 통신, Flow 트리거 Hooking 등이 모두 구현됩니다.
 
-`context["emit_widget"](§RUMI§0§)`은 위젯 JSON을 UI로 보냅니다. 프런트엔드 위젯 렌더러에 의해 그려집니다.
+`context["emit_widget"](widget_json)`은 위젯 JSON을 UI로 보냅니다. 프런트엔드 위젯 렌더러에 의해 그려집니다.
 
 `context["cancel_check"]()`은 취소 확인입니다. 사용자가 취소하면 CancelledError가 발생합니다.
 
@@ -139,25 +139,25 @@ rumiai (コンパイル済みバイナリ)
 
 ### 이를 기능으로 선언하여 주입되는 내용
 
-`data_read`은 user_data 아래의 파일을 읽습니다. `context["data_read"](§RUMI§0§)`를 통해 액세스합니다. 경로는 user_data/를 기준으로 합니다.
+`data_read`은 user_data 아래의 파일을 읽습니다. `context["data_read"](path)`를 통해 액세스합니다. 경로는 user_data/를 기준으로 합니다.
 
-`data_write`은 user_data 아래에 파일을 씁니다. `context["data_write"](§RUMI§0§)`를 통해 액세스합니다.
+`data_write`은 user_data 아래에 파일을 씁니다. `context["data_write"](path, content)`를 통해 액세스합니다.
 
-`execute_flow`이 Flow를 시작합니다. `context["execute_flow"](§RUMI§0§)`를 통해 액세스합니다. Flow Engine을 통해 실행됩니다.
+`execute_flow`이 Flow를 시작합니다. `context["execute_flow"](flow_id, input)`를 통해 액세스합니다. Flow Engine을 통해 실행됩니다.
 
-`shell_exec`은 쉘 명령을 실행합니다. `context["capability"](§RUMI§0§)`를 통해 액세스합니다.
+`shell_exec`은 쉘 명령을 실행합니다. `context["capability"]("shell_exec", {...})`를 통해 액세스합니다.
 
-`browser_control`은 브라우저 작업입니다. `context["capability"](§RUMI§0§)`를 통해 액세스합니다.
+`browser_control`은 브라우저 작업입니다. `context["capability"]("browser_control", {...})`를 통해 액세스합니다.
 
-`container_exec`은 Docker 컨테이너를 시작, 작동 및 파괴합니다. `context["capability"](§RUMI§0§)`를 통해 액세스합니다. GUI 환경(Xvfb + VNC)은 디스플레이 옵션으로 시작되며, 스크린샷 및 입력(클릭, 타이핑, 키, 스크롤)으로 좌표 기반의 화면 조작이 가능합니다.
+`container_exec`은 Docker 컨테이너를 시작, 작동 및 파괴합니다. `context["capability"]("container_exec", {...})`를 통해 액세스합니다. GUI 환경(Xvfb + VNC)은 디스플레이 옵션으로 시작되며, 스크린샷 및 입력(클릭, 타이핑, 키, 스크롤)으로 좌표 기반의 화면 조작이 가능합니다.
 
-`app_control`은 호스트 애플리케이션 작업입니다. `context["capability"](§RUMI§0§)`를 통해 액세스합니다.
+`app_control`은 호스트 애플리케이션 작업입니다. `context["capability"]("app_control", {...})`를 통해 액세스합니다.
 
-`http_request`은 외부 HTTP 통신입니다. `context["capability"](§RUMI§0§)`를 통해 액세스합니다.
+`http_request`은 외부 HTTP 통신입니다. `context["capability"]("http_request", {...})`를 통해 액세스합니다.
 
-`llm_call`은 도구 내 LLM 통화입니다. `context["capability"](§RUMI§0§)`를 통해 액세스합니다.
+`llm_call`은 도구 내 LLM 통화입니다. `context["capability"]("llm_call", {...})`를 통해 액세스합니다.
 
-`session_state`은 세션 상태 읽기/쓰기입니다. `context["capability"](§RUMI§0§)`를 통해 액세스합니다.
+`session_state`은 세션 상태 읽기/쓰기입니다. `context["capability"]("session_state", {...})`를 통해 액세스합니다.
 
 ### 특화된 API를 만들어보면 어떨까요?
 
@@ -224,23 +224,23 @@ extensions: {}
 
 ### 지식 검색
 
-user_data/shared/tools/knowledge_search/에 벡터 검색 도구를 배치하세요. user_data/shared/flows/에 Flow Modifier를 배치하고 user_input이 도착할 때 이 도구를 자동으로 실행하는 단계를 삽입합니다. 도구 handler.py는 `context["capability"](§RUMI§0§)`에 임베딩을 생성하고 `context["data_read"]`의 인덱스를 읽고 결과를 반환합니다. 기본값은 0으로 변경됩니다.
+user_data/shared/tools/knowledge_search/에 벡터 검색 도구를 배치하세요. user_data/shared/flows/에 Flow Modifier를 배치하고 user_input이 도착할 때 이 도구를 자동으로 실행하는 단계를 삽입합니다. 도구 handler.py는 `context["capability"]("llm_call", {...})`에 임베딩을 생성하고 `context["data_read"]`의 인덱스를 읽고 결과를 반환합니다. 기본값은 0으로 변경됩니다.
 
 ### 다중 에이전트
 
-user_data/shared/tools/agent_delegate/에 에이전트 위임 도구를 배치하세요. 도구 handler.py는 `context["call_handler"](§RUMI§0§)`에서 새 대화를 생성하고, `context["call_handler"](§RUMI§1§)`에서 에이전트를 시작하고, 결과를 수신하고 반환합니다. 조직 구조가 필요한 경우 user_data/shared/agents/에 여러 개의 agent.json 파일을 배치하면 위임 도구가 적절한 에이전트를 선택합니다. 기본값은 0으로 변경됩니다.
+user_data/shared/tools/agent_delegate/에 에이전트 위임 도구를 배치하세요. 도구 handler.py는 `context["call_handler"]("defaults.chat.create_conversation", {...})`에서 새 대화를 생성하고, `context["call_handler"]("defaults.agent.execute", {...})`에서 에이전트를 시작하고, 결과를 수신하고 반환합니다. 조직 구조가 필요한 경우 user_data/shared/agents/에 여러 개의 agent.json 파일을 배치하면 위임 도구가 적절한 에이전트를 선택합니다. 기본값은 0으로 변경됩니다.
 
 ### AI로 대화 내용 자체 편집
 
-user_data/shared/tools/history_prune/에 기록 편집 도구를 배치합니다. 도구 handler.py는 `context["call_handler"](§RUMI§0§)`에서 메시지를 검색하고 `context["data_write"]`에서 대화 파일을 업데이트합니다. Agent.json의 tools.enabled에 이 도구를 추가하면 에이전트가 자신의 기록을 자율적으로 구성할 수 있습니다. 기본값은 0으로 변경됩니다.
+user_data/shared/tools/history_prune/에 기록 편집 도구를 배치합니다. 도구 handler.py는 `context["call_handler"]("defaults.chat.list_conversations", {...})`에서 메시지를 검색하고 `context["data_write"]`에서 대화 파일을 업데이트합니다. Agent.json의 tools.enabled에 이 도구를 추가하면 에이전트가 자신의 기록을 자율적으로 구성할 수 있습니다. 기본값은 0으로 변경됩니다.
 
 ### Linux 환경에서 GUI 동작
 
-user_data/shared/tools/linux_env/에 환경 조작 도구를 배치합니다. 도구 handler.py는 `context["capability"](§RUMI§0§)`으로 컨테이너를 시작하고 스크린샷 및 입력 작업으로 화면을 작동합니다. Agent.json의 모델 설정을 이용하여 동작할 모델을 선택합니다. 기본값은 0으로 변경됩니다.
+user_data/shared/tools/linux_env/에 환경 조작 도구를 배치합니다. 도구 handler.py는 `context["capability"]("container_exec", {"action": "create", "options": {"display": true}})`으로 컨테이너를 시작하고 스크린샷 및 입력 작업으로 화면을 작동합니다. Agent.json의 모델 설정을 이용하여 동작할 모델을 선택합니다. 기본값은 0으로 변경됩니다.
 
 ### 동의 팝업
 
-user_data/shared/tools/consent_check/에 동의 확인 도구를 배치하세요. 도구 handler.py는 `context["emit_event"](§RUMI§0§)`에 팝업을 표시하고 `context["wait_event"](§RUMI§1§)`에서 사용자의 응답을 기다립니다. 이를 Agent.json의 tools.enabled에 추가하고 에이전트의 시스템 프롬프트에 "투자 조언에 적용 가능한 경우 이 도구를 사용하십시오."라고 지시합니다. 기본값은 변경되지 않습니다.
+user_data/shared/tools/consent_check/에 동의 확인 도구를 배치하세요. 도구 handler.py는 `context["emit_event"]("ui.popup.show", {"title": "免責事項", ...})`에 팝업을 표시하고 `context["wait_event"]("ui.popup.response", timeout=60)`에서 사용자의 응답을 기다립니다. 이를 Agent.json의 tools.enabled에 추가하고 에이전트의 시스템 프롬프트에 "투자 조언에 적용 가능한 경우 이 도구를 사용하십시오."라고 지시합니다. 기본값은 변경되지 않습니다.
 
 ### 정규 실행
 
@@ -248,7 +248,7 @@ user_data/shared/flows/에 일정 트리거가 있는 흐름을 배치합니다.
 
 ### 청구/신용 관리
 
-user_data/shared/tools/billing_check/에 사용량 확인 도구를 배치하세요. 도구 handler.py는 `context["call_handler"](§RUMI§0§)`에서 사용량을 가져오고, `context["data_read"](§RUMI§1§)`에서 계획 정의를 읽고 남은 크레딧을 계산하여 반환합니다. UI 표시가 필요한 경우 user_data/packs/에 청구 자산이 포함된 팩을 배치하세요. 기본값은 0으로 변경됩니다.
+user_data/shared/tools/billing_check/에 사용량 확인 도구를 배치하세요. 도구 handler.py는 `context["call_handler"]("defaults.ai.usage", {...})`에서 사용량을 가져오고, `context["data_read"]("billing/plan.json")`에서 계획 정의를 읽고 남은 크레딧을 계산하여 반환합니다. UI 표시가 필요한 경우 user_data/packs/에 청구 자산이 포함된 팩을 배치하세요. 기본값은 0으로 변경됩니다.
 
 ## 7. 기본 파일 구조
 

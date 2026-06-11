@@ -48,11 +48,11 @@ ComputerSeat는 AI 에이전트를 제공하는 모듈식 데스크탑 자동화
 
 | 구성요소 | 파일 | 역할 |
 |-----------|------|------|
-| §루미§0§ | §루미§1§ | 드라이버 체인을 통해 작업 조율 |
-| §루미§0§ | §루미§1§ | 운전자 등록 및 체인 주문 관리 |
-| §루미§0§ | §루미§1§ | JSON 라인 추가 전용 감사 로그 |
-| §루미§0§ | §루미§1§ | 위험 분류 및 승인 확인 |
-| §루미§0§ | §루미§1§ | 공유 데이터 클래스(ActionResult, ObserveResult 등) |
+| `ComputerSeatService` | `service.py` | 드라이버 체인을 통해 작업 조율 |
+| `DriverRegistry` | `registry.py` | 운전자 등록 및 체인 주문 관리 |
+| `AuditLogger` | `audit.py` | JSON 라인 추가 전용 감사 로그 |
+| `permissions` | `permissions.py` | 위험 분류 및 승인 확인 |
+| `models` | `models.py` | 공유 데이터 클래스(ActionResult, ObserveResult 등) |
 
 ### 데이터 모델
 
@@ -94,18 +94,18 @@ class ObserveResult:
 
 | 드라이버 | 이름 | 우선순위 | 기능 |
 |--------|------|----------|--------------|
-| Mac접근성드라이버 | §루미§0§ | 1(가장 높음) | AX 트리를 통한 의미적 동작 |
-| MacApple이벤트드라이버 | §루미§0§ | 2 | 허용된 AppleScript 작업 |
-| MacCGEventPidDriver | §루미§0§ | 3 | CGEventPostToPid를 통한 백그라운드 입력 |
-| MacForegroundFallback드라이버 | §루미§0§ | 4(최저) | 앱 + 포그라운드 입력 활성화 |
-| MacScreenCapture드라이버 | §루미§0§ | — | 관찰 전용(스크린샷) |
+| Mac접근성드라이버 | `mac_accessibility` | 1(가장 높음) | AX 트리를 통한 의미적 동작 |
+| MacApple이벤트드라이버 | `mac_apple_events` | 2 | 허용된 AppleScript 작업 |
+| MacCGEventPidDriver | `mac_cgevent_pid` | 3 | CGEventPostToPid를 통한 백그라운드 입력 |
+| MacForegroundFallback드라이버 | `mac_foreground` | 4(최저) | 앱 + 포그라운드 입력 활성화 |
+| MacScreenCapture드라이버 | `mac_screen_capture` | — | 관찰 전용(스크린샷) |
 
 ### Windows 드라이버(스켈레톤)
 
 | 드라이버 | 이름 | 우선순위 | 상태 |
 |--------|------|----------|--------|
-| WindowsUIA드라이버 | §루미§0§ | 1 | 스켈레톤 – NotImplementedError 발생 |
-| WindowsPostMessageDriver | §루미§0§ | 2 | 스켈레톤 – NotImplementedError 발생 |
+| WindowsUIA드라이버 | `windows_uia` | 1 | 스켈레톤 – NotImplementedError 발생 |
+| WindowsPostMessageDriver | `windows_postmessage` | 2 | 스켈레톤 – NotImplementedError 발생 |
 
 ---
 
@@ -294,9 +294,9 @@ result = service.doctor()
 
 | 레벨 | 작업 | 행동 |
 |-------|---------|----------|
-| §루미§0§ | 관찰, 목록, 스크린샷, ax_tree_read | 승인이 필요하지 않습니다 |
-| §루미§0§ | 스크롤 | 승인이 필요하지 않습니다(현재) |
-| §루미§0§ | 클릭, type_text, 키, semantic_action, ax_press, ax_set_value, post_to_pid | 승인 필요 |
+| `low` | 관찰, 목록, 스크린샷, ax_tree_read | 승인이 필요하지 않습니다 |
+| `medium` | 스크롤 | 승인이 필요하지 않습니다(현재) |
+| `high` | 클릭, type_text, 키, semantic_action, ax_press, ax_set_value, post_to_pid | 승인 필요 |
 
 ### 승인 흐름
 
@@ -334,10 +334,10 @@ result = service.doctor()
 
 | 기능 | 설명 |
 |----------|-------------|
-| §루미§0§ | 목표 관찰 – 스크린샷 + AX ​​트리 + 기능 |
-| §루미§0§ | 의미적 동작 실행(버튼 누르기, 값 설정) |
-| §루미§0§ | 직접 CGEvent 주입(실험적) |
-| §루미§0§ | 플랫폼 기능 및 권한 진단 |
+| `computer_observe` | 목표 관찰 – 스크린샷 + AX ​​트리 + 기능 |
+| `computer_semantic_action` | 의미적 동작 실행(버튼 누르기, 값 설정) |
+| `computer_pid_event` | 직접 CGEvent 주입(실험적) |
+| `computer_doctor` | 플랫폼 기능 및 권한 진단 |
 
 각 함수는 표준 매니페스트 형식을 따릅니다.
 ```json
@@ -365,9 +365,9 @@ Windows 구현은 동일한 드라이버 인터페이스를 제공하지만
 
 | 모듈 | 목적 |
 |--------|---------|
-| §루미§0§ | UI 자동화 트리 작업(스텁) |
-| §루미§0§ | 창 핸들 열거(스텁) |
-| §루미§0§ | PrintWindow 스크린샷 캡처(스텁) |
+| `windows/uia.py` | UI 자동화 트리 작업(스텁) |
+| `windows/hwnd.py` | 창 핸들 열거(스텁) |
+| `windows/printwindow.py` | PrintWindow 스크린샷 캡처(스텁) |
 
 ### Windows 드라이버 주문
 
@@ -455,13 +455,13 @@ domain/computer/
 
 | 테스트 파일 | 적용범위 |
 |-----------|----------|
-| §루미§0§ | 서비스 관찰/클릭/모의 텍스트 입력 |
-| §루미§0§ | 레지스트리 순서 및 필터링 |
-| §루미§0§ | 대체 체인 동작 |
-| §루미§0§ | 기존 컴퓨터 사용 연기 테스트 |
-| §루미§0§ | Windows 드라이버 인터페이스 계약 |
-| §루미§0§ | Mac AX 드라이버 인스턴스화 |
-| §루미§0§ | CGEvent 드라이버 PID 요구 사항 |
+| `test_computer_seat_service.py` | 서비스 관찰/클릭/모의 텍스트 입력 |
+| `test_computer_driver_registry.py` | 레지스트리 순서 및 필터링 |
+| `test_computer_fallback_order.py` | 대체 체인 동작 |
+| `test_browser_computer_compat.py` | 기존 컴퓨터 사용 연기 테스트 |
+| `test_windows_driver_skeleton.py` | Windows 드라이버 인터페이스 계약 |
+| `test_mac_accessibility_driver.py` | Mac AX 드라이버 인스턴스화 |
+| `test_mac_cgevent_pid_driver.py` | CGEvent 드라이버 PID 요구 사항 |
 
 모든 테스트를 실행합니다.
 ```bash

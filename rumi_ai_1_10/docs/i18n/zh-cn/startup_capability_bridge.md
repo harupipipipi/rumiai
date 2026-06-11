@@ -32,7 +32,7 @@
 省略`launch_capability_graph`或将其设置为`false`的配置文件，保留
 之前的启动启动行为。他们的发布结果包括
 `capability_graph.skipped: true`有理由
-§鲁米§0§；这是非致命的。
+`launch_capability_graph_disabled`；这是非致命的。
 
 ## 启动行为
 

@@ -13,15 +13,7 @@ Defaults provide a ``format specification'' and ``enforcement mechanism'' for a 
 
 ## 2. Design philosophy
 
-**Declarative**: Themes are not code. Just write the value in YAML. It does not contain any execution logic.
-
-**Token-based**: Themes are defined as named tokens (`color.primary`, `spacing.md`, etc.) rather than writing color and size values directly. Asset looks up the token name and the theme resolves the actual value.
-
-**Backend independent**: Theme is read only by the frontend layer (Theme Engine in shell.html). Backend handlers, tools, and flows are unaware of the existence of the theme. The Widget JSON sent by emit_widget is theme-independent data, and the Theme Engine applies the appearance when rendering.
-
-**Completely replaceable**: The default theme placed by defaults during initial setup can be freely overwritten or replaced by the user or pack.
-
-**Inheritable**: A theme can inherit another theme with `extends` and define only the differences.
+**Declarative**: Themes are not code. Just write the value in YAML. It does not contain any execution logic.**Token-based**: Themes are defined as named tokens (`color.primary`, `spacing.md`, etc.) rather than writing color and size values directly. Asset looks up the token name and the theme resolves the actual value.**Backend independent**: Theme is read only by the frontend layer (Theme Engine in shell.html). Backend handlers, tools, and flows are unaware of the existence of the theme. The Widget JSON sent by emit_widget is theme-independent data, and the Theme Engine applies the appearance when rendering.**Completely replaceable**: The default theme placed by defaults during initial setup can be freely overwritten or replaced by the user or pack.**Inheritable**: A theme can inherit another theme with `extends` and define only the differences.
 
 
 ## 3. Directory structure
@@ -646,19 +638,9 @@ References are only valid within theme files. Circular references are prohibited
 
 ### 5.2 Token Categories
 
-**color** — Color value. Describe using CSS color expression (hex, rgba, hsl). Define with a semantic name (`primary`, `success`, `error`, etc.) and assign a specific color code.
+**color** — Color value. Describe using CSS color expression (hex, rgba, hsl). Define with a semantic name (`primary`, `success`, `error`, etc.) and assign a specific color code.**typography** — Font-related values. `font_family` is a CSS font-family string. `font_size_*` is an integer in px. `font_weight_*` is a CSS font-weight value. `line_height_*` is a unitless ratio.
 
-**typography** — Font-related values. `font_family` is a CSS font-family string. `font_size_*` is an integer in px. `font_weight_*` is a CSS font-weight value. `line_height_*` is a unitless ratio.
-
-**spacing** — Margin or gap value. An integer in px. The names are relative sizes: xs, sm, md, lg, xl, 2xl.
-
-**radius** — Corner radius value. An integer in px. `full` represents a pill type with 9999px.
-
-**shadow** — Box shadow value. CSS box-shadow string.
-
-**transition** — Transition value. CSS transition shorthand string.
-
-**z_index** — Stacking order value. integer.
+**spacing** — Margin or gap value. An integer in px. The names are relative sizes: xs, sm, md, lg, xl, 2xl.**radius** — Corner radius value. An integer in px. `full` represents a pill type with 9999px.**shadow** — Box shadow value. CSS box-shadow string.**transition** — Transition value. CSS transition shorthand string.**z_index** — Stacking order value. integer.
 
 
 ## 6. Animation definition

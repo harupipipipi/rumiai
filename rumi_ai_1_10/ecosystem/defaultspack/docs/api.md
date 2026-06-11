@@ -13,13 +13,7 @@ Tauri frontend, CLI, external scripts, webhooks, all reach the same Flow. The on
 
 ## 2. Design philosophy
 
-**Transport independent**: All communication ultimately results in a call to `FlowEngine.execute(flow_id, trigger_input)`. Whether via HTTP, stdin/stdout, or UDS, trigger_input that reaches Flow has the same format.
-
-**Endpoints are flows**: HTTP's `/v1/chat/completions` and CLI's `rumi chat` both launch the same `default.chat` flow. Adding an endpoint is an addition to the Flow definition and does not involve changing the code.
-
-**Authentication is done at the transport layer**: API key for HTTP, parent process trust for stdio, socket permissions for UDS. The Flow layer only accepts authenticated requests.
-
-**Streaming is absorbed by transport**: Flow only issues events in `ctx.emit()`. HTTP transport is converted to SSE, stdio transport is converted to JSON Lines, and Tauri transport is converted to IPC Channel. Flow does not know which transport it will be delivered on.
+**Transport independent**: All communication ultimately results in a call to `FlowEngine.execute(flow_id, trigger_input)`. Whether via HTTP, stdin/stdout, or UDS, trigger_input that reaches Flow has the same format.**Endpoints are flows**: HTTP's `/v1/chat/completions` and CLI's `rumi chat` both launch the same `default.chat` flow. Adding an endpoint is an addition to the Flow definition and does not involve changing the code.**Authentication is done at the transport layer**: API key for HTTP, parent process trust for stdio, socket permissions for UDS. The Flow layer only accepts authenticated requests.**Streaming is absorbed by transport**: Flow only issues events in `ctx.emit()`. HTTP transport is converted to SSE, stdio transport is converted to JSON Lines, and Tauri transport is converted to IPC Channel. Flow does not know which transport it will be delivered on.
 
 
 ## 3. Architecture

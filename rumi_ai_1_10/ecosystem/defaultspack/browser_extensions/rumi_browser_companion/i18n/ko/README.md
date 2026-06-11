@@ -4,9 +4,9 @@
 
 # 루미 브라우저 컴패니언
 
-`Rumi Browser Companion`은 Rumi가 로컬 브리지를 통해 사용자의 실제 브라우저 세션을 구동할 수 있게 해주는 Manifest V3 Chromium 확장입니다. 기존 `browser_use` 및 `computer_use` 도구를 보완하도록 설계되었습니다.
+`Rumi Browser Companion`은 Rumi가 로컬 브리지를 통해 사용자의 실제 브라우저 세션을 구동할 수 있게 해주는 Manifest V3 Chromium 확장입니다. 이는 기존 `browser_use` 및 `computer_use` 도구를 보완하도록 설계되었습니다.
 
-- `computer_use` / `browser_computer`: 보이는 창, 컴퓨터 사용 스타일 컨트롤
+- `computer_use` / `browser_computer`: 보이는 창, 컴퓨터 사용 스타일 제어
 - `browser_companion`: 사용자가 로그인한 브라우저 프로필 내의 DOM 인식 브라우저 제어
 
 이를 통해 Rumi는 모델이 DOM 상태를 검사하고, 연결된 브라우저 중에서 선택하고, 사용자의 라이브 쿠키 및 세션으로 작동할 수 있는 "컴퓨터 사용 + 브라우저 사용" 경로를 제공합니다.
@@ -14,7 +14,7 @@
 ## 파일
 
 - `manifest.json`: 확장 매니페스트
-- `background.js`: 브리지 폴링, 브라우저 메타데이터, 탭 작업, 캡처 오케스트레이션
+- `background.js`: 브리지 폴링, 브라우저 메타데이터, 탭 작업, 캡처 조정
 - `content_script.js`: DOM 스냅샷 및 요소 수준 작업
 - `options.html`, `options.css`, `options.js`: 로컬 브리지 구성 UI
 
@@ -24,13 +24,13 @@
 2. 브라우저의 확장 페이지를 열고 개발자 모드를 활성화합니다.
 3. "압축해제된 항목 로드"를 선택하고 다음 폴더를 선택합니다.
 
-   §루미§0§
+   `<repo>/rumi_ai_1_10/ecosystem/defaultspack/browser_extensions/rumi_browser_companion`
 
-4. Rumi에서 `action: "bridge.pairing"`로 `browser_companion`를 호출하여 페어링 토큰과 후보 서버 URL을 가져옵니다.
+4. Rumi에서 `action: "bridge.pairing"`과 함께 `browser_companion`을 호출하여 페어링 토큰과 후보 서버 URL을 가져옵니다.
 5. 확장 옵션 페이지를 열고 다음을 붙여넣습니다.
 
-   - `Server URL`(예: `http://127.0.0.1:8766`)
-   - §루미§0§
+   - `http://127.0.0.1:8766` 등 `Server URL`
+   - `Pairing Token`
 
 6. `Poll Bridge Now`을 클릭하여 확장 프로그램을 연결할 수 있는지 확인하세요.
 
@@ -38,8 +38,8 @@
 
 확장 프로그램은 다음 로컬 엔드포인트와 통신합니다.
 
-- §루미§0§
-- §루미§0§
+- `POST {serverUrl}/api/tools/browser-companion/bridge/poll`
+- `POST {serverUrl}/api/tools/browser-companion/bridge/result`
 
 `poll` 요청 본문:
 
@@ -114,16 +114,16 @@
 
 ## 지원되는 작업
 
-- §루미§0§
-- §루미§0§
-- §루미§0§
-- §루미§0§
-- §루미§0§
-- §루미§0§
-- §루미§0§
-- §루미§0§
-- §루미§0§
-- §루미§0§
+- `browser.tabs`
+- `browser.select_tab`
+- `page.navigate`
+- `page.snapshot`
+- `page.capture`
+- `page.click`
+- `page.type`
+- `page.press`
+- `page.scroll`
+- `page.extract`
 
 ## 안전 참고사항
 

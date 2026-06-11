@@ -33,15 +33,7 @@ class AIClient:
 
 ### Applicable class
 
-**AIClient** (`domain/ai_client/client.py`) — Manage and delegate AI providers. Register the stub provider during initialization and automatically register the providers (OpenAI, Anthropic, Google) detected in the environment variables. Has `complete()`, `stream()`, `embed()`, `image_gen()`, `image_analyze()`, `transcribe()`, `tts()` methods. Resolve model string `"provider/model"` and delegate to corresponding provider.
-
-**McpClient** (`domain/tool/mcp_client.py`) — Manages connections with MCP (Model Context Protocol) servers. Perform thread-safe server connection management with `threading.Lock`. Has `connect()`, `disconnect()`, `invoke()`, `list_servers()`, `get_server_tools()` methods.
-
-**ToolRegistry** (`domain/tool/registry.py`) — Register and manage tool definitions. Manage persistence to in-memory dict + `user_data/shared/tools/`. Automatically registers built-in tools (web_search, calculator, file_reader) at startup, and loads dynamic tools from files. Provide thread-safe operation with `threading.Lock`.
-
-**ChatStore** (`domain/chat/store.py`) — Provides in-memory management of conversations and messages. Share instances in `__new__` and maintain dict in `_conversations`. In addition to CRUD operations, it provides tree operations such as `branch()`, `search()`, `export_conversation()`, `get_message_chain()`.
-
-**Inspector** (`domain/dev/inspector.py`) — Manages recording and retrieval of request logs. Thread safe with `threading.Lock`. The upper limit is controlled by `collections.deque(maxlen=1000)`. Has `log_request()`, `get_log()`, `get_latest()`, `list_logs()`, `find_by_conversation()` methods.
+**AIClient** (`domain/ai_client/client.py`) — Manage and delegate AI providers. Register the stub provider during initialization and automatically register the providers (OpenAI, Anthropic, Google) detected in the environment variables. Has `complete()`, `stream()`, `embed()`, `image_gen()`, `image_analyze()`, `transcribe()`, `tts()` methods. Resolve model string `"provider/model"` and delegate to corresponding provider.**McpClient** (`domain/tool/mcp_client.py`) — Manages connections with MCP (Model Context Protocol) servers. Perform thread-safe server connection management with `threading.Lock`. Has `connect()`, `disconnect()`, `invoke()`, `list_servers()`, `get_server_tools()` methods.**ToolRegistry** (`domain/tool/registry.py`) — Register and manage tool definitions. Manage persistence to in-memory dict + `user_data/shared/tools/`. Automatically registers built-in tools (web_search, calculator, file_reader) at startup, and loads dynamic tools from files. Provide thread-safe operation with `threading.Lock`.**ChatStore** (`domain/chat/store.py`) — Provides in-memory management of conversations and messages. Share instances in `__new__` and maintain dict in `_conversations`. In addition to CRUD operations, it provides tree operations such as `branch()`, `search()`, `export_conversation()`, `get_message_chain()`.**Inspector** (`domain/dev/inspector.py`) — Manages recording and retrieval of request logs. Thread safe with `threading.Lock`. The upper limit is controlled by `collections.deque(maxlen=1000)`. Has `log_request()`, `get_log()`, `get_latest()`, `list_logs()`, `find_by_conversation()` methods.
 
 ---
 
@@ -130,15 +122,7 @@ class BaseProvider:
 
 ### Implementation provider
 
-**StubProvider** — Returns a fixed response. For testing and development. No API calls.
-
-**OpenAIProvider** — Call the OpenAI API. Detected by environment variable `OPENAI_API_KEY`.
-
-**AnthropicProvider** — Calls the Anthropic API. Detected by environment variable `ANTHROPIC_API_KEY`.
-
-**GoogleProvider** — Calls Google AI API. Detected by environment variable `GOOGLE_API_KEY`.
-
-**RumiProvider** — Meta provider. Process the request via Pipeline or delegate to a fallback provider. Receives an AIClient instance and is only enabled if one or more other providers are registered.
+**StubProvider** — Returns a fixed response. For testing and development. No API calls.**OpenAIProvider** — Call the OpenAI API. Detected by environment variable `OPENAI_API_KEY`.**AnthropicProvider** — Calls the Anthropic API. Detected by environment variable `ANTHROPIC_API_KEY`.**GoogleProvider** — Calls Google AI API. Detected by environment variable `GOOGLE_API_KEY`.**RumiProvider** — Meta provider. Process the request via Pipeline or delegate to a fallback provider. Receives an AIClient instance and is only enabled if one or more other providers are registered.
 
 ### Provider auto-detection
 
@@ -201,6 +185,4 @@ A unified template system for tools and prompts. Both have similar structures (n
 
 PromptManager manages prompts with JSON file persistence to an in-memory dict + `user_data/shared/prompts/`. Obtained as a module-level singleton with `get_manager()`.
 
-**Key methods:** `create_prompt()`, `get_prompt()`, `get_prompt_by_name()`, `list_prompts()`, `update_prompt()`, `delete_prompt()`, `to_template()`, `create_from_template()`, `get_system_prompt()`, `set_system_prompt()`.
-
-**Context variable injection:** `inject_context_variables(variables, context)` Static method automatically injects special variables such as `context.total_tokens`, `context.message_count` from the context dict.
+**Key methods:** `create_prompt()`, `get_prompt()`, `get_prompt_by_name()`, `list_prompts()`, `update_prompt()`, `delete_prompt()`, `to_template()`, `create_from_template()`, `get_system_prompt()`, `set_system_prompt()`.**Context variable injection:** `inject_context_variables(variables, context)` Static method automatically injects special variables such as `context.total_tokens`, `context.message_count` from the context dict.

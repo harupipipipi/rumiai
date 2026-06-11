@@ -11,12 +11,12 @@
 
 - リポジトリ: `rumiai`
 - このチェックポイントに使用されるローカル ワークスペース:
-  §るみ§0§
+  `/Users/haru/Desktop/puroguramukei/rumi_ai_mac`
 - メインパッケージディレクトリ: `rumi_ai_1_10`
 - 分岐: `codex/defaultspack-function-flow`
 - リモート: `origin`、`https://github.com/harupipipipi/rumiai.git`
 - このハンドオフ ファイルの前のチェックポイント コミット:
-  §るみ§0§
+  `776178f2 WIP: canonicalize defaultspack function flow runtime`
 
 同じブランチで作業を続け、残りの作業をすべて 1 つの PR にまとめます。
 ユーザーがスコープを明示的に変更しない限り、これを複数の PR に分割しないでください。

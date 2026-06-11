@@ -10,17 +10,17 @@
 
 ## 位置
 
-- §鲁米§0§
-- §鲁米§0§
+- `extensions/ui/rumi_bundle/manifest.json`
+- `frontend/ui/rumi_bundle/module.json`
 
 ## 我们目前掌握的信息
 
-- §鲁米§0§：§鲁米§1§
-- §鲁米§0§：§鲁米§1§
-- §鲁米§0§：§鲁米§1§
-- §鲁米§0§：§鲁米§1§
-- §鲁米§0§：§鲁米§1§
-- §鲁米§0§：§鲁米§1§
+- `bundle_id`：`rumi_bundle`
+- `pack_id`：`defaultspack`
+- `launch_mode`：`desktop_app`
+- `entry_url`：`http://127.0.0.1:${RUMI_DEFAULTSPACK_PORT}`
+- `port_source.default`：`8766`
+- `app.icon`：`/static/assets/icons/defaultspack-icon.png`
 - `parts`：`app_chrome`，`conversation_history`，`ai_chat`，`activity_preview`，`extension_sidebar`，`settings`
 - `component_bindings`：`ai_chat`使用`chat`并需要`ai_client`
 - `diagnostics`：返回格式错误的前端合约作为警告

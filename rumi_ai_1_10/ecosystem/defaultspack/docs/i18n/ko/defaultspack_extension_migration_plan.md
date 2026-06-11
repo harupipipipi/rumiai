@@ -69,7 +69,7 @@ ecosystem/defaultspack/extensions/
 
 ### B. LLM / Provider 마이그레이션 (호환 유지)
 
-- [] B1 : § RUMI § 0 §을 extension manifest 구동으로 대체
+- [] B1 : `domain.ai_client.providers.__init__`을 extension manifest 구동으로 대체
   - 수락: 중앙 `_PROVIDER_REGISTRY` 의존성이 제거됨
 - [ ] B2: OpenAI 호환 generic adapter 추가
   - 수락 : manifest의 env / base_url 설정만으로 provider를 추가 할 수 있습니다.
@@ -93,7 +93,7 @@ ecosystem/defaultspack/extensions/
 - [] C4 : chat_mode / agent_mode runner를 entrypoint 해결 가능하게 만들기
   - 수락 : mode manifest가 runner 호출의 시작점이됩니다.
 - [] C5 : transport / http.py의 fallback 라우트 테이블 외출
-- 수락 : 루트 정의가 transport registry module 쪽으로 향하고 § RUMI § 0§는 dispatcher 중심입니다.
+- 수락 : 루트 정의가 transport registry module 쪽으로 향하고 `http.py`는 dispatcher 중심입니다.
 - [ ] C6: prompt / tool / chat_mode / agent_mode / knowledge_backend / transport / ui / policy 의 manifest 병아리 완성
   - 수락 : discovery 결과에 모든 카테고리가 나타난다
 

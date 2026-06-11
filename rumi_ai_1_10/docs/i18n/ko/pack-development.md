@@ -5,7 +5,7 @@
 > **빠른 시작 가이드**: 팩 개발을 시작하려면 [팩 개발 빠른 시작 가이드](./pack-development-guide.md)를 참조하세요.
 # Rumi AI OS — 팩 개발 가이드
 
-Pack 개발자를 위한 가이드입니다. 전체 설계는 [architecture.md](./architecture.md)를, 작동 지침은 [operations.md](./operations.md)을 참조하세요.
+Pack 개발자를 위한 가이드입니다. 전체 설계는 [architecture.md](./architecture.md), 작동 지침은 [operations.md](./operations.md)을 참조하세요.
 
 ---
 
@@ -13,9 +13,9 @@ Pack 개발자를 위한 가이드입니다. 전체 설계는 [architecture.md](
 
 1. [개발 흐름](#개발-흐름)
 2. [최소 구성](#minimum-configuration)
-3. §루미§0§
+3. [ecosystem.json](#생태계json)
 4. [블록](#블록)
-5. §루미§0§
+5. [Type hints/validation](#힌트검증-입력)
 6. [흐름 정의](#흐름-정의)
 7. [흐름 → HTTP 응답 매핑](#flow--http-response-mapping)
 8. [흐름 수정자](#흐름-수정자)
@@ -25,11 +25,11 @@ Pack 개발자를 위한 가이드입니다. 전체 설계는 [architecture.md](
 12. [기능 사용](#기능-사용)
 13. [스토어 API(기능을 통해)](#store-api기능을-통해)
 14. [팩 간 협력 패턴](#팩-간-협력-패턴)
-15. §루미§0§
+15. [lib（install / update）](#libinstall--update)
 16. [pip 종속성(requirements.lock)](#pip-종속성requirementslock)
-17. §루미§0§
+17. [permissions.json](#권한json)
 18. [기능 처리기 포함](#includes-capability-handler)
-19. §루미§0§
+19. [vocab/converter (advanced)](#어휘변환기고급)
 20. [구성요소(고급)](#구성요소고급)
 21. [팩별 엔드포인트(routes.json)](#팩별-엔드포인트routesjson)
 22. [HTTP 상태 코드 제어](#http-상태-코드-제어)
@@ -60,7 +60,7 @@ python -m core_runtime.pack_scaffold my-pack --template minimal --output-dir eco
 1. **팩 만들기** — `ecosystem/<pack_id>/backend/`에 파일 배치
 2. **ecosystem.json 작성** — 팩 메타데이터(`pack_id`, `pack_identity` 필요)
 3. **쓰기 블록/** — `python_file_call`에서 호출되는 코드
-4. **쓰기 흐름** — 팩 및 연결 블록의 `user_data/shared/flows/` 또는 `flows/`에 배치합니다.
+4. **쓰기 흐름** — Pack and connect 블록의 `user_data/shared/flows/` 또는 `flows/`에 배치합니다.
 5. **승인 받기** — 사용자가 팩을 승인합니다.
 6. **실행** — 승인 후 흐름 실행 시 블록이 호출됩니다.
 
@@ -76,7 +76,7 @@ ecosystem/my_pack/
         └── hello.py
 ```
 
-> **경로 정보**: `ecosystem/<pack_id>/`가 권장 경로입니다. `ecosystem/packs/<pack_id>/`도 호환 경로로 지원되지만, 둘 다 동일한 `pack_id`가 존재할 경우 `ecosystem/<pack_id>/`이 우선 적용됩니다.
+> **경로 정보**: `ecosystem/<pack_id>/`이 권장 경로입니다. `ecosystem/packs/<pack_id>/`도 호환 경로로 지원되지만, 둘 다 동일한 `pack_id`가 존재할 경우 `ecosystem/<pack_id>/`이 우선 적용됩니다.
 
 ---
 
@@ -92,16 +92,16 @@ ecosystem/my_pack/
 }
 ```
 
-| 필드 | 필수 | 설명 |
+| Field | Required | Description |
 |-----------|------|------|
-| §루미§0§ | ✅ | 팩 식별자. 디렉터리 이름 일치 |
-| §루미§0§ | ✅ | 배포자 식별자(예: `github:author/repo`). 팩 업데이트 중에 이 값이 변경되면 적용이 거부됩니다 |
-| §루미§0§ | 선택사항 | 의미적 버전 관리 |
-| §루미§0§ | 선택사항 | 설명 |
-| §루미§0§ | 선택사항 | Pack에서 사용하는 어휘 목록입니다. vocab.txt와의 협업에 사용 |
-| §루미§0§ | 선택사항 | 필수 비밀 키 목록(예: `["OPENAI_API_KEY"]`). 이용자에게 정보를 제공하기 위해 |
-| §루미§0§ | 선택사항 | 네트워크 요구 사항(예: `{"allowed_domains": ["api.example.com"], "allowed_ports": [443]}`). 이용자에게 정보를 제공하기 위해 |
-| §루미§0§ | 선택사항 | 호스트 실행이 필요합니다(`true` / `false`). `true`의 경우 컨테이너 격리 대신 호스트 프로세스로 실행 |
+| `pack_id` | ✅ | Pack identifier. Match directory name |
+| `pack_identity` | ✅ | Distributor identifier (e.g. `github:author/repo`). If this value changes during Pack update, apply will be rejected |
+| `version` | Optional | Semantic Versioning |
+| `description` | Optional | Description |
+| `pack_identity_vocabulary` | Optional | List of vocabulary used by Pack. Used for collaboration with vocab.txt |
+| `required_secrets` | Optional | List of required secret keys (e.g. `["OPENAI_API_KEY"]`). For providing information to users |
+| `required_network` | Optional | Network requirements (e.g. `{"allowed_domains": ["api.example.com"], "allowed_ports": [443]}`). For providing information to users |
+| `host_execution` | Optional | Need for host execution (`true` / `false`). For `true`, run as a host process instead of container isolation |
 
 ### 연결성(팩 간 종속성 선언)
 
@@ -118,12 +118,12 @@ ecosystem/my_pack/
 }
 ```
 
-| 필드 | 설명 |
+| Field | Description |
 |-----------|------|
-| §루미§0§ | 이 팩에서 제공하는 서비스 이름 목록 |
-| §루미§0§ | 이 팩에 필요한 서비스 이름 목록 |
+| `provides` | List of service names provided by this Pack |
+| `requires` | List of service names required by this Pack |
 
-연결 `requires` / `provides`은 시작 시 팩 로드 순서(load_order)를 자동으로 해결하는 데 사용됩니다. `requires`에 명시된 서비스를 `provides`로 먼저 로드하는 팩입니다.
+연결 `requires` / `provides`은 시작 시 팩 로드 순서(load_order)를 자동으로 확인하는 데 사용됩니다. `provides` `requires`에 지정된 서비스가 먼저 로드되는 팩입니다.
 
 수동 사양(`ecosystem.json`의 `load_order` 필드)이 있는 경우 해당 사양이 우선 적용됩니다. 자동 해결은 수동 지정이 없는 경우에만 적용됩니다.
 
@@ -131,12 +131,12 @@ ecosystem/my_pack/
 
 #### 연결 패턴 예
 
-| 제공 | 의미 | 일반 팩 |
+| provides | Meaning | Typical Pack |
 |----------|------|--------------|
-| §루미§0§ | AI API 클라이언트 | OpenAI / Anthropic 클라이언트 |
-| §루미§0§ | 도구 등록 | 도구 관리자 |
-| §루미§0§ | 메모리 저장소 | 메모리 관리 |
-| §루미§0§ | 채팅 UI | 프론트엔드 |
+| `ai.client` | AI API Client | OpenAI / Anthropic Client |
+| `tool.registry` | Tool registration | Tool manager |
+| `memory.store` | Memory Store | Memory Management |
+| `ui.chat` | Chat UI | Frontend |
 
 제공/요구 값은 점으로 구분된 자유 문자열입니다. OS는 값의 의미를 해석하지 않고 load_order의 자동 해결에만 사용합니다. 팩 개발자들끼리 이름을 맞춰주세요.
 
@@ -183,7 +183,7 @@ JSON 호환 사전을 반환하세요. 반환된 값은 흐름의 `output` 필�
 
 흐름 단계의 `output`에 저장된 값의 키 이름에는 다음 규칙이 적용됩니다.
 
-`_` 접두사로 시작하는 키는 커널 내부 키로 예약되어 있습니다. `python_file_call`의 `run()`에 의해 반환된 dict에 `_` 접두사가 붙은 키가 포함되어 있는 경우(예: `_kernel_step_status`, `_debug`) Flow의 `output` 컨텍스트에 저장될 때 자동으로 제외됩니다.
+`_` 접두사로 시작하는 키는 커널 내부 키로 예약되어 있습니다. `python_file_call`의 `run()`에 의해 반환된 사전에 `_` 접두사가 있는 키가 포함되어 있는 경우(예: `_kernel_step_status`, `_debug`) Flow의 `output` 컨텍스트에 저장될 때 자동으로 제외됩니다.
 
 Pack 블록에서 반환된 출력 키에 `_` 접두사를 사용하지 마세요. 이로 인해 본의 아니게 제외될 수 있습니다.
 
@@ -224,37 +224,37 @@ def run() -> dict | None:
 
 `input_data`은 흐름 정의의 `input` 필드에 대한 JSON 직렬화/역직렬화 값입니다. 따라서 포함된 유형은 다음 JSON 파생 유형으로 제한됩니다.
 
-| JSON 유형 | 파이썬 유형 |
+| JSON type | Python type |
 |---------|----------|
-| 개체 | §루미§0§ |
-| 배열 | §루미§0§ |
-| 문자열 | §루미§0§ |
-| 숫자(정수) | §루미§0§ |
-| 숫자(10진수) | §루미§0§ |
-| 부울 | §루미§0§ |
-| null | §루미§0§ |
+| object | `dict` |
+| array | `list` |
+| string | `str` |
+| number (integer) | `int` |
+| number (decimal) | `float` |
+| boolean | `bool` |
+| null | `None` |
 
 `input_data` 자체는 일반적으로 `dict`이지만, 흐름 정의에서 직접 스칼라 값이나 목록을 지정하면 해당 유형이 됩니다.
 
 ### 컨텍스트 유형
 
-`context`는 `dict[str, Any]`입니다. 주요 키는 다음과 같습니다:
+`context`은 `dict[str, Any]`입니다. 주요 키는 다음과 같습니다:
 
-| 열쇠 | 유형 | 설명 |
+| Key | Type | Description |
 |------|----|------|
-| §루미§0§ | §루미§1§ | 실행 중인 흐름 ID |
-| §루미§0§ | §루미§1§ | 실행 단계 ID |
-| §루미§0§ | §루미§1§ | 실행 단계 이름 |
-| §루미§0§ | §루미§1§ | 실행 시작 타임스탬프(ISO 8601 UTC) |
-| §루미§0§ | §루미§1§ | 소유 팩 ID |
-| §루미§0§ | §루미§1§ | input_data와 동일 |
-| §루미§0§ | §루미§1§ | HTTP 요청 기능([context\["http\_request"\] 상세 사양](#contexthttp_request-상세 사양) 참조) |
-| §루미§0§ | §루미§1§ | 네트워크 접속 확인 기능 |
-| §루미§0§ | §루미§1§ | 기능 UDS 소켓 경로 |
+| `flow_id` | `str` | Running Flow ID |
+| `step_id` | `str` | Running step ID |
+| `phase` | `str` | Execution phase name |
+| `ts` | `str` | Execution start timestamp (ISO 8601 UTC) |
+| `owner_pack` | `str \| None` | Owned Pack ID |
+| `inputs` | `dict` | Same as input_data |
+| `http_request` | `Callable` | HTTP request function (see [context\["http\_request"\] detailed specifications](#contexthttp_request-detailed specifications)) |
+| `network_check` | `Callable` | Network access check function |
+| `capability_socket` | `str \| None` | Capability UDS Socket Path |
 
 ### 반환 유형
 
-`run()`의 반환 값은 JSON 직렬화 가능 값(`dict`, `list`, `str`, `int`, `float`, `bool`, `None`)이어야 합니다. `None`을 반환하면 Flow 출력은 `null`로 처리됩니다. 반환 값이 `dict`인 경우 해당 내용은 흐름의 `output` 변수에 저장됩니다.
+`run()`의 반환 값은 JSON 직렬화 가능 값(`dict`, `list`, `str`, `int`, `float`, `bool`, `None`)이어야 합니다. `None`을 반환하면 흐름 출력은 `null`로 처리됩니다. 반환 값이 `dict`인 경우 해당 내용은 흐름의 `output` 변수에 저장됩니다.
 
 ### 유효성 검사 모범 사례
 
@@ -296,7 +296,7 @@ def run(input_data: dict, context: dict) -> dict:
 
 - 예외를 발생시키는 대신 `{"error": "..."}`을 반환하고 정상적으로 종료합니다.
 - 기능 시작 시 모든 필수 필드를 확인하세요.
-- `isinstance()`으로 유형을 엄격하게 확인하세요.
+- `isinstance()`을 통해 유형을 엄격하게 확인하세요.
 - 숫자 범위 및 목록 길이에 대한 제한 설정
 
 ---
@@ -305,10 +305,10 @@ def run(input_data: dict, context: dict) -> dict:
 
 ### 배치 경로
 
-| 경로 | 목적 |
+| Path | Purpose |
 |------|------|
-| §루미§0§ | 공유 흐름. 여러 팩에 걸친 배선에 적합 |
-| §루미§0§ | 팩별 흐름 |
+| `user_data/shared/flows/` | Share Flow. Suitable for wiring across multiple packs |
+| `ecosystem/<pack_id>/backend/flows/` | Pack-specific Flow |
 
 ### 예
 
@@ -353,17 +353,17 @@ steps:
   timeout_seconds: 60
 ```
 
-| 필드 | 필수 | 설명 |
+| Field | Required | Description |
 |-----------|------|------|
-| §루미§0§ | ✅ | 단계 ID(흐름 내에서 고유함) |
-| §루미§0§ | ✅ | 제휴 단계 |
-| §루미§0§ | 선택사항 | 실행 우선순위(오름차순, 기본값 100) |
-| §루미§0§ | ✅ | §루미§1§ |
-| §루미§0§ | 선택사항 | 보유 팩(경로로 유추할 경우 생략 가능) |
-| §루미§0§ | ✅ | 실행 파일의 상대 경로 |
-| §루미§0§ | 모두 | 입력 데이터(변수 확장 가능) |
-| §루미§0§ | 선택사항 | 출력 대상 컨텍스트 키 |
-| §루미§0§ | 선택사항 | 시간 초과 초(기본값 60) |
+| `id` | ✅ | Step ID (unique within the Flow) |
+| `phase` | ✅ | Affiliation phase |
+| `priority` | Optional | Execution priority (ascending order; default 100) |
+| `type` | ✅ | `python_file_call` |
+| `owner_pack` | Optional | Owned Pack (can be omitted if inferred from the path) |
+| `file` | ✅ | Relative path of executable file |
+| `input` | Any | Input data (variable expansion possible) |
+| `output` | Optional | Output destination context key |
+| `timeout_seconds` | Optional | Timeout seconds (default 60) |
 
 #### 핸들러
 
@@ -379,7 +379,7 @@ steps:
   output: context
 ```
 
-`handler` 유형은 `input.handler`(`kernel:*`)에 지정된 커널 핸들러 또는 InterfaceRegistry 등록 핸들러를 직접 호출합니다. `input.args`이 핸들러에 인수로 전달됩니다.
+`handler` 유형은 `input.handler`(`kernel:*`)에 지정된 커널 핸들러 또는 InterfaceRegistry 등록 핸들러를 직접 호출합니다. `input.args`은 핸들러에 인수로 전달됩니다.
 
 #### 세트
 
@@ -393,7 +393,7 @@ steps:
     value: "gpt-4"
 ```
 
-> **참고**: `set` 유형은 InterfaceRegistry에 등록된 `flow.construct.set` 핸들러에 의해 처리됩니다. 플로우 로더는 `set`를 표준 단계 유형으로 해석하지만 실행은 구성을 통해 이루어집니다. `set` 구문이 등록되지 않은 경우 해당 단계를 건너뜁니다.
+> **참고**: `set` 유형은 InterfaceRegistry에 등록된 `flow.construct.set` 핸들러에 의해 처리됩니다. 흐름 로더는 `set`를 표준 단계 유형으로 해석하지만 실행은 구성을 통해 이루어집니다. `set` 구성이 등록되지 않은 경우 해당 단계를 건너뜁니다.
 
 #### 흐름(하위 흐름 호출)
 
@@ -408,7 +408,7 @@ steps:
   output: sub_result
 ```
 
-`flow` 유형은 다른 Flow를 하위 Flow로 호출합니다. 재귀 호출(순환 참조)이 자동으로 감지되어 오류가 발생합니다. 하위 Flow의 컨텍스트는 상위 Flow에서 Deep Copy되며 `args`에 지정된 값이 추가됩니다.
+`flow` 유형은 다른 흐름을 하위 흐름으로 호출합니다. 재귀 호출(순환 참조)이 자동으로 감지되어 오류가 발생합니다. 하위 Flow의 컨텍스트는 상위 Flow에서 Deep Copy되며 `args`에 지정된 값이 추가됩니다.
 
 #### 함수(능력 함수 호출)
 
@@ -424,19 +424,19 @@ steps:
   output: store_result
 ```
 
-`function` 타입은 `capability_executor`을 통해 FunctionRegistry에 등록된 기능을 실행합니다. `function` 필드에 `permission_id`(예: `store.get`)를 지정합니다. 실행을 위해서는 해당 기능 부여가 필요합니다.
+`function` 타입은 `capability_executor`을 통해 FunctionRegistry에 등록된 함수를 실행합니다. `function` 필드에 `permission_id`(예: `store.get`)을 지정합니다. 실행을 위해서는 해당 기능 부여가 필요합니다.
 
-| 필드 | 필수 | 설명 |
+| Field | Required | Description |
 |-----------|------|------|
-| §루미§0§ | ✅ | §루미§1§ |
-| §루미§0§ | ✅ | 실행할 함수의Permission_id (예: `store.get`, `docker.run`) |
-| §루미§0§ | 모두 | 함수에 대한 인수(변수 확장 가능) |
-| §루미§0§ | 선택사항 | 출력 대상 컨텍스트 키 |
-| §루미§0§ | 선택사항 | `true`의 경우 어휘는 해결하기 전에 `function`의 값을 정규화합니다 |
+| `type` | ✅ | `function` |
+| `function` | ✅ | permission_id of the function to be executed (e.g. `store.get`, `docker.run`) |
+| `input` | Any | Argument to the function (variable expansion possible) |
+| `output` | Optional | Output destination context key |
+| `vocab_normalize` | Optional | For `true`, vocab normalize the value of `function` before solving |
 
 ### 변수 확장
 
-`${ctx.key}`의 맥락에서 값을 참조할 수 있습니다. 중첩된 참조(`${ctx.user.id}`)도 가능합니다. 참조가 존재하지 않는 경우 `null`가 됩니다.
+`${ctx.key}`의 맥락에서 값을 참조할 수 있습니다. 중첩된 참조(`${ctx.user.id}`)도 가능합니다. 참조가 존재하지 않는 경우 `null`입니다.
 
 ### 실행 예약
 
@@ -530,29 +530,29 @@ class APIResponse:
 
 ### 상태 코드
 
-Pack API 서버의 `_send_response`은 다음 HTTP 상태 코드를 사용합니다.
+Pack API 서버의 `_send_response`은 다음과 같은 HTTP 상태 코드를 사용합니다.
 
-| 상태 | 상태 코드 |
+| Status | Status Code |
 |------|-----------------|
-| 흐름 실행 성공 | §루미§0§ |
-| 인증 실패 | §루미§0§ |
-| 잘못된 입력 | §루미§0§ |
-| 경로를 찾을 수 없습니다 | §루미§0§ |
-| 내부 오류 | §루미§0§ |
+| Flow execution successful | `200 OK` |
+| Authentication failure | `401 Unauthorized` |
+| Invalid input | `400 Bad Request` |
+| Route not found | `404 Not Found` |
+| Internal error | `500 Internal Server Error` |
 
 ### 헤더
 
 다음 헤더가 응답에 자동으로 추가됩니다.
 
-| 헤더 | 가치 | 조건 |
+| Header | Value | Condition |
 |---------|-----|------|
-| §루미§0§ | §루미§1§ | 항상 부여됨 |
-| §루미§0§ | Origin에서 요청함 | CORS 허용 목록과 일치 |
-| §루미§0§ | §루미§1§ | CORS 헤더를 추가할 때 |
+| `Content-Type` | `application/json; charset=utf-8` | Always granted |
+| `Access-Control-Allow-Origin` | Requested by Origin | Matches CORS allow list |
+| `Vary` | `Origin` | When adding CORS header |
 
 ### 특수키로 제어
 
-`_status_code`, `_headers`, `_body`와 같은 특수 키를 사용한 HTTP 응답의 직접 제어는 현재 **지원되지 않습니다**. 흐름 출력은 항상 `APIResponse`의 `data` 필드에 저장되고 `application/json` 형식으로 반환됩니다.
+`_status_code`, `_headers`, `_body`와 같은 특수 키를 사용하여 HTTP 응답을 직접 제어하는 것은 현재 **지원되지 않습니다**. 흐름 출력은 항상 `APIResponse`의 `data` 필드에 저장되고 `application/json` 형식으로 반환됩니다.
 
 사용자 정의 상태 코드 또는 헤더 제어가 필요한 경우 [HTTP 상태 코드 제어](#http-상태-코드-제어)를 참조하세요.
 
@@ -564,8 +564,8 @@ Pack API 서버의 `_send_response`은 다음 HTTP 상태 코드를 사용합니
 
 ### 배치 경로
 
-- §루미§0§
-- §루미§0§
+- `user_data/shared/flows/modifiers/`
+- `ecosystem/<pack_id>/backend/flows/modifiers/`
 
 ### 예
 
@@ -590,13 +590,13 @@ step:
 
 ### 사용 가능한 작업
 
-| 액션 | 설명 |
+| action | description |
 |--------|------|
-| §루미§0§ | 지정된 단계 앞에 삽입 |
-| §루미§0§ | 지정된 단계 뒤에 삽입 |
-| §루미§0§ | 단계 끝에 추가 |
-| §루미§0§ | 지정된 단계 바꾸기 |
-| §루미§0§ | 지정된 단계 삭제 |
+| `inject_before` | Insert before specified step |
+| `inject_after` | Insert after specified step |
+| `append` | Add to end of phase |
+| `replace` | Replace specified step |
+| `remove` | Delete specified step |
 
 > **단계 제약**: 수정자의 `phase`은 대상 흐름의 `phases` 목록에 포함되어야 합니다. 존재하지 않는 단계를 지정하면 수정자를 건너뜁니다.
 
@@ -606,10 +606,10 @@ step:
 
 `target_flow_id`에서 와일드카드 패턴을 사용하여 동시에 여러 흐름에 수정자를 적용할 수 있습니다.
 
-| 패턴 | 의미 |
+| Pattern | Meaning |
 |----------|------|
-| §루미§0§ | 모든 흐름에 적용 |
-| §루미§0§ | `my_pack.`으로 시작하는 모든 흐름에 적용 |
+| `*` | Applies to all Flows |
+| `my_pack.*` | Applies to all Flows starting with `my_pack.` |
 
 일치에는 Python의 `fnmatch`이 사용됩니다.
 
@@ -671,7 +671,7 @@ def run(input_data, context=None):
         return {"error": result["error"]}
 ```
 
-> **시간 초과 제한**: `timeout_seconds`의 최대값은 120초입니다. 120보다 큰 값은 120초로 잘립니다. 이 제한은 `rumi_syscall` 및 `rumi_capability` 모두에 적용됩니다.
+> **시간 초과 제한**: `timeout_seconds`의 최대값은 120초입니다. 120보다 큰 값은 120초로 잘립니다. 이 제한은 `rumi_syscall` 및 `rumi_capability`에 모두 적용됩니다.
 
 ### 접속 가능 여부를 사전 확인하세요
 
@@ -711,13 +711,13 @@ def http_request(
 
 ### 매개변수
 
-| 매개변수 | 유형 | 기본값 | 설명 |
+| Parameters | Type | Default | Description |
 |------------|-----|-----------|------|
-| §루미§0§ | §루미§1§ | (필수) | HTTP 메서드. §루미§2§, §루미§3§, §루미§4§, §루미§5§, §루미§6§, §루미§7§ |
-| §루미§0§ | §루미§1§ | (필수) | 요청할 전체 URL |
-| §루미§0§ | §루미§1§ | §루미§2§ | HTTP 요청 헤더 |
-| §루미§0§ | §루미§1§ | §루미§2§ | 요청 본문(문자열). JSON을 보낼 때 `json.dumps()` 문자열 |
-| §루미§0§ | §루미§1§ | §루미§2§ | 시간 초과(초) 최대 `120.0`초로 제한됨 |
+| `method` | `str` | (Required) | HTTP method. `GET`, `POST`, `PUT`, `DELETE`, `PATCH`, `HEAD` |
+| `url` | `str` | (required) | Complete URL to request |
+| `headers` | `dict[str, str] \| None` | `None` | HTTP request headers |
+| `body` | `str \| None` | `None` | Request body (string). When sending JSON, pass the `json.dumps()` string |
+| `timeout_seconds` | `float` | `30.0` | Timeout seconds. Limited to maximum `120.0` seconds |
 
 ### 반환값
 
@@ -748,15 +748,15 @@ def http_request(
 
 ### error_type 목록
 
-| 오류 유형 | 설명 |
+| error_type | description |
 |------------|------|
-| §루미§0§ | 송신 프록시 소켓을 찾을 수 없습니다. |
-| §루미§0§ | 소켓에 액세스할 수 있는 권한이 없습니다 |
-| §루미§0§ | 송신 프록시에 대한 연결이 거부되었습니다 |
-| §루미§0§ | 요청 시간이 초과되었습니다 |
-| §루미§0§ | 프로토콜 수준 오류 |
-| §루미§0§ | 응답의 JSON 구문 분석 실패 |
-| §루미§0§ | 네트워크 부여로 인해 액세스가 거부되었습니다 |
+| `socket_not_found` | Egress Proxy socket not found |
+| `permission_denied` | No permission to access socket |
+| `connection_refused` | Connection to Egress Proxy was refused |
+| `timeout` | Request timed out |
+| `syscall_error` | Protocol level error |
+| `json_decode_error` | JSON parsing of response failed |
+| `grant_denied` | Access denied due to Network Grant |
 
 ### UDS 송신 프록시를 통한 통신
 
@@ -778,15 +778,15 @@ Pack コード (run関数)
 
 ### 컨테이너 모드와 호스트 모드의 차이점
 
-| 아이템 | 컨테이너 모드(엄격) | 호스트 모드(허용) |
+| Item | Container mode (strict) | Host mode (permissive) |
 |------|--------------------------|---------------------------|
-| 네트워크 | `--network=none`(완전격리) | 호스트 네트워크 사용 |
-| 통신 경로 | UDS 소켓을 통해서만 | UDS 소켓을 통해(도우미 기능을 통해) |
-| 소켓 경로 | `/run/rumi/egress/packs/{pack_id}.sock`(컨테이너 내부 마운트) | §루미§1§ |
-| 승인된 보조금 | 송신 프록시 검증됨 | 송신 프록시 검증됨 |
-| 보안 | Docker 격리 + UDS 제한 사항 | 경고와 함께 실행(프로덕션에는 권장되지 않음) |
+| Network | `--network=none` (Complete isolation) | Use host network |
+| Communication path | Only via UDS socket | Via UDS socket (via helper function) |
+| Socket path | `/run/rumi/egress/packs/{pack_id}.sock` (Inside container mount) | `{RUMI_EGRESS_SOCK_DIR}/{pack_id}.sock` |
+| Grant Validated | Egress Proxy Validated | Egress Proxy Validated |
+| Security | Docker Quarantine + UDS Restrictions | Run with warnings (not recommended for production) |
 
-컨테이너 모드(`RUMI_SECURITY_MODE=strict`)에서는 Docker 컨테이너가 `--network=none`으로 시작되므로 UDS 소켓 외에는 다른 통신 수단이 없습니다. 호스트 모드(`RUMI_SECURITY_MODE=permissive`)는 Docker 없이 실행되지만 `context["http_request"]`도 Egress Proxy를 통과하므로 네트워크 부여에 의한 제어가 효과적입니다.
+컨테이너 모드(`RUMI_SECURITY_MODE=strict`)에서는 Docker 컨테이너가 `--network=none`으로 시작되므로 UDS 소켓 외에는 다른 통신 수단이 없습니다. 호스트 모드(`RUMI_SECURITY_MODE=permissive`)는 Docker 없이 실행되지만 `context["http_request"]`도 Egress Proxy를 통과하므로 Network Grant에 의한 제어가 효과적입니다.
 
 ### 사용예
 
@@ -861,8 +861,8 @@ curl -X POST http://localhost:8765/api/capability/grants/grant \
 
 ### 중요 제약사항
 
-- `get`는 능력을 통해서만 획득할 수 있습니다. 비밀 값을 직접 다시 표시하는 API가 없습니다.
-- `secrets.get`에는 비율 제한이 적용됩니다. (기본값은 60회/분/팩, 환경변수 `RUMI_SECRET_GET_RATE_LIMIT`로 변경 가능, 슬라이딩 윈도우 방식)
+- `get`은 능력을 통해서만 획득할 수 있습니다. 비밀 값을 직접 다시 표시하는 API가 없습니다.
+- `secrets.get`에는 비율 제한이 적용됩니다. (기본값은 60회/분/팩, 환경변수 `RUMI_SECRET_GET_RATE_LIMIT`, 슬라이딩 윈도우 방식으로 변경 가능)
 - 값은 로그, 감사 또는 예외 메시지에 포함되지 않습니다.
 - 키가 존재하는지 여부는 오류 메시지에서 확인할 수 없습니다("액세스가 거부되었거나 비밀을 찾을 수 없음"으로 통일).
 
@@ -906,23 +906,23 @@ else:
 
 다음 기능 핸들러는 코어 런타임에 포함되어 있으며 신뢰 등록 없이도 사용할 수 있습니다(별도 부여 필요).
 
-| 허가_ID | 핸들러_ID | 설명 | 위험 |
+| permission_id | handler_id | description | risk |
 |---------------|-----------|------|------|
-| §루미§0§ | §루미§1§ | 비밀 값 얻기 | 높다 |
-| §루미§0§ | §루미§1§ | Store에서 값 읽기 | 낮음 |
-| §루미§0§ | §루미§1§ | 저장소에 값 쓰기 | 매체 |
-| §루미§0§ | §루미§1§ | 저장소에서 값 제거 | 매체 |
-| §루미§0§ | §루미§1§ | 스토어에서 키 목록 가져오기 | 낮음 |
-| §루미§0§ | §루미§1§ | 스토어에서 대량 검색(최대 100개 키) | 낮음 |
-| §루미§0§ | §루미§1§ | Store Compare-And-Swap(낙관적 배타적 제어) | 매체 |
-| §루미§0§ | §루미§1§ | 다른 Pack 구성 요소의 받은 편지함에 JSON 메시지 보내기 | 매체 |
-| §루미§0§ | §루미§1§ | 다른 팩에 파일 변경 제안(스테이징 생성, 자동 적용 없음) | 높다 |
-| §루미§0§ | §루미§1§ | 동기식 Flow-to-Flow 호출 | 매체 |
-| §루미§0§ | §루미§1§ | Docker 컨테이너 실행 | — |
-| §루미§0§ | §루미§1§ | Docker 컨테이너 내부의 명령 실행 | — |
-| §루미§0§ | §루미§1§ | Docker 컨테이너 중지 | — |
-| §루미§0§ | §루미§1§ | Docker 컨테이너 로그 획득 | — |
-| §루미§0§ | §루미§1§ | 도커 컨테이너 목록 | — |
+| `secrets.get` | `core.secrets.get` | Get secret value | high |
+| `store.get` | `core.store.get` | Reading value from Store | low |
+| `store.set` | `core.store.set` | Writing value to Store | medium |
+| `store.delete` | `core.store.delete` | Removing a value from a Store | medium |
+| `store.list` | `core.store.list` | Get list of keys in Store | low |
+| `store.batch_get` | `core.store.batch_get` | Bulk retrieval from Store (up to 100 keys) | low |
+| `store.cas` | `core.store.cas` | Store Compare-And-Swap (optimistic exclusive control) | medium |
+| `pack.inbox.send` | `core.communication.send` | Send JSON message to inbox of other Pack components | medium |
+| `pack.update.propose_patch` | `core.communication.propose_patch` | Propose file changes to other Packs (staging creation, no automatic application) | high |
+| `flow.run` | `core.flow.run` | Synchronous Flow-to-Flow calls | medium |
+| `docker.run` | `core.docker.run` | Docker container execution | — |
+| `docker.exec` | `core.docker.exec` | Command execution inside Docker container | — |
+| `docker.stop` | `core.docker.stop` | Stopping Docker container | — |
+| `docker.logs` | `core.docker.logs` | Docker container log acquisition | — |
+| `docker.list` | `core.docker.list` | Docker container list | — |
 
 ### 그랜트 그랜트
 
@@ -938,13 +938,13 @@ curl -X POST http://localhost:8765/api/capability/grants/grant \
 
 ### 부여 구성(grant_config)
 
-보조금은 `config`에 설정된 한도를 가질 수 있습니다. 권한에 따라 설정이 다릅니다.
+보조금에는 `config`에 설정된 제한이 있을 수 있습니다. 권한에 따라 설정이 다릅니다.
 
-| 허가_ID | grant_config 키 | 설명 |
+| permission_id | grant_config key | description |
 |---------------|-------------------|------|
-| §루미§0§ | §루미§1§ | 액세스 가능한 키 이름 목록(필수, 비어 있으면 완전히 거부됨) |
-| §루미§0§ | §루미§1§ | 접근 가능한 store_ids 목록(필수, 비어 있으면 완전히 거부됨) |
-| §루미§0§ | §루미§1§ | 최대 쓰기 크기(바이트, 기본값 1MB) |
+| `secrets.get` | `allowed_keys` | List of accessible key names (required, completely denied if empty) |
+| `store.get/set/delete/list` | `allowed_store_ids` | List of accessible store_ids (required, completely rejected if empty) |
+| `store.set` | `max_value_bytes` | Maximum write size (bytes, default 1MB) |
 
 `allowed_keys` / `allowed_store_ids`은 페일클로즈됩니다. 목록이 비어 있거나 지정되지 않은 경우 모든 액세스가 거부됩니다.
 
@@ -977,14 +977,14 @@ if not result.get("success", False):
         pass
 ```
 
-| 오류 유형 | 설명 |
+| error_type | description |
 |------------|------|
-| §루미§0§ | 팩에는 권한 부여가 없습니다 |
-| §루미§0§ | 처리기의 sha256이 Trust Store에 등록되지 않았습니다. |
-| §루미§0§ | 지정된 허가_ID에 해당하는 핸들러가 존재하지 않습니다 |
-| §루미§0§ | 핸들러 실행 중 오류 발생 |
-| §루미§0§ | 실행 시간이 초과되었습니다 |
-| §루미§0§ | 기능 소켓을 찾을 수 없습니다 |
+| `grant_denied` | Pack has no permission grant |
+| `trust_denied` | sha256 of handler is not registered in Trust Store |
+| `handler_not_found` | The handler corresponding to the specified permission_id does not exist |
+| `execution_error` | Error while running handler |
+| `timeout` | Execution timed out |
+| `socket_not_found` | Capability socket not found |
 
 ---
 
@@ -996,12 +996,12 @@ if not result.get("success", False):
 
 ### 사용 가능한 허가_id
 
-| 허가_ID | 설명 | 인수 |
+| permission_id | description | args |
 |---------------|------|------|
-| §루미§0§ | 저장소에서 값 읽기 | §루미§1§, §루미§2§ |
-| §루미§0§ | 저장소에 값 쓰기 | §루미§1§, §루미§2§, §루미§3§ |
-| §루미§0§ | 저장소에서 값 제거 | §루미§1§, §루미§2§ |
-| §루미§0§ | 스토어에서 키 목록 가져오기 | `store_id`, `prefix`(선택) |
+| `store.get` | Read value from Store | `store_id`, `key` |
+| `store.set` | Write value to Store | `store_id`, `key`, `value` |
+| `store.delete` | Remove value from Store | `store_id`, `key` |
+| `store.list` | Get list of keys in Store | `store_id`, `prefix` (optional) |
 
 ### 사용예
 
@@ -1046,12 +1046,12 @@ result = rumi_capability.call("store.delete", args={
 
 `store.*`의 보조금에는 `grant_config`에 설정된 제한이 있을 수 있습니다.
 
-| grant_config 키 | 설명 | 기본값 |
+| grant_config key | Description | Default |
 |-------------------|------|-----------|
-| §루미§0§ | 접근을 허용할 store_id 목록 | `[]` (목록이 비어 있으면 모든 스토어에 대한 접근이 거부됩니다. Store_id를 명시적으로 지정해야 접근 가능) |
-| §루미§0§ | `store.set` 최대 크기(바이트) | 1MB(1048576) |
+| `allowed_store_ids` | List of store_ids to allow access | `[]` (If the list is empty, access to all Stores is denied. Store_id must be explicitly specified to access) |
+| `max_value_bytes` | `store.set` maximum size (bytes) | 1MB (1048576) |
 
-`allowed_store_ids`은 실패 시 닫힙니다. 보조금 생성 시 `allowed_store_ids`을 지정하지 않거나 빈 목록 `[]`을 지정하면 해당 보조금에 대해 모든 스토어에 대한 액세스가 거부됩니다. Pack이 Store에 액세스하려면 운영자는 store_id를 목록에 명시적으로 추가해야 합니다.
+`allowed_store_ids`은 실패 시 닫힙니다. 보조금을 생성할 때 `allowed_store_ids`을 지정하지 않거나 빈 목록 `[]`을 지정하면 해당 보조금에 대해 모든 스토어에 대한 액세스가 거부됩니다. Pack이 Store에 액세스하려면 운영자는 store_id를 목록에 명시적으로 추가해야 합니다.
 
 ### 매장 만들기
 
@@ -1070,23 +1070,23 @@ curl -X POST http://localhost:8765/api/stores/create \
 
 다음 기능 핸들러는 코어 런타임에 포함되어 있으며 신뢰 등록 없이도 사용할 수 있습니다(별도 부여 필요).
 
-| 허가_ID | 핸들러_ID | 설명 | 위험 |
+| permission_id | handler_id | description | risk |
 |---------------|-----------|------|------|
-| §루미§0§ | §루미§1§ | 비밀 값 얻기 | 높다 |
-| §루미§0§ | §루미§1§ | Store에서 값 읽기 | 낮음 |
-| §루미§0§ | §루미§1§ | 저장소에 값 쓰기 | 매체 |
-| §루미§0§ | §루미§1§ | 저장소에서 값 제거 | 매체 |
-| §루미§0§ | §루미§1§ | 스토어에서 키 목록 가져오기 | 낮음 |
-| §루미§0§ | §루미§1§ | 스토어에서 대량 검색(최대 100개 키) | 낮음 |
-| §루미§0§ | §루미§1§ | Store Compare-And-Swap(낙관적 배타적 제어) | 매체 |
-| §루미§0§ | §루미§1§ | 다른 Pack 구성 요소의 받은 편지함에 JSON 메시지 보내기 | 매체 |
-| §루미§0§ | §루미§1§ | 다른 팩에 파일 변경 제안(스테이징 생성, 자동 적용 없음) | 높다 |
-| §루미§0§ | §루미§1§ | 동기식 Flow-to-Flow 호출 | 매체 |
-| §루미§0§ | §루미§1§ | Docker 컨테이너 실행 | — |
-| §루미§0§ | §루미§1§ | Docker 컨테이너 내부의 명령 실행 | — |
-| §루미§0§ | §루미§1§ | Docker 컨테이너 중지 | — |
-| §루미§0§ | §루미§1§ | Docker 컨테이너 로그 획득 | — |
-| §루미§0§ | §루미§1§ | 도커 컨테이너 목록 | — |
+| `secrets.get` | `core.secrets.get` | Get secret value | high |
+| `store.get` | `core.store.get` | Reading value from Store | low |
+| `store.set` | `core.store.set` | Writing value to Store | medium |
+| `store.delete` | `core.store.delete` | Removing a value from a Store | medium |
+| `store.list` | `core.store.list` | Get list of keys in Store | low |
+| `store.batch_get` | `core.store.batch_get` | Bulk retrieval from Store (up to 100 keys) | low |
+| `store.cas` | `core.store.cas` | Store Compare-And-Swap (optimistic exclusive control) | medium |
+| `pack.inbox.send` | `core.communication.send` | Send JSON message to inbox of other Pack components | medium |
+| `pack.update.propose_patch` | `core.communication.propose_patch` | Propose file changes to other Packs (staging creation, no automatic application) | high |
+| `flow.run` | `core.flow.run` | Synchronous Flow-to-Flow calls | medium |
+| `docker.run` | `core.docker.run` | Docker container execution | — |
+| `docker.exec` | `core.docker.exec` | Command execution inside Docker container | — |
+| `docker.stop` | `core.docker.stop` | Stopping Docker container | — |
+| `docker.logs` | `core.docker.logs` | Docker container log acquisition | — |
+| `docker.list` | `core.docker.list` | Docker container list | — |
 
 ---
 
@@ -1186,17 +1186,17 @@ def run(context=None):
 
 ### 상황에 따라 제공되는 정보
 
-| 열쇠 | 설명 |
+| Key | Description |
 |------|------|
-| §루미§0§ | 팩 ID |
-| §루미§0§ | `"install"` 또는 `"update"` |
-| §루미§0§ | 타임스탬프 |
-| §루미§0§ | lib 디렉터리 경로(컨테이너 내부: `/lib`) |
-| §루미§0§ | 쓰기 가능한 디렉터리(컨테이너 내: `/data`, 호스트: `user_data/packs/{pack_id}/`) |
+| `pack_id` | Pack ID |
+| `lib_type` | `"install"` or `"update"` |
+| `ts` | Timestamp |
+| `lib_dir` | lib directory path (inside container: `/lib`) |
+| `data_dir` | Writable directory (in container: `/data`, host: `user_data/packs/{pack_id}/`) |
 
 ### 보안 제약
 
-엄격 모드에서는 Docker 컨테이너 내에서 격리되어 실행됩니다. §루미§0§, §루미§1§. 글쓰기는 `/data`(= `user_data/packs/{pack_id}/`)까지만 가능합니다.
+엄격 모드에서는 Docker 컨테이너 내에서 격리되어 실행됩니다. `--network=none`, `--read-only`. 글쓰기는 `/data`(= `user_data/packs/{pack_id}/`)까지만 가능합니다.
 
 ---
 
@@ -1210,12 +1210,12 @@ def run(context=None):
 
 다음 순서로 검색했습니다.
 
-1. §루미§0§
+1.`<pack_subdir>/requirements.lock`
 2. `<pack_subdir>/backend/requirements.lock`(호환)
 
 ### 형식
 
-`NAME==VERSION` 라인만 허용됩니다. 주석 라인과 빈 라인이 허용됩니다.
+`NAME==VERSION` 줄만 허용됩니다. 주석 라인과 빈 라인이 허용됩니다.
 
 ```
 requests==2.31.0
@@ -1226,7 +1226,7 @@ flask==3.0.0
 
 ### 팩 코드의 사용법
 
-승인 및 설치 후 평소처럼 `import`를 실행하세요.
+승인 및 설치 후 평소대로 `import`을 실행하면 됩니다.
 
 ```python
 import requests  # pip で導入された依存
@@ -1236,7 +1236,7 @@ def run(input_data, context=None):
     return {"data": resp.json()}
 ```
 
-실행 컨테이너에서는 사이트 패키지가 `/pip-packages:ro`로 마운트되고 `PYTHONPATH`에 추가됩니다.
+실행 컨테이너에서 사이트 패키지는 `/pip-packages:ro`로 마운트되고 `PYTHONPATH`에 추가됩니다.
 
 ### 승인을 받는 방법
 
@@ -1296,13 +1296,13 @@ ecosystem/<pack_id>/
 }
 ```
 
-| 필드 | 필수 | 설명 |
+| Field | Required | Description |
 |-----------|------|------|
-| §루미§0§ | ✅ | 핸들러의 고유 식별자 |
-| §루미§0§ | ✅ | 요청된 권한 ID |
-| §루미§0§ | ✅ | 실행 진입점(예: `handler.py:execute`) |
-| §루미§0§ | 선택사항 | 설명 |
-| §루미§0§ | 선택사항 | 위험 설명 |
+| `handler_id` | ✅ | Unique identifier of the handler |
+| `permission_id` | ✅ | Requested permission ID |
+| `entrypoint` | ✅ | Execution entry point (e.g. `handler.py:execute`) |
+| `description` | Optional | Description |
+| `risk` | Optional | Risk description |
 
 후보자는 스캔으로 감지되고 사용자가 승인한 후 `user_data/capabilities/handlers/<slug>/`에 복사됩니다. 승인은 Trust(sha256 허용 목록) 등록에만 적용되며, 별도로 Grant가 필요합니다.
 
@@ -1354,22 +1354,22 @@ ecosystem/<pack_id>/
 }
 ```
 
-| 필드 | 필수 | 설명 |
+| Field | Required | Description |
 |-----------|------|------|
-| §루미§0§ | ✅ | 기능 식별자 |
-| §루미§0§ | 선택사항 | 기능 설명 |
-| §루미§0§ | ✅ | 이 기능을 실행하는 데 필요한 허가_ID 목록(예: `["store.get"]`) |
-| §루미§0§ | 선택사항 | 호출자에게 요청할 수 있는 추가 권한 목록 |
-| §루미§0§ | 선택사항 | `true`인 경우 컨테이너 대신 호스트 프로세스에서 실행 |
-| §루미§0§ | 선택사항 | 분류 태그 목록 |
-| §루미§0§ | 선택사항 | 위험 수준(`low`, `medium`, `high`). docker type | 등 일부 함수에서는 생략됩니다.
-| §루미§0§ | 선택사항 | 어휘 정규화에 사용되는 별칭 목록 |
-| §루미§0§ | 선택사항 | JSON 스키마 입력 |
-| §루미§0§ | 선택사항 | JSON 스키마 출력 |
-| §루미§0§ | 선택사항 | Grant에 대한 기본 설정(docker 시스템에서 사용됨) |
-| §루미§0§ | 선택사항 | 호출 규칙. `block` (기본값, core_pack 표준) = `execute(context, args)` 패턴 |
+| `function_id` | ✅ | Function identifier |
+| `description` | Optional | Function description |
+| `requires` | ✅ | List of permission_ids required to run this function (e.g. `["store.get"]`) |
+| `caller_requires` | Optional | List of additional privileges to request from the caller |
+| `host_execution` | Optional | If `true`, run in the host process instead of the container |
+| `tags` | Optional | List of classification tags |
+| `risk` | Optional | Risk level (`low`, `medium`, `high`). It is omitted in some functions such as docker type |
+| `vocab_aliases` | Optional | List of aliases used for vocab normalization |
+| `input_schema` | Optional | Input JSON Schema |
+| `output_schema` | Optional | Output JSON Schema |
+| `grant_config` | Optional | Default settings for Grant (used in docker systems) |
+| `calling_convention` | Optional | Calling convention. `block` (default, core_pack standard) = `execute(context, args)` Pattern |
 
-> **참고**: `permission_id` 필드는 매니페스트.json에 존재하지 않습니다. 권한을 지정하려면 `requires` 배열을 사용하세요.
+> **참고**: `permission_id` 필드는 Manifest.json에 존재하지 않습니다. 권한을 지정하려면 `requires` 배열을 사용하세요.
 
 #### 메인.py
 
@@ -1392,7 +1392,7 @@ def execute(context: dict, args: dict) -> dict:
     return {"success": True, "value": result}
 ```
 
-`calling_convention`가 `block`(기본값)인 경우 진입점은 `execute(context, args)`입니다. `context`에는 `grant_config`와 같은 실행 정보가 포함되어 있으며, `args`에는 Flow 단계의 `input`에 지정된 값이 전달됩니다.
+`calling_convention`이 `block`(기본값)인 경우 진입점은 `execute(context, args)`입니다. `context`에는 `grant_config` 등의 실행 정보가 포함되어 있으며, `args`에는 Flow 단계의 `input`에 지정된 값이 전달됩니다.
 
 ---
 
@@ -1422,7 +1422,7 @@ def convert(data, context=None):
 
 ## 구성요소(고급)
 
-Component는 `components/{component_id}/manifest.json`을 갖는 단위로 Lifecycle 관리(설정 등)에 사용됩니다. `python_file_call`에서는 컴포넌트를 특별히 취급하지 않으므로 `file` 필드에 상대 경로를 지정해 주십시오.
+컴포넌트는 `components/{component_id}/manifest.json`의 단위로 라이프사이클 관리(설정 등)에 사용됩니다. `python_file_call`은 컴포넌트를 특별히 취급하지 않으므로 `file` 항목에 상대 경로를 지정해 주시기 바랍니다.
 
 ```yaml
 type: python_file_call
@@ -1432,7 +1432,7 @@ file: components/comp1/blocks/foo.py
 
 ### setup.py의 기본 패턴
 
-Component의 초기화 과정은 `components/{component_id}/setup.py`에 설명되어 있습니다.
+Component의 초기화 프로세스는 `components/{component_id}/setup.py`에 설명되어 있습니다.
 
 ```python
 # ecosystem/my_pack/backend/components/my_component/setup.py
@@ -1469,7 +1469,7 @@ def setup(context=None):
 
 ### 배치 경로
 
-§루미§0§
+`ecosystem/<pack_id>/backend/routes.json`
 
 ### Routes.json 형식
 
@@ -1496,7 +1496,7 @@ def setup(context=None):
 
 경로 매개변수는 `{param}` 표기법을 사용하여 정의할 수 있습니다. 경로 매개변수 값은 Flow의 `inputs`에 자동으로 포함됩니다.
 
-예: `/api/orgs/{org_id}/tasks/{task_id}`를 요청하면 `inputs.org_id` 및 `inputs.task_id`가 각각의 값을 갖게 됩니다.
+예: `/api/orgs/{org_id}/tasks/{task_id}`을 요청하는 경우 `inputs.org_id` 및 `inputs.task_id`는 각각의 값을 갖습니다.
 
 ### 쿼리 매개변수 가져오기
 
@@ -1506,12 +1506,12 @@ GET 요청에 대한 쿼리 매개변수도 `inputs`에 포함되어 있습니�
 
 Flow의 `inputs`에는 다음과 같은 특수 키도 포함되어 있습니다.
 
-| 열쇠 | 설명 |
+| Key | Description |
 |------|------|
-| §루미§0§ | 요청 본문의 base64 인코딩 값 |
-| §루미§0§ | 요청 헤더의 사전 |
-| §루미§0§ | HTTP 메소드(GET, POST 등) |
-| §루미§0§ | 요청 경로 |
+| `_raw_body` | base64 encoded value of request body |
+| `_headers` | dict of request headers |
+| `_method` | HTTP methods (GET, POST, etc.) |
+| `_path` | Request path |
 
 ### 경로 재장전
 
@@ -1533,22 +1533,22 @@ curl http://localhost:8765/api/routes \
 
 ### 현재 사양
 
-현재 Pack API 서버 구현에서는 **Pack이 Pack의 `routes.json` 엔드포인트에서 반환된 HTTP 상태 코드를 직접 제어하는 ​​것을 허용하지 않습니다.
+현재 Pack API 서버 구현에서는 **Pack이 Pack의 `routes.json` 끝점에서 반환된 HTTP 상태 코드를 직접 제어하는 것을 허용하지 않습니다.
 
-Flow의 출력에 `_status_code`와 같은 특수 키를 포함하더라도 응답의 `data` 필드에만 포함되며 HTTP 상태 코드에는 반영되지 않습니다.
+Flow의 출력에 `_status_code`과 같은 특수 키를 포함하더라도 응답의 `data` 필드에만 포함되며 HTTP 상태 코드에는 반영되지 않습니다.
 
 ### 상태코드 판단 로직
 
 Pack API 서버는 다음 논리를 사용하여 상태 코드를 결정합니다.
 
-| 판결명령 | 상태 | 상태 코드 |
+| Judgment order | Status | Status code |
 |--------|------|-----------------|
-| 1 | 인증 실패 | §루미§0§ |
-| 2 | 입력 유효성 검사 실패 | §루미§0§ |
-| 3 | 경로를 찾을 수 없습니다 | §루미§0§ |
-| 4 | 흐름 실행 성공 | `200`(고정) |
-| 5 | Flow를 실행할 때 오류 dict가 반환됨 | `200`(데이터에 오류가 있지만 HTTP는 200) |
-| 6 | Flow 실행 중 예외 발생 | §루미§0§ |
+| 1 | Authentication failure | `401` |
+| 2 | Input validation failure | `400` |
+| 3 | Route not found | `404` |
+| 4 | Flow execution successful | `200` (fixed) |
+| 5 | Error dict returned when running Flow | `200` (data contains error but HTTP is 200) |
+| 6 | Exception occurs during Flow execution | `500` |
 
 즉, 흐름이 성공적으로 완료되어 `{"error": "not found"}`을 반환하더라도 HTTP 상태 코드는 `200 OK`이 됩니다.
 
@@ -1584,9 +1584,7 @@ def run(input_data: dict, context: dict) -> dict:
 
 `run()` 함수 내에서 포착되지 않은 예외가 발생하면 실행 엔진은 다음을 수행합니다.
 
-**컨테이너 모드**: Docker 프로세스가 0이 아닌 종료 코드로 종료되고 stderr의 내용이 오류 메시지로 기록됩니다. `ExecutionResult`의 `success`은 `False`가 되고, `error_type`은 `"container_execution_error"`가 됩니다.
-
-**호스트 모드(허용)**: 예외는 `ThreadPoolExecutor`의 `Future`에서 전파되고 마찬가지로 `ExecutionResult`의 `success`는 `False`가 됩니다.
+**컨테이너 모드**: Docker 프로세스가 0이 아닌 종료 코드로 종료되고 stderr의 내용이 오류 메시지로 기록됩니다. `ExecutionResult`의 `success`은 `False`가 되고 `error_type`은 `"container_execution_error"`이 됩니다.**호스트 모드(허용)**: 예외는 `ThreadPoolExecutor`의 `Future`에서 전파되고 마찬가지로 `ExecutionResult`의 `success`은 `False`가 됩니다.
 
 두 경우 모두 커널 처리기(`_h_python_file_call`)는 `_kernel_step_status: "failed"`을 반환합니다.
 
@@ -1622,15 +1620,15 @@ def run(input_data: dict, context: dict) -> dict:
 
 흐름의 한 단계가 실패할 때의 동작은 흐름 정의의 `defaults` 및 단계별 `on_error` 설정에 따라 결정됩니다.
 
-| 설정 | 행동 |
+| Settings | Behavior |
 |------|------|
-| `defaults.fail_soft: true`(기본값) | 단계 실패를 기록하고 다음 단계로 진행 |
-| §루미§0§ | 단계가 실패하면 전체 흐름을 중단합니다. |
-| §루미§0§ | 이 단계가 실패하면 흐름 중단 |
-| §루미§0§ | 이 단계가 실패하더라도 계속 |
-| §루미§0§ | 대상을 비활성화하고 진행 |
+| `defaults.fail_soft: true` (default) | Record step failure and proceed to next step |
+| `defaults.fail_soft: false` | Interrupt the entire Flow when a step fails |
+| `on_error.action: "abort"` | Abort Flow if this step fails |
+| `on_error.action: "continue"` | Continue even if this step fails |
+| `on_error.action: "disable_target"` | Disable target and proceed |
 
-흐름 수준 오류 처리기가 InterfaceRegistry에 `flow.error_handler`으로 등록되어 있으면 단계 예외가 발생할 때 해당 처리기가 호출됩니다. 오류 처리기는 `"abort"`(중단), `"retry"`(재시도) 또는 기타 항목(계속)을 반환하여 동작을 제어할 수 있습니다.
+Flow 수준 오류 핸들러가 InterfaceRegistry에 `flow.error_handler`으로 등록되어 있으면 단계 예외가 발생할 때 해당 핸들러가 호출됩니다. 오류 처리기는 `"abort"`(중단), `"retry"`(재시도) 또는 기타 항목(계속)을 반환하여 동작을 제어할 수 있습니다.
 
 ### Capability.call() 실패시 반환값 처리 방법
 
@@ -1656,17 +1654,17 @@ value = result.get("output", {}).get("value")
 
 기능 호출이 실패할 수 있는 이유는 다음과 같습니다.
 
-| 오류 유형 | 설명 |
+| error_type | description |
 |------------|------|
-| §루미§0§ | 기능 사용이 승인되지 않음 |
-| §루미§0§ | 기능 부여가 부여되지 않음 |
-| §루미§0§ | Trust Store 확인 실패 |
-| §루미§0§ | 지정된 기능 처리기가 존재하지 않습니다 |
-| §루미§0§ | 핸들러를 실행하는 동안 오류가 발생했습니다 |
-| §루미§0§ | 실행 시간이 초과되었습니다 |
-| §루미§0§ | 기능 소켓을 찾을 수 없습니다 |
+| `approval_denied` | Not authorized for use of Capability |
+| `grant_denied` | Capability Grant not granted |
+| `trust_denied` | Trust Store verification failed |
+| `handler_not_found` | The specified Capability Handler does not exist |
+| `execution_error` | An error occurred while running Handler |
+| `timeout` | Execution timed out |
+| `socket_not_found` | Capability socket not found |
 
-Try-Exception을 사용하는 대신 반환 값의 `success` 필드를 사용하여 이러한 오류를 확인하는 것이 좋습니다.
+try-Exception을 사용하는 대신 반환 값의 `success` 필드를 사용하여 이러한 오류를 확인하는 것이 좋습니다.
 
 ---
 
@@ -1744,24 +1742,24 @@ inject_before / inject_after는 특정 단계 전후에 처리를 삽입하고 �
 
 Flow 정의에서 직접 사용할 수 있는 핸들러입니다. 안정적인 인터페이스가 보장됩니다.
 
-| 핸들러 | 설명 | Flow에서 사용하는 방법 |
+| Handler | Description | How to use in Flow |
 |---------|------|----------------|
-| §루미§0§ | Python 파일 실행 | §루미§1§ |
-| §루미§0§ | 하위 흐름 호출 | §루미§1§ |
-| §루미§0§ | 실행 기능 기능 | §루미§1§ |
-| §루미§0§ | 컨텍스트에 따라 값 설정 | §루미§1§ |
-| §루미§0§ | 등록된 핸들러를 직접 호출 | §루미§1§ |
+| `python_file_call` | Run Python file | `type: python_file_call` |
+| `flow` | Call sub Flow | `type: flow` |
+| `function` | Execute Capability function | `type: function` |
+| `set` | Set value in context | `type: set` |
+| `handler` | Directly call registered handler | `type: handler` |
 
 ### 내부 API(Pack 개발자는 사용하지 않음)
 
 내부 커널 작업에 사용되는 핸들러입니다. 팩 개발자는 이를 직접 호출할 필요가 없습니다.
 
-| 카테고리 | 예 | 설명 |
+| Category | Examples | Description |
 |---------|-----|------|
-| §루미§0§ | §루미§1§, §루미§2§ | 커널 내부의 컨텍스트 작업 |
-| §루미§0§ | §루미§1§, §루미§2§ | 흐름 수명 주기 후크 |
-| §루미§0§ | §루미§1§, §루미§2§ | Flow 구문의 내부 구현 |
-| §루미§0§ | §루미§1§, §루미§2§ | 구성요소 수명주기 |
+| `kernel:*` | `kernel:ctx.get`, `kernel:ctx.set` | Context operations inside the Kernel |
+| `flow.hooks.*` | `flow.hooks.pre_step`, `flow.hooks.post_step` | Flow lifecycle hook |
+| `flow.construct.*` | `flow.construct.set`, `flow.construct.if` | Internal implementation of Flow syntax |
+| `component_phase:*` | `component_phase:setup`, `component_phase:startup` | Component life cycle |
 
 > **참고**: 내부 API는 예고 없이 변경될 수 있습니다. 팩의 흐름 정의에서 이를 직접 참조하지 마십시오.
 
@@ -1773,22 +1771,22 @@ Flow 정의에서 직접 사용할 수 있는 핸들러입니다. 안정적인 �
 
 Flow 실행 결과가 HTTP 응답으로 반환되면 다음 접두사로 시작하는 키는 **커널 내부 키**에서 자동으로 제외됩니다.
 
-| 접두사 | 설명 |
+| Prefix | Description |
 |---------------|------|
-| §루미§0§ | 흐름 제어 정보 |
-| §루미§0§ | 커널 단계 메타데이터 |
-| §루미§0§ | 단계 출력 내부 참조 |
-| §루미§0§ | 현재 단계 번호 |
-| §루미§0§ | 총 걸음수 |
-| §루미§0§ | 상위 흐름 정보 |
-| §루미§0§ | 집행자 ID |
-| §루미§0§ | 흐름 제어 신호 |
-| §루미§0§ | 오류 정보 |
-| §루미§0§ | 흐름 기본값 |
+| `_flow_` | Flow control information |
+| `_kernel_` | Kernel step metadata |
+| `_step_out.` | Step output internal reference |
+| `_current_step` | Current step number |
+| `_total_steps` | Total number of steps |
+| `_parent_flow` | Parent Flow information |
+| `_principal_id` | Executor ID |
+| `_flow_control` | Flow control signal |
+| `_error` | Error information |
+| `_flow_defaults` | Flow default value |
 
 ### 팩 개발자가 `_` 접두사 키를 반환하는 경우
 
-위에 나열된 커널 내부 접두사(예: `_debug`, `_my_internal`)와 **일치하지** 않는 `_` 접두사 키는 응답에서 제외되지 않습니다. 그러나 경고가 기록됩니다.
+위에 나열된 커널 내부 접두사(예: `_debug`, `_my_internal`)와 **일치하지 않음** `_` 접두사 키는 응답에서 제외되지 않습니다. 그러나 경고가 기록됩니다.
 
 ```python
 # この例では _debug は除外されず、レスポンスに含まれる（警告ログ付き）
@@ -1799,7 +1797,7 @@ def run(input_data, context=None):
     }
 ```
 
-### 권장사항
+### 권장 사항
 
 - Pack 출력 키에 `_` 접두사를 사용하지 않는 것이 좋습니다.
 - 디버그 정보를 포함하려면 `debug` 또는 `metadata`과 같은 일반 키 이름을 사용하세요.
@@ -1833,16 +1831,16 @@ def run(input_data, context=None):
 
 ## 메모
 
-- **InterfaceRegistry는 내부 API입니다. ** 팩에서 직접 IR을 작동하지 마십시오.
-- **외부 통신은 Egress Proxy를 통해 이루어져야 합니다**. `context["http_request"]`를 사용하세요.
-- **lib는 `/data`에만 쓸 수 있습니다. ** `--read-only`으로 인해 다른 경로에 쓰기가 실패합니다.
-- **pack_identity를 변경하지 마십시오. ** 업데이트 중 `pack_identity`이 변경되면 신청이 거부됩니다.
-- **principal_id는 v1의 owner_pack에 의해 강제로 덮어쓰기됩니다. ** Flow 정의나 Modifier에서 `principal_id`를 지정하더라도 런타임 시에는 `owner_pack` 값이 주체로 사용됩니다. 불일치가 감지되면 감사 로그에 경고가 기록됩니다.
-- **응답 크기 제한 정보**: Egress Proxy(`rumi_syscall`) 및 Capability Client(`rumi_capability`)의 응답 제한은 4MB입니다(`RUMI_MAX_RESPONSE_BYTES`에서 변경 가능). 그러나 Capability Executor(서버 측 하위 프로세스 실행)의 응답 제한은 1MB입니다.
-- **store.set의 기본 값 크기 제한은 1MB입니다. ** Grant의 `grant_config.max_value_bytes`로 변경될 수 있습니다.
-- **FlowScheduler의 최소 간격 값은 10초입니다. ** 10초 미만으로 지정하시면 다음 10초로 반올림됩니다.
-- **Flow 동시 실행의 기본 개수는 10개입니다. ** `RUMI_MAX_CONCURRENT_FLOWS` 환경 변수를 사용하여 변경할 수 있습니다.
-- **기능 실행 시간 초과 제한은 120초입니다. ** `rumi_capability.call()`의 `timeout_seconds`에 120보다 큰 값을 지정하더라도 120초로 제한됩니다. 기본값은 30초입니다.
+- **InterfaceRegistry는 내부 API입니다.** 팩에서 직접 IR을 작동하지 마십시오.
+- **외부 통신은 Egress Proxy를 통해 이루어져야 합니다**. `context["http_request"]`을 사용하세요.
+- **lib는 `/data`에만 쓸 수 있습니다.** 다른 경로에 쓰는 것은 `--read-only`으로 인해 실패합니다.
+- **pack_identity**를 변경하지 마십시오. 업데이트 중 `pack_identity`이 변경되면 적용이 거부됩니다.
+- **principal_id는 v1에서 owner_pack에 의해 강제로 덮어쓰기됩니다.** Flow 정의 또는 Modifier에서 `principal_id`을 지정하더라도 런타임 시 `owner_pack` 값이 주체로 사용됩니다. 불일치가 감지되면 감사 로그에 경고가 기록됩니다.
+- **응답 크기 제한 정보**: 송신 프록시(`rumi_syscall`) 및 기능 클라이언트(`rumi_capability`)의 응답 제한은 4MB입니다(`RUMI_MAX_RESPONSE_BYTES`에서 변경 가능). 그러나 Capability Executor(서버 측 하위 프로세스 실행)의 응답 제한은 1MB입니다.
+- **store.set의 기본 크기 제한은 1MB입니다.** Grant의 `grant_config.max_value_bytes`로 변경할 수 있습니다.
+- **FlowScheduler의 최소 간격 값은 10초입니다.** 10초 미만으로 지정하면 다음 10초로 반올림됩니다.
+- **Flow 동시 실행의 기본 개수는 10개입니다.** `RUMI_MAX_CONCURRENT_FLOWS` 환경 변수를 사용하여 변경할 수 있습니다.
+- **기능 실행 제한 시간은 120초입니다.** `rumi_capability.call()`의 `timeout_seconds`에 120보다 큰 값을 지정하더라도 120초로 제한됩니다. 기본값은 30초입니다.
 
 ### 하드 링크는 지원되지 않습니다.
 
@@ -1850,7 +1848,7 @@ Pack 디렉터리(`ecosystem/<pack_id>/`) 내의 하드 링크 사용은 **지�
 
 #### 이유
 
-팩 인증/해시 확인 시스템은 `Path.resolve()`으로 정규화된 파일 경로를 캐시 키로 사용합니다. 심볼릭 링크는 `resolve()`에 의해 실제 경로로 해석되므로 소스와 대상이 동일한 캐시 항목으로 결합됩니다. 반면, 하드 링크는 `resolve()`에서 통합되지 않습니다(각 경로 항목은 독립적으로 유지됩니다). 따라서 동일한 inode를 가리키는 여러 경로는 별도의 캐시 항목으로 처리되며 한 경로를 통한 파일 변경 사항은 다른 경로의 해시 유효성 검사에 반영되지 않을 수 있습니다.
+팩 인증/해시 확인 시스템은 `Path.resolve()`으로 정규화된 파일 경로를 캐시 키로 사용합니다. 심볼릭 링크는 `resolve()`에 의해 실제 경로로 확인되므로 소스와 대상이 동일한 캐시 항목으로 결합됩니다. 반면, 하드 링크는 `resolve()`에서 통합되지 않습니다(각 경로 항목은 독립적으로 유지됩니다). 따라서 동일한 inode를 가리키는 여러 경로는 별도의 캐시 항목으로 처리되며 한 경로를 통한 파일 변경 사항은 다른 경로의 해시 유효성 검사에 반영되지 않을 수 있습니다.
 
 ```
 hardlink_a.py ─┐
@@ -1867,7 +1865,7 @@ symlink.py → target.py:
 
 #### 권장 대안
 
-- **기호 링크**: `resolve()`의 실제 경로로 확인되어 해시 유효성 검사와 일관성을 유지합니다. 그러나 심볼릭 링크의 참조 대상은 **pack_subdir 경계 내**로 제한됩니다. 경계 외부를 가리키는 기호 링크는 런타임 시 거부됩니다.
+- **기호 링크**: `resolve()`의 실제 경로로 확인되어 해시 유효성 검사와 일관성을 유지합니다. 그러나 심볼릭 링크의 참조 대상은**pack_subdir 경계 내**로 제한됩니다. 경계 외부를 가리키는 기호 링크는 런타임 시 거부됩니다.
 - **파일 복사**: 가장 안전한 방법입니다. 각 파일에는 독립적인 해시가 있으며 확인 문제가 없습니다.
 
 ---
@@ -1878,28 +1876,28 @@ symlink.py → target.py:
 
 컨테이너 내에서 외부 HTTP 통신을 수행하기 위한 모듈입니다. `import rumi_syscall`에서 사용됩니다.
 
-| 기능 | 설명 |
+| Function | Description |
 |------|------|
-| §루미§0§ | 일반 HTTP 요청 |
-| §루미§0§ | 바로가기 받기 |
-| §루미§0§ | POST 바로가기 |
-| §루미§0§ | JSON POST 단축키(Content-Type 자동 설정) |
-| §루미§0§ | PUT 바로가기 |
-| §루미§0§ | 삭제 단축키 |
-| §루미§0§ | 패치 바로가기 |
-| §루미§0§ | 헤드 바로가기 |
+| `http_request(method, url, headers=None, body=None, timeout_seconds=30.0)` | Generic HTTP request |
+| `get(url, headers=None, timeout_seconds=30.0)` | GET shortcut |
+| `post(url, body=None, headers=None, timeout_seconds=30.0)` | POST shortcut |
+| `post_json(url, data, headers=None, timeout_seconds=30.0)` | JSON POST shortcut (Content-Type automatic setting) |
+| `put(url, body=None, headers=None, timeout_seconds=30.0)` | PUT shortcut |
+| `delete(url, headers=None, timeout_seconds=30.0)` | DELETE shortcut |
+| `patch(url, body=None, headers=None, timeout_seconds=30.0)` | PATCH shortcut |
+| `head(url, headers=None, timeout_seconds=30.0)` | HEAD shortcut |
 
-반환 값은 `success`(bool), `status_code`(int), `headers`(dict), `body`(str), `error`(str), `error_type`(str), `latency_ms`(float), `redirect_hops`(int), `bytes_read`(int), `final_url`를 포함하는 dict입니다. (str) 등
+반환 값은 `success`(bool), `status_code`(int), `headers`(dict), `body`(str), `error`(str), `error_type`(str), `latency_ms`(float), `redirect_hops`(int), `bytes_read`(int), `final_url`(str) 등을 포함하는 dict입니다.
 
-`request`는 `http_request`의 별칭입니다. `rumi_syscall.request(...)`도 동일한 동작을 합니다.
+`request`은 `http_request`의 별칭입니다. `rumi_syscall.request(...)`도 동일한 동작을 합니다.
 
 ### rumi_capability (능력 호출)
 
 컨테이너 내에서 Capability를 호출하기 위한 모듈입니다. `import rumi_capability`에서 사용됩니다.
 
-| 기능 | 설명 |
+| Function | Description |
 |------|------|
-| §루미§0§ | 실행 능력 |
+| `call(permission_id, args=None, timeout_seconds=30.0, request_id=None)` | Execute Capability |
 
 반환 값은 `success`(bool), `output`(Any), `error`(str), `error_type`(str), `latency_ms`(float)을 포함하는 사전입니다.
 

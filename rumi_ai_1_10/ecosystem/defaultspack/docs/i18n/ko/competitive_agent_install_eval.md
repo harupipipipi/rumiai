@@ -30,7 +30,7 @@ Genspark, Manus, Cline, Hermes 및 OpenClaw에 대한 현재 공개 설치 흐�
   defaultspack luxe 쉘.
 - `npm run lint`은 Lint 스크립트가 사용되었기 때문에 Windows에서 처음에 실패했습니다.
   `new URL(...).pathname`, `C:\C:\...` 생산; 이것은 해결되었습니다
-  §루미§0§.
+  `fileURLToPath(import.meta.url)`.
 
 ## 경쟁사 로컬 설치 참고 사항
 

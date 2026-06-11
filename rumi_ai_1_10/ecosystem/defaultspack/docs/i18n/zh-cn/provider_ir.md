@@ -26,8 +26,8 @@ ir_to_stored_messages(ir)
 ## 鲁米聊天 IR v2
 
 IR 对象带有明确的`schema_version` 字段。核心模型包括
-§鲁米§0§，§鲁米§1§，§鲁米§2§，§鲁米§3§，
-§鲁米§0§，§鲁米§1§，§鲁米§2§，§鲁米§3§，
+`RumiChatIR`，`RumiIRMessage`，`RumiIRBlock`，`RumiToolCallIR`，
+`RumiToolResultIR`，`RumiUsageIR`，`RumiResponseIR`，`RumiStreamEventIR`，
 `ProviderWarning`、`DroppedFeature`和`BridgeAction`。
 
 支持的块类型包括文本、图像、音频、视频、文件、PDF、工具调用、

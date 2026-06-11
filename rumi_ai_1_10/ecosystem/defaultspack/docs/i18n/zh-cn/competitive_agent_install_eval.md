@@ -30,7 +30,7 @@ Genspark、Manus、Cline、Hermes 和 OpenClaw 的当前公共安装流程。
   defaultspack 豪华外壳。
 - `npm run lint` 最初在 Windows 上失败，因为使用了 lint 脚本
   `new URL(...).pathname`，生产`C:\C:\...`；这是固定的
-  §鲁米§0§。
+  `fileURLToPath(import.meta.url)`。
 
 ## 竞争对手本地安装说明
 
@@ -40,7 +40,7 @@ Genspark、Manus、Cline、Hermes 和 OpenClaw 的当前公共安装流程。
 - `npm install --prefix work/competitor-installs/hermes --ignore-scripts
   hermes-agent@0.15.2` completed, but `hermes-agent --help` 失败
   在此 Windows 环境中`ModuleNotFoundError: No module named 'run_agent'`。
-- §鲁米§0§
+- `npm install --prefix work/competitor-installs/openclaw openclaw@2026.5.28`
   超过五分钟，而安装后/运行状况进程仍在运行。
   第二次`--ignore-scripts`尝试也超过了三分钟。这使得
   OpenClaw 的安装程序在运行时很有吸引力，但它的软件包安装是一个

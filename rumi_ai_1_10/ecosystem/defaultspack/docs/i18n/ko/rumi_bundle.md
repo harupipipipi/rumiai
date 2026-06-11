@@ -2,7 +2,7 @@
 [EN](../../rumi_bundle.md) | [JP](../ja/rumi_bundle.md) | [KR](./rumi_bundle.md) | [CN](../zh-cn/rumi_bundle.md)
 <!-- docs-i18n-links:end -->
 
-#rumi_bundle
+# rumi_bundle
 
 `rumi_bundle`는 `defaultspack`와 함께 제공되는 standalone frontend bundle입니다.
 

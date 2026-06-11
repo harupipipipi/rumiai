@@ -34,9 +34,9 @@ rendered = context["call_handler"]("defaults.prompt.render", {
 禁用提示到工具转换作为创作路径。如果流量需要
 提示文字，拨打：
 
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
+- `defaults.prompt.load_effective`
+- `defaults.prompt.resolve_for_conversation`
+- `defaults.prompt.render`
 
 如果需要用户可见的工具，请定义一个普通的功能/能力外观
 调用适当的可信函数。不要将提示渲染公开为

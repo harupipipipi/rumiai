@@ -8,21 +8,13 @@
 
 위젯은 백엔드에서 '이 데이터를 이렇게 표시하길 원합니다.''를 선언할 수 있는 통합 데이터 형식입니다. 위젯은 순수 JSON 데이터이며 UI 라이브러리가 아닙니다.
 
-백엔드의 모든 코드(핸들러, 도구의 handler.py, 프롬프트, Flow 노드)는 위젯 JSON을 생성하고 `emit_widget`을 사용하여 전송합니다. 프런트엔드 자산은 이 JSON을 수신하여 테마에 따라 렌더링합니다.
+백엔드의 모든 코드(핸들러, 도구의 handler.py, 프롬프트, Flow 노드)는 위젯 JSON을 생성하여 `emit_widget`과 함께 전송합니다. 프런트엔드 자산은 이 JSON을 수신하여 테마에 따라 렌더링합니다.
 
 위젯에는 도메인 지식이 없습니다. "채팅 위젯"이나 "에이전트 위젯"은 없습니다. 텍스트, 코드 블록, 이미지, 테이블, 진행률 표시줄과 같은 범용 표시 기본 요소만 정의하세요. 위젯을 생성하는 측(툴, 핸들러 등)에 따라 무엇을 어떻게 표시할지가 결정되고, 테마에 따라 어떻게 표시되는지가 결정됩니다.
 
 ## 2. 디자인 철학
 
-**순수 데이터**: 위젯은 JSON 사전입니다. 렌더링 논리나 이벤트 처리기가 포함되어 있지 않습니다. 그리기는 프런트 엔드의 책임입니다.
-
-**도메인 독립적**: 위젯 유형은 "텍스트", "이미지" 및 "테이블"과 같은 범용 표시 기본 요소입니다. 특정 도메인(채팅, 상담원 등)에 대한 특화된 유형은 없습니다.
-
-**중첩 가능**: 위젯을 위젯 내부에 배치할 수 있습니다. CodeBlock과 텍스트를 카드에 넣고, 여러 개의 버튼을 한 줄로 배열하는 등의 작업을 수행합니다.
-
-**대체 가정**: 프런트 엔드가 특정 위젯 유형을 그릴 수 없는 경우 텍스트 표현으로 대체됩니다. 사용자 정의 위젯에는 명시적인 대체 위젯이 있습니다. CLI 환경에서는 모든 위젯이 텍스트 표현으로 대체됩니다.
-
-**테마와 분리**: 위젯은 "표시할 내용"만 선언합니다. 테마는 표시 방법(색상, 글꼴, 애니메이션, 둥근 모서리, 그림자 등)을 결정합니다. 위젯은 style_hint를 사용하여 테마에 힌트를 전달할 수 있지만 테마는 이를 무시할 수 있습니다.
+**순수 데이터**: 위젯은 JSON 사전입니다. 렌더링 논리나 이벤트 처리기가 포함되어 있지 않습니다. 그리기는 프런트 엔드의 책임입니다.**도메인 독립적**: 위젯 유형은 "텍스트", "이미지" 및 "테이블"과 같은 범용 표시 기본 요소입니다. 특정 도메인(채팅, 상담원 등)에 특화된 유형은 없습니다.**중첩 가능**: 위젯을 위젯 내에 배치할 수 있습니다. CodeBlock 및 텍스트를 카드에 넣고 여러 개의 버튼을 행으로 배열하는 등의 작업을 수행합니다.**대체 가정**: 프런트 엔드가 특정 위젯 유형을 그릴 수 없는 경우 텍스트 표현으로 대체됩니다. 사용자 정의 위젯에는 명시적인 대체 위젯이 있습니다. CLI 환경에서는 모든 위젯이 텍스트 표현으로 대체됩니다.**테마와 분리**: 위젯은 "표시할 내용"만 선언합니다. 테마는 표시 방법(색상, 글꼴, 애니메이션, 둥근 모서리, 그림자 등)을 결정합니다. 위젯은 style_hint를 사용하여 테마에 힌트를 전달할 수 있지만 테마는 이를 무시할 수 있습니다.
 
 ## 3. 위젯 JSON 사양
 
@@ -39,12 +31,12 @@
 }
 ```
 
-| 부동산 | 유형 | 필수 | 설명 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §루미§0§ | 문자열 | 필수 | 위젯 유형. 아래 나열된 유형 중 하나 |
-| §루미§0§ | 문자열 | 선택사항 | 위젯 식별자. 스트리밍 업데이트 중에 특정 위젯을 업데이트하는 데 사용됩니다. |
-| §루미§0§ | 사전 | 선택사항 | 주제에 대한 힌트. 주제는 해석될 수도 있고 해석되지 않을 수도 있습니다 |
-| §루미§0§ | 사전 | 어떤 | 모든 메타데이터. 프런트 엔드는 무시할 수 있습니다 |
+| `type` | string | Required | Widget type. One of the types listed below |
+| `id` | string | optional | Widget identifier. Used to update specific widgets during streaming updates |
+| `style_hint` | dict | optional | hints to the theme. The theme may or may not be interpreted |
+| `meta` | dict | any | any metadata. You can ignore the front end |
 
 ### 3.2 JSON 표현식 예시
 
@@ -86,9 +78,9 @@
 }
 ```
 
-| 부동산 | 유형 | 필수 | 설명 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §루미§0§ | 문자열 | 필수 | 표시할 텍스트 |
+| `text` | string | Required | Text to display |
 
 CLI 대체: 있는 그대로 출력됩니다.
 
@@ -106,12 +98,12 @@ CLI 대체: 있는 그대로 출력됩니다.
 }
 ```
 
-| 부동산 | 유형 | 필수 | 설명 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §루미§0§ | 문자열 | 어떤 | 프로그래밍 언어 |
-| §루미§0§ | 문자열 | 필수 | 코드 본문 |
-| §루미§0§ | 문자열 | 선택사항 | 파일명(표시용) |
-| §루미§0§ | 정수 | 선택사항 | 시작줄 번호. 기본값 1 |
+| `language` | string | any | programming language |
+| `content` | string | Required | Code body |
+| `filename` | string | Optional | File name (for display) |
+| `line_start` | integer | optional | starting line number. Default 1 |
 
 CLI 대체: 일반 텍스트 출력.
 
@@ -128,11 +120,11 @@ CLI 대체: 일반 텍스트 출력.
 }
 ```
 
-| 부동산 | 유형 | 필수 | 설명 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §루미§0§ | 문자열 | 필수 | 변경 전 내용 |
-| §루미§0§ | 문자열 | 필수 | 새로운 콘텐츠 |
-| §루미§0§ | 문자열 | 임의 | 파일 이름 |
+| `old_content` | string | Required | Contents before change |
+| `new_content` | string | Required | New content |
+| `filename` | string | arbitrary | file name |
 
 CLI 대체: 통합 diff 형식.
 
@@ -150,12 +142,12 @@ CLI 대체: 통합 diff 형식.
 }
 ```
 
-| 부동산 | 유형 | 필수 | 설명 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §루미§0§ | 문자열 | 필수 | base64 데이터 또는 URL |
-| §루미§0§ | 문자열 | 어떤 | 대체 텍스트 |
-| §루미§0§ | 정수 | 어떤 | 너비(픽셀) |
-| §루미§0§ | 정수 | 임의 | 높이(픽셀) |
+| `src` | string | Required | base64 data or URL |
+| `alt` | string | any | alternative text |
+| `width` | integer | any | width (pixels) |
+| `height` | integer | arbitrary | height (pixels) |
 
 CLI 대체: `[Image: {alt} {width}x{height}]`
 
@@ -172,11 +164,11 @@ CLI 대체: `[Image: {alt} {width}x{height}]`
 }
 ```
 
-| 부동산 | 유형 | 필수 | 설명 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §루미§0§ | 문자열 | 필수 | base64 데이터 |
-| §루미§0§ | 문자열 | 모두 | 스크린샷 소스 URL |
-| §루미§0§ | 문자열 | 선택사항 | 페이지 제목 |
+| `src` | string | Required | base64 data |
+| `url` | string | Any | Screenshot source URL |
+| `title` | string | optional | page title |
 
 CLI 대체: `[Screenshot: {title} - {url}]`
 
@@ -194,12 +186,12 @@ CLI 대체: `[Screenshot: {title} - {url}]`
 }
 ```
 
-| 부동산 | 유형 | 필수 | 설명 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §루미§0§ | 문자열 | 필수 | 진행 라벨 |
-| §루미§0§ | 번호 | 필수 | 현재 가치 |
-| §루미§0§ | 번호 | 필수 | 총 가치 |
-| §루미§0§ | 문자열 | 선택사항 | §루미§1§, §루미§2§, §루미§3§. 기본 `"running"` |
+| `label` | string | Required | Progress label |
+| `current` | number | Required | Current value |
+| `total` | number | Required | Total value |
+| `state` | string | Optional | `"running"`, `"success"`, `"error"`. Default `"running"` |
 
 CLI 대체: `[████░░░░░░] 30% Reading file...`
 
@@ -216,11 +208,11 @@ CLI 대체: `[████░░░░░░] 30% Reading file...`
 }
 ```
 
-| 부동산 | 유형 | 필수 | 설명 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §루미§0§ | 문자열 | 어떤 | 실행된 명령 |
-| §루미§0§ | 문자열 | 필수 | 출력 내용 |
-| §루미§0§ | 정수 | 선택사항 | 종료 코드 |
+| `command` | string | any | executed command |
+| `output` | string | Required | Output content |
+| `exit_code` | integer | optional | exit code |
 
 CLI 대체: `$ {command}\n{output}`
 
@@ -239,10 +231,10 @@ CLI 대체: `$ {command}\n{output}`
 }
 ```
 
-| 부동산 | 유형 | 필수 | 설명 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §루미§0§ | 목록[문자열] | 필수 | 열 헤더 |
-| §루미§0§ | 목록[목록] | 필수 | 행 데이터 |
+| `headers` | list[string] | Required | Column header |
+| `rows` | list[list] | Required | Row data |
 
 CLI 대체: ASCII 테이블.
 
@@ -259,11 +251,11 @@ CLI 대체: ASCII 테이블.
 }
 ```
 
-| 부동산 | 유형 | 필수 | 설명 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §루미§0§ | 문자열 | 필수 | §루미§1§, §루미§2§, §루미§3§, §루미§4§ |
-| §루미§0§ | 목록[문자열] | 필수 | 라벨 |
-| §루미§0§ | 목록[번호] | 필수 | 데이터 |
+| `chart_type` | string | Required | `"bar"`, `"line"`, `"pie"`, `"scatter"` |
+| `labels` | list[string] | Required | Label |
+| `data` | list[number] | Required | Data |
 
 CLI 대체: 숫자 요약 텍스트.
 
@@ -284,9 +276,9 @@ CLI 대체: 숫자 요약 텍스트.
 }
 ```
 
-| 부동산 | 유형 | 필수 | 설명 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §루미§0§ | 목록[dict] | 필수 | 트리 노드. 각 노드에는 `name`, `type`(`"file"` 또는 `"dir"`), `children`(선택 사항) |
+| `tree` | list[dict] | required | tree node. Each node has `name`, `type`(`"file"` or `"dir"`), `children` (optional) |
 
 CLI 대체: 들여쓰기된 텍스트입니다.
 
@@ -301,9 +293,9 @@ Markdown 텍스트를 렌더링하고 표시합니다.
 }
 ```
 
-| 부동산 | 유형 | 필수 | 설명 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §루미§0§ | 문자열 | 필수 | 마크다운 텍스트 |
+| `content` | string | Required | Markdown text |
 
 CLI 대체: 일반 텍스트.
 
@@ -319,10 +311,10 @@ CLI 대체: 일반 텍스트.
 }
 ```
 
-| 부동산 | 유형 | 필수 | 설명 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §루미§0§ | 문자열 | 필수 | base64 데이터 또는 URL |
-| §루미§0§ | 정수 | 임의 | 재생 시간(ms) |
+| `src` | string | Required | base64 data or URL |
+| `duration` | integer | arbitrary | playback time (ms) |
 
 CLI 대체: `[Audio: {duration}ms]`
 
@@ -338,10 +330,10 @@ CLI 대체: `[Audio: {duration}ms]`
 }
 ```
 
-| 부동산 | 유형 | 필수 | 설명 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §루미§0§ | 문자열 | 필수 | base64 데이터 또는 URL |
-| §루미§0§ | 정수 | 임의 | 재생 시간(ms) |
+| `src` | string | Required | base64 data or URL |
+| `duration` | integer | arbitrary | playback time (ms) |
 
 CLI 대체: `[Video: {duration}ms]`
 
@@ -358,11 +350,11 @@ CLI 대체: `[Video: {duration}ms]`
 }
 ```
 
-| 부동산 | 유형 | 필수 | 설명 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §루미§0§ | 번호 | 필수 | 위도 |
-| §루미§0§ | 번호 | 필수 | 경도 |
-| §루미§0§ | 정수 | 선택사항 | 확대/축소 수준. 기본값 13 |
+| `lat` | number | required | latitude |
+| `lng` | number | required | longitude |
+| `zoom` | integer | optional | zoom level. Default 13 |
 
 CLI 대체: `[Map: {lat}, {lng}]`
 
@@ -383,11 +375,11 @@ CLI 대체: `[Map: {lat}, {lng}]`
 }
 ```
 
-| 부동산 | 유형 | 필수 | 설명 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §루미§0§ | 문자열 | 선택사항 | 자리표시자 |
-| §루미§0§ | 문자열 | 임의 | 초기값 |
-| §루미§0§ | 부울 | 어떤 | 여러 줄. 기본 거짓 |
+| `placeholder` | string | optional | placeholder |
+| `value` | string | arbitrary | initial value |
+| `multiline` | boolean | any | multiple lines. Default false |
 
 #### 버튼
 
@@ -402,11 +394,11 @@ CLI 대체: `[Map: {lat}, {lng}]`
 }
 ```
 
-| 부동산 | 유형 | 필수 | 설명 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §루미§0§ | 문자열 | 필수 | 버튼 라벨 |
-| §루미§0§ | 문자열 | 필수 | 클릭 시 발행되는 액션 이름 |
-| §루미§0§ | 문자열 | 선택사항 | §루미§1§, §루미§2§, §루미§3§. 기본 `"primary"` |
+| `label` | string | Required | Button label |
+| `action` | string | Required | Action name issued on click |
+| `variant` | string | Optional | `"primary"`, `"secondary"`, `"danger"`. Default `"primary"` |
 
 #### 선택
 
@@ -424,11 +416,11 @@ CLI 대체: `[Map: {lat}, {lng}]`
 }
 ```
 
-| 부동산 | 유형 | 필수 | 설명 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §루미§0§ | 목록[dict] | 필수 | 선택. 각 요소에는 `label`, `value` |
-| §루미§0§ | 어떤 | 어떤 | 선택한 값 |
-| §루미§0§ | 부울 | 모두 | 다중 선택. 기본 거짓 |
+| `options` | list[dict] | Required | Choices. Each element has `label`, `value` |
+| `value` | any | any | selected value |
+| `multiple` | boolean | Any | Multiple selection. Default false |
 
 #### 토글
 
@@ -442,10 +434,10 @@ CLI 대체: `[Map: {lat}, {lng}]`
 }
 ```
 
-| 부동산 | 유형 | 필수 | 설명 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §루미§0§ | 문자열 | 필수 | 라벨 |
-| §루미§0§ | 부울 | 모두 | 현재 상태. 기본 거짓 |
+| `label` | string | Required | Label |
+| `value` | boolean | Any | Current state. Default false |
 
 #### 슬라이더
 
@@ -461,12 +453,12 @@ CLI 대체: `[Map: {lat}, {lng}]`
 }
 ```
 
-| 부동산 | 유형 | 필수 | 설명 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §루미§0§ | 번호 | 필수 | 최소값 |
-| §루미§0§ | 번호 | 필수 | 최대 |
-| §루미§0§ | 번호 | 임의 | 현재 가치 |
-| §루미§0§ | 번호 | 어떤 | 단계. 기본값 1 |
+| `min` | number | Required | Minimum value |
+| `max` | number | Required | Maximum |
+| `value` | number | arbitrary | current value |
+| `step` | number | any | step. Default 1 |
 
 #### 체크박스
 
@@ -480,10 +472,10 @@ CLI 대체: `[Map: {lat}, {lng}]`
 }
 ```
 
-| 부동산 | 유형 | 필수 | 설명 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §루미§0§ | 문자열 | 필수 | 라벨 |
-| §루미§0§ | 부울 | 선택사항 | 확인된 상태입니다. 기본 거짓 |
+| `label` | string | Required | Label |
+| `checked` | boolean | Optional | Checked state. Default false |
 
 ### 4.3 레이아웃 종류(6종)
 
@@ -503,9 +495,9 @@ CLI 대체: `[Map: {lat}, {lng}]`
 }
 ```
 
-| 부동산 | 유형 | 필수 | 설명 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §루미§0§ | 목록[위젯] | 필수 | 하위 위젯 배열 |
+| `children` | list[Widget] | Required | Array of child widgets |
 
 #### 행
 
@@ -522,10 +514,10 @@ CLI 대체: `[Map: {lat}, {lng}]`
 }
 ```
 
-| 부동산 | 유형 | 필수 | 설명 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §루미§0§ | 목록[위젯] | 필수 | 어린이 위젯 |
-| §루미§0§ | 정수 | 어떤 | 하위 요소 사이의 간격(픽셀) |
+| `children` | list[Widget] | Required | Child Widget |
+| `gap` | integer | any | gap between child elements (pixels) |
 
 #### 열
 
@@ -539,10 +531,10 @@ CLI 대체: `[Map: {lat}, {lng}]`
 }
 ```
 
-| 부동산 | 유형 | 필수 | 설명 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §루미§0§ | 목록[위젯] | 필수 | 어린이 위젯 |
-| §루미§0§ | 정수 | 어떤 | 하위 요소 사이의 간격(픽셀) |
+| `children` | list[Widget] | Required | Child Widget |
+| `gap` | integer | any | gap between child elements (pixels) |
 
 #### 탭
 
@@ -558,9 +550,9 @@ CLI 대체: `[Map: {lat}, {lng}]`
 }
 ```
 
-| 부동산 | 유형 | 필수 | 설명 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §루미§0§ | 목록[dict] | 필수 | 각 탭. `label`(문자열) 및 `content`(위젯) 사용 |
+| `tabs` | list[dict] | Required | Each tab. with `label`(string) and `content`(Widget) |
 
 #### 접이식
 
@@ -577,11 +569,11 @@ CLI 대체: `[Map: {lat}, {lng}]`
 }
 ```
 
-| 부동산 | 유형 | 필수 | 설명 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §루미§0§ | 문자열 | 필수 | 접이식 라벨 |
-| §루미§0§ | 부울 | 선택사항 | 초기 상태. 기본 거짓 |
-| §루미§0§ | 목록[위젯] | 필수 | 축소된 하위 위젯 |
+| `label` | string | Required | Folding label |
+| `default_open` | boolean | Optional | Initial state. Default false |
+| `children` | list[Widget] | Required | Child Widget in Collapse |
 
 #### 카드
 
@@ -596,11 +588,11 @@ CLI 대체: `[Map: {lat}, {lng}]`
 }
 ```
 
-| 부동산 | 유형 | 필수 | 설명 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §루미§0§ | 위젯 | 선택사항 | 헤더 |
-| §루미§0§ | 위젯 | 모두 | 몸 |
-| §루미§0§ | 위젯 | 선택사항 | 바닥글 |
+| `header` | Widget | Optional | Header |
+| `body` | Widget | Any | Body |
+| `footer` | Widget | Optional | Footer |
 
 ### 4.4 스트리밍 방식(2종)
 
@@ -619,9 +611,9 @@ CLI 대체: `[Map: {lat}, {lng}]`
 }
 ```
 
-| 부동산 | 유형 | 필수 | 설명 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §루미§0§ | 사전[문자열, 사전] | 필수 | 상태 이름을 키로 사용하여 정의합니다. 각 주에는 `animation`(문자열, 선택 사항) 및 `label`(문자열) |
+| `states` | dict[string, dict] | Required | Definition with state name as key. Each state has `animation`(string, optional) and `label`(string) |
 
 #### 표시
 
@@ -636,11 +628,11 @@ CLI 대체: `[Map: {lat}, {lng}]`
 }
 ```
 
-| 부동산 | 유형 | 필수 | 설명 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §루미§0§ | 문자열 | 필수 | 라벨 |
-| §루미§0§ | 문자열 | 필수 | §루미§1§, §루미§2§, §루미§3§, §루미§4§ |
-| §루미§0§ | 문자열 | 선택사항 | 테마에 정의된 애니메이션 이름 |
+| `label` | string | Required | Label |
+| `state` | string | Required | `"running"`, `"success"`, `"error"`, `"waiting"` |
+| `animation` | string | Optional | Animation name defined in the theme |
 
 ### 4.5 커스텀(1종)
 
@@ -664,11 +656,11 @@ CLI 대체: `[Map: {lat}, {lng}]`
 }
 ```
 
-| 부동산 | 유형 | 필수 | 설명 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §루미§0§ | 문자열 | 필수 | 사용자 정의 유형 식별자 |
-| §루미§0§ | 위젯 | 필수 | 렌더러가 없는 경우 대체 위젯 |
-| §루미§0§ | 사전 | 선택사항 | 사용자 정의 렌더러에 전달할 데이터 |
+| `custom_type` | string | Required | Custom type identifier |
+| `fallback` | Widget | Required | Fallback Widget if no renderer exists |
+| `data` | dict | Optional | Data to pass to custom renderer |
 
 사용자 정의 위젯 렌더러는 `user_data/widget_renderers/`에 배치할 수 있습니다.
 
@@ -693,7 +685,7 @@ entry: "renderer.js"
 
 ## 5. rumi_widgets — Python 도우미 라이브러리
 
-`lib/rumi_widgets/`에 기본적으로 배치되는 Python 도우미입니다. 도구의 handler.py 또는 handler.py에서 import하여 사용할 수 있습니다. 사용법은 선택사항이며 JSON dict를 직접 반환하는 것과 동일합니다.
+기본값은 `lib/rumi_widgets/`에 있는 Python 도우미입니다. 도구의 handler.py 또는 handler.py에서 import하여 사용할 수 있습니다. 사용법은 선택사항이며 JSON dict를 직접 반환하는 것과 동일합니다.
 
 ### 5.1 위치
 
@@ -772,7 +764,7 @@ class Widget:
 
 ## 6. Emit_widget으로 보내기
 
-위젯은 도구 컨텍스트 API의 범용 프리미티브 `emit_widget`를 사용하여 전송됩니다.
+위젯은 도구 컨텍스트 API의 범용 기본 `emit_widget`을 사용하여 전송됩니다.
 
 ```python
 # tool の handler.py
@@ -822,17 +814,17 @@ Emit_widget이 보낸 Widget은 message.stream.data 메시지의 데이터에 Wi
 
 ### 7.1 위젯 렌더러
 
-프런트엔드의 shell.html에는 위젯 렌더러가 내장되어 있습니다. 위젯 렌더러는 위젯 JSON의 `type` 필드를 보고 해당 그리기 함수를 호출합니다.
+프런트엔드의 shell.html에는 위젯 렌더러가 내장되어 있습니다. 위젯 렌더러는 위젯 JSON의 `type` 필드를 살펴보고 해당 그리기 함수를 호출합니다.
 
-그리기 기능은 자산의 iframe 내가 아닌 셸 수준에서 제공됩니다. Asset의 JS는 `window.renderWidget(widgetJson, targetElement)`를 호출하여 위젯을 그립니다.
+그리기 기능은 자산의 iframe 내가 아닌 셸 수준에서 제공됩니다. Asset의 JS는 `window.renderWidget(widgetJson, targetElement)`을 호출하여 위젯을 그립니다.
 
 ### 7.2 알 수 없는 유형
 
-위젯 렌더러가 `type`을 인식할 수 없는 경우 다음 순서로 대체됩니다.
+위젯 렌더러가 `type`을 인식할 수 없으면 다음 순서로 대체됩니다.
 
-1. `user_data/widget_renderers/`에 맞춤 렌더러가 있는 경우 이를 사용하세요.
+1. `user_data/widget_renderers/`에 사용자 정의 렌더러가 있는 경우 이를 사용하십시오.
 2. 유형이 `"custom"`이고 `fallback`이 존재하는 경우 대체 위젯을 그립니다.
-3. 이들 중 어느 것도 해당되지 않으면 텍스트를 `[Unknown widget: {type}]`로 표시합니다.
+3. 위 사항 중 어느 것도 적용되지 않는 경우 텍스트를 `[Unknown widget: {type}]`로 표시합니다.
 
 ### 7.3 테마와의 협력
 
@@ -863,7 +855,7 @@ widgets:
         padding: "{spacing.sm}"
 ```
 
-위젯의 `style_hint`는 테마 변형 등을 선택하는 힌트로 사용됩니다. 예를 들어 `style_hint: {"variant": "compact"}`인 경우 해당 테마의 `card.variants.compact`가 적용됩니다. 테마는 이 힌트를 무시할 수 있습니다.
+위젯의 `style_hint`은 테마 변형 등을 선택하는 힌트로 사용됩니다. 예를 들어 `style_hint: {"variant": "compact"}`인 경우 해당 테마의 `card.variants.compact`가 적용됩니다. 테마는 이 힌트를 무시할 수 있습니다.
 
 테마에 대한 자세한 내용은 theme.md를 참조하세요.
 
@@ -871,37 +863,37 @@ widgets:
 
 CLI 환경에서는 모든 위젯이 텍스트 표현으로 대체됩니다. 위젯 유형별 대체 표현식은 다음과 같습니다.
 
-| 유형 | CLI 표현식 |
+| type | CLI expression |
 |---|---|
-| §루미§0§ | 있는 그대로 출력 |
-| §루미§0§ | 일반 텍스트 |
-| §루미§0§ | 통합 차이 |
-| §루미§0§ | §루미§1§ |
-| §루미§0§ | §루미§1§ |
-| §루미§0§ | §루미§1§ |
-| §루미§0§ | §루미§1§ |
-| §루미§0§ | ASCII 테이블 |
-| §루미§0§ | 수치 요약 |
-| §루미§0§ | 들여쓰기된 텍스트 |
-| §루미§0§ | 일반 텍스트 |
-| §루미§0§ | §루미§1§ |
-| §루미§0§ | §루미§1§ |
-| §루미§0§ | §루미§1§ |
-| §루미§0§ | §루미§1§ |
-| §루미§0§ | §루미§1§ |
-| §루미§0§ | §루미§1§ |
-| §루미§0§ | §루미§1§ |
-| §루미§0§ | §루미§1§ |
-| §루미§0§ | §루미§1§ |
-| §루미§0§ | 자식을 순서대로 출력 |
-| §루미§0§ | `  ` |
-| §루미§0§ | 줄 바꿈을 사용하여 하위 항목을 세로로 출력 |
-| §루미§0§ | `--- {label} ---\n{content}` 각 탭의 출력 |
-| §루미§0§ | §루미§1§ |
-| §루미§0§ | §루미§1§ |
-| §루미§0§ | §루미§1§ |
-| §루미§0§ | §루미§1§ |
-| §루미§0§ | 대체 위젯의 CLI 표현 |
+| `text` | Output as is |
+| `code_block` | Plain text |
+| `diff` | unified diff |
+| `image` | `[Image: {alt} {width}x{height}]` |
+| `screenshot` | `[Screenshot: {title} - {url}]` |
+| `progress` | `[████░░░░░░] 30% {label}` |
+| `terminal` | `$ {command}\n{output}` |
+| `table` | ASCII table |
+| `chart` | Numerical summary |
+| `file_tree` | Indented text |
+| `markdown` | Plain text |
+| `audio` | `[Audio: {duration}ms]` |
+| `video` | `[Video: {duration}ms]` |
+| `map` | `[Map: {lat}, {lng}]` |
+| `input` | `[Input: {placeholder}]` |
+| `button` | `[{label}]` |
+| `select` | `[Select: {options}]` |
+| `toggle` | `[{label}: {value}]` |
+| `slider` | `[{min}-{max}: {value}]` |
+| `checkbox` | `[{checked ? "x" : " "}] {label}` |
+| `container` | Output children in order |
+| `row` | Output children horizontally, separated by `  ` |
+| `column` | Output children vertically with line breaks |
+| `tabs` | `--- {label} ---\n{content}` output on each tab |
+| `collapsible` | `▸ {label}\n{children}` |
+| `card` | `[{header}]\n{body}\n{footer}` |
+| `stream` | `[{current_state.label}]` |
+| `indicator` | `[{state}] {label}` |
+| `custom` | CLI representation of fallback widget |
 ```
 
 これで完全な widget.md の内容。
@@ -950,7 +942,7 @@ Widget型一覧:
 
 表示系（14種）:
 - Text
-- CodeBlock  
+- CodeBlock
 - Diff
 - Image
 - Screenshot
@@ -1034,34 +1026,26 @@ widget.md に必要な要素:
 
 위젯은 백엔드에서 '이 데이터를 이렇게 표시하길 원합니다.''를 선언할 수 있는 통합 데이터 형식입니다. 위젯은 순수 JSON 데이터이며 UI 라이브러리가 아닙니다.
 
-백엔드의 모든 코드(도구, 핸들러, Flow 노드의 handler.py)는 위젯 JSON을 생성하고 이를 컨텍스트의 `emit_widget`으로 보냅니다. 프런트 엔드는 이 JSON을 수신하고 테마에 따라 렌더링합니다.
+백엔드의 모든 코드(도구, 핸들러, Flow 노드의 handler.py)는 위젯 JSON을 생성하고 이를 컨텍스트의 `emit_widget`로 보냅니다. 프런트 엔드는 이 JSON을 수신하고 테마에 따라 렌더링합니다.
 
 위젯에는 도메인 지식이 없습니다. 텍스트, 코드 블록, 이미지, 테이블, 진행률 표시줄과 같은 범용 표시 기본 요소만 정의하세요. 무엇을 표시할지, 어떻게 표시할지는 위젯을 생성하는 측에 따라 결정되며, 표시 방법은 테마에 따라 결정됩니다.
 
 
 ## 2. 디자인 철학
 
-**순수 데이터**: 위젯은 JSON 사전입니다. 렌더링 논리, 이벤트 처리기 또는 스타일 정의가 포함되어 있지 않습니다. 그리기는 프런트 엔드의 책임입니다.
-
-**도메인 독립적**: 위젯 유형은 "텍스트", "이미지", "테이블"과 같은 범용 기본 요소입니다. "채팅 메시지 위젯" 또는 "에이전트 상태 위젯"과 같은 도메인별 유형은 없습니다.
-
-**중첩 가능**: 위젯을 위젯 내부에 배치할 수 있습니다. 카드 본문에 CodeBlock 삽입, 여러 개의 버튼을 한 줄로 배열, 탭의 각 탭에 다른 위젯 배치 등
-
-**대체 가정**: 프런트 엔드가 특정 위젯 유형을 그릴 수 없는 경우 텍스트 표현으로 대체됩니다. 사용자 정의 위젯에는 명시적인 대체 위젯이 있습니다. CLI 환경에서는 모든 위젯이 텍스트 표현으로 대체됩니다.
-
-**테마와 분리**: 위젯은 "표시할 내용"만 선언합니다. 주제에 따라 표현 방법이 결정됩니다. 위젯은 `style_hint`을 사용하여 테마에 힌트를 전달할 수 있지만 테마는 이를 무시할 수 있습니다.
+**순수 데이터**: 위젯은 JSON 사전입니다. 렌더링 논리, 이벤트 처리기 또는 스타일 정의가 포함되어 있지 않습니다. 그리기는 프런트 엔드의 책임입니다.**도메인 독립적**: 위젯 유형은 "텍스트", "이미지" 및 "테이블"과 같은 범용 기본 요소입니다. "채팅 메시지 위젯" 또는 "에이전트 상태 위젯"과 같은 도메인별 유형은 없습니다.**중첩 가능**: 위젯을 위젯 내에 배치할 수 있습니다. 카드 본문에 CodeBlock 삽입, 행에 여러 개의 버튼 배열, 탭의 각 탭에 다른 위젯 배치 등.**대체 가정**: 프런트 엔드가 특정 위젯 유형을 그릴 수 없는 경우 텍스트 표현으로 대체됩니다. 사용자 정의 위젯에는 명시적인 대체 위젯이 있습니다. CLI 환경에서는 모든 위젯이 텍스트 표현으로 대체됩니다.**테마와 분리**: 위젯은 "표시할 내용"만 선언합니다. 주제에 따라 표현 방법이 결정됩니다. 위젯은 `style_hint`을 사용하여 테마에 힌트를 전달할 수 있지만 테마는 이를 무시할 수 있습니다.
 
 
 ## 3. 기본 속성
 
 모든 위젯이 갖고 있는 공통 속성입니다.
 
-| 부동산 | 유형 | 필수 | 설명 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §루미§0§ | 문자열 | 필수 | 위젯 유형. 섹션 4 |
-| §루미§0§ | 문자열 | 선택사항 | 식별자. 스트리밍 업데이트 중 특정 위젯을 교체하는 데 사용 |
-| §루미§0§ | 사전 | 선택사항 | 주제에 대한 힌트. 주제는 해석될 수도 있고 해석되지 않을 수도 있습니다 |
-| §루미§0§ | 사전 | 어떤 | 모든 메타데이터. 프런트 엔드는 무시할 수 있습니다 |
+| `type` | string | Required | Widget type. Any of the types listed in Section 4 |
+| `id` | string | optional | identifier. Used to replace specific widgets during streaming updates |
+| `style_hint` | dict | optional | hints to the theme. The theme may or may not be interpreted |
+| `meta` | dict | any | any metadata. You can ignore the front end |
 
 ```json
 {
@@ -1090,9 +1074,9 @@ widget.md に必要な要素:
 { "type": "text", "text": "Hello, world" }
 ```
 
-| 부동산 | 유형 | 필수 | 설명 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §루미§0§ | 문자열 | 필수 | 표시 텍스트 |
+| `text` | string | Required | Display text |
 
 CLI: 있는 그대로 출력합니다.
 
@@ -1110,12 +1094,12 @@ CLI: 있는 그대로 출력합니다.
 }
 ```
 
-| 부동산 | 유형 | 필수 | 설명 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §루미§0§ | 문자열 | 어떤 | 언어 이름 |
-| §루미§0§ | 문자열 | 필수 | 코드 본문 |
-| §루미§0§ | 문자열 | 임의 | 파일 이름 |
-| §루미§0§ | 정수 | 선택사항 | 시작줄 번호. 기본값 1 |
+| `language` | string | any | language name |
+| `content` | string | Required | Code body |
+| `filename` | string | arbitrary | file name |
+| `line_start` | integer | optional | starting line number. Default 1 |
 
 CLI: 일반 텍스트.
 
@@ -1132,11 +1116,11 @@ CLI: 일반 텍스트.
 }
 ```
 
-| 부동산 | 유형 | 필수 | 설명 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §루미§0§ | 문자열 | 필수 | 변경 전 |
-| §루미§0§ | 문자열 | 필수 | 변경 후 |
-| §루미§0§ | 문자열 | 임의 | 파일 이름 |
+| `old_content` | string | Required | Before change |
+| `new_content` | string | Required | After change |
+| `filename` | string | arbitrary | file name |
 
 CLI: 통합 차이점.
 
@@ -1154,14 +1138,14 @@ CLI: 통합 차이점.
 }
 ```
 
-| 부동산 | 유형 | 필수 | 설명 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §루미§0§ | 문자열 | 필수 | base64 데이터 또는 URL |
-| §루미§0§ | 문자열 | 어떤 | 대체 텍스트 |
-| §루미§0§ | 정수 | 임의 | 폭 |
-| §루미§0§ | 정수 | 임의 | 신장 |
+| `src` | string | Required | base64 data or URL |
+| `alt` | string | any | alternative text |
+| `width` | integer | arbitrary | width |
+| `height` | integer | arbitrary | height |
 
-CLI: §루미§0§
+CLI: `[Image: {alt} {width}x{height}]`
 
 ---
 
@@ -1176,13 +1160,13 @@ CLI: §루미§0§
 }
 ```
 
-| 부동산 | 유형 | 필수 | 설명 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §루미§0§ | 문자열 | 필수 | base64 데이터 |
-| §루미§0§ | 문자열 | 어떤 | 원본 URL |
-| §루미§0§ | 문자열 | 임의 | 제목 |
+| `src` | string | Required | base64 data |
+| `url` | string | any | original URL |
+| `title` | string | arbitrary | title |
 
-CLI: §루미§0§
+CLI: `[Screenshot: {title} - {url}]`
 
 ---
 
@@ -1198,14 +1182,14 @@ CLI: §루미§0§
 }
 ```
 
-| 부동산 | 유형 | 필수 | 설명 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §루미§0§ | 문자열 | 필수 | 라벨 |
-| §루미§0§ | 번호 | 필수 | 현재 가치 |
-| §루미§0§ | 번호 | 필수 | 총 가치 |
-| §루미§0§ | 문자열 | 선택사항 | §루미§1§ / §루미§2§ / §루미§3§. 기본 `"running"` |
+| `label` | string | Required | Label |
+| `current` | number | Required | Current value |
+| `total` | number | Required | Total value |
+| `state` | string | optional | `"running"` / `"success"` / `"error"`. Default `"running"` |
 
-CLI: §루미§0§
+CLI: `[████░░░░░░] 30% Reading...`
 
 ---
 
@@ -1220,13 +1204,13 @@ CLI: §루미§0§
 }
 ```
 
-| 부동산 | 유형 | 필수 | 설명 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §루미§0§ | 문자열 | 임의 | 실행 명령 |
-| §루미§0§ | 문자열 | 필수 | 출력 |
-| §루미§0§ | 정수 | 선택사항 | 종료 코드 |
+| `command` | string | arbitrary | execution command |
+| `output` | string | Required | Output |
+| `exit_code` | integer | optional | exit code |
 
-CLI: §루미§0§
+CLI: `$ {command}\n{output}`
 
 ---
 
@@ -1240,10 +1224,10 @@ CLI: §루미§0§
 }
 ```
 
-| 부동산 | 유형 | 필수 | 설명 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §루미§0§ | 목록[문자열] | 필수 | 열 헤더 |
-| §루미§0§ | 목록[목록] | 필수 | 행 데이터 |
+| `headers` | list[string] | Required | Column header |
+| `rows` | list[list] | Required | Row data |
 
 CLI: ASCII 테이블.
 
@@ -1260,11 +1244,11 @@ CLI: ASCII 테이블.
 }
 ```
 
-| 부동산 | 유형 | 필수 | 설명 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §루미§0§ | 문자열 | 필수 | §루미§1§ / §루미§2§ / §루미§3§ / §루미§4§ |
-| §루미§0§ | 목록[문자열] | 필수 | 라벨 |
-| §루미§0§ | 목록[번호] | 필수 | 데이터 |
+| `chart_type` | string | Required | `"bar"` / `"line"` / `"pie"` / `"scatter"` |
+| `labels` | list[string] | Required | Label |
+| `data` | list[number] | Required | Data |
 
 CLI: 수치 요약.
 
@@ -1284,9 +1268,9 @@ CLI: 수치 요약.
 }
 ```
 
-| 부동산 | 유형 | 필수 | 설명 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §루미§0§ | 목록[dict] | 필수 | 노드 배열. 각 노드는 `name`(문자열), `type`(`"file"` 또는 `"dir"`), `children`(목록, 선택 사항) |
+| `tree` | list[dict] | Required | Node array. Each node is `name`(string), `type`(`"file"` or `"dir"`), `children`(list, optional) |
 
 CLI: 들여쓰기된 텍스트.
 
@@ -1298,9 +1282,9 @@ CLI: 들여쓰기된 텍스트.
 { "type": "markdown", "content": "# Title\n\n**bold**" }
 ```
 
-| 부동산 | 유형 | 필수 | 설명 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §루미§0§ | 문자열 | 필수 | 마크다운 텍스트 |
+| `content` | string | Required | Markdown text |
 
 CLI: 일반 텍스트.
 
@@ -1312,12 +1296,12 @@ CLI: 일반 텍스트.
 { "type": "audio", "src": "base64 or URL", "duration": 5000 }
 ```
 
-| 부동산 | 유형 | 필수 | 설명 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §루미§0§ | 문자열 | 필수 | base64 또는 URL |
-| §루미§0§ | 정수 | 어떤 | 밀리초 |
+| `src` | string | Required | base64 or URL |
+| `duration` | integer | any | milliseconds |
 
-CLI: §루미§0§
+CLI: `[Audio: {duration}ms]`
 
 ---
 
@@ -1327,12 +1311,12 @@ CLI: §루미§0§
 { "type": "video", "src": "base64 or URL", "duration": 30000 }
 ```
 
-| 부동산 | 유형 | 필수 | 설명 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §루미§0§ | 문자열 | 필수 | base64 또는 URL |
-| §루미§0§ | 정수 | 어떤 | 밀리초 |
+| `src` | string | Required | base64 or URL |
+| `duration` | integer | any | milliseconds |
 
-CLI: §루미§0§
+CLI: `[Video: {duration}ms]`
 
 ---
 
@@ -1342,13 +1326,13 @@ CLI: §루미§0§
 { "type": "map", "lat": 35.6812, "lng": 139.7671, "zoom": 15 }
 ```
 
-| 부동산 | 유형 | 필수 | 설명 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §루미§0§ | 번호 | 필수 | 위도 |
-| §루미§0§ | 번호 | 필수 | 경도 |
-| §루미§0§ | 정수 | 선택사항 | 확대/축소 수준. 기본값 13 |
+| `lat` | number | required | latitude |
+| `lng` | number | required | longitude |
+| `zoom` | integer | optional | zoom level. Default 13 |
 
-CLI: §루미§0§
+CLI: `[Map: {lat}, {lng}]`
 
 
 ### 4.2 제어 시스템(6종)
@@ -1363,11 +1347,11 @@ CLI: §루미§0§
 { "type": "input", "placeholder": "Type here...", "value": "", "multiline": false }
 ```
 
-| 부동산 | 유형 | 필수 | 설명 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §루미§0§ | 문자열 | 선택사항 | 자리표시자 |
-| §루미§0§ | 문자열 | 임의 | 초기값 |
-| §루미§0§ | 부울 | 어떤 | 여러 줄. 기본 거짓 |
+| `placeholder` | string | optional | placeholder |
+| `value` | string | arbitrary | initial value |
+| `multiline` | boolean | any | multiple lines. Default false |
 
 ---
 
@@ -1377,11 +1361,11 @@ CLI: §루미§0§
 { "type": "button", "label": "Execute", "action": "run_task", "variant": "primary" }
 ```
 
-| 부동산 | 유형 | 필수 | 설명 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §루미§0§ | 문자열 | 필수 | 라벨 |
-| §루미§0§ | 문자열 | 필수 | 클릭 액션 이름 |
-| §루미§0§ | 문자열 | 선택사항 | §루미§1§ / §루미§2§ / §루미§3§. 기본 `"primary"` |
+| `label` | string | Required | Label |
+| `action` | string | Required | Click action name |
+| `variant` | string | optional | `"primary"` / `"secondary"` / `"danger"`. Default `"primary"` |
 
 ---
 
@@ -1396,11 +1380,11 @@ CLI: §루미§0§
 }
 ```
 
-| 부동산 | 유형 | 필수 | 설명 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §루미§0§ | 목록[dict] | 필수 | 각 요소는 `label`(string), `value`(any) |
-| §루미§0§ | 어떤 | 어떤 | 현재 가치 |
-| §루미§0§ | 부울 | 모두 | 다중 선택. 기본 거짓 |
+| `options` | list[dict] | Required | Each element is `label`(string), `value`(any) |
+| `value` | any | any | current value |
+| `multiple` | boolean | Any | Multiple selection. Default false |
 
 ---
 
@@ -1410,10 +1394,10 @@ CLI: §루미§0§
 { "type": "toggle", "label": "Enable", "value": false }
 ```
 
-| 부동산 | 유형 | 필수 | 설명 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §루미§0§ | 문자열 | 필수 | 라벨 |
-| §루미§0§ | 부울 | 선택사항 | 기본 거짓 |
+| `label` | string | Required | Label |
+| `value` | boolean | Optional | Default false |
 
 ---
 
@@ -1423,12 +1407,12 @@ CLI: §루미§0§
 { "type": "slider", "min": 0, "max": 100, "value": 50, "step": 1 }
 ```
 
-| 부동산 | 유형 | 필수 | 설명 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §루미§0§ | 번호 | 필수 | 최소값 |
-| §루미§0§ | 번호 | 필수 | 최대 |
-| §루미§0§ | 번호 | 임의 | 현재 가치 |
-| §루미§0§ | 번호 | 어떤 | 단계. 기본값 1 |
+| `min` | number | Required | Minimum value |
+| `max` | number | Required | Maximum |
+| `value` | number | arbitrary | current value |
+| `step` | number | any | step. Default 1 |
 
 ---
 
@@ -1438,10 +1422,10 @@ CLI: §루미§0§
 { "type": "checkbox", "label": "I agree", "checked": false }
 ```
 
-| 부동산 | 유형 | 필수 | 설명 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §루미§0§ | 문자열 | 필수 | 라벨 |
-| §루미§0§ | 부울 | 선택사항 | 기본 거짓 |
+| `label` | string | Required | Label |
+| `checked` | boolean | Optional | Default false |
 
 
 ### 4.3 레이아웃 종류(6종)
@@ -1456,9 +1440,9 @@ CLI: §루미§0§
 { "type": "container", "children": [{"type": "text", "text": "..."}, {"type": "code_block", "content": "..."}] }
 ```
 
-| 부동산 | 유형 | 필수 | 설명 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §루미§0§ | 목록[위젯] | 필수 | 어린이 위젯 |
+| `children` | list[Widget] | Required | Child Widget |
 
 ---
 
@@ -1468,10 +1452,10 @@ CLI: §루미§0§
 { "type": "row", "children": [...], "gap": 8 }
 ```
 
-| 부동산 | 유형 | 필수 | 설명 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §루미§0§ | 목록[위젯] | 필수 | 어린이 위젯 |
-| §루미§0§ | 정수 | 임의 | 간격(px) |
+| `children` | list[Widget] | Required | Child Widget |
+| `gap` | integer | arbitrary | interval (px) |
 
 ---
 
@@ -1481,10 +1465,10 @@ CLI: §루미§0§
 { "type": "column", "children": [...], "gap": 8 }
 ```
 
-| 부동산 | 유형 | 필수 | 설명 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §루미§0§ | 목록[위젯] | 필수 | 어린이 위젯 |
-| §루미§0§ | 정수 | 임의 | 간격(px) |
+| `children` | list[Widget] | Required | Child Widget |
+| `gap` | integer | arbitrary | interval (px) |
 
 ---
 
@@ -1500,9 +1484,9 @@ CLI: §루미§0§
 }
 ```
 
-| 부동산 | 유형 | 필수 | 설명 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §루미§0§ | 목록[dict] | 필수 | 각 요소는 `label`(string), `content`(Widget) |
+| `tabs` | list[dict] | Required | Each element is `label`(string), `content`(Widget) |
 
 ---
 
@@ -1517,11 +1501,11 @@ CLI: §루미§0§
 }
 ```
 
-| 부동산 | 유형 | 필수 | 설명 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §루미§0§ | 문자열 | 필수 | 라벨 |
-| §루미§0§ | 부울 | 선택사항 | 기본 거짓 |
-| §루미§0§ | 목록[위젯] | 필수 | 어린이 위젯 |
+| `label` | string | Required | Label |
+| `default_open` | boolean | Optional | Default false |
+| `children` | list[Widget] | Required | Child Widget |
 
 ---
 
@@ -1536,11 +1520,11 @@ CLI: §루미§0§
 }
 ```
 
-| 부동산 | 유형 | 필수 | 설명 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §루미§0§ | 위젯 | 선택사항 | 헤더 |
-| §루미§0§ | 위젯 | 모두 | 몸 |
-| §루미§0§ | 위젯 | 선택사항 | 바닥글 |
+| `header` | Widget | Optional | Header |
+| `body` | Widget | Any | Body |
+| `footer` | Widget | Optional | Footer |
 
 
 ### 4.4 스트리밍 방식(2종)
@@ -1562,9 +1546,9 @@ CLI: §루미§0§
 }
 ```
 
-| 부동산 | 유형 | 필수 | 설명 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §루미§0§ | 사전[문자열, 사전] | 필수 | 주명 → `label`(문자열) + `animation`(문자열, 선택) |
+| `states` | dict[string, dict] | Required | State name → `label`(string) + `animation`(string, optional) |
 
 ---
 
@@ -1581,11 +1565,11 @@ CLI: §루미§0§
 }
 ```
 
-| 부동산 | 유형 | 필수 | 설명 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §루미§0§ | 문자열 | 필수 | 라벨 |
-| §루미§0§ | 문자열 | 필수 | §루미§1§ / §루미§2§ / §루미§3§ / §루미§4§ |
-| §루미§0§ | 문자열 | 선택사항 | 테마 정의 애니메이션 이름 |
+| `label` | string | Required | Label |
+| `state` | string | Required | `"running"` / `"success"` / `"error"` / `"waiting"` |
+| `animation` | string | Optional | Theme-defined animation name |
 
 
 ### 4.5 커스텀(1종)
@@ -1603,11 +1587,11 @@ CLI: §루미§0§
 }
 ```
 
-| 부동산 | 유형 | 필수 | 설명 |
+| Property | Type | Required | Description |
 |---|---|---|---|
-| §루미§0§ | 문자열 | 필수 | 사용자 정의 유형 식별자 |
-| §루미§0§ | 위젯 | 필수 | 렌더러가 없을 때 대체 |
-| §루미§0§ | 사전 | 선택사항 | 사용자 정의 렌더러에 전달할 데이터 |
+| `custom_type` | string | Required | Custom type identifier |
+| `fallback` | Widget | Required | Fallback when renderer is absent |
+| `data` | dict | Optional | Data to pass to custom renderer |
 
 사용자 정의 렌더러 배치:
 
@@ -1727,7 +1711,7 @@ widget = {
 
 ### 6.1 방출_위젯
 
-도구의 handler.py에서 `context["emit_widget"]`를 호출하세요. 진행된 Widget을 실시간으로 프런트 엔드로 보냅니다.
+도구의 handler.py에서 `context["emit_widget"]`을 호출합니다. 진행된 Widget을 실시간으로 프런트 엔드로 보냅니다.
 
 ```python
 def run(params, context):
@@ -1746,7 +1730,7 @@ def run(params, context):
     }
 ```
 
-`emit_widget`으로 전송된 위젯은 스트리밍 메시지로 전송됩니다. `widget` 반환 필드는 최종 결과 위젯입니다.
+`emit_widget`과 함께 전송된 위젯은 스트리밍 메시지로 전송됩니다. `widget` 반환 필드는 최종 결과 위젯입니다.
 
 ### 6.2 통신 표현
 
@@ -1764,7 +1748,7 @@ Emit_widget이 보낸 위젯은 JSON Lines 메시지의 데이터에 저장됩�
 
 ### 6.3 ID로 교체
 
-위젯에 `id`를 추가하고 내보내면 프런트 엔드는 동일한 `id`으로 위젯을 덮어쓰고 그립니다. 진행 상황을 업데이트하는 데 사용됩니다.
+위젯에 `id`을 추가하고 내보내면 프런트 엔드는 동일한 `id`으로 위젯을 덮어쓰고 그립니다. 진행 상황을 업데이트하는 데 사용됩니다.
 
 ```python
 context["emit_widget"](Progress(id="p1", label="Step 1", current=1, total=3))
@@ -1792,7 +1776,7 @@ window.rumiWidgets.render(widgetJson, targetElement);
 2. 유형이 `"custom"`인 경우 `user_data/widget_renderers/{custom_type}/` 렌더러를 검색합니다.
 3. 사용자 정의 렌더러가 있는 경우 전용 렌더링을 사용하십시오.
 4. 그렇지 않은 경우 `fallback` 내장 렌더러를 사용하여 위젯을 그립니다.
-5. 위 사항 중 어느 것도 해당되지 않는 경우 텍스트를 `[Unknown widget: {type}]`으로 표시합니다.
+5. 위 사항 중 어느 것도 해당되지 않는 경우 텍스트를 `[Unknown widget: {type}]`로 표시합니다.
 
 ### 7.3 테마 협업
 
@@ -1853,36 +1837,36 @@ widgets:
 
 CLI 환경에는 프런트엔드 위젯 렌더러가 없습니다. 모든 위젯은 텍스트 표현으로 변환됩니다.
 
-| 유형 | CLI 표현식 |
+| type | CLI expression |
 |---|---|
-| §루미§0§ | 있는 그대로 출력 |
-| §루미§0§ | 일반 텍스트 |
-| §루미§0§ | 통합 차이 |
-| §루미§0§ | §루미§1§ |
-| §루미§0§ | §루미§1§ |
-| §루미§0§ | §루미§1§ |
-| §루미§0§ | §루미§1§ |
-| §루미§0§ | ASCII 테이블 |
-| §루미§0§ | 수치 요약 |
-| §루미§0§ | 들여쓰기된 텍스트 |
-| §루미§0§ | 일반 텍스트 |
-| §루미§0§ | §루미§1§ |
-| §루미§0§ | §루미§1§ |
-| §루미§0§ | §루미§1§ |
-| §루미§0§ | §루미§1§ |
-| §루미§0§ | §루미§1§ |
-| §루미§0§ | §루미§1§ |
-| §루미§0§ | §루미§1§ |
-| §루미§0§ | §루미§1§ |
-| §루미§0§ | §루미§1§ |
-| §루미§0§ | 자식을 순서대로 출력 |
-| §루미§0§ | 공백으로 가로로 구분된 자식 출력 |
-| §루미§0§ | 줄 바꿈을 사용하여 하위 항목을 세로로 출력 |
-| §루미§0§ | §루미§1§ |
-| §루미§0§ | §루미§1§ |
-| §루미§0§ | §루미§1§ |
-| §루미§0§ | §루미§1§ |
-| §루미§0§ | §루미§1§ |
-| §루미§0§ | 대체의 CLI 표현 |
+| `text` | Output as is |
+| `code_block` | Plain text |
+| `diff` | unified diff |
+| `image` | `[Image: {alt} {width}x{height}]` |
+| `screenshot` | `[Screenshot: {title} - {url}]` |
+| `progress` | `[████░░░░░░] 30% {label}` |
+| `terminal` | `$ {command}\n{output}` |
+| `table` | ASCII table |
+| `chart` | Numerical summary |
+| `file_tree` | Indented text |
+| `markdown` | Plain text |
+| `audio` | `[Audio: {duration}ms]` |
+| `video` | `[Video: {duration}ms]` |
+| `map` | `[Map: {lat}, {lng}]` |
+| `input` | `[Input: {placeholder}]` |
+| `button` | `[{label}]` |
+| `select` | `[Select: {options}]` |
+| `toggle` | `[{label}: {value}]` |
+| `slider` | `[{min}-{max}: {value}]` |
+| `checkbox` | `[{checked ? "x" : " "}] {label}` |
+| `container` | Output children in order |
+| `row` | Output children horizontally separated by spaces |
+| `column` | Output children vertically with line breaks |
+| `tabs` | `--- {label} ---\n{content}` |
+| `collapsible` | `▸ {label}\n{children}` |
+| `card` | `[{header}]\n{body}\n{footer}` |
+| `stream` | `[{current_state.label}]` |
+| `indicator` | `[{state}] {label}` |
+| `custom` | CLI representation of fallback |
 
 CLI 대체 구현은 `lib/rumi_widgets/`의 각 클래스에서 `to_cli()` 메서드로 제공됩니다. 전송 계층이 CLI 모드를 감지하면 Emit_widget은 `to_dict()` 대신 `to_cli()`의 결과를 출력합니다.

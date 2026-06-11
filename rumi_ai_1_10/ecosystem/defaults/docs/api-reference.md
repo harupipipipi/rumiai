@@ -87,9 +87,7 @@ Create a new conversation. Call `blocks.chat.create_conversation` internally.
 
 Get a list of conversations. Call `blocks.chat.list_conversations` internally.
 
-**Request Body:** None (query parameter is not necessary because it is GET)
-
-**Response (`data`):**
+**Request Body:** None (query parameter is not necessary because it is GET)**Response (`data`):**
 
 | Field | Type | Description |
 |---|---|---|
@@ -110,9 +108,7 @@ Get the conversation with the specified ID. The path parameter `{id}` is injecte
 |---|---|---|---|
 | `id` | Required | `string` | Conversation ID |
 
-**Response (`data`):** Conversation object (same format as Response of POST /api/chat/conversations)
-
-**Error case:**
+**Response (`data`):** Conversation object (same format as Response of POST /api/chat/conversations)**Error case:**
 
 | Code | Description |
 |---|---|
@@ -140,9 +136,7 @@ Update conversation metadata.
 | `is_archived` | Optional | `bool` | Archive status |
 | `model` | Optional | `string` | Model change |
 
-**Response (`data`):** Updated conversation object
-
-**Error case:**
+**Response (`data`):** Updated conversation object**Error case:**
 
 | Code | Description |
 |---|---|
@@ -160,9 +154,7 @@ Delete a conversation. Call `blocks.chat.delete_conversation` internally.
 |---|---|---|---|
 | `id` | Required | `string` | Conversation ID |
 
-**Response (`data`):** `{"success": true}`
-
-**Error case:**
+**Response (`data`):** `{"success": true}`**Error case:**
 
 | Code | Description |
 |---|---|
@@ -186,9 +178,7 @@ Send messages to conversations and get AI responses. Calls the same block (`bloc
 |---|---|---|---|
 | `message` | Required | `object` | `{"role": "user", "content": "..."}` |
 
-**Response (`data`):** Assistant message object (same format as POST /v1/chat/completions)
-
-**Error case:** Same as POST /v1/chat/completions
+**Response (`data`):** Assistant message object (same format as POST /v1/chat/completions)**Error case:** Same as POST /v1/chat/completions
 
 ---
 
@@ -273,9 +263,7 @@ Summarize and trim conversations. Call `blocks.chat.summarize_and_trim` internal
 | `end_message_id` | Required | `string` | Summary end message ID |
 | `model` | Optional | `string` | Model used for summarization |
 
-**Response (`data`):** Summary result object
-
-**Error case:**
+**Response (`data`):** Summary result object**Error case:**
 
 | Code | Description |
 |---|---|
@@ -301,9 +289,7 @@ Auto-trim conversations. Call `blocks.chat.auto_trim` internally.
 | `max_tokens` | Optional | `int` | Trimming threshold token count |
 | `model` | Optional | `string` | Model used for summarization |
 
-**Response (`data`):** Trimming result object
-
-**Error case:**
+**Response (`data`):** Trimming result object**Error case:**
 
 | Code | Description |
 |---|---|
@@ -352,9 +338,7 @@ Approve the agent's current step. Call `blocks.agent.approve` internally.
 |---|---|---|---|
 | `id` | Required | `string` | execution_id |
 
-**Response (`data`):** Approval result object
-
-**Error case:**
+**Response (`data`):** Approval result object**Error case:**
 
 | Code | Description |
 |---|---|
@@ -372,9 +356,7 @@ Reject the agent's current step. Call `blocks.agent.reject` internally.
 |---|---|---|---|
 | `id` | Required | `string` | execution_id |
 
-**Response (`data`):** Rejection result object
-
-**Error case:**
+**Response (`data`):** Rejection result object**Error case:**
 
 | Code | Description |
 |---|---|
@@ -392,9 +374,7 @@ Cancel agent execution. Call `blocks.agent.cancel` internally.
 |---|---|---|---|
 | `id` | Required | `string` | execution_id |
 
-**Response (`data`):** Cancellation result object
-
-**Error case:**
+**Response (`data`):** Cancellation result object**Error case:**
 
 | Code | Description |
 |---|---|
@@ -412,9 +392,7 @@ Get the execution status of the agent. Call `blocks.agent.status` internally.
 |---|---|---|---|
 | `id` | Required | `string` | execution_id |
 
-**Response (`data`):** Status object
-
-**Error case:**
+**Response (`data`):** Status object**Error case:**
 
 | Code | Description |
 |---|---|
@@ -498,9 +476,7 @@ Get the state of a multi-agent session. Call `blocks.agent.multi_status` interna
 |---|---|---|---|
 | `id` | Required | `string` | session_id |
 
-**Response (`data`):** Session state object (result of `session.to_dict()`)
-
-**Error case:**
+**Response (`data`):** Session state object (result of `session.to_dict()`)**Error case:**
 
 | Code | Description |
 |---|---|
@@ -628,9 +604,7 @@ Update existing prompts. Call `blocks.prompt.update` internally.
 | `variables` | Optional | `array` | Variable definition |
 | `metadata` | Optional | `object` | Metadata |
 
-**Response (`data`):** Updated prompt object
-
-**Error case:**
+**Response (`data`):** Updated prompt object**Error case:**
 
 | Code | Description |
 |---|---|
@@ -648,9 +622,7 @@ Remove prompts. Call `blocks.prompt.delete` internally.
 |---|---|---|---|
 | `name` | Required | `string` | Prompt name |
 
-**Response (`data`):** `{"deleted": true}`
-
-**Error case:**
+**Response (`data`):** `{"deleted": true}`**Error case:**
 
 | Code | Description |
 |---|---|
@@ -743,9 +715,7 @@ Update dynamic tools. Call `blocks.tool.update` internally.
 | `handler_code` | Optional | `string` | New handler code |
 | `tags` | Optional | `array[string]` | New tag |
 
-**Response (`data`):** Updated tool definition
-
-**Error case:**
+**Response (`data`):** Updated tool definition**Error case:**
 
 | Code | Description |
 |---|---|
@@ -763,9 +733,7 @@ Delete dynamic tools. The files will also be deleted at the same time. Call `blo
 |---|---|---|---|
 | `name` | Required | `string` | Tool name |
 
-**Response (`data`):** `{"deleted": true}`
-
-**Error case:**
+**Response (`data`):** `{"deleted": true}`**Error case:**
 
 | Code | Description |
 |---|---|
@@ -783,9 +751,7 @@ Export the tool definition including handler_code. Call `blocks.tool.export` int
 |---|---|---|---|
 | `name` | Required | `string` | Tool name |
 
-**Response (`data`):** Tool definition object (contains handler_code field)
-
-**Error case:**
+**Response (`data`):** Tool definition object (contains handler_code field)**Error case:**
 
 | Code | Description |
 |---|---|
@@ -853,9 +819,7 @@ Live edit and rerun prompts. Call `blocks.dev.edit_prompt_live` internally.
 | `request_id` | Required | `string` | Request ID to be edited |
 | `new_prompt` | Required | `string` | New prompt |
 
-**Response (`data`):** Re-execution result
-
-**Error case:**
+**Response (`data`):** Re-execution result**Error case:**
 
 | Code | Description |
 |---|---|
@@ -875,9 +839,7 @@ Retry past requests. Call `blocks.dev.replay` internally.
 | `request_id` | Required | `string` | Request ID to be re-executed |
 | `model` | Optional | `string` | Rerun with another model |
 
-**Response (`data`):** Re-execution result
-
-**Error case:**
+**Response (`data`):** Re-execution result**Error case:**
 
 | Code | Description |
 |---|---|
@@ -891,9 +853,7 @@ Retry past requests. Call `blocks.dev.replay` internally.
 
 Health check. Return the response directly without calling block.
 
-**Request Body:** None
-
-**Response (`data`):**
+**Request Body:** None**Response (`data`):**
 
 | Field | Type | Description |
 |---|---|---|
@@ -909,9 +869,7 @@ Health check. Return the response directly without calling block.
 
 Get context information for a Pack. If facade is set, also returns a list of interfaces.
 
-**Request Body:** None
-
-**Response (`data`):**
+**Request Body:** None**Response (`data`):**
 
 | Field | Type | Description |
 |---|---|---|

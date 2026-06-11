@@ -35,13 +35,13 @@
 레거시 `composite_models`은 호환성을 유지하며 내부 장치로 처리될 수 있습니다.
 팩 같은 구조.
 
-## §루미§0§
+## `model.call`
 
 `model.call`은 "다른 모델에 질문하기"에 대한 제한된 유틸리티 경로입니다.
 
 - 기본적으로 도구 액세스가 없습니다.
 - `required_capabilities`, `model_hint`, `output_schema`, `max_tokens` 허용
-  그리고 §루미§0§
+  그리고 `attachments`
 - 전달하기 전에 숨겨진 메타데이터와 비밀을 제거합니다.
 - 재귀 깊이 제한을 적용합니다.
 

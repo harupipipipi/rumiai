@@ -16,15 +16,7 @@ rumiai 本身是一个通用内核，没有领域知识。 Defaults 为 rumiai �
 
 ## 想法
 
-**包含电池，但每个电池都是可拆卸的。**如果包含默认值，所有功能都将起作用。但是，您可以用另一个包替换任何组件。
-
-**默认定义标准，而不是限制。**默认定义的权限、处理程序和域模型成为rumiai生态系统的“标准词汇”。其他包也使用这个词汇。然而，这个词汇表是可扩展的，其他包可以添加默认不知道的概念。
-
-**了解一切，不做任何假设。** 默认情况下拥有人工智能服务所需的所有领域知识。但它不会对用户的环境、用例或偏好做出任何假设。
-
-**安全靠的是能力，而不是信任。**默认完全遵循rumiai的安全模型。默认值本身仅在授予的权限范围内运行。
-
-**仅基础设施，user_data 中的内容。**默认仅提供域逻辑（处理程序）、通信基础设施、Widget 库、shell 和流定义。屏幕外观（资产）、工具定义、代理设置、提示、主题和布局都放置在 user_data 中。默认提供 API 和框架供​​它们工作。
+**包含电池，但每个电池都是可拆卸的。**如果包含默认值，所有功能都将起作用。但是，您可以用另一个包替换任何组件。**默认定义标准，而不是限制。**默认定义的权限、处理程序和域模型成为rumiai生态系统的“标准词汇”。其他包也使用这个词汇。然而，这个词汇表是可扩展的，其他包可以添加默认值不知道的概念。**知道一切，假设什么都不做。**默认值拥有人工智能服务所需的所有领域知识。但它不会对用户的环境、用例或偏好做出任何假设。**安全取决于能力，而不是信任。**默认完全遵循 rumiai 的安全模型。 defaults 本身仅在授予的权限范围内运行。**仅基础设施，user_data 中的内容。**defaults 仅提供域逻辑（处理程序）、通信基础设施、Widget 库、shell 和 Flow 定义。屏幕外观（资产）、工具定义、代理设置、提示、主题和布局都放置在 user_data 中。默认提供 API 和框架供​​它们工作。
 
 ---
 
@@ -55,30 +47,30 @@ rumiai 本身是一个通用内核，没有领域知识。 Defaults 为 rumiai �
 
 ### 始终注入（无需声明）
 
-|上下文键 |描述 |
+| context key | description |
 |---|---|
-| §鲁米§0§|呼叫任何处理程序。只能在Grant | 授予的权限范围内执行
-| §鲁米§0§|发布一个活动。 handler、Flow触发器、前端均可接收 |
-| §鲁米§0§|等待一个事件。可以指定超时 |
-| §鲁米§0§|将 Widget JSON 发送到 UI |
-| §鲁米§0§|取消确认 |
-| §鲁米§0§|从conditions.json 注入的设置 |
-| §鲁米§0§|会话信息（session_id、工作空间等）|
+| `call_handler(handler_name, params)` | Call any handler. Can only be executed within the scope of permissions granted by Grant |
+| `emit_event(event_type, data)` | Publish an event. handler, Flow trigger, and front end can be received |
+| `wait_event(event_type, timeout, filter)` | Wait for an event. Timeout can be specified |
+| `emit_widget(widget_json)` | Send Widget JSON to the UI |
+| `cancel_check()` | Cancellation confirmation |
+| `handler_config` | Settings injected from conditions.json |
+| `session` | Session information (session_id, workspace, etc.) |
 
 ### 使用 features_required 声明和注入什么
 
-|能力_id |上下文键 |描述 |风险|
+| capability_id | context key | description | risk |
 |---|---|---|---|
-| §鲁米§0§| §鲁米§1§ |读取user_data下的文件|低|
-| §鲁米§0§| §鲁米§1§ |在user_data下写入文件 |中等|
-| §鲁米§0§| §鲁米§1§ |启动流程|中等|
-| §鲁米§0§| §鲁米§1§ | Shell命令执行 |高|
-| §鲁米§0§| §鲁米§1§ |浏览器操作|高|
-| §鲁米§0§| §鲁米§1§ |启动、操作和销毁 Docker 容器 |高|
-| §鲁米§0§| §鲁米§1§ |主机应用操作|高|
-| §鲁米§0§| §鲁米§1§ |外部 HTTP 通信 |中等|
-| §鲁米§0§| §鲁米§1§ |工具内法学硕士通话|中等|
-| §鲁米§0§| §鲁米§1§ |会话状态读/写|低|
+| `data_read` | `data_read(path) → str/bytes` | Read file under user_data | Low |
+| `data_write` | `data_write(path, content)` | Writing files under user_data | Medium |
+| `execute_flow` | `execute_flow(flow_id, input) → FlowResult` | Launch Flow | Medium |
+| `shell_exec` | `capability("shell_exec", {...})` | Shell command execution | High |
+| `browser_control` | `capability("browser_control", {...})` | Browser operation | High |
+| `container_exec` | `capability("container_exec", {...})` | Starting, operating, and destroying Docker containers | High |
+| `app_control` | `capability("app_control", {...})` | Host application operation | High |
+| `http_request` | `capability("http_request", {...})` | External HTTP communication | Medium |
+| `llm_call` | `capability("llm_call", {...})` | In-tool LLM call | Medium |
+| `session_state` | `capability("session_state", {...})` | Session state read/write | Low |
 
 ### call_handler 的工作原理
 
@@ -95,7 +87,7 @@ result = context["call_handler"]("defaults.chat.send", {
 
 聊天操作、代理激活、内存读写、提示渲染，都可以通过call_handler来完成。如果 Pack 添加了新的处理程序，工具也可以使用相同的 call_handler 来调用它。
 
-###emit_event / wait_event 是如何工作的
+### emit_event / wait_event 是如何工作的
 
 事件是整个系统中的通用通信机制。
 
@@ -158,347 +150,347 @@ chat.conversation.*          → conversation の全アクション
 chat.*                       → chat ドメインの全権限
 ```
 
-###聊天域（18个权限）
+### 聊天域（18个权限）
 
-|权限|描述 |
+| Permissions | Description |
 |------|------|
-| §鲁米§0§|对话创建 |
-| §鲁米§0§|对话阅读 |
-| §鲁米§0§|对话列表 |
-| §鲁米§0§|对话更新 |
-| §鲁米§0§|对话已删除 |
-| §鲁米§0§|对话导出 |
-| §鲁米§0§|对话分支 |
-| §鲁米§0§|发送消息 |
-| §鲁米§0§|阅读留言 |
-| §鲁米§0§|编辑留言 |
-| §鲁米§0§|删除留言 |
-| §鲁米§0§| AI响应再生|
-| §鲁米§0§|流媒体 |
-| §鲁米§0§|停止串流 |
-| §鲁米§0§|上传附件 |
-| §鲁米§0§|阅读附件 |
-| §鲁米§0§|反应|
-| §鲁米§0§|留言搜索 |
+| `chat.conversation.create` | Conversation creation |
+| `chat.conversation.read` | Conversation reading |
+| `chat.conversation.list` | Conversation list |
+| `chat.conversation.update` | Conversation update |
+| `chat.conversation.delete` | Conversation deleted |
+| `chat.conversation.export` | Conversation export |
+| `chat.conversation.branch` | Conversation branching |
+| `chat.message.send` | Send message |
+| `chat.message.read` | Read message |
+| `chat.message.edit` | Edit message |
+| `chat.message.delete` | Delete message |
+| `chat.message.regenerate` | AI response regeneration |
+| `chat.message.stream` | Streaming |
+| `chat.message.stop` | Stop streaming |
+| `chat.attachment.upload` | Upload attachment |
+| `chat.attachment.read` | Read attachment |
+| `chat.reaction.write` | Reaction |
+| `chat.search` | Message search |
 
-###代理域（18个权限）
+### 代理域（18个权限）
 
-|权限|描述 |
+| Permissions | Description |
 |------|------|
-| §鲁米§0§|代理创建 |
-| §鲁米§0§|代理阅读 |
-| §鲁米§0§|代理名单 |
-| §鲁米§0§|代理更新 |
-| §鲁米§0§|代理删除|
-| §鲁米§0§|代理执行|
-| §鲁米§0§|步骤阅读 |
-| §鲁米§0§|步骤审批|
-| §鲁米§0§|步骤拒绝|
-| §鲁米§0§|取消执行 |
-| §鲁米§0§|暂停|
-| §鲁米§0§|简历 |
-| §鲁米§0§|状态读取|
-| §鲁米§0§|子代理启动 |
-| §鲁米§0§|子代理管理 |
-| §鲁米§0§|阅读计划 |
-| §鲁米§0§|计划变更|
-| §鲁米§0§|历史阅读|
+| `agent.create` | Agent creation |
+| `agent.read` | Agent read |
+| `agent.list` | Agent list |
+| `agent.update` | Agent update |
+| `agent.delete` | Agent deletion |
+| `agent.execute` | Agent execution |
+| `agent.step.read` | Step reading |
+| `agent.step.approve` | Step approval |
+| `agent.step.reject` | Step Rejection |
+| `agent.cancel` | Cancel execution |
+| `agent.pause` | Pause |
+| `agent.resume` | Resume |
+| `agent.status.read` | Status reading |
+| `agent.sub.spawn` | Subagent startup |
+| `agent.sub.manage` | Subagent management |
+| `agent.plan.read` | Read plan |
+| `agent.plan.modify` | Plan change |
+| `agent.history.read` | History reading |
 
-###工具域（13个权限）
+### 工具域（13个权限）
 
-|权限|描述 |
+| Permissions | Description |
 |------|------|
-| §鲁米§0§|工具执行 |
-| §鲁米§0§|工具阅读|
-| §鲁米§0§|工具清单 |
-| §鲁米§0§|架构阅读|
-| §鲁米§0§|工具创建|
-| §鲁米§0§|工具更新|
-| §鲁米§0§|工具删除 |
-| §鲁米§0§|读取执行结果 |
-| §鲁米§0§|读取权限 |
-| §鲁米§0§|授权写入|
-| §鲁米§0§| MCP 服务器连接 |
-| §鲁米§0§| MCP服务器断线|
-| §鲁米§0§| MCP 工具列表 |
+| `tool.invoke` | Tool execution |
+| `tool.read` | Tool reading |
+| `tool.list` | Tool list |
+| `tool.schema.read` | Schema reading |
+| `tool.create` | Tool creation |
+| `tool.update` | Tool update |
+| `tool.delete` | Tool deletion |
+| `tool.result.read` | Read execution results |
+| `tool.permission.read` | Read permissions |
+| `tool.permission.write` | Authorization write |
+| `tool.mcp.connect` | MCP server connection |
+| `tool.mcp.disconnect` | MCP server disconnection |
+| `tool.mcp.list` | MCP tools list |
 
-###提示域（12个权限）
+### 提示域（12个权限）
 
-|权限|描述 |
+| Permissions | Description |
 |------|------|
-| §鲁米§0§|快速创建 |
-| §鲁米§0§|即时阅读 |
-| §鲁米§0§|提示列表 |
-| §鲁米§0§|及时更新 |
-| §鲁米§0§|删除提示|
-| §鲁米§0§|提示渲染 |
-| §鲁米§0§|读取变量 |
-| §鲁米§0§|写入变量 |
-| §鲁米§0§|阅读系统提示 |
-| §鲁米§0§|系统提示书写|
-| §鲁米§0§|进口|
-| §鲁米§0§|出口|
+| `prompt.create` | Prompt creation |
+| `prompt.read` | Prompt reading |
+| `prompt.list` | Prompt list |
+| `prompt.update` | Prompt update |
+| `prompt.delete` | Delete prompt |
+| `prompt.render` | Prompt rendering |
+| `prompt.variable.read` | Read variable |
+| `prompt.variable.write` | Writing variables |
+| `prompt.system.read` | Read system prompt |
+| `prompt.system.write` | System prompt writing |
+| `prompt.import` | Import |
+| `prompt.export` | Export |
 
 ### ai域名（19个权限）
 
-|权限|描述 |
+| Permissions | Description |
 |------|------|
-| §鲁米§0§|文本生成|
-| §鲁米§0§|流媒体一代|
-| §鲁米§0§|型号列表|
-| §鲁米§0§|阅读型号信息 |
-| §鲁米§0§|供应商名单 |
-| §鲁米§0§|添加提供商 |
-| §鲁米§0§|删除提供商 |
-| §鲁米§0§|读取提供商设置 |
-| §鲁米§0§|写入提供商设置 |
-| §鲁米§0§| AI档案读取|
-| §鲁米§0§| AI简介|
-| §鲁米§0§|简介列表 |
-| §鲁米§0§|阅读用法 |
-| §鲁米§0§|代币计数 |
-| §鲁米§0§|嵌入向量生成 |
-| §鲁米§0§|图像生成|
-| §鲁米§0§|图像分析|
-| §鲁米§0§|音频转录 |
-| §鲁米§0§|语音合成 |
+| `ai.completion` | Text generation |
+| `ai.stream` | Streaming generation |
+| `ai.model.list` | Model list |
+| `ai.model.read` | Read model information |
+| `ai.provider.list` | List of providers |
+| `ai.provider.add` | Add provider |
+| `ai.provider.remove` | Delete provider |
+| `ai.provider.config.read` | Read provider settings |
+| `ai.provider.config.write` | Write provider settings |
+| `ai.profile.read` | AI profile reading |
+| `ai.profile.write` | AI profile writing |
+| `ai.profile.list` | Profile list |
+| `ai.usage.read` | Read usage |
+| `ai.token.count` | Token count |
+| `ai.embedding` | Embedding vector generation |
+| `ai.image.generate` | Image generation |
+| `ai.image.analyze` | Image analysis |
+| `ai.audio.transcribe` | Audio transcription |
+| `ai.audio.synthesize` | Speech synthesis |
 
-###文件域（18个权限）
+### 文件域（18个权限）
 
-|权限|描述 |
+| Permissions | Description |
 |------|------|
-| §鲁米§0§|文件读取 |
-| §鲁米§0§|文件写入 |
-| §鲁米§0§|文件创建 |
-| §鲁米§0§|文件删除|
-| §鲁米§0§|文件移动 |
-| §鲁米§0§|文件复制 |
-| §鲁米§0§|文件列表|
-| §鲁米§0§|文件搜索 |
-| §鲁米§0§|文件监控|
-| §鲁米§0§|读取元数据 |
-| §鲁米§0§|读取权限 |
-| §鲁米§0§|工作空间 阅读 |
-| §鲁米§0§|工作空间写作 |
-| §鲁米§0§|系统文件读取|
-| §鲁米§0§|系统文件写入|
-| §鲁米§0§|临时文件写入|
-| §鲁米§0§|档案阅读|
-| §鲁米§0§|档案创建|
+| `file.read` | File read |
+| `file.write` | File writing |
+| `file.create` | File creation |
+| `file.delete` | File deletion |
+| `file.move` | File movement |
+| `file.copy` | File copy |
+| `file.list` | File list |
+| `file.search` | File search |
+| `file.watch` | File monitoring |
+| `file.metadata.read` | Read metadata |
+| `file.permission.read` | Read permissions |
+| `file.workspace.read` | Workspace Read |
+| `file.workspace.write` | Workspace writing |
+| `file.system.read` | System file read |
+| `file.system.write` | System file writing |
+| `file.temp.write` | Temporary file writing |
+| `file.archive.read` | Archive reading |
+| `file.archive.create` | Archive creation |
 
-###终端域（11个权限）
+### 终端域（11个权限）
 
-|权限|描述 |
+| Permissions | Description |
 |------|------|
-| §鲁米§0§|命令执行 |
-| §鲁米§0§|读取输出 |
-| §鲁米§0§|流式输出 |
-| §鲁米§0§|会话创建 |
-| §鲁米§0§|会议列表|
-| §鲁米§0§|结束会议 |
-| §鲁米§0§|中断|
-| §鲁米§0§|读取环境变量 |
-| §鲁米§0§|写入环境变量|
-| §鲁米§0§|读取当前目录|
-| §鲁米§0§|更改当前目录|
+| `terminal.execute` | Command execution |
+| `terminal.read` | Read output |
+| `terminal.stream` | Streaming output |
+| `terminal.session.create` | Session creation |
+| `terminal.session.list` | Session list |
+| `terminal.session.close` | End session |
+| `terminal.interrupt` | Interruption |
+| `terminal.env.read` | Read environment variables |
+| `terminal.env.write` | Writing environment variables |
+| `terminal.cwd.read` | Read current directory |
+| `terminal.cwd.write` | Change current directory |
 
 ### git 域（15 个权限）
 
-|权限|描述 |
+| Permissions | Description |
 |------|------|
-| §鲁米§0§|状态确认 |
-| §鲁米§0§|差异展示|
-| §鲁米§0§|日志显示|
-| §鲁米§0§|提交 |
-| §鲁米§0§|分店列表 |
-| §鲁米§0§|创建分支 |
-| §鲁米§0§|分支切换|
-| §鲁米§0§|删除分支 |
-| §鲁米§0§|合并 |
-| §鲁米§0§|推 |
-| §鲁米§0§|拉|
-| §鲁米§0§|藏匿|
-| §鲁米§0§|重置 |
-| §鲁米§0§|远程列表 |
-| §鲁米§0§|远程管理 |
+| `git.status` | Status confirmation |
+| `git.diff` | Difference display |
+| `git.log` | Log display |
+| `git.commit` | Commit |
+| `git.branch.list` | Branch list |
+| `git.branch.create` | Create branch |
+| `git.branch.switch` | Branch switching |
+| `git.branch.delete` | Branch deletion |
+| `git.merge` | Merge |
+| `git.push` | Push |
+| `git.pull` | Pull |
+| `git.stash` | Stash |
+| `git.reset` | Reset |
+| `git.remote.list` | Remote list |
+| `git.remote.manage` | Remote management |
 
-###内存域（13个权限）
+### 内存域（13个权限）
 
-|权限|描述 |
+| Permissions | Description |
 |------|------|
-| §鲁米§0§|短期记忆阅读 |
-| §鲁米§0§|短期记忆写入|
-| §鲁米§0§|长期记忆阅读 |
-| §鲁米§0§|长期记忆写入|
-| §鲁米§0§|长期记忆删除 |
-| §鲁米§0§|长期记忆检索 |
-| §鲁米§0§|读取项目内存|
-| §鲁米§0§|项目内存写入|
-| §鲁米§0§|用户内存读取|
-| §鲁米§0§|用户内存写入|
-| §鲁米§0§|矢量存储|
-| §鲁米§0§|矢量搜索|
-| §鲁米§0§|清除内存|
+| `memory.short.read` | Short-term memory read |
+| `memory.short.write` | Short-term memory write |
+| `memory.long.read` | Long-term memory read |
+| `memory.long.write` | Long-term memory write |
+| `memory.long.delete` | Long-term memory deletion |
+| `memory.long.search` | Long-term memory retrieval |
+| `memory.project.read` | Read project memory |
+| `memory.project.write` | Project memory write |
+| `memory.user.read` | User memory read |
+| `memory.user.write` | User memory write |
+| `memory.vector.store` | Vector storage |
+| `memory.vector.query` | Vector search |
+| `memory.clear` | Clear memory |
 
-###媒体域（12个权限）
+### 媒体域（12个权限）
 
-|权限|描述 |
+| Permissions | Description |
 |------|------|
-| §鲁米§0§|图像读取|
-| §鲁米§0§|图像创作 |
-| §鲁米§0§|图像转换 |
-| §鲁米§0§|语音朗读|
-| §鲁米§0§|音频创作|
-| §鲁米§0§|音频转录 |
-| §鲁米§0§|视频阅读 |
-| §鲁米§0§|阅读文档 |
-| §鲁米§0§|文献分析|
-| §鲁米§0§|剪贴板阅读|
-| §鲁米§0§|剪贴板书写|
-| §鲁米§0§|截图|
+| `media.image.read` | Image reading |
+| `media.image.create` | Image creation |
+| `media.image.transform` | Image conversion |
+| `media.audio.read` | Voice reading |
+| `media.audio.create` | Audio creation |
+| `media.audio.transcribe` | Audio transcription |
+| `media.video.read` | Video reading |
+| `media.document.read` | Read document |
+| `media.document.parse` | Document analysis |
+| `media.clipboard.read` | Clipboard reading |
+| `media.clipboard.write` | Clipboard writing |
+| `media.screenshot` | Screenshot |
 
-###流域（12个权限）
+### 流域（12个权限）
 
-|权限|描述 |
+| Permissions | Description |
 |------|------|
-| §鲁米§0§|流程执行 |
-| §鲁米§0§|流量阅读|
-| §鲁米§0§|流量列表 |
-| §鲁米§0§|流程创建|
-| §鲁米§0§|流程更新|
-| §鲁米§0§|流程删除|
-| §鲁米§0§|读取执行状态 |
-| §鲁米§0§|取消正在运行的流程 |
-| §鲁米§0§|应用流量调节剂 |
-| §鲁米§0§|修改器列表 |
-| §鲁米§0§|流程上下文读取 |
-| §鲁米§0§|流程上下文写作 |
+| `flow.execute` | Flow execution |
+| `flow.read` | Flow reading |
+| `flow.list` | Flow list |
+| `flow.create` | Flow creation |
+| `flow.update` | Flow update |
+| `flow.delete` | Flow Delete |
+| `flow.status.read` | Read execution status |
+| `flow.cancel` | Cancel running Flow |
+| `flow.modifier.apply` | Apply Flow Modifier |
+| `flow.modifier.list` | Modifier list |
+| `flow.context.read` | Flow context read |
+| `flow.context.write` | Flow context writing |
 
 ### 配置域（13个权限）
 
-|权限|描述 |
+| Permissions | Description |
 |------|------|
-| §鲁米§0§|读取设置 |
-| §鲁米§0§|设置写入|
-| §鲁米§0§|简介阅读 |
-| §鲁米§0§|简介写作|
-| §鲁米§0§|简介列表 |
-| §鲁米§0§|主题阅读|
-| §鲁米§0§|主题写作|
-| §鲁米§0§|按键绑定 阅读 |
-| §鲁米§0§|按键绑定写作 |
-| §鲁米§0§|阅读语言环境 |
-| §鲁米§0§|区域设置写作 |
-| §鲁米§0§|设置导出 |
-| §鲁米§0§|设置导入 |
+| `config.read` | Read settings |
+| `config.write` | Settings write |
+| `config.profile.read` | Profile reading |
+| `config.profile.write` | Profile writing |
+| `config.profile.list` | Profile list |
+| `config.theme.read` | Theme reading |
+| `config.theme.write` | Theme writing |
+| `config.keybind.read` | Keybind Read |
+| `config.keybind.write` | Keybind writing |
+| `config.locale.read` | Read locale |
+| `config.locale.write` | Locale writing |
+| `config.export` | Settings export |
+| `config.import` | Settings import |
 
 ### 网络域名（11个权限）
 
-|权限|描述 |
+| Permissions | Description |
 |------|------|
-| §鲁米§0§| HTTP 请求 |
-| §鲁米§0§| HTTP 流 |
-| §鲁米§0§| WebSocket 连接 |
-| §鲁米§0§| WebSocket 发送 |
-| §鲁米§0§| DNS解析 |
-| §鲁米§0§|代理阅读 |
-| §鲁米§0§|代理写作 |
-| §鲁米§0§|读取权限列表 |
-| §鲁米§0§|写入权限列表 |
-| §鲁米§0§|下载 |
-| §鲁米§0§|上传 |
+| `net.http.request` | HTTP request |
+| `net.http.stream` | HTTP Streaming |
+| `net.websocket.connect` | WebSocket connection |
+| `net.websocket.send` | WebSocket sending |
+| `net.dns.resolve` | DNS resolution |
+| `net.proxy.read` | Proxy read |
+| `net.proxy.write` | Proxy writing |
+| `net.allowlist.read` | Read permission list |
+| `net.allowlist.write` | Write permission list |
+| `net.download` | Download |
+| `net.upload` | Upload |
 
-###前端域（12个权限）
+### 前端域（12个权限）
 
-|权限|描述 |
+| Permissions | Description |
 |------|------|
-| §鲁米§0§|将资源放在绘图表面上 |
-| §鲁米§0§|从绘图表面移除 |
-| §鲁米§0§|更新绘图内容 |
-| §鲁米§0§|后端→绘图面|
-| §鲁米§0§|绘图表面→后端|
-| §鲁米§0§|连续传输数据 |
-| §鲁米§0§|接受资产登记 |
-| §鲁米§0§|资产注销 |
-| §鲁米§0§|登记资产清单 |
-| §鲁米§0§|获取布局信息 |
-| §鲁米§0§|更改/保存布局 |
-| §鲁米§0§|获取主题信息 |
+| `frontend.render.mount` | Put Asset on the drawing surface |
+| `frontend.render.unmount` | Remove from drawing surface |
+| `frontend.render.update` | Update drawing content |
+| `frontend.message.send` | Backend → drawing surface |
+| `frontend.message.receive` | Drawing surface → backend |
+| `frontend.message.stream` | Stream data continuously |
+| `frontend.asset.register` | Accept Asset Registration |
+| `frontend.asset.unregister` | Cancellation of Asset |
+| `frontend.asset.list` | List of registered Assets |
+| `frontend.layout.read` | Get layout information |
+| `frontend.layout.write` | Change/save layout |
+| `frontend.theme.read` | Get theme information |
 
-###事件域（5个权限）
+### 事件域（5个权限）
 
-|权限|描述 |
+| Permissions | Description |
 |------|------|
-| §鲁米§0§|活动发布|
-| §鲁米§0§|活动订阅 |
-| §鲁米§0§|取消订阅活动 |
-| §鲁米§0§|活动列表|
-| §鲁米§0§|阅读事件历史 |
+| `event.emit` | Event publication |
+| `event.subscribe` | Event subscription |
+| `event.unsubscribe` | Unsubscribe from event |
+| `event.list` | Event list |
+| `event.history.read` | Read event history |
 
-###审核域（3个权限）
+### 审核域（3个权限）
 
-|权限|描述 |
+| Permissions | Description |
 |------|------|
-| §鲁米§0§|阅读审核日志 |
-| §鲁米§0§|审核日志搜索|
-| §鲁米§0§|审计日志导出|
+| `audit.read` | Read audit log |
+| `audit.search` | Audit log search |
+| `audit.export` | Audit log export |
 
-###打包域名（8个权限）
+### 打包域名（8个权限）
 
-|权限|描述 |
+| Permissions | Description |
 |------|------|
-| §鲁米§0§|包装清单 |
-| §鲁米§0§|打包阅读 |
-| §鲁米§0§|包安装 |
-| §鲁米§0§|删除包 |
-| §鲁米§0§|包更新 |
-| §鲁米§0§|包装审批 |
-| §鲁米§0§|读取包设置 |
-| §鲁米§0§|包设置写入|
+| `pack.list` | Pack list |
+| `pack.read` | Pack reading |
+| `pack.install` | Pack installation |
+| `pack.remove` | Delete pack |
+| `pack.update` | Pack update |
+| `pack.approve` | Pack approval |
+| `pack.config.read` | Read pack settings |
+| `pack.config.write` | Pack settings write |
 
 ### 秘密域（4个权限）
 
-|权限|描述 |
+| Permissions | Description |
 |------|------|
-| §鲁米§0§|秘密阅读 |
-| §鲁米§0§|秘密写作|
-| §鲁米§0§|秘密删除|
-| §鲁米§0§|秘密名单|
+| `secret.read` | Secret read |
+| `secret.write` | Secret writing |
+| `secret.delete` | Secret deletion |
+| `secret.list` | Secret list |
 
 ### 内核域（5个权限）
 
-|权限|描述 |
+| Permissions | Description |
 |------|------|
-| §鲁米§0§|读取内核状态 |
-| §鲁米§0§|关机 |
-| §鲁米§0§|重启 |
-| §鲁米§0§|健康检查 |
-| §鲁米§0§|版本信息 |
+| `kernel.status.read` | Read kernel state |
+| `kernel.shutdown` | Shutdown |
+| `kernel.restart` | Reboot |
+| `kernel.health` | Health check |
+| `kernel.version` | Version information |
 
 ### 调度域（5个权限）
 
-|权限|描述 |
+| Permissions | Description |
 |------|------|
-| §鲁米§0§|日程创建 |
-| §鲁米§0§|安排阅读 |
-| §鲁米§0§|日程更新|
-| §鲁米§0§|删除日程 |
-| §鲁米§0§|日程表|
+| `schedule.create` | Schedule creation |
+| `schedule.read` | Schedule reading |
+| `schedule.update` | Schedule update |
+| `schedule.delete` | Delete schedule |
+| `schedule.list` | Schedule list |
 
 ---
 
 ## 权限预设
 
-|预设|包含的权限 |用途 |
+| Preset | Permissions included | Usage |
 |-----------|---------|------|
-| §鲁米§0§| §鲁米§1§、§鲁米§2§、§鲁米§3§、§鲁米§4§|基本聊天 |
-| §鲁米§0§| `preset.chat_basic` + `chat.search`、`chat.attachment.*`、`prompt.*`、`memory.short.*` |完整聊天 |
-| §鲁米§0§| `file.workspace.*`、`terminal.*`、`git.*`、`ai.completion`、`ai.stream` |编码 |
-| §鲁米§0§| `agent.*`、`tool.invoke`、`tool.list`、`tool.schema.read`、`ai.*` |基础剂|
-| §鲁米§0§| `preset.agent_basic` + `file.*`、`terminal.*`、`net.*`、`memory.*` |全权代理|
-| §鲁米§0§| §鲁米§1§、§鲁米§2§、§鲁米§3§、§鲁米§4§|前端|
-| §鲁米§0§| §鲁米§1§，§鲁米§2§|只读 |
-| §鲁米§0§| `*`（全部权限）|管理员|
+| `preset.chat_basic` | `chat.conversation.*`, `chat.message.*`, `ai.completion`, `ai.stream` | Basic chat |
+| `preset.chat_full` | `preset.chat_basic` + `chat.search`, `chat.attachment.*`, `prompt.*`, `memory.short.*` | Full chat |
+| `preset.coding` | `file.workspace.*`, `terminal.*`, `git.*`, `ai.completion`, `ai.stream` | Coding |
+| `preset.agent_basic` | `agent.*`, `tool.invoke`, `tool.list`, `tool.schema.read`, `ai.*` | Basic agent |
+| `preset.agent_full` | `preset.agent_basic` + `file.*`, `terminal.*`, `net.*`, `memory.*` | Full agent |
+| `preset.frontend` | `frontend.*`, `event.*`, `config.read`, `config.theme.*` | Front end |
+| `preset.readonly` | `*.read`, `*.list` | Read-only |
+| `preset.admin` | `*` (Full privileges) | Administrator |
 
 ---
 
@@ -528,7 +520,7 @@ grants:
 
 以下内容不会添加到默认值中。需要 rumiai CLI 或显式用户交互。
 
-§鲁米§0§，§鲁米§1§，§鲁米§2§，§鲁米§3§，§鲁米§4§，§鲁米§5§，§鲁米§6§
+`secret.write`、`secret.delete`、`kernel.shutdown`、`kernel.restart`、`pack.install`、`pack.remove`、`pack.approve`
 
 ---
 
@@ -538,7 +530,7 @@ grants:
 
 ### 处理程序命名约定
 
-§鲁米§0§
+`pack_id.category.name`
 
 ```
 defaults.frontend.start        → defaults パック、frontend カテゴリ、start handler
@@ -548,116 +540,116 @@ some_pack.custom.my_handler    → 別パックの handler
 
 ### 默认处理程序列表
 
-####前端（3个处理程序）
+#### 前端（3个处理程序）
 
-|处理程序 |所需权限 |描述 |
+| handler | Required permissions | Description |
 |---|---|---|
-| §鲁米§0§| §鲁米§1§、§鲁米§2§、§鲁米§3§|启动传输 (http/stdio/uds) |
-| §鲁米§0§| §鲁米§1§ |停止运输 |
-| §鲁米§0§| §鲁米§1§ |发送事件到前端 |
+| `defaults.frontend.start` | `frontend.serve`, `frontend.bind`, `frontend.auth.manage` | Start transport (http/stdio/uds) |
+| `defaults.frontend.stop` | `frontend.serve` | Stop transport |
+| `defaults.frontend.emit` | `frontend.event.emit` | Send events to the front end |
 
-####聊天（16个handler）
+#### 聊天（16个handler）
 
-|处理程序 |所需权限 |描述 |
+| handler | Required permissions | Description |
 |---|---|---|
-| §鲁米§0§| §鲁米§1§ |对话创建 |
-| §鲁米§0§| §鲁米§1§ |对话数据采集|
-| §鲁米§0§| §鲁米§1§ |对话列表 |
-| §鲁米§0§| §鲁米§1§ |对话元数据更新 |
-| §鲁米§0§| §鲁米§1§ |对话删除 |
-| §鲁米§0§| §鲁米§1§ |对话导出 |
-| §鲁米§0§| §鲁米§1§，§鲁米§2§|消息发送+AI回复生成 |
-| §鲁米§0§| §鲁米§1§，§鲁米§2§|流媒体响应 |
-| §鲁米§0§| §鲁米§1§ |添加消息（AI无回复） |
-| §鲁米§0§| §鲁米§1§ |获取消息 |
-| §鲁米§0§| §鲁米§1§ |编辑留言 |
-| §鲁米§0§| §鲁米§1§ |删除留言 |
-| §鲁米§0§| §鲁米§1§ |对话分支 |
-| §鲁米§0§| §鲁米§1§ |留言搜索 |
-| §鲁米§0§| §鲁米§1§ |停止串流 |
-| §鲁米§0§| §鲁米§1§，§鲁米§2§|反应再生|
+| `defaults.chat.create_conversation` | `chat.conversation.create` | Conversation creation |
+| `defaults.chat.get_conversation` | `chat.conversation.read` | Conversation data acquisition |
+| `defaults.chat.list_conversations` | `chat.conversation.list` | Conversation list |
+| `defaults.chat.update_conversation` | `chat.conversation.update` | Conversation metadata update |
+| `defaults.chat.delete_conversation` | `chat.conversation.delete` | Conversation deletion |
+| `defaults.chat.export_conversation` | `chat.conversation.export` | Conversation export |
+| `defaults.chat.send` | `chat.message.send`, `ai.completion` | Message sending + AI response generation |
+| `defaults.chat.stream` | `chat.message.stream`, `ai.stream` | Streaming response |
+| `defaults.chat.add_message` | `chat.message.send` | Add message (AI no response) |
+| `defaults.chat.get_message` | `chat.message.read` | Get message |
+| `defaults.chat.update_message` | `chat.message.edit` | Edit message |
+| `defaults.chat.delete_message` | `chat.message.delete` | Delete message |
+| `defaults.chat.branch` | `chat.conversation.branch` | Conversation branching |
+| `defaults.chat.search` | `chat.search` | Message search |
+| `defaults.chat.stop` | `chat.message.stop` | Stop streaming |
+| `defaults.chat.regenerate` | `chat.message.regenerate`, `ai.completion` | Response regeneration |
 
-####代理人（6名经纪人）
+#### 代理人（6名经纪人）
 
-|处理程序 |所需权限 |描述 |
+| handler | Required permissions | Description |
 |---|---|---|
-| §鲁米§0§| §鲁米§1§，§鲁米§2§|代理执行|
-| §鲁米§0§| §鲁米§1§ |步骤审批|
-| §鲁米§0§| §鲁米§1§ |步骤拒绝|
-| §鲁米§0§| §鲁米§1§ |取消执行 |
-| §鲁米§0§| §鲁米§1§ |状态获取|
-| §鲁米§0§| §鲁米§1§ |制定计划|
+| `defaults.agent.execute` | `agent.execute`, `tool.invoke` | Agent execution |
+| `defaults.agent.approve` | `agent.step.approve` | Step approval |
+| `defaults.agent.reject` | `agent.step.reject` | Step Rejection |
+| `defaults.agent.cancel` | `agent.cancel` | Cancel execution |
+| `defaults.agent.status` | `agent.status.read` | Status acquisition |
+| `defaults.agent.plan` | `agent.plan.read` | Get a plan |
 
-####编码（12个处理程序）
+#### 编码（12个处理程序）
 
-|处理程序 |所需权限 |描述 |
+| handler | Required permissions | Description |
 |---|---|---|
-| §鲁米§0§| §鲁米§1§ |文件读取 |
-| §鲁米§0§| §鲁米§1§ |文件写入 |
-| §鲁米§0§| §鲁米§1§ |文件创建 |
-| §鲁米§0§| §鲁米§1§ |文件删除|
-| §鲁米§0§| §鲁米§1§ |文件搜索 |
-| §鲁米§0§| §鲁米§1§ |文件列表|
-| §鲁米§0§| §鲁米§1§ |命令执行 |
-| §鲁米§0§| §鲁米§1§ |流式输出 |
-| §鲁米§0§| §鲁米§1§ | git 状态 |
-| §鲁米§0§| §鲁米§1§ | git 差异 |
-| §鲁米§0§| §鲁米§1§ | git 提交 |
-| §鲁米§0§| §鲁米§1§ | git 推送 |
+| `defaults.coding.file_read` | `file.workspace.read` | File reading |
+| `defaults.coding.file_write` | `file.workspace.write` | File writing |
+| `defaults.coding.file_create` | `file.create` | File creation |
+| `defaults.coding.file_delete` | `file.delete` | File deletion |
+| `defaults.coding.file_search` | `file.search` | File search |
+| `defaults.coding.file_list` | `file.list` | File list |
+| `defaults.coding.terminal_exec` | `terminal.execute` | Command execution |
+| `defaults.coding.terminal_stream` | `terminal.stream` | Streaming output |
+| `defaults.coding.git_status` | `git.status` | Git status |
+| `defaults.coding.git_diff` | `git.diff` | Git diff |
+| `defaults.coding.git_commit` | `git.commit` | Git commit |
+| `defaults.coding.git_push` | `git.push` | Git push |
 
 #### ai（9个处理程序）
 
-|处理程序 |所需权限 |描述 |
+| handler | Required permissions | Description |
 |---|---|---|
-| §鲁米§0§| §鲁米§1§ |文本生成|
-| §鲁米§0§| §鲁米§1§ |流媒体一代|
-| §鲁米§0§| §鲁米§1§ |型号列表|
-| §鲁米§0§| §鲁米§1§ |供应商名单 |
-| §鲁米§0§| §鲁米§1§ |嵌入向量生成 |
-| §鲁米§0§| §鲁米§1§ |图像生成|
-| §鲁米§0§| §鲁米§1§ |图像分析|
-| §鲁米§0§| §鲁米§1§ |音频转录 |
-| §鲁米§0§| §鲁米§1§ |语音合成 |
+| `defaults.ai.complete` | `ai.completion` | Text generation |
+| `defaults.ai.stream` | `ai.stream` | Streaming generation |
+| `defaults.ai.models` | `ai.model.list` | Model list |
+| `defaults.ai.providers` | `ai.provider.list` | List of providers |
+| `defaults.ai.embed` | `ai.embedding` | Embedding vector generation |
+| `defaults.ai.image_gen` | `ai.image.generate` | Image generation |
+| `defaults.ai.image_analyze` | `ai.image.analyze` | Image analysis |
+| `defaults.ai.transcribe` | `ai.audio.transcribe` | Audio transcription |
+| `defaults.ai.tts` | `ai.audio.synthesize` | Speech synthesis |
 
-####工具（5个handler）
+#### 工具（5个handler）
 
-|处理程序 |所需权限 |描述 |
+| handler | Required permissions | Description |
 |---|---|---|
-| §鲁米§0§| §鲁米§1§ |工具执行 |
-| §鲁米§0§| §鲁米§1§ |工具清单 |
-| §鲁米§0§| §鲁米§1§ |架构阅读|
-| §鲁米§0§| §鲁米§1§ | MCP 服务器连接 |
-| §鲁米§0§| §鲁米§1§ | MCP 工具列表 |
+| `defaults.tool.invoke` | `tool.invoke` | Tool execution |
+| `defaults.tool.list` | `tool.list` | Tool list |
+| `defaults.tool.schema` | `tool.schema.read` | Schema reading |
+| `defaults.tool.mcp_connect` | `tool.mcp.connect` | MCP server connection |
+| `defaults.tool.mcp_list` | `tool.mcp.list` | MCP tools list |
 
-####提示（4个handler）
+#### 提示（4个handler）
 
-|处理程序 |所需权限 |描述 |
+| handler | Required permissions | Description |
 |---|---|---|
-| §鲁米§0§| §鲁米§1§ |提示渲染 |
-| §鲁米§0§| §鲁米§1§ |提示列表 |
-| §鲁米§0§| §鲁米§1§ |快速创建 |
-| §鲁米§0§| §鲁米§1§，§鲁米§2§|系统提示管理 |
+| `defaults.prompt.render` | `prompt.render` | Prompt rendering |
+| `defaults.prompt.list` | `prompt.list` | Prompt list |
+| `defaults.prompt.create` | `prompt.create` | Prompt creation |
+| `defaults.prompt.system` | `prompt.system.read`, `prompt.system.write` | System prompt management |
 
-####内存（5个处理程序）
+#### 内存（5个处理程序）
 
-|处理程序 |所需权限 |描述 |
+| handler | Required permissions | Description |
 |---|---|---|
-| §鲁米§0§| §鲁米§1§ |长期记忆存储|
-| §鲁米§0§| §鲁米§1§，§鲁米§2§|长期记忆搜索/读取 |
-| §鲁米§0§| §鲁米§1§ |读取项目内存|
-| §鲁米§0§| §鲁米§1§ |载体保存|
-| §鲁米§0§| §鲁米§1§ |矢量搜索|
+| `defaults.memory.store` | `memory.long.write` | Long-term memory storage |
+| `defaults.memory.recall` | `memory.long.read`, `memory.long.search` | Long-term memory search/read |
+| `defaults.memory.project_context` | `memory.project.read` | Read project memory |
+| `defaults.memory.vector_store` | `memory.vector.store` | Vector preservation |
+| `defaults.memory.vector_query` | `memory.vector.query` | Vector search |
 
-####媒体（6个处理程序）
+#### 媒体（6个处理程序）
 
-|处理程序 |所需权限 |描述 |
+| handler | Required permissions | Description |
 |---|---|---|
-| §鲁米§0§| §鲁米§1§ |图像读取|
-| §鲁米§0§| §鲁米§1§ |图像转换 |
-| §鲁米§0§| §鲁米§1§ |文献分析|
-| §鲁米§0§| §鲁米§1§ |剪贴板阅读|
-| §鲁米§0§| §鲁米§1§ |剪贴板书写|
-| §鲁米§0§| §鲁米§1§ |截图|
+| `defaults.media.image_read` | `media.image.read` | Image reading |
+| `defaults.media.image_transform` | `media.image.transform` | Image conversion |
+| `defaults.media.doc_parse` | `media.document.parse` | Document analysis |
+| `defaults.media.clipboard_read` | `media.clipboard.read` | Clipboard reading |
+| `defaults.media.clipboard_write` | `media.clipboard.write` | Clipboard writing |
+| `defaults.media.screenshot` | `media.screenshot` | Screenshot |
 
 ### 使用处理程序的另一个包的示例
 
@@ -774,22 +766,22 @@ user_data/
 
 ## 文档列表
 
-|文件|尺寸|内容 |
+| File | Size | Contents |
 |---------|--------|------|
-| §鲁米§0§| 3.9KB |整体架构|defaults
-| §鲁米§0§| 41KB |代理设计|
-| §鲁米§0§| 53KB | AI客户端设计|
-| §鲁米§0§| 43KB |聊天模块设计 |
-| §鲁米§0§| 36KB |流程引擎设计|
-| §鲁米§0§| 32KB |及时设计 |
-| §鲁米§0§| 35KB |工具模块设计 |
-| §鲁米§0§| - |前端设计（预定改版）|
-| §鲁米§0§| - | Widget规格（新规划）|
-| §鲁米§0§| - |主题规格（新规划）|
-| §鲁米§0§| 3.2KB | AI模型简介 |
-| §鲁米§0§| 3.4KB |冲突解决 |
-| §鲁米§0§| 4.2KB |用户界面和布局 |
-| §鲁米§0§| 9.2KB |能力依赖解析|
+| `docs/architecture_defaults.md` | 3.9KB | defaults Overall architecture |
+| `docs/agent.md` | 41KB | Agent design |
+| `docs/ai_client.md` | 53KB | AI client design |
+| `docs/chat.md` | 43KB | Chat module design |
+| `docs/flow.md` | 36KB | Flow Engine design |
+| `docs/prompt.md` | 32KB | Prompt design |
+| `docs/tool.md` | 35KB | Tool module design |
+| `docs/frontend.md` | - | Front-end design (scheduled for revision) |
+| `docs/widget.md` | - | Widget specifications (newly planned) |
+| `docs/theme.md` | - | Theme specifications (newly planned) |
+| `docs/profiles_and_models.md` | 3.2KB | AI model profile |
+| `docs/conflict_resolution.md` | 3.4KB | Conflict resolution |
+| `docs/ui_and_layout.md` | 4.2KB | UI and layout |
+| `docs/capability/dependency-resolution.md` | 9.2KB | capability dependency resolution |
 
 ---
 

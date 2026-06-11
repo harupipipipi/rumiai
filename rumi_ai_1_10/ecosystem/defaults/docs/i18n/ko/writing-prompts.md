@@ -4,7 +4,7 @@
 
 # 프롬프트 작성
 
-기본 팩을 사용하여 프롬프트 템플릿을 생성하고 관리하기 위한 가이드입니다. 핸들러는 `blocks/prompt/`에서 구현되며 도메인 로직은 `domain/prompt/manager.py`(PromptManager), `domain/prompt/template.py`(PromptTemplate) 및 `domain/prompt/renderer.py`(렌더링)에서 구현됩니다.
+기본 팩을 사용하여 프롬프트 템플릿을 생성하고 관리하기 위한 가이드입니다. 핸들러는 `blocks/prompt/`에서 구현되고, 도메인 로직은 `domain/prompt/manager.py`(PromptManager), `domain/prompt/template.py`(PromptTemplate), `domain/prompt/renderer.py`(렌더링)에서 구현됩니다.
 
 ## 프롬프트 컨셉
 
@@ -12,7 +12,7 @@
 
 프롬프트는 메모리 내 dict + `user_data/shared/prompts/`에 대한 JSON 파일 지속성을 갖춘 `PromptManager`(싱글톤)에 의해 관리됩니다. 시작 시 JSON 파일에서 자동 로드됩니다.
 
-프롬프트와 도구는 `PromptTemplate`를 통해 상호 교환 가능합니다. `blocks/prompt/convert.py`을 사용하면 도구 → 프롬프트, 프롬프트 → 도구로 변환할 수 있습니다.
+프롬프트와 도구는 `PromptTemplate`을 통해 상호 교환 가능합니다. `blocks/prompt/convert.py`을 사용하면 도구 → 프롬프트, 프롬프트 → 도구를 변환할 수 있습니다.
 
 ## PromptTemplate의 형식
 
@@ -31,7 +31,7 @@ PromptTemplate(
 )
 ```
 
-지속형 JSON 형식은 다음과 같습니다(`domain/prompt/manager.py`의 `create_prompt()`).
+지속되는 JSON 형식은 다음과 같습니다(`domain/prompt/manager.py`의 `create_prompt()`).
 
 ```json
 {
@@ -50,26 +50,26 @@ PromptTemplate(
 }
 ```
 
-| 필드 | 유형 | 설명 |
+| Field | Type | Description |
 |---|---|---|
-| §루미§0§ | §루미§1§ | 자동으로 생성된 8자리 16진수 ID |
-| §루미§0§ | §루미§1§ | 프롬프트 이름(고유) |
-| §루미§0§ | §루미§1§ | 템플릿 본문(`body`의 별칭. 이전 버전과의 호환성을 위해 둘 다 유지) |
-| §루미§0§ | §루미§1§ | 템플릿 본문 |
-| §루미§0§ | §루미§1§ | 설명 |
-| §루미§0§ | §루미§1§ | 변수 정의 목록 |
-| §루미§0§ | §루미§1§ | 자유 형식 메타데이터 |
-| §루미§0§ | §루미§1§ | 생성 날짜 및 시간(ISO 8601) |
-| §루미§0§ | §루미§1§ | 업데이트된 날짜 및 시간(ISO 8601) |
+| `id` | `string` | Automatically generated 8-character hex ID |
+| `name` | `string` | Prompt name (unique) |
+| `content` | `string` | Template body (alias of `body`. Keep both for backwards compatibility) |
+| `body` | `string` | Template body |
+| `description` | `string` | Explanation |
+| `variables` | `list[dict]` | Variable definition list |
+| `metadata` | `dict` | Free-form metadata |
+| `created_at` | `string` | Creation date and time (ISO 8601) |
+| `updated_at` | `string` | Updated date and time (ISO 8601) |
 
 변수의 각 요소에는 다음과 같은 필드가 있습니다.
 
-| 필드 | 유형 | 설명 |
+| Field | Type | Description |
 |---|---|---|
-| §루미§0§ | §루미§1§ | 변수 이름 |
-| §루미§0§ | §루미§1§ | 유형(`"string"`, `"integer"` 등). 기본 `"string"` |
-| §루미§0§ | §루미§1§ | 기본값. `null`에는 없음 |
-| §루미§0§ | §루미§1§ | 필수인가요? 기본 `false` |
+| `name` | `string` | Variable name |
+| `type` | `string` | type (`"string"`, `"integer"`, etc.). Default `"string"` |
+| `default` | `any` | Default value. None for `null` |
+| `required` | `bool` | Is it required? Default `false` |
 
 이전 형식(`variables: ["var1", "var2"]`)도 지원되며 `_normalize_variables()`에서 새 형식으로 자동 변환됩니다.
 
@@ -77,23 +77,23 @@ PromptTemplate(
 
 ### 일반 변수
 
-`{{variable_name}}`에 설명되어 있습니다. 렌더링 중에 `variables` dict의 값으로 대체되었습니다. `domain/prompt/renderer.py`의 `render()` 기능은 `_VARIABLE_PATTERN = re.compile(r"\{\{\s*([\w.]+)\s*\}\}")`를 사용하여 한 번에 대체합니다.
+`{{variable_name}}`에 설명되어 있습니다. 렌더링 중에 `variables` dict의 값으로 대체되었습니다. `domain/prompt/renderer.py`의 `render()` 함수는 `_VARIABLE_PATTERN = re.compile(r"\{\{\s*([\w.]+)\s*\}\}")`를 사용하여 한 번에 대체합니다.
 
 존재하지 않는 변수는 그대로 유지됩니다(오류가 발생하지 않음). 공백이 허용됩니다(`{{ name }}`도 유효함).
 
 ### 특수 변수(컨텍스트 변수)
 
-`domain/prompt/template.py`에 정의된 `CONTEXT_VARIABLE_KEYS`.
+`CONTEXT_VARIABLE_KEYS`은 `domain/prompt/template.py`에 정의되어 있습니다.
 
-| 변수 이름 | 유형 | 설명 |
+| Variable name | Type | Description |
 |---|---|---|
-| §루미§0§ | §루미§1§ | 현재 컨텍스트의 총 토큰 수 |
-| §루미§0§ | §루미§1§ | 메시지 수 |
-| §루미§0§ | §루미§1§ | 메시지 내용. 목록/딕셔너리의 경우 JSON 문자열 |
-| §루미§0§ | §루미§1§ | 시스템 프롬프트 |
-| §루미§0§ | §루미§1§ | 대화 ID |
+| `{{context.total_tokens}}` | `int` | Total number of tokens in current context |
+| `{{context.message_count}}` | `int` | Number of messages |
+| `{{context.messages}}` | `string/list` | Message content. For list/dict, it is converted to JSON string |
+| `{{context.system_prompt}}` | `string` | System prompt |
+| `{{context.conversation_id}}` | `string` | Conversation ID |
 
-특수 변수는 `PromptManager.inject_context_variables(variables, context)`로 자동 주입됩니다. 사용자가 명시적으로 지정한 값은 덮어쓰이지 않습니다. 값은 컨텍스트 dict(`total_tokens`, `message_count` 등)의 해당 키에서 검색됩니다.
+특수 변수에는 `PromptManager.inject_context_variables(variables, context)`이 자동 주입됩니다. 사용자가 명시적으로 지정한 값은 덮어쓰이지 않습니다. 값은 컨텍스트 dict(`total_tokens`, `message_count` 등)의 해당 키에서 검색됩니다.
 
 ### 변수 추출 방법
 
@@ -112,7 +112,7 @@ template.list_context_variables()   # → ["context.total_tokens"]
 
 **처리자**: `defaults.prompt.create`(`blocks/prompt/create.py`)
 
-HTTP 전송에 대한 직접적인 프롬프트 생성 경로는 없습니다. `call_handler`를 통해 전화하세요.
+HTTP 전송에 대한 직접적인 프롬프트 생성 경로는 없습니다. `call_handler`을 통해 전화하세요.
 
 ```python
 result = context["call_handler"]("defaults.prompt.create", {
@@ -124,11 +124,11 @@ result = context["call_handler"]("defaults.prompt.create", {
 
 **입력_데이터**:
 
-| 필드 | 유형 | 필수 | 설명 |
+| Field | Type | Required | Description |
 |---|---|---|---|
-| §루미§0§ | §루미§1§ | 예 | 프롬프트 이름 |
-| §루미§0§ | §루미§1§ | 예 | 템플릿 본문 |
-| §루미§0§ | §루미§1§ | 아니요 | 변수 정의. `["var1"]` 형식(기존)과 `[{"name": "var1", ...}]` 형식(신규) 모두 가능 |
+| `name` | `string` | Yes | Prompt name |
+| `content` | `string` | Yes | Template body |
+| `variables` | `list` | No | Variable definition. Both `["var1"]` format (old) and `[{"name": "var1", ...}]` format (new) are possible |
 
 **반환 값**: `ok({"prompt": {...}})`
 
@@ -136,28 +136,22 @@ result = context["call_handler"]("defaults.prompt.create", {
 
 **처리자**: `defaults.prompt.list`(`blocks/prompt/list.py`)
 
-HTTP 전송에 대한 직접 프롬프트 목록 경로는 없습니다. `call_handler`를 통해 전화하세요.
+HTTP 전송에 대한 직접 프롬프트 목록 경로는 없습니다. `call_handler`을 통해 전화하세요.
 
 ```python
 result = context["call_handler"]("defaults.prompt.list", {})
 ```
 
-**input_data**: `{}`(매개변수 없음)
-
-**반환 값**: `ok({"prompts": [...]})`
+**입력_데이터**: `{}`(매개변수 없음)**반환 값**: `ok({"prompts": [...]})`
 
 ### 신속한 업데이트
 
-**처리자**: `defaults.prompt.update`(`blocks/prompt/update.py`)
+**처리기**: `defaults.prompt.update`(`blocks/prompt/update.py`)**HTTP**: `PUT /api/prompts/{name}`**input_data**:
 
-**HTTP**: §루미§0§
-
-**입력_데이터**:
-
-| 필드 | 유형 | 필수 | 설명 |
+| Field | Type | Required | Description |
 |---|---|---|---|
-| §루미§0§ | §루미§1§ | 예 | 업데이트할 프롬프트 이름(URL 경로에서 자동으로 삽입) |
-| §루미§0§ | §루미§1§ | 예 | 업데이트할 필드 |
+| `name` | `string` | Yes | Prompt name to be updated (automatically injected from URL path) |
+| `updates` | `dict` | Yes | Field to update |
 
 `updates`에 가능한 필드: `content`(또는 `body`), `description`, `variables`, `metadata`, `name`(이름 변경). 이름을 바꾸면 오래된 파일이 삭제되고 색인이 자동으로 업데이트됩니다.
 
@@ -165,15 +159,11 @@ result = context["call_handler"]("defaults.prompt.list", {})
 
 ### 삭제 프롬프트
 
-**처리자**: `defaults.prompt.delete`(`blocks/prompt/delete.py`)
+**처리기**: `defaults.prompt.delete`(`blocks/prompt/delete.py`)**HTTP**: `DELETE /api/prompts/{name}`**input_data**:
 
-**HTTP**: §루미§0§
-
-**입력_데이터**:
-
-| 필드 | 유형 | 필수 | 설명 |
+| Field | Type | Required | Description |
 |---|---|---|---|
-| §루미§0§ | §루미§1§ | 예 | 프롬프트 이름(URL 경로에서 자동 삽입) |
+| `name` | `string` | Yes | Prompt name (auto-injected from URL path) |
 
 **반환 값**: `ok({"deleted": "prompt_name"})`
 
@@ -181,7 +171,7 @@ result = context["call_handler"]("defaults.prompt.list", {})
 
 **처리자**: `defaults.prompt.render`(`blocks/prompt/render.py`)
 
-HTTP 전송을 위한 직접 렌더링 경로는 없습니다. `call_handler`를 통해 전화하세요.
+HTTP 전송을 위한 직접 렌더링 경로는 없습니다. `call_handler`을 통해 전화하세요.
 
 ```python
 result = context["call_handler"]("defaults.prompt.render", {
@@ -192,11 +182,11 @@ result = context["call_handler"]("defaults.prompt.render", {
 
 **입력_데이터**:
 
-| 필드 | 유형 | 필수 | 설명 |
+| Field | Type | Required | Description |
 |---|---|---|---|
-| §루미§0§ | §루미§1§ | 아니요 | 프롬프트 ID. 지정된 경우 PromptManager |
-| §루미§0§ | §루미§1§ | 아니요 | 템플릿 문자열을 직접 지정합니다. `prompt_id`가 우선 적용됩니다 |
-| §루미§0§ | §루미§1§ | 아니요 | 변수값 |
+| `prompt_id` | `string` | No | Prompt ID. When specified, retrieved from PromptManager |
+| `template` | `string` | No | Specify template string directly. `prompt_id` takes precedence |
+| `variables` | `dict` | No | Variable value |
 
 **반환 값**: `ok({"rendered": "rendered string", "prompt_id": "..." or null})`
 
@@ -210,21 +200,15 @@ result = context["call_handler"]("defaults.prompt.render", {
 
 ### 도구 ⇔ 프롬프트 변환
 
-**처리자**: `defaults.prompt.convert`(`blocks/prompt/convert.py`)
+**처리기**: `defaults.prompt.convert`(`blocks/prompt/convert.py`)**HTTP**: `POST /api/prompts/convert`**input_data**:
 
-**HTTP**: §루미§0§
-
-**입력_데이터**:
-
-| 필드 | 유형 | 필수 | 설명 |
+| Field | Type | Required | Description |
 |---|---|---|---|
-| §루미§0§ | §루미§1§ | 예 | `"tool"` 또는 `"prompt"` |
-| §루미§0§ | §루미§1§ | 예 | 소스 이름 |
-| §루미§0§ | §루미§1§ | 예 | `"tool"` 또는 `"prompt"`(source_type과 달라야 함) |
+| `source_type` | `string` | Yes | `"tool"` or `"prompt"` |
+| `source_name` | `string` | Yes | Source name |
+| `target_type` | `string` | Yes | `"tool"` or `"prompt"` (must be different from source_type) |
 
-**도구 → 프롬프트**: 도구의 `parameters`를 변수로 변환하고 `summary`을 템플릿 본문 헤더로 변환합니다. `PromptTemplate.from_tool_schema()`가 사용됩니다.
-
-**프롬프트 → 도구**: 템플릿 변수를 `parameters`로, 본문을 `execution.body`로 변환합니다. `PromptTemplate.to_tool_schema()`는 `execution.type: "prompt"`의 도구로 `ToolRegistry.register_dynamic()`에 사용되고 등록되어 있습니다. context.* 변수는 도구 매개변수에서 제외됩니다.
+**도구 → 프롬프트**: 도구의 `parameters`를 변수로, `summary`을 템플릿 본문 헤더로 변환합니다. `PromptTemplate.from_tool_schema()`를 사용합니다.**프롬프트 → 도구**: 템플릿 변수를 `parameters`로, 본문을 `execution.body`로 변환합니다. `PromptTemplate.to_tool_schema()`는 `execution.type: "prompt"`의 도구로 `ToolRegistry.register_dynamic()`에 사용 및 등록되어 있습니다. context.* 변수는 도구 매개변수에서 제외됩니다.
 
 ## 컨텍스트 가져오기의 예
 
@@ -237,7 +221,7 @@ result = context["call_handler"]("defaults.prompt.create", {
 })
 ```
 
-렌더링 시 컨텍스트를 전달하면 `inject_context_variables()`는 `context.message_count` 및 `context.conversation_id`를 자동 주입합니다.
+렌더링 시 컨텍스트를 전달하면 `inject_context_variables()`은 `context.message_count` 및 `context.conversation_id`를 자동으로 삽입합니다.
 
 ## 구체적인 예
 
@@ -288,10 +272,10 @@ result = context["call_handler"]("defaults.prompt.create", {
 
 `name`은 프롬프트의 목적을 명확하게 설명하는 이름이어야 합니다. 이렇게 하면 프롬프트 목록에서 해당 항목을 더 쉽게 식별할 수 있습니다.
 
-`variables`에 `required: true`를 적절하게 설정해 주세요. 필수 변수가 지정되지 않은 경우 `{{variable_name}}`가 출력에 남아 있습니다.
+`variables`에 `required: true`을 적절하게 설정해주세요. 필수 변수가 지정되지 않은 경우 `{{variable_name}}`가 출력에 남아 있습니다.
 
-`{{context.*}}` 변수를 사용하면 런타임 시 컨텍스트 정보를 `content`(본문)에 자동으로 주입할 수 있습니다. 사용자가 명시적으로 값을 지정하면 덮어쓰이지 않으므로 테스트 시 모의 값을 전달할 수 있습니다.
+런타임에 컨텍스트 정보를 `content`(본문)에 자동으로 삽입하려면 `{{context.*}}` 변수를 사용하십시오. 사용자가 명시적으로 값을 지정하면 덮어쓰이지 않으므로 테스트 시 모의 값을 전달할 수 있습니다.
 
 프롬프트에서 도구로 변환(`prompt → tool`)에서는 `context.*` 변수가 도구 매개변수에서 자동으로 제외됩니다. 이는 컨텍스트 변수가 런타임에 자동으로 삽입될 것으로 예상되기 때문입니다.
 
-지속성 파일(`user_data/shared/prompts/`)은 `PromptManager`에 의해 관리됩니다. 파일 이름은 `_safe_filename(name) + ".json"`에 의해 생성되며, 영숫자, 하이픈, 밑줄 이외의 문자는 밑줄로 변환됩니다.
+지속성 파일(`user_data/shared/prompts/`)은 `PromptManager`에서 관리됩니다. 파일명은 `_safe_filename(name) + ".json"`에 의해 생성되며, 영숫자, 하이픈, 밑줄 이외의 문자는 밑줄로 변환됩니다.

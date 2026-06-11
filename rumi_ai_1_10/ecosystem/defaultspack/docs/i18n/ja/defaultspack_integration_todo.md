@@ -2,7 +2,7 @@
 [EN](../../defaultspack_integration_todo.md) | [JP](./defaultspack_integration_todo.md) | [KR](../ko/defaultspack_integration_todo.md) | [CN](../zh-cn/defaultspack_integration_todo.md)
 <!-- docs-i18n-links:end -->
 
-#defaultspack 統合 TODO
+# defaultspack 統合 TODO
 
 ## 目標
 

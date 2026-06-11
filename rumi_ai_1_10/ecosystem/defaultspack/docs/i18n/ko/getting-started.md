@@ -40,8 +40,8 @@ ui/              ← 配信される build 済み frontend（shell.html, shell-a
 
 | 환경 변수 | 기본값 | 설명 |
 |---|---|---|
-| §루미§0§ | §루미§1§ | HTTP 서버 바인드 주소 |
-| §루미§0§ | §루미§1§ | HTTP 서버 포트 번호 |
+| `DEFAULTS_HTTP_HOST` | `127.0.0.1` | HTTP 서버 바인드 주소 |
+| `DEFAULTS_HTTP_PORT` | `8766` | HTTP 서버 포트 번호 |
 
 AI 공급자를 사용하는 경우 각 공급자에 대한 API 키도 설정합니다(예: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` 등). API 키가 설정되지 않은 경우 AI 호출은 스텁 응답(`[stub] AI response placeholder`)을 반환합니다.
 

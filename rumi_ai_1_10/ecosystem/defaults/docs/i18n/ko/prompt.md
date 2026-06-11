@@ -8,7 +8,7 @@
 
 프롬프트 모듈은 Rumi AI OS에서 프롬프트를 정의, 관리, 렌더링하는 역할을 담당하는 구성요소입니다.
 
-프롬프트는 ``function that receives a variable and returns text.'' The prompt module is completely passive and only works when the caller (agent, chat, etc.) calls `prompt_manager.render(prompt_id, 변수)`입니다. 프롬프트 모듈 자체는 아무것도 시작하지 않으며 다른 모듈을 방해하지 않습니다.
+프롬프트는 ``function that receives a variable and returns text.'' The prompt module is completely passive and only works when the caller (agent, chat, etc.) calls `prompt_manager.render(prompt_id,variables)`입니다. 프롬프트 모듈 자체는 아무것도 시작하지 않으며 다른 모듈을 방해하지 않습니다.
 
 템플릿 파일(Jinja2 구문)을 사용하는 선언적 정의와 Python 파일(prompt.py)을 사용하는 프로그래밍 가능한 확장을 모두 지원합니다.
 
@@ -96,7 +96,7 @@ user_data/packs/coding_pro_prompts/
 
 template.md라는 파일 하나만 넣으면 작동하는 가장 간단한 구성입니다.
 
-§루미§0§:
+`user_data/shared/prompts/my_prompt/template.md`:
 
 ```markdown
 あなたは {{ agent_name }} です。
@@ -352,11 +352,7 @@ VARIABLES = {
 
 ### 7.1 변수 분류
 
-**필수**는 호출자가 값을 전달해야 하는 변수입니다. 통과하지 못한 경우 유효성 검사기는 오류를 반환합니다.
-
-**선택**은 전달되지 않더라도 기본값이 사용되는 변수입니다. `source: system`을 지정하면 Variable_resolver가 시스템에서 자동으로 값을 검색합니다.
-
-**custom**은 이 프롬프트와 관련된 사용자 정의 지점입니다. 프롬프트(agent.json의 prompt_variables 또는 호출 코드) 사용자는 값을 재정의할 수 있습니다. 프롬프트 팩 사용자가 프롬프트 동작을 미세 조정하는 데 사용됩니다.
+**필수**는 호출자가 값을 전달해야 하는 변수입니다. 통과되지 않으면 검증자는 오류를 반환합니다.**선택 사항**은 통과되지 않아도 기본값이 사용되는 변수입니다. `source: system`을 지정하면 Variable_resolver가 시스템에서 자동으로 값을 검색합니다.**custom**은 이 프롬프트에 특정한 사용자 정의 지점입니다. 프롬프트(agent.json의 prompt_variables 또는 호출 코드) 사용자는 값을 재정의할 수 있습니다. 프롬프트 팩 사용자가 프롬프트 동작을 미세 조정하는 데 사용됩니다.
 
 변수의 개수에는 제한이 없습니다. 프롬프트.py의 pre_render 내에서 변수를 동적으로 생성하고 반환할 수도 있습니다.
 
@@ -366,7 +362,7 @@ Variable_resolver.py는 다음 우선순위에 따라 변수를 해결합니다.
 
 1. VARIABLES에 대한 사용자 정의 기본값(최하위 우선순위)
 2. VARIABLES의 선택적 기본값
-3. 시스템 변수(datetime, os_info 등, `source: system`으로 자동 획득)
+3. 시스템 변수(datetime, os_info 등, `source: system`로 자동 획득)
 4. Pack 변수 공급자가 제공하는 값
 5. Agent.json의 Prompt_variables에 지정된 값
 6. 호출 시 전달되는 매개변수(가장 높은 우선순위)
@@ -563,9 +559,9 @@ render(prompt_id, variables, context) が呼ばれる
 
 loader.py는 다음 순서로 모든 검색 경로를 검색하고 동일한 Prompt_id를 가진 모든 후보를 수집합니다.
 
-1. §루미§0§
+1.`user_data/shared/prompts/{prompt_id}/`
 2. `user_data/packs/*/prompts/{prompt_id}/`(모든 팩)
-3. §루미§0§
+3. `ecosystem/default/prompts/{prompt_id}/`
 
 ### 10.2 충돌 감지
 
@@ -766,34 +762,28 @@ user_data/packs/advanced_coding_prompts/
 
 ### 15.3 프롬프트 팩 유형
 
-**시스템 프롬프트 팩**은 상담원의 성격과 행동 강령을 정의하는 프롬프트 모음입니다.
-
-**Utility Prompt Pack**은 내부 처리(압축, 메모리 업데이트, 계획 등)를 위한 템플릿 모음입니다.
-
-**부분 팩**은 다른 프롬프트에서 포함된 부품 모음입니다.
-
-**전체 에이전트 팩**은 모든 프롬프트, 도구 및 에이전트 정의가 포함된 완전한 패키지입니다.
+**시스템 프롬프트 팩**은 상담원의 성격과 행동 강령을 정의하는 프롬프트 모음입니다.**유틸리티 프롬프트 팩**은 내부 처리(압축, 메모리 업데이트, 계획 등)를 위한 템플릿 모음입니다.**부분 팩**은 다른 프롬프트에서 포함된 부분 모음입니다.**전체 에이전트 팩**은 모든 프롬프트, 도구 및 에이전트 정의가 포함된 완전한 패키지입니다.
 
 
 ## 16. 내장 프롬프트
 
 Rumi AI OS에서 기본적으로 제공하는 프롬프트 목록입니다.
 
-| 프롬프트_ID | 유형 | 확장 | 사용법 |
+| prompt_id | type | extends | usage |
 |-----------|------|---------|------|
-| 일반_시스템 | 시스템 | — | 일반 시스템 프롬프트. 모든 에이전트의 기반 |
-| 코딩 시스템 | 시스템 | 일반_시스템 | 코딩별 시스템 프롬프트 |
-| 기록_압축 | 압축 | — | 대화 내용 압축 |
-| 메모리 업데이트 | 메모리 업데이트 | — | project.md / user.md 업데이트 |
-| 계획_작업_분해 | 계획 | — | 작업 분해 |
+| general_system | system | — | General system prompt. Foundation of all agents |
+| coding_system | system | general_system | Coding-specific system prompt |
+| history_compression | compression | — | Conversation history compression |
+| memory_update | memory_update | — | Update project.md / user.md |
+| planning_task_decomposition | planning | — | Task decomposition |
 
 부분:
 
-| 파일 | 사용법 |
+| File | Usage |
 |----------|------|
-| 부분/안전_규칙.md | 안전수칙 |
-| 부분/tool_instructions.md | 도구 사용에 대한 일반 지침 |
-| 부분/output_format.md | 출력 형식 지정 |
+| partials/safety_rules.md | Safety rules |
+| partials/tool_instructions.md | General guidelines for using the tool |
+| partials/output_format.md | Specifying output format |
 
 템플릿의 실제 텍스트가 아직 생성되지 않았습니다. 구조만 확인되었습니다.
 
@@ -937,7 +927,7 @@ class PromptLoader:
 
 ### 18.1 최소 구성(template.md만 해당)
 
-`user_data/shared/prompts/my_prompt/template.md` 파일 하나만 배치하면 됩니다.
+`user_data/shared/prompts/my_prompt/template.md` 파일 하나만 배치하세요.
 
 ### 18.2 전체 구성(prompt.py)
 

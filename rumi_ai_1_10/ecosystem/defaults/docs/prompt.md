@@ -352,11 +352,7 @@ Child template (coding_system/template.md):
 
 ### 7.1 Classification of variables
 
-**required** is a variable whose value must be passed by the caller. If not passed, validator will return an error.
-
-**optional** is a variable whose default value will be used even if it is not passed. Specifying `source: system` causes variable_resolver to automatically retrieve the value from the system.
-
-**custom** is a customization point specific to this prompt. The user of prompt (prompt_variables in agent.json or calling code) can override the value. Used by prompt pack users to fine-tune prompt behavior.
+**required** is a variable whose value must be passed by the caller. If not passed, validator will return an error.**optional** is a variable whose default value will be used even if it is not passed. Specifying `source: system` causes variable_resolver to automatically retrieve the value from the system.**custom** is a customization point specific to this prompt. The user of prompt (prompt_variables in agent.json or calling code) can override the value. Used by prompt pack users to fine-tune prompt behavior.
 
 There is no limit to the number of variables. You can also dynamically generate and return variables within pre_render in prompt.py.
 
@@ -766,13 +762,7 @@ user_data/packs/advanced_coding_prompts/
 
 ### 15.3 Prompt Pack Types
 
-**System Prompt Pack** is a collection of prompts that define an agent's personality and code of conduct.
-
-**Utility Prompt Pack** is a collection of templates for internal processing (compression, memory update, planning, etc.).
-
-**Partial Pack** is a collection of parts included from other prompts.
-
-**Full Agent Pack** is a complete package containing all prompts, tools, and agent definitions.
+**System Prompt Pack** is a collection of prompts that define an agent's personality and code of conduct.**Utility Prompt Pack** is a collection of templates for internal processing (compression, memory update, planning, etc.).**Partial Pack** is a collection of parts included from other prompts.**Full Agent Pack** is a complete package containing all prompts, tools, and agent definitions.
 
 
 ## 16. Built-in prompt

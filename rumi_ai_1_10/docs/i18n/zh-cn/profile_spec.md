@@ -14,8 +14,8 @@
 
 初步发现候选者：
 
-1.§鲁米§0§
-2.§鲁米§0§
+1.`user_data/shared/profiles/*.profile.yaml`
+2.`ecosystem/<pack_id>/profiles/*.profile.yaml`
 
 包提供的配置文件仅从通过现有包批准和哈希验证流程的包加载，与用于包提供的流程加载的信任边界匹配。用户共享配置文件是用户拥有的配置，但在注册或使用之前仍然需要架构验证和诊断。
 
@@ -93,21 +93,21 @@ node_settings:
 
 ## 必填字段
 
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
+- `profile_id`
+- `version`
+- `kind`
 
 ## 常用字段
 
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
-- §鲁米§0§
+- `enabled_nodes`
+- `disabled_nodes`
+- `default_graph`
+- `default_flow`
+- `viewer.palette`
+- `permissions`
+- `policy`
+- `node_settings`
+- `locale`
 
 ## 节点可用性
 
