@@ -1,0 +1,17 @@
+example:
+  intent: incident review transcript-to-decisions with unresolved ownership marked
+  inputs:
+  - source_type: transcript_text
+    source_id: incident_review_transcript_004
+    source_span: 00:03:10-00:49:55
+  expected_result: transcript_to_decision_log
+  required_outputs:
+  - decision_records
+  - action_items
+  - open_questions
+  - evidence_ledger_entries
+  draft_only: true
+  human_review_required: true
+  handoffs:
+  - rumi_connector_gateway_pack
+  - rumi_workflow_scheduler_pack

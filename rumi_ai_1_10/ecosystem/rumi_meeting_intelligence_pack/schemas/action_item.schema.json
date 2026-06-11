@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "MeetingActionItem",
+  "type": "object",
+  "required": [
+    "action_id",
+    "owner",
+    "task",
+    "due_date_confidence",
+    "source_evidence_ids",
+    "handoff_owner"
+  ],
+  "properties": {
+    "action_id": {
+      "type": "string"
+    },
+    "owner": {
+      "type": "string"
+    },
+    "task": {
+      "type": "string"
+    },
+    "due_date_confidence": {
+      "enum": [
+        "explicit",
+        "inferred",
+        "missing"
+      ]
+    },
+    "source_evidence_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "handoff_owner": {
+      "type": "string"
+    }
+  }
+}
