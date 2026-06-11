@@ -1,0 +1,25 @@
+quality_matrix:
+  pack_id: rumi_code_migration_pack
+  minimum_pass: all_blocking_checks
+  checks:
+  - id: inventory_complete
+    blocking: true
+    evidence: inventory_complete_evidence_ref
+  - id: codemod_dry_run_required
+    blocking: true
+    evidence: codemod_dry_run_required_evidence_ref
+  - id: generated_files_excluded
+    blocking: true
+    evidence: generated_files_excluded_evidence_ref
+  - id: pr_shards_blast_radius_limited
+    blocking: true
+    evidence: pr_shards_blast_radius_limited_evidence_ref
+  - id: compatibility_matrix_reviewed
+    blocking: true
+    evidence: compatibility_matrix_reviewed_evidence_ref
+  - id: rollback_plan_linked
+    blocking: true
+    evidence: rollback_plan_linked_evidence_ref
+  - id: owner_handoff_named
+    blocking: true
+    evidence: owner_handoff_named_evidence_ref

@@ -1,0 +1,19 @@
+negative_cases:
+  pack_id: rumi_code_migration_pack
+  cases:
+  - attempted_codemod_execution
+  - missing_rollback_plan
+  - unbounded_pr_shard
+  - generated_files_included
+  - pr_merge_claimed_by_pack
+  expected_behavior: block_or_handoff_without_external_action
+  blocked_requests:
+  - execute codemods
+  - edit files directly
+  - run terminal command loops
+  - create pull requests
+  - merge pull requests
+  - publish release notes
+  - deploy changes
+  - record telemetry
+  - claim migration success without checks
