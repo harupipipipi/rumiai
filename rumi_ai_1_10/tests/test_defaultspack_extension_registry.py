@@ -607,4 +607,5 @@ def test_build_fallback_http_routes_contains_core_routes():
     assert ("POST", "^/v1/chat/completions$") in route_methods
     assert ("GET", "^/api/health$") in route_methods
     assert ("GET", "^/api/tools/mcp$") in route_methods
+    assert ("DELETE", "^/api/tools/mcp$") in route_methods
     assert ("POST", "^/api/tools/mcp/connect$") in route_methods

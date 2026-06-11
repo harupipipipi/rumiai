@@ -2081,7 +2081,6 @@ class PackAPIHandler(
         self._request_auth_mode = None
         self._panel_session = None
         self._panel_session_cookie = None
-        result: Any = None
         # --- テーブル駆動: 認証チェック ---
         if not self._is_pre_auth_route("PUT", _pre_auth_path_put) and not self._check_auth("PUT", _pre_auth_path_put):
             self._discard_request_body()
