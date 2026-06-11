@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rumi.local/schemas/source_quality_label.schema.json",
+  "title": "Source Quality Label",
+  "description": "Quality label for a source.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "quality_label_id",
+    "source_id",
+    "credibility",
+    "recency_state",
+    "bias_notes",
+    "review_state"
+  ],
+  "properties": {
+    "quality_label_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "credibility": {
+      "type": "string",
+      "enum": [
+        "unknown",
+        "low",
+        "medium",
+        "high"
+      ]
+    },
+    "recency_state": {
+      "type": "string",
+      "enum": [
+        "current",
+        "stale",
+        "undated",
+        "not_time_sensitive"
+      ]
+    },
+    "bias_notes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "review_state": {
+      "type": "string",
+      "enum": [
+        "draft",
+        "reviewed",
+        "blocked"
+      ]
+    }
+  }
+}
