@@ -91,9 +91,13 @@ def _sync_core_runtime_alias(module_name: str, module=None) -> None:
     if alias_name:
         existing_alias = sys.modules.get(alias_name)
         if existing_alias is not None and existing_alias is not module:
-            sys.modules[module_name] = existing_alias
-            _bind_parent_module(module_name, existing_alias)
-            module = existing_alias
+            if _is_real_core_runtime_module(existing_alias) and not _is_real_core_runtime_module(module):
+                sys.modules[module_name] = existing_alias
+                _bind_parent_module(module_name, existing_alias)
+                module = existing_alias
+            else:
+                sys.modules[alias_name] = module
+                _bind_parent_module(alias_name, module)
         else:
             sys.modules[alias_name] = module
             _bind_parent_module(alias_name, module)
@@ -334,8 +338,14 @@ def _install_capability_handler_registry_shim() -> None:
 def _force_real_import(module_name: str) -> None:
     """collection 時の sys.modules 汚染を、必要なテストの前に実 module へ戻す。"""
     sys.modules.pop(module_name, None)
+    alias_name = _alias_for_module(module_name)
+    if alias_name:
+        sys.modules.pop(alias_name, None)
     module = importlib.import_module(module_name)
     _bind_parent_module(module_name, module)
+    if alias_name:
+        sys.modules[alias_name] = module
+        _bind_parent_module(alias_name, module)
 
 
 def _sync_alias_module(alias_name: str, target_name: str) -> None:
@@ -407,6 +417,7 @@ _ALIAS_MODULES = (
 )
 
 _RESTORE_SKIP_PREFIXES = (
+    "tests/test_bug_20260305_01_flow_fallback.py",
     "tests/test_wave20a_active_ecosystem_hmac.py",
     "tests/test_wave20b_container_cleanup.py",
     "tests/test_wave21a_host_privilege_hardening.py",
