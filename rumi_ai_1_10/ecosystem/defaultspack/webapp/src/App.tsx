@@ -531,7 +531,11 @@ function CalendarComposerPanel({
   const calendarCells = Array.from({ length: 42 }, (_, index): CalendarCell => {
     const date = new Date(year, month, 1 + index - monthStartOffset);
     const isCurrentMonth = date.getMonth() === month;
-    const isToday = date.getFullYear() === year && date.getMonth() === month && date.getDate() === today.getDate();
+    const isToday = (
+      date.getFullYear() === today.getFullYear()
+      && date.getMonth() === today.getMonth()
+      && date.getDate() === today.getDate()
+    );
     const row = Math.floor(index / 7);
     const col = index % 7;
     return {
@@ -789,14 +793,15 @@ function CalendarComposerPanel({
     <section
       ref={calendarRef}
       aria-label="Calendar month"
-      className="relative h-full min-h-0 w-full overflow-hidden rounded-[26px] border border-zinc-800 bg-[#101112] shadow-[0_24px_80px_rgba(0,0,0,0.36)]"
+      className="relative flex h-full min-h-0 w-full flex-col overflow-hidden rounded-lg border border-zinc-800 bg-[#101112] shadow-[0_20px_60px_rgba(0,0,0,0.32)]"
     >
-      <div className="pointer-events-none absolute left-4 top-3 rumi-layer-local-popover flex items-center gap-2">
+      <div className="flex h-12 flex-shrink-0 items-center justify-between border-b border-zinc-800/80 bg-[#121314] px-4">
+        <div className="flex items-center gap-2">
         <button
           type="button"
           aria-label="前の月"
           title="前の月"
-          className="pointer-events-auto flex h-8 w-8 items-center justify-center rounded-lg border border-zinc-700/80 bg-zinc-950/82 text-lg leading-none text-zinc-300 shadow-lg backdrop-blur transition-colors hover:border-zinc-500 hover:bg-zinc-900 hover:text-zinc-50"
+          className="flex h-8 w-8 items-center justify-center rounded-md border border-zinc-700/80 bg-zinc-950/70 text-lg leading-none text-zinc-300 transition-colors hover:border-zinc-500 hover:bg-zinc-900 hover:text-zinc-50"
           onClick={() => moveVisibleMonth(-1)}
         >
           ‹
@@ -805,7 +810,7 @@ function CalendarComposerPanel({
           type="button"
           aria-label="今日"
           title="今日"
-          className="pointer-events-auto rounded-lg border border-zinc-700/80 bg-zinc-950/82 px-3 py-1.5 text-[12px] font-semibold text-zinc-200 shadow-lg backdrop-blur transition-colors hover:border-zinc-500 hover:bg-zinc-900 hover:text-zinc-50"
+          className="rounded-md border border-zinc-700/80 bg-zinc-950/70 px-3 py-1.5 text-[12px] font-semibold text-zinc-200 transition-colors hover:border-zinc-500 hover:bg-zinc-900 hover:text-zinc-50"
           onClick={returnToToday}
         >
           {year}年{month + 1}月
@@ -814,13 +819,15 @@ function CalendarComposerPanel({
           type="button"
           aria-label="次の月"
           title="次の月"
-          className="pointer-events-auto flex h-8 w-8 items-center justify-center rounded-lg border border-zinc-700/80 bg-zinc-950/82 text-lg leading-none text-zinc-300 shadow-lg backdrop-blur transition-colors hover:border-zinc-500 hover:bg-zinc-900 hover:text-zinc-50"
+          className="flex h-8 w-8 items-center justify-center rounded-md border border-zinc-700/80 bg-zinc-950/70 text-lg leading-none text-zinc-300 transition-colors hover:border-zinc-500 hover:bg-zinc-900 hover:text-zinc-50"
           onClick={() => moveVisibleMonth(1)}
         >
           ›
         </button>
+        </div>
+        <div className="h-8 w-[112px]" aria-hidden="true" />
       </div>
-      <div className="grid h-full min-h-[620px] grid-cols-7 grid-rows-6 overflow-hidden">
+      <div className="grid min-h-0 flex-1 grid-cols-7 grid-rows-6 overflow-hidden">
         {calendarCells.map((cell, index) => {
           const visibleItems = (itemsByDate[cell.key] ?? []).slice(0, settings.maxItemsPerDay);
           const hiddenCount = Math.max(0, (itemsByDate[cell.key] ?? []).length - visibleItems.length);
