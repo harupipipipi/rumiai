@@ -251,7 +251,7 @@ class ContainerOrchestrator:
         name = container_name or f"rumi-uc-{pack_id}-{uuid.uuid4().hex[:8]}"
 
         builder = (
-            DockerRunBuilder()
+            DockerRunBuilder(name=name)
             .set_pids_limit(100)
             .add_volume(workspace_dir, "/workspace", read_only=True)
             .set_workdir("/workspace")
