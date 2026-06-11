@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from .paths import ECOSYSTEM_DIR, find_ecosystem_json
+from .validation import check_path_within, is_safe_staging_id
 
 BACKUP_ROOT = "user_data/pack_backups"
 STAGING_ROOT = "user_data/pack_staging"
@@ -59,6 +60,15 @@ class PackApplier:
     def _now_ts_safe() -> str:
         return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
+    def _staging_dir_for(self, staging_id: str) -> Optional[Path]:
+        if not is_safe_staging_id(staging_id):
+            return None
+        staging_dir = self._staging_root / str(staging_id)
+        path_ok, _ = check_path_within(staging_dir, self._staging_root)
+        if not path_ok:
+            return None
+        return staging_dir
+
     def apply(
         self,
         staging_id: str,
@@ -68,7 +78,9 @@ class PackApplier:
         if mode != "replace":
             return ApplyResult(success=False, error=f"Unsupported mode: {mode}")
 
-        staging_dir = self._staging_root / staging_id
+        staging_dir = self._staging_dir_for(staging_id)
+        if staging_dir is None:
+            return ApplyResult(success=False, error=f"Invalid staging_id: {staging_id}")
         if not staging_dir.exists():
             return ApplyResult(success=False, error=f"Staging not found: {staging_id}")
 
@@ -162,6 +174,15 @@ class PackApplier:
             },
         )
         return result
+
+    def apply_staging(
+        self,
+        staging_id: str,
+        mode: str = "replace",
+        actor: str = "api_user",
+    ) -> ApplyResult:
+        """Compatibility wrapper for callers that still use the old name."""
+        return self.apply(staging_id, mode=mode, actor=actor)
 
     def _apply_single_pack(
         self,

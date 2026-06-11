@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import shutil
 import time
 from dataclasses import asdict, dataclass, field
@@ -24,6 +25,16 @@ class PatchMode(str, Enum):
 
 
 PACK_REQUEST_MODES = frozenset(mode.value for mode in PatchMode)
+_STAGING_ID_RE = re.compile(r"^[a-fA-F0-9]{16}$")
+
+
+def _is_safe_staging_id(value: str) -> bool:
+    try:
+        from core_runtime.validation import is_safe_staging_id
+
+        return is_safe_staging_id(value)
+    except Exception:
+        return bool(value and _STAGING_ID_RE.fullmatch(str(value)))
 
 
 @dataclass
@@ -249,6 +260,8 @@ class ExtensionManager:
     ) -> Dict[str, Any]:
         if not staging_id:
             return {"error": "staging_id is required", "status_code": 400}
+        if not _is_safe_staging_id(staging_id):
+            return {"error": "invalid staging_id", "status_code": 400}
         try:
             request = self.create_request(
                 mode,
@@ -315,12 +328,44 @@ class ExtensionManager:
             return {"error": f"Unknown request: {request_id}", "status_code": 404}
         if request.status != "pending":
             return {"error": f"Request is not pending: {request.status}", "status_code": 409}
+        if not _is_safe_staging_id(request.staging_id):
+            return {"error": "invalid staging_id", "status_code": 400}
+
+        try:
+            from core_runtime.pack_applier import PackApplier
+
+            apply_result = PackApplier(
+                ecosystem_dir=str(self.ecosystem_dir),
+                backup_root=str(self.backup_root),
+            ).apply(request.staging_id, mode="replace", actor=reviewer)
+        except Exception as exc:
+            request.error = str(exc)
+            request.reviewed_at = self._now_ts()
+            self._write_request(request)
+            return {"error": "pack apply failed", "detail": str(exc), "status_code": 500}
+
+        if not getattr(apply_result, "success", False):
+            request.error = getattr(apply_result, "error", None) or "pack apply failed"
+            request.reviewed_at = self._now_ts()
+            self._write_request(request)
+            payload = apply_result.to_dict() if hasattr(apply_result, "to_dict") else {"error": request.error}
+            payload.setdefault("status_code", 500)
+            return payload
+
         request.status = "applied"
         request.reviewed_at = self._now_ts()
         request.applied_at = request.reviewed_at
         request.decision_notes = decision_notes
+        request.applied_pack_ids = list(getattr(apply_result, "applied_pack_ids", []) or [])
+        request.backup_paths = dict(getattr(apply_result, "backup_paths", {}) or {})
+        request.error = None
         self._write_request(request)
-        self._audit.append({"action": "approve_request", "request_id": request_id, "reviewer": reviewer})
+        self._audit.append({
+            "action": "approve_request",
+            "request_id": request_id,
+            "reviewer": reviewer,
+            "applied_pack_ids": request.applied_pack_ids,
+        })
         return request.to_dict()
 
     def reject_request(

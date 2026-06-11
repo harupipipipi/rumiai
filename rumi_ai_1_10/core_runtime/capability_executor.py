@@ -722,9 +722,10 @@ class CapabilityExecutor:
             entrypoint = entry.entrypoint or "main.py:run"
             function_dir = Path(entry.function_dir) if entry.function_dir else Path(".")
             ep_file = entrypoint.rsplit(":", 1)[0] if ":" in entrypoint else entrypoint
+            trusted_handler_path = Path(entry.main_py_path) if getattr(entry, "main_py_path", None) else function_dir / ep_file
             adapter = _HandlerDefAdapter(handler_id=entry.qualified_name, permission_id=effective_permission_id,
                                           entrypoint=entrypoint, handler_dir=function_dir,
-                                          handler_py_path=function_dir / ep_file, is_builtin=getattr(entry, "is_builtin", False))
+                                          handler_py_path=trusted_handler_path, is_builtin=getattr(entry, "is_builtin", False))
             return self._execute_handler_subprocess(handler_def=adapter, principal_id=principal_id,
                                                      permission_id=effective_permission_id, grant_config=grant_config,
                                                      args=args, timeout_seconds=timeout_seconds,
@@ -764,9 +765,10 @@ class CapabilityExecutor:
             entrypoint = entry.entrypoint or "main.py:run"
             function_dir = Path(entry.function_dir) if entry.function_dir else Path(".")
             ep_file = entrypoint.rsplit(":", 1)[0] if ":" in entrypoint else entrypoint
+            trusted_handler_path = Path(entry.main_py_path) if getattr(entry, "main_py_path", None) else function_dir / ep_file
             adapter = _HandlerDefAdapter(handler_id=entry.qualified_name, permission_id=effective_permission_id,
                                           entrypoint=entrypoint, handler_dir=function_dir,
-                                          handler_py_path=function_dir / ep_file, is_builtin=getattr(entry, "is_builtin", False))
+                                          handler_py_path=trusted_handler_path, is_builtin=getattr(entry, "is_builtin", False))
             return self._execute_handler_subprocess(handler_def=adapter, principal_id=principal_id,
                                                      permission_id=effective_permission_id, grant_config=grant_config,
                                                      args=args, timeout_seconds=timeout_seconds,
@@ -1382,8 +1384,20 @@ class CapabilityExecutor:
         return CapabilityResponse(success=True, output=result, latency_ms=latency_ms)
 
     def _execute_handler_subprocess(self, handler_def, principal_id, permission_id, grant_config, args, timeout_seconds, request_id, start_time, request_context=None):
+        if ":" not in str(handler_def.entrypoint or ""):
+            return CapabilityResponse(success=False, error="Invalid handler entrypoint", error_type="invalid_entrypoint", latency_ms=(time.time() - start_time) * 1000)
         ep_file, ep_func = handler_def.entrypoint.rsplit(":", 1)
-        handler_py_path = handler_def.handler_dir / ep_file
+        try:
+            handler_dir = Path(handler_def.handler_dir).resolve()
+            handler_py_path = (handler_dir / ep_file).resolve()
+            handler_py_path.relative_to(handler_dir)
+            trusted_handler_path = Path(handler_def.handler_py_path).resolve()
+        except (OSError, ValueError, TypeError):
+            return CapabilityResponse(success=False, error="Invalid handler entrypoint", error_type="invalid_entrypoint", latency_ms=(time.time() - start_time) * 1000)
+        if trusted_handler_path != handler_py_path:
+            return CapabilityResponse(success=False, error="Handler entrypoint does not match trusted registry path", error_type="invalid_entrypoint", latency_ms=(time.time() - start_time) * 1000)
+        if not handler_py_path.is_file():
+            return CapabilityResponse(success=False, error="Handler entrypoint not found", error_type="entrypoint_not_found", latency_ms=(time.time() - start_time) * 1000)
         context = dict(request_context or {}) if isinstance(request_context, dict) else {}
         context.update({"principal_id": principal_id, "permission_id": permission_id, "handler_id": handler_def.handler_id, "grant_config": grant_config, "request_id": request_id, "ts": self._now_ts()})
         input_json = self._build_runner_payload(str(handler_py_path), ep_func, context, args)

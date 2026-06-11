@@ -28,7 +28,12 @@ class TestDefaultspackApiRoutes(unittest.TestCase):
         class _Registry:
             packs = {"defaultspack": _PackInfo()}
 
-        count = PackAPIHandler.load_api_routes(_Registry(), pack_ids={"defaultspack"})
+        with patch.object(
+            PackAPIHandler,
+            "_is_pack_approved_for_runtime_routes",
+            return_value=True,
+        ):
+            count = PackAPIHandler.load_api_routes(_Registry(), pack_ids={"defaultspack"})
         self.assertEqual(count, 16)
         self.assertIn(("GET", "/api/defaultspack/modules"), PackAPIHandler._api_route_exact)
         self.assertIn(("GET", "/api/defaultspack/pack-requests"), PackAPIHandler._api_route_exact)
@@ -36,7 +41,7 @@ class TestDefaultspackApiRoutes(unittest.TestCase):
         self.assertIn(("POST", "/api/tools/mcp/connect"), PackAPIHandler._api_route_exact)
         self.assertEqual(
             PackAPIHandler._api_route_exact[("GET", "/api/defaultspack/modules")]["function_id"],
-            "list_modules",
+            "management_list_modules",
         )
         self.assertEqual(
             PackAPIHandler._api_route_exact[("GET", "/api/tools/mcp")]["function_id"],
@@ -67,7 +72,11 @@ class TestDefaultspackApiRoutes(unittest.TestCase):
         sent = []
         handler._send_result = sent.append
 
-        with patch(
+        with patch.object(
+            PackAPIHandler,
+            "_is_pack_approved_for_runtime_routes",
+            return_value=True,
+        ), patch(
             "core_runtime.pack_function_runtime.invoke_pack_function",
             return_value={"ok": True},
         ) as mocked:
@@ -90,7 +99,7 @@ class TestDefaultspackApiRoutes(unittest.TestCase):
         route_entry = {
             "pack_id": "defaultspack",
             "handler": "",
-            "function_id": "review_pack_request",
+            "function_id": "pack_request_review",
             "pass_body": True,
             "response_mode": "result",
             "args": {"decision": "approve"},
@@ -108,7 +117,11 @@ class TestDefaultspackApiRoutes(unittest.TestCase):
         handler = PackAPIHandler.__new__(PackAPIHandler)
         handler._send_result = lambda result: None
 
-        with patch(
+        with patch.object(
+            PackAPIHandler,
+            "_is_pack_approved_for_runtime_routes",
+            return_value=True,
+        ), patch(
             "core_runtime.pack_function_runtime.invoke_pack_function",
             return_value={"ok": True},
         ) as mocked:
@@ -125,7 +138,7 @@ class TestDefaultspackApiRoutes(unittest.TestCase):
         self.assertTrue(dispatched)
         mocked.assert_called_once_with(
             "defaultspack",
-            "review_pack_request",
+            "pack_request_review",
             {
                 "decision": "approve",
                 "decision_notes": "nope",

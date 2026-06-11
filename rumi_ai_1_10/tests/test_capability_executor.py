@@ -7,6 +7,7 @@ test_capability_executor.py - CapabilityExecutor ユニットテスト
 from __future__ import annotations
 
 import sys
+import tempfile
 import threading
 import time
 import unittest
@@ -180,7 +181,17 @@ class TestExecuteSuccess(unittest.TestCase):
     @patch("core_runtime.capability_executor.compute_file_sha256", return_value="sha256_abc")
     def test_execute_success(self, mock_sha, mock_audit_module):
         mock_audit_module.return_value = MagicMock()
-        handler_def = _MockHandlerDef(is_builtin=True)
+        tmp_ctx = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp_ctx.cleanup)
+        handler_dir = Path(tmp_ctx.name)
+        handler_path = handler_dir / "handler.py"
+        handler_path.write_text("def handle(ctx, args): return {'result': 'ok'}\n", encoding="utf-8")
+        handler_def = _MockHandlerDef(
+            handler_py_path=str(handler_path),
+            handler_dir=handler_dir,
+            entrypoint="handler.py:handle",
+            is_builtin=True,
+        )
         registry = MagicMock()
         registry.get_by_permission_id.return_value = handler_def
 

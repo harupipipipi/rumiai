@@ -6,7 +6,7 @@ import json
 import sys
 import unittest
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 # テスト対象のモジュールへのパスを追加
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -53,6 +53,19 @@ class TestCompileTemplatePath(unittest.TestCase):
 
 class TestApiRouteTableBuild(unittest.TestCase):
     """load_api_routes のテスト（モック registry 使用）"""
+
+    def setUp(self):
+        from core_runtime.pack_api_server import PackAPIHandler
+
+        self._approval_patcher = patch.object(
+            PackAPIHandler,
+            "_is_pack_approved_for_runtime_routes",
+            return_value=True,
+        )
+        self._approval_patcher.start()
+
+    def tearDown(self):
+        self._approval_patcher.stop()
 
     def _make_mock_registry(self, api_routes):
         pack_info = MagicMock()
