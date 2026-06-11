@@ -319,7 +319,7 @@ def build_review_messages(
 ) -> list[dict[str, Any]]:
     review_payload = {
         "phase": "review",
-        "user_messages": original_messages,
+        "user_messages": reviewer_visible_user_messages(original_messages),
         "draft_answer": draft,
         "criteria": RUMI_CRITERIA,
         "freshness_summary": context.get("freshness_summary", {}),
@@ -514,7 +514,7 @@ def build_deepthink_reviewer_messages(original_messages: list[dict[str, Any]], a
             "role": "user",
             "content": "\n\n".join(
                 [
-                    f"Task:\n{messages_text(original_messages)}",
+                    f"Task:\n{reviewer_messages_text(original_messages)}",
                     f"Output under review:\n{answer}",
                     'Return this exact shape: {"pass": boolean, "score": number, "issues": string[], "required_changes": string[]}.',
                 ]
@@ -539,7 +539,7 @@ def build_deepthink_user_rejection_review_messages(original_messages: list[dict[
             "role": "user",
             "content": "\n\n".join(
                 [
-                    f"Original user input:\n{messages_text(original_messages)}",
+                    f"Original user input:\n{reviewer_messages_text(original_messages)}",
                     f"Final candidate rejected by the requester:\n{answer}",
                     'Return this exact shape: {"pass": boolean, "score": number, "issues": string[], "required_changes": string[]}.',
                 ]
@@ -582,6 +582,21 @@ def messages_text(messages: list[dict[str, Any]]) -> str:
                 if isinstance(block, dict):
                     parts.append(str(block.get("text") or block.get("content") or ""))
     return "\n".join(part for part in parts if part)
+
+
+def reviewer_visible_user_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    visible: list[dict[str, Any]] = []
+    for message in messages or []:
+        if not isinstance(message, dict):
+            continue
+        if str(message.get("role") or "").strip().casefold() != "user":
+            continue
+        visible.append({"role": "user", "content": deepcopy(message.get("content", ""))})
+    return visible
+
+
+def reviewer_messages_text(messages: list[dict[str, Any]]) -> str:
+    return messages_text(reviewer_visible_user_messages(messages))
 
 
 def messages_have_images(messages: list[dict[str, Any]]) -> bool:
@@ -639,15 +654,46 @@ def phase_event(phase: str, model: str, *, output: str = "", metadata: dict[str,
 def response_has_tool_calls(response: Any) -> bool:
     if not isinstance(response, dict):
         return False
+    if str(response.get("finish_reason") or "").strip().casefold() in {"tool_calls", "tool_call", "tool_use", "function_call", "function_calls"}:
+        return True
     if response.get("tool_calls"):
+        return True
+    if _content_has_tool_call_blocks(response.get("content")):
+        return True
+    if _content_has_tool_call_blocks(response.get("output")):
         return True
     choices = response.get("choices")
     if isinstance(choices, list):
         for choice in choices:
             message = choice.get("message") if isinstance(choice, dict) else {}
-            if isinstance(message, dict) and message.get("tool_calls"):
-                return True
+            delta = choice.get("delta") if isinstance(choice, dict) else {}
+            if isinstance(message, dict):
+                if message.get("tool_calls") or isinstance(message.get("function_call"), dict):
+                    return True
+                if _content_has_tool_call_blocks(message.get("content")):
+                    return True
+            if isinstance(delta, dict):
+                if delta.get("tool_calls") or isinstance(delta.get("function_call"), dict):
+                    return True
+                if _content_has_tool_call_blocks(delta.get("content")):
+                    return True
     return False
+
+
+def _content_has_tool_call_blocks(content: Any) -> bool:
+    if isinstance(content, list):
+        return any(_content_has_tool_call_blocks(block) for block in content)
+    if not isinstance(content, dict):
+        return False
+    block_type = str(content.get("type") or "").strip().casefold()
+    if block_type in {"tool_use", "tool_call", "function_call"}:
+        return True
+    if content.get("tool_calls") or isinstance(content.get("tool_call"), dict):
+        return True
+    if isinstance(content.get("function_call"), dict) or isinstance(content.get("functionCall"), dict):
+        return True
+    nested = content.get("content")
+    return _content_has_tool_call_blocks(nested) if isinstance(nested, list) else False
 
 
 def parse_deepthink_plan_strict(text: str) -> dict[str, Any] | None:

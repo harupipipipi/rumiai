@@ -1060,13 +1060,11 @@ class AIClient:
         model_pack = self._model_pack_for_model(model) if int(params.get("_composite_depth", 0) or 0) < 3 else None
         if model_pack is not None:
             response = self._complete_model_pack(model_pack, messages, tools, params)
-            text = self._response_text(response)
-            return iter([{"type": "text_delta", "text": text}, {"finish_reason": response.get("finish_reason", "stop") if isinstance(response, dict) else "stop"}])
+            return self._response_to_stream(response)
         composite = self._composite_for_model(model) if int(params.get("_composite_depth", 0) or 0) < 3 else None
         if composite is not None:
             response = self._complete_composite(composite, messages, tools, params)
-            text = self._response_text(response)
-            return iter([{"type": "text_delta", "text": text}, {"finish_reason": response.get("finish_reason", "stop") if isinstance(response, dict) else "stop"}])
+            return self._response_to_stream(response)
         provider_params = self._provider_params(params)
         routed, handled = self._call_with_api_routes("stream", model, messages, tools, provider_params)
         if handled:
@@ -1078,6 +1076,19 @@ class AIClient:
             return provider.stream(model_name, messages, tools or [], provider_params or {})
         except NotImplementedError as e:
             raise RuntimeError(str(e)) from None
+
+    @classmethod
+    def _response_to_stream(cls, response):
+        text = cls._response_text(response)
+        if text:
+            yield {"type": "content_delta", "delta": {"type": "text", "text": text}}
+        finish_reason = response.get("finish_reason", "stop") if isinstance(response, dict) else "stop"
+        usage = response.get("usage") if isinstance(response, dict) and isinstance(response.get("usage"), dict) else {}
+        metadata = response.get("metadata") if isinstance(response, dict) and isinstance(response.get("metadata"), dict) else {}
+        event = {"type": "stream_end", "finish_reason": finish_reason, "usage": usage}
+        if metadata:
+            event["metadata"] = metadata
+        yield event
 
     @staticmethod
     def _provider_params(params):

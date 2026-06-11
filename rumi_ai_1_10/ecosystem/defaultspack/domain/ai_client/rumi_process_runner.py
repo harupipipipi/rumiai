@@ -550,7 +550,7 @@ class RumiProcessRunner:
                     "quarantined": True,
                     "reason": "reviewer_failed",
                 }
-                return self._text_response(current_answer, "review_quarantine", process)
+                return self._text_response(rumi_process.RUMI_QUARANTINE_MESSAGE, "review_quarantine", process)
 
             reviews.append(review)
             process["deepthink"]["reviews"] = deepcopy(reviews)
@@ -567,9 +567,10 @@ class RumiProcessRunner:
                     process["review"] = {
                         "approved": False,
                         "loop_broken": True,
+                        "quarantined": True,
                         "reason": "reviewer_feedback_loop_detected",
                     }
-                    return self._text_response(current_answer, "loop_broken", process)
+                    return self._text_response(rumi_process.RUMI_QUARANTINE_MESSAGE, "loop_broken", process)
                 seen_review_hashes.add(review_hash)
                 if review_attempt >= max_iterations:
                     break
@@ -616,7 +617,7 @@ class RumiProcessRunner:
                         "quarantined": True,
                         "reason": "user_rejection_review_failed",
                     }
-                    return self._text_response(current_answer, "review_quarantine", process)
+                    return self._text_response(rumi_process.RUMI_QUARANTINE_MESSAGE, "review_quarantine", process)
                 user_rejection_cycles_done += 1
                 if review_attempt >= max_iterations:
                     break
@@ -642,7 +643,7 @@ class RumiProcessRunner:
             "reason": "deepthink_watchdog_max_review_iterations",
             "last_review": reviews[-1] if reviews else {},
         }
-        return self._text_response(current_answer, "review_quarantine", process)
+        return self._text_response(rumi_process.RUMI_QUARANTINE_MESSAGE, "review_quarantine", process)
 
     def _parse_plan_with_repair(
         self,
