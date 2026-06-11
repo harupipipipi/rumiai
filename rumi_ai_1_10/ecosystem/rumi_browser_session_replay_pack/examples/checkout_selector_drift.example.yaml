@@ -1,0 +1,57 @@
+example:
+  id: checkout_selector_drift
+  pack_id: rumi_browser_session_replay_pack
+  scenario: A checkout button selector drifted after a markup release; semantic evidence
+    and screenshot refs are bundled for review.
+  input_refs:
+  - workspace_ref:case-file
+  evidence_refs:
+  - dom:snapshot:checkout-review-redacted
+  - screenshot:artifact:checkout-footer-redacted
+  - event:selector_missed:place-order-button
+  handoff_owner: rumi_browser_element_pack
+  trace_contract:
+    trace_id: trace_checkout_selector_drift_2026_06_04
+    redaction_state: redacted
+    evidence_bundle_refs:
+    - bundle:checkout-selector-drift
+  selector_drift_report:
+    drift_id: drift_checkout_place_order
+    original_selector: "[data-testid='place-order']"
+    semantic_element_ref: semantic_dom_v2:button:place_order
+    semantic_owner: rumi_browser_element_pack
+    observed_selector_candidates:
+    - "button[aria-label='Place order']"
+    - "[data-action='submit-order']"
+    confidence: 0.82
+    drift_reason: test_id_removed_during_checkout_markup_release
+    screenshot_evidence_refs:
+    - screenshot:artifact:checkout-footer-redacted
+    dom_evidence_refs:
+    - dom:snapshot:checkout-review-redacted
+    recommended_handoff: handoff_to_rumi_browser_element_pack
+  redaction:
+    state: redacted
+    sensitive_classes:
+    - payment_field
+    - private_url
+  review_gate: all_blocking_checks
+  expected_result: reviewed_handoff_packet
+  must_not:
+  - external_action
+  - runtime_execution
+  - secret_material
+  status: ready_for_owner_handoff
+  redaction:
+    state: redacted
+    sensitive_classes:
+    - private_url
+    - typed_input_evidence
+    - dom_text
+    receipt_ref: redaction:checkout_selector_drift
+  selector_drift_report:
+    semantic_owner: rumi_browser_element_pack
+    drift_id: drift:checkout_selector_drift
+    evidence_refs:
+    - dom:checkout:v2
+    - shot:checkout:v2
