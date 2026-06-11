@@ -1,0 +1,39 @@
+spec_id: rumi.data_analysis.audit_trail.v1
+description: Reproducibility and review schema for local data analysis.
+required_fields:
+  - audit_id
+  - question
+  - source_inventory
+  - data_profile
+  - cleaning_steps
+  - analysis_steps
+  - validation_checks
+  - outputs
+  - limitations
+  - reproducibility_status
+source_inventory_fields:
+  - label
+  - local_path_or_user_label
+  - file_type
+  - received_from
+  - row_count_if_known
+  - last_modified_if_known
+cleaning_step_fields:
+  - step_id
+  - affected_columns
+  - operation
+  - rationale
+  - reversible
+  - validation_check
+analysis_step_fields:
+  - step_id
+  - method
+  - inputs
+  - outputs
+  - assumptions
+  - caveats
+reproducibility_status_values:
+  - declarative_only
+  - runnable_with_local_tools
+  - partially_reproducible
+  - blocked_missing_data
