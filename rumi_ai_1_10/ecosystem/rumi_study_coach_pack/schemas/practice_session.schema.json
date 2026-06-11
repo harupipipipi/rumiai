@@ -1,0 +1,112 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rumi.local/schemas/practice_session.schema.json",
+  "title": "Practice Session",
+  "description": "Contract schema for Practice Session.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "practice_session_id",
+    "study_goal_id",
+    "quiz_items",
+    "source_note_ids",
+    "feedback_contract",
+    "uncertainty"
+  ],
+  "properties": {
+    "practice_session_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "study_goal_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "quiz_items": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "quiz_id",
+          "question",
+          "answer",
+          "source_note_ids",
+          "uncertainty"
+        ],
+        "properties": {
+          "quiz_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "question": {
+            "type": "string",
+            "minLength": 1
+          },
+          "answer": {
+            "type": "string",
+            "minLength": 1
+          },
+          "source_note_ids": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string"
+            }
+          },
+          "uncertainty": {
+            "type": "string",
+            "enum": [
+              "low",
+              "medium",
+              "high_due_to_missing_notes"
+            ]
+          }
+        }
+      }
+    },
+    "source_note_ids": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string"
+      }
+    },
+    "feedback_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode",
+        "show_answer_after_attempt",
+        "cite_note_ids"
+      ],
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": [
+            "socratic_hint",
+            "worked_solution",
+            "short_correction"
+          ]
+        },
+        "show_answer_after_attempt": {
+          "type": "boolean",
+          "const": true
+        },
+        "cite_note_ids": {
+          "type": "boolean",
+          "const": true
+        }
+      }
+    },
+    "uncertainty": {
+      "type": "string",
+      "enum": [
+        "low",
+        "medium",
+        "high_due_to_missing_notes"
+      ]
+    }
+  }
+}

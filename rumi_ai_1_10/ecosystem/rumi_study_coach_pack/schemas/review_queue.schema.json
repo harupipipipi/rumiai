@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rumi.local/schemas/review_queue.schema.json",
+  "title": "Review Queue",
+  "description": "Contract schema for Review Queue.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "queue_id",
+    "learner_id",
+    "items",
+    "next_review_reason",
+    "decay_model",
+    "handoff_owner"
+  ],
+  "properties": {
+    "queue_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "learner_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "items": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "item_id",
+          "skill_id",
+          "last_seen",
+          "next_review_window",
+          "source_note_ids"
+        ],
+        "properties": {
+          "item_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "skill_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "last_seen": {
+            "type": "string",
+            "minLength": 1
+          },
+          "next_review_window": {
+            "type": "string",
+            "minLength": 1
+          },
+          "source_note_ids": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "next_review_reason": {
+      "type": "string",
+      "minLength": 1
+    },
+    "decay_model": {
+      "type": "string",
+      "enum": [
+        "simple_spacing",
+        "manual_priority",
+        "unknown"
+      ]
+    },
+    "handoff_owner": {
+      "type": "string",
+      "const": "rumi_workflow_scheduler_pack"
+    }
+  }
+}
