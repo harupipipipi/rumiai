@@ -48,7 +48,6 @@ import {
   Loader2,
   Monitor,
   MoreHorizontal,
-  MousePointerClick,
   Plus,
   RefreshCw,
   Rocket,
@@ -697,6 +696,7 @@ function SupervisorSnapshot({
   const recentEvent = data?.recent_events[0] ?? null;
   const macDriverOrder = router?.computer_driver_order.darwin ?? [];
   const routeCount = (router?.operation_layers.length ?? 0) + (router?.fallback_layers.length ?? 0);
+  const capabilities = data?.capabilities ?? null;
 
   if (!data) {
     return (
@@ -704,7 +704,7 @@ function SupervisorSnapshot({
         <div className="flex items-center gap-3">
           <Monitor className="h-4 w-4 text-text-muted" />
           <div className="min-w-0 flex-1">
-            <h2 className="text-sm font-semibold text-text-main">Supervisor</h2>
+            <h2 className="text-sm font-semibold text-text-main">Supervisor Snapshot</h2>
             <p className="text-xs text-text-muted">
               {loading ? 'Loading runtime snapshot...' : error || 'Runtime snapshot unavailable.'}
             </p>
@@ -768,10 +768,10 @@ function SupervisorSnapshot({
         <div className="flex items-start justify-between gap-3">
           <div className="flex items-center gap-2">
             <Monitor className="h-4 w-4 text-accent" />
-            <h2 className="text-sm font-semibold text-text-main">Live Supervision</h2>
+            <h2 className="text-sm font-semibold text-text-main">Run Snapshot</h2>
           </div>
-          <Badge variant={metrics?.available ? 'success' : 'secondary'} className="text-[10px]">
-            {metrics?.available ? 'Connected' : 'Idle'}
+          <Badge variant={capabilities?.snapshot ? 'success' : 'secondary'} className="text-[10px]">
+            {capabilities?.snapshot ? 'Snapshot' : 'Unavailable'}
           </Badge>
         </div>
         <div className="mt-4 grid grid-cols-4 gap-2 text-center">
@@ -782,17 +782,16 @@ function SupervisorSnapshot({
         </div>
         <div className="mt-4 space-y-2 text-xs">
           <div className="flex items-center justify-between gap-3">
-            <span className="text-text-muted">Selected</span>
-            <span className="truncate text-text-main">{selectedSession?.run_id ?? 'No active session'}</span>
+            <span className="text-text-muted">Run</span>
+            <span className="truncate text-text-main">{selectedSession?.run_id ?? 'No run snapshot'}</span>
           </div>
           <div className="flex items-center justify-between gap-3">
             <span className="text-text-muted">Last event</span>
             <span className="truncate text-text-main">{recentEvent?.event_type ?? '--'}</span>
           </div>
-          <div className="flex items-center gap-2 text-text-muted">
-            <MousePointerClick className="h-3.5 w-3.5" />
-            <span className="truncate">{formatCompactList(data.action_buttons.slice(0, 4))}</span>
-          </div>
+          <CapabilityRow label="Live screen" enabled={capabilities?.live_screen === true} />
+          <CapabilityRow label="Takeover" enabled={capabilities?.takeover === true} />
+          <CapabilityRow label="Replay" enabled={capabilities?.replay === true} />
         </div>
       </article>
     </section>
@@ -804,6 +803,17 @@ function MetricTile({ label, value }: { label: string; value: string }) {
     <div className="rounded-lg border border-border bg-bg-hover/40 px-2 py-2">
       <div className="text-[11px] text-text-muted">{label}</div>
       <div className="mt-1 text-sm font-semibold text-text-main">{value}</div>
+    </div>
+  );
+}
+
+function CapabilityRow({ label, enabled }: { label: string; enabled: boolean }) {
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <span className="text-text-muted">{label}</span>
+      <span className={enabled ? 'truncate text-text-main' : 'truncate text-text-muted'}>
+        {enabled ? 'Available' : 'Not available'}
+      </span>
     </div>
   );
 }

@@ -29,6 +29,12 @@ def test_supervisor_catalog_is_cloud_first_without_docker_desktop_requirement() 
     snapshot = build_supervisor_dashboard_snapshot(run_store=None)
     providers = {provider["id"]: provider for provider in snapshot["sandbox_providers"]}
 
+    assert snapshot["capabilities"] == {
+        "snapshot": True,
+        "live_screen": False,
+        "takeover": False,
+        "replay": False,
+    }
     assert providers["cloud"]["default"] is True
     assert providers["cloud"]["install_required"] is False
     assert "browserbase" in providers["cloud"]["providers"]
@@ -52,7 +58,12 @@ def test_supervisor_snapshot_summarizes_agent_runtime_store(tmp_path) -> None:
             agent_id="reviewer",
             runtime_profile_json={"policy": {"risk": "high"}, "sandbox": {"provider": "browserbase"}},
             execution_json={
-                "screen": {"available": True, "provider": "browserbase", "url": "https://live.example/session"},
+                "screen": {
+                    "available": True,
+                    "provider": "browserbase",
+                    "url": "https://live.example/session",
+                    "screenshot_url": "https://snapshot.example/session.png",
+                },
                 "replay": {"available": True, "url": "https://replay.example/session"},
                 "artifacts": {"screenshots": ["one.png"], "logs": ["run.log"]},
             },
@@ -80,11 +91,30 @@ def test_supervisor_snapshot_summarizes_agent_runtime_store(tmp_path) -> None:
     assert snapshot["metrics"]["active_runs"] == 2
     assert snapshot["metrics"]["waiting_approvals"] == 1
     assert snapshot["metrics"]["stale_runs"] == 1
-    assert snapshot["metrics"]["screen_sessions"] == 1
-    assert snapshot["metrics"]["replay_ready"] == 1
+    assert snapshot["metrics"]["screen_sessions"] == 0
+    assert snapshot["metrics"]["replay_ready"] == 0
+    assert "recordings" not in snapshot["metrics"]["artifact_streams"]
     assert snapshot["selected_session"]["run_id"] == "run_wait"
     assert snapshot["selected_session"]["risk"] == "high"
+    assert snapshot["selected_session"]["screen"]["available"] is False
+    assert snapshot["selected_session"]["screen"]["url"] is None
+    assert snapshot["selected_session"]["screen"]["screenshot_url"] == "https://snapshot.example/session.png"
+    assert snapshot["selected_session"]["replay"] == {"available": False, "url": None}
     assert snapshot["recent_events"][0]["event_type"] == "approval_requested"
+
+
+def test_supervisor_snapshot_does_not_advertise_live_controls() -> None:
+    from core_runtime.supervisor_dashboard import build_supervisor_dashboard_snapshot
+
+    snapshot = build_supervisor_dashboard_snapshot(run_store=None)
+    live_actions = {"pause", "resume", "take_over", "open_live_screen", "open_replay"}
+
+    assert snapshot["capabilities"]["snapshot"] is True
+    assert snapshot["capabilities"]["live_screen"] is False
+    assert snapshot["capabilities"]["takeover"] is False
+    assert snapshot["capabilities"]["replay"] is False
+    assert live_actions.isdisjoint(snapshot["action_buttons"])
+    assert "replay_evidence_is_recorded" not in snapshot["security_guardrails"]
 
 
 def test_panel_dashboard_includes_supervisor_snapshot(monkeypatch) -> None:

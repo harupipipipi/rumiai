@@ -152,15 +152,17 @@ EVENT_SCHEMA: list[dict[str, str]] = [
     {"type": "run.finished", "description": "Run lifecycle terminal state."},
 ]
 
+SUPERVISOR_CAPABILITY_FLAGS = {
+    "snapshot": True,
+    "live_screen": False,
+    "takeover": False,
+    "replay": False,
+}
+
+# Passive snapshot affordances only. Live controls need real endpoints before
+# they can be advertised by this contract.
 ACTION_BUTTONS = [
-    "pause",
-    "resume",
-    "take_over",
-    "approve_once",
-    "approve_rule",
-    "kill_session",
-    "open_live_screen",
-    "open_replay",
+    "inspect_snapshot",
     "view_diff",
     "export_artifact",
 ]
@@ -172,7 +174,7 @@ SECURITY_GUARDRAILS = [
     "clipboard_download_upload_monitored",
     "external_side_effects_require_approval",
     "sandbox_destroyed_at_session_end",
-    "replay_evidence_is_recorded",
+    "snapshot_evidence_is_recorded",
 ]
 
 STORAGE_TARGETS = {
@@ -192,12 +194,15 @@ def build_supervisor_dashboard_snapshot(
 ) -> dict[str, Any]:
     """Return a dashboard-safe snapshot of routing, sandbox, and run state."""
 
+    capabilities = dict(SUPERVISOR_CAPABILITY_FLAGS)
     metrics, sessions, selected_session, recent_events = _runtime_metrics(
         run_store=run_store,
         stale_after_seconds=stale_after_seconds,
         event_limit=event_limit,
+        capabilities=capabilities,
     )
     return {
+        "capabilities": capabilities,
         "router": build_runtime_router_contract(),
         "sandbox_providers": [dict(provider) for provider in SANDBOX_PROVIDERS],
         "runtime_templates": [dict(template) for template in RUNTIME_TEMPLATES],
@@ -234,6 +239,7 @@ def _runtime_metrics(
     run_store: Any | None,
     stale_after_seconds: int,
     event_limit: int,
+    capabilities: dict[str, bool],
 ) -> tuple[dict[str, Any], list[dict[str, Any]], dict[str, Any] | None, list[dict[str, Any]]]:
     store = run_store if run_store is not None else _default_agent_run_store()
     base_metrics: dict[str, Any] = {
@@ -244,7 +250,7 @@ def _runtime_metrics(
         "failed_runs": 0,
         "screen_sessions": 0,
         "replay_ready": 0,
-        "artifact_streams": ["screenshots", "recordings", "traces", "diffs", "logs"],
+        "artifact_streams": ["screenshots", "traces", "diffs", "logs"],
     }
     if store is None:
         return base_metrics, [], None, []
@@ -258,7 +264,10 @@ def _runtime_metrics(
         base_metrics["available"] = False
         return base_metrics, [], None, []
 
-    sessions = _session_grid(_unique_runs([*waiting_runs, *stale_runs, *active_runs, *failed_runs]))
+    sessions = _session_grid(
+        _unique_runs([*waiting_runs, *stale_runs, *active_runs, *failed_runs]),
+        capabilities=capabilities,
+    )
     selected_session = sessions[0] if sessions else None
     recent_events = _recent_events(store, sessions, limit=event_limit)
     metrics = {
@@ -267,8 +276,16 @@ def _runtime_metrics(
         "waiting_approvals": len(waiting_runs),
         "stale_runs": len(stale_runs),
         "failed_runs": len(failed_runs),
-        "screen_sessions": sum(1 for session in sessions if session.get("screen", {}).get("available")),
-        "replay_ready": sum(1 for session in sessions if session.get("replay", {}).get("available")),
+        "screen_sessions": (
+            sum(1 for session in sessions if session.get("screen", {}).get("available"))
+            if capabilities.get("live_screen")
+            else 0
+        ),
+        "replay_ready": (
+            sum(1 for session in sessions if session.get("replay", {}).get("available"))
+            if capabilities.get("replay")
+            else 0
+        ),
     }
     return metrics, sessions, selected_session, recent_events
 
@@ -316,13 +333,21 @@ def _unique_runs(runs: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
     return result
 
 
-def _session_grid(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _session_grid(runs: list[dict[str, Any]], *, capabilities: dict[str, bool]) -> list[dict[str, Any]]:
     sessions: list[dict[str, Any]] = []
     for run in runs[:12]:
         execution = run.get("execution_json") if isinstance(run.get("execution_json"), dict) else {}
         artifacts = execution.get("artifacts") if isinstance(execution.get("artifacts"), dict) else {}
         screen = execution.get("screen") if isinstance(execution.get("screen"), dict) else {}
         replay = execution.get("replay") if isinstance(execution.get("replay"), dict) else {}
+        live_screen_available = bool(
+            capabilities.get("live_screen")
+            and (screen.get("available") or screen.get("url") or screen.get("stream_url"))
+        )
+        replay_available = bool(
+            capabilities.get("replay")
+            and (replay.get("available") or replay.get("url") or replay.get("recording_url"))
+        )
         sessions.append(
             {
                 "run_id": run.get("run_id"),
@@ -333,14 +358,14 @@ def _session_grid(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "heartbeat_at": run.get("heartbeat_at"),
                 "risk": _runtime_risk(run),
                 "screen": {
-                    "available": bool(screen.get("available") or screen.get("url") or screen.get("screenshot_url")),
+                    "available": live_screen_available,
                     "provider": screen.get("provider") or _provider_from_runtime(run),
-                    "url": screen.get("url") or screen.get("stream_url"),
+                    "url": (screen.get("url") or screen.get("stream_url")) if live_screen_available else None,
                     "screenshot_url": screen.get("screenshot_url"),
                 },
                 "replay": {
-                    "available": bool(replay.get("available") or replay.get("url") or replay.get("recording_url")),
-                    "url": replay.get("url") or replay.get("recording_url"),
+                    "available": replay_available,
+                    "url": (replay.get("url") or replay.get("recording_url")) if replay_available else None,
                 },
                 "artifacts": {
                     "screenshots": _artifact_count(artifacts, "screenshots"),

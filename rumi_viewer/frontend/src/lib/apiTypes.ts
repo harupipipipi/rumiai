@@ -87,6 +87,13 @@ export interface ApiSupervisorSandboxProvider {
   artifacts: string[];
 }
 
+export interface ApiSupervisorCapabilityFlags {
+  snapshot: boolean;
+  live_screen: boolean;
+  takeover: boolean;
+  replay: boolean;
+}
+
 export interface ApiSupervisorSession {
   run_id: string;
   agent_id: string | null;
@@ -121,6 +128,7 @@ export interface ApiSupervisorEvent {
 }
 
 export interface ApiSupervisorDashboard {
+  capabilities: ApiSupervisorCapabilityFlags;
   router: ApiSupervisorRouter;
   sandbox_providers: ApiSupervisorSandboxProvider[];
   runtime_templates: Array<Record<string, unknown>>;
