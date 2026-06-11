@@ -8,12 +8,11 @@ pip依存ライブラリ管理のHTTP APIを提供。
 from __future__ import annotations
 
 import hmac
+import hashlib
 import json
 import logging
 import os
-import base64
 import re
-import secrets
 import threading
 import time
 import collections
@@ -30,8 +29,8 @@ from .runtime_port import resolve_runtime_port
 from .validation import (
     validate_pack_id as _v_validate_pack_id,
     is_safe_id as _v_is_safe_id,
-    PACK_ID_RE,
-    SAFE_ID_RE,
+    PACK_ID_RE as PACK_ID_RE,
+    SAFE_ID_RE as SAFE_ID_RE,
     MAX_REQUEST_BODY_BYTES,
 )
 
@@ -2082,7 +2081,6 @@ class PackAPIHandler(
         self._request_auth_mode = None
         self._panel_session = None
         self._panel_session_cookie = None
-        result: Any = None
         # --- テーブル駆動: 認証チェック ---
         if not self._is_pre_auth_route("PUT", _pre_auth_path_put) and not self._check_auth("PUT", _pre_auth_path_put):
             self._discard_request_body()

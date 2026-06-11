@@ -927,7 +927,6 @@ class CapabilityExecutor:
 
         pack_id = str(getattr(entry, "pack_id", "") or "")
         pack_root_hint = getattr(entry, "function_dir", None) or getattr(entry, "main_py_path", None)
-        is_core = pack_id.startswith(_CORE_PACK_ID_PREFIX)
         is_trusted_builtin = self._is_trusted_builtin_pack(pack_id, pack_root_hint=pack_root_hint)
         is_core_builtin = self._is_core_builtin_trust_bypass_entry(entry)
         if self._approval_manager is not None and not (is_core_builtin or is_trusted_builtin):
@@ -1062,7 +1061,6 @@ class CapabilityExecutor:
             "binary",
             "command",
         }
-        legacy_grant_required = bool(getattr(entry, "legacy_grant_required", False))
         # Unified FunctionRegistry execution preserves the legacy capability
         # boundary: every principal x permission dispatch requires a grant.
         grant_required = True

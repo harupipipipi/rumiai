@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import pytest
+
+pytestmark = pytest.mark.contract
+
 import sys
 from pathlib import Path
 

@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import pytest
+
+pytestmark = pytest.mark.contract
+
 import json
 import re
 import sys

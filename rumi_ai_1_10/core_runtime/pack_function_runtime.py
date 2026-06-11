@@ -19,7 +19,6 @@ from .paths import (
 )
 from .pack_function_policy import (
     permission_id_for_entry,
-    validate_function_execution,
 )
 
 
