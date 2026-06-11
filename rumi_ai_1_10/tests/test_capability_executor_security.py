@@ -29,7 +29,6 @@ from core_runtime.capability_executor import (
     CapabilityExecutor,
     CapabilityResponse,
     _sanitize_error,
-    _get_secure_tmp_dir,
 )
 
 
@@ -491,18 +490,19 @@ class TestSecureTmpDir:
 
         expected_tmp = tmp_path / "rumi_ai_1_10" / "user_data" / "tmp"
 
-        with patch.object(mod, "__file__", str(fake_file)):
-            result = _get_secure_tmp_dir()
+        try:
+            with patch.object(mod, "__file__", str(fake_file)):
+                result = mod._get_secure_tmp_dir()
 
-        assert Path(result) == expected_tmp
-        assert expected_tmp.is_dir()
-        # パーミッション確認 (Unix のみ)
-        if os.name != "nt" and hasattr(os, "stat"):
-            mode = oct(os.stat(str(expected_tmp)).st_mode & 0o777)
-            assert mode == "0o700"
-
-        # クリーンアップ
-        mod._SECURE_TMP_DIR = original
+            assert Path(result) == expected_tmp
+            assert expected_tmp.is_dir()
+            # パーミッション確認 (Unix のみ)
+            if os.name != "nt" and hasattr(os, "stat"):
+                mode = oct(os.stat(str(expected_tmp)).st_mode & 0o777)
+                assert mode == "0o700"
+        finally:
+            # クリーンアップ
+            mod._SECURE_TMP_DIR = original
 
     def test_mkstemp_uses_secure_dir(self, monkeypatch, tmp_path):
         """mkstemp が _get_secure_tmp_dir() のディレクトリを使用する"""
