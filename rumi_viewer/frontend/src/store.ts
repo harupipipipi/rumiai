@@ -20,6 +20,7 @@ import {
   openExternalUrl,
   startOAuth,
 } from './lib/api';
+import type { ApiSupervisorDashboard } from './lib/apiTypes';
 import {
   transformDashboard,
   transformPacks,
@@ -109,6 +110,7 @@ export interface DashboardData {
   activePacks: number;
   registeredFlows: number;
   activities: Activity[];
+  supervisor: ApiSupervisorDashboard | null;
 }
 
 export interface Profile {
@@ -215,6 +217,7 @@ const defaultDashboard: DashboardData = {
   activePacks: 0,
   registeredFlows: 0,
   activities: [],
+  supervisor: null,
 };
 
 const defaultProfile: Profile = {
