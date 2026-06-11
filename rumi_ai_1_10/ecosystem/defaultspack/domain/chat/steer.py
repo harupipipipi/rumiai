@@ -69,6 +69,8 @@ class ConversationSteerStore:
         """Consume queued steer items so an active run can inject them into its next model turn."""
         consumed: list[dict[str, Any]] = []
         for item in self.list(status="queued"):
+            if item.get("auto_send") is False:
+                continue
             if not self._matches(item, target_type="conversation", target_id=conversation_id, conversation_id=conversation_id):
                 continue
             updated = self.mark(

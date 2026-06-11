@@ -11,7 +11,7 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(DEFAULTSPACK_ROOT))
 
 
-def test_terminal_policy_marks_common_read_and_test_commands_low_risk(tmp_path):
+def test_terminal_policy_marks_common_read_commands_low_risk(tmp_path):
     from domain.coding.terminal_policy import classify_command
 
     for command in (
@@ -19,16 +19,56 @@ def test_terminal_policy_marks_common_read_and_test_commands_low_risk(tmp_path):
         "git ls-files",
         "rg --files",
         "rg approval rumi_ai_1_10",
-        "pytest",
-        "python -m pytest",
-        "npm test",
-        "ruff check core_runtime",
-        "cargo check",
     ):
         result = classify_command(command, workspace_root=tmp_path)
         assert result["classification"] == "low"
         assert result["risk_level"] == "low"
         assert result["approval_required"] is False
+
+
+def test_terminal_policy_requires_approval_for_project_code_execution_commands(tmp_path):
+    from domain.coding.terminal_policy import classify_command
+
+    for command in (
+        "pytest",
+        "pytest -q",
+        "python -m pytest",
+        "python3 -m pytest",
+        "npm test",
+        "npm run test",
+        "npm run lint",
+        "ruff check core_runtime",
+        "mypy",
+        "cargo check",
+        "cargo test",
+        "cargo nextest run",
+    ):
+        result = classify_command(command, workspace_root=tmp_path)
+        assert result["classification"] == "medium"
+        assert result["risk_level"] == "medium"
+        assert result["approval_required"] is True
+        assert "command_execution" in result["risk_reasons"]
+
+
+def test_terminal_exec_does_not_run_test_commands_without_approval(tmp_path):
+    from blocks.coding.terminal_exec import run as terminal_exec_run
+    from domain.safety.approval import reset_approval_state_for_tests
+
+    reset_approval_state_for_tests()
+    marker = tmp_path / "pytest-marker.txt"
+    (tmp_path / "test_probe.py").write_text(
+        "from pathlib import Path\n"
+        f"def test_probe():\n    Path({str(marker)!r}).write_text('executed', encoding='utf-8')\n",
+        encoding="utf-8",
+    )
+
+    result = terminal_exec_run({"workspace_root": str(tmp_path), "command": "pytest -q"}, {})
+
+    assert result["status"] == "ok"
+    assert result["data"]["approval_required"] is True
+    assert result["data"]["exit_code"] is None
+    assert result["data"]["classification"] == "medium"
+    assert not marker.exists()
 
 
 def test_terminal_policy_keeps_read_commands_sensitive_when_shell_escape_or_outside_path(tmp_path):

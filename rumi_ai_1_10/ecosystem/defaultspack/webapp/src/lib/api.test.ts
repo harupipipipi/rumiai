@@ -1027,26 +1027,38 @@ test("company and p2p helpers target frontend workspace routes", async () => {
   const seen: Array<{ input: string; method: string; body?: unknown }> = [];
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const path = String(input);
     seen.push({
-      input: String(input),
+      input: path,
       method: init?.method ?? "GET",
       body: init?.body ? JSON.parse(String(init.body)) : undefined,
     });
-    return new Response(JSON.stringify({
-      status: "ok",
-      data: String(input).includes("/p2p/status")
-        ? { p2p: { enabled: false }, peer_count: 0, approved_peer_count: 0 }
-        : String(input).includes("/p2p/messages/send")
-          ? { envelope: {}, peer: { peer_id: "peer-a" } }
-          : String(input).includes("/company/operations-company/tasks")
-            ? { id: "task-1", company_id: "operations-company", title: "Ship it" }
-            : { companies: [], total: 0 },
-    }), { status: 200, headers: { "Content-Type": "application/json" } });
+    let data: unknown = { companies: [], total: 0 };
+    if (path.includes("/p2p/status")) data = { p2p: { enabled: false }, peer_count: 0, approved_peer_count: 0 };
+    if (path.includes("/p2p/messages/send")) data = { envelope: {}, peer: { peer_id: "peer-a" } };
+    if (path.includes("/company/status")) data = { bootstrapped: true, company_id: "chat-team-c1", conversation_id: "c1", company: null };
+    if (path.includes("/company/bootstrap")) data = { bootstrapped: true, company: { id: "chat-team-c1", name: "Executive Team" } };
+    if (path.includes("/research/web-search")) data = { provider: "external_web", sources: [] };
+    if (path.includes("/company/operations-company/runs")) data = { runs: [], total: 0 };
+    if (path.includes("/company/operations-company/agents/reviewer/inbox")) data = { inbox: [], total: 0 };
+    if (path.includes("/company/operations-company/agents") && init?.method === "POST") {
+      data = { id: "reviewer", agent_id: "reviewer", model: "stub/default" };
+    }
+    if (path.includes("/company/operations-company/dispatch")) data = { dispatch: { status: "completed" }, run_links: [] };
+    if (path.includes("/company/operations-company/tasks")) data = { id: "task-1", company_id: "operations-company", title: "Ship it" };
+    return new Response(JSON.stringify({ status: "ok", data }), { status: 200, headers: { "Content-Type": "application/json" } });
   }) as typeof fetch;
 
   try {
     await api.listCompanies({ limit: 10 });
+    await api.getCompanyStatus({ conversationId: "c1", bootstrap: true });
+    await api.bootstrapCompanyWorkspace({ conversation_id: "c1", source: "webapp" }, { conversationId: "c1", scope: "conversation" });
+    await api.webSearch("deep research", true);
+    await api.upsertCompanyAgent("operations-company", { agent_id: "reviewer", model: "stub/default" });
     await api.createCompanyTask("operations-company", { title: "Ship it", target_agent_ids: ["reviewer"] });
+    await api.dispatchCompanyTask("operations-company", "task-1");
+    await api.listCompanyRuns("operations-company", { task_id: "task-1", limit: 5 });
+    await api.listCompanyAgentInbox("operations-company", "reviewer", { limit: 5 });
     await api.getP2PStatus();
     await api.sendP2PMessage("peer-a", { text: "hello" });
   } finally {
@@ -1054,7 +1066,30 @@ test("company and p2p helpers target frontend workspace routes", async () => {
   }
 
   assert.equal(seen[0].input, "/api/company?limit=10");
-  assert.deepEqual(seen[1], {
+  assert.equal(seen[1].input, "/api/company/status?conversation_id=c1&bootstrap=true");
+  assert.deepEqual(seen[2], {
+    input: "/api/company/bootstrap",
+    method: "POST",
+    body: { metadata: { conversation_id: "c1", source: "webapp" }, conversation_id: "c1", scope: "conversation" },
+  });
+  assert.deepEqual(seen[3], {
+    input: "/api/research/web-search",
+    method: "POST",
+    body: { query: "deep research", allow_network: true, limit: 5 },
+  });
+  assert.deepEqual(seen[4], {
+    input: "/api/company/operations-company/agents",
+    method: "POST",
+    body: {
+      company_id: "operations-company",
+      action: "upsert",
+      agent: {
+        agent_id: "reviewer",
+        model: "stub/default",
+      },
+    },
+  });
+  assert.deepEqual(seen[5], {
     input: "/api/company/operations-company/tasks",
     method: "POST",
     body: {
@@ -1064,8 +1099,15 @@ test("company and p2p helpers target frontend workspace routes", async () => {
       target_agent_ids: ["reviewer"],
     },
   });
-  assert.equal(seen[2].input, "/api/p2p/status");
-  assert.deepEqual(seen[3], {
+  assert.deepEqual(seen[6], {
+    input: "/api/company/operations-company/dispatch",
+    method: "POST",
+    body: { company_id: "operations-company", task_id: "task-1" },
+  });
+  assert.equal(seen[7].input, "/api/company/operations-company/runs?company_id=operations-company&task_id=task-1&limit=5");
+  assert.equal(seen[8].input, "/api/company/operations-company/agents/reviewer/inbox?company_id=operations-company&agent_id=reviewer&limit=5");
+  assert.equal(seen[9].input, "/api/p2p/status");
+  assert.deepEqual(seen[10], {
     input: "/api/p2p/messages/send",
     method: "POST",
     body: { peer_id: "peer-a", text: "hello" },

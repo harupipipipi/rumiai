@@ -70,6 +70,10 @@ export type ToolPreviewMode = 'auto' | 'manual';
 
 export const MEMO_PREVIEW_ID = '__memo__';
 const TIMELINE_TAB_ID = '__timeline__';
+// Keep web preview documents in an opaque origin even when they are served from
+// the same loopback host as the panel. Combining allow-scripts with
+// allow-same-origin would let preview HTML escape the sandbox boundary.
+export const WEB_PREVIEW_IFRAME_SANDBOX = 'allow-forms allow-modals allow-popups allow-scripts';
 
 function matchesPreviewId(item: ToolPreviewItem, previewId?: string | null) {
   return Boolean(previewId && (item.id === previewId || item.toolStepId === previewId));
@@ -608,7 +612,7 @@ function WebPreviewContent({ data }: { data: WebPreview }) {
             src={data.url}
             title={data.title || data.url}
             className="h-full w-full border-0 bg-white"
-            sandbox="allow-forms allow-modals allow-popups allow-scripts allow-same-origin"
+            sandbox={WEB_PREVIEW_IFRAME_SANDBOX}
           />
         ) : data.screenshot ? (
           <img
@@ -1064,7 +1068,7 @@ export function ToolPreviewPanel({
   };
 
   return (
-    <div className="flex flex-col h-full border-l border-zinc-800/60 bg-[#0a0a0c] w-full">
+    <div className="flex flex-col h-full border-l border-zinc-800/60 bg-[#0a0a0c] w-full rumi-anim-fade-right">
       <div className="relative flex min-h-11 items-center gap-1.5 border-b border-zinc-800/60 bg-zinc-950/60 px-2">
         <div className="flex shrink-0 items-center gap-1.5 px-1 text-[11px] font-semibold text-zinc-300">
           <Layers size={13} className="text-zinc-500" />

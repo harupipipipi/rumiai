@@ -23,7 +23,6 @@ conversation:
   model: google/gemma-4-31b-it
 response:
   mode: computer_use_line_biz
-  auto_approve_computer_use: true
 tokens:
   - kind: channel_secret
     label: Messaging API Channel Secret

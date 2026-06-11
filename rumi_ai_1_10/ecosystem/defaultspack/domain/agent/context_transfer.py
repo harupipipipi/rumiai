@@ -13,12 +13,13 @@ import threading
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from blocks._common import gen_id, timestamp
+from blocks.chat._prompt_helpers import build_summarizer_system_prompt
 from domain.ai_client.client import AIClient
 
 
 _SUMMARIZE_SYSTEM_PROMPT = (
-    "You are a context summarizer. Given a conversation history, "
-    "produce a concise but comprehensive summary that preserves:\n"
+    build_summarizer_system_prompt(persona="context")
+    + "\n\nPreserve:\n"
     "1. Key decisions and their rationale\n"
     "2. Current state of all work items\n"
     "3. Open questions and blockers\n"

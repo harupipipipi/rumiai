@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 import json
 import ipaddress
 import re
@@ -172,6 +173,11 @@ def _query_terms(query: str) -> list[str]:
     return [term for term in re.split(r"\W+", str(query or "").lower()) if len(term) >= 2]
 
 
+def _html_attr(attrs: str, name: str) -> str:
+    match = re.search(rf"""\b{name}\s*=\s*(['"])(.*?)\1""", attrs, flags=re.I | re.S)
+    return html.unescape(match.group(2)).strip() if match else ""
+
+
 @dataclass
 class ProviderResult:
     query: str
@@ -221,7 +227,7 @@ class ExternalWebProvider:
         requested_domains = _normalize_domains(domains)
         preferred_domains = _official_domains_for_query(query, requested_domains if official_only else None)
         direct_url = query.startswith(("http://", "https://"))
-        url = query if direct_url else "https://duckduckgo.com/html/?" + urllib.parse.urlencode({"q": query})
+        url = query if direct_url else "https://duckduckgo.com/lite/?" + urllib.parse.urlencode({"q": query})
         try:
             body = self._fetcher(url, timeout)
         except Exception as exc:
@@ -255,18 +261,48 @@ class ExternalWebProvider:
         return ProviderResult(query, self.provider_id, limited, f"Found {len(limited)} external web sources{filter_text}.", True)
 
     def _parse_duckduckgo(self, body: str, query: str, limit: int) -> list[dict[str, Any]]:
-        matches = re.findall(r'<a[^>]+class="result__a"[^>]+href="([^"]+)"[^>]*>(.*?)</a>', body, flags=re.I | re.S)
-        snippets = re.findall(r'<a[^>]+class="result__snippet"[^>]*>(.*?)</a>|<div[^>]+class="result__snippet"[^>]*>(.*?)</div>', body, flags=re.I | re.S)
+        matches: list[tuple[str, str]] = []
+        for anchor in re.finditer(r"<a(?P<attrs>[^>]*)>(?P<title>.*?)</a>", body, flags=re.I | re.S):
+            attrs = anchor.group("attrs")
+            classes = {
+                token.strip().lower()
+                for token in _html_attr(attrs, "class").split()
+                if token.strip()
+            }
+            if not classes.intersection({"result__a", "result-link"}):
+                continue
+            href = _html_attr(attrs, "href")
+            if not href:
+                continue
+            matches.append((href, anchor.group("title")))
+
+        snippets: list[str] = []
+        for node in re.finditer(
+            r"<(?P<tag>a|div|td)(?P<attrs>[^>]*)>(?P<content>.*?)</(?P=tag)>",
+            body,
+            flags=re.I | re.S,
+        ):
+            attrs = node.group("attrs")
+            classes = {
+                token.strip().lower()
+                for token in _html_attr(attrs, "class").split()
+                if token.strip()
+            }
+            if not classes.intersection({"result__snippet", "result-snippet"}):
+                continue
+            snippets.append(_strip_html(node.group("content"), limit=500))
+
         sources: list[dict[str, Any]] = []
         for index, (href, title_html) in enumerate(matches[:limit]):
             title = _strip_html(title_html, limit=180) or f"Result {index + 1}"
             parsed_href = urllib.parse.unquote(href)
+            if parsed_href.startswith("//"):
+                parsed_href = "https:" + parsed_href
             url = parsed_href
             if "uddg=" in parsed_href:
                 params = urllib.parse.parse_qs(urllib.parse.urlparse(parsed_href).query)
                 url = params.get("uddg", [parsed_href])[0]
-            snippet_parts = snippets[index] if index < len(snippets) else ("", "")
-            snippet = _strip_html(" ".join(part for part in snippet_parts if part), limit=500)
+            snippet = snippets[index] if index < len(snippets) else ""
             sources.append(self._source(query, title, url, snippet))
         return sources
 

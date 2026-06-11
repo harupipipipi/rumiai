@@ -251,6 +251,7 @@ export type CompanyAgent = {
   allowed_tools?: string[];
   context_limit?: number;
   aliases?: string[];
+  system_prompt?: string;
   status?: string;
   metadata?: Record<string, unknown>;
   created_at?: string;
@@ -310,6 +311,52 @@ export type CompanyTask = {
   updated_at?: string;
 };
 
+export type CompanyRunLink = {
+  link_id: string;
+  company_id: string;
+  task_id?: string | null;
+  thread_id?: string | null;
+  message_id?: string | null;
+  agent_id: string;
+  run_id: string;
+  status: string;
+  heartbeat_at?: string | null;
+  agent_run?: {
+    status?: string | null;
+    model?: string | null;
+    result_preview?: string;
+    error?: string | null;
+    conversation?: CompanyRunConversationMessage[];
+    updated_at?: string | null;
+  };
+  metadata?: Record<string, unknown>;
+  created_at?: string;
+  updated_at?: string;
+};
+
+export type CompanyRunConversationMessage = {
+  role: string;
+  label?: string;
+  content: string;
+  is_error?: boolean;
+};
+
+export type CompanyInboxItem = {
+  inbox_id: string;
+  company_id: string;
+  agent_id: string;
+  message_id?: string | null;
+  task_id?: string | null;
+  run_id?: string | null;
+  kind: string;
+  status: string;
+  priority?: string;
+  content: string;
+  metadata?: Record<string, unknown>;
+  created_at?: string;
+  updated_at?: string;
+};
+
 export type CompanyInboundRoute = {
   id: string;
   provider?: string;
@@ -345,7 +392,9 @@ export type CompanyRecord = {
 export type CompanyStatusResponse = {
   bootstrapped: boolean;
   company_id: string;
+  conversation_id?: string;
   company?: CompanyRecord | null;
+  runtime?: Record<string, number>;
   storage_file?: string;
 };
 
@@ -1945,17 +1994,28 @@ export const api = {
     });
   },
 
-  getCompanyStatus(companyId?: string) {
+  getCompanyStatus(options?: string | { companyId?: string | null; conversationId?: string | null; bootstrap?: boolean }) {
+    const query = typeof options === "string"
+      ? { company_id: options }
+      : {
+          company_id: options?.companyId,
+          conversation_id: options?.conversationId,
+          bootstrap: options?.bootstrap,
+        };
     return request<CompanyStatusResponse>(
-      withQuery("/api/company/status", { company_id: companyId }),
+      withQuery("/api/company/status", query),
       { cache: "no-store" },
     );
   },
 
-  bootstrapCompanyWorkspace(metadata?: Record<string, unknown>) {
+  bootstrapCompanyWorkspace(metadata?: Record<string, unknown>, options?: { conversationId?: string | null; scope?: "conversation" | "default" }) {
     return request<{ bootstrapped: boolean; company: CompanyRecord }>("/api/company/bootstrap", {
       method: "POST",
-      body: JSON.stringify(metadata ? { metadata } : {}),
+      body: JSON.stringify({
+        ...(metadata ? { metadata } : {}),
+        ...(options?.conversationId ? { conversation_id: options.conversationId } : {}),
+        ...(options?.scope ? { scope: options.scope } : {}),
+      }),
     });
   },
 
@@ -2054,6 +2114,24 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ company_id: companyId, task_id: taskId, policy }),
     });
+  },
+
+  listCompanyRuns(companyId: string, options?: { agent_id?: string; task_id?: string; status?: string; limit?: number }) {
+    return request<{ runs: CompanyRunLink[]; total: number }>(
+      withQuery(`/api/company/${encodeURIComponent(companyId)}/runs`, { company_id: companyId, ...options }),
+      { cache: "no-store" },
+    );
+  },
+
+  listCompanyAgentInbox(companyId: string, agentId: string, options?: { status?: string; kind?: string; limit?: number }) {
+    return request<{ inbox: CompanyInboxItem[]; total: number }>(
+      withQuery(`/api/company/${encodeURIComponent(companyId)}/agents/${encodeURIComponent(agentId)}/inbox`, {
+        company_id: companyId,
+        agent_id: agentId,
+        ...options,
+      }),
+      { cache: "no-store" },
+    );
   },
 
   listCompanyInboundRoutes(companyId: string) {

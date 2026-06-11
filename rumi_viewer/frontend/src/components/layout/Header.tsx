@@ -1,8 +1,9 @@
 import { useLocation } from 'react-router-dom';
-import { ArrowDown } from 'lucide-react';
+import { ArrowDown, Loader2 } from 'lucide-react';
 import { useAppStore } from '@/src/store';
 import { useT } from '@/src/lib/i18n';
 import { describeRuntimeBadge } from '@/src/lib/runtimeHealth';
+import { cn } from '@/src/lib/utils';
 import { panelRoutes } from '@/src/lib/routes';
 
 export function Header() {
@@ -35,6 +36,29 @@ export function Header() {
     if (location.pathname === panelRoutes.settings) return t('nav.settings');
     return '';
   };
+
+  const runtimePill = (() => {
+    if (runtimeBadge.tone === 'danger') {
+      return {
+        label: runtimeBadge.label,
+        dotClass: 'bg-red-500',
+        textClass: 'text-red-600 dark:text-red-400',
+      };
+    }
+    if (runtimeBadge.tone === 'warning') {
+      return {
+        label: runtimeBadge.label,
+        dotClass: 'bg-amber-500 animate-pulse',
+        textClass: 'text-amber-600 dark:text-amber-400',
+      };
+    }
+    return {
+      label: runtimeBadge.label,
+      dotClass: 'bg-emerald-500',
+      textClass: 'text-emerald-600 dark:text-emerald-400',
+    };
+  })();
+  const showRuntimeSpinner = runtimeBadge.tone === 'warning' && !runtimeReady && runtimeStatus !== 'error';
 
   return (
     <header className={`z-40 flex shrink-0 items-center justify-between border-b border-border bg-bg-header transition-colors duration-[var(--transition-base)] ${isFlows ? 'h-12 px-4' : 'h-14 px-6'}`}>
@@ -69,6 +93,22 @@ export function Header() {
       </div>
 
       <div className="flex items-center gap-3">
+        <div
+          className={cn(
+            "rumi-control-pill hidden md:inline-flex",
+            runtimePill.textClass,
+          )}
+          role="status"
+          aria-live="polite"
+          title={runtimeBadge.detail}
+        >
+          {showRuntimeSpinner ? (
+            <Loader2 className="h-3 w-3 animate-spin" />
+          ) : (
+            <span className={cn("rumi-control-pill-dot", runtimePill.dotClass)} />
+          )}
+          <span>{runtimePill.label}</span>
+        </div>
         <span className="text-xs text-text-muted hidden sm:block">{profile.username}</span>
         {profile.avatar ? (
           <img

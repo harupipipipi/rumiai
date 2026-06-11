@@ -10,11 +10,13 @@ from typing import Literal
 
 # Risk classification for action types
 _RISK_MAP: dict[str, Literal["low", "medium", "high"]] = {
-    # Low-risk: read-only / observation
-    "observe": "low",
+    # Low-risk: read-only metadata
     "list": "low",
-    "screenshot": "low",
     "ax_tree_read": "low",
+    # High-risk: visual capture may disclose sensitive data and foreground
+    # fallback observation can activate target applications.
+    "observe": "high",
+    "screenshot": "high",
     # Medium-risk: limited side effects
     "scroll": "medium",
     "move": "medium",
