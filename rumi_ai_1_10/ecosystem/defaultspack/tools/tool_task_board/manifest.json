@@ -1,10 +1,10 @@
 {
-  "id": "tool_kanban",
-  "description": "Maintain a local per-workspace Kanban task board.",
+  "id": "tool_task_board",
+  "description": "Maintain a local per-workspace task board.",
   "config": {
-    "tool_id": "tool_kanban",
-    "name": "tool_kanban",
-    "summary": "Kanban task board",
+    "tool_id": "tool_task_board",
+    "name": "tool_task_board",
+    "summary": "Task Board",
     "tool_category": "planning",
     "action_type": "update",
     "write_action": true,
@@ -12,13 +12,11 @@
     "risk": "medium",
     "tags": [
       "planning",
-      "kanban",
       "task_board",
       "workspace"
     ],
     "metadata": {
       "keywords": [
-        "kanban",
         "task board",
         "cards",
         "columns",
@@ -34,7 +32,7 @@
       "drop_capabilities": [
         "composer.toggle_chip"
       ],
-      "composer_label": "Kanban",
+      "composer_label": "Task Board",
       "composer_description": "Maintain local task-board cards and columns.",
       "composer_icon": "columns"
     },
@@ -233,7 +231,7 @@
     },
     "execution": {
       "type": "local",
-      "handler": "domain.tool.kanban:tool_kanban"
+      "handler": "domain.tool.task_board:tool_task_board"
     }
   }
 }

@@ -31,10 +31,10 @@ def test_github_issue_update_builds_multi_step_dry_run_plan():
             {
                 "issue_number": "42",
                 "repo": "owner/repo",
-                "title": "Ship agent kanban",
+                "title": "Ship agent task board",
                 "status": "Ready For Review",
                 "assignee": "alice",
-                "comment": "Synced from kanban card card-1",
+                "comment": "Synced from task board card card-1",
             }
         )
     )
@@ -49,7 +49,7 @@ def test_github_issue_update_builds_multi_step_dry_run_plan():
         "--repo",
         "owner/repo",
         "--title",
-        "Ship agent kanban",
+        "Ship agent task board",
         "--add-assignee",
         "alice",
         "--add-label",
@@ -61,7 +61,7 @@ def test_github_issue_update_builds_multi_step_dry_run_plan():
         "comment",
         "42",
         "--body",
-        "Synced from kanban card card-1",
+        "Synced from task board card card-1",
         "--repo",
         "owner/repo",
     ]
@@ -82,7 +82,7 @@ def test_github_issue_list_builds_read_only_filtered_plan():
                 "repo": "owner/repo",
                 "status": "Needs Review",
                 "assignee": "@me",
-                "labels": ["agent", "kanban"],
+                "labels": ["agent", "task-board"],
                 "search": "sync",
                 "limit": 12,
             }
@@ -103,7 +103,7 @@ def test_github_issue_list_builds_read_only_filtered_plan():
         "--label",
         "agent",
         "--label",
-        "kanban",
+        "task-board",
         "--label",
         "status:needs-review",
         "--search",
@@ -120,7 +120,7 @@ def test_linear_and_jira_sync_return_redacted_dry_run_payloads():
                 "status": "In Progress",
                 "assignee": "alice",
                 "comment": "Started from card-1",
-                "metadata": {"api_token": "secret-token", "kanban_card_id": "card-1"},
+                "metadata": {"api_token": "secret-token", "task_board_card_id": "card-1"},
             }
         )
     )

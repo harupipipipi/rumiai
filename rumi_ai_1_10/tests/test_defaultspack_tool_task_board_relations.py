@@ -9,14 +9,14 @@ DEFAULTSPACK_ROOT = ROOT / "ecosystem" / "defaultspack"
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(DEFAULTSPACK_ROOT))
 
-from domain.tool.kanban import KanbanController  # noqa: E402
+from domain.tool.task_board import TaskBoardController  # noqa: E402
 from domain.tool.executor import ToolExecutor  # noqa: E402
 from domain.tool.registry import ToolRegistry  # noqa: E402
 
 
-def test_kanban_tracks_dependencies_blockers_and_subtasks(tmp_path):
+def test_task_board_tracks_dependencies_blockers_and_subtasks(tmp_path):
     context = {"conversation_workspace_dir": str(tmp_path / "workspace")}
-    controller = KanbanController()
+    controller = TaskBoardController()
     foundation = controller.run({"action": "create", "title": "Foundation"}, context)["changed"]
     feature = controller.run(
         {
@@ -45,18 +45,18 @@ def test_kanban_tracks_dependencies_blockers_and_subtasks(tmp_path):
     assert unblocked["changed"]["depends_on"] == [foundation["id"]]
 
 
-def test_tool_kanban_relations_manifest_loads_and_executes(tmp_path):
+def test_tool_task_board_relations_manifest_loads_and_executes(tmp_path):
     ToolRegistry._instance = None
     registry = ToolRegistry()
     context = {"conversation_workspace_dir": str(tmp_path), "_tool_server_approved": True, "principal_id": "defaultspack"}
-    root = ToolExecutor().execute("tool_kanban", {"action": "create", "title": "Root"}, context)["widget"]["changed"]
+    root = ToolExecutor().execute("tool_task_board", {"action": "create", "title": "Root"}, context)["widget"]["changed"]
     result = ToolExecutor().execute(
-        "tool_kanban",
+        "tool_task_board",
         {"action": "create", "title": "Child", "depends_on": [root["id"]]},
         context,
     )
 
-    tool = registry.get("tool_kanban")
+    tool = registry.get("tool_task_board")
 
     assert tool is not None
     assert "subtask_add" in tool["schema"]["parameters"]["properties"]["action"]["enum"]
@@ -64,9 +64,9 @@ def test_tool_kanban_relations_manifest_loads_and_executes(tmp_path):
     assert result["widget"]["dependency_counts"]["total_dependencies"] == 1
 
 
-def test_kanban_block_action_keeps_dependency_aliases_in_summary(tmp_path):
+def test_task_board_block_action_keeps_dependency_aliases_in_summary(tmp_path):
     context = {"conversation_workspace_dir": str(tmp_path / "workspace")}
-    controller = KanbanController()
+    controller = TaskBoardController()
     root = controller.run({"action": "create", "title": "Root"}, context)["changed"]
     child = controller.run({"action": "create", "title": "Child"}, context)["changed"]
 

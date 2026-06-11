@@ -16,8 +16,8 @@ def _now_ms() -> int:
     return int(time.time() * 1000)
 
 
-class KanbanController:
-    """Small per-workspace Kanban/task-board store used by the tool runtime."""
+class TaskBoardController:
+    """Small per-workspace task board store used by the tool runtime."""
 
     def __init__(self, root: Path | None = None) -> None:
         self._root = root
@@ -44,7 +44,7 @@ class KanbanController:
         if action in {"create", "add"}:
             title = str(arguments.get("title") or arguments.get("task") or "").strip()
             if not title:
-                raise ValueError("'title' is required for kanban.create")
+                raise ValueError("'title' is required for task_board.create")
             column_id = _resolve_column_id(arguments, board["columns"]) or board["columns"][0]["id"]
             now = _now_ms()
             card = {
@@ -126,7 +126,7 @@ class KanbanController:
                 raise ValueError("card_id not found")
             title = str(arguments.get("title") or arguments.get("task") or "").strip()
             if not title:
-                raise ValueError("'title' is required for kanban.subtask_add")
+                raise ValueError("'title' is required for task_board.subtask_add")
             subtask = {
                 "id": str(arguments.get("subtask_id") or uuid.uuid4()),
                 "title": title,
@@ -202,7 +202,7 @@ class KanbanController:
         if action in {"list", "show"}:
             return self._result("list", board)
 
-        raise ValueError(f"Unsupported kanban action: {action}")
+        raise ValueError(f"Unsupported task board action: {action}")
 
     def _path(self, context: dict[str, Any]) -> Path:
         if self._root is not None:
@@ -214,7 +214,7 @@ class KanbanController:
             else:
                 root = Path(__file__).resolve().parents[2] / "user_data" / "shared"
         root.mkdir(parents=True, exist_ok=True)
-        return root / "kanban.json"
+        return root / "task_board.json"
 
     @staticmethod
     def _read(path: Path) -> dict[str, Any]:
@@ -269,12 +269,12 @@ class KanbanController:
         }
 
 
-def tool_kanban(arguments: dict[str, Any] | None = None, context: dict[str, Any] | None = None) -> dict[str, Any]:
-    result = KanbanController().run(arguments, context if isinstance(context, dict) else {})
+def tool_task_board(arguments: dict[str, Any] | None = None, context: dict[str, Any] | None = None) -> dict[str, Any]:
+    result = TaskBoardController().run(arguments, context if isinstance(context, dict) else {})
     return {
-        "result": result.get("summary", "kanban updated"),
+        "result": result.get("summary", "task board updated"),
         "is_error": False,
-        "widget": {"type": "kanban", **result},
+        "widget": {"type": "task_board", **result},
     }
 
 
@@ -355,7 +355,7 @@ def _resolve_column_id(arguments: dict[str, Any], columns: list[dict[str, Any]],
     for column in columns:
         if candidate == column["id"] or candidate.lower() == str(column.get("title") or "").strip().lower():
             return str(column["id"])
-    raise ValueError(f"Unknown kanban column: {candidate}")
+    raise ValueError(f"Unknown task board column: {candidate}")
 
 
 def _card_id(arguments: dict[str, Any]) -> str:

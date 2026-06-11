@@ -4,7 +4,7 @@ import re
 import time
 from typing import Any
 
-from domain.tool.kanban import KanbanController
+from domain.tool.task_board import TaskBoardController
 
 
 def _now_ms() -> int:
@@ -18,11 +18,11 @@ _STAGE_COLUMN_ALIASES = {
 }
 
 
-class KanbanAgentSessionController:
-    """Link Kanban cards to defaultspack coding agent sessions."""
+class TaskBoardAgentSessionController:
+    """Link task board cards to defaultspack coding agent sessions."""
 
-    def __init__(self, kanban: KanbanController | None = None) -> None:
-        self._kanban = kanban or KanbanController()
+    def __init__(self, task_board: TaskBoardController | None = None) -> None:
+        self._task_board = task_board or TaskBoardController()
 
     def run(self, arguments: dict[str, Any] | None = None, context: dict[str, Any] | None = None) -> dict[str, Any]:
         arguments = arguments or {}
@@ -42,7 +42,7 @@ class KanbanAgentSessionController:
             return self._mark_terminal(arguments, context, terminal_state="dismissed", default_column=None)
         if action in {"unlink", "clear"}:
             return self._unlink(arguments, context)
-        raise ValueError(f"Unsupported kanban agent session action: {action}")
+        raise ValueError(f"Unsupported task_board agent session action: {action}")
 
     def _start(self, arguments: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
         card = self._card(arguments, context)
@@ -91,7 +91,7 @@ class KanbanAgentSessionController:
         session_link = self._session_link(card, arguments)
         session_id = str(session_link.get("session_id") or "").strip()
         if not session_id:
-            raise ValueError("session_id not found on kanban card")
+            raise ValueError("session_id not found on task board card")
         from blocks.agent.coding_session_status import run as session_status
 
         output = session_status({"session_id": session_id}, context)
@@ -112,7 +112,7 @@ class KanbanAgentSessionController:
         session_link = self._session_link(card, arguments)
         session_id = str(session_link.get("session_id") or "").strip()
         if not session_id:
-            raise ValueError("session_id not found on kanban card")
+            raise ValueError("session_id not found on task board card")
         from blocks.agent.coding_session_merge_report import run as merge_report
 
         output = merge_report({"session_id": session_id}, context)
@@ -182,7 +182,7 @@ class KanbanAgentSessionController:
         card = self._card(arguments, context)
         metadata = _metadata(card)
         previous = metadata.pop("agent_session", {})
-        card = self._kanban.run(
+        card = self._task_board.run(
             {"action": "update", "card_id": card["id"], "metadata": metadata},
             context,
         )["changed"]
@@ -192,7 +192,7 @@ class KanbanAgentSessionController:
         card_id = str(arguments.get("card_id") or arguments.get("id") or "").strip()
         if not card_id:
             raise ValueError("card_id is required")
-        board = self._kanban.run({"action": "list"}, context)
+        board = self._task_board.run({"action": "list"}, context)
         for card in board.get("cards", []):
             if card.get("id") == card_id:
                 return dict(card)
@@ -230,7 +230,7 @@ class KanbanAgentSessionController:
         target_column = self._resolve_target_column(card, context, column, explicit_column=explicit_column)
         if target_column:
             update_args["column"] = target_column
-        updated = self._kanban.run(update_args, context)
+        updated = self._task_board.run(update_args, context)
         return dict(updated["changed"])
 
     def _resolve_target_column(
@@ -243,13 +243,13 @@ class KanbanAgentSessionController:
     ) -> str | None:
         if not column:
             return None
-        board = self._kanban.run({"action": "list"}, context)
+        board = self._task_board.run({"action": "list"}, context)
         columns = list(board.get("columns") if isinstance(board.get("columns"), list) else [])
         exact = _find_column(columns, str(column))
         if exact is not None:
             return exact
         if explicit_column:
-            raise ValueError(f"Unknown kanban column: {column}")
+            raise ValueError(f"Unknown task board column: {column}")
         semantic = _find_stage_column(columns, str(column), current_column_id=str(card.get("column_id") or ""))
         if semantic is not None:
             return semantic
@@ -258,7 +258,7 @@ class KanbanAgentSessionController:
     @staticmethod
     def _result(action: str, card: dict[str, Any], session_link: dict[str, Any], data: dict[str, Any]) -> dict[str, Any]:
         session_id = str(session_link.get("session_id") or "")
-        summary = f"{action}: kanban card {card.get('id')}"
+        summary = f"{action}: task board card {card.get('id')}"
         if session_id:
             summary += f" linked to {session_id}"
         return {
@@ -270,12 +270,12 @@ class KanbanAgentSessionController:
         }
 
 
-def tool_kanban_agent_session(arguments: dict[str, Any] | None = None, context: dict[str, Any] | None = None) -> dict[str, Any]:
-    result = KanbanAgentSessionController().run(arguments, context if isinstance(context, dict) else {})
+def tool_task_board_agent_session(arguments: dict[str, Any] | None = None, context: dict[str, Any] | None = None) -> dict[str, Any]:
+    result = TaskBoardAgentSessionController().run(arguments, context if isinstance(context, dict) else {})
     return {
-        "result": result.get("summary", "kanban agent session updated"),
+        "result": result.get("summary", "task board agent session updated"),
         "is_error": False,
-        "widget": {"type": "kanban_agent_session", **result},
+        "widget": {"type": "task_board_agent_session", **result},
     }
 
 

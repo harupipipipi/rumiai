@@ -1,26 +1,22 @@
 {
-  "function_id": "tool_kanban_agent_session",
-  "description": "Link Kanban cards to defaultspack coding agent sessions.",
+  "function_id": "tool_task_board",
+  "description": "Run the default task board tool.",
   "tags": [
     "tool",
     "planning",
-    "kanban",
-    "agent"
+    "task_board"
   ],
   "risk": "medium",
   "requires": [
-    "tool.kanban",
-    "coding.agent.session.create"
+    "tool.task_board"
   ],
   "caller_requires": [],
   "host_execution": false,
   "calling_convention": "subprocess",
   "entrypoint": "main.py:run",
   "vocab_aliases": [
-    "defaults.tool.kanban_agent_session",
-    "defaultspack.tool.kanban_agent_session",
-    "defaults.tool.kanban.agent.session",
-    "defaultspack.tool.kanban.agent.session"
+    "defaults.tool.task_board",
+    "defaultspack.tool.task_board"
   ],
   "input_schema": {
     "type": "object",

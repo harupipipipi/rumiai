@@ -1,10 +1,10 @@
 {
-  "id": "tool_kanban_agent_session",
-  "description": "Start and track coding agent sessions from Kanban cards.",
+  "id": "tool_task_board_agent_session",
+  "description": "Start and track coding agent sessions from task board cards.",
   "config": {
-    "tool_id": "tool_kanban_agent_session",
-    "name": "tool_kanban_agent_session",
-    "summary": "Kanban agent sessions",
+    "tool_id": "tool_task_board_agent_session",
+    "name": "tool_task_board_agent_session",
+    "summary": "Task Board agent sessions",
     "tool_category": "planning",
     "action_type": "update",
     "write_action": true,
@@ -12,14 +12,13 @@
     "risk": "medium",
     "tags": [
       "planning",
-      "kanban",
+      "task_board",
       "agent",
-      "coding_session",
-      "task_board"
+      "coding_session"
     ],
     "metadata": {
       "keywords": [
-        "kanban",
+        "task board",
         "agent session",
         "task run",
         "ready",
@@ -36,8 +35,8 @@
       "drop_capabilities": [
         "composer.toggle_chip"
       ],
-      "composer_label": "Kanban Agent Run",
-      "composer_description": "Link Kanban cards to coding agent sessions.",
+      "composer_label": "Task Board Agent Run",
+      "composer_description": "Link task board cards to coding agent sessions.",
       "composer_icon": "play-circle"
     },
     "schema": {
@@ -120,7 +119,7 @@
     },
     "execution": {
       "type": "local",
-      "handler": "domain.tool.kanban_agent_session:tool_kanban_agent_session"
+      "handler": "domain.tool.task_board_agent_session:tool_task_board_agent_session"
     }
   }
 }

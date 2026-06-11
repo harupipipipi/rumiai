@@ -13,4 +13,4 @@ from domain.function_runtime.dispatcher import run_defaultspack_function
 
 
 def run(context, args):
-    return run_defaultspack_function("tool_kanban_agent_session", args, context)
+    return run_defaultspack_function("tool_task_board_agent_session", args, context)

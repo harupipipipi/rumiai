@@ -1035,23 +1035,23 @@ class ToolExecutor:
                 "is_error": False,
                 "widget": {"type": "todo", **result},
             }
-        elif tool_name in {"kanban", "tool_kanban"}:
-            from domain.tool.kanban import KanbanController
+        elif tool_name in {"task_board", "tool_task_board"}:
+            from domain.tool.task_board import TaskBoardController
 
-            result = KanbanController().run(arguments, context if isinstance(context, dict) else {})
+            result = TaskBoardController().run(arguments, context if isinstance(context, dict) else {})
             return {
-                "result": result.get("summary", "kanban updated"),
+                "result": result.get("summary", "task board updated"),
                 "is_error": False,
-                "widget": {"type": "kanban", **result},
+                "widget": {"type": "task_board", **result},
             }
-        elif tool_name == "tool_kanban_agent_session":
-            from domain.tool.kanban_agent_session import KanbanAgentSessionController
+        elif tool_name == "tool_task_board_agent_session":
+            from domain.tool.task_board_agent_session import TaskBoardAgentSessionController
 
-            result = KanbanAgentSessionController().run(arguments, context if isinstance(context, dict) else {})
+            result = TaskBoardAgentSessionController().run(arguments, context if isinstance(context, dict) else {})
             return {
-                "result": result.get("summary", "kanban agent session updated"),
+                "result": result.get("summary", "task board agent session updated"),
                 "is_error": False,
-                "widget": {"type": "kanban_agent_session", **result},
+                "widget": {"type": "task_board_agent_session", **result},
             }
         elif tool_name == "subagent":
             from ecosystem.rumi_default_tools_pack.domain.tool.subagent import SubagentController

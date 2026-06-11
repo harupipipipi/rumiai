@@ -2174,21 +2174,21 @@ aliases:
     reason: legacy caller compatibility
     remove_after: v2.3
     replacement: defaultspack.tool.calculator
-  defaults.tool.kanban:
+  defaults.tool.task_board:
     owner: tool
     reason: legacy caller compatibility
     remove_after: v2.3
-    replacement: defaultspack.tool.kanban
-  defaults.tool.kanban.agent.session:
+    replacement: defaultspack.tool.task_board
+  defaults.tool.task_board.agent.session:
     owner: tool
     reason: legacy caller compatibility
     remove_after: v2.3
-    replacement: defaultspack.tool.kanban.agent.session
-  defaults.tool.kanban_agent_session:
+    replacement: defaultspack.tool.task_board.agent.session
+  defaults.tool.task_board_agent_session:
     owner: tool
     reason: legacy caller compatibility
     remove_after: v2.3
-    replacement: defaultspack.tool.kanban_agent_session
+    replacement: defaultspack.tool.task_board_agent_session
   defaults.tool.consent.check:
     owner: tool
     reason: legacy caller compatibility
@@ -2459,21 +2459,21 @@ aliases:
     reason: legacy caller compatibility
     remove_after: v2.3
     replacement: defaultspack.vision.describe_images
-  defaults.tool.kanban:
+  defaults.tool.task_board:
     owner: tool
     reason: legacy caller compatibility
     remove_after: v2.3
-    replacement: defaultspack.tool.kanban
-  defaults.tool.kanban.agent.session:
+    replacement: defaultspack.tool.task_board
+  defaults.tool.task_board.agent.session:
     owner: tool
     reason: legacy caller compatibility
     remove_after: v2.3
-    replacement: defaultspack.tool.kanban.agent.session
-  defaults.tool.kanban_agent_session:
+    replacement: defaultspack.tool.task_board.agent.session
+  defaults.tool.task_board_agent_session:
     owner: tool
     reason: legacy caller compatibility
     remove_after: v2.3
-    replacement: defaultspack.tool.kanban_agent_session
+    replacement: defaultspack.tool.task_board_agent_session
 canonical_prefix: defaultspack.
 compat_prefixes:
 - defaults.

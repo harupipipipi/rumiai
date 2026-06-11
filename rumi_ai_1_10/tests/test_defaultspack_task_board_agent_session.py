@@ -9,8 +9,8 @@ DEFAULTSPACK_ROOT = ROOT / "ecosystem" / "defaultspack"
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(DEFAULTSPACK_ROOT))
 
-from domain.tool.kanban import KanbanController  # noqa: E402
-from domain.tool.kanban_agent_session import KanbanAgentSessionController  # noqa: E402
+from domain.tool.task_board import TaskBoardController  # noqa: E402
+from domain.tool.task_board_agent_session import TaskBoardAgentSessionController  # noqa: E402
 from domain.tool.executor import ToolExecutor  # noqa: E402
 from domain.tool.registry import ToolRegistry  # noqa: E402
 
@@ -21,14 +21,14 @@ def _reset_sessions():
     _state._multi_sessions.clear()
 
 
-def test_kanban_card_starts_tracks_and_applies_agent_session(tmp_path):
+def test_task_board_card_starts_tracks_and_applies_agent_session(tmp_path):
     _reset_sessions()
     context = {"conversation_workspace_dir": str(tmp_path / "workspace")}
-    card = KanbanController().run(
+    card = TaskBoardController().run(
         {"action": "create", "title": "Implement task run", "notes": "Keep it backend-only."},
         context,
     )["changed"]
-    controller = KanbanAgentSessionController()
+    controller = TaskBoardAgentSessionController()
 
     started = controller.run({"action": "start", "card_id": card["id"], "max_turns": 1}, context)
     session_id = started["session_link"]["session_id"]
@@ -49,52 +49,52 @@ def test_kanban_card_starts_tracks_and_applies_agent_session(tmp_path):
     assert applied["session_link"]["terminal_state"] == "applied"
 
 
-def test_kanban_agent_session_tool_and_dispatcher_are_registered(tmp_path):
+def test_task_board_agent_session_tool_and_dispatcher_are_registered(tmp_path):
     _reset_sessions()
     ToolRegistry._instance = None
     context = {"conversation_workspace_dir": str(tmp_path / "workspace")}
-    card = KanbanController().run({"action": "create", "title": "Registry task"}, context)["changed"]
+    card = TaskBoardController().run({"action": "create", "title": "Registry task"}, context)["changed"]
     registry = ToolRegistry()
 
-    tool = registry.get("tool_kanban_agent_session")
+    tool = registry.get("tool_task_board_agent_session")
     executed = ToolExecutor().execute(
-        "tool_kanban_agent_session",
+        "tool_task_board_agent_session",
         {"action": "start", "card_id": card["id"]},
         {**context, "_tool_server_approved": True, "principal_id": "defaultspack"},
     )
 
     from ecosystem.defaultspack.domain.function_runtime.dispatcher import run_defaultspack_function
 
-    dispatched_card = KanbanController().run(
+    dispatched_card = TaskBoardController().run(
         {"action": "create", "title": "Dispatcher task"},
         {"conversation_workspace_dir": str(tmp_path / "dispatcher")},
     )["changed"]
     dispatched = run_defaultspack_function(
-        "tool_kanban_agent_session",
+        "tool_task_board_agent_session",
         {"action": "start", "card_id": dispatched_card["id"]},
         {"conversation_workspace_dir": str(tmp_path / "dispatcher")},
     )
 
     assert tool is not None
-    assert tool["execution"]["handler"] == "domain.tool.kanban_agent_session:tool_kanban_agent_session"
+    assert tool["execution"]["handler"] == "domain.tool.task_board_agent_session:tool_task_board_agent_session"
     assert executed["is_error"] is False
-    assert executed["widget"]["type"] == "kanban_agent_session"
+    assert executed["widget"]["type"] == "task_board_agent_session"
     assert dispatched["status"] == "ok"
     assert dispatched["data"]["widget"]["session_link"]["session_id"].startswith("multi_")
 
 
-def test_kanban_agent_session_maps_custom_board_columns_and_done_state(tmp_path):
+def test_task_board_agent_session_maps_custom_board_columns_and_done_state(tmp_path):
     _reset_sessions()
     context = {"conversation_workspace_dir": str(tmp_path / "workspace")}
-    kanban = KanbanController()
-    kanban.run({"action": "configure", "columns": ["Inbox", "Active", "QA Review", "Completed"]}, context)
-    card = kanban.run({"action": "create", "title": "Custom board task"}, context)["changed"]
-    controller = KanbanAgentSessionController()
+    task_board = TaskBoardController()
+    task_board.run({"action": "configure", "columns": ["Inbox", "Active", "QA Review", "Completed"]}, context)
+    card = task_board.run({"action": "create", "title": "Custom board task"}, context)["changed"]
+    controller = TaskBoardAgentSessionController()
 
     started = controller.run({"action": "start", "card_id": card["id"], "max_turns": 1}, context)
     report = controller.run({"action": "merge_report", "card_id": card["id"]}, context)
     applied = controller.run({"action": "apply", "card_id": card["id"]}, context)
-    board = kanban.run({"action": "list"}, context)
+    board = task_board.run({"action": "list"}, context)
 
     assert started["card"]["column_id"] == "active"
     assert report["card"]["column_id"] == "qa-review"
@@ -102,15 +102,15 @@ def test_kanban_agent_session_maps_custom_board_columns_and_done_state(tmp_path)
     assert board["summary"].endswith("(0 open)")
 
 
-def test_kanban_agent_session_rejects_unknown_explicit_column(tmp_path):
+def test_task_board_agent_session_rejects_unknown_explicit_column(tmp_path):
     _reset_sessions()
     context = {"conversation_workspace_dir": str(tmp_path / "workspace")}
-    card = KanbanController().run({"action": "create", "title": "Explicit column task"}, context)["changed"]
-    controller = KanbanAgentSessionController()
+    card = TaskBoardController().run({"action": "create", "title": "Explicit column task"}, context)["changed"]
+    controller = TaskBoardAgentSessionController()
 
     try:
         controller.run({"action": "start", "card_id": card["id"], "column": "Nope", "max_turns": 1}, context)
     except ValueError as exc:
-        assert "Unknown kanban column" in str(exc)
+        assert "Unknown task board column" in str(exc)
     else:
         raise AssertionError("expected explicit invalid column to fail")
