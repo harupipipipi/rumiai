@@ -1,0 +1,141 @@
+{
+  "pack_id": "rumi_knowledge_marketplace_pack",
+  "pack_identity": "rumi:ecosystem/rumi_knowledge_marketplace_pack",
+  "display_name": "Rumi Knowledge Marketplace Pack",
+  "description": "Declarative local-first marketplace pack for capability cards, provenance ledgers, install review, trust rubrics, promotion gates, and blacklist policy.",
+  "version": "0.1.0",
+  "license": "MIT",
+  "vocabulary": {
+    "types": [
+      "manifest",
+      "documentation",
+      "catalog",
+      "schema",
+      "policy",
+      "workflow",
+      "ledger",
+      "profile",
+      "prompt",
+      "preset",
+      "example"
+    ],
+    "custom_types": {
+      "workflow": {
+        "description": "Declarative install-review workflows for untrusted marketplace candidates.",
+        "singleton": false
+      },
+      "ledger": {
+        "description": "Local provenance ledger contracts for reviewed marketplace content.",
+        "singleton": false
+      },
+      "schema": {
+        "description": "JSON Schema assets for marketplace cards and review records.",
+        "singleton": false
+      }
+    }
+  },
+  "dependencies": {
+    "defaultspack": ">=2.0.0"
+  },
+  "components": {},
+  "load_order": [],
+  "connectivity": {
+    "provides": [
+      "marketplace.card_schema",
+      "marketplace.trust_rubric",
+      "marketplace.install_review_workflow",
+      "marketplace.provenance_ledger"
+    ],
+    "requires": [
+      "defaultspack.grants"
+    ]
+  },
+  "required_secrets": [],
+  "required_network": [],
+  "host_execution": false,
+  "metadata": {
+    "required_secrets": [],
+    "network_policy": "none_by_default",
+    "executable_code": false,
+    "runtime_type": "declarative_pack",
+    "owner_surfaces": [
+      "skill_cards",
+      "template_catalogs",
+      "install_candidate_reviews",
+      "trust_metadata",
+      "provenance_ledgers",
+      "promotion_blacklist_policy"
+    ],
+    "optional_integrations": [
+      {
+        "pack_id": "rumi_pack_suite_pack",
+        "reason": "Pack bundles and suite composition stay with the suite pack; marketplace records card-level review evidence."
+      },
+      {
+        "pack_id": "rumi_security_review_pack",
+        "reason": "Suspicious candidates, excessive permissions, and blacklist decisions route to security review."
+      },
+      {
+        "pack_id": "rumi_memory_knowledge_pack",
+        "reason": "Learned skills and durable knowledge records stay with memory/knowledge; marketplace records install and trust evidence."
+      },
+      {
+        "pack_id": "rumi_connector_gateway_pack",
+        "reason": "Connector execution, secrets, and live grants stay with connector gateway; marketplace captures card metadata only."
+      }
+    ],
+    "overlap_notes": {
+      "defaultspack": "Owns active grants, pack selection, and runtime enforcement.",
+      "rumi_pack_suite_pack": "Owns bundle installation and suite composition; marketplace owns candidate card trust metadata.",
+      "rumi_security_review_pack": "Owns security analysis; marketplace owns triage, provenance, and blacklist policy.",
+      "rumi_connector_gateway_pack": "Owns connector execution; marketplace owns connector-card review records."
+    },
+    "asset_index": {
+      "manifest": [
+        "ecosystem.json"
+      ],
+      "readme": [
+        "README.md"
+      ],
+      "docs": [
+        "docs/README.md",
+        "docs/architecture.md",
+        "docs/interfaces.md",
+        "docs/operations.md"
+      ],
+      "catalog": [
+        "catalog/marketplace_card_schema.yaml",
+        "catalog/trust_rubric.yaml"
+      ],
+      "schemas": [
+        "schemas/marketplace_card.schema.json"
+      ],
+      "policies": [
+        "policies/marketplace_trust.policy.yaml",
+        "policies/promotion_blacklist.policy.yaml"
+      ],
+      "workflows": [
+        "workflows/install_review_workflow.yaml"
+      ],
+      "ledgers": [
+        "ledgers/provenance_ledger.yaml"
+      ],
+      "profiles": [
+        "profiles/marketplace_curator.profile.yaml"
+      ],
+      "prompts": [
+        "prompts/marketplace_curator.system.md"
+      ],
+      "presets": [
+        "presets/safe_default.preset.yaml",
+        "presets/handoff_review.preset.yaml",
+        "presets/quality_gate.preset.yaml"
+      ],
+      "examples": [
+        "examples/connector_card_review.example.yaml",
+        "examples/skill_review_card.example.yaml",
+        "examples/template_catalog_entry.example.yaml"
+      ]
+    }
+  }
+}

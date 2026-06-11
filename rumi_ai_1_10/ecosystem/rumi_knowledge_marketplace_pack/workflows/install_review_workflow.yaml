@@ -1,0 +1,40 @@
+version: rumi.knowledge_marketplace.install_review_workflow.v1
+pack_id: rumi_knowledge_marketplace_pack
+network_default: none
+
+phases:
+  - id: identify_candidate
+    required_inputs:
+      - card_id
+      - capability_type
+      - source_ref
+      - publisher
+  - id: permission_review
+    required_inputs:
+      - required_permissions
+      - network_requirement
+      - secret_requirement
+      - host_execution_requirement
+  - id: provenance_review
+    required_inputs:
+      - content_digest
+      - source_ref
+      - reviewer
+      - review_timestamp
+  - id: trust_decision
+    required_inputs:
+      - trust_rubric_level
+      - risk_level
+      - install_decision
+      - required_followups
+
+decisions:
+  - allow_install
+  - allow_with_warning
+  - needs_security_review
+  - block_install
+
+completion_gate:
+  auto_install_allowed: false
+  explicit_user_approval_required: true
+  provenance_ledger_entry_required: true
