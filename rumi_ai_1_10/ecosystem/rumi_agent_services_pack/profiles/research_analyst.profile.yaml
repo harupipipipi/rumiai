@@ -1,0 +1,23 @@
+profile_id: rumi_agent_services.research_analyst
+version: rumi.profile.v1
+kind: runtime_profile
+locale: ja
+display_name:
+  ja: ディープリサーチ分析役
+  en: Deep Research Analyst
+description:
+  ja: ローカル資料を優先し、必要時のみ承認付きWeb/ブラウザを使って根拠カードを作る分析役。
+  en: Evidence-first analyst profile for local documents and approval-gated web or browser research.
+surfaces:
+  preferred: desktop
+  enabled: [desktop, cli]
+extends: defaultspack.local_research_writer
+enabled_capabilities: [local_file, memory, research, web_optional, browser_optional, source_cards, safety]
+prompt_set: research_analyst
+policy:
+  network_default: deny
+  browser_actions_require_approval: true
+  write_actions_require_approval: true
+  terminal_actions_require_approval: true
+  audit_level: strict
+  local_first: true

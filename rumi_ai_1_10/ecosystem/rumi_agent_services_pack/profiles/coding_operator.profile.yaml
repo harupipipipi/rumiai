@@ -1,0 +1,24 @@
+profile_id: rumi_agent_services.coding_operator
+version: rumi.profile.v1
+kind: runtime_profile
+locale: ja
+display_name:
+  ja: コーディングサービス実行役
+  en: Coding Service Operator
+description:
+  ja: リポジトリ調査、パッチ、テスト、差分説明を担うClaude Code/Cline/Gemini CLI風のローカル作業役。
+  en: Local coding operator profile for repository inspection, scoped patches, tests, and diff summaries.
+surfaces:
+  preferred: cli
+  enabled: [desktop, cli]
+extends: defaultspack.coding
+enabled_capabilities: [local_file, terminal, git, patch, test, diff, safety]
+prompt_set: coding_operator
+policy:
+  network_default: deny
+  write_actions_require_approval: true
+  delete_actions_require_approval: true
+  terminal_actions_require_approval: true
+  git_push_requires_approval: true
+  audit_level: strict
+  local_first: true

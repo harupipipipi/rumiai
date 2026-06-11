@@ -1,0 +1,25 @@
+profile_id: rumi_agent_services.service_director
+version: rumi.profile.v1
+kind: runtime_profile
+locale: ja
+display_name:
+  ja: エージェントサービス統括
+  en: Agent Service Director
+description:
+  ja: 複数ロールの作業を分解、委任、統合し、最後の納品品質まで責任を持つローカル優先プロファイル。
+  en: Local-first director profile for decomposing, delegating, integrating, and delivering multi-role agent work.
+surfaces:
+  preferred: desktop
+  enabled: [desktop, cli]
+extends: defaultspack.local_agent
+enabled_capabilities: [project, planning, memory, artifact, subagent_coordination, safety]
+prompt_set: service_director
+policy:
+  network_default: deny
+  write_actions_require_approval: true
+  delete_actions_require_approval: true
+  terminal_actions_require_approval: true
+  browser_actions_require_approval: true
+  git_push_requires_approval: true
+  audit_level: strict
+  local_first: true
