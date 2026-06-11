@@ -204,6 +204,8 @@ def prepare_chat_run(input_data: dict[str, Any], context: dict[str, Any] | None 
             profile_id=model,
             conversation_id=conversation_id,
         )["level"]
+    if "deepthink_enabled" not in params:
+        params["deepthink_enabled"] = bool(model_settings.get("deepthink_enabled", False))
 
     request_context = _merge_active_startup_profile_context(context or {}, active_startup_profile)
     if effective_inferred_tool_ids:

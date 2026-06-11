@@ -2191,6 +2191,7 @@ export default function App() {
     ?? activeProfile?.default_thinking_level
     ?? "medium",
   );
+  const deepthinkEnabled = parseCommandBoolean(settingsValues.models?.deepthink_enabled, false);
   const contextUsage = contextUsageFor(activeConversation, activeProfile);
   const composerExtensions = useMemo(
     () => composerExtensionItems(sidebarItems).filter((item) => !disabledToolIdSet.has(item.id)),
@@ -2330,10 +2331,10 @@ export default function App() {
       .filter((command) => command.id !== "think" || profileSupportsThinking(activeProfile))
       .map((command) => ({
         ...command,
-        active: command.id === "yolo" ? (yoloMode || ultraYoloMode) : command.id === "ultra_yolo" ? ultraYoloMode : command.id === mode,
-        enabled: command.id === "yolo" ? (yoloMode || ultraYoloMode) : command.id === "ultra_yolo" ? ultraYoloMode : command.id === mode,
+        active: command.id === "yolo" ? (yoloMode || ultraYoloMode) : command.id === "ultra_yolo" ? ultraYoloMode : command.id === "deepthink" ? deepthinkEnabled : command.id === mode,
+        enabled: command.id === "yolo" ? (yoloMode || ultraYoloMode) : command.id === "ultra_yolo" ? ultraYoloMode : command.id === "deepthink" ? deepthinkEnabled : command.id === mode,
       }));
-  }, [activeProfile, commandCatalog, mode, selectableModelProfiles, settingsValues.commands?.show_advanced_commands, ultraYoloMode, yoloMode]);
+  }, [activeProfile, commandCatalog, deepthinkEnabled, mode, selectableModelProfiles, settingsValues.commands?.show_advanced_commands, ultraYoloMode, yoloMode]);
   const modelCommandCandidates = composerCandidateMenu?.mode === "model" ? composerCandidateMenu.candidates : [];
   const unknownBlockStrategy = String(settingsValues.chat_rendering?.unknown_block_strategy ?? "hidden");
   const showWidgets = settingsValues.chat_rendering?.show_widgets !== false;
@@ -3395,7 +3396,7 @@ export default function App() {
       }
       case "show_status":
         setError(
-          `status: mode=${mode}, model=${activeProfile?.display_name ?? preferredModel}, thinking=${selectedThinkingLevel}, yolo=${yoloMode ? "on" : "off"}, ultra_yolo=${ultraYoloMode ? "on" : "off"}, tools=${selectedTools.length}`,
+          `status: mode=${mode}, model=${activeProfile?.display_name ?? preferredModel}, thinking=${selectedThinkingLevel}, deepthink=${deepthinkEnabled ? "on" : "off"}, yolo=${yoloMode ? "on" : "off"}, ultra_yolo=${ultraYoloMode ? "on" : "off"}, tools=${selectedTools.length}`,
         );
         return;
       case "open_settings":
@@ -3522,6 +3523,9 @@ export default function App() {
       }
       if (parsed.command.execution.type === "rumi_function") {
         await refreshCatalog();
+      }
+      if (result.message) {
+        setError(result.message);
       }
     } catch (commandError) {
       setError(commandError instanceof Error ? commandError.message : "command execution に失敗しました。");
@@ -4513,6 +4517,7 @@ export default function App() {
 
       await api.streamMessage(conversation.id, userText, {
         thinking_level: activeProfile?.supports_thinking ? selectedThinkingLevel : null,
+        deepthink_enabled: deepthinkEnabled,
         tool_choice: submittedToolIds.length > 0 ? "required" : undefined,
         tool_policy: {
           ...(ultraYoloMode ? { yolo_mode: true, allow_shell: true, allow_file_write: true, write_actions_require_approval: false } : {}),

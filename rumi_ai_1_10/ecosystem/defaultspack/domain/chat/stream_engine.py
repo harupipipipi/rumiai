@@ -1907,6 +1907,7 @@ class ChatRunEngine:
                     **({"transcript": "".join(self._thinking_transcript_parts)} if self._thinking_transcript_parts else {}),
                 },
                 "thinking_level": prepared.params.get("thinking_level"),
+                "deepthink_enabled": bool(prepared.params.get("deepthink_enabled")),
                 "model_routing": dict(prepared.model_routing or {}),
                 "chat_references": dict(prepared.chat_references or {}),
                 "ir": {"schema_version": prepared.ir_schema_version},
@@ -2330,6 +2331,7 @@ class ChatRunEngine:
             metadata.setdefault("attached_tool_count", len(prepared.provider_tools))
             metadata.setdefault("attached_tools", list(prepared.tools_called))
             metadata["thinking_level"] = prepared.params.get("thinking_level")
+            metadata["deepthink_enabled"] = bool(prepared.params.get("deepthink_enabled"))
             response["metadata"] = metadata
             return response
         return None
