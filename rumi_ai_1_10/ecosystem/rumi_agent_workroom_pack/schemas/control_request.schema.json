@@ -1,0 +1,98 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rumi.local/schemas/control_request.schema.json",
+  "title": "Control Request",
+  "description": "Idempotent control request contract for workroom intervention.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "control_request_id",
+    "run_id",
+    "kind",
+    "idempotency_key",
+    "idempotency_scope",
+    "duplicate_policy",
+    "precondition_status",
+    "requested_by",
+    "requested_at",
+    "reason",
+    "state",
+    "audit_ref"
+  ],
+  "properties": {
+    "control_request_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "run_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "interrupt",
+        "redirect",
+        "cancel",
+        "pause",
+        "resume"
+      ]
+    },
+    "idempotency_key": {
+      "type": "string",
+      "minLength": 8,
+      "description": "Stable key generated from run_id, kind, requested_by, and client request id."
+    },
+    "idempotency_scope": {
+      "type": "string",
+      "const": "run_id_kind_requested_by"
+    },
+    "duplicate_policy": {
+      "type": "string",
+      "const": "return_existing_control_request"
+    },
+    "precondition_status": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "enum": [
+          "created",
+          "queued",
+          "running",
+          "waiting_approval",
+          "waiting_user_input",
+          "paused",
+          "resumable",
+          "compacting"
+        ]
+      }
+    },
+    "requested_by": {
+      "type": "string",
+      "minLength": 1
+    },
+    "requested_at": {
+      "type": "string",
+      "minLength": 1
+    },
+    "reason": {
+      "type": "string",
+      "minLength": 1
+    },
+    "state": {
+      "type": "string",
+      "enum": [
+        "requested",
+        "accepted",
+        "applied",
+        "rejected",
+        "expired"
+      ]
+    },
+    "audit_ref": {
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}
