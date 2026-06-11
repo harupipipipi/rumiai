@@ -192,6 +192,18 @@ class APIRouteTableMixin:
             if entry.get("function_id"):
                 from ..capability_executor import get_capability_executor
 
+                if not type(self)._pack_allows_in_process_api_metadata(entry["pack_id"]):
+                    logger.warning(
+                        "Rejecting function api_route dispatch from non-first-party pack: %s:%s",
+                        entry["pack_id"],
+                        entry["function_id"],
+                    )
+                    self._send_response(
+                        APIResponse(False, error="Pack function route is not allowed"),
+                        403,
+                    )
+                    return True
+
                 call_args = dict(body if pass_body and body is not None else {})
                 call_args.update(entry.get("args") or {})
                 param_map = entry.get("path_param_map") or {}

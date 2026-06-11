@@ -550,6 +550,61 @@ class PackAPIHandler(
 
         return True
 
+    def _execute_api_route_pack_function(
+        self,
+        pack_id: str,
+        function_id: str,
+        args: dict[str, Any],
+        context: dict[str, Any],
+    ) -> Any:
+        """Execute a pack-backed API route through the capability boundary.
+
+        Pack-declared HTTP routes are externally triggerable, so they must not
+        import and execute pack code in the API server process. Route function
+        calls go through ``CapabilityExecutor`` to preserve approval/hash, grant,
+        audit, and sandbox/subprocess dispatch semantics.
+        """
+        from .capability_executor import get_capability_executor
+
+        qualified_name = (
+            function_id if ":" in function_id else f"{pack_id}:{function_id}"
+        )
+        route_context = dict(context or {})
+        route_context["_api_route"] = True
+        request_id = "api-route:{}:{}".format(
+            route_context.get("method", ""),
+            route_context.get("path", ""),
+        )
+        request = {
+            "type": "function.call",
+            "qualified_name": qualified_name,
+            "args": dict(args or {}),
+            "request_id": request_id,
+            "context": route_context,
+        }
+        response = get_capability_executor().execute(pack_id, request)
+        if response.success:
+            return response.output
+
+        error_type = getattr(response, "error_type", None) or "function_call_failed"
+        if error_type in {
+            "pack_not_approved",
+            "approval_check_error",
+            "permission_denied",
+            "requires_denied",
+            "caller_requires_denied",
+        }:
+            logger.warning(
+                "api_route pack function denied: pack_id=%s function_id=%s error_type=%s",
+                pack_id,
+                function_id,
+                error_type,
+            )
+            raise PermissionError(
+                getattr(response, "error", None) or "Pack function denied"
+            )
+        raise RuntimeError(getattr(response, "error", None) or "Pack function failed")
+
     def _send_response(
         self,
         response: APIResponse,
@@ -1094,7 +1149,12 @@ class PackAPIHandler(
                 health = alm.get_health()
             else:
                 health = {"status": "ok", "needs_setup": True}
-            challenge = self.headers.get("X-Rumi-Desktop-Health-Challenge", "")
+            headers = getattr(self, "headers", None)
+            challenge = (
+                headers.get("X-Rumi-Desktop-Health-Challenge", "")
+                if headers is not None
+                else ""
+            )
             bootstrap_secret = os.environ.get("RUMI_PANEL_BOOTSTRAP_SECRET", "")
             if challenge and bootstrap_secret:
                 health["desktop_challenge_response"] = hmac.new(

@@ -2164,6 +2164,21 @@ aliases:
     reason: legacy caller compatibility
     remove_after: v2.3
     replacement: defaultspack.tool.calculator
+  defaults.tool.kanban:
+    owner: tool
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.tool.kanban
+  defaults.tool.kanban.agent.session:
+    owner: tool
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.tool.kanban.agent.session
+  defaults.tool.kanban_agent_session:
+    owner: tool
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.tool.kanban_agent_session
   defaults.tool.consent.check:
     owner: tool
     reason: legacy caller compatibility

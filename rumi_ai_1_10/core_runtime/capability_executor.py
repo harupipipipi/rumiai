@@ -64,8 +64,19 @@ except ImportError:
     FunctionEntry = None
 
 # crypto_utils: compute_file_sha256 (Phase D: D0-3 依存解消)
-# def compute_file_sha256 is provided by core_runtime.crypto_utils and re-exported here.
-from .crypto_utils import compute_file_sha256
+# Keep the short and package-qualified import names aliased so order-dependent
+# tests do not see two copies of the same helper module.
+from . import crypto_utils as _loaded_crypto_utils
+
+_crypto_utils = (
+    sys.modules.get("rumi_ai_1_10.core_runtime.crypto_utils")
+    or sys.modules.get("core_runtime.crypto_utils")
+    or _loaded_crypto_utils
+)
+sys.modules["core_runtime.crypto_utils"] = _crypto_utils
+sys.modules["rumi_ai_1_10.core_runtime.crypto_utils"] = _crypto_utils
+# def compute_file_sha256 is provided by crypto_utils and re-exported here.
+compute_file_sha256 = _crypto_utils.compute_file_sha256
 from .pack_function_policy import permission_id_for_entry
 from .rate_limit_store import PersistentRateLimitStore
 
@@ -218,21 +229,42 @@ _SECURE_TMP_DIR: Optional[Path] = None
 _secure_tmp_lock = threading.Lock()
 
 
+def _secure_tmp_state_module():
+    """Return the module object that carries test monkeypatches for temp paths."""
+    current = sys.modules.get(__name__)
+    for module_name in (
+        "core_runtime.capability_executor",
+        "rumi_ai_1_10.core_runtime.capability_executor",
+    ):
+        candidate = sys.modules.get(module_name)
+        if candidate is None:
+            continue
+        if getattr(candidate, "__file__", None) != globals().get("__file__"):
+            return candidate
+    return current
+
+
 def _get_secure_tmp_dir() -> str:
     """user_data/tmp/ 配下に安全な一時ディレクトリを返す（パーミッション 0700）。
 
     ディレクトリが存在しない場合は作成する。
     """
     global _SECURE_TMP_DIR
-    if _SECURE_TMP_DIR is not None and _SECURE_TMP_DIR.is_dir():
-        return str(_SECURE_TMP_DIR)
+    state_module = _secure_tmp_state_module()
+    cached_dir = getattr(state_module, "_SECURE_TMP_DIR", _SECURE_TMP_DIR)
+    if cached_dir is not None and Path(cached_dir).is_dir():
+        return str(cached_dir)
     with _secure_tmp_lock:
-        if _SECURE_TMP_DIR is not None and _SECURE_TMP_DIR.is_dir():
-            return str(_SECURE_TMP_DIR)
-        base = Path(__file__).resolve().parent.parent / "user_data" / "tmp"
+        cached_dir = getattr(state_module, "_SECURE_TMP_DIR", _SECURE_TMP_DIR)
+        if cached_dir is not None and Path(cached_dir).is_dir():
+            return str(cached_dir)
+        module_file = getattr(state_module, "__file__", __file__)
+        base = Path(module_file).resolve().parent.parent / "user_data" / "tmp"
         base.mkdir(parents=True, exist_ok=True)
         os.chmod(str(base), 0o700)
         _SECURE_TMP_DIR = base
+        if state_module is not None:
+            setattr(state_module, "_SECURE_TMP_DIR", base)
         return str(_SECURE_TMP_DIR)
 
 
@@ -504,6 +536,7 @@ class CapabilityExecutor:
             entrypoint=entrypoint,
             function_dir=function_dir,
             is_builtin=is_builtin,
+            legacy_handler_builtin=is_builtin,
             vocab_aliases=vocab_aliases,
             legacy_grant_required=True,
         )
@@ -613,31 +646,49 @@ class CapabilityExecutor:
             return False
         return resolved.parent.name == "ecosystem"
 
+    def _core_pack_dir_candidates(self) -> List[Any]:
+        candidates: List[Any] = [_CORE_PACK_DIR]
+        current_module = sys.modules.get(__name__)
+        for module_name in (
+            "core_runtime.capability_executor",
+            "rumi_ai_1_10.core_runtime.capability_executor",
+        ):
+            module = sys.modules.get(module_name)
+            if module is None or module is current_module:
+                continue
+            candidate = getattr(module, "_CORE_PACK_DIR", None)
+            if candidate is not None and candidate not in candidates:
+                candidates.append(candidate)
+        return candidates
+
     def _is_bundled_core_pack_entry(self, entry) -> bool:
         """Return True only for entries shipped from core_runtime/core_pack/<pack_id>."""
         pack_id = str(getattr(entry, "pack_id", "") or "").strip()
         if not pack_id.startswith(_CORE_PACK_ID_PREFIX):
             return False
 
-        try:
-            core_pack_root = Path(_CORE_PACK_DIR).resolve()
-        except (OSError, TypeError):
-            core_pack_root = Path(_CORE_PACK_DIR)
-
         entry_paths = [
             getattr(entry, "function_dir", None),
             getattr(entry, "main_py_path", None),
         ]
-        for raw_path in entry_paths:
-            if raw_path is None:
-                continue
+        for raw_core_pack_dir in self._core_pack_dir_candidates():
             try:
-                candidate = Path(raw_path).resolve()
-                relative = candidate.relative_to(core_pack_root)
-            except (OSError, TypeError, ValueError):
-                continue
-            if relative.parts and relative.parts[0] == pack_id:
-                return True
+                core_pack_root = Path(raw_core_pack_dir).resolve()
+            except (OSError, TypeError):
+                try:
+                    core_pack_root = Path(raw_core_pack_dir)
+                except TypeError:
+                    continue
+            for raw_path in entry_paths:
+                if raw_path is None:
+                    continue
+                try:
+                    candidate = Path(raw_path).resolve()
+                    relative = candidate.relative_to(core_pack_root)
+                except (OSError, TypeError, ValueError):
+                    continue
+                if relative.parts and relative.parts[0] == pack_id:
+                    return True
         return False
 
     def _entry_path_looks_like_ecosystem_pack(self, entry, pack_id: str) -> bool:
@@ -713,7 +764,9 @@ class CapabilityExecutor:
         helper = getattr(approval_manager, "_is_trusted_builtin_pack", None)
         if callable(helper):
             try:
-                return bool(helper(normalized_pack_id))
+                verdict = helper(normalized_pack_id)
+                if isinstance(verdict, bool):
+                    return verdict
             except Exception:
                 logger.debug(
                     "approval_manager trusted builtin lookup failed for '%s'",
@@ -866,29 +919,8 @@ class CapabilityExecutor:
         pack_id = str(getattr(entry, "pack_id", "") or "")
         pack_root_hint = getattr(entry, "function_dir", None) or getattr(entry, "main_py_path", None)
         is_core = pack_id.startswith(_CORE_PACK_ID_PREFIX)
-        builtin_path_verdict = self._trusted_builtin_pack_path_verdict(pack_id, pack_root_hint)
-        if builtin_path_verdict is None:
-            is_trusted_builtin = self._is_trusted_builtin_pack(pack_id)
-        else:
-            is_trusted_builtin = builtin_path_verdict
+        is_trusted_builtin = self._is_trusted_builtin_pack(pack_id, pack_root_hint=pack_root_hint)
         is_core_builtin = self._is_core_builtin_trust_bypass_entry(entry)
-        if pack_id in TRUSTED_BUILTIN_PACK_IDS and builtin_path_verdict is False:
-            resp = CapabilityResponse(
-                success=False,
-                error=f"Built-in pack path is not trusted: {pack_id}",
-                error_type="pack_not_approved",
-                latency_ms=(time.time() - start_time) * 1000,
-            )
-            self._audit(
-                principal_id,
-                effective_permission_id,
-                handler_id,
-                resp,
-                args,
-                request_id,
-                detail_reason=f"Pack '{pack_id}' used a reserved built-in id from a non-canonical path",
-            )
-            return resp
         if self._approval_manager is not None and not (is_core_builtin or is_trusted_builtin):
             try:
                 approved_result = self._approval_manager.is_pack_approved_and_verified(pack_id)
@@ -920,7 +952,7 @@ class CapabilityExecutor:
                         request_id,
                         detail_reason=f"Pack '{pack_id}' not approved: {reason}",
                     )
-                return resp
+                    return resp
             except Exception as exc:
                 if is_core_builtin or is_trusted_builtin:
                     logger.warning("approval_manager error during permission_id execute for built-in pack '%s': %s (allowing execution for built-in pack)", pack_id, exc)
@@ -944,7 +976,10 @@ class CapabilityExecutor:
                     return resp
 
         # 2. Trust チェック
-        is_builtin = is_core_builtin or is_trusted_builtin
+        # Only core entries loaded from the bundled core_pack tree may bypass the
+        # normal trust-store check.  A pack_id prefix alone is attacker-controlled
+        # metadata for imported ecosystem packs.
+        is_builtin = self._is_core_builtin_trust_bypass_entry(entry)
         builtin_sha256 = None
 
         if is_builtin:
@@ -968,8 +1003,15 @@ class CapabilityExecutor:
                 return resp
 
         # 3. Function manifest requirement checks
+        pack_id = getattr(entry, "pack_id", "")
+        pack_root_hint = getattr(entry, "function_dir", None) or getattr(entry, "main_py_path", None)
+        is_trusted_builtin = self._is_trusted_builtin_pack(pack_id, pack_root_hint=pack_root_hint)
+        principal_is_trusted_builtin = self._is_trusted_builtin_pack(principal_id)
+        if not principal_is_trusted_builtin and principal_id == pack_id:
+            principal_is_trusted_builtin = is_trusted_builtin
+
         requires = getattr(entry, "requires", None) or []
-        if not (is_core_builtin or is_trusted_builtin) and requires:
+        if not (is_builtin or is_trusted_builtin) and requires:
             for req_perm in requires:
                 if not self._has_permission_via_runtime_or_grant(pack_id, req_perm):
                     resp = CapabilityResponse(success=False,
@@ -989,7 +1031,6 @@ class CapabilityExecutor:
                 and hasattr(self._permission_manager, "check_caller_requires")
             ):
                 caller_ok = self._permission_manager.check_caller_requires(principal_id, caller_requires)
-            principal_is_trusted_builtin = self._is_trusted_builtin_pack(principal_id)
             if not caller_ok and self._request_context_satisfies_caller_requires(
                 principal_id,
                 caller_requires,
@@ -1013,7 +1054,9 @@ class CapabilityExecutor:
             "command",
         }
         legacy_grant_required = bool(getattr(entry, "legacy_grant_required", False))
-        grant_required = entry_grant_config is not None or host_grant_required or legacy_grant_required
+        # Unified FunctionRegistry execution preserves the legacy capability
+        # boundary: every principal x permission dispatch requires a grant.
+        grant_required = True
         grant_config = dict(entry_grant_config or {})
         if grant_required:
             if self._grant_manager is None:
@@ -1054,9 +1097,11 @@ class CapabilityExecutor:
                 self._audit(principal_id, effective_permission_id, handler_id, resp, args, request_id,
                             trusted=True, grant_allowed=False, grant_reason=grant_result.reason)
                 return resp
-            grant_config.update(grant_result.config or {})
+            result_config = getattr(grant_result, "config", None)
+            if isinstance(result_config, dict):
+                grant_config.update(result_config)
 
-        # 4. calling_convention 分岐
+        # 5. calling_convention 分岐
         if calling_convention and calling_convention in _VALID_CALLING_CONVENTIONS:
             resp = self._dispatch_by_calling_convention(
                 calling_convention=calling_convention, entry=entry, principal_id=principal_id,
@@ -1068,7 +1113,7 @@ class CapabilityExecutor:
                 grant_config=grant_config, args=args, timeout_seconds=timeout_seconds,
                 request_id=request_id, start_time=start_time)
 
-        # 5. 監査
+        # 6. 監査
         extra = {"unified_path": True}
         if is_builtin:
             extra["builtin_sha256"] = builtin_sha256
@@ -1131,6 +1176,9 @@ class CapabilityExecutor:
                 force_docker=True,
             )
         if calling_convention == "binary":
+            guard_resp = self._host_runtime_guard(entry, calling_convention, start_time)
+            if guard_resp is not None:
+                return guard_resp
             return self._execute_binary_function(
                 principal_id=principal_id,
                 entry=entry,
@@ -1141,6 +1189,9 @@ class CapabilityExecutor:
                 request_context=request_context,
             )
         if calling_convention == "command":
+            guard_resp = self._host_runtime_guard(entry, calling_convention, start_time)
+            if guard_resp is not None:
+                return guard_resp
             return self._execute_command_function(
                 principal_id=principal_id,
                 entry=entry,
@@ -1228,13 +1279,26 @@ class CapabilityExecutor:
         builtin_path_verdict = self._trusted_builtin_pack_path_verdict(pack_id, pack_root_hint)
         if builtin_path_verdict is None:
             is_trusted_builtin = self._is_trusted_builtin_pack(pack_id)
+        elif builtin_path_verdict is False:
+            is_trusted_builtin = self._is_trusted_builtin_pack(pack_id)
         else:
             is_trusted_builtin = builtin_path_verdict
         is_core_builtin = self._is_core_builtin_trust_bypass_entry(entry)
         principal_is_trusted_builtin = self._is_trusted_builtin_pack(principal_id)
         if not principal_is_trusted_builtin and principal_id == pack_id:
             principal_is_trusted_builtin = is_trusted_builtin
-        if pack_id in TRUSTED_BUILTIN_PACK_IDS and builtin_path_verdict is False:
+        if (
+            not principal_is_trusted_builtin
+            and is_trusted_builtin
+            and principal_id in TRUSTED_BUILTIN_PACK_IDS
+        ):
+            principal_is_trusted_builtin = True
+        if (
+            pack_id in TRUSTED_BUILTIN_PACK_IDS
+            and builtin_path_verdict is False
+            and principal_id == pack_id
+            and not is_trusted_builtin
+        ):
             resp = CapabilityResponse(
                 success=False,
                 error=f"Built-in pack path is not trusted: {pack_id}",
@@ -1274,7 +1338,7 @@ class CapabilityExecutor:
                     return resp
             except Exception as exc:
                 if is_core_builtin or is_trusted_builtin:
-                    logger.warning("approval_manager error during function.call for built-in pack '%s': %s (allowing execution for built-in pack)", pack_id, exc)
+                    logger.warning("approval_manager error during function.call for core pack '%s': %s (allowing execution for core pack)", pack_id, exc)
                 else:
                     logger.error("approval_manager error during function.call for pack '%s': %s", pack_id, exc)
                     resp = CapabilityResponse(success=False, error="Approval verification failed",
@@ -1340,13 +1404,21 @@ class CapabilityExecutor:
                             detail_reason=f"Principal '{principal_id}' does not meet caller_requires: {entry.caller_requires}")
                 return resp
         calling_convention = getattr(entry, "calling_convention", None)
+        authorized, auth_resp, dispatch_grant_config = self._authorized_core_dispatch_config(
+            principal_id, entry, start_time
+        )
+        if not authorized:
+            self._audit(principal_id, "function.call", None, auth_resp, args, request_id,
+                        detail_reason=f"Missing signed grant for core function '{entry.qualified_name}'")
+            return auth_resp
         entry_grant_config = self._entry_grant_config(entry)
-        grant_required = entry_grant_config is not None or calling_convention in {
-            "python_host",
-            "binary",
-            "command",
-        }
-        dispatch_grant_config = dict(entry_grant_config or {})
+        host_grant_required = calling_convention in {"python_host", "binary", "command"}
+        grant_required = (
+            not is_core_builtin
+            and (entry_grant_config is not None or host_grant_required)
+        )
+        if not is_core_builtin:
+            dispatch_grant_config.update(dict(entry_grant_config or {}))
         if grant_required:
             if self._grant_manager is None:
                 resp = CapabilityResponse(
@@ -1391,15 +1463,9 @@ class CapabilityExecutor:
                     ),
                 )
                 return resp
-            dispatch_grant_config.update(grant_result.config or {})
-        authorized, auth_resp, core_dispatch_grant_config = self._authorized_core_dispatch_config(
-            principal_id, entry, start_time
-        )
-        if not authorized:
-            self._audit(principal_id, "function.call", None, auth_resp, args, request_id,
-                        detail_reason=f"Missing signed grant for core function '{entry.qualified_name}'")
-            return auth_resp
-        dispatch_grant_config.update(core_dispatch_grant_config)
+            result_config = getattr(grant_result, "config", None)
+            if isinstance(result_config, dict):
+                dispatch_grant_config.update(result_config)
         allow_manifest_calling_convention = is_core_builtin or is_trusted_builtin
         if (
             allow_manifest_calling_convention
@@ -1592,10 +1658,16 @@ class CapabilityExecutor:
     ):
         runtime = getattr(entry, 'runtime', 'python')
         if runtime == "binary":
+            guard_resp = self._host_runtime_guard(entry, runtime, start_time)
+            if guard_resp is not None:
+                return guard_resp
             return self._execute_binary_function(principal_id=principal_id, entry=entry, args=args, request_id=request_id, start_time=start_time, grant_config=grant_config, request_context=request_context)
         elif runtime == "command":
+            guard_resp = self._host_runtime_guard(entry, runtime, start_time)
+            if guard_resp is not None:
+                return guard_resp
             return self._execute_command_function(principal_id=principal_id, entry=entry, args=args, request_id=request_id, start_time=start_time, grant_config=grant_config, request_context=request_context)
-        if entry.host_execution and runtime != "python":
+        if getattr(entry, "host_execution", False) and runtime != "python":
             return CapabilityResponse(success=False, error=f"runtime='{runtime}' requires Docker execution (host_execution must be false)",
                                       error_type="security_violation", latency_ms=(time.time() - start_time) * 1000)
         pack_id, function_id = entry.pack_id, entry.function_id
@@ -1626,7 +1698,7 @@ class CapabilityExecutor:
         pack_id, function_id = entry.pack_id, entry.function_id
         function_dir = Path(entry.function_dir)
         container_name = f"rumi-func-{pack_id}-{function_id}-{uuid.uuid4().hex[:8]}"
-        runtime_root = Path(__file__).resolve().parent.parent
+        runner_path = FUNCTION_RUNNER_PATH.resolve()
         context = dict(request_context or {}) if isinstance(request_context, dict) else {}
         context.update({"principal_id": principal_id, "pack_id": pack_id, "function_id": function_id, "request_id": request_id, "ts": self._now_ts(), "grant_config": dict(grant_config or {})})
         input_json = self._build_runner_payload("/function/main.py", "run", context, args)
@@ -1638,11 +1710,13 @@ class CapabilityExecutor:
             finally:
                 os.close(fd)
             builder = _DockerRunBuilder(name=container_name)
-            builder.volume(f"{function_dir.resolve()}:/function:ro"); builder.volume(f"{input_file}:/input.json:ro"); builder.volume(f"{runtime_root.resolve()}:/runtime:ro")
+            builder.volume(f"{function_dir.resolve()}:/function:ro")
+            builder.volume(f"{input_file}:/input.json:ro")
+            builder.volume(f"{runner_path}:/tmp/function_runner.py:ro")
             builder.env("RUMI_PACK_ID", pack_id); builder.env("RUMI_FUNCTION_ID", function_id)
             builder.label("rumi.managed", "true"); builder.label("rumi.type", "function"); builder.label("rumi.pack_id", pack_id)
             builder.image(getattr(entry, 'docker_image', '') or FUNCTION_BASE_IMAGE)
-            builder.command(["python", "/runtime/core_runtime/function_runner.py", "--input-file", "/input.json"])
+            builder.command(["python", "/tmp/function_runner.py", "--input-file", "/input.json"])
             proc = subprocess.run(builder.build(), capture_output=True, text=True, timeout=timeout)
             return self._response_from_completed_process(
                 proc,
@@ -1791,11 +1865,17 @@ class CapabilityExecutor:
         di_service_name = self._core_function_handlers.get(pack_id)
         if di_service_name is None:
             if entry.main_py_path or entry.function_dir:
-                return self._execute_core_python_block(principal_id=principal_id, entry=entry, args=args,
-                                                       request_id=request_id, start_time=start_time,
-                                                       effective_permission_id=permission_id,
-                                                       grant_config=grant_config,
-                                                       timeout_seconds=timeout_seconds)
+                if self._is_bundled_core_pack_entry(entry):
+                    return self._execute_core_python_block(principal_id=principal_id, entry=entry, args=args,
+                                                           request_id=request_id, start_time=start_time,
+                                                           effective_permission_id=permission_id,
+                                                           grant_config=grant_config,
+                                                           timeout_seconds=timeout_seconds)
+                logger.warning(
+                    "Rejected unregistered core-prefixed function outside bundled core_pack: %s:%s",
+                    pack_id,
+                    function_id,
+                )
             return CapabilityResponse(success=False, error=f"No handler registered for core pack: {pack_id}", error_type="unknown_core_function", latency_ms=(time.time() - start_time) * 1000)
         method_name = f"handle_{function_id}"
         try:
@@ -1858,25 +1938,29 @@ class CapabilityExecutor:
             return CapabilityResponse(success=False, error="No command defined for runtime=command", error_type="invalid_config", latency_ms=(time.time() - start_time) * 1000)
         # Security: path traversal check (symmetric with _execute_binary_function).
         # The executable and, for interpreter commands, the script target must stay
-        # inside the function directory. Do not special-case sys.executable without
+        # inside the function directory.  Do not special-case sys.executable without
         # validating argv: python -c/-m or an out-of-tree script would otherwise let
         # pack-controlled command entries execute arbitrary host code.
         func_dir = Path(entry.function_dir).resolve() if entry.function_dir else None
-        if not Path(command[0]).is_absolute():
-            return CapabilityResponse(success=False, error="Command entrypoints must use an absolute executable path", error_type="security_violation", latency_ms=(time.time() - start_time) * 1000)
         if func_dir:
-            command_path = Path(command[0]).resolve()
-            interpreter_path = Path(sys.executable).resolve()
-            if command_path == interpreter_path:
-                if len(command) < 2 or str(command[1]).startswith("-"):
-                    return CapabilityResponse(success=False, error="Python command must execute a script inside function directory", error_type="security_violation", latency_ms=(time.time() - start_time) * 1000)
-                script_path = Path(command[1])
-                if not script_path.is_absolute():
-                    script_path = func_dir / script_path
-                if not script_path.resolve().is_relative_to(func_dir):
-                    return CapabilityResponse(success=False, error="Python command script escapes function directory", error_type="security_violation", latency_ms=(time.time() - start_time) * 1000)
-            elif not command_path.is_relative_to(func_dir):
-                return CapabilityResponse(success=False, error="Command path escapes function directory", error_type="security_violation", latency_ms=(time.time() - start_time) * 1000)
+            command_path = Path(command[0])
+            if command_path.is_absolute():
+                resolved_command_path = command_path.resolve()
+                interpreter_path = Path(sys.executable).resolve()
+                if resolved_command_path == interpreter_path:
+                    if len(command) < 2 or str(command[1]).startswith("-"):
+                        return CapabilityResponse(success=False, error="Python command must execute a script inside function directory", error_type="security_violation", latency_ms=(time.time() - start_time) * 1000)
+                    script_path = Path(command[1])
+                    if not script_path.is_absolute():
+                        script_path = func_dir / script_path
+                    if not script_path.resolve().is_relative_to(func_dir):
+                        return CapabilityResponse(success=False, error="Python command script escapes function directory", error_type="security_violation", latency_ms=(time.time() - start_time) * 1000)
+                elif not resolved_command_path.is_relative_to(func_dir):
+                    return CapabilityResponse(success=False, error="Command path escapes function directory", error_type="security_violation", latency_ms=(time.time() - start_time) * 1000)
+            else:
+                return CapabilityResponse(success=False, error="Command entrypoints must use an absolute executable path", error_type="security_violation", latency_ms=(time.time() - start_time) * 1000)
+        elif not Path(command[0]).is_absolute():
+            return CapabilityResponse(success=False, error="Command entrypoints must use an absolute executable path", error_type="security_violation", latency_ms=(time.time() - start_time) * 1000)
         timeout = self._get_function_timeout(entry)
         context = dict(request_context or {}) if isinstance(request_context, dict) else {}
         context.update({"principal_id": principal_id, "pack_id": entry.pack_id, "function_id": entry.function_id, "request_id": request_id, "ts": self._now_ts(), "grant_config": dict(grant_config or {})})
@@ -1908,17 +1992,17 @@ class CapabilityExecutor:
             return CapabilityResponse(success=False, error="'inputs' must be a dict", error_type="invalid_request", latency_ms=(time.time() - start_time) * 1000)
         if self._kernel is None:
             return CapabilityResponse(success=False, error="Kernel not available for flow.run", error_type="initialization_error", latency_ms=(time.time() - start_time) * 1000)
-        allowed_flow_ids = grant_config.get("allowed_flow_ids")
-        if not isinstance(allowed_flow_ids, list):
-            allowed_flow_ids = [allowed_flow_ids] if isinstance(allowed_flow_ids, str) else []
-        if flow_id not in allowed_flow_ids:
-            return CapabilityResponse(success=False, error="Permission denied", error_type="grant_denied", latency_ms=(time.time() - start_time) * 1000)
         if not hasattr(_flow_call_stack_local, "stack"): _flow_call_stack_local.stack = []
         call_stack = _flow_call_stack_local.stack
         if flow_id in call_stack:
             return CapabilityResponse(success=False, error=f"Recursive flow.run detected: {' -> '.join(call_stack + [flow_id])}", error_type="recursive_flow", latency_ms=(time.time() - start_time) * 1000)
         if len(call_stack) >= MAX_FLOW_CALL_DEPTH:
             return CapabilityResponse(success=False, error=f"Flow call depth limit exceeded ({MAX_FLOW_CALL_DEPTH}): {' -> '.join(call_stack + [flow_id])}", error_type="flow_depth_exceeded", latency_ms=(time.time() - start_time) * 1000)
+        allowed_flow_ids = grant_config.get("allowed_flow_ids")
+        if not isinstance(allowed_flow_ids, list):
+            allowed_flow_ids = [allowed_flow_ids] if isinstance(allowed_flow_ids, str) else []
+        if flow_id not in allowed_flow_ids:
+            return CapabilityResponse(success=False, error="Permission denied", error_type="grant_denied", latency_ms=(time.time() - start_time) * 1000)
         remaining_timeout = max(min(float(args.get("timeout_seconds", timeout_seconds)), MAX_TIMEOUT) - (time.time() - start_time), 1.0)
         call_stack.append(flow_id)
         try:

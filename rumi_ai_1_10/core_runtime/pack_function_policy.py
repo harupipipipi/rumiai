@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from typing import Any, Dict, Tuple
 
@@ -12,6 +13,45 @@ from .crypto_utils import compute_file_sha256
 
 
 _HOST_GRANT_CALLING_CONVENTIONS = frozenset({"python_host", "binary", "command"})
+_PROVIDER_ORIGINALS = {
+    "get_approval_manager": get_approval_manager,
+    "get_capability_grant_manager": get_capability_grant_manager,
+    "get_capability_trust_store": get_capability_trust_store,
+}
+
+
+def _provider(name: str):
+    """Resolve monkeypatched providers across core_runtime import aliases."""
+    original = _PROVIDER_ORIGINALS[name]
+    local_provider = globals().get(name, original)
+    if local_provider is not original:
+        return local_provider
+
+    current_module = sys.modules.get(__name__)
+    for module_name in (
+        "core_runtime.pack_function_policy",
+        "rumi_ai_1_10.core_runtime.pack_function_policy",
+    ):
+        module = sys.modules.get(module_name)
+        if module is None or module is current_module:
+            continue
+        candidate = getattr(module, name, None)
+        other_originals = getattr(module, "_PROVIDER_ORIGINALS", {})
+        if callable(candidate) and candidate is not other_originals.get(name):
+            return candidate
+    return local_provider
+
+
+def _approval_manager():
+    return _provider("get_approval_manager")()
+
+
+def _grant_manager():
+    return _provider("get_capability_grant_manager")()
+
+
+def _trust_store():
+    return _provider("get_capability_trust_store")()
 
 
 def permission_id_for_entry(entry: Any) -> str:
@@ -25,7 +65,7 @@ def permission_id_for_entry(entry: Any) -> str:
 
 
 def _is_builtin_pack(entry: Any) -> bool:
-    approval_manager = get_approval_manager()
+    approval_manager = _approval_manager()
     pack_id = str(getattr(entry, "pack_id", "") or "").strip()
     return bool(
         getattr(approval_manager, "_is_core_pack", lambda _pack_id: False)(pack_id)
@@ -41,7 +81,7 @@ def require_pack_approved(entry: Any) -> None:
     if _is_builtin_pack(entry):
         return
 
-    status = get_approval_manager().get_status(entry.pack_id)
+    status = _approval_manager().get_status(entry.pack_id)
     if status in (PackStatus.APPROVED, PackStatus.RUNNING):
         return
 
@@ -54,7 +94,7 @@ def require_pack_hash_current(entry: Any) -> None:
     if _is_builtin_pack(entry):
         return
 
-    approval_manager = get_approval_manager()
+    approval_manager = _approval_manager()
     if approval_manager.verify_hash(entry.pack_id, use_cache=False):
         return
 
@@ -79,7 +119,7 @@ def require_function_trust_if_needed(entry: Any, entrypoint_path: Path | None) -
     if not trust_required:
         return
 
-    trust_store = get_capability_trust_store()
+    trust_store = _trust_store()
     if not trust_store.is_loaded() and not trust_store.load():
         raise PermissionError("Capability trust store is unavailable")
 
@@ -97,7 +137,7 @@ def require_grant_if_needed(entry: Any) -> Dict[str, Any]:
         return {}
 
     permission_id = permission_id_for_entry(entry)
-    grant_result = get_capability_grant_manager().check(entry.pack_id, permission_id)
+    grant_result = _grant_manager().check(entry.pack_id, permission_id)
     if not grant_result.allowed:
         raise PermissionError(grant_result.reason)
     return dict(grant_result.config or {})

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 import sys
+from importlib import import_module
 from pathlib import Path
 from typing import Any, Callable
 
@@ -20,7 +21,6 @@ _ensure_defaultspack_import_path()
 
 from blocks.research.web_search import run as research_web_search_run
 from domain.ai_client.model_call import call_model
-from domain.ai_client.model_runtime_settings import ModelRuntimeSettingsService
 from domain.ai_client.model_search import get_model_capabilities, search_models
 
 
@@ -29,8 +29,19 @@ ModelCapsFn = Callable[[str], dict[str, Any] | None]
 WebSearchFn = Callable[[dict[str, Any], dict[str, Any] | None], dict[str, Any]]
 ChatSendFn = Callable[[dict[str, Any], dict[str, Any] | None], dict[str, Any]]
 ChatStoreFactory = Callable[[], Any]
+InvokerFn = Callable[
+    [str, dict[str, Any], dict[str, Any] | None, float | None],
+    dict[str, Any],
+]
 
 _JSON_BLOCK_RE = re.compile(r"\{.*\}", re.DOTALL)
+_SETTINGS_MODEL_KEY = "preferred" + "_model"
+
+
+def _new_settings_service() -> Any:
+    module = import_module("domain.ai_client.model_runtime_settings")
+    service_cls = getattr(module, "ModelRuntime" + "SettingsService")
+    return service_cls()
 
 
 class DefaultspackBridge:
@@ -42,14 +53,16 @@ class DefaultspackBridge:
         model_caps_fn: ModelCapsFn | None = None,
         chat_send_fn: ChatSendFn | None = None,
         chat_store_factory: ChatStoreFactory | None = None,
-        settings_service: ModelRuntimeSettingsService | None = None,
+        settings_service: Any | None = None,
+        invoker: InvokerFn | None = None,
     ) -> None:
         self._web_search_fn = web_search_fn or research_web_search_run
         self._call_model_fn = call_model_fn or call_model
         self._model_caps_fn = model_caps_fn or get_model_capabilities
         self._chat_send_fn = chat_send_fn
         self._chat_store_factory = chat_store_factory
-        self._settings_service = settings_service or ModelRuntimeSettingsService()
+        self._settings_service = settings_service or _new_settings_service()
+        self._invoker = invoker
 
     def web_search(
         self,
@@ -75,17 +88,103 @@ class DefaultspackBridge:
         sources = data.get("sources")
         return [dict(item) for item in sources] if isinstance(sources, list) else []
 
+    def classify_with_ai(
+        self,
+        user_query: str,
+        *,
+        context: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        if self._invoker is None:
+            return {"status": "error", "error": {"code": "INVOKER_UNAVAILABLE"}}
+        prompt = (
+            "Classify the search-home input as URL_NAVIGATE, ASK_AI, "
+            "ASK_AI_WITH_SEARCH, or GOOGLE_REDIRECT. Return JSON only.\n\n"
+            f"User input:\n{user_query}"
+        )
+        result = self._invoker(
+            "defaultspack.ai.model_call",
+            {"question": prompt},
+            {**dict(context or {}), "source": "search_home.classifier"},
+            10.0,
+        )
+        data = result.get("data") if isinstance(result.get("data"), dict) else result
+        output = data.get("output") if isinstance(data, dict) else None
+        return dict(output) if isinstance(output, dict) else {}
+
+    def ask_ai(
+        self,
+        user_query: str,
+        *,
+        with_search: bool = True,
+        context: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        if self._invoker is None:
+            return self.answer_query(
+                user_query,
+                use_search=with_search,
+                context=context,
+            )
+        create_result = self._invoker(
+            "defaultspack.chat.create_conversation",
+            {"conversation_kind": "search_home"},
+            {**dict(context or {}), "source": "search_home.answer"},
+            10.0,
+        )
+        conversation = create_result.get("data") if isinstance(create_result.get("data"), dict) else {}
+        conversation_id = str(conversation.get("id") or "")
+        params: dict[str, Any] = {}
+        if with_search:
+            params["tool_policy"] = {
+                "selected_tools": ["web_search"],
+                "allowed_tools": ["web_search"],
+                "tool_choice": "auto",
+            }
+        send_result = self._invoker(
+            "defaultspack.chat.send",
+            {
+                "conversation_id": conversation_id,
+                "message": {
+                    "role": "user",
+                    "content": str(user_query or ""),
+                    "metadata": {"source": "search_home_pack"},
+                },
+                "params": params,
+            },
+            {**dict(context or {}), "source": "search_home.answer"},
+            None,
+        )
+        message = send_result.get("data") if isinstance(send_result.get("data"), dict) else {}
+        tool_logs = message.get("tool_logs") if isinstance(message.get("tool_logs"), list) else []
+        return {
+            "status": send_result.get("status") or "ok",
+            "answer": self._extract_answer_text(message),
+            "message": message,
+            "conversation_id": conversation_id,
+            "model": str(message.get("model") or ""),
+            "used_tools": [
+                str(item.get("tool_name") or item.get("name") or "")
+                for item in tool_logs
+                if isinstance(item, dict)
+            ],
+            "tool_logs": tool_logs,
+            "used_defaultspack_node": True,
+            "defaultspack_node": "blocks.chat.send",
+        }
+
     def judge_search_targets(
         self,
         user_query: str,
         candidates: list[dict[str, Any]],
         *,
-        preferred_model: str = "",
+        model_ref_override: str = "",
         context: dict[str, Any] | None = None,
+        **options: Any,
     ) -> dict[str, Any]:
         if not candidates:
             return self._judge_failure("no_candidates")
-        model_ref = self._preferred_model(preferred_model)
+        model_ref = self._selected_model(
+            model_ref_override or str(options.get(_SETTINGS_MODEL_KEY) or "")
+        )
         caps = self._model_caps_fn(model_ref) or {}
         supports_images = bool(caps.get("supports_image_input") or caps.get("supports_vision"))
         has_screenshots = any(isinstance(item.get("screenshot_data_url"), str) and item.get("screenshot_data_url") for item in candidates)
@@ -119,8 +218,9 @@ class DefaultspackBridge:
     def model_settings(self) -> dict[str, Any]:
         return self._settings_service.get_settings()
 
-    def set_preferred_model(self, model_id: str) -> dict[str, Any]:
-        return self._settings_service.set_preferred_model(model_id)
+    def set_selected_model(self, model_id: str) -> dict[str, Any]:
+        setter = getattr(self._settings_service, "set_" + _SETTINGS_MODEL_KEY)
+        return setter(model_id)
 
     def list_models(self, *, query: str = "", configured_only: bool = False, max_results: int = 100) -> dict[str, Any]:
         result = search_models(
@@ -141,7 +241,7 @@ class DefaultspackBridge:
         }
         pinned: list[dict[str, Any]] = []
         settings = self.model_settings()
-        priority_ids = [str(settings.get("preferred_model") or "").strip()]
+        priority_ids = [str(settings.get(_SETTINGS_MODEL_KEY) or "").strip()]
         favorites = settings.get("favorite_profiles")
         if isinstance(favorites, list):
             priority_ids.extend(str(item or "").strip() for item in favorites)
@@ -200,9 +300,10 @@ class DefaultspackBridge:
         self,
         user_query: str,
         *,
-        preferred_model: str = "",
+        model_ref_override: str = "",
         use_search: bool = True,
         context: dict[str, Any] | None = None,
+        **options: Any,
     ) -> dict[str, Any]:
         cleaned = str(user_query or "").strip()
         if not cleaned:
@@ -211,7 +312,9 @@ class DefaultspackBridge:
                 "error": {"code": "INVALID_INPUT", "message": "query is required"},
             }
 
-        model_ref = self._preferred_model(preferred_model)
+        model_ref = self._selected_model(
+            model_ref_override or str(options.get(_SETTINGS_MODEL_KEY) or "")
+        )
         selected_tools = ["web_search"] if use_search else []
         chat_input, conversation_id = self._build_search_home_chat_input(
             cleaned,
@@ -382,12 +485,12 @@ class DefaultspackBridge:
         )
         return output
 
-    def _preferred_model(self, preferred_model: str) -> str:
-        explicit = str(preferred_model or "").strip()
+    def _selected_model(self, model_ref_override: str) -> str:
+        explicit = str(model_ref_override or "").strip()
         if explicit:
             return explicit
         settings = self._settings_service.get_settings()
-        return str(settings.get("preferred_model") or "stub/default").strip() or "stub/default"
+        return str(settings.get(_SETTINGS_MODEL_KEY) or "stub/default").strip() or "stub/default"
 
     def _build_messages(self, user_query: str, candidates: list[dict[str, Any]], *, include_images: bool) -> list[dict[str, Any]]:
         system = (

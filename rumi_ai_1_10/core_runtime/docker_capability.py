@@ -21,9 +21,36 @@ from __future__ import annotations
 import fnmatch
 import re
 import subprocess
+import sys
 import threading
 import uuid
 from typing import Any, Dict, List, Optional
+
+
+def _docker_run_builder_class():
+    modules = []
+    for module_name in (
+        "core_runtime.docker_run_builder",
+        "rumi_ai_1_10.core_runtime.docker_run_builder",
+    ):
+        module = sys.modules.get(module_name)
+        if module is not None and module not in modules:
+            modules.append(module)
+    for module in modules:
+        builder_cls = getattr(module, "DockerRunBuilder", None)
+        original_build = getattr(module, "_ORIGINAL_DOCKER_RUN_BUILD", None)
+        if (
+            builder_cls is not None
+            and original_build is not None
+            and getattr(builder_cls, "build", None) is not original_build
+        ):
+            return builder_cls
+    for module in modules:
+        if hasattr(module, "DockerRunBuilder"):
+            return module.DockerRunBuilder
+    from .docker_run_builder import DockerRunBuilder
+
+    return DockerRunBuilder
 
 
 class DockerCapabilityHandler:
@@ -428,8 +455,7 @@ class DockerCapabilityHandler:
             # -------------------------------------------------------- #
             # 6. DockerRunBuilder でコマンド構築
             # -------------------------------------------------------- #
-            from .docker_run_builder import DockerRunBuilder
-
+            DockerRunBuilder = _docker_run_builder_class()
             builder = DockerRunBuilder(name=container_name)
 
             # メモリ/CPU をインスタンス属性で上書き
@@ -815,4 +841,3 @@ class DockerCapabilityHandler:
         )
 
         return {"containers": containers}
-

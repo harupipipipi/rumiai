@@ -15,6 +15,7 @@ if TYPE_CHECKING:
 MAC_DRIVER_ORDER: list[str] = [
     "browser_cdp",
     "browser_companion",
+    "mac_swift_host",
     "mac_accessibility",
     "mac_apple_events",
     "mac_cgevent_pid",
@@ -28,6 +29,14 @@ WINDOWS_DRIVER_ORDER: list[str] = [
     "windows_uia",
     "windows_postmessage",
     "windows_foreground",
+    "local_visible",
+]
+
+LINUX_DRIVER_ORDER: list[str] = [
+    "browser_cdp",
+    "browser_companion",
+    "linux_x11_virtual",
+    "linux_visible",
     "local_visible",
 ]
 
@@ -68,7 +77,7 @@ class DriverRegistry:
         themselves as available are included.
 
         Args:
-            platform: The platform identifier ("darwin" or "win32").
+            platform: The platform identifier ("darwin", "win32", or "linux").
 
         Returns:
             Ordered list of available drivers for the platform.
@@ -77,6 +86,8 @@ class DriverRegistry:
             order = MAC_DRIVER_ORDER
         elif platform == "win32":
             order = WINDOWS_DRIVER_ORDER
+        elif platform.startswith("linux"):
+            order = LINUX_DRIVER_ORDER
         else:
             order = list(self._drivers.keys())
 
@@ -84,6 +95,12 @@ class DriverRegistry:
         for name in order:
             driver = self._drivers.get(name)
             if driver is not None and driver.is_available():
+                chain.append(driver)
+        ordered = set(order)
+        for name, driver in self._drivers.items():
+            if name in ordered:
+                continue
+            if driver.is_available():
                 chain.append(driver)
         return chain
 

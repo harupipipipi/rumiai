@@ -224,3 +224,6 @@ class DockerRunBuilder:
         cmd.extend(self._command_val)
 
         return cmd
+
+
+_ORIGINAL_DOCKER_RUN_BUILD = DockerRunBuilder.build

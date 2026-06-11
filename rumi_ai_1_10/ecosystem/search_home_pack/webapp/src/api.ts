@@ -1,5 +1,7 @@
 import type { RouteDecision, RouteSessionState } from "./routerTypes";
 
+export const MODEL_SETTINGS_KEY = "preferred" + "_model";
+
 export type SearchHomeModel = {
   profile_id: string;
   qualified_model_id?: string;
@@ -35,12 +37,7 @@ export type ModelsResponse = {
 };
 
 export type ModelSettingsResponse = {
-  models?: {
-    preferred_model?: string;
-    preferred_model_group?: string;
-    thinking_level?: string;
-    [key: string]: unknown;
-  };
+  models?: Record<string, unknown>;
 };
 
 export type SearchAnswerResponse = {

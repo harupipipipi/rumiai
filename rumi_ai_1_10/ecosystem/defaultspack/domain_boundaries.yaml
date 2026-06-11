@@ -20,6 +20,7 @@ domains:
     - domain/components
     - domain/extensions
     - domain/human_operator
+    - domain/temporal_context
     - domain/tool
     path: domain/ai_client
   api_map:
@@ -58,6 +59,7 @@ domains:
     - domain/safety
     - domain/skill_trigger
     - domain/stream
+    - domain/temporal_context
     - domain/tool
     - domain/vision
     path: domain/chat

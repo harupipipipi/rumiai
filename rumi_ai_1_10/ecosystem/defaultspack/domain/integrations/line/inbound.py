@@ -124,7 +124,9 @@ def _handle_event(
         return _line_addressing_ignored_result(external_event, addressing)
     if require_group_mention:
         policy = _require_audience_mention(policy)
-        policy = _allow_current_scope(policy, external_event)
+        source = source_record.get("source") if isinstance(source_record, dict) else None
+        if isinstance(source, dict) and source.get("enabled"):
+            policy = _allow_current_scope(policy, external_event)
     decision = AudiencePolicy(policy).evaluate(external_event, mentioned=addressed if require_group_mention else mentioned)
     if not decision.allowed:
         return _policy_denied_result(external_event, decision)
@@ -594,4 +596,28 @@ def _require_audience_mention(policy: dict[str, Any]) -> dict[str, Any]:
     require = dict(updated.get("require") if isinstance(updated.get("require"), dict) else {})
     require["mention"] = True
     updated["require"] = require
+    return updated
+
+
+def _allow_current_scope(policy: dict[str, Any], external_event) -> dict[str, Any]:
+    scope = getattr(external_event, "scope", None)
+    if scope is None or scope.type not in {"group", "room"} or not scope.id:
+        return dict(policy or {})
+    updated = dict(policy or {})
+    allow = list(updated.get("allow")) if isinstance(updated.get("allow"), list) else []
+    scope_rule = {
+        "id": f"mentioned-scope:{scope.type}:{scope.id}",
+        "provider": external_event.provider,
+        "scope": {"type": scope.type, "id": scope.id},
+    }
+    if not any(
+        isinstance(rule, dict)
+        and rule.get("provider") == scope_rule["provider"]
+        and isinstance(rule.get("scope"), dict)
+        and str(rule["scope"].get("type") or "") == scope.type
+        and str(rule["scope"].get("id") or "") == scope.id
+        for rule in allow
+    ):
+        allow.append(scope_rule)
+    updated["allow"] = allow
     return updated

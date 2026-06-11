@@ -6,7 +6,7 @@ import sys
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -74,12 +74,54 @@ class TestDefaultspackApiRoutes(unittest.TestCase):
         self.assertEqual(count, 0)
         self.assertNotIn(("POST", "/api/evil/run"), PackAPIHandler._api_route_exact)
 
+    def test_api_route_blocks_untrusted_pack_function_dispatch(self):
+        from core_runtime.pack_api_server import PackAPIHandler
+
+        PackAPIHandler._api_route_exact = {
+            ("POST", "/api/evil/run"): {
+                "pack_id": "evil_pack",
+                "handler": "",
+                "function_id": "run",
+                "pass_body": True,
+                "response_mode": "result",
+                "args": {},
+                "path_param_map": {},
+            }
+        }
+        PackAPIHandler._api_route_patterns = []
+        handler = PackAPIHandler.__new__(PackAPIHandler)
+        sent = []
+        handler._send_response = lambda response, status_code=200: sent.append((status_code, response))
+
+        executor = SimpleNamespace(
+            execute=Mock(
+                return_value=SimpleNamespace(
+                    success=False,
+                    error="denied",
+                    error_type="permission_denied",
+                )
+            )
+        )
+        with patch("core_runtime.pack_function_runtime.invoke_pack_function") as mocked:
+            with patch(
+                "core_runtime.capability_executor.get_capability_executor",
+                return_value=executor,
+            ):
+                dispatched = handler._dispatch_api_route(
+                    "POST", "/api/evil/run", {"input": "hello"}
+                )
+
+        self.assertTrue(dispatched)
+        mocked.assert_not_called()
+        executor.execute.assert_not_called()
+        self.assertEqual(sent[0][0], 403)
+
     def test_api_route_dispatches_pack_function(self):
         from core_runtime.pack_api_server import PackAPIHandler
 
         PackAPIHandler._api_route_exact = {
-            ("POST", "/api/example/run"): {
-                "pack_id": "example",
+            ("POST", "/api/defaultspack/run"): {
+                "pack_id": "defaultspack",
                 "handler": "",
                 "function_id": "run",
                 "pass_body": True,
@@ -94,26 +136,31 @@ class TestDefaultspackApiRoutes(unittest.TestCase):
         handler._send_result = sent.append
         execute = MagicMock(return_value=SimpleNamespace(success=True, output={"ok": True}))
 
+        executor = SimpleNamespace(
+            execute=Mock(
+                return_value=SimpleNamespace(success=True, output={"ok": True})
+            )
+        )
         with patch(
             "core_runtime.capability_executor.get_capability_executor",
-            return_value=SimpleNamespace(execute=execute),
+            return_value=executor,
         ):
             dispatched = handler._dispatch_api_route(
-                "POST", "/api/example/run", {"input": "hello"}
+                "POST", "/api/defaultspack/run", {"input": "hello"}
             )
 
         self.assertTrue(dispatched)
-        execute.assert_called_once_with(
-            "example",
+        executor.execute.assert_called_once_with(
+            "defaultspack",
             {
                 "type": "function.call",
-                "qualified_name": "example:run",
+                "qualified_name": "defaultspack:run",
                 "args": {"mode": "fast", "input": "hello"},
-                "request_id": "api-route:POST:/api/example/run",
+                "request_id": "api-route:POST:/api/defaultspack/run",
                 "context": {
-                    "pack_id": "example",
+                    "pack_id": "defaultspack",
                     "method": "POST",
-                    "path": "/api/example/run",
+                    "path": "/api/defaultspack/run",
                     "_api_route": True,
                 },
             },
@@ -145,9 +192,14 @@ class TestDefaultspackApiRoutes(unittest.TestCase):
         handler._send_result = lambda result: None
         execute = MagicMock(return_value=SimpleNamespace(success=True, output={"ok": True}))
 
+        executor = SimpleNamespace(
+            execute=Mock(
+                return_value=SimpleNamespace(success=True, output={"ok": True})
+            )
+        )
         with patch(
             "core_runtime.capability_executor.get_capability_executor",
-            return_value=SimpleNamespace(execute=execute),
+            return_value=executor,
         ):
             dispatched = handler._dispatch_api_route(
                 "POST",
@@ -160,7 +212,7 @@ class TestDefaultspackApiRoutes(unittest.TestCase):
             )
 
         self.assertTrue(dispatched)
-        execute.assert_called_once_with(
+        executor.execute.assert_called_once_with(
             "defaultspack",
             {
                 "type": "function.call",
@@ -224,10 +276,10 @@ class TestDefaultspackApiRoutes(unittest.TestCase):
         from core_runtime.pack_api_server import PackAPIHandler
 
         PackAPIHandler._api_route_exact = {
-            ("POST", "/api/example/run"): {
-                "pack_id": "example",
+            ("POST", "/api/defaultspack/missing"): {
+                "pack_id": "defaultspack",
                 "handler": "",
-                "function_id": "run",
+                "function_id": "missing",
                 "pass_body": True,
                 "response_mode": "result",
                 "args": {},
@@ -240,7 +292,7 @@ class TestDefaultspackApiRoutes(unittest.TestCase):
         execute = MagicMock(
             return_value=SimpleNamespace(
                 success=False,
-                error="Function not found: example:run",
+                error="Function not found: defaultspack:missing",
                 error_type="function_not_found",
             )
         )
@@ -249,7 +301,7 @@ class TestDefaultspackApiRoutes(unittest.TestCase):
             "core_runtime.capability_executor.get_capability_executor",
             return_value=SimpleNamespace(execute=execute),
         ):
-            dispatched = handler._dispatch_api_route("POST", "/api/example/run", {"input": "hello"})
+            dispatched = handler._dispatch_api_route("POST", "/api/defaultspack/missing", {"input": "hello"})
 
         self.assertFalse(dispatched)
         handler._send_response.assert_not_called()

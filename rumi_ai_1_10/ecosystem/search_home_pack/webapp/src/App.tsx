@@ -5,6 +5,7 @@ import {
   loadModelSettings,
   loadModels,
   loadRouteState,
+  MODEL_SETTINGS_KEY,
   persistRouteStateRemotely,
   routeInput,
   setPreferredModel,
@@ -405,7 +406,7 @@ export default function App() {
     void Promise.all([loadModels(), loadModelSettings()])
       .then(([modelsPayload, settingsPayload]) => {
         setModels(Array.isArray(modelsPayload.models) ? modelsPayload.models : []);
-        const preferred = String(settingsPayload.models?.preferred_model || "");
+        const preferred = String(settingsPayload.models?.[MODEL_SETTINGS_KEY] || "");
         if (preferred) {
           setSelectedModel(preferred);
         }

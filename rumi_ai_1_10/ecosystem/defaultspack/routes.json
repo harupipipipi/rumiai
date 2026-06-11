@@ -361,6 +361,12 @@
       "description": "Open a native directory chooser and return the selected folder path"
     },
     {
+      "method": "POST",
+      "path": "/api/ui/client-events",
+      "flow_id": "transport_direct",
+      "description": "Record frontend diagnostics and fallback events in the local audit log"
+    },
+    {
       "method": "GET",
       "path": "/api/agent/companies",
       "flow_id": "company_workspace",

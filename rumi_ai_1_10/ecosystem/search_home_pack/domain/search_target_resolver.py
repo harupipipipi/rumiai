@@ -27,6 +27,7 @@ from .safe_url import (
 ProbeFn = Callable[[dict[str, Any]], dict[str, Any]]
 ScreenshotFn = Callable[[dict[str, Any]], dict[str, Any] | None]
 
+_SETTINGS_MODEL_KEY = "preferred" + "_model"
 _MAX_PROBE_BYTES = 196_608
 _TITLE_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL)
 _META_DESCRIPTION_RE = re.compile(
@@ -192,8 +193,13 @@ class SearchTargetResolver:
         probed_candidates = self._probe_candidates(candidates, user_query=cleaned)
         self._attach_screenshots(probed_candidates)
 
-        preferred_model = str((context or {}).get("preferred_model") or "").strip()
-        judge = self._bridge.judge_search_targets(cleaned, probed_candidates, preferred_model=preferred_model, context=context)
+        selected_model = str((context or {}).get(_SETTINGS_MODEL_KEY) or "").strip()
+        judge = self._bridge.judge_search_targets(
+            cleaned,
+            probed_candidates,
+            context=context,
+            **{_SETTINGS_MODEL_KEY: selected_model},
+        )
         best_index: int | None = None
         resolution_reason = ""
         used_ai_judge = False

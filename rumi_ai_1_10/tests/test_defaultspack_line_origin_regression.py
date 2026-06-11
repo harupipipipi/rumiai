@@ -1319,7 +1319,11 @@ def test_line_computer_use_group_mention_from_unknown_source_is_denied(monkeypat
     denied = result["data"]["events"][0]
     assert denied["status"] == "denied"
     assert denied["policy"]["reason"] == "default deny"
-    assert denied["event"]["metadata"]["line_mention"] == {"mentioned": True, "require_group_mention": True}
+    assert denied["event"]["metadata"]["line_mention"] == {
+        "mentioned": True,
+        "require_group_mention": True,
+        "addressed": True,
+    }
     saved = ExternalSourceStore().get("line", "group", "Cunknown")
     assert saved is not None
     assert saved["enabled"] is False

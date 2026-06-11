@@ -202,6 +202,20 @@ legacy_routes:
   owner: chat
   reason: tracked compatibility fallback during HTTP function migration
   remove_after: v2.4
+- method: GET
+  pattern: /api/human-operator/conversations/{conversation_id}/sessions/{session_id}
+  legacy_block_module: blocks.human_operator.page
+  replacement_function_id: ''
+  owner: human_operator
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/human-operator/conversations/{conversation_id}/sessions/{session_id}/messages
+  legacy_block_module: blocks.human_operator.append_message
+  replacement_function_id: ''
+  owner: human_operator
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
 - method: POST
   pattern: /api/chat/group-storage
   legacy_block_module: blocks.chat.group_storage
@@ -2082,6 +2096,13 @@ legacy_routes:
   pattern: /api/ui/settings
   legacy_block_module: blocks.ui.settings
   replacement_function_id: ui_settings_get
+  owner: ui
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/ui/client-events
+  legacy_block_module: blocks.ui.client_events
+  replacement_function_id: ''
   owner: ui
   reason: tracked compatibility fallback during HTTP function migration
   remove_after: v2.4
