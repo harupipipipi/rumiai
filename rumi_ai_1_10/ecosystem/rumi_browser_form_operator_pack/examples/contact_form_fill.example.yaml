@@ -1,0 +1,12 @@
+example:
+  id: contact_form_fill
+  pack_id: rumi_browser_form_operator_pack
+  workflow: map_fields_from_semantic_dom
+  intent: Review a contact form's semantic DOM evidence, classify name/email/message fields, and stage values for user confirmation without submitting.
+  evidence:
+    - field_selector_map
+    - before_after_screenshot_ids
+    - submit_intent
+    - receipt_url
+  handoff: handoff_to_rumi_browser_element_pack
+  expected_result: semantic_dom_dependency_report_with_low_and_medium_field_risk_map
