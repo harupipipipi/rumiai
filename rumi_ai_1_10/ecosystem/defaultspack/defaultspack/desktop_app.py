@@ -1,13 +1,28 @@
 from __future__ import annotations
 
+import json
 import os
 import signal
+import subprocess
 import sys
+import tempfile
 import time
 import types
 import urllib.error
 import urllib.request
+from datetime import datetime, timezone
 from pathlib import Path
+
+_DIAGNOSTIC_ENV_KEYS = (
+    "DEFAULTS_HTTP_HOST",
+    "DEFAULTS_HTTP_PORT",
+    "RUMI_DEFAULTSPACK_OPEN_BROWSER",
+    "RUMI_DEFAULTSPACK_PORT",
+    "RUMI_DEFAULTSPACK_SURFACE",
+    "RUMI_LOG_DIR",
+    "RUMI_PROFILE_SURFACE",
+    "RUMI_USER_DATA",
+)
 
 
 def _pack_root() -> Path:
@@ -109,6 +124,94 @@ def _url() -> str:
     return f"http://localhost:{port}/chat"
 
 
+def _diagnostic_log_path() -> Path:
+    explicit = os.environ.get("RUMI_DEFAULTSPACK_LAUNCH_LOG")
+    if explicit:
+        return Path(explicit).expanduser()
+
+    log_dir = os.environ.get("RUMI_LOG_DIR")
+    if log_dir:
+        return Path(log_dir).expanduser() / "defaultspack-launch.jsonl"
+
+    user_data = os.environ.get("RUMI_USER_DATA")
+    if user_data:
+        return Path(user_data).expanduser().parent / "logs" / "defaultspack-launch.jsonl"
+
+    return Path(tempfile.gettempdir()) / "rumi-defaultspack-launch.jsonl"
+
+
+def _safe_cwd() -> str:
+    try:
+        return str(Path.cwd())
+    except OSError:
+        return "<unavailable>"
+
+
+def _diagnostic_env() -> dict[str, str]:
+    return {key: value for key in _DIAGNOSTIC_ENV_KEYS if (value := os.environ.get(key))}
+
+
+def _write_launch_event(event: str, **fields: object) -> None:
+    payload = {
+        "ts": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "event": event,
+        "pid": os.getpid(),
+        "ppid": os.getppid(),
+        "cwd": _safe_cwd(),
+        **fields,
+    }
+    try:
+        path = _diagnostic_log_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(payload, ensure_ascii=True, sort_keys=True) + "\n")
+    except Exception:
+        # Launch diagnostics must never make the user-facing app fail to open.
+        pass
+
+
+def _port_owner_snapshot(port: str) -> list[dict[str, str]]:
+    if not port.isdigit():
+        return []
+    try:
+        result = subprocess.run(
+            ["lsof", "-nP", f"-iTCP:{port}", "-sTCP:LISTEN", "-F", "pcL"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=1.0,
+        )
+    except Exception:
+        return []
+    if result.returncode != 0 or not result.stdout:
+        return []
+
+    owners: list[dict[str, str]] = []
+    current: dict[str, str] = {}
+    for raw_line in result.stdout.splitlines():
+        if not raw_line:
+            continue
+        key, value = raw_line[0], raw_line[1:]
+        if key == "p":
+            if current:
+                owners.append(current)
+            current = {"pid": value}
+        elif key == "c":
+            current["command"] = value
+        elif key == "L":
+            current["user"] = value
+    if current:
+        owners.append(current)
+    return owners
+
+
+def _port_from_url(url: str) -> str:
+    try:
+        return url.split(":", 2)[2].split("/", 1)[0]
+    except IndexError:
+        return ""
+
+
 def _wait_until_ready(url: str, timeout: float = 10.0) -> bool:
     deadline = time.time() + timeout
     health_url = url.split("/chat", 1)[0].rstrip("/") + "/api/health"
@@ -121,42 +224,96 @@ def _wait_until_ready(url: str, timeout: float = 10.0) -> bool:
     return False
 
 
+def _wait_until_chat_ready(url: str, timeout: float = 10.0) -> bool:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            with urllib.request.urlopen(url, timeout=1.0) as response:
+                body = response.read(2048).decode("utf-8", "ignore")
+                if 200 <= response.status < 300 and ("<title>" in body or 'id="root"' in body):
+                    return True
+        except (OSError, urllib.error.URLError):
+            time.sleep(0.2)
+    return False
+
+
 def main() -> int:
     _ensure_import_path()
     os.environ.setdefault("DEFAULTS_HTTP_HOST", "127.0.0.1")
     os.environ.setdefault("DEFAULTS_HTTP_PORT", os.environ.get("RUMI_DEFAULTSPACK_PORT", "8766"))
     os.environ.setdefault("RUMI_DEFAULTSPACK_PORT", os.environ["DEFAULTS_HTTP_PORT"])
+    url = _url()
+    port = _port_from_url(url)
+    _write_launch_event(
+        "start",
+        env=_diagnostic_env(),
+        log_path=str(_diagnostic_log_path()),
+        port=port,
+        url=url,
+    )
     try:
         from domain.integrations.secrets import load_integration_secrets_into_env
 
         load_integration_secrets_into_env()
-    except Exception:
-        pass
+    except Exception as exc:
+        _write_launch_event("secrets_load_skipped", error=repr(exc), port=port, url=url)
     try:
         from domain.scheduler.daemon import start_scheduler_daemon
 
         start_scheduler_daemon()
-    except Exception:
-        pass
+    except Exception as exc:
+        _write_launch_event("scheduler_start_skipped", error=repr(exc), port=port, url=url)
 
     from transport.http import DefaultsHttpServer
 
-    url = _url()
     server = DefaultsHttpServer(facade=None)
+    reused_existing_server = False
     try:
+        _write_launch_event("server_start_attempt", port=port, url=url)
         server.start()
-    except OSError:
-        if not _wait_until_ready(url, timeout=1.0):
+        _write_launch_event("server_started", port=port, url=url)
+    except OSError as exc:
+        existing_ready = _wait_until_ready(url, timeout=1.0)
+        _write_launch_event(
+            "server_start_oserror",
+            error=repr(exc),
+            existing_ready=existing_ready,
+            port=port,
+            port_owners=_port_owner_snapshot(port),
+            url=url,
+        )
+        if not existing_ready:
             raise
         server = None
-    _wait_until_ready(url)
+        reused_existing_server = True
+
+    health_ready = _wait_until_ready(url)
+    chat_ready = _wait_until_chat_ready(url)
+    _write_launch_event(
+        "readiness_complete",
+        chat_ready=chat_ready,
+        health_ready=health_ready,
+        port=port,
+        url=url,
+    )
 
     from defaultspack.native_webview import open_desktop_surface
 
     surface_result = open_desktop_surface(url, title="Rumi Defaultspack")
+    _write_launch_event(
+        "surface_opened",
+        port=port,
+        reused_existing_server=reused_existing_server,
+        surface_result=surface_result,
+        url=url,
+    )
     if surface_result == "webview":
         if server is not None:
             server.stop()
+            _write_launch_event("server_stopped_after_webview", port=port, url=url)
+        return 0
+    if server is None:
+        _write_launch_event("duplicate_launcher_exit", port=port, url=url)
         return 0
 
     stop = False
@@ -174,6 +331,7 @@ def main() -> int:
     finally:
         if server is not None:
             server.stop()
+            _write_launch_event("server_stopped", port=port, url=url)
     return 0
 
 
