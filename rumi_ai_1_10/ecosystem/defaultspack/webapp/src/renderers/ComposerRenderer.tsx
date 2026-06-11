@@ -314,6 +314,32 @@ function ModelStatusIndicatorButton({
   );
 }
 
+function GlobalDismissButton({
+  ariaLabel,
+  className,
+  onClick,
+  tabIndex,
+}: {
+  ariaLabel: string;
+  className: string;
+  onClick: () => void;
+  tabIndex?: number;
+}) {
+  const button = (
+    <button
+      type="button"
+      aria-label={ariaLabel}
+      tabIndex={tabIndex}
+      className={className}
+      onClick={onClick}
+    />
+  );
+
+  return typeof document !== "undefined"
+    ? createPortal(button, document.body)
+    : button;
+}
+
 type ComposerMentionDescriptor = {
   kind: "tool" | "skill" | "file";
   label: string;
@@ -766,7 +792,7 @@ function ProviderApiKeyPrompt({
 
   return (
     <>
-      <button type="button" aria-label="close api key prompt" className="fixed inset-0 rumi-layer-global-overlay cursor-default" onClick={onCancel} />
+      <GlobalDismissButton ariaLabel="close api key prompt" className="fixed inset-0 rumi-layer-global-overlay cursor-default" onClick={onCancel} />
       <div className="absolute bottom-full right-3 rumi-layer-global-overlay mb-2 w-[min(430px,calc(100vw-32px))] overflow-hidden rounded-xl border border-zinc-700/80 bg-zinc-950 shadow-2xl">
         <div className="border-b border-zinc-800 px-4 py-3">
           <div className="flex items-center gap-2 text-sm font-medium text-zinc-100">
@@ -858,7 +884,7 @@ function ModelDropdown({
 
   return (
     <>
-      <button type="button" aria-label="close model dropdown" className="fixed inset-0 rumi-layer-local-popover cursor-default" onClick={onClose} />
+      <GlobalDismissButton ariaLabel="close model dropdown" className="fixed inset-0 rumi-layer-local-popover cursor-default" onClick={onClose} />
       <div
         className={`absolute rumi-layer-command-palette w-[min(360px,calc(100vw-88px))] max-w-[calc(100vw-88px)] overflow-hidden rounded-xl border border-zinc-700/70 bg-zinc-950 shadow-2xl ${
           modelDropdownPlacementClassName(placement)
@@ -955,7 +981,7 @@ function ModeSelector({
 }) {
   return (
     <>
-      <button type="button" aria-label="close mode selector" className="fixed inset-0 rumi-layer-local-popover cursor-default" onClick={onClose} />
+      <GlobalDismissButton ariaLabel="close mode selector" className="fixed inset-0 rumi-layer-local-popover cursor-default" onClick={onClose} />
       <div className="absolute bottom-full left-0 mb-2 rumi-layer-modal w-[220px] overflow-hidden rounded-xl border border-zinc-700/70 bg-zinc-950 shadow-2xl">
         <div className="border-b border-zinc-800 px-3 py-2">
           <p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">モード選択</p>
@@ -1011,7 +1037,7 @@ function AtMentionMenu({
 }) {
   if (candidates.length === 0) return null;
 
-  return (
+  const menu = (
     <>
       <button type="button" aria-label="close mention menu" className="fixed inset-0 rumi-layer-local-popover cursor-default" onClick={onClose} />
       <div
@@ -1019,7 +1045,7 @@ function AtMentionMenu({
         aria-label="Composer mentions"
         data-testid="composer-at-mention-candidates"
         style={style}
-        className="fixed rumi-layer-modal w-[min(440px,calc(100vw-32px))] overflow-hidden rounded-xl border border-zinc-700/70 bg-zinc-950 shadow-2xl"
+        className="fixed rumi-layer-modal flex w-[min(440px,calc(100vw-32px))] flex-col overflow-hidden rounded-xl border border-zinc-700/70 bg-zinc-950 shadow-2xl"
       >
         <div className="border-b border-zinc-800 px-3 py-2 flex items-center justify-between gap-2">
           <span className="inline-flex min-w-0 items-center gap-2">
@@ -1028,7 +1054,7 @@ function AtMentionMenu({
           </span>
           <span className="text-[10px] text-zinc-600">{candidates.length}</span>
         </div>
-        <div className="max-h-56 overflow-y-auto py-1">
+        <div className="min-h-0 flex-1 overflow-y-auto py-1">
           {candidates.map((candidate, index) => {
             const Icon = candidate.kind === "tool" ? Wrench : candidate.kind === "skill" ? BrainCircuit : FileText;
             return (
@@ -1066,6 +1092,10 @@ function AtMentionMenu({
       </div>
     </>
   );
+
+  return typeof document !== "undefined"
+    ? createPortal(menu, document.body)
+    : menu;
 }
 
 export function filterAtMentionFiles(files: string[], query: string): string[] {
@@ -1151,7 +1181,7 @@ function modelCandidateApiKeyBadge(candidate: ModelCommandCandidate): string | n
   return null;
 }
 
-type PopupAnchorRect = Pick<DOMRect, "left" | "right" | "top">;
+type PopupAnchorRect = Pick<DOMRect, "left" | "right" | "top"> & Partial<Pick<DOMRect, "bottom">>;
 
 export function modelCandidatePopupStyleForAnchor(
   anchorRect: PopupAnchorRect | null,
@@ -1167,6 +1197,41 @@ export function modelCandidatePopupStyleForAnchor(
     top,
     width,
     transform: "translateY(-100%)",
+  };
+}
+
+export function composerMentionPopupStyleForAnchor(
+  anchorRect: PopupAnchorRect | null,
+  viewportWidth: number,
+  viewportHeight: number,
+  preferredWidth = 440,
+  preferredHeight = 256,
+): CSSProperties | undefined {
+  if (!anchorRect || viewportWidth <= 0 || viewportHeight <= 0) return undefined;
+  const margin = 8;
+  const width = Math.min(preferredWidth, Math.max(260, viewportWidth - margin * 2));
+  const left = Math.max(margin, Math.min(anchorRect.left, viewportWidth - width - margin));
+  const anchorBottom = anchorRect.bottom ?? anchorRect.top;
+  const spaceAbove = Math.max(0, anchorRect.top - margin * 2);
+  const spaceBelow = Math.max(0, viewportHeight - anchorBottom - margin * 2);
+  const placeAbove = spaceAbove >= Math.min(preferredHeight, 220) || spaceAbove >= spaceBelow;
+
+  if (placeAbove) {
+    return {
+      left,
+      top: Math.max(margin, anchorRect.top - margin),
+      width,
+      maxHeight: Math.max(160, Math.min(preferredHeight, spaceAbove - margin)),
+      transform: "translateY(-100%)",
+    };
+  }
+
+  const maxHeight = Math.max(160, Math.min(preferredHeight, spaceBelow - margin));
+  return {
+    left,
+    top: Math.min(viewportHeight - margin - maxHeight, anchorBottom + margin),
+    width,
+    maxHeight,
   };
 }
 
@@ -1187,7 +1252,7 @@ function ModelCommandCandidatePopup({
 }) {
   if (candidates.length === 0) return null;
 
-  return (
+  const popup = (
     <div
       role="listbox"
       aria-label="Model candidates"
@@ -1243,6 +1308,10 @@ function ModelCommandCandidatePopup({
       </div>
     </div>
   );
+
+  return typeof document !== "undefined"
+    ? createPortal(popup, document.body)
+    : popup;
 }
 
 export function ComposerRenderer({
@@ -1321,6 +1390,7 @@ export function ComposerRenderer({
   const [selectedCommandIndex, setSelectedCommandIndex] = useState(0);
   const [selectedModelCandidateIndex, setSelectedModelCandidateIndex] = useState(0);
   const [composerPopoverStyle, setComposerPopoverStyle] = useState<CSSProperties | undefined>(undefined);
+  const [composerMentionPopoverStyle, setComposerMentionPopoverStyle] = useState<CSSProperties | undefined>(undefined);
   const [isVoiceListening, setIsVoiceListening] = useState(false);
   const [textareaSelection, setTextareaSelection] = useState({ start: input.length, end: input.length });
   const [textareaFocused, setTextareaFocused] = useState(false);
@@ -1505,6 +1575,12 @@ export function ComposerRenderer({
     setComposerPopoverStyle(modelCandidatePopupStyleForAnchor(anchorRect, window.innerWidth));
   }, []);
 
+  const updateComposerMentionPopoverAnchor = useCallback(() => {
+    if (typeof window === "undefined") return;
+    const anchorRect = textareaRef.current?.getBoundingClientRect() ?? null;
+    setComposerMentionPopoverStyle(composerMentionPopupStyleForAnchor(anchorRect, window.innerWidth, window.innerHeight));
+  }, []);
+
   const syncTextareaSelection = useCallback(() => {
     const textarea = textareaRef.current;
     if (!textarea) return;
@@ -1651,6 +1727,17 @@ export function ComposerRenderer({
   }, [hasModelCommandCandidates, updateComposerPopoverAnchor]);
 
   useEffect(() => {
+    if (!atMentionOpen) return;
+    updateComposerMentionPopoverAnchor();
+    window.addEventListener("resize", updateComposerMentionPopoverAnchor);
+    window.addEventListener("scroll", updateComposerMentionPopoverAnchor, true);
+    return () => {
+      window.removeEventListener("resize", updateComposerMentionPopoverAnchor);
+      window.removeEventListener("scroll", updateComposerMentionPopoverAnchor, true);
+    };
+  }, [atMentionOpen, updateComposerMentionPopoverAnchor]);
+
+  useEffect(() => {
     textareaRef.current?.focus({ preventScroll: true });
     const focusTimer = window.setTimeout(() => {
       textareaRef.current?.focus({ preventScroll: true });
@@ -1760,13 +1847,13 @@ export function ComposerRenderer({
       if (atMatch && !isSteerMode && hasMentionTargets) {
         setAtMentionOpen(true);
         setAtMentionQuery(atMatch[1]);
-        updateComposerPopoverAnchor();
+        updateComposerMentionPopoverAnchor();
       } else {
         setAtMentionOpen(false);
         setAtMentionQuery("");
       }
     },
-    [codingContext?.files?.length, isSteerMode, mode, skillExtensions.length, suppressPopovers, toolItems.length, updateComposerPopoverAnchor],
+    [codingContext?.files?.length, isSteerMode, mode, skillExtensions.length, suppressPopovers, toolItems.length, updateComposerMentionPopoverAnchor],
   );
 
   useEffect(() => {
@@ -2523,14 +2610,14 @@ export function ComposerRenderer({
               onActiveIndexChange={setSelectedAtMentionIndex}
               onSelect={handleAtMentionSelect}
               onClose={() => setAtMentionOpen(false)}
+              style={composerMentionPopoverStyle}
             />
           )}
 
           {menuOpen && (
             <>
-                      <button
-                        type="button"
-                        aria-label="close composer menu"
+                      <GlobalDismissButton
+                        ariaLabel="close composer menu"
                         tabIndex={chromeButtonTabIndex}
                         className="fixed inset-0 rumi-layer-local-popover cursor-default"
                         onClick={() => setMenuOpen(false)}
